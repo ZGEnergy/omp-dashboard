@@ -3,14 +3,12 @@ import Icon from "@mdi/react";
 import { mdiChevronRight, mdiChevronDown } from "@mdi/js";
 import type { DashboardSession, OpenSpecData } from "../../shared/types.js";
 import {
-  getHiddenSessionIds,
-  setHiddenSessionIds,
   getActiveOnly,
   setActiveOnly as persistActiveOnly,
-  pruneStaleHiddenIds,
   getCollapsedGroups,
   setCollapsedGroups,
   pruneStaleCollapsedGroups,
+  removeLegacyHiddenSessions,
 } from "../lib/session-filter-storage.js";
 import { SessionCard, GroupGitInfo, EditorButtons } from "./SessionCard.js";
 import { ThemeToggle } from "./ThemeToggle.js";
@@ -34,6 +32,9 @@ interface Props {
   onOpenSpecRefresh?: (sessionId: string) => void;
   onRename?: (sessionId: string, name: string) => void;
   onShutdown?: (sessionId: string) => void;
+  onResume?: (sessionId: string, mode: "continue" | "fork") => void;
+  onHideSession?: (sessionId: string) => void;
+  onUnhideSession?: (sessionId: string) => void;
 }
 
 /** Group sessions by cwd, ordered by most recent activity. */
@@ -62,12 +63,11 @@ export function groupSessionsByDirectory(sessions: DashboardSession[]): Array<{ 
 export function filterSessions(
   sessions: DashboardSession[],
   activeOnly: boolean,
-  hiddenSet: Set<string>,
   showHidden: boolean,
 ): DashboardSession[] {
   return sessions.filter((s) => {
     if (activeOnly && s.status === "ended") return false;
-    if (hiddenSet.has(s.id) && !showHidden) return false;
+    if (s.hidden && !showHidden) return false;
     return true;
   });
 }
@@ -95,7 +95,7 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, onSendPrompt, onOpenSpecRefresh, onRename, onShutdown }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, onSendPrompt, onOpenSpecRefresh, onRename, onShutdown, onResume, onHideSession, onUnhideSession }: Props) {
   const now = Date.now();
   const { messages, showToast, dismissToast } = useToast();
 
@@ -110,20 +110,21 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     }
   }, [showToast]);
 
-  // Filter state
+  // Remove legacy client-side hidden storage on mount
+  useEffect(() => {
+    removeLegacyHiddenSessions();
+  }, []);
+
+  // Filter state - active-only defaults to ON
   const [activeOnly, setActiveOnly] = useState(() => getActiveOnly());
-  const [hiddenSet, setHiddenSet] = useState(() => getHiddenSessionIds());
   const [showHidden, setShowHidden] = useState(false);
 
   // Collapsed groups state
   const [collapsedGroups, setCollapsedGroupsState] = useState(() => getCollapsedGroups());
 
-  // Prune stale hidden IDs and collapsed groups when sessions change
+  // Prune stale collapsed groups when sessions change
   useEffect(() => {
     if (sessions.length === 0) return;
-    const knownIds = new Set(sessions.map((s) => s.id));
-    const pruned = pruneStaleHiddenIds(knownIds);
-    setHiddenSet(pruned);
     const knownCwds = new Set(sessions.map((s) => s.cwd));
     const prunedGroups = pruneStaleCollapsedGroups(knownCwds);
     setCollapsedGroupsState(prunedGroups);
@@ -138,13 +139,8 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
   }, []);
 
   const handleHide = useCallback((id: string) => {
-    setHiddenSet((prev) => {
-      const next = new Set(prev);
-      next.add(id);
-      setHiddenSessionIds(next);
-      return next;
-    });
-  }, []);
+    onHideSession?.(id);
+  }, [onHideSession]);
 
   const handleToggleCollapse = useCallback((cwd: string) => {
     setCollapsedGroupsState((prev) => {
@@ -160,25 +156,20 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
   }, []);
 
   const handleUnhide = useCallback((id: string) => {
-    setHiddenSet((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      setHiddenSessionIds(next);
-      return next;
-    });
-  }, []);
+    onUnhideSession?.(id);
+  }, [onUnhideSession]);
 
   const filteredSessions = useMemo(
-    () => filterSessions(sessions, activeOnly, hiddenSet, showHidden),
-    [sessions, activeOnly, hiddenSet, showHidden],
+    () => filterSessions(sessions, activeOnly, showHidden),
+    [sessions, activeOnly, showHidden],
   );
 
   const hiddenCount = useMemo(() => {
     const afterActiveFilter = activeOnly
       ? sessions.filter((s) => s.status !== "ended")
       : sessions;
-    return afterActiveFilter.filter((s) => hiddenSet.has(s.id)).length;
-  }, [sessions, activeOnly, hiddenSet]);
+    return afterActiveFilter.filter((s) => s.hidden).length;
+  }, [sessions, activeOnly]);
 
   const groups = groupSessionsByDirectory(filteredSessions);
 
@@ -244,7 +235,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                       onSelect={onSelect}
                       now={now}
                       showGitInfo={group.sessions.length === 1}
-                      isHidden={hiddenSet.has(session.id)}
+                      isHidden={!!session.hidden}
                       onHide={handleHide}
                       onUnhide={handleUnhide}
                       editors={group.sessions.length === 1 ? editorMap.get(group.cwd) : undefined}
@@ -255,6 +246,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                       onOpenSpecRefresh={onOpenSpecRefresh ? () => onOpenSpecRefresh(session.id) : undefined}
                       onRename={onRename ? (name) => onRename(session.id, name) : undefined}
                       onShutdown={onShutdown}
+                      onResume={onResume ? (mode) => onResume(session.id, mode) : undefined}
                     />
                   ))}
                 </div>

@@ -26,27 +26,21 @@ describe("loadConfig", () => {
     const config = loadConfig();
     expect(config.port).toBe(8000);
     expect(config.piPort).toBe(9999);
-    expect(config.retentionDays).toBe(30);
     expect(config.autoStart).toBe(true);
     expect(config.autoShutdown).toBe(true);
     expect(config.shutdownIdleSeconds).toBe(300);
-    expect(config.dbPath).toContain("dashboard.db");
   });
 
   it("should return values from config when all fields present", () => {
     fs.writeFileSync(configFile, JSON.stringify({
       port: 3000,
       piPort: 4000,
-      dbPath: "/custom/path.db",
-      retentionDays: 7,
       autoStart: false,
     }));
 
     const config = loadConfig();
     expect(config.port).toBe(3000);
     expect(config.piPort).toBe(4000);
-    expect(config.dbPath).toBe("/custom/path.db");
-    expect(config.retentionDays).toBe(7);
     expect(config.autoStart).toBe(false);
   });
 
@@ -56,7 +50,6 @@ describe("loadConfig", () => {
     const config = loadConfig();
     expect(config.port).toBe(3000);
     expect(config.piPort).toBe(9999);
-    expect(config.retentionDays).toBe(30);
     expect(config.autoStart).toBe(true);
     expect(config.autoShutdown).toBe(true);
     expect(config.shutdownIdleSeconds).toBe(300);
@@ -136,7 +129,6 @@ describe("ensureConfig", () => {
 
     const content = JSON.parse(fs.readFileSync(configFile, "utf-8"));
     expect(content.port).toBe(1234);
-    // Should NOT have added defaults
     expect(content.piPort).toBeUndefined();
   });
 });

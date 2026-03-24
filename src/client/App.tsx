@@ -120,6 +120,18 @@ export default function App() {
           return next;
         });
         break;
+
+      case "resume_result":
+        // Show toast or notification for resume/fork result
+        if (!msg.success) {
+          console.warn("[dashboard] Resume/fork failed:", msg.message);
+        }
+        break;
+
+      case "sessions_list":
+        // Sessions discovered from pi listing — add to session map if not already present
+        // The server already creates SQLite records; the browser gets them via session_added
+        break;
     }
   }, [send]);
 
@@ -136,10 +148,13 @@ export default function App() {
     prevStatusRef.current = status;
   }, [status]);
 
-  // Auto-select first session if none selected
+  // Auto-select: prefer active/streaming session, fall back to first non-hidden
   useEffect(() => {
     if (!selectedId && sessions.size > 0) {
-      setSelectedId(sessions.keys().next().value);
+      const all = Array.from(sessions.values());
+      const active = all.find((s) => s.status === "streaming" || s.status === "active");
+      const visible = all.find((s) => !s.hidden);
+      setSelectedId((active ?? visible ?? all[0]).id);
     }
   }, [selectedId, sessions]);
 
@@ -233,6 +248,45 @@ export default function App() {
     [send],
   );
 
+  const handleResumeSession = useCallback(
+    (sessionId: string, mode: "continue" | "fork") => {
+      send({ type: "resume_session", sessionId, mode } as any);
+    },
+    [send],
+  );
+
+  const handleHideSession = useCallback(
+    (sessionId: string) => {
+      // Optimistic UI update
+      setSessions((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(sessionId);
+        if (existing) {
+          next.set(sessionId, { ...existing, hidden: true });
+        }
+        return next;
+      });
+      send({ type: "hide_session", sessionId });
+    },
+    [send],
+  );
+
+  const handleUnhideSession = useCallback(
+    (sessionId: string) => {
+      // Optimistic UI update
+      setSessions((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(sessionId);
+        if (existing) {
+          next.set(sessionId, { ...existing, hidden: false });
+        }
+        return next;
+      });
+      send({ type: "unhide_session", sessionId });
+    },
+    [send],
+  );
+
   const sessionList = (
     <SessionList
       sessions={Array.from(sessions.values())}
@@ -244,6 +298,9 @@ export default function App() {
       onOpenSpecRefresh={handleOpenSpecRefresh}
       onRename={handleRenameSession}
       onShutdown={handleShutdownSession}
+      onResume={handleResumeSession}
+      onHideSession={handleHideSession}
+      onUnhideSession={handleUnhideSession}
     />
   );
 

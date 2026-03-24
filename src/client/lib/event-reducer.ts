@@ -11,7 +11,7 @@ export interface ChatImage {
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | "toolResult";
+  role: "user" | "assistant" | "toolResult" | "thinking";
   content: string;
   images?: ChatImage[];
   toolName?: string;
@@ -44,6 +44,7 @@ export interface SessionState {
   messages: ChatMessage[];
   toolCalls: Map<string, ToolCallState>;
   streamingText: string;
+  streamingThinking: string;
   isStreaming: boolean;
   model?: string;
   thinkingLevel?: string;
@@ -63,6 +64,7 @@ export function createInitialState(): SessionState {
     messages: [],
     toolCalls: new Map(),
     streamingText: "",
+    streamingThinking: "",
     isStreaming: false,
     tokensIn: 0,
     tokensOut: 0,
@@ -163,6 +165,36 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
     }
 
     case "message_update": {
+      const assistantEvent = data.assistantMessageEvent as any;
+
+      // Handle thinking events from assistantMessageEvent
+      if (assistantEvent) {
+        if (assistantEvent.type === "thinking_start") {
+          next.streamingThinking = "";
+          break;
+        }
+        if (assistantEvent.type === "thinking_delta") {
+          next.streamingThinking = next.streamingThinking + (assistantEvent.delta ?? "");
+          break;
+        }
+        if (assistantEvent.type === "thinking_end") {
+          if (next.streamingThinking) {
+            next.messages = [
+              ...next.messages,
+              {
+                id: `thinking-${next.messages.length}`,
+                role: "thinking",
+                content: next.streamingThinking,
+                timestamp: event.timestamp,
+              },
+            ];
+          }
+          next.streamingThinking = "";
+          break;
+        }
+      }
+
+      // Handle text streaming
       const msg = data.message as any;
       if (msg?.role === "assistant") {
         const text = Array.isArray(msg.content)

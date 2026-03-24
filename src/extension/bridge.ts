@@ -16,13 +16,60 @@ import type { ServerToExtensionMessage } from "../shared/protocol.js";
 import { gatherGitInfo, type GitInfo } from "./git-info.js";
 import { extractTurnStats } from "./stats-extractor.js";
 import { pollOpenSpec } from "./openspec-poller.js";
+import { sendSessionHistory as syncSessionHistory } from "./session-history.js";
+import { replayEntriesAsEvents } from "./state-replay.js";
+import { detectOpenSpecActivity } from "./openspec-activity-detector.js";
+import type { OpenSpecPhase } from "../shared/types.js";
 
 const HEARTBEAT_INTERVAL = 15_000;
 const GIT_POLL_INTERVAL = 30_000;
 const OPENSPEC_POLL_INTERVAL = 30_000;
 
+// Use globalThis to survive jiti module cache invalidation on /reload
+const BRIDGE_KEY = "__pi_dashboard_bridge__";
+interface BridgeState {
+  cleanup?: () => void;
+  sessionId?: string;
+  ctx?: any;
+  modelRegistry?: any;
+  hasUI?: boolean;
+}
+function getBridgeState(): BridgeState {
+  if (!(globalThis as any)[BRIDGE_KEY]) {
+    (globalThis as any)[BRIDGE_KEY] = {};
+  }
+  return (globalThis as any)[BRIDGE_KEY];
+}
+
 export default function (pi: ExtensionAPI) {
-  const sessionId = crypto.randomUUID();
+  const prev = getBridgeState();
+  prev.cleanup?.();
+  prev.cleanup = undefined;
+  let sessionId: string = prev.sessionId ?? crypto.randomUUID();
+  let sessionReady = false; // true after session_start has run
+  let lastSessionFile: string | undefined;
+  let lastSessionDir: string | undefined;
+  let lastFirstMessage: string | undefined;
+
+  function extractFirstMessage(ctx: any): string | undefined {
+    try {
+      const entries = ctx.sessionManager.getEntries?.();
+      if (!entries || !Array.isArray(entries)) return undefined;
+      for (const entry of entries) {
+        if (entry.role === "user" && typeof entry.content === "string") {
+          return entry.content.slice(0, 200);
+        }
+        if (entry.role === "user" && Array.isArray(entry.content)) {
+          for (const part of entry.content) {
+            if (part.type === "text" && typeof part.text === "string") {
+              return part.text.slice(0, 200);
+            }
+          }
+        }
+      }
+    } catch { /* ignore */ }
+    return undefined;
+  }
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let gitPollTimer: ReturnType<typeof setInterval> | null = null;
   let openspecPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -30,9 +77,9 @@ export default function (pi: ExtensionAPI) {
   let lastGitPrNumber: number | undefined;
   let lastOpenSpecJson: string | undefined;
   let lastSessionName: string | undefined;
-  let cachedHasUI: boolean | undefined;
-  let cachedModelRegistry: any | undefined;
-  let cachedCtx: any | undefined;
+  let cachedHasUI: boolean | undefined = prev.hasUI;
+  let cachedModelRegistry: any | undefined = prev.modelRegistry;
+  let cachedCtx: any | undefined = prev.ctx;
   let lastModel: string | undefined;
   let lastThinkingLevel: string | undefined;
 
@@ -43,9 +90,9 @@ export default function (pi: ExtensionAPI) {
 
   const connection = new ConnectionManager({
     url: dashboardUrl,
-    onMessage: (data) => {
+    onMessage: async (data) => {
       const msg = data as ServerToExtensionMessage;
-      const response = commandHandler.handle(msg);
+      const response = await commandHandler.handle(msg);
       if (response) connection.send(response);
       // Force openspec refresh and update cache
       if (msg.type === "openspec_refresh") {
@@ -59,10 +106,12 @@ export default function (pi: ExtensionAPI) {
     },
     onReconnect: () => {
       sendStateSync();
+      replaySessionEntries();
+      sendSessionHistory();
     },
   });
 
-  const commandHandler = createCommandHandler(pi, sessionId, {
+  const commandHandler = createCommandHandler(pi, () => sessionId, {
     getModelRegistry: () => cachedModelRegistry,
     setThinkingLevel: (level: string) => (pi as any).setThinkingLevel?.(level),
     getThinkingLevel: () => (pi as any).getThinkingLevel?.(),
@@ -154,6 +203,12 @@ export default function (pi: ExtensionAPI) {
     const thinkingLevel = (pi as any).getThinkingLevel?.() ?? undefined;
     lastModel = model;
     lastThinkingLevel = thinkingLevel;
+
+    // Include session file/dir and first message
+    const sessionFile = lastSessionFile ?? cachedCtx?.sessionManager?.getSessionFile?.() ?? undefined;
+    const sessionDir = lastSessionDir ?? cachedCtx?.sessionManager?.getSessionDir?.() ?? undefined;
+    const firstMessage = extractFirstMessage(cachedCtx);
+
     connection.send({
       type: "session_register",
       sessionId,
@@ -162,6 +217,9 @@ export default function (pi: ExtensionAPI) {
       source: detectSessionSource(cachedHasUI),
       model,
       thinkingLevel,
+      sessionFile,
+      sessionDir,
+      firstMessage,
     });
 
     // Send current openspec data
@@ -187,6 +245,24 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  function sendSessionHistory() {
+    syncSessionHistory({
+      send: (msg) => connection.send(msg),
+      cwd: process.cwd(),
+    });
+  }
+
+  function replaySessionEntries() {
+    try {
+      const entries = cachedCtx?.sessionManager?.getBranch?.();
+      if (!entries || entries.length === 0) return;
+      const events = replayEntriesAsEvents(sessionId, entries);
+      for (const msg of events) {
+        connection.send(msg);
+      }
+    } catch { /* ignore */ }
+  }
+
   // Forward all relevant pi events
   const eventTypes = [
     "agent_start",
@@ -200,14 +276,28 @@ export default function (pi: ExtensionAPI) {
     "tool_execution_update",
     "tool_execution_end",
     "session_compact",
-    "session_switch",
     "model_select",
   ] as const;
+
+  // OpenSpec activity tracking
+  let currentOpenSpecPhase: OpenSpecPhase | undefined;
+  let currentOpenSpecChange: string | undefined;
+
+  function sendOpenSpecActivityUpdate(phase?: OpenSpecPhase, changeName?: string) {
+    connection.send({
+      type: "openspec_activity_update",
+      sessionId,
+      phase,
+      changeName,
+    });
+  }
 
   for (const eventType of eventTypes) {
     pi.on(eventType as any, async (event: any, ctx: any) => {
       // Always keep latest context for abort/shutdown
       cachedCtx = ctx;
+      // Don't send events before session_start has established the correct session ID
+      if (!sessionReady) return;
       // For model_select, enrich the event data with thinkingLevel
       if (eventType === "model_select") {
         const enriched = { ...event, thinkingLevel: (pi as any).getThinkingLevel?.() };
@@ -217,27 +307,66 @@ export default function (pi: ExtensionAPI) {
         sendModelUpdateIfChanged();
         return;
       }
+
+      // Detect OpenSpec activity from tool calls
+      if (eventType === "tool_execution_start") {
+        const detected = detectOpenSpecActivity(
+          event.toolName as string,
+          event.args as Record<string, unknown> | undefined,
+        );
+        if (detected) {
+          let changed = false;
+          if (detected.phase && detected.phase !== currentOpenSpecPhase) {
+            currentOpenSpecPhase = detected.phase;
+            changed = true;
+          }
+          if (detected.changeName && detected.changeName !== currentOpenSpecChange) {
+            currentOpenSpecChange = detected.changeName;
+            changed = true;
+          }
+          if (changed) {
+            sendOpenSpecActivityUpdate(currentOpenSpecPhase, currentOpenSpecChange);
+          }
+        }
+      }
+
+      // Clear OpenSpec activity when agent finishes
+      if (eventType === "agent_end") {
+        if (currentOpenSpecPhase || currentOpenSpecChange) {
+          currentOpenSpecPhase = undefined;
+          currentOpenSpecChange = undefined;
+          connection.send({
+            type: "openspec_activity_update",
+            sessionId,
+            phase: null,
+            changeName: null,
+          });
+        }
+      }
+
       const msg = mapEventToProtocol(sessionId, event);
       connection.send(msg);
     });
   }
 
   pi.on("session_start", async (_event, ctx) => {
-    // Auto-start server if not running
-    const serverRunning = await isPortOpen(config.piPort);
-
-    if (!serverRunning && config.autoStart) {
-      const result = await launchServer(config);
-      if (result.success) {
-        ctx.ui.notify(`🌐 Dashboard started at http://localhost:${config.port}`, "info");
-      } else {
-        ctx.ui.notify(`Dashboard server failed to start: ${result.message}`, "warning");
-      }
-    }
+    const newSessionId = ctx.sessionManager.getSessionId();
 
     cachedHasUI = ctx.hasUI;
     cachedCtx = ctx;
+    sessionId = newSessionId;
+
+    // Connect first, then auto-start if needed.
+    // session_register must be buffered before any event_forward messages.
     connection.connect();
+
+    // Extract session file/dir and first message
+    const sessionFile = ctx.sessionManager.getSessionFile?.() ?? undefined;
+    const sessionDir = ctx.sessionManager.getSessionDir?.() ?? undefined;
+    lastSessionFile = sessionFile;
+    lastSessionDir = sessionDir;
+    const firstMessage = extractFirstMessage(ctx);
+    lastFirstMessage = firstMessage;
 
     // Register session with initial model/thinkingLevel
     lastSessionName = pi.getSessionName() ?? "";
@@ -253,7 +382,16 @@ export default function (pi: ExtensionAPI) {
       source: detectSessionSource(cachedHasUI),
       model: initialModel,
       thinkingLevel: initialThinkingLevel,
+      sessionFile,
+      sessionDir,
+      firstMessage,
     });
+
+    // Allow event forwarding now that session_register is buffered
+    sessionReady = true;
+
+    // Replay full session history so the dashboard has all messages
+    replaySessionEntries();
 
     // Send initial commands list
     const commands = pi.getCommands();
@@ -274,6 +412,21 @@ export default function (pi: ExtensionAPI) {
         connection.send({ type: "models_list", sessionId, models });
       } catch { /* modelRegistry not available */ }
     }
+
+    // Send local session history for this workspace
+    sendSessionHistory();
+
+    // Auto-start server if not running (non-blocking — connection will reconnect)
+    isPortOpen(config.piPort).then(async (running) => {
+      if (!running && config.autoStart) {
+        const result = await launchServer(config);
+        if (result.success) {
+          ctx.ui.notify(`🌐 Dashboard started at http://localhost:${config.port}`, "info");
+        } else {
+          ctx.ui.notify(`Dashboard server failed to start: ${result.message}`, "warning");
+        }
+      }
+    }).catch(() => {});
 
     // Send initial git info
     sendGitInfoIfChanged(ctx.cwd);
@@ -300,8 +453,110 @@ export default function (pi: ExtensionAPI) {
     }, OPENSPEC_POLL_INTERVAL);
   });
 
+  // Shared handler for session_switch and session_fork
+  function handleSessionChange(ctx: any) {
+    // Unregister old session
+    connection.send({
+      type: "session_unregister",
+      sessionId,
+    });
+
+    // Update to new session identity
+    sessionId = ctx.sessionManager.getSessionId();
+    lastSessionFile = ctx.sessionManager.getSessionFile?.() ?? undefined;
+    lastSessionDir = ctx.sessionManager.getSessionDir?.() ?? undefined;
+    const firstMessage = extractFirstMessage(ctx);
+
+    // Reset cached state for new session
+    lastFirstMessage = firstMessage;
+    lastGitBranch = undefined;
+    lastGitPrNumber = undefined;
+    lastOpenSpecJson = undefined;
+    lastSessionName = pi.getSessionName() ?? "";
+    lastModel = getCurrentModelString();
+    lastThinkingLevel = (pi as any).getThinkingLevel?.() ?? undefined;
+
+    // Register new session
+    connection.send({
+      type: "session_register",
+      sessionId,
+      cwd: ctx.cwd,
+      name: lastSessionName || undefined,
+      source: detectSessionSource(cachedHasUI),
+      model: lastModel,
+      thinkingLevel: lastThinkingLevel,
+      sessionFile: lastSessionFile,
+      sessionDir: lastSessionDir,
+      firstMessage,
+    });
+
+    // Replay full session history
+    replaySessionEntries();
+
+    // Full state sync
+    sendOpenSpecNow(ctx.cwd);
+    sendGitInfoIfChanged(ctx.cwd);
+
+    const commands = pi.getCommands();
+    connection.send({
+      type: "commands_list",
+      sessionId,
+      commands,
+    });
+
+    if (cachedModelRegistry) {
+      try {
+        const models = cachedModelRegistry.getAvailable().map((m: any) => ({
+          provider: m.provider,
+          id: m.id,
+        }));
+        connection.send({ type: "models_list", sessionId, models });
+      } catch { /* ignore */ }
+    }
+
+    // Restart polling timers
+    if (gitPollTimer) clearInterval(gitPollTimer);
+    gitPollTimer = setInterval(() => {
+      sendGitInfoIfChanged(ctx.cwd);
+    }, GIT_POLL_INTERVAL);
+
+    if (openspecPollTimer) clearInterval(openspecPollTimer);
+    openspecPollTimer = setInterval(() => {
+      sendOpenSpecIfChanged(ctx.cwd);
+      sendSessionNameIfChanged();
+      sendModelUpdateIfChanged();
+    }, OPENSPEC_POLL_INTERVAL);
+  }
+
+  pi.on("session_switch" as any, async (_event: any, ctx: any) => {
+    cachedCtx = ctx;
+    handleSessionChange(ctx);
+  });
+
+  pi.on("session_fork" as any, async (_event: any, ctx: any) => {
+    cachedCtx = ctx;
+    handleSessionChange(ctx);
+  });
+
   pi.on("turn_end", async (event, ctx) => {
     cachedCtx = ctx;
+    if (!sessionReady) return;
+
+    // Send firstMessage update after first turn if not previously sent
+    if (!lastFirstMessage) {
+      const firstMsg = extractFirstMessage(ctx);
+      if (firstMsg) {
+        lastFirstMessage = firstMsg;
+        connection.send({
+          type: "session_register",
+          sessionId,
+          cwd: ctx.cwd,
+          source: detectSessionSource(cachedHasUI),
+          firstMessage: firstMsg,
+        });
+      }
+    }
+
     const stats = extractTurnStats(
       event as Record<string, unknown>,
       ctx.getContextUsage(),
@@ -338,5 +593,22 @@ export default function (pi: ExtensionAPI) {
     // Give time for the unregister to send
     await new Promise((resolve) => setTimeout(resolve, 100));
     connection.disconnect();
+    getBridgeState().cleanup = undefined;
   });
+
+  // Register cleanup for /reload — saves state to globalThis and tears down resources
+  const state = getBridgeState();
+  state.cleanup = () => {
+    const s = getBridgeState();
+    s.sessionId = sessionId;
+    s.ctx = cachedCtx;
+    s.modelRegistry = cachedModelRegistry;
+    s.hasUI = cachedHasUI;
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (gitPollTimer) { clearInterval(gitPollTimer); gitPollTimer = null; }
+    if (openspecPollTimer) { clearInterval(openspecPollTimer); openspecPollTimer = null; }
+    connection.disconnect();
+  };
+
+  // Reload is handled by session_start which fires on /reload too
 }

@@ -3,11 +3,13 @@
 ### Requirement: Extension lifecycle and server connection
 The bridge extension SHALL be a global pi extension installed at `~/.pi/agent/extensions/` (via pi package). On `session_start`, it SHALL read configuration from the shared config module to determine the WebSocket port. If `PI_DASHBOARD_URL` env var is set, it SHALL use that instead. It SHALL then check whether the server is running and optionally auto-start it before connecting. On `session_shutdown`, it SHALL send `session_unregister` and close the connection.
 
+The bridge extension SHALL use `ctx.sessionManager.getSessionId()` as the session ID instead of generating a random UUID. The session ID SHALL be stored as a mutable variable (`let`) to support session switches.
+
 The ConnectionManager SHALL never throw unhandled exceptions that could crash the host pi process. All WebSocket operations (construction, send, close) SHALL be wrapped in error handling that falls back to buffering and/or reconnection.
 
 #### Scenario: Successful connection on session start
 - **WHEN** pi session starts and the bridge extension loads
-- **THEN** the extension SHALL read `piPort` from `~/.pi/dashboard/config.json`, connect to `ws://localhost:{piPort}`, and send a `session_register` message with session metadata
+- **THEN** the extension SHALL read `piPort` from `~/.pi/dashboard/config.json`, set `sessionId` from `ctx.sessionManager.getSessionId()`, connect to `ws://localhost:{piPort}`, and send a `session_register` message with session metadata including `sessionFile` and `sessionDir`
 
 #### Scenario: PI_DASHBOARD_URL override
 - **WHEN** the `PI_DASHBOARD_URL` environment variable is set
@@ -48,6 +50,18 @@ The ConnectionManager SHALL never throw unhandled exceptions that could crash th
 #### Scenario: Server restart cycle
 - **WHEN** the dashboard server is killed and restarted
 - **THEN** the bridge extension SHALL reconnect automatically and re-sync full session state without any impact on the pi agent
+
+#### Scenario: Session switch to new session
+- **WHEN** pi fires `session_switch` with reason `"new"` or `"resume"`
+- **THEN** the bridge SHALL send `session_unregister` for the old session ID, update its internal `sessionId` from `ctx.sessionManager.getSessionId()`, read new `sessionFile` and `sessionDir`, send `session_register` with the new ID and file info, and perform a full state sync
+
+#### Scenario: Session fork
+- **WHEN** pi fires `session_fork` (triggered by `/fork`)
+- **THEN** the bridge SHALL perform the same unregister/register flow as `session_switch`: unregister old ID, update `sessionId`, `sessionFile`, `sessionDir` from ctx, register new ID, full state sync
+
+#### Scenario: Events after session switch or fork
+- **WHEN** events fire after a `session_switch` or `session_fork`
+- **THEN** all forwarded events SHALL use the updated session ID
 
 ### Requirement: Session source detection
 The bridge extension SHALL detect the source environment where pi is running and include it in the `session_register` message.
@@ -288,9 +302,35 @@ The bridge extension SHALL read available models from `ctx.modelRegistry.getAvai
 - **WHEN** the session starts
 - **THEN** the extension sends `models_list` with all models that have configured API keys
 
+### Requirement: Session history sync on connect
+After completing the `session_register` handshake, the bridge extension SHALL call `SessionManager.list(process.cwd())` to retrieve local session history and send a `session_history_sync` message to the dashboard server. This SHALL occur once per connection (including reconnections). The call SHALL be non-blocking and errors SHALL be silently caught to avoid disrupting normal bridge operation.
+
+#### Scenario: Bridge syncs history after registration
+- **WHEN** the bridge extension successfully sends `session_register` to the server
+- **THEN** it SHALL asynchronously call `SessionManager.list(process.cwd())` and send a `session_history_sync` message with the results
+
+#### Scenario: Reconnection triggers history sync
+- **WHEN** the bridge extension reconnects after a connection drop
+- **THEN** it SHALL send `session_history_sync` again as part of the state sync flow
+
+#### Scenario: History sync error is non-fatal
+- **WHEN** `SessionManager.list()` throws an error (e.g., filesystem permission issue)
+- **THEN** the bridge SHALL catch the error silently and continue normal operation without sending `session_history_sync`
+
 ### Requirement: Handle request_models
 The bridge extension SHALL handle `request_models` messages by re-reading available models and responding with `models_list`.
 
 #### Scenario: Refresh models
 - **WHEN** the extension receives `request_models`
 - **THEN** it reads `modelRegistry.getAvailable()` and sends `models_list`
+
+### Requirement: List sessions handler
+The bridge extension SHALL handle `list_sessions` messages by importing `SessionManager` from `@mariozechner/pi-coding-agent` and calling its static `list(cwd)` method.
+
+#### Scenario: List sessions request
+- **WHEN** the bridge receives a `list_sessions` message with a `cwd`
+- **THEN** it SHALL call `SessionManager.list(cwd)` and return a `sessions_list` message with the results
+
+#### Scenario: List sessions failure
+- **WHEN** `SessionManager.list(cwd)` throws an error
+- **THEN** the bridge SHALL return a `sessions_list` with an empty sessions array

@@ -12,8 +12,6 @@ export const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 export interface DashboardConfig {
   port: number;
   piPort: number;
-  dbPath: string;
-  retentionDays: number;
   autoStart: boolean;
   autoShutdown: boolean;
   shutdownIdleSeconds: number;
@@ -23,8 +21,6 @@ export interface DashboardConfig {
 const DEFAULTS: DashboardConfig = {
   port: 8000,
   piPort: 9999,
-  dbPath: path.join(CONFIG_DIR, "dashboard.db"),
-  retentionDays: 30,
   autoStart: true,
   autoShutdown: true,
   shutdownIdleSeconds: 300,
@@ -38,10 +34,7 @@ const DEFAULTS: DashboardConfig = {
 export function loadConfig(): DashboardConfig {
   const configDir = path.join(os.homedir(), ".pi", "dashboard");
   const configFile = path.join(configDir, "config.json");
-  const defaults: DashboardConfig = {
-    ...DEFAULTS,
-    dbPath: path.join(configDir, "dashboard.db"),
-  };
+  const defaults: DashboardConfig = { ...DEFAULTS };
 
   try {
     if (!fs.existsSync(configFile)) return defaults;
@@ -51,8 +44,6 @@ export function loadConfig(): DashboardConfig {
     return {
       port: parsed.port ?? defaults.port,
       piPort: parsed.piPort ?? defaults.piPort,
-      dbPath: parsed.dbPath ?? defaults.dbPath,
-      retentionDays: parsed.retentionDays ?? defaults.retentionDays,
       autoStart: parsed.autoStart ?? defaults.autoStart,
       autoShutdown: parsed.autoShutdown ?? defaults.autoShutdown,
       shutdownIdleSeconds: parsed.shutdownIdleSeconds ?? defaults.shutdownIdleSeconds,
@@ -80,8 +71,6 @@ export function ensureConfig(): void {
   const defaults = {
     port: DEFAULTS.port,
     piPort: DEFAULTS.piPort,
-    dbPath: path.join(configDir, "dashboard.db"),
-    retentionDays: DEFAULTS.retentionDays,
     autoStart: DEFAULTS.autoStart,
     autoShutdown: DEFAULTS.autoShutdown,
     shutdownIdleSeconds: DEFAULTS.shutdownIdleSeconds,

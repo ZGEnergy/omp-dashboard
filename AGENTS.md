@@ -39,9 +39,12 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/extension/server-probe.ts` | TCP probe to detect running server |
 | `src/extension/server-launcher.ts` | Auto-start server as detached process |
 | `src/server/server.ts` | HTTP + WebSocket server |
-| `src/server/db.ts` | SQLite via sql.js |
-| `src/server/event-store.ts` | Event persistence with sequence numbers |
-| `src/server/session-manager.ts` | In-memory session registry |
+| `src/server/memory-event-store.ts` | In-memory event buffer with LRU eviction |
+| `src/server/memory-session-manager.ts` | Pure in-memory session registry |
+| `src/server/workspace-store.ts` | JSON-backed workspace CRUD |
+| `src/server/state-store.ts` | JSON-backed user preferences (hidden sessions) |
+| `src/server/pending-load-manager.ts` | On-demand session load request tracking |
+| `src/server/json-store.ts` | Atomic JSON file read/write helpers |
 | `src/client/App.tsx` | React app with WebSocket integration |
 | `src/client/lib/event-reducer.ts` | Event-sourced state reducer |
 

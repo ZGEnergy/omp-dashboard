@@ -5,12 +5,14 @@ import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDatabaseAsync, type Database } from "./db.js";
-import { createEventStore, type EventStore } from "./event-store.js";
-import { createSessionManager, type SessionManager } from "./session-manager.js";
+import { createMemoryEventStore, type EventStore } from "./memory-event-store.js";
+import { createMemorySessionManager, type SessionManager } from "./memory-session-manager.js";
 import { createPiGateway, type PiGateway } from "./pi-gateway.js";
 import { createBrowserGateway, type BrowserGateway } from "./browser-gateway.js";
-import { createWorkspaceManager, type WorkspaceManager } from "./workspace-manager.js";
+import { createWorkspaceStore, type WorkspaceStore } from "./workspace-store.js";
+import { createStateStore, type StateStore } from "./state-store.js";
+
+import { createPendingLoadManager, type PendingLoadManager } from "./pending-load-manager.js";
 import type { ApiResponse } from "../shared/types.js";
 import { extractSessionUpdates } from "./event-status-extraction.js";
 import { createTunnel, deleteTunnel } from "./tunnel.js";
@@ -21,7 +23,6 @@ import { spawn } from "node:child_process";
 export interface ServerConfig {
   port: number;
   piPort: number;
-  dbPath: string;
   dev: boolean;
   autoShutdown: boolean;
   shutdownIdleSeconds: number;
@@ -31,18 +32,64 @@ export interface ServerConfig {
 export interface DashboardServer {
   start(): Promise<void>;
   stop(): Promise<void>;
-  db: Database;
   sessionManager: SessionManager;
   eventStore: EventStore;
 }
 
 export async function createServer(config: ServerConfig): Promise<DashboardServer> {
-  const db = await createDatabaseAsync(config.dbPath);
-  const eventStore = createEventStore(db);
-  const sessionManager = createSessionManager(db);
-  const workspaceManager = createWorkspaceManager(db);
+  const stateStore = createStateStore();
+  const workspaceStore = createWorkspaceStore();
+  const sessionManager = createMemorySessionManager(stateStore, workspaceStore);
   const piGateway = createPiGateway(sessionManager);
-  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway);
+
+  // Create event store with pinning callback
+  const eventStore = createMemoryEventStore(
+    (sessionId) =>
+      piGateway.isSessionConnected(sessionId) ||
+      browserGateway.getSubscriberCount(sessionId) > 0,
+  );
+
+  // Create pending load manager with timeout handler
+  const pendingLoadManager = createPendingLoadManager((sessionId, browsers) => {
+    // Timeout: send dataUnavailable to all waiting browsers
+    sessionManager.update(sessionId, { dataUnavailable: true });
+    browserGateway.broadcastSessionUpdated(sessionId, { dataUnavailable: true });
+  });
+
+  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, pendingLoadManager);
+
+  // Handle bridge disconnect — cancel pending loads
+  piGateway.onDisconnect = (bridgeSessionId) => {
+    const cancelled = pendingLoadManager.cancelForBridge(bridgeSessionId);
+    for (const [sessionId, browsers] of cancelled) {
+      // Try another bridge
+      const session = sessionManager.get(sessionId);
+      const altBridge = session?.cwd ? piGateway.findSessionByCwd(session.cwd) : undefined;
+      if (altBridge && session?.sessionFile) {
+        // Retry with another bridge
+        for (const ws of browsers) {
+          pendingLoadManager.start(sessionId, ws, altBridge);
+        }
+        piGateway.sendToSession(altBridge, {
+          type: "load_session_events",
+          sessionId,
+          sessionFile: session.sessionFile,
+        });
+      } else {
+        // No alternative bridge — data unavailable
+        sessionManager.update(sessionId, { dataUnavailable: true });
+        browserGateway.broadcastSessionUpdated(sessionId, { dataUnavailable: true });
+      }
+    }
+  };
+
+  // Broadcast placeholder session to browsers when auto-created from early events
+  piGateway.onSessionCreated = (sessionId) => {
+    const session = sessionManager.get(sessionId);
+    if (session) {
+      browserGateway.broadcastSessionAdded(session);
+    }
+  };
 
   // Wire up event forwarding from pi gateway to browser gateway
   piGateway.onEvent = (sessionId, msg) => {
@@ -58,9 +105,22 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       }
     }
     if (msg.type === "session_register") {
+      // Always clear events — bridge replays full session history after registering
+      eventStore.deleteEventsForSession(sessionId);
+      // Force visible + clear dataUnavailable — active sessions must always be visible
+      sessionManager.update(sessionId, { hidden: false, dataUnavailable: false });
       const session = sessionManager.get(sessionId);
       if (session) {
         browserGateway.broadcastSessionAdded(session);
+      }
+    }
+    if (msg.type === "session_history_sync") {
+      // Broadcast newly inserted historical sessions to browsers
+      for (const hist of msg.sessions) {
+        const session = sessionManager.get(hist.id);
+        if (session && session.status === "ended") {
+          browserGateway.broadcastSessionAdded(session);
+        }
       }
     }
     if (msg.type === "session_unregister") {
@@ -99,6 +159,17 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         data: msg.data,
       });
     }
+    if (msg.type === "openspec_activity_update") {
+      const activityUpdates: Partial<import("../shared/types.js").DashboardSession> = {
+        openspecPhase: msg.phase ?? undefined,
+        openspecChange: msg.changeName ?? undefined,
+      };
+      sessionManager.update(sessionId, activityUpdates);
+      browserGateway.broadcastSessionUpdated(sessionId, {
+        openspecPhase: msg.phase ?? null,
+        openspecChange: msg.changeName ?? null,
+      });
+    }
     if (msg.type === "models_list") {
       browserGateway.sendToSubscribers(sessionId, {
         type: "models_list",
@@ -121,8 +192,36 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       sessionManager.update(sessionId, nameUpdates);
       browserGateway.broadcastSessionUpdated(sessionId, nameUpdates);
     }
+    if (msg.type === "sessions_list") {
+      // Create in-memory records for sessions not already known
+      for (const piSession of msg.sessions) {
+        const existing = sessionManager.get(piSession.id);
+        if (!existing) {
+          sessionManager.register({
+            id: piSession.id,
+            cwd: piSession.cwd,
+            name: piSession.name,
+            source: "unknown",
+            sessionFile: piSession.path,
+            sessionDir: piSession.cwd,
+            firstMessage: piSession.firstMessage,
+          });
+          sessionManager.unregister(piSession.id);
+        } else if (existing.sessionFile !== piSession.path) {
+          sessionManager.update(piSession.id, {
+            sessionFile: piSession.path,
+            sessionDir: piSession.cwd,
+          });
+        }
+      }
+      browserGateway.broadcastToAll({
+        type: "sessions_list",
+        sessionId,
+        cwd: msg.cwd,
+        sessions: msg.sessions,
+      });
+    }
     if (msg.type === "stats_update") {
-      // Broadcast accumulated totals (pi-gateway already accumulated into session manager)
       const session = sessionManager.get(sessionId);
       if (session) {
         browserGateway.broadcastSessionUpdated(sessionId, {
@@ -132,9 +231,9 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
           cacheWrite: session.cacheWrite,
           cost: session.cost,
         });
+
       }
 
-      // Forward as event so the reducer can update turnStats/contextUsage
       const statsEvent = {
         eventType: "stats_update",
         timestamp: Date.now(),
@@ -148,6 +247,42 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       };
       const seq = eventStore.insertEvent(sessionId, statsEvent);
       browserGateway.broadcastEvent(sessionId, seq, statsEvent);
+    }
+
+    // Handle on-demand session load results from bridge
+    if (msg.type === "load_session_events_result") {
+      const loadSessionId = msg.sessionId;
+      const browsers = pendingLoadManager.complete(loadSessionId);
+      if (browsers) {
+        // Insert events into memory buffer
+        for (const evt of msg.events) {
+          eventStore.insertEvent(loadSessionId, evt);
+        }
+        // Clear dataUnavailable
+        sessionManager.update(loadSessionId, { dataUnavailable: false });
+        browserGateway.broadcastSessionUpdated(loadSessionId, { dataUnavailable: false });
+        // Send batch replay to all waiting browsers
+        const stored = eventStore.getEvents(loadSessionId, 1);
+        const replayMsg = {
+          type: "event_replay" as const,
+          sessionId: loadSessionId,
+          events: stored.map((e) => ({ seq: e.seq, event: e.event })),
+          isLast: true,
+        };
+        for (const ws of browsers) {
+          if (ws.readyState === 1) { // WebSocket.OPEN
+            ws.send(JSON.stringify(replayMsg));
+          }
+        }
+      }
+    }
+    if (msg.type === "load_session_events_error") {
+      const loadSessionId = msg.sessionId;
+      const browsers = pendingLoadManager.complete(loadSessionId);
+      if (browsers) {
+        sessionManager.update(loadSessionId, { dataUnavailable: true });
+        browserGateway.broadcastSessionUpdated(loadSessionId, { dataUnavailable: true });
+      }
     }
   };
 
@@ -201,12 +336,12 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   );
 
   fastify.get("/api/workspaces", async () => {
-    return { success: true, data: workspaceManager.list() } satisfies ApiResponse;
+    return { success: true, data: workspaceStore.list() } satisfies ApiResponse;
   });
 
   fastify.post<{ Body: { path: string; name?: string } }>("/api/workspaces", async (request) => {
     try {
-      const ws = workspaceManager.create(request.body);
+      const ws = workspaceStore.create(request.body);
       return { success: true, data: ws } satisfies ApiResponse;
     } catch (err: any) {
       return { success: false, error: err.message } satisfies ApiResponse;
@@ -217,7 +352,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     "/api/workspaces/:id",
     async (request) => {
       try {
-        const ws = workspaceManager.update(request.params.id, request.body);
+        const ws = workspaceStore.update(request.params.id, request.body);
         return { success: true, data: ws } satisfies ApiResponse;
       } catch (err: any) {
         return { success: false, error: err.message } satisfies ApiResponse;
@@ -226,7 +361,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   );
 
   fastify.delete<{ Params: { id: string } }>("/api/workspaces/:id", async (request) => {
-    workspaceManager.delete(request.params.id);
+    workspaceStore.delete(request.params.id);
     return { success: true } satisfies ApiResponse;
   });
 
@@ -254,23 +389,19 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         return { success: false, error: "path and editor required" } satisfies ApiResponse;
       }
 
-      // Validate path against known session cwds
       const allSessions = sessionManager.listAll();
       if (!allSessions.some((s) => s.cwd === cwd)) {
         return { success: false, error: "unknown session path" } satisfies ApiResponse;
       }
 
-      // Validate editor ID
       const editorEntry = EDITORS.find((e) => e.id === editorId);
       if (!editorEntry) {
         return { success: false, error: "unknown editor" } satisfies ApiResponse;
       }
 
-      // Build args: open specific file or workspace root
       const target = file ? path.resolve(cwd, file) : cwd;
       const args = line && file ? [`${target}:${line}`] : [target];
 
-      // Spawn editor as detached process
       try {
         const child = spawn(editorEntry.cli, args, {
           detached: true,
@@ -295,15 +426,12 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   }
 
   const server: DashboardServer = {
-    db,
     sessionManager,
     eventStore,
 
     async start() {
-      // Start Pi Gateway
       piGateway.start(config.piPort);
 
-      // Start HTTP server with WebSocket upgrade for browser gateway
       fastify.server.on("upgrade", (request, socket, head) => {
         if (request.url === "/ws") {
           browserGateway.wss.handleUpgrade(request, socket, head, (ws) => {
@@ -318,7 +446,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       console.log(`Dashboard server running at http://localhost:${config.port}`);
       console.log(`Pi gateway listening on port ${config.piPort}`);
 
-      // Create zrok tunnel if enabled
       if (config.tunnel) {
         const tunnelUrl = await createTunnel(config.port);
         if (tunnelUrl) {
@@ -326,21 +453,22 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         }
       }
 
-      // Start idle timer immediately (handles case where no sessions ever connect)
       startIdleTimer();
     },
 
     async stop() {
       cancelIdleTimer();
+      pendingLoadManager.dispose();
+      stateStore.flush();
+      stateStore.dispose();
+
       await deleteTunnel();
       piGateway.stop();
-      // Forcibly terminate browser WebSocket clients before closing
       for (const client of browserGateway.wss.clients) {
         client.terminate();
       }
       browserGateway.wss.close();
       await fastify.close();
-      db.close();
     },
   };
 

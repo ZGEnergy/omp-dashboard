@@ -35,5 +35,40 @@ describe("Process Manager", () => {
       const cmd = buildTmuxCommand("/home/user/project", false);
       expect(cmd).toContain("PI_DASHBOARD_SPAWNED=1");
     });
+
+    it("should include --session flag for continue mode", () => {
+      const cmd = buildTmuxCommand("/home/user/project", true, {
+        sessionFile: "/path/to/session.jsonl",
+        mode: "continue",
+      });
+      expect(cmd).toContain("--session /path/to/session.jsonl");
+      expect(cmd).toContain("PI_DASHBOARD_SPAWNED=1");
+      expect(cmd).not.toContain("--fork");
+    });
+
+    it("should include --fork flag for fork mode", () => {
+      const cmd = buildTmuxCommand("/home/user/project", true, {
+        sessionFile: "/path/to/session.jsonl",
+        mode: "fork",
+      });
+      expect(cmd).toContain("--fork /path/to/session.jsonl");
+      expect(cmd).toContain("PI_DASHBOARD_SPAWNED=1");
+      expect(cmd).not.toContain("--session");
+    });
+
+    it("should not include session flags when no options provided", () => {
+      const cmd = buildTmuxCommand("/home/user/project", false);
+      expect(cmd).not.toContain("--session");
+      expect(cmd).not.toContain("--fork");
+    });
+
+    it("should create new session for continue mode when no tmux session exists", () => {
+      const cmd = buildTmuxCommand("/home/user/project", false, {
+        sessionFile: "/path/to/session.jsonl",
+        mode: "continue",
+      });
+      expect(cmd).toContain("new-session");
+      expect(cmd).toContain("--session /path/to/session.jsonl");
+    });
   });
 });

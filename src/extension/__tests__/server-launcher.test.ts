@@ -17,9 +17,10 @@ describe("server-launcher", () => {
     const args = buildSpawnArgs({
       port: 3000,
       piPort: 4000,
-      dbPath: "/tmp/test.db",
-      retentionDays: 30,
       autoStart: true,
+      autoShutdown: true,
+      shutdownIdleSeconds: 300,
+      tunnel: { enabled: true },
     });
 
     expect(args).toContain("--port");

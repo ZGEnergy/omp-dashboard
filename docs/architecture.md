@@ -12,8 +12,8 @@ The PI Dashboard is a web-based dashboard for monitoring and interacting with pi
 └─────────────┘                     └──────────────┘                   └─────────────┘
                                           │
                                     ┌─────┴─────┐
-                                    │  SQLite   │
-                                    │  Database │
+                                    │  In-Memory │
+                                    │  + JSON    │
                                     └───────────┘
 ```
 
@@ -26,13 +26,17 @@ A global pi extension that runs in every pi session. It:
 - Relays commands from the dashboard back to pi
 - Handles reconnection with exponential backoff and event buffering
 - Sends heartbeats every 15s
+- Loads historical session files on demand via `SessionManager.open()`
 
 ### 2. Dashboard Server (`src/server/`)
 A Node.js HTTP + WebSocket server that:
 - Accepts connections from bridge extensions (Pi Gateway, port 9999)
 - Accepts connections from web browsers (Browser Gateway, port 8000)
-- Persists events in SQLite with 30-day retention
-- Manages workspaces (project folders) and session-to-workspace mapping
+- Stores events in an in-memory buffer with LRU eviction (max 100 sessions)
+- Manages sessions in a pure in-memory registry (populated from bridge connections)
+- Persists workspaces in `~/.pi/dashboard/workspaces.json`
+- Persists user preferences (hidden sessions) in `~/.pi/dashboard/state.json`
+- Requests on-demand session loading from bridge extensions for evicted sessions
 - Serves the built web client as static files
 - Exposes REST API for workspace CRUD, session management, event content fetch
 
@@ -50,14 +54,13 @@ TypeScript type definitions shared across all components:
 - `protocol.ts` - Extension↔Server WebSocket messages
 - `browser-protocol.ts` - Server↔Browser WebSocket messages
 - `types.ts` - Data models (Session, Workspace, Event, etc.)
-- `rest-api.ts` - REST API types
 
 ## Data Flow
 
 ### Event Flow (pi → browser)
 1. Pi emits event (e.g., `message_update`)
 2. Bridge extension converts to `event_forward` protocol message
-3. Server receives, stores in SQLite, assigns sequence number
+3. Server receives, stores in in-memory buffer, assigns sequence number
 4. Server broadcasts to all subscribed browsers via `event` message
 5. Browser's event reducer processes event, React renders update
 
@@ -79,8 +82,27 @@ TypeScript type definitions shared across all components:
 
 ### Reconnection Flow
 1. Browser reconnects with `subscribe` message including `lastSeq`
-2. Server replays missed events from SQLite in batches of 200
+2. Server replays missed events from in-memory buffer in batches of 200
 3. Browser's event reducer processes replay, rebuilding state
+
+### On-Demand Session Loading
+When a browser subscribes to a session whose events have been evicted from memory:
+1. Server sends empty `event_replay` with `isLast: false` to indicate loading
+2. Server sends `load_session_events` to a connected bridge in the same workspace
+3. Bridge calls `SessionManager.open(sessionFile).getBranch()` to load the session
+4. Bridge converts entries via `replayEntriesAsEvents()` and sends back as `load_session_events_result`
+5. Server stores events in memory and sends `event_replay` batch to waiting browsers
+6. If no bridge is available or loading times out (10s), server sends `dataUnavailable: true`
+
+## Persistence
+
+| Data | Storage | Details |
+|------|---------|---------|
+| Events | In-memory Map | LRU eviction, max 100 sessions. Pinned if active bridge or browser subscribers. |
+| Sessions | In-memory Map | Populated from bridge `session_register` + `session_history_sync`. Empty on restart. |
+| Workspaces | `~/.pi/dashboard/workspaces.json` | Atomic write (tmp+rename). Read on startup. |
+| Hidden sessions | `~/.pi/dashboard/state.json` | Debounced writes (max 1/sec). Atomic write. |
+| Session files | `~/.pi/agent/sessions/` (pi's own) | Source of truth. Bridge loads on demand. |
 
 ## Configuration
 
@@ -90,9 +112,9 @@ Precedence: CLI flags → environment variables → config file (`~/.pi/dashboar
 |---------|---------|-------------|
 | `port` | 8000 | HTTP + Browser WebSocket port |
 | `piPort` | 9999 | Pi extension WebSocket port |
-| `dbPath` | `~/.pi/dashboard/dashboard.db` | SQLite database path |
-| `retentionDays` | 30 | Event retention period |
 | `autoStart` | true | Bridge extension auto-starts server if not running |
+| `autoShutdown` | true | Server shuts down after idle period |
+| `shutdownIdleSeconds` | 300 | Idle timeout before auto-shutdown |
 
 ## Shared Config
 

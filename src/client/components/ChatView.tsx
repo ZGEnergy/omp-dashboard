@@ -6,6 +6,7 @@ import type { ToolContext } from "./tool-renderers/index.js";
 import { MarkdownContent } from "./MarkdownContent.js";
 import { CopyButton } from "./CopyButton.js";
 import { ToolCallStep } from "./ToolCallStep.js";
+import { ThinkingBlock } from "./ThinkingBlock.js";
 
 interface Props {
   state: SessionState;
@@ -75,6 +76,15 @@ export function ChatView({ state, toolContext }: Props) {
           );
         }
 
+        if (msg.role === "thinking") {
+          return (
+            <ThinkingBlock
+              key={msg.id}
+              content={msg.content}
+            />
+          );
+        }
+
         if (msg.role === "toolResult") {
           return (
             <ToolCallStep
@@ -99,6 +109,15 @@ export function ChatView({ state, toolContext }: Props) {
           </div>
         );
       })}
+
+      {/* Streaming thinking */}
+      {state.streamingThinking && (
+        <ThinkingBlock
+          content={state.streamingThinking}
+          isStreaming
+          defaultExpanded
+        />
+      )}
 
       {/* Streaming text */}
       {state.streamingText && (

@@ -9,6 +9,7 @@ import { ContextUsageBar } from "./ContextUsageBar.js";
 import type { ContextUsageInfo } from "./SessionList.js";
 import type { OpenSpecData } from "../../shared/types.js";
 import { OpenSpecSection } from "./OpenSpecSection.js";
+import { OpenSpecActivityBadge } from "./OpenSpecActivityBadge.js";
 import { InlineRenameInput } from "./InlineRenameInput.js";
 
 export const statusColors: Record<string, string> = {
@@ -174,6 +175,7 @@ export function SessionCard({
   onOpenSpecRefresh,
   onRename,
   onShutdown,
+  onResume,
 }: {
   session: DashboardSession;
   selectedId?: string;
@@ -191,6 +193,7 @@ export function SessionCard({
   onOpenSpecRefresh?: () => void;
   onRename?: (name: string) => void;
   onShutdown?: (id: string) => void;
+  onResume?: (mode: "continue" | "fork") => void;
 }) {
   const isSelected = selectedId === session.id;
   const [isRenaming, setIsRenaming] = useState(false);
@@ -279,6 +282,24 @@ export function SessionCard({
         )}
       </div>
 
+      {/* OpenSpec activity badge */}
+      {session.openspecPhase && (
+        <OpenSpecActivityBadge
+          phase={session.openspecPhase}
+          changeName={session.openspecChange}
+          completedTasks={
+            session.openspecChange
+              ? openspecData?.changes?.find((c) => c.name === session.openspecChange)?.completedTasks
+              : undefined
+          }
+          totalTasks={
+            session.openspecChange
+              ? openspecData?.changes?.find((c) => c.name === session.openspecChange)?.totalTasks
+              : undefined
+          }
+        />
+      )}
+
       {/* Line 4: context usage bar */}
       <div className="mt-1 ml-4">
         <ContextUsageBar
@@ -300,6 +321,25 @@ export function SessionCard({
         <span className={`text-[10px] ${sourceBadgeColors[session.source] ?? "text-[var(--text-tertiary)]"}`}>
           {session.source}
         </span>
+        {/* Resume/Fork buttons for hidden sessions */}
+        {isHidden && onResume && session.sessionFile && (
+          <>
+            <button
+              onClick={(e) => { e.stopPropagation(); onResume("continue"); }}
+              className="text-[10px] px-1.5 py-0.5 rounded border border-green-500/30 text-green-400 hover:bg-green-500/10"
+              title="Resume session (continue same session)"
+            >
+              Resume
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onResume("fork"); }}
+              className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
+              title="Fork session (new session from this point)"
+            >
+              Fork
+            </button>
+          </>
+        )}
         {/* Spacer */}
         <span className="flex-1" />
         {/* Hide/unhide button (right) */}

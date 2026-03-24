@@ -36,6 +36,13 @@ export interface DashboardSession {
   gitPrNumber?: number;
   gitPrUrl?: string;
   openspecData?: string;
+  openspecPhase?: OpenSpecPhase | null;
+  openspecChange?: string | null;
+  sessionFile?: string;
+  sessionDir?: string;
+  hidden?: boolean;
+  firstMessage?: string;
+  dataUnavailable?: boolean;
 }
 
 /** An event forwarded from a pi session */
@@ -106,6 +113,37 @@ export interface OpenSpecChange {
 export interface OpenSpecData {
   initialized: boolean;
   changes: OpenSpecChange[];
+}
+
+/** OpenSpec workflow phase detected from tool calls */
+export type OpenSpecPhase =
+  | "explore"
+  | "new"
+  | "continue"
+  | "ff"
+  | "apply"
+  | "verify"
+  | "archive"
+  | "sync-specs"
+  | "onboard";
+
+/** Active OpenSpec activity for a session */
+export interface OpenSpecActivity {
+  phase: OpenSpecPhase;
+  changeName?: string;
+}
+
+/** Pi session info returned from SessionManager.list() */
+export interface PiSessionInfo {
+  id: string;
+  path: string;
+  cwd: string;
+  name?: string;
+  parentSessionPath?: string;
+  created: string;
+  modified: string;
+  messageCount: number;
+  firstMessage?: string;
 }
 
 /** REST API response envelope */

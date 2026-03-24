@@ -517,6 +517,245 @@ describe("model_select event", () => {
   });
 });
 
+describe("thinking events", () => {
+  it("should initialize streamingThinking to empty string", () => {
+    const state = createInitialState();
+    expect(state.streamingThinking).toBe("");
+  });
+
+  it("should reset streamingThinking on thinking_start", () => {
+    let state = createInitialState();
+    state = { ...state, streamingThinking: "leftover" };
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+      },
+    });
+    expect(state.streamingThinking).toBe("");
+  });
+
+  it("should accumulate thinking deltas", () => {
+    let state = createInitialState();
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Let me think" },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: " about this..." },
+      },
+    });
+    expect(state.streamingThinking).toBe("Let me think about this...");
+  });
+
+  it("should create thinking message on thinking_end and reset streamingThinking", () => {
+    let state = createInitialState();
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Deep reasoning here" },
+      },
+    });
+    const ts = Date.now();
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: ts,
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "Deep reasoning here" },
+      },
+    });
+    expect(state.streamingThinking).toBe("");
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].role).toBe("thinking");
+    expect(state.messages[0].content).toBe("Deep reasoning here");
+    expect(state.messages[0].timestamp).toBe(ts);
+  });
+
+  it("should skip creating thinking message when streamingThinking is empty", () => {
+    let state = createInitialState();
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+      },
+    });
+    // thinking_end with no deltas
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "" },
+      },
+    });
+    expect(state.messages).toHaveLength(0);
+    expect(state.streamingThinking).toBe("");
+  });
+
+  it("should handle multiple thinking blocks in sequence", () => {
+    let state = createInitialState();
+    // First thinking block
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "First thought" },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "First thought" },
+      },
+    });
+    // Second thinking block
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_start", contentIndex: 1 },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_delta", contentIndex: 1, delta: "Second thought" },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_end", contentIndex: 1, content: "Second thought" },
+      },
+    });
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0].role).toBe("thinking");
+    expect(state.messages[0].content).toBe("First thought");
+    expect(state.messages[1].role).toBe("thinking");
+    expect(state.messages[1].content).toBe("Second thought");
+  });
+
+  it("should store full reasoning text without truncation", () => {
+    const longThinking = "x".repeat(10000);
+    let state = createInitialState();
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: longThinking },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: longThinking },
+      },
+    });
+    expect(state.messages[0].content).toHaveLength(10000);
+  });
+
+  it("should not interfere with text streaming during thinking", () => {
+    let state = createInitialState();
+    state = reduceEvent(state, { eventType: "agent_start", timestamp: Date.now(), data: {} });
+    // Thinking happens
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "reasoning" },
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "reasoning" },
+      },
+    });
+    // Then text streams
+    state = reduceEvent(state, {
+      eventType: "message_update",
+      timestamp: Date.now(),
+      data: {
+        message: { role: "assistant", content: [{ type: "text", text: "Here is the answer" }] },
+        assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: "Here is the answer" },
+      },
+    });
+    expect(state.messages).toHaveLength(1); // thinking message
+    expect(state.messages[0].role).toBe("thinking");
+    expect(state.streamingText).toBe("Here is the answer");
+    expect(state.streamingThinking).toBe("");
+  });
+});
+
 describe("toDisplayString", () => {
   it("returns empty string for null/undefined", () => {
     expect(toDisplayString(null)).toBe("");

@@ -10,6 +10,7 @@ import type {
   Workspace,
   OpenSpecData,
   ModelInfo,
+  PiSessionInfo,
 } from "./types.js";
 
 // ── Server → Browser ────────────────────────────────────────────────
@@ -80,6 +81,20 @@ export interface BrowserModelsListMessage {
   models: ModelInfo[];
 }
 
+export interface SessionsListBrowserMessage {
+  type: "sessions_list";
+  sessionId: string;
+  cwd: string;
+  sessions: PiSessionInfo[];
+}
+
+export interface ResumeResultBrowserMessage {
+  type: "resume_result";
+  sessionId: string;
+  success: boolean;
+  message: string;
+}
+
 export type ServerToBrowserMessage =
   | SessionAddedMessage
   | SessionUpdatedMessage
@@ -91,7 +106,9 @@ export type ServerToBrowserMessage =
   | WorkspaceUpdatedMessage
   | BrowserFilesListMessage
   | BrowserOpenSpecUpdateMessage
-  | BrowserModelsListMessage;
+  | BrowserModelsListMessage
+  | SessionsListBrowserMessage
+  | ResumeResultBrowserMessage;
 
 // ── Browser → Server ────────────────────────────────────────────────
 
@@ -162,6 +179,27 @@ export interface ShutdownBrowserMessage {
   sessionId: string;
 }
 
+export interface ListSessionsBrowserMessage {
+  type: "list_sessions";
+  cwd: string;
+}
+
+export interface ResumeSessionBrowserMessage {
+  type: "resume_session";
+  sessionId: string;
+  mode: "continue" | "fork";
+}
+
+export interface HideSessionBrowserMessage {
+  type: "hide_session";
+  sessionId: string;
+}
+
+export interface UnhideSessionBrowserMessage {
+  type: "unhide_session";
+  sessionId: string;
+}
+
 export type BrowserToServerMessage =
   | SubscribeMessage
   | UnsubscribeMessage
@@ -174,4 +212,8 @@ export type BrowserToServerMessage =
   | RenameSessionBrowserMessage
   | RequestModelsBrowserMessage
   | SetThinkingLevelBrowserMessage
-  | ShutdownBrowserMessage;
+  | ShutdownBrowserMessage
+  | ListSessionsBrowserMessage
+  | ResumeSessionBrowserMessage
+  | HideSessionBrowserMessage
+  | UnhideSessionBrowserMessage;

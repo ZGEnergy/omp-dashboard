@@ -20,8 +20,19 @@ export function detectPlatform(platform?: string): PlatformInfo {
   return { strategy: "tmux", platform: p };
 }
 
-export function buildTmuxCommand(cwd: string, sessionExists: boolean): string {
-  const piCmd = `cd ${cwd} && PI_DASHBOARD_SPAWNED=1 pi`;
+export interface SessionOptions {
+  sessionFile?: string;
+  mode?: "continue" | "fork";
+}
+
+export function buildTmuxCommand(cwd: string, sessionExists: boolean, options?: SessionOptions): string {
+  let piCmd = `cd ${cwd} && PI_DASHBOARD_SPAWNED=1 pi`;
+
+  if (options?.sessionFile && options?.mode === "continue") {
+    piCmd = `cd ${cwd} && PI_DASHBOARD_SPAWNED=1 pi --session ${options.sessionFile}`;
+  } else if (options?.sessionFile && options?.mode === "fork") {
+    piCmd = `cd ${cwd} && PI_DASHBOARD_SPAWNED=1 pi --fork ${options.sessionFile}`;
+  }
 
   if (sessionExists) {
     return `tmux new-window -t pi-dashboard -c "${cwd}" "${piCmd}"`;
@@ -52,7 +63,7 @@ export interface SpawnResult {
   message: string;
 }
 
-export async function spawnPiSession(cwd: string): Promise<SpawnResult> {
+export async function spawnPiSession(cwd: string, options?: SessionOptions): Promise<SpawnResult> {
   const platform = detectPlatform();
 
   if (platform.strategy === "tmux") {
@@ -64,7 +75,7 @@ export async function spawnPiSession(cwd: string): Promise<SpawnResult> {
     }
 
     const exists = dashboardSessionExists();
-    const cmd = buildTmuxCommand(cwd, exists);
+    const cmd = buildTmuxCommand(cwd, exists, options);
 
     try {
       execSync(cmd, { stdio: "ignore" });

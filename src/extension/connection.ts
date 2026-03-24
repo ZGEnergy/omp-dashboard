@@ -30,7 +30,7 @@ export class ConnectionManager {
   constructor(options: ConnectionManagerOptions) {
     this.url = options.url;
     this.WS = options.WebSocketImpl ?? (globalThis as any).WebSocket;
-    this.maxBufferSize = options.maxBufferSize ?? 1000;
+    this.maxBufferSize = options.maxBufferSize ?? 10000;
     this.onMessage = options.onMessage;
     this.onReconnect = options.onReconnect;
   }

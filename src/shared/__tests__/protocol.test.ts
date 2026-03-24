@@ -62,6 +62,20 @@ describe("Protocol message serialization round-trip", () => {
         sessionId: "s1",
         stats: { tokensIn: 100, tokensOut: 50, cost: 0.01 },
       },
+      {
+        type: "session_history_sync",
+        sessions: [
+          {
+            id: "hist-1",
+            cwd: "/home/user/project",
+            name: "old session",
+            startedAt: Date.now() - 86400000,
+            firstMessage: "Hello",
+            sessionFile: "/path/to/session.jsonl",
+            sessionDir: "/path/to/dir",
+          },
+        ],
+      },
     ];
 
     for (const msg of messages) {

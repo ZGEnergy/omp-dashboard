@@ -1,7 +1,7 @@
 /**
  * Extension ↔ Server WebSocket protocol messages.
  */
-import type { DashboardEvent, CommandInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, OpenSpecData, ModelInfo } from "./types.js";
+import type { DashboardEvent, CommandInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, OpenSpecData, ModelInfo, PiSessionInfo, OpenSpecPhase } from "./types.js";
 
 // ── Extension → Server ──────────────────────────────────────────────
 
@@ -13,6 +13,11 @@ export interface SessionRegisterMessage {
   source: SessionSource;
   model?: string;
   thinkingLevel?: string;
+  sessionFile?: string;
+  sessionDir?: string;
+  firstMessage?: string;
+  /** True when this is a fresh session start (not a reconnection) */
+  isNew?: boolean;
 }
 
 export interface SessionUnregisterMessage {
@@ -89,11 +94,50 @@ export interface SessionNameUpdateMessage {
   name: string;
 }
 
+export interface SessionsListExtensionMessage {
+  type: "sessions_list";
+  sessionId: string;
+  cwd: string;
+  sessions: PiSessionInfo[];
+}
+
+export interface SessionHistorySyncMessage {
+  type: "session_history_sync";
+  sessions: Array<{
+    id: string;
+    cwd: string;
+    name?: string;
+    startedAt: number;
+    firstMessage?: string;
+    sessionFile?: string;
+    sessionDir?: string;
+  }>;
+}
+
+export interface OpenSpecActivityUpdateMessage {
+  type: "openspec_activity_update";
+  sessionId: string;
+  phase?: OpenSpecPhase | null;
+  changeName?: string | null;
+}
+
 export interface ModelUpdateMessage {
   type: "model_update";
   sessionId: string;
   model: string;
   thinkingLevel?: string;
+}
+
+export interface LoadSessionEventsResultMessage {
+  type: "load_session_events_result";
+  sessionId: string;
+  events: Array<{ eventType: string; timestamp: number; data: Record<string, unknown> }>;
+}
+
+export interface LoadSessionEventsErrorMessage {
+  type: "load_session_events_error";
+  sessionId: string;
+  error: string;
 }
 
 export type ExtensionToServerMessage =
@@ -109,7 +153,12 @@ export type ExtensionToServerMessage =
   | OpenSpecUpdateMessage
   | SessionNameUpdateMessage
   | ModelsListMessage
-  | ModelUpdateMessage;
+  | ModelUpdateMessage
+  | OpenSpecActivityUpdateMessage
+  | SessionsListExtensionMessage
+  | SessionHistorySyncMessage
+  | LoadSessionEventsResultMessage
+  | LoadSessionEventsErrorMessage;
 
 // ── Server → Extension ──────────────────────────────────────────────
 
@@ -163,9 +212,21 @@ export interface SetThinkingLevelMessage {
   level: string;
 }
 
+export interface ListSessionsExtensionMessage {
+  type: "list_sessions";
+  sessionId: string;
+  cwd: string;
+}
+
 export interface ShutdownExtensionMessage {
   type: "shutdown";
   sessionId: string;
+}
+
+export interface LoadSessionEventsMessage {
+  type: "load_session_events";
+  sessionId: string;
+  sessionFile: string;
 }
 
 export type ServerToExtensionMessage =
@@ -178,4 +239,6 @@ export type ServerToExtensionMessage =
   | RenameSessionExtensionMessage
   | RequestModelsMessage
   | SetThinkingLevelMessage
-  | ShutdownExtensionMessage;
+  | ListSessionsExtensionMessage
+  | ShutdownExtensionMessage
+  | LoadSessionEventsMessage;

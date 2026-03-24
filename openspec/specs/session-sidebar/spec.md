@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Active session list
-The session sidebar SHALL display all active and idle sessions for the selected workspace. Each session entry SHALL show:
+The session sidebar SHALL display only non-hidden sessions by default. Each session entry SHALL show:
 - Status indicator (🟢 green dot for active/idle, 🟡 yellow pulsing dot for streaming, ⚫ gray for ended)
 - Source badge (TUI / Zed / tmux)
 - Model name and thinking level (e.g., "claude-4-sonnet (high)")
@@ -21,13 +21,13 @@ Session cards SHALL have a 3D elevated appearance with `rounded-xl`, `shadow-md 
 - **WHEN** an `agent_end` event arrives for a session
 - **THEN** the sidebar SHALL update the status indicator to green/connected and show "● idle"
 
-#### Scenario: Session is active (connected, no agent activity yet)
-- **WHEN** a session is registered but no agent activity has occurred
-- **THEN** the sidebar SHALL show a green status indicator
+#### Scenario: Only active sessions shown by default
+- **WHEN** the sidebar loads
+- **THEN** it SHALL display only sessions with `hidden = false`
 
-#### Scenario: Session ends
+#### Scenario: Session ends and disappears
 - **WHEN** a session is unregistered or heartbeat times out
-- **THEN** the sidebar SHALL show a gray status indicator
+- **THEN** the session SHALL be marked `hidden = true` and removed from the default sidebar view
 
 #### Scenario: Tool execution in progress
 - **WHEN** a `session_updated` event arrives with `currentTool` set to a tool name
@@ -83,23 +83,39 @@ Clicking a session in the sidebar SHALL select it and display its conversation i
 - **THEN** the chat view SHALL load and display that session's conversation with live streaming
 
 #### Scenario: Select inactive session
-- **WHEN** a user clicks an inactive session
-- **THEN** the chat view SHALL load the session's historical conversation (read-only, no input box)
+- **WHEN** a user clicks an inactive session (from hidden/revealed list)
+- **THEN** the chat view SHALL load the session's historical conversation (read-only, no input box). If no events are stored, it SHALL show a message indicating no conversation history with options to resume or fork.
 
 #### Scenario: Selected session ends
 - **WHEN** the currently selected session's pi process exits
 - **THEN** the chat view SHALL show a "Session ended" indicator and disable the input box
 
-### Requirement: Inactive sessions toggle
-The sidebar SHALL show inactive (ended) sessions in a collapsed section with a toggle. When expanded, inactive sessions SHALL show with basic metadata (name, date, model, cost).
+### Requirement: Hidden sessions toggle
+The sidebar SHALL include a toggle to show hidden (ended) sessions. When enabled, hidden sessions SHALL appear with muted styling and resume/fork action buttons.
 
-#### Scenario: Toggle inactive sessions
-- **WHEN** a user clicks the "Inactive" toggle in the sidebar
-- **THEN** the section SHALL expand to show ended sessions for the selected workspace
+#### Scenario: Toggle hidden sessions on
+- **WHEN** the user enables the "Show hidden" toggle
+- **THEN** all hidden sessions for the selected workspace SHALL appear in the list with reduced opacity and resume/fork buttons
 
-#### Scenario: Filter inactive sessions
-- **WHEN** inactive sessions are shown
-- **THEN** they SHALL be sorted by last activity timestamp (most recent first) and limited to sessions within the 30-day retention period
+#### Scenario: Toggle hidden sessions off
+- **WHEN** the user disables the "Show hidden" toggle
+- **THEN** hidden sessions SHALL be removed from the list
+
+#### Scenario: Hidden count indicator
+- **WHEN** hidden sessions exist and the toggle is off
+- **THEN** the sidebar SHALL show "N hidden" at the bottom of the session list
+
+#### Scenario: Resume button on hidden session
+- **WHEN** a hidden session card is shown with the toggle on
+- **THEN** it SHALL display a "Resume" button (continue same session) and a "Fork" button (new session from old)
+
+#### Scenario: Resume action
+- **WHEN** the user clicks "Resume" on a hidden session
+- **THEN** the client SHALL send `resume_session` with `mode: "continue"` and the session ID
+
+#### Scenario: Fork action
+- **WHEN** the user clicks "Fork" on a hidden session
+- **THEN** the client SHALL send `resume_session` with `mode: "fork"` and the session ID
 
 ### Requirement: New session button
 The sidebar SHALL include a "+ New session" button that spawns a new pi session in the selected workspace via tmux (see process-manager spec).
@@ -138,6 +154,25 @@ On mobile viewports (width < 768px), the session sidebar SHALL be hidden by defa
 #### Scenario: Editor button on grouped sessions
 - **WHEN** multiple sessions share the same cwd and are displayed under a group header
 - **THEN** editor buttons SHALL appear on the group header, not on each individual session card
+
+### Requirement: Session display name with firstMessage fallback
+The session display name function SHALL use the following fallback chain: explicit name → first user message (truncated to 50 characters) → cwd last segment → session ID prefix. This ensures sessions are distinguishable even when the user has not explicitly named them.
+
+#### Scenario: Named session
+- **WHEN** a session has `name` set (e.g., "Fix auth bug")
+- **THEN** the display name SHALL be the name
+
+#### Scenario: Unnamed session with first message
+- **WHEN** a session has no `name` but has `firstMessage` set (e.g., "Help me fix the authentication module so it...")
+- **THEN** the display name SHALL be the firstMessage truncated to 50 characters with "..." appended if truncated
+
+#### Scenario: Unnamed session without first message
+- **WHEN** a session has neither `name` nor `firstMessage`
+- **THEN** the display name SHALL be the last segment of the cwd (e.g., "my-project")
+
+#### Scenario: Brand new session
+- **WHEN** a session has just started with no messages or name
+- **THEN** the display name SHALL be the cwd last segment, and SHALL update to the firstMessage once the first turn completes
 
 ### Requirement: Session sidebar styling
 The session sidebar, session list, and session cards SHALL use theme-aware CSS variables for all background, text, and border colors instead of hardcoded Tailwind dark-mode classes.

@@ -4,7 +4,7 @@
 The system SHALL define TypeScript types for all messages sent between the bridge extension and the dashboard server over WebSocket. Messages SHALL be JSON-serializable and include a `type` discriminator field.
 
 The following message types SHALL be defined for extension → server:
-- `session_register`: session metadata on connect (piSessionId, cwd, source, model, thinkingLevel, sessionName, entries for state sync)
+- `session_register`: session metadata on connect (piSessionId, cwd, source, model, thinkingLevel, sessionName, sessionFile, sessionDir, entries for state sync)
 - `session_unregister`: session disconnect
 - `session_heartbeat`: periodic liveness signal
 - `event_forward`: forwarded pi event (wraps any pi event type with sessionId)
@@ -15,6 +15,12 @@ The following message types SHALL be defined for extension → server:
 - `openspec_update`: openspec change data for the session's project (sessionId, data: OpenSpecData)
 - `session_name_update`: session display name change (sessionId, name)
 - `models_list`: available models for the session (sessionId, models: Array<{provider, id}>)
+- `session_history_sync`: array of historical session metadata from pi's local session files (id, cwd, name, startedAt, firstMessage, sessionFile, sessionDir)
+- `sessions_list`: list of available pi sessions for a cwd (sessionId, cwd, sessions: PiSessionInfo[])
+
+The `session_register` message SHALL include optional `sessionFile`, `sessionDir`, and `firstMessage` fields for the pi session's JSONL file path, directory, and first user message text.
+
+The `sessions_list` message SHALL include an array of `PiSessionInfo` objects with: `id`, `path`, `cwd`, `name?`, `parentSessionPath?`, `created` (ISO string), `modified` (ISO string), `messageCount`, `firstMessage`.
 
 The `openspec_update` message SHALL include:
 - `data.initialized`: boolean indicating whether openspec is initialized
@@ -38,6 +44,7 @@ The following message types SHALL be defined for server → extension:
 - `openspec_refresh`: request immediate openspec data refresh
 - `rename_session`: rename session display name (sessionId, name)
 - `request_models`: ask extension to re-send available models list
+- `list_sessions`: request available pi sessions for a cwd (sessionId, cwd)
 
 #### Scenario: Message serialization round-trip
 - **WHEN** any protocol message is created and serialized to JSON
@@ -47,12 +54,16 @@ The following message types SHALL be defined for server → extension:
 - **WHEN** a message with an unrecognized `type` field is received
 - **THEN** the receiver SHALL log a warning and ignore the message without crashing
 
+#### Scenario: Extension sends session history sync
+- **WHEN** the bridge extension has local session history to sync
+- **THEN** it SHALL send a `session_history_sync` message with `sessions` array, each containing `id` (string), `cwd` (string), `name` (string, optional), `startedAt` (number), `firstMessage` (string, optional), `sessionFile` (string, optional), `sessionDir` (string, optional)
+
 ### Requirement: Server-to-browser WebSocket message types
 The system SHALL define TypeScript types for all messages sent between the dashboard server and browser clients over WebSocket. Messages SHALL include a `type` discriminator field.
 
 The following message types SHALL be defined for server → browser:
-- `session_added`: new session connected (full DashboardSession object including optional name)
-- `session_updated`: session metadata changed (partial update including name changes)
+- `session_added`: new session connected (full DashboardSession object including optional name, sessionFile, sessionDir, hidden)
+- `session_updated`: session metadata changed (partial update including name, hidden changes)
 - `session_removed`: session disconnected/ended
 - `event`: single forwarded event with sequence number
 - `event_replay`: batch of events for replay on subscribe
@@ -62,6 +73,8 @@ The following message types SHALL be defined for server → browser:
 - `files_list`: file listing response
 - `openspec_update`: openspec data for a session
 - `models_list`: forwarded available models for a session
+- `sessions_list`: available pi sessions for a cwd
+- `resume_result`: result of a resume/fork operation (success, message)
 
 The following message types SHALL be defined for browser → server:
 - `subscribe`: subscribe to events for a session (with optional lastSeq)
@@ -74,6 +87,8 @@ The following message types SHALL be defined for browser → server:
 - `openspec_refresh`: request openspec data refresh
 - `rename_session`: rename a session (sessionId, name)
 - `request_models`: request models refresh for a session
+- `list_sessions`: request available pi sessions for a cwd
+- `resume_session`: resume or fork a session (sessionId, mode: "continue" | "fork")
 
 #### Scenario: Session name included in session_added
 - **WHEN** a new session is broadcast to browsers
@@ -99,6 +114,14 @@ The following message types SHALL be defined for browser → server:
 - **WHEN** browser sends `list_files` with sessionId and query
 - **THEN** server SHALL forward to the bridge, and forward the bridge's `files_list` response back to the browser
 
+#### Scenario: Session listing round-trip
+- **WHEN** browser sends `list_sessions` with a cwd
+- **THEN** server SHALL forward to a connected bridge for that cwd, receive `sessions_list`, create missing SQLite records, and forward the list to the browser
+
+#### Scenario: Resume session round-trip
+- **WHEN** browser sends `resume_session` with sessionId and mode
+- **THEN** server SHALL look up session_file, spawn pi with appropriate CLI flag, and send `resume_result` back to the browser
+
 ### Requirement: REST API types
 The system SHALL define TypeScript types for the REST API used by the browser for non-real-time operations.
 
@@ -122,9 +145,10 @@ The system SHALL define TypeScript types for the core data models shared across 
 
 Types SHALL include:
 - `Workspace`: id, name, path, sortOrder, createdAt
-- `DashboardSession`: id, workspaceId, piSessionId, piSessionFile, cwd, source (tui|zed|tmux|unknown), displayName, status (active|idle|streaming|ended), model info, thinking level, token stats, cost, currentTool, timestamps
+- `DashboardSession`: id, workspaceId, cwd, source (tui|zed|tmux|unknown), name, status (active|idle|streaming|ended), model info, thinking level, token stats, cost, currentTool, timestamps, sessionFile, sessionDir, hidden, firstMessage
 - `DashboardEvent`: id, sessionId, seq, eventType, payload, createdAt
-- `SessionSource`: enum of tui, zed, tmux, unknown
+- `SessionSource`: enum of tui, zed, tmux, dashboard, unknown
+- `PiSessionInfo`: id, path, cwd, name, parentSessionPath, created, modified, messageCount, firstMessage
 - `SessionStatus`: enum of active, idle, streaming, ended
 - `CommandInfo`: name, description, source, location, path
 

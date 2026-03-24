@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env node --import tsx
 /**
  * PI Dashboard Server CLI
  */
@@ -38,7 +38,6 @@ async function main() {
   const config: ServerConfig = {
     port: cliArgs.port ?? (parseInt(process.env.PI_DASHBOARD_PORT ?? "") || null) ?? fileConfig.port,
     piPort: cliArgs.piPort ?? (parseInt(process.env.PI_DASHBOARD_PI_PORT ?? "") || null) ?? fileConfig.piPort,
-    dbPath: process.env.PI_DASHBOARD_DB_PATH ?? fileConfig.dbPath,
     dev: cliArgs.dev ?? false,
     autoShutdown: fileConfig.autoShutdown,
     shutdownIdleSeconds: fileConfig.shutdownIdleSeconds,
