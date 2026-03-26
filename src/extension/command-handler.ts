@@ -52,6 +52,58 @@ function searchFiles(cwd: string, query: string): FileEntry[] {
   }
 }
 
+/** Parsed result from parseSendPrompt */
+export type ParsedPrompt =
+  | { type: "bash"; command: string; excludeFromContext: boolean }
+  | { type: "compact"; customInstructions: string | undefined }
+  | { type: "shutdown" }
+  | { type: "reload" }
+  | { type: "slash"; text: string }
+  | { type: "passthrough"; text: string };
+
+/** Parse input text to detect pi internal command prefixes */
+export function parseSendPrompt(text: string): ParsedPrompt {
+  // 1. Check !! (must check before !)
+  if (text.startsWith("!!")) {
+    const command = text.slice(2).trim();
+    if (!command) return { type: "passthrough", text };
+    return { type: "bash", command, excludeFromContext: true };
+  }
+
+  // 2. Check !
+  if (text.startsWith("!")) {
+    const command = text.slice(1).trim();
+    if (!command) return { type: "passthrough", text };
+    return { type: "bash", command, excludeFromContext: false };
+  }
+
+  // 3. Check /compact
+  if (text === "/compact" || text.startsWith("/compact ")) {
+    const args = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
+    return { type: "compact", customInstructions: args || undefined };
+  }
+
+  // 4. Check /quit and /exit
+  if (text === "/quit" || text === "/exit") {
+    return { type: "shutdown" };
+  }
+
+  // 4b. Check /reload
+  if (text === "/reload") {
+    return { type: "reload" };
+  }
+
+  // 5. Check / prefix (generic slash command)
+  if (text.startsWith("/") && !text.includes("\n")) {
+    return { type: "slash", text };
+  }
+
+  // 5. Passthrough
+  return { type: "passthrough", text };
+}
+
+const BASH_TIMEOUT = 30_000;
+
 export interface CommandHandler {
   handle(msg: ServerToExtensionMessage): ExtensionToServerMessage | undefined | Promise<ExtensionToServerMessage | undefined>;
 }
@@ -66,6 +118,14 @@ export function createCommandHandler(
     shutdown?: () => void;
     abort?: () => void;
     getCwd?: () => string;
+    /** Callback to send events (e.g., bash_output, command_feedback) back to server */
+    eventSink?: (msg: ExtensionToServerMessage) => void;
+    /** Trigger context compaction */
+    compact?: (options: { customInstructions?: string }) => void;
+    /** Trigger session reload (extensions, settings, skills, etc.) */
+    reload?: () => void;
+    /** Route slash commands through session.prompt() */
+    sessionPrompt?: (text: string) => void;
   },
 ): CommandHandler {
   const getSessionId = typeof sessionIdOrGetter === "function" ? sessionIdOrGetter : () => sessionIdOrGetter;
@@ -85,42 +145,65 @@ export function createCommandHandler(
       }
 
       switch (msg.type) {
-        case "send_prompt":
-          if (msg.images && msg.images.length > 0) {
-            const validMimeTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
-            const validImages = msg.images.filter((img) => {
-              if (!img || typeof img !== "object") {
-                console.error("[dashboard] Dropping non-object image entry");
-                return false;
-              }
-              if (!img.mimeType || typeof img.mimeType !== "string" || !validMimeTypes.has(img.mimeType)) {
-                console.error(`[dashboard] Dropping image with invalid mimeType: "${img.mimeType}" (type: ${typeof img.mimeType})`);
-                return false;
-              }
-              if (!img.data || typeof img.data !== "string") {
-                console.error(`[dashboard] Dropping image with invalid data (type: ${typeof img.data}, length: ${img.data?.length ?? 0})`);
-                return false;
-              }
-              return true;
-            });
-            if (validImages.length > 0) {
-              const content = [
-                { type: "text" as const, text: msg.text },
-                ...validImages.map((img) => ({
-                  type: "image" as const,
-                  data: img.data,
-                  mimeType: img.mimeType,
-                })),
-              ];
-              console.error(`[dashboard] Sending message with ${validImages.length} image(s), mimeTypes: ${validImages.map(i => i.mimeType).join(", ")}`);
-              pi.sendUserMessage(content);
-            } else {
-              pi.sendUserMessage(msg.text);
-            }
-          } else {
-            pi.sendUserMessage(msg.text);
+        case "send_prompt": {
+          const parsed = parseSendPrompt(msg.text);
+
+          // Route based on parsed command type
+          if (parsed.type === "bash") {
+            await handleBashCommand(pi, sessionId, parsed.command, parsed.excludeFromContext, options?.eventSink);
+            return undefined;
           }
+
+          if (parsed.type === "compact") {
+            await handleCompactCommand(sessionId, parsed.customInstructions, options?.compact, options?.eventSink);
+            return undefined;
+          }
+
+          if (parsed.type === "shutdown") {
+            if (options?.shutdown) {
+              options.shutdown();
+            }
+            return undefined;
+          }
+
+          if (parsed.type === "reload") {
+            if (options?.reload) {
+              options.reload();
+            }
+            options?.eventSink?.({
+              type: "event_forward",
+              sessionId,
+              event: {
+                eventType: "command_feedback",
+                timestamp: Date.now(),
+                data: { command: "/reload", status: "completed" },
+              },
+            });
+            return undefined;
+          }
+
+          if (parsed.type === "slash") {
+            if (options?.sessionPrompt) {
+              options.sessionPrompt(parsed.text);
+            } else {
+              pi.sendUserMessage(parsed.text);
+            }
+            options?.eventSink?.({
+              type: "event_forward",
+              sessionId,
+              event: {
+                eventType: "command_feedback",
+                timestamp: Date.now(),
+                data: { command: parsed.text, status: "completed" },
+              },
+            });
+            return undefined;
+          }
+
+          // Passthrough: send as regular user message (with image handling)
+          sendUserMessageWithImages(pi, msg.text, msg.images);
           return undefined;
+        }
 
         case "abort":
           if (options?.abort) {
@@ -129,7 +212,7 @@ export function createCommandHandler(
           return undefined;
 
         case "request_commands": {
-          const commands = pi.getCommands();
+          const commands = pi.getCommands().filter((cmd: any) => !cmd.name.startsWith("__"));
           return {
             type: "commands_list",
             sessionId,
@@ -218,6 +301,121 @@ export function createCommandHandler(
       }
     },
   };
+}
+
+/** Send a user message with optional image validation.
+ * Uses deliverAs: "followUp" so messages queue properly when the agent is streaming. */
+function sendUserMessageWithImages(
+  pi: ExtensionAPI,
+  text: string,
+  images?: Array<{ type: string; data: string; mimeType: string }>,
+): void {
+  const sendOptions = { deliverAs: "followUp" as const };
+  if (images && images.length > 0) {
+    const validMimeTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+    const validImages = images.filter((img) => {
+      if (!img || typeof img !== "object") {
+        console.error("[dashboard] Dropping non-object image entry");
+        return false;
+      }
+      if (!img.mimeType || typeof img.mimeType !== "string" || !validMimeTypes.has(img.mimeType)) {
+        console.error(`[dashboard] Dropping image with invalid mimeType: "${img.mimeType}" (type: ${typeof img.mimeType})`);
+        return false;
+      }
+      if (!img.data || typeof img.data !== "string") {
+        console.error(`[dashboard] Dropping image with invalid data (type: ${typeof img.data}, length: ${img.data?.length ?? 0})`);
+        return false;
+      }
+      return true;
+    });
+    if (validImages.length > 0) {
+      const content = [
+        { type: "text" as const, text },
+        ...validImages.map((img) => ({
+          type: "image" as const,
+          data: img.data,
+          mimeType: img.mimeType,
+        })),
+      ];
+      console.error(`[dashboard] Sending message with ${validImages.length} image(s), mimeTypes: ${validImages.map(i => i.mimeType).join(", ")}`);
+      (pi.sendUserMessage as any)(content, sendOptions);
+    } else {
+      (pi.sendUserMessage as any)(text, sendOptions);
+    }
+  } else {
+    (pi.sendUserMessage as any)(text, sendOptions);
+  }
+}
+
+/** Execute a bash command and forward results */
+async function handleBashCommand(
+  pi: ExtensionAPI,
+  sessionId: string,
+  command: string,
+  excludeFromContext: boolean,
+  eventSink?: (msg: ExtensionToServerMessage) => void,
+): Promise<void> {
+  let output = "";
+  let exitCode = 0;
+  try {
+    const result = await pi.exec("sh", ["-c", command], { timeout: BASH_TIMEOUT });
+    output = (result.stdout || "") + (result.stderr || "");
+    exitCode = result.exitCode ?? 0;
+  } catch (err: any) {
+    output = err?.message ?? "Command execution failed";
+    exitCode = 1;
+  }
+
+  // Forward bash output event
+  eventSink?.({
+    type: "event_forward",
+    sessionId,
+    event: {
+      eventType: "bash_output",
+      timestamp: Date.now(),
+      data: { command, output, exitCode, excludeFromContext },
+    },
+  });
+
+  // For ! (not !!), also send to LLM
+  if (!excludeFromContext) {
+    const message = `$ ${command}\n${output}`;
+    pi.sendUserMessage(message);
+  }
+}
+
+/** Handle /compact command */
+async function handleCompactCommand(
+  sessionId: string,
+  customInstructions: string | undefined,
+  compact?: (options: { customInstructions?: string }) => void,
+  eventSink?: (msg: ExtensionToServerMessage) => void,
+): Promise<void> {
+  eventSink?.({
+    type: "event_forward",
+    sessionId,
+    event: {
+      eventType: "command_feedback",
+      timestamp: Date.now(),
+      data: { command: "/compact", status: "started" },
+    },
+  });
+
+  try {
+    if (compact) {
+      compact({ customInstructions });
+    }
+  } catch (err: any) {
+    eventSink?.({
+      type: "event_forward",
+      sessionId,
+      event: {
+        eventType: "command_feedback",
+        timestamp: Date.now(),
+        data: { command: "/compact", status: "error", message: err?.message ?? "Compaction failed" },
+      },
+    });
+  }
 }
 
 async function handleLoadSessionEvents(

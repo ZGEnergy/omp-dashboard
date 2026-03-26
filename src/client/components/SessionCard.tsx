@@ -3,7 +3,7 @@ import Icon from "@mdi/react";
 import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline } from "@mdi/js";
 import type { DashboardSession } from "../../shared/types.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
-import { formatRelativeTime } from "../lib/format.js";
+import { formatRelativeTime, formatTokens } from "../lib/format.js";
 import type { DetectedEditor } from "../lib/editor-api.js";
 import { ContextUsageBar } from "./ContextUsageBar.js";
 import type { ContextUsageInfo } from "./SessionList.js";
@@ -173,6 +173,8 @@ export function SessionCard({
   openspecData,
   onSendPrompt,
   onOpenSpecRefresh,
+  onAttachProposal,
+  onDetachProposal,
   onRename,
   onShutdown,
   onResume,
@@ -191,6 +193,8 @@ export function SessionCard({
   openspecData?: OpenSpecData;
   onSendPrompt?: (text: string) => void;
   onOpenSpecRefresh?: () => void;
+  onAttachProposal?: (changeName: string) => void;
+  onDetachProposal?: () => void;
   onRename?: (name: string) => void;
   onShutdown?: (id: string) => void;
   onResume?: (mode: "continue" | "fork") => void;
@@ -283,10 +287,10 @@ export function SessionCard({
       </div>
 
       {/* OpenSpec activity badge */}
-      {session.openspecPhase && (
+      {session.openspecPhase ? (
         <OpenSpecActivityBadge
-          phase={session.openspecPhase}
-          changeName={session.openspecChange}
+          phase={session.openspecPhase!}
+          changeName={session.openspecChange ?? undefined}
           completedTasks={
             session.openspecChange
               ? openspecData?.changes?.find((c) => c.name === session.openspecChange)?.completedTasks
@@ -298,7 +302,11 @@ export function SessionCard({
               : undefined
           }
         />
-      )}
+      ) : session.attachedProposal ? (
+        <div className="text-[11px] mt-0.5 ml-4 text-[var(--text-tertiary)]">
+          📋 {session.attachedProposal}
+        </div>
+      ) : null}
 
       {/* Line 4: context usage bar */}
       <div className="mt-1 ml-4">
@@ -376,8 +384,11 @@ export function SessionCard({
             <div className="mt-2 pt-2 border-t border-[var(--border-secondary)]">
               <OpenSpecSection
                 data={openspecData}
+                attachedProposal={session.attachedProposal}
                 onSendPrompt={onSendPrompt}
                 onRefresh={onOpenSpecRefresh}
+                onAttach={onAttachProposal}
+                onDetach={onDetachProposal}
               />
             </div>
           )}

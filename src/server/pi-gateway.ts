@@ -124,18 +124,19 @@ export function createPiGateway(
 
             // Track session identity from any message with a sessionId
             if (!currentSessionId && "sessionId" in msg && (msg as any).sessionId) {
-              currentSessionId = (msg as any).sessionId;
-              connections.set(currentSessionId, ws);
+              const sid: string = (msg as any).sessionId;
+              currentSessionId = sid;
+              connections.set(sid, ws);
               // Auto-create a placeholder session so events aren't lost
-              if (!sessionManager.get(currentSessionId)) {
+              if (!sessionManager.get(sid)) {
                 sessionManager.register({
-                  id: currentSessionId,
+                  id: sid,
                   cwd: "",
                   source: "unknown",
                 });
-                onSessionCreated?.(currentSessionId);
+                onSessionCreated?.(sid);
               }
-              resetHeartbeat(currentSessionId);
+              resetHeartbeat(sid);
               onConnection?.();
             }
 

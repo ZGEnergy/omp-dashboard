@@ -10,7 +10,7 @@ Web-based dashboard for monitoring and interacting with pi agent sessions remote
 See [docs/architecture.md](docs/architecture.md) for full details.
 
 - **Bridge Extension** (`src/extension/`) — Runs in every pi session, forwards events via WebSocket
-- **Dashboard Server** (`src/server/`) — Aggregates events, SQLite persistence, dual WebSocket servers
+- **Dashboard Server** (`src/server/`) — Aggregates events, in-memory + JSON persistence, dual WebSocket servers
 - **Web Client** (`src/client/`) — React + Tailwind responsive UI
 - **Shared Types** (`src/shared/`) — Protocol definitions shared across components
 
@@ -22,6 +22,8 @@ npm test             # Run all tests (vitest)
 npm run test:watch   # Watch mode
 npm run build        # Build web client (Vite)
 npm run dev          # Start Vite dev server
+npm run reload       # Reload all connected pi sessions
+npm run reload:check # Type-check + reload all pi sessions
 pi-dashboard         # Start dashboard server
 pi-dashboard --dev   # Start with Vite proxy
 ```
@@ -38,14 +40,38 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/extension/connection.ts` | WebSocket with exponential backoff |
 | `src/extension/server-probe.ts` | TCP probe to detect running server |
 | `src/extension/server-launcher.ts` | Auto-start server as detached process |
+| `src/extension/command-handler.ts` | Command routing: `!`/`!!` bash, `/compact`, slash commands |
 | `src/extension/dev-build.ts` | Dev build-on-reload helper (client build + server shutdown) |
+| `src/extension/git-info.ts` | Git branch/remote/PR detection (polled every 30s) |
+| `src/extension/git-link-builder.ts` | Git remote URL parsing and platform-specific links |
+| `src/extension/openspec-poller.ts` | OpenSpec CLI polling for change data (every 30s) |
+| `src/extension/openspec-activity-detector.ts` | Detects OpenSpec activity from tool events |
+| `src/extension/session-history.ts` | Sends local pi session history to the server |
+| `src/extension/state-replay.ts` | Synthesizes events from pi entries on reconnect |
+| `src/extension/stats-extractor.ts` | Extracts token/cost stats from turn_end events |
 | `src/server/server.ts` | HTTP + WebSocket server |
+| `src/server/pi-gateway.ts` | Extension WebSocket gateway (port 9999) |
+| `src/server/browser-gateway.ts` | Browser WebSocket gateway (port 8000) |
 | `src/server/memory-event-store.ts` | In-memory event buffer with LRU eviction |
 | `src/server/memory-session-manager.ts` | Pure in-memory session registry |
-| `src/server/workspace-store.ts` | JSON-backed workspace CRUD |
+| `src/client/components/PinDirectoryDialog.tsx` | Dialog to pin a directory by path |
+| `src/client/components/SortablePinnedGroup.tsx` | Drag-to-reorder wrapper for pinned directory groups |
 | `src/server/state-store.ts` | JSON-backed user preferences (hidden sessions) |
+| `src/server/session-persistence.ts` | Persists session metadata to JSON for server restarts |
+| `src/server/session-order-manager.ts` | Per-cwd session ordering with persistence |
 | `src/server/pending-load-manager.ts` | On-demand session load request tracking |
+| `src/server/pending-fork-registry.ts` | Tracks pending fork operations for session placement |
 | `src/server/json-store.ts` | Atomic JSON file read/write helpers |
+| `src/server/process-manager.ts` | Session spawning via tmux or headless mode |
+| `src/server/editor-registry.ts` | Detects available editors (running processes + CLI) |
+| `src/server/event-status-extraction.ts` | Extracts session status/tool updates from events |
+| `src/server/headless-pid-registry.ts` | Maps headless child PIDs to session IDs |
+| `src/server/localhost-guard.ts` | Localhost-only access guard for routes |
+| `src/server/server-pid.ts` | PID file management for daemon mode |
+| `src/server/tunnel.ts` | Zrok tunnel integration via REST API |
+| `src/server/cli.ts` | CLI entry point with subcommands (start/stop/restart/status) |
+| `src/shared/rest-api.ts` | REST API type definitions |
+| `scripts/reload-all.sh` | Build bridge + reload all pi sessions |
 | `src/client/App.tsx` | React app with WebSocket integration |
 | `src/client/lib/event-reducer.ts` | Event-sourced state reducer |
 
@@ -62,4 +88,4 @@ pi-dashboard --dev   # Start with Vite proxy
 
 ## Document changes
 
-When an implementation is ready, update AGENTS.md and README.md. AGENTS.md contains instructions, architecture, commands needed to build and operate. README.md contains end-user and developer documentations with CI badges and detailed information about the project.
+When an implementation is ready, update AGENTS.md, README.md, and docs/architecture.md. AGENTS.md contains instructions for AI agents, key files, and commands needed to build and operate. README.md contains end-user and developer documentation with CI badges, prerequisites, configuration, and project structure. docs/architecture.md contains detailed data flows, persistence model, reconnection logic, and configuration reference.

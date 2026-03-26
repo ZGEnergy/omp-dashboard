@@ -21,6 +21,7 @@ import { extractTurnStats } from "./stats-extractor.js";
 import { pollOpenSpec } from "./openspec-poller.js";
 import { sendSessionHistory as syncSessionHistory } from "./session-history.js";
 import { replayEntriesAsEvents } from "./state-replay.js";
+import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
 import { detectOpenSpecActivity } from "./openspec-activity-detector.js";
 import type { OpenSpecPhase } from "../shared/types.js";
 
@@ -51,6 +52,11 @@ export default function (pi: ExtensionAPI) {
     // Never crash the host pi agent — dashboard is non-essential
     console.error("[dashboard] Bridge init failed:", err);
   }
+}
+
+/** Filter out hidden commands (names starting with __) from commands list */
+function filterHiddenCommands(commands: any[]): any[] {
+  return commands.filter((cmd) => !cmd.name.startsWith("__"));
 }
 
 function initBridge(pi: ExtensionAPI) {
@@ -147,13 +153,53 @@ function initBridge(pi: ExtensionAPI) {
     shutdown: () => {
       if (cachedCtx?.shutdown) {
         cachedCtx.shutdown();
-      } else {
-        process.exit(0);
       }
+      // Safety net: force exit after a short delay in case ctx.shutdown()
+      // doesn't terminate (e.g. in RPC mode headless sessions)
+      setTimeout(() => process.exit(0), 500);
     },
     abort: () => {
       if (cachedCtx?.abort) {
         cachedCtx.abort();
+      }
+    },
+    eventSink: (msg) => connection.send(msg),
+    compact: (opts) => {
+      if (cachedCtx?.compact) {
+        cachedCtx.compact(opts);
+      }
+    },
+    reload: () => {
+      const reloadFn = (globalThis as any)[RELOAD_KEY] as (() => Promise<void>) | undefined;
+      if (reloadFn) {
+        reloadFn().catch((err: any) => {
+          console.error("[dashboard] reload failed:", err);
+        });
+      } else {
+        console.error("[dashboard] reload not available — type /__dashboard_reload in pi TUI once to bootstrap");
+      }
+    },
+    sessionPrompt: (text) => {
+      // pi.sendUserMessage calls session.prompt() with expandPromptTemplates: false,
+      // which skips command/skill expansion. To work around this, we expand prompt
+      // templates ourselves by reading the template file and sending the expanded content.
+      const expanded = expandPromptTemplateFromDisk(text, process.cwd());
+      pi.sendUserMessage(expanded);
+    },
+  });
+
+  // Reload support: extension events only provide ExtensionContext (no reload).
+  // ExtensionCommandContext (with reload()) is only available in command handlers.
+  // We register __dashboard_reload command; invoking /__dashboard_reload from pi TUI
+  // captures ctx.reload(). After first capture, dashboard-triggered reloads work.
+  // The captured fn is stored in globalThis to survive module reloads.
+  const RELOAD_KEY = "__pi_dashboard_reload_fn__";
+
+  pi.registerCommand("__dashboard_reload", {
+    handler: async (_args: string, ctx: any) => {
+      if (ctx?.reload) {
+        (globalThis as any)[RELOAD_KEY] = () => ctx.reload();
+        await ctx.reload();
       }
     },
   });
@@ -255,7 +301,7 @@ function initBridge(pi: ExtensionAPI) {
     sendOpenSpecNow(process.cwd());
 
     // Send commands list
-    const commands = pi.getCommands();
+    const commands = filterHiddenCommands(pi.getCommands());
     connection.send({
       type: "commands_list",
       sessionId,
@@ -423,7 +469,7 @@ function initBridge(pi: ExtensionAPI) {
     replaySessionEntries();
 
     // Send initial commands list
-    const commands = pi.getCommands();
+    const commands = filterHiddenCommands(pi.getCommands());
     connection.send({
       type: "commands_list",
       sessionId,
@@ -530,7 +576,7 @@ function initBridge(pi: ExtensionAPI) {
     sendOpenSpecNow(ctx.cwd);
     sendGitInfoIfChanged(ctx.cwd);
 
-    const commands = pi.getCommands();
+    const commands = filterHiddenCommands(pi.getCommands());
     connection.send({
       type: "commands_list",
       sessionId,

@@ -833,6 +833,32 @@ describe("pendingPrompt", () => {
     });
     expect(state.pendingPrompt).toEqual(pending);
   });
+
+  it("should clear pendingPrompt on bash_output event", () => {
+    const pending: PendingPrompt = { text: "!!ls" };
+    let state = createInitialState();
+    state = { ...state, pendingPrompt: pending };
+
+    state = reduceEvent(state, {
+      eventType: "bash_output",
+      timestamp: Date.now(),
+      data: { command: "ls", output: "file.txt", exitCode: 0, excludeFromContext: true },
+    });
+    expect(state.pendingPrompt).toBeUndefined();
+  });
+
+  it("should clear pendingPrompt on command_feedback event", () => {
+    const pending: PendingPrompt = { text: "/compact" };
+    let state = createInitialState();
+    state = { ...state, pendingPrompt: pending };
+
+    state = reduceEvent(state, {
+      eventType: "command_feedback",
+      timestamp: Date.now(),
+      data: { command: "/compact", status: "started" },
+    });
+    expect(state.pendingPrompt).toBeUndefined();
+  });
 });
 
 describe("toDisplayString", () => {
@@ -866,5 +892,62 @@ describe("toDisplayString", () => {
 
   it("converts numbers to string", () => {
     expect(toDisplayString(42)).toBe("42");
+  });
+});
+
+describe("bash_output events", () => {
+  it("should add bashOutput message from bash_output event", () => {
+    const state = applyEvents([
+      {
+        eventType: "bash_output",
+        timestamp: 1000,
+        data: { command: "ls -la", output: "file.txt", exitCode: 0, excludeFromContext: false },
+      },
+    ]);
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].role).toBe("bashOutput");
+    expect(state.messages[0].content).toBe("file.txt");
+    expect((state.messages[0].args as any).command).toBe("ls -la");
+    expect((state.messages[0].args as any).exitCode).toBe(0);
+    expect((state.messages[0].args as any).excludeFromContext).toBe(false);
+  });
+
+  it("should mark silent bash with excludeFromContext", () => {
+    const state = applyEvents([
+      {
+        eventType: "bash_output",
+        timestamp: 1000,
+        data: { command: "docker ps", output: "CONTAINER ID", exitCode: 0, excludeFromContext: true },
+      },
+    ]);
+    expect((state.messages[0].args as any).excludeFromContext).toBe(true);
+  });
+});
+
+describe("command_feedback events", () => {
+  it("should add commandFeedback message from command_feedback event", () => {
+    const state = applyEvents([
+      {
+        eventType: "command_feedback",
+        timestamp: 1000,
+        data: { command: "/compact", status: "started" },
+      },
+    ]);
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].role).toBe("commandFeedback");
+    expect((state.messages[0].args as any).command).toBe("/compact");
+    expect((state.messages[0].args as any).status).toBe("started");
+  });
+
+  it("should include error message in commandFeedback", () => {
+    const state = applyEvents([
+      {
+        eventType: "command_feedback",
+        timestamp: 1000,
+        data: { command: "/compact", status: "error", message: "Already compacted" },
+      },
+    ]);
+    expect(state.messages[0].content).toBe("Already compacted");
+    expect((state.messages[0].args as any).status).toBe("error");
   });
 });

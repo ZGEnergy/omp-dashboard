@@ -1,5 +1,5 @@
 {
-  "name": "@user/pi-dashboard",
+  "name": "@blackbelt-technology/pi-dashboard",
   "version": "0.1.0",
   "description": "Web dashboard for monitoring and interacting with pi agent sessions",
   "keywords": [
@@ -28,9 +28,14 @@
     "prepare": "vite build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "reload": "./scripts/reload-all.sh",
+    "reload:check": "./scripts/reload-all.sh --check"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@fastify/static": "^8.0.0",
     "@fastify/websocket": "^11.0.0",
     "@mdi/js": "^7.4.47",
@@ -44,6 +49,7 @@
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
     "remark-gfm": "^4.0.1",
+    "tsx": "^4.21.0",
     "wouter": "^3.9.0",
     "ws": "^8.18.0"
   },
@@ -58,7 +64,6 @@
     "@vitejs/plugin-react": "^4.0.0",
     "jsdom": "^29.0.1",
     "tailwindcss": "^4.0.0",
-    "tsx": "^4.21.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
     "vitest": "^3.0.0"

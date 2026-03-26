@@ -11,7 +11,7 @@ export interface ChatImage {
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | "toolResult" | "thinking";
+  role: "user" | "assistant" | "toolResult" | "thinking" | "bashOutput" | "commandFeedback";
   content: string;
   images?: ChatImage[];
   toolName?: string;
@@ -354,6 +354,43 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
           role: "assistant",
           content: "── Session compacted ──",
           timestamp: event.timestamp,
+        },
+      ];
+      break;
+    }
+
+    case "bash_output": {
+      const command = data.command as string;
+      const output = data.output as string;
+      const exitCode = data.exitCode as number;
+      const excludeFromContext = data.excludeFromContext as boolean;
+      next.pendingPrompt = undefined;
+      next.messages = [
+        ...next.messages,
+        {
+          id: `bash-${next.messages.length}`,
+          role: "bashOutput" as any,
+          content: output,
+          timestamp: event.timestamp,
+          args: { command, exitCode, excludeFromContext } as any,
+        },
+      ];
+      break;
+    }
+
+    case "command_feedback": {
+      const command = data.command as string;
+      const status = data.status as string;
+      const message = data.message as string | undefined;
+      next.pendingPrompt = undefined;
+      next.messages = [
+        ...next.messages,
+        {
+          id: `cmdfb-${next.messages.length}`,
+          role: "commandFeedback" as any,
+          content: message ?? "",
+          timestamp: event.timestamp,
+          args: { command, status } as any,
         },
       ];
       break;

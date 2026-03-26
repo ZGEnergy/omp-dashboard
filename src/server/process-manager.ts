@@ -94,7 +94,7 @@ function spawnHeadless(cwd: string, options?: SessionOptions): SpawnResult {
         env: { ...process.env, PI_DASHBOARD_SPAWNED: "1" },
       });
       child.unref();
-      child.stdin?.unref();
+      (child.stdin as any)?.unref();
 
       return {
         success: true,
