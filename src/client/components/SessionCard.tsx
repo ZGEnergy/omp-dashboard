@@ -235,7 +235,7 @@ export function SessionCard({
       onClick={() => onSelect(session.id)}
       className={`px-3 py-2.5 cursor-pointer rounded-xl shadow-md shadow-[var(--shadow-card)] border border-[var(--border-subtle)] hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 bg-[var(--bg-tertiary)] ${
         isSelected ? "border-l-2 border-l-blue-500/40" : ""
-      } ${isHidden ? "opacity-40" : ""}`}
+      } ${isHidden ? "opacity-40" : ""} ${session.status === "streaming" || session.resuming ? "card-working-pulse" : ""}`}
     >
       <div className="flex gap-2">
       {/* Left gutter: source icon vertically centered */}

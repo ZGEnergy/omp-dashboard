@@ -148,4 +148,32 @@ describe("SessionCard", () => {
     );
     expect(screen.queryByTestId("session-openspec-actions")).toBeNull();
   });
+
+  it("should apply card-working-pulse animation when streaming", () => {
+    const session = makeSession({ status: "streaming" });
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).toContain("card-working-pulse");
+  });
+
+  it("should apply card-working-pulse animation when resuming", () => {
+    const session = makeSession({ status: "idle", resuming: true });
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).toContain("card-working-pulse");
+  });
+
+  it("should NOT apply card-working-pulse animation when idle", () => {
+    const session = makeSession({ status: "idle" });
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).not.toContain("card-working-pulse");
+  });
+
+  it("should NOT apply card-working-pulse animation when ended", () => {
+    const session = makeSession({ status: "ended" });
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).not.toContain("card-working-pulse");
+  });
 });

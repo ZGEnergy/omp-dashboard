@@ -117,6 +117,15 @@ body {
 .markdown-content strong { font-weight: 700; }
 .markdown-content em { font-style: italic; }
 
+/* Card working pulse — subtle amber background tint for streaming/resuming sessions */
+@keyframes card-working-pulse {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(234, 179, 8, 0.06); }
+}
+.card-working-pulse {
+  animation: card-working-pulse 3s ease-in-out infinite;
+}
+
 /* Collapsible group animation — grid row trick for auto-height transitions */
 .group-collapse {
   display: grid;
