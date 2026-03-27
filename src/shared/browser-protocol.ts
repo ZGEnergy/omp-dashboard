@@ -65,7 +65,7 @@ export interface BrowserFilesListMessage {
 
 export interface BrowserOpenSpecUpdateMessage {
   type: "openspec_update";
-  sessionId: string;
+  cwd: string;
   data: OpenSpecData;
 }
 
@@ -168,7 +168,7 @@ export interface ListFilesToBrowserMessage {
 
 export interface OpenSpecRefreshBrowserMessage {
   type: "openspec_refresh";
-  sessionId: string;
+  cwd: string;
 }
 
 export interface RenameSessionBrowserMessage {
@@ -251,6 +251,11 @@ export interface ReorderPinnedDirsMessage {
   paths: string[];
 }
 
+export interface OpenSpecBulkArchiveBrowserMessage {
+  type: "openspec_bulk_archive";
+  cwd: string;
+}
+
 export type BrowserToServerMessage =
   | SubscribeMessage
   | UnsubscribeMessage
@@ -274,4 +279,5 @@ export type BrowserToServerMessage =
   | ReorderSessionsBrowserMessage
   | PinDirectoryMessage
   | UnpinDirectoryMessage
-  | ReorderPinnedDirsMessage;
+  | ReorderPinnedDirsMessage
+  | OpenSpecBulkArchiveBrowserMessage;

@@ -1,14 +1,14 @@
 import React, { useState, type ReactNode } from "react";
 import Icon from "@mdi/react";
-import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline } from "@mdi/js";
+import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiConsoleLine, mdiRobotOutline, mdiCodeTags, mdiApplicationOutline } from "@mdi/js";
 import type { DashboardSession } from "../../shared/types.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
 import { formatRelativeTime, formatTokens } from "../lib/format.js";
 import type { DetectedEditor } from "../lib/editor-api.js";
 import { ContextUsageBar } from "./ContextUsageBar.js";
 import type { ContextUsageInfo } from "./SessionList.js";
-import type { OpenSpecData } from "../../shared/types.js";
-import { OpenSpecSection } from "./OpenSpecSection.js";
+import type { OpenSpecData, OpenSpecChange } from "../../shared/types.js";
+import { SessionOpenSpecActions } from "./SessionOpenSpecActions.js";
 import { OpenSpecActivityBadge } from "./OpenSpecActivityBadge.js";
 import { InlineRenameInput } from "./InlineRenameInput.js";
 
@@ -23,8 +23,25 @@ export const sourceBadgeColors: Record<string, string> = {
   tui: "text-blue-400",
   zed: "text-purple-400",
   tmux: "text-orange-400",
-  dashboard: "text-green-400",
+  dashboard: "text-blue-400",
+  terminal: "text-cyan-400",
   unknown: "text-[var(--text-tertiary)]",
+};
+
+const sourceIcons: Record<string, string> = {
+  tui: mdiConsoleLine,
+  dashboard: mdiRobotOutline,
+  tmux: mdiApplicationOutline,
+  zed: mdiCodeTags,
+  terminal: mdiConsoleLine,
+};
+
+const sourceLabels: Record<string, string> = {
+  tui: "TUI",
+  dashboard: "Headless",
+  tmux: "tmux",
+  zed: "Zed",
+  terminal: "Terminal",
 };
 
 export function ActivityIndicator({ session }: { session: DashboardSession }) {
@@ -170,11 +187,11 @@ export function SessionCard({
   editors,
   onOpenEditor,
   contextUsage,
-  openspecData,
+  openspecChanges,
   onSendPrompt,
-  onOpenSpecRefresh,
   onAttachProposal,
   onDetachProposal,
+  onReadArtifact,
   onRename,
   onShutdown,
   onResume,
@@ -190,11 +207,11 @@ export function SessionCard({
   editors?: DetectedEditor[];
   onOpenEditor?: (editorId: string) => void;
   contextUsage?: ContextUsageInfo;
-  openspecData?: OpenSpecData;
+  openspecChanges?: OpenSpecChange[];
   onSendPrompt?: (text: string) => void;
-  onOpenSpecRefresh?: () => void;
   onAttachProposal?: (changeName: string) => void;
   onDetachProposal?: () => void;
+  onReadArtifact?: (changeName: string, artifactId: string) => void;
   onRename?: (name: string) => void;
   onShutdown?: (id: string) => void;
   onResume?: (mode: "continue" | "fork") => void;
@@ -212,15 +229,29 @@ export function SessionCard({
   return (
     <li
       onClick={() => onSelect(session.id)}
-      className={`px-3 py-2.5 cursor-pointer rounded-xl shadow-md shadow-[var(--shadow-card)] border border-[var(--border-subtle)] hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ${
-        isSelected ? "bg-[var(--bg-tertiary)] border-l-2 border-l-blue-500/40" : ""
+      className={`px-3 py-2.5 cursor-pointer rounded-xl shadow-md shadow-[var(--shadow-card)] border border-[var(--border-subtle)] hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 bg-[var(--bg-tertiary)] ${
+        isSelected ? "border-l-2 border-l-blue-500/40" : ""
       } ${isHidden ? "opacity-40" : ""}`}
     >
-      {/* Line 1: status dot + name + time */}
-      <div className="flex items-center gap-2">
+      <div className="flex gap-2">
+      {/* Left gutter: source icon vertically centered */}
+      <div className="flex flex-col items-center flex-shrink-0 w-4 pt-1">
         <span
-          className={`w-2 h-2 rounded-full flex-shrink-0 ${statusColors[session.status] ?? "bg-[var(--bg-surface)]"}`}
+          className={`w-2 h-2 rounded-full ${statusColors[session.status] ?? "bg-[var(--bg-surface)]"}`}
         />
+        <span className="flex-1" />
+        <span
+          className={`${sourceBadgeColors[session.source] ?? "text-[var(--text-tertiary)]"}`}
+          title={sourceLabels[session.source] ?? session.source}
+        >
+          <Icon path={sourceIcons[session.source] ?? mdiConsoleLine} size={0.55} />
+        </span>
+        <span className="flex-1" />
+      </div>
+      {/* Card content */}
+      <div className="flex-1 min-w-0">
+      {/* Line 1: name + time */}
+      <div className="flex items-center gap-2">
         {isRenaming ? (
           <InlineRenameInput
             currentName={getSessionDisplayName(session)}
@@ -253,6 +284,26 @@ export function SessionCard({
         <span className="text-[10px] text-[var(--text-muted)]">
           {formatRelativeTime(now - session.startedAt)}
         </span>
+        {/* Hide/unhide button */}
+        {isHidden ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onUnhide(session.id); }}
+            className="text-[var(--text-tertiary)] hover:text-green-400 p-0.5 flex-shrink-0"
+            title="Show session"
+            data-testid="session-unhide-btn"
+          >
+            <Icon path={mdiEyeOutline} size={0.45} />
+          </button>
+        ) : (
+          <button
+            onClick={(e) => { e.stopPropagation(); onHide(session.id); }}
+            className="text-[var(--text-tertiary)] hover:text-[var(--text-muted)] p-0.5 flex-shrink-0"
+            title="Hide session"
+            data-testid="session-hide-btn"
+          >
+            <Icon path={mdiEyeOffOutline} size={0.45} />
+          </button>
+        )}
         {isAlive && onShutdown && (
           <button
             onClick={(e) => {
@@ -271,65 +322,14 @@ export function SessionCard({
         )}
       </div>
 
-      {/* Line 2: model + thinking level */}
-      {session.model && (
-        <div className="text-xs text-[var(--text-tertiary)] mt-0.5 ml-4 truncate">
-          {session.model}{session.thinkingLevel ? ` (${session.thinkingLevel})` : ""}
-        </div>
-      )}
-
-      {/* Line 3: activity + cost */}
-      <div className="flex items-center justify-between mt-0.5 ml-4 text-[11px] gap-2">
-        <ActivityIndicator session={session} />
-        {session.cost != null && session.cost > 0 && (
-          <span className="text-[var(--text-tertiary)]">${session.cost.toFixed(2)}</span>
+      {/* Line 2: model + thinking level + source/fork right-aligned */}
+      <div className="flex items-center mt-0.5 gap-1.5">
+        {session.model && (
+          <span className="text-xs text-[var(--text-tertiary)] truncate">
+            {session.model}{session.thinkingLevel ? ` (${session.thinkingLevel})` : ""}
+          </span>
         )}
-      </div>
-
-      {/* OpenSpec activity badge */}
-      {session.openspecPhase ? (
-        <OpenSpecActivityBadge
-          phase={session.openspecPhase!}
-          changeName={session.openspecChange ?? undefined}
-          completedTasks={
-            session.openspecChange
-              ? openspecData?.changes?.find((c) => c.name === session.openspecChange)?.completedTasks
-              : undefined
-          }
-          totalTasks={
-            session.openspecChange
-              ? openspecData?.changes?.find((c) => c.name === session.openspecChange)?.totalTasks
-              : undefined
-          }
-        />
-      ) : session.attachedProposal ? (
-        <div className="text-[11px] mt-0.5 ml-4 text-[var(--text-tertiary)]">
-          📋 {session.attachedProposal}
-        </div>
-      ) : null}
-
-      {/* Line 4: context usage bar */}
-      <div className="mt-1 ml-4">
-        <ContextUsageBar
-          tokens={contextUsage?.tokens ?? null}
-          contextWindow={contextUsage?.contextWindow}
-        />
-      </div>
-
-      {/* Line 4: git info (only for single-session groups) */}
-      {showGitInfo && <GitInfo session={session} />}
-
-      {/* Thin divider before action row */}
-      <div className="border-t border-[var(--border-secondary)] mt-1.5 pt-1.5 ml-4 flex items-center gap-2">
-        {/* Editor buttons (left) */}
-        {editors && editors.length > 0 && onOpenEditor && (
-          <EditorButtons editors={editors} onOpen={onOpenEditor} />
-        )}
-        {/* Source badge */}
-        <span className={`text-[10px] ${sourceBadgeColors[session.source] ?? "text-[var(--text-tertiary)]"}`}>
-          {session.source}
-        </span>
-        {/* Fork: all sessions; Resume: ended or hidden */}
+        <span className="flex-1" />
         {onResume && session.sessionFile && (
           <>
             {(!isAlive || isHidden) && (
@@ -350,50 +350,65 @@ export function SessionCard({
             </button>
           </>
         )}
-        {/* Spacer */}
-        <span className="flex-1" />
-        {/* Hide/unhide button (right) */}
-        {isHidden ? (
-          <button
-            onClick={(e) => { e.stopPropagation(); onUnhide(session.id); }}
-            className="text-[var(--text-tertiary)] hover:text-green-400 p-0.5"
-            title="Show session"
-            data-testid="session-unhide-btn"
-          >
-            <Icon path={mdiEyeOutline} size={0.45} />
-          </button>
-        ) : (
-          <button
-            onClick={(e) => { e.stopPropagation(); onHide(session.id); }}
-            className="text-[var(--text-tertiary)] hover:text-[var(--text-muted)] p-0.5"
-            title="Hide session"
-            data-testid="session-hide-btn"
-          >
-            <Icon path={mdiEyeOffOutline} size={0.45} />
-          </button>
+      </div>
+
+      {/* Line 3: activity + cost */}
+      <div className="flex items-center justify-between mt-0.5 text-[11px] gap-2">
+        <ActivityIndicator session={session} />
+        {session.cost != null && session.cost > 0 && (
+          <span className="text-[var(--text-tertiary)]">${session.cost.toFixed(2)}</span>
         )}
       </div>
 
-      {/* Accordion expanded section */}
-      <div
-        className="grid transition-[grid-template-rows] duration-200 ease-in-out"
-        style={{ gridTemplateRows: isSelected ? "1fr" : "0fr" }}
-      >
-        <div className="overflow-hidden">
-          {isSelected && openspecData?.initialized && (
-            <div className="mt-2 pt-2 border-t border-[var(--border-secondary)]">
-              <OpenSpecSection
-                data={openspecData}
-                attachedProposal={session.attachedProposal}
-                onSendPrompt={onSendPrompt}
-                onRefresh={onOpenSpecRefresh}
-                onAttach={onAttachProposal}
-                onDetach={onDetachProposal}
-              />
-            </div>
-          )}
-        </div>
+      {/* OpenSpec activity badge */}
+      {session.openspecPhase ? (
+        <OpenSpecActivityBadge
+          phase={session.openspecPhase!}
+          changeName={session.openspecChange ?? undefined}
+          completedTasks={
+            session.openspecChange
+              ? openspecChanges?.find((c) => c.name === session.openspecChange)?.completedTasks
+              : undefined
+          }
+          totalTasks={
+            session.openspecChange
+              ? openspecChanges?.find((c) => c.name === session.openspecChange)?.totalTasks
+              : undefined
+          }
+        />
+      ) : null}
+
+      {/* Line 4: context usage bar */}
+      <div className="mt-1">
+        <ContextUsageBar
+          tokens={contextUsage?.tokens ?? null}
+          contextWindow={contextUsage?.contextWindow}
+        />
       </div>
+
+      {/* Line 4: git info (only for single-session groups) */}
+      {showGitInfo && <GitInfo session={session} />}
+
+      {/* Thin divider before action row */}
+      {editors && editors.length > 0 && onOpenEditor && (
+        <div className="border-t border-[var(--border-secondary)] mt-1.5 pt-1.5 flex items-center gap-2">
+          <EditorButtons editors={editors} onOpen={onOpenEditor} />
+        </div>
+      )}
+
+      {/* OpenSpec attach/actions */}
+      {openspecChanges && onSendPrompt && onAttachProposal && onDetachProposal && (
+        <SessionOpenSpecActions
+          session={session}
+          changes={openspecChanges}
+          onAttach={onAttachProposal}
+          onDetach={onDetachProposal}
+          onSendPrompt={onSendPrompt}
+          onReadArtifact={onReadArtifact}
+        />
+      )}
+      </div>{/* end card content */}
+      </div>{/* end flex row */}
     </li>
   );
 }

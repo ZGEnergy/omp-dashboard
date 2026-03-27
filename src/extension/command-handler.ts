@@ -7,8 +7,7 @@ import type {
   ServerToExtensionMessage,
   ExtensionToServerMessage,
 } from "../shared/protocol.js";
-import type { FileEntry, PiSessionInfo, DashboardEvent } from "../shared/types.js";
-import { replayEntriesAsEvents } from "./state-replay.js";
+import type { FileEntry, PiSessionInfo } from "../shared/types.js";
 
 /** Escape regex special characters for fd pattern */
 function escapeRegex(value: string): string {
@@ -133,11 +132,6 @@ export function createCommandHandler(
     async handle(msg: ServerToExtensionMessage): Promise<ExtensionToServerMessage | undefined> {
       const sessionId = getSessionId();
 
-      // load_session_events is workspace-scoped, not session-scoped
-      if (msg.type === "load_session_events") {
-        return handleLoadSessionEvents(msg.sessionId, msg.sessionFile);
-      }
-
       // Ignore messages for other sessions
       if (msg.sessionId !== sessionId) {
         console.error(`[dashboard] Ignoring message type=${msg.type} for session ${msg.sessionId}, current session is ${sessionId}`);
@@ -230,9 +224,7 @@ export function createCommandHandler(
           };
         }
 
-        case "openspec_refresh":
-          // Handled by bridge.ts onMessage to update lastOpenSpecJson cache
-          return undefined;
+        // openspec_refresh removed — server handles directly via DirectoryService
 
         case "rename_session":
           pi.setSessionName(msg.name);
@@ -418,20 +410,4 @@ async function handleCompactCommand(
   }
 }
 
-async function handleLoadSessionEvents(
-  sessionId: string,
-  sessionFile: string,
-): Promise<ExtensionToServerMessage> {
-  try {
-    const { SessionManager } = await import("@mariozechner/pi-coding-agent") as any;
-    const sm = SessionManager.open(sessionFile);
-    const entries = sm.getBranch();
-    const eventMessages = replayEntriesAsEvents(sessionId, entries);
-    const events: Array<{ eventType: string; timestamp: number; data: Record<string, unknown> }> =
-      eventMessages.map((m) => m.event);
-    return { type: "load_session_events_result", sessionId, events };
-  } catch (err: any) {
-    const message = err?.code === "ENOENT" ? "file_not_found" : (err?.message ?? "parse_error");
-    return { type: "load_session_events_error", sessionId, error: message };
-  }
-}
+// handleLoadSessionEvents removed — server loads sessions directly via DirectoryService

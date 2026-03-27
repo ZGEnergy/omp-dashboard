@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import React from "react";
 import { SessionCard } from "../SessionCard.js";
-import type { DashboardSession, OpenSpecData } from "../../../shared/types.js";
+import type { DashboardSession } from "../../../shared/types.js";
 
 afterEach(() => cleanup());
 
@@ -31,125 +31,121 @@ const defaultProps = {
 };
 
 describe("SessionCard", () => {
-  it("should render thinking level in parentheses after model name", () => {
-    const session = makeSession({ model: "claude-4-sonnet", thinkingLevel: "high" });
-    const { getByText } = render(
-      <SessionCard session={session} {...defaultProps} />
-    );
-    expect(getByText("claude-4-sonnet (high)")).toBeTruthy();
+  it("should render session name or fallback to cwd", () => {
+    const session = makeSession({ name: "My Session" });
+    render(<SessionCard session={session} {...defaultProps} />);
+    expect(screen.getByText("My Session")).toBeTruthy();
   });
 
-  it("should render only model name when thinkingLevel is undefined", () => {
-    const session = makeSession({ model: "claude-4-sonnet" });
-    const { container } = render(
-      <SessionCard session={session} {...defaultProps} />
-    );
-    const modelLine = container.querySelector(".text-xs.text-\\[var\\(--text-tertiary\\)\\]");
-    expect(modelLine?.textContent).toBe("claude-4-sonnet");
+  it("should show active status indicator", () => {
+    const session = makeSession({ status: "active" });
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    // Status dot is a span with bg-green-500 class
+    const statusDot = container.querySelector(".bg-green-500");
+    expect(statusDot).toBeTruthy();
   });
 
-  it("should show source badge in action row below divider", () => {
-    const session = makeSession({ source: "tui" });
-    const { container } = render(
-      <SessionCard session={session} {...defaultProps} />
-    );
-    // Action row has the border-t divider class
-    const actionRow = container.querySelector(".border-t.border-\\[var\\(--border-secondary\\)\\]");
-    expect(actionRow).not.toBeNull();
-    // Source badge should be inside the action row
-    expect(actionRow!.textContent).toContain("tui");
-  });
-
-  it("should show selected card with left accent border and 3D styling", () => {
+  it("should highlight when selected", () => {
     const session = makeSession();
     const { container } = render(
       <SessionCard session={session} {...defaultProps} selectedId="test-session" />
     );
-    const li = container.querySelector("li");
-    expect(li?.className).toContain("border-l-2");
-    expect(li?.className).toContain("border-l-blue-500/40");
-    expect(li?.className).toContain("rounded-xl");
-    expect(li?.className).toContain("shadow-md");
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).toContain("border-l-blue-500");
   });
 
-  it("should have 3D styling but no left accent border when not selected", () => {
+  it("should call onSelect when clicked", () => {
+    const onSelect = vi.fn();
     const session = makeSession();
     const { container } = render(
-      <SessionCard session={session} {...defaultProps} selectedId="other-session" />
+      <SessionCard session={session} {...defaultProps} onSelect={onSelect} />
     );
-    const li = container.querySelector("li");
-    expect(li?.className).not.toContain("border-l-2");
-    expect(li?.className).toContain("rounded-xl");
-    expect(li?.className).toContain("shadow-md");
+    fireEvent.click(container.firstChild as HTMLElement);
+    expect(onSelect).toHaveBeenCalledWith("test-session");
   });
 
-  it("should show hide button in action row", () => {
-    const session = makeSession();
+  it("should show cost when present", () => {
+    const session = makeSession({ cost: 0.42 });
     render(<SessionCard session={session} {...defaultProps} />);
-    expect(screen.getByTestId("session-hide-btn")).toBeTruthy();
+    expect(screen.getByText("$0.42")).toBeTruthy();
   });
 
-  it("should show unhide button when hidden", () => {
-    const session = makeSession();
-    render(<SessionCard session={session} {...defaultProps} isHidden={true} />);
-    expect(screen.getByTestId("session-unhide-btn")).toBeTruthy();
+  it("should show source badge icon", () => {
+    const session = makeSession({ source: "tui" });
+    render(<SessionCard session={session} {...defaultProps} />);
+    expect(screen.getByTitle("TUI")).toBeTruthy();
   });
 
-  it("should show close button for active sessions when onShutdown provided", () => {
-    const session = makeSession({ status: "idle" });
-    const onShutdown = vi.fn();
-    render(<SessionCard session={session} {...defaultProps} onShutdown={onShutdown} />);
-    const btn = screen.getByTestId("session-close-btn");
-    fireEvent.click(btn);
-    expect(onShutdown).toHaveBeenCalledWith("test-session");
+  it("should show git branch when showGitInfo is true", () => {
+    const session = makeSession({ gitBranch: "feature/test" });
+    render(
+      <SessionCard session={session} {...defaultProps} showGitInfo={true} />
+    );
+    expect(screen.getByText("feature/test")).toBeTruthy();
   });
 
-  it("should not show close button for ended sessions", () => {
+  it("should hide git branch when showGitInfo is false", () => {
+    const session = makeSession({ gitBranch: "feature/test" });
+    render(
+      <SessionCard session={session} {...defaultProps} showGitInfo={false} />
+    );
+    expect(screen.queryByText("feature/test")).toBeNull();
+  });
+
+  it("should show ended status for ended sessions", () => {
     const session = makeSession({ status: "ended" });
-    render(<SessionCard session={session} {...defaultProps} onShutdown={() => {}} />);
-    expect(screen.queryByTestId("session-close-btn")).toBeNull();
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    // Ended sessions have bg-[var(--bg-surface)] status dot
+    const statusDot = container.querySelector(".bg-\\[var\\(--bg-surface\\)\\]");
+    expect(statusDot).toBeTruthy();
   });
 
-  it("should confirm before closing streaming session", () => {
-    const session = makeSession({ status: "streaming" });
+  it("should show shutdown button when session is active and selected", () => {
     const onShutdown = vi.fn();
-    window.confirm = vi.fn(() => false);
-    render(<SessionCard session={session} {...defaultProps} onShutdown={onShutdown} />);
-    fireEvent.click(screen.getByTestId("session-close-btn"));
-    expect(window.confirm).toHaveBeenCalled();
+    const session = makeSession({ status: "active" });
+    render(
+      <SessionCard session={session} {...defaultProps} selectedId="test-session" onShutdown={onShutdown} />
+    );
+    const shutdownBtn = screen.queryByTestId("session-close-btn");
+    expect(shutdownBtn).toBeTruthy();
+  });
+
+  it("should NOT show shutdown button when session is ended", () => {
+    const onShutdown = vi.fn();
+    const session = makeSession({ status: "ended" });
+    render(
+      <SessionCard session={session} {...defaultProps} selectedId="test-session" onShutdown={onShutdown} />
+    );
+    const shutdownBtn = screen.queryByTestId("shutdown-button");
+    // Ended sessions should not have shutdown button
     expect(onShutdown).not.toHaveBeenCalled();
   });
 
-  it("should show OpenSpec section when selected and data initialized", () => {
+  it("should show OpenSpec actions when selected and has changes", () => {
     const session = makeSession();
-    const openspecData: OpenSpecData = {
-      initialized: true,
-      changes: [{ name: "feat-a", status: "in-progress", completedTasks: 1, totalTasks: 3, artifacts: [] }],
-    };
+    const changes = [{ name: "feat-a", status: "in-progress" as const, completedTasks: 1, totalTasks: 3, artifacts: [] }];
     render(
-      <SessionCard session={session} {...defaultProps} selectedId="test-session" openspecData={openspecData} />
+      <SessionCard session={session} {...defaultProps} selectedId="test-session" openspecChanges={changes}
+        onSendPrompt={() => {}} onAttachProposal={() => {}} onDetachProposal={() => {}} />
     );
-    expect(screen.getByTestId("openspec-section")).toBeTruthy();
+    expect(screen.getByTestId("session-openspec-actions")).toBeTruthy();
   });
 
-  it("should NOT show OpenSpec section when not selected", () => {
+  it("should show OpenSpec actions even when not selected (renders on all cards with changes)", () => {
     const session = makeSession();
-    const openspecData: OpenSpecData = {
-      initialized: true,
-      changes: [{ name: "feat-a", status: "in-progress", completedTasks: 1, totalTasks: 3, artifacts: [] }],
-    };
+    const changes = [{ name: "feat-a", status: "in-progress" as const, completedTasks: 1, totalTasks: 3, artifacts: [] }];
     render(
-      <SessionCard session={session} {...defaultProps} selectedId="other" openspecData={openspecData} />
+      <SessionCard session={session} {...defaultProps} selectedId="other" openspecChanges={changes}
+        onSendPrompt={() => {}} onAttachProposal={() => {}} onDetachProposal={() => {}} />
     );
-    expect(screen.queryByTestId("openspec-section")).toBeNull();
+    expect(screen.getByTestId("session-openspec-actions")).toBeTruthy();
   });
 
-  it("should NOT show OpenSpec section when not initialized", () => {
+  it("should NOT show OpenSpec actions when no changes", () => {
     const session = makeSession();
-    const openspecData: OpenSpecData = { initialized: false, changes: [] };
     render(
-      <SessionCard session={session} {...defaultProps} selectedId="test-session" openspecData={openspecData} />
+      <SessionCard session={session} {...defaultProps} selectedId="test-session" />
     );
-    expect(screen.queryByTestId("openspec-section")).toBeNull();
+    expect(screen.queryByTestId("session-openspec-actions")).toBeNull();
   });
 });

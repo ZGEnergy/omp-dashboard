@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createCommandHandler, parseSendPrompt } from "../command-handler.js";
-import type { ServerToExtensionMessage, LoadSessionEventsResultMessage, LoadSessionEventsErrorMessage } from "../../shared/protocol.js";
+import type { ServerToExtensionMessage } from "../../shared/protocol.js";
 
 describe("CommandHandler", () => {
   function createMockPi() {
@@ -201,18 +201,6 @@ describe("CommandHandler", () => {
     await handler.handle({ type: "abort", sessionId: "s1" } as ServerToExtensionMessage);
   });
 
-  it("should return undefined for openspec_refresh (handled by bridge)", async () => {
-    const pi = createMockPi();
-    const handler = createCommandHandler(pi as any, "s1");
-
-    const result = await handler.handle({
-      type: "openspec_refresh",
-      sessionId: "s1",
-    } as ServerToExtensionMessage);
-
-    expect(result).toBeUndefined();
-  });
-
   it("should handle request_commands message", async () => {
     const pi = createMockPi();
     const handler = createCommandHandler(pi as any, "s1");
@@ -259,125 +247,6 @@ describe("CommandHandler", () => {
     expect(result).toBeDefined();
     expect(result!.type).toBe("sessions_list");
     expect((result as any).sessions).toEqual([]);
-  });
-
-  describe("load_session_events", () => {
-    it("should load session file and return events", async () => {
-      const pi = createMockPi();
-      const handler = createCommandHandler(pi as any, "s1");
-
-      // Mock the dynamic import
-      const mockEntries = [
-        {
-          type: "message",
-          timestamp: "2024-01-01T00:00:00Z",
-          message: { role: "user", content: [{ type: "text", text: "Hello" }] },
-        },
-      ];
-      vi.doMock("@mariozechner/pi-coding-agent", () => ({
-        SessionManager: {
-          open: vi.fn().mockReturnValue({
-            getBranch: vi.fn().mockReturnValue(mockEntries),
-          }),
-        },
-      }));
-
-      const result = await handler.handle({
-        type: "load_session_events",
-        sessionId: "old-session",
-        sessionFile: "/path/to/session.json",
-      } as any);
-
-      expect(result).toBeDefined();
-      expect(result!.type).toBe("load_session_events_result");
-      const r = result as LoadSessionEventsResultMessage;
-      expect(r.sessionId).toBe("old-session");
-      expect(r.events.length).toBeGreaterThan(0);
-
-      vi.doUnmock("@mariozechner/pi-coding-agent");
-    });
-
-    it("should return error when file not found", async () => {
-      const pi = createMockPi();
-      const handler = createCommandHandler(pi as any, "s1");
-
-      vi.doMock("@mariozechner/pi-coding-agent", () => ({
-        SessionManager: {
-          open: vi.fn().mockImplementation(() => {
-            const err: any = new Error("ENOENT");
-            err.code = "ENOENT";
-            throw err;
-          }),
-        },
-      }));
-
-      const result = await handler.handle({
-        type: "load_session_events",
-        sessionId: "missing",
-        sessionFile: "/nonexistent/session.json",
-      } as any);
-
-      expect(result).toBeDefined();
-      expect(result!.type).toBe("load_session_events_error");
-      const r = result as LoadSessionEventsErrorMessage;
-      expect(r.sessionId).toBe("missing");
-      expect(r.error).toBe("file_not_found");
-
-      vi.doUnmock("@mariozechner/pi-coding-agent");
-    });
-
-    it("should return error on parse failure", async () => {
-      const pi = createMockPi();
-      const handler = createCommandHandler(pi as any, "s1");
-
-      vi.doMock("@mariozechner/pi-coding-agent", () => ({
-        SessionManager: {
-          open: vi.fn().mockImplementation(() => {
-            throw new Error("Invalid JSON");
-          }),
-        },
-      }));
-
-      const result = await handler.handle({
-        type: "load_session_events",
-        sessionId: "corrupt",
-        sessionFile: "/corrupt/session.json",
-      } as any);
-
-      expect(result).toBeDefined();
-      expect(result!.type).toBe("load_session_events_error");
-      const r = result as LoadSessionEventsErrorMessage;
-      expect(r.error).toBe("Invalid JSON");
-
-      vi.doUnmock("@mariozechner/pi-coding-agent");
-    });
-
-    it("should handle load_session_events for any sessionId (not just current)", async () => {
-      const pi = createMockPi();
-      const handler = createCommandHandler(pi as any, "s1");
-
-      // load_session_events for "other-session" should NOT be ignored
-      // even though current session is "s1"
-      vi.doMock("@mariozechner/pi-coding-agent", () => ({
-        SessionManager: {
-          open: vi.fn().mockReturnValue({
-            getBranch: vi.fn().mockReturnValue([]),
-          }),
-        },
-      }));
-
-      const result = await handler.handle({
-        type: "load_session_events",
-        sessionId: "other-session",
-        sessionFile: "/path/to/other.json",
-      } as any);
-
-      expect(result).toBeDefined();
-      expect(result!.type).toBe("load_session_events_result");
-      expect((result as LoadSessionEventsResultMessage).sessionId).toBe("other-session");
-
-      vi.doUnmock("@mariozechner/pi-coding-agent");
-    });
   });
 
   it("should use sessionId getter for dynamic session ID", async () => {

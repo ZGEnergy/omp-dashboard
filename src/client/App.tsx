@@ -6,6 +6,9 @@ import { SessionList } from "./components/SessionList.js";
 import { ResizableSidebar } from "./components/ResizableSidebar.js";
 import { HamburgerButton, MobileOverlay } from "./components/MobileOverlay.js";
 import { ChatView } from "./components/ChatView.js";
+import { MarkdownPreviewView } from "./components/MarkdownPreviewView.js";
+import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
+import type { OpenSpecArtifact } from "../shared/types.js";
 import { SessionHeader } from "./components/SessionHeader.js";
 import { TokenStatsBar } from "./components/TokenStatsBar.js";
 import { CommandInput } from "./components/CommandInput.js";
@@ -21,6 +24,34 @@ import type { ContextUsageInfo } from "./components/SessionList.js";
 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const wsPort = window.location.port ? `:${window.location.port}` : "";
 const WS_URL = `${wsProtocol}//${window.location.hostname}${wsPort}/ws`;
+
+function OpenSpecPreview({
+  cwd,
+  changeName,
+  initialArtifact,
+  artifacts,
+  onBack,
+}: {
+  cwd: string;
+  changeName: string;
+  initialArtifact: string;
+  artifacts: OpenSpecArtifact[];
+  onBack: () => void;
+}) {
+  const reader = useOpenSpecReader(cwd, changeName, initialArtifact, artifacts);
+  return (
+    <MarkdownPreviewView
+      title={reader.title}
+      content={reader.content}
+      isLoading={reader.isLoading}
+      error={reader.error}
+      tabs={reader.tabs}
+      activeTab={reader.activeTab}
+      onTabChange={reader.setActiveTab}
+      onBack={onBack}
+    />
+  );
+}
 
 export default function App() {
   const { send, onMessage, status } = useWebSocket(WS_URL);
@@ -43,6 +74,12 @@ export default function App() {
   const [sessionOrderMap, setSessionOrderMap] = useState<Map<string, string[]>>(new Map());
   const [pinnedDirectories, setPinnedDirectories] = useState<string[]>([]);
   const subscribedRef = useRef(new Set<string>());
+  const [previewState, setPreviewState] = useState<{
+    cwd: string;
+    changeName: string;
+    artifactId: string;
+    artifacts: OpenSpecArtifact[];
+  } | null>(null);
 
   const clearSpawningCwd = useCallback((cwd: string) => {
     setSpawningCwds((prev) => {
@@ -71,8 +108,9 @@ export default function App() {
           clearSpawningCwd(msg.session.cwd);
           navigate(`/session/${msg.session.id}`);
         }
-        // Auto-subscribe to new sessions
-        if (!subscribedRef.current.has(msg.session.id)) {
+        // Auto-subscribe to active sessions for live events.
+        // Ended sessions are subscribed on-demand when selected (lazy loading).
+        if (!subscribedRef.current.has(msg.session.id) && msg.session.status !== "ended") {
           subscribedRef.current.add(msg.session.id);
           send({ type: "subscribe", sessionId: msg.session.id, lastSeq: 0 });
           send({ type: "request_commands", sessionId: msg.session.id });
@@ -134,7 +172,7 @@ export default function App() {
       case "openspec_update":
         setOpenspecMap((prev) => {
           const next = new Map(prev);
-          next.set(msg.sessionId, msg.data);
+          next.set(msg.cwd, msg.data);
           return next;
         });
         break;
@@ -205,6 +243,20 @@ export default function App() {
     }
   }, [selectedId, sessionsLoaded, sessions, navigate]);
 
+  // Clear preview when session changes + lazy subscribe ended sessions
+  const prevSelectedRef = useRef(selectedId);
+  useEffect(() => {
+    if (selectedId !== prevSelectedRef.current) {
+      setPreviewState(null);
+      prevSelectedRef.current = selectedId;
+    }
+    // Lazy subscribe: load events for ended sessions when first selected
+    if (selectedId && !subscribedRef.current.has(selectedId)) {
+      subscribedRef.current.add(selectedId);
+      send({ type: "subscribe", sessionId: selectedId, lastSeq: 0 });
+    }
+  }, [selectedId, send]);
+
   const selectedState = selectedId
     ? sessionStates.get(selectedId) ?? createInitialState()
     : createInitialState();
@@ -224,13 +276,20 @@ export default function App() {
 
   const contextUsageMap = useMemo(() => {
     const map = new Map<string, ContextUsageInfo>();
+    // First: populate from event-reduced state (live sessions)
     for (const [id, state] of sessionStates) {
       if (state.contextUsage) {
         map.set(id, state.contextUsage);
       }
     }
+    // Second: fill in from server-persisted session data (covers all sessions)
+    for (const [id, session] of sessions) {
+      if (!map.has(id) && session.contextWindow && session.contextTokens !== undefined) {
+        map.set(id, { tokens: session.contextTokens ?? null, contextWindow: session.contextWindow });
+      }
+    }
     return map;
-  }, [sessionStates]);
+  }, [sessionStates, sessions]);
 
   const handleAbort = useCallback(
     () => {
@@ -261,10 +320,28 @@ export default function App() {
   );
 
   const handleOpenSpecRefresh = useCallback(
-    (sessionId: string) => {
-      send({ type: "openspec_refresh", sessionId });
+    (cwd: string) => {
+      send({ type: "openspec_refresh", cwd });
     },
     [send],
+  );
+
+  const handleBulkArchive = useCallback(
+    (cwd: string) => {
+      send({ type: "openspec_bulk_archive", cwd });
+    },
+    [send],
+  );
+
+  const handleReadArtifact = useCallback(
+    (cwd: string, changeName: string, artifactId: string) => {
+      // Find artifacts for this change from openspecMap
+      const openspecData = openspecMap.get(cwd);
+      const change = openspecData?.changes.find((c) => c.name === changeName);
+      const artifacts = change?.artifacts ?? [];
+      setPreviewState({ cwd, changeName, artifactId, artifacts });
+    },
+    [openspecMap],
   );
 
   const handleAttachProposal = useCallback(
@@ -416,6 +493,8 @@ export default function App() {
       }}
       onSendPrompt={handleSendPromptToSession}
       onOpenSpecRefresh={handleOpenSpecRefresh}
+      onBulkArchive={handleBulkArchive}
+      onReadArtifact={handleReadArtifact}
       onAttachProposal={handleAttachProposal}
       onDetachProposal={handleDetachProposal}
       onRename={handleRenameSession}
@@ -488,32 +567,44 @@ export default function App() {
               cacheWrite={selectedState.cacheWrite}
               cost={selectedState.cost}
             />
-            <ChatView state={selectedState} toolContext={toolContext} onCancelPending={handleCancelPending} />
-            <StatusBar
-              model={selectedState.model ?? selectedSession?.model}
-              models={modelsMap.get(selectedId)}
-              thinkingLevel={selectedState.thinkingLevel ?? selectedSession?.thinkingLevel}
-              status={selectedState.status}
-              currentTool={selectedState.currentTool}
-              streamingText={selectedState.streamingText || undefined}
-              onSelectModel={(modelStr) => {
-                send({ type: "send_prompt", sessionId: selectedId, text: `/model ${modelStr}` });
-              }}
-              onSelectThinkingLevel={(level) => {
-                send({ type: "set_thinking_level", sessionId: selectedId, level });
-              }}
-            />
-            <CommandInput
-              commands={selectedCommands}
-              onSend={handleSend}
-              onListFiles={handleListFiles}
-              fileResults={fileResults}
-              disabled={false}
-              sessionStatus={selectedState.status}
-              onAbort={handleAbort}
-              pendingPrompt={!!selectedState.pendingPrompt}
-              onCancelPending={handleCancelPending}
-            />
+            {previewState ? (
+              <OpenSpecPreview
+                cwd={previewState.cwd}
+                changeName={previewState.changeName}
+                initialArtifact={previewState.artifactId}
+                artifacts={previewState.artifacts}
+                onBack={() => setPreviewState(null)}
+              />
+            ) : (
+              <>
+                <ChatView state={selectedState} toolContext={toolContext} onCancelPending={handleCancelPending} />
+                <StatusBar
+                  model={selectedState.model ?? selectedSession?.model}
+                  models={modelsMap.get(selectedId)}
+                  thinkingLevel={selectedState.thinkingLevel ?? selectedSession?.thinkingLevel}
+                  status={selectedState.status}
+                  currentTool={selectedState.currentTool}
+                  streamingText={selectedState.streamingText || undefined}
+                  onSelectModel={(modelStr) => {
+                    send({ type: "send_prompt", sessionId: selectedId, text: `/model ${modelStr}` });
+                  }}
+                  onSelectThinkingLevel={(level) => {
+                    send({ type: "set_thinking_level", sessionId: selectedId, level });
+                  }}
+                />
+                <CommandInput
+                  commands={selectedCommands}
+                  onSend={handleSend}
+                  onListFiles={handleListFiles}
+                  fileResults={fileResults}
+                  disabled={false}
+                  sessionStatus={selectedState.status}
+                  onAbort={handleAbort}
+                  pendingPrompt={!!selectedState.pendingPrompt}
+                  onCancelPending={handleCancelPending}
+                />
+              </>
+            )}
           </>
         ) : (
           <LandingPage />

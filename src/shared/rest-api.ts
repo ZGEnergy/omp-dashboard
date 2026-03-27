@@ -37,3 +37,19 @@ export interface AggregateStats {
 }
 
 export type AggregateStatsResponse = ApiResponse<AggregateStats>;
+
+// ── File Read ───────────────────────────────────────────────────────
+
+export interface FileContentResult {
+  type: "file";
+  content: string;
+}
+
+export interface DirectoryListResult {
+  type: "directory";
+  entries: string[];
+}
+
+export type FileReadResult = FileContentResult | DirectoryListResult;
+
+export type FileReadResponse = ApiResponse<FileReadResult>;

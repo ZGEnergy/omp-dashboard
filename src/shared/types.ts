@@ -25,10 +25,11 @@ export interface DashboardSession {
   gitBranchUrl?: string;
   gitPrNumber?: number;
   gitPrUrl?: string;
-  openspecData?: string;
   openspecPhase?: OpenSpecPhase | null;
   openspecChange?: string | null;
   attachedProposal?: string | null;
+  contextTokens?: number | null;
+  contextWindow?: number;
   sessionFile?: string;
   sessionDir?: string;
   hidden?: boolean;

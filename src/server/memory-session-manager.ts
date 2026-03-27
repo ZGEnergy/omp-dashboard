@@ -38,22 +38,45 @@ export function createMemorySessionManager(
 
   const mgr: SessionManager = {
     register(params: RegisterSessionParams): DashboardSession {
+      // Preserve accumulated data (tokens, cost) from a prior session with the
+      // same ID (e.g. restored after server restart). Git and openspec data are
+      // polled by the bridge extension shortly after reconnect, so they don't
+      // need to be carried over.
+      const existing = sessions.get(params.id);
+
       const session: DashboardSession = {
+        // Carry over accumulated data from the existing session (e.g. restored after restart)
+        ...(existing ? {
+          tokensIn: existing.tokensIn,
+          tokensOut: existing.tokensOut,
+          cacheRead: existing.cacheRead,
+          cacheWrite: existing.cacheWrite,
+          cost: existing.cost,
+          // Preserve user-set openspec assignment (not polled, set via dashboard UI)
+          attachedProposal: existing.attachedProposal,
+          // Preserve context usage until bridge sends fresh data
+          contextTokens: existing.contextTokens,
+          contextWindow: existing.contextWindow,
+        } : {
+          tokensIn: 0,
+          tokensOut: 0,
+          cost: 0,
+        }),
+        // Apply registration params (always override)
         id: params.id,
         cwd: params.cwd,
-        name: params.name,
+        name: params.name ?? existing?.name,
         source: params.source,
         status: "active",
         model: params.model,
         thinkingLevel: params.thinkingLevel,
-        startedAt: params.startedAt ?? Date.now(),
-        tokensIn: 0,
-        tokensOut: 0,
-        cost: 0,
+        startedAt: params.startedAt ?? existing?.startedAt ?? Date.now(),
+        endedAt: undefined,
         sessionFile: params.sessionFile,
         sessionDir: params.sessionDir,
         hidden: false,
-        firstMessage: params.firstMessage,
+        firstMessage: params.firstMessage ?? existing?.firstMessage,
+        dataUnavailable: false,
       };
       // Clear hidden state on register — active sessions should always be visible
       stateStore.setHidden(params.id, false);

@@ -26,18 +26,20 @@ A global pi extension that runs in every pi session. It:
 - Relays commands from the dashboard back to pi
 - Handles reconnection with exponential backoff and event buffering
 - Sends heartbeats every 15s
-- Loads historical session files on demand via `SessionManager.open()`
+- Detects OpenSpec activity (phase/change) from tool events
 
 ### 2. Dashboard Server (`src/server/`)
 A Node.js HTTP + WebSocket server that:
 - Accepts connections from bridge extensions (Pi Gateway, port 9999)
 - Accepts connections from web browsers (Browser Gateway, port 8000)
 - Stores events in an in-memory buffer with LRU eviction (max 100 sessions)
-- Manages sessions in a pure in-memory registry (populated from bridge connections)
+- Manages sessions in a pure in-memory registry (populated from bridge connections and direct disk discovery)
 - Persists user preferences (hidden sessions, pinned directories, session order) in `~/.pi/dashboard/state.json`
-- Requests on-demand session loading from bridge extensions for evicted sessions
+- Discovers historical sessions directly from disk via `SessionManager.list()` (DirectoryService)
+- Loads session events on demand directly from disk via `SessionManager.open()` (DirectoryService)
+- Polls OpenSpec CLI per directory every 30s, broadcasting changes to browsers (DirectoryService)
 - Serves the built web client as static files
-- Exposes REST API for session management, event content fetch, pinned directories
+- Exposes REST API for session management, event content fetch, pinned directories, and file reading
 
 ### 3. Web Client (`src/client/`)
 A React-based responsive web UI that:
@@ -84,32 +86,44 @@ TypeScript type definitions shared across all components:
 6. Thinking level changes (via pi keybinding) are detected when `model_select` events fire, on reconnect, and immediately after `set_thinking_level` commands
 7. Browser can send `set_thinking_level` to change thinking level remotely
 
-### Git & OpenSpec Polling
+### Git Polling
 1. Bridge polls git info every 30s (`git-info.ts`): branch, remote URL, PR number
-2. Bridge polls OpenSpec CLI every 30s (`openspec-poller.ts`): active changes, artifacts
-3. Changes are sent to the server only when values differ from last poll
-4. Server broadcasts updates to subscribed browsers
+2. Changes are sent to the server only when values differ from last poll
+3. Server broadcasts updates to subscribed browsers
+
+### OpenSpec Polling (Server-Side)
+1. Server's DirectoryService polls `openspec` CLI every 30s for each known directory (union of pinned dirs + session cwds)
+2. OpenSpec data is keyed by directory (cwd), not by session — one poll per directory regardless of session count
+3. Changes are broadcast to all connected browsers via `openspec_update { cwd, data }`
+4. Browsers can request immediate refresh via `openspec_refresh { cwd }`
+5. New directories (pinned or from new sessions) trigger immediate discovery + polling
+
+### File Read API
+The server exposes `GET /api/file?cwd=...&path=...` for reading files or listing directories from session working directories. Guards: localhost-only, cwd must match a known session, resolved path must stay inside cwd. Returns `{ type: "file", content }` or `{ type: "directory", entries }`.
+
+### Markdown Preview View
+The web client includes a generic `MarkdownPreviewView` component that replaces the chat area. It supports a back button, title, optional tab bar, and loading/error states. For OpenSpec artifacts, the `useOpenSpecReader` hook maps artifact IDs (P/S/D/T) to file paths, fetches content via the file API, and concatenates specs from subdirectories.
 
 ### Reconnection Flow
 1. Browser reconnects with `subscribe` message including `lastSeq`
 2. Server replays missed events from in-memory buffer in batches of 200
 3. Browser's event reducer processes replay, rebuilding state
 
-### On-Demand Session Loading
+### On-Demand Session Loading (Server-Side)
 When a browser subscribes to a session whose events have been evicted from memory:
 1. Server sends empty `event_replay` with `isLast: false` to indicate loading
-2. Server sends `load_session_events` to a connected bridge in the same workspace
-3. Bridge calls `SessionManager.open(sessionFile).getBranch()` to load the session
-4. Bridge converts entries via `replayEntriesAsEvents()` and sends back as `load_session_events_result`
-5. Server stores events in memory and sends `event_replay` batch to waiting browsers
-6. If no bridge is available or loading times out (10s), server sends `dataUnavailable: true`
+2. Server's DirectoryService loads the session file directly via `SessionManager.open(sessionFile).getBranch()`
+3. Entries are converted via `replayEntriesAsEvents()` and stored in the event buffer
+4. Server sends `event_replay` batch to all waiting browsers
+5. If the session file is missing or corrupt, server sends `dataUnavailable: true`
+6. Concurrent loads for the same session are deduplicated
 
 ## Persistence
 
 | Data | Storage | Details |
 |------|---------|---------|
 | Events | In-memory Map | LRU eviction, max 100 sessions. Pinned if active bridge or browser subscribers. |
-| Sessions | In-memory Map + JSON | In-memory registry + `session-persistence.ts` saves metadata to JSON for server restarts. Populated from bridge `session_register` + `session_history_sync`. |
+| Sessions | In-memory Map + JSON | In-memory registry + `session-persistence.ts` saves metadata to JSON for server restarts. Populated from bridge `session_register` + DirectoryService disk discovery. |
 | Hidden sessions | `~/.pi/dashboard/state.json` | Debounced writes (max 1/sec). Atomic write. |
 | Pinned directories | `~/.pi/dashboard/state.json` | Ordered array of cwd paths. Pinned dirs always visible in sidebar. |
 | Session order | `~/.pi/dashboard/state.json` | Per-cwd ordering managed by `session-order-manager.ts`. |

@@ -10,7 +10,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 // Import after mock is set up
-const { pollOpenSpec } = await import("../openspec-poller.js");
+const { pollOpenSpec } = await import("../../shared/openspec-poller.js");
 
 function ok(data: unknown): Partial<SpawnSyncReturns<string>> {
   return { status: 0, stdout: JSON.stringify(data), stderr: "" };

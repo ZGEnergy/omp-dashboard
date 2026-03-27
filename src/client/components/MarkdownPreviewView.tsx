@@ -1,0 +1,90 @@
+import React from "react";
+import Icon from "@mdi/react";
+import { mdiArrowLeft, mdiLoading } from "@mdi/js";
+import { MarkdownContent } from "./MarkdownContent.js";
+
+export interface PreviewTab {
+  id: string;
+  label: string;
+  colorClass?: string;
+}
+
+interface Props {
+  title?: string;
+  content?: string;
+  isLoading?: boolean;
+  error?: string;
+  tabs?: PreviewTab[];
+  activeTab?: string;
+  onTabChange?: (tabId: string) => void;
+  onBack: () => void;
+}
+
+export function MarkdownPreviewView({
+  title,
+  content,
+  isLoading,
+  error,
+  tabs,
+  activeTab,
+  onTabChange,
+  onBack,
+}: Props) {
+  return (
+    <div className="flex-1 flex flex-col min-h-0" data-testid="markdown-preview">
+      {/* Header with back button and title */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border-secondary)]">
+        <button
+          onClick={onBack}
+          className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-1 rounded hover:bg-[var(--bg-surface)]"
+          data-testid="preview-back"
+          title="Back to chat"
+        >
+          <Icon path={mdiArrowLeft} size={0.7} />
+        </button>
+        {title && (
+          <span className="text-sm font-medium text-[var(--text-secondary)] truncate">
+            {title}
+          </span>
+        )}
+      </div>
+
+      {/* Tab bar */}
+      {tabs && tabs.length > 0 && (
+        <div className="flex items-center gap-1 px-4 py-1.5 border-b border-[var(--border-secondary)]" data-testid="preview-tabs">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => onTabChange?.(tab.id)}
+              className={`text-xs font-bold font-mono px-2 py-1 rounded transition-colors ${
+                tab.id === activeTab
+                  ? "bg-[var(--bg-surface)] text-[var(--text-primary)]"
+                  : `${tab.colorClass ?? "text-[var(--text-muted)]"} hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]`
+              }`}
+              data-testid={`preview-tab-${tab.id}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Content area */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {isLoading && (
+          <div className="flex items-center justify-center h-full text-[var(--text-muted)]" data-testid="preview-loading">
+            <Icon path={mdiLoading} size={1.2} spin className="animate-spin" />
+          </div>
+        )}
+        {error && !isLoading && (
+          <div className="text-red-400 text-sm py-4" data-testid="preview-error">
+            {error}
+          </div>
+        )}
+        {content && !isLoading && !error && (
+          <MarkdownContent content={content} />
+        )}
+      </div>
+    </div>
+  );
+}

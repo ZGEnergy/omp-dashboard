@@ -1,3 +1,5 @@
+## ADDED Requirements
+
 ### Requirement: Placeholder card shown during session spawn
 When the user clicks "New" to spawn a session in a workspace group, the system SHALL immediately render a placeholder skeleton card at the top of that group's session list. The placeholder SHALL display a pulse/loading animation to indicate a spawn is in progress.
 

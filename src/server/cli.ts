@@ -248,7 +248,7 @@ async function main() {
 
 // Only run when executed directly (not when imported for testing)
 const isDirectExecution = process.argv[1] &&
-  (process.argv[1].endsWith("cli.ts") || process.argv[1].endsWith("cli.js"));
+  (process.argv[1].endsWith("cli.ts") || process.argv[1].endsWith("cli.js") || process.argv[1].endsWith("pi-dashboard"));
 
 if (isDirectExecution) {
   main().catch((err) => {

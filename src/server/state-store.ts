@@ -5,6 +5,7 @@
 import path from "node:path";
 import { CONFIG_DIR } from "../shared/config.js";
 import { readJsonFile, writeJsonFile } from "./json-store.js";
+import { safeRealpathSync } from "./resolve-path.js";
 
 export const STATE_FILE = path.join(CONFIG_DIR, "state.json");
 
@@ -37,9 +38,14 @@ export function createStateStore(filePath: string = STATE_FILE): StateStore {
   const data: StateData = readJsonFile<StateData>(filePath, { hiddenSessions: [], sessionOrder: {}, pinnedDirectories: [] });
   const hiddenSet = new Set(data.hiddenSessions);
   let sessionOrder: Record<string, string[]> = data.sessionOrder ?? {};
-  let pinnedDirectories: string[] = data.pinnedDirectories ?? [];
+  // Resolve symlinks in stored pinned paths on load
+  const rawPinned = data.pinnedDirectories ?? [];
+  let pinnedDirectories: string[] = rawPinned.map(safeRealpathSync);
+  // Deduplicate in case symlinks resolved to the same path
+  pinnedDirectories = [...new Set(pinnedDirectories)];
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let dirty = false;
+  // Mark dirty if any paths were resolved so the file gets updated
+  let dirty = pinnedDirectories.length !== rawPinned.length || pinnedDirectories.some((p, i) => p !== rawPinned[i]);
 
   function scheduleSave(): void {
     dirty = true;
@@ -63,6 +69,9 @@ export function createStateStore(filePath: string = STATE_FILE): StateStore {
       writeJsonFile(filePath, { hiddenSessions: Array.from(hiddenSet), sessionOrder, pinnedDirectories });
     }
   }
+
+  // Persist resolved paths immediately if any changed on load
+  if (dirty) scheduleSave();
 
   return {
     isHidden(sessionId: string): boolean {

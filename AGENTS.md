@@ -44,22 +44,23 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/extension/dev-build.ts` | Dev build-on-reload helper (client build + server shutdown) |
 | `src/extension/git-info.ts` | Git branch/remote/PR detection (polled every 30s) |
 | `src/extension/git-link-builder.ts` | Git remote URL parsing and platform-specific links |
-| `src/extension/openspec-poller.ts` | OpenSpec CLI polling for change data (every 30s) |
 | `src/extension/openspec-activity-detector.ts` | Detects OpenSpec activity from tool events |
-| `src/extension/session-history.ts` | Sends local pi session history to the server |
-| `src/extension/state-replay.ts` | Synthesizes events from pi entries on reconnect |
+| `src/shared/openspec-poller.ts` | OpenSpec CLI polling (shared, used by server DirectoryService) |
+| `src/shared/state-replay.ts` | Synthesizes events from pi entries (shared, used by server + bridge) |
 | `src/extension/stats-extractor.ts` | Extracts token/cost stats from turn_end events |
 | `src/server/server.ts` | HTTP + WebSocket server |
 | `src/server/pi-gateway.ts` | Extension WebSocket gateway (port 9999) |
 | `src/server/browser-gateway.ts` | Browser WebSocket gateway (port 8000) |
 | `src/server/memory-event-store.ts` | In-memory event buffer with LRU eviction |
 | `src/server/memory-session-manager.ts` | Pure in-memory session registry |
+| `src/client/components/FolderOpenSpecSection.tsx` | Folder-level OpenSpec UI: collapsible change list, refresh, bulk archive |
+| `src/client/components/SessionOpenSpecActions.tsx` | Session-level OpenSpec: attach combo box, action buttons, detach |
 | `src/client/components/PinDirectoryDialog.tsx` | Dialog to pin a directory by path |
 | `src/client/components/SortablePinnedGroup.tsx` | Drag-to-reorder wrapper for pinned directory groups |
 | `src/server/state-store.ts` | JSON-backed user preferences (hidden sessions) |
 | `src/server/session-persistence.ts` | Persists session metadata to JSON for server restarts |
 | `src/server/session-order-manager.ts` | Per-cwd session ordering with persistence |
-| `src/server/pending-load-manager.ts` | On-demand session load request tracking |
+| `src/server/directory-service.ts` | Server-side session discovery, event loading, and OpenSpec polling |
 | `src/server/pending-fork-registry.ts` | Tracks pending fork operations for session placement |
 | `src/server/json-store.ts` | Atomic JSON file read/write helpers |
 | `src/server/process-manager.ts` | Session spawning via tmux or headless mode |
@@ -72,8 +73,12 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/server/cli.ts` | CLI entry point with subcommands (start/stop/restart/status) |
 | `src/shared/rest-api.ts` | REST API type definitions |
 | `scripts/reload-all.sh` | Build bridge + reload all pi sessions |
+| `src/client/components/MarkdownPreviewView.tsx` | Generic reusable markdown preview with back button, tabs, loading/error states |
+| `src/client/hooks/useOpenSpecReader.ts` | Maps OpenSpec artifacts to file paths, fetches content, concatenates specs |
 | `src/client/App.tsx` | React app with WebSocket integration |
 | `src/client/lib/event-reducer.ts` | Event-sourced state reducer |
+| `src/client/lib/truncate-path.ts` | Middle-truncation utility for filesystem paths |
+| `src/server/resolve-path.ts` | Safe realpath resolution (symlink handling) |
 
 ## Code Instructions
 

@@ -3,6 +3,7 @@
  */
 import { WebSocketServer, WebSocket } from "ws";
 import type { ExtensionToServerMessage, ServerToExtensionMessage } from "../shared/protocol.js";
+import type { DashboardSession } from "../shared/types.js";
 import type { SessionManager } from "./memory-session-manager.js";
 
 export const HEARTBEAT_TIMEOUT = 45_000;
@@ -195,41 +196,24 @@ export function createPiGateway(
               }
             }
 
-            if (msg.type === "session_history_sync") {
-              for (const hist of msg.sessions) {
-                // Never hide the bridge's own active session
-                if (hist.id === currentSessionId) continue;
-                // Skip already known sessions
-                if (sessionManager.get(hist.id)) continue;
-                sessionManager.register({
-                  id: hist.id,
-                  cwd: hist.cwd,
-                  name: hist.name,
-                  source: "tui",
-                  sessionFile: hist.sessionFile,
-                  sessionDir: hist.sessionDir,
-                  firstMessage: hist.firstMessage,
-                  startedAt: hist.startedAt,
-                });
-                // Mark as ended + hidden immediately
-                sessionManager.update(hist.id, {
-                  status: "ended",
-                  endedAt: hist.startedAt,
-                  hidden: true,
-                });
-              }
-            }
+            // session_history_sync removed — server discovers sessions via DirectoryService
 
             if (msg.type === "stats_update") {
               const session = sessionManager.get(msg.sessionId);
               if (session) {
-                sessionManager.update(msg.sessionId, {
+                const updates: Partial<DashboardSession> = {
                   tokensIn: (session.tokensIn ?? 0) + (msg.stats.tokensIn ?? 0),
                   tokensOut: (session.tokensOut ?? 0) + (msg.stats.tokensOut ?? 0),
                   cacheRead: (session.cacheRead ?? 0) + (msg.stats.turnUsage?.cacheRead ?? 0),
                   cacheWrite: (session.cacheWrite ?? 0) + (msg.stats.turnUsage?.cacheWrite ?? 0),
                   cost: (session.cost ?? 0) + (msg.stats.cost ?? 0),
-                });
+                };
+                // Store context usage on the session for persistence
+                if (msg.stats.contextUsage) {
+                  updates.contextTokens = msg.stats.contextUsage.tokens;
+                  updates.contextWindow = msg.stats.contextUsage.contextWindow;
+                }
+                sessionManager.update(msg.sessionId, updates);
               }
             }
 

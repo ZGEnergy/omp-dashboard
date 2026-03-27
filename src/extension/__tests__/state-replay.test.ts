@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { replayEntriesAsEvents } from "../state-replay.js";
+import { replayEntriesAsEvents } from "../../shared/state-replay.js";
 
 describe("replayEntriesAsEvents", () => {
   it("should convert user message entry to message_start event", () => {

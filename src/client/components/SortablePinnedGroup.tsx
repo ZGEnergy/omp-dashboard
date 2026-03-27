@@ -17,7 +17,7 @@ export function SortablePinnedGroup({ id, children }: Props) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, data: { type: "pinned-group" } });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -31,7 +31,7 @@ export function SortablePinnedGroup({ id, children }: Props) {
       <div
         {...attributes}
         {...listeners}
-        className="absolute left-0 top-0 h-8 w-4 flex items-center justify-center cursor-grab active:cursor-grabbing opacity-0 group-hover/pinned-sortable:opacity-60 transition-opacity z-10"
+        className="absolute left-1 top-0 h-8 w-4 flex items-center justify-center cursor-grab active:cursor-grabbing opacity-0 group-hover/pinned-sortable:opacity-60 transition-opacity z-10"
         data-testid="drag-handle-pinned"
         onClick={(e) => e.stopPropagation()}
       >

@@ -1,7 +1,7 @@
 /**
  * Extension ↔ Server WebSocket protocol messages.
  */
-import type { DashboardEvent, CommandInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, OpenSpecData, ModelInfo, PiSessionInfo, OpenSpecPhase } from "./types.js";
+import type { DashboardEvent, CommandInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, PiSessionInfo, OpenSpecPhase } from "./types.js";
 
 // ── Extension → Server ──────────────────────────────────────────────
 
@@ -76,11 +76,7 @@ export interface GitInfoUpdateMessage {
   gitPrUrl?: string;
 }
 
-export interface OpenSpecUpdateMessage {
-  type: "openspec_update";
-  sessionId: string;
-  data: OpenSpecData;
-}
+// OpenSpecUpdateMessage removed — server polls directly via DirectoryService
 
 export interface ModelsListMessage {
   type: "models_list";
@@ -101,18 +97,7 @@ export interface SessionsListExtensionMessage {
   sessions: PiSessionInfo[];
 }
 
-export interface SessionHistorySyncMessage {
-  type: "session_history_sync";
-  sessions: Array<{
-    id: string;
-    cwd: string;
-    name?: string;
-    startedAt: number;
-    firstMessage?: string;
-    sessionFile?: string;
-    sessionDir?: string;
-  }>;
-}
+// SessionHistorySyncMessage removed — server reads history directly via DirectoryService
 
 export interface OpenSpecActivityUpdateMessage {
   type: "openspec_activity_update";
@@ -128,17 +113,7 @@ export interface ModelUpdateMessage {
   thinkingLevel?: string;
 }
 
-export interface LoadSessionEventsResultMessage {
-  type: "load_session_events_result";
-  sessionId: string;
-  events: Array<{ eventType: string; timestamp: number; data: Record<string, unknown> }>;
-}
-
-export interface LoadSessionEventsErrorMessage {
-  type: "load_session_events_error";
-  sessionId: string;
-  error: string;
-}
+// LoadSessionEventsResultMessage and LoadSessionEventsErrorMessage removed — server loads directly
 
 export type ExtensionToServerMessage =
   | SessionRegisterMessage
@@ -150,15 +125,11 @@ export type ExtensionToServerMessage =
   | StatsUpdateMessage
   | FilesListMessage
   | GitInfoUpdateMessage
-  | OpenSpecUpdateMessage
   | SessionNameUpdateMessage
   | ModelsListMessage
   | ModelUpdateMessage
   | OpenSpecActivityUpdateMessage
-  | SessionsListExtensionMessage
-  | SessionHistorySyncMessage
-  | LoadSessionEventsResultMessage
-  | LoadSessionEventsErrorMessage;
+  | SessionsListExtensionMessage;
 
 // ── Server → Extension ──────────────────────────────────────────────
 
@@ -190,10 +161,7 @@ export interface ListFilesMessage {
   query: string;
 }
 
-export interface OpenSpecRefreshMessage {
-  type: "openspec_refresh";
-  sessionId: string;
-}
+// OpenSpecRefreshMessage removed — server refreshes directly via DirectoryService
 
 export interface RenameSessionExtensionMessage {
   type: "rename_session";
@@ -223,11 +191,7 @@ export interface ShutdownExtensionMessage {
   sessionId: string;
 }
 
-export interface LoadSessionEventsMessage {
-  type: "load_session_events";
-  sessionId: string;
-  sessionFile: string;
-}
+// LoadSessionEventsMessage removed — server loads directly via DirectoryService
 
 export type ServerToExtensionMessage =
   | SendPromptToExtensionMessage
@@ -235,10 +199,8 @@ export type ServerToExtensionMessage =
   | RequestCommandsMessage
   | RequestStateSyncMessage
   | ListFilesMessage
-  | OpenSpecRefreshMessage
   | RenameSessionExtensionMessage
   | RequestModelsMessage
   | SetThinkingLevelMessage
   | ListSessionsExtensionMessage
-  | ShutdownExtensionMessage
-  | LoadSessionEventsMessage;
+  | ShutdownExtensionMessage;

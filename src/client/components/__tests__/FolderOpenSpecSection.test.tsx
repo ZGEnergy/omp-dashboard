@@ -1,0 +1,134 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import React from "react";
+import { FolderOpenSpecSection } from "../FolderOpenSpecSection.js";
+import type { OpenSpecData } from "../../../shared/types.js";
+
+afterEach(() => cleanup());
+
+const mockData: OpenSpecData = {
+  initialized: true,
+  changes: [
+    {
+      name: "feat-complete",
+      status: "complete",
+      completedTasks: 4,
+      totalTasks: 4,
+      artifacts: [
+        { id: "proposal", status: "done" },
+        { id: "design", status: "done" },
+        { id: "specs", status: "done" },
+        { id: "tasks", status: "done" },
+      ],
+    },
+    {
+      name: "feat-in-progress",
+      status: "in-progress",
+      completedTasks: 2,
+      totalTasks: 5,
+      artifacts: [
+        { id: "proposal", status: "done" },
+        { id: "design", status: "ready" },
+        { id: "specs", status: "blocked" },
+        { id: "tasks", status: "blocked" },
+      ],
+    },
+  ],
+};
+
+const defaultProps = {
+  data: mockData,
+  cwd: "/project/foo",
+  onRefresh: vi.fn(),
+  onBulkArchive: vi.fn(),
+};
+
+describe("FolderOpenSpecSection", () => {
+  it("renders collapsed by default", () => {
+    render(<FolderOpenSpecSection {...defaultProps} />);
+    expect(screen.getByText("▶")).toBeTruthy();
+    expect(screen.getByText("OpenSpec (2 changes)")).toBeTruthy();
+    expect(screen.queryByTestId("folder-openspec-changes")).toBeNull();
+  });
+
+  it("does not render when not initialized", () => {
+    const { container } = render(
+      <FolderOpenSpecSection {...defaultProps} data={{ initialized: false, changes: [] }} />,
+    );
+    expect(container.querySelector('[data-testid="folder-openspec-section"]')).toBeNull();
+  });
+
+  it("expands and collapses on header click", () => {
+    render(<FolderOpenSpecSection {...defaultProps} />);
+    const header = screen.getByTestId("folder-openspec-header");
+
+    fireEvent.click(header);
+    expect(screen.getByText("▼")).toBeTruthy();
+    expect(screen.getByTestId("folder-openspec-changes")).toBeTruthy();
+
+    fireEvent.click(header);
+    expect(screen.getByText("▶")).toBeTruthy();
+    expect(screen.queryByTestId("folder-openspec-changes")).toBeNull();
+  });
+
+  it("sorts in-progress changes before complete", () => {
+    render(<FolderOpenSpecSection {...defaultProps} />);
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+    const names = screen.getAllByTestId("change-name");
+    expect(names[0].textContent).toBe("feat-in-progress");
+    expect(names[1].textContent).toBe("feat-complete");
+  });
+
+  it("shows artifact letters and task counts", () => {
+    render(<FolderOpenSpecSection {...defaultProps} />);
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+    expect(screen.getByText("2/5 tasks")).toBeTruthy();
+    expect(screen.getByText("4/4 tasks")).toBeTruthy();
+    expect(screen.getAllByTestId("artifact-letter").length).toBe(8);
+  });
+
+  it("calls onRefresh when refresh button clicked", () => {
+    const onRefresh = vi.fn();
+    render(<FolderOpenSpecSection {...defaultProps} onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByTestId("folder-openspec-refresh"));
+    expect(onRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("shows bulk archive confirmation dialog and calls onBulkArchive", () => {
+    const onBulkArchive = vi.fn();
+    render(<FolderOpenSpecSection {...defaultProps} onBulkArchive={onBulkArchive} />);
+
+    fireEvent.click(screen.getByTestId("folder-bulk-archive-btn"));
+    expect(screen.getByText("Bulk archive all completed changes?")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("confirm-ok"));
+    expect(onBulkArchive).toHaveBeenCalledOnce();
+  });
+
+  it("calls onReadArtifact when an artifact letter is clicked", () => {
+    const onReadArtifact = vi.fn();
+    render(<FolderOpenSpecSection {...defaultProps} onReadArtifact={onReadArtifact} />);
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+
+    // Click the first artifact letter (P for proposal of feat-in-progress)
+    const letters = screen.getAllByTestId("artifact-letter");
+    fireEvent.click(letters[0]);
+    expect(onReadArtifact).toHaveBeenCalledWith("feat-in-progress", "proposal");
+  });
+
+  it("artifact letters are rendered as buttons", () => {
+    render(<FolderOpenSpecSection {...defaultProps} />);
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+    const letters = screen.getAllByTestId("artifact-letter");
+    expect(letters[0].tagName).toBe("BUTTON");
+  });
+
+  it("cancelling bulk archive does not call onBulkArchive", () => {
+    const onBulkArchive = vi.fn();
+    render(<FolderOpenSpecSection {...defaultProps} onBulkArchive={onBulkArchive} />);
+
+    fireEvent.click(screen.getByTestId("folder-bulk-archive-btn"));
+    fireEvent.click(screen.getByTestId("confirm-cancel"));
+    expect(onBulkArchive).not.toHaveBeenCalled();
+  });
+});

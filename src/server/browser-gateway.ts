@@ -10,14 +10,18 @@ import type {
 import type { SessionManager } from "./memory-session-manager.js";
 import type { EventStore } from "./memory-event-store.js";
 import type { PiGateway } from "./pi-gateway.js";
-import type { PendingLoadManager } from "./pending-load-manager.js";
+// PendingLoadManager removed — server loads sessions directly via DirectoryService
 import { spawnPiSession, type SpawnResult } from "./process-manager.js";
 import { loadConfig } from "../shared/config.js";
+import { safeRealpathSync } from "./resolve-path.js";
 import { createHeadlessPidRegistry, type HeadlessPidRegistry } from "./headless-pid-registry.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { SessionOrderManager } from "./session-order-manager.js";
 import type { StateStore } from "./state-store.js";
-import { execSync } from "node:child_process";
+import type { DirectoryService } from "./directory-service.js";
+import { execSync, execFile } from "node:child_process";
+import { promisify } from "node:util";
+const execFileAsync = promisify(execFile);
 
 const REPLAY_BATCH_SIZE = 200;
 
@@ -73,10 +77,11 @@ export function createBrowserGateway(
   sessionManager: SessionManager,
   eventStore: EventStore,
   piGateway: PiGateway,
-  pendingLoadManager?: PendingLoadManager,
+  _pendingLoadManager?: unknown,
   pendingForkRegistry?: PendingForkRegistry,
   sessionOrderManager?: SessionOrderManager,
   stateStore?: StateStore,
+  directoryService?: DirectoryService,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -133,6 +138,16 @@ export function createBrowserGateway(
       }
     }
 
+    // Send cached OpenSpec data for all known directories
+    if (directoryService) {
+      for (const cwd of directoryService.knownDirectories()) {
+        const data = directoryService.getOpenSpecData(cwd);
+        if (data && data.initialized) {
+          sendTo(ws, { type: "openspec_update", cwd, data });
+        }
+      }
+    }
+
     ws.on("message", async (raw) => {
       try {
         const msg = JSON.parse(raw.toString()) as BrowserToServerMessage;
@@ -142,7 +157,7 @@ export function createBrowserGateway(
             subs.add(msg.sessionId);
 
             // Check if events are in memory
-            if (eventStore.hasEvents(msg.sessionId) || !pendingLoadManager) {
+            if (eventStore.hasEvents(msg.sessionId)) {
               // Replay events from lastSeq
               const events = eventStore.getEvents(msg.sessionId, (msg.lastSeq ?? 0) + 1);
               for (let i = 0; i < events.length; i += REPLAY_BATCH_SIZE) {
@@ -154,37 +169,58 @@ export function createBrowserGateway(
                   isLast: i + REPLAY_BATCH_SIZE >= events.length,
                 });
               }
-            } else if (pendingLoadManager.isPending(msg.sessionId)) {
-              // Already loading — add browser to waiting set
-              pendingLoadManager.addBrowser(msg.sessionId, ws);
-              sendTo(ws, {
-                type: "event_replay",
-                sessionId: msg.sessionId,
-                events: [],
-                isLast: false,
-              });
-            } else {
-              // Try on-demand loading via bridge
+            } else if (directoryService) {
+              // Load session events directly from disk via DirectoryService
               const session = sessionManager.get(msg.sessionId);
-              const bridgeSessionId = session?.cwd
-                ? piGateway.findSessionByCwd(session.cwd)
-                : undefined;
-
-              if (bridgeSessionId && session?.sessionFile) {
-                pendingLoadManager.start(msg.sessionId, ws, bridgeSessionId);
+              if (session?.sessionFile) {
+                // Send placeholder while loading
                 sendTo(ws, {
                   type: "event_replay",
                   sessionId: msg.sessionId,
                   events: [],
                   isLast: false,
                 });
-                piGateway.sendToSession(bridgeSessionId, {
-                  type: "load_session_events",
-                  sessionId: msg.sessionId,
-                  sessionFile: session.sessionFile,
+                directoryService.loadSessionEvents(msg.sessionId, session.sessionFile).then((result) => {
+                  if (result.success) {
+                    // Insert events into memory buffer
+                    for (const evt of result.events) {
+                      eventStore.insertEvent(msg.sessionId, evt);
+                    }
+                    sessionManager.update(msg.sessionId, { dataUnavailable: false });
+                    broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { dataUnavailable: false } });
+                    // Send loaded events to all subscribers
+                    const stored = eventStore.getEvents(msg.sessionId, 1);
+                    const replayMsg: ServerToBrowserMessage = {
+                      type: "event_replay",
+                      sessionId: msg.sessionId,
+                      events: stored.map((e) => ({ seq: e.seq, event: e.event })),
+                      isLast: true,
+                    };
+                    for (const sub of getSubscribers(msg.sessionId)) {
+                      sendTo(sub, replayMsg);
+                    }
+                  } else {
+                    sendTo(ws, {
+                      type: "event_replay",
+                      sessionId: msg.sessionId,
+                      events: [],
+                      isLast: true,
+                    });
+                    sessionManager.update(msg.sessionId, { dataUnavailable: true });
+                    broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { dataUnavailable: true } });
+                  }
+                }).catch(() => {
+                  sendTo(ws, {
+                    type: "event_replay",
+                    sessionId: msg.sessionId,
+                    events: [],
+                    isLast: true,
+                  });
+                  sessionManager.update(msg.sessionId, { dataUnavailable: true });
+                  broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { dataUnavailable: true } });
                 });
               } else {
-                // No bridge available — data unavailable
+                // No session file — data unavailable
                 sendTo(ws, {
                   type: "event_replay",
                   sessionId: msg.sessionId,
@@ -196,25 +232,17 @@ export function createBrowserGateway(
                   broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { dataUnavailable: true } });
                 }
               }
-            }
-
-            // Hydrate stored OpenSpec data or force refresh from extension
-            const session = sessionManager.get(msg.sessionId);
-            if (session?.openspecData) {
-              try {
-                sendTo(ws, {
-                  type: "openspec_update",
-                  sessionId: msg.sessionId,
-                  data: JSON.parse(session.openspecData),
-                });
-              } catch { /* malformed JSON, request fresh */ }
-            }
-            if (!session?.openspecData && session?.status !== "ended") {
-              piGateway.sendToSession(msg.sessionId, {
-                type: "openspec_refresh",
+            } else {
+              // No directoryService — send empty
+              sendTo(ws, {
+                type: "event_replay",
                 sessionId: msg.sessionId,
+                events: [],
+                isLast: true,
               });
             }
+
+            // OpenSpec data is now sent per-directory on connect, not per-session on subscribe
             break;
           }
 
@@ -257,12 +285,27 @@ export function createBrowserGateway(
             });
             break;
 
-          case "openspec_refresh":
-            piGateway.sendToSession(msg.sessionId, {
-              type: "openspec_refresh",
-              sessionId: msg.sessionId,
-            });
+          case "openspec_refresh": {
+            if (directoryService) {
+              directoryService.refreshOpenSpec(msg.cwd).then((data) => {
+                broadcast({ type: "openspec_update", cwd: msg.cwd, data });
+              });
+            }
             break;
+          }
+
+          case "openspec_bulk_archive": {
+            if (directoryService) {
+              // Run archive async to avoid blocking the event loop
+              execFileAsync("openspec", ["archive", "--completed"], { cwd: msg.cwd, timeout: 30000 })
+                .catch(() => { /* Ignore errors (e.g. no completed changes) */ })
+                .then(() => directoryService.refreshOpenSpec(msg.cwd))
+                .then((data) => {
+                  if (data) broadcast({ type: "openspec_update", cwd: msg.cwd, data });
+                });
+            }
+            break;
+          }
 
           case "request_models":
             piGateway.sendToSession(msg.sessionId, {
@@ -473,15 +516,44 @@ export function createBrowserGateway(
 
           case "pin_directory": {
             if (stateStore) {
-              stateStore.pinDirectory(msg.path);
+              const resolved = safeRealpathSync(msg.path);
+              stateStore.pinDirectory(resolved);
               broadcast({ type: "pinned_dirs_updated", paths: stateStore.getPinnedDirectories() });
+              // Trigger directory discovery for newly pinned directory
+              if (directoryService) {
+                directoryService.onDirectoryAdded(resolved).then(({ sessions, openspecData }) => {
+                  for (const hist of sessions) {
+                    if (!sessionManager.get(hist.id)) {
+                      sessionManager.register({
+                        id: hist.id,
+                        cwd: hist.cwd,
+                        name: hist.name,
+                        source: "tui",
+                        sessionFile: hist.sessionFile,
+                        sessionDir: hist.sessionDir,
+                        firstMessage: hist.firstMessage,
+                        startedAt: hist.startedAt,
+                      });
+                      sessionManager.unregister(hist.id);
+                      sessionManager.update(hist.id, { hidden: true });
+                      const s = sessionManager.get(hist.id);
+                      if (s) broadcast({ type: "session_added", session: s });
+                    }
+                  }
+                  broadcast({
+                    type: "openspec_update",
+                    cwd: resolved,
+                    data: openspecData,
+                  } as any);
+                }).catch(() => {});
+              }
             }
             break;
           }
 
           case "unpin_directory": {
             if (stateStore) {
-              stateStore.unpinDirectory(msg.path);
+              stateStore.unpinDirectory(safeRealpathSync(msg.path));
               broadcast({ type: "pinned_dirs_updated", paths: stateStore.getPinnedDirectories() });
             }
             break;
@@ -489,7 +561,7 @@ export function createBrowserGateway(
 
           case "reorder_pinned_dirs": {
             if (stateStore) {
-              stateStore.reorderPinnedDirs(msg.paths);
+              stateStore.reorderPinnedDirs(msg.paths.map(safeRealpathSync));
               broadcast({ type: "pinned_dirs_updated", paths: stateStore.getPinnedDirectories() });
             }
             break;

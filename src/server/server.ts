@@ -14,14 +14,17 @@ import { createSessionPersistence, type SessionPersistence } from "./session-per
 import { createSessionOrderManager, type SessionOrderManager } from "./session-order-manager.js";
 import { createPendingForkRegistry, type PendingForkRegistry } from "./pending-fork-registry.js";
 
-import { createPendingLoadManager, type PendingLoadManager } from "./pending-load-manager.js";
+// pending-load-manager removed — server loads sessions directly via DirectoryService
+import { createDirectoryService, type DirectoryService } from "./directory-service.js";
 import { writePid, removePid } from "./server-pid.js";
 import type { ApiResponse } from "../shared/types.js";
+import { extractSessionStats } from "./session-stats-reader.js";
 import { extractSessionUpdates } from "./event-status-extraction.js";
 import { createTunnel, deleteTunnel } from "./tunnel.js";
 import { detectEditors, EDITORS } from "./editor-registry.js";
 import { localhostGuard } from "./localhost-guard.js";
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
 
 export interface ServerConfig {
   port: number;
@@ -48,14 +51,42 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   const pendingForkRegistry = createPendingForkRegistry();
 
   // Restore persisted sessions from previous server run
+  // Mark non-ended sessions as disconnected — no bridge is connected after restart.
+  // When a bridge reconnects, register() will merge and set status back to "active".
+  // Enrich with stats from session files if persisted stats are missing.
   for (const session of sessionPersistence.load()) {
-    sessionManager.restore({ ...session, dataUnavailable: true });
+    const restored = { ...session, dataUnavailable: true };
+    if (restored.status !== "ended") {
+      restored.status = "ended";
+      restored.endedAt = restored.endedAt ?? Date.now();
+    }
+    // Enrich with stats from session file if cost or context data is missing
+    const needsEnrichment = !(restored.cost && restored.cost > 0) || restored.contextTokens === undefined;
+    if (restored.sessionFile && needsEnrichment) {
+      try {
+        const stats = extractSessionStats(restored.sessionFile);
+        if (stats) {
+          restored.tokensIn = stats.tokensIn;
+          restored.tokensOut = stats.tokensOut;
+          restored.cacheRead = stats.cacheRead;
+          restored.cacheWrite = stats.cacheWrite;
+          restored.cost = stats.cost;
+          if (!restored.model && stats.model) restored.model = stats.model;
+          if (!restored.thinkingLevel && stats.thinkingLevel) restored.thinkingLevel = stats.thinkingLevel;
+          if (stats.lastTotalTokens) restored.contextTokens = stats.lastTotalTokens;
+          if (stats.contextWindow) restored.contextWindow = stats.contextWindow;
+        }
+      } catch { /* ignore — stats are nice-to-have */ }
+    }
+    sessionManager.restore(restored);
   }
 
   // Save sessions to disk on any change
   sessionManager.onChange = () => {
     sessionPersistence.save(sessionManager.listAll());
   };
+
+  const directoryService = createDirectoryService(stateStore, sessionManager);
 
   const piGateway = createPiGateway(sessionManager);
 
@@ -66,39 +97,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       browserGateway.getSubscriberCount(sessionId) > 0,
   );
 
-  // Create pending load manager with timeout handler
-  const pendingLoadManager = createPendingLoadManager((sessionId, browsers) => {
-    // Timeout: send dataUnavailable to all waiting browsers
-    sessionManager.update(sessionId, { dataUnavailable: true });
-    browserGateway.broadcastSessionUpdated(sessionId, { dataUnavailable: true });
-  });
-
-  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, pendingLoadManager, pendingForkRegistry, sessionOrderManager, stateStore);
-
-  // Handle bridge disconnect — cancel pending loads
-  piGateway.onDisconnect = (bridgeSessionId) => {
-    const cancelled = pendingLoadManager.cancelForBridge(bridgeSessionId);
-    for (const [sessionId, browsers] of cancelled) {
-      // Try another bridge
-      const session = sessionManager.get(sessionId);
-      const altBridge = session?.cwd ? piGateway.findSessionByCwd(session.cwd) : undefined;
-      if (altBridge && session?.sessionFile) {
-        // Retry with another bridge
-        for (const ws of browsers) {
-          pendingLoadManager.start(sessionId, ws, altBridge);
-        }
-        piGateway.sendToSession(altBridge, {
-          type: "load_session_events",
-          sessionId,
-          sessionFile: session.sessionFile,
-        });
-      } else {
-        // No alternative bridge — data unavailable
-        sessionManager.update(sessionId, { dataUnavailable: true });
-        browserGateway.broadcastSessionUpdated(sessionId, { dataUnavailable: true });
-      }
-    }
-  };
+  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, stateStore, directoryService);
 
   // Broadcast placeholder session to browsers when auto-created from early events
   piGateway.onSessionCreated = (sessionId) => {
@@ -155,16 +154,40 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       if (updatedSession) {
         browserGateway.broadcastSessionAdded(updatedSession);
       }
-    }
-    if (msg.type === "session_history_sync") {
-      // Broadcast newly inserted historical sessions to browsers
-      for (const hist of msg.sessions) {
-        const session = sessionManager.get(hist.id);
-        if (session && session.status === "ended") {
-          browserGateway.broadcastSessionAdded(session);
-        }
+
+      // Trigger directory discovery for new cwd (async, non-blocking)
+      const isNewCwd = !sessionManager.listAll().some(
+        (s) => s.id !== sessionId && s.cwd === msg.cwd,
+      );
+      if (isNewCwd) {
+        directoryService.onDirectoryAdded(msg.cwd).then(({ sessions, openspecData }) => {
+          for (const hist of sessions) {
+            if (!sessionManager.get(hist.id)) {
+              sessionManager.register({
+                id: hist.id,
+                cwd: hist.cwd,
+                name: hist.name,
+                source: "tui",
+                sessionFile: hist.sessionFile,
+                sessionDir: hist.sessionDir,
+                firstMessage: hist.firstMessage,
+                startedAt: hist.startedAt,
+              });
+              sessionManager.unregister(hist.id);
+              sessionManager.update(hist.id, { hidden: true });
+              const s = sessionManager.get(hist.id);
+              if (s) browserGateway.broadcastSessionAdded(s);
+            }
+          }
+          browserGateway.broadcastToAll({
+            type: "openspec_update",
+            cwd: msg.cwd,
+            data: openspecData,
+          } as any);
+        }).catch(() => {});
       }
     }
+    // session_history_sync removed — server discovers sessions directly via DirectoryService
     if (msg.type === "session_unregister") {
       browserGateway.broadcastSessionRemoved(sessionId);
     }
@@ -193,14 +216,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         files: msg.files,
       });
     }
-    if (msg.type === "openspec_update") {
-      sessionManager.update(sessionId, { openspecData: JSON.stringify(msg.data) });
-      browserGateway.sendToSubscribers(sessionId, {
-        type: "openspec_update",
-        sessionId,
-        data: msg.data,
-      });
-    }
+    // openspec_update from bridge is ignored — server handles polling directly via DirectoryService
     if (msg.type === "openspec_activity_update") {
       const activityUpdates: Partial<import("../shared/types.js").DashboardSession> = {};
       if (msg.phase !== undefined) activityUpdates.openspecPhase = msg.phase;
@@ -287,14 +303,16 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     if (msg.type === "stats_update") {
       const session = sessionManager.get(sessionId);
       if (session) {
-        browserGateway.broadcastSessionUpdated(sessionId, {
+        const updates: Record<string, unknown> = {
           tokensIn: session.tokensIn,
           tokensOut: session.tokensOut,
           cacheRead: session.cacheRead,
           cacheWrite: session.cacheWrite,
           cost: session.cost,
-        });
-
+        };
+        if (session.contextTokens !== undefined) updates.contextTokens = session.contextTokens;
+        if (session.contextWindow !== undefined) updates.contextWindow = session.contextWindow;
+        browserGateway.broadcastSessionUpdated(sessionId, updates);
       }
 
       const statsEvent = {
@@ -312,41 +330,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       browserGateway.broadcastEvent(sessionId, seq, statsEvent);
     }
 
-    // Handle on-demand session load results from bridge
-    if (msg.type === "load_session_events_result") {
-      const loadSessionId = msg.sessionId;
-      const browsers = pendingLoadManager.complete(loadSessionId);
-      if (browsers) {
-        // Insert events into memory buffer
-        for (const evt of msg.events) {
-          eventStore.insertEvent(loadSessionId, evt);
-        }
-        // Clear dataUnavailable
-        sessionManager.update(loadSessionId, { dataUnavailable: false });
-        browserGateway.broadcastSessionUpdated(loadSessionId, { dataUnavailable: false });
-        // Send batch replay to all waiting browsers
-        const stored = eventStore.getEvents(loadSessionId, 1);
-        const replayMsg = {
-          type: "event_replay" as const,
-          sessionId: loadSessionId,
-          events: stored.map((e) => ({ seq: e.seq, event: e.event })),
-          isLast: true,
-        };
-        for (const ws of browsers) {
-          if (ws.readyState === 1) { // WebSocket.OPEN
-            ws.send(JSON.stringify(replayMsg));
-          }
-        }
-      }
-    }
-    if (msg.type === "load_session_events_error") {
-      const loadSessionId = msg.sessionId;
-      const browsers = pendingLoadManager.complete(loadSessionId);
-      if (browsers) {
-        sessionManager.update(loadSessionId, { dataUnavailable: true });
-        browserGateway.broadcastSessionUpdated(loadSessionId, { dataUnavailable: true });
-      }
-    }
+    // load_session_events_result and load_session_events_error removed — server loads directly
   };
 
   // Auto-shutdown idle timer with sleep-wake resilience
@@ -387,7 +371,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     cancelIdleTimer();
   };
 
-  const fastify = Fastify({ logger: false });
+  const fastify = Fastify({
+    logger: false,
+    keepAliveTimeout: 30_000,
+    connectionTimeout: 10_000,
+  });
 
   // REST API routes
   fastify.get("/api/sessions", async () => {
@@ -461,6 +449,46 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     }
   );
 
+  // File read endpoint (localhost-only) — read file content or list directory
+  fastify.get<{ Querystring: { cwd?: string; path?: string } }>(
+    "/api/file",
+    { preHandler: localhostGuard },
+    async (request, reply) => {
+      const cwd = request.query.cwd;
+      const relPath = request.query.path;
+      if (!cwd || !relPath) {
+        reply.code(400);
+        return { success: false, error: "cwd and path parameters required" } satisfies ApiResponse;
+      }
+
+      const allSessions = sessionManager.listAll();
+      if (!allSessions.some((s) => s.cwd === cwd)) {
+        reply.code(403);
+        return { success: false, error: "unknown session path" } satisfies ApiResponse;
+      }
+
+      const resolved = path.resolve(cwd, relPath);
+      if (!resolved.startsWith(cwd + path.sep) && resolved !== cwd) {
+        reply.code(403);
+        return { success: false, error: "path outside working directory" } satisfies ApiResponse;
+      }
+
+      try {
+        const stat = await fs.stat(resolved);
+        if (stat.isDirectory()) {
+          const entries = await fs.readdir(resolved);
+          entries.sort();
+          return { success: true, data: { type: "directory", entries } } satisfies ApiResponse;
+        }
+        const content = await fs.readFile(resolved, "utf-8");
+        return { success: true, data: { type: "file", content } } satisfies ApiResponse;
+      } catch {
+        reply.code(404);
+        return { success: false, error: "not found" } satisfies ApiResponse;
+      }
+    }
+  );
+
   // Health endpoint — liveness check for CLI status and probing
   const serverStartTime = Date.now();
   fastify.get("/api/health", async () => {
@@ -478,6 +506,9 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     "/api/shutdown",
     { preHandler: localhostGuard },
     async () => {
+      // Flush persistence before exit to avoid losing recent changes
+      sessionPersistence.flush();
+      stateStore.flush();
       setTimeout(() => process.exit(0), 100);
       return { ok: true };
     }
@@ -531,14 +562,60 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         }
       }
 
+      // Start directory service: discover sessions and begin OpenSpec polling (async, non-blocking)
+      (async () => {
+        try {
+          const dirs = directoryService.knownDirectories();
+          for (const cwd of dirs) {
+            const discovered = await directoryService.discoverSessions(cwd);
+            for (const hist of discovered) {
+              if (!sessionManager.get(hist.id)) {
+                sessionManager.register({
+                  id: hist.id,
+                  cwd: hist.cwd,
+                  name: hist.name,
+                  source: "tui",
+                  sessionFile: hist.sessionFile,
+                  sessionDir: hist.sessionDir,
+                  firstMessage: hist.firstMessage,
+                  startedAt: hist.startedAt,
+                });
+                sessionManager.unregister(hist.id);
+                sessionManager.update(hist.id, { hidden: true });
+                const session = sessionManager.get(hist.id);
+                if (session) {
+                  browserGateway.broadcastSessionAdded(session);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error("[dashboard] Session discovery failed:", err);
+        }
+
+        // Start OpenSpec polling, broadcast changes to browsers
+        directoryService.startPolling((cwd, data) => {
+          browserGateway.broadcastToAll({
+            type: "openspec_update",
+            cwd,
+            data,
+          } as any);
+        });
+
+        // Initial OpenSpec poll for all known directories (non-blocking)
+        await Promise.all(
+          directoryService.knownDirectories().map((cwd) => directoryService.refreshOpenSpec(cwd)),
+        );
+      })();
+
       startIdleTimer();
     },
 
     async stop() {
       removePid();
       cancelIdleTimer();
+      directoryService.stopPolling();
       browserGateway.shutdownHeadlessProcesses();
-      pendingLoadManager.dispose();
       sessionPersistence.flush();
       sessionPersistence.dispose();
       pendingForkRegistry.dispose();

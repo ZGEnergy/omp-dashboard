@@ -17,7 +17,7 @@ export function SortableSessionCard({ id, children }: Props) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, data: { type: "session" } });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -31,11 +31,11 @@ export function SortableSessionCard({ id, children }: Props) {
       <div
         {...attributes}
         {...listeners}
-        className="absolute left-0 top-0 bottom-0 w-5 flex items-center justify-center cursor-grab active:cursor-grabbing opacity-0 group-hover/sortable:opacity-60 transition-opacity z-10"
+        className="absolute -left-1 top-1 bottom-1 w-4 flex items-center justify-center cursor-grab active:cursor-grabbing opacity-0 group-hover/sortable:opacity-60 transition-opacity z-10 rounded-l-xl"
         data-testid="drag-handle-session"
         onClick={(e) => e.stopPropagation()}
       >
-        <Icon path={mdiDragHorizontalVariant} size={0.55} className="text-[var(--text-tertiary)]" />
+        <Icon path={mdiDragHorizontalVariant} size={0.5} className="text-[var(--text-tertiary)]" />
       </div>
       {children}
     </div>

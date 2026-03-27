@@ -179,14 +179,5 @@ describe("session-persistence", () => {
     persistence.dispose();
   });
 
-  it("persists openspecData", () => {
-    const persistence = createSessionPersistence(filePath);
-    const session = makeSession({ id: "s1", openspecData: '{"changes":[]}' });
-    persistence.save([session]);
-    persistence.flush();
-
-    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    expect(data[0].openspecData).toBe('{"changes":[]}');
-    persistence.dispose();
-  });
+  // openspecData removed from DashboardSession — now per-directory, not per-session
 });

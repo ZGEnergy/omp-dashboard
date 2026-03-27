@@ -54,7 +54,7 @@ export function SessionSidebar({ sessions, selectedId, onSelect, onRename }: Pro
   return (
     <div className="w-72 border-r border-[var(--border-primary)] overflow-y-auto flex flex-col">
       <div className="p-3 border-b border-[var(--border-primary)]">
-        <button onClick={() => navigate("/")} className="text-lg font-bold text-[var(--text-primary)] hover:text-[var(--accent-primary)] transition-colors leading-none" title="Home">π</button>
+        <button onClick={() => navigate("/")} className="text-lg font-bold text-blue-500 hover:text-blue-400 transition-colors leading-none" title="Home">π</button>
       </div>
 
       {/* Active sessions */}

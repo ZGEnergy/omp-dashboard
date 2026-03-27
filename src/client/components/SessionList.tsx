@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import Icon from "@mdi/react";
-import { mdiChevronRight, mdiChevronDown, mdiPlus } from "@mdi/js";
+import { mdiChevronRight, mdiChevronDown, mdiPlus, mdiPin, mdiPinOff } from "@mdi/js";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { SortableSessionCard } from "./SortableSessionCard.js";
@@ -17,12 +17,14 @@ import {
 } from "../lib/session-filter-storage.js";
 import { SessionCard, GroupGitInfo, EditorButtons } from "./SessionCard.js";
 import { PlaceholderSessionCard } from "./PlaceholderSessionCard.js";
+import { FolderOpenSpecSection } from "./FolderOpenSpecSection.js";
 import { ThemeToggle } from "./ThemeToggle.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useEditors } from "../lib/use-editors.js";
 import { openEditor } from "../lib/editor-api.js";
 import { Toast, useToast } from "./Toast.js";
 import { PinDirectoryDialog } from "./PinDirectoryDialog.js";
+import { truncatePathMiddle } from "../lib/truncate-path.js";
 
 export interface ContextUsageInfo {
   tokens: number | null;
@@ -38,8 +40,10 @@ interface Props {
   sessionOrderMap?: Map<string, string[]>;
   onReorderSessions?: (cwd: string, sessionIds: string[]) => void;
   onSendPrompt?: (sessionId: string, text: string) => void;
-  onOpenSpecRefresh?: (sessionId: string) => void;
+  onOpenSpecRefresh?: (cwd: string) => void;
   onAttachProposal?: (sessionId: string, changeName: string) => void;
+  onBulkArchive?: (cwd: string) => void;
+  onReadArtifact?: (cwd: string, changeName: string, artifactId: string) => void;
   onDetachProposal?: (sessionId: string) => void;
   onRename?: (sessionId: string, name: string) => void;
   onShutdown?: (sessionId: string) => void;
@@ -163,13 +167,13 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs }: Props) {
   const now = Date.now();
   const [, navigate] = useLocation();
   const { messages, showToast, dismissToast } = useToast();
 
-  // Detect editors for all unique cwds
-  const cwds = useMemo(() => sessions.map((s) => s.cwd), [sessions]);
+  // Detect editors for all unique cwds (sessions + pinned directories)
+  const cwds = useMemo(() => [...sessions.map((s) => s.cwd), ...(pinnedDirectories ?? [])], [sessions, pinnedDirectories]);
   const editorMap = useEditors(cwds);
 
   const handleOpenEditor = useCallback(async (cwd: string, editorId: string) => {
@@ -261,72 +265,87 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
 
-  const handleSessionDragEnd = useCallback((event: DragEndEvent) => {
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
-    for (const group of allGroups) {
-      const ids = group.sessions.map((s) => s.id);
+    const activeType = active.data.current?.type;
+    const overType = over.data.current?.type;
+
+    // Cross-type drag is a no-op
+    if (activeType !== overType) return;
+
+    if (activeType === "session") {
+      for (const group of allGroups) {
+        const ids = group.sessions.map((s) => s.id);
+        const oldIndex = ids.indexOf(active.id as string);
+        const newIndex = ids.indexOf(over.id as string);
+        if (oldIndex !== -1 && newIndex !== -1) {
+          const newOrder = arrayMove(ids, oldIndex, newIndex);
+          onReorderSessions?.(group.cwd, newOrder);
+          break;
+        }
+      }
+    } else if (activeType === "pinned-group") {
+      const ids = pinnedGroups.map((g) => g.cwd);
       const oldIndex = ids.indexOf(active.id as string);
       const newIndex = ids.indexOf(over.id as string);
       if (oldIndex !== -1 && newIndex !== -1) {
         const newOrder = arrayMove(ids, oldIndex, newIndex);
-        onReorderSessions?.(group.cwd, newOrder);
-        break;
+        onReorderPinnedDirs?.(newOrder);
       }
     }
-  }, [allGroups, onReorderSessions]);
-
-  const handlePinnedDirDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const ids = pinnedGroups.map((g) => g.cwd);
-    const oldIndex = ids.indexOf(active.id as string);
-    const newIndex = ids.indexOf(over.id as string);
-    if (oldIndex !== -1 && newIndex !== -1) {
-      const newOrder = arrayMove(ids, oldIndex, newIndex);
-      onReorderPinnedDirs?.(newOrder);
-    }
-  }, [pinnedGroups, onReorderPinnedDirs]);
+  }, [allGroups, pinnedGroups, onReorderSessions, onReorderPinnedDirs]);
 
   function renderGroup(group: DirectoryGroup, isPinned: boolean) {
-    const dirName = group.cwd.split("/").pop() ?? group.cwd;
+    const dirName = truncatePathMiddle(group.cwd, 45);
     const isCollapsed = collapsedGroups.has(group.cwd);
 
     return (
-      <React.Fragment key={group.cwd}>
-        <li
-          className="px-3 py-1.5 bg-[var(--bg-hover)] border-b border-[var(--border-primary)] cursor-pointer hover:bg-[var(--bg-hover)]"
+      <div key={group.cwd} className="bg-[var(--bg-secondary)] rounded-lg p-2">
+        <div
+          className="px-2 py-1.5 cursor-pointer rounded hover:bg-[var(--bg-hover)]"
           onClick={() => handleToggleCollapse(group.cwd)}
         >
           <div className="flex items-center gap-1.5">
             <span className="inline-flex text-[var(--text-tertiary)]">
               <Icon path={isCollapsed ? mdiChevronRight : mdiChevronDown} size={0.6} />
             </span>
-            <span className="text-xs font-medium text-[var(--text-secondary)] truncate">{isPinned ? "📌" : "📁"} {dirName}</span>
+            <span className="text-xs font-medium text-[var(--text-secondary)] truncate flex items-center gap-1">
+              {isPinned ? <Icon path={mdiPin} size={0.5} className="text-yellow-400 shrink-0" /> : "📁"} {dirName}
+            </span>
             <span className="text-[10px] text-[var(--text-muted)]">({group.sessions.length})</span>
             {/* Pin/Unpin button */}
             {isPinned ? (
               <button
                 onClick={(e) => { e.stopPropagation(); onUnpinDirectory?.(group.cwd); }}
-                className="ml-auto text-[10px] px-1 py-0.5 rounded text-[var(--text-tertiary)] hover:text-yellow-400"
+                className="ml-auto px-1 py-0.5 rounded text-[var(--text-tertiary)] hover:text-yellow-400"
                 title="Unpin directory"
                 data-testid="unpin-dir-btn"
               >
-                📌
+                <Icon path={mdiPinOff} size={0.55} />
               </button>
             ) : onPinDirectory && (
               <button
                 onClick={(e) => { e.stopPropagation(); onPinDirectory(group.cwd); }}
-                className="ml-auto text-[10px] px-1 py-0.5 rounded text-[var(--text-muted)] hover:text-yellow-400 opacity-0 group-hover/header:opacity-100"
+                className="ml-auto px-1 py-0.5 rounded text-[var(--text-muted)] hover:text-yellow-400"
                 title="Pin directory"
                 data-testid="pin-dir-btn"
               >
-                📌
+                <Icon path={mdiPin} size={0.55} />
               </button>
             )}
           </div>
           <GroupGitInfo sessions={group.sessions} />
+          {openspecMap?.get(group.cwd)?.initialized && (
+            <FolderOpenSpecSection
+              data={openspecMap.get(group.cwd)!}
+              cwd={group.cwd}
+              onRefresh={() => onOpenSpecRefresh?.(group.cwd)}
+              onBulkArchive={() => onBulkArchive?.(group.cwd)}
+              onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(group.cwd, changeName, artifactId) : undefined}
+            />
+          )}
           <div className="mt-1 ml-5 flex items-center gap-1">
             {editorMap.get(group.cwd)?.length ? (
               <EditorButtons
@@ -355,10 +374,10 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               </button>
             )}
           </div>
-        </li>
+        </div>
         {/* Session cards — animated collapse */}
         <div className={`group-collapse ${isCollapsed ? "collapsed" : "expanded"}`}>
-        <div className="space-y-1 p-1">
+        <div className="space-y-1 pt-1">
           {spawningCwds?.has(group.cwd) && <PlaceholderSessionCard />}
           <SortableContext items={group.sessions.map((s) => s.id)} strategy={verticalListSortingStrategy}>
           {group.sessions.map((session) => (
@@ -375,11 +394,11 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               editors={group.sessions.length === 1 ? editorMap.get(group.cwd) : undefined}
               onOpenEditor={group.sessions.length === 1 ? (editorId) => handleOpenEditor(group.cwd, editorId) : undefined}
               contextUsage={contextUsageMap?.get(session.id)}
-              openspecData={openspecMap?.get(session.id)}
+              openspecChanges={openspecMap?.get(session.cwd)?.changes}
               onSendPrompt={onSendPrompt ? (text) => onSendPrompt(session.id, text) : undefined}
-              onOpenSpecRefresh={onOpenSpecRefresh ? () => onOpenSpecRefresh(session.id) : undefined}
               onAttachProposal={onAttachProposal ? (changeName) => onAttachProposal(session.id, changeName) : undefined}
               onDetachProposal={onDetachProposal ? () => onDetachProposal(session.id) : undefined}
+              onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(session.cwd, changeName, artifactId) : undefined}
               onRename={onRename ? (name) => onRename(session.id, name) : undefined}
               onShutdown={onShutdown}
               onResume={onResume ? (mode) => onResume(session.id, mode) : undefined}
@@ -389,7 +408,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
           </SortableContext>
         </div>
         </div>
-      </React.Fragment>
+      </div>
     );
   }
 
@@ -397,7 +416,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     <div className="w-full border-r border-[var(--border-primary)] overflow-y-auto">
       <div className="p-3 border-b border-[var(--border-primary)]">
         <div className="flex items-center justify-between">
-          <button onClick={() => navigate("/")} className="text-lg font-bold text-[var(--text-primary)] hover:text-[var(--accent-primary)] transition-colors leading-none" title="Home">π</button>
+          <button onClick={() => navigate("/")} className="text-lg font-bold text-blue-500 hover:text-blue-400 transition-colors leading-none" title="Home">π</button>
           <div className="flex gap-1 items-center">
             <ThemePicker />
             <ThemeToggle />
@@ -423,24 +442,19 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
       {filteredSessions.length === 0 && pinnedGroups.length === 0 ? (
         <div className="p-4 text-sm text-[var(--text-tertiary)]">No active sessions</div>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSessionDragEnd}>
-        <ul>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <ul className="flex flex-col gap-2 p-2">
           {/* Pinned directory groups */}
           {pinnedGroups.length > 0 && (
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handlePinnedDirDragEnd}>
-              <SortableContext items={pinnedGroups.map((g) => g.cwd)} strategy={verticalListSortingStrategy}>
-                {pinnedGroups.map((group) => (
-                  <SortablePinnedGroup key={group.cwd} id={group.cwd}>
-                    {renderGroup(group, true)}
-                  </SortablePinnedGroup>
-                ))}
-              </SortableContext>
-            </DndContext>
+            <SortableContext items={pinnedGroups.map((g) => g.cwd)} strategy={verticalListSortingStrategy}>
+              {pinnedGroups.map((group) => (
+                <SortablePinnedGroup key={group.cwd} id={group.cwd}>
+                  {renderGroup(group, true)}
+                </SortablePinnedGroup>
+              ))}
+            </SortableContext>
           )}
-          {/* Separator between pinned and unpinned */}
-          {pinnedGroups.length > 0 && unpinnedGroups.length > 0 && (
-            <li className="border-b-2 border-[var(--border-primary)]" />
-          )}
+          {/* Gap between pinned and unpinned is handled by flex gap */}
           {/* Unpinned directory groups */}
           {unpinnedGroups.map((group) => renderGroup(group, false))}
         </ul>

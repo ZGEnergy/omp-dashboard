@@ -83,4 +83,59 @@ describe("Session drag-and-drop", () => {
     // Verify the drag handles exist (order is verified in unit tests for groupSessionsByDirectory)
     expect(handles.length).toBe(3);
   });
+
+  it("renders drag handles for session cards inside pinned groups", () => {
+    const sessions = [
+      makeSession("s1", "/pinned-project", 1000),
+      makeSession("s2", "/pinned-project", 2000),
+    ];
+    render(
+      <TestRouter>
+        <ThemeProvider>
+          <SessionList
+            sessions={sessions}
+            onSelect={() => {}}
+            sessionOrderMap={new Map([["/pinned-project", ["s1", "s2"]]])}
+            onReorderSessions={vi.fn()}
+            pinnedDirectories={["/pinned-project"]}
+          />
+        </ThemeProvider>
+      </TestRouter>,
+    );
+    const sessionHandles = screen.getAllByTestId("drag-handle-session");
+    expect(sessionHandles.length).toBe(2);
+    const pinnedHandles = screen.getAllByTestId("drag-handle-pinned");
+    expect(pinnedHandles.length).toBe(1);
+  });
+
+  it("renders both pinned group and session drag handles without nested DndContext", () => {
+    const sessions = [
+      makeSession("s1", "/pinned-a", 1000),
+      makeSession("s2", "/pinned-a", 2000),
+      makeSession("s3", "/unpinned-b", 3000),
+    ];
+    render(
+      <TestRouter>
+        <ThemeProvider>
+          <SessionList
+            sessions={sessions}
+            onSelect={() => {}}
+            sessionOrderMap={new Map([
+              ["/pinned-a", ["s1", "s2"]],
+              ["/unpinned-b", ["s3"]],
+            ])}
+            onReorderSessions={vi.fn()}
+            onReorderPinnedDirs={vi.fn()}
+            pinnedDirectories={["/pinned-a"]}
+          />
+        </ThemeProvider>
+      </TestRouter>,
+    );
+    // All 3 session cards have drag handles
+    const sessionHandles = screen.getAllByTestId("drag-handle-session");
+    expect(sessionHandles.length).toBe(3);
+    // Pinned group has its own drag handle
+    const pinnedHandles = screen.getAllByTestId("drag-handle-pinned");
+    expect(pinnedHandles.length).toBe(1);
+  });
 });

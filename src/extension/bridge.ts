@@ -18,16 +18,13 @@ import { launchServer } from "./server-launcher.js";
 import type { ServerToExtensionMessage } from "../shared/protocol.js";
 import { gatherGitInfo, type GitInfo } from "./git-info.js";
 import { extractTurnStats } from "./stats-extractor.js";
-import { pollOpenSpec } from "./openspec-poller.js";
-import { sendSessionHistory as syncSessionHistory } from "./session-history.js";
-import { replayEntriesAsEvents } from "./state-replay.js";
+import { replayEntriesAsEvents } from "../shared/state-replay.js";
 import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
 import { detectOpenSpecActivity } from "./openspec-activity-detector.js";
 import type { OpenSpecPhase } from "../shared/types.js";
 
 const HEARTBEAT_INTERVAL = 15_000;
 const GIT_POLL_INTERVAL = 30_000;
-const OPENSPEC_POLL_INTERVAL = 30_000;
 
 // Use globalThis to survive jiti module cache invalidation on /reload
 const BRIDGE_KEY = "__pi_dashboard_bridge__";
@@ -90,10 +87,8 @@ function initBridge(pi: ExtensionAPI) {
   }
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let gitPollTimer: ReturnType<typeof setInterval> | null = null;
-  let openspecPollTimer: ReturnType<typeof setInterval> | null = null;
   let lastGitBranch: string | undefined;
   let lastGitPrNumber: number | undefined;
-  let lastOpenSpecJson: string | undefined;
   let lastSessionName: string | undefined;
   let cachedHasUI: boolean | undefined = prev.hasUI;
   let cachedModelRegistry: any | undefined = prev.modelRegistry;
@@ -129,10 +124,6 @@ function initBridge(pi: ExtensionAPI) {
       const msg = data as ServerToExtensionMessage;
       const response = await commandHandler.handle(msg);
       if (response) connection.send(response);
-      // Force openspec refresh and update cache
-      if (msg.type === "openspec_refresh") {
-        sendOpenSpecNow(process.cwd());
-      }
       // Immediately send model/thinking update after handling set_thinking_level
       if (msg.type === "set_thinking_level") {
         // Small delay to let pi process the level change
@@ -142,7 +133,6 @@ function initBridge(pi: ExtensionAPI) {
     onReconnect: safe(() => {
       sendStateSync();
       replaySessionEntries();
-      sendSessionHistory();
     }),
   });
 
@@ -203,28 +193,6 @@ function initBridge(pi: ExtensionAPI) {
       }
     },
   });
-
-  function sendOpenSpecIfChanged(cwd: string) {
-    const data = pollOpenSpec(cwd);
-    const json = JSON.stringify(data);
-    if (json === lastOpenSpecJson) return;
-    lastOpenSpecJson = json;
-    connection.send({
-      type: "openspec_update",
-      sessionId,
-      data,
-    });
-  }
-
-  function sendOpenSpecNow(cwd: string) {
-    const data = pollOpenSpec(cwd);
-    lastOpenSpecJson = JSON.stringify(data);
-    connection.send({
-      type: "openspec_update",
-      sessionId,
-      data,
-    });
-  }
 
   function getCurrentModelString(): string | undefined {
     const model = cachedCtx?.model;
@@ -297,9 +265,6 @@ function initBridge(pi: ExtensionAPI) {
       firstMessage,
     });
 
-    // Send current openspec data
-    sendOpenSpecNow(process.cwd());
-
     // Send commands list
     const commands = filterHiddenCommands(pi.getCommands());
     connection.send({
@@ -318,13 +283,6 @@ function initBridge(pi: ExtensionAPI) {
         connection.send({ type: "models_list", sessionId, models });
       } catch { /* ignore */ }
     }
-  }
-
-  function sendSessionHistory() {
-    syncSessionHistory({
-      send: (msg) => connection.send(msg),
-      cwd: process.cwd(),
-    });
   }
 
   function replaySessionEntries() {
@@ -488,9 +446,6 @@ function initBridge(pi: ExtensionAPI) {
       } catch { /* modelRegistry not available */ }
     }
 
-    // Send local session history for this workspace
-    sendSessionHistory();
-
     // Auto-start server if not running (non-blocking — connection will reconnect)
     isPortOpen(config.piPort).then(async (running) => {
       if (!running && config.autoStart) {
@@ -518,18 +473,12 @@ function initBridge(pi: ExtensionAPI) {
       });
     }, HEARTBEAT_INTERVAL);
 
-    // Start git info polling
+    // Start git info + name/model polling
     gitPollTimer = setInterval(() => {
       sendGitInfoIfChanged(ctx.cwd);
-    }, GIT_POLL_INTERVAL);
-
-    // Send initial openspec data and start polling
-    sendOpenSpecIfChanged(ctx.cwd);
-    openspecPollTimer = setInterval(() => {
-      sendOpenSpecIfChanged(ctx.cwd);
       sendSessionNameIfChanged();
       sendModelUpdateIfChanged();
-    }, OPENSPEC_POLL_INTERVAL);
+    }, GIT_POLL_INTERVAL);
   }));
 
   // Shared handler for session_switch and session_fork
@@ -550,7 +499,6 @@ function initBridge(pi: ExtensionAPI) {
     lastFirstMessage = firstMessage;
     lastGitBranch = undefined;
     lastGitPrNumber = undefined;
-    lastOpenSpecJson = undefined;
     lastSessionName = pi.getSessionName() ?? "";
     lastModel = getCurrentModelString();
     lastThinkingLevel = (pi as any).getThinkingLevel?.() ?? undefined;
@@ -573,7 +521,6 @@ function initBridge(pi: ExtensionAPI) {
     replaySessionEntries();
 
     // Full state sync
-    sendOpenSpecNow(ctx.cwd);
     sendGitInfoIfChanged(ctx.cwd);
 
     const commands = filterHiddenCommands(pi.getCommands());
@@ -599,12 +546,6 @@ function initBridge(pi: ExtensionAPI) {
       sendGitInfoIfChanged(ctx.cwd);
     }, GIT_POLL_INTERVAL);
 
-    if (openspecPollTimer) clearInterval(openspecPollTimer);
-    openspecPollTimer = setInterval(() => {
-      sendOpenSpecIfChanged(ctx.cwd);
-      sendSessionNameIfChanged();
-      sendModelUpdateIfChanged();
-    }, OPENSPEC_POLL_INTERVAL);
   }
 
   pi.on("session_switch" as any, safe(async (_event: any, ctx: any) => {
@@ -659,11 +600,6 @@ function initBridge(pi: ExtensionAPI) {
       clearInterval(gitPollTimer);
       gitPollTimer = null;
     }
-    if (openspecPollTimer) {
-      clearInterval(openspecPollTimer);
-      openspecPollTimer = null;
-    }
-
     connection.send({
       type: "session_unregister",
       sessionId,
@@ -684,7 +620,6 @@ function initBridge(pi: ExtensionAPI) {
     s.hasUI = cachedHasUI;
     if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
     if (gitPollTimer) { clearInterval(gitPollTimer); gitPollTimer = null; }
-    if (openspecPollTimer) { clearInterval(openspecPollTimer); openspecPollTimer = null; }
 
     // Dev build & restart: rebuild client and stop server before reload
     if (config.devBuildOnReload) {

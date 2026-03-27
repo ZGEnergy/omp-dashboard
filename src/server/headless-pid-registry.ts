@@ -4,6 +4,7 @@
  * Persists entries to disk so a restarted server can clean up orphans.
  */
 import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { readJsonFile, writeJsonFile } from "./json-store.js";
 import path from "node:path";
 import os from "node:os";
@@ -190,7 +191,7 @@ export function createHeadlessPidRegistry(options?: HeadlessPidRegistryOptions):
 
         // Alive and not too old — reclaim into registry
         // Create a dummy ChildProcess-like emitter for the entry
-        const { EventEmitter } = require("node:events");
+        // EventEmitter imported at top level
         const dummyProc = new EventEmitter() as ChildProcess;
         entries.set(entry.pid, {
           pid: entry.pid,
