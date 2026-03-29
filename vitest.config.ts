@@ -5,5 +5,11 @@ export default defineConfig({
     root: ".",
     include: ["src/**/__tests__/**/*.test.{ts,tsx}"],
     environment: "jsdom",
+    pool: "forks",
+    poolOptions: {
+      forks: {
+        maxForks: 2,
+      },
+    },
   },
 });
