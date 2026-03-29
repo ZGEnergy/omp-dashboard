@@ -11,6 +11,7 @@ import type {
   ModelInfo,
   PiSessionInfo,
 } from "./types.js";
+import type { TerminalSession } from "./terminal-types.js";
 
 // ── Server → Browser ────────────────────────────────────────────────
 
@@ -109,6 +110,22 @@ export interface PinnedDirsUpdatedMessage {
   paths: string[];
 }
 
+export interface TerminalAddedMessage {
+  type: "terminal_added";
+  terminal: TerminalSession;
+}
+
+export interface TerminalRemovedMessage {
+  type: "terminal_removed";
+  terminalId: string;
+}
+
+export interface TerminalUpdatedMessage {
+  type: "terminal_updated";
+  terminalId: string;
+  updates: Partial<TerminalSession>;
+}
+
 export type ServerToBrowserMessage =
   | SessionAddedMessage
   | SessionUpdatedMessage
@@ -124,7 +141,10 @@ export type ServerToBrowserMessage =
   | ResumeResultBrowserMessage
   | SpawnResultBrowserMessage
   | SessionsReorderedMessage
-  | PinnedDirsUpdatedMessage;
+  | PinnedDirsUpdatedMessage
+  | TerminalAddedMessage
+  | TerminalRemovedMessage
+  | TerminalUpdatedMessage;
 
 // ── Browser → Server ────────────────────────────────────────────────
 
@@ -265,6 +285,22 @@ export interface OpenSpecBulkArchiveBrowserMessage {
   cwd: string;
 }
 
+export interface CreateTerminalBrowserMessage {
+  type: "create_terminal";
+  cwd: string;
+}
+
+export interface KillTerminalBrowserMessage {
+  type: "kill_terminal";
+  terminalId: string;
+}
+
+export interface RenameTerminalBrowserMessage {
+  type: "rename_terminal";
+  terminalId: string;
+  title: string;
+}
+
 export interface BrowserExtensionUiResponseMessage {
   type: "extension_ui_response";
   sessionId: string;
@@ -299,4 +335,7 @@ export type BrowserToServerMessage =
   | PinDirectoryMessage
   | UnpinDirectoryMessage
   | ReorderPinnedDirsMessage
-  | OpenSpecBulkArchiveBrowserMessage;
+  | OpenSpecBulkArchiveBrowserMessage
+  | CreateTerminalBrowserMessage
+  | KillTerminalBrowserMessage
+  | RenameTerminalBrowserMessage;

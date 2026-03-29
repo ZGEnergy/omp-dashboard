@@ -17,6 +17,7 @@ A web-based dashboard for monitoring and interacting with [pi](https://github.co
 - **Session spawning** — Launch new pi sessions from the dashboard (headless by default, or via tmux)
 - **Extension UI forwarding** — View blocked tool calls and extension notifications
 - **On-demand session loading** — Browse historical sessions with lazy-loaded content from pi session files
+- **Integrated terminal** — Full browser-based terminal emulator (xterm.js + node-pty) with ANSI color support, scrollback, and keep-alive
 
 ## Architecture
 
@@ -62,6 +63,7 @@ See [docs/architecture.md](docs/architecture.md) for detailed data flows, reconn
 |-------------|-----|---------|
 | **[pi](https://github.com/badlogic/pi-mono)** or **[Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent)** | The AI coding agent that the dashboard monitors | `npm i -g @mariozechner/pi-coding-agent` |
 | **Node.js ≥ 20** | Runtime for the dashboard server | [nodejs.org](https://nodejs.org/) |
+| **C++ build tools** | Required by `node-pty` native addon for terminal emulation | Xcode CLI Tools (macOS) / `build-essential` (Linux) |
 
 ### Optional tools
 

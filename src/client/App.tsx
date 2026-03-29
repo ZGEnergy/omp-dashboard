@@ -16,9 +16,11 @@ import { TokenStatsBar } from "./components/TokenStatsBar.js";
 import { CommandInput } from "./components/CommandInput.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { LandingPage } from "./components/LandingPage.js";
+import { TerminalView } from "./components/TerminalView.js";
 import { createInitialState, reduceEvent, addInteractiveRequest, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { useEditors } from "./lib/use-editors.js";
 import type { DashboardSession, CommandInfo, FileEntry, OpenSpecData, ModelInfo } from "../shared/types.js";
+import type { TerminalSession } from "../shared/terminal-types.js";
 import type { ServerToBrowserMessage } from "../shared/browser-protocol.js";
 import type { ToolContext } from "./components/tool-renderers/index.js";
 import type { ContextUsageInfo } from "./components/SessionList.js";
@@ -59,7 +61,9 @@ export default function App() {
   const { send, onMessage, status } = useWebSocket(WS_URL);
   const [, navigate] = useLocation();
   const [match, params] = useRoute("/session/:id");
+  const [termMatch, termParams] = useRoute("/terminal/:id");
   const selectedId = match ? params?.id : undefined;
+  const selectedTerminalId = termMatch ? termParams?.id : undefined;
   const sidebar = useSidebarState();
   const isMobile = useMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -76,6 +80,7 @@ export default function App() {
   const spawnTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [sessionOrderMap, setSessionOrderMap] = useState<Map<string, string[]>>(new Map());
   const [pinnedDirectories, setPinnedDirectories] = useState<string[]>([]);
+  const [terminals, setTerminals] = useState<Map<string, TerminalSession>>(new Map());
   const subscribedRef = useRef(new Set<string>());
   const [previewState, setPreviewState] = useState<{
     cwd: string;
@@ -244,6 +249,33 @@ export default function App() {
           const next = new Map(prev);
           const current = next.get(msg.sessionId) ?? createInitialState();
           next.set(msg.sessionId, addInteractiveRequest(current, msg.requestId, msg.method, msg.params));
+          return next;
+        });
+        break;
+
+      case "terminal_added":
+        setTerminals((prev) => {
+          const next = new Map(prev);
+          next.set(msg.terminal.id, msg.terminal);
+          return next;
+        });
+        break;
+
+      case "terminal_removed":
+        setTerminals((prev) => {
+          const next = new Map(prev);
+          next.delete(msg.terminalId);
+          return next;
+        });
+        break;
+
+      case "terminal_updated":
+        setTerminals((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(msg.terminalId);
+          if (existing) {
+            next.set(msg.terminalId, { ...existing, ...msg.updates });
+          }
           return next;
         });
         break;
@@ -530,10 +562,48 @@ export default function App() {
     [send],
   );
 
+  const handleCreateTerminal = useCallback(
+    (cwd: string) => {
+      send({ type: "create_terminal", cwd } as any);
+    },
+    [send],
+  );
+
+  const handleKillTerminal = useCallback(
+    (terminalId: string) => {
+      send({ type: "kill_terminal", terminalId } as any);
+    },
+    [send],
+  );
+
+  const handleRenameTerminal = useCallback(
+    (terminalId: string, title: string) => {
+      send({ type: "rename_terminal", terminalId, title } as any);
+    },
+    [send],
+  );
+
+  const handleTerminalTitle = useCallback(
+    (terminalId: string, title: string) => {
+      // Update local state and notify server
+      setTerminals((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(terminalId);
+        if (existing) {
+          next.set(terminalId, { ...existing, title });
+        }
+        return next;
+      });
+      send({ type: "rename_terminal", terminalId, title } as any);
+    },
+    [send],
+  );
+
   const sessionList = (
     <SessionList
       sessions={Array.from(sessions.values())}
-      selectedId={selectedId}
+      terminals={Array.from(terminals.values())}
+      selectedId={selectedId ?? selectedTerminalId}
       onSelect={handleSelect}
       contextUsageMap={contextUsageMap}
       openspecMap={openspecMap}
@@ -574,6 +644,9 @@ export default function App() {
         setPinnedDirectories(paths);
         send({ type: "reorder_pinned_dirs", paths } as any);
       }}
+      onCreateTerminal={handleCreateTerminal}
+      onKillTerminal={handleKillTerminal}
+      onRenameTerminal={handleRenameTerminal}
     />
   );
 
@@ -709,9 +782,38 @@ export default function App() {
     </div>
   ) : null;
 
+  // Terminal keep-alive views — always mounted, CSS toggled
+  const terminalViews = useMemo(() => {
+    return Array.from(terminals.values()).map((t) => (
+      <TerminalView
+        key={t.id}
+        terminalId={t.id}
+        visible={selectedTerminalId === t.id}
+        terminalName={t.title || t.shell.split("/").pop()}
+        onTitle={handleTerminalTitle}
+        onClose={handleKillTerminal}
+      />
+    ));
+  }, [terminals, selectedTerminalId, handleTerminalTitle, handleKillTerminal]);
+
+  // Navigate away from terminal when it's removed
+  useEffect(() => {
+    if (selectedTerminalId && !terminals.has(selectedTerminalId)) {
+      navigate("/");
+    }
+  }, [selectedTerminalId, terminals, navigate]);
+
+  // Navigate away from invalid terminal URL (same as session logic)
+  const terminalsLoaded = terminals.size > 0 || sessions.size > 0;
+  useEffect(() => {
+    if (selectedTerminalId && terminalsLoaded && !terminals.has(selectedTerminalId)) {
+      navigate("/");
+    }
+  }, [selectedTerminalId, terminalsLoaded, terminals, navigate]);
+
   // Mobile: two-step full-screen navigation
   if (isMobile) {
-    const mobileDepth = previewState ? 2 : selectedId ? 1 : 0;
+    const mobileDepth = previewState ? 2 : (selectedId || selectedTerminalId) ? 1 : 0;
     return (
       <div className="bg-[var(--bg-primary)] text-[var(--text-primary)]">
         <MobileShell
@@ -729,7 +831,13 @@ export default function App() {
               {sessionList}
             </div>
           }
-          detailPanel={sessionDetail ?? <LandingPage />}
+          detailPanel={
+            selectedTerminalId ? (
+              <div className="flex-1 flex flex-col min-w-0 h-full">
+                {terminalViews}
+              </div>
+            ) : sessionDetail ?? <LandingPage />
+          }
         />
       </div>
     );
@@ -751,7 +859,10 @@ export default function App() {
 
       <div className="flex-1 flex flex-col min-w-0">
         {connectionBanner}
-        {sessionDetail ?? <LandingPage />}
+        {/* Terminal views are always mounted (keep-alive), CSS hidden/shown */}
+        {terminalViews}
+        {/* Show session detail or landing page when no terminal is selected */}
+        {!selectedTerminalId && (sessionDetail ?? <LandingPage />)}
       </div>
     </div>
   );

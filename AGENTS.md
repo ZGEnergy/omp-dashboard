@@ -73,6 +73,8 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/server/headless-pid-registry.ts` | Maps headless child PIDs to session IDs |
 | `src/server/localhost-guard.ts` | Localhost-only access guard for routes |
 | `src/server/server-pid.ts` | PID file management for daemon mode |
+| `src/server/terminal-manager.ts` | PTY lifecycle, ring buffer, spawn/attach/kill terminals |
+| `src/server/terminal-gateway.ts` | Binary WebSocket upgrade handler for `/ws/terminal/:id` |
 | `src/server/tunnel.ts` | Zrok tunnel integration via REST API |
 | `src/server/cli.ts` | CLI entry point with subcommands (start/stop/restart/status) |
 | `src/shared/rest-api.ts` | REST API type definitions |
@@ -80,6 +82,9 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/client/components/MarkdownPreviewView.tsx` | Generic reusable markdown preview with back button, tabs, loading/error states |
 | `src/client/hooks/useOpenSpecReader.ts` | Maps OpenSpec artifacts to file paths, fetches content, concatenates specs |
 | `src/client/components/interactive-renderers/` | Registry + renderers for interactive UI dialogs (confirm, select, input, editor, notify) |
+| `src/shared/terminal-types.ts` | TerminalSession type and control messages |
+| `src/client/components/TerminalView.tsx` | xterm.js terminal emulator wrapper with keep-alive |
+| `src/client/components/TerminalCard.tsx` | Sidebar card for terminal sessions (cyan accent) |
 | `src/client/App.tsx` | React app with WebSocket integration |
 | `src/client/lib/event-reducer.ts` | Event-sourced state reducer |
 | `src/client/lib/truncate-path.ts` | Middle-truncation utility for filesystem paths |

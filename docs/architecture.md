@@ -206,3 +206,46 @@ silently  pass --port & --pi-port
 ```
 
 The server is spawned detached (`child_process.spawn` with `detached: true`, `stdio: 'ignore'`, `unref()`), so it outlives the pi session. If multiple pi sessions start simultaneously, duplicate spawn attempts fail harmlessly with EADDRINUSE.
+
+## Terminal Emulator
+
+The dashboard includes a browser-based terminal emulator for direct shell access.
+
+### Architecture
+
+```
+Browser                              Server
+┌────────────────┐            ┌──────────────────┐
+│  xterm.js      │            │ TerminalManager   │
+│  (per terminal)│◄──binary──►│  ├─ node-pty      │
+│  FitAddon      │    WS      │  ├─ RingBuffer    │
+│  AttachAddon   │            │  └─ clients Set   │
+└────────────────┘            └──────────────────┘
+```
+
+### WebSocket Protocol
+
+Each terminal has a dedicated binary WebSocket at `/ws/terminal/:id`:
+- **Binary frames**: Raw terminal I/O (keystrokes client→server, PTY output server→client)
+- **Text frames**: JSON control messages (`{ "type": "resize", "cols": N, "rows": N }`)
+
+This is separate from the main JSON dashboard WebSocket (`/ws`).
+
+### Terminal Lifecycle
+
+1. Browser sends `create_terminal` on main WS → server spawns PTY via `node-pty`
+2. Server broadcasts `terminal_added` to all browsers
+3. Browser opens binary WS to `/ws/terminal/:id`, attaches `xterm.js`
+4. Shell exit → PTY `onExit` → server broadcasts `terminal_removed` → card removed
+
+### Output Buffering
+
+Each terminal maintains a 256KB ring buffer of raw PTY output. When a new WebSocket connects (reconnect, new tab), the buffer is replayed before live streaming. Combined with client-side 10,000-line scrollback.
+
+### Keep-Alive
+
+Terminal xterm.js instances stay mounted in the DOM (CSS hidden/shown) for instant switching without replay flicker. The binary WebSocket stays open while mounted.
+
+### Sidebar Integration
+
+Terminal cards appear alongside agent session cards, sharing the same folder groups and drag-and-drop ordering. Terminal IDs (`term-*`) coexist with session IDs in the `SessionOrderManager`.

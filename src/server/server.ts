@@ -16,6 +16,8 @@ import { createPendingForkRegistry, type PendingForkRegistry } from "./pending-f
 
 // pending-load-manager removed — server loads sessions directly via DirectoryService
 import { createDirectoryService, type DirectoryService } from "./directory-service.js";
+import { createTerminalManager, type TerminalManager } from "./terminal-manager.js";
+import { createTerminalGateway, type TerminalGateway } from "./terminal-gateway.js";
 import { writePid, removePid } from "./server-pid.js";
 import type { ApiResponse } from "../shared/types.js";
 import { extractSessionStats } from "./session-stats-reader.js";
@@ -97,7 +99,24 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       browserGateway.getSubscriberCount(sessionId) > 0,
   );
 
-  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, stateStore, directoryService);
+  // Create terminal manager with exit callback
+  const terminalManager = createTerminalManager({
+    onExit: (terminalId) => {
+      // Find and remove from session order
+      const allOrders = sessionOrderManager.getAllOrders();
+      for (const [cwd, ids] of Object.entries(allOrders)) {
+        if (ids.includes(terminalId)) {
+          sessionOrderManager.remove(cwd, terminalId);
+          break;
+        }
+      }
+      browserGateway.broadcastToAll({ type: "terminal_removed", terminalId });
+    },
+  });
+
+  const terminalGateway = createTerminalGateway(terminalManager);
+
+  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, stateStore, directoryService, terminalManager);
 
   // Broadcast placeholder session to browsers when auto-created from early events
   piGateway.onSessionCreated = (sessionId) => {
@@ -591,6 +610,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
           browserGateway.wss.handleUpgrade(request, socket, head, (ws) => {
             browserGateway.wss.emit("connection", ws, request);
           });
+        } else if (request.url?.startsWith("/ws/terminal/")) {
+          terminalGateway.handleUpgrade(request, socket, head);
         } else {
           socket.destroy();
         }
@@ -692,6 +713,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         client.terminate();
       }
       browserGateway.wss.close();
+      terminalGateway.close();
+      // Kill all active terminal PTY processes
+      for (const t of terminalManager.list()) {
+        try { terminalManager.kill(t.id); } catch {}
+      }
       await fastify.close();
     },
   };

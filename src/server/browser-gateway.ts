@@ -20,6 +20,7 @@ import type { SessionOrderManager } from "./session-order-manager.js";
 import type { StateStore } from "./state-store.js";
 import type { DirectoryService } from "./directory-service.js";
 import { createPendingResumeRegistry, type PendingResumeRegistry } from "./pending-resume-registry.js";
+import type { TerminalManager } from "./terminal-manager.js";
 import { execSync, execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
@@ -85,6 +86,7 @@ export function createBrowserGateway(
   sessionOrderManager?: SessionOrderManager,
   stateStore?: StateStore,
   directoryService?: DirectoryService,
+  terminalManager?: TerminalManager,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -157,6 +159,13 @@ export function createBrowserGateway(
         if (data && data.initialized) {
           sendTo(ws, { type: "openspec_update", cwd, data });
         }
+      }
+    }
+
+    // Send active terminals on connect
+    if (terminalManager) {
+      for (const terminal of terminalManager.list()) {
+        sendTo(ws, { type: "terminal_added", terminal });
       }
     }
 
@@ -642,6 +651,31 @@ export function createBrowserGateway(
               result: msg.result,
               cancelled: msg.cancelled,
             });
+            break;
+          }
+
+          case "create_terminal": {
+            if (terminalManager && sessionOrderManager) {
+              const terminal = terminalManager.spawn(msg.cwd);
+              sessionOrderManager.insert(msg.cwd, terminal.id);
+              broadcast({ type: "terminal_added", terminal });
+              broadcast({ type: "sessions_reordered", cwd: msg.cwd, sessionIds: sessionOrderManager.getOrder(msg.cwd) });
+            }
+            break;
+          }
+
+          case "kill_terminal": {
+            if (terminalManager) {
+              try { terminalManager.kill(msg.terminalId); } catch { /* ignore */ }
+            }
+            break;
+          }
+
+          case "rename_terminal": {
+            if (terminalManager) {
+              terminalManager.updateTitle(msg.terminalId, msg.title);
+              broadcast({ type: "terminal_updated", terminalId: msg.terminalId, updates: { title: msg.title } });
+            }
             break;
           }
         }

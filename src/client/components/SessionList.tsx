@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import Icon from "@mdi/react";
-import { mdiChevronRight, mdiChevronDown, mdiPlus, mdiPin, mdiPinOff } from "@mdi/js";
+import { mdiChevronRight, mdiChevronDown, mdiPlus, mdiPin, mdiPinOff, mdiConsoleLine } from "@mdi/js";
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { SortableSessionCard } from "./SortableSessionCard.js";
 import { SortablePinnedGroup } from "./SortablePinnedGroup.js";
 import type { DashboardSession, OpenSpecData } from "../../shared/types.js";
+import type { TerminalSession } from "../../shared/terminal-types.js";
+import { TerminalCard } from "./TerminalCard.js";
 import {
   getActiveOnly,
   setActiveOnly as persistActiveOnly,
@@ -59,6 +61,10 @@ interface Props {
   onPinDirectory?: (dirPath: string) => void;
   onUnpinDirectory?: (dirPath: string) => void;
   onReorderPinnedDirs?: (paths: string[]) => void;
+  terminals?: TerminalSession[];
+  onCreateTerminal?: (cwd: string) => void;
+  onKillTerminal?: (terminalId: string) => void;
+  onRenameTerminal?: (terminalId: string, title: string) => void;
 }
 
 /** Sort sessions within a group by server order, then by startedAt descending for unordered ones. */
@@ -78,6 +84,21 @@ function sortSessionsByOrder(sessions: DashboardSession[], order?: string[]): Da
   }
   ordered.sort((a, b) => orderIndex.get(a.id)! - orderIndex.get(b.id)!);
   unordered.sort((a, b) => b.startedAt - a.startedAt);
+  return [...ordered, ...unordered];
+}
+
+/** Get unified order of session + terminal IDs for a group. */
+function getUnifiedOrder(sessions: DashboardSession[], terminals: TerminalSession[], order?: string[]): string[] {
+  const allIds = new Set([...sessions.map((s) => s.id), ...terminals.map((t) => t.id)]);
+  if (!order || order.length === 0) {
+    // Default: terminals first (newest first), then sessions (newest first)
+    return [
+      ...terminals.sort((a, b) => b.createdAt - a.createdAt).map((t) => t.id),
+      ...sessions.sort((a, b) => b.startedAt - a.startedAt).map((s) => s.id),
+    ];
+  }
+  const ordered = order.filter((id) => allIds.has(id));
+  const unordered = [...allIds].filter((id) => !new Set(ordered).has(id));
   return [...ordered, ...unordered];
 }
 
@@ -168,7 +189,7 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal }: Props) {
   const now = Date.now();
   const [, navigate] = useLocation();
   const { messages, showToast, dismissToast } = useToast();
@@ -256,6 +277,17 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     return afterActiveFilter.filter((s) => s.hidden).length;
   }, [sessions, activeOnly]);
 
+  // Build a map of terminals by cwd for quick lookup
+  const terminalsByCwd = useMemo(() => {
+    const map = new Map<string, TerminalSession[]>();
+    for (const t of terminals ?? []) {
+      const existing = map.get(t.cwd);
+      if (existing) existing.push(t);
+      else map.set(t.cwd, [t]);
+    }
+    return map;
+  }, [terminals]);
+
   const { pinned: pinnedGroups, unpinned: unpinnedGroups } = useMemo(
     () => groupSessionsByDirectory(filteredSessions, sessionOrderMap, pinnedDirectories),
     [filteredSessions, sessionOrderMap, pinnedDirectories],
@@ -279,11 +311,13 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
 
     if (activeType === "session") {
       for (const group of allGroups) {
-        const ids = group.sessions.map((s) => s.id);
-        const oldIndex = ids.indexOf(active.id as string);
-        const newIndex = ids.indexOf(over.id as string);
+        // Unified IDs: sessions + terminals in order
+        const groupTerminals = terminalsByCwd.get(group.cwd) ?? [];
+        const allIds = getUnifiedOrder(group.sessions, groupTerminals, sessionOrderMap?.get(group.cwd));
+        const oldIndex = allIds.indexOf(active.id as string);
+        const newIndex = allIds.indexOf(over.id as string);
         if (oldIndex !== -1 && newIndex !== -1) {
-          const newOrder = arrayMove(ids, oldIndex, newIndex);
+          const newOrder = arrayMove(allIds, oldIndex, newIndex);
           onReorderSessions?.(group.cwd, newOrder);
           break;
         }
@@ -316,7 +350,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             <span className="text-xs font-medium text-[var(--text-secondary)] truncate flex items-center gap-1">
               {isPinned ? <Icon path={mdiPin} size={0.5} className="text-yellow-400 shrink-0" /> : "📁"} {dirName}
             </span>
-            <span className="text-[10px] text-[var(--text-muted)]">({group.sessions.length})</span>
+            <span className="text-[10px] text-[var(--text-muted)]">({group.sessions.length + (terminalsByCwd.get(group.cwd)?.length ?? 0)})</span>
             {/* Pin/Unpin button */}
             {isPinned ? (
               <button
@@ -378,39 +412,83 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 </span>
               </button>
             )}
+            {onCreateTerminal && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCreateTerminal(group.cwd);
+                }}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-cyan-400 hover:border-cyan-500/50"
+                title="New terminal"
+                data-testid="create-terminal-btn"
+              >
+                <span className="inline-flex items-center gap-0.5">
+                  <Icon path={mdiConsoleLine} size={0.5} /> Term
+                </span>
+              </button>
+            )}
           </div>
         </div>
-        {/* Session cards — animated collapse */}
+        {/* Session + terminal cards — animated collapse */}
         <div className={`group-collapse ${isCollapsed ? "collapsed" : "expanded"}`}>
         <div className="space-y-1 pt-1">
           {spawningCwds?.has(group.cwd) && <PlaceholderSessionCard />}
-          <SortableContext items={group.sessions.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-          {group.sessions.map((session) => (
-            <SortableSessionCard key={session.id} id={session.id}>
-            <SessionCard
-              session={session}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              now={now}
-              showGitInfo={group.sessions.length === 1}
-              isHidden={!!session.hidden}
-              onHide={handleHide}
-              onUnhide={handleUnhide}
-              editors={group.sessions.length === 1 ? editorMap.get(group.cwd) : undefined}
-              onOpenEditor={group.sessions.length === 1 ? (editorId) => handleOpenEditor(group.cwd, editorId) : undefined}
-              contextUsage={contextUsageMap?.get(session.id)}
-              openspecChanges={openspecMap?.get(session.cwd)?.changes}
-              onSendPrompt={onSendPrompt ? (text) => onSendPrompt(session.id, text) : undefined}
-              onAttachProposal={onAttachProposal ? (changeName) => onAttachProposal(session.id, changeName) : undefined}
-              onDetachProposal={onDetachProposal ? () => onDetachProposal(session.id) : undefined}
-              onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(session.cwd, changeName, artifactId) : undefined}
-              onRename={onRename ? (name) => onRename(session.id, name) : undefined}
-              onShutdown={onShutdown}
-              onResume={onResume ? (mode) => onResume(session.id, mode) : undefined}
-            />
-            </SortableSessionCard>
-          ))}
-          </SortableContext>
+          {(() => {
+            const groupTerminals = terminalsByCwd.get(group.cwd) ?? [];
+            const unifiedIds = getUnifiedOrder(group.sessions, groupTerminals, sessionOrderMap?.get(group.cwd));
+            const sessionMap = new Map(group.sessions.map((s) => [s.id, s]));
+            const terminalMap = new Map(groupTerminals.map((t) => [t.id, t]));
+            return (
+              <SortableContext items={unifiedIds} strategy={verticalListSortingStrategy}>
+                {unifiedIds.map((id) => {
+                  const session = sessionMap.get(id);
+                  if (session) {
+                    return (
+                      <SortableSessionCard key={id} id={id}>
+                        <SessionCard
+                          session={session}
+                          selectedId={selectedId}
+                          onSelect={onSelect}
+                          now={now}
+                          showGitInfo={group.sessions.length === 1 && groupTerminals.length === 0}
+                          isHidden={!!session.hidden}
+                          onHide={handleHide}
+                          onUnhide={handleUnhide}
+                          editors={group.sessions.length === 1 ? editorMap.get(group.cwd) : undefined}
+                          onOpenEditor={group.sessions.length === 1 ? (editorId) => handleOpenEditor(group.cwd, editorId) : undefined}
+                          contextUsage={contextUsageMap?.get(session.id)}
+                          openspecChanges={openspecMap?.get(session.cwd)?.changes}
+                          onSendPrompt={onSendPrompt ? (text) => onSendPrompt(session.id, text) : undefined}
+                          onAttachProposal={onAttachProposal ? (changeName) => onAttachProposal(session.id, changeName) : undefined}
+                          onDetachProposal={onDetachProposal ? () => onDetachProposal(session.id) : undefined}
+                          onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(session.cwd, changeName, artifactId) : undefined}
+                          onRename={onRename ? (name) => onRename(session.id, name) : undefined}
+                          onShutdown={onShutdown}
+                          onResume={onResume ? (mode) => onResume(session.id, mode) : undefined}
+                        />
+                      </SortableSessionCard>
+                    );
+                  }
+                  const terminal = terminalMap.get(id);
+                  if (terminal) {
+                    return (
+                      <SortableSessionCard key={id} id={id}>
+                        <TerminalCard
+                          terminal={terminal}
+                          selectedId={selectedId}
+                          onSelect={(termId) => navigate(`/terminal/${termId}`)}
+                          onClose={onKillTerminal}
+                          onRename={onRenameTerminal}
+                          now={now}
+                        />
+                      </SortableSessionCard>
+                    );
+                  }
+                  return null;
+                })}
+              </SortableContext>
+            );
+          })()}
         </div>
         </div>
       </div>
