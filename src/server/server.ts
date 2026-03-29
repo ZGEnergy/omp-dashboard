@@ -158,6 +158,18 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       eventStore.deleteEventsForSession(sessionId);
       // Force visible + clear dataUnavailable — active sessions must always be visible
       sessionManager.update(sessionId, { hidden: false, dataUnavailable: false });
+
+      // When pi continues a session via --session, it reuses the same JSONL file
+      // but creates a new session ID. Clear sessionFile from any other session
+      // that points to the same file so stale sessions can't resume the wrong content.
+      if (msg.sessionFile) {
+        for (const other of sessionManager.listAll()) {
+          if (other.id !== sessionId && other.sessionFile === msg.sessionFile) {
+            sessionManager.update(other.id, { sessionFile: undefined });
+            browserGateway.broadcastSessionUpdated(other.id, { sessionFile: null });
+          }
+        }
+      }
       // Link headless PID to session ID (if spawned from dashboard)
       browserGateway.headlessPidRegistry.linkSession(sessionId, msg.cwd);
 

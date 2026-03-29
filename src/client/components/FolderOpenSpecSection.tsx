@@ -69,7 +69,7 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onR
           className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-green-400 hover:border-green-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
           data-testid="folder-new-change-btn"
         >
-          + New
+          + Change
         </button>
       </div>
 

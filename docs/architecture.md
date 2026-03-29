@@ -135,6 +135,9 @@ The web client includes a generic `MarkdownPreviewView` component that replaces 
 2. Server replays missed events from in-memory buffer in batches of 200
 3. Browser's event reducer processes replay, rebuilding state
 
+### Session File Deduplication
+When pi continues a session via `--session <file>`, it reuses the same JSONL file but may create a new session ID. The server detects this: when a new session registers with a `sessionFile` already associated with another session, the old session's `sessionFile` is cleared. This prevents the Resume button from loading the wrong conversation.
+
 ### On-Demand Session Loading (Server-Side)
 When a browser subscribes to a session whose events have been evicted from memory:
 1. Server sends empty `event_replay` with `isLast: false` to indicate loading
@@ -205,7 +208,7 @@ silently  pass --port & --pi-port
             connect
 ```
 
-The server is spawned detached (`child_process.spawn` with `detached: true`, `stdio: 'ignore'`, `unref()`), so it outlives the pi session. If multiple pi sessions start simultaneously, duplicate spawn attempts fail harmlessly with EADDRINUSE.
+The server is spawned detached (`child_process.spawn` with `detached: true`, `stdio: 'ignore'`, `unref()`), so it outlives the pi session. If multiple pi sessions start simultaneously, duplicate spawn attempts fail harmlessly with EADDRINUSE. After a failed launch, the bridge re-probes the port — if another agent started the server concurrently, the warning is suppressed. The auto-start logic is extracted into `server-auto-start.ts` for testability.
 
 ## Terminal Emulator
 

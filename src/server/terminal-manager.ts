@@ -156,17 +156,24 @@ export function createTerminalManager(options?: TerminalManagerOptions): Termina
 
     ws.on("message", (data: Buffer, isBinary: boolean) => {
       if (isBinary) {
-        // Terminal input
+        // Terminal input (binary frame)
         entry.pty.write(data.toString());
       } else {
-        // Control message (text frame)
+        // Text frame: could be a control message or terminal input from AttachAddon
+        const str = data.toString();
         try {
-          const msg: TerminalControlMessage = JSON.parse(data.toString());
+          const msg: TerminalControlMessage = JSON.parse(str);
           if (msg.type === "resize") {
             entry.pty.resize(msg.cols, msg.rows);
+          } else if (msg.type === "title") {
+            // title control message — handled elsewhere
+          } else {
+            // Unknown JSON, treat as terminal input
+            entry.pty.write(str);
           }
         } catch {
-          // Ignore malformed control messages
+          // Not JSON — treat as terminal input (AttachAddon sends text frames)
+          entry.pty.write(str);
         }
       }
     });

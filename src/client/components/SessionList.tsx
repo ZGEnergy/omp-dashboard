@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import Icon from "@mdi/react";
-import { mdiChevronRight, mdiChevronDown, mdiPlus, mdiPin, mdiPinOff, mdiConsoleLine } from "@mdi/js";
+import { mdiChevronRight, mdiChevronDown, mdiChevronLeft, mdiPlus, mdiPin, mdiPinOff, mdiConsoleLine } from "@mdi/js";
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { SortableSessionCard } from "./SortableSessionCard.js";
@@ -65,6 +65,7 @@ interface Props {
   onCreateTerminal?: (cwd: string) => void;
   onKillTerminal?: (terminalId: string) => void;
   onRenameTerminal?: (terminalId: string, title: string) => void;
+  onCollapseSidebar?: () => void;
 }
 
 /** Sort sessions within a group by server order, then by startedAt descending for unordered ones. */
@@ -189,7 +190,7 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal, onCollapseSidebar }: Props) {
   const now = Date.now();
   const [, navigate] = useLocation();
   const { messages, showToast, dismissToast } = useToast();
@@ -373,18 +374,6 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             )}
           </div>
           <GroupGitInfo sessions={group.sessions} />
-          {openspecMap?.get(group.cwd)?.initialized && (
-            <FolderOpenSpecSection
-              data={openspecMap.get(group.cwd)!}
-              cwd={group.cwd}
-              onRefresh={() => onOpenSpecRefresh?.(group.cwd)}
-              onBulkArchive={() => onBulkArchive?.(group.cwd)}
-              onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(group.cwd, changeName, artifactId) : undefined}
-              sessions={group.sessions}
-              onSendPrompt={onSendPrompt}
-              onNavigateToSession={onSelect}
-            />
-          )}
           <div className="mt-1 ml-5 flex items-center gap-1">
             {editorMap.get(group.cwd)?.length ? (
               <EditorButtons
@@ -408,7 +397,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 data-testid="spawn-session-btn"
               >
                 <span className="inline-flex items-center gap-0.5">
-                  <Icon path={mdiPlus} size={0.5} /> New
+                  <Icon path={mdiPlus} size={0.5} /> Session
                 </span>
               </button>
             )}
@@ -423,11 +412,24 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 data-testid="create-terminal-btn"
               >
                 <span className="inline-flex items-center gap-0.5">
-                  <Icon path={mdiConsoleLine} size={0.5} /> Term
+                  <Icon path={mdiPlus} size={0.5} /> Terminal
                 </span>
               </button>
             )}
           </div>
+          {openspecMap?.get(group.cwd)?.initialized && (
+            <FolderOpenSpecSection
+              data={openspecMap.get(group.cwd)!}
+              cwd={group.cwd}
+              onRefresh={() => onOpenSpecRefresh?.(group.cwd)}
+              onBulkArchive={() => onBulkArchive?.(group.cwd)}
+              onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(group.cwd, changeName, artifactId) : undefined}
+              sessions={group.sessions}
+              onSendPrompt={onSendPrompt}
+              onNavigateToSession={onSelect}
+            />
+          )}
+
         </div>
         {/* Session + terminal cards — animated collapse */}
         <div className={`group-collapse ${isCollapsed ? "collapsed" : "expanded"}`}>
@@ -496,7 +498,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
   }
 
   return (
-    <div className="w-full border-r border-[var(--border-primary)] overflow-y-auto">
+    <div className="w-full border-r border-[var(--border-primary)] flex flex-col min-h-0 h-full">
       <div className="p-3 border-b border-[var(--border-primary)]">
         <div className="flex items-center justify-between">
           <button onClick={() => navigate("/")} className="text-lg font-bold text-blue-500 hover:text-blue-400 transition-colors leading-none" title="Home">π</button>
@@ -519,9 +521,20 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 📌+
               </button>
             )}
+            {onCollapseSidebar && (
+              <button
+                onClick={onCollapseSidebar}
+                className="text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                title="Collapse sidebar"
+                data-testid="sidebar-collapse"
+              >
+                <Icon path={mdiChevronLeft} size={0.6} />
+              </button>
+            )}
           </div>
         </div>
       </div>
+      <div className="flex-1 overflow-y-auto">
       {filteredSessions.length === 0 && pinnedGroups.length === 0 ? (
         <div className="p-4 text-sm text-[var(--text-tertiary)]">No active sessions</div>
       ) : (
@@ -558,6 +571,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
         /></DialogPortal>
       )}
       <Toast messages={messages} onDismiss={dismissToast} />
+      </div>
     </div>
   );
 }

@@ -25,6 +25,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "postinstall": "node scripts/fix-pty-permissions.cjs",
     "prepare": "vite build",
     "test": "vitest run",
     "test:watch": "vitest",

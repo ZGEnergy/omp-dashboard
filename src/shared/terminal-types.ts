@@ -8,6 +8,7 @@ export interface TerminalSession {
   shell: string;
   status: "active" | "ended";
   title?: string;
+  manuallyRenamed?: boolean;
   createdAt: number;
 }
 

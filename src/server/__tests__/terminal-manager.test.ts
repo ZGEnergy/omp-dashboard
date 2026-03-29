@@ -165,6 +165,25 @@ describe("TerminalManager", () => {
       expect(mockPtyWrite).toHaveBeenCalledWith(input.toString());
     });
 
+    it("routes non-JSON text frames to pty.write (AttachAddon sends text)", () => {
+      const session = manager.spawn("/tmp");
+      const handlers: Record<string, Function> = {};
+
+      const mockWs = {
+        send: vi.fn(),
+        on: vi.fn((event: string, cb: any) => { handlers[event] = cb; }),
+        readyState: 1,
+        OPEN: 1,
+      } as any;
+
+      manager.attach(session.id, mockWs);
+
+      // AttachAddon sends keystrokes as text frames
+      const input = Buffer.from("ls\n");
+      handlers.message(input, false);
+      expect(mockPtyWrite).toHaveBeenCalledWith("ls\n");
+    });
+
     it("handles resize control message", () => {
       const session = manager.spawn("/tmp");
       const handlers: Record<string, Function> = {};

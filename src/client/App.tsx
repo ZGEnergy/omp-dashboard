@@ -81,6 +81,7 @@ export default function App() {
   const [sessionOrderMap, setSessionOrderMap] = useState<Map<string, string[]>>(new Map());
   const [pinnedDirectories, setPinnedDirectories] = useState<string[]>([]);
   const [terminals, setTerminals] = useState<Map<string, TerminalSession>>(new Map());
+  const pendingTerminalCwdRef = useRef<string | null>(null);
   const subscribedRef = useRef(new Set<string>());
   const [previewState, setPreviewState] = useState<{
     cwd: string;
@@ -259,6 +260,11 @@ export default function App() {
           next.set(msg.terminal.id, msg.terminal);
           return next;
         });
+        // Auto-navigate if this terminal was spawned by this browser tab
+        if (pendingTerminalCwdRef.current === msg.terminal.cwd) {
+          pendingTerminalCwdRef.current = null;
+          navigate(`/terminal/${msg.terminal.id}`);
+        }
         break;
 
       case "terminal_removed":
@@ -292,6 +298,7 @@ export default function App() {
     if (status === "connected" && prevStatusRef.current !== "connected") {
       subscribedRef.current.clear();
       setSessionOrderMap(new Map());
+      setTerminals(new Map());
     }
     prevStatusRef.current = status;
   }, [status]);
@@ -564,6 +571,7 @@ export default function App() {
 
   const handleCreateTerminal = useCallback(
     (cwd: string) => {
+      pendingTerminalCwdRef.current = cwd;
       send({ type: "create_terminal", cwd } as any);
     },
     [send],
@@ -578,6 +586,15 @@ export default function App() {
 
   const handleRenameTerminal = useCallback(
     (terminalId: string, title: string) => {
+      // Mark as manually renamed so PTY title doesn't override
+      setTerminals((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(terminalId);
+        if (existing) {
+          next.set(terminalId, { ...existing, title, manuallyRenamed: true });
+        }
+        return next;
+      });
       send({ type: "rename_terminal", terminalId, title } as any);
     },
     [send],
@@ -585,18 +602,21 @@ export default function App() {
 
   const handleTerminalTitle = useCallback(
     (terminalId: string, title: string) => {
-      // Update local state and notify server
       setTerminals((prev) => {
+        const existing = prev.get(terminalId);
+        // Don't override a manually set name with PTY title
+        if (!existing || existing.manuallyRenamed) return prev;
         const next = new Map(prev);
-        const existing = next.get(terminalId);
-        if (existing) {
-          next.set(terminalId, { ...existing, title });
-        }
+        next.set(terminalId, { ...existing, title });
         return next;
       });
-      send({ type: "rename_terminal", terminalId, title } as any);
+      // Only send to server if not manually renamed
+      const t = terminals.get(terminalId);
+      if (!t?.manuallyRenamed) {
+        send({ type: "rename_terminal", terminalId, title } as any);
+      }
     },
-    [send],
+    [send, terminals],
   );
 
   const sessionList = (
@@ -647,6 +667,7 @@ export default function App() {
       onCreateTerminal={handleCreateTerminal}
       onKillTerminal={handleKillTerminal}
       onRenameTerminal={handleRenameTerminal}
+      onCollapseSidebar={sidebar.toggleCollapse}
     />
   );
 

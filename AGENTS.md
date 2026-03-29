@@ -42,6 +42,7 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/extension/server-launcher.ts` | Auto-start server as detached process |
 | `src/extension/command-handler.ts` | Command routing: `!`/`!!` bash, `/compact`, slash commands |
 | `src/extension/dev-build.ts` | Dev build-on-reload helper (client build + server shutdown) |
+| `src/extension/server-auto-start.ts` | Extracted auto-start logic with retry-probe for concurrent launches |
 | `src/extension/git-info.ts` | Git branch/remote/PR detection (polled every 30s) |
 | `src/extension/git-link-builder.ts` | Git remote URL parsing and platform-specific links |
 | `src/extension/ui-proxy.ts` | Proxies ctx.ui dialogs to dashboard (confirm/select/input/editor/notify) |
@@ -75,6 +76,7 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/server/server-pid.ts` | PID file management for daemon mode |
 | `src/server/terminal-manager.ts` | PTY lifecycle, ring buffer, spawn/attach/kill terminals |
 | `src/server/terminal-gateway.ts` | Binary WebSocket upgrade handler for `/ws/terminal/:id` |
+| `scripts/fix-pty-permissions.cjs` | Postinstall: fix node-pty spawn-helper execute permissions |
 | `src/server/tunnel.ts` | Zrok tunnel integration via REST API |
 | `src/server/cli.ts` | CLI entry point with subcommands (start/stop/restart/status) |
 | `src/shared/rest-api.ts` | REST API type definitions |

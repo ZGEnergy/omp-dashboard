@@ -90,17 +90,6 @@ export function ResizableSidebar({ sidebar, children }: Props) {
       style={{ width }}
     >
       <div className="flex-1 overflow-hidden flex flex-col border-r border-[var(--border-primary)]">
-        {/* Collapse toggle in header area */}
-        <div className="absolute top-2 right-5 z-10">
-          <button
-            onClick={toggleCollapse}
-            className="text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-            title="Collapse sidebar"
-            data-testid="sidebar-collapse"
-          >
-            <Icon path={mdiChevronLeft} size={0.6} />
-          </button>
-        </div>
         {children}
       </div>
       {/* Drag handle */}

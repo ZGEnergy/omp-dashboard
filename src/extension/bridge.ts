@@ -15,6 +15,7 @@ import { loadConfig, ensureConfig } from "../shared/config.js";
 import { runDevBuild } from "./dev-build.js";
 import { isPortOpen } from "./server-probe.js";
 import { launchServer } from "./server-launcher.js";
+import { autoStartServer } from "./server-auto-start.js";
 import type { ServerToExtensionMessage } from "../shared/protocol.js";
 import { gatherGitInfo, type GitInfo } from "./git-info.js";
 import { extractTurnStats } from "./stats-extractor.js";
@@ -485,19 +486,10 @@ function initBridge(pi: ExtensionAPI) {
     }
 
     // Auto-start server if not running (non-blocking — connection will reconnect)
-    isPortOpen(config.piPort).then(async (running) => {
-      if (!running && config.autoStart) {
-        const result = await launchServer(config);
-        if (result.success) {
-          ctx.ui.notify(`🌐 Dashboard started at http://localhost:${config.port}`, "info");
-        } else {
-          // Another agent may have started the server concurrently — recheck before warning
-          const nowRunning = await isPortOpen(config.piPort);
-          if (!nowRunning) {
-            ctx.ui.notify(`Dashboard server failed to start: ${result.message}`, "warning");
-          }
-        }
-      }
+    autoStartServer(config, {
+      isPortOpen,
+      launchServer,
+      notify: (msg, level) => ctx.ui.notify(msg, level),
     }).catch(() => {});
 
     // Send initial git info

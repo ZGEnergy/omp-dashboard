@@ -34,6 +34,29 @@ export function EditToolRenderer({ args, status, result, context }: ToolRenderer
   const filePath = args?.path as string | undefined;
   const oldText = args?.oldText as string | undefined;
   const newText = args?.newText as string | undefined;
+  const edits = Array.isArray(args?.edits) ? (args.edits as Array<{ oldText: string; newText: string }>) : null;
+
+  const renderDiffs = () => {
+    if (oldText != null && newText != null) {
+      return (
+        <div className="rounded bg-[var(--bg-code)] overflow-hidden">
+          <DiffView oldText={oldText} newText={newText} filePath={filePath ?? "file"} />
+        </div>
+      );
+    }
+    if (edits && edits.length > 0) {
+      return (
+        <div className="rounded bg-[var(--bg-code)] overflow-hidden">
+          {edits.map((edit, i) => (
+            <div key={i} className={i > 0 ? "border-t border-[var(--border-secondary)]" : ""}>
+              <DiffView oldText={edit.oldText} newText={edit.newText} filePath={filePath ?? "file"} />
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return <pre className="text-xs text-[var(--text-secondary)]">{JSON.stringify(args, null, 2)}</pre>;
+  };
 
   return (
     <div className="space-y-1">
@@ -42,13 +65,7 @@ export function EditToolRenderer({ args, status, result, context }: ToolRenderer
         <OpenFileButton filePath={filePath} context={context} />
       </div>
 
-      {oldText != null && newText != null ? (
-        <div className="rounded bg-[var(--bg-code)] overflow-hidden">
-          <DiffView oldText={oldText} newText={newText} filePath={filePath ?? "file"} />
-        </div>
-      ) : (
-        <pre className="text-xs text-[var(--text-secondary)]">{JSON.stringify(args, null, 2)}</pre>
-      )}
+      {renderDiffs()}
 
       {result && status !== "running" && (
         <div className="text-xs text-[var(--text-tertiary)] italic">{result}</div>

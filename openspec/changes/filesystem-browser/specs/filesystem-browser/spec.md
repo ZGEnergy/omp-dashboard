@@ -35,45 +35,88 @@ The server SHALL expose `GET /api/browse?path=<dir>` (localhost-only) that retur
 - **WHEN** a directory contains more than 200 subdirectories
 - **THEN** only the first 200 (alphabetically sorted) SHALL be returned
 
-### Requirement: Filesystem browser component
-The web client SHALL provide a `FilesystemBrowser` modal component for visually navigating the host filesystem to select a directory.
+### Requirement: PathPicker component
+The web client SHALL provide a reusable `PathPicker` component combining a text input with a fixed-height scrollable directory list for keyboard-first filesystem navigation.
 
 The component SHALL display:
-- Breadcrumb path bar with clickable segments for quick navigation
-- Scrollable list of subdirectories with folder icons
-- Visual indicators for git repos (`.git` present) and pi projects (`.pi` present)
-- ".." entry at the top for parent directory navigation
-- "Select" button to confirm the current directory
-- "Cancel" button to close without selecting
+- Text input (always focused) showing the current path with cursor
+- Fixed-height directory list (configurable rows, default 8) below the input
+- `..` entry at the top of the list for parent navigation (except at root)
+- Visual indicators for git repos (`isGit`) and pi projects (`isPi`)
+- Highlight on the currently selected list entry
 
-#### Scenario: Open browser
-- **WHEN** the filesystem browser is opened
-- **THEN** it SHALL start at the user's home directory and display its subdirectories
+#### Scenario: Open PathPicker
+- **WHEN** PathPicker mounts with `initialPath="/Users/robson/"`
+- **THEN** the input SHALL show `/Users/robson/` and the list SHALL show subdirectories of that path
 
-#### Scenario: Navigate into subdirectory
-- **WHEN** a user clicks a subdirectory entry
-- **THEN** the browser SHALL navigate into that directory and display its contents
+#### Scenario: Open PathPicker without initialPath
+- **WHEN** PathPicker mounts without `initialPath`
+- **THEN** it SHALL default to the user's home directory
 
-#### Scenario: Navigate to parent
-- **WHEN** a user clicks the ".." entry
-- **THEN** the browser SHALL navigate to the parent directory
+#### Scenario: Type to filter
+- **WHEN** the user types characters after the last `/` in the input
+- **THEN** the list SHALL filter entries client-side to those matching the typed partial (case-insensitive prefix match)
+- **AND** the highlight SHALL reset to the first matching entry
 
-#### Scenario: Breadcrumb navigation
-- **WHEN** the current path is `/home/user/projects/my-app` and the user clicks "projects" in the breadcrumb
-- **THEN** the browser SHALL navigate to `/home/user/projects`
+#### Scenario: Arrow key navigation
+- **WHEN** the user presses ↓ or ↑
+- **THEN** the highlight SHALL move through the filtered list entries
+- **AND** focus SHALL remain in the text input
 
-#### Scenario: Select directory
-- **WHEN** a user clicks the "Select" button
-- **THEN** the browser SHALL close and return the current directory path to the caller
+#### Scenario: Tab descends into directory
+- **WHEN** the user presses Tab with a highlighted entry
+- **THEN** the input SHALL become `parentPath + highlightedEntry + /`
+- **AND** the list SHALL fetch and show the contents of that directory
 
-#### Scenario: Cancel browsing
-- **WHEN** a user clicks "Cancel"
-- **THEN** the browser SHALL close without selecting any directory
+#### Scenario: Single match auto-select
+- **WHEN** only one entry matches the typed partial
+- **THEN** Tab SHALL complete that entry without requiring arrow key selection first
+
+#### Scenario: Enter confirms path
+- **WHEN** the user presses Enter
+- **THEN** `onSelect` SHALL be called with the current input path
+
+#### Scenario: Escape cancels
+- **WHEN** the user presses Escape
+- **THEN** `onCancel` SHALL be called
+
+#### Scenario: Click entry descends
+- **WHEN** the user clicks a directory entry in the list
+- **THEN** the input SHALL become that entry's path + `/`
+- **AND** the list SHALL fetch and show the contents of that directory
+
+#### Scenario: Click `..` goes up
+- **WHEN** the user clicks the `..` entry
+- **THEN** the input SHALL navigate to the parent directory
+- **AND** the list SHALL show the parent's contents
+
+#### Scenario: Backspace past slash
+- **WHEN** the user backspaces past a `/` separator
+- **THEN** the resolved parent SHALL change to the grandparent directory
+- **AND** the list SHALL fetch the grandparent's contents
+- **AND** the remaining text after the new last `/` SHALL filter the list
+
+#### Scenario: Paste full path
+- **WHEN** the user pastes a full path like `/Users/robson/Project/pi-agent-dashboard`
+- **THEN** PathPicker SHALL resolve the deepest valid directory
+- **AND** display its contents in the list
+
+#### Scenario: Empty directory
+- **WHEN** the resolved directory has no subdirectories
+- **THEN** the list SHALL show only `..` and a "No subdirectories" hint
+
+#### Scenario: No filter matches
+- **WHEN** the typed partial matches no entries
+- **THEN** the list SHALL show `..` and a "No matches" hint
+
+#### Scenario: Loading state
+- **WHEN** the PathPicker is fetching directory contents from the API
+- **THEN** a loading indicator SHALL be shown in the list area
 
 #### Scenario: Git repo indicator
 - **WHEN** a directory entry has `isGit: true`
-- **THEN** it SHALL show a visual indicator (e.g., branch icon or colored dot)
+- **THEN** it SHALL show a visual git indicator
 
-#### Scenario: Loading state
-- **WHEN** the browser is fetching directory contents
-- **THEN** a loading indicator SHALL be shown
+#### Scenario: Pi project indicator
+- **WHEN** a directory entry has `isPi: true`
+- **THEN** it SHALL show a visual pi indicator
