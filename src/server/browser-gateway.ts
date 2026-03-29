@@ -69,6 +69,10 @@ export interface BrowserGateway {
   broadcastToAll(msg: ServerToBrowserMessage): void;
   /** Get number of browser subscribers for a session */
   getSubscriberCount(sessionId: string): number;
+  /** Track a pending interactive UI request for replay on reconnect */
+  trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): void;
+  /** Clear a pending interactive UI request (resolved or cancelled) */
+  clearUiRequest(sessionId: string, requestId: string): void;
   /** Shut down all tracked headless child processes */
   shutdownHeadlessProcesses(): void;
   /** Registry for linking headless PIDs to session IDs */
@@ -96,6 +100,9 @@ export function createBrowserGateway(
   // Track headless child processes with sessionId linkage
   const headlessPidRegistry = createHeadlessPidRegistry();
 
+  // Track pending interactive UI requests per session for replay on reconnect
+  const pendingUiRequests = new Map<string, Map<string, { requestId: string; method: string; params: Record<string, unknown> }>>();
+
   // Track pending auto-resume prompts for ended sessions
   const pendingResumeRegistry = createPendingResumeRegistry({
     onTimeout(oldSessionId) {
@@ -104,6 +111,21 @@ export function createBrowserGateway(
       broadcast({ type: "session_updated", sessionId: oldSessionId, updates: { resuming: false } });
     },
   });
+
+  /** Send any pending interactive UI requests to a specific browser socket */
+  function replayPendingUiRequests(ws: WebSocket, sessionId: string) {
+    const sessionPending = pendingUiRequests.get(sessionId);
+    if (!sessionPending) return;
+    for (const req of sessionPending.values()) {
+      sendTo(ws, {
+        type: "extension_ui_request",
+        sessionId,
+        requestId: req.requestId,
+        method: req.method,
+        params: req.params,
+      });
+    }
+  }
 
   function getSubscribers(sessionId: string): WebSocket[] {
     const result: WebSocket[] = [];
@@ -190,6 +212,7 @@ export function createBrowserGateway(
                   isLast: i + REPLAY_BATCH_SIZE >= events.length,
                 });
               }
+              replayPendingUiRequests(ws, msg.sessionId);
             } else if (directoryService) {
               // Load session events directly from disk via DirectoryService
               const session = sessionManager.get(msg.sessionId);
@@ -219,6 +242,7 @@ export function createBrowserGateway(
                     };
                     for (const sub of getSubscribers(msg.sessionId)) {
                       sendTo(sub, replayMsg);
+                      replayPendingUiRequests(sub, msg.sessionId);
                     }
                   } else {
                     sendTo(ws, {
@@ -644,6 +668,14 @@ export function createBrowserGateway(
           }
 
           case "extension_ui_response": {
+            // Clear pending UI request tracking
+            const sessionMap = pendingUiRequests.get(msg.sessionId);
+            if (sessionMap) {
+              sessionMap.delete(msg.requestId);
+              if (sessionMap.size === 0) {
+                pendingUiRequests.delete(msg.sessionId);
+              }
+            }
             piGateway.sendToSession(msg.sessionId, {
               type: "extension_ui_response",
               sessionId: msg.sessionId,
@@ -730,6 +762,25 @@ export function createBrowserGateway(
 
     getSubscriberCount(sessionId: string): number {
       return getSubscribers(sessionId).length;
+    },
+
+    trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>) {
+      let sessionMap = pendingUiRequests.get(sessionId);
+      if (!sessionMap) {
+        sessionMap = new Map();
+        pendingUiRequests.set(sessionId, sessionMap);
+      }
+      sessionMap.set(requestId, { requestId, method, params });
+    },
+
+    clearUiRequest(sessionId: string, requestId: string) {
+      const sessionMap = pendingUiRequests.get(sessionId);
+      if (sessionMap) {
+        sessionMap.delete(requestId);
+        if (sessionMap.size === 0) {
+          pendingUiRequests.delete(sessionId);
+        }
+      }
     },
 
     shutdownHeadlessProcesses() {

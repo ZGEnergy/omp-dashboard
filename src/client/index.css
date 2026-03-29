@@ -126,6 +126,15 @@ body {
   animation: card-working-pulse 3s ease-in-out infinite;
 }
 
+/* Card input pulse — purple tint for sessions waiting for user input (ask_user) */
+@keyframes card-input-pulse {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(168, 85, 247, 0.08); }
+}
+.card-input-pulse {
+  animation: card-input-pulse 3s ease-in-out infinite;
+}
+
 /* Collapsible group animation — grid row trick for auto-height transitions */
 .group-collapse {
   display: grid;

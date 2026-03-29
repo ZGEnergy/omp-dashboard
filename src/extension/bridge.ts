@@ -141,6 +141,8 @@ function initBridge(pi: ExtensionAPI) {
     onReconnect: safe(() => {
       sendStateSync();
       replaySessionEntries();
+      // Re-send pending interactive UI requests so the new server can track them
+      uiProxy?.resendPending();
     }),
   });
 

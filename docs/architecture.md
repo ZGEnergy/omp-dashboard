@@ -31,6 +31,7 @@ A global pi extension that runs in every pi session. It:
   - TUI sessions: races terminal dialog against dashboard response (first wins)
   - Headless sessions: only dashboard can respond
   - Fire-and-forget methods (notify) are forwarded alongside the original call
+  - Re-sends pending UI requests on WebSocket reconnect (server restart resilience)
 
 ### 2. Dashboard Server (`src/server/`)
 A Node.js HTTP + WebSocket server that:
@@ -72,12 +73,16 @@ TypeScript type definitions shared across all components:
 ### Interactive UI Flow (extension dialog → browser → response)
 1. Extension calls `ctx.ui.confirm()` / `select()` / `input()` / `editor()`
 2. Bridge UI proxy intercepts, sends `extension_ui_request` to server
-3. Server forwards to subscribed browsers
+3. Server tracks the request in `pendingUiRequests` map and forwards to subscribed browsers
 4. Browser renders interactive card inline in chat (renderers in `interactive-renderers/`)
 5. User clicks Allow/Deny/option/submits text
-6. Browser sends `extension_ui_response` to server
-7. Server routes to bridge extension
+6. Browser sends `extension_ui_response` to server, optimistically clears "Waiting for input" on session card
+7. Server clears the request from `pendingUiRequests` and routes response to bridge extension
 8. Bridge UI proxy resolves the original dialog promise
+
+**Resilience:**
+- **Page refresh**: Server replays pending `extension_ui_request` messages when a browser subscribes, so interactive dialogs survive page refreshes.
+- **Server restart**: Bridge UI proxy re-sends all pending requests on WebSocket reconnect (`resendPending()`), so dialogs survive server restarts.
 
 ### Command Flow (browser → pi)
 1. User types prompt or command in browser

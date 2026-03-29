@@ -1,6 +1,6 @@
 import React, { useState, type ReactNode } from "react";
 import Icon from "@mdi/react";
-import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiConsoleLine, mdiRobotOutline, mdiCodeTags, mdiApplicationOutline } from "@mdi/js";
+import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiConsoleLine, mdiRobotOutline, mdiCodeTags, mdiApplicationOutline, mdiCommentQuestion } from "@mdi/js";
 import type { DashboardSession } from "../../shared/types.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
 import { formatRelativeTime, formatTokens } from "../lib/format.js";
@@ -45,12 +45,22 @@ const sourceLabels: Record<string, string> = {
   terminal: "Terminal",
 };
 
+export function getCardPulseClass(session: DashboardSession): string {
+  if (session.currentTool === "ask_user") return "card-input-pulse";
+  if (session.status === "streaming" || session.resuming) return "card-working-pulse";
+  return "";
+}
+
 export function ActivityIndicator({ session }: { session: DashboardSession }) {
   if (session.resuming) {
     return <span className="text-yellow-400">Resuming…</span>;
   }
 
   if (session.status === "ended") return null;
+
+  if (session.currentTool === "ask_user") {
+    return <span className="text-purple-400 truncate inline-flex items-center gap-0.5"><Icon path={mdiCommentQuestion} size={0.5} /> Waiting for input</span>;
+  }
 
   if (session.currentTool) {
     return <span className="text-yellow-400 truncate inline-flex items-center gap-0.5"><Icon path={mdiFlash} size={0.5} /> {session.currentTool}</span>;
@@ -239,7 +249,7 @@ export function SessionCard({
         onClick={() => onSelect(session.id)}
         className={`px-4 py-3 cursor-pointer rounded-xl shadow-md shadow-[var(--shadow-card)] border border-[var(--border-subtle)] hover:shadow-lg transition-all duration-200 bg-[var(--bg-tertiary)] ${
           isHidden ? "opacity-40" : ""
-        } ${session.status === "streaming" || session.resuming ? "card-working-pulse" : ""}`}
+        } ${getCardPulseClass(session)}`}
       >
         {/* Line 1: status dot + name + age */}
         <div className="flex items-center gap-2">
@@ -302,7 +312,7 @@ export function SessionCard({
       onClick={() => onSelect(session.id)}
       className={`px-3 py-2.5 cursor-pointer rounded-xl shadow-md shadow-[var(--shadow-card)] border border-[var(--border-subtle)] hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 bg-[var(--bg-tertiary)] ${
         isSelected ? "border-l-2 border-l-blue-500/40" : ""
-      } ${isHidden ? "opacity-40" : ""} ${session.status === "streaming" || session.resuming ? "card-working-pulse" : ""}`}
+      } ${isHidden ? "opacity-40" : ""} ${getCardPulseClass(session)}`}
     >
       <div className="flex gap-2">
       {/* Left gutter: source icon vertically centered */}

@@ -176,4 +176,27 @@ describe("SessionCard", () => {
     const card = container.firstChild as HTMLElement;
     expect(card.className).not.toContain("card-working-pulse");
   });
+
+  it("should apply card-input-pulse when currentTool is ask_user", () => {
+    const session = makeSession({ status: "streaming", currentTool: "ask_user" });
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).toContain("card-input-pulse");
+    expect(card.className).not.toContain("card-working-pulse");
+  });
+
+  it("should apply card-working-pulse when streaming with a non-ask_user tool", () => {
+    const session = makeSession({ status: "streaming", currentTool: "Read" });
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).toContain("card-working-pulse");
+    expect(card.className).not.toContain("card-input-pulse");
+  });
+
+  it("should show 'Waiting for input' when currentTool is ask_user", () => {
+    const session = makeSession({ status: "streaming", currentTool: "ask_user" });
+    render(<SessionCard session={session} {...defaultProps} />);
+    expect(screen.getByText("Waiting for input")).toBeTruthy();
+    expect(screen.queryByText("ask_user")).toBeNull();
+  });
 });

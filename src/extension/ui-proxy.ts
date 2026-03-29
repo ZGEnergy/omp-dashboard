@@ -30,6 +30,7 @@ export interface UiProxyOptions {
 
 interface PendingRequest {
   method: string;
+  params: Record<string, unknown>;
   resolve: (value: any) => void;
 }
 
@@ -53,10 +54,23 @@ export function createUiProxy(options: UiProxyOptions) {
     return requestId;
   }
 
-  function createDashboardPromise<T>(requestId: string, method: string): Promise<T> {
+  function createDashboardPromise<T>(requestId: string, method: string, params: Record<string, unknown>): Promise<T> {
     return new Promise<T>((resolve) => {
-      pending.set(requestId, { method, resolve });
+      pending.set(requestId, { method, params, resolve });
     });
+  }
+
+  /** Re-send all pending UI requests (e.g. after server reconnect) */
+  function resendPending(): void {
+    for (const [requestId, entry] of pending) {
+      send({
+        type: "extension_ui_request",
+        sessionId: getSessionId(),
+        requestId,
+        method: entry.method,
+        params: entry.params,
+      });
+    }
   }
 
   /** Extract the result for a specific dialog method from the response */
@@ -85,8 +99,9 @@ export function createUiProxy(options: UiProxyOptions) {
 
   const wrappedUi = {
     confirm: (title: string, message: string, opts?: any): Promise<boolean> => {
-      const requestId = sendRequest("confirm", { title, message });
-      const dashPromise = createDashboardPromise<boolean>(requestId, "confirm");
+      const params = { title, message };
+      const requestId = sendRequest("confirm", params);
+      const dashPromise = createDashboardPromise<boolean>(requestId, "confirm", params);
 
       if (hasUI) {
         const originalPromise = ui.confirm(title, message, opts);
@@ -96,8 +111,9 @@ export function createUiProxy(options: UiProxyOptions) {
     },
 
     select: (title: string, selectOptions: string[], opts?: any): Promise<string | undefined> => {
-      const requestId = sendRequest("select", { title, options: selectOptions });
-      const dashPromise = createDashboardPromise<string | undefined>(requestId, "select");
+      const params = { title, options: selectOptions };
+      const requestId = sendRequest("select", params);
+      const dashPromise = createDashboardPromise<string | undefined>(requestId, "select", params);
 
       if (hasUI) {
         const originalPromise = ui.select(title, selectOptions, opts);
@@ -107,8 +123,9 @@ export function createUiProxy(options: UiProxyOptions) {
     },
 
     input: (title: string, placeholder?: string, opts?: any): Promise<string | undefined> => {
-      const requestId = sendRequest("input", { title, placeholder });
-      const dashPromise = createDashboardPromise<string | undefined>(requestId, "input");
+      const params = { title, placeholder };
+      const requestId = sendRequest("input", params);
+      const dashPromise = createDashboardPromise<string | undefined>(requestId, "input", params);
 
       if (hasUI) {
         const originalPromise = ui.input(title, placeholder, opts);
@@ -118,8 +135,9 @@ export function createUiProxy(options: UiProxyOptions) {
     },
 
     editor: (title: string, prefill?: string, opts?: any): Promise<string | undefined> => {
-      const requestId = sendRequest("editor", { title, prefill });
-      const dashPromise = createDashboardPromise<string | undefined>(requestId, "editor");
+      const params = { title, prefill };
+      const requestId = sendRequest("editor", params);
+      const dashPromise = createDashboardPromise<string | undefined>(requestId, "editor", params);
 
       if (hasUI && ui.editor) {
         const originalPromise = ui.editor(title, prefill, opts);
@@ -142,5 +160,5 @@ export function createUiProxy(options: UiProxyOptions) {
     entry.resolve(extractResult(entry.method, response));
   }
 
-  return { wrappedUi, handleResponse };
+  return { wrappedUi, handleResponse, resendPending };
 }

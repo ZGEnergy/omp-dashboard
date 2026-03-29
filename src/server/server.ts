@@ -329,6 +329,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       browserGateway.broadcastSessionUpdated(sessionId, modelUpdates);
     }
     if (msg.type === "extension_ui_request") {
+      browserGateway.trackUiRequest(sessionId, msg.requestId, msg.method, msg.params);
       browserGateway.sendToSubscribers(sessionId, {
         type: "extension_ui_request",
         sessionId,

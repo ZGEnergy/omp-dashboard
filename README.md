@@ -15,7 +15,7 @@ A web-based dashboard for monitoring and interacting with [pi](https://github.co
 - **Session statistics** — Token counts, costs, model info, thinking level
 - **Mobile-friendly** — Responsive layout with swipe drawer and touch targets
 - **Session spawning** — Launch new pi sessions from the dashboard (headless by default, or via tmux)
-- **Extension UI forwarding** — View blocked tool calls and extension notifications
+- **Extension UI forwarding** — Interactive dialogs (confirm/select/input) survive page refresh and server restart
 - **On-demand session loading** — Browse historical sessions with lazy-loaded content from pi session files
 - **Integrated terminal** — Full browser-based terminal emulator (xterm.js + node-pty) with ANSI color support, scrollback, and keep-alive
 

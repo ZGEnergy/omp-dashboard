@@ -399,6 +399,15 @@ export default function App() {
           }
           return next;
         });
+        // Optimistically clear "Waiting for input" on the session card
+        setSessions((prev) => {
+          const next = new Map(prev);
+          const session = next.get(selectedId);
+          if (session?.currentTool === "ask_user") {
+            next.set(selectedId, { ...session, currentTool: undefined });
+          }
+          return next;
+        });
       }
     },
     [selectedId, send],

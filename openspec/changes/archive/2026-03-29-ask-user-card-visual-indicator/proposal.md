@@ -4,9 +4,8 @@ When a session is waiting for user input via `ask_user` (an interactive UI dialo
 
 ## What Changes
 
-- The `ActivityIndicator` component in `SessionCard.tsx` detects when `currentTool` is `"ask_user"` and renders a distinct "Waiting for input" indicator with a different color/icon instead of the generic tool execution display.
-- The card border/glow styling changes when the session is waiting for input, making it stand out from cards that are just processing.
-- The working pulse animation (`card-working-pulse`) is replaced with a different visual cue (e.g., a subtle attention-drawing style) when the session needs input.
+- The `ActivityIndicator` component in `SessionCard.tsx` detects when `currentTool` is `"ask_user"` and renders a "Waiting for input" label instead of the generic "⚡ ask_user" tool text.
+- The card uses a different pulsating color (e.g., purple pulse) instead of the current `card-working-pulse` when the session is waiting for input, so it's visually distinct from "processing" at a glance.
 
 ## Capabilities
 
