@@ -59,7 +59,10 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/client/components/FolderOpenSpecSection.tsx` | Folder-level OpenSpec UI: collapsible change list, refresh, bulk archive |
 | `src/client/components/SessionOpenSpecActions.tsx` | Session-level OpenSpec: attach combo box, action buttons, detach |
 | `src/client/components/DialogPortal.tsx` | Portal wrapper rendering dialogs at document.body with scroll lock |
-| `src/client/components/PinDirectoryDialog.tsx` | Dialog to pin a directory by path |
+| `src/client/components/PinDirectoryDialog.tsx` | Dialog to pin a directory (wraps PathPicker) |
+| `src/client/components/PathPicker.tsx` | Reusable keyboard-first path picker with typeahead directory list |
+| `src/client/lib/browse-api.ts` | Client-side browse API helper for PathPicker |
+| `src/server/browse.ts` | Directory listing logic for browse API endpoint |
 | `src/client/components/SortablePinnedGroup.tsx` | Drag-to-reorder wrapper for pinned directory groups |
 | `src/server/state-store.ts` | JSON-backed user preferences (hidden sessions) |
 | `src/server/session-persistence.ts` | Persists session metadata to JSON for server restarts |

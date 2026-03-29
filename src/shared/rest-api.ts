@@ -53,3 +53,20 @@ export interface DirectoryListResult {
 export type FileReadResult = FileContentResult | DirectoryListResult;
 
 export type FileReadResponse = ApiResponse<FileReadResult>;
+
+// ── Browse ──────────────────────────────────────────────────────────
+
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  isGit: boolean;
+  isPi: boolean;
+}
+
+export interface BrowseResult {
+  entries: BrowseEntry[];
+  parent: string | null;
+  current: string;
+}
+
+export type BrowseResponse = ApiResponse<BrowseResult>;

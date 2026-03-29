@@ -25,6 +25,7 @@ import { extractSessionUpdates } from "./event-status-extraction.js";
 import { createTunnel, deleteTunnel } from "./tunnel.js";
 import { detectEditors, EDITORS } from "./editor-registry.js";
 import { localhostGuard } from "./localhost-guard.js";
+import { listDirectories } from "./browse.js";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 
@@ -468,6 +469,20 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   fastify.get("/api/pinned-dirs", async () => {
     return { success: true, data: stateStore.getPinnedDirectories() } satisfies ApiResponse;
   });
+
+  // Directory browse endpoint (localhost-only)
+  fastify.get<{ Querystring: { path?: string } }>(
+    "/api/browse",
+    { preHandler: localhostGuard },
+    async (request) => {
+      try {
+        const result = await listDirectories(request.query.path || undefined);
+        return { success: true, data: result } satisfies ApiResponse;
+      } catch {
+        return { success: false, error: "directory not found" } satisfies ApiResponse;
+      }
+    }
+  );
 
   // Editor detection endpoint (localhost-only)
   fastify.get<{ Querystring: { path?: string } }>(

@@ -46,12 +46,15 @@ Users SHALL be able to pin a directory path that is not currently visible in the
 
 #### Scenario: Open pin dialog
 - **WHEN** a user clicks the "Pin directory" action (e.g., a button in the sidebar header area)
-- **THEN** a dialog SHALL appear with a text input for entering a directory path
+- **THEN** a dialog SHALL appear with a PathPicker component for selecting a directory
 - **AND** the dialog is rendered at document.body via DialogPortal
 
 #### Scenario: Pin directory from dialog
-- **WHEN** a user enters a path and confirms in the pin dialog
+- **WHEN** a user selects a path and confirms in the pin dialog
 - **THEN** the directory SHALL be pinned and appear in the pinned section
+
+### Requirement: Pin directory dialog uses PathPicker
+Pin directory dialog (`PinDirectoryDialog.tsx`) SHALL use the `PathPicker` component for directory selection. The dialog SHALL serve as a thin wrapper providing the title and calling `onPin` with the selected path. All path navigation (typing, filtering, browsing) SHALL be handled by PathPicker internally.
 
 ### Requirement: Visual distinction between pinned and unpinned groups
 The sidebar SHALL visually distinguish pinned directory groups from unpinned ones.

@@ -102,8 +102,13 @@ Input: /Users/robson/Pro▌
 
 **Rationale**: `..` always available ensures users can always navigate up. Error/empty states keep the UI stable.
 
-### 7. Integration with PinDirectoryDialog
-**Decision**: Replace the text input in `PinDirectoryDialog` with `<PathPicker>`. The dialog provides the title, Cancel/Pin buttons, and calls `onPin` with the selected path. PathPicker handles all navigation internally.
+### 7. Select button
+**Decision**: PathPicker includes a "Select" button below the list. Both Enter key and the Select button confirm the current path. The button is disabled when the input is empty.
+
+**Rationale**: Keyboard users use Enter, mouse users click Select. Both paths converge to `onSelect`.
+
+### 8. Integration with PinDirectoryDialog
+**Decision**: Replace the text input in `PinDirectoryDialog` with `<PathPicker>`. The dialog provides the title and calls `onPin` with the selected path. PathPicker handles all navigation internally, including Cancel/Select buttons.
 
 **Rationale**: PinDirectoryDialog becomes trivial — just a dialog shell around PathPicker.
 
