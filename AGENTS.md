@@ -108,6 +108,49 @@ pi-dashboard --dev   # Start with Vite proxy
 | `.pi/skills/openspec-coherence-check/SKILL.md` | Skill: sweep proposals for staleness, conflicts, obsolescence against codebase |
 | `.pi/skills/openspec-coherence-check/references/proposal-queue-schema.md` | JSON schema for `.pi/proposal-queue.json` |
 
+## Build & Restart Workflow
+
+The dashboard has three components that need rebuilding depending on what changed:
+
+### After bridge extension changes (`src/extension/`)
+Reload all connected pi sessions to pick up the new bridge code:
+```bash
+npm run reload          # Reload all pi sessions
+npm run reload:check    # Type-check first, then reload
+```
+
+### After server changes (`src/server/`, `src/shared/`)
+Restart the dashboard server. The server runs TypeScript directly via tsx, so no separate build step is needed — just restart:
+```bash
+# Production mode
+pi-dashboard stop && pi-dashboard start
+
+# Dev mode (with Vite proxy)
+pi-dashboard stop && pi-dashboard start --dev
+```
+
+### After client changes (`src/client/`)
+- **Dev mode**: Vite hot-reloads automatically, no action needed. Start with `npm run dev`.
+- **Production mode**: Rebuild the client and restart the server:
+  ```bash
+  npm run build
+  pi-dashboard stop && pi-dashboard start
+  ```
+
+### After OpenSpec apply finishes (full rebuild)
+When an openspec-apply-change skill completes implementation, do a full rebuild and restart:
+```bash
+# Production mode
+npm run build
+pi-dashboard stop && pi-dashboard start
+npm run reload
+
+# Dev mode
+pi-dashboard stop && pi-dashboard start --dev
+npm run reload
+```
+Check which mode is running: if the Vite dev server is active on port 3000/5173 (`lsof -i :3000 -i :5173`), use dev mode. Otherwise use production mode.
+
 ## Code Instructions
 
 1. First think through the problem, read the codebase for relevant files.
