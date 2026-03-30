@@ -4,10 +4,10 @@ The sidebar group headers currently only show editor buttons. Users need quick a
 
 ## What Changes
 
-- **"Add pi-agent" button**: Action button on group headers and empty workspace groups that spawns a new pi session via tmux in that folder's CWD. Wires existing `process-manager.ts` to a new `POST /api/spawn-session` endpoint.
+- ~~**"Add pi-agent" button**~~: Already implemented — `spawn-session-btn` in `SessionList.tsx` uses WebSocket `spawn_session` message (shipped in `headless-spawn` + `placeholder-spawn-card` archives).
 - **"Add worktree" button**: Action button on group headers that opens a dialog to create a git worktree. Runs `git worktree add -b <branch-name> <path>` where the base branch defaults to the group's detected branch. New `POST /api/git/worktree` endpoint.
 - **Add worktree dialog**: Modal with branch name input, auto-derived worktree path (sibling directory), and confirmation.
-- **Server endpoints**: `POST /api/spawn-session` (body: `{ cwd }`) and `POST /api/git/worktree` (body: `{ cwd, branchName, worktreePath? }`), both localhost-only.
+- **Server endpoint**: `POST /api/git/worktree` (body: `{ cwd, branchName, worktreePath? }`), localhost-only.
 
 ## Capabilities
 

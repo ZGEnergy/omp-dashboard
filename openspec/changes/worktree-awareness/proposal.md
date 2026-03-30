@@ -7,7 +7,7 @@ Git worktrees are common in multi-branch workflows — each worktree is a separa
 - **Worktree detection in git-info**: Detect if a CWD is a git worktree (`.git` is a file, not a directory) and expose `isWorktree: boolean` and `worktreePath: string` on the session data.
 - **Session card**: Show worktree folder name instead of branch when the session CWD is a worktree (e.g., "🌲 feature-worktree" instead of "⎇ feature/branch").
 - **Group header**: Continue showing branch + PR as before (no change to group header git info).
-- **Zed open behavior**: When opening Zed for a directory, check if Zed already has that directory open. If not, use `zed -n <path>` to create a new window. Always target the session's actual CWD (which is the worktree directory).
+- **Zed open behavior**: The `/api/open-editor` endpoint in `server.ts` (folder-level) should use `zed -n <path>` to create a new window when the directory is not already open in Zed. Always target the session's actual CWD (which is the worktree directory). Note: editor buttons are folder-level only (not on session cards).
 - **DashboardSession type**: Add optional `isWorktree` field.
 
 ## Capabilities
@@ -24,6 +24,6 @@ _(none)_
 
 ## Impact
 
-- **Files**: `src/extension/git-info.ts`, `src/shared/types.ts`, `src/client/components/SessionCard.tsx`, `src/server/editor-registry.ts`, `src/server/server.ts` (open-editor endpoint)
-- **Tests**: `git-info.test.ts`, `SessionCard.test.tsx`, `editor-registry.test.ts`
+- **Files**: `src/extension/git-info.ts`, `src/shared/types.ts`, `src/client/components/SessionCard.tsx`, `src/server/server.ts` (open-editor endpoint — Zed `-n` flag)
+- **Tests**: `git-info.test.ts`, `SessionCard.test.tsx`
 - **Protocol**: `session_added` / `session_updated` messages gain optional `isWorktree` field (backward compatible).
