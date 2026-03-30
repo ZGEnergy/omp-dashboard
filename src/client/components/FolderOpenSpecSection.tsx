@@ -4,8 +4,7 @@ import { mdiRefresh } from "@mdi/js";
 import type { OpenSpecData, DashboardSession } from "../../shared/types.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { DialogPortal } from "./DialogPortal.js";
-import { NewChangeDialog } from "./NewChangeDialog.js";
-import { ArtifactLetters } from "./openspec-helpers.js";
+import { ArtifactLettersButton } from "./openspec-helpers.js";
 
 interface Props {
   data: OpenSpecData;
@@ -13,23 +12,17 @@ interface Props {
   onRefresh: () => void;
   onBulkArchive: () => void;
   onReadArtifact?: (changeName: string, artifactId: string) => void;
-  /** Sessions in this folder group (for + New targeting and session links) */
+  /** Sessions in this folder group (for session links) */
   sessions?: DashboardSession[];
-  /** Send a prompt to a specific session */
-  onSendPrompt?: (sessionId: string, text: string) => void;
   /** Navigate to a session */
   onNavigateToSession?: (sessionId: string) => void;
 }
 
-export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onReadArtifact, sessions, onSendPrompt, onNavigateToSession }: Props) {
+export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onReadArtifact, sessions, onNavigateToSession }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [bulkArchiveConfirm, setBulkArchiveConfirm] = useState(false);
-  const [newChangeOpen, setNewChangeOpen] = useState(false);
 
   if (!data.initialized) return null;
-
-  const activeSession = sessions?.find((s) => s.status !== "ended");
-  const canCreateNew = !!(activeSession && onSendPrompt);
 
   const sortedChanges = [
     ...data.changes.filter((c) => c.status !== "complete"),
@@ -63,14 +56,6 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onR
         >
           Bulk Archive
         </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); setNewChangeOpen(true); }}
-          disabled={!canCreateNew}
-          className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-green-400 hover:border-green-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
-          data-testid="folder-new-change-btn"
-        >
-          + Change
-        </button>
       </div>
 
       {/* Expanded change list */}
@@ -83,7 +68,6 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onR
                 <span data-testid="change-name" className="text-[11px] font-medium text-[var(--text-secondary)] truncate">
                   {c.name}
                 </span>
-                <ArtifactLetters artifacts={c.artifacts} changeName={c.name} onReadArtifact={onReadArtifact} />
                 {linkedSessions.length > 0 && (
                   <span className="flex items-center gap-1">
                     {linkedSessions.map((s) => (
@@ -104,6 +88,7 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onR
                     {c.completedTasks}/{c.totalTasks} tasks
                   </span>
                 )}
+                <ArtifactLettersButton artifacts={c.artifacts} changeName={c.name} onReadArtifact={onReadArtifact} />
               </div>
             );
           })}
@@ -119,16 +104,6 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onR
             setBulkArchiveConfirm(false);
           }}
           onCancel={() => setBulkArchiveConfirm(false)}
-        /></DialogPortal>
-      )}
-
-      {newChangeOpen && canCreateNew && (
-        <DialogPortal><NewChangeDialog
-          onSend={(prompt) => {
-            onSendPrompt!(activeSession!.id, prompt);
-            setNewChangeOpen(false);
-          }}
-          onClose={() => setNewChangeOpen(false)}
         /></DialogPortal>
       )}
     </div>

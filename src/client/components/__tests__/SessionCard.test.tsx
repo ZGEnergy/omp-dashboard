@@ -4,6 +4,10 @@ import React from "react";
 import { SessionCard } from "../SessionCard.js";
 import type { DashboardSession } from "../../../shared/types.js";
 
+vi.mock("../../hooks/useMobile.js", () => ({
+  useMobile: vi.fn(() => false),
+}));
+
 afterEach(() => cleanup());
 
 function makeSession(overrides: Partial<DashboardSession> = {}): DashboardSession {
@@ -198,5 +202,52 @@ describe("SessionCard", () => {
     render(<SessionCard session={session} {...defaultProps} />);
     expect(screen.getByText("Waiting for input")).toBeTruthy();
     expect(screen.queryByText("ask_user")).toBeNull();
+  });
+
+  it("should render compact context bar inline with activity and cost", () => {
+    const session = makeSession({ status: "streaming", currentTool: "Read", cost: 1.5 });
+    render(
+      <SessionCard
+        session={session}
+        {...defaultProps}
+        contextUsage={{ tokens: 5000, contextWindow: 10000 }}
+      />
+    );
+    // Context bar, activity indicator, and cost should all be in the same parent row
+    const bar = screen.getByTestId("context-usage-bar");
+    const row = bar.parentElement!;
+    // Cost is in the same row
+    expect(row.textContent).toContain("$1.50");
+    // Activity indicator (tool name) is in the same row
+    expect(row.textContent).toContain("Read");
+    // Bar is compact (w-16, no percentage text)
+    expect(bar.className).toContain("w-16");
+    expect(screen.queryByTestId("context-usage-pct")).toBeNull();
+  });
+
+  it("should render compact context bar inline on mobile card", async () => {
+    const { useMobile } = await import("../../hooks/useMobile.js");
+    (useMobile as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    const session = makeSession({ status: "streaming", cost: 2.0, model: "claude-4" });
+    render(
+      <SessionCard
+        session={session}
+        {...defaultProps}
+        contextUsage={{ tokens: 3000, contextWindow: 10000 }}
+      />
+    );
+
+    const bar = screen.getByTestId("context-usage-bar");
+    const row = bar.parentElement!;
+    // Cost and model in the same row
+    expect(row.textContent).toContain("$2.00");
+    expect(row.textContent).toContain("claude-4");
+    // Bar is compact
+    expect(bar.className).toContain("w-16");
+    expect(screen.queryByTestId("context-usage-pct")).toBeNull();
+
+    // Restore
+    (useMobile as ReturnType<typeof vi.fn>).mockReturnValue(false);
   });
 });

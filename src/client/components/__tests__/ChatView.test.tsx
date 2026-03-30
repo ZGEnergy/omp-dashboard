@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
+import { render, fireEvent, act } from "@testing-library/react";
 import React from "react";
 import { ChatView } from "../ChatView.js";
 import { ThemeProvider } from "../ThemeProvider.js";
@@ -203,5 +203,117 @@ describe("ChatView", () => {
     state.pendingPrompt = { text: "Hello" };
     const { container } = render(<ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>);
     expect(container.textContent).not.toContain("No messages yet");
+  });
+
+  describe("scroll lock", () => {
+    let scrollToSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      scrollToSpy = vi.fn();
+      Element.prototype.scrollTo = scrollToSpy;
+    });
+
+    /** Helper to set scroll geometry on the scroll container */
+    function setScrollPosition(el: Element, scrollTop: number, scrollHeight: number, clientHeight: number) {
+      Object.defineProperty(el, "scrollTop", { value: scrollTop, writable: true, configurable: true });
+      Object.defineProperty(el, "scrollHeight", { value: scrollHeight, writable: true, configurable: true });
+      Object.defineProperty(el, "clientHeight", { value: clientHeight, writable: true, configurable: true });
+    }
+
+    function getScrollContainer(container: HTMLElement): HTMLElement {
+      return container.querySelector("[class*='overflow-y-auto']")!;
+    }
+
+    it("auto-scrolls when near bottom (default behavior)", () => {
+      const state = stateWithMessages([
+        { id: "1", role: "user", content: "Hello" },
+      ]);
+      const { rerender } = render(<ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>);
+
+      // isNearBottom defaults to true, so adding a message should trigger scrollTo
+      scrollToSpy.mockClear();
+      const state2 = stateWithMessages([
+        { id: "1", role: "user", content: "Hello" },
+        { id: "2", role: "assistant", content: "Hi" },
+      ]);
+      rerender(<ThemeProvider><ChatView state={state2} toolContext={defaultToolContext} /></ThemeProvider>);
+
+      expect(scrollToSpy).toHaveBeenCalled();
+    });
+
+    it("does NOT auto-scroll when scrolled away from bottom", () => {
+      const state = stateWithMessages([
+        { id: "1", role: "user", content: "Hello" },
+      ]);
+      const { container, rerender } = render(<ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>);
+
+      const scrollEl = getScrollContainer(container);
+      // Simulate user scrolling up: far from bottom
+      setScrollPosition(scrollEl, 0, 1000, 400);
+      fireEvent.scroll(scrollEl);
+
+      scrollToSpy.mockClear();
+      const state2 = stateWithMessages([
+        { id: "1", role: "user", content: "Hello" },
+        { id: "2", role: "assistant", content: "Hi" },
+      ]);
+      rerender(<ThemeProvider><ChatView state={state2} toolContext={defaultToolContext} /></ThemeProvider>);
+
+      expect(scrollToSpy).not.toHaveBeenCalled();
+    });
+
+    it("shows scroll-to-bottom button when not near bottom", () => {
+      const state = stateWithMessages([
+        { id: "1", role: "user", content: "Hello" },
+      ]);
+      const { container } = render(<ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>);
+
+      const scrollEl = getScrollContainer(container);
+      setScrollPosition(scrollEl, 0, 1000, 400);
+      fireEvent.scroll(scrollEl);
+
+      const btn = container.querySelector('[data-testid="scroll-to-bottom"]');
+      expect(btn).not.toBeNull();
+    });
+
+    it("hides scroll-to-bottom button when near bottom", () => {
+      const state = stateWithMessages([
+        { id: "1", role: "user", content: "Hello" },
+      ]);
+      const { container } = render(<ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>);
+
+      // Default state — near bottom
+      const btn = container.querySelector('[data-testid="scroll-to-bottom"]');
+      expect(btn).toBeNull();
+
+      // Scroll up then back to bottom
+      const scrollEl = getScrollContainer(container);
+      setScrollPosition(scrollEl, 0, 1000, 400);
+      fireEvent.scroll(scrollEl);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+
+      setScrollPosition(scrollEl, 970, 1000, 400);
+      fireEvent.scroll(scrollEl);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+    });
+
+    it("clicking scroll-to-bottom button calls scrollTo and hides button", () => {
+      const state = stateWithMessages([
+        { id: "1", role: "user", content: "Hello" },
+      ]);
+      const { container } = render(<ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>);
+
+      const scrollEl = getScrollContainer(container);
+      setScrollPosition(scrollEl, 0, 1000, 400);
+      fireEvent.scroll(scrollEl);
+
+      scrollToSpy.mockClear();
+      const btn = container.querySelector('[data-testid="scroll-to-bottom"]')!;
+      fireEvent.click(btn);
+
+      expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+      // Button should be hidden after click
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+    });
   });
 });

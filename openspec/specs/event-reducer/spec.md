@@ -70,6 +70,21 @@ A `session_compact` event SHALL clear all messages and tool call state, resettin
 - **WHEN** a `session_compact` event arrives
 - **THEN** `messages` SHALL be cleared, `toolCalls` SHALL be cleared, and streaming state SHALL be reset
 
+### Requirement: Full replay state reset
+When an `event_replay` message is received whose first event has `seq === 1`, the reducer SHALL reset session state to `createInitialState()` before applying the replayed events. This prevents duplicate messages when re-subscribing to a previously-loaded session (e.g. switching back to a session card or reconnecting after a WebSocket drop).
+
+#### Scenario: Full replay resets state
+- **WHEN** an `event_replay` arrives with events starting at `seq: 1`
+- **THEN** the session state SHALL be reset to `createInitialState()` before reducing the replayed events
+
+#### Scenario: Incremental replay preserves state
+- **WHEN** an `event_replay` arrives with events starting at a `seq > 1`
+- **THEN** the existing session state SHALL be preserved and the new events SHALL be reduced on top of it
+
+#### Scenario: Empty replay preserves state
+- **WHEN** an `event_replay` arrives with an empty events array
+- **THEN** the existing session state SHALL be preserved (no reset)
+
 ### Requirement: Model select handling
 A `model_select` event SHALL update `model` and `thinkingLevel` on the session state.
 

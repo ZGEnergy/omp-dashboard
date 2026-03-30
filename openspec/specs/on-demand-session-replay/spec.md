@@ -30,6 +30,13 @@ On-demand loaded events SHALL be delivered as batch `event_replay` messages, not
 - **WHEN** the server loads events from a session file
 - **THEN** it SHALL insert all events into the in-memory buffer, then send `event_replay { events, isLast: true }` to all waiting browsers
 
+### Requirement: Client state reset on full replay
+When the browser receives a full `event_replay` (first event has `seq === 1`), the client SHALL reset the session's `SessionState` to its initial state before reducing the replayed events. This prevents duplicate messages when switching between session cards or re-subscribing after a WebSocket reconnect. See the `event-reducer` spec for implementation details.
+
+#### Scenario: Switching to a previously-subscribed session
+- **WHEN** a user switches to a session card that was already loaded, triggering a new full replay
+- **THEN** the client SHALL reset state and reduce from scratch, producing the same result as a fresh page load
+
 #### Scenario: Live events not affected by loading
 - **WHEN** live `event_forward` messages arrive for an active session while a different session is being loaded
 - **THEN** the live events SHALL be broadcast normally to subscribers — loading only applies to the specific session being loaded

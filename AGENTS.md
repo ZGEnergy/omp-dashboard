@@ -114,6 +114,8 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/server/resolve-path.ts` | Safe realpath resolution (symlink handling) |
 | `.pi/skills/openspec-coherence-check/SKILL.md` | Skill: sweep proposals for staleness, conflicts, obsolescence against codebase |
 | `.pi/skills/openspec-coherence-check/references/proposal-queue-schema.md` | JSON schema for `.pi/proposal-queue.json` |
+| `.pi/skills/code-review/SKILL.md` | Skill: comprehensive code review with severity labels, four-phase process, language-specific guides |
+| `.pi/skills/code-review/references/` | On-demand language guides (React, TypeScript, Vue, Rust, Go, Java, Python, C/C++, CSS, Qt) + architecture/performance/security reviews |
 
 ## Build & Restart Workflow
 

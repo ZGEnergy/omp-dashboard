@@ -55,4 +55,31 @@ describe("ContextUsageBar", () => {
     const inner = bar.querySelector("[title]")!;
     expect(inner.getAttribute("title")).toBe("No context data");
   });
+
+  describe("compact mode", () => {
+    it("hides percentage text when compact", () => {
+      render(<ContextUsageBar tokens={5000} contextWindow={10000} compact />);
+      expect(screen.queryByTestId("context-usage-pct")).toBeNull();
+    });
+
+    it("still shows fill bar when compact", () => {
+      render(<ContextUsageBar tokens={5000} contextWindow={10000} compact />);
+      const fill = screen.getByTestId("context-usage-fill");
+      expect(fill.style.width).toBe("50%");
+    });
+
+    it("shows percentage in tooltip when compact", () => {
+      render(<ContextUsageBar tokens={5000} contextWindow={10000} compact />);
+      const bar = screen.getByTestId("context-usage-bar");
+      const inner = bar.querySelector("[title]")!;
+      expect(inner.getAttribute("title")).toContain("50%");
+    });
+
+    it("uses fixed width class when compact", () => {
+      render(<ContextUsageBar tokens={5000} contextWindow={10000} compact />);
+      const bar = screen.getByTestId("context-usage-bar");
+      expect(bar.className).toContain("w-16");
+      expect(bar.className).not.toContain("flex-1");
+    });
+  });
 });

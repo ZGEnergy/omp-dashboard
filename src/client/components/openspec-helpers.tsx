@@ -45,6 +45,32 @@ export function ArtifactLetters({
   );
 }
 
+export function ArtifactLettersButton({
+  artifacts,
+  changeName,
+  onReadArtifact,
+}: {
+  artifacts: OpenSpecArtifact[];
+  changeName: string;
+  onReadArtifact?: (changeName: string, artifactId: string) => void;
+}) {
+  if (artifacts.length === 0) return null;
+  return (
+    <button
+      data-testid="artifact-letters-btn"
+      title="Open proposal"
+      className="flex items-center gap-0.5 px-1 py-0.5 rounded border border-[var(--border-secondary)] hover:border-blue-500/50 cursor-pointer"
+      onClick={(e) => { e.stopPropagation(); onReadArtifact?.(changeName, "proposal"); }}
+    >
+      {artifacts.map((a) => (
+        <span key={a.id} className={`text-[10px] font-bold font-mono ${statusColor(a.status)}`}>
+          {artifactLetter(a.id)}
+        </span>
+      ))}
+    </button>
+  );
+}
+
 export function allArtifactsDone(artifacts: OpenSpecChange["artifacts"]): boolean {
   return artifacts.length > 0 && artifacts.every((a) => a.status === "done");
 }

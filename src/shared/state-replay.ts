@@ -19,6 +19,7 @@ export function replayEntriesAsEvents(
   entries: any[],
 ): EventForwardMessage[] {
   const messages: EventForwardMessage[] = [];
+  const openToolCalls = new Set<string>(); // track tool calls without results
 
   let currentModel = "";
 
@@ -49,6 +50,7 @@ export function replayEntriesAsEvents(
                 ? tryParseJson(part.arguments)
                 : part.arguments,
             }));
+            openToolCalls.add(part.id);
           }
         }
         // Emit message_update (sets streamingText) then message_end (finalizes)
@@ -97,6 +99,7 @@ export function replayEntriesAsEvents(
           result: resultText,
           isError: msg.isError ?? false,
         }));
+        openToolCalls.delete(msg.toolCallId);
       }
     }
 
@@ -106,6 +109,20 @@ export function replayEntriesAsEvents(
         model: { provider: entry.provider, id: entry.modelId },
       }));
     }
+  }
+
+  // Close any orphaned tool calls (agent killed mid-execution)
+  for (const toolCallId of openToolCalls) {
+    const startEvent = messages.find(
+      (m) => m.event.eventType === "tool_execution_start" && (m.event.data as any).toolCallId === toolCallId,
+    );
+    const ts = startEvent ? startEvent.event.timestamp : Date.now();
+    messages.push(makeEvent(sessionId, "tool_execution_end", ts, {
+      toolCallId,
+      toolName: (startEvent?.event.data as any)?.toolName ?? "unknown",
+      result: "",
+      isError: false,
+    }));
   }
 
   return messages;

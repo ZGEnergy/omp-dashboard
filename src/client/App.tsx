@@ -199,10 +199,13 @@ export default function App() {
         });
         break;
 
-      case "event_replay":
+      case "event_replay": {
+        // Determine if this is a full replay (seq starts at 1) or incremental
+        const firstSeq = msg.events.length > 0 ? msg.events[0].seq : null;
         setSessionStates((prev) => {
           const next = new Map(prev);
-          let current = next.get(msg.sessionId) ?? createInitialState();
+          // Reset state on full replay to avoid duplicate messages
+          let current = (firstSeq === 1) ? createInitialState() : (next.get(msg.sessionId) ?? createInitialState());
           for (const { event } of msg.events) {
             current = reduceEvent(current, event);
           }
@@ -210,6 +213,7 @@ export default function App() {
           return next;
         });
         break;
+      }
 
       case "resume_result":
         if (!msg.success) {
@@ -254,6 +258,10 @@ export default function App() {
         setSessionStates((prev) => {
           const next = new Map(prev);
           const current = next.get(msg.sessionId) ?? createInitialState();
+          // Skip if this request was already added (replay after reconnect)
+          if (current.interactiveRequests.some((r) => r.requestId === msg.requestId)) {
+            return prev;
+          }
           next.set(msg.sessionId, addInteractiveRequest(current, msg.requestId, msg.method, msg.params));
           return next;
         });
@@ -323,12 +331,14 @@ export default function App() {
       setPreviewState(null);
       prevSelectedRef.current = selectedId;
     }
-    // Lazy subscribe: load events for ended sessions when first selected
-    if (selectedId && !subscribedRef.current.has(selectedId)) {
+    // Lazy subscribe: load events for ended sessions when first selected.
+    // Also re-subscribes the selected session after reconnect (status change
+    // clears subscribedRef, and adding `status` here re-triggers the effect).
+    if (selectedId && !subscribedRef.current.has(selectedId) && status === "connected") {
       subscribedRef.current.add(selectedId);
       send({ type: "subscribe", sessionId: selectedId, lastSeq: 0 });
     }
-  }, [selectedId, send]);
+  }, [selectedId, send, status]);
 
   const selectedState = selectedId
     ? sessionStates.get(selectedId) ?? createInitialState()

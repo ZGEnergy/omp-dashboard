@@ -60,11 +60,12 @@ describe("replayEntriesAsEvents", () => {
     ];
 
     const events = replayEntriesAsEvents("sess-1", entries);
-    // tool_execution_start + message_update + message_end
-    expect(events).toHaveLength(3);
+    // tool_execution_start + message_update + message_end + tool_execution_end (orphaned)
+    expect(events).toHaveLength(4);
     expect(events[0].event.eventType).toBe("tool_execution_start");
     expect((events[0].event.data as any).toolName).toBe("bash");
     expect((events[0].event.data as any).args).toEqual({ command: "ls" });
+    expect(events[3].event.eventType).toBe("tool_execution_end");
   });
 
   it("should convert tool result message to tool_execution_end", () => {
@@ -161,6 +162,35 @@ describe("replayEntriesAsEvents", () => {
     // Only message_update + message_end, no stats_update
     expect(events).toHaveLength(2);
     expect(events.every(e => e.event.eventType !== "stats_update")).toBe(true);
+  });
+
+  it("should emit tool_execution_end for orphaned tool calls (killed mid-execution)", () => {
+    const entries = [
+      {
+        type: "message", id: "e1", parentId: null,
+        timestamp: "2025-01-01T00:00:00Z",
+        message: { role: "user", content: [{ type: "text", text: "Run something" }] },
+      },
+      {
+        type: "message", id: "e2", parentId: "e1",
+        timestamp: "2025-01-01T00:00:01Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "tc-1", name: "bash", arguments: '{"command":"sleep 100"}' },
+          ],
+        },
+      },
+      // No toolResult — agent was killed mid-execution
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries);
+    const types = events.map((e) => e.event.eventType);
+    // Should auto-close the orphaned tool call
+    expect(types).toContain("tool_execution_end");
+    const endEvent = events.find(e => e.event.eventType === "tool_execution_end");
+    expect((endEvent!.event.data as any).toolCallId).toBe("tc-1");
+    expect((endEvent!.event.data as any).toolName).toBe("bash");
   });
 
   it("should handle a full conversation sequence", () => {

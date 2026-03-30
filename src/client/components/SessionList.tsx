@@ -431,7 +431,6 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               onBulkArchive={() => onBulkArchive?.(group.cwd)}
               onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(group.cwd, changeName, artifactId) : undefined}
               sessions={group.sessions}
-              onSendPrompt={onSendPrompt}
               onNavigateToSession={onSelect}
             />
           )}
@@ -462,8 +461,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                           isHidden={!!session.hidden}
                           onHide={handleHide}
                           onUnhide={handleUnhide}
-                          editors={group.sessions.length === 1 ? editorMap.get(group.cwd) : undefined}
-                          onOpenEditor={group.sessions.length === 1 ? (editorId) => handleOpenEditor(group.cwd, editorId) : undefined}
+
                           contextUsage={contextUsageMap?.get(session.id)}
                           openspecChanges={openspecMap?.get(session.cwd)?.changes}
                           onSendPrompt={onSendPrompt ? (text) => onSendPrompt(session.id, text) : undefined}

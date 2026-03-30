@@ -11,9 +11,13 @@ The chat view SHALL render an optimistic user message card at the bottom of the 
 - **WHEN** `state.pendingPrompt` becomes undefined (server confirmed or cancelled)
 - **THEN** the optimistic card SHALL no longer be rendered
 
-#### Scenario: Auto-scroll to pending card
-- **WHEN** a pending card appears
-- **THEN** the chat view SHALL auto-scroll to show it
+#### Scenario: Auto-scroll to pending card when following
+- **WHEN** a pending card appears AND the user is at or near the bottom (within 50px)
+- **THEN** the chat view SHALL auto-scroll to show the pending card
+
+#### Scenario: No auto-scroll to pending card when scroll-locked
+- **WHEN** a pending card appears AND the user has scrolled up (more than 50px from bottom)
+- **THEN** the chat view SHALL NOT auto-scroll
 
 ### Requirement: Bash output event rendering
 The chat view SHALL render `bash_output` events as styled cards in the message stream. Each card SHALL display:

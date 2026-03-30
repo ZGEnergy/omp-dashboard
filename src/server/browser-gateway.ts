@@ -22,6 +22,7 @@ import type { DirectoryService } from "./directory-service.js";
 import { createPendingResumeRegistry, type PendingResumeRegistry } from "./pending-resume-registry.js";
 import type { TerminalManager } from "./terminal-manager.js";
 import { execSync, execFile } from "node:child_process";
+import { extractStatsFromEvents } from "./event-status-extraction.js";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
@@ -230,8 +231,11 @@ export function createBrowserGateway(
                     for (const evt of result.events) {
                       eventStore.insertEvent(msg.sessionId, evt);
                     }
-                    sessionManager.update(msg.sessionId, { dataUnavailable: false });
-                    broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { dataUnavailable: false } });
+                    // Extract stats from loaded events and update session metadata
+                    const statsUpdates = extractStatsFromEvents(result.events);
+                    const metaUpdates: Record<string, unknown> = { dataUnavailable: false, ...statsUpdates };
+                    sessionManager.update(msg.sessionId, metaUpdates);
+                    broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: metaUpdates });
                     // Send loaded events to all subscribers
                     const stored = eventStore.getEvents(msg.sessionId, 1);
                     const replayMsg: ServerToBrowserMessage = {

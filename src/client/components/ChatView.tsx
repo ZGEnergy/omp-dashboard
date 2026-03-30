@@ -1,6 +1,6 @@
-import React, { useRef, useEffect, useCallback } from "react";
+import React, { useRef, useEffect, useCallback, useState } from "react";
 import Icon from "@mdi/react";
-import { mdiContentCopy, mdiTextBox, mdiLoading } from "@mdi/js";
+import { mdiContentCopy, mdiTextBox, mdiLoading, mdiChevronDown } from "@mdi/js";
 import type { SessionState, ChatImage, InteractiveUiRequest } from "../lib/event-reducer.js";
 import type { ToolContext } from "./tool-renderers/index.js";
 import { MarkdownContent } from "./MarkdownContent.js";
@@ -81,19 +81,42 @@ function hasMermaid(content: string): boolean {
   return /```mermaid\b/.test(content);
 }
 
+const SCROLL_THRESHOLD = 50;
+
 export function ChatView({ state, toolContext, onCancelPending, onRespondToUi }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isNearBottom = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const isMobile = useMobile();
   const bubbleMax = isMobile ? "max-w-[95%]" : "max-w-[80%]";
   /** Force wide when message contains a mermaid diagram */
   const bubbleWide = isMobile ? "w-[95%]" : "w-[95%]";
 
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+    isNearBottom.current = nearBottom;
+    setShowScrollButton(!nearBottom);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    isNearBottom.current = true;
+    setShowScrollButton(false);
+  }, []);
+
   useEffect(() => {
-    scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
+    if (isNearBottom.current) {
+      scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
+    }
   }, [state.messages.length, state.streamingText, state.pendingPrompt]);
 
   return (
-    <div ref={scrollRef} className={`flex-1 overflow-y-auto ${isMobile ? "p-2" : "p-4"} space-y-1`}>
+    <div className="flex-1 relative overflow-hidden">
+    <div ref={scrollRef} onScroll={handleScroll} className={`h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"} space-y-1`}>
       {state.messages.map((msg) => {
         if (msg.role === "user") {
           return (
@@ -235,6 +258,17 @@ export function ChatView({ state, toolContext, onCancelPending, onRespondToUi }:
           <p>No messages yet</p>
         </div>
       )}
+    </div>
+    {showScrollButton && (
+      <button
+        data-testid="scroll-to-bottom"
+        onClick={scrollToBottom}
+        className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-full p-2 shadow-lg hover:bg-[var(--bg-surface)] transition-colors"
+        title="Scroll to bottom"
+      >
+        <Icon path={mdiChevronDown} size={0.8} className="text-[var(--text-secondary)]" />
+      </button>
+    )}
     </div>
   );
 }

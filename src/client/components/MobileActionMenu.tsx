@@ -11,7 +11,6 @@ import {
   mdiClose,
   mdiSourceBranch,
   mdiLinkVariant,
-  mdiBookOpenPageVariantOutline,
   mdiCompassOutline,
   mdiFastForward,
   mdiPlayCircleOutline,
@@ -39,19 +38,23 @@ interface Props {
   onReadArtifact?: (changeName: string, artifactId: string) => void;
 }
 
-function MenuRow({ icon, label, onClick, danger }: {
+function MenuRow({ icon, label, onClick, danger, disabled }: {
   icon: string;
   label: string;
   onClick: () => void;
   danger?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={`w-full flex items-center gap-3 px-4 py-3 text-sm text-left min-h-[44px] ${
-        danger
-          ? "text-red-400 hover:bg-red-500/10"
-          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+        disabled
+          ? "text-[var(--text-muted)] opacity-40 cursor-not-allowed"
+          : danger
+            ? "text-red-400 hover:bg-red-500/10"
+            : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
       }`}
     >
       <Icon path={icon} size={0.7} />
@@ -171,27 +174,31 @@ export function MobileActionMenu({ session, editors, openspecChanges, onRename, 
                 <div className="px-4 py-1.5 text-[10px] text-[var(--text-muted)] uppercase tracking-wider border-t border-[var(--border-primary)]">
                   OpenSpec: {attached}
                 </div>
-                {change.artifacts.length > 0 && onReadArtifact && (
-                  <MenuRow icon={mdiBookOpenPageVariantOutline} label="Read" onClick={() => act(() => onReadArtifact!(change.name, change.artifacts[0].id))} />
-                )}
-                {onSendPrompt && (
-                  <MenuRow icon={mdiCompassOutline} label="Explore" onClick={() => act(() => onSendPrompt(`/skill:openspec-explore ${attached}`))} />
-                )}
-                {state === ChangeState.PLANNING && onSendPrompt && (
-                  <>
-                    <MenuRow icon={mdiChevronRight} label="Continue" onClick={() => act(() => onSendPrompt(`/opsx:continue ${attached}`))} />
-                    <MenuRow icon={mdiFastForward} label="Fast-Forward" onClick={() => act(() => onSendPrompt(`/opsx:ff ${attached}`))} />
-                  </>
-                )}
-                {(state === ChangeState.READY || state === ChangeState.IMPLEMENTING) && onSendPrompt && (
-                  <MenuRow icon={mdiPlayCircleOutline} label="Apply" onClick={() => act(() => onSendPrompt(`/opsx:apply ${attached}`))} />
-                )}
-                {state === ChangeState.COMPLETE && onSendPrompt && (
-                  <>
-                    <MenuRow icon={mdiCheckCircleOutline} label="Verify" onClick={() => act(() => onSendPrompt(`/opsx:verify ${attached}`))} />
-                    <MenuRow icon={mdiArchiveOutline} label="Archive" onClick={() => act(() => onSendPrompt(`/opsx:archive ${attached}`))} />
-                  </>
-                )}
+                {(() => {
+                  const actionsDisabled = session.status === "streaming";
+                  return (
+                    <>
+                      {onSendPrompt && (
+                        <MenuRow icon={mdiCompassOutline} label="Explore" onClick={() => act(() => onSendPrompt(`/skill:openspec-explore ${attached}`))} disabled={actionsDisabled} />
+                      )}
+                      {state === ChangeState.PLANNING && onSendPrompt && (
+                        <>
+                          <MenuRow icon={mdiChevronRight} label="Continue" onClick={() => act(() => onSendPrompt(`/opsx:continue ${attached}`))} disabled={actionsDisabled} />
+                          <MenuRow icon={mdiFastForward} label="Fast-Forward" onClick={() => act(() => onSendPrompt(`/opsx:ff ${attached}`))} disabled={actionsDisabled} />
+                        </>
+                      )}
+                      {(state === ChangeState.READY || state === ChangeState.IMPLEMENTING) && onSendPrompt && (
+                        <MenuRow icon={mdiPlayCircleOutline} label="Apply" onClick={() => act(() => onSendPrompt(`/opsx:apply ${attached}`))} disabled={actionsDisabled} />
+                      )}
+                      {state === ChangeState.COMPLETE && onSendPrompt && (
+                        <>
+                          <MenuRow icon={mdiCheckCircleOutline} label="Verify" onClick={() => act(() => onSendPrompt(`/opsx:verify ${attached}`))} disabled={actionsDisabled} />
+                          <MenuRow icon={mdiArchiveOutline} label="Archive" onClick={() => act(() => onSendPrompt(`/opsx:archive ${attached}`))} disabled={actionsDisabled} />
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               </>
             );
           })()}

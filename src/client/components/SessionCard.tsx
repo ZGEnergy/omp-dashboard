@@ -199,8 +199,6 @@ export function SessionCard({
   isHidden,
   onHide,
   onUnhide,
-  editors,
-  onOpenEditor,
   contextUsage,
   openspecChanges,
   onSendPrompt,
@@ -219,8 +217,6 @@ export function SessionCard({
   isHidden: boolean;
   onHide: (id: string) => void;
   onUnhide: (id: string) => void;
-  editors?: DetectedEditor[];
-  onOpenEditor?: (editorId: string) => void;
   contextUsage?: ContextUsageInfo;
   openspecChanges?: OpenSpecChange[];
   onSendPrompt?: (text: string) => void;
@@ -264,17 +260,22 @@ export function SessionCard({
           </span>
         </div>
 
-        {/* Line 2: model + activity + cost */}
+        {/* Line 2: model + activity (left) | context bar + cost (right) */}
         <div className="flex items-center mt-1 gap-2 text-[12px]">
           {session.model && (
             <span className="text-[var(--text-tertiary)] truncate">
               {session.model}
             </span>
           )}
-          <span className="flex-1" />
           <ActivityIndicator session={session} />
+          <span className="flex-1" />
+          <ContextUsageBar
+            tokens={contextUsage?.tokens ?? null}
+            contextWindow={contextUsage?.contextWindow}
+            compact
+          />
           {session.cost != null && session.cost > 0 && (
-            <span className="text-[var(--text-tertiary)]">${session.cost.toFixed(2)}</span>
+            <span className="text-[var(--text-tertiary)] flex-shrink-0">${session.cost.toFixed(2)}</span>
           )}
         </div>
 
@@ -295,14 +296,6 @@ export function SessionCard({
             }
           />
         ) : null}
-
-        {/* Context usage bar */}
-        <div className="mt-1">
-          <ContextUsageBar
-            tokens={contextUsage?.tokens ?? null}
-            contextWindow={contextUsage?.contextWindow}
-          />
-        </div>
       </li>
     );
   }
@@ -435,11 +428,17 @@ export function SessionCard({
         )}
       </div>
 
-      {/* Line 3: activity + cost */}
-      <div className="flex items-center justify-between mt-0.5 text-[11px] gap-2">
+      {/* Line 3: activity (left) | context bar + cost (right) */}
+      <div className="flex items-center mt-0.5 text-[11px] gap-2">
         <ActivityIndicator session={session} />
+        <span className="flex-1" />
+        <ContextUsageBar
+          tokens={contextUsage?.tokens ?? null}
+          contextWindow={contextUsage?.contextWindow}
+          compact
+        />
         {session.cost != null && session.cost > 0 && (
-          <span className="text-[var(--text-tertiary)]">${session.cost.toFixed(2)}</span>
+          <span className="text-[var(--text-tertiary)] flex-shrink-0">${session.cost.toFixed(2)}</span>
         )}
       </div>
 
@@ -461,24 +460,10 @@ export function SessionCard({
         />
       ) : null}
 
-      {/* Line 4: context usage bar */}
-      <div className="mt-1">
-        <ContextUsageBar
-          tokens={contextUsage?.tokens ?? null}
-          contextWindow={contextUsage?.contextWindow}
-        />
-      </div>
-
       {/* Line 4: git info (only for single-session groups) */}
       {showGitInfo && <GitInfo session={session} />}
 
       {/* Thin divider before action row */}
-      {editors && editors.length > 0 && onOpenEditor && (
-        <div className="border-t border-[var(--border-secondary)] mt-1.5 pt-1.5 flex items-center gap-2">
-          <EditorButtons editors={editors} onOpen={onOpenEditor} />
-        </div>
-      )}
-
       {/* OpenSpec attach/actions */}
       {openspecChanges && onSendPrompt && onAttachProposal && onDetachProposal && (
         <SessionOpenSpecActions

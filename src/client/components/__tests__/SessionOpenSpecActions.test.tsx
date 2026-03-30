@@ -129,9 +129,33 @@ describe("SessionOpenSpecActions", () => {
     expect(onAttach).toHaveBeenCalledWith("add-auth");
   });
 
-  // --- PLANNING state: Continue, FF, Explore, Read ---
+  // --- Unattached active state: + Change, Explore ---
 
-  it("shows Read, Explore, Continue, FF for PLANNING state", () => {
+  it("shows + Change and Explore buttons when active and unattached", () => {
+    render(
+      <SessionOpenSpecActions
+        session={makeSession()}
+        changes={[planningChange]}
+        {...defaultProps}
+      />,
+    );
+    expect(screen.getByTestId("new-change-btn")).toBeTruthy();
+    expect(screen.getByTestId("explore-unattached-btn")).toBeTruthy();
+  });
+
+  it("hides + Change and Explore when ended and unattached", () => {
+    render(
+      <SessionOpenSpecActions
+        session={makeSession({ status: "ended" })}
+        changes={[planningChange]}
+        {...defaultProps}
+      />,
+    );
+    expect(screen.queryByTestId("new-change-btn")).toBeNull();
+    expect(screen.queryByTestId("explore-unattached-btn")).toBeNull();
+  });
+
+  it("does not show + Change when a change is attached", () => {
     render(
       <SessionOpenSpecActions
         session={makeSession({ attachedProposal: "add-auth" })}
@@ -139,12 +163,40 @@ describe("SessionOpenSpecActions", () => {
         {...defaultProps}
       />,
     );
+    expect(screen.queryByTestId("new-change-btn")).toBeNull();
+  });
+
+  // --- PDST single button ---
+
+  it("shows PDST as a single button in attached state", () => {
+    render(
+      <SessionOpenSpecActions
+        session={makeSession({ attachedProposal: "add-auth" })}
+        changes={[planningChange]}
+        {...defaultProps}
+      />,
+    );
+    const btn = screen.getByTestId("artifact-letters-btn");
+    expect(btn.tagName).toBe("BUTTON");
+    expect(btn.textContent).toBe("PD");
+  });
+
+  // --- PLANNING state: Continue, FF, Explore ---
+
+  it("shows Explore, Continue, FF for PLANNING state", () => {
+    render(
+      <SessionOpenSpecActions
+        session={makeSession({ attachedProposal: "add-auth", status: "active" })}
+        changes={[planningChange]}
+        {...defaultProps}
+      />,
+    );
     expect(screen.getByTestId("attached-badge").textContent).toContain("add-auth");
-    expect(screen.getByTestId("read-btn")).toBeTruthy();
     expect(screen.getByTestId("explore-btn")).toBeTruthy();
     expect(screen.getByTestId("continue-btn")).toBeTruthy();
     expect(screen.getByTestId("ff-btn")).toBeTruthy();
     expect(screen.getByTestId("detach-btn")).toBeTruthy();
+    expect(screen.queryByTestId("read-btn")).toBeNull();
     expect(screen.queryByTestId("apply-btn")).toBeNull();
     expect(screen.queryByTestId("verify-btn")).toBeNull();
     expect(screen.queryByTestId("archive-btn")).toBeNull();
@@ -152,18 +204,18 @@ describe("SessionOpenSpecActions", () => {
 
   // --- READY state: Apply, Explore, Read ---
 
-  it("shows Read, Explore, Apply for READY state", () => {
+  it("shows Explore, Apply for READY state", () => {
     render(
       <SessionOpenSpecActions
-        session={makeSession({ attachedProposal: "ready-change" })}
+        session={makeSession({ attachedProposal: "ready-change", status: "active" })}
         changes={[readyChange]}
         {...defaultProps}
       />,
     );
-    expect(screen.getByTestId("read-btn")).toBeTruthy();
     expect(screen.getByTestId("explore-btn")).toBeTruthy();
     expect(screen.getByTestId("apply-btn")).toBeTruthy();
     expect(screen.getByTestId("detach-btn")).toBeTruthy();
+    expect(screen.queryByTestId("read-btn")).toBeNull();
     expect(screen.queryByTestId("continue-btn")).toBeNull();
     expect(screen.queryByTestId("ff-btn")).toBeNull();
     expect(screen.queryByTestId("verify-btn")).toBeNull();
@@ -172,18 +224,18 @@ describe("SessionOpenSpecActions", () => {
 
   // --- IMPLEMENTING state: Apply, Explore, Read ---
 
-  it("shows Read, Explore, Apply for IMPLEMENTING state", () => {
+  it("shows Explore, Apply for IMPLEMENTING state", () => {
     render(
       <SessionOpenSpecActions
-        session={makeSession({ attachedProposal: "impl-change" })}
+        session={makeSession({ attachedProposal: "impl-change", status: "active" })}
         changes={[implementingChange]}
         {...defaultProps}
       />,
     );
-    expect(screen.getByTestId("read-btn")).toBeTruthy();
     expect(screen.getByTestId("explore-btn")).toBeTruthy();
     expect(screen.getByTestId("apply-btn")).toBeTruthy();
     expect(screen.getByTestId("detach-btn")).toBeTruthy();
+    expect(screen.queryByTestId("read-btn")).toBeNull();
     expect(screen.queryByTestId("continue-btn")).toBeNull();
     expect(screen.queryByTestId("ff-btn")).toBeNull();
     expect(screen.queryByTestId("verify-btn")).toBeNull();
@@ -192,19 +244,19 @@ describe("SessionOpenSpecActions", () => {
 
   // --- COMPLETE state: Verify, Archive, Explore, Read ---
 
-  it("shows Read, Explore, Verify, Archive for COMPLETE state", () => {
+  it("shows Explore, Verify, Archive for COMPLETE state", () => {
     render(
       <SessionOpenSpecActions
-        session={makeSession({ attachedProposal: "fix-bug" })}
+        session={makeSession({ attachedProposal: "fix-bug", status: "active" })}
         changes={[completeChange]}
         {...defaultProps}
       />,
     );
-    expect(screen.getByTestId("read-btn")).toBeTruthy();
     expect(screen.getByTestId("explore-btn")).toBeTruthy();
     expect(screen.getByTestId("verify-btn")).toBeTruthy();
     expect(screen.getByTestId("archive-btn")).toBeTruthy();
     expect(screen.getByTestId("detach-btn")).toBeTruthy();
+    expect(screen.queryByTestId("read-btn")).toBeNull();
     expect(screen.queryByTestId("continue-btn")).toBeNull();
     expect(screen.queryByTestId("ff-btn")).toBeNull();
     expect(screen.queryByTestId("apply-btn")).toBeNull();
@@ -232,7 +284,7 @@ describe("SessionOpenSpecActions", () => {
     const onSendPrompt = vi.fn();
     render(
       <SessionOpenSpecActions
-        session={makeSession({ attachedProposal: "add-auth" })}
+        session={makeSession({ attachedProposal: "add-auth", status: "active" })}
         changes={[planningChange]}
         {...defaultProps}
         onSendPrompt={onSendPrompt}
@@ -246,7 +298,7 @@ describe("SessionOpenSpecActions", () => {
     const onSendPrompt = vi.fn();
     render(
       <SessionOpenSpecActions
-        session={makeSession({ attachedProposal: "fix-bug" })}
+        session={makeSession({ attachedProposal: "fix-bug", status: "active" })}
         changes={[completeChange]}
         {...defaultProps}
         onSendPrompt={onSendPrompt}
@@ -260,7 +312,7 @@ describe("SessionOpenSpecActions", () => {
     const onSendPrompt = vi.fn();
     render(
       <SessionOpenSpecActions
-        session={makeSession({ attachedProposal: "ready-change" })}
+        session={makeSession({ attachedProposal: "ready-change", status: "active" })}
         changes={[readyChange]}
         {...defaultProps}
         onSendPrompt={onSendPrompt}
@@ -274,7 +326,7 @@ describe("SessionOpenSpecActions", () => {
     const onDetach = vi.fn();
     render(
       <SessionOpenSpecActions
-        session={makeSession({ attachedProposal: "add-auth" })}
+        session={makeSession({ attachedProposal: "add-auth", status: "active" })}
         changes={[planningChange]}
         {...defaultProps}
         onDetach={onDetach}
@@ -301,20 +353,9 @@ describe("SessionOpenSpecActions", () => {
     expect(screen.getByTestId("detach-btn")).toBeTruthy();
   });
 
-  // --- Read button ---
+  // --- PDST button calls onReadArtifact ---
 
-  it("shows Read button when attached change has artifacts", () => {
-    render(
-      <SessionOpenSpecActions
-        session={makeSession({ attachedProposal: "add-auth" })}
-        changes={[planningChange]}
-        {...defaultProps}
-      />,
-    );
-    expect(screen.getByTestId("read-btn")).toBeTruthy();
-  });
-
-  it("calls onReadArtifact with first artifact when Read clicked", () => {
+  it("calls onReadArtifact with proposal when PDST button clicked", () => {
     const onReadArtifact = vi.fn();
     render(
       <SessionOpenSpecActions
@@ -324,8 +365,59 @@ describe("SessionOpenSpecActions", () => {
         onReadArtifact={onReadArtifact}
       />,
     );
-    fireEvent.click(screen.getByTestId("read-btn"));
+    fireEvent.click(screen.getByTestId("artifact-letters-btn"));
     expect(onReadArtifact).toHaveBeenCalledWith("add-auth", "proposal");
+  });
+
+  // --- Disabled when not active ---
+
+  it("enables action buttons when session is idle", () => {
+    render(
+      <SessionOpenSpecActions
+        session={makeSession({ attachedProposal: "add-auth", status: "idle" })}
+        changes={[planningChange]}
+        {...defaultProps}
+      />,
+    );
+    expect((screen.getByTestId("explore-btn") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId("continue-btn") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId("ff-btn") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("disables action buttons when session is streaming", () => {
+    render(
+      <SessionOpenSpecActions
+        session={makeSession({ attachedProposal: "add-auth", status: "streaming" })}
+        changes={[planningChange]}
+        {...defaultProps}
+      />,
+    );
+    expect((screen.getByTestId("explore-btn") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("continue-btn") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("enables action buttons when session is active", () => {
+    render(
+      <SessionOpenSpecActions
+        session={makeSession({ attachedProposal: "add-auth", status: "active" })}
+        changes={[planningChange]}
+        {...defaultProps}
+      />,
+    );
+    expect((screen.getByTestId("explore-btn") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId("continue-btn") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("disables action buttons when session is streaming", () => {
+    render(
+      <SessionOpenSpecActions
+        session={makeSession({ attachedProposal: "add-auth", status: "streaming" })}
+        changes={[planningChange]}
+        {...defaultProps}
+      />,
+    );
+    expect((screen.getByTestId("explore-btn") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("continue-btn") as HTMLButtonElement).disabled).toBe(true);
   });
 
   // --- Attached change not found ---

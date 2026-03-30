@@ -16,23 +16,15 @@ Each folder group in the session list SHALL render a `FolderOpenSpecSection` com
 - **THEN** the `FolderOpenSpecSection` SHALL still be rendered showing change list and folder-level actions
 
 ### Requirement: Collapsible change list in folder section
-The folder OpenSpec section SHALL be collapsed by default, showing a header line with chevron, label, change count, and action buttons. The header SHALL include Refresh, Bulk Archive, and `+ New` buttons. Clicking the header toggles expansion to show the full change list.
+The folder OpenSpec section SHALL be collapsed by default, showing a header line with chevron, label, change count, and action buttons. The header SHALL include Refresh and Bulk Archive buttons. Clicking the header toggles expansion to show the full change list.
 
 #### Scenario: Collapsed by default
 - **WHEN** the folder OpenSpec section is first rendered
-- **THEN** it SHALL show only the header line: `▶ OpenSpec (N changes)` with Refresh, Bulk Archive, and `+ New` buttons
-
-#### Scenario: + New button opens NewChangeDialog
-- **WHEN** the user clicks `+ New` in the folder OpenSpec header
-- **THEN** a `NewChangeDialog` SHALL open
-
-#### Scenario: + New button disabled when no active sessions
-- **WHEN** the folder has no active (non-ended) sessions
-- **THEN** the `+ New` button SHALL be disabled with reduced opacity
+- **THEN** it SHALL show only the header line: `▶ OpenSpec (N changes)` with Refresh and Bulk Archive buttons
 
 #### Scenario: Expand on click
 - **WHEN** the user clicks the folder OpenSpec header
-- **THEN** the section SHALL expand to show all changes with artifact letters and task counts, chevron changes to `▼`
+- **THEN** the section SHALL expand to show all changes with PDST button and task counts, chevron changes to `▼`
 
 #### Scenario: Collapse on click
 - **WHEN** the user clicks the expanded folder OpenSpec header
@@ -45,9 +37,9 @@ The expanded folder OpenSpec section SHALL list all changes, sorted with in-prog
 - **WHEN** the folder has changes `["done-change" (complete), "wip-change" (in-progress)]`
 - **THEN** `"wip-change"` SHALL appear before `"done-change"`
 
-#### Scenario: Change card shows name, artifact letters, session links, task count
+#### Scenario: Change card shows name, PDST button, session links, task count
 - **WHEN** a change `"add-auth"` has artifacts `[proposal: done, design: ready]`, 2 attached sessions, and `3/8 tasks`
-- **THEN** the change card SHALL show: `add-auth  P D  [s1] [s2]  3/8 tasks`
+- **THEN** the change card SHALL show: `add-auth  [s1] [s2]  3/8 tasks  [PD]` where `[PD]` is a single button after the tasks counter
 
 ### Requirement: Change list displays linked sessions
 The expanded folder OpenSpec change list SHALL show clickable session indicators per change, displaying sessions that have `attachedProposal` matching the change name.
