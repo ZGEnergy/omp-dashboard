@@ -60,6 +60,8 @@ The auth module SHALL implement the OAuth2 authorization code flow. The `/auth/l
 ### Requirement: OAuth callback handling
 The `/auth/callback/:provider` route SHALL exchange the authorization code for an access token, fetch the user's profile (email, display name, username), validate the user against `allowedUsers` (if configured), issue a signed JWT cookie, and redirect to the return URL (or `/`).
 
+The access denied page SHALL HTML-escape all user-provided data (email address, username) before interpolating into the HTML response to prevent XSS attacks. The server SHALL use an `escapeHtml()` helper that encodes `&`, `<`, `>`, `"`, and `'` as their HTML entity equivalents.
+
 #### Scenario: Successful callback with valid code
 - **WHEN** the OAuth provider redirects back with a valid `code` and `state`
 - **THEN** the server SHALL exchange the code for an access token, fetch user info, set a JWT cookie, and redirect to `/`
@@ -75,6 +77,12 @@ The `/auth/callback/:provider` route SHALL exchange the authorization code for a
 #### Scenario: User not in allowedUsers
 - **WHEN** `auth.allowedUsers` is configured and neither the user's email nor username matches any entry
 - **THEN** the server SHALL return a 403 page explaining access is denied
+- **AND** the email SHALL be HTML-escaped to prevent XSS
+
+#### Scenario: Access denied — crafted email with HTML
+- **WHEN** an OIDC provider returns an email like `<script>alert(1)</script>@evil.com`
+- **THEN** the denied page SHALL render the escaped string `&lt;script&gt;alert(1)&lt;/script&gt;@evil.com`
+- **AND** no script SHALL execute in the browser
 
 #### Scenario: allowedUsers not configured
 - **WHEN** `auth.allowedUsers` is not set or is an empty array

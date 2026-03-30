@@ -90,18 +90,18 @@ describe("loadConfig", () => {
     expect(config.spawnStrategy).toBe("headless");
   });
 
-  it("should default spawnStrategy to tmux when missing", () => {
+  it("should default spawnStrategy to headless when missing", () => {
     fs.writeFileSync(configFile, JSON.stringify({ port: 3000 }));
 
     const config = loadConfig();
-    expect(config.spawnStrategy).toBe("tmux");
+    expect(config.spawnStrategy).toBe("headless");
   });
 
-  it("should fall back to tmux for invalid spawnStrategy", () => {
+  it("should fall back to headless for invalid spawnStrategy", () => {
     fs.writeFileSync(configFile, JSON.stringify({ spawnStrategy: "invalid" }));
 
     const config = loadConfig();
-    expect(config.spawnStrategy).toBe("tmux");
+    expect(config.spawnStrategy).toBe("headless");
   });
 
   it("should return devBuildOnReload true when set", () => {

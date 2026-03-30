@@ -107,13 +107,14 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/client/components/MobileOverlay.tsx` | Hamburger button and sidebar overlay for mobile |
 | `src/client/components/SessionHeader.tsx` | Session header with MobileAttachButton and MobileHeader for mobile |
 | `src/client/hooks/useSwipeBack.ts` | iOS-style left-edge swipe-back gesture (40px edge zone, document-level listeners) |
+| `src/client/components/ChatView.tsx` | Chat message view with scroll-lock: pauses auto-scroll when user scrolls up, floating scroll-to-bottom button |
 | `src/client/lib/mobile-depth.ts` | Pure function computing MobileShell depth from route state |
 | `src/client/hooks/useZoomPan.ts` | Reusable zoom/pan hook (wheel, drag, pinch, buttons) |
 | `src/client/lib/event-reducer.ts` | Event-sourced state reducer |
 | `src/client/lib/truncate-path.ts` | Middle-truncation utility for filesystem paths |
 | `src/server/resolve-path.ts` | Safe realpath resolution (symlink handling) |
-| `.pi/skills/openspec-coherence-check/SKILL.md` | Skill: sweep proposals for staleness, conflicts, obsolescence against codebase |
-| `.pi/skills/openspec-coherence-check/references/proposal-queue-schema.md` | JSON schema for `.pi/proposal-queue.json` |
+| `.pi/skills/spec-coherence-check/SKILL.md` | Skill: sweep proposals for staleness, conflicts, obsolescence against codebase |
+| `.pi/skills/spec-coherence-check/references/proposal-queue-schema.md` | JSON schema for `.pi/proposal-queue.json` |
 | `.pi/skills/code-review/SKILL.md` | Skill: comprehensive code review with severity labels, four-phase process, language-specific guides |
 | `.pi/skills/code-review/references/` | On-demand language guides (React, TypeScript, Vue, Rust, Go, Java, Python, C/C++, CSS, Qt) + architecture/performance/security reviews |
 

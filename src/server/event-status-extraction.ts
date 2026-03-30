@@ -6,7 +6,9 @@ import type { DashboardEvent, DashboardSession } from "../shared/types.js";
 
 // Use null (not undefined) for fields that must be cleared — undefined is
 // dropped during JSON serialisation so the browser would keep the stale value.
-type SessionUpdates = Partial<Pick<DashboardSession, "status" | "currentTool" | "model" | "thinkingLevel">>;
+type SessionUpdates = Partial<Pick<DashboardSession, "status" | "model" | "thinkingLevel">> & {
+  currentTool?: string | null;
+};
 
 /**
  * Accumulate token/cost stats from a batch of events (e.g. loaded from disk).
@@ -53,16 +55,16 @@ export function extractStatsFromEvents(
 export function extractSessionUpdates(event: DashboardEvent): SessionUpdates | null {
   switch (event.eventType) {
     case "agent_start":
-      return { status: "streaming", currentTool: null as any };
+      return { status: "streaming", currentTool: null };
 
     case "agent_end":
-      return { status: "idle", currentTool: null as any };
+      return { status: "idle", currentTool: null };
 
     case "tool_execution_start":
       return { currentTool: (event.data.toolName as string) ?? null };
 
     case "tool_execution_end":
-      return { currentTool: null as any };
+      return { currentTool: null };
 
     case "model_select": {
       const model = event.data.model as { provider?: string; id?: string } | undefined;

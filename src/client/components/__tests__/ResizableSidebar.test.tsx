@@ -47,14 +47,17 @@ describe("ResizableSidebar", () => {
     expect(screen.getByTestId("sidebar-expand")).toBeTruthy();
   });
 
-  it("calls toggleCollapse when collapse button clicked", () => {
+  it("calls toggleCollapse when drag handle is clicked twice rapidly", () => {
     const sidebar = makeSidebar();
     render(
       <ResizableSidebar sidebar={sidebar}>
         <div>Content</div>
       </ResizableSidebar>,
     );
-    fireEvent.click(screen.getByTestId("sidebar-collapse"));
+    const handle = screen.getByTestId("drag-handle");
+    // The component uses custom double-click detection via two mouseDown events within 300ms
+    fireEvent.mouseDown(handle);
+    fireEvent.mouseDown(handle);
     expect(sidebar.toggleCollapse).toHaveBeenCalledOnce();
   });
 

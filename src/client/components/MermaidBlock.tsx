@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useId } from "react";
+import DOMPurify from "dompurify";
 import { useThemeContext } from "./ThemeProvider.js";
 import { useZoomPan } from "../hooks/useZoomPan.js";
 import Icon from "@mdi/react";
@@ -262,7 +263,7 @@ export function MermaidBlock({ code }: Props) {
             transform: `translate(${zoom.translateX}px, ${zoom.translateY}px) scale(${zoom.scale})`,
             transformOrigin: "0 0",
           }}
-          dangerouslySetInnerHTML={{ __html: svg }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(svg) }}
         />
       </div>
     </div>

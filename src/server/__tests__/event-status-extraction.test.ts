@@ -9,12 +9,12 @@ function makeEvent(eventType: string, data: Record<string, unknown> = {}): Dashb
 describe("extractSessionUpdates", () => {
   it("should return streaming status on agent_start", () => {
     const updates = extractSessionUpdates(makeEvent("agent_start"));
-    expect(updates).toEqual({ status: "streaming", currentTool: undefined });
+    expect(updates).toEqual({ status: "streaming", currentTool: null });
   });
 
   it("should return idle status on agent_end", () => {
     const updates = extractSessionUpdates(makeEvent("agent_end"));
-    expect(updates).toEqual({ status: "idle", currentTool: undefined });
+    expect(updates).toEqual({ status: "idle", currentTool: null });
   });
 
   it("should return currentTool on tool_execution_start", () => {
@@ -24,7 +24,7 @@ describe("extractSessionUpdates", () => {
 
   it("should clear currentTool on tool_execution_end", () => {
     const updates = extractSessionUpdates(makeEvent("tool_execution_end", { toolName: "Read" }));
-    expect(updates).toEqual({ currentTool: undefined });
+    expect(updates).toEqual({ currentTool: null });
   });
 
   it("should extract model from model_select event", () => {

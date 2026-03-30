@@ -28,18 +28,19 @@ export interface SessionOptions {
 }
 
 export function buildTmuxCommand(cwd: string, sessionExists: boolean, options?: SessionOptions): string {
-  let piCmd = `cd ${cwd} && PI_DASHBOARD_SPAWNED=1 pi`;
+  const safeCwd = shellEscape(cwd);
+  let piCmd = `cd ${safeCwd} && PI_DASHBOARD_SPAWNED=1 pi`;
 
   if (options?.sessionFile && options?.mode === "continue") {
-    piCmd = `cd ${cwd} && PI_DASHBOARD_SPAWNED=1 pi --session ${options.sessionFile}`;
+    piCmd = `cd ${safeCwd} && PI_DASHBOARD_SPAWNED=1 pi --session ${shellEscape(options.sessionFile)}`;
   } else if (options?.sessionFile && options?.mode === "fork") {
-    piCmd = `cd ${cwd} && PI_DASHBOARD_SPAWNED=1 pi --fork ${options.sessionFile}`;
+    piCmd = `cd ${safeCwd} && PI_DASHBOARD_SPAWNED=1 pi --fork ${shellEscape(options.sessionFile)}`;
   }
 
   if (sessionExists) {
-    return `tmux new-window -t pi-dashboard -c "${cwd}" "${piCmd}"`;
+    return `tmux new-window -t pi-dashboard -c ${safeCwd} "${piCmd}"`;
   }
-  return `tmux new-session -d -s pi-dashboard -c "${cwd}" "${piCmd}"`;
+  return `tmux new-session -d -s pi-dashboard -c ${safeCwd} "${piCmd}"`;
 }
 
 function isTmuxAvailable(): boolean {
@@ -133,7 +134,7 @@ function spawnHeadless(cwd: string, options?: SessionOptions): SpawnResult {
 }
 
 /** Escape a string for safe use in a shell command. */
-function shellEscape(s: string): string {
+export function shellEscape(s: string): string {
   if (/^[a-zA-Z0-9_./:=@-]+$/.test(s)) return s;
   return `'${s.replace(/'/g, "'\\''")}'`;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { detectPlatform, buildTmuxCommand, buildHeadlessArgs, type SessionOptions } from "../process-manager.js";
+import { detectPlatform, buildTmuxCommand, buildHeadlessArgs, shellEscape, type SessionOptions } from "../process-manager.js";
 
 describe("Process Manager", () => {
   describe("detectPlatform", () => {
@@ -34,6 +34,36 @@ describe("Process Manager", () => {
     it("should set PI_DASHBOARD_SPAWNED env var", () => {
       const cmd = buildTmuxCommand("/home/user/project", false);
       expect(cmd).toContain("PI_DASHBOARD_SPAWNED=1");
+    });
+
+    it("should shell-escape cwd with spaces", () => {
+      const cmd = buildTmuxCommand("/home/user/my project", false);
+      expect(cmd).toContain("'/home/user/my project'");
+      expect(cmd).not.toContain('cd /home/user/my project &&');
+    });
+
+    it("should shell-escape cwd with semicolons to prevent injection", () => {
+      const cmd = buildTmuxCommand("/tmp/test; rm -rf /", false);
+      expect(cmd).toContain("'/tmp/test; rm -rf /'");
+    });
+
+    it("should shell-escape cwd with backticks to prevent injection", () => {
+      const cmd = buildTmuxCommand("/tmp/`whoami`", false);
+      expect(cmd).toContain("'/tmp/`whoami`'");
+    });
+
+    it("should shell-escape sessionFile with special characters", () => {
+      const cmd = buildTmuxCommand("/home/user/project", true, {
+        sessionFile: "/path/to/my session; cat /etc/passwd",
+        mode: "continue",
+      });
+      expect(cmd).toContain("--session '/path/to/my session; cat /etc/passwd'");
+    });
+
+    it("should not double-quote safe paths", () => {
+      const cmd = buildTmuxCommand("/home/user/project", false);
+      // Safe path should not be wrapped in single quotes
+      expect(cmd).toContain("cd /home/user/project &&");
     });
 
     it("should include --session flag for continue mode", () => {

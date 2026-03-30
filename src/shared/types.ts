@@ -20,7 +20,7 @@ export interface DashboardSession {
   cacheRead?: number;
   cacheWrite?: number;
   cost?: number;
-  currentTool?: string;
+  currentTool?: string | null;
   gitBranch?: string;
   gitBranchUrl?: string;
   gitPrNumber?: number;

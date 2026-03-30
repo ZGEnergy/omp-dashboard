@@ -23,6 +23,16 @@ import {
 } from "./auth.js";
 import { isLoopback } from "./localhost-guard.js";
 
+/** Escape HTML special characters to prevent XSS in server-rendered pages. */
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export interface AuthPluginOptions {
   authConfig: AuthConfig;
   port: number;
@@ -70,13 +80,14 @@ h1{margin:0 0 24px;font-size:24px;}</style>
  * Access denied page HTML.
  */
 function renderDeniedPage(email: string): string {
+  const safeEmail = escapeHtml(email);
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PI Dashboard — Access Denied</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0;}
 .card{background:#1e293b;padding:40px;border-radius:12px;max-width:400px;width:100%;text-align:center;}
 h1{margin:0 0 16px;font-size:24px;color:#ef4444;}</style>
-</head><body><div class="card"><h1>Access Denied</h1><p>The email <strong>${email}</strong> is not authorized to access this dashboard.</p>
+</head><body><div class="card"><h1>Access Denied</h1><p>The email <strong>${safeEmail}</strong> is not authorized to access this dashboard.</p>
 <a href="/auth/login" style="color:#60a5fa;">Try a different account</a></div></body></html>`;
 }
 

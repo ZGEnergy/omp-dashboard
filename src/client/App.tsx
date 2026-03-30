@@ -405,7 +405,7 @@ export default function App() {
   const handleRespondToUi = useCallback(
     (requestId: string, result?: unknown, cancelled?: boolean) => {
       if (selectedId) {
-        send({ type: "extension_ui_response", sessionId: selectedId, requestId, result, cancelled } as any);
+        send({ type: "extension_ui_response", sessionId: selectedId, requestId, result, cancelled });
         setSessionStates((prev) => {
           const next = new Map(prev);
           const current = next.get(selectedId);
@@ -538,7 +538,7 @@ export default function App() {
         }
         return next;
       });
-      send({ type: "resume_session", sessionId, mode } as any);
+      send({ type: "resume_session", sessionId, mode });
     },
     [send],
   );
@@ -556,7 +556,7 @@ export default function App() {
         clearSpawningCwd(cwd);
       }, 30_000);
       spawnTimeoutsRef.current.set(cwd, timer);
-      send({ type: "spawn_session", cwd } as any);
+      send({ type: "spawn_session", cwd });
     },
     [send, clearSpawningCwd],
   );
@@ -596,14 +596,14 @@ export default function App() {
   const handleCreateTerminal = useCallback(
     (cwd: string) => {
       pendingTerminalCwdRef.current = cwd;
-      send({ type: "create_terminal", cwd } as any);
+      send({ type: "create_terminal", cwd });
     },
     [send],
   );
 
   const handleKillTerminal = useCallback(
     (terminalId: string) => {
-      send({ type: "kill_terminal", terminalId } as any);
+      send({ type: "kill_terminal", terminalId });
     },
     [send],
   );
@@ -619,7 +619,7 @@ export default function App() {
         }
         return next;
       });
-      send({ type: "rename_terminal", terminalId, title } as any);
+      send({ type: "rename_terminal", terminalId, title });
     },
     [send],
   );
@@ -637,7 +637,7 @@ export default function App() {
       // Only send to server if not manually renamed
       const t = terminals.get(terminalId);
       if (!t?.manuallyRenamed) {
-        send({ type: "rename_terminal", terminalId, title } as any);
+        send({ type: "rename_terminal", terminalId, title });
       }
     },
     [send, terminals],
@@ -658,7 +658,7 @@ export default function App() {
           next.set(cwd, sessionIds);
           return next;
         });
-        send({ type: "reorder_sessions", cwd, sessionIds } as any);
+        send({ type: "reorder_sessions", cwd, sessionIds });
       }}
       onSendPrompt={handleSendPromptToSession}
       onOpenSpecRefresh={handleOpenSpecRefresh}
@@ -678,15 +678,15 @@ export default function App() {
       pinnedDirectories={pinnedDirectories}
       onPinDirectory={(dirPath) => {
         setPinnedDirectories((prev) => prev.includes(dirPath) ? prev : [...prev, dirPath]);
-        send({ type: "pin_directory", path: dirPath } as any);
+        send({ type: "pin_directory", path: dirPath });
       }}
       onUnpinDirectory={(dirPath) => {
         setPinnedDirectories((prev) => prev.filter((p) => p !== dirPath));
-        send({ type: "unpin_directory", path: dirPath } as any);
+        send({ type: "unpin_directory", path: dirPath });
       }}
       onReorderPinnedDirs={(paths) => {
         setPinnedDirectories(paths);
-        send({ type: "reorder_pinned_dirs", paths } as any);
+        send({ type: "reorder_pinned_dirs", paths });
       }}
       onCreateTerminal={handleCreateTerminal}
       onKillTerminal={handleKillTerminal}
