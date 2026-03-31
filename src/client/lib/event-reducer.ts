@@ -49,7 +49,7 @@ export interface InteractiveUiRequest {
   requestId: string;
   method: string;
   params: Record<string, unknown>;
-  status: "pending" | "resolved" | "cancelled";
+  status: "pending" | "resolved" | "cancelled" | "dismissed";
   result?: unknown;
 }
 
@@ -133,6 +133,14 @@ export function addInteractiveRequest(
   method: string,
   params: Record<string, unknown>,
 ): SessionState {
+  // Deduplicate by requestId (re-sent on reconnect) or by content
+  // (recursive proxy generates multiple requestIds for the same dialog)
+  if (state.interactiveRequests.some((r) =>
+    r.requestId === requestId ||
+    (r.status === "pending" && r.method === method && r.params.title === params.title),
+  )) {
+    return state;
+  }
   const request: InteractiveUiRequest = { requestId, method, params, status: "pending" };
   return {
     ...state,
@@ -168,6 +176,30 @@ export function resolveInteractiveRequest(
     messages: state.messages.map((msg) =>
       msg.id === `ui-${requestId}`
         ? { ...msg, args: { ...msg.args as any, status: newStatus, result } }
+        : msg,
+    ),
+  };
+}
+
+/** Dismiss an interactive UI request (answered in TUI, not via dashboard) */
+export function dismissInteractiveRequest(
+  state: SessionState,
+  requestId: string,
+): SessionState {
+  // Only dismiss pending requests
+  const existing = state.interactiveRequests.find((r) => r.requestId === requestId);
+  if (!existing || existing.status !== "pending") return state;
+
+  return {
+    ...state,
+    interactiveRequests: state.interactiveRequests.map((req) =>
+      req.requestId === requestId
+        ? { ...req, status: "dismissed" as const }
+        : req,
+    ),
+    messages: state.messages.map((msg) =>
+      msg.id === `ui-${requestId}`
+        ? { ...msg, args: { ...msg.args as any, status: "dismissed" } }
         : msg,
     ),
   };

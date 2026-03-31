@@ -334,13 +334,22 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       browserGateway.broadcastSessionUpdated(sessionId, modelUpdates);
     }
     if (msg.type === "extension_ui_request") {
-      browserGateway.trackUiRequest(sessionId, msg.requestId, msg.method, msg.params);
+      const tracked = browserGateway.trackUiRequest(sessionId, msg.requestId, msg.method, msg.params);
+      if (tracked !== false) {
+        browserGateway.sendToSubscribers(sessionId, {
+          type: "extension_ui_request",
+          sessionId,
+          requestId: msg.requestId,
+          method: msg.method,
+          params: msg.params,
+        });
+      }
+    }
+    if (msg.type === "extension_ui_dismiss") {
       browserGateway.sendToSubscribers(sessionId, {
-        type: "extension_ui_request",
+        type: "ui_dismiss",
         sessionId,
         requestId: msg.requestId,
-        method: msg.method,
-        params: msg.params,
       });
     }
     if (msg.type === "session_name_update") {
@@ -588,6 +597,69 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     }
   );
 
+  // Pi Resources endpoint (localhost-only) — returns discovered extensions, skills, prompts
+  fastify.get<{ Querystring: { cwd?: string } }>(
+    "/api/pi-resources",
+    { preHandler: localhostGuard },
+    async (request, reply) => {
+      const cwd = request.query.cwd;
+      if (!cwd) {
+        reply.code(400);
+        return { success: false, error: "cwd parameter required" } satisfies ApiResponse;
+      }
+      // Return cached result or scan on-demand
+      let data = directoryService.getPiResources(cwd);
+      if (!data) {
+        data = await directoryService.refreshPiResources(cwd);
+      }
+      return { success: true, data } satisfies ApiResponse;
+    },
+  );
+
+  // Pi Resource file endpoint (localhost-only) — reads files from allowed pi resource locations
+  fastify.get<{ Querystring: { path?: string } }>(
+    "/api/pi-resource-file",
+    { preHandler: localhostGuard },
+    async (request, reply) => {
+      const filePath = request.query.path;
+      if (!filePath) {
+        reply.code(400);
+        return { success: false, error: "path parameter required" } satisfies ApiResponse;
+      }
+
+      // Validate path is within allowed pi resource locations
+      const homeDir = process.env.HOME || process.env.USERPROFILE || "";
+      const globalPiDir = path.join(homeDir, ".pi", "agent");
+      const allSessions = sessionManager.listAll();
+      const knownCwds = new Set(allSessions.map((s) => s.cwd));
+      for (const dir of stateStore.getPinnedDirectories()) knownCwds.add(dir);
+
+      const normalizedPath = path.resolve(filePath);
+      const isAllowed =
+        normalizedPath.startsWith(globalPiDir + path.sep) ||
+        [...knownCwds].some(
+          (cwd) =>
+            normalizedPath.startsWith(path.join(cwd, ".pi") + path.sep),
+        ) ||
+        // Allow reading from resolved package locations (npm global, git clones)
+        normalizedPath.includes(path.join(".pi", "git") + path.sep) ||
+        normalizedPath.includes("node_modules" + path.sep);
+
+      if (!isAllowed) {
+        reply.code(403);
+        return { success: false, error: "path not in allowed resource location" } satisfies ApiResponse;
+      }
+
+      try {
+        const content = await fs.readFile(normalizedPath, "utf-8");
+        return { success: true, data: { type: "file", content } } satisfies ApiResponse;
+      } catch {
+        reply.code(404);
+        return { success: false, error: "not found" } satisfies ApiResponse;
+      }
+    },
+  );
+
   // Config endpoints (localhost-only)
   fastify.get(
     "/api/config",
@@ -631,6 +703,22 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // Tunnel status endpoint
   fastify.get("/api/tunnel-status", async () => {
     return getTunnelStatus();
+  });
+
+  // Tunnel connect endpoint
+  fastify.post("/api/tunnel-connect", async () => {
+    const status = getTunnelStatus();
+    if (status.status === "active") return { ok: true, url: status.url };
+    if (status.status === "unavailable") return { ok: false, error: "zrok not installed" };
+    const url = await createTunnel(config.port, config.tunnelReservedToken);
+    if (url) return { ok: true, url };
+    return { ok: false, error: "Failed to create tunnel" };
+  });
+
+  // Tunnel disconnect endpoint
+  fastify.post("/api/tunnel-disconnect", async () => {
+    await deleteTunnel();
+    return { ok: true };
   });
 
   // Health endpoint — liveness check for CLI status and probing

@@ -79,3 +79,33 @@ export type TunnelStatus =
   | { status: "unavailable"; serverOs: string };
 
 export type TunnelStatusResponse = ApiResponse<TunnelStatus>;
+
+// ── Pi Resources ────────────────────────────────────────────────────
+
+export interface PiResource {
+  name: string;
+  description?: string;
+  filePath: string;
+  type: "extension" | "skill" | "prompt";
+}
+
+export interface PiResourceScope {
+  extensions: PiResource[];
+  skills: PiResource[];
+  prompts: PiResource[];
+}
+
+export interface PiPackageInfo {
+  name: string;
+  description?: string;
+  source: string; // e.g. "npm:pi-web-access", "git:github.com/user/repo", "../relative"
+  resources: PiResourceScope;
+}
+
+export interface PiResourcesResult {
+  local: PiResourceScope;
+  global: PiResourceScope;
+  packages: PiPackageInfo[];
+}
+
+export type PiResourcesResponse = ApiResponse<PiResourcesResult>;

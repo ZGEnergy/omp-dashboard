@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import Icon from "@mdi/react";
-import { mdiChevronRight, mdiChevronDown, mdiChevronLeft, mdiPlus, mdiPin, mdiPinOff, mdiConsoleLine, mdiCog } from "@mdi/js";
+import { mdiChevronRight, mdiChevronDown, mdiChevronLeft, mdiPlus, mdiPin, mdiPinOff, mdiConsoleLine, mdiCog, mdiPuzzleOutline } from "@mdi/js";
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { SortableSessionCard } from "./SortableSessionCard.js";
@@ -29,9 +29,9 @@ import { PinDirectoryDialog } from "./PinDirectoryDialog.js";
 import { DialogPortal } from "./DialogPortal.js";
 import { truncatePathMiddle } from "../lib/truncate-path.js";
 import { TunnelButton } from "./TunnelButton.js";
-import { QrCodeDialog } from "./QrCodeDialog.js";
-import { useTunnelStatus } from "../hooks/useTunnelStatus.js";
-import { mdiQrcode } from "@mdi/js";
+import { InstallButton } from "./InstallButton.js";
+import { useInstallPrompt } from "../hooks/useInstallPrompt.js";
+
 
 export interface ContextUsageInfo {
   tokens: number | null;
@@ -51,6 +51,7 @@ interface Props {
   onAttachProposal?: (sessionId: string, changeName: string) => void;
   onBulkArchive?: (cwd: string) => void;
   onReadArtifact?: (cwd: string, changeName: string, artifactId: string) => void;
+  onOpenPiResources?: (cwd: string) => void;
   onDetachProposal?: (sessionId: string) => void;
   onRename?: (sessionId: string, name: string) => void;
   onShutdown?: (sessionId: string) => void;
@@ -194,12 +195,12 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal, onCollapseSidebar }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal, onCollapseSidebar }: Props) {
   const now = Date.now();
   const [, navigate] = useLocation();
   const { messages, showToast, dismissToast } = useToast();
-  const tunnelStatus = useTunnelStatus();
-  const [qrOpen, setQrOpen] = useState(false);
+  const installPrompt = useInstallPrompt();
+
 
   // Detect editors for all unique cwds (sessions + pinned directories)
   const cwds = useMemo(() => [...sessions.map((s) => s.cwd), ...(pinnedDirectories ?? [])], [sessions, pinnedDirectories]);
@@ -422,6 +423,19 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 </span>
               </button>
             )}
+            {onOpenPiResources && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenPiResources(group.cwd);
+                }}
+                className="ml-auto text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-muted)] hover:text-purple-400 hover:border-purple-500/50"
+                title="Pi Resources"
+                data-testid="pi-resources-btn"
+              >
+                <Icon path={mdiPuzzleOutline} size={0.5} />
+              </button>
+            )}
           </div>
           {openspecMap?.get(group.cwd)?.initialized && (
             <FolderOpenSpecSection
@@ -535,17 +549,8 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 <Icon path={mdiChevronLeft} size={0.6} />
               </button>
             )}
+            <InstallButton canInstall={installPrompt.canInstall} isInstalled={installPrompt.isInstalled} prompt={installPrompt.prompt} />
             <TunnelButton />
-            {tunnelStatus?.status === "active" && (
-              <button
-                onClick={() => setQrOpen(true)}
-                className="text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                title="Show QR code"
-                data-testid="qr-code-btn"
-              >
-                <Icon path={mdiQrcode} size={0.6} />
-              </button>
-            )}
             <button
               onClick={() => navigate("/settings")}
               className="text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
@@ -594,9 +599,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
         /></DialogPortal>
       )}
       <Toast messages={messages} onDismiss={dismissToast} />
-      {qrOpen && tunnelStatus?.status === "active" && (
-        <QrCodeDialog url={tunnelStatus.url} onClose={() => setQrOpen(false)} />
-      )}
+
       </div>
     </div>
   );

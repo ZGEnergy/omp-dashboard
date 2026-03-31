@@ -115,6 +115,12 @@ export interface ModelUpdateMessage {
   thinkingLevel?: string;
 }
 
+export interface ExtensionUiDismissMessage {
+  type: "extension_ui_dismiss";
+  sessionId: string;
+  requestId: string;
+}
+
 // LoadSessionEventsResultMessage and LoadSessionEventsErrorMessage removed — server loads directly
 
 export type ExtensionToServerMessage =
@@ -131,7 +137,8 @@ export type ExtensionToServerMessage =
   | ModelsListMessage
   | ModelUpdateMessage
   | OpenSpecActivityUpdateMessage
-  | SessionsListExtensionMessage;
+  | SessionsListExtensionMessage
+  | ExtensionUiDismissMessage;
 
 // ── Server → Extension ──────────────────────────────────────────────
 

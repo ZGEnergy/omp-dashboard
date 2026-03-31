@@ -119,3 +119,29 @@ The server SHALL expose `GET /api/tunnel-status` returning the current tunnel st
 #### Scenario: Tunnel status after tunnel creation
 - **WHEN** the server starts with zrok enrolled and tunnel enabled, and the tunnel is successfully created
 - **THEN** subsequent calls to `GET /api/tunnel-status` SHALL return status `"active"` with the tunnel URL
+
+### Requirement: Tunnel connect endpoint
+The server SHALL expose `POST /api/tunnel-connect` to start the tunnel on demand. If the tunnel is already active, it SHALL return the existing URL. If zrok is unavailable, it SHALL return an error.
+
+#### Scenario: Connect when inactive
+- **WHEN** `POST /api/tunnel-connect` is called and zrok is available but no tunnel is running
+- **THEN** the server SHALL call `createTunnel()` and return `{ ok: true, url: "<url>" }`
+
+#### Scenario: Connect when already active
+- **WHEN** `POST /api/tunnel-connect` is called and a tunnel is already running
+- **THEN** the server SHALL return `{ ok: true, url: "<existing-url>" }` without creating a new tunnel
+
+#### Scenario: Connect when zrok unavailable
+- **WHEN** `POST /api/tunnel-connect` is called and zrok is not installed
+- **THEN** the server SHALL return `{ ok: false, error: "zrok not installed" }`
+
+### Requirement: Tunnel disconnect endpoint
+The server SHALL expose `POST /api/tunnel-disconnect` to stop the active tunnel.
+
+#### Scenario: Disconnect when active
+- **WHEN** `POST /api/tunnel-disconnect` is called and a tunnel is running
+- **THEN** the server SHALL call `deleteTunnel()` and return `{ ok: true }`
+
+#### Scenario: Disconnect when not active
+- **WHEN** `POST /api/tunnel-disconnect` is called and no tunnel is running
+- **THEN** the server SHALL return `{ ok: true }` (idempotent)

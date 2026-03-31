@@ -1,45 +1,46 @@
 ## ADDED Requirements
 
-### Requirement: QR code button in sidebar header
-The sidebar header SHALL display a QR code icon button next to the π logo. The button SHALL only be visible when an active tunnel URL is available.
+### Requirement: Unified tunnel/QR button in sidebar header
+The sidebar header SHALL display a single unified button that combines tunnel status indication and QR code access. The button's icon and behavior SHALL change based on tunnel state.
 
-#### Scenario: Tunnel is active
-- **WHEN** the client detects an active tunnel URL from the tunnel status endpoint
-- **THEN** a QR code icon button SHALL be rendered in the sidebar header
+#### Scenario: Tunnel not set up (zrok unavailable)
+- **WHEN** the tunnel status is `"unavailable"` (zrok not installed)
+- **THEN** the button SHALL display a tunnel icon in the default muted color
+- **AND** clicking SHALL navigate to `/tunnel-setup`
 
-#### Scenario: No tunnel active
-- **WHEN** the tunnel status endpoint returns no active URL
-- **THEN** the QR code button SHALL NOT be rendered
+#### Scenario: Tunnel set up but disconnected (inactive)
+- **WHEN** the tunnel status is `"inactive"` (zrok installed but tunnel not running)
+- **THEN** the button SHALL display a QR code icon in the default muted color
+- **AND** clicking SHALL navigate to `/tunnel-setup`
 
-### Requirement: Tunnel status polling
-The client SHALL fetch the tunnel status from `GET /api/tunnel-status` on mount and poll periodically (every 30 seconds) to detect tunnel availability changes.
+#### Scenario: Tunnel connected (active)
+- **WHEN** the tunnel status is `"active"` with a URL
+- **THEN** the button SHALL display a QR code icon in green
+- **AND** clicking SHALL open the QR code dialog
 
-#### Scenario: Initial fetch on mount
-- **WHEN** the sidebar component mounts
-- **THEN** it SHALL fetch `GET /api/tunnel-status` and update the tunnel URL state
+### Requirement: Tunnel status lazy fetch
+The button SHALL fetch tunnel status lazily on first hover (`onMouseEnter`) and on every click, rather than polling continuously. This avoids unnecessary polling when the button is not interacted with.
 
-#### Scenario: Periodic polling
-- **WHEN** 30 seconds have elapsed since the last check
-- **THEN** the client SHALL re-fetch `GET /api/tunnel-status`
+#### Scenario: First hover fetches status
+- **WHEN** the user hovers over the button for the first time
+- **THEN** the button SHALL fetch `GET /api/tunnel-status` and update its icon/color
 
-#### Scenario: Tunnel becomes active
-- **WHEN** a poll returns `{ active: true, url: "https://..." }` after previously returning inactive
-- **THEN** the QR code button SHALL appear
-
-#### Scenario: Tunnel becomes inactive
-- **WHEN** a poll returns `{ active: false, url: null }` after previously returning active
-- **THEN** the QR code button SHALL disappear
+#### Scenario: Click always fetches fresh status
+- **WHEN** the user clicks the button
+- **THEN** the button SHALL fetch `GET /api/tunnel-status` before deciding the action
 
 ### Requirement: QR code dialog display
-Clicking the QR code button SHALL open a dialog (via DialogPortal) displaying:
+Clicking the button when the tunnel is active SHALL open a dialog (via DialogPortal) displaying:
 1. A QR code image encoding the tunnel URL
 2. The tunnel URL as selectable text
 3. A copy button to copy the URL to clipboard
 4. A close button
+5. A disconnect button to stop the tunnel
+6. A setup button to navigate to tunnel configuration
 
-#### Scenario: Dialog opens on click
-- **WHEN** the user clicks the QR code button
-- **THEN** a modal dialog SHALL appear with the QR code and URL
+#### Scenario: Dialog opens on click when active
+- **WHEN** the user clicks the button and tunnel status is `"active"`
+- **THEN** a modal dialog SHALL appear with the QR code, URL, and action buttons
 
 #### Scenario: QR code encodes tunnel URL
 - **WHEN** the dialog is displayed
@@ -50,5 +51,22 @@ Clicking the QR code button SHALL open a dialog (via DialogPortal) displaying:
 - **THEN** the tunnel URL SHALL be copied to the clipboard
 
 #### Scenario: Close dialog
-- **WHEN** the user clicks the close button or presses Escape
+- **WHEN** the user clicks the close button, clicks the backdrop, or presses Escape
 - **THEN** the dialog SHALL close
+
+### Requirement: Disconnect from QR dialog
+The QR code dialog SHALL include a disconnect button that stops the active tunnel.
+
+#### Scenario: Disconnect tunnel
+- **WHEN** the user clicks the disconnect button in the QR dialog
+- **THEN** the client SHALL call `POST /api/tunnel-disconnect`
+- **AND** the dialog SHALL close
+- **AND** the button SHALL refresh its status
+
+### Requirement: Setup navigation from QR dialog
+The QR code dialog SHALL include a setup button that navigates to the tunnel setup guide.
+
+#### Scenario: Navigate to setup
+- **WHEN** the user clicks the setup button in the QR dialog
+- **THEN** the dialog SHALL close
+- **AND** the client SHALL navigate to `/tunnel-setup`

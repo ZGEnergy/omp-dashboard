@@ -71,7 +71,7 @@ export interface BrowserGateway {
   /** Get number of browser subscribers for a session */
   getSubscriberCount(sessionId: string): number;
   /** Track a pending interactive UI request for replay on reconnect */
-  trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): void;
+  trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void;
   /** Clear a pending interactive UI request (resolved or cancelled) */
   clearUiRequest(sessionId: string, requestId: string): void;
   /** Shut down all tracked headless child processes */
@@ -774,7 +774,18 @@ export function createBrowserGateway(
         sessionMap = new Map();
         pendingUiRequests.set(sessionId, sessionMap);
       }
+      // Deduplicate: if a pending request with the same method+title already exists,
+      // skip (e.g. recursive proxy generates multiple requestIds for the same dialog)
+      const title = params.title;
+      if (title !== undefined) {
+        for (const existing of sessionMap.values()) {
+          if (existing.method === method && existing.params.title === title) {
+            return false;
+          }
+        }
+      }
       sessionMap.set(requestId, { requestId, method, params });
+      return true;
     },
 
     clearUiRequest(sessionId: string, requestId: string) {

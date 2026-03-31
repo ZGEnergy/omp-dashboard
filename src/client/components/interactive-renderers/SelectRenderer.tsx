@@ -22,6 +22,9 @@ export function SelectRenderer({ params, status, result, onRespond, onCancel }: 
         {status === "cancelled" && (
           <span className="ml-1 text-[var(--text-tertiary)]">Cancelled</span>
         )}
+        {status === "dismissed" && (
+          <span className="ml-1 text-[var(--text-tertiary)]">Answered in terminal</span>
+        )}
       </div>
     );
   }

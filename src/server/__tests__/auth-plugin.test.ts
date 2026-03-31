@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateWsUpgrade, escapeHtml } from "../auth-plugin.js";
+import { validateWsUpgrade, escapeHtml, isBypassed } from "../auth-plugin.js";
 import { signToken, COOKIE_NAME } from "../auth.js";
 
 const SECRET = "test-secret-for-ws-auth-testing";
@@ -27,6 +27,38 @@ describe("validateWsUpgrade", () => {
   it("should reject external request with wrong secret", () => {
     const token = signToken({ sub: "user@example.com", name: "User", username: "user", provider: "github" }, "other-secret");
     expect(validateWsUpgrade(`${COOKIE_NAME}=${token}`, "1.2.3.4", SECRET)).toBe(false);
+  });
+});
+
+describe("isBypassed", () => {
+  it("should return false for empty bypassUrls list", () => {
+    expect(isBypassed("/api/sessions", [])).toBe(false);
+  });
+
+  it("should return true when URL starts with a bypass prefix", () => {
+    expect(isBypassed("/webhooks/github", ["/webhooks/"])).toBe(true);
+  });
+
+  it("should return false when URL does not start with any bypass prefix", () => {
+    expect(isBypassed("/api/sessions", ["/webhooks/"])).toBe(false);
+  });
+
+  it("should match multiple prefixes", () => {
+    expect(isBypassed("/metrics", ["/webhooks/", "/metrics"])).toBe(true);
+    expect(isBypassed("/healthz/ready", ["/healthz", "/metrics"])).toBe(true);
+  });
+
+  it("should match because startsWith is a prefix check (not word-boundary)", () => {
+    // /api/public IS a prefix of /api/publications — this is expected, documented behaviour
+    expect(isBypassed("/api/publications", ["/api/public"])).toBe(true);
+  });
+
+  it("should not match when prefix is only a substring in the middle", () => {
+    expect(isBypassed("/v1/webhooks/data", ["/webhooks/"])).toBe(false);
+  });
+
+  it("should return false when no prefix matches", () => {
+    expect(isBypassed("/secure/data", ["/webhooks/", "/metrics"])).toBe(false);
   });
 });
 

@@ -21,6 +21,9 @@ import {
 import type { DashboardSession, OpenSpecChange } from "../../shared/types.js";
 import { ChangeState, deriveChangeState } from "../../shared/types.js";
 import type { DetectedEditor } from "../lib/editor-api.js";
+import { ExploreDialog } from "./ExploreDialog.js";
+import { NewChangeDialog } from "./NewChangeDialog.js";
+import { DialogPortal } from "./DialogPortal.js";
 
 interface Props {
   session: DashboardSession;
@@ -65,6 +68,8 @@ function MenuRow({ icon, label, onClick, danger, disabled }: {
 
 export function MobileActionMenu({ session, editors, openspecChanges, onRename, onHide, onUnhide, onResume, onShutdown, onOpenEditor, onAttachProposal, onDetachProposal, onSendPrompt, onReadArtifact }: Props) {
   const [open, setOpen] = useState(false);
+  const [exploreOpen, setExploreOpen] = useState(false);
+  const [newChangeOpen, setNewChangeOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const isAlive = session.status !== "ended";
@@ -99,6 +104,7 @@ export function MobileActionMenu({ session, editors, openspecChanges, onRename, 
   }
 
   return (
+    <>
     <div ref={containerRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
@@ -163,6 +169,17 @@ export function MobileActionMenu({ session, editors, openspecChanges, onRename, 
             />
           ))}
 
+          {/* OpenSpec commands (unattached: Explore + New Change) */}
+          {!session.attachedProposal && isAlive && onSendPrompt && (
+            <>
+              <div className="px-4 py-1.5 text-[10px] text-[var(--text-muted)] uppercase tracking-wider border-t border-[var(--border-primary)]">
+                OpenSpec
+              </div>
+              <MenuRow icon={mdiCompassOutline} label="Explore" onClick={() => act(() => setExploreOpen(true))} />
+              <MenuRow icon={mdiChevronRight} label="+ New Change" onClick={() => act(() => setNewChangeOpen(true))} />
+            </>
+          )}
+
           {/* OpenSpec commands (when a change is attached) */}
           {session.attachedProposal && openspecChanges && (() => {
             const attached = session.attachedProposal;
@@ -220,5 +237,27 @@ export function MobileActionMenu({ session, editors, openspecChanges, onRename, 
         </div>
       )}
     </div>
+
+      {/* Dialogs rendered outside the menu via portal */}
+      {exploreOpen && (
+        <DialogPortal><ExploreDialog
+          changeName=""
+          onSend={(text) => {
+            onSendPrompt?.(`/skill:openspec-explore\n${text}`);
+            setExploreOpen(false);
+          }}
+          onClose={() => setExploreOpen(false)}
+        /></DialogPortal>
+      )}
+      {newChangeOpen && (
+        <DialogPortal><NewChangeDialog
+          onSend={(prompt) => {
+            onSendPrompt?.(prompt);
+            setNewChangeOpen(false);
+          }}
+          onClose={() => setNewChangeOpen(false)}
+        /></DialogPortal>
+      )}
+    </>
   );
 }

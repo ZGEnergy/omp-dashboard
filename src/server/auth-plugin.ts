@@ -23,6 +23,14 @@ import {
 } from "./auth.js";
 import { isLoopback } from "./localhost-guard.js";
 
+/**
+ * Returns true if the request URL matches any of the configured bypass prefixes.
+ * Exported for unit testing.
+ */
+export function isBypassed(url: string, bypassUrls: string[]): boolean {
+  return bypassUrls.some((prefix) => url.startsWith(prefix));
+}
+
 /** Escape HTML special characters to prevent XSS in server-rendered pages. */
 export function escapeHtml(str: string): string {
   return str
@@ -102,6 +110,7 @@ export async function registerAuthPlugin(
     secret: ensureAuthSecret(authConfig),
     providerRegistry: await buildProviderRegistry(authConfig.providers),
     allowedUsers: authConfig.allowedUsers,
+    bypassUrls: authConfig.bypassUrls ?? [],
   };
 
   if (authState.providerRegistry.size === 0) {
@@ -114,6 +123,7 @@ export async function registerAuthPlugin(
     authState.secret = ensureAuthSecret(newConfig);
     authState.providerRegistry = await buildProviderRegistry(newConfig.providers);
     authState.allowedUsers = newConfig.allowedUsers;
+    authState.bypassUrls = newConfig.bypassUrls ?? [];
     const names = Array.from(authState.providerRegistry.values()).map((p) => p.name);
     console.log(`🔐 Auth reloaded with providers: ${names.join(", ")}`);
   };
@@ -233,6 +243,9 @@ export async function registerAuthPlugin(
 
     // Skip health endpoint
     if (request.url === "/api/health") return;
+
+    // Skip configured bypass URL prefixes
+    if (isBypassed(request.url, authState.bypassUrls)) return;
 
     // Validate JWT cookie
     const cookieToken = (request.cookies as any)?.[COOKIE_NAME];

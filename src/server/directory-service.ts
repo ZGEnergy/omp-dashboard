@@ -6,7 +6,9 @@
 import { pollOpenSpecAsync } from "../shared/openspec-poller.js";
 import { discoverSessionsForCwd } from "./session-discovery.js";
 import { replayEntriesAsEvents } from "../shared/state-replay.js";
+import { scanPiResources } from "./pi-resource-scanner.js";
 import type { OpenSpecData } from "../shared/types.js";
+import type { PiResourcesResult } from "../shared/rest-api.js";
 import type { StateStore } from "./state-store.js";
 import type { SessionManager } from "./memory-session-manager.js";
 
@@ -32,6 +34,8 @@ export interface DirectoryService {
   loadSessionEvents(sessionId: string, sessionFile: string): Promise<LoadResult>;
   getOpenSpecData(cwd: string): OpenSpecData | undefined;
   refreshOpenSpec(cwd: string): Promise<OpenSpecData>;
+  getPiResources(cwd: string): PiResourcesResult | undefined;
+  refreshPiResources(cwd: string): Promise<PiResourcesResult>;
   startPolling(onChange: (cwd: string, data: OpenSpecData) => void): void;
   stopPolling(): void;
   onDirectoryAdded(cwd: string): Promise<DirectoryAddedResult>;
@@ -42,6 +46,7 @@ export function createDirectoryService(
   sessionManager: SessionManager,
 ): DirectoryService {
   const openspecCache = new Map<string, OpenSpecData>();
+  const piResourcesCache = new Map<string, PiResourcesResult>();
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let onChangeCallback: ((cwd: string, data: OpenSpecData) => void) | null = null;
 
@@ -89,11 +94,20 @@ export function createDirectoryService(
     return data;
   }
 
+  async function refreshPiResourcesInternal(cwd: string): Promise<PiResourcesResult> {
+    const data = await scanPiResources(cwd);
+    piResourcesCache.set(cwd, data);
+    return data;
+  }
+
   async function pollAllDirectories() {
     const dirs = computeKnownDirectories();
     // Poll all directories in parallel, non-blocking
     await Promise.all(dirs.map(async (cwd) => {
-      const data = await pollOpenSpecAsync(cwd);
+      const [data] = await Promise.all([
+        pollOpenSpecAsync(cwd),
+        refreshPiResourcesInternal(cwd),
+      ]);
       const prev = openspecCache.get(cwd);
       const prevJson = prev ? JSON.stringify(prev) : undefined;
       const newJson = JSON.stringify(data);
@@ -114,6 +128,14 @@ export function createDirectoryService(
     },
 
     refreshOpenSpec,
+
+    getPiResources(cwd: string): PiResourcesResult | undefined {
+      return piResourcesCache.get(cwd);
+    },
+
+    async refreshPiResources(cwd: string): Promise<PiResourcesResult> {
+      return refreshPiResourcesInternal(cwd);
+    },
 
     startPolling(onChange: (cwd: string, data: OpenSpecData) => void) {
       onChangeCallback = onChange;

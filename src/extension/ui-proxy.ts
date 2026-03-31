@@ -101,15 +101,50 @@ export function createUiProxy(options: UiProxyOptions) {
     }
   }
 
+  // Recursion guard: if ui.confirm/select/etc is actually our own proxy
+  // (e.g. ctx.ui was already patched from a previous /reload), skip the
+  // TUI race to avoid infinite recursion.
+  let inProxy = false;
+
+  /** Send a dismiss message to the server so dashboard can close the stale dialog */
+  function sendDismiss(requestId: string): void {
+    send({
+      type: "extension_ui_dismiss",
+      sessionId: getSessionId(),
+      requestId,
+    });
+  }
+
+  /**
+   * Race TUI promise against dashboard promise with proper cancellation.
+   * When TUI wins: clean up pending Map entry + send dismiss to server.
+   * When dashboard wins: abort TUI dialog via AbortController.
+   */
+  function raceWithCancellation<T>(requestId: string, tuiPromise: Promise<T>, dashPromise: Promise<T>, ac: AbortController): Promise<T> {
+    // Wire up cross-cancellation before racing
+    tuiPromise.then(() => {
+      // TUI won — clean up dashboard side
+      pending.delete(requestId);
+      sendDismiss(requestId);
+    }).catch(() => {});
+    dashPromise.then(() => {
+      // Dashboard won — abort TUI dialog
+      ac.abort();
+    }).catch(() => {});
+    return Promise.race([tuiPromise, dashPromise]);
+  }
+
   const wrappedUi = {
     confirm: (title: string, message: string, opts?: any): Promise<boolean> => {
       const params = { title, message };
       const requestId = sendRequest("confirm", params);
       const dashPromise = createDashboardPromise<boolean>(requestId, "confirm", params);
 
-      if (hasUI) {
-        const originalPromise = ui.confirm(title, message, opts);
-        return Promise.race([originalPromise, dashPromise]);
+      if (hasUI && !inProxy) {
+        const ac = new AbortController();
+        inProxy = true;
+        const originalPromise = ui.confirm(title, message, { ...opts, signal: ac.signal }).finally(() => { inProxy = false; });
+        return raceWithCancellation(requestId, originalPromise, dashPromise, ac);
       }
       return dashPromise;
     },
@@ -119,9 +154,11 @@ export function createUiProxy(options: UiProxyOptions) {
       const requestId = sendRequest("select", params);
       const dashPromise = createDashboardPromise<string | undefined>(requestId, "select", params);
 
-      if (hasUI) {
-        const originalPromise = ui.select(title, selectOptions, opts);
-        return Promise.race([originalPromise, dashPromise]);
+      if (hasUI && !inProxy) {
+        const ac = new AbortController();
+        inProxy = true;
+        const originalPromise = ui.select(title, selectOptions, { ...opts, signal: ac.signal }).finally(() => { inProxy = false; });
+        return raceWithCancellation(requestId, originalPromise, dashPromise, ac);
       }
       return dashPromise;
     },
@@ -131,9 +168,11 @@ export function createUiProxy(options: UiProxyOptions) {
       const requestId = sendRequest("input", params);
       const dashPromise = createDashboardPromise<string | undefined>(requestId, "input", params);
 
-      if (hasUI) {
-        const originalPromise = ui.input(title, placeholder, opts);
-        return Promise.race([originalPromise, dashPromise]);
+      if (hasUI && !inProxy) {
+        const ac = new AbortController();
+        inProxy = true;
+        const originalPromise = ui.input(title, placeholder, { ...opts, signal: ac.signal }).finally(() => { inProxy = false; });
+        return raceWithCancellation(requestId, originalPromise, dashPromise, ac);
       }
       return dashPromise;
     },
@@ -143,9 +182,11 @@ export function createUiProxy(options: UiProxyOptions) {
       const requestId = sendRequest("editor", params);
       const dashPromise = createDashboardPromise<string | undefined>(requestId, "editor", params);
 
-      if (hasUI && ui.editor) {
-        const originalPromise = ui.editor(title, prefill, opts);
-        return Promise.race([originalPromise, dashPromise]);
+      if (hasUI && !inProxy && ui.editor) {
+        const ac = new AbortController();
+        inProxy = true;
+        const originalPromise = ui.editor(title, prefill, { ...opts, signal: ac.signal }).finally(() => { inProxy = false; });
+        return raceWithCancellation(requestId, originalPromise, dashPromise, ac);
       }
       return dashPromise;
     },
@@ -155,17 +196,19 @@ export function createUiProxy(options: UiProxyOptions) {
       const requestId = sendRequest("multiselect", params);
       const dashPromise = createDashboardPromise<string[]>(requestId, "multiselect", params);
 
-      if (hasUI) {
+      if (hasUI && !inProxy) {
+        const ac = new AbortController();
+        inProxy = true;
         const numbered = selectOptions.map((o, i) => `${i + 1}. ${o}`).join("\n");
-        const tuiPromise = ui.input(`${title}\n${numbered}`, "e.g. 1,3").then((raw) => {
+        const tuiPromise = ui.input(`${title}\n${numbered}`, "e.g. 1,3", { signal: ac.signal }).then((raw) => {
           if (!raw) return [] as string[];
           return raw
             .split(",")
             .map((s) => parseInt(s.trim(), 10))
             .filter((n) => !isNaN(n) && n >= 1 && n <= selectOptions.length)
             .map((n) => selectOptions[n - 1]);
-        });
-        return Promise.race([tuiPromise, dashPromise]);
+        }).finally(() => { inProxy = false; });
+        return raceWithCancellation(requestId, tuiPromise, dashPromise, ac);
       }
       return dashPromise;
     },

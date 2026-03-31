@@ -46,7 +46,7 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/extension/git-info.ts` | Git branch/remote/PR detection (polled every 30s) |
 | `src/extension/git-link-builder.ts` | Git remote URL parsing and platform-specific links |
 | `src/extension/ui-proxy.ts` | Proxies ctx.ui dialogs to dashboard (confirm/select/input/editor/notify) |
-| `src/extension/ask-user-tool.ts` | `ask_user` tool registration (bundled in bridge, auto-registered with collision avoidance) |
+| `src/extension/ask-user-tool.ts` | `ask_user` tool registration (bundled in bridge, registered at session_start to avoid static tool-name conflicts with other extensions) |
 | `src/extension/openspec-activity-detector.ts` | Detects OpenSpec activity from tool events |
 | `src/shared/openspec-poller.ts` | OpenSpec CLI polling (shared, used by server DirectoryService) |
 | `src/shared/state-replay.ts` | Synthesizes events from pi entries (shared, used by server + bridge) |
@@ -63,6 +63,7 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/client/components/PathPicker.tsx` | Reusable keyboard-first path picker with typeahead directory list |
 | `src/client/lib/browse-api.ts` | Client-side browse API helper for PathPicker |
 | `src/server/browse.ts` | Directory listing logic for browse API endpoint |
+| `src/server/pi-resource-scanner.ts` | Discovers pi extensions, skills, prompts from local, global, and package sources |
 | `src/client/components/SortablePinnedGroup.tsx` | Drag-to-reorder wrapper for pinned directory groups |
 | `src/server/state-store.ts` | JSON-backed user preferences (hidden sessions) |
 | `src/server/session-persistence.ts` | Persists session metadata to JSON for server restarts |
@@ -86,15 +87,16 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/server/terminal-gateway.ts` | Binary WebSocket upgrade handler for `/ws/terminal/:id` |
 | `scripts/fix-pty-permissions.cjs` | Postinstall: fix node-pty spawn-helper execute permissions |
 | `src/server/tunnel.ts` | Zrok tunnel with reserved shares for persistent URLs, binary detection, PID tracking, stale cleanup |
-| `src/client/components/TunnelButton.tsx` | Sidebar tunnel status button — copies URL when active, navigates to setup guide when unavailable |
-| `src/client/components/QrCodeDialog.tsx` | QR code dialog showing tunnel URL as scannable QR code with copy button |
-| `src/client/hooks/useTunnelStatus.ts` | Tunnel status polling hook (fetch on mount + 30s interval) |
+| `src/client/components/TunnelButton.tsx` | Unified tunnel/QR button — tunnel icon when not set up, QR icon when inactive, green QR icon when connected; opens QR dialog with disconnect/setup |
+| `src/client/components/QrCodeDialog.tsx` | QR code dialog showing tunnel URL as scannable QR code with copy, disconnect, and setup buttons |
 | `public/manifest.json` | PWA web app manifest for installability |
 | `public/sw.js` | Minimal service worker for PWA installability |
 | `src/client/components/ZrokInstallGuide.tsx` | OS-aware zrok installation guide view (macOS/Linux/Windows) |
 | `src/server/cli.ts` | CLI entry point with subcommands (start/stop/restart/status) |
 | `src/shared/rest-api.ts` | REST API type definitions |
 | `scripts/reload-all.sh` | Build bridge + reload all pi sessions |
+| `src/client/components/PiResourcesView.tsx` | Content area view for browsing pi extensions, skills, and prompts |
+| `src/client/hooks/usePiResources.ts` | Fetch + 30s polling hook for pi resources API |
 | `src/client/components/MarkdownPreviewView.tsx` | Generic reusable markdown preview with back button, tabs, loading/error states |
 | `src/client/hooks/useOpenSpecReader.ts` | Maps OpenSpec artifacts to file paths, fetches content, concatenates specs |
 | `src/client/components/interactive-renderers/` | Registry + renderers for interactive UI dialogs (confirm, select, multiselect, input, editor, notify) |

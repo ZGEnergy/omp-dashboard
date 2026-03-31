@@ -3,7 +3,7 @@ export interface InteractiveRendererProps {
   requestId: string;
   method: string;
   params: Record<string, unknown>;
-  status: "pending" | "resolved" | "cancelled";
+  status: "pending" | "resolved" | "cancelled" | "dismissed";
   result?: unknown;
   onRespond: (result: unknown) => void;
   onCancel: () => void;

@@ -59,6 +59,12 @@ export interface BrowserExtensionUiRequestMessage {
   params: Record<string, unknown>;
 }
 
+export interface BrowserUiDismissMessage {
+  type: "ui_dismiss";
+  sessionId: string;
+  requestId: string;
+}
+
 export interface BrowserFilesListMessage {
   type: "files_list";
   sessionId: string;
@@ -134,6 +140,7 @@ export type ServerToBrowserMessage =
   | EventReplayMessage
   | BrowserCommandsListMessage
   | BrowserExtensionUiRequestMessage
+  | BrowserUiDismissMessage
   | BrowserFilesListMessage
   | BrowserOpenSpecUpdateMessage
   | BrowserModelsListMessage

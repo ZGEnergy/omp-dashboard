@@ -207,6 +207,49 @@ describe("loadConfig", () => {
     const config = loadConfig();
     expect(config.auth!.secret).toBe("");
   });
+
+  it("should parse auth.bypassUrls as a string array", () => {
+    fs.writeFileSync(configFile, JSON.stringify({
+      auth: {
+        providers: { github: { clientId: "id1", clientSecret: "s1" } },
+        bypassUrls: ["/webhooks/", "/metrics"],
+      },
+    }));
+    const config = loadConfig();
+    expect(config.auth!.bypassUrls).toEqual(["/webhooks/", "/metrics"]);
+  });
+
+  it("should default auth.bypassUrls to empty array when absent", () => {
+    fs.writeFileSync(configFile, JSON.stringify({
+      auth: {
+        providers: { github: { clientId: "id1", clientSecret: "s1" } },
+      },
+    }));
+    const config = loadConfig();
+    expect(config.auth!.bypassUrls).toEqual([]);
+  });
+
+  it("should ignore non-array auth.bypassUrls", () => {
+    fs.writeFileSync(configFile, JSON.stringify({
+      auth: {
+        providers: { github: { clientId: "id1", clientSecret: "s1" } },
+        bypassUrls: "not-an-array",
+      },
+    }));
+    const config = loadConfig();
+    expect(config.auth!.bypassUrls).toEqual([]);
+  });
+
+  it("should filter non-string entries from auth.bypassUrls", () => {
+    fs.writeFileSync(configFile, JSON.stringify({
+      auth: {
+        providers: { github: { clientId: "id1", clientSecret: "s1" } },
+        bypassUrls: ["/valid", 42, null, "/also-valid"],
+      },
+    }));
+    const config = loadConfig();
+    expect(config.auth!.bypassUrls).toEqual(["/valid", "/also-valid"]);
+  });
 });
 
 describe("ensureConfig", () => {

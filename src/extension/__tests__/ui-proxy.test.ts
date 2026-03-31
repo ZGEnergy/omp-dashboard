@@ -195,6 +195,133 @@ describe("createUiProxy", () => {
     });
   });
 
+  describe("race cancellation", () => {
+    it("should pass AbortSignal to TUI dialog calls", () => {
+      setup(true);
+      // Make TUI never resolve so we can inspect the call
+      proxy.wrappedUi.confirm("Title", "Msg");
+
+      expect(mockUi.confirm).toHaveBeenCalledWith(
+        "Title",
+        "Msg",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+
+    it("should abort TUI dialog when dashboard wins confirm", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      mockUi.confirm.mockImplementation((_t: string, _m: string, opts?: any) => {
+        capturedSignal = opts?.signal;
+        return new Promise(() => {}); // never resolves
+      });
+      setup(true);
+      const promise = proxy.wrappedUi.confirm("Title", "Msg");
+
+      const requestId = mockConnection.send.mock.calls[0][0].requestId;
+      proxy.handleResponse({ type: "extension_ui_response", sessionId, requestId, result: { confirmed: true } });
+      await promise;
+
+      // Wait a tick for the .then() cleanup to run
+      await new Promise((r) => setTimeout(r, 0));
+      expect(capturedSignal?.aborted).toBe(true);
+    });
+
+    it("should send extension_ui_dismiss when TUI wins confirm", async () => {
+      mockUi.confirm.mockResolvedValue(true);
+      setup(true);
+      await proxy.wrappedUi.confirm("Title", "Msg");
+
+      // Wait a tick for the .then() cleanup to run
+      await new Promise((r) => setTimeout(r, 0));
+
+      const dismissMsg = mockConnection.send.mock.calls.find(
+        (c: any) => c[0].type === "extension_ui_dismiss",
+      );
+      expect(dismissMsg).toBeDefined();
+      expect(dismissMsg![0]).toMatchObject({
+        type: "extension_ui_dismiss",
+        sessionId: "test-session",
+      });
+    });
+
+    it("should clean up pending Map when TUI wins", async () => {
+      mockUi.confirm.mockResolvedValue(false);
+      setup(true);
+      await proxy.wrappedUi.confirm("Title", "Msg");
+
+      // Wait for cleanup
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Dashboard response after TUI won should be silently ignored
+      const requestId = mockConnection.send.mock.calls[0][0].requestId;
+      proxy.handleResponse({ type: "extension_ui_response", sessionId, requestId, result: { confirmed: true } });
+      // No error — entry already cleaned up
+    });
+
+    it("should abort TUI dialog when dashboard wins select", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      mockUi.select.mockImplementation((_t: string, _opts: string[], opts?: any) => {
+        capturedSignal = opts?.signal;
+        return new Promise(() => {});
+      });
+      setup(true);
+      const promise = proxy.wrappedUi.select("Pick:", ["A", "B"]);
+
+      const requestId = mockConnection.send.mock.calls[0][0].requestId;
+      proxy.handleResponse({ type: "extension_ui_response", sessionId, requestId, result: { value: "A" } });
+      await promise;
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(capturedSignal?.aborted).toBe(true);
+    });
+
+    it("should abort TUI dialog when dashboard wins input", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      mockUi.input.mockImplementation((_t: string, _p?: string, opts?: any) => {
+        capturedSignal = opts?.signal;
+        return new Promise(() => {});
+      });
+      setup(true);
+      const promise = proxy.wrappedUi.input("Name:");
+
+      const requestId = mockConnection.send.mock.calls[0][0].requestId;
+      proxy.handleResponse({ type: "extension_ui_response", sessionId, requestId, result: { value: "hello" } });
+      await promise;
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(capturedSignal?.aborted).toBe(true);
+    });
+
+    it("should send dismiss when TUI wins select", async () => {
+      mockUi.select.mockResolvedValue("B");
+      setup(true);
+      await proxy.wrappedUi.select("Pick:", ["A", "B"]);
+      await new Promise((r) => setTimeout(r, 0));
+
+      const dismissMsg = mockConnection.send.mock.calls.find(
+        (c: any) => c[0].type === "extension_ui_dismiss",
+      );
+      expect(dismissMsg).toBeDefined();
+    });
+
+    it("should abort TUI input when dashboard wins multiselect", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      mockUi.input.mockImplementation((_t: string, _p?: string, opts?: any) => {
+        capturedSignal = opts?.signal;
+        return new Promise(() => {});
+      });
+      setup(true);
+      const promise = proxy.wrappedUi.multiselect("Pick:", ["A", "B"]);
+
+      const requestId = mockConnection.send.mock.calls[0][0].requestId;
+      proxy.handleResponse({ type: "extension_ui_response", sessionId, requestId, result: { values: ["A"] } });
+      await promise;
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(capturedSignal?.aborted).toBe(true);
+    });
+  });
+
   describe("headless-only mode (hasUI=false)", () => {
     it("should NOT call original dialog methods", () => {
       setup(false);
@@ -269,6 +396,7 @@ describe("createUiProxy", () => {
       expect(mockUi.input).toHaveBeenCalledWith(
         expect.stringContaining("1. a.ts"),
         expect.any(String),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
 
@@ -324,6 +452,46 @@ describe("createUiProxy", () => {
       // Second response with same ID should be ignored (already cleaned up)
       proxy.handleResponse({ type: "extension_ui_response", sessionId, requestId, result: { confirmed: false } });
       // No error thrown — silently ignored
+    });
+  });
+
+  describe("recursion guard", () => {
+    it("should not recurse when ui.confirm calls back into the proxy", async () => {
+      setup(true);
+
+      // Simulate ctx.ui being patched: make ui.confirm call the proxy's wrappedUi.confirm
+      let callCount = 0;
+      mockUi.confirm.mockImplementation(() => {
+        callCount++;
+        // This simulates the scenario where ui.confirm IS the proxy (ctx.ui was patched)
+        return proxy.wrappedUi.confirm("re-entrant", "msg");
+      });
+
+      const promise = proxy.wrappedUi.confirm("Test?", "msg");
+
+      // Should have called ui.confirm exactly once (inProxy guard prevents re-entry)
+      expect(callCount).toBe(1);
+
+      // The re-entrant call should go dashboard-only (no TUI race)
+      // Two sendRequest calls: original + re-entrant
+      expect(mockConnection.send).toHaveBeenCalledTimes(2);
+
+      // Resolve via dashboard to clean up
+      const requestId = mockConnection.send.mock.calls[0][0].requestId;
+      proxy.handleResponse({ type: "extension_ui_response", sessionId, requestId, result: { confirmed: true } });
+    });
+
+    it("should not recurse when ui.input calls back into the proxy", async () => {
+      setup(true);
+
+      let callCount = 0;
+      mockUi.input.mockImplementation(() => {
+        callCount++;
+        return proxy.wrappedUi.input("re-entrant", "placeholder");
+      });
+
+      proxy.wrappedUi.input("Test input", "placeholder");
+      expect(callCount).toBe(1);
     });
   });
 });

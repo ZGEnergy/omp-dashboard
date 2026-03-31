@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // Mock modules before importing
 vi.mock("@sinclair/typebox", () => ({
@@ -16,60 +16,29 @@ vi.mock("@mariozechner/pi-ai", () => ({
 
 import { registerAskUserTool } from "../ask-user-tool.js";
 
-function createMockPi(existingTools: Array<{ name: string }> = []) {
+function createMockPi() {
   return {
     registerTool: vi.fn(),
-    getAllTools: vi.fn(() => existingTools),
   };
 }
 
 describe("registerAskUserTool", () => {
-  const origEnv = process.env.PI_DASHBOARD_SPAWNED;
-
-  beforeEach(() => {
-    delete process.env.PI_DASHBOARD_SPAWNED;
-  });
-
-  afterEach(() => {
-    if (origEnv !== undefined) {
-      process.env.PI_DASHBOARD_SPAWNED = origEnv;
-    } else {
-      delete process.env.PI_DASHBOARD_SPAWNED;
-    }
-  });
-
-  it("registers ask_user when no existing tool and not dashboard-spawned", () => {
-    const pi = createMockPi([]);
+  it("registers ask_user tool", () => {
+    const pi = createMockPi();
     registerAskUserTool(pi as any);
 
-    expect(pi.getAllTools).toHaveBeenCalled();
     expect(pi.registerTool).toHaveBeenCalledTimes(1);
     expect(pi.registerTool.mock.calls[0][0].name).toBe("ask_user");
   });
 
-  it("skips registration when existing ask_user tool and not dashboard-spawned", () => {
-    const pi = createMockPi([{ name: "ask_user" }]);
+  it("registers with correct methods", () => {
+    const pi = createMockPi();
     registerAskUserTool(pi as any);
 
-    expect(pi.getAllTools).toHaveBeenCalled();
-    expect(pi.registerTool).not.toHaveBeenCalled();
-  });
-
-  it("overrides existing ask_user when dashboard-spawned", () => {
-    process.env.PI_DASHBOARD_SPAWNED = "1";
-    const pi = createMockPi([{ name: "ask_user" }]);
-    registerAskUserTool(pi as any);
-
-    expect(pi.getAllTools).not.toHaveBeenCalled();
-    expect(pi.registerTool).toHaveBeenCalledTimes(1);
-    expect(pi.registerTool.mock.calls[0][0].name).toBe("ask_user");
-  });
-
-  it("registers normally when dashboard-spawned and no existing tool", () => {
-    process.env.PI_DASHBOARD_SPAWNED = "1";
-    const pi = createMockPi([]);
-    registerAskUserTool(pi as any);
-
-    expect(pi.registerTool).toHaveBeenCalledTimes(1);
+    const tool = pi.registerTool.mock.calls[0][0];
+    expect(tool.name).toBe("ask_user");
+    expect(tool.execute).toBeTypeOf("function");
+    expect(tool.promptGuidelines).toBeDefined();
+    expect(tool.promptGuidelines.length).toBeGreaterThan(0);
   });
 });

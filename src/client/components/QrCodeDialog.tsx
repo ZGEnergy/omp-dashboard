@@ -1,20 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import Icon from "@mdi/react";
-import { mdiClose, mdiContentCopy, mdiCheck } from "@mdi/js";
+import { mdiClose, mdiContentCopy, mdiCheck, mdiLanDisconnect, mdiLanConnect, mdiCog } from "@mdi/js";
 import { DialogPortal } from "./DialogPortal.js";
 
 interface Props {
-  url: string;
+  url?: string;
+  connected: boolean;
   onClose: () => void;
+  onDisconnect?: () => void;
+  onConnect?: () => void;
+  onSetup?: () => void;
 }
 
-export function QrCodeDialog({ url, onClose }: Props) {
+export function QrCodeDialog({ url, connected, onClose, onDisconnect, onConnect, onSetup }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (canvasRef.current) {
+    if (canvasRef.current && url) {
       QRCode.toCanvas(canvasRef.current, url, {
         width: 256,
         margin: 2,
@@ -32,6 +36,7 @@ export function QrCodeDialog({ url, onClose }: Props) {
   }, [onClose]);
 
   async function handleCopy() {
+    if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -55,7 +60,7 @@ export function QrCodeDialog({ url, onClose }: Props) {
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-              Open on Mobile
+              {connected ? "Open on Mobile" : "Tunnel Disconnected"}
             </h2>
             <button
               onClick={onClose}
@@ -67,37 +72,87 @@ export function QrCodeDialog({ url, onClose }: Props) {
             </button>
           </div>
 
-          {/* QR Code */}
-          <div className="flex justify-center mb-4">
-            <canvas
-              ref={canvasRef}
-              data-testid="qr-canvas"
-              className="rounded"
-            />
-          </div>
+          {connected && url ? (
+            <>
+              {/* QR Code */}
+              <div className="flex justify-center mb-4">
+                <canvas
+                  ref={canvasRef}
+                  data-testid="qr-canvas"
+                  className="rounded"
+                />
+              </div>
 
-          {/* URL + Copy */}
-          <div className="flex items-center gap-2 bg-[var(--bg-surface)] rounded px-3 py-2">
-            <span
-              className="text-sm text-[var(--text-secondary)] truncate flex-1 select-all"
-              title={url}
-              data-testid="qr-url"
-            >
-              {url}
-            </span>
-            <button
-              onClick={handleCopy}
-              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex-shrink-0"
-              title={copied ? "Copied!" : "Copy URL"}
-              data-testid="qr-copy-btn"
-            >
-              <Icon path={copied ? mdiCheck : mdiContentCopy} size={0.7} />
-            </button>
-          </div>
+              {/* URL + Copy */}
+              <div className="flex items-center gap-2 bg-[var(--bg-surface)] rounded px-3 py-2">
+                <span
+                  className="text-sm text-[var(--text-secondary)] truncate flex-1 select-all"
+                  title={url}
+                  data-testid="qr-url"
+                >
+                  {url}
+                </span>
+                <button
+                  onClick={handleCopy}
+                  className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex-shrink-0"
+                  title={copied ? "Copied!" : "Copy URL"}
+                  data-testid="qr-copy-btn"
+                >
+                  <Icon path={copied ? mdiCheck : mdiContentCopy} size={0.7} />
+                </button>
+              </div>
 
-          <p className="text-xs text-[var(--text-muted)] mt-3 text-center">
-            Scan to open PI Dashboard or install as an app
-          </p>
+              <p className="text-xs text-[var(--text-muted)] mt-3 text-center">
+                Scan to open PI Dashboard or install as an app
+              </p>
+            </>
+          ) : (
+            <div className="text-center py-4">
+              <p className="text-sm text-[var(--text-secondary)] mb-1">
+                Tunnel is set up but not connected.
+              </p>
+              <p className="text-xs text-[var(--text-muted)]">
+                Connect to generate a QR code for mobile access.
+              </p>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex items-center justify-center gap-3 mt-4 pt-3 border-t border-[var(--border-primary)]">
+            {connected && onDisconnect && (
+              <button
+                onClick={onDisconnect}
+                className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-red-400 transition-colors"
+                title="Disconnect tunnel"
+                data-testid="qr-disconnect-btn"
+              >
+                <Icon path={mdiLanDisconnect} size={0.55} />
+                Disconnect
+              </button>
+            )}
+            {!connected && onConnect && (
+              <button
+                onClick={onConnect}
+                className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-green-400 transition-colors"
+                title="Connect tunnel"
+                data-testid="qr-connect-btn"
+              >
+                <Icon path={mdiLanConnect} size={0.55} />
+                Connect
+              </button>
+            )}
+            {onSetup && (
+              <button
+                onClick={onSetup}
+                className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                title="Tunnel setup"
+                data-testid="qr-setup-btn"
+              >
+                <Icon path={mdiCog} size={0.55} />
+                Setup
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </DialogPortal>

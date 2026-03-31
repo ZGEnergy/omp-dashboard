@@ -22,6 +22,7 @@ export interface AuthConfig {
   secret: string;
   providers: Record<string, AuthProviderConfig>;
   allowedUsers?: string[];
+  bypassUrls?: string[];
 }
 
 export interface DashboardConfig {
@@ -77,6 +78,7 @@ function parseAuthConfig(raw: any): AuthConfig | undefined {
     secret: raw.secret ?? "",
     providers: validProviders,
     ...(Array.isArray(raw.allowedUsers) ? { allowedUsers: raw.allowedUsers } : Array.isArray(raw.allowedEmails) ? { allowedUsers: raw.allowedEmails } : {}),
+    bypassUrls: Array.isArray(raw.bypassUrls) ? raw.bypassUrls.filter((u: unknown) => typeof u === "string") : [],
   };
 }
 

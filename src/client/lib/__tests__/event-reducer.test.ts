@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createInitialState, reduceEvent, toDisplayString, type SessionState, type PendingPrompt } from "../event-reducer.js";
+import { createInitialState, reduceEvent, toDisplayString, addInteractiveRequest, resolveInteractiveRequest, dismissInteractiveRequest, type SessionState, type PendingPrompt } from "../event-reducer.js";
 import type { DashboardEvent } from "../../../shared/types.js";
 
 function applyEvents(events: DashboardEvent[]): SessionState {
@@ -949,5 +949,90 @@ describe("command_feedback events", () => {
     ]);
     expect(state.messages[0].content).toBe("Already compacted");
     expect((state.messages[0].args as any).status).toBe("error");
+  });
+
+  describe("addInteractiveRequest deduplication", () => {
+    it("should ignore duplicate requestId", () => {
+      const initial = createInitialState();
+      const params = { title: "Continue?", message: "" };
+
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", params);
+      expect(s1.interactiveRequests).toHaveLength(1);
+      expect(s1.messages).toHaveLength(1);
+
+      // Same requestId again — should be a no-op
+      const s2 = addInteractiveRequest(s1, "req-1", "confirm", params);
+      expect(s2).toBe(s1); // exact same reference
+      expect(s2.interactiveRequests).toHaveLength(1);
+      expect(s2.messages).toHaveLength(1);
+    });
+
+    it("should ignore duplicate pending request with same method+title but different requestId", () => {
+      const initial = createInitialState();
+
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
+      // Different requestId, same method+title (recursive proxy scenario)
+      const s2 = addInteractiveRequest(s1, "req-2", "confirm", { title: "Continue?" });
+      expect(s2).toBe(s1);
+      expect(s2.interactiveRequests).toHaveLength(1);
+    });
+
+    it("should allow same title after previous request is resolved", () => {
+      const initial = createInitialState();
+
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
+      const s2 = resolveInteractiveRequest(s1, "req-1", true);
+      // Same title but previous is resolved — should allow
+      const s3 = addInteractiveRequest(s2, "req-2", "confirm", { title: "Continue?" });
+      expect(s3.interactiveRequests).toHaveLength(2);
+    });
+
+    it("should allow different titles", () => {
+      const initial = createInitialState();
+
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "A" });
+      const s2 = addInteractiveRequest(s1, "req-2", "confirm", { title: "B" });
+      expect(s2.interactiveRequests).toHaveLength(2);
+      expect(s2.messages).toHaveLength(2);
+    });
+  });
+
+  describe("dismissInteractiveRequest", () => {
+    it("should transition pending request to dismissed", () => {
+      const initial = createInitialState();
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
+      const s2 = dismissInteractiveRequest(s1, "req-1");
+
+      expect(s2.interactiveRequests[0].status).toBe("dismissed");
+      expect((s2.messages[0].args as any).status).toBe("dismissed");
+    });
+
+    it("should not change already resolved requests", () => {
+      const initial = createInitialState();
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
+      const s2 = resolveInteractiveRequest(s1, "req-1", { confirmed: true });
+      const s3 = dismissInteractiveRequest(s2, "req-1");
+
+      expect(s3).toBe(s2); // No change — same reference
+      expect(s3.interactiveRequests[0].status).toBe("resolved");
+    });
+
+    it("should not change already cancelled requests", () => {
+      const initial = createInitialState();
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
+      const s2 = resolveInteractiveRequest(s1, "req-1", undefined, true);
+      const s3 = dismissInteractiveRequest(s2, "req-1");
+
+      expect(s3).toBe(s2);
+      expect(s3.interactiveRequests[0].status).toBe("cancelled");
+    });
+
+    it("should return same state for unknown requestId", () => {
+      const initial = createInitialState();
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
+      const s2 = dismissInteractiveRequest(s1, "unknown-id");
+
+      expect(s2).toBe(s1);
+    });
   });
 });

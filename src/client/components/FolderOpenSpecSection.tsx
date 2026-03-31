@@ -83,10 +83,12 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onR
                     ))}
                   </span>
                 )}
-                {c.totalTasks > 0 && (
+                {c.totalTasks > 0 ? (
                   <span className="text-[10px] text-[var(--text-tertiary)] whitespace-nowrap ml-auto">
                     {c.completedTasks}/{c.totalTasks} tasks
                   </span>
+                ) : (
+                  <span className="ml-auto" />
                 )}
                 <ArtifactLettersButton artifacts={c.artifacts} changeName={c.name} onReadArtifact={onReadArtifact} />
               </div>

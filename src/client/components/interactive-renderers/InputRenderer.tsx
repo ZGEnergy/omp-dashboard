@@ -23,6 +23,9 @@ export function InputRenderer({ params, status, result, onRespond, onCancel }: I
         {status === "cancelled" && (
           <span className="ml-1 text-[var(--text-tertiary)]">Cancelled</span>
         )}
+        {status === "dismissed" && (
+          <span className="ml-1 text-[var(--text-tertiary)]">Answered in terminal</span>
+        )}
       </div>
     );
   }

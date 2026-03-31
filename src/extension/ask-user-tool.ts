@@ -1,22 +1,15 @@
 /**
  * Registers the ask_user tool in the bridge extension.
  *
- * Collision strategy:
- * - PI_DASHBOARD_SPAWNED=1: Always register (override existing) — dashboard is primary UI
- * - No env var: Only register if no existing ask_user tool found
+ * Called at runtime (session_start) rather than extension load time to avoid
+ * static tool-name conflicts with other extensions (e.g. pi-flows) that also
+ * register ask_user. Runtime registration bypasses detectExtensionConflicts.
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 
 export function registerAskUserTool(pi: ExtensionAPI): void {
-  const dashboardSpawned = !!process.env.PI_DASHBOARD_SPAWNED;
-
-  if (!dashboardSpawned) {
-    const existing = pi.getAllTools().find((t) => t.name === "ask_user");
-    if (existing) return;
-  }
-
   pi.registerTool({
     name: "ask_user",
     label: "Ask User",

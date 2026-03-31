@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { SettingsPanel } from "../SettingsPanel.js";
 
 // Mock wouter
@@ -21,6 +21,10 @@ const mockConfig = {
 describe("SettingsPanel", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("should load and display config on mount", async () => {
@@ -59,6 +63,61 @@ describe("SettingsPanel", () => {
 
     await waitFor(() => {
       expect(screen.getByText("No changes to save")).toBeTruthy();
+    });
+  });
+
+  it("should display bypass URLs from auth config", async () => {
+    const configWithAuth = {
+      ...mockConfig,
+      auth: {
+        secret: "***",
+        providers: { github: { clientId: "id1", clientSecret: "***" } },
+        allowedUsers: ["user@example.com"],
+        bypassUrls: ["/webhooks/", "/metrics"],
+      },
+    };
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ success: true, data: configWithAuth }),
+    });
+
+    render(<SettingsPanel />);
+
+    await waitFor(() => screen.getByTestId("bypass-urls-textarea"));
+
+    const textarea = screen.getByTestId("bypass-urls-textarea");
+    expect(textarea).toBeTruthy();
+    expect((textarea as HTMLTextAreaElement).value).toBe("/webhooks/\n/metrics");
+  });
+
+  it("should include bypassUrls in save payload when changed", async () => {
+    const configWithAuth = {
+      ...mockConfig,
+      auth: {
+        secret: "***",
+        providers: { github: { clientId: "id1", clientSecret: "***" } },
+        bypassUrls: [],
+      },
+    };
+    let savedBody: any;
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((_url: string, options?: any) => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({ json: () => Promise.resolve({ success: true, data: configWithAuth }) });
+      }
+      savedBody = JSON.parse(options.body);
+      return Promise.resolve({ json: () => Promise.resolve({ success: true }) });
+    });
+
+    render(<SettingsPanel />);
+    await waitFor(() => screen.getByTestId("bypass-urls-textarea"));
+
+    const textarea = screen.getByTestId("bypass-urls-textarea");
+    fireEvent.change(textarea, { target: { value: "/webhooks/\n/public" } });
+    fireEvent.click(screen.getAllByTestId("save-btn")[0]);
+
+    await waitFor(() => {
+      expect(savedBody?.auth?.bypassUrls).toEqual(["/webhooks/", "/public"]);
     });
   });
 

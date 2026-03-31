@@ -70,7 +70,7 @@ export function MarkdownPreviewView({
       )}
 
       {/* Content area */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4" style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
         {isLoading && (
           <div className="flex items-center justify-center h-full text-[var(--text-muted)]" data-testid="preview-loading">
             <Icon path={mdiLoading} size={1.2} spin className="animate-spin" />

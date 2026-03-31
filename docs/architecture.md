@@ -29,6 +29,7 @@ A global pi extension that runs in every pi session. It:
 - Detects OpenSpec activity (phase/change) from tool events
 - Proxies `ctx.ui` dialog methods (confirm, select, input, editor) to the dashboard via `ui-proxy.ts`
   - TUI sessions: races terminal dialog against dashboard response (first wins)
+  - Race cancellation: when dashboard wins, TUI dialog is aborted via `AbortSignal`; when TUI wins, dashboard dialog is dismissed via `extension_ui_dismiss` message
   - Headless sessions: only dashboard can respond
   - Fire-and-forget methods (notify) are forwarded alongside the original call
   - Re-sends pending UI requests on WebSocket reconnect (server restart resilience)
@@ -79,6 +80,12 @@ TypeScript type definitions shared across all components:
 6. Browser sends `extension_ui_response` to server, optimistically clears "Waiting for input" on session card
 7. Server clears the request from `pendingUiRequests` and routes response to bridge extension
 8. Bridge UI proxy resolves the original dialog promise
+
+**Race cancellation (TUI sessions):**
+- TUI and dashboard both show the dialog simultaneously via `Promise.race`
+- When dashboard answers first: TUI dialog is dismissed via `AbortSignal` (passed in `ExtensionUIDialogOptions.signal`)
+- When TUI answers first: bridge sends `extension_ui_dismiss` to server → forwarded as `ui_dismiss` to browsers → dashboard transitions dialog to "dismissed" ("Answered in terminal")
+- Pending Map entry is cleaned up immediately when TUI wins, preventing memory leaks
 
 **Resilience:**
 - **Page refresh**: Server replays pending `extension_ui_request` messages when a browser subscribes, so interactive dialogs survive page refreshes.
@@ -131,6 +138,25 @@ When a user sends a prompt to an ended session, the server automatically resumes
 
 ### File Read API
 The server exposes `GET /api/file?cwd=...&path=...` for reading files or listing directories from session working directories. Guards: localhost-only, cwd must match a known session, resolved path must stay inside cwd. Returns `{ type: "file", content }` or `{ type: "directory", entries }`.
+
+### Pi Resources Browser
+
+The dashboard can display pi extensions, skills, and prompts installed for each workspace. The server-side scanner (`pi-resource-scanner.ts`) discovers resources from three sources:
+
+1. **Local**: `<cwd>/.pi/extensions/`, `.pi/skills/`, `.pi/prompts/`
+2. **Global**: `~/.pi/agent/extensions/`, `skills/`, `prompts/`
+3. **Packages**: Resolved from `packages[]` in both `<cwd>/.pi/settings.json` and `~/.pi/agent/settings.json` — supports npm, git, and local path packages with pi manifest or conventional directory fallback
+
+Metadata is parsed from SKILL.md YAML frontmatter (`name`, `description`), prompt frontmatter, and `package.json`. Results are cached in DirectoryService and polled every 30s alongside OpenSpec.
+
+**API endpoints:**
+- `GET /api/pi-resources?cwd=...` — returns grouped resources (local, global, packages) from cache
+- `GET /api/pi-resource-file?path=...` — reads resource files from allowed locations (`.pi/`, `~/.pi/agent/`, `node_modules/`, `.pi/git/`)
+
+**Client navigation stack:**
+- Puzzle icon button in folder header → PiResourcesView (content area)
+- "View" button on resource → MarkdownPreviewView (`.md` as markdown, `.ts` as code block)
+- Back buttons pop the stack: Preview → Resources → Chat
 
 ### Markdown Preview View
 The web client includes a generic `MarkdownPreviewView` component that replaces the chat area. It supports a back button, title, optional tab bar, and loading/error states. For OpenSpec artifacts, the `useOpenSpecReader` hook maps artifact IDs (P/S/D/T) to file paths, fetches content via the file API, and concatenates specs from subdirectories.
@@ -218,7 +244,7 @@ The tunnel is **enabled by default** (`tunnel.enabled: true`). When the server s
 To disable: set `tunnel.enabled` to `false` in `~/.pi/dashboard/config.json` or pass `--no-tunnel` on the CLI.
 
 The client can query `GET /api/tunnel-status` which returns `{ status: "active"|"inactive"|"unavailable", url?, serverOs }`.
-If zrok is not installed, the sidebar tunnel button navigates to `/tunnel-setup` which shows an OS-specific installation guide.
+The client can connect/disconnect the tunnel via `POST /api/tunnel-connect` and `POST /api/tunnel-disconnect`.
 
 ### PWA Support
 
@@ -226,8 +252,8 @@ The dashboard is installable as a Progressive Web App on mobile devices:
 
 - **Manifest** (`public/manifest.json`) — app name, icons, standalone display mode
 - **Service Worker** (`public/sw.js`) — minimal fetch pass-through for installability
-- **QR Code Button** — sidebar header shows a QR code icon when a tunnel is active; clicking opens a dialog with a scannable QR code and copyable URL
-- **Tunnel Status Polling** — `useTunnelStatus` hook fetches `GET /api/tunnel-status` on mount and every 30s to detect tunnel availability changes
+- **Tunnel/QR Button** — unified sidebar button: shows tunnel icon when zrok is not installed (click → setup guide), QR code icon when set up but disconnected (click → setup guide), green QR code icon when connected (click → QR dialog with disconnect and setup buttons)
+
 | `devBuildOnReload` | false | Rebuild Vite client + restart server on `/reload` |
 
 ## Shared Config

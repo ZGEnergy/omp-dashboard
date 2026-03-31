@@ -60,8 +60,6 @@ function filterHiddenCommands(commands: any[]): any[] {
 }
 
 function initBridge(pi: ExtensionAPI) {
-  registerAskUserTool(pi);
-
   const prev = getBridgeState();
   prev.cleanup?.();
   prev.cleanup = undefined;
@@ -415,6 +413,10 @@ function initBridge(pi: ExtensionAPI) {
     cachedCtx = ctx;
     sessionId = newSessionId;
 
+    // Register ask_user at runtime (not at load time) to avoid static
+    // tool-name conflicts with other extensions like pi-flows.
+    registerAskUserTool(pi);
+
     // Set up UI proxy to forward dialogs to dashboard.
     // For dashboard-spawned sessions (tmux or headless), skip the TUI race —
     // the dashboard is the primary UI, and the TUI dialog in an unattended
@@ -426,7 +428,14 @@ function initBridge(pi: ExtensionAPI) {
       getSessionId: () => sessionId,
       send: (msg: any) => connection.send(msg),
     });
-    // Replace ctx.ui methods with proxied versions
+    // Replace ctx.ui methods with proxied versions.
+    // The ui-proxy has a recursion guard (inProxy flag) so even if ctx.ui
+    // is already patched from a previous /reload, the TUI race path won't
+    // recurse — it falls back to dashboard-only on re-entry.
+    // Replace ctx.ui methods with proxied versions.
+    // The ui-proxy has a recursion guard (inProxy flag) so even if ctx.ui
+    // is already patched from a previous /reload, the TUI race path won't
+    // recurse — it falls back to dashboard-only on re-entry.
     (ctx.ui as any).confirm = uiProxy.wrappedUi.confirm;
     (ctx.ui as any).select = uiProxy.wrappedUi.select;
     (ctx.ui as any).input = uiProxy.wrappedUi.input;

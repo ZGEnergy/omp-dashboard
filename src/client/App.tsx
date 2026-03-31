@@ -10,6 +10,7 @@ import { useMobile } from "./hooks/useMobile.js";
 import { getMobileDepth } from "./lib/mobile-depth.js";
 import { ChatView } from "./components/ChatView.js";
 import { MarkdownPreviewView } from "./components/MarkdownPreviewView.js";
+import { PiResourcesView } from "./components/PiResourcesView.js";
 import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
 import type { OpenSpecArtifact } from "../shared/types.js";
 import { SessionHeader } from "./components/SessionHeader.js";
@@ -19,8 +20,10 @@ import { StatusBar } from "./components/StatusBar.js";
 import { LandingPage } from "./components/LandingPage.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
+import { InstallBanner } from "./components/InstallBanner.js";
+import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { TerminalView } from "./components/TerminalView.js";
-import { createInitialState, reduceEvent, addInteractiveRequest, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { createInitialState, reduceEvent, addInteractiveRequest, resolveInteractiveRequest, dismissInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { useEditors } from "./lib/use-editors.js";
 import type { DashboardSession, CommandInfo, FileEntry, OpenSpecData, ModelInfo } from "../shared/types.js";
 import type { TerminalSession } from "../shared/terminal-types.js";
@@ -31,6 +34,22 @@ import type { ContextUsageInfo } from "./components/SessionList.js";
 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const wsPort = window.location.port ? `:${window.location.port}` : "";
 const WS_URL = `${wsProtocol}//${window.location.hostname}${wsPort}/ws`;
+
+const SOURCE_LANG_MAP: Record<string, string> = {
+  ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript",
+  ".json": "json", ".sh": "bash", ".bash": "bash", ".zsh": "bash",
+  ".py": "python", ".rb": "ruby", ".rs": "rust", ".go": "go",
+  ".java": "java", ".kt": "kotlin", ".swift": "swift",
+  ".css": "css", ".scss": "scss", ".html": "html", ".xml": "xml",
+  ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
+  ".c": "c", ".cpp": "cpp", ".h": "c", ".hpp": "cpp",
+  ".sql": "sql", ".graphql": "graphql",
+};
+
+function getSourceLanguage(filePath: string): string | null {
+  const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
+  return SOURCE_LANG_MAP[ext] ?? null;
+}
 
 function OpenSpecPreview({
   cwd,
@@ -71,6 +90,7 @@ export default function App() {
   const selectedTerminalId = termMatch ? termParams?.id : undefined;
   const sidebar = useSidebarState();
   const isMobile = useMobile();
+  const installPrompt = useInstallPrompt();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sessions, setSessions] = useState<Map<string, DashboardSession>>(new Map());
   const [sessionStates, setSessionStates] = useState<Map<string, SessionState>>(new Map());
@@ -93,6 +113,14 @@ export default function App() {
     changeName: string;
     artifactId: string;
     artifacts: OpenSpecArtifact[];
+  } | null>(null);
+  const [piResourcesState, setPiResourcesState] = useState<{ cwd: string } | null>(null);
+  const [piResourceFilePreview, setPiResourceFilePreview] = useState<{
+    filePath: string;
+    title: string;
+    content?: string;
+    isLoading: boolean;
+    error?: string;
   } | null>(null);
 
   const clearSpawningCwd = useCallback((cwd: string) => {
@@ -258,11 +286,21 @@ export default function App() {
         setSessionStates((prev) => {
           const next = new Map(prev);
           const current = next.get(msg.sessionId) ?? createInitialState();
-          // Skip if this request was already added (replay after reconnect)
-          if (current.interactiveRequests.some((r) => r.requestId === msg.requestId)) {
-            return prev;
-          }
-          next.set(msg.sessionId, addInteractiveRequest(current, msg.requestId, msg.method, msg.params));
+          const updated = addInteractiveRequest(current, msg.requestId, msg.method, msg.params);
+          if (updated === current) return prev; // dedup: no change
+          next.set(msg.sessionId, updated);
+          return next;
+        });
+        break;
+
+      case "ui_dismiss":
+        setSessionStates((prev) => {
+          const next = new Map(prev);
+          const current = next.get(msg.sessionId);
+          if (!current) return prev;
+          const updated = dismissInteractiveRequest(current, msg.requestId);
+          if (updated === current) return prev;
+          next.set(msg.sessionId, updated);
           return next;
         });
         break;
@@ -451,6 +489,36 @@ export default function App() {
       setPreviewState({ cwd, changeName, artifactId, artifacts });
     },
     [openspecMap],
+  );
+
+  const handleOpenPiResources = useCallback(
+    (cwd: string) => {
+      setPiResourcesState({ cwd });
+      setPiResourceFilePreview(null);
+    },
+    [],
+  );
+
+  const handleViewPiResourceFile = useCallback(
+    async (filePath: string, title: string) => {
+      setPiResourceFilePreview({ filePath, title, isLoading: true });
+      try {
+        const res = await fetch(`/api/pi-resource-file?path=${encodeURIComponent(filePath)}`);
+        const body = await res.json();
+        if (body.success) {
+          const lang = getSourceLanguage(filePath);
+          const content = lang
+            ? "```" + lang + "\n" + body.data.content + "\n```"
+            : body.data.content;
+          setPiResourceFilePreview({ filePath, title, content, isLoading: false });
+        } else {
+          setPiResourceFilePreview({ filePath, title, isLoading: false, error: body.error });
+        }
+      } catch (err: any) {
+        setPiResourceFilePreview({ filePath, title, isLoading: false, error: err.message });
+      }
+    },
+    [],
   );
 
   const handleAttachProposal = useCallback(
@@ -664,6 +732,7 @@ export default function App() {
       onOpenSpecRefresh={handleOpenSpecRefresh}
       onBulkArchive={handleBulkArchive}
       onReadArtifact={handleReadArtifact}
+      onOpenPiResources={handleOpenPiResources}
       onAttachProposal={handleAttachProposal}
       onDetachProposal={handleDetachProposal}
       onRename={handleRenameSession}
@@ -791,7 +860,21 @@ export default function App() {
           cost={selectedState.cost}
         />
       )}
-      {previewState ? (
+      {piResourceFilePreview ? (
+        <MarkdownPreviewView
+          title={piResourceFilePreview.title}
+          content={piResourceFilePreview.content}
+          isLoading={piResourceFilePreview.isLoading}
+          error={piResourceFilePreview.error}
+          onBack={() => setPiResourceFilePreview(null)}
+        />
+      ) : piResourcesState ? (
+        <PiResourcesView
+          cwd={piResourcesState.cwd}
+          onBack={() => setPiResourcesState(null)}
+          onViewFile={handleViewPiResourceFile}
+        />
+      ) : previewState ? (
         <OpenSpecPreview
           cwd={previewState.cwd}
           changeName={previewState.changeName}
@@ -873,14 +956,18 @@ export default function App() {
       selectedTerminalId,
       settingsMatch: !!settingsMatch,
       tunnelSetupMatch: !!tunnelSetupMatch,
-      hasPreview: !!previewState,
+      hasPreview: !!previewState || !!piResourcesState || !!piResourceFilePreview,
     });
     return (
       <div className="bg-[var(--bg-primary)] text-[var(--text-primary)]">
         <MobileShell
           depth={mobileDepth}
           onBack={() => {
-            if (previewState) {
+            if (piResourceFilePreview) {
+              setPiResourceFilePreview(null);
+            } else if (piResourcesState) {
+              setPiResourcesState(null);
+            } else if (previewState) {
               setPreviewState(null);
             } else {
               navigate("/");
@@ -888,6 +975,7 @@ export default function App() {
           }}
           listPanel={
             <div className="flex flex-col h-full">
+              <InstallBanner canInstall={installPrompt.canInstall} isIOS={installPrompt.isIOS} isInstalled={installPrompt.isInstalled} prompt={installPrompt.prompt} />
               {connectionBanner}
               {sessionList}
             </div>
@@ -897,6 +985,20 @@ export default function App() {
               <SettingsPanel />
             ) : tunnelSetupMatch ? (
               <ZrokInstallGuide onBack={() => navigate("/")} />
+            ) : piResourceFilePreview ? (
+              <MarkdownPreviewView
+                title={piResourceFilePreview.title}
+                content={piResourceFilePreview.content}
+                isLoading={piResourceFilePreview.isLoading}
+                error={piResourceFilePreview.error}
+                onBack={() => setPiResourceFilePreview(null)}
+              />
+            ) : piResourcesState ? (
+              <PiResourcesView
+                cwd={piResourcesState.cwd}
+                onBack={() => setPiResourcesState(null)}
+                onViewFile={handleViewPiResourceFile}
+              />
             ) : previewState ? (
               <OpenSpecPreview
                 cwd={previewState.cwd}
@@ -935,7 +1037,25 @@ export default function App() {
         {/* Terminal views are always mounted (keep-alive), CSS hidden/shown */}
         {terminalViews}
         {/* Show session detail or landing page when no terminal is selected */}
-        {!selectedTerminalId && !settingsMatch && !tunnelSetupMatch && (sessionDetail ?? <LandingPage />)}
+        {!selectedTerminalId && !settingsMatch && !tunnelSetupMatch && (
+          piResourceFilePreview ? (
+            <MarkdownPreviewView
+              title={piResourceFilePreview.title}
+              content={piResourceFilePreview.content}
+              isLoading={piResourceFilePreview.isLoading}
+              error={piResourceFilePreview.error}
+              onBack={() => setPiResourceFilePreview(null)}
+            />
+          ) : piResourcesState && !selectedId ? (
+            <PiResourcesView
+              cwd={piResourcesState.cwd}
+              onBack={() => setPiResourcesState(null)}
+              onViewFile={handleViewPiResourceFile}
+            />
+          ) : (
+            sessionDetail ?? <LandingPage />
+          )
+        )}
         {settingsMatch && <SettingsPanel />}
         {tunnelSetupMatch && <ZrokInstallGuide onBack={() => navigate("/")} />}
       </div>
