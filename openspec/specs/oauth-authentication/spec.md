@@ -23,8 +23,8 @@ The auth module SHALL maintain a registry of OAuth2 provider configurations. Eac
 - **WHEN** config contains `auth` but `auth.providers` is empty or missing
 - **THEN** the module SHALL treat auth as disabled (same as no `auth` key)
 
-### Requirement: Localhost bypass
-The auth module SHALL skip authentication entirely for requests originating from loopback addresses (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`). Additionally, if `auth.bypassUrls` is configured, the auth module SHALL skip authentication for HTTP requests whose URL starts with any entry in that list. Both bypass rules apply before any cookie/session validation.
+### Requirement: Localhost and trusted host bypass
+The auth module SHALL skip authentication entirely for requests originating from loopback addresses (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`). Additionally, if `auth.bypassUrls` is configured, the auth module SHALL skip authentication for HTTP requests whose URL starts with any entry in that list. If `auth.bypassHosts` is configured, the auth module SHALL skip authentication for requests originating from any matching IP (exact, wildcard, or CIDR). All bypass rules apply before any cookie/session validation, for both HTTP requests and WebSocket upgrades.
 
 #### Scenario: Localhost HTTP request without cookie
 - **WHEN** an HTTP request arrives from `127.0.0.1` with no auth cookie

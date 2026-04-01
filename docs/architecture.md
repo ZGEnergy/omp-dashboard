@@ -167,7 +167,7 @@ Optional OAuth2 authentication protects the dashboard when accessed via tunnel (
 
 1. Server loads `auth` config from `~/.pi/dashboard/config.json` at startup
 2. If `auth.providers` has entries, the auth plugin registers routes and an `onRequest` hook
-3. The `onRequest` hook skips localhost requests (`isLoopback`), `/auth/*` paths, and `/api/health`
+3. The `onRequest` hook skips localhost requests (`isLoopback`), `/auth/*` paths, `/api/health`, configured `bypassUrls` path prefixes, and configured `bypassHosts` trusted source IPs (exact, wildcard, CIDR)
 4. External requests without a valid `pi_dash_token` JWT cookie are redirected to `/auth/login`
 5. `/auth/login` shows a provider picker (or auto-redirects if single provider)
 6. OAuth callback exchanges code for token, fetches user info, validates against `allowedEmails`

@@ -20,7 +20,7 @@ The settings panel SHALL render as a full-page view in the main content area (re
   - **Server**: `port`, `piPort`, `autoShutdown`, `shutdownIdleSeconds`
   - **Sessions**: `spawnStrategy`
   - **Tunnel**: `tunnel.enabled`
-  - **Authentication**: `auth.providers` (per-provider clientId/clientSecret/issuerUrl), `auth.allowedUsers` (usernames, emails, domain wildcards), `auth.bypassUrls` (URL path prefixes that skip authentication)
+  - **Authentication**: `auth.providers` (per-provider clientId/clientSecret/issuerUrl), `auth.allowedUsers` (usernames, emails, domain wildcards), `auth.bypassUrls` (URL path prefixes that skip authentication), `auth.bypassHosts` (trusted source IPs/hosts that skip authentication — supports exact IP, wildcards, CIDR)
   - **Developer**: `devBuildOnReload`
 
 #### Scenario: bypassUrls field display
@@ -30,6 +30,14 @@ The settings panel SHALL render as a full-page view in the main content area (re
 #### Scenario: bypassUrls field save
 - **WHEN** the user edits the Bypass URLs textarea and clicks Save
 - **THEN** the client SHALL POST `{ auth: { bypassUrls: <array of trimmed non-empty lines> } }` to `/api/config` and the server SHALL merge it into the running config
+
+#### Scenario: bypassHosts field display
+- **WHEN** the Settings panel is open and auth is configured
+- **THEN** the Authentication group SHALL show a textarea labelled "Trusted Hosts" containing one IP/host per line, with placeholder examples showing wildcard and CIDR notation
+
+#### Scenario: bypassHosts field save
+- **WHEN** the user edits the Trusted Hosts textarea and clicks Save
+- **THEN** the client SHALL POST `{ auth: { bypassHosts: <array of trimmed non-empty lines> } }` to `/api/config` and the server SHALL merge it into the running config
 
 #### Scenario: Settings panel back navigation
 - **WHEN** the user clicks a back button or the π logo in the sidebar
