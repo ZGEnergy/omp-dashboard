@@ -2,6 +2,7 @@
  * Process manager for spawning pi sessions via tmux or headless (RPC mode).
  */
 import { execSync, spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import type { SpawnStrategy } from "../shared/config.js";
 
 export interface PlatformInfo {
@@ -140,6 +141,13 @@ export function shellEscape(s: string): string {
 }
 
 export async function spawnPiSession(cwd: string, options?: SessionOptions): Promise<SpawnResult> {
+  if (!existsSync(cwd)) {
+    return {
+      success: false,
+      message: `Directory does not exist: ${cwd}`,
+    };
+  }
+
   if (options?.strategy === "headless") {
     return spawnHeadless(cwd, options);
   }

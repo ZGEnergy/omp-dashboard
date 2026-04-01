@@ -15,6 +15,7 @@ interface AuthConfig {
   providers: Record<string, ProviderConfig>;
   allowedUsers?: string[];
   bypassUrls?: string[];
+  bypassHosts?: string[];
 }
 
 interface Config {
@@ -246,19 +247,38 @@ export function SettingsPanel() {
           </div>
           <div className="mt-3">
             <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-              Bypass URLs <span className="text-[var(--text-tertiary)]">(one URL prefix per line — requests to these paths skip OAuth)</span>
+              Bypass URL Prefixes <span className="text-[var(--text-tertiary)]">(one per line — requests to these paths skip auth)</span>
             </label>
             <textarea
               className="w-full bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1.5 text-sm text-[var(--text-primary)] font-mono resize-y"
-              rows={3}
+              rows={2}
               data-testid="bypass-urls-textarea"
-              placeholder={"/webhooks/\n/metrics\n/healthz"}
+              placeholder={"/webhooks/\n/metrics"}
               value={(config.auth?.bypassUrls || []).join("\n")}
               onChange={(e) => {
                 const urls = e.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
                 update((c) => {
                   if (!c.auth) c.auth = { secret: "", providers: {} };
                   c.auth.bypassUrls = urls;
+                });
+              }}
+            />
+          </div>
+          <div className="mt-3">
+            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+              Trusted Hosts <span className="text-[var(--text-tertiary)]">(one per line — requests from these IPs/hosts skip auth. Supports exact IP, wildcards like 10.0.0.*, CIDR like 192.168.1.0/24)</span>
+            </label>
+            <textarea
+              className="w-full bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1.5 text-sm text-[var(--text-primary)] font-mono resize-y"
+              rows={2}
+              data-testid="bypass-hosts-textarea"
+              placeholder={"10.0.0.*\n192.168.1.0/24"}
+              value={(config.auth?.bypassHosts || []).join("\n")}
+              onChange={(e) => {
+                const hosts = e.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
+                update((c) => {
+                  if (!c.auth) c.auth = { secret: "", providers: {} };
+                  c.auth.bypassHosts = hosts;
                 });
               }}
             />

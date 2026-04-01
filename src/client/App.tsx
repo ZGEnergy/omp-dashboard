@@ -9,6 +9,8 @@ import { MobileShell } from "./components/MobileShell.js";
 import { useMobile } from "./hooks/useMobile.js";
 import { getMobileDepth } from "./lib/mobile-depth.js";
 import { ChatView } from "./components/ChatView.js";
+import { FlowDashboard } from "./components/FlowDashboard.js";
+import { FlowAgentDetail } from "./components/FlowAgentDetail.js";
 import { MarkdownPreviewView } from "./components/MarkdownPreviewView.js";
 import { PiResourcesView } from "./components/PiResourcesView.js";
 import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
@@ -108,6 +110,7 @@ export default function App() {
   const [terminals, setTerminals] = useState<Map<string, TerminalSession>>(new Map());
   const pendingTerminalCwdRef = useRef<string | null>(null);
   const subscribedRef = useRef(new Set<string>());
+  const [flowDetailAgent, setFlowDetailAgent] = useState<string | null>(null);
   const [previewState, setPreviewState] = useState<{
     cwd: string;
     changeName: string;
@@ -761,6 +764,7 @@ export default function App() {
       onKillTerminal={handleKillTerminal}
       onRenameTerminal={handleRenameTerminal}
       onCollapseSidebar={sidebar.toggleCollapse}
+      commandsMap={sessionCommands}
     />
   );
 
@@ -811,6 +815,11 @@ export default function App() {
           onSendPrompt: (text) => handleSend(text),
           onReadArtifact: (changeName, artifactId) => handleReadArtifact(selectedCwd!, changeName, artifactId),
         } : undefined}
+        commands={selectedCommands}
+        onSendPrompt={handleSend}
+        openspecChanges={selectedCwd ? openspecMap.get(selectedCwd)?.changes : undefined}
+        onAttachProposal={(changeName) => handleAttachProposal(selectedId, changeName)}
+        onDetachProposal={() => handleDetachProposal(selectedId)}
       />
       {/* Mobile info strip */}
       {isMobile && selectedSession && (
@@ -882,8 +891,52 @@ export default function App() {
           artifacts={previewState.artifacts}
           onBack={() => setPreviewState(null)}
         />
+      ) : flowDetailAgent && selectedState.flowState?.agents.has(flowDetailAgent) ? (
+        <>
+          {selectedState.flowState && (
+            <div className="sticky top-0 z-10">
+              <FlowDashboard
+                flowState={selectedState.flowState}
+                onAgentClick={setFlowDetailAgent}
+                onAbort={() => selectedId && send({ type: "flow_control" as any, sessionId: selectedId, action: "abort" })}
+                onToggleAutonomous={() => selectedId && send({ type: "flow_control" as any, sessionId: selectedId, action: "toggle_autonomous" })}
+                onDismiss={() => {
+                  setFlowDetailAgent(null);
+                  setSessionStates(prev => {
+                    const next = new Map(prev);
+                    const current = next.get(selectedId!);
+                    if (current) next.set(selectedId!, { ...current, flowState: null });
+                    return next;
+                  });
+                }}
+              />
+            </div>
+          )}
+          <FlowAgentDetail
+            agent={selectedState.flowState!.agents.get(flowDetailAgent)!}
+            onBack={() => setFlowDetailAgent(null)}
+          />
+        </>
       ) : (
         <>
+          {selectedState.flowState && (
+            <div className="sticky top-0 z-10">
+              <FlowDashboard
+                flowState={selectedState.flowState}
+                onAgentClick={setFlowDetailAgent}
+                onAbort={() => selectedId && send({ type: "flow_control" as any, sessionId: selectedId, action: "abort" })}
+                onToggleAutonomous={() => selectedId && send({ type: "flow_control" as any, sessionId: selectedId, action: "toggle_autonomous" })}
+                onDismiss={() => {
+                  setSessionStates(prev => {
+                    const next = new Map(prev);
+                    const current = next.get(selectedId!);
+                    if (current) next.set(selectedId!, { ...current, flowState: null });
+                    return next;
+                  });
+                }}
+              />
+            </div>
+          )}
           <ChatView state={selectedState} toolContext={toolContext} onCancelPending={handleCancelPending} onRespondToUi={handleRespondToUi} />
           <StatusBar
             model={selectedState.model ?? selectedSession?.model}

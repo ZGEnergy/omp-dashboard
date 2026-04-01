@@ -316,6 +316,12 @@ export interface BrowserExtensionUiResponseMessage {
   cancelled?: boolean;
 }
 
+export interface FlowControlBrowserMessage {
+  type: "flow_control";
+  sessionId: string;
+  action: "abort" | "toggle_autonomous";
+}
+
 export type BrowserToServerMessage =
   | SubscribeMessage
   | UnsubscribeMessage
@@ -345,4 +351,5 @@ export type BrowserToServerMessage =
   | OpenSpecBulkArchiveBrowserMessage
   | CreateTerminalBrowserMessage
   | KillTerminalBrowserMessage
-  | RenameTerminalBrowserMessage;
+  | RenameTerminalBrowserMessage
+  | FlowControlBrowserMessage;

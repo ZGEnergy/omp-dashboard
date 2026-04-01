@@ -36,6 +36,14 @@ export interface DashboardSession {
   firstMessage?: string;
   dataUnavailable?: boolean;
   resuming?: boolean;
+  /** Active flow name (set during flow execution) */
+  activeFlowName?: string;
+  /** Number of completed agents in the active flow */
+  flowAgentsDone?: number;
+  /** Total number of agents in the active flow */
+  flowAgentsTotal?: number;
+  /** Flow execution status */
+  flowStatus?: FlowStatus;
 }
 
 /** An event forwarded from a pi session */
@@ -170,6 +178,66 @@ export interface CommandFeedbackData {
   command: string;
   status: "started" | "completed" | "error";
   message?: string;
+}
+
+// ── Flow Dashboard Types ────────────────────────────────────────────
+
+/** Status of a flow agent card */
+export type FlowAgentStatus = "pending" | "running" | "complete" | "error" | "blocked";
+
+/** A recent tool call displayed on an agent card */
+export interface FlowRecentTool {
+  toolName: string;
+  inputPreview: string;
+}
+
+/** Detail history entry for agent detail view */
+export type FlowDetailEntry =
+  | { kind: "tool"; toolName: string; input: unknown; output?: unknown; isError: boolean }
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "error"; text: string };
+
+/** Agent card config from pi-flows AgentConfig (minimal subset) */
+export interface FlowAgentCardConfig {
+  name: string;
+  description?: string;
+  model?: string;
+  card?: { label?: string; metric?: string; role?: string };
+}
+
+/** Per-agent state tracked in flow state */
+export interface FlowAgentState {
+  agentName: string;
+  stepId: string;
+  status: FlowAgentStatus;
+  label?: string;
+  model?: string;
+  cardRole?: string;
+  blockedBy: string[];
+  tokens?: { input: number; output: number };
+  duration?: number;
+  summary?: string;
+  files?: string[];
+  recentTools: FlowRecentTool[];
+  detailHistory: FlowDetailEntry[];
+  loopIteration?: number;
+  loopMax?: number;
+}
+
+/** Overall flow execution status */
+export type FlowStatus = "running" | "success" | "error" | "aborted";
+
+/** Flow execution state tracked client-side by the event reducer */
+export interface FlowState {
+  flowName: string;
+  task: string;
+  status: FlowStatus;
+  autonomousMode: boolean;
+  /** Ordered map — insertion order matches step order from flow config */
+  agents: Map<string, FlowAgentState>;
+  /** Set after flow_complete event */
+  flowResult?: Record<string, unknown>;
 }
 
 /** REST API response envelope */

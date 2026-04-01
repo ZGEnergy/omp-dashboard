@@ -31,6 +31,50 @@ export function isBypassed(url: string, bypassUrls: string[]): boolean {
   return bypassUrls.some((prefix) => url.startsWith(prefix));
 }
 
+/**
+ * Returns true if the source IP/hostname matches any configured bypass host.
+ * Supports exact match, wildcard (e.g. "10.0.0.*"), and CIDR notation (e.g. "192.168.1.0/24").
+ */
+export function isBypassedHost(sourceIp: string, bypassHosts: string[]): boolean {
+  for (const entry of bypassHosts) {
+    if (entry.includes("/")) {
+      // CIDR notation
+      if (matchCidr(sourceIp, entry)) return true;
+    } else if (entry.includes("*")) {
+      // Wildcard — convert to regex
+      const pattern = new RegExp("^" + entry.replace(/\./g, "\\.").replace(/\*/g, "\\d+") + "$");
+      if (pattern.test(sourceIp)) return true;
+    } else {
+      // Exact match
+      if (sourceIp === entry) return true;
+    }
+  }
+  return false;
+}
+
+function matchCidr(ip: string, cidr: string): boolean {
+  const [base, bitsStr] = cidr.split("/");
+  const bits = parseInt(bitsStr, 10);
+  if (isNaN(bits) || bits < 0 || bits > 32) return false;
+  const ipNum = ipToNum(ip);
+  const baseNum = ipToNum(base);
+  if (ipNum === null || baseNum === null) return false;
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return (ipNum & mask) === (baseNum & mask);
+}
+
+function ipToNum(ip: string): number | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let num = 0;
+  for (const p of parts) {
+    const n = parseInt(p, 10);
+    if (isNaN(n) || n < 0 || n > 255) return null;
+    num = (num << 8) | n;
+  }
+  return num >>> 0;
+}
+
 /** Escape HTML special characters to prevent XSS in server-rendered pages. */
 export function escapeHtml(str: string): string {
   return str
@@ -111,6 +155,7 @@ export async function registerAuthPlugin(
     providerRegistry: await buildProviderRegistry(authConfig.providers),
     allowedUsers: authConfig.allowedUsers,
     bypassUrls: authConfig.bypassUrls ?? [],
+    bypassHosts: authConfig.bypassHosts ?? [],
   };
 
   if (authState.providerRegistry.size === 0) {
@@ -124,6 +169,7 @@ export async function registerAuthPlugin(
     authState.providerRegistry = await buildProviderRegistry(newConfig.providers);
     authState.allowedUsers = newConfig.allowedUsers;
     authState.bypassUrls = newConfig.bypassUrls ?? [];
+    authState.bypassHosts = newConfig.bypassHosts ?? [];
     const names = Array.from(authState.providerRegistry.values()).map((p) => p.name);
     console.log(`🔐 Auth reloaded with providers: ${names.join(", ")}`);
   };
@@ -246,6 +292,9 @@ export async function registerAuthPlugin(
 
     // Skip configured bypass URL prefixes
     if (isBypassed(request.url, authState.bypassUrls)) return;
+
+    // Skip configured bypass hosts (trusted source IPs)
+    if (isBypassedHost(request.ip, authState.bypassHosts)) return;
 
     // Validate JWT cookie
     const cookieToken = (request.cookies as any)?.[COOKIE_NAME];

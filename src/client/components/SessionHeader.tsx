@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
 import Icon from "@mdi/react";
 import { mdiPencilOutline, mdiArrowLeft, mdiPaperclip } from "@mdi/js";
-import type { DashboardSession, OpenSpecChange } from "../../shared/types.js";
+import type { DashboardSession, OpenSpecChange, CommandInfo } from "../../shared/types.js";
 import type { SessionState } from "../lib/event-reducer.js";
 import type { DetectedEditor } from "../lib/editor-api.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
 import { InlineRenameInput } from "./InlineRenameInput.js";
 import { MobileActionMenu } from "./MobileActionMenu.js";
 import { useMobile } from "../hooks/useMobile.js";
+import { getFlowCommands } from "../lib/flow-commands.js";
+import { FlowLaunchDialog } from "./FlowLaunchDialog.js";
+import { SearchableSelectDialog, type SelectOption } from "./SearchableSelectDialog.js";
 
 interface Props {
   session?: DashboardSession;
@@ -15,6 +18,11 @@ interface Props {
   onRename?: (sessionId: string, name: string) => void;
   showBack?: boolean;
   onBack?: () => void;
+  commands?: CommandInfo[];
+  onSendPrompt?: (text: string) => void;
+  openspecChanges?: OpenSpecChange[];
+  onAttachProposal?: (changeName: string) => void;
+  onDetachProposal?: () => void;
   /** Mobile action menu props (only used on mobile) */
   mobileActions?: {
     editors?: DetectedEditor[];
@@ -186,9 +194,30 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
-export function SessionHeader({ session, state, onRename, showBack, onBack, mobileActions }: Props) {
+export function SessionHeader({ session, state, onRename, showBack, onBack, mobileActions, commands, onSendPrompt, openspecChanges, onAttachProposal, onDetachProposal }: Props) {
   const [now, setNow] = useState(Date.now());
   const [isRenaming, setIsRenaming] = useState(false);
+  const [flowPickerOpen, setFlowPickerOpen] = useState(false);
+  const [flowLaunchTarget, setFlowLaunchTarget] = useState<CommandInfo | null>(null);
+  const [openspecPickerOpen, setOpenspecPickerOpen] = useState(false);
+  const flowCmds = commands ? getFlowCommands(commands) : [];
+  const flowOptions: SelectOption[] = flowCmds.map(c => ({ value: c.name, label: c.name, description: c.description }));
+
+  const attached = session?.attachedProposal;
+  const openspecOptions: SelectOption[] = (openspecChanges || []).map(c => {
+    const stateLabels: Record<string, string> = {
+      "no-tasks": "Planning",
+      "in-progress": `Implementing — ${c.completedTasks}/${c.totalTasks} tasks`,
+      "complete": `Complete — ${c.completedTasks}/${c.totalTasks} tasks`,
+    };
+    return {
+      value: c.name,
+      label: c.name,
+      description: stateLabels[c.status] || c.status,
+      badge: c.status === "complete" ? "✓" : c.status === "in-progress" ? `${c.completedTasks}/${c.totalTasks}` : undefined,
+      badgeColor: c.status === "complete" ? "text-green-400" : "text-blue-400",
+    };
+  });
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -275,7 +304,81 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
       {(state.thinkingLevel || session.thinkingLevel) && (
         <span className="text-[var(--text-tertiary)]">💭 {state.thinkingLevel || session.thinkingLevel}</span>
       )}
-      <span className="text-[var(--text-muted)] ml-auto">{formatDuration(duration)}</span>
+      {/* OpenSpec + Flow buttons */}
+      <span className="flex-1" />
+      {onAttachProposal && openspecChanges && openspecChanges.length > 0 && (
+        attached ? (
+          <span className="text-[10px] flex items-center gap-1 mr-2">
+            <span className="text-blue-400">📋 {attached}</span>
+            {onDetachProposal && (
+              <button
+                onClick={onDetachProposal}
+                className="text-[var(--text-muted)] hover:text-red-400 px-0.5"
+                title="Detach change"
+              >
+                ×
+              </button>
+            )}
+          </span>
+        ) : (
+          <button
+            onClick={() => setOpenspecPickerOpen(true)}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 mr-1"
+            title="Attach OpenSpec change"
+          >
+            📋 Attach
+          </button>
+        )
+      )}
+      {flowCmds.length > 0 && onSendPrompt && (
+        <button
+          onClick={() => setFlowPickerOpen(true)}
+          className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 mr-2"
+          title="Run a flow"
+        >
+          ▶ Flow
+        </button>
+      )}
+      <span className="text-[var(--text-muted)]">{formatDuration(duration)}</span>
+      {openspecPickerOpen && onAttachProposal && (
+        <SearchableSelectDialog
+          title="Attach OpenSpec Change"
+          options={openspecOptions}
+          placeholder="Search changes..."
+          emptyMessage="No changes available"
+          onSelect={(value) => {
+            onAttachProposal(value);
+            setOpenspecPickerOpen(false);
+          }}
+          onCancel={() => setOpenspecPickerOpen(false)}
+        />
+      )}
+      {flowPickerOpen && onSendPrompt && (
+        <SearchableSelectDialog
+          title="Run Flow"
+          options={flowOptions}
+          placeholder="Search flows..."
+          emptyMessage="No flows available"
+          onSelect={(value) => {
+            const cmd = flowCmds.find(c => c.name === value);
+            if (cmd) setFlowLaunchTarget(cmd);
+            setFlowPickerOpen(false);
+          }}
+          onCancel={() => setFlowPickerOpen(false)}
+        />
+      )}
+      {flowLaunchTarget && onSendPrompt && (
+        <FlowLaunchDialog
+          flowName={flowLaunchTarget.name}
+          description={flowLaunchTarget.description}
+          onSubmit={(task) => {
+            const prompt = task ? `/${flowLaunchTarget.name} ${task}` : `/${flowLaunchTarget.name}`;
+            onSendPrompt(prompt);
+            setFlowLaunchTarget(null);
+          }}
+          onCancel={() => setFlowLaunchTarget(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateWsUpgrade, escapeHtml, isBypassed } from "../auth-plugin.js";
+import { validateWsUpgrade, escapeHtml, isBypassed, isBypassedHost } from "../auth-plugin.js";
 import { signToken, COOKIE_NAME } from "../auth.js";
 
 const SECRET = "test-secret-for-ws-auth-testing";
@@ -59,6 +59,38 @@ describe("isBypassed", () => {
 
   it("should return false when no prefix matches", () => {
     expect(isBypassed("/secure/data", ["/webhooks/", "/metrics"])).toBe(false);
+  });
+});
+
+describe("isBypassedHost", () => {
+  it("should return false for empty bypass list", () => {
+    expect(isBypassedHost("10.0.0.5", [])).toBe(false);
+  });
+
+  it("should match exact IP", () => {
+    expect(isBypassedHost("10.0.0.5", ["10.0.0.5"])).toBe(true);
+  });
+
+  it("should match exact hostname", () => {
+    expect(isBypassedHost("build-server.local", ["build-server.local"])).toBe(true);
+  });
+
+  it("should not match different IP", () => {
+    expect(isBypassedHost("10.0.0.6", ["10.0.0.5"])).toBe(false);
+  });
+
+  it("should match CIDR notation", () => {
+    expect(isBypassedHost("192.168.1.50", ["192.168.1.0/24"])).toBe(true);
+    expect(isBypassedHost("192.168.2.50", ["192.168.1.0/24"])).toBe(false);
+  });
+
+  it("should match wildcard subnet", () => {
+    expect(isBypassedHost("10.0.0.99", ["10.0.0.*"])).toBe(true);
+    expect(isBypassedHost("10.0.1.99", ["10.0.0.*"])).toBe(false);
+  });
+
+  it("should match multiple entries", () => {
+    expect(isBypassedHost("10.0.0.5", ["192.168.1.1", "10.0.0.5"])).toBe(true);
   });
 });
 

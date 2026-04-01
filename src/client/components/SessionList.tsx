@@ -6,7 +6,7 @@ import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSe
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { SortableSessionCard } from "./SortableSessionCard.js";
 import { SortablePinnedGroup } from "./SortablePinnedGroup.js";
-import type { DashboardSession, OpenSpecData } from "../../shared/types.js";
+import type { DashboardSession, OpenSpecData, CommandInfo } from "../../shared/types.js";
 import type { TerminalSession } from "../../shared/terminal-types.js";
 import { TerminalCard } from "./TerminalCard.js";
 import {
@@ -71,6 +71,7 @@ interface Props {
   onKillTerminal?: (terminalId: string) => void;
   onRenameTerminal?: (terminalId: string, title: string) => void;
   onCollapseSidebar?: () => void;
+  commandsMap?: Map<string, CommandInfo[]>;
 }
 
 /** Sort sessions within a group by server order, then by startedAt descending for unordered ones. */
@@ -195,7 +196,7 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal, onCollapseSidebar }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap }: Props) {
   const now = Date.now();
   const [, navigate] = useLocation();
   const { messages, showToast, dismissToast } = useToast();
@@ -485,6 +486,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                           onRename={onRename ? (name) => onRename(session.id, name) : undefined}
                           onShutdown={onShutdown}
                           onResume={onResume ? (mode) => onResume(session.id, mode) : undefined}
+                          commands={commandsMap?.get(session.id)}
                         />
                       </SortableSessionCard>
                     );

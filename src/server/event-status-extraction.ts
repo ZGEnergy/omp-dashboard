@@ -2,12 +2,16 @@
  * Extract session status/tool updates from forwarded events.
  * Returns partial DashboardSession updates, or null if the event is not relevant.
  */
-import type { DashboardEvent, DashboardSession } from "../shared/types.js";
+import type { DashboardEvent, DashboardSession, FlowStatus } from "../shared/types.js";
 
 // Use null (not undefined) for fields that must be cleared — undefined is
 // dropped during JSON serialisation so the browser would keep the stale value.
 type SessionUpdates = Partial<Pick<DashboardSession, "status" | "model" | "thinkingLevel">> & {
   currentTool?: string | null;
+  activeFlowName?: string | null;
+  flowAgentsDone?: number;
+  flowAgentsTotal?: number;
+  flowStatus?: FlowStatus | null;
 };
 
 /**
@@ -77,6 +81,31 @@ export function extractSessionUpdates(event: DashboardEvent): SessionUpdates | n
         return updates;
       }
       return null;
+    }
+
+    // ── Flow events ──
+    case "flow_started": {
+      const d = event.data;
+      const steps = d.steps as Array<{ stepType: string }> | undefined;
+      const agentCount = steps?.filter(s => s.stepType === "agent").length ?? 0;
+      return {
+        activeFlowName: (d.flowName as string) ?? null,
+        flowAgentsTotal: agentCount,
+        flowAgentsDone: 0,
+        flowStatus: "running" as FlowStatus,
+      };
+    }
+
+    case "flow_agent_complete":
+      // Increment is handled by the caller — we return a marker
+      return { flowAgentsDone: -1 }; // sentinel: caller must increment
+
+    case "flow_complete": {
+      const result = event.data;
+      const status = (result.status as string) ?? "success";
+      return {
+        flowStatus: status as FlowStatus,
+      };
     }
 
     default:

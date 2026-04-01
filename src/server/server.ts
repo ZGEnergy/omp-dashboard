@@ -29,7 +29,7 @@ import { listDirectories } from "./browse.js";
 import { readConfigRedacted, writeConfigPartial } from "./config-api.js";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
-import { registerAuthPlugin, validateWsUpgrade } from "./auth-plugin.js";
+import { registerAuthPlugin, validateWsUpgrade, isBypassedHost } from "./auth-plugin.js";
 import type { AuthConfig } from "../shared/config.js";
 
 export interface ServerConfig {
@@ -155,6 +155,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       // Extract status/tool updates from the event and broadcast
       const updates = extractSessionUpdates(msg.event);
       if (updates) {
+        // Handle flow_agent_complete increment: sentinel -1 means "increment by 1"
+        if (updates.flowAgentsDone === -1) {
+          const session = sessionManager.get(sessionId);
+          updates.flowAgentsDone = (session?.flowAgentsDone ?? 0) + 1;
+        }
         sessionManager.update(sessionId, updates);
         browserGateway.broadcastSessionUpdated(sessionId, updates);
       }
@@ -783,7 +788,9 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         // Auth check for WebSocket upgrades (when auth is configured)
         if (config.authConfig?.secret) {
           const remoteAddress = request.socket.remoteAddress || "";
-          if (!validateWsUpgrade(request.headers.cookie, remoteAddress, config.authConfig.secret)) {
+          if (isBypassedHost(remoteAddress, config.authConfig.bypassHosts ?? [])) {
+            // Trusted host — skip auth
+          } else if (!validateWsUpgrade(request.headers.cookie, remoteAddress, config.authConfig.secret)) {
             socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
             socket.destroy();
             return;

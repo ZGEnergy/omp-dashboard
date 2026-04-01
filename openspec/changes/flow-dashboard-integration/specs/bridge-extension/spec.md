@@ -16,8 +16,8 @@ The bridge SHALL handle incoming `flow_control` messages from the server. For `a
 
 #### Scenario: Abort flow control received
 - **WHEN** the bridge receives `{ type: "flow_control", action: "abort" }`
-- **THEN** the bridge SHALL trigger flow abort via the existing abort pipeline
+- **THEN** the bridge SHALL emit `flow:abort` on `pi.events` (pi-flows listens for this and calls `flowManager.abort()`)
 
 #### Scenario: Toggle autonomous control received
 - **WHEN** the bridge receives `{ type: "flow_control", action: "toggle_autonomous" }`
-- **THEN** the bridge SHALL toggle autonomous mode in pi-flows
+- **THEN** the bridge SHALL emit `flow:toggle-autonomous` on `pi.events` (pi-flows listens for this and toggles `setAutonomousMode`)

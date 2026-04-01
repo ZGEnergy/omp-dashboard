@@ -26,9 +26,9 @@ Selecting a flow to run SHALL open a dialog with a text input for the task/conte
 - **WHEN** the user cancels the task input dialog
 - **THEN** no message SHALL be sent
 
-### Requirement: Flow launcher also available in content area
-The flow launcher SHALL also be accessible from the session content area header (not only the sidebar card), allowing flow launch when viewing a session.
+### Requirement: Flow launcher also available in content area header
+The flow launcher SHALL also be accessible from the session content area header via a "▶ Flow" button. Clicking it SHALL open the same `SearchableSelectDialog` followed by the `FlowLaunchDialog`.
 
 #### Scenario: Launch from content header
-- **WHEN** the user clicks a "Run Flow" button in the session header
-- **THEN** the same flow picker and task input dialog SHALL appear
+- **WHEN** the user clicks the "▶ Flow" button in the session header
+- **THEN** a searchable flow picker dialog SHALL appear, followed by a task input dialog on selection

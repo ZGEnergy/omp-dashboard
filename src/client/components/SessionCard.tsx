@@ -11,6 +11,9 @@ import type { OpenSpecData, OpenSpecChange } from "../../shared/types.js";
 import { SessionOpenSpecActions } from "./SessionOpenSpecActions.js";
 import { OpenSpecActivityBadge } from "./OpenSpecActivityBadge.js";
 import { InlineRenameInput } from "./InlineRenameInput.js";
+import { FlowActivityBadge } from "./FlowActivityBadge.js";
+import { SessionFlowActions } from "./SessionFlowActions.js";
+import type { CommandInfo } from "../../shared/types.js";
 import { useMobile } from "../hooks/useMobile.js";
 
 export const statusColors: Record<string, string> = {
@@ -208,6 +211,7 @@ export function SessionCard({
   onRename,
   onShutdown,
   onResume,
+  commands,
 }: {
   session: DashboardSession;
   selectedId?: string;
@@ -226,6 +230,7 @@ export function SessionCard({
   onRename?: (name: string) => void;
   onShutdown?: (id: string) => void;
   onResume?: (mode: "continue" | "fork") => void;
+  commands?: CommandInfo[];
 }) {
   const isSelected = selectedId === session.id;
   const [isRenaming, setIsRenaming] = useState(false);
@@ -294,6 +299,15 @@ export function SessionCard({
                 ? openspecChanges?.find((c) => c.name === session.openspecChange)?.totalTasks
                 : undefined
             }
+          />
+        ) : null}
+        {/* Flow activity badge */}
+        {session.activeFlowName ? (
+          <FlowActivityBadge
+            flowName={session.activeFlowName}
+            agentsDone={session.flowAgentsDone}
+            agentsTotal={session.flowAgentsTotal}
+            status={session.flowStatus}
           />
         ) : null}
       </li>
@@ -460,6 +474,16 @@ export function SessionCard({
         />
       ) : null}
 
+      {/* Flow activity badge */}
+      {session.activeFlowName ? (
+        <FlowActivityBadge
+          flowName={session.activeFlowName}
+          agentsDone={session.flowAgentsDone}
+          agentsTotal={session.flowAgentsTotal}
+          status={session.flowStatus}
+        />
+      ) : null}
+
       {/* Line 4: git info (only for single-session groups) */}
       {showGitInfo && <GitInfo session={session} />}
 
@@ -474,6 +498,10 @@ export function SessionCard({
           onSendPrompt={onSendPrompt}
           onReadArtifact={onReadArtifact}
         />
+      )}
+      {/* Flow launcher */}
+      {commands && onSendPrompt && (
+        <SessionFlowActions commands={commands} onSendPrompt={onSendPrompt} />
       )}
       </div>{/* end card content */}
       </div>{/* end flex row */}

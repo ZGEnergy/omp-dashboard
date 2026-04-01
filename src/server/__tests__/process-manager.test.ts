@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { detectPlatform, buildTmuxCommand, buildHeadlessArgs, shellEscape, type SessionOptions } from "../process-manager.js";
+import { detectPlatform, buildTmuxCommand, buildHeadlessArgs, shellEscape, spawnPiSession, type SessionOptions } from "../process-manager.js";
 
 describe("Process Manager", () => {
   describe("detectPlatform", () => {
@@ -127,6 +127,14 @@ describe("Process Manager", () => {
     it("should not include session flags when no options", () => {
       const args = buildHeadlessArgs({});
       expect(args).toEqual(["--mode", "rpc"]);
+    });
+  });
+
+  describe("spawnPiSession", () => {
+    it("should return error for non-existent directory", async () => {
+      const result = await spawnPiSession("/tmp/definitely-does-not-exist-" + Date.now());
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Directory does not exist");
     });
   });
 

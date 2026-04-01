@@ -131,6 +131,15 @@ function initBridge(pi: ExtensionAPI) {
         uiProxy.handleResponse(msg);
         return;
       }
+      // Route flow control messages to pi-flows via pi.events
+      if (msg.type === "flow_control" && pi.events) {
+        if (msg.action === "abort") {
+          pi.events.emit("flow:abort", {});
+        } else if (msg.action === "toggle_autonomous") {
+          pi.events.emit("flow:toggle-autonomous", {});
+        }
+        return;
+      }
       const response = await commandHandler.handle(msg);
       if (response) connection.send(response);
       // Immediately send model/thinking update after handling set_thinking_level
@@ -523,6 +532,46 @@ function initBridge(pi: ExtensionAPI) {
       sendSessionNameIfChanged();
       sendModelUpdateIfChanged();
     }, GIT_POLL_INTERVAL);
+
+    // Register flow event listeners (pi-flows emits these via pi.events)
+    if (pi.events) {
+      const flowEventMap: Record<string, string> = {
+        "flow:flow-started": "flow_started",
+        "flow:agent-started": "flow_agent_started",
+        "flow:agent-complete": "flow_agent_complete",
+        "flow:subagent-tool-call": "flow_tool_call",
+        "flow:subagent-tool-result": "flow_tool_result",
+        "flow:assistant-text": "flow_assistant_text",
+        "flow:thinking-text": "flow_thinking_text",
+        "flow:loop-iteration": "flow_loop_iteration",
+        "flow:auto-decision": "flow_auto_decision",
+        "flow:complete": "flow_complete",
+      };
+      // Re-send commands list when pi-flows discovers new flows or a flow completes
+      const resendCommands = () => {
+        if (!sessionReady) return;
+        const commands = filterHiddenCommands(pi.getCommands());
+        connection.send({ type: "commands_list", sessionId, commands });
+      };
+      pi.events.on("flow:rediscover", resendCommands);
+      pi.events.on("flow:complete", resendCommands);
+
+      for (const [piEvent, eventType] of Object.entries(flowEventMap)) {
+        pi.events.on(piEvent, (data: unknown) => {
+          if (!sessionReady) return;
+          const eventData = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+          connection.send({
+            type: "event_forward",
+            sessionId,
+            event: {
+              eventType,
+              timestamp: Date.now(),
+              data: eventData,
+            },
+          });
+        });
+      }
+    }
   }));
 
   // Shared handler for session_switch and session_fork

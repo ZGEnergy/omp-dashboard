@@ -207,6 +207,12 @@ export interface ShutdownExtensionMessage {
   sessionId: string;
 }
 
+export interface FlowControlExtensionMessage {
+  type: "flow_control";
+  sessionId: string;
+  action: "abort" | "toggle_autonomous";
+}
+
 // LoadSessionEventsMessage removed — server loads directly via DirectoryService
 
 export interface ExtensionUiResponseMessage {
@@ -229,4 +235,5 @@ export type ServerToExtensionMessage =
   | SetThinkingLevelMessage
   | ListSessionsExtensionMessage
   | SetModelMessage
-  | ShutdownExtensionMessage;
+  | ShutdownExtensionMessage
+  | FlowControlExtensionMessage;

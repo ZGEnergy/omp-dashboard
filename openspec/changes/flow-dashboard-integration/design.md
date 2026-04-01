@@ -51,13 +51,13 @@ The local pi-flows installation has been patched to emit all 10 `FlowObserver` e
 
 **Rationale:** User requirement: "live cards fixed on top of chat window." Sticky positioning keeps cards visible without stealing vertical space from chat when scrolled down.
 
-### D5: Flow commands detected from existing commands list
+### D5: Flow commands detected from existing commands list via heuristic
 
-**Decision:** Available flows are detected from the session's `commands` list (already sent by the bridge). Flow commands have `source: "extension"` or `source: "prompt"` — we filter by name pattern (not starting with `flows:` prefix and registered by pi-flows). The server doesn't need flow-specific discovery.
+**Decision:** Available flows are detected from the session's `commands` list (already sent by the bridge). Flow commands are identified by: `source: "extension"` and name NOT in an excluded set of known pi-flows management commands (`flows`, `flows:new`, `flows:edit`, `flows:delete`, `provider`, `roles`, `catalog`). The server doesn't need flow-specific discovery.
 
-**Rationale:** pi-flows auto-registers each flow YAML as a slash command. The bridge already sends `commands_list` on request. No new API needed — just client-side filtering.
+**Rationale:** pi-flows auto-registers each flow YAML as a slash command alongside management commands. The bridge already sends `commands_list` on request. Simple exclusion list is sufficient and avoids pi-flows changes.
 
-**Alternative considered:** Dedicated REST endpoint to query available flows from pi-flows. Rejected — requires pi-flows changes and a new protocol path.
+**Alternative considered:** pi-flows tags flow commands with a marker (e.g., `source: "flow"`). Cleaner but requires upstream changes. Heuristic works for now.
 
 ### D6: Flow launcher uses task input dialog + `send_prompt`
 
@@ -65,11 +65,11 @@ The local pi-flows installation has been patched to emit all 10 `FlowObserver` e
 
 **Rationale:** pi-flows commands already accept a task as the argument to the slash command. Using `send_prompt` requires zero protocol changes and works identically to typing in the TUI.
 
-### D7: Abort and autonomous mode use `send_prompt` with escape/command sequences
+### D7: Abort and autonomous mode via `flow_control` message + pi.events
 
-**Decision:** "Abort flow" sends an `abort` message (existing protocol). "Toggle autonomous mode" is tracked as flow state from events — when the bridge detects `flow:flow-started`, it also sends the current autonomous mode state. Toggling from the dashboard sends a special prompt or uses a new lightweight `flow_control` message type that the bridge translates to `pi.events.emit("flow:toggle-autonomous")` or similar.
+**Decision:** A new `flow_control` message type flows from browser → server → bridge. The bridge emits `flow:abort` or `flow:toggle-autonomous` on `pi.events`. pi-flows has been patched to listen for both events: `flow:abort` calls `flowManager.abort()`, `flow:toggle-autonomous` calls `setAutonomousMode(!isAutonomousMode())`. The bridge also includes current autonomous mode state in `flow_started` events.
 
-**Rationale:** Abort already exists. Autonomous mode toggle needs a new path because there's no slash command for it (it's `Ctrl+A` in TUI). A minimal `flow_control` message from browser → server → bridge is the cleanest approach, with the bridge calling the pi-flows API to toggle.
+**Rationale:** Abort and autonomous toggle are internal pi-flows functions with no slash command equivalents. Using `pi.events` as the bridge-to-pi-flows communication channel follows the existing pattern (same as `flow:run`, `flow:rediscover`). Two small event listeners were added to pi-flows locally.
 
 ### D8: Architect widget reuses flow dashboard infrastructure
 
@@ -92,3 +92,5 @@ The local pi-flows installation has been patched to emit all 10 `FlowObserver` e
 - **[Large FlowResult on complete]** → `flow:complete` sends the full `FlowResult` which includes all step outputs. For large flows this could be significant. Mitigation: the bridge could trim large text fields (e.g., cap at 10KB per agent output).
 
 - **[Autonomous mode state sync]** → Dashboard needs to know if autonomous mode is on/off, but this is pi-flows internal state not exposed via events. Mitigation: bridge reads `isAutonomousMode()` at flow start and on toggle; sends state with flow events.
+
+- **[Mobile viewport]** → Card grid with 4+ agents could consume 50%+ of mobile screen height. Mitigation: on mobile, collapse to a thin status bar (flow name + progress count) with tap-to-expand.

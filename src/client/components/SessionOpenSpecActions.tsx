@@ -6,6 +6,7 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
 import { DialogPortal } from "./DialogPortal.js";
 import { ArtifactLettersButton } from "./openspec-helpers.js";
 import { NewChangeDialog } from "./NewChangeDialog.js";
+import { SearchableSelectDialog, type SelectOption } from "./SearchableSelectDialog.js";
 
 function ActionButton({ label, onClick, testId, disabled }: { label: string; onClick: () => void; testId?: string; disabled?: boolean }) {
   return (
@@ -34,6 +35,7 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
   const [archiveConfirm, setArchiveConfirm] = useState(false);
   const [attachingName, setAttachingName] = useState<string | null>(null);
   const [newChangeOpen, setNewChangeOpen] = useState(false);
+  const [attachPickerOpen, setAttachPickerOpen] = useState(false);
 
   const attached = session.attachedProposal;
   const isEnded = session.status === "ended";
@@ -53,32 +55,40 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
       );
     }
 
-    const sorted = [
+    const changeOptions: SelectOption[] = [
       ...changes.filter((c) => c.status !== "complete"),
       ...changes.filter((c) => c.status === "complete"),
-    ];
+    ].map((c) => {
+      const state = deriveChangeState(c);
+      const stateLabels: Record<string, string> = {
+        PLANNING: "Planning",
+        READY: "Ready to implement",
+        IMPLEMENTING: `Implementing — ${c.completedTasks}/${c.totalTasks} tasks`,
+        COMPLETE: `Complete — ${c.completedTasks}/${c.totalTasks} tasks`,
+      };
+      const desc = stateLabels[state] || c.status;
+      const artifactNames = c.artifacts.map(a => a.id).join(", ");
+      return {
+        value: c.name,
+        label: c.name,
+        description: artifactNames ? `${desc} · ${artifactNames}` : desc,
+        badge: c.status === "complete" ? "✓" : c.status === "in-progress" ? `${c.completedTasks}/${c.totalTasks}` : undefined,
+        badgeColor: c.status === "complete" ? "text-green-400" : "text-blue-400",
+      };
+    });
 
     return (
       <div className="mt-1" data-testid="session-openspec-actions">
         <div className="flex items-center gap-1.5">
-          <select
+          <span className="text-[10px] text-[var(--text-muted)]">OpenSpec:</span>
+          <button
             data-testid="attach-combo"
             disabled={changes.length === 0}
-            value=""
-            onChange={(e) => {
-              if (e.target.value) {
-                setAttachingName(e.target.value);
-                onAttach(e.target.value);
-              }
-            }}
-            onClick={(e) => e.stopPropagation()}
-            className="text-[10px] px-1 py-0.5 rounded border border-[var(--border-secondary)] bg-[var(--bg-primary)] text-[var(--text-secondary)]"
+            onClick={(e) => { e.stopPropagation(); setAttachPickerOpen(true); }}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:border-blue-500/50 disabled:opacity-40"
           >
-            <option value="">{changes.length === 0 ? "No changes" : "Attach change..."}</option>
-            {sorted.map((c) => (
-              <option key={c.name} value={c.name}>{c.name}</option>
-            ))}
-          </select>
+            {changes.length === 0 ? "No changes" : "Attach change..."}
+          </button>
           {!isEnded && (
             <>
               <ActionButton label="+ Change" onClick={() => setNewChangeOpen(true)} testId="new-change-btn" />
@@ -104,6 +114,20 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
             }}
             onClose={() => setExploreOpen(false)}
           /></DialogPortal>
+        )}
+        {attachPickerOpen && (
+          <SearchableSelectDialog
+            title="Attach OpenSpec Change"
+            options={changeOptions}
+            placeholder="Search changes..."
+            emptyMessage="No changes available"
+            onSelect={(value) => {
+              setAttachingName(value);
+              onAttach(value);
+              setAttachPickerOpen(false);
+            }}
+            onCancel={() => setAttachPickerOpen(false)}
+          />
         )}
       </div>
     );

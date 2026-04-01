@@ -356,6 +356,14 @@ export function createBrowserGateway(
             });
             break;
 
+          case "flow_control":
+            piGateway.sendToSession(msg.sessionId, {
+              type: "flow_control",
+              sessionId: msg.sessionId,
+              action: msg.action,
+            });
+            break;
+
           case "request_commands":
             piGateway.sendToSession(msg.sessionId, {
               type: "request_commands",
