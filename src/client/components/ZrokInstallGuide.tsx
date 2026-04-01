@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiOpenInNew } from "@mdi/js";
 import type { TunnelStatus } from "../../shared/rest-api.js";
 

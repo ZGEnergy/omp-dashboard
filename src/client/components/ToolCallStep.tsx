@@ -1,5 +1,5 @@
 import React, { useState, type ReactNode } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiLoading, mdiCheck, mdiAlertCircle, mdiChevronRight, mdiChevronDown } from "@mdi/js";
 import { getToolRenderer, type ToolContext } from "./tool-renderers/index.js";
 import { useMobile } from "../hooks/useMobile.js";

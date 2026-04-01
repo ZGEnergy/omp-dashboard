@@ -51,7 +51,7 @@ export function MobileShell({ depth, listPanel, detailPanel, onBack }: Props) {
 
       {/* Panel 1: Session detail (or preview at depth 2) */}
       <div
-        className={`absolute inset-0 ${transitionClass} bg-[var(--bg-primary)]`}
+        className={`absolute inset-0 ${transitionClass} bg-[var(--bg-primary)] flex flex-col`}
         style={{ transform: detailTransform }}
         aria-hidden={!showDetail}
       >

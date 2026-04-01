@@ -1,5 +1,5 @@
 import React, { useState, type ReactNode } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiConsoleLine, mdiRobotOutline, mdiCodeTags, mdiApplicationOutline, mdiCommentQuestion } from "@mdi/js";
 import type { DashboardSession } from "../../shared/types.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";

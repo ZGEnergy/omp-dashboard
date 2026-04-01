@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useEffect, type ReactNode } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiChevronLeft, mdiChevronRight } from "@mdi/js";
 import type { SidebarState } from "../hooks/useSidebarState.js";
 

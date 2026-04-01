@@ -4,7 +4,8 @@ import { useInstallPrompt } from "../useInstallPrompt.js";
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  // Default matchMedia stub (non-standalone)
+  // Default matchMedia stub (non-standalone) — define if missing in jsdom
+  window.matchMedia = window.matchMedia || (() => ({ matches: false }) as MediaQueryList);
   vi.spyOn(window, "matchMedia").mockReturnValue({
     matches: false,
   } as MediaQueryList);

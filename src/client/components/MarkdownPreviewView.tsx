@@ -1,5 +1,5 @@
 import React from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiLoading } from "@mdi/js";
 import { MarkdownContent } from "./MarkdownContent.js";
 

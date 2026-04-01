@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { useThemeContext } from "./ThemeProvider.js";
 import { getSyntaxTheme } from "../lib/syntax-theme.js";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiContentCopy, mdiTable } from "@mdi/js";
 import { CopyButton } from "./CopyButton.js";
 import { wrapAsciiTables } from "../lib/wrap-ascii-tables.js";

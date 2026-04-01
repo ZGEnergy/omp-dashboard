@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiTunnel, mdiQrcode } from "@mdi/js";
 import { useLocation } from "wouter";
 import type { TunnelStatus } from "../../shared/rest-api.js";

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiClose, mdiDownload } from "@mdi/js";
 
 const DISMISSED_KEY = "pwa-install-dismissed";

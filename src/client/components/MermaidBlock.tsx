@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useId } from "react";
 import DOMPurify from "dompurify";
 import { useThemeContext } from "./ThemeProvider.js";
 import { useZoomPan } from "../hooks/useZoomPan.js";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiMagnifyPlusOutline, mdiMagnifyMinusOutline, mdiArrowExpandAll } from "@mdi/js";
 
 let mermaidIdCounter = 0;

@@ -1,5 +1,5 @@
 import React from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiWeatherSunny, mdiMonitor, mdiWeatherNight } from "@mdi/js";
 import { useThemeContext } from "./ThemeProvider.js";
 import type { ThemePreference } from "../hooks/useTheme.js";

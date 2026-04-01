@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiFlash, mdiClipboardText, mdiWrench, mdiFolder, mdiFile, mdiPlay, mdiStop, mdiConsole } from "@mdi/js";
 import type { CommandInfo, ImageContent, FileEntry } from "../../shared/types.js";
 

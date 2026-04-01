@@ -1,5 +1,5 @@
 import React from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiLoading, mdiFlash } from "@mdi/js";
 import { ModelSelector } from "./ModelSelector.js";
 import { ThinkingLevelSelector } from "./ThinkingLevelSelector.js";

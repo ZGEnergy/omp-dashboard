@@ -1,5 +1,5 @@
 import React, { useState, useCallback, type ReactNode } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiCheck } from "@mdi/js";
 
 interface Props {

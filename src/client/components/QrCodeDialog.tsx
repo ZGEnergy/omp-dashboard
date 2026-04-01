@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiClose, mdiContentCopy, mdiCheck, mdiLanDisconnect, mdiLanConnect, mdiCog } from "@mdi/js";
 import { DialogPortal } from "./DialogPortal.js";
 

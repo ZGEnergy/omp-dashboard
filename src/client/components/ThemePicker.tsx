@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiPalette, mdiCheck } from "@mdi/js";
 import { useThemeContext } from "./ThemeProvider.js";
 import { THEMES } from "../lib/themes.js";

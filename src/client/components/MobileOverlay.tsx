@@ -1,5 +1,5 @@
 import React, { type ReactNode } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiMenu, mdiClose } from "@mdi/js";
 
 interface HamburgerProps {

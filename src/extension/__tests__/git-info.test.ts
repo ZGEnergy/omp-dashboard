@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import * as childProcess from "node:child_process";
 import { gatherGitInfo, detectBranch, detectRemoteUrl, detectPrNumber } from "../git-info.js";
 
-vi.mock("node:child_process");
+const { execSyncMock } = vi.hoisted(() => ({
+  execSyncMock: vi.fn(),
+}));
 
-const execSyncMock = vi.mocked(childProcess.execSync);
+vi.mock("node:child_process", () => ({
+  default: { execSync: execSyncMock },
+  execSync: execSyncMock,
+}));
 
 describe("git-info", () => {
   beforeEach(() => {

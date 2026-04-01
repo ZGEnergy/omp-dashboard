@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiChevronRight, mdiChevronDown, mdiChevronLeft, mdiPlus, mdiPin, mdiPinOff, mdiConsoleLine, mdiCog, mdiPuzzleOutline } from "@mdi/js";
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";

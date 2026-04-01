@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const { mockedExecSync } = vi.hoisted(() => ({
+  mockedExecSync: vi.fn(),
+}));
+
+vi.mock("node:child_process", () => ({
+  default: { execSync: mockedExecSync },
+  execSync: mockedExecSync,
+}));
+
 import { detectEditors, isProcessRunning, EDITORS, type DetectedEditor } from "../editor-registry.js";
-import { execSync } from "node:child_process";
-
-vi.mock("node:child_process");
-
-const mockedExecSync = vi.mocked(execSync);
 
 describe("editor-registry", () => {
   beforeEach(() => {

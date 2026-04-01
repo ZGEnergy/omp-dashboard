@@ -1,5 +1,5 @@
 import React from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiOpenInNew } from "@mdi/js";
 import { openEditor } from "../../lib/editor-api.js";
 import type { ToolContext } from "./types.js";

@@ -1,5 +1,5 @@
 import React from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiLoading, mdiRefresh, mdiPuzzleOutline, mdiBookOpenPageVariant, mdiTextBoxOutline } from "@mdi/js";
 import { usePiResources } from "../hooks/usePiResources.js";
 import type { PiResource, PiResourceScope, PiPackageInfo } from "../../shared/rest-api.js";

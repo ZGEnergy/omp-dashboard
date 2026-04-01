@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiChevronRight, mdiChevronDown, mdiHeadLightbulb } from "@mdi/js";
 import { MarkdownContent } from "./MarkdownContent.js";
 

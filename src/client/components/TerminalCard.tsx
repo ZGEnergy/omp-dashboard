@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiConsoleLine, mdiClose, mdiPencilOutline } from "@mdi/js";
 import type { TerminalSession } from "../../shared/terminal-types.js";
 import { InlineRenameInput } from "./InlineRenameInput.js";

@@ -1,22 +1,40 @@
 {
   "lastResult": {
     "success": true,
-    "output": "I'll validate both codes to ensure they're valid hex strings and match each other.",
+    "output": "I'll validate both codes to ensure they match and are valid hex strings.",
     "stderr": "",
     "exitCode": null,
     "result": {
       "status": "complete",
-      "summary": "Validation PASS: all 2 codes valid and matching. Both typed output and artifacts contain the same valid hex code: f0da9201",
+      "summary": "Validation PASS: all 2 codes valid and matching. Both typed output and artifacts contain the identical hex code 3f9b7fa2, which is a valid 8-character hex string.",
       "files": [],
-      "artifacts": "<validation>PASS</validation>\n<details>\n- Typed output code: f0da9201 ✓ Valid 8-character hex string\n- Artifacts code: f0da9201 ✓ Valid 8-character hex string\n- Code comparison: ✓ Both codes match exactly\n- Result: All validations passed for PHASE 7 typed outputs comparison\n</details>"
+      "artifacts": "<validation>PASS</validation><details>Typed output code: 3f9b7fa2 - Valid hex format ✓\nArtifacts code: 3f9b7fa2 - Valid hex format ✓\nCode comparison: IDENTICAL ✓\nAll validations passed successfully.</details>"
     },
     "toolCalls": [
       {
         "toolName": "bash",
         "input": {
-          "command": "\n# Test both codes\nTYPED_CODE=\"f0da9201\"\nARTIFACTS_CODE=\"f0da9201\"\n\necho \"Validating codes...\"\necho \"Typed output code: $TYPED_CODE\"\necho \"Artifacts code: $ARTIFACTS_CODE\"\necho \"\"\n\n# Validate hex format for typed code\necho \"Checking typed code format...\"\necho \"$TYPED_CODE\" | grep -qE '^[0-9a-f]{8}$' && echo \"Typed code: VALID\" || echo \"Typed code: INVALID\"\n\n# Validate hex format for artifacts code\necho \"Checking artifacts code format...\"\necho \"$ARTIFACTS_CODE\" | grep -qE '^[0-9a-f]{8}$' && echo \"Artifacts code: VALID\" || echo \"Artifacts code: INVALID\"\n\n# Check if codes match\necho \"\"\necho \"Checking if codes match...\"\nif [ \"$TYPED_CODE\" = \"$ARTIFACTS_CODE\" ]; then\n  echo \"Codes MATCH: Both contain f0da9201\"\nelse\n  echo \"Codes DO NOT MATCH\"\nfi\n"
+          "command": "echo \"Validating typed output code: 3f9b7fa2\"\necho \"3f9b7fa2\" | grep -qE '^[0-9a-f]{8}$' && echo \"✓ VALID hex format\" || echo \"✗ INVALID hex format\""
         },
-        "output": "Validating codes...\nTyped output code: f0da9201\nArtifacts code: f0da9201\n\nChecking typed code format...\nTyped code: VALID\nChecking artifacts code format...\nArtifacts code: VALID\n\nChecking if codes match...\nCodes MATCH: Both contain f0da9201\n",
+        "output": "",
+        "duration": 0,
+        "isError": false
+      },
+      {
+        "toolName": "bash",
+        "input": {
+          "command": "echo \"Validating artifacts code: 3f9b7fa2\"\necho \"3f9b7fa2\" | grep -qE '^[0-9a-f]{8}$' && echo \"✓ VALID hex format\" || echo \"✗ INVALID hex format\""
+        },
+        "output": "",
+        "duration": 0,
+        "isError": false
+      },
+      {
+        "toolName": "bash",
+        "input": {
+          "command": "echo \"Comparing codes...\"\ntyped=\"3f9b7fa2\"\nartifacts=\"3f9b7fa2\"\nif [ \"$typed\" = \"$artifacts\" ]; then\n  echo \"✓ Codes match: IDENTICAL\"\nelse\n  echo \"✗ Codes do NOT match\"\n  echo \"  Typed:     $typed\"\n  echo \"  Artifacts: $artifacts\"\nfi"
+        },
+        "output": "Comparing codes...\n✓ Codes match: IDENTICAL\n",
         "duration": 0,
         "isError": false
       },
@@ -24,21 +42,9 @@
         "toolName": "finish",
         "input": {
           "status": "complete",
-          "summary": "Validation PASS: all 2 codes valid and matching. Both typed output and artifacts contain the same valid hex code: f0da9201",
+          "summary": "Validation PASS: all 2 codes valid and matching. Both typed output and artifacts contain the identical hex code 3f9b7fa2, which is a valid 8-character hex string.",
           "validation_result": "PASS",
-          "artifacts": "<validation>PASS</validation>\n<details>\n- Typed output code: f0da9201 ✓ Valid 8-character hex string\n- Artifacts code: f0da9201 ✓ Valid 8-character hex string\n- Code comparison: ✓ Both codes match exactly\n- Result: All validations passed for PHASE 7 typed outputs comparison\n</details>"
-        },
-        "output": "Validation failed for tool \"finish\":\n  - files: must have required property 'files'\n\nReceived arguments:\n{\n  \"status\": \"complete\",\n  \"summary\": \"Validation PASS: all 2 codes valid and matching. Both typed output and artifacts contain the same valid hex code: f0da9201\",\n  \"validation_result\": \"PASS\",\n  \"artifacts\": \"<validation>PASS</validation>\\n<details>\\n- Typed output code: f0da9201 ✓ Valid 8-character hex string\\n- Artifacts code: f0da9201 ✓ Valid 8-character hex string\\n- Code comparison: ✓ Both codes match exactly\\n- Result: All validations passed for PHASE 7 typed outputs comparison\\n</details>\"\n}",
-        "duration": 0,
-        "isError": true
-      },
-      {
-        "toolName": "finish",
-        "input": {
-          "status": "complete",
-          "summary": "Validation PASS: all 2 codes valid and matching. Both typed output and artifacts contain the same valid hex code: f0da9201",
-          "validation_result": "PASS",
-          "artifacts": "<validation>PASS</validation>\n<details>\n- Typed output code: f0da9201 ✓ Valid 8-character hex string\n- Artifacts code: f0da9201 ✓ Valid 8-character hex string\n- Code comparison: ✓ Both codes match exactly\n- Result: All validations passed for PHASE 7 typed outputs comparison\n</details>",
+          "artifacts": "<validation>PASS</validation><details>Typed output code: 3f9b7fa2 - Valid hex format ✓\nArtifacts code: 3f9b7fa2 - Valid hex format ✓\nCode comparison: IDENTICAL ✓\nAll validations passed successfully.</details>",
           "files": []
         },
         "output": "Result recorded.",
@@ -46,16 +52,16 @@
         "isError": false
       }
     ],
-    "duration": 9070,
+    "duration": 6787,
     "tokens": {
-      "input": 7855,
-      "output": 1138
+      "input": 4791,
+      "output": 959
     },
     "finishParams": {
       "status": "complete",
-      "summary": "Validation PASS: all 2 codes valid and matching. Both typed output and artifacts contain the same valid hex code: f0da9201",
+      "summary": "Validation PASS: all 2 codes valid and matching. Both typed output and artifacts contain the identical hex code 3f9b7fa2, which is a valid 8-character hex string.",
       "validation_result": "PASS",
-      "artifacts": "<validation>PASS</validation>\n<details>\n- Typed output code: f0da9201 ✓ Valid 8-character hex string\n- Artifacts code: f0da9201 ✓ Valid 8-character hex string\n- Code comparison: ✓ Both codes match exactly\n- Result: All validations passed for PHASE 7 typed outputs comparison\n</details>",
+      "artifacts": "<validation>PASS</validation><details>Typed output code: 3f9b7fa2 - Valid hex format ✓\nArtifacts code: 3f9b7fa2 - Valid hex format ✓\nCode comparison: IDENTICAL ✓\nAll validations passed successfully.</details>",
       "files": []
     },
     "typedOutputs": {
@@ -64,59 +70,52 @@
   },
   "results": {
     "basic-gen": {
-      "fullOutput": "I'll generate a verification code for the basic agent step test.",
+      "fullOutput": "",
       "status": "complete",
-      "summary": "Generated code: 1cec7995",
-      "artifacts": "<code>1cec7995</code>",
+      "summary": "Generated code: ceae0cc8",
+      "artifacts": "<code>ceae0cc8</code>",
       "files": "",
-      "code": "1cec7995"
+      "code": "ceae0cc8"
     },
     "parallel-a": {
       "fullOutput": "",
       "status": "complete",
-      "summary": "Generated code: b5da5c1d",
-      "artifacts": "<code>b5da5c1d</code>",
+      "summary": "Generated code: 3e19b9cc",
+      "artifacts": "<code>3e19b9cc</code>",
       "files": "",
-      "code": "b5da5c1d"
+      "code": "3e19b9cc"
     },
     "parallel-b": {
       "fullOutput": "",
       "status": "complete",
-      "summary": "Generated code: 78ed7ede",
-      "artifacts": "<code>78ed7ede</code>",
+      "summary": "Generated verification code B: 87568e04",
+      "artifacts": "<code>87568e04</code>",
       "files": "",
-      "code": "78ed7ede"
+      "code": "87568e04"
     },
     "parallel-c": {
-      "fullOutput": "I'll generate a verification code for you using the openssl command.",
+      "fullOutput": "I'll generate the verification code for you.",
       "status": "complete",
-      "summary": "Generated verification code: 2a609dae",
-      "artifacts": "<code>2a609dae</code>",
+      "summary": "Generated code: 66052746",
+      "artifacts": "<code>66052746</code>",
       "files": "",
-      "code": "2a609dae"
+      "code": "66052746"
     },
     "basic-validate": {
-      "fullOutput": "Perfect! All validations passed. Let me provide the final result:",
+      "fullOutput": "I'll validate the codes from the basic generator. Let me parse and verify the hex codes.",
       "status": "complete",
-      "summary": "Validation PASS: all 1 code valid. Code 1cec7995 is a valid 8-character hex string appearing in both summary and artifacts with matching values.",
-      "artifacts": "<validation>PASS</validation><details>Code from PHASE 1 Basic agent step: 1cec7995\n- Format validation: ✓ Valid hex (matches ^[0-9a-f]{8}$)\n- Summary code: 1cec7995 ✓\n- Artifacts code: 1cec7995 ✓\n- Match verification: ✓ Both codes identical\n- Total codes validated: 1/1\n- Result: PASS</details>",
+      "summary": "Validation PASS: 1 code valid and matching between summary and artifacts",
+      "artifacts": "<validation>PASS</validation><details>Code 'ceae0cc8' is a valid 8-character hex string (matches regex ^[0-9a-f]{8}$). Summary and artifacts contain matching code. 1 of 1 expected codes validated successfully.</details>",
       "files": "",
       "validation_result": "PASS"
     },
     "fanin-validate": {
-      "fullOutput": "Excellent! All validations passed. Let me summarize the results:",
+      "fullOutput": "Perfect! All codes have been validated successfully. Let me summarize the results:\n\n**Validation Summary:**\n- ✅ Code A (3e19b9cc): VALID hex format\n- ✅ Code B (87568e04): VALID hex format  \n- ✅ Code C (66052746): VALID hex format\n- ✅ All codes are UNIQUE\n- ✅ Received all 3 expected codes from parallel agents",
       "status": "complete",
-      "summary": "Validation PASS: all 3 codes valid and unique. Code A (b5da5c1d), Code B (78ed7ede), and Code C (2a609dae) are each valid 8-character hexadecimal strings with no duplicates.",
-      "artifacts": "<validation><status>PASS</status><details>All 3 codes from parallel agents validated successfully:\n- Code A: b5da5c1d - VALID (8-char hex)\n- Code B: 78ed7ede - VALID (8-char hex)\n- Code C: 2a609dae - VALID (8-char hex)\n- Uniqueness: All 3 codes are UNIQUE\n- Total codes received: 3/3 (Expected)</details></validation>",
+      "summary": "Validation PASS: all 3 codes valid and unique",
+      "artifacts": "<validation>PASS</validation><details>Code A (3e19b9cc): Valid 8-char hex string. Code B (87568e04): Valid 8-char hex string. Code C (66052746): Valid 8-char hex string. All codes are unique. Regex validation ^[0-9a-f]{8}$ passed for all codes.</details>",
       "files": "",
       "validation_result": "PASS"
-    },
-    "choose-path": {
-      "fullOutput": "Based on the clear instruction to \"Pick Path A for deterministic results,\" and my role as a fork routing agent for deterministic testing, I will choose **Path A**.",
-      "status": "complete",
-      "summary": "Chose Path A for deterministic test routing",
-      "artifacts": "",
-      "files": ""
     },
     "path-b-gen": {
       "fullOutput": "",
@@ -128,24 +127,24 @@
     "path-a-gen": {
       "fullOutput": "",
       "status": "complete",
-      "summary": "Generated code: a142be3f",
-      "artifacts": "<code>a142be3f</code>",
+      "summary": "Generated code: c0a3c24e",
+      "artifacts": "<code>c0a3c24e</code>",
       "files": "",
-      "code": "a142be3f"
+      "code": "c0a3c24e"
     },
     "fork-validate": {
-      "fullOutput": "Perfect! Let me summarize the validation:",
+      "fullOutput": "Perfect! Let me verify the fork behavior validation:",
       "status": "complete",
-      "summary": "Validation PASS: Fork branching behavior verified. Path A executed with valid code (a142be3f). Path B was skipped (empty). Exactly one path was taken as expected in PHASE 3 fork branching.",
-      "artifacts": "<validation>PASS</validation><details>Path A: a142be3f (VALID 8-char hex). Path B: empty (skipped). Fork behavior correct - exactly one path executed, one skipped.</details>",
+      "summary": "Validation PASS: Fork branching verified. Path A taken with valid code c0a3c24e. Path B correctly empty (skipped).",
+      "artifacts": "<validation>\n  <status>PASS</status>\n  <path_a>\n    <code>c0a3c24e</code>\n    <format>VALID</format>\n    <description>8-character hex string</description>\n  </path_a>\n  <path_b>\n    <code></code>\n    <status>EMPTY</status>\n    <description>Branch correctly skipped</description>\n  </path_b>\n  <fork_result>ONE path taken, ONE path skipped - CORRECT</fork_result>\n</validation>",
       "files": "",
       "validation_result": "PASS"
     },
     "cond-producer": {
-      "fullOutput": "I'll generate a code and include it in the artifacts field.",
+      "fullOutput": "",
       "status": "complete",
-      "summary": "Produced code: 9f3b4f27",
-      "artifacts": "<code>9f3b4f27</code>",
+      "summary": "Produced code: 726c7c13",
+      "artifacts": "<code>726c7c13</code>",
       "files": ""
     },
     "cond-absent-validate": {
@@ -156,91 +155,92 @@
       "files": ""
     },
     "cond-present-validate": {
-      "fullOutput": "I'll validate the code from the conditional producer. Let me check the expected code format.",
+      "fullOutput": "I'll validate the conditional code provided. Let me verify it's a valid 8-character hex string.",
       "status": "complete",
-      "summary": "Validation PASS: all 1 codes valid",
-      "artifacts": "<validation>PASS</validation>\n<details>\n  <code>9f3b4f27</code>\n  <status>VALID</status>\n  <format>8-character hexadecimal string</format>\n  <regex_match>^[0-9a-f]{8}$</regex_match>\n  <source>PHASE 4: Conditional — routed to PRESENT branch (artifacts exist)</source>\n</details>",
+      "summary": "Validation PASS: all 1 code valid. Conditional code 726c7c13 verified as valid 8-character hex string.",
+      "artifacts": "<validation>PASS</validation><details><code>726c7c13</code> - Valid 8-character hexadecimal string from PHASE 4: Conditional (PRESENT branch with artifacts)</details>",
       "files": "",
-      "validation_result": "PASS: Code 9f3b4f27 is a valid 8-character hexadecimal string matching pattern ^[0-9a-f]{8}$"
+      "validation_result": "PASS"
     },
     "loop-gen": {
       "fullOutput": "",
       "status": "complete",
-      "summary": "Generated code: ea89e759",
-      "artifacts": "&lt;code&gt;ea89e759&lt;/code&gt;",
+      "summary": "Generated code: 253239b0",
+      "artifacts": "<code>253239b0</code>",
       "files": "",
-      "code": "ea89e759"
+      "code": "253239b0"
     },
     "loop-decision": {
-      "fullOutput": "Looking at the prior step summary: \"Generated code: ea89e759\"\n\nThis contains a valid code identifier (the hexadecimal hash ea89e759), which indicates successful code generation - a **PASS** state.\n\nAccording to the decision rules provided:\n- Summary contains a valid code → indicates PASS\n- Branch for exit: \"loop-final\"",
+      "fullOutput": "I need to correct my branch parameter - it must be either \"loop\" or \"exit\":",
       "status": "complete",
-      "summary": "Iteration 1/2: Prior step generated valid code (ea89e759). This is a PASS state, so exiting to loop-final.",
+      "summary": "Prior step generated code successfully (253239b0). Code generation completed without failure indicators. Exiting per task routing to loop-final.",
       "artifacts": "",
       "files": ""
     },
     "loop-final": {
-      "fullOutput": "I'll validate the code from the loop that exited successfully.",
+      "fullOutput": "I'll validate the code provided. Let me verify that it matches the expected hex format.",
       "status": "complete",
-      "summary": "Validation PASS: all 1 code valid. Code ea89e759 from PHASE 5 (Agent loop decision) validated successfully as a proper 8-character hexadecimal string.",
-      "artifacts": "<validation>PASS</validation><details>Code ea89e759 matches required format (^[0-9a-f]{8}$). Single code received and validated from Phase 5 agent loop exit.</details>",
+      "summary": "Validation PASS: all 1 codes valid",
+      "artifacts": "<validation>PASS</validation><details><code>253239b0</code> — 8-character hexadecimal string (PHASE 5: Agent loop decision — exited loop successfully) — Format verified: VALID</details></artifacts>",
       "files": "",
       "validation_result": "PASS"
     },
     "subflow-gen": {
-      "fullOutput": "",
+      "fullOutput": "Perfect! I've generated the verification code. Now let me submit the result.",
       "status": "complete",
-      "summary": "Generated code: 5bbf1067",
-      "artifacts": "<code>5bbf1067</code>",
+      "summary": "Generated code: d0050333",
+      "artifacts": "<code>d0050333</code>",
       "files": "",
-      "code": "5bbf1067"
+      "code": "d0050333"
     },
     "subflow-validate": {
-      "fullOutput": "Perfect! The code validation is complete.",
+      "fullOutput": "Perfect! The code validation is complete. Let me submit the results:",
       "status": "complete",
-      "summary": "Validation PASS: all 1 codes valid. Code 5bbf1067 matches the required 8-character hex string format (^[0-9a-f]{8}$).",
-      "artifacts": "<validation>PASS</validation><details>Sub-flow code: 5bbf1067 - Format: VALID (8-character hex string). Source: Testing flow-ref sub-flow execution</details>",
+      "summary": "Validation PASS: 1 code validated successfully. Code 'd0050333' is a valid 8-character hexadecimal string.",
+      "artifacts": "<validation>PASS</validation>\n<details>\n  <code>d0050333</code> - VALID (matches pattern ^[0-9a-f]{8}$)\n  <source>Testing flow-ref sub-flow execution</source>\n  <count>1 of 1 codes validated</count>\n</details>",
       "files": "",
       "validation_result": "PASS"
     },
     "run-subflow": {
-      "fullOutput": "Perfect! The code validation is complete.",
+      "fullOutput": "Perfect! The code validation is complete. Let me submit the results:",
       "status": "complete",
-      "summary": "Validation PASS: all 1 codes valid. Code 5bbf1067 matches the required 8-character hex string format (^[0-9a-f]{8}$).",
-      "artifacts": "<validation>PASS</validation><details>Sub-flow code: 5bbf1067 - Format: VALID (8-character hex string). Source: Testing flow-ref sub-flow execution</details>",
+      "summary": "Validation PASS: 1 code validated successfully. Code 'd0050333' is a valid 8-character hexadecimal string.",
+      "artifacts": "<validation>PASS</validation>\n<details>\n  <code>d0050333</code> - VALID (matches pattern ^[0-9a-f]{8}$)\n  <source>Testing flow-ref sub-flow execution</source>\n  <count>1 of 1 codes validated</count>\n</details>",
       "files": "",
       "validation_result": "PASS"
     },
     "subflow-result-check": {
-      "fullOutput": "",
+      "fullOutput": "Perfect! I've successfully validated the sub-flow code. Here's what I verified:\n\n**Validation Results:**\n- **Code received**: `d0050333`\n- **Length**: 8 characters ✓\n- **Format**: Valid 8-character hexadecimal string ✓\n- **Regex match** (`^[0-9a-f]{8}$`): VALID ✓\n- **Count**: 1 code as expected ✓\n\nThe sub-flow results are properly propagated and accessible in the parent flow context.",
       "status": "complete",
-      "summary": "Validation PASS: all 1 codes valid. Sub-flow code 5bbf1067 is accessible in parent flow and matches the required 8-character hex string format (^[0-9a-f]{8}$).",
-      "artifacts": "<validation>PASS</validation><details>Code: 5bbf1067 | Format: Valid 8-character hex string | Count: 1/1 codes validated | Phase: PHASE 6 Flow-ref sub-flow results propagation confirmed</details>",
+      "summary": "Validation PASS: 1 code validated successfully. Code 'd0050333' is a valid 8-character hexadecimal string. Sub-flow results are accessible in parent flow.",
+      "artifacts": "<validation>PASS</validation><details>Code 'd0050333' matches regex pattern ^[0-9a-f]{8}$ - valid 8-character hex string. Sub-flow validation confirmed.</details>",
       "files": "",
       "validation_result": "PASS"
     },
     "typed-gen": {
       "fullOutput": "",
       "status": "complete",
-      "summary": "Generated code: f0da9201",
-      "artifacts": "<code>f0da9201</code>",
+      "summary": "Generated code: 3f9b7fa2",
+      "artifacts": "<code>3f9b7fa2</code>",
       "files": "",
-      "code": "f0da9201"
+      "code": "3f9b7fa2"
     },
     "typed-validate": {
-      "fullOutput": "I'll validate both codes to ensure they're valid hex strings and match each other.",
+      "fullOutput": "I'll validate both codes to ensure they match and are valid hex strings.",
       "status": "complete",
-      "summary": "Validation PASS: all 2 codes valid and matching. Both typed output and artifacts contain the same valid hex code: f0da9201",
-      "artifacts": "<validation>PASS</validation>\n<details>\n- Typed output code: f0da9201 ✓ Valid 8-character hex string\n- Artifacts code: f0da9201 ✓ Valid 8-character hex string\n- Code comparison: ✓ Both codes match exactly\n- Result: All validations passed for PHASE 7 typed outputs comparison\n</details>",
+      "summary": "Validation PASS: all 2 codes valid and matching. Both typed output and artifacts contain the identical hex code 3f9b7fa2, which is a valid 8-character hex string.",
+      "artifacts": "<validation>PASS</validation><details>Typed output code: 3f9b7fa2 - Valid hex format ✓\nArtifacts code: 3f9b7fa2 - Valid hex format ✓\nCode comparison: IDENTICAL ✓\nAll validations passed successfully.</details>",
       "files": "",
       "validation_result": "PASS"
     }
   },
   "forks": {
     "choose-path": {
-      "answer": "Path A"
+      "answer": "Path A",
+      "notes": "HZLKaDSHadaD"
     }
   },
   "flowName": "test-all-features",
-  "stepCount": 22,
-  "totalDuration": 120702
+  "stepCount": 21,
+  "totalDuration": 326782
 }

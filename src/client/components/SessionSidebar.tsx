@@ -1,6 +1,6 @@
 import React, { useState, type ReactNode } from "react";
 import { useLocation } from "wouter";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiMonitor, mdiFlash, mdiTelevision, mdiWeb, mdiHelpCircle, mdiCog } from "@mdi/js";
 import type { DashboardSession } from "../../shared/types.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiRefresh } from "@mdi/js";
 import type { OpenSpecData, DashboardSession } from "../../shared/types.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";

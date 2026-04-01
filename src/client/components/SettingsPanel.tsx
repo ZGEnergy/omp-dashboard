@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiContentSave, mdiAlert } from "@mdi/js";
 import { useLocation } from "wouter";
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiPencilOutline, mdiArrowLeft, mdiPaperclip } from "@mdi/js";
 import type { DashboardSession, OpenSpecChange, CommandInfo } from "../../shared/types.js";
 import type { SessionState } from "../lib/event-reducer.js";

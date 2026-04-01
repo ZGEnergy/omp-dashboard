@@ -1105,6 +1105,14 @@ export default function App() {
               onBack={() => setPiResourcesState(null)}
               onViewFile={handleViewPiResourceFile}
             />
+          ) : previewState && !selectedId ? (
+            <OpenSpecPreview
+              cwd={previewState.cwd}
+              changeName={previewState.changeName}
+              initialArtifact={previewState.artifactId}
+              artifacts={previewState.artifacts}
+              onBack={() => setPreviewState(null)}
+            />
           ) : (
             sessionDetail ?? <LandingPage />
           )

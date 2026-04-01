@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import Icon from "@mdi/react";
+import { Icon } from "@mdi/react";
 import { mdiCheckCircle, mdiCheckboxMarkedOutline } from "@mdi/js";
 import type { InteractiveRendererProps } from "./types.js";
 import { InlineMarkdown } from "./InlineMarkdown.js";
