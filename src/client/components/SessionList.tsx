@@ -6,7 +6,7 @@ import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSe
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { SortableSessionCard } from "./SortableSessionCard.js";
 import { SortablePinnedGroup } from "./SortablePinnedGroup.js";
-import type { DashboardSession, OpenSpecData, CommandInfo } from "../../shared/types.js";
+import type { DashboardSession, OpenSpecData, CommandInfo, FlowInfo } from "../../shared/types.js";
 import type { TerminalSession } from "../../shared/terminal-types.js";
 import { TerminalCard } from "./TerminalCard.js";
 import {
@@ -17,7 +17,7 @@ import {
   pruneStaleCollapsedGroups,
   removeLegacyHiddenSessions,
 } from "../lib/session-filter-storage.js";
-import { SessionCard, GroupGitInfo, EditorButtons } from "./SessionCard.js";
+import { SessionCard, GroupGitInfo, EditorButtons, branchCache } from "./SessionCard.js";
 import { PlaceholderSessionCard } from "./PlaceholderSessionCard.js";
 import { FolderOpenSpecSection } from "./FolderOpenSpecSection.js";
 import { ThemeToggle } from "./ThemeToggle.js";
@@ -27,6 +27,7 @@ import { openEditor } from "../lib/editor-api.js";
 import { Toast, useToast } from "./Toast.js";
 import { PinDirectoryDialog } from "./PinDirectoryDialog.js";
 import { DialogPortal } from "./DialogPortal.js";
+import { BranchSwitchDialog } from "./BranchSwitchDialog.js";
 import { truncatePathMiddle } from "../lib/truncate-path.js";
 import { TunnelButton } from "./TunnelButton.js";
 import { InstallButton } from "./InstallButton.js";
@@ -72,6 +73,8 @@ interface Props {
   onRenameTerminal?: (terminalId: string, title: string) => void;
   onCollapseSidebar?: () => void;
   commandsMap?: Map<string, CommandInfo[]>;
+  flowsMap?: Map<string, FlowInfo[]>;
+  onOpenSpecs?: (cwd: string) => void;
 }
 
 /** Sort sessions within a group by server order, then by startedAt descending for unordered ones. */
@@ -196,7 +199,7 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, flowsMap, onOpenSpecs }: Props) {
   const now = Date.now();
   const [, navigate] = useLocation();
   const { messages, showToast, dismissToast } = useToast();
@@ -229,6 +232,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
 
   // Pin directory dialog state
   const [showPinDialog, setShowPinDialog] = useState(false);
+  const [branchDialogCwd, setBranchDialogCwd] = useState<string | null>(null);
 
   // Filter state - active-only defaults to ON
   const [activeOnly, setActiveOnly] = useState(() => getActiveOnly());
@@ -381,7 +385,11 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               </button>
             )}
           </div>
-          <GroupGitInfo sessions={group.sessions} />
+          <GroupGitInfo
+            sessions={group.sessions}
+            cwd={group.cwd}
+            onBranchClick={() => setBranchDialogCwd(group.cwd)}
+          />
           <div className="mt-1 ml-5 flex items-center gap-1">
             {editorMap.get(group.cwd)?.length ? (
               <EditorButtons
@@ -443,10 +451,10 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               data={openspecMap.get(group.cwd)!}
               cwd={group.cwd}
               onRefresh={() => onOpenSpecRefresh?.(group.cwd)}
-              onBulkArchive={() => onBulkArchive?.(group.cwd)}
               onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(group.cwd, changeName, artifactId) : undefined}
               sessions={group.sessions}
               onNavigateToSession={onSelect}
+              onOpenSpecs={onOpenSpecs ? () => onOpenSpecs(group.cwd) : undefined}
             />
           )}
 
@@ -483,10 +491,12 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                           onAttachProposal={onAttachProposal ? (changeName) => onAttachProposal(session.id, changeName) : undefined}
                           onDetachProposal={onDetachProposal ? () => onDetachProposal(session.id) : undefined}
                           onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(session.cwd, changeName, artifactId) : undefined}
+                          onBulkArchive={onBulkArchive ? () => onBulkArchive(session.cwd) : undefined}
                           onRename={onRename ? (name) => onRename(session.id, name) : undefined}
                           onShutdown={onShutdown}
                           onResume={onResume ? (mode) => onResume(session.id, mode) : undefined}
                           commands={commandsMap?.get(session.id)}
+                          flows={flowsMap?.get(session.id)}
                         />
                       </SortableSessionCard>
                     );
@@ -599,6 +609,15 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
           }}
           onCancel={() => setShowPinDialog(false)}
         /></DialogPortal>
+      )}
+      {branchDialogCwd && (
+        <BranchSwitchDialog
+          cwd={branchDialogCwd}
+          onClose={() => {
+            branchCache.delete(branchDialogCwd);
+            setBranchDialogCwd(null);
+          }}
+        />
       )}
       <Toast messages={messages} onDismiss={dismissToast} />
 

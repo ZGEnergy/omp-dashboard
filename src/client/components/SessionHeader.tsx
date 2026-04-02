@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Icon } from "@mdi/react";
 import { mdiPencilOutline, mdiArrowLeft, mdiPaperclip } from "@mdi/js";
-import type { DashboardSession, OpenSpecChange, CommandInfo } from "../../shared/types.js";
+import type { DashboardSession, OpenSpecChange, CommandInfo, FlowInfo } from "../../shared/types.js";
 import type { SessionState } from "../lib/event-reducer.js";
 import type { DetectedEditor } from "../lib/editor-api.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
 import { InlineRenameInput } from "./InlineRenameInput.js";
 import { MobileActionMenu } from "./MobileActionMenu.js";
 import { useMobile } from "../hooks/useMobile.js";
-import { getFlowCommands } from "../lib/flow-commands.js";
 import { FlowLaunchDialog } from "./FlowLaunchDialog.js";
 import { SearchableSelectDialog, type SelectOption } from "./SearchableSelectDialog.js";
 
@@ -19,6 +18,7 @@ interface Props {
   showBack?: boolean;
   onBack?: () => void;
   commands?: CommandInfo[];
+  flows?: FlowInfo[];
   onSendPrompt?: (text: string) => void;
   openspecChanges?: OpenSpecChange[];
   onAttachProposal?: (changeName: string) => void;
@@ -194,14 +194,14 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
-export function SessionHeader({ session, state, onRename, showBack, onBack, mobileActions, commands, onSendPrompt, openspecChanges, onAttachProposal, onDetachProposal }: Props) {
+export function SessionHeader({ session, state, onRename, showBack, onBack, mobileActions, commands, flows, onSendPrompt, openspecChanges, onAttachProposal, onDetachProposal }: Props) {
   const [now, setNow] = useState(Date.now());
   const [isRenaming, setIsRenaming] = useState(false);
   const [flowPickerOpen, setFlowPickerOpen] = useState(false);
-  const [flowLaunchTarget, setFlowLaunchTarget] = useState<CommandInfo | null>(null);
+  const [flowLaunchTarget, setFlowLaunchTarget] = useState<FlowInfo | null>(null);
   const [openspecPickerOpen, setOpenspecPickerOpen] = useState(false);
-  const flowCmds = commands ? getFlowCommands(commands) : [];
-  const flowOptions: SelectOption[] = flowCmds.map(c => ({ value: c.name, label: c.name, description: c.description }));
+  const flowCmds = flows ?? [];
+  const flowOptions: SelectOption[] = flowCmds.map(f => ({ value: f.name, label: f.name, description: f.description }));
 
   const attached = session?.attachedProposal;
   const openspecOptions: SelectOption[] = (openspecChanges || []).map(c => {
@@ -360,8 +360,8 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
           placeholder="Search flows..."
           emptyMessage="No flows available"
           onSelect={(value) => {
-            const cmd = flowCmds.find(c => c.name === value);
-            if (cmd) setFlowLaunchTarget(cmd);
+            const flow = flowCmds.find(f => f.name === value);
+            if (flow) setFlowLaunchTarget(flow);
             setFlowPickerOpen(false);
           }}
           onCancel={() => setFlowPickerOpen(false)}

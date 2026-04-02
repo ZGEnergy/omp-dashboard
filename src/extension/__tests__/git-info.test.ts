@@ -25,6 +25,20 @@ describe("git-info", () => {
       execSyncMock.mockImplementation(() => { throw new Error("not a git repo"); });
       expect(detectBranch("/test")).toBeUndefined();
     });
+
+    it("returns short SHA for detached HEAD", () => {
+      execSyncMock
+        .mockReturnValueOnce("HEAD\n")       // rev-parse --abbrev-ref HEAD
+        .mockReturnValueOnce("abc1234\n");   // rev-parse --short HEAD
+      expect(detectBranch("/test")).toBe("abc1234");
+    });
+
+    it("returns 'HEAD' as fallback if short SHA fails", () => {
+      execSyncMock
+        .mockReturnValueOnce("HEAD\n")
+        .mockImplementationOnce(() => { throw new Error("fail"); });
+      expect(detectBranch("/test")).toBe("HEAD");
+    });
   });
 
   describe("detectRemoteUrl", () => {

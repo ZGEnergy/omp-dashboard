@@ -58,8 +58,20 @@ export type ParsedPrompt =
   | { type: "model"; provider: string; modelId: string }
   | { type: "shutdown" }
   | { type: "reload" }
+  | { type: "mgmt"; event: string; data: Record<string, unknown> }
   | { type: "slash"; text: string }
   | { type: "passthrough"; text: string };
+
+/** pi-flows management commands with known event mappings.
+ *  These are dispatched via pi.events instead of flow:run.
+ *
+ *  Note: flows:new is NOT here because pi-flows' flows:new-request handler
+ *  requires lastCtx which is null after reload in headless sessions.
+ *  Instead, flows:new falls through to sendUserMessage → input interceptor. */
+const MANAGEMENT_COMMAND_EVENTS: Record<string, {
+  event: string;
+  dataFn: (args: string) => Record<string, unknown>;
+}> = {};
 
 /** Parse input text to detect pi internal command prefixes */
 export function parseSendPrompt(text: string): ParsedPrompt {
@@ -102,7 +114,19 @@ export function parseSendPrompt(text: string): ParsedPrompt {
     }
   }
 
-  // 5. Check / prefix (generic slash command)
+  // 5. Check management commands (/flows:new, etc.) with known event mappings
+  if (text.startsWith("/") && !text.includes("\n")) {
+    const cmdText = text.slice(1);
+    const spaceIdx = cmdText.indexOf(" ");
+    const cmdName = spaceIdx === -1 ? cmdText : cmdText.slice(0, spaceIdx);
+    const cmdArgs = spaceIdx === -1 ? "" : cmdText.slice(spaceIdx + 1);
+    const mgmt = MANAGEMENT_COMMAND_EVENTS[cmdName];
+    if (mgmt) {
+      return { type: "mgmt", event: mgmt.event, data: mgmt.dataFn(cmdArgs) };
+    }
+  }
+
+  // 6. Check / prefix (generic slash command)
   if (text.startsWith("/") && !text.includes("\n")) {
     return { type: "slash", text };
   }
@@ -204,6 +228,23 @@ export function createCommandHandler(
             return undefined;
           }
 
+          if (parsed.type === "mgmt") {
+            // Dispatch management command via pi.events (e.g. flows:new-request)
+            if ((pi as any).events) {
+              (pi as any).events.emit(parsed.event, parsed.data);
+            }
+            options?.eventSink?.({
+              type: "event_forward",
+              sessionId,
+              event: {
+                eventType: "command_feedback",
+                timestamp: Date.now(),
+                data: { command: parsed.event, status: "completed" },
+              },
+            });
+            return undefined;
+          }
+
           if (parsed.type === "slash") {
             if (options?.sessionPrompt) {
               options.sessionPrompt(parsed.text);
@@ -235,6 +276,12 @@ export function createCommandHandler(
 
         case "request_commands": {
           const commands = pi.getCommands().filter((cmd: any) => !cmd.name.startsWith("__"));
+          // Also send flows list alongside commands
+          if (options?.eventSink) {
+            const probe: any = {};
+            try { pi.events?.emit("flow:list-flows", probe); } catch { /* ignore */ }
+            options.eventSink({ type: "flows_list", sessionId, flows: probe.flows ?? [] });
+          }
           return {
             type: "commands_list",
             sessionId,

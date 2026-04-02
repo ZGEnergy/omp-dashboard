@@ -13,6 +13,7 @@ import { FlowDashboard } from "./components/FlowDashboard.js";
 import { FlowAgentDetail } from "./components/FlowAgentDetail.js";
 import { MarkdownPreviewView } from "./components/MarkdownPreviewView.js";
 import { PiResourcesView } from "./components/PiResourcesView.js";
+import { SpecsBrowserView } from "./components/SpecsBrowserView.js";
 import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
 import type { OpenSpecArtifact } from "../shared/types.js";
 import { SessionHeader } from "./components/SessionHeader.js";
@@ -27,7 +28,7 @@ import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { TerminalView } from "./components/TerminalView.js";
 import { createInitialState, reduceEvent, addInteractiveRequest, resolveInteractiveRequest, dismissInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { useEditors } from "./lib/use-editors.js";
-import type { DashboardSession, CommandInfo, FileEntry, OpenSpecData, ModelInfo } from "../shared/types.js";
+import type { DashboardSession, CommandInfo, FlowInfo, FileEntry, OpenSpecData, ModelInfo } from "../shared/types.js";
 import type { TerminalSession } from "../shared/terminal-types.js";
 import type { ServerToBrowserMessage } from "../shared/browser-protocol.js";
 import type { ToolContext } from "./components/tool-renderers/index.js";
@@ -97,6 +98,7 @@ export default function App() {
   const [sessions, setSessions] = useState<Map<string, DashboardSession>>(new Map());
   const [sessionStates, setSessionStates] = useState<Map<string, SessionState>>(new Map());
   const [sessionCommands, setSessionCommands] = useState<Map<string, CommandInfo[]>>(new Map());
+  const [sessionFlows, setSessionFlows] = useState<Map<string, FlowInfo[]>>(new Map());
   const [fileResults, setFileResults] = useState<{ query: string; files: FileEntry[] } | null>(null);
   const [openspecMap, setOpenspecMap] = useState<Map<string, OpenSpecData>>(new Map());
   const [modelsMap, setModelsMap] = useState<Map<string, ModelInfo[]>>(new Map());
@@ -118,6 +120,7 @@ export default function App() {
     artifacts: OpenSpecArtifact[];
   } | null>(null);
   const [piResourcesState, setPiResourcesState] = useState<{ cwd: string } | null>(null);
+  const [specsBrowserCwd, setSpecsBrowserCwd] = useState<string | null>(null);
   const [piResourceFilePreview, setPiResourceFilePreview] = useState<{
     filePath: string;
     title: string;
@@ -206,6 +209,14 @@ export default function App() {
         setSessionCommands((prev) => {
           const next = new Map(prev);
           next.set(msg.sessionId, msg.commands);
+          return next;
+        });
+        break;
+
+      case "flows_list":
+        setSessionFlows((prev) => {
+          const next = new Map(prev);
+          next.set(msg.sessionId, msg.flows);
           return next;
         });
         break;
@@ -370,6 +381,7 @@ export default function App() {
   useEffect(() => {
     if (selectedId !== prevSelectedRef.current) {
       setPreviewState(null);
+      setSpecsBrowserCwd(null);
       prevSelectedRef.current = selectedId;
     }
     // Lazy subscribe: load events for ended sessions when first selected.
@@ -387,6 +399,10 @@ export default function App() {
 
   const selectedCommands = selectedId
     ? sessionCommands.get(selectedId) ?? []
+    : [];
+
+  const selectedFlows = selectedId
+    ? sessionFlows.get(selectedId) ?? []
     : [];
 
   const selectedSession = selectedId ? sessions.get(selectedId) : undefined;
@@ -736,6 +752,7 @@ export default function App() {
       onBulkArchive={handleBulkArchive}
       onReadArtifact={handleReadArtifact}
       onOpenPiResources={handleOpenPiResources}
+      onOpenSpecs={(cwd) => setSpecsBrowserCwd(cwd)}
       onAttachProposal={handleAttachProposal}
       onDetachProposal={handleDetachProposal}
       onRename={handleRenameSession}
@@ -765,6 +782,7 @@ export default function App() {
       onRenameTerminal={handleRenameTerminal}
       onCollapseSidebar={sidebar.toggleCollapse}
       commandsMap={sessionCommands}
+      flowsMap={sessionFlows}
     />
   );
 
@@ -816,6 +834,7 @@ export default function App() {
           onReadArtifact: (changeName, artifactId) => handleReadArtifact(selectedCwd!, changeName, artifactId),
         } : undefined}
         commands={selectedCommands}
+        flows={selectedFlows}
         onSendPrompt={handleSend}
         openspecChanges={selectedCwd ? openspecMap.get(selectedCwd)?.changes : undefined}
         onAttachProposal={(changeName) => handleAttachProposal(selectedId, changeName)}
@@ -869,7 +888,12 @@ export default function App() {
           cost={selectedState.cost}
         />
       )}
-      {piResourceFilePreview ? (
+      {specsBrowserCwd ? (
+        <SpecsBrowserView
+          cwd={specsBrowserCwd}
+          onBack={() => setSpecsBrowserCwd(null)}
+        />
+      ) : piResourceFilePreview ? (
         <MarkdownPreviewView
           title={piResourceFilePreview.title}
           content={piResourceFilePreview.content}
@@ -1009,14 +1033,16 @@ export default function App() {
       selectedTerminalId,
       settingsMatch: !!settingsMatch,
       tunnelSetupMatch: !!tunnelSetupMatch,
-      hasPreview: !!previewState || !!piResourcesState || !!piResourceFilePreview,
+      hasPreview: !!previewState || !!piResourcesState || !!piResourceFilePreview || !!specsBrowserCwd,
     });
     return (
       <div className="bg-[var(--bg-primary)] text-[var(--text-primary)]">
         <MobileShell
           depth={mobileDepth}
           onBack={() => {
-            if (piResourceFilePreview) {
+            if (specsBrowserCwd) {
+              setSpecsBrowserCwd(null);
+            } else if (piResourceFilePreview) {
               setPiResourceFilePreview(null);
             } else if (piResourcesState) {
               setPiResourcesState(null);
@@ -1038,6 +1064,11 @@ export default function App() {
               <SettingsPanel />
             ) : tunnelSetupMatch ? (
               <ZrokInstallGuide onBack={() => navigate("/")} />
+            ) : specsBrowserCwd ? (
+              <SpecsBrowserView
+                cwd={specsBrowserCwd}
+                onBack={() => setSpecsBrowserCwd(null)}
+              />
             ) : piResourceFilePreview ? (
               <MarkdownPreviewView
                 title={piResourceFilePreview.title}
@@ -1091,7 +1122,12 @@ export default function App() {
         {terminalViews}
         {/* Show session detail or landing page when no terminal is selected */}
         {!selectedTerminalId && !settingsMatch && !tunnelSetupMatch && (
-          piResourceFilePreview ? (
+          specsBrowserCwd ? (
+            <SpecsBrowserView
+              cwd={specsBrowserCwd}
+              onBack={() => setSpecsBrowserCwd(null)}
+            />
+          ) : piResourceFilePreview ? (
             <MarkdownPreviewView
               title={piResourceFilePreview.title}
               content={piResourceFilePreview.content}

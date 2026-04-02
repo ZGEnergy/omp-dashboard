@@ -40,7 +40,6 @@ const defaultProps = {
   data: mockData,
   cwd: "/project/foo",
   onRefresh: vi.fn(),
-  onBulkArchive: vi.fn(),
 };
 
 describe("FolderOpenSpecSection", () => {
@@ -96,15 +95,12 @@ describe("FolderOpenSpecSection", () => {
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
-  it("shows bulk archive confirmation dialog and calls onBulkArchive", () => {
-    const onBulkArchive = vi.fn();
-    render(<FolderOpenSpecSection {...defaultProps} onBulkArchive={onBulkArchive} />);
+  it("shows Specs button and calls onOpenSpecs", () => {
+    const onOpenSpecs = vi.fn();
+    render(<FolderOpenSpecSection {...defaultProps} onOpenSpecs={onOpenSpecs} />);
 
-    fireEvent.click(screen.getByTestId("folder-bulk-archive-btn"));
-    expect(screen.getByText("Bulk archive all completed changes?")).toBeTruthy();
-
-    fireEvent.click(screen.getByTestId("confirm-ok"));
-    expect(onBulkArchive).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId("folder-specs-btn"));
+    expect(onOpenSpecs).toHaveBeenCalledOnce();
   });
 
   it("calls onReadArtifact with proposal when PDST button clicked", () => {
@@ -117,13 +113,9 @@ describe("FolderOpenSpecSection", () => {
     expect(onReadArtifact).toHaveBeenCalledWith("feat-in-progress", "proposal");
   });
 
-  it("cancelling bulk archive does not call onBulkArchive", () => {
-    const onBulkArchive = vi.fn();
-    render(<FolderOpenSpecSection {...defaultProps} onBulkArchive={onBulkArchive} />);
-
-    fireEvent.click(screen.getByTestId("folder-bulk-archive-btn"));
-    fireEvent.click(screen.getByTestId("confirm-cancel"));
-    expect(onBulkArchive).not.toHaveBeenCalled();
+  it("does not show Specs button when onOpenSpecs not provided", () => {
+    render(<FolderOpenSpecSection {...defaultProps} />);
+    expect(screen.queryByTestId("folder-specs-btn")).toBeNull();
   });
 
   // --- Cross-session links ---

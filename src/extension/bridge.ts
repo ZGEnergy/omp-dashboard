@@ -25,9 +25,12 @@ import { detectOpenSpecActivity } from "./openspec-activity-detector.js";
 import type { OpenSpecPhase } from "../shared/types.js";
 import { createUiProxy } from "./ui-proxy.js";
 import { registerAskUserTool } from "./ask-user-tool.js";
+import type { FlowInfo } from "../shared/types.js";
 
 const HEARTBEAT_INTERVAL = 15_000;
 const GIT_POLL_INTERVAL = 30_000;
+
+
 
 // Use globalThis to survive jiti module cache invalidation on /reload
 const BRIDGE_KEY = "__pi_dashboard_bridge__";
@@ -59,6 +62,8 @@ function filterHiddenCommands(commands: any[]): any[] {
   return commands.filter((cmd) => !cmd.name.startsWith("__"));
 }
 
+
+
 function initBridge(pi: ExtensionAPI) {
   const prev = getBridgeState();
   prev.cleanup?.();
@@ -68,6 +73,24 @@ function initBridge(pi: ExtensionAPI) {
   let lastSessionFile: string | undefined;
   let lastSessionDir: string | undefined;
   let lastFirstMessage: string | undefined;
+
+
+
+  /** Query pi-flows for available flows via synchronous event RPC */
+  function getFlowsList(): FlowInfo[] {
+    const probe: any = {};
+    try {
+      pi.events?.emit("flow:list-flows", probe);
+    } catch { /* ignore */ }
+    return (probe.flows as FlowInfo[] | undefined) ?? [];
+  }
+
+  /** Send flows_list message to the dashboard server */
+  function sendFlowsList() {
+    const flows = getFlowsList();
+    console.error(`[dashboard] sendFlowsList: ${flows.length} flows, sessionId=${sessionId.slice(0,8)}`);
+    connection.send({ type: "flows_list", sessionId, flows });
+  }
 
   function extractFirstMessage(ctx: any): string | undefined {
     try {
@@ -203,41 +226,38 @@ function initBridge(pi: ExtensionAPI) {
       }
     },
     sessionPrompt: (text) => {
-      // For slash commands, try to execute via pi-flows events first (flow:run),
-      // then fall back to sendUserMessage for non-flow commands.
-      // pi.sendUserMessage() uses expandPromptTemplates: false which skips
-      // command execution — but built-in commands (/compact, /skill:, etc.)
-      // are handled by the bridge's command handler before reaching here.
-      // Only extension-registered commands (like pi-flows) need this workaround.
+      // Route slash commands: management events, flow:run, then fallback
       if (text.startsWith("/") && pi.events) {
         const cmdText = text.slice(1);
         const spaceIdx = cmdText.indexOf(" ");
         const cmdName = spaceIdx === -1 ? cmdText : cmdText.slice(0, spaceIdx);
         const cmdArgs = spaceIdx === -1 ? "" : cmdText.slice(spaceIdx + 1);
 
-        // Check if this is a pi-flows flow command by seeing if flow:run can handle it
-        // pi-flows listens for flow:run and executes the named flow
-        const flowCommands = pi.getCommands().filter((c: any) => c.source === "extension");
-        const isFlowCmd = flowCommands.some((c: any) => c.name === cmdName);
-        if (isFlowCmd) {
-          // For flows, emit flow:run event. For flows with task, we need to
-          // pass the task — but flow:run only takes flowName. So we send as
-          // a user message which triggers the flow's task_required prompt.
-          // Actually use sendUserMessage with the slash — the flow command
-          // will be picked up IF we can get expandPromptTemplates: true.
-          // Since we can't, use pi-flows' flow:run for no-task flows.
-          if (!cmdArgs.trim()) {
-            pi.events.emit("flow:run", { flowName: cmdName });
-          } else {
-            // Flow with task arg: we must execute the command handler.
-            // Emit a custom event that our bridge registered command can handle.
-            pi.events.emit("flow:run", { flowName: cmdName, task: cmdArgs });
-          }
+        // Route flow management commands via direct event emission
+        if (cmdName === "flows:new") {
+          pi.events.emit("flows:new-request", { description: cmdArgs.trim() });
+          return;
+        }
+        if (cmdName === "flows:edit") {
+          pi.events.emit("flows:edit-request", { flowName: cmdArgs.trim() });
+          return;
+        }
+        if (cmdName === "flows:delete") {
+          pi.events.emit("flow:delete-request", { flowName: cmdArgs.trim() });
+          return;
+        }
+
+        // Check if it's a user-defined flow via flow:list-flows
+        const flowsList = getFlowsList();
+        if (flowsList.some(f => f.name === cmdName)) {
+          pi.events.emit("flow:run", { flowName: cmdName, task: cmdArgs.trim() || undefined });
           return;
         }
       }
+      // Fallback: send as user message (template-expanded).
+      // Uses deliverAs:followUp so it queues properly when agent is streaming.
       const expanded = expandPromptTemplateFromDisk(text, process.cwd());
-      pi.sendUserMessage(expanded);
+      (pi.sendUserMessage as any)(expanded, { deliverAs: "followUp" });
     },
   });
 
@@ -335,6 +355,9 @@ function initBridge(pi: ExtensionAPI) {
       sessionId,
       commands,
     });
+
+    // Send flows list
+    sendFlowsList();
 
     // Send models list
     if (cachedModelRegistry) {
@@ -528,6 +551,9 @@ function initBridge(pi: ExtensionAPI) {
       commands,
     });
 
+    // Send initial flows list
+    sendFlowsList();
+
     // Send available models
     cachedModelRegistry = (ctx as any).modelRegistry;
     if (cachedModelRegistry) {
@@ -579,14 +605,15 @@ function initBridge(pi: ExtensionAPI) {
         "flow:auto-decision": "flow_auto_decision",
         "flow:complete": "flow_complete",
       };
-      // Re-send commands list when pi-flows discovers new flows or a flow completes
-      const resendCommands = () => {
+      // Re-send commands and flows list when pi-flows discovers new flows or a flow completes
+      const resendCommandsAndFlows = () => {
         if (!sessionReady) return;
         const commands = filterHiddenCommands(pi.getCommands());
         connection.send({ type: "commands_list", sessionId, commands });
+        sendFlowsList();
       };
-      pi.events.on("flow:rediscover", resendCommands);
-      pi.events.on("flow:complete", resendCommands);
+      pi.events.on("flow:rediscover", resendCommandsAndFlows);
+      pi.events.on("flow:complete", resendCommandsAndFlows);
 
       for (const [piEvent, eventType] of Object.entries(flowEventMap)) {
         pi.events.on(piEvent, (data: unknown) => {
@@ -654,6 +681,8 @@ function initBridge(pi: ExtensionAPI) {
       sessionId,
       commands,
     });
+
+    sendFlowsList();
 
     if (cachedModelRegistry) {
       try {

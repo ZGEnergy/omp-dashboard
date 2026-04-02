@@ -28,6 +28,7 @@ import { localhostGuard } from "./localhost-guard.js";
 import { listDirectories } from "./browse.js";
 import { readConfigRedacted, writeConfigPartial } from "./config-api.js";
 import { spawn } from "node:child_process";
+import { isGitRepo, listBranches, checkoutBranch, gitInit, stashPop } from "./git-operations.js";
 import fs from "node:fs/promises";
 import { registerAuthPlugin, validateWsUpgrade, isBypassedHost } from "./auth-plugin.js";
 import type { AuthConfig } from "../shared/config.js";
@@ -268,6 +269,14 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         type: "commands_list",
         sessionId,
         commands: msg.commands,
+      });
+    }
+    if (msg.type === "flows_list") {
+      console.log(`[dashboard] flows_list received for ${sessionId}, ${msg.flows?.length} flows`);
+      browserGateway.sendToSubscribers(sessionId, {
+        type: "flows_list",
+        sessionId,
+        flows: msg.flows,
       });
     }
     if (msg.type === "git_info_update") {
@@ -728,6 +737,87 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   // Health endpoint — liveness check for CLI status and probing
   const serverStartTime = Date.now();
+  // ── Git Operations (localhost-only) ──────────────────────────────────
+
+  fastify.get<{ Querystring: { cwd?: string } }>(
+    "/api/git/branches",
+    { preHandler: localhostGuard },
+    async (request, reply) => {
+      const cwd = request.query.cwd;
+      if (!cwd) {
+        reply.code(400);
+        return { success: false, error: "cwd parameter required" } satisfies ApiResponse;
+      }
+      if (!isGitRepo(cwd)) {
+        return { success: false, error: "not a git repository" } satisfies ApiResponse;
+      }
+      try {
+        const data = listBranches(cwd);
+        return { success: true, data } satisfies ApiResponse;
+      } catch (err: any) {
+        return { success: false, error: err.message ?? "failed to list branches" } satisfies ApiResponse;
+      }
+    }
+  );
+
+  fastify.post<{ Body: { cwd?: string; branch?: string; stash?: boolean } }>(
+    "/api/git/checkout",
+    { preHandler: localhostGuard },
+    async (request, reply) => {
+      const { cwd, branch, stash } = request.body ?? {};
+      if (!cwd || !branch) {
+        reply.code(400);
+        return { success: false, error: "cwd and branch required" } satisfies ApiResponse;
+      }
+      try {
+        const result = checkoutBranch(cwd, branch, stash ?? false);
+        if (!result.success) {
+          reply.code(409);
+          return result;
+        }
+        return { success: true, data: { stashed: result.stashed } } satisfies ApiResponse;
+      } catch (err: any) {
+        return { success: false, error: err.message ?? "checkout failed" } satisfies ApiResponse;
+      }
+    }
+  );
+
+  fastify.post<{ Body: { cwd?: string } }>(
+    "/api/git/init",
+    { preHandler: localhostGuard },
+    async (request, reply) => {
+      const { cwd } = request.body ?? {};
+      if (!cwd) {
+        reply.code(400);
+        return { success: false, error: "cwd required" } satisfies ApiResponse;
+      }
+      try {
+        gitInit(cwd);
+        return { success: true } satisfies ApiResponse;
+      } catch (err: any) {
+        return { success: false, error: err.message ?? "init failed" } satisfies ApiResponse;
+      }
+    }
+  );
+
+  fastify.post<{ Body: { cwd?: string } }>(
+    "/api/git/stash-pop",
+    { preHandler: localhostGuard },
+    async (request, reply) => {
+      const { cwd } = request.body ?? {};
+      if (!cwd) {
+        reply.code(400);
+        return { success: false, error: "cwd required" } satisfies ApiResponse;
+      }
+      try {
+        const result = stashPop(cwd);
+        return { success: true, data: result } satisfies ApiResponse;
+      } catch (err: any) {
+        return { success: false, error: err.message ?? "stash pop failed" } satisfies ApiResponse;
+      }
+    }
+  );
+
   fastify.get("/api/health", async () => {
     return {
       ok: true,

@@ -20,9 +20,15 @@ function runGit(command: string, cwd: string): string | undefined {
   }
 }
 
-/** Detect the current git branch. */
+/** Detect the current git branch. Returns short SHA for detached HEAD. */
 export function detectBranch(cwd: string): string | undefined {
-  return runGit("git rev-parse --abbrev-ref HEAD", cwd);
+  const ref = runGit("git rev-parse --abbrev-ref HEAD", cwd);
+  if (!ref) return undefined;
+  if (ref === "HEAD") {
+    // Detached HEAD — return short commit SHA
+    return runGit("git rev-parse --short HEAD", cwd) ?? "HEAD";
+  }
+  return ref;
 }
 
 /** Detect the remote origin URL. */

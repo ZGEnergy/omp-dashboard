@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import React from "react";
-import { SessionCard } from "../SessionCard.js";
+import { SessionCard, GroupGitInfo } from "../SessionCard.js";
 import type { DashboardSession } from "../../../shared/types.js";
 
 vi.mock("../../hooks/useMobile.js", () => ({
@@ -249,5 +249,45 @@ describe("SessionCard", () => {
 
     // Restore
     (useMobile as ReturnType<typeof vi.fn>).mockReturnValue(false);
+  });
+});
+
+// Mock fetch for GroupGitInfo server-side branch lookup
+const origFetch = globalThis.fetch;
+
+describe("GroupGitInfo", () => {
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+  });
+
+  it("renders branch icon as clickable button", () => {
+    const onClick = vi.fn();
+    const sessions = [makeSession({ gitBranch: "main" })];
+    render(<GroupGitInfo sessions={sessions} cwd="/test" onBranchClick={onClick} />);
+    const btn = screen.getByTestId("git-branch-btn");
+    fireEvent.click(btn);
+    expect(onClick).toHaveBeenCalled();
+  });
+
+  it("renders branch name for normal branch", () => {
+    const sessions = [makeSession({ gitBranch: "feature/new" })];
+    render(<GroupGitInfo sessions={sessions} cwd="/test" />);
+    expect(screen.getByText("feature/new")).toBeTruthy();
+  });
+
+  it("renders detached HEAD (short SHA)", () => {
+    const sessions = [makeSession({ gitBranch: "abc1234" })];
+    render(<GroupGitInfo sessions={sessions} cwd="/test" />);
+    expect(screen.getByText("abc1234")).toBeTruthy();
+  });
+
+  it("shows dimmed icon when no git branch info and fetch fails", () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("fail"));
+    const onClick = vi.fn();
+    const sessions = [makeSession()];
+    render(<GroupGitInfo sessions={sessions} cwd="/test" onBranchClick={onClick} />);
+    const btn = screen.getByTestId("git-init-btn");
+    fireEvent.click(btn);
+    expect(onClick).toHaveBeenCalled();
   });
 });

@@ -109,3 +109,41 @@ export interface PiResourcesResult {
 }
 
 export type PiResourcesResponse = ApiResponse<PiResourcesResult>;
+
+// ── Git Operations ──────────────────────────────────────────────────
+
+export interface GitBranchEntry {
+  name: string;
+  isRemote: boolean;
+  isCurrent: boolean;
+}
+
+export interface GitBranchesResult {
+  current: string;
+  detached: boolean;
+  branches: GitBranchEntry[];
+}
+
+export type GitBranchesResponse = ApiResponse<GitBranchesResult>;
+
+export interface GitCheckoutRequest {
+  cwd: string;
+  branch: string;
+  stash?: boolean;
+}
+
+export type GitCheckoutResponse =
+  | ApiResponse<{ stashed?: boolean }>
+  | ApiResponse<never> & { success: false; dirty: true; files: string[] };
+
+export interface GitInitRequest {
+  cwd: string;
+}
+
+export type GitInitResponse = ApiResponse<void>;
+
+export interface GitStashPopResult {
+  conflicts: boolean;
+}
+
+export type GitStashPopResponse = ApiResponse<GitStashPopResult>;

@@ -1,7 +1,7 @@
 /**
  * Extension ↔ Server WebSocket protocol messages.
  */
-import type { DashboardEvent, CommandInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, PiSessionInfo, OpenSpecPhase } from "./types.js";
+import type { DashboardEvent, CommandInfo, FlowInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, PiSessionInfo, OpenSpecPhase } from "./types.js";
 
 // ── Extension → Server ──────────────────────────────────────────────
 
@@ -40,6 +40,12 @@ export interface CommandsListMessage {
   type: "commands_list";
   sessionId: string;
   commands: CommandInfo[];
+}
+
+export interface FlowsListMessage {
+  type: "flows_list";
+  sessionId: string;
+  flows: FlowInfo[];
 }
 
 export interface ExtensionUiRequestMessage {
@@ -129,6 +135,7 @@ export type ExtensionToServerMessage =
   | SessionHeartbeatMessage
   | EventForwardMessage
   | CommandsListMessage
+  | FlowsListMessage
   | ExtensionUiRequestMessage
   | StatsUpdateMessage
   | FilesListMessage

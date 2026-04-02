@@ -28,17 +28,42 @@ interface Props {
   onDetach: () => void;
   onSendPrompt: (text: string) => void;
   onReadArtifact?: (changeName: string, artifactId: string) => void;
+  onBulkArchive?: () => void;
 }
 
-export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, onSendPrompt, onReadArtifact }: Props) {
+export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, onSendPrompt, onReadArtifact, onBulkArchive }: Props) {
   const [exploreOpen, setExploreOpen] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
+  const [bulkArchiveConfirm, setBulkArchiveConfirm] = useState(false);
   const [attachingName, setAttachingName] = useState<string | null>(null);
   const [newChangeOpen, setNewChangeOpen] = useState(false);
   const [attachPickerOpen, setAttachPickerOpen] = useState(false);
 
   const attached = session.attachedProposal;
   const isEnded = session.status === "ended";
+  const hasCompletedChanges = changes.some((c) => c.status === "complete");
+  const actionsDisabledGlobal = session.status === "streaming";
+
+  const bulkArchiveButton = hasCompletedChanges && onBulkArchive ? (
+    <ActionButton
+      label="Bulk Archive"
+      onClick={() => setBulkArchiveConfirm(true)}
+      testId="bulk-archive-btn"
+      disabled={actionsDisabledGlobal}
+    />
+  ) : null;
+
+  const bulkArchiveDialog = bulkArchiveConfirm ? (
+    <DialogPortal><ConfirmDialog
+      message="Bulk archive all completed changes?"
+      confirmLabel="Bulk Archive"
+      onConfirm={() => {
+        onBulkArchive?.();
+        setBulkArchiveConfirm(false);
+      }}
+      onCancel={() => setBulkArchiveConfirm(false)}
+    /></DialogPortal>
+  ) : null;
 
   // Clear attaching state once the session reflects the attachment
   if (attachingName && attached === attachingName) {
@@ -93,9 +118,11 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
             <>
               <ActionButton label="+ Change" onClick={() => setNewChangeOpen(true)} testId="new-change-btn" />
               <ActionButton label="Explore" onClick={() => setExploreOpen(true)} testId="explore-unattached-btn" />
+              {bulkArchiveButton}
             </>
           )}
         </div>
+        {bulkArchiveDialog}
         {newChangeOpen && (
           <DialogPortal><NewChangeDialog
             onSend={(prompt) => {
@@ -181,6 +208,7 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
                 <ActionButton label="Archive" onClick={() => setArchiveConfirm(true)} testId="archive-btn" disabled={actionsDisabled} />
               </>
             )}
+            {bulkArchiveButton}
           </div>
         );
       })()}
@@ -207,6 +235,7 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
           onCancel={() => setArchiveConfirm(false)}
         /></DialogPortal>
       )}
+      {bulkArchiveDialog}
     </div>
   );
 }

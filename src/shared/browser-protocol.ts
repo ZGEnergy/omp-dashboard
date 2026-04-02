@@ -5,6 +5,7 @@ import type {
   DashboardSession,
   DashboardEvent,
   CommandInfo,
+  FlowInfo,
   ImageContent,
   FileEntry,
   OpenSpecData,
@@ -49,6 +50,12 @@ export interface BrowserCommandsListMessage {
   type: "commands_list";
   sessionId: string;
   commands: CommandInfo[];
+}
+
+export interface BrowserFlowsListMessage {
+  type: "flows_list";
+  sessionId: string;
+  flows: FlowInfo[];
 }
 
 export interface BrowserExtensionUiRequestMessage {
@@ -139,6 +146,7 @@ export type ServerToBrowserMessage =
   | EventMessage
   | EventReplayMessage
   | BrowserCommandsListMessage
+  | BrowserFlowsListMessage
   | BrowserExtensionUiRequestMessage
   | BrowserUiDismissMessage
   | BrowserFilesListMessage

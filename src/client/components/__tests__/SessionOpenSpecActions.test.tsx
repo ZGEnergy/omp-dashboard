@@ -437,4 +437,94 @@ describe("SessionOpenSpecActions", () => {
     expect(screen.queryByTestId("explore-btn")).toBeNull();
     expect(screen.queryByTestId("continue-btn")).toBeNull();
   });
+
+  // --- Bulk Archive ---
+
+  describe("bulk archive", () => {
+    const completedChange: OpenSpecChange = {
+      name: "done-feat",
+      status: "complete",
+      completedTasks: 4,
+      totalTasks: 4,
+      artifacts: [
+        { id: "proposal", status: "done" },
+        { id: "tasks", status: "done" },
+      ],
+    };
+
+    it("shows Bulk Archive button when completed changes exist (unattached)", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession()}
+          changes={[planningChange, completedChange]}
+          onAttach={vi.fn()}
+          onDetach={vi.fn()}
+          onSendPrompt={vi.fn()}
+          onBulkArchive={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("bulk-archive-btn")).toBeTruthy();
+    });
+
+    it("hides Bulk Archive button when no completed changes", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession()}
+          changes={[planningChange]}
+          onAttach={vi.fn()}
+          onDetach={vi.fn()}
+          onSendPrompt={vi.fn()}
+          onBulkArchive={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId("bulk-archive-btn")).toBeNull();
+    });
+
+    it("shows confirmation dialog and calls onBulkArchive", () => {
+      const onBulkArchive = vi.fn();
+      render(
+        <SessionOpenSpecActions
+          session={makeSession()}
+          changes={[completedChange]}
+          onAttach={vi.fn()}
+          onDetach={vi.fn()}
+          onSendPrompt={vi.fn()}
+          onBulkArchive={onBulkArchive}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("bulk-archive-btn"));
+      expect(screen.getByText("Bulk archive all completed changes?")).toBeTruthy();
+      fireEvent.click(screen.getByTestId("confirm-ok"));
+      expect(onBulkArchive).toHaveBeenCalledOnce();
+    });
+
+    it("disables Bulk Archive when streaming", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ status: "streaming" })}
+          changes={[completedChange]}
+          onAttach={vi.fn()}
+          onDetach={vi.fn()}
+          onSendPrompt={vi.fn()}
+          onBulkArchive={vi.fn()}
+        />,
+      );
+      const btn = screen.getByTestId("bulk-archive-btn");
+      expect(btn.hasAttribute("disabled")).toBe(true);
+    });
+
+    it("shows Bulk Archive on attached session with completed changes", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "add-auth" })}
+          changes={[planningChange, completedChange]}
+          onAttach={vi.fn()}
+          onDetach={vi.fn()}
+          onSendPrompt={vi.fn()}
+          onBulkArchive={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("bulk-archive-btn")).toBeTruthy();
+    });
+  });
 });

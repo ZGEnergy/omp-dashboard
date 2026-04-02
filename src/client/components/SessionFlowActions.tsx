@@ -1,28 +1,27 @@
 import React, { useState } from "react";
-import type { CommandInfo } from "../../shared/types.js";
-import { getFlowCommands } from "../lib/flow-commands.js";
+import type { FlowInfo } from "../../shared/types.js";
 import { FlowLaunchDialog } from "./FlowLaunchDialog.js";
 import { SearchableSelectDialog, type SelectOption } from "./SearchableSelectDialog.js";
 
 export function SessionFlowActions({
-  commands,
+  flows,
+  hasFlowsNew,
   onSendPrompt,
 }: {
-  commands: CommandInfo[];
+  flows: FlowInfo[];
+  hasFlowsNew: boolean;
   onSendPrompt: (text: string) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [selectedFlow, setSelectedFlow] = useState<CommandInfo | null>(null);
+  const [selectedFlow, setSelectedFlow] = useState<FlowInfo | null>(null);
   const [newFlowOpen, setNewFlowOpen] = useState(false);
-  const flowCommands = getFlowCommands(commands);
-  const hasFlowsNew = commands.some(c => c.name === "flows:new");
 
-  if (flowCommands.length === 0 && !hasFlowsNew) return null;
+  if (flows.length === 0 && !hasFlowsNew) return null;
 
-  const flowOptions: SelectOption[] = flowCommands.map((cmd) => ({
-    value: cmd.name,
-    label: cmd.name,
-    description: cmd.description,
+  const flowOptions: SelectOption[] = flows.map((f) => ({
+    value: f.name,
+    label: f.name,
+    description: f.description,
   }));
 
   return (
@@ -30,7 +29,7 @@ export function SessionFlowActions({
       <div className="mt-1.5 pt-1.5 border-t border-[var(--border-subtle)]">
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-[var(--text-muted)]">Flows:</span>
-          {flowCommands.length > 0 && (
+          {flows.length > 0 && (
             <button
               onClick={(e) => { e.stopPropagation(); setPickerOpen(true); }}
               className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
@@ -56,8 +55,8 @@ export function SessionFlowActions({
           placeholder="Search flows..."
           emptyMessage="No flows available"
           onSelect={(value) => {
-            const cmd = flowCommands.find(c => c.name === value);
-            if (cmd) setSelectedFlow(cmd);
+            const flow = flows.find(f => f.name === value);
+            if (flow) setSelectedFlow(flow);
             setPickerOpen(false);
           }}
           onCancel={() => setPickerOpen(false)}

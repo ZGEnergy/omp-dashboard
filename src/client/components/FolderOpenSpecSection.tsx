@@ -2,25 +2,23 @@ import React, { useState } from "react";
 import { Icon } from "@mdi/react";
 import { mdiRefresh } from "@mdi/js";
 import type { OpenSpecData, DashboardSession } from "../../shared/types.js";
-import { ConfirmDialog } from "./ConfirmDialog.js";
-import { DialogPortal } from "./DialogPortal.js";
 import { ArtifactLettersButton } from "./openspec-helpers.js";
 
 interface Props {
   data: OpenSpecData;
   cwd: string;
   onRefresh: () => void;
-  onBulkArchive: () => void;
   onReadArtifact?: (changeName: string, artifactId: string) => void;
   /** Sessions in this folder group (for session links) */
   sessions?: DashboardSession[];
   /** Navigate to a session */
   onNavigateToSession?: (sessionId: string) => void;
+  /** Open the main specs browser */
+  onOpenSpecs?: () => void;
 }
 
-export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onReadArtifact, sessions, onNavigateToSession }: Props) {
+export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, sessions, onNavigateToSession, onOpenSpecs }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const [bulkArchiveConfirm, setBulkArchiveConfirm] = useState(false);
 
   if (!data.initialized) return null;
 
@@ -49,13 +47,16 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onR
         >
           <Icon path={mdiRefresh} size={0.5} />
         </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); setBulkArchiveConfirm(true); }}
-          className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-orange-400 hover:border-orange-500/50"
-          data-testid="folder-bulk-archive-btn"
-        >
-          Bulk Archive
-        </button>
+        <span className="flex-1" />
+        {onOpenSpecs && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpenSpecs(); }}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-blue-400 hover:border-blue-500/50"
+            data-testid="folder-specs-btn"
+          >
+            Specs
+          </button>
+        )}
       </div>
 
       {/* Expanded change list */}
@@ -97,17 +98,6 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onBulkArchive, onR
         </div>
       )}
 
-      {bulkArchiveConfirm && (
-        <DialogPortal><ConfirmDialog
-          message="Bulk archive all completed changes?"
-          confirmLabel="Bulk Archive"
-          onConfirm={() => {
-            onBulkArchive();
-            setBulkArchiveConfirm(false);
-          }}
-          onCancel={() => setBulkArchiveConfirm(false)}
-        /></DialogPortal>
-      )}
     </div>
   );
 }

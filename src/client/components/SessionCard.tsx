@@ -1,4 +1,4 @@
-import React, { useState, type ReactNode } from "react";
+import React, { useState, useEffect, type ReactNode } from "react";
 import { Icon } from "@mdi/react";
 import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiConsoleLine, mdiRobotOutline, mdiCodeTags, mdiApplicationOutline, mdiCommentQuestion } from "@mdi/js";
 import type { DashboardSession } from "../../shared/types.js";
@@ -13,7 +13,7 @@ import { OpenSpecActivityBadge } from "./OpenSpecActivityBadge.js";
 import { InlineRenameInput } from "./InlineRenameInput.js";
 import { FlowActivityBadge } from "./FlowActivityBadge.js";
 import { SessionFlowActions } from "./SessionFlowActions.js";
-import type { CommandInfo } from "../../shared/types.js";
+import type { CommandInfo, FlowInfo } from "../../shared/types.js";
 import { useMobile } from "../hooks/useMobile.js";
 
 export const statusColors: Record<string, string> = {
@@ -129,29 +129,103 @@ export function GitInfo({ session }: { session: DashboardSession }) {
   );
 }
 
-export function GroupGitInfo({ sessions }: { sessions: DashboardSession[] }) {
+// Simple cache to avoid redundant fetches across re-renders.
+// Exported so the BranchSwitchDialog can invalidate on close.
+export const branchCache = new Map<string, { branch: string | null; noGit: boolean }>();
+
+interface GroupGitInfoProps {
+  sessions: DashboardSession[];
+  cwd: string;
+  onBranchClick?: () => void;
+}
+
+export function GroupGitInfo({ sessions, cwd, onBranchClick }: GroupGitInfoProps) {
   const session = sessions.find((s) => s.gitBranch);
-  if (!session?.gitBranch) return null;
+  const cached = branchCache.get(cwd);
+  const [fetchedBranch, setFetchedBranch] = useState<string | null>(cached?.branch ?? null);
+  const [noGitRepo, setNoGitRepo] = useState(cached?.noGit ?? false);
+
+  // When no session has branch info, fetch it directly from the server
+  useEffect(() => {
+    if (session?.gitBranch) {
+      setFetchedBranch(null);
+      setNoGitRepo(false);
+      return;
+    }
+    // Use cache if available
+    if (branchCache.has(cwd)) return;
+
+    let cancelled = false;
+    fetch(`/api/git/branches?cwd=${encodeURIComponent(cwd)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return;
+        if (json.success) {
+          branchCache.set(cwd, { branch: json.data.current, noGit: false });
+          setFetchedBranch(json.data.current);
+          setNoGitRepo(false);
+        } else {
+          branchCache.set(cwd, { branch: null, noGit: true });
+          setNoGitRepo(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          branchCache.set(cwd, { branch: null, noGit: true });
+          setNoGitRepo(true);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [cwd, session?.gitBranch]);
+
+  const branchName = session?.gitBranch ?? fetchedBranch;
+  const branchUrl = session?.gitBranchUrl;
+  const prNumber = session?.gitPrNumber;
+  const prUrl = session?.gitPrUrl;
+
+  // No branch info at all: show dimmed icon (with "Init git" if confirmed not a repo)
+  if (!branchName) {
+    return (
+      <div className="text-[11px] flex items-center gap-1.5 text-[var(--text-muted)]">
+        <button
+          onClick={(e) => { e.stopPropagation(); onBranchClick?.(); }}
+          className="flex items-center gap-1 hover:text-[var(--text-secondary)] transition-colors"
+          title={noGitRepo ? "Initialize git repository" : "Git branches"}
+          data-testid="git-init-btn"
+        >
+          <Icon path={mdiSourceBranch} size={0.5} />
+          {noGitRepo && <span className="text-[10px]">Init git</span>}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="text-[11px] flex items-center gap-1.5 text-[var(--text-tertiary)]">
-      <Icon path={mdiSourceBranch} size={0.5} />
-      {session.gitBranchUrl ? (
-        <a href={session.gitBranchUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline truncate">
-          {session.gitBranch}
+      <button
+        onClick={(e) => { e.stopPropagation(); onBranchClick?.(); }}
+        className="flex items-center gap-1 hover:text-blue-400 transition-colors"
+        title="Switch branch"
+        data-testid="git-branch-btn"
+      >
+        <Icon path={mdiSourceBranch} size={0.5} />
+      </button>
+      {branchUrl ? (
+        <a href={branchUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline truncate">
+          {branchName}
         </a>
       ) : (
-        <span className="truncate">{session.gitBranch}</span>
+        <span className="truncate">{branchName}</span>
       )}
-      {session.gitPrNumber != null && (
+      {prNumber != null && (
         <>
           <span className="text-[var(--text-muted)]">·</span>
-          {session.gitPrUrl ? (
-            <a href={session.gitPrUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
-              #{session.gitPrNumber}
+          {prUrl ? (
+            <a href={prUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+              #{prNumber}
             </a>
           ) : (
-            <span>#{session.gitPrNumber}</span>
+            <span>#{prNumber}</span>
           )}
         </>
       )}
@@ -208,10 +282,12 @@ export function SessionCard({
   onAttachProposal,
   onDetachProposal,
   onReadArtifact,
+  onBulkArchive,
   onRename,
   onShutdown,
   onResume,
   commands,
+  flows,
 }: {
   session: DashboardSession;
   selectedId?: string;
@@ -227,10 +303,12 @@ export function SessionCard({
   onAttachProposal?: (changeName: string) => void;
   onDetachProposal?: () => void;
   onReadArtifact?: (changeName: string, artifactId: string) => void;
+  onBulkArchive?: () => void;
   onRename?: (name: string) => void;
   onShutdown?: (id: string) => void;
   onResume?: (mode: "continue" | "fork") => void;
   commands?: CommandInfo[];
+  flows?: FlowInfo[];
 }) {
   const isSelected = selectedId === session.id;
   const [isRenaming, setIsRenaming] = useState(false);
@@ -497,11 +575,16 @@ export function SessionCard({
           onDetach={onDetachProposal}
           onSendPrompt={onSendPrompt}
           onReadArtifact={onReadArtifact}
+          onBulkArchive={onBulkArchive}
         />
       )}
       {/* Flow launcher */}
-      {commands && onSendPrompt && (
-        <SessionFlowActions commands={commands} onSendPrompt={onSendPrompt} />
+      {flows && onSendPrompt && (
+        <SessionFlowActions
+          flows={flows}
+          hasFlowsNew={commands?.some(c => c.name === "flows:new") ?? false}
+          onSendPrompt={onSendPrompt}
+        />
       )}
       </div>{/* end card content */}
       </div>{/* end flex row */}

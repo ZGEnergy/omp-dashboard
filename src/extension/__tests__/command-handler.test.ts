@@ -216,6 +216,40 @@ describe("CommandHandler", () => {
     expect(result?.type).toBe("commands_list");
   });
 
+  it("should send flows_list via eventSink on request_commands", async () => {
+    const pi = createMockPi();
+    (pi as any).events = {
+      emit: vi.fn((event: string, probe: any) => {
+        if (event === "flow:list-flows") {
+          probe.flows = [{ name: "my-flow", description: "A flow", taskRequired: false }];
+        }
+      }),
+    };
+    const eventSink = vi.fn();
+    const handler = createCommandHandler(pi as any, "s1", { eventSink });
+
+    await handler.handle({ type: "request_commands", sessionId: "s1" });
+    expect(eventSink).toHaveBeenCalledWith({
+      type: "flows_list",
+      sessionId: "s1",
+      flows: [{ name: "my-flow", description: "A flow", taskRequired: false }],
+    });
+  });
+
+  it("should send empty flows_list when pi-flows is not installed", async () => {
+    const pi = createMockPi();
+    // No events property — pi-flows not installed
+    const eventSink = vi.fn();
+    const handler = createCommandHandler(pi as any, "s1", { eventSink });
+
+    await handler.handle({ type: "request_commands", sessionId: "s1" });
+    expect(eventSink).toHaveBeenCalledWith({
+      type: "flows_list",
+      sessionId: "s1",
+      flows: [],
+    });
+  });
+
   it("should filter hidden commands (starting with __) from commands list", async () => {
     const pi = createMockPi();
     pi.getCommands.mockReturnValue([
@@ -637,5 +671,19 @@ describe("parseSendPrompt", () => {
 
   it("should treat bare /model as generic slash", () => {
     expect(parseSendPrompt("/model")).toEqual({ type: "slash", text: "/model" });
+  });
+
+  it("should detect /flows:new as generic slash (routed by bridge sessionPrompt)", () => {
+    expect(parseSendPrompt("/flows:new create a test flow")).toEqual({
+      type: "slash",
+      text: "/flows:new create a test flow",
+    });
+  });
+
+  it("should detect /flows:delete as generic slash (routed by session.prompt)", () => {
+    expect(parseSendPrompt("/flows:delete my-flow")).toEqual({
+      type: "slash",
+      text: "/flows:delete my-flow",
+    });
   });
 });

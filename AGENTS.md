@@ -45,6 +45,10 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/extension/server-auto-start.ts` | Extracted auto-start logic with retry-probe for concurrent launches |
 | `src/extension/git-info.ts` | Git branch/remote/PR detection (polled every 30s) |
 | `src/extension/git-link-builder.ts` | Git remote URL parsing and platform-specific links |
+| `src/server/git-operations.ts` | Server-side git commands: branch listing, checkout, init, stash pop |
+| `src/client/components/BranchPicker.tsx` | Typeahead branch picker with keyboard navigation |
+| `src/client/components/BranchSwitchDialog.tsx` | Checkout orchestration: dirty-state stash, pop prompt |
+| `src/client/lib/git-api.ts` | Client-side fetch helpers for git API endpoints |
 | `src/extension/ui-proxy.ts` | Proxies ctx.ui dialogs to dashboard (confirm/select/input/editor/notify) |
 | `src/extension/ask-user-tool.ts` | `ask_user` tool registration (bundled in bridge, registered at session_start to avoid static tool-name conflicts with other extensions) |
 | `src/extension/openspec-activity-detector.ts` | Detects OpenSpec activity from tool events |
@@ -123,7 +127,7 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/client/components/FlowLaunchDialog.tsx` | Task input dialog for launching a flow |
 | `src/client/components/SessionFlowActions.tsx` | Session card flow launcher: searchable picker + new flow button |
 | `src/client/components/SearchableSelectDialog.tsx` | Shared searchable select dialog (keyboard nav, filtering, badges) |
-| `src/client/lib/flow-commands.ts` | Heuristic detection of launchable flow commands from commands list |
+
 | `.pi/skills/spec-coherence-check/SKILL.md` | Skill: sweep proposals for staleness, conflicts, obsolescence against codebase |
 | `.pi/skills/spec-coherence-check/references/proposal-queue-schema.md` | JSON schema for `.pi/proposal-queue.json` |
 | `.pi/skills/code-review/SKILL.md` | Skill: comprehensive code review with severity labels, four-phase process, language-specific guides |

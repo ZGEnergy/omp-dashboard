@@ -184,6 +184,22 @@ Metadata is parsed from SKILL.md YAML frontmatter (`name`, `description`), promp
 - "View" button on resource → MarkdownPreviewView (`.md` as markdown, `.ts` as code block)
 - Back buttons pop the stack: Preview → Resources → Chat
 
+### Git Branch Selector
+
+The dashboard provides a git branch selector at the folder group level. Clicking the branch icon in `GroupGitInfo` opens a typeahead `BranchPicker` dialog. The flow supports three states:
+
+1. **No git repo**: Dimmed icon labeled "Init git" — clicking triggers `POST /api/git/init`
+2. **Detached HEAD**: Shows short commit SHA — clicking opens the branch picker
+3. **Normal branch**: Shows branch name — clicking opens the branch picker
+
+**Server API endpoints** (all localhost-only in `git-operations.ts`):
+- `GET /api/git/branches?cwd=...` — lists local + remote branches sorted by committer date
+- `POST /api/git/checkout` — switches branch; returns 409 with dirty file list if working tree is dirty
+- `POST /api/git/init` — initializes a git repository
+- `POST /api/git/stash-pop` — pops the most recent stash, reports conflicts
+
+**Checkout flow**: Clean checkout closes immediately. Dirty working tree → client shows file list + "Stash & Switch" button → stash + checkout → asks "Pop stash on new branch?" with explicit Yes/No. Remote branches auto-create local tracking branches.
+
 ### Markdown Preview View
 The web client includes a generic `MarkdownPreviewView` component that replaces the chat area. It supports a back button, title, optional tab bar, and loading/error states. For OpenSpec artifacts, the `useOpenSpecReader` hook maps artifact IDs (P/S/D/T) to file paths, fetches content via the file API, and concatenates specs from subdirectories.
 

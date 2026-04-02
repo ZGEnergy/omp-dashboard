@@ -155,3 +155,15 @@ body {
 .group-collapse > * {
   overflow: hidden;
 }
+
+/* Markdown search highlights */
+mark.markdown-search-highlight {
+  background-color: rgba(250, 204, 21, 0.3);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+mark.markdown-search-highlight-active {
+  background-color: rgba(250, 204, 21, 0.6);
+  outline: 2px solid rgba(250, 204, 21, 0.8);
+}

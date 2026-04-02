@@ -1,6 +1,7 @@
 import React, { useRef, useCallback, useMemo, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { useThemeContext } from "./ThemeProvider.js";
 import { getSyntaxTheme } from "../lib/syntax-theme.js";
@@ -171,6 +172,7 @@ export function MarkdownContent({ content }: Props) {
     <div ref={containerRef} className="markdown-content text-sm">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw]}
         components={{
           code({ className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || "");

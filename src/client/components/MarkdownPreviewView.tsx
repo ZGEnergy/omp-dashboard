@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useRef } from "react";
 import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiLoading } from "@mdi/js";
 import { MarkdownContent } from "./MarkdownContent.js";
+import { MarkdownSearch } from "./MarkdownSearch.js";
 
 export interface PreviewTab {
   id: string;
@@ -18,6 +19,8 @@ interface Props {
   activeTab?: string;
   onTabChange?: (tabId: string) => void;
   onBack: () => void;
+  /** Enable fuzzy text search overlay */
+  searchable?: boolean;
 }
 
 export function MarkdownPreviewView({
@@ -29,7 +32,9 @@ export function MarkdownPreviewView({
   activeTab,
   onTabChange,
   onBack,
+  searchable,
 }: Props) {
+  const contentRef = useRef<HTMLDivElement>(null);
   return (
     <div className="flex-1 flex flex-col min-h-0" data-testid="markdown-preview">
       {/* Header with back button and title */}
@@ -47,6 +52,8 @@ export function MarkdownPreviewView({
             {title}
           </span>
         )}
+        {searchable && <span className="flex-1" />}
+        {searchable && <MarkdownSearch contentRef={contentRef} content={content} />}
       </div>
 
       {/* Tab bar */}
@@ -70,7 +77,7 @@ export function MarkdownPreviewView({
       )}
 
       {/* Content area */}
-      <div className="flex-1 overflow-y-auto p-4" style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
+      <div ref={contentRef} className="flex-1 overflow-y-auto p-4" style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
         {isLoading && (
           <div className="flex items-center justify-center h-full text-[var(--text-muted)]" data-testid="preview-loading">
             <Icon path={mdiLoading} size={1.2} spin className="animate-spin" />
