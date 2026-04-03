@@ -18,7 +18,9 @@
 import { createServer, type ServerConfig } from "./server.js";
 import { loadConfig, ensureConfig } from "../shared/config.js";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { readPid, isProcessAlive, removePid, isServerRunning } from "./server-pid.js";
 import { isPortOpen } from "../extension/server-probe.js";
 import { resolveJitiImport } from "../shared/resolve-jiti.js";
@@ -128,7 +130,9 @@ async function cmdStart(config: ServerConfig): Promise<void> {
   try {
     tsLoader = resolveJitiImport();
   } catch {
-    tsLoader = "tsx";
+    // Fallback to tsx when jiti is not available (e.g. running outside pi)
+    const tsxMain = createRequire(cliPath).resolve("tsx");
+    tsLoader = path.join(path.dirname(tsxMain), "esm", "index.mjs");
   }
 
   const child = spawn(process.execPath, ["--import", tsLoader, cliPath, ...args], {
