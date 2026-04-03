@@ -30,12 +30,12 @@ export interface SessionOptions {
 
 export function buildTmuxCommand(cwd: string, sessionExists: boolean, options?: SessionOptions): string {
   const safeCwd = shellEscape(cwd);
-  let piCmd = `cd ${safeCwd} && PI_DASHBOARD_SPAWNED=1 pi`;
+  let piCmd = `cd ${safeCwd} && pi`;
 
   if (options?.sessionFile && options?.mode === "continue") {
-    piCmd = `cd ${safeCwd} && PI_DASHBOARD_SPAWNED=1 pi --session ${shellEscape(options.sessionFile)}`;
+    piCmd = `cd ${safeCwd} && pi --session ${shellEscape(options.sessionFile)}`;
   } else if (options?.sessionFile && options?.mode === "fork") {
-    piCmd = `cd ${safeCwd} && PI_DASHBOARD_SPAWNED=1 pi --fork ${shellEscape(options.sessionFile)}`;
+    piCmd = `cd ${safeCwd} && pi --fork ${shellEscape(options.sessionFile)}`;
   }
 
   if (sessionExists) {
@@ -67,6 +67,8 @@ export interface SpawnResult {
   message: string;
   pid?: number;
   process?: ChildProcess;
+  /** True when spawned from the dashboard (for writing session meta) */
+  dashboardSpawned?: boolean;
 }
 
 export function buildHeadlessArgs(options?: SessionOptions): string[] {
@@ -93,13 +95,14 @@ function spawnHeadless(cwd: string, options?: SessionOptions): SpawnResult {
         cwd,
         detached: true,
         stdio: ["pipe", "ignore", "ignore"],
-        env: { ...process.env, PI_DASHBOARD_SPAWNED: "1" },
+        env: process.env,
       });
       child.unref();
       (child.stdin as any)?.unref();
 
       return {
         success: true,
+        dashboardSpawned: true,
         message: `Pi session spawned headless (pid ${child.pid})`,
         pid: child.pid,
         process: child,
@@ -116,12 +119,13 @@ function spawnHeadless(cwd: string, options?: SessionOptions): SpawnResult {
       cwd,
       detached: true,
       stdio: "ignore",
-      env: { ...process.env, PI_DASHBOARD_SPAWNED: "1" },
+      env: process.env,
     });
     child.unref();
 
     return {
       success: true,
+      dashboardSpawned: true,
       message: `Pi session spawned headless (pid ${child.pid})`,
       pid: child.pid,
       process: child,
@@ -169,6 +173,7 @@ export async function spawnPiSession(cwd: string, options?: SessionOptions): Pro
       execSync(cmd, { stdio: "ignore" });
       return {
         success: true,
+        dashboardSpawned: true,
         message: `Pi session spawned in tmux (${exists ? "new window" : "new session"})`,
       };
     } catch (err: any) {
@@ -185,15 +190,15 @@ export async function spawnPiSession(cwd: string, options?: SessionOptions): Pro
       execSync("wsl which tmux", { stdio: "ignore" });
       const cmd = `wsl ${buildTmuxCommand(cwd, false)}`;
       execSync(cmd, { stdio: "ignore" });
-      return { success: true, message: "Pi session spawned via WSL tmux" };
+      return { success: true, dashboardSpawned: true, message: "Pi session spawned via WSL tmux" };
     } catch {
       // Fallback to cmd
       try {
-        spawn("cmd", ["/c", `cd /d "${cwd}" && set PI_DASHBOARD_SPAWNED=1 && pi`], {
+        spawn("cmd", ["/c", `cd /d "${cwd}" && pi`], {
           detached: true,
           stdio: "ignore",
         }).unref();
-        return { success: true, message: "Pi session spawned via cmd" };
+        return { success: true, dashboardSpawned: true, message: "Pi session spawned via cmd" };
       } catch (err: any) {
         return { success: false, message: `Failed to spawn: ${err.message}` };
       }

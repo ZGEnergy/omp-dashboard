@@ -2,7 +2,8 @@
  * Event reducer: builds session UI state from a stream of events.
  * (state, event) → new state
  */
-import type { DashboardEvent, FlowAgentState, FlowDetailEntry, FlowRecentTool, FlowState, FlowAgentCardConfig } from "../../shared/types.js";
+import type { DashboardEvent } from "../../shared/types.js";
+import { isFlowEvent, reduceFlowEvent } from "./flow-reducer.js";
 
 export interface ChatImage {
   data: string;
@@ -21,6 +22,10 @@ export interface ChatMessage {
   args?: Record<string, unknown>;
   result?: string;
   toolStatus?: "running" | "complete" | "error";
+  /** Epoch ms when the block started (for live elapsed counter) */
+  startedAt?: number;
+  /** Duration in ms (set when complete) */
+  duration?: number;
 }
 
 export interface ToolCallState {
@@ -58,6 +63,8 @@ export interface SessionState {
   toolCalls: Map<string, ToolCallState>;
   streamingText: string;
   streamingThinking: string;
+  /** Epoch ms when current thinking block started (for live counter) */
+  thinkingStartedAt?: number;
   isStreaming: boolean;
   model?: string;
   thinkingLevel?: string;
@@ -73,6 +80,8 @@ export interface SessionState {
   pendingPrompt?: PendingPrompt;
   interactiveRequests: InteractiveUiRequest[];
   flowState: FlowState | null;
+  /** Whether any Write/Edit tool calls have been seen (for Changed Files button) */
+  hasFileChanges: boolean;
 }
 
 export function createInitialState(): SessionState {
@@ -91,28 +100,11 @@ export function createInitialState(): SessionState {
     turnStats: [],
     interactiveRequests: [],
     flowState: null,
+    hasFileChanges: false,
   };
 }
 
-/** Extract a short input preview for tool call display */
-function extractToolInputPreview(toolName: string, input: unknown): string {
-  if (!input || typeof input !== "object") return "";
-  const inp = input as Record<string, unknown>;
-  switch (toolName.toLowerCase()) {
-    case "read":
-    case "write":
-    case "edit":
-      return String(inp.file_path || inp.path || "").split("/").pop() || "";
-    case "grep":
-      return String(inp.pattern || "").slice(0, 20);
-    case "bash":
-      return String(inp.command || "").slice(0, 20);
-    case "flow_write":
-      return String(inp.name || "");
-    default:
-      return JSON.stringify(input).slice(0, 20);
-  }
-}
+
 
 /** Extract text from content blocks: [{ type: "text", text: "..." }, ...] */
 function extractContentBlockText(blocks: unknown[]): string | null {
@@ -290,6 +282,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       if (assistantEvent) {
         if (assistantEvent.type === "thinking_start") {
           next.streamingThinking = "";
+          next.thinkingStartedAt = event.timestamp;
           break;
         }
         if (assistantEvent.type === "thinking_delta") {
@@ -298,6 +291,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
         }
         if (assistantEvent.type === "thinking_end") {
           if (next.streamingThinking) {
+            const startedAt = next.thinkingStartedAt;
             next.messages = [
               ...next.messages,
               {
@@ -305,10 +299,13 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
                 role: "thinking",
                 content: next.streamingThinking,
                 timestamp: event.timestamp,
+                startedAt,
+                duration: startedAt ? event.timestamp - startedAt : undefined,
               },
             ];
           }
           next.streamingThinking = "";
+          next.thinkingStartedAt = undefined;
           break;
         }
       }
@@ -356,6 +353,12 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       });
       next.currentTool = toolName;
 
+      // Track file-modifying tools
+      const toolLower = toolName.toLowerCase();
+      if (toolLower === "write" || toolLower === "edit") {
+        next.hasFileChanges = true;
+      }
+
       // Add tool message immediately (visible while running)
       next.messages = [
         ...next.messages,
@@ -368,6 +371,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
           args,
           toolStatus: "running",
           timestamp: event.timestamp,
+          startedAt: event.timestamp,
         },
       ];
       break;
@@ -404,11 +408,13 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       const idx = next.messages.findLastIndex((m) => m.toolCallId === toolCallId);
       if (idx !== -1) {
         const result = data.result as string | undefined;
+        const msgStartedAt = next.messages[idx].startedAt;
         next.messages = [...next.messages];
         next.messages[idx] = {
           ...next.messages[idx],
           toolStatus: (data.isError as boolean) ? "error" : "complete",
           result: result ? truncateLines(result, 30) : next.messages[idx].result,
+          duration: msgStartedAt ? event.timestamp - msgStartedAt : undefined,
         };
       }
       break;
@@ -507,168 +513,11 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       break;
     }
 
-    // ── Flow events ──
-
-    case "flow_started": {
-      const steps = data.steps as Array<{ id: string; stepType: string; agent?: string; blockedBy?: string[] }> | undefined;
-      const agents = new Map<string, FlowAgentState>();
-      if (steps) {
-        for (const step of steps) {
-          if (step.stepType === "agent" && step.agent) {
-            agents.set(step.agent, {
-              agentName: step.agent,
-              stepId: step.id,
-              status: "pending",
-              blockedBy: step.blockedBy || [],
-              recentTools: [],
-              detailHistory: [],
-            });
-          }
-        }
+    default: {
+      // Delegate flow events to flow reducer
+      if (isFlowEvent(event.eventType)) {
+        next.flowState = reduceFlowEvent(next.flowState, event);
       }
-      next.flowState = {
-        flowName: data.flowName as string,
-        task: (data.task as string) || "",
-        status: "running",
-        autonomousMode: (data.autonomousMode as boolean) || false,
-        agents,
-      };
-      break;
-    }
-
-    case "flow_agent_started": {
-      if (!next.flowState) break;
-      const agentName = data.agentName as string;
-      const config = data.config as FlowAgentCardConfig | undefined;
-      const agents = new Map(next.flowState.agents);
-      const existing = agents.get(agentName);
-      agents.set(agentName, {
-        ...(existing || { agentName, stepId: data.stepId as string || agentName, blockedBy: [], recentTools: [], detailHistory: [] }),
-        status: "running",
-        label: config?.card?.label,
-        model: config?.model,
-        cardRole: config?.card?.role,
-      });
-      next.flowState = { ...next.flowState, agents };
-      break;
-    }
-
-    case "flow_agent_complete": {
-      if (!next.flowState) break;
-      const agentName = data.agentName as string;
-      const result = data.result as { success: boolean; status?: string; summary?: string; files?: string[]; tokens?: { input: number; output: number }; duration?: number } | undefined;
-      const agents = new Map(next.flowState.agents);
-      const existing = agents.get(agentName);
-      if (existing) {
-        agents.set(agentName, {
-          ...existing,
-          status: result?.status === "blocked" ? "blocked" : result?.success ? "complete" : "error",
-          tokens: result?.tokens,
-          duration: result?.duration,
-          summary: result?.summary,
-          files: result?.files,
-        });
-      }
-      next.flowState = { ...next.flowState, agents };
-      break;
-    }
-
-    case "flow_tool_call": {
-      if (!next.flowState) break;
-      const agentName = data.agentName as string;
-      const toolName = data.toolName as string;
-      const input = data.input;
-      const agents = new Map(next.flowState.agents);
-      const existing = agents.get(agentName);
-      if (existing) {
-        const preview = extractToolInputPreview(toolName, input);
-        const recentTools: FlowRecentTool[] = [...existing.recentTools, { toolName, inputPreview: preview }].slice(-3);
-        const detailHistory: FlowDetailEntry[] = [...existing.detailHistory, { kind: "tool", toolName, input, isError: false }];
-        agents.set(agentName, { ...existing, recentTools, detailHistory });
-      }
-      next.flowState = { ...next.flowState, agents };
-      break;
-    }
-
-    case "flow_tool_result": {
-      if (!next.flowState) break;
-      const agentName = data.agentName as string;
-      const agents = new Map(next.flowState.agents);
-      const existing = agents.get(agentName);
-      if (existing) {
-        // Update last tool entry with result
-        const detailHistory = [...existing.detailHistory];
-        for (let i = detailHistory.length - 1; i >= 0; i--) {
-          const entry = detailHistory[i];
-          if (entry.kind === "tool" && entry.output === undefined) {
-            detailHistory[i] = { ...entry, output: data.output, isError: (data.isError as boolean) || false };
-            break;
-          }
-        }
-        agents.set(agentName, { ...existing, detailHistory });
-      }
-      next.flowState = { ...next.flowState, agents };
-      break;
-    }
-
-    case "flow_assistant_text": {
-      if (!next.flowState) break;
-      const agentName = data.agentName as string;
-      const text = data.text as string;
-      if (!text) break;
-      const agents = new Map(next.flowState.agents);
-      const existing = agents.get(agentName);
-      if (existing) {
-        const detailHistory: FlowDetailEntry[] = [...existing.detailHistory, { kind: "text", text }];
-        agents.set(agentName, { ...existing, detailHistory });
-      }
-      next.flowState = { ...next.flowState, agents };
-      break;
-    }
-
-    case "flow_thinking_text": {
-      if (!next.flowState) break;
-      const agentName = data.agentName as string;
-      const text = data.text as string;
-      if (!text) break;
-      const agents = new Map(next.flowState.agents);
-      const existing = agents.get(agentName);
-      if (existing) {
-        const detailHistory: FlowDetailEntry[] = [...existing.detailHistory, { kind: "thinking", text }];
-        agents.set(agentName, { ...existing, detailHistory });
-      }
-      next.flowState = { ...next.flowState, agents };
-      break;
-    }
-
-    case "flow_loop_iteration": {
-      if (!next.flowState) break;
-      const loopTarget = data.loopTarget as string;
-      const iteration = data.iteration as number;
-      const maxIterations = data.maxIterations as number;
-      if (!loopTarget) break;
-      const agents = new Map(next.flowState.agents);
-      const existing = agents.get(loopTarget);
-      if (existing) {
-        agents.set(loopTarget, { ...existing, loopIteration: iteration, loopMax: maxIterations });
-      }
-      next.flowState = { ...next.flowState, agents };
-      break;
-    }
-
-    case "flow_auto_decision": {
-      // Record for display but no specific state change needed
-      break;
-    }
-
-    case "flow_complete": {
-      if (!next.flowState) break;
-      const status = (data.status as string) || "success";
-      next.flowState = {
-        ...next.flowState,
-        status: status as FlowState["status"],
-        flowResult: data as Record<string, unknown>,
-      };
       break;
     }
   }

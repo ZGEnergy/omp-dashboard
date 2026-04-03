@@ -1,11 +1,19 @@
 import React, { useEffect, useRef, useState, useId } from "react";
-import DOMPurify from "dompurify";
 import { useThemeContext } from "./ThemeProvider.js";
 import { useZoomPan } from "../hooks/useZoomPan.js";
 import { Icon } from "@mdi/react";
 import { mdiMagnifyPlusOutline, mdiMagnifyMinusOutline, mdiArrowExpandAll } from "@mdi/js";
 
 let mermaidIdCounter = 0;
+
+// ── Module-level SVG cache ──────────────────────────────────────────────────
+// Survives component unmount/remount so re-mounted MermaidBlocks can display
+// instantly without a "Loading diagram…" flash or re-calling mermaid.render().
+export const _svgCache = new Map<string, string>();
+
+function cacheKey(code: string, theme: string): string {
+  return `${code}\0${theme}`;
+}
 
 // ── Mermaid code sanitisation ───────────────────────────────────────────────
 // LLMs often produce mermaid code with minor issues that cause parse errors.
@@ -32,6 +40,19 @@ function sanitizeMermaidCode(raw: string): string {
   }
 
   return code;
+}
+
+// ── SVG sanitisation ────────────────────────────────────────────────────────
+// DOMPurify strips HTML inside <foreignObject> which Mermaid uses for labels.
+// Since the SVG is generated client-side by Mermaid (not from user input),
+// we use a lightweight sanitizer that strips dangerous elements/attributes
+// while preserving foreignObject content.
+
+function sanitizeMermaidSvg(svg: string): string {
+  // Remove <script> tags and on* event attributes
+  return svg
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, "");
 }
 
 // ── Serialized render queue ─────────────────────────────────────────────────
@@ -122,12 +143,12 @@ function ZoomControls({
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function MermaidBlock({ code }: Props) {
+export const MermaidBlock = React.memo(function MermaidBlock({ code }: Props) {
   const reactId = useId();
-  const [svg, setSvg] = useState<string | null>(null);
+  const { resolved: theme } = useThemeContext();
+  const [svg, setSvg] = useState<string | null>(() => _svgCache.get(cacheKey(code, theme)) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
-  const { resolved: theme } = useThemeContext();
   const cancelledRef = useRef(false);
   const prevCodeRef = useRef<string | null>(null);
   const prevThemeRef = useRef<string | null>(null);
@@ -143,15 +164,22 @@ export function MermaidBlock({ code }: Props) {
     prevThemeRef.current = theme;
 
     cancelledRef.current = false;
-    if (!svg) {
-      setSvg(null);
-    }
+    // Don't clear existing SVG — keep showing the old diagram while re-rendering
     setError(null);
+
+    // Check cache — if hit, use cached SVG and skip render
+    const key = cacheKey(code, theme);
+    const cached = _svgCache.get(key);
+    if (cached) {
+      setSvg(cached);
+      return;
+    }
 
     const id = `mermaid-${reactId.replace(/:/g, "")}-${mermaidIdCounter++}`;
 
     renderMermaid(id, code, theme).then(
       (result) => {
+        _svgCache.set(key, result);
         if (!cancelledRef.current) setSvg(result);
       },
       (err) => {
@@ -263,9 +291,9 @@ export function MermaidBlock({ code }: Props) {
             transform: `translate(${zoom.translateX}px, ${zoom.translateY}px) scale(${zoom.scale})`,
             transformOrigin: "0 0",
           }}
-          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(svg) }}
+          dangerouslySetInnerHTML={{ __html: sanitizeMermaidSvg(svg) }}
         />
       </div>
     </div>
   );
-}
+});

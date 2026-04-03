@@ -121,6 +121,11 @@ export interface ModelUpdateMessage {
   thinkingLevel?: string;
 }
 
+export interface ReplayCompleteMessage {
+  type: "replay_complete";
+  sessionId: string;
+}
+
 export interface ExtensionUiDismissMessage {
   type: "extension_ui_dismiss";
   sessionId: string;
@@ -145,7 +150,8 @@ export type ExtensionToServerMessage =
   | ModelUpdateMessage
   | OpenSpecActivityUpdateMessage
   | SessionsListExtensionMessage
-  | ExtensionUiDismissMessage;
+  | ExtensionUiDismissMessage
+  | ReplayCompleteMessage;
 
 // ── Server → Extension ──────────────────────────────────────────────
 
@@ -222,6 +228,10 @@ export interface FlowControlExtensionMessage {
 
 // LoadSessionEventsMessage removed — server loads directly via DirectoryService
 
+export interface HeartbeatAckMessage {
+  type: "heartbeat_ack";
+}
+
 export interface ExtensionUiResponseMessage {
   type: "extension_ui_response";
   sessionId: string;
@@ -243,4 +253,5 @@ export type ServerToExtensionMessage =
   | ListSessionsExtensionMessage
   | SetModelMessage
   | ShutdownExtensionMessage
-  | FlowControlExtensionMessage;
+  | FlowControlExtensionMessage
+  | HeartbeatAckMessage;

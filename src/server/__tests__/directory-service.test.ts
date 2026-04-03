@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createDirectoryService, type DirectoryService } from "../directory-service.js";
-import type { StateStore } from "../state-store.js";
+import type { PreferencesStore } from "../preferences-store.js";
 import type { SessionManager } from "../memory-session-manager.js";
 import type { DashboardSession } from "../../shared/types.js";
 
@@ -37,12 +37,9 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   },
 }));
 
-function createMockStateStore(pinnedDirs: string[] = []): StateStore {
+function createMockPreferencesStore(pinnedDirs: string[] = []): PreferencesStore {
   return {
     getPinnedDirectories: () => pinnedDirs,
-    isHidden: () => false,
-    setHidden: vi.fn(),
-    getHiddenSessions: () => [],
     getSessionOrder: () => ({}),
     setSessionOrder: vi.fn(),
     setPinnedDirectories: vi.fn(),
@@ -84,7 +81,7 @@ describe("DirectoryService", () => {
 
   describe("knownDirectories", () => {
     it("returns union of pinned dirs and session cwds", () => {
-      const stateStore = createMockStateStore(["/pinned/a", "/pinned/b"]);
+      const stateStore = createMockPreferencesStore(["/pinned/a", "/pinned/b"]);
       const sessionManager = createMockSessionManager([
         { id: "s1", cwd: "/pinned/a", source: "tui", status: "active", startedAt: 1 } as DashboardSession,
         { id: "s2", cwd: "/project/c", source: "tui", status: "active", startedAt: 2 } as DashboardSession,
@@ -99,7 +96,7 @@ describe("DirectoryService", () => {
     });
 
     it("deduplicates directories", () => {
-      const stateStore = createMockStateStore(["/same/dir"]);
+      const stateStore = createMockPreferencesStore(["/same/dir"]);
       const sessionManager = createMockSessionManager([
         { id: "s1", cwd: "/same/dir", source: "tui", status: "active", startedAt: 1 } as DashboardSession,
       ]);
@@ -126,7 +123,7 @@ describe("DirectoryService", () => {
         },
       ]);
 
-      const stateStore = createMockStateStore();
+      const stateStore = createMockPreferencesStore();
       const sessionManager = createMockSessionManager();
       service = createDirectoryService(stateStore, sessionManager);
 
@@ -141,7 +138,7 @@ describe("DirectoryService", () => {
       const { discoverSessionsForCwd } = await import("../session-discovery.js");
       (discoverSessionsForCwd as any).mockReturnValueOnce([]);
 
-      const stateStore = createMockStateStore();
+      const stateStore = createMockPreferencesStore();
       const sessionManager = createMockSessionManager();
       service = createDirectoryService(stateStore, sessionManager);
 
@@ -161,7 +158,7 @@ describe("DirectoryService", () => {
         { type: "event_forward", sessionId: "s1", event: { eventType: "message_start", timestamp: 1, data: {} } },
       ]);
 
-      const stateStore = createMockStateStore();
+      const stateStore = createMockPreferencesStore();
       const sessionManager = createMockSessionManager();
       service = createDirectoryService(stateStore, sessionManager);
 
@@ -175,7 +172,7 @@ describe("DirectoryService", () => {
       const { loadSessionEntries } = await import("../session-file-reader.js");
       (loadSessionEntries as any).mockImplementationOnce(() => { throw Object.assign(new Error("not found"), { code: "ENOENT" }); });
 
-      const stateStore = createMockStateStore();
+      const stateStore = createMockPreferencesStore();
       const sessionManager = createMockSessionManager();
       service = createDirectoryService(stateStore, sessionManager);
 
@@ -190,7 +187,7 @@ describe("DirectoryService", () => {
       const { pollOpenSpecAsync } = await import("../../shared/openspec-poller.js");
       (pollOpenSpecAsync as any).mockResolvedValue({ initialized: true, changes: [{ name: "change-1" }] });
 
-      const stateStore = createMockStateStore();
+      const stateStore = createMockPreferencesStore();
       const sessionManager = createMockSessionManager();
       service = createDirectoryService(stateStore, sessionManager);
 
@@ -212,7 +209,7 @@ describe("DirectoryService", () => {
       (discoverSessionsForCwd as any).mockReturnValueOnce([]);
       (pollOpenSpecAsync as any).mockResolvedValue({ initialized: false, changes: [] });
 
-      const stateStore = createMockStateStore();
+      const stateStore = createMockPreferencesStore();
       const sessionManager = createMockSessionManager();
       service = createDirectoryService(stateStore, sessionManager);
 
@@ -226,7 +223,7 @@ describe("DirectoryService", () => {
   describe("polling", () => {
     it("startPolling and stopPolling control the timer", () => {
       vi.useFakeTimers();
-      const stateStore = createMockStateStore(["/project"]);
+      const stateStore = createMockPreferencesStore(["/project"]);
       const sessionManager = createMockSessionManager();
       service = createDirectoryService(stateStore, sessionManager);
 

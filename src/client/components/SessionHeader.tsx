@@ -23,6 +23,8 @@ interface Props {
   openspecChanges?: OpenSpecChange[];
   onAttachProposal?: (changeName: string) => void;
   onDetachProposal?: () => void;
+  hasFileChanges?: boolean;
+  onOpenDiffView?: () => void;
   /** Mobile action menu props (only used on mobile) */
   mobileActions?: {
     editors?: DetectedEditor[];
@@ -194,7 +196,7 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
-export function SessionHeader({ session, state, onRename, showBack, onBack, mobileActions, commands, flows, onSendPrompt, openspecChanges, onAttachProposal, onDetachProposal }: Props) {
+export function SessionHeader({ session, state, onRename, showBack, onBack, mobileActions, commands, flows, onSendPrompt, openspecChanges, onAttachProposal, onDetachProposal, hasFileChanges, onOpenDiffView }: Props) {
   const [now, setNow] = useState(Date.now());
   const [isRenaming, setIsRenaming] = useState(false);
   const [flowPickerOpen, setFlowPickerOpen] = useState(false);
@@ -333,10 +335,19 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
       {flowCmds.length > 0 && onSendPrompt && (
         <button
           onClick={() => setFlowPickerOpen(true)}
-          className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 mr-2"
+          className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 mr-1"
           title="Run a flow"
         >
           ▶ Flow
+        </button>
+      )}
+      {hasFileChanges && onOpenDiffView && (
+        <button
+          onClick={onOpenDiffView}
+          className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 mr-1"
+          title="View changed files"
+        >
+          📄 Changed Files
         </button>
       )}
       <span className="text-[var(--text-muted)]">{formatDuration(duration)}</span>

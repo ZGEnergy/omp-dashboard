@@ -14,13 +14,13 @@ export function DiffView({ content }: Props) {
         let textColor = "text-[var(--text-secondary)]";
 
         if (line.startsWith("+") && !line.startsWith("+++")) {
-          bgColor = "bg-green-900/30";
-          textColor = "text-green-400";
+          bgColor = "bg-[color-mix(in_srgb,var(--accent-green)_15%,transparent)]";
+          textColor = "text-[var(--accent-green)]";
         } else if (line.startsWith("-") && !line.startsWith("---")) {
-          bgColor = "bg-red-900/30";
-          textColor = "text-red-400";
+          bgColor = "bg-[color-mix(in_srgb,var(--accent-red)_15%,transparent)]";
+          textColor = "text-[var(--accent-red)]";
         } else if (line.startsWith("@@")) {
-          textColor = "text-blue-400";
+          textColor = "text-[var(--accent-blue)]";
         }
 
         return (

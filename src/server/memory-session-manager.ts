@@ -3,7 +3,6 @@
  * Replaces SQLite-backed session-manager.ts.
  */
 import type { DashboardSession, SessionSource, SessionStatus } from "../shared/types.js";
-import type { StateStore } from "./state-store.js";
 
 export interface RegisterSessionParams {
   id: string;
@@ -27,15 +26,13 @@ export interface SessionManager {
   get(sessionId: string): DashboardSession | undefined;
   listActive(): DashboardSession[];
   listAll(): DashboardSession[];
-  /** Called after any mutation (register, unregister, update). */
-  onChange?: () => void;
+  /** Called after any mutation (register, unregister, update). Receives the affected session ID. */
+  onChange?: (sessionId: string) => void;
   /** Called after a session is unregistered (status set to ended). */
   onUnregister?: (sessionId: string) => void;
 }
 
-export function createMemorySessionManager(
-  stateStore: StateStore,
-): SessionManager {
+export function createMemorySessionManager(): SessionManager {
   const sessions = new Map<string, DashboardSession>();
 
   const mgr: SessionManager = {
@@ -80,10 +77,8 @@ export function createMemorySessionManager(
         firstMessage: params.firstMessage ?? existing?.firstMessage,
         dataUnavailable: false,
       };
-      // Clear hidden state on register — active sessions should always be visible
-      stateStore.setHidden(params.id, false);
       sessions.set(params.id, session);
-      mgr.onChange?.();
+      mgr.onChange?.(params.id);
       return session;
     },
 
@@ -96,7 +91,7 @@ export function createMemorySessionManager(
       if (session) {
         session.status = "ended";
         session.endedAt = Date.now();
-        mgr.onChange?.();
+        mgr.onChange?.(sessionId);
         mgr.onUnregister?.(sessionId);
       }
     },
@@ -105,11 +100,7 @@ export function createMemorySessionManager(
       const session = sessions.get(sessionId);
       if (session) {
         Object.assign(session, updates);
-        // Persist hidden state changes
-        if (updates.hidden !== undefined) {
-          stateStore.setHidden(sessionId, updates.hidden);
-        }
-        mgr.onChange?.();
+        mgr.onChange?.(sessionId);
       }
     },
 

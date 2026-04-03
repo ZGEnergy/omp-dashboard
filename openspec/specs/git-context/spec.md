@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Git branch detection
-The bridge extension SHALL detect the current git branch by running `git rev-parse --abbrev-ref HEAD` in the session's `cwd`. If the command fails (not a git repo), the branch SHALL be `undefined`.
+The bridge extension SHALL detect the current git branch by running `git rev-parse --abbrev-ref HEAD` in the session's `cwd`. If the command fails (not a git repo), the branch SHALL be `undefined`. When in detached HEAD state, the extension SHALL detect the short commit SHA via `git rev-parse --short HEAD`.
 
 #### Scenario: Session in a git repository
 - **WHEN** the extension gathers git info in a directory that is a git repository
@@ -13,7 +13,10 @@ The bridge extension SHALL detect the current git branch by running `git rev-par
 
 #### Scenario: Detached HEAD
 - **WHEN** the git repository is in a detached HEAD state
-- **THEN** the branch SHALL be the value returned by git (e.g., "HEAD") and no branch link SHALL be generated
+- **THEN** `git rev-parse --abbrev-ref HEAD` returns `"HEAD"`
+- **AND** the extension SHALL run `git rev-parse --short HEAD` to get the short commit SHA
+- **AND** the branch SHALL be the short SHA (e.g., `"abc1234"`)
+- **AND** no branch link SHALL be generated
 
 ### Requirement: Git remote URL detection
 The extension SHALL detect the remote URL by running `git remote get-url origin` in the session's `cwd`. If the command fails (no origin remote), the remote URL SHALL be `undefined`.

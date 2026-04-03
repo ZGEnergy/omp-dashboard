@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen } from "@testing-library/react";
-import React from "react";
+import { render, screen, act } from "@testing-library/react";
+import React, { useState } from "react";
 import { MarkdownContent, tableToMarkdown, tableToTsv } from "../MarkdownContent.js";
 import { ThemeProvider } from "../ThemeProvider.js";
 
@@ -200,6 +200,33 @@ describe("MarkdownContent", () => {
     expect(codeBlock).not.toBeNull();
     expect(codeBlock!.textContent).toContain("┌──────┬──────┐");
     expect(codeBlock!.textContent).toContain("│ Name │ Type │");
+  });
+
+  it("does not re-render when content prop is unchanged (React.memo)", () => {
+    const renderSpy = vi.fn();
+
+    // A wrapper that forces re-renders via state, passing same content prop
+    function Wrapper() {
+      const [tick, setTick] = useState(0);
+      renderSpy();
+      return (
+        <ThemeProvider>
+          <MarkdownContent content="static content" />
+          <button data-testid="rerender" onClick={() => setTick((t) => t + 1)}>tick</button>
+        </ThemeProvider>
+      );
+    }
+
+    const { getByTestId, container } = render(<Wrapper />);
+    const initialHtml = container.innerHTML;
+    expect(renderSpy).toHaveBeenCalledTimes(1);
+
+    // Force parent re-render
+    act(() => { getByTestId("rerender").click(); });
+    expect(renderSpy).toHaveBeenCalledTimes(2); // parent re-rendered
+
+    // Content should be identical — MarkdownContent should have been skipped by memo
+    expect(container.innerHTML).toBe(initialHtml);
   });
 
   // ASCII table fixer disabled pending refinement

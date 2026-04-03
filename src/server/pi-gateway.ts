@@ -7,9 +7,11 @@ import type { DashboardSession } from "../shared/types.js";
 import type { SessionManager } from "./memory-session-manager.js";
 
 export const HEARTBEAT_TIMEOUT = 45_000;
+export const WS_PING_INTERVAL = 30_000;
 
 export interface PiGatewayOptions {
   heartbeatTimeout?: number;
+  pingInterval?: number;
 }
 
 export interface PiGateway {
@@ -31,10 +33,14 @@ export function createPiGateway(
   options?: PiGatewayOptions,
 ): PiGateway {
   const hbTimeout = options?.heartbeatTimeout ?? HEARTBEAT_TIMEOUT;
+  const pingMs = options?.pingInterval ?? WS_PING_INTERVAL;
   let wss: WebSocketServer | null = null;
+  let pingTimer: ReturnType<typeof setInterval> | null = null;
 
   // Map sessionId → WebSocket
   const connections = new Map<string, WebSocket>();
+  // Track connection liveness for WS ping/pong
+  const aliveFlags = new Map<WebSocket, boolean>();
   // Map sessionId → heartbeat timeout
   const heartbeatTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Map sessionId → { setAt: timestamp, sleepRetried: boolean } for sleep detection
@@ -73,6 +79,7 @@ export function createPiGateway(
           heartbeatTimers.set(
             sessionId,
             setTimeout(() => {
+              console.error(`[gateway] session timed out: ${sessionId} (sleep recovery failed)`);
               sessionManager.unregister(sessionId);
               connections.delete(sessionId);
               heartbeatTimers.delete(sessionId);
@@ -83,6 +90,7 @@ export function createPiGateway(
           return;
         }
 
+        console.error(`[gateway] session timed out: ${sessionId} (no heartbeat for ${hbTimeout}ms)`);
         sessionManager.unregister(sessionId);
         connections.delete(sessionId);
         heartbeatTimers.delete(sessionId);
@@ -116,8 +124,39 @@ export function createPiGateway(
     start(port: number) {
       wss = new WebSocketServer({ port });
 
+      // WS-level ping/pong: detect dead connections
+      if (pingMs > 0) pingTimer = setInterval(() => {
+        if (!wss) return;
+        for (const client of wss.clients) {
+          if (aliveFlags.get(client) === false) {
+            // No pong since last ping — connection is dead
+            // Find the session ID for logging
+            for (const [sid, ws] of connections) {
+              if (ws === client) {
+                console.error(`[gateway] connection dead (ping timeout): ${sid}`);
+                sessionManager.unregister(sid);
+                connections.delete(sid);
+                const timer = heartbeatTimers.get(sid);
+                if (timer) clearTimeout(timer);
+                heartbeatTimers.delete(sid);
+                heartbeatMeta.delete(sid);
+                break;
+              }
+            }
+            client.terminate();
+            aliveFlags.delete(client);
+            checkEmpty();
+            continue;
+          }
+          aliveFlags.set(client, false);
+          client.ping();
+        }
+      }, pingMs);
+
       wss.on("connection", (ws) => {
         let currentSessionId: string | null = null;
+        aliveFlags.set(ws, true);
+        ws.on("pong", () => { aliveFlags.set(ws, true); });
 
         ws.on("message", (raw) => {
           try {
@@ -164,6 +203,7 @@ export function createPiGateway(
                 sessionDir: msg.sessionDir,
                 firstMessage: msg.firstMessage,
               });
+              console.error(`[gateway] session registered: ${msg.sessionId} cwd=${msg.cwd}`);
 
               resetHeartbeat(msg.sessionId);
               onConnection?.();
@@ -171,9 +211,14 @@ export function createPiGateway(
 
             if (msg.type === "session_heartbeat" && msg.sessionId) {
               resetHeartbeat(msg.sessionId);
+              // Respond with ack so the bridge can track server liveness
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "heartbeat_ack" }));
+              }
             }
 
             if (msg.type === "session_unregister" && msg.sessionId) {
+              console.error(`[gateway] session unregistered: ${msg.sessionId} (explicit)`);
               sessionManager.unregister(msg.sessionId);
               connections.delete(msg.sessionId);
               const timer = heartbeatTimers.get(msg.sessionId);
@@ -227,20 +272,27 @@ export function createPiGateway(
 
         ws.on("close", () => {
           if (currentSessionId) {
+            console.error(`[gateway] connection closed: ${currentSessionId}`);
             // Don't immediately unregister - wait for heartbeat timeout
             // This handles temporary disconnects
             onDisconnect?.(currentSessionId);
           }
+          aliveFlags.delete(ws);
         });
       });
     },
 
     stop() {
+      if (pingTimer) {
+        clearInterval(pingTimer);
+        pingTimer = null;
+      }
       for (const timer of heartbeatTimers.values()) {
         clearTimeout(timer);
       }
       heartbeatTimers.clear();
       heartbeatMeta.clear();
+      aliveFlags.clear();
       // Forcibly terminate all extension connections
       for (const ws of connections.values()) {
         ws.terminate();

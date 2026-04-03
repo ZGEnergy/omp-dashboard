@@ -14,11 +14,11 @@ function DiffView({ oldText, newText, filePath }: { oldText: string; newText: st
         if (line.startsWith("+++") || line.startsWith("---")) {
           className = "text-[var(--text-tertiary)] px-2 font-bold";
         } else if (line.startsWith("@@")) {
-          className = "text-blue-400 px-2 bg-blue-900/20";
+          className = "text-[var(--accent-blue)] px-2 bg-[color-mix(in_srgb,var(--accent-blue)_15%,transparent)]";
         } else if (line.startsWith("+")) {
-          className = "text-green-400 px-2 bg-green-900/20";
+          className = "text-[var(--accent-green)] px-2 bg-[color-mix(in_srgb,var(--accent-green)_15%,transparent)]";
         } else if (line.startsWith("-")) {
-          className = "text-red-400 px-2 bg-red-900/20";
+          className = "text-[var(--accent-red)] px-2 bg-[color-mix(in_srgb,var(--accent-red)_15%,transparent)]";
         }
         return (
           <div key={i} className={className}>

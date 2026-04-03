@@ -73,7 +73,7 @@ export function ActivityIndicator({ session }: { session: DashboardSession }) {
     return <span className="text-green-400">Thinking…</span>;
   }
 
-  if (session.status === "idle") {
+  if (session.status === "idle" || session.status === "active") {
     return <span className="text-[var(--text-tertiary)]">Waiting for input</span>;
   }
 

@@ -77,8 +77,11 @@ The command handler SHALL process `send_prompt` text in this exact order:
 4. Check for `/quit` or `/exit` → shutdown
 5. Check for `/reload` → extension reload
 6. Check for `/model provider/id` → model switch via `setModel` callback
-7. Check for `/` prefix → session.prompt() routing
-8. Default → `pi.sendUserMessage(text)` (existing behavior)
+7. Check for `/flows:new` → emit `flows:new-request` event
+8. Check for `/flows:edit` → emit `flows:edit-request` event
+9. Check for `/` prefix matching a known flow name → emit `flow:run` event
+10. Check for `/` prefix → session.prompt() routing (handles `/flows:delete` and other commands)
+11. Default → `pi.sendUserMessage(text)` (existing behavior)
 
 #### Scenario: Routing precedence
 - **WHEN** `send_prompt` text is `!!echo hello`
@@ -86,7 +89,21 @@ The command handler SHALL process `send_prompt` text in this exact order:
 
 #### Scenario: Non-command text passthrough
 - **WHEN** `send_prompt` text is `explain this code`
-- **THEN** the handler SHALL reach step 8 and call `pi.sendUserMessage("explain this code")`
+- **THEN** the handler SHALL reach step 11 and call `pi.sendUserMessage("explain this code")`
+
+#### Scenario: Flow management command routed via event
+- **WHEN** `send_prompt` text is `/flows:new my description`
+- **THEN** the handler SHALL match step 7 and emit `flows:new-request`
+
+#### Scenario: User-defined flow routed via flow:run
+- **WHEN** `send_prompt` text is `/my-flow task`
+- **AND** `flow:list-flows` includes a flow named `my-flow`
+- **THEN** the handler SHALL match step 9 and emit `flow:run`
+
+#### Scenario: Unknown slash command falls through to session.prompt
+- **WHEN** `send_prompt` text is `/some-skill args`
+- **AND** it does not match any flow name
+- **THEN** the handler SHALL match step 10 and call `session.prompt()`
 
 ### Requirement: Model command routing
 The command handler SHALL detect `/model provider/id` in `send_prompt` text and route it through the `setModel` callback instead of sending to the LLM. The `/model` command is a TUI-only command in pi and does not work via `session.prompt()` or `sendUserMessage()`.

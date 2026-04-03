@@ -3,6 +3,7 @@ import { Icon } from "@mdi/react";
 import { mdiLoading, mdiCheck, mdiAlertCircle, mdiChevronRight, mdiChevronDown } from "@mdi/js";
 import { getToolRenderer, type ToolContext } from "./tool-renderers/index.js";
 import { useMobile } from "../hooks/useMobile.js";
+import { ElapsedBadge } from "./ElapsedBadge.js";
 
 interface Props {
   toolName: string;
@@ -11,6 +12,8 @@ interface Props {
   status: "running" | "complete" | "error";
   result?: string;
   context: ToolContext;
+  startedAt?: number;
+  duration?: number;
 }
 
 const toolSummaries: Record<string, (args?: Record<string, unknown>) => string> = {
@@ -35,7 +38,7 @@ const statusIcons: Record<string, ReactNode> = {
   error: <Icon path={mdiAlertCircle} size={0.55} />,
 };
 
-export function ToolCallStep({ toolName, toolCallId, args, status, result, context }: Props) {
+export function ToolCallStep({ toolName, toolCallId, args, status, result, context, startedAt, duration }: Props) {
   const isMobile = useMobile();
   const [expanded, setExpanded] = useState(false);
   const Renderer = getToolRenderer(toolName);
@@ -50,6 +53,7 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, conte
           {statusIcons[status]}
         </span>
         <span className="truncate">{getSummary(toolName, args)}</span>
+        <ElapsedBadge startedAt={startedAt} duration={duration} />
         <span className="ml-auto text-[var(--text-muted)] inline-flex">
           <Icon path={expanded ? mdiChevronDown : mdiChevronRight} size={0.6} />
         </span>

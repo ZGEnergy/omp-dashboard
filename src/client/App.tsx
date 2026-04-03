@@ -14,6 +14,7 @@ import { FlowAgentDetail } from "./components/FlowAgentDetail.js";
 import { MarkdownPreviewView } from "./components/MarkdownPreviewView.js";
 import { PiResourcesView } from "./components/PiResourcesView.js";
 import { SpecsBrowserView } from "./components/SpecsBrowserView.js";
+import { ArchiveBrowserView } from "./components/ArchiveBrowserView.js";
 import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
 import type { OpenSpecArtifact } from "../shared/types.js";
 import { SessionHeader } from "./components/SessionHeader.js";
@@ -26,8 +27,13 @@ import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
 import { InstallBanner } from "./components/InstallBanner.js";
 import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { TerminalView } from "./components/TerminalView.js";
-import { createInitialState, reduceEvent, addInteractiveRequest, resolveInteractiveRequest, dismissInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { FileDiffView } from "./components/FileDiffView.js";
+import { createInitialState, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { useMessageHandler } from "./hooks/useMessageHandler.js";
 import { useEditors } from "./lib/use-editors.js";
+import { useContentViews } from "./hooks/useContentViews.js";
+import { useSessionActions } from "./hooks/useSessionActions.js";
+import { useOpenSpecActions } from "./hooks/useOpenSpecActions.js";
 import type { DashboardSession, CommandInfo, FlowInfo, FileEntry, OpenSpecData, ModelInfo } from "../shared/types.js";
 import type { TerminalSession } from "../shared/terminal-types.js";
 import type { ServerToBrowserMessage } from "../shared/browser-protocol.js";
@@ -38,21 +44,7 @@ const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const wsPort = window.location.port ? `:${window.location.port}` : "";
 const WS_URL = `${wsProtocol}//${window.location.hostname}${wsPort}/ws`;
 
-const SOURCE_LANG_MAP: Record<string, string> = {
-  ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript",
-  ".json": "json", ".sh": "bash", ".bash": "bash", ".zsh": "bash",
-  ".py": "python", ".rb": "ruby", ".rs": "rust", ".go": "go",
-  ".java": "java", ".kt": "kotlin", ".swift": "swift",
-  ".css": "css", ".scss": "scss", ".html": "html", ".xml": "xml",
-  ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
-  ".c": "c", ".cpp": "cpp", ".h": "c", ".hpp": "cpp",
-  ".sql": "sql", ".graphql": "graphql",
-};
 
-function getSourceLanguage(filePath: string): string | null {
-  const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
-  return SOURCE_LANG_MAP[ext] ?? null;
-}
 
 function OpenSpecPreview({
   cwd,
@@ -119,15 +111,17 @@ export default function App() {
     artifactId: string;
     artifacts: OpenSpecArtifact[];
   } | null>(null);
-  const [piResourcesState, setPiResourcesState] = useState<{ cwd: string } | null>(null);
   const [specsBrowserCwd, setSpecsBrowserCwd] = useState<string | null>(null);
-  const [piResourceFilePreview, setPiResourceFilePreview] = useState<{
-    filePath: string;
-    title: string;
-    content?: string;
-    isLoading: boolean;
-    error?: string;
-  } | null>(null);
+  const [archiveBrowserCwd, setArchiveBrowserCwd] = useState<string | null>(null);
+  const [diffViewSessionId, setDiffViewSessionId] = useState<string | null>(null);
+  const {
+    piResourcesState, setPiResourcesState,
+    piResourceFilePreview, setPiResourceFilePreview,
+    readmePreview, setReadmePreview,
+    handleOpenPiResources,
+    handleViewPiResourceFile,
+    handleViewReadme,
+  } = useContentViews();
 
   const clearSpawningCwd = useCallback((cwd: string) => {
     setSpawningCwds((prev) => {
@@ -143,215 +137,10 @@ export default function App() {
     }
   }, []);
 
-  const handleMessage = useCallback((msg: ServerToBrowserMessage) => {
-    switch (msg.type) {
-      case "session_added":
-        setSessions((prev) => {
-          const next = new Map(prev);
-          next.set(msg.session.id, msg.session);
-          // Clear resuming flag on any session in the same cwd (handles fork case)
-          if (msg.session.status !== "ended") {
-            for (const [id, s] of next) {
-              if (id !== msg.session.id && s.cwd === msg.session.cwd && s.resuming) {
-                next.set(id, { ...s, resuming: false });
-              }
-            }
-          }
-          return next;
-        });
-        // Clear placeholder and auto-select if this was a spawned session
-        if (spawningCwdsRef.current.has(msg.session.cwd)) {
-          clearSpawningCwd(msg.session.cwd);
-          navigate(`/session/${msg.session.id}`);
-        }
-        // Auto-subscribe to active sessions for live events.
-        // Ended sessions are subscribed on-demand when selected (lazy loading).
-        if (!subscribedRef.current.has(msg.session.id) && msg.session.status !== "ended") {
-          subscribedRef.current.add(msg.session.id);
-          send({ type: "subscribe", sessionId: msg.session.id, lastSeq: 0 });
-          send({ type: "request_commands", sessionId: msg.session.id });
-          send({ type: "request_models", sessionId: msg.session.id });
-        }
-        break;
-
-      case "session_updated":
-        setSessions((prev) => {
-          const next = new Map(prev);
-          const existing = next.get(msg.sessionId);
-          if (existing) {
-            next.set(msg.sessionId, { ...existing, ...msg.updates });
-          }
-          return next;
-        });
-        break;
-
-      case "session_removed":
-        setSessions((prev) => {
-          const next = new Map(prev);
-          const existing = next.get(msg.sessionId);
-          if (existing) {
-            next.set(msg.sessionId, { ...existing, status: "ended" });
-          }
-          return next;
-        });
-        break;
-
-      case "event":
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          const current = next.get(msg.sessionId) ?? createInitialState();
-          next.set(msg.sessionId, reduceEvent(current, msg.event));
-          return next;
-        });
-        break;
-
-      case "commands_list":
-        setSessionCommands((prev) => {
-          const next = new Map(prev);
-          next.set(msg.sessionId, msg.commands);
-          return next;
-        });
-        break;
-
-      case "flows_list":
-        setSessionFlows((prev) => {
-          const next = new Map(prev);
-          next.set(msg.sessionId, msg.flows);
-          return next;
-        });
-        break;
-
-      case "files_list":
-        setFileResults({ query: msg.query, files: msg.files });
-        break;
-
-      case "models_list":
-        setModelsMap((prev) => {
-          const next = new Map(prev);
-          next.set(msg.sessionId, msg.models);
-          return next;
-        });
-        break;
-
-      case "openspec_update":
-        setOpenspecMap((prev) => {
-          const next = new Map(prev);
-          next.set(msg.cwd, msg.data);
-          return next;
-        });
-        break;
-
-      case "event_replay": {
-        // Determine if this is a full replay (seq starts at 1) or incremental
-        const firstSeq = msg.events.length > 0 ? msg.events[0].seq : null;
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          // Reset state on full replay to avoid duplicate messages
-          let current = (firstSeq === 1) ? createInitialState() : (next.get(msg.sessionId) ?? createInitialState());
-          for (const { event } of msg.events) {
-            current = reduceEvent(current, event);
-          }
-          next.set(msg.sessionId, current);
-          return next;
-        });
-        break;
-      }
-
-      case "resume_result":
-        if (!msg.success) {
-          console.warn("[dashboard] Resume/fork failed:", msg.message);
-          // Clear optimistic resuming state on failure
-          setSessions((prev) => {
-            const next = new Map(prev);
-            const existing = next.get(msg.sessionId);
-            if (existing) {
-              next.set(msg.sessionId, { ...existing, resuming: false });
-            }
-            return next;
-          });
-        }
-        break;
-
-      case "spawn_result":
-        setSpawnResult({ success: msg.success, message: msg.message });
-        if (!msg.success) {
-          clearSpawningCwd(msg.cwd);
-        }
-        break;
-
-      case "sessions_list":
-        // Sessions discovered from pi listing — add to session map if not already present
-        // The server already creates SQLite records; the browser gets them via session_added
-        break;
-
-      case "sessions_reordered":
-        setSessionOrderMap((prev) => {
-          const next = new Map(prev);
-          next.set(msg.cwd, msg.sessionIds);
-          return next;
-        });
-        break;
-
-      case "pinned_dirs_updated":
-        setPinnedDirectories(msg.paths);
-        break;
-
-      case "extension_ui_request":
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          const current = next.get(msg.sessionId) ?? createInitialState();
-          const updated = addInteractiveRequest(current, msg.requestId, msg.method, msg.params);
-          if (updated === current) return prev; // dedup: no change
-          next.set(msg.sessionId, updated);
-          return next;
-        });
-        break;
-
-      case "ui_dismiss":
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          const current = next.get(msg.sessionId);
-          if (!current) return prev;
-          const updated = dismissInteractiveRequest(current, msg.requestId);
-          if (updated === current) return prev;
-          next.set(msg.sessionId, updated);
-          return next;
-        });
-        break;
-
-      case "terminal_added":
-        setTerminals((prev) => {
-          const next = new Map(prev);
-          next.set(msg.terminal.id, msg.terminal);
-          return next;
-        });
-        // Auto-navigate if this terminal was spawned by this browser tab
-        if (pendingTerminalCwdRef.current === msg.terminal.cwd) {
-          pendingTerminalCwdRef.current = null;
-          navigate(`/terminal/${msg.terminal.id}`);
-        }
-        break;
-
-      case "terminal_removed":
-        setTerminals((prev) => {
-          const next = new Map(prev);
-          next.delete(msg.terminalId);
-          return next;
-        });
-        break;
-
-      case "terminal_updated":
-        setTerminals((prev) => {
-          const next = new Map(prev);
-          const existing = next.get(msg.terminalId);
-          if (existing) {
-            next.set(msg.terminalId, { ...existing, ...msg.updates });
-          }
-          return next;
-        });
-        break;
-    }
-  }, [send, clearSpawningCwd, navigate]);
+  const handleMessage = useMessageHandler(
+    { setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals },
+    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef },
+  );
 
   useEffect(() => {
     return onMessage(handleMessage);
@@ -382,6 +171,8 @@ export default function App() {
     if (selectedId !== prevSelectedRef.current) {
       setPreviewState(null);
       setSpecsBrowserCwd(null);
+      setArchiveBrowserCwd(null);
+      setDiffViewSessionId(null);
       prevSelectedRef.current = selectedId;
     }
     // Lazy subscribe: load events for ended sessions when first selected.
@@ -431,304 +222,25 @@ export default function App() {
     return map;
   }, [sessionStates, sessions]);
 
-  const handleAbort = useCallback(
-    () => {
-      if (selectedId) {
-        send({ type: "abort", sessionId: selectedId });
-      }
-    },
-    [selectedId, send],
-  );
+  const sessionActions = useSessionActions({
+    selectedId, send, navigate, setMobileOpen,
+    setSessions, setSessionStates, setSpawningCwds, setTerminals,
+    clearSpawningCwd, spawnTimeoutsRef, pendingTerminalCwdRef, terminals,
+  });
+  const {
+    handleAbort, handleCancelPending, handleRespondToUi, handleSend,
+    handleSelect, handleRenameSession, handleShutdownSession,
+    handleSendPromptToSession, handleResumeSession, handleSpawnSession,
+    handleHideSession, handleUnhideSession,
+    handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleTerminalTitle,
+    handleListFiles,
+  } = sessionActions;
 
-  const handleCancelPending = useCallback(
-    () => {
-      if (selectedId) {
-        // Clear pending prompt
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          const current = next.get(selectedId);
-          if (current?.pendingPrompt) {
-            next.set(selectedId, { ...current, pendingPrompt: undefined });
-          }
-          return next;
-        });
-        // Send abort to stop any server-side processing
-        send({ type: "abort", sessionId: selectedId });
-      }
-    },
-    [selectedId, send],
-  );
-
-  const handleRespondToUi = useCallback(
-    (requestId: string, result?: unknown, cancelled?: boolean) => {
-      if (selectedId) {
-        send({ type: "extension_ui_response", sessionId: selectedId, requestId, result, cancelled });
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          const current = next.get(selectedId);
-          if (current) {
-            next.set(selectedId, resolveInteractiveRequest(current, requestId, result, cancelled));
-          }
-          return next;
-        });
-        // Optimistically clear "Waiting for input" on the session card
-        setSessions((prev) => {
-          const next = new Map(prev);
-          const session = next.get(selectedId);
-          if (session?.currentTool === "ask_user") {
-            next.set(selectedId, { ...session, currentTool: undefined });
-          }
-          return next;
-        });
-      }
-    },
-    [selectedId, send],
-  );
-
-  const handleOpenSpecRefresh = useCallback(
-    (cwd: string) => {
-      send({ type: "openspec_refresh", cwd });
-    },
-    [send],
-  );
-
-  const handleBulkArchive = useCallback(
-    (cwd: string) => {
-      send({ type: "openspec_bulk_archive", cwd });
-    },
-    [send],
-  );
-
-  const handleReadArtifact = useCallback(
-    (cwd: string, changeName: string, artifactId: string) => {
-      // Find artifacts for this change from openspecMap
-      const openspecData = openspecMap.get(cwd);
-      const change = openspecData?.changes.find((c) => c.name === changeName);
-      const artifacts = change?.artifacts ?? [];
-      setPreviewState({ cwd, changeName, artifactId, artifacts });
-    },
-    [openspecMap],
-  );
-
-  const handleOpenPiResources = useCallback(
-    (cwd: string) => {
-      setPiResourcesState({ cwd });
-      setPiResourceFilePreview(null);
-    },
-    [],
-  );
-
-  const handleViewPiResourceFile = useCallback(
-    async (filePath: string, title: string) => {
-      setPiResourceFilePreview({ filePath, title, isLoading: true });
-      try {
-        const res = await fetch(`/api/pi-resource-file?path=${encodeURIComponent(filePath)}`);
-        const body = await res.json();
-        if (body.success) {
-          const lang = getSourceLanguage(filePath);
-          const content = lang
-            ? "```" + lang + "\n" + body.data.content + "\n```"
-            : body.data.content;
-          setPiResourceFilePreview({ filePath, title, content, isLoading: false });
-        } else {
-          setPiResourceFilePreview({ filePath, title, isLoading: false, error: body.error });
-        }
-      } catch (err: any) {
-        setPiResourceFilePreview({ filePath, title, isLoading: false, error: err.message });
-      }
-    },
-    [],
-  );
-
-  const handleAttachProposal = useCallback(
-    (sessionId: string, changeName: string) => {
-      send({ type: "attach_proposal", sessionId, changeName });
-    },
-    [send],
-  );
-
-  const handleDetachProposal = useCallback(
-    (sessionId: string) => {
-      send({ type: "detach_proposal", sessionId });
-    },
-    [send],
-  );
-
-  const handleListFiles = useCallback(
-    (query: string) => {
-      if (selectedId) {
-        send({ type: "list_files", sessionId: selectedId, query });
-      }
-    },
-    [selectedId, send]
-  );
-
-  const handleSend = useCallback(
-    (text: string, images?: import("../shared/types.js").ImageContent[]) => {
-      if (selectedId) {
-        send({ type: "send_prompt", sessionId: selectedId, text, images });
-        // Set optimistic pending prompt
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          const current = next.get(selectedId) ?? createInitialState();
-          next.set(selectedId, {
-            ...current,
-            pendingPrompt: {
-              text,
-              images: images?.map((img) => ({ data: img.data, mimeType: img.mimeType })),
-            },
-          });
-          return next;
-        });
-      }
-    },
-    [selectedId, send]
-  );
-
-  const handleSelect = useCallback(
-    (id: string) => {
-      navigate(`/session/${id}`);
-      setMobileOpen(false);
-    },
-    [navigate],
-  );
-
-  const handleRenameSession = useCallback(
-    (sessionId: string, name: string) => {
-      send({ type: "rename_session", sessionId, name });
-    },
-    [send],
-  );
-
-  const handleShutdownSession = useCallback(
-    (sessionId: string) => {
-      send({ type: "shutdown", sessionId });
-    },
-    [send],
-  );
-
-  const handleSendPromptToSession = useCallback(
-    (sessionId: string, text: string) => {
-      send({ type: "send_prompt", sessionId, text });
-    },
-    [send],
-  );
-
-  const handleResumeSession = useCallback(
-    (sessionId: string, mode: "continue" | "fork") => {
-      // Optimistic: show resuming state immediately
-      setSessions((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(sessionId);
-        if (existing) {
-          next.set(sessionId, { ...existing, resuming: true });
-        }
-        return next;
-      });
-      send({ type: "resume_session", sessionId, mode });
-    },
-    [send],
-  );
-
-  const handleSpawnSession = useCallback(
-    (cwd: string) => {
-      setSpawningCwds((prev) => {
-        const next = new Set(prev);
-        next.add(cwd);
-        return next;
-      });
-      // Safety timeout: auto-clear after 30s
-      const timer = setTimeout(() => {
-        spawnTimeoutsRef.current.delete(cwd);
-        clearSpawningCwd(cwd);
-      }, 30_000);
-      spawnTimeoutsRef.current.set(cwd, timer);
-      send({ type: "spawn_session", cwd });
-    },
-    [send, clearSpawningCwd],
-  );
-
-  const handleHideSession = useCallback(
-    (sessionId: string) => {
-      // Optimistic UI update
-      setSessions((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(sessionId);
-        if (existing) {
-          next.set(sessionId, { ...existing, hidden: true });
-        }
-        return next;
-      });
-      send({ type: "hide_session", sessionId });
-    },
-    [send],
-  );
-
-  const handleUnhideSession = useCallback(
-    (sessionId: string) => {
-      // Optimistic UI update
-      setSessions((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(sessionId);
-        if (existing) {
-          next.set(sessionId, { ...existing, hidden: false });
-        }
-        return next;
-      });
-      send({ type: "unhide_session", sessionId });
-    },
-    [send],
-  );
-
-  const handleCreateTerminal = useCallback(
-    (cwd: string) => {
-      pendingTerminalCwdRef.current = cwd;
-      send({ type: "create_terminal", cwd });
-    },
-    [send],
-  );
-
-  const handleKillTerminal = useCallback(
-    (terminalId: string) => {
-      send({ type: "kill_terminal", terminalId });
-    },
-    [send],
-  );
-
-  const handleRenameTerminal = useCallback(
-    (terminalId: string, title: string) => {
-      // Mark as manually renamed so PTY title doesn't override
-      setTerminals((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(terminalId);
-        if (existing) {
-          next.set(terminalId, { ...existing, title, manuallyRenamed: true });
-        }
-        return next;
-      });
-      send({ type: "rename_terminal", terminalId, title });
-    },
-    [send],
-  );
-
-  const handleTerminalTitle = useCallback(
-    (terminalId: string, title: string) => {
-      setTerminals((prev) => {
-        const existing = prev.get(terminalId);
-        // Don't override a manually set name with PTY title
-        if (!existing || existing.manuallyRenamed) return prev;
-        const next = new Map(prev);
-        next.set(terminalId, { ...existing, title });
-        return next;
-      });
-      // Only send to server if not manually renamed
-      const t = terminals.get(terminalId);
-      if (!t?.manuallyRenamed) {
-        send({ type: "rename_terminal", terminalId, title });
-      }
-    },
-    [send, terminals],
-  );
+  const openspecActions = useOpenSpecActions({ send, openspecMap, setPreviewState });
+  const {
+    handleOpenSpecRefresh, handleBulkArchive, handleReadArtifact,
+    handleAttachProposal, handleDetachProposal,
+  } = openspecActions;
 
   const sessionList = (
     <SessionList
@@ -753,6 +265,8 @@ export default function App() {
       onReadArtifact={handleReadArtifact}
       onOpenPiResources={handleOpenPiResources}
       onOpenSpecs={(cwd) => setSpecsBrowserCwd(cwd)}
+      onOpenArchive={(cwd) => setArchiveBrowserCwd(cwd)}
+      onViewReadme={handleViewReadme}
       onAttachProposal={handleAttachProposal}
       onDetachProposal={handleDetachProposal}
       onRename={handleRenameSession}
@@ -839,6 +353,8 @@ export default function App() {
         openspecChanges={selectedCwd ? openspecMap.get(selectedCwd)?.changes : undefined}
         onAttachProposal={(changeName) => handleAttachProposal(selectedId, changeName)}
         onDetachProposal={() => handleDetachProposal(selectedId)}
+        hasFileChanges={selectedState.hasFileChanges}
+        onOpenDiffView={() => setDiffViewSessionId(selectedId)}
       />
       {/* Mobile info strip */}
       {isMobile && selectedSession && (
@@ -888,7 +404,12 @@ export default function App() {
           cost={selectedState.cost}
         />
       )}
-      {specsBrowserCwd ? (
+      {archiveBrowserCwd ? (
+        <ArchiveBrowserView
+          cwd={archiveBrowserCwd}
+          onBack={() => setArchiveBrowserCwd(null)}
+        />
+      ) : specsBrowserCwd ? (
         <SpecsBrowserView
           cwd={specsBrowserCwd}
           onBack={() => setSpecsBrowserCwd(null)}
@@ -900,6 +421,14 @@ export default function App() {
           isLoading={piResourceFilePreview.isLoading}
           error={piResourceFilePreview.error}
           onBack={() => setPiResourceFilePreview(null)}
+        />
+      ) : readmePreview ? (
+        <MarkdownPreviewView
+          title={`README.md — ${readmePreview.cwd.split("/").pop()}`}
+          content={readmePreview.content}
+          isLoading={readmePreview.isLoading}
+          error={readmePreview.error}
+          onBack={() => setReadmePreview(null)}
         />
       ) : piResourcesState ? (
         <PiResourcesView
@@ -914,6 +443,11 @@ export default function App() {
           initialArtifact={previewState.artifactId}
           artifacts={previewState.artifacts}
           onBack={() => setPreviewState(null)}
+        />
+      ) : diffViewSessionId ? (
+        <FileDiffView
+          sessionId={diffViewSessionId}
+          onBack={() => setDiffViewSessionId(null)}
         />
       ) : flowDetailAgent && selectedState.flowState?.agents.has(flowDetailAgent) ? (
         <>
@@ -1033,17 +567,23 @@ export default function App() {
       selectedTerminalId,
       settingsMatch: !!settingsMatch,
       tunnelSetupMatch: !!tunnelSetupMatch,
-      hasPreview: !!previewState || !!piResourcesState || !!piResourceFilePreview || !!specsBrowserCwd,
+      hasPreview: !!previewState || !!piResourcesState || !!piResourceFilePreview || !!readmePreview || !!specsBrowserCwd || !!archiveBrowserCwd || !!diffViewSessionId,
     });
     return (
       <div className="bg-[var(--bg-primary)] text-[var(--text-primary)]">
         <MobileShell
           depth={mobileDepth}
           onBack={() => {
-            if (specsBrowserCwd) {
+            if (archiveBrowserCwd) {
+              setArchiveBrowserCwd(null);
+            } else if (specsBrowserCwd) {
               setSpecsBrowserCwd(null);
+            } else if (diffViewSessionId) {
+              setDiffViewSessionId(null);
             } else if (piResourceFilePreview) {
               setPiResourceFilePreview(null);
+            } else if (readmePreview) {
+              setReadmePreview(null);
             } else if (piResourcesState) {
               setPiResourcesState(null);
             } else if (previewState) {
@@ -1064,10 +604,20 @@ export default function App() {
               <SettingsPanel />
             ) : tunnelSetupMatch ? (
               <ZrokInstallGuide onBack={() => navigate("/")} />
+            ) : archiveBrowserCwd ? (
+              <ArchiveBrowserView
+                cwd={archiveBrowserCwd}
+                onBack={() => setArchiveBrowserCwd(null)}
+              />
             ) : specsBrowserCwd ? (
               <SpecsBrowserView
                 cwd={specsBrowserCwd}
                 onBack={() => setSpecsBrowserCwd(null)}
+              />
+            ) : diffViewSessionId ? (
+              <FileDiffView
+                sessionId={diffViewSessionId}
+                onBack={() => setDiffViewSessionId(null)}
               />
             ) : piResourceFilePreview ? (
               <MarkdownPreviewView
@@ -1076,6 +626,14 @@ export default function App() {
                 isLoading={piResourceFilePreview.isLoading}
                 error={piResourceFilePreview.error}
                 onBack={() => setPiResourceFilePreview(null)}
+              />
+            ) : readmePreview ? (
+              <MarkdownPreviewView
+                title={`README.md — ${readmePreview.cwd.split("/").pop()}`}
+                content={readmePreview.content}
+                isLoading={readmePreview.isLoading}
+                error={readmePreview.error}
+                onBack={() => setReadmePreview(null)}
               />
             ) : piResourcesState ? (
               <PiResourcesView
@@ -1122,7 +680,12 @@ export default function App() {
         {terminalViews}
         {/* Show session detail or landing page when no terminal is selected */}
         {!selectedTerminalId && !settingsMatch && !tunnelSetupMatch && (
-          specsBrowserCwd ? (
+          archiveBrowserCwd ? (
+            <ArchiveBrowserView
+              cwd={archiveBrowserCwd}
+              onBack={() => setArchiveBrowserCwd(null)}
+            />
+          ) : specsBrowserCwd ? (
             <SpecsBrowserView
               cwd={specsBrowserCwd}
               onBack={() => setSpecsBrowserCwd(null)}
@@ -1134,6 +697,14 @@ export default function App() {
               isLoading={piResourceFilePreview.isLoading}
               error={piResourceFilePreview.error}
               onBack={() => setPiResourceFilePreview(null)}
+            />
+          ) : readmePreview ? (
+            <MarkdownPreviewView
+              title={`README.md — ${readmePreview.cwd.split("/").pop()}`}
+              content={readmePreview.content}
+              isLoading={readmePreview.isLoading}
+              error={readmePreview.error}
+              onBack={() => setReadmePreview(null)}
             />
           ) : piResourcesState && !selectedId ? (
             <PiResourcesView

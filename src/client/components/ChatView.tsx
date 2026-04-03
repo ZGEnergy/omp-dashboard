@@ -142,6 +142,8 @@ export function ChatView({ state, toolContext, onCancelPending, onRespondToUi }:
             <ThinkingBlock
               key={msg.id}
               content={msg.content}
+              startedAt={msg.startedAt}
+              duration={msg.duration}
             />
           );
         }
@@ -156,6 +158,8 @@ export function ChatView({ state, toolContext, onCancelPending, onRespondToUi }:
               status={msg.toolStatus ?? "running"}
               result={msg.result}
               context={toolContext}
+              startedAt={msg.startedAt}
+              duration={msg.duration}
             />
           );
         }
@@ -223,6 +227,7 @@ export function ChatView({ state, toolContext, onCancelPending, onRespondToUi }:
           content={state.streamingThinking}
           isStreaming
           defaultExpanded
+          startedAt={state.thinkingStartedAt}
         />
       )}
 

@@ -9,7 +9,7 @@ export function BashToolRenderer({ args, status, result }: ToolRendererProps) {
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-2">
-        <span className="text-xs text-green-400 font-mono">$</span>
+        <span className="text-xs text-[var(--accent-green)] font-mono">$</span>
         <span className="text-xs text-[var(--text-secondary)] font-mono truncate">{command ?? "command"}</span>
         {timeout && <span className="text-[10px] text-[var(--text-muted)]">(timeout: {timeout}s)</span>}
       </div>

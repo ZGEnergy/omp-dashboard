@@ -13,7 +13,7 @@ vi.mock("mermaid", () => ({
 }));
 
 // Import after mock is set up
-import { MermaidBlock } from "../MermaidBlock.js";
+import { MermaidBlock, _svgCache } from "../MermaidBlock.js";
 
 beforeAll(() => {
   Object.defineProperty(window, "matchMedia", {
@@ -34,6 +34,7 @@ function renderWithTheme(ui: React.ReactElement) {
 describe("MermaidBlock", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _svgCache.clear();
   });
 
   it("renders SVG from valid mermaid code", async () => {
@@ -104,5 +105,43 @@ describe("MermaidBlock", () => {
     const ids = mockRender.mock.calls.map((c) => c[0]);
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(ids.length);
+  });
+
+  it("initializes from SVG cache on remount without re-rendering", async () => {
+    const svgContent = '<svg><text>cached</text></svg>';
+    mockRender.mockResolvedValue({ svg: svgContent });
+
+    // First render — populates cache
+    const { container, unmount } = renderWithTheme(<MermaidBlock code="graph TD; X-->Y" />);
+    await waitFor(() => {
+      expect(container.querySelector("svg")).not.toBeNull();
+    });
+    expect(mockRender).toHaveBeenCalledTimes(1);
+
+    // Unmount and remount with same code
+    unmount();
+    mockRender.mockClear();
+
+    const { container: c2 } = renderWithTheme(<MermaidBlock code="graph TD; X-->Y" />);
+
+    // Should show SVG immediately from cache — no loading flash
+    expect(c2.querySelector("svg")).not.toBeNull();
+    // Should NOT call mermaid.render() again
+    expect(mockRender).not.toHaveBeenCalled();
+  });
+
+  it("re-renders when theme changes even with same code", async () => {
+    const svgLight = '<svg><text>light</text></svg>';
+    const svgDark = '<svg><text>dark</text></svg>';
+
+    // Pre-populate cache for light theme
+    _svgCache.set("graph TD; A-->B\0light", svgLight);
+    // Pre-populate cache for dark theme with different SVG
+    _svgCache.set("graph TD; A-->B\0dark", svgDark);
+
+    // Both should be separate cache entries
+    expect(_svgCache.size).toBe(2);
+    expect(_svgCache.get("graph TD; A-->B\0light")).toBe(svgLight);
+    expect(_svgCache.get("graph TD; A-->B\0dark")).toBe(svgDark);
   });
 });

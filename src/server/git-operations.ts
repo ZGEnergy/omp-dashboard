@@ -57,7 +57,18 @@ export interface BranchInfo {
 /** List all local and remote branches sorted by most recent commit. */
 export function listBranches(cwd: string): BranchInfo {
   // Detect current branch / detached HEAD
-  const headRef = run("git rev-parse --abbrev-ref HEAD", cwd);
+  const headRef = tryRun("git rev-parse --abbrev-ref HEAD", cwd);
+
+  // Empty repo (no commits yet)
+  if (!headRef) {
+    // Try to read the default branch name from HEAD
+    const symbolic = tryRun("git symbolic-ref --short HEAD", cwd);
+    return {
+      current: symbolic ?? "main",
+      detached: false,
+      branches: [],
+    };
+  }
   const detached = headRef === "HEAD";
   const current = detached
     ? run("git rev-parse --short HEAD", cwd)

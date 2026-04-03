@@ -1,22 +1,29 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import { detectSessionSource } from "../source-detector.js";
+import { writeSessionMeta } from "../../shared/session-meta.js";
 
 describe("detectSessionSource", () => {
   const originalEnv = { ...process.env };
+  let tmpDir: string;
 
   beforeEach(() => {
-    delete process.env.PI_DASHBOARD_SPAWNED;
     delete process.env.ZED_TERM;
     delete process.env.TMUX;
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "source-detect-test-"));
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("should return 'dashboard' when PI_DASHBOARD_SPAWNED is set", () => {
-    process.env.PI_DASHBOARD_SPAWNED = "1";
-    expect(detectSessionSource()).toBe("dashboard");
+  it("should return 'dashboard' when .meta.json has source dashboard", () => {
+    const sessionFile = path.join(tmpDir, "test.jsonl");
+    writeSessionMeta(sessionFile, { source: "dashboard" });
+    expect(detectSessionSource(undefined, sessionFile)).toBe("dashboard");
   });
 
   it("should return 'zed' when ZED_TERM is set and hasUI is false", () => {
@@ -39,15 +46,12 @@ describe("detectSessionSource", () => {
     expect(detectSessionSource()).toBe("tmux");
   });
 
-  it("should return 'tui' when no env vars are set", () => {
+  it("should return 'tui' when no env vars or meta file", () => {
     expect(detectSessionSource()).toBe("tui");
   });
 
-  it("should prioritize dashboard over zed and tmux", () => {
-    process.env.PI_DASHBOARD_SPAWNED = "1";
-    process.env.ZED_TERM = "1";
-    process.env.TMUX = "something";
-    expect(detectSessionSource()).toBe("dashboard");
+  it("should return 'tui' when no session file provided", () => {
+    expect(detectSessionSource(undefined, undefined)).toBe("tui");
   });
 
   it("should prioritize zed over tmux when hasUI is false", () => {
@@ -60,5 +64,10 @@ describe("detectSessionSource", () => {
     process.env.ZED_TERM = "1";
     process.env.TMUX = "something";
     expect(detectSessionSource(true)).toBe("tui");
+  });
+
+  it("should return 'tui' when meta file does not exist", () => {
+    const sessionFile = path.join(tmpDir, "nonexistent.jsonl");
+    expect(detectSessionSource(undefined, sessionFile)).toBe("tui");
   });
 });

@@ -9,7 +9,7 @@ import { replayEntriesAsEvents } from "../shared/state-replay.js";
 import { scanPiResources } from "./pi-resource-scanner.js";
 import type { OpenSpecData } from "../shared/types.js";
 import type { PiResourcesResult } from "../shared/rest-api.js";
-import type { StateStore } from "./state-store.js";
+import type { PreferencesStore } from "./preferences-store.js";
 import type { SessionManager } from "./memory-session-manager.js";
 
 const POLL_INTERVAL = 30_000;
@@ -42,7 +42,7 @@ export interface DirectoryService {
 }
 
 export function createDirectoryService(
-  stateStore: StateStore,
+  preferencesStore: PreferencesStore,
   sessionManager: SessionManager,
 ): DirectoryService {
   const openspecCache = new Map<string, OpenSpecData>();
@@ -55,7 +55,7 @@ export function createDirectoryService(
 
   function computeKnownDirectories(): string[] {
     const dirs = new Set<string>();
-    for (const dir of stateStore.getPinnedDirectories()) {
+    for (const dir of preferencesStore.getPinnedDirectories()) {
       dirs.add(dir);
     }
     for (const session of sessionManager.listAll()) {

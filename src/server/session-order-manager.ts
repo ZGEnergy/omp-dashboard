@@ -1,8 +1,8 @@
 /**
- * Manages per-cwd session ordering with persistence via StateStore.
+ * Manages per-cwd session ordering with persistence via PreferencesStore.
  * All mutations are synchronous — Node.js event loop provides concurrency safety.
  */
-import type { StateStore } from "./state-store.js";
+import type { PreferencesStore } from "./preferences-store.js";
 
 export interface SessionOrderManager {
   /** Insert session into cwd order. Prepends by default, or inserts after afterSessionId. */
@@ -17,12 +17,12 @@ export interface SessionOrderManager {
   getAllOrders(): Record<string, string[]>;
 }
 
-export function createSessionOrderManager(stateStore: StateStore): SessionOrderManager {
+export function createSessionOrderManager(preferencesStore: PreferencesStore): SessionOrderManager {
   // Load initial state from store
-  const orderMap: Record<string, string[]> = { ...stateStore.getSessionOrder() };
+  const orderMap: Record<string, string[]> = { ...preferencesStore.getSessionOrder() };
 
   function persist(): void {
-    stateStore.setSessionOrder({ ...orderMap });
+    preferencesStore.setSessionOrder({ ...orderMap });
   }
 
   return {

@@ -17,9 +17,7 @@ import { isPortOpen } from "./server-probe.js";
 import { launchServer } from "./server-launcher.js";
 import { autoStartServer } from "./server-auto-start.js";
 import type { ServerToExtensionMessage } from "../shared/protocol.js";
-import { gatherGitInfo, type GitInfo } from "./git-info.js";
 import { extractTurnStats } from "./stats-extractor.js";
-import { replayEntriesAsEvents } from "../shared/state-replay.js";
 import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
 import { detectOpenSpecActivity } from "./openspec-activity-detector.js";
 import type { OpenSpecPhase } from "../shared/types.js";
@@ -27,6 +25,11 @@ import { createUiProxy } from "./ui-proxy.js";
 import { registerAskUserTool } from "./ask-user-tool.js";
 import { activate as activateProviderRegister, onProviderChanged } from "./provider-register.js";
 import type { FlowInfo } from "../shared/types.js";
+import type { BridgeContext } from "./bridge-context.js";
+import { filterHiddenCommands, extractFirstMessage, getCurrentModelString } from "./bridge-context.js";
+import { sendStateSync as _sendStateSync, replaySessionEntries as _replaySessionEntries, handleSessionChange as _handleSessionChange } from "./session-sync.js";
+import { sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged } from "./model-tracker.js";
+import { registerFlowEventListeners } from "./flow-event-wiring.js";
 
 const HEARTBEAT_INTERVAL = 15_000;
 const GIT_POLL_INTERVAL = 30_000;
@@ -61,10 +64,7 @@ export default function (pi: ExtensionAPI) {
   }
 }
 
-/** Filter out hidden commands (names starting with __) from commands list */
-function filterHiddenCommands(commands: any[]): any[] {
-  return commands.filter((cmd) => !cmd.name.startsWith("__"));
-}
+
 
 
 
@@ -96,25 +96,7 @@ function initBridge(pi: ExtensionAPI) {
     connection.send({ type: "flows_list", sessionId, flows });
   }
 
-  function extractFirstMessage(ctx: any): string | undefined {
-    try {
-      const entries = ctx.sessionManager.getEntries?.();
-      if (!entries || !Array.isArray(entries)) return undefined;
-      for (const entry of entries) {
-        if (entry.role === "user" && typeof entry.content === "string") {
-          return entry.content.slice(0, 200);
-        }
-        if (entry.role === "user" && Array.isArray(entry.content)) {
-          for (const part of entry.content) {
-            if (part.type === "text" && typeof part.text === "string") {
-              return part.text.slice(0, 200);
-            }
-          }
-        }
-      }
-    } catch { /* ignore */ }
-    return undefined;
-  }
+
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let gitPollTimer: ReturnType<typeof setInterval> | null = null;
   let lastGitBranch: string | undefined;
@@ -178,6 +160,7 @@ function initBridge(pi: ExtensionAPI) {
     onReconnect: safe(() => {
       sendStateSync();
       replaySessionEntries();
+      connection.send({ type: "replay_complete", sessionId });
       // Re-send pending interactive UI requests so the new server can track them
       uiProxy?.resendPending();
     }),
@@ -281,110 +264,38 @@ function initBridge(pi: ExtensionAPI) {
     },
   });
 
-  function getCurrentModelString(): string | undefined {
-    const model = cachedCtx?.model;
-    if (!model) return undefined;
-    return `${model.provider}/${model.id}`;
+  /** Sync local variables into BridgeContext for extracted module calls */
+  function syncBc(): BridgeContext {
+    return {
+      pi, connection, sessionId,
+      cachedCtx, cachedModelRegistry, cachedHasUI,
+      lastModel, lastThinkingLevel,
+      lastSessionFile, lastSessionDir, lastFirstMessage,
+      lastGitBranch, lastGitPrNumber, lastSessionName,
+    };
+  }
+  /** Sync BridgeContext mutations back to local variables */
+  function applyBc(bc: BridgeContext): void {
+    sessionId = bc.sessionId;
+    cachedCtx = bc.cachedCtx;
+    cachedModelRegistry = bc.cachedModelRegistry;
+    cachedHasUI = bc.cachedHasUI;
+    lastModel = bc.lastModel;
+    lastThinkingLevel = bc.lastThinkingLevel;
+    lastSessionFile = bc.lastSessionFile;
+    lastSessionDir = bc.lastSessionDir;
+    lastFirstMessage = bc.lastFirstMessage;
+    lastGitBranch = bc.lastGitBranch;
+    lastGitPrNumber = bc.lastGitPrNumber;
+    lastSessionName = bc.lastSessionName;
   }
 
-  function sendModelUpdateIfChanged() {
-    const model = getCurrentModelString();
-    const thinkingLevel = (pi as any).getThinkingLevel?.() ?? undefined;
-    if (model === lastModel && thinkingLevel === lastThinkingLevel) return;
-    lastModel = model;
-    lastThinkingLevel = thinkingLevel;
-    if (model) {
-      connection.send({
-        type: "model_update",
-        sessionId,
-        model,
-        thinkingLevel,
-      });
-    }
-  }
-
-  function sendSessionNameIfChanged() {
-    const name = pi.getSessionName() ?? "";
-    if (name === lastSessionName) return;
-    lastSessionName = name;
-    connection.send({
-      type: "session_name_update",
-      sessionId,
-      name,
-    });
-  }
-
-  function sendGitInfoIfChanged(cwd: string) {
-    const info = gatherGitInfo(cwd);
-    if (!info) return;
-    if (info.gitBranch === lastGitBranch && info.gitPrNumber === lastGitPrNumber) return;
-    lastGitBranch = info.gitBranch;
-    lastGitPrNumber = info.gitPrNumber;
-    connection.send({
-      type: "git_info_update",
-      sessionId,
-      ...info,
-    });
-  }
-
-  function sendStateSync() {
-    // Re-register session on reconnect
-    const model = getCurrentModelString();
-    const thinkingLevel = (pi as any).getThinkingLevel?.() ?? undefined;
-    lastModel = model;
-    lastThinkingLevel = thinkingLevel;
-
-    // Include session file/dir and first message
-    const sessionFile = lastSessionFile ?? cachedCtx?.sessionManager?.getSessionFile?.() ?? undefined;
-    const sessionDir = lastSessionDir ?? cachedCtx?.sessionManager?.getSessionDir?.() ?? undefined;
-    const firstMessage = extractFirstMessage(cachedCtx);
-
-    connection.send({
-      type: "session_register",
-      sessionId,
-      cwd: process.cwd(),
-      name: pi.getSessionName() ?? undefined,
-      source: detectSessionSource(cachedHasUI),
-      model,
-      thinkingLevel,
-      sessionFile,
-      sessionDir,
-      firstMessage,
-    });
-
-    // Send commands list
-    const commands = filterHiddenCommands(pi.getCommands());
-    connection.send({
-      type: "commands_list",
-      sessionId,
-      commands,
-    });
-
-    // Send flows list
-    sendFlowsList();
-
-    // Send models list
-    if (cachedModelRegistry) {
-      try {
-        const models = cachedModelRegistry.getAvailable().map((m: any) => ({
-          provider: m.provider,
-          id: m.id,
-        }));
-        connection.send({ type: "models_list", sessionId, models });
-      } catch { /* ignore */ }
-    }
-  }
-
-  function replaySessionEntries() {
-    try {
-      const entries = cachedCtx?.sessionManager?.getBranch?.();
-      if (!entries || entries.length === 0) return;
-      const events = replayEntriesAsEvents(sessionId, entries);
-      for (const msg of events) {
-        connection.send(msg);
-      }
-    } catch { /* ignore */ }
-  }
+  // Local wrappers that sync bc around extracted module calls
+  function sendStateSync() { const bc = syncBc(); _sendStateSync(bc, getFlowsList); applyBc(bc); }
+  function replaySessionEntries() { _replaySessionEntries(syncBc()); }
+  function sendModelUpdateIfChanged() { const bc = syncBc(); _sendModelUpdateIfChanged(bc); applyBc(bc); }
+  function sendSessionNameIfChanged() { const bc = syncBc(); _sendSessionNameIfChanged(bc); applyBc(bc); }
+  function sendGitInfoIfChanged(cwd: string) { const bc = syncBc(); _sendGitInfoIfChanged(bc, cwd); applyBc(bc); }
 
   // Forward all relevant pi events
   const eventTypes = [
@@ -483,13 +394,17 @@ function initBridge(pi: ExtensionAPI) {
     // tool-name conflicts with other extensions like pi-flows.
     registerAskUserTool(pi);
 
-
+    // Extract session file/dir early — needed for source detection and UI proxy
+    const sessionFile = ctx.sessionManager.getSessionFile?.() ?? undefined;
+    const sessionDir = ctx.sessionManager.getSessionDir?.() ?? undefined;
+    lastSessionFile = sessionFile;
+    lastSessionDir = sessionDir;
 
     // Set up UI proxy to forward dialogs to dashboard.
     // For dashboard-spawned sessions (tmux or headless), skip the TUI race —
     // the dashboard is the primary UI, and the TUI dialog in an unattended
     // tmux window would auto-resolve/flood.
-    const dashboardSpawned = !!process.env.PI_DASHBOARD_SPAWNED;
+    const dashboardSpawned = detectSessionSource(cachedHasUI, sessionFile) === "dashboard";
     uiProxy = createUiProxy({
       ui: ctx.ui as any,
       hasUI: ctx.hasUI && !dashboardSpawned,
@@ -514,17 +429,13 @@ function initBridge(pi: ExtensionAPI) {
     // session_register must be buffered before any event_forward messages.
     connection.connect();
 
-    // Extract session file/dir and first message
-    const sessionFile = ctx.sessionManager.getSessionFile?.() ?? undefined;
-    const sessionDir = ctx.sessionManager.getSessionDir?.() ?? undefined;
-    lastSessionFile = sessionFile;
-    lastSessionDir = sessionDir;
+    // Extract first message (sessionFile/sessionDir already extracted above)
     const firstMessage = extractFirstMessage(ctx);
     lastFirstMessage = firstMessage;
 
     // Register session with initial model/thinkingLevel
     lastSessionName = pi.getSessionName() ?? "";
-    const initialModel = getCurrentModelString();
+    const initialModel = getCurrentModelString(syncBc());
     const initialThinkingLevel = (pi as any).getThinkingLevel?.() ?? undefined;
     lastModel = initialModel;
     lastThinkingLevel = initialThinkingLevel;
@@ -533,7 +444,7 @@ function initBridge(pi: ExtensionAPI) {
       sessionId,
       cwd: ctx.cwd,
       name: lastSessionName || undefined,
-      source: detectSessionSource(cachedHasUI),
+      source: detectSessionSource(cachedHasUI, sessionFile),
       model: initialModel,
       thinkingLevel: initialThinkingLevel,
       sessionFile,
@@ -546,6 +457,7 @@ function initBridge(pi: ExtensionAPI) {
 
     // Replay full session history so the dashboard has all messages
     replaySessionEntries();
+    connection.send({ type: "replay_complete", sessionId });
 
     // Send initial commands list
     const commands = filterHiddenCommands(pi.getCommands());
@@ -596,114 +508,20 @@ function initBridge(pi: ExtensionAPI) {
     }, GIT_POLL_INTERVAL);
 
     // Register flow event listeners (pi-flows emits these via pi.events)
-    if (pi.events) {
-      const flowEventMap: Record<string, string> = {
-        "flow:flow-started": "flow_started",
-        "flow:agent-started": "flow_agent_started",
-        "flow:agent-complete": "flow_agent_complete",
-        "flow:subagent-tool-call": "flow_tool_call",
-        "flow:subagent-tool-result": "flow_tool_result",
-        "flow:assistant-text": "flow_assistant_text",
-        "flow:thinking-text": "flow_thinking_text",
-        "flow:loop-iteration": "flow_loop_iteration",
-        "flow:auto-decision": "flow_auto_decision",
-        "flow:complete": "flow_complete",
-      };
-      // Re-send commands and flows list when pi-flows discovers new flows or a flow completes
-      const resendCommandsAndFlows = () => {
-        if (!sessionReady) return;
-        const commands = filterHiddenCommands(pi.getCommands());
-        connection.send({ type: "commands_list", sessionId, commands });
-        sendFlowsList();
-      };
-      pi.events.on("flow:rediscover", resendCommandsAndFlows);
-      pi.events.on("flow:complete", resendCommandsAndFlows);
-
-      for (const [piEvent, eventType] of Object.entries(flowEventMap)) {
-        pi.events.on(piEvent, (data: unknown) => {
-          if (!sessionReady) return;
-          const eventData = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
-          connection.send({
-            type: "event_forward",
-            sessionId,
-            event: {
-              eventType,
-              timestamp: Date.now(),
-              data: eventData,
-            },
-          });
-        });
-      }
-    }
+    registerFlowEventListeners(syncBc(), () => sessionReady, getFlowsList);
   }));
 
   // Shared handler for session_switch and session_fork
   function handleSessionChange(ctx: any) {
-    // Unregister old session
-    connection.send({
-      type: "session_unregister",
-      sessionId,
-    });
-
-    // Update to new session identity
-    sessionId = ctx.sessionManager.getSessionId();
-    lastSessionFile = ctx.sessionManager.getSessionFile?.() ?? undefined;
-    lastSessionDir = ctx.sessionManager.getSessionDir?.() ?? undefined;
-    const firstMessage = extractFirstMessage(ctx);
-
-    // Reset cached state for new session
-    lastFirstMessage = firstMessage;
-    lastGitBranch = undefined;
-    lastGitPrNumber = undefined;
-    lastSessionName = pi.getSessionName() ?? "";
-    lastModel = getCurrentModelString();
-    lastThinkingLevel = (pi as any).getThinkingLevel?.() ?? undefined;
-
-    // Register new session
-    connection.send({
-      type: "session_register",
-      sessionId,
-      cwd: ctx.cwd,
-      name: lastSessionName || undefined,
-      source: detectSessionSource(cachedHasUI),
-      model: lastModel,
-      thinkingLevel: lastThinkingLevel,
-      sessionFile: lastSessionFile,
-      sessionDir: lastSessionDir,
-      firstMessage,
-    });
-
-    // Replay full session history
-    replaySessionEntries();
-
-    // Full state sync
-    sendGitInfoIfChanged(ctx.cwd);
-
-    const commands = filterHiddenCommands(pi.getCommands());
-    connection.send({
-      type: "commands_list",
-      sessionId,
-      commands,
-    });
-
-    sendFlowsList();
-
-    if (cachedModelRegistry) {
-      try {
-        const models = cachedModelRegistry.getAvailable().map((m: any) => ({
-          provider: m.provider,
-          id: m.id,
-        }));
-        connection.send({ type: "models_list", sessionId, models });
-      } catch { /* ignore */ }
-    }
+    const bc = syncBc();
+    _handleSessionChange(bc, ctx, getFlowsList);
+    applyBc(bc);
 
     // Restart polling timers
     if (gitPollTimer) clearInterval(gitPollTimer);
     gitPollTimer = setInterval(() => {
       sendGitInfoIfChanged(ctx.cwd);
     }, GIT_POLL_INTERVAL);
-
   }
 
   pi.on("session_switch" as any, safe(async (_event: any, ctx: any) => {
@@ -729,7 +547,7 @@ function initBridge(pi: ExtensionAPI) {
           type: "session_register",
           sessionId,
           cwd: ctx.cwd,
-          source: detectSessionSource(cachedHasUI),
+          source: detectSessionSource(cachedHasUI, lastSessionFile),
           firstMessage: firstMsg,
         });
       }

@@ -43,6 +43,18 @@ describe("MarkdownSearch", () => {
     expect(counter.textContent).toContain("/");
   });
 
+  it("uses exact match when substring found, fuzzy only as fallback", async () => {
+    render(<TestHarness html="<p>authentication system</p><p>authorization layer</p>" />);
+    await act(() => vi.advanceTimersByTime(150));
+
+    const input = screen.getByTestId("markdown-search-input");
+    // Exact substring — should match only "authentication"
+    fireEvent.change(input, { target: { value: "authentication" } });
+    const counter = screen.getByTestId("markdown-search-counter");
+    // Should find exactly 1 match (exact), not fuzzy-match "authorization" too
+    expect(counter.textContent).toMatch(/^1\/1$/);
+  });
+
   it("shows 0 results for non-matching query", async () => {
     render(<TestHarness html="<p>Hello world</p>" />);
     await act(() => vi.advanceTimersByTime(150));

@@ -31,9 +31,9 @@ describe("Process Manager", () => {
       expect(cmd).toContain("new-window");
     });
 
-    it("should set PI_DASHBOARD_SPAWNED env var", () => {
+    it("should not set PI_DASHBOARD_SPAWNED env var", () => {
       const cmd = buildTmuxCommand("/home/user/project", false);
-      expect(cmd).toContain("PI_DASHBOARD_SPAWNED=1");
+      expect(cmd).not.toContain("PI_DASHBOARD_SPAWNED");
     });
 
     it("should shell-escape cwd with spaces", () => {
@@ -72,7 +72,6 @@ describe("Process Manager", () => {
         mode: "continue",
       });
       expect(cmd).toContain("--session /path/to/session.jsonl");
-      expect(cmd).toContain("PI_DASHBOARD_SPAWNED=1");
       expect(cmd).not.toContain("--fork");
     });
 
@@ -82,7 +81,6 @@ describe("Process Manager", () => {
         mode: "fork",
       });
       expect(cmd).toContain("--fork /path/to/session.jsonl");
-      expect(cmd).toContain("PI_DASHBOARD_SPAWNED=1");
       expect(cmd).not.toContain("--session");
     });
 

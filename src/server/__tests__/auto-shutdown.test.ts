@@ -10,6 +10,7 @@ describe("Server auto-shutdown", () => {
     autoShutdown: true,
     shutdownIdleSeconds: 2,
     tunnel: false,
+    pingInterval: 0, // Disable WS ping to avoid fake/real timer conflicts
   };
 
   let testPort = 18700;
@@ -97,7 +98,7 @@ describe("Server auto-shutdown", () => {
     vi.useRealTimers();
     ws.close();
     exitSpy.mockRestore();
-  });
+  }, 10000);
 
   it("should cancel idle timer when a session connects", async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);

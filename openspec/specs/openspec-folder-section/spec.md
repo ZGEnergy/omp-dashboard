@@ -81,3 +81,18 @@ The folder OpenSpec section header SHALL include a Bulk Archive button. Clicking
 #### Scenario: Bulk Archive cancelled
 - **WHEN** the user cancels the Bulk Archive dialog
 - **THEN** no action SHALL be taken
+
+### Requirement: Archive button in folder OpenSpec section
+The folder OpenSpec section header SHALL include an "Archive" button next to the existing "Specs" button, visible only when OpenSpec is initialized.
+
+#### Scenario: Archive button rendered
+- **WHEN** a folder OpenSpec section is rendered with `initialized: true` and an `onOpenArchive` callback is provided
+- **THEN** an "Archive" button SHALL be displayed next to the "Specs" button
+
+#### Scenario: Archive button opens archive browser
+- **WHEN** the user clicks the "Archive" button on folder `/project/foo`
+- **THEN** the `ArchiveBrowserView` SHALL open in the content area for that cwd
+
+#### Scenario: Archive button not rendered without callback
+- **WHEN** the `onOpenArchive` prop is not provided
+- **THEN** the "Archive" button SHALL NOT be rendered

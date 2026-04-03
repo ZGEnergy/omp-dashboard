@@ -7,8 +7,8 @@ import { OpenFileButton } from "./OpenFileButton.js";
 import { detectLanguage } from "./lang-detect.js";
 
 export function WriteToolRenderer({ args, status, result, context }: ToolRendererProps) {
-  const { resolved: theme } = useThemeContext();
-  const syntaxStyle = getSyntaxTheme(theme);
+  const { resolved: theme, themeName } = useThemeContext();
+  const syntaxStyle = getSyntaxTheme(theme, themeName);
   const filePath = args?.path as string | undefined;
   const content = args?.content as string | undefined;
   const language = detectLanguage(filePath);
@@ -32,7 +32,7 @@ export function WriteToolRenderer({ args, status, result, context }: ToolRendere
               language={language}
               PreTag="div"
               showLineNumbers={true}
-              customStyle={{ margin: 0, padding: "0.5rem", fontSize: "0.7rem" }}
+              customStyle={{ margin: 0, padding: "0.5rem", fontSize: "0.7rem", background: 'var(--bg-code)' }}
             >
               {content}
             </SyntaxHighlighter>

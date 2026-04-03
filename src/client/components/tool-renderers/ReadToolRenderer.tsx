@@ -7,8 +7,8 @@ import { OpenFileButton } from "./OpenFileButton.js";
 import { detectLanguage } from "./lang-detect.js";
 
 export function ReadToolRenderer({ args, status, result, context }: ToolRendererProps) {
-  const { resolved: theme } = useThemeContext();
-  const syntaxStyle = getSyntaxTheme(theme);
+  const { resolved: theme, themeName } = useThemeContext();
+  const syntaxStyle = getSyntaxTheme(theme, themeName);
   const filePath = args?.path as string | undefined;
   const offset = args?.offset as number | undefined;
   const limit = args?.limit as number | undefined;
@@ -40,7 +40,7 @@ export function ReadToolRenderer({ args, status, result, context }: ToolRenderer
               PreTag="div"
               showLineNumbers={true}
               startingLineNumber={offset ?? 1}
-              customStyle={{ margin: 0, padding: "0.5rem", fontSize: "0.7rem" }}
+              customStyle={{ margin: 0, padding: "0.5rem", fontSize: "0.7rem", background: 'var(--bg-code)' }}
             >
               {result}
             </SyntaxHighlighter>

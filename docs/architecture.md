@@ -21,11 +21,13 @@ The PI Dashboard is a web-based dashboard for monitoring and interacting with pi
 
 ### 1. Bridge Extension (`src/extension/`)
 A global pi extension that runs in every pi session. It:
-- Detects session source (TUI, Zed, tmux, dashboard-spawned)
+- Detects session source (TUI, Zed, tmux, dashboard-spawned) via `.meta.json` sidecar files and environment variables
 - Forwards all pi events to the dashboard server via WebSocket
 - Relays commands from the dashboard back to pi
 - Handles reconnection with exponential backoff and event buffering
-- Sends heartbeats every 15s
+- Sends heartbeats every 15s; server responds with `heartbeat_ack`
+- Server liveness watchdog: forces reconnect if no message received for 60s
+- Server-side WS ping/pong (30s interval) detects dead TCP connections within one cycle
 - Detects OpenSpec activity (phase/change) from tool events
 - Proxies `ctx.ui` dialog methods (confirm, select, input, editor) to the dashboard via `ui-proxy.ts`
   - TUI sessions: races terminal dialog against dashboard response (first wins)
@@ -40,18 +42,29 @@ A Node.js HTTP + WebSocket server that:
 - Accepts connections from web browsers (Browser Gateway, port 8000)
 - Stores events in an in-memory buffer with LRU eviction (max 100 sessions)
 - Manages sessions in a pure in-memory registry (populated from bridge connections and direct disk discovery)
-- Persists user preferences (hidden sessions, pinned directories, session order) in `~/.pi/dashboard/state.json`
+- Persists global preferences (pinned directories, session order) in `~/.pi/dashboard/preferences.json`
 - Discovers historical sessions directly from disk via `SessionManager.list()` (DirectoryService)
 - Loads session events on demand directly from disk via `SessionManager.open()` (DirectoryService)
 - Polls OpenSpec CLI per directory every 30s, broadcasting changes to browsers (DirectoryService)
-- Serves the built web client as static files
+- Serves the built web client as static files (production) or proxies to Vite dev server (dev mode)
+- Writes per-session `.meta.json` sidecar files with dashboard state and cached stats
 - Exposes REST API for session management, event content fetch, pinned directories, and file reading
+- Provides session control REST endpoints (`/api/session/:id/*`) wrapping WebSocket-only operations (prompt, abort, spawn, resume, rename, hide, flow-control, model, thinking-level, attach/detach-proposal) — see `src/server/session-api.ts`
+
+**Server decomposition:** The server is split into focused modules:
+- `server.ts` — Orchestrator: creates services, composes modules, manages lifecycle
+- `routes/` — REST API routes grouped by domain (session, git, file, openspec, system)
+- `event-wiring.ts` — Pi gateway → browser gateway event forwarding
+- `idle-timer.ts` — Auto-shutdown idle timer
+- `session-bootstrap.ts` — Startup session discovery and OpenSpec polling init
+- `browser-handlers/` — Browser WebSocket message handlers by domain (subscription, session-actions, session-meta, terminal, directory)
 
 ### 3. Web Client (`src/client/`)
 A React-based responsive web UI that:
 - Shows all active sessions organized by directory, with pinned directories always visible at the top
 - Renders chat messages with markdown, syntax highlighting, and streaming
-- Displays collapsed tool call steps with lazy-loaded content
+- Displays collapsed tool call steps with lazy-loaded content and elapsed time badges
+- Shows live ticking elapsed counters on running operations (thinking, tool calls) and final duration on completed ones
 - Provides command autocomplete with `/` prefix
 - Supports bidirectional interaction (send prompts, run commands)
 - Works on mobile with responsive layout and swipe gestures
@@ -200,8 +213,21 @@ The dashboard provides a git branch selector at the folder group level. Clicking
 
 **Checkout flow**: Clean checkout closes immediately. Dirty working tree → client shows file list + "Stash & Switch" button → stash + checkout → asks "Pop stash on new branch?" with explicit Yes/No. Remote branches auto-create local tracking branches.
 
+### Session File Diff View
+
+The dashboard provides a GitHub-style file diff viewer for sessions. It shows what files a session has changed, with per-change drill-down.
+
+**Data flow**: `GET /api/session-diff?sessionId=xxx` (localhost-only) scans session events for Write/Edit tool calls, extracts file paths and change data, optionally enriches with `git diff HEAD` output. Returns `SessionDiffResponse` with files, per-file change events (timestamps + context messages), and optional git diffs.
+
+**UI**: Split-pane content-area view (replaces ChatView when active). Left panel shows a two-level file tree — files with status indicators, expandable to show individual change events with timestamps and assistant message context. Right panel renders diffs via `@git-diff-view/react` with `@git-diff-view/lowlight` syntax highlighting. Supports split/unified diff modes and a file content view toggle.
+
+**Entry point**: "Changed Files" button in SessionHeader (only visible when Write/Edit tool events exist). Works for both active and ended sessions.
+
 ### Markdown Preview View
 The web client includes a generic `MarkdownPreviewView` component that replaces the chat area. It supports a back button, title, optional tab bar, and loading/error states. For OpenSpec artifacts, the `useOpenSpecReader` hook maps artifact IDs (P/S/D/T) to file paths, fetches content via the file API, and concatenates specs from subdirectories.
+
+### Archive Browser
+The `ArchiveBrowserView` provides a searchable, date-grouped listing of archived OpenSpec changes. It uses a dedicated `GET /api/openspec-archive?cwd=<path>` endpoint that scans `openspec/changes/archive/` and returns entry metadata (name, date, artifacts). The view uses two-level navigation: the list is the first level, and clicking an artifact letter (P/D/S/T) opens the reader as the second level. Back from the reader returns to the list (preserving search and scroll), and back from the list returns to the session view. Entry point is the `[Archive]` button in `FolderOpenSpecSection`.
 
 ### OAuth Authentication Flow
 
@@ -230,6 +256,21 @@ The web client includes a Settings panel (gear icon in sidebar header → `/sett
 2. Server replays missed events from in-memory buffer in batches of 200
 3. Browser's event reducer processes replay, rebuilding state
 
+### Bridge Reconnection (State Reset)
+When a bridge extension reconnects (e.g., after `npm run reload` or network recovery):
+1. Bridge sends `session_register` to re-register the session
+2. Server marks the session as "replaying" and clears the in-memory event store
+3. Server broadcasts `session_state_reset` to all browser subscribers of that session
+4. Browser resets accumulated state to initial (clearing messages, tool calls, stats)
+5. Bridge replays full session history as individual `event_forward` messages
+6. Bridge sends `replay_complete` to signal replay is done
+7. Server clears the replaying flag and broadcasts the final accumulated session status
+8. Browser rebuilds state cleanly from the replayed events
+
+Without the `session_state_reset` message, replayed events would duplicate existing messages in the browser's accumulated state.
+
+**Replay status suppression**: During step 5, replayed events like `agent_start`/`agent_end` would normally trigger rapid `session_updated` broadcasts (e.g., `status: "streaming"` → `status: "idle"` for each turn), causing visible flicker on session cards. The server suppresses these status broadcasts while replaying, accumulating them in the session manager. Only the final status is broadcast after `replay_complete`. A 5-second safety timeout ensures the flag is cleared even if `replay_complete` never arrives (e.g., older bridge versions).
+
 ### Session File Deduplication
 When pi continues a session via `--session <file>`, it reuses the same JSONL file but may create a new session ID. The server detects this: when a new session registers with a `sessionFile` already associated with another session, the old session's `sessionFile` is cleared. This prevents the Resume button from loading the wrong conversation.
 
@@ -247,10 +288,10 @@ When a browser subscribes to a session whose events have been evicted from memor
 | Data | Storage | Details |
 |------|---------|---------|
 | Events | In-memory Map | LRU eviction, max 100 sessions. Pinned if active bridge or browser subscribers. |
-| Sessions | In-memory Map + JSON | In-memory registry + `session-persistence.ts` saves metadata to JSON for server restarts. Populated from bridge `session_register` + DirectoryService disk discovery. |
-| Hidden sessions | `~/.pi/dashboard/state.json` | Debounced writes (max 1/sec). Atomic write. |
-| Pinned directories | `~/.pi/dashboard/state.json` | Ordered array of cwd paths. Pinned dirs always visible in sidebar. |
-| Session order | `~/.pi/dashboard/state.json` | Per-cwd ordering managed by `session-order-manager.ts`. |
+| Sessions | In-memory Map + `.meta.json` | In-memory registry. Each session's state cached in per-session `.meta.json` sidecar next to `.jsonl`. On startup, `session-scanner.ts` scans `~/.pi/agent/sessions/*/` to restore all sessions from cached meta. |
+| Session meta | `~/.pi/agent/sessions/…/<id>.meta.json` | Per-session sidecar: dashboard-owned state (name, attachedProposal, hidden, source) + cached stats (tokens, cost, model, status). Debounced per-session writes (max 1/sec). Stale cache detected via `cachedAt` vs `.jsonl` mtime. |
+| Pinned directories | `~/.pi/dashboard/preferences.json` | Ordered array of cwd paths. Pinned dirs always visible in sidebar. |
+| Session order | `~/.pi/dashboard/preferences.json` | Per-cwd ordering managed by `session-order-manager.ts`. |
 | Server PID | `~/.pi/dashboard/server.pid` | Tracks running server process for daemon management. |
 | Headless PIDs | `~/.pi/dashboard/headless-pids.json` | Maps spawned headless processes to sessions. |
 | Session files | `~/.pi/agent/sessions/` (pi's own) | Source of truth. Bridge loads on demand. |
@@ -375,3 +416,36 @@ Terminal xterm.js instances stay mounted in the DOM (CSS hidden/shown) for insta
 ### Sidebar Integration
 
 Terminal cards appear alongside agent session cards, sharing the same folder groups and drag-and-drop ordering. Terminal IDs (`term-*`) coexist with session IDs in the `SessionOrderManager`.
+
+## Bundled Skill: pi-dashboard
+
+The `.pi/skills/pi-dashboard/` directory is both a local project skill (discovered by pi from `.pi/skills/`) and shipped with the npm package (discovered via `pi.skills` in `package.json`). This means any pi session in the dashboard project or any project that installs the dashboard package gets access to the skill.
+
+### Session Control REST API
+
+`src/server/session-api.ts` registers REST wrappers for operations that were previously WebSocket-only:
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/session/:id/prompt` | Send a text prompt to a session |
+| `POST /api/session/:id/abort` | Abort current operation |
+| `POST /api/session/:id/shutdown` | Shutdown a pi session |
+| `POST /api/session/:id/rename` | Rename a session |
+| `POST /api/session/:id/hide` | Hide session |
+| `POST /api/session/:id/unhide` | Unhide session |
+| `POST /api/session/spawn` | Spawn new session in a directory |
+| `POST /api/session/:id/resume` | Resume or fork ended session |
+| `POST /api/session/:id/flow-control` | Abort flow or toggle autonomous |
+| `POST /api/session/:id/model` | Set provider + model |
+| `POST /api/session/:id/thinking-level` | Set thinking level |
+| `POST /api/session/:id/attach-proposal` | Attach OpenSpec change |
+| `POST /api/session/:id/detach-proposal` | Detach OpenSpec change |
+
+These call the same internal methods as the browser-gateway WebSocket handlers — no duplicated logic.
+
+### Skill Contents
+
+- `SKILL.md` — Auto-discovers dashboard port from `~/.pi/dashboard/config.json`, organized by capability, auth-aware
+- `references/api-reference.md` — Complete REST API documentation
+- `references/recipes.md` — Multi-step orchestration patterns (spawn→prompt→monitor, batch operations, health checks)
+- `scripts/dashboard-api.sh` — curl wrapper with port detection, optional auth token, graceful jq fallback

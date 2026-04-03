@@ -11,54 +11,21 @@ import type { SessionManager } from "./memory-session-manager.js";
 import type { EventStore } from "./memory-event-store.js";
 import type { PiGateway } from "./pi-gateway.js";
 // PendingLoadManager removed — server loads sessions directly via DirectoryService
-import { spawnPiSession, type SpawnResult } from "./process-manager.js";
-import { loadConfig } from "../shared/config.js";
-import { safeRealpathSync } from "./resolve-path.js";
 import { createHeadlessPidRegistry, type HeadlessPidRegistry } from "./headless-pid-registry.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { SessionOrderManager } from "./session-order-manager.js";
-import type { StateStore } from "./state-store.js";
+import type { PreferencesStore } from "./preferences-store.js";
 import type { DirectoryService } from "./directory-service.js";
 import { createPendingResumeRegistry, type PendingResumeRegistry } from "./pending-resume-registry.js";
 import type { TerminalManager } from "./terminal-manager.js";
-import { execSync, execFile } from "node:child_process";
-import { extractStatsFromEvents } from "./event-status-extraction.js";
-import { promisify } from "node:util";
-const execFileAsync = promisify(execFile);
+import type { BrowserHandlerContext } from "./browser-handlers/handler-context.js";
+import { handleSubscribe } from "./browser-handlers/subscription-handler.js";
+import { handleSendPrompt, handleResumeSession, handleSpawnSession, handleShutdown, handleAbort, handleFlowControl } from "./browser-handlers/session-action-handler.js";
+import { handleRenameSession, handleHideSession, handleUnhideSession, handleAttachProposal, handleDetachProposal, handleFetchContent, handleListSessions } from "./browser-handlers/session-meta-handler.js";
+import { handleCreateTerminal, handleKillTerminal, handleRenameTerminal } from "./browser-handlers/terminal-handler.js";
+import { handlePinDirectory, handleUnpinDirectory, handleReorderPinnedDirs, handleReorderSessions, handleOpenSpecRefresh, handleOpenSpecBulkArchive, handleExtensionUiResponse, handlePiGatewayForward } from "./browser-handlers/directory-handler.js";
 
-const REPLAY_BATCH_SIZE = 200;
 
-/**
- * Fallback: find and kill a headless pi process by matching the session ID
- * in the process command line. This handles the case where the PID registry
- * is empty (e.g., after server restart).
- */
-function killHeadlessBySessionId(sessionId: string): boolean {
-  if (process.platform === "win32") return false;
-  try {
-    // Find the wrapper shell process: sh -c sleep ... | pi --mode rpc --session .../<sessionId>.jsonl
-    const output = execSync(
-      `ps -eo pid,command | grep "${sessionId}" | grep "sleep 2147483647" | grep -v grep`,
-      { encoding: "utf8", timeout: 3000 },
-    ).trim();
-    if (!output) return false;
-    for (const line of output.split("\n")) {
-      const pid = parseInt(line.trim(), 10);
-      if (pid > 0) {
-        try {
-          // Kill the entire process group (wrapper shell + sleep + pi)
-          process.kill(-pid, "SIGTERM");
-        } catch {
-          // Try direct kill if process group fails
-          try { process.kill(pid, "SIGTERM"); } catch { /* ignore */ }
-        }
-      }
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export interface BrowserGateway {
   wss: WebSocketServer;
@@ -74,6 +41,8 @@ export interface BrowserGateway {
   trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void;
   /** Clear a pending interactive UI request (resolved or cancelled) */
   clearUiRequest(sessionId: string, requestId: string): void;
+  /** Tell browser subscribers to reset accumulated state for a session (bridge reconnected) */
+  broadcastSessionStateReset(sessionId: string): void;
   /** Shut down all tracked headless child processes */
   shutdownHeadlessProcesses(): void;
   /** Registry for linking headless PIDs to session IDs */
@@ -89,9 +58,10 @@ export function createBrowserGateway(
   _pendingLoadManager?: unknown,
   pendingForkRegistry?: PendingForkRegistry,
   sessionOrderManager?: SessionOrderManager,
-  stateStore?: StateStore,
+  preferencesStore?: PreferencesStore,
   directoryService?: DirectoryService,
   terminalManager?: TerminalManager,
+  pendingDashboardSpawns?: Map<string, number>,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -128,6 +98,24 @@ export function createBrowserGateway(
     }
   }
 
+  function trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void {
+    let sessionMap = pendingUiRequests.get(sessionId);
+    if (!sessionMap) {
+      sessionMap = new Map();
+      pendingUiRequests.set(sessionId, sessionMap);
+    }
+    const title = params.title;
+    if (title !== undefined) {
+      for (const existing of sessionMap.values()) {
+        if (existing.method === method && existing.params.title === title) {
+          return false;
+        }
+      }
+    }
+    sessionMap.set(requestId, { requestId, method, params });
+    return true;
+  }
+
   function getSubscribers(sessionId: string): WebSocket[] {
     const result: WebSocket[] = [];
     for (const [ws, subs] of subscriptions) {
@@ -161,8 +149,8 @@ export function createBrowserGateway(
     }
 
     // Send pinned directories on connect
-    if (stateStore) {
-      sendTo(ws, { type: "pinned_dirs_updated", paths: stateStore.getPinnedDirectories() });
+    if (preferencesStore) {
+      sendTo(ws, { type: "pinned_dirs_updated", paths: preferencesStore.getPinnedDirectories() });
     }
 
     // Send session orders for all cwds
@@ -192,536 +180,106 @@ export function createBrowserGateway(
       }
     }
 
+
     ws.on("message", async (raw) => {
       try {
         const msg = JSON.parse(raw.toString()) as BrowserToServerMessage;
+        const ctx: BrowserHandlerContext = {
+          ws, sessionManager, eventStore, piGateway,
+          pendingForkRegistry, sessionOrderManager, preferencesStore,
+          directoryService, terminalManager,
+          headlessPidRegistry, pendingResumeRegistry, pendingDashboardSpawns,
+          sendTo, broadcast, getSubscribers, replayPendingUiRequests,
+          trackUiRequest: trackUiRequest,
+        };
 
         switch (msg.type) {
-          case "subscribe": {
-            subs.add(msg.sessionId);
-
-            // Check if events are in memory
-            if (eventStore.hasEvents(msg.sessionId)) {
-              // Replay events from lastSeq
-              const events = eventStore.getEvents(msg.sessionId, (msg.lastSeq ?? 0) + 1);
-              for (let i = 0; i < events.length; i += REPLAY_BATCH_SIZE) {
-                const batch = events.slice(i, i + REPLAY_BATCH_SIZE);
-                sendTo(ws, {
-                  type: "event_replay",
-                  sessionId: msg.sessionId,
-                  events: batch.map((e) => ({ seq: e.seq, event: e.event })),
-                  isLast: i + REPLAY_BATCH_SIZE >= events.length,
-                });
-              }
-              replayPendingUiRequests(ws, msg.sessionId);
-            } else if (directoryService) {
-              // Load session events directly from disk via DirectoryService
-              const session = sessionManager.get(msg.sessionId);
-              if (session?.sessionFile) {
-                // Send placeholder while loading
-                sendTo(ws, {
-                  type: "event_replay",
-                  sessionId: msg.sessionId,
-                  events: [],
-                  isLast: false,
-                });
-                directoryService.loadSessionEvents(msg.sessionId, session.sessionFile).then((result) => {
-                  if (result.success) {
-                    // Insert events into memory buffer
-                    for (const evt of result.events) {
-                      eventStore.insertEvent(msg.sessionId, evt);
-                    }
-                    // Extract stats from loaded events and update session metadata
-                    const statsUpdates = extractStatsFromEvents(result.events);
-                    const metaUpdates: Record<string, unknown> = { dataUnavailable: false, ...statsUpdates };
-                    sessionManager.update(msg.sessionId, metaUpdates);
-                    broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: metaUpdates });
-                    // Send loaded events to all subscribers
-                    const stored = eventStore.getEvents(msg.sessionId, 1);
-                    const replayMsg: ServerToBrowserMessage = {
-                      type: "event_replay",
-                      sessionId: msg.sessionId,
-                      events: stored.map((e) => ({ seq: e.seq, event: e.event })),
-                      isLast: true,
-                    };
-                    for (const sub of getSubscribers(msg.sessionId)) {
-                      sendTo(sub, replayMsg);
-                      replayPendingUiRequests(sub, msg.sessionId);
-                    }
-                  } else {
-                    sendTo(ws, {
-                      type: "event_replay",
-                      sessionId: msg.sessionId,
-                      events: [],
-                      isLast: true,
-                    });
-                    sessionManager.update(msg.sessionId, { dataUnavailable: true });
-                    broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { dataUnavailable: true } });
-                  }
-                }).catch(() => {
-                  sendTo(ws, {
-                    type: "event_replay",
-                    sessionId: msg.sessionId,
-                    events: [],
-                    isLast: true,
-                  });
-                  sessionManager.update(msg.sessionId, { dataUnavailable: true });
-                  broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { dataUnavailable: true } });
-                });
-              } else {
-                // No session file — data unavailable
-                sendTo(ws, {
-                  type: "event_replay",
-                  sessionId: msg.sessionId,
-                  events: [],
-                  isLast: true,
-                });
-                if (session) {
-                  sessionManager.update(msg.sessionId, { dataUnavailable: true });
-                  broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { dataUnavailable: true } });
-                }
-              }
-            } else {
-              // No directoryService — send empty
-              sendTo(ws, {
-                type: "event_replay",
-                sessionId: msg.sessionId,
-                events: [],
-                isLast: true,
-              });
-            }
-
-            // OpenSpec data is now sent per-directory on connect, not per-session on subscribe
+          case "subscribe":
+            handleSubscribe(msg, subs, ctx);
             break;
-          }
-
           case "unsubscribe":
             subs.delete(msg.sessionId);
             break;
-
-          case "send_prompt": {
-            const promptSession = sessionManager.get(msg.sessionId);
-            if (promptSession?.status === "ended") {
-              // Auto-resume: queue prompt and spawn pi to continue
-              if (!promptSession.sessionFile) {
-                console.error(`[dashboard] auto-resume failed: no session file for session ${msg.sessionId}`);
-                break;
-              }
-              // If already resuming, just update the queued prompt (don't spawn again)
-              const alreadyResuming = promptSession.resuming;
-              pendingResumeRegistry.record(promptSession.cwd, {
-                text: msg.text,
-                images: msg.images,
-                oldSessionId: msg.sessionId,
-                sessionFile: promptSession.sessionFile,
-              });
-              if (alreadyResuming) break;
-              // Show resuming state on the session card
-              sessionManager.update(msg.sessionId, { resuming: true });
-              broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { resuming: true } });
-              // Spawn pi to continue the session
-              const autoResumeConfig = loadConfig();
-              const spawnResult = await spawnPiSession(promptSession.cwd, {
-                sessionFile: promptSession.sessionFile,
-                mode: "continue",
-                strategy: autoResumeConfig.spawnStrategy,
-              });
-              if (!spawnResult.success) {
-                console.error(`[dashboard] auto-resume spawn failed: ${spawnResult.message}`);
-                pendingResumeRegistry.consume(promptSession.cwd);
-                sessionManager.update(msg.sessionId, { resuming: false });
-                broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { resuming: false } });
-              }
-              if (spawnResult.process && spawnResult.pid) {
-                headlessPidRegistry.register(spawnResult.pid, promptSession.cwd, spawnResult.process);
-              }
-            } else {
-              const sent = piGateway.sendToSession(msg.sessionId, {
-                type: "send_prompt",
-                sessionId: msg.sessionId,
-                text: msg.text,
-                images: msg.images,
-              });
-              if (!sent) {
-                console.error(`[dashboard] send_prompt failed: no bridge connection for session ${msg.sessionId}`);
-              }
-            }
+          case "send_prompt":
+            await handleSendPrompt(msg, ctx);
             break;
-          }
-
           case "abort":
-            piGateway.sendToSession(msg.sessionId, {
-              type: "abort",
-              sessionId: msg.sessionId,
-            });
+            handleAbort(msg, ctx);
             break;
-
           case "flow_control":
-            piGateway.sendToSession(msg.sessionId, {
-              type: "flow_control",
-              sessionId: msg.sessionId,
-              action: msg.action,
-            });
+            handleFlowControl(msg, ctx);
             break;
-
-          case "request_commands":
-            piGateway.sendToSession(msg.sessionId, {
-              type: "request_commands",
-              sessionId: msg.sessionId,
-            });
+          case "shutdown":
+            handleShutdown(msg, ctx);
             break;
-
-          case "list_files":
-            piGateway.sendToSession(msg.sessionId, {
-              type: "list_files",
-              sessionId: msg.sessionId,
-              query: msg.query,
-            });
+          case "rename_session":
+            handleRenameSession(msg, ctx);
             break;
-
-          case "openspec_refresh": {
-            if (directoryService) {
-              directoryService.refreshOpenSpec(msg.cwd).then((data) => {
-                broadcast({ type: "openspec_update", cwd: msg.cwd, data });
-              });
-            }
+          case "hide_session":
+            handleHideSession(msg, ctx);
             break;
-          }
-
-          case "openspec_bulk_archive": {
-            if (directoryService) {
-              // Run archive async to avoid blocking the event loop
-              execFileAsync("openspec", ["archive", "--completed"], { cwd: msg.cwd, timeout: 30000 })
-                .catch(() => { /* Ignore errors (e.g. no completed changes) */ })
-                .then(() => directoryService.refreshOpenSpec(msg.cwd))
-                .then((data) => {
-                  if (data) broadcast({ type: "openspec_update", cwd: msg.cwd, data });
-                });
-            }
+          case "unhide_session":
+            handleUnhideSession(msg, ctx);
             break;
-          }
-
-          case "request_models":
-            piGateway.sendToSession(msg.sessionId, {
-              type: "request_models",
-              sessionId: msg.sessionId,
-            });
+          case "attach_proposal":
+            handleAttachProposal(msg, ctx);
             break;
-
-          case "set_thinking_level":
-            piGateway.sendToSession(msg.sessionId, {
-              type: "set_thinking_level",
-              sessionId: msg.sessionId,
-              level: msg.level,
-            });
+          case "detach_proposal":
+            handleDetachProposal(msg, ctx);
             break;
-
-          case "set_model":
-            piGateway.sendToSession(msg.sessionId, {
-              type: "set_model",
-              sessionId: msg.sessionId,
-              provider: msg.provider,
-              modelId: msg.modelId,
-            });
+          case "fetch_content":
+            handleFetchContent(msg, ctx);
             break;
-
-          case "shutdown": {
-            // Send shutdown to bridge (graceful shutdown via pi API)
-            piGateway.sendToSession(msg.sessionId, {
-              type: "shutdown",
-              sessionId: msg.sessionId,
-            });
-            // Kill headless process group to ensure the wrapper shell is terminated
-            headlessPidRegistry.killBySessionId(msg.sessionId);
-            // Fallback: find and kill by session ID in process list
-            killHeadlessBySessionId(msg.sessionId);
-            // Immediately mark as ended so the UI updates without waiting
-            // for heartbeat timeout
-            sessionManager.unregister(msg.sessionId);
-            broadcast({ type: "session_removed", sessionId: msg.sessionId });
+          case "list_sessions":
+            handleListSessions(msg, ctx);
             break;
-          }
-
-          case "rename_session": {
-            // Optimistically update session name server-side
-            const nameUpdates = { name: msg.name || undefined };
-            sessionManager.update(msg.sessionId, nameUpdates);
-            // Broadcast to all browsers immediately
-            broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: nameUpdates });
-            // Forward to extension to persist in pi
-            piGateway.sendToSession(msg.sessionId, {
-              type: "rename_session",
-              sessionId: msg.sessionId,
-              name: msg.name,
-            });
+          case "resume_session":
+            await handleResumeSession(msg, ctx);
             break;
-          }
-
-          case "fetch_content": {
-            const event = eventStore.getEvent(msg.sessionId, msg.seq);
-            if (event) {
-              sendTo(ws, {
-                type: "event",
-                sessionId: msg.sessionId,
-                seq: msg.seq,
-                event,
-              });
-            }
+          case "spawn_session":
+            await handleSpawnSession(msg, ctx);
             break;
-          }
-
-          case "list_sessions": {
-            const cwd = msg.cwd;
-            // Try to forward to a connected bridge for this cwd
-            const bridgeSessionId = piGateway.findSessionByCwd(cwd);
-            if (bridgeSessionId) {
-              piGateway.sendToSession(bridgeSessionId, {
-                type: "list_sessions",
-                sessionId: bridgeSessionId,
-                cwd,
-              });
-            } else {
-              // Fallback: return sessions from in-memory registry filtered by cwd
-              const allSessions = sessionManager.listAll();
-              const filtered = allSessions
-                .filter((s) => s.cwd === cwd || s.cwd.startsWith(cwd + "/") || cwd.startsWith(s.cwd + "/"))
-                .map((s) => ({
-                  id: s.id,
-                  path: s.sessionFile || "",
-                  cwd: s.cwd,
-                  name: s.name,
-                  created: new Date(s.startedAt).toISOString(),
-                  modified: new Date(s.endedAt || s.startedAt).toISOString(),
-                  messageCount: 0,
-                  firstMessage: s.firstMessage,
-                }));
-              sendTo(ws, {
-                type: "sessions_list",
-                sessionId: "",
-                cwd,
-                sessions: filtered,
-              });
-            }
+          case "reorder_sessions":
+            handleReorderSessions(msg, ctx);
             break;
-          }
-
-          case "resume_session": {
-            const session = sessionManager.get(msg.sessionId);
-            if (!session) {
-              sendTo(ws, {
-                type: "resume_result",
-                sessionId: msg.sessionId,
-                success: false,
-                message: "Session not found",
-              });
-              break;
-            }
-            if (!session.sessionFile) {
-              sendTo(ws, {
-                type: "resume_result",
-                sessionId: msg.sessionId,
-                success: false,
-                message: "Session file is unknown (pre-migration session)",
-              });
-              break;
-            }
-            if (msg.mode === "continue" && session.status !== "ended") {
-              sendTo(ws, {
-                type: "resume_result",
-                sessionId: msg.sessionId,
-                success: false,
-                message: "Session is already active",
-              });
-              break;
-            }
-            if (session.resuming) {
-              sendTo(ws, {
-                type: "resume_result",
-                sessionId: msg.sessionId,
-                success: false,
-                message: "Session is already being resumed",
-              });
-              break;
-            }
-            // Record pending fork for session ordering
-            if (msg.mode === "fork" && pendingForkRegistry) {
-              pendingForkRegistry.recordFork(session.cwd, msg.sessionId);
-            }
-            const resumeConfig = loadConfig();
-            const result = await spawnPiSession(session.cwd, {
-              sessionFile: session.sessionFile,
-              mode: msg.mode,
-              strategy: resumeConfig.spawnStrategy,
-            });
-            sendTo(ws, {
-              type: "resume_result",
-              sessionId: msg.sessionId,
-              success: result.success,
-              message: result.message,
-            });
+          case "pin_directory":
+            handlePinDirectory(msg, ctx);
             break;
-          }
-
-          case "spawn_session": {
-            const config = loadConfig();
-            const spawnResult = await spawnPiSession(msg.cwd, {
-              strategy: config.spawnStrategy,
-            });
-            if (spawnResult.process && spawnResult.pid) {
-              headlessPidRegistry.register(spawnResult.pid, msg.cwd, spawnResult.process);
-            }
-            sendTo(ws, {
-              type: "spawn_result",
-              cwd: msg.cwd,
-              success: spawnResult.success,
-              message: spawnResult.message,
-            });
+          case "unpin_directory":
+            handleUnpinDirectory(msg, ctx);
             break;
-          }
-
-          case "attach_proposal": {
-            const updates: Record<string, unknown> = { attachedProposal: msg.changeName };
-            const session = sessionManager.get(msg.sessionId);
-            // Auto-name: set session name to proposal name if name is empty
-            if (session && !session.name?.trim()) {
-              updates.name = msg.changeName;
-              // Forward rename to extension so pi's internal name is updated
-              piGateway.sendToSession(msg.sessionId, {
-                type: "rename_session",
-                sessionId: msg.sessionId,
-                name: msg.changeName,
-              });
-            }
-            sessionManager.update(msg.sessionId, updates);
-            broadcast({ type: "session_updated", sessionId: msg.sessionId, updates });
+          case "reorder_pinned_dirs":
+            handleReorderPinnedDirs(msg, ctx);
             break;
-          }
-
-          case "detach_proposal": {
-            const updates = { attachedProposal: null, openspecPhase: null, openspecChange: null };
-            sessionManager.update(msg.sessionId, updates);
-            broadcast({ type: "session_updated", sessionId: msg.sessionId, updates });
+          case "openspec_refresh":
+            handleOpenSpecRefresh(msg, ctx);
             break;
-          }
-
-          case "hide_session": {
-            const updates = { hidden: true };
-            sessionManager.update(msg.sessionId, updates);
-            broadcast({ type: "session_updated", sessionId: msg.sessionId, updates });
+          case "openspec_bulk_archive":
+            handleOpenSpecBulkArchive(msg, ctx);
             break;
-          }
-
-          case "unhide_session": {
-            const updates = { hidden: false };
-            sessionManager.update(msg.sessionId, updates);
-            broadcast({ type: "session_updated", sessionId: msg.sessionId, updates });
-            break;
-          }
-
-          case "reorder_sessions": {
-            if (sessionOrderManager) {
-              sessionOrderManager.reorder(msg.cwd, msg.sessionIds);
-              broadcast({ type: "sessions_reordered", cwd: msg.cwd, sessionIds: msg.sessionIds });
-            }
-            break;
-          }
-
-          case "pin_directory": {
-            if (stateStore) {
-              const resolved = safeRealpathSync(msg.path);
-              stateStore.pinDirectory(resolved);
-              broadcast({ type: "pinned_dirs_updated", paths: stateStore.getPinnedDirectories() });
-              // Trigger directory discovery for newly pinned directory
-              if (directoryService) {
-                directoryService.onDirectoryAdded(resolved).then(({ sessions, openspecData }) => {
-                  for (const hist of sessions) {
-                    if (!sessionManager.get(hist.id)) {
-                      sessionManager.register({
-                        id: hist.id,
-                        cwd: hist.cwd,
-                        name: hist.name,
-                        source: "tui",
-                        sessionFile: hist.sessionFile,
-                        sessionDir: hist.sessionDir,
-                        firstMessage: hist.firstMessage,
-                        startedAt: hist.startedAt,
-                      });
-                      sessionManager.unregister(hist.id);
-                      sessionManager.update(hist.id, { hidden: true });
-                      const s = sessionManager.get(hist.id);
-                      if (s) broadcast({ type: "session_added", session: s });
-                    }
-                  }
-                  broadcast({
-                    type: "openspec_update",
-                    cwd: resolved,
-                    data: openspecData,
-                  } as any);
-                }).catch(() => {});
-              }
-            }
-            break;
-          }
-
-          case "unpin_directory": {
-            if (stateStore) {
-              stateStore.unpinDirectory(safeRealpathSync(msg.path));
-              broadcast({ type: "pinned_dirs_updated", paths: stateStore.getPinnedDirectories() });
-            }
-            break;
-          }
-
-          case "reorder_pinned_dirs": {
-            if (stateStore) {
-              stateStore.reorderPinnedDirs(msg.paths.map(safeRealpathSync));
-              broadcast({ type: "pinned_dirs_updated", paths: stateStore.getPinnedDirectories() });
-            }
-            break;
-          }
-
           case "extension_ui_response": {
             // Clear pending UI request tracking
             const sessionMap = pendingUiRequests.get(msg.sessionId);
             if (sessionMap) {
               sessionMap.delete(msg.requestId);
-              if (sessionMap.size === 0) {
-                pendingUiRequests.delete(msg.sessionId);
-              }
+              if (sessionMap.size === 0) pendingUiRequests.delete(msg.sessionId);
             }
-            piGateway.sendToSession(msg.sessionId, {
-              type: "extension_ui_response",
-              sessionId: msg.sessionId,
-              requestId: msg.requestId,
-              result: msg.result,
-              cancelled: msg.cancelled,
-            });
+            handleExtensionUiResponse(msg, ctx);
             break;
           }
-
-          case "create_terminal": {
-            if (terminalManager && sessionOrderManager) {
-              const terminal = terminalManager.spawn(msg.cwd);
-              sessionOrderManager.insert(msg.cwd, terminal.id);
-              broadcast({ type: "terminal_added", terminal });
-              broadcast({ type: "sessions_reordered", cwd: msg.cwd, sessionIds: sessionOrderManager.getOrder(msg.cwd) });
-            }
+          case "create_terminal":
+            handleCreateTerminal(msg, ctx);
             break;
-          }
-
-          case "kill_terminal": {
-            if (terminalManager) {
-              try { terminalManager.kill(msg.terminalId); } catch { /* ignore */ }
-            }
+          case "kill_terminal":
+            handleKillTerminal(msg, ctx);
             break;
-          }
-
-          case "rename_terminal": {
-            if (terminalManager) {
-              terminalManager.updateTitle(msg.terminalId, msg.title);
-              broadcast({ type: "terminal_updated", terminalId: msg.terminalId, updates: { title: msg.title } });
-            }
+          case "rename_terminal":
+            handleRenameTerminal(msg, ctx);
             break;
-          }
+          default:
+            // Forward simple pi-gateway commands
+            handlePiGatewayForward(msg, ctx);
+            break;
         }
       } catch {
         // Ignore malformed messages
@@ -761,6 +319,14 @@ export function createBrowserGateway(
       broadcast({ type: "session_removed", sessionId });
     },
 
+    broadcastSessionStateReset(sessionId: string) {
+      const subscribers = getSubscribers(sessionId);
+      const msg: ServerToBrowserMessage = { type: "session_state_reset", sessionId };
+      for (const ws of subscribers) {
+        sendTo(ws, msg);
+      }
+    },
+
     sendToSubscribers(sessionId: string, msg: ServerToBrowserMessage) {
       const subscribers = getSubscribers(sessionId);
       for (const ws of subscribers) {
@@ -776,25 +342,7 @@ export function createBrowserGateway(
       return getSubscribers(sessionId).length;
     },
 
-    trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>) {
-      let sessionMap = pendingUiRequests.get(sessionId);
-      if (!sessionMap) {
-        sessionMap = new Map();
-        pendingUiRequests.set(sessionId, sessionMap);
-      }
-      // Deduplicate: if a pending request with the same method+title already exists,
-      // skip (e.g. recursive proxy generates multiple requestIds for the same dialog)
-      const title = params.title;
-      if (title !== undefined) {
-        for (const existing of sessionMap.values()) {
-          if (existing.method === method && existing.params.title === title) {
-            return false;
-          }
-        }
-      }
-      sessionMap.set(requestId, { requestId, method, params });
-      return true;
-    },
+    trackUiRequest,
 
     clearUiRequest(sessionId: string, requestId: string) {
       const sessionMap = pendingUiRequests.get(sessionId);

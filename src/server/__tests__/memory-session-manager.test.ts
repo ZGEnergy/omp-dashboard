@@ -1,27 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import { describe, it, expect } from "vitest";
 import { createMemorySessionManager } from "../memory-session-manager.js";
-import { createStateStore } from "../state-store.js";
-import type { StateStore } from "../state-store.js";
 
 describe("memory-session-manager", () => {
-  let tmpDir: string;
-  let stateStore: StateStore;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mem-sm-test-"));
-    stateStore = createStateStore(path.join(tmpDir, "state.json"));
-  });
-
-  afterEach(() => {
-    stateStore.dispose();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
   it("registers a session", () => {
-    const sm = createMemorySessionManager(stateStore);
+    const sm = createMemorySessionManager();
     const session = sm.register({
       id: "s1",
       cwd: "/tmp",
@@ -34,14 +16,14 @@ describe("memory-session-manager", () => {
   });
 
   it("gets session by id", () => {
-    const sm = createMemorySessionManager(stateStore);
+    const sm = createMemorySessionManager();
     sm.register({ id: "s1", cwd: "/tmp", source: "tui" });
     expect(sm.get("s1")).toBeDefined();
     expect(sm.get("nonexistent")).toBeUndefined();
   });
 
   it("unregisters session", () => {
-    const sm = createMemorySessionManager(stateStore);
+    const sm = createMemorySessionManager();
     sm.register({ id: "s1", cwd: "/tmp", source: "tui" });
     sm.unregister("s1");
     const s = sm.get("s1");
@@ -50,30 +32,22 @@ describe("memory-session-manager", () => {
   });
 
   it("updates session", () => {
-    const sm = createMemorySessionManager(stateStore);
+    const sm = createMemorySessionManager();
     sm.register({ id: "s1", cwd: "/tmp", source: "tui" });
     sm.update("s1", { tokensIn: 100, model: "test/model" });
     expect(sm.get("s1")?.tokensIn).toBe(100);
     expect(sm.get("s1")?.model).toBe("test/model");
   });
 
-  it("persists hidden state via stateStore", () => {
-    const sm = createMemorySessionManager(stateStore);
+  it("updates hidden state on session object", () => {
+    const sm = createMemorySessionManager();
     sm.register({ id: "s1", cwd: "/tmp", source: "tui" });
     sm.update("s1", { hidden: true });
-    expect(stateStore.isHidden("s1")).toBe(true);
-  });
-
-  it("clears hidden state on register (active sessions are always visible)", () => {
-    stateStore.setHidden("s1", true);
-    const sm = createMemorySessionManager(stateStore);
-    const session = sm.register({ id: "s1", cwd: "/tmp", source: "tui" });
-    expect(session.hidden).toBe(false);
-    expect(stateStore.isHidden("s1")).toBe(false);
+    expect(sm.get("s1")?.hidden).toBe(true);
   });
 
   it("listActive excludes ended sessions", () => {
-    const sm = createMemorySessionManager(stateStore);
+    const sm = createMemorySessionManager();
     sm.register({ id: "s1", cwd: "/tmp", source: "tui" });
     sm.register({ id: "s2", cwd: "/tmp", source: "tui" });
     sm.unregister("s1");
@@ -82,7 +56,7 @@ describe("memory-session-manager", () => {
   });
 
   it("listAll includes all sessions", () => {
-    const sm = createMemorySessionManager(stateStore);
+    const sm = createMemorySessionManager();
     sm.register({ id: "s1", cwd: "/tmp", source: "tui" });
     sm.register({ id: "s2", cwd: "/tmp", source: "tui" });
     sm.unregister("s1");
@@ -90,7 +64,17 @@ describe("memory-session-manager", () => {
   });
 
   it("starts empty after creation", () => {
-    const sm = createMemorySessionManager(stateStore);
+    const sm = createMemorySessionManager();
     expect(sm.listAll()).toHaveLength(0);
+  });
+
+  it("onChange receives sessionId", () => {
+    const sm = createMemorySessionManager();
+    const ids: string[] = [];
+    sm.onChange = (sessionId) => ids.push(sessionId);
+    sm.register({ id: "s1", cwd: "/tmp", source: "tui" });
+    sm.update("s1", { tokensIn: 50 });
+    sm.unregister("s1");
+    expect(ids).toEqual(["s1", "s1", "s1"]);
   });
 });

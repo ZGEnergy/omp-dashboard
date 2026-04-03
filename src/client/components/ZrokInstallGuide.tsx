@@ -104,7 +104,7 @@ function EnrollAndVerify() {
         <CodeBlock>{`zrok enable <your-token>`}</CodeBlock>
         <p className="text-sm text-[var(--text-tertiary)] mt-2">
           This stores your API token in zrok's own config directory
-          (<code className="text-xs">~/.zrok2/environment.json</code>).
+          (<code className="text-xs bg-[var(--bg-surface)] px-1 py-0.5 rounded font-mono">~/.zrok2/environment.json</code>).
           The dashboard reads this file to detect enrollment — no keys are
           copied into the dashboard config.
         </p>
@@ -165,16 +165,16 @@ export function ZrokInstallGuide({ onBack }: Props) {
 
         <Section title="4. Restart the Dashboard Server">
           <p className="text-sm text-[var(--text-secondary)] mb-2">
-            The tunnel is <strong>enabled by default</strong> (<code className="text-xs">tunnel.enabled: true</code>).
+            The tunnel is <strong>enabled by default</strong> (<code className="text-xs bg-[var(--bg-surface)] px-1 py-0.5 rounded font-mono">tunnel.enabled: true</code>).
             After installing and enrolling zrok, restart the dashboard server —
             it will automatically detect zrok and open a tunnel on startup.
             The tunnel URL will appear in the server logs.
           </p>
           <CodeBlock>{`pi-dashboard stop && pi-dashboard start`}</CodeBlock>
           <p className="text-sm text-[var(--text-tertiary)] mt-2">
-            To disable auto-tunnel, set <code className="text-xs">tunnel.enabled</code> to{" "}
-            <code className="text-xs">false</code> in Settings or pass{" "}
-            <code className="text-xs">--no-tunnel</code> on the CLI.
+            To disable auto-tunnel, set <code className="text-xs bg-[var(--bg-surface)] px-1 py-0.5 rounded font-mono">tunnel.enabled</code> to{" "}
+            <code className="text-xs bg-[var(--bg-surface)] px-1 py-0.5 rounded font-mono">false</code> in Settings or pass{" "}
+            <code className="text-xs bg-[var(--bg-surface)] px-1 py-0.5 rounded font-mono">--no-tunnel</code> on the CLI.
           </p>
         </Section>
 

@@ -139,6 +139,12 @@ export interface TerminalUpdatedMessage {
   updates: Partial<TerminalSession>;
 }
 
+/** Tells the browser to reset accumulated state for a session (bridge reconnected). */
+export interface SessionStateResetMessage {
+  type: "session_state_reset";
+  sessionId: string;
+}
+
 export type ServerToBrowserMessage =
   | SessionAddedMessage
   | SessionUpdatedMessage
@@ -159,7 +165,8 @@ export type ServerToBrowserMessage =
   | PinnedDirsUpdatedMessage
   | TerminalAddedMessage
   | TerminalRemovedMessage
-  | TerminalUpdatedMessage;
+  | TerminalUpdatedMessage
+  | SessionStateResetMessage;
 
 // ── Browser → Server ────────────────────────────────────────────────
 

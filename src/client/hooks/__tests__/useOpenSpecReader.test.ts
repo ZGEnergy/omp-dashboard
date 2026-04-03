@@ -113,6 +113,40 @@ describe("useOpenSpecReader", () => {
     ]);
   });
 
+  it("uses archive path when archive flag is true", async () => {
+    fetchMock.mockReturnValue(mockFileResponse("# Archived proposal"));
+
+    const { result } = renderHook(() =>
+      useOpenSpecReader(CWD, CHANGE, "proposal", ARTIFACTS, true)
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.content).toBe("# Archived proposal");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("path=openspec%2Fchanges%2Farchive%2Fmy-change%2Fproposal.md")
+    );
+  });
+
+  it("uses archive path for specs directory when archive flag is true", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes("path=openspec%2Fchanges%2Farchive%2Fmy-change%2Fspecs")) {
+        if (url.includes("auth%2Fspec.md")) return mockFileResponse("Auth spec");
+        return mockDirResponse(["auth"]);
+      }
+      return mockErrorResponse("unexpected");
+    });
+
+    const { result } = renderHook(() =>
+      useOpenSpecReader(CWD, CHANGE, "specs", ARTIFACTS, true)
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.content).toContain("# auth");
+    expect(result.current.content).toContain("Auth spec");
+  });
+
   it("refetches when tab changes", async () => {
     fetchMock.mockReturnValue(mockFileResponse("proposal content"));
 

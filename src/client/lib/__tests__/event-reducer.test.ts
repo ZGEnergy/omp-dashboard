@@ -1035,4 +1035,97 @@ describe("command_feedback events", () => {
       expect(s2).toBe(s1);
     });
   });
+
+  describe("duration tracking", () => {
+    it("should store startedAt on tool_execution_start messages", () => {
+      const state = applyEvents([
+        {
+          eventType: "tool_execution_start",
+          timestamp: 1000,
+          data: { toolCallId: "tc-1", toolName: "bash", args: { command: "npm test" } },
+        },
+      ]);
+      const toolMsg = state.messages.find((m) => m.toolCallId === "tc-1");
+      expect(toolMsg?.startedAt).toBe(1000);
+    });
+
+    it("should compute duration on tool_execution_end", () => {
+      const state = applyEvents([
+        {
+          eventType: "tool_execution_start",
+          timestamp: 1000,
+          data: { toolCallId: "tc-1", toolName: "bash", args: { command: "npm test" } },
+        },
+        {
+          eventType: "tool_execution_end",
+          timestamp: 4500,
+          data: { toolCallId: "tc-1", result: "ok" },
+        },
+      ]);
+      const toolMsg = state.messages.find((m) => m.toolCallId === "tc-1");
+      expect(toolMsg?.duration).toBe(3500);
+    });
+
+    it("should store startedAt and duration on thinking messages", () => {
+      const state = applyEvents([
+        {
+          eventType: "message_update",
+          timestamp: 2000,
+          data: { assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } },
+        },
+        {
+          eventType: "message_update",
+          timestamp: 2500,
+          data: { assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "reasoning..." } },
+        },
+        {
+          eventType: "message_update",
+          timestamp: 5000,
+          data: { assistantMessageEvent: { type: "thinking_end", contentIndex: 0 } },
+        },
+      ]);
+      const thinkingMsg = state.messages.find((m) => m.role === "thinking");
+      expect(thinkingMsg?.startedAt).toBe(2000);
+      expect(thinkingMsg?.duration).toBe(3000);
+    });
+
+    it("should track thinkingStartedAt for live counter during streaming", () => {
+      const state = applyEvents([
+        {
+          eventType: "message_update",
+          timestamp: 2000,
+          data: { assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } },
+        },
+        {
+          eventType: "message_update",
+          timestamp: 2500,
+          data: { assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "still thinking" } },
+        },
+      ]);
+      // While still streaming, thinkingStartedAt is set
+      expect(state.thinkingStartedAt).toBe(2000);
+      expect(state.streamingThinking).toBe("still thinking");
+    });
+
+    it("should clear thinkingStartedAt on thinking_end", () => {
+      const state = applyEvents([
+        {
+          eventType: "message_update",
+          timestamp: 2000,
+          data: { assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } },
+        },
+        {
+          eventType: "message_update",
+          timestamp: 2500,
+          data: { assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "done" } },
+        },
+        {
+          eventType: "message_update",
+          timestamp: 5000,
+          data: { assistantMessageEvent: { type: "thinking_end", contentIndex: 0 } },
+        },
+      ]);
+      expect(state.thinkingStartedAt).toBeUndefined();
+    });
+  });
 });

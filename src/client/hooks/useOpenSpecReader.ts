@@ -48,8 +48,8 @@ async function fetchDir(cwd: string, dirPath: string): Promise<string[]> {
   return body.data.entries;
 }
 
-async function fetchArtifactContent(cwd: string, changeName: string, artifactId: string): Promise<string> {
-  const basePath = `openspec/changes/${changeName}`;
+async function fetchArtifactContent(cwd: string, changeName: string, artifactId: string, archive?: boolean): Promise<string> {
+  const basePath = archive ? `openspec/changes/archive/${changeName}` : `openspec/changes/${changeName}`;
 
   if (artifactId === "specs") {
     // Fetch directory listing, then fetch all spec.md files in parallel
@@ -75,6 +75,7 @@ export function useOpenSpecReader(
   changeName: string,
   initialArtifact: string,
   artifacts: OpenSpecArtifact[],
+  archive?: boolean,
 ): OpenSpecReaderState {
   const [activeTab, setActiveTab] = useState(initialArtifact);
   const [content, setContent] = useState<string | undefined>(undefined);
@@ -98,7 +99,7 @@ export function useOpenSpecReader(
     setContent(undefined);
 
     try {
-      const result = await fetchArtifactContent(cwd, changeName, artifactId);
+      const result = await fetchArtifactContent(cwd, changeName, artifactId, archive);
       if (!controller.signal.aborted) {
         setContent(result);
         setIsLoading(false);
@@ -109,7 +110,7 @@ export function useOpenSpecReader(
         setIsLoading(false);
       }
     }
-  }, [cwd, changeName]);
+  }, [cwd, changeName, archive]);
 
   useEffect(() => {
     loadContent(activeTab);

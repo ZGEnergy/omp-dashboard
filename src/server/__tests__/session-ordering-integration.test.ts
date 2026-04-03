@@ -4,14 +4,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createSessionOrderManager } from "../session-order-manager.js";
 import { createPendingForkRegistry } from "../pending-fork-registry.js";
-import type { StateStore } from "../state-store.js";
+import type { PreferencesStore } from "../preferences-store.js";
 
-function createMockStateStore(): StateStore {
+function createMockPreferencesStore(): PreferencesStore {
   let order: Record<string, string[]> = {};
   return {
-    isHidden: vi.fn(() => false),
-    setHidden: vi.fn(),
-    getHiddenSessions: vi.fn(() => []),
     getSessionOrder: vi.fn(() => order),
     setSessionOrder: vi.fn((o: Record<string, string[]>) => { order = o; }),
     getPinnedDirectories: vi.fn(() => []),
@@ -25,10 +22,10 @@ function createMockStateStore(): StateStore {
 }
 
 describe("Session ordering integration", () => {
-  let stateStore: StateStore;
+  let stateStore: PreferencesStore;
 
   beforeEach(() => {
-    stateStore = createMockStateStore();
+    stateStore = createMockPreferencesStore();
   });
 
   it("new session prepends to order", () => {

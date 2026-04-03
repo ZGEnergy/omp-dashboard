@@ -15,9 +15,11 @@ interface Props {
   onNavigateToSession?: (sessionId: string) => void;
   /** Open the main specs browser */
   onOpenSpecs?: () => void;
+  /** Open the archive browser */
+  onOpenArchive?: () => void;
 }
 
-export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, sessions, onNavigateToSession, onOpenSpecs }: Props) {
+export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, sessions, onNavigateToSession, onOpenSpecs, onOpenArchive }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   if (!data.initialized) return null;
@@ -48,6 +50,15 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, se
           <Icon path={mdiRefresh} size={0.5} />
         </button>
         <span className="flex-1" />
+        {onOpenArchive && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpenArchive(); }}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-blue-400 hover:border-blue-500/50"
+            data-testid="folder-archive-btn"
+          >
+            Archive
+          </button>
+        )}
         {onOpenSpecs && (
           <button
             onClick={(e) => { e.stopPropagation(); onOpenSpecs(); }}

@@ -139,37 +139,45 @@ export function MarkdownSearch({ contentRef, content }: Props) {
       return;
     }
 
-    const results = fuseRef.current.search(searchQuery);
+    // Strategy: try exact (substring) match first, fuzzy only as fallback
+    const queryLower = searchQuery.toLowerCase();
+    const exactMatches = itemsRef.current.filter((item) =>
+      item.text.toLowerCase().includes(queryLower),
+    );
 
-    // Collect unique search terms from fuse matches for highlighting
-    const terms = new Set<string>();
-    for (const result of results) {
-      if (result.matches) {
-        for (const m of result.matches) {
-          if (m.value) {
-            // Extract the matched substrings
-            for (const [start, end] of m.indices ?? []) {
-              const matchedText = m.value.slice(start, end + 1);
-              if (matchedText.length >= 2) {
-                terms.add(matchedText);
+    let terms: Set<string>;
+    let matchedElements: Set<Element>;
+
+    if (exactMatches.length > 0) {
+      // Exact substring match — highlight the query itself
+      terms = new Set([searchQuery]);
+      matchedElements = new Set(exactMatches.map((m) => m.element));
+    } else {
+      // Fuzzy fallback via fuse.js
+      const results = fuseRef.current.search(searchQuery);
+      terms = new Set<string>();
+      for (const result of results) {
+        if (result.matches) {
+          for (const m of result.matches) {
+            if (m.value) {
+              for (const [start, end] of m.indices ?? []) {
+                const matchedText = m.value.slice(start, end + 1);
+                if (matchedText.length >= 2) {
+                  terms.add(matchedText);
+                }
               }
             }
           }
         }
       }
-    }
-
-    if (terms.size === 0) {
-      // Fallback: use the query itself as a search term
-      terms.add(searchQuery);
+      if (terms.size === 0) {
+        terms.add(searchQuery);
+      }
+      matchedElements = new Set(results.map((r) => r.item.element));
     }
 
     // Highlight in matching elements
     let totalHighlights = 0;
-    const matchedElements = new Set<Element>();
-    for (const result of results) {
-      matchedElements.add(result.item.element);
-    }
 
     for (const element of matchedElements) {
       totalHighlights += highlightTextInElement(element, [...terms]);

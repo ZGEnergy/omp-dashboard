@@ -2,14 +2,17 @@ import React, { useState } from "react";
 import { Icon } from "@mdi/react";
 import { mdiChevronRight, mdiChevronDown, mdiHeadLightbulb } from "@mdi/js";
 import { MarkdownContent } from "./MarkdownContent.js";
+import { ElapsedBadge } from "./ElapsedBadge.js";
 
 interface Props {
   content: string;
   isStreaming?: boolean;
   defaultExpanded?: boolean;
+  startedAt?: number;
+  duration?: number;
 }
 
-export function ThinkingBlock({ content, isStreaming, defaultExpanded = false }: Props) {
+export function ThinkingBlock({ content, isStreaming, defaultExpanded = false, startedAt, duration }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   return (
@@ -25,6 +28,7 @@ export function ThinkingBlock({ content, isStreaming, defaultExpanded = false }:
           Reasoning
           {isStreaming && <span className="ml-1 animate-pulse">…</span>}
         </span>
+        <ElapsedBadge startedAt={startedAt} duration={duration} />
         <span className="ml-auto text-[var(--text-muted)] inline-flex">
           <Icon path={expanded ? mdiChevronDown : mdiChevronRight} size={0.6} />
         </span>

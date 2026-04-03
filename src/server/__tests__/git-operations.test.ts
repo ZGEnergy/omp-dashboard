@@ -91,6 +91,19 @@ describe("git-operations", () => {
       expect(names).toContain("feature-b");
     });
 
+    it("handles empty repo (no commits)", () => {
+      const emptyRepo = mkdtempSync(join(tmpdir(), "git-empty-"));
+      try {
+        git("init", emptyRepo);
+        const info = listBranches(emptyRepo);
+        expect(info.detached).toBe(false);
+        expect(info.branches).toEqual([]);
+        expect(info.current).toBeTruthy(); // default branch name
+      } finally {
+        rmSync(emptyRepo, { recursive: true, force: true });
+      }
+    });
+
     it("detects detached HEAD", () => {
       const sha = execSync("git rev-parse HEAD", { cwd: repo, encoding: "utf-8" }).trim();
       git(`checkout ${sha}`, repo);

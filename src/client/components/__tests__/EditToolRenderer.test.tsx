@@ -19,8 +19,8 @@ describe("EditToolRenderer", () => {
 
     // Should show diff lines (green for additions, red for deletions)
     const lines = container.querySelectorAll("div.font-mono > div");
-    const greenLines = Array.from(lines).filter((el) => el.className.includes("text-green-400"));
-    const redLines = Array.from(lines).filter((el) => el.className.includes("text-red-400"));
+    const greenLines = Array.from(lines).filter((el) => el.className.includes("text-[var(--accent-green)]"));
+    const redLines = Array.from(lines).filter((el) => el.className.includes("text-[var(--accent-red)]"));
     expect(greenLines.length).toBeGreaterThan(0);
     expect(redLines.length).toBeGreaterThan(0);
   });
@@ -48,10 +48,10 @@ describe("EditToolRenderer", () => {
     // Each should have green and red lines
     for (const block of diffBlocks) {
       const greenLines = Array.from(block.querySelectorAll("div")).filter((el) =>
-        el.className.includes("text-green-400"),
+        el.className.includes("text-[var(--accent-green)]"),
       );
       const redLines = Array.from(block.querySelectorAll("div")).filter((el) =>
-        el.className.includes("text-red-400"),
+        el.className.includes("text-[var(--accent-red)]"),
       );
       expect(greenLines.length).toBeGreaterThan(0);
       expect(redLines.length).toBeGreaterThan(0);

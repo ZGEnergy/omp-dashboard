@@ -13,6 +13,7 @@ A web-based dashboard for monitoring and interacting with [pi](https://github.co
 - **Workspace management** — Organize sessions by project folder
 - **Command autocomplete** — `/` prefix triggers command dropdown with filtering
 - **Session statistics** — Token counts, costs, model info, thinking level
+- **Elapsed time tracking** — Live ticking counters on running operations, final duration on completed tool calls and reasoning blocks
 - **Mobile-friendly** — Responsive layout with swipe drawer and touch targets
 - **Session spawning** — Launch new pi sessions from the dashboard (headless by default, or via tmux)
 - **Extension UI forwarding** — Interactive dialogs (confirm/select/input) survive page refresh and server restart
@@ -357,7 +358,33 @@ npm run dev
 # Terminal 3: pi with the bridge extension
 pi -e src/extension/bridge.ts   # or just `pi` if installed
 
-# Open http://localhost:3000 (Vite proxies API/WS to :8000)
+# Open http://localhost:8000 (server proxies to Vite for SPA routes + assets)
+# Or http://localhost:3000 (Vite directly, proxies API/WS to :8000)
+```
+
+### Deploy after changes
+
+The `pi-dashboard` command is available globally when the package is installed. After making changes, restart the appropriate components:
+
+```bash
+# After client changes (production mode)
+npm run build
+pi-dashboard stop && pi-dashboard start
+
+# After server changes (runs TypeScript directly, no build needed)
+pi-dashboard stop && pi-dashboard start
+
+# After bridge extension changes
+npm run reload          # Reload all connected pi sessions
+
+# Full rebuild (e.g., after pulling updates)
+npm run build
+pi-dashboard stop && pi-dashboard start
+npm run reload
+
+# Dev mode variant (with Vite proxy)
+pi-dashboard stop && pi-dashboard start --dev
+npm run reload
 ```
 
 ### Project Structure
@@ -374,7 +401,7 @@ src/
 │   ├── bridge.ts          # Main extension entry
 │   ├── connection.ts      # WebSocket with reconnection
 │   ├── event-forwarder.ts # Event mapping
-│   ├── source-detector.ts # Session source detection
+│   ├── source-detector.ts # Session source detection (via .meta.json sidecar)
 │   ├── command-handler.ts # Command relay
 │   ├── server-probe.ts    # TCP probe for server detection
 │   ├── server-launcher.ts # Auto-start server as detached process
@@ -400,6 +427,7 @@ src/
 │   ├── tunnel.ts          # Zrok tunnel with reserved shares for persistent URLs, binary detection, PID tracking
 │   ├── server-pid.ts      # PID file for daemon management
 │   └── json-store.ts      # Atomic JSON file helpers
+├── shared/session-meta.ts # Session metadata sidecar (.meta.json) read/write
 └── client/           # React web client
     ├── App.tsx
     ├── hooks/             # WebSocket hook

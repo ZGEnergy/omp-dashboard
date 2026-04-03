@@ -153,7 +153,7 @@ function fixWideCharsInCodeBlocks(container: HTMLElement) {
   }
 }
 
-export function MarkdownContent({ content }: Props) {
+export const MarkdownContent = React.memo(function MarkdownContent({ content }: Props) {
   // ASCII table monospace fixer — disabled pending further refinement
   // const processedContent = useMemo(() => wrapAsciiTables(content), [content]);
   const processedContent = content;
@@ -189,6 +189,7 @@ export function MarkdownContent({ content }: Props) {
                     style={syntaxStyle}
                     language={match[1]}
                     PreTag="div"
+                    customStyle={{ background: 'var(--bg-code)' }}
                   >
                     {codeString}
                   </SyntaxHighlighter>
@@ -232,4 +233,4 @@ export function MarkdownContent({ content }: Props) {
       </ReactMarkdown>
     </div>
   );
-}
+});

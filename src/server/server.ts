@@ -9,8 +9,8 @@ import { createMemoryEventStore, type EventStore } from "./memory-event-store.js
 import { createMemorySessionManager, type SessionManager } from "./memory-session-manager.js";
 import { createPiGateway, type PiGateway } from "./pi-gateway.js";
 import { createBrowserGateway, type BrowserGateway } from "./browser-gateway.js";
-import { createStateStore, type StateStore } from "./state-store.js";
-import { createSessionPersistence, type SessionPersistence } from "./session-persistence.js";
+import { createPreferencesStore, type PreferencesStore } from "./preferences-store.js";
+import { createMetaPersistence, type MetaPersistence } from "./meta-persistence.js";
 import { createSessionOrderManager, type SessionOrderManager } from "./session-order-manager.js";
 import { createPendingForkRegistry, type PendingForkRegistry } from "./pending-fork-registry.js";
 
@@ -19,20 +19,20 @@ import { createDirectoryService, type DirectoryService } from "./directory-servi
 import { createTerminalManager, type TerminalManager } from "./terminal-manager.js";
 import { createTerminalGateway, type TerminalGateway } from "./terminal-gateway.js";
 import { writePid, removePid } from "./server-pid.js";
-import type { ApiResponse } from "../shared/types.js";
-import { extractSessionStats } from "./session-stats-reader.js";
-import { extractSessionUpdates } from "./event-status-extraction.js";
-import { createTunnel, deleteTunnel, getTunnelStatus, detectZrokBinary, cleanupStaleZrok } from "./tunnel.js";
-import { detectEditors, EDITORS } from "./editor-registry.js";
-import { localhostGuard } from "./localhost-guard.js";
-import { listDirectories } from "./browse.js";
-import { readConfigRedacted, writeConfigPartial } from "./config-api.js";
-import { spawn } from "node:child_process";
-import { isGitRepo, listBranches, checkoutBranch, gitInit, stashPop } from "./git-operations.js";
-import fs from "node:fs/promises";
-import os from "node:os";
+import { wireEvents } from "./event-wiring.js";
+import { createIdleTimer } from "./idle-timer.js";
+import { discoverAndBroadcastSessions } from "./session-bootstrap.js";
+import { scanAllSessions } from "./session-scanner.js";
+import { needsMigration, runMigration } from "./migrate-persistence.js";
+import { detectZrokBinary, cleanupStaleZrok, createTunnel, deleteTunnel } from "./tunnel.js";
 import { registerAuthPlugin, validateWsUpgrade, isBypassedHost } from "./auth-plugin.js";
 import type { AuthConfig } from "../shared/config.js";
+import { registerSessionApi } from "./session-api.js";
+import { registerSessionRoutes } from "./routes/session-routes.js";
+import { registerGitRoutes } from "./routes/git-routes.js";
+import { registerFileRoutes } from "./routes/file-routes.js";
+import { registerOpenSpecRoutes } from "./routes/openspec-routes.js";
+import { registerSystemRoutes } from "./routes/system-routes.js";
 
 export interface ServerConfig {
   port: number;
@@ -43,6 +43,8 @@ export interface ServerConfig {
   tunnel: boolean;
   tunnelReservedToken?: string;
   authConfig?: AuthConfig;
+  /** Override WS ping interval for pi-gateway (ms). Default 30000. Set 0 to disable. */
+  pingInterval?: number;
 }
 
 export interface DashboardServer {
@@ -54,51 +56,74 @@ export interface DashboardServer {
 }
 
 export async function createServer(config: ServerConfig): Promise<DashboardServer> {
-  const stateStore = createStateStore();
-  const sessionManager = createMemorySessionManager(stateStore);
-  const sessionPersistence = createSessionPersistence();
-  const sessionOrderManager = createSessionOrderManager(stateStore);
+  // Run migration from sessions.json + state.json if needed
+  if (needsMigration()) {
+    const migResult = runMigration();
+    console.log(`[dashboard] Migration complete: ${migResult.sessionsWritten} sessions, ${migResult.hiddenApplied} hidden applied, ${migResult.hiddenOrphaned} orphaned, renamed: ${migResult.oldFilesRenamed.join(", ")}`);
+  }
+
+  const preferencesStore = createPreferencesStore();
+  const sessionManager = createMemorySessionManager();
+  const metaPersistence = createMetaPersistence();
+  const sessionOrderManager = createSessionOrderManager(preferencesStore);
   const pendingForkRegistry = createPendingForkRegistry();
 
-  // Restore persisted sessions from previous server run
-  // Mark non-ended sessions as disconnected — no bridge is connected after restart.
-  // When a bridge reconnects, register() will merge and set status back to "active".
-  // Enrich with stats from session files if persisted stats are missing.
-  for (const session of sessionPersistence.load()) {
+  // Restore sessions from per-session .meta.json files (scans ~/.pi/agent/sessions/)
+  const scanResult = scanAllSessions();
+  for (const session of scanResult.sessions) {
     const restored = { ...session, dataUnavailable: true };
     if (restored.status !== "ended") {
       restored.status = "ended";
       restored.endedAt = restored.endedAt ?? Date.now();
     }
-    // Enrich with stats from session file if cost or context data is missing
-    const needsEnrichment = !(restored.cost && restored.cost > 0) || restored.contextTokens === undefined;
-    if (restored.sessionFile && needsEnrichment) {
-      try {
-        const stats = extractSessionStats(restored.sessionFile);
-        if (stats) {
-          restored.tokensIn = stats.tokensIn;
-          restored.tokensOut = stats.tokensOut;
-          restored.cacheRead = stats.cacheRead;
-          restored.cacheWrite = stats.cacheWrite;
-          restored.cost = stats.cost;
-          if (!restored.model && stats.model) restored.model = stats.model;
-          if (!restored.thinkingLevel && stats.thinkingLevel) restored.thinkingLevel = stats.thinkingLevel;
-          if (stats.lastTotalTokens) restored.contextTokens = stats.lastTotalTokens;
-          if (stats.contextWindow) restored.contextWindow = stats.contextWindow;
-        }
-      } catch { /* ignore — stats are nice-to-have */ }
-    }
     sessionManager.restore(restored);
   }
+  if (scanResult.cacheUpdates > 0) {
+    console.log(`[dashboard] Session scan: ${scanResult.sessions.length} sessions, ${scanResult.cacheUpdates} cache updates`);
+  }
 
-  // Save sessions to disk on any change
-  sessionManager.onChange = () => {
-    sessionPersistence.save(sessionManager.listAll());
+  // Save per-session .meta.json on any change
+  sessionManager.onChange = (sessionId: string) => {
+    const session = sessionManager.get(sessionId);
+    if (!session?.sessionFile) return;
+    metaPersistence.save(session.sessionFile, {
+      source: session.source,
+      name: session.name,
+      attachedProposal: session.attachedProposal,
+      hidden: session.hidden,
+      cwd: session.cwd,
+      status: session.status,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      model: session.model,
+      thinkingLevel: session.thinkingLevel,
+      tokensIn: session.tokensIn,
+      tokensOut: session.tokensOut,
+      cacheRead: session.cacheRead,
+      cacheWrite: session.cacheWrite,
+      cost: session.cost,
+      contextTokens: session.contextTokens,
+      contextWindow: session.contextWindow,
+      firstMessage: session.firstMessage,
+      cachedAt: Date.now(),
+    });
   };
 
-  const directoryService = createDirectoryService(stateStore, sessionManager);
+  // Track cwds with pending dashboard-spawned sessions (for writing .meta.json).
+  // Uses a counter per cwd to handle multiple spawns and avoid reconnects consuming entries.
+  const pendingDashboardSpawns = new Map<string, number>();
+  // Track known session IDs so we can distinguish new sessions from reconnections.
+  const knownSessionIds = new Set<string>();
+  // Populate from persisted sessions
+  for (const s of sessionManager.listAll()) {
+    knownSessionIds.add(s.id);
+  }
 
-  const piGateway = createPiGateway(sessionManager);
+  const directoryService = createDirectoryService(preferencesStore, sessionManager);
+
+  const piGateway = createPiGateway(sessionManager, {
+    ...(config.pingInterval !== undefined ? { pingInterval: config.pingInterval } : {}),
+  });
 
   // Create event store with pinning callback
   const eventStore = createMemoryEventStore(
@@ -124,353 +149,24 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   const terminalGateway = createTerminalGateway(terminalManager);
 
-  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, stateStore, directoryService, terminalManager);
+  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns);
 
-  // Broadcast placeholder session to browsers when auto-created from early events
-  piGateway.onSessionCreated = (sessionId) => {
-    const session = sessionManager.get(sessionId);
-    if (session) {
-      browserGateway.broadcastSessionAdded(session);
-    }
-  };
-
-  // Broadcast session ended to browsers when sessions are unregistered
-  // (heartbeat timeout in pi-gateway, ~45s after disconnect)
-  sessionManager.onUnregister = (sessionId) => {
-    const session = sessionManager.get(sessionId);
-    if (session) {
-      browserGateway.broadcastSessionUpdated(sessionId, {
-        status: "ended",
-        endedAt: session.endedAt,
-        currentTool: null,
-      });
-    }
-  };
 
   // Wire up event forwarding from pi gateway to browser gateway
-  piGateway.onEvent = (sessionId, msg) => {
+  wireEvents({
+    sessionManager,
+    eventStore,
+    piGateway,
+    browserGateway,
+    sessionOrderManager,
+    pendingForkRegistry,
+    directoryService,
+    knownSessionIds,
+    pendingDashboardSpawns,
+  });
 
-    if (msg.type === "event_forward") {
-      const seq = eventStore.insertEvent(sessionId, msg.event);
-      browserGateway.broadcastEvent(sessionId, seq, msg.event);
-
-      // Extract status/tool updates from the event and broadcast
-      const updates = extractSessionUpdates(msg.event);
-      if (updates) {
-        // Handle flow_agent_complete increment: sentinel -1 means "increment by 1"
-        if (updates.flowAgentsDone === -1) {
-          const session = sessionManager.get(sessionId);
-          updates.flowAgentsDone = (session?.flowAgentsDone ?? 0) + 1;
-        }
-        sessionManager.update(sessionId, updates);
-        browserGateway.broadcastSessionUpdated(sessionId, updates);
-      }
-    }
-    if (msg.type === "session_register") {
-      // Always clear events — bridge replays full session history after registering
-      eventStore.deleteEventsForSession(sessionId);
-      // Force visible + clear dataUnavailable — active sessions must always be visible
-      sessionManager.update(sessionId, { hidden: false, dataUnavailable: false });
-
-      // When pi continues a session via --session, it reuses the same JSONL file
-      // but creates a new session ID. Clear sessionFile from any other session
-      // that points to the same file so stale sessions can't resume the wrong content.
-      if (msg.sessionFile) {
-        for (const other of sessionManager.listAll()) {
-          if (other.id !== sessionId && other.sessionFile === msg.sessionFile) {
-            sessionManager.update(other.id, { sessionFile: undefined });
-            browserGateway.broadcastSessionUpdated(other.id, { sessionFile: null });
-          }
-        }
-      }
-      // Link headless PID to session ID (if spawned from dashboard)
-      browserGateway.headlessPidRegistry.linkSession(sessionId, msg.cwd);
-
-      // Insert into session order — check for pending fork to place after parent
-      const forkParent = pendingForkRegistry.consumeFork(msg.cwd);
-      sessionOrderManager.insert(msg.cwd, sessionId, forkParent ?? undefined);
-
-      // Carry over attachedProposal only for forked/resumed sessions (not brand new spawns)
-      if (forkParent) {
-        const session = sessionManager.get(sessionId);
-        if (session && !session.attachedProposal) {
-          const donor = sessionManager.listAll().find(
-            (s) => s.id !== sessionId && s.cwd === msg.cwd && s.status === "ended" && s.attachedProposal,
-          );
-          if (donor?.attachedProposal) {
-            sessionManager.update(sessionId, { attachedProposal: donor.attachedProposal });
-          }
-        }
-      }
-
-      // Broadcast order update
-      const validIds = new Set(sessionManager.listAll().filter((s) => s.cwd === msg.cwd).map((s) => s.id));
-      const order = sessionOrderManager.getOrder(msg.cwd, validIds);
-      browserGateway.broadcastToAll({ type: "sessions_reordered", cwd: msg.cwd, sessionIds: order });
-
-      const updatedSession = sessionManager.get(sessionId);
-      if (updatedSession) {
-        browserGateway.broadcastSessionAdded(updatedSession);
-      }
-
-      // Trigger directory discovery for new cwd (async, non-blocking)
-      const isNewCwd = !sessionManager.listAll().some(
-        (s) => s.id !== sessionId && s.cwd === msg.cwd,
-      );
-      if (isNewCwd) {
-        directoryService.onDirectoryAdded(msg.cwd).then(({ sessions, openspecData }) => {
-          for (const hist of sessions) {
-            if (!sessionManager.get(hist.id)) {
-              sessionManager.register({
-                id: hist.id,
-                cwd: hist.cwd,
-                name: hist.name,
-                source: "tui",
-                sessionFile: hist.sessionFile,
-                sessionDir: hist.sessionDir,
-                firstMessage: hist.firstMessage,
-                startedAt: hist.startedAt,
-              });
-              sessionManager.unregister(hist.id);
-              sessionManager.update(hist.id, { hidden: true });
-              const s = sessionManager.get(hist.id);
-              if (s) browserGateway.broadcastSessionAdded(s);
-            }
-          }
-          browserGateway.broadcastToAll({
-            type: "openspec_update",
-            cwd: msg.cwd,
-            data: openspecData,
-          } as any);
-        }).catch(() => {});
-      }
-
-      // Flush pending auto-resume prompt if one exists for this cwd
-      const pendingResume = browserGateway.pendingResumeRegistry.consume(msg.cwd);
-      if (pendingResume) {
-        // Forward the queued prompt to the resumed session
-        piGateway.sendToSession(sessionId, {
-          type: "send_prompt",
-          sessionId,
-          text: pendingResume.text,
-          images: pendingResume.images,
-        });
-        // Clear resuming flag — register() already set status="active" and hidden=false
-        // No navigation needed: pi --session reuses the same session ID
-        sessionManager.update(sessionId, { resuming: false });
-        browserGateway.broadcastSessionUpdated(sessionId, { resuming: false });
-      }
-    }
-    // session_history_sync removed — server discovers sessions directly via DirectoryService
-    if (msg.type === "session_unregister") {
-      browserGateway.broadcastSessionRemoved(sessionId);
-    }
-    if (msg.type === "commands_list") {
-      browserGateway.sendToSubscribers(sessionId, {
-        type: "commands_list",
-        sessionId,
-        commands: msg.commands,
-      });
-    }
-    if (msg.type === "flows_list") {
-      console.log(`[dashboard] flows_list received for ${sessionId}, ${msg.flows?.length} flows`);
-      browserGateway.sendToSubscribers(sessionId, {
-        type: "flows_list",
-        sessionId,
-        flows: msg.flows,
-      });
-    }
-    if (msg.type === "git_info_update") {
-      const gitUpdates = {
-        gitBranch: msg.gitBranch,
-        gitBranchUrl: msg.gitBranchUrl,
-        gitPrNumber: msg.gitPrNumber,
-        gitPrUrl: msg.gitPrUrl,
-      };
-      sessionManager.update(sessionId, gitUpdates);
-      browserGateway.broadcastSessionUpdated(sessionId, gitUpdates);
-    }
-    if (msg.type === "files_list") {
-      browserGateway.sendToSubscribers(sessionId, {
-        type: "files_list",
-        sessionId,
-        query: msg.query,
-        files: msg.files,
-      });
-    }
-    // openspec_update from bridge is ignored — server handles polling directly via DirectoryService
-    if (msg.type === "openspec_activity_update") {
-      const activityUpdates: Partial<import("../shared/types.js").DashboardSession> = {};
-      if (msg.phase !== undefined) activityUpdates.openspecPhase = msg.phase;
-      if (msg.changeName !== undefined) activityUpdates.openspecChange = msg.changeName;
-
-      // Apply updates first so we can check accumulated state
-      sessionManager.update(sessionId, activityUpdates);
-
-      // Auto-attach: when both phase and changeName are accumulated and no proposal is attached
-      const session = sessionManager.get(sessionId);
-      const attachUpdates: Partial<import("../shared/types.js").DashboardSession> = {};
-      if (session?.openspecPhase && session?.openspecChange && !session.attachedProposal) {
-        attachUpdates.attachedProposal = session.openspecChange;
-        // Auto-name if session name is empty
-        if (!session.name?.trim()) {
-          attachUpdates.name = session.openspecChange;
-          piGateway.sendToSession(sessionId, {
-            type: "rename_session",
-            sessionId,
-            name: session.openspecChange,
-          });
-        }
-        sessionManager.update(sessionId, attachUpdates);
-      }
-
-      browserGateway.broadcastSessionUpdated(sessionId, {
-        openspecPhase: msg.phase ?? null,
-        openspecChange: msg.changeName ?? null,
-        ...(attachUpdates.attachedProposal !== undefined ? { attachedProposal: attachUpdates.attachedProposal } : {}),
-        ...(attachUpdates.name !== undefined ? { name: attachUpdates.name } : {}),
-      });
-    }
-    if (msg.type === "models_list") {
-      browserGateway.sendToSubscribers(sessionId, {
-        type: "models_list",
-        sessionId,
-        models: msg.models,
-      });
-    }
-    if (msg.type === "model_update") {
-      const modelUpdates: Partial<import("../shared/types.js").DashboardSession> = {
-        model: msg.model,
-      };
-      if (msg.thinkingLevel !== undefined) {
-        modelUpdates.thinkingLevel = msg.thinkingLevel;
-      }
-      sessionManager.update(sessionId, modelUpdates);
-      browserGateway.broadcastSessionUpdated(sessionId, modelUpdates);
-    }
-    if (msg.type === "extension_ui_request") {
-      const tracked = browserGateway.trackUiRequest(sessionId, msg.requestId, msg.method, msg.params);
-      if (tracked !== false) {
-        browserGateway.sendToSubscribers(sessionId, {
-          type: "extension_ui_request",
-          sessionId,
-          requestId: msg.requestId,
-          method: msg.method,
-          params: msg.params,
-        });
-      }
-    }
-    if (msg.type === "extension_ui_dismiss") {
-      browserGateway.sendToSubscribers(sessionId, {
-        type: "ui_dismiss",
-        sessionId,
-        requestId: msg.requestId,
-      });
-    }
-    if (msg.type === "session_name_update") {
-      const nameUpdates = { name: msg.name || undefined };
-      sessionManager.update(sessionId, nameUpdates);
-      browserGateway.broadcastSessionUpdated(sessionId, nameUpdates);
-    }
-    if (msg.type === "sessions_list") {
-      // Create in-memory records for sessions not already known
-      for (const piSession of msg.sessions) {
-        const existing = sessionManager.get(piSession.id);
-        if (!existing) {
-          sessionManager.register({
-            id: piSession.id,
-            cwd: piSession.cwd,
-            name: piSession.name,
-            source: "unknown",
-            sessionFile: piSession.path,
-            sessionDir: piSession.cwd,
-            firstMessage: piSession.firstMessage,
-          });
-          sessionManager.unregister(piSession.id);
-        } else if (existing.sessionFile !== piSession.path) {
-          sessionManager.update(piSession.id, {
-            sessionFile: piSession.path,
-            sessionDir: piSession.cwd,
-          });
-        }
-      }
-      browserGateway.broadcastToAll({
-        type: "sessions_list",
-        sessionId,
-        cwd: msg.cwd,
-        sessions: msg.sessions,
-      });
-    }
-    if (msg.type === "stats_update") {
-      const session = sessionManager.get(sessionId);
-      if (session) {
-        const updates: Record<string, unknown> = {
-          tokensIn: session.tokensIn,
-          tokensOut: session.tokensOut,
-          cacheRead: session.cacheRead,
-          cacheWrite: session.cacheWrite,
-          cost: session.cost,
-        };
-        if (session.contextTokens !== undefined) updates.contextTokens = session.contextTokens;
-        if (session.contextWindow !== undefined) updates.contextWindow = session.contextWindow;
-        browserGateway.broadcastSessionUpdated(sessionId, updates);
-      }
-
-      const statsEvent = {
-        eventType: "stats_update",
-        timestamp: Date.now(),
-        data: {
-          tokensIn: msg.stats.tokensIn,
-          tokensOut: msg.stats.tokensOut,
-          cost: msg.stats.cost,
-          turnUsage: msg.stats.turnUsage,
-          contextUsage: msg.stats.contextUsage,
-        },
-      };
-      const seq = eventStore.insertEvent(sessionId, statsEvent);
-      browserGateway.broadcastEvent(sessionId, seq, statsEvent);
-    }
-
-    // load_session_events_result and load_session_events_error removed — server loads directly
-  };
-
-  // Auto-shutdown idle timer with sleep-wake resilience
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
-  let stopServer: (() => Promise<void>) | null = null;
-  let lastConnectionTimestamp = 0;
-
-  function startIdleTimer() {
-    if (!config.autoShutdown) return;
-    cancelIdleTimer();
-    idleTimer = setTimeout(async () => {
-      // Double-check: verify truly idle before exiting (prevents false shutdown after sleep/wake)
-      const realIdleMs = Date.now() - lastConnectionTimestamp;
-      if (piGateway.connectionCount() > 0 || realIdleMs < config.shutdownIdleSeconds * 1000) {
-        // Sessions reconnected or not truly idle — restart timer
-        startIdleTimer();
-        return;
-      }
-      console.log(`No pi sessions for ${config.shutdownIdleSeconds}s, shutting down...`);
-      await stopServer?.();
-      process.exit(0);
-    }, config.shutdownIdleSeconds * 1000);
-  }
-
-  function cancelIdleTimer() {
-    if (idleTimer) {
-      clearTimeout(idleTimer);
-      idleTimer = null;
-    }
-  }
-
-  piGateway.onEmpty = () => {
-    startIdleTimer();
-  };
-
-  piGateway.onConnection = () => {
-    lastConnectionTimestamp = Date.now();
-    cancelIdleTimer();
-  };
+  // Auto-shutdown idle timer
+  const idleTimer = createIdleTimer(config, piGateway);
 
   const fastify = Fastify({
     logger: false,
@@ -486,430 +182,48 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     fastify.get("/auth/status", async () => ({ authenticated: true, authEnabled: false }));
   }
 
-  // REST API routes
-  fastify.get("/api/sessions", async () => {
-    const sessions = sessionManager.listAll();
-    return { success: true, data: sessions } satisfies ApiResponse;
+  // Session control REST API (wraps WebSocket-only operations)
+  registerSessionApi(fastify, {
+    sessionManager,
+    piGateway,
+    browserGateway,
+    pendingForkRegistry,
+    pendingDashboardSpawns,
   });
 
-  fastify.get<{ Params: { sessionId: string; seq: string } }>(
-    "/api/events/:sessionId/:seq",
-    async (request) => {
-      const { sessionId, seq } = request.params;
-      const event = eventStore.getEvent(sessionId, parseInt(seq, 10));
-      if (!event) {
-        return { success: false, error: "Event not found" } satisfies ApiResponse;
-      }
-      return { success: true, data: event } satisfies ApiResponse;
-    }
-  );
+  // Register route modules
+  registerSessionRoutes(fastify, { sessionManager, eventStore });
+  registerGitRoutes(fastify);
+  registerFileRoutes(fastify, { sessionManager, preferencesStore });
+  registerOpenSpecRoutes(fastify, { sessionManager, preferencesStore, directoryService });
+  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config });
 
-  fastify.get("/api/pinned-dirs", async () => {
-    return { success: true, data: stateStore.getPinnedDirectories() } satisfies ApiResponse;
-  });
-
-  // Directory browse endpoint (localhost-only)
-  fastify.get<{ Querystring: { path?: string } }>(
-    "/api/browse",
-    { preHandler: localhostGuard },
-    async (request) => {
+  // Serve static files / SPA fallback
+  if (config.dev) {
+    // Dev mode: proxy SPA routes to Vite dev server
+    // Detect which port Vite is running on (tries 3000 first, then common fallbacks)
+    let vitePort = 3000;
+    for (const port of [3000, 5173, 5174]) {
       try {
-        const result = await listDirectories(request.query.path || undefined);
-        return { success: true, data: result } satisfies ApiResponse;
+        const res = await fetch(`http://localhost:${port}/`);
+        if (res.ok) { vitePort = port; break; }
+      } catch { /* not listening */ }
+    }
+
+    fastify.setNotFoundHandler(async (request, reply) => {
+      try {
+        const viteUrl = `http://localhost:${vitePort}${request.url}`;
+        const res = await fetch(viteUrl);
+        // Forward content-type and status from Vite
+        const contentType = res.headers.get("content-type");
+        if (contentType) reply.header("Content-Type", contentType);
+        reply.code(res.status);
+        return reply.send(Buffer.from(await res.arrayBuffer()));
       } catch {
-        return { success: false, error: "directory not found" } satisfies ApiResponse;
+        return reply.code(502).send({ error: "Vite dev server not reachable" });
       }
-    }
-  );
-
-  // Editor detection endpoint (localhost-only)
-  fastify.get<{ Querystring: { path?: string } }>(
-    "/api/editors",
-    { preHandler: localhostGuard },
-    async (request) => {
-      const cwd = request.query.path;
-      if (!cwd) {
-        return { success: false, error: "path parameter required" } satisfies ApiResponse;
-      }
-      const editors = detectEditors(cwd);
-      return { success: true, data: editors } satisfies ApiResponse;
-    }
-  );
-
-  // Open editor endpoint (localhost-only)
-  fastify.post<{ Body: { path?: string; editor?: string; file?: string; line?: number } }>(
-    "/api/open-editor",
-    { preHandler: localhostGuard },
-    async (request) => {
-      const { path: cwd, editor: editorId, file, line } = request.body ?? {};
-      if (!cwd || !editorId) {
-        return { success: false, error: "path and editor required" } satisfies ApiResponse;
-      }
-
-      const allSessions = sessionManager.listAll();
-      if (!allSessions.some((s) => s.cwd === cwd)) {
-        return { success: false, error: "unknown session path" } satisfies ApiResponse;
-      }
-
-      const editorEntry = EDITORS.find((e) => e.id === editorId);
-      if (!editorEntry) {
-        return { success: false, error: "unknown editor" } satisfies ApiResponse;
-      }
-
-      const target = file ? path.resolve(cwd, file) : cwd;
-      const args = line && file ? [`${target}:${line}`] : [target];
-
-      try {
-        const child = spawn(editorEntry.cli, args, {
-          detached: true,
-          stdio: "ignore",
-        });
-        child.unref();
-        return { success: true } satisfies ApiResponse;
-      } catch (err: any) {
-        return { success: false, error: `failed to open editor: ${err.message}` } satisfies ApiResponse;
-      }
-    }
-  );
-
-  // File read endpoint (localhost-only) — read file content or list directory
-  fastify.get<{ Querystring: { cwd?: string; path?: string } }>(
-    "/api/file",
-    { preHandler: localhostGuard },
-    async (request, reply) => {
-      const cwd = request.query.cwd;
-      const relPath = request.query.path;
-      if (!cwd || !relPath) {
-        reply.code(400);
-        return { success: false, error: "cwd and path parameters required" } satisfies ApiResponse;
-      }
-
-      const allSessions = sessionManager.listAll();
-      if (!allSessions.some((s) => s.cwd === cwd)) {
-        reply.code(403);
-        return { success: false, error: "unknown session path" } satisfies ApiResponse;
-      }
-
-      const resolved = path.resolve(cwd, relPath);
-      if (!resolved.startsWith(cwd + path.sep) && resolved !== cwd) {
-        reply.code(403);
-        return { success: false, error: "path outside working directory" } satisfies ApiResponse;
-      }
-
-      try {
-        const stat = await fs.stat(resolved);
-        if (stat.isDirectory()) {
-          const entries = await fs.readdir(resolved);
-          entries.sort();
-          return { success: true, data: { type: "directory", entries } } satisfies ApiResponse;
-        }
-        const content = await fs.readFile(resolved, "utf-8");
-        return { success: true, data: { type: "file", content } } satisfies ApiResponse;
-      } catch {
-        reply.code(404);
-        return { success: false, error: "not found" } satisfies ApiResponse;
-      }
-    }
-  );
-
-  // Pi Resources endpoint (localhost-only) — returns discovered extensions, skills, prompts
-  fastify.get<{ Querystring: { cwd?: string } }>(
-    "/api/pi-resources",
-    { preHandler: localhostGuard },
-    async (request, reply) => {
-      const cwd = request.query.cwd;
-      if (!cwd) {
-        reply.code(400);
-        return { success: false, error: "cwd parameter required" } satisfies ApiResponse;
-      }
-      // Return cached result or scan on-demand
-      let data = directoryService.getPiResources(cwd);
-      if (!data) {
-        data = await directoryService.refreshPiResources(cwd);
-      }
-      return { success: true, data } satisfies ApiResponse;
-    },
-  );
-
-  // Pi Resource file endpoint (localhost-only) — reads files from allowed pi resource locations
-  fastify.get<{ Querystring: { path?: string } }>(
-    "/api/pi-resource-file",
-    { preHandler: localhostGuard },
-    async (request, reply) => {
-      const filePath = request.query.path;
-      if (!filePath) {
-        reply.code(400);
-        return { success: false, error: "path parameter required" } satisfies ApiResponse;
-      }
-
-      // Validate path is within allowed pi resource locations
-      const homeDir = process.env.HOME || process.env.USERPROFILE || "";
-      const globalPiDir = path.join(homeDir, ".pi", "agent");
-      const allSessions = sessionManager.listAll();
-      const knownCwds = new Set(allSessions.map((s) => s.cwd));
-      for (const dir of stateStore.getPinnedDirectories()) knownCwds.add(dir);
-
-      const normalizedPath = path.resolve(filePath);
-      const isAllowed =
-        normalizedPath.startsWith(globalPiDir + path.sep) ||
-        [...knownCwds].some(
-          (cwd) =>
-            normalizedPath.startsWith(path.join(cwd, ".pi") + path.sep),
-        ) ||
-        // Allow reading from resolved package locations (npm global, git clones)
-        normalizedPath.includes(path.join(".pi", "git") + path.sep) ||
-        normalizedPath.includes("node_modules" + path.sep);
-
-      if (!isAllowed) {
-        reply.code(403);
-        return { success: false, error: "path not in allowed resource location" } satisfies ApiResponse;
-      }
-
-      try {
-        const content = await fs.readFile(normalizedPath, "utf-8");
-        return { success: true, data: { type: "file", content } } satisfies ApiResponse;
-      } catch {
-        reply.code(404);
-        return { success: false, error: "not found" } satisfies ApiResponse;
-      }
-    },
-  );
-
-  // Config endpoints (localhost-only)
-  fastify.get(
-    "/api/config",
-    { preHandler: localhostGuard },
-    async () => {
-      return { success: true, data: readConfigRedacted() };
-    },
-  );
-
-  fastify.put(
-    "/api/config",
-    { preHandler: localhostGuard },
-    async (request, reply) => {
-      const partial = request.body as Record<string, any>;
-      if (!partial || typeof partial !== "object") {
-        return reply.code(400).send({ success: false, error: "Invalid body" });
-      }
-      const result = writeConfigPartial(partial);
-      if (!result.success) {
-        return reply.code(500).send({ success: false, error: result.error });
-      }
-
-      // Apply runtime-safe changes
-      const reloaded = (await import("../shared/config.js")).loadConfig();
-      if (partial.autoShutdown !== undefined || partial.shutdownIdleSeconds !== undefined) {
-        config.autoShutdown = reloaded.autoShutdown;
-        config.shutdownIdleSeconds = reloaded.shutdownIdleSeconds;
-      }
-      if (partial.auth !== undefined) {
-        config.authConfig = reloaded.auth;
-        // Rebuild auth provider registry if plugin is registered
-        if (reloaded.auth && (fastify as any)._reloadAuth) {
-          await (fastify as any)._reloadAuth(reloaded.auth);
-        }
-      }
-
-      return { success: true, restartRequired: result.restartRequired };
-    },
-  );
-
-  // LLM Provider endpoints (read/write ~/.pi/agent/providers.json)
-  const PROVIDERS_PATH = path.join(os.homedir(), ".pi", "agent", "providers.json");
-
-  fastify.get(
-    "/api/providers",
-    { preHandler: localhostGuard },
-    async () => {
-      try {
-        const raw = await fs.readFile(PROVIDERS_PATH, "utf-8");
-        const config = JSON.parse(raw);
-        // Redact API keys that are literal values (not env var references)
-        const providers: Record<string, any> = {};
-        for (const [name, entry] of Object.entries(config.providers || {}) as [string, any][]) {
-          providers[name] = {
-            ...entry,
-            apiKey: entry.apiKey?.startsWith("$") ? entry.apiKey : "***",
-          };
-        }
-        return { success: true, providers };
-      } catch {
-        return { success: true, providers: {} };
-      }
-    },
-  );
-
-  fastify.put(
-    "/api/providers",
-    { preHandler: localhostGuard },
-    async (request, reply) => {
-      const body = request.body as { providers: Record<string, any> };
-      if (!body?.providers || typeof body.providers !== "object") {
-        return reply.code(400).send({ success: false, error: "Invalid body: expected { providers: {...} }" });
-      }
-      try {
-        // Read existing file to preserve roles and other fields
-        let existing: Record<string, any> = {};
-        try {
-          const raw = await fs.readFile(PROVIDERS_PATH, "utf-8");
-          existing = JSON.parse(raw);
-        } catch { /* start fresh */ }
-
-        // Preserve redacted API keys from existing config
-        const merged: Record<string, any> = {};
-        for (const [name, entry] of Object.entries(body.providers)) {
-          merged[name] = { ...entry };
-          if (entry.apiKey === "***" && existing.providers?.[name]?.apiKey) {
-            merged[name].apiKey = existing.providers[name].apiKey;
-          }
-        }
-
-        existing.providers = merged;
-        await fs.mkdir(path.dirname(PROVIDERS_PATH), { recursive: true });
-        await fs.writeFile(PROVIDERS_PATH, JSON.stringify(existing, null, 2));
-
-        // Tell all connected pi sessions to reload so they pick up new providers
-        for (const sessionId of piGateway.getConnectedSessionIds()) {
-          piGateway.sendToSession(sessionId, { type: "request_reload", sessionId });
-        }
-
-        return { success: true };
-      } catch (err: any) {
-        return reply.code(500).send({ success: false, error: err.message });
-      }
-    },
-  );
-
-  // Tunnel status endpoint
-  fastify.get("/api/tunnel-status", async () => {
-    return getTunnelStatus();
-  });
-
-  // Tunnel connect endpoint
-  fastify.post("/api/tunnel-connect", async () => {
-    const status = getTunnelStatus();
-    if (status.status === "active") return { ok: true, url: status.url };
-    if (status.status === "unavailable") return { ok: false, error: "zrok not installed" };
-    const url = await createTunnel(config.port, config.tunnelReservedToken);
-    if (url) return { ok: true, url };
-    return { ok: false, error: "Failed to create tunnel" };
-  });
-
-  // Tunnel disconnect endpoint
-  fastify.post("/api/tunnel-disconnect", async () => {
-    await deleteTunnel();
-    return { ok: true };
-  });
-
-  // Health endpoint — liveness check for CLI status and probing
-  const serverStartTime = Date.now();
-  // ── Git Operations (localhost-only) ──────────────────────────────────
-
-  fastify.get<{ Querystring: { cwd?: string } }>(
-    "/api/git/branches",
-    { preHandler: localhostGuard },
-    async (request, reply) => {
-      const cwd = request.query.cwd;
-      if (!cwd) {
-        reply.code(400);
-        return { success: false, error: "cwd parameter required" } satisfies ApiResponse;
-      }
-      if (!isGitRepo(cwd)) {
-        return { success: false, error: "not a git repository" } satisfies ApiResponse;
-      }
-      try {
-        const data = listBranches(cwd);
-        return { success: true, data } satisfies ApiResponse;
-      } catch (err: any) {
-        return { success: false, error: err.message ?? "failed to list branches" } satisfies ApiResponse;
-      }
-    }
-  );
-
-  fastify.post<{ Body: { cwd?: string; branch?: string; stash?: boolean } }>(
-    "/api/git/checkout",
-    { preHandler: localhostGuard },
-    async (request, reply) => {
-      const { cwd, branch, stash } = request.body ?? {};
-      if (!cwd || !branch) {
-        reply.code(400);
-        return { success: false, error: "cwd and branch required" } satisfies ApiResponse;
-      }
-      try {
-        const result = checkoutBranch(cwd, branch, stash ?? false);
-        if (!result.success) {
-          reply.code(409);
-          return result;
-        }
-        return { success: true, data: { stashed: result.stashed } } satisfies ApiResponse;
-      } catch (err: any) {
-        return { success: false, error: err.message ?? "checkout failed" } satisfies ApiResponse;
-      }
-    }
-  );
-
-  fastify.post<{ Body: { cwd?: string } }>(
-    "/api/git/init",
-    { preHandler: localhostGuard },
-    async (request, reply) => {
-      const { cwd } = request.body ?? {};
-      if (!cwd) {
-        reply.code(400);
-        return { success: false, error: "cwd required" } satisfies ApiResponse;
-      }
-      try {
-        gitInit(cwd);
-        return { success: true } satisfies ApiResponse;
-      } catch (err: any) {
-        return { success: false, error: err.message ?? "init failed" } satisfies ApiResponse;
-      }
-    }
-  );
-
-  fastify.post<{ Body: { cwd?: string } }>(
-    "/api/git/stash-pop",
-    { preHandler: localhostGuard },
-    async (request, reply) => {
-      const { cwd } = request.body ?? {};
-      if (!cwd) {
-        reply.code(400);
-        return { success: false, error: "cwd required" } satisfies ApiResponse;
-      }
-      try {
-        const result = stashPop(cwd);
-        return { success: true, data: result } satisfies ApiResponse;
-      } catch (err: any) {
-        return { success: false, error: err.message ?? "stash pop failed" } satisfies ApiResponse;
-      }
-    }
-  );
-
-  fastify.get("/api/health", async () => {
-    return {
-      ok: true,
-      pid: process.pid,
-      uptime: Math.floor((Date.now() - serverStartTime) / 1000),
-    };
-  });
-
-  // Shutdown endpoint (localhost-only) — used by devBuildOnReload
-  // Skips server.stop() to avoid killing headless/spawned sessions.
-  // Just exits the process; the OS cleans up sockets.
-  fastify.post(
-    "/api/shutdown",
-    { preHandler: localhostGuard },
-    async () => {
-      // Flush persistence before exit to avoid losing recent changes
-      sessionPersistence.flush();
-      stateStore.flush();
-      setTimeout(() => process.exit(0), 100);
-      return { ok: true };
-    }
-  );
-
-  // Serve static files (built web client) in production
-  if (!config.dev) {
+    });
+  } else {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     const clientDir = path.join(__dirname, "../../dist/client");
     await fastify.register(fastifyStatic, {
@@ -981,83 +295,22 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         }
       }
 
-      // Start directory service: discover sessions and begin OpenSpec polling (async, non-blocking)
-      (async () => {
-        try {
-          const dirs = directoryService.knownDirectories();
-          for (const cwd of dirs) {
-            const discovered = directoryService.discoverSessions(cwd);
-            for (const hist of discovered) {
-              if (!sessionManager.get(hist.id)) {
-                // Restore discovered sessions directly as ended+hidden
-                // (no register/unregister dance that triggers spurious broadcasts)
-                const needsStats = true;
-                let contextTokens: number | undefined;
-                let contextWindow: number | undefined;
-                let model: string | undefined;
-                if (needsStats && hist.sessionFile) {
-                  try {
-                    const stats = extractSessionStats(hist.sessionFile);
-                    if (stats) {
-                      contextTokens = stats.lastTotalTokens;
-                      contextWindow = stats.contextWindow;
-                      model = stats.model;
-                    }
-                  } catch { /* ignore */ }
-                }
-                sessionManager.restore({
-                  id: hist.id,
-                  cwd: hist.cwd,
-                  name: hist.name,
-                  source: "tui",
-                  status: "ended",
-                  startedAt: hist.startedAt,
-                  sessionFile: hist.sessionFile,
-                  sessionDir: hist.sessionDir,
-                  firstMessage: hist.firstMessage,
-                  hidden: true,
-                  dataUnavailable: true,
-                  model,
-                  contextTokens,
-                  contextWindow,
-                });
-                const session = sessionManager.get(hist.id);
-                if (session) browserGateway.broadcastSessionAdded(session);
-              }
-            }
-          }
-        } catch (err) {
-          console.error("[dashboard] Session discovery failed:", err);
-        }
+      // Discover sessions and start OpenSpec polling (async, non-blocking)
+      discoverAndBroadcastSessions({ sessionManager, browserGateway, directoryService });
 
-        // Start OpenSpec polling, broadcast changes to browsers
-        directoryService.startPolling((cwd, data) => {
-          browserGateway.broadcastToAll({
-            type: "openspec_update",
-            cwd,
-            data,
-          } as any);
-        });
-
-        // Initial OpenSpec poll for all known directories (non-blocking)
-        await Promise.all(
-          directoryService.knownDirectories().map((cwd) => directoryService.refreshOpenSpec(cwd)),
-        );
-      })();
-
-      startIdleTimer();
+      idleTimer.start();
     },
 
     async stop() {
       removePid();
-      cancelIdleTimer();
+      idleTimer.cancel();
       directoryService.stopPolling();
       browserGateway.shutdownHeadlessProcesses();
-      sessionPersistence.flush();
-      sessionPersistence.dispose();
+      metaPersistence.flushAll();
+      metaPersistence.dispose();
       pendingForkRegistry.dispose();
-      stateStore.flush();
-      stateStore.dispose();
+      preferencesStore.flush();
+      preferencesStore.dispose();
 
       await deleteTunnel();
       piGateway.stop();
@@ -1074,6 +327,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     },
   };
 
-  stopServer = server.stop.bind(server);
+  idleTimer.setStopFn(server.stop.bind(server));
   return server;
 }

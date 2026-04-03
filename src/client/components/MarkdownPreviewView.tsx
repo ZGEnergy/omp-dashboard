@@ -19,7 +19,7 @@ interface Props {
   activeTab?: string;
   onTabChange?: (tabId: string) => void;
   onBack: () => void;
-  /** Enable fuzzy text search overlay */
+  /** Enable text search overlay (default: true) */
   searchable?: boolean;
 }
 
@@ -32,7 +32,7 @@ export function MarkdownPreviewView({
   activeTab,
   onTabChange,
   onBack,
-  searchable,
+  searchable = true,
 }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
   return (
