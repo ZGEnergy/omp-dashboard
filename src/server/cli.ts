@@ -1,3 +1,4 @@
+#!/usr/bin/env node --import tsx
 /**
  * PI Dashboard Server CLI
  *
@@ -123,7 +124,14 @@ async function cmdStart(config: ServerConfig): Promise<void> {
   if (config.dev) args.push("--dev");
   if (!config.tunnel) args.push("--no-tunnel");
 
-  const child = spawn(process.execPath, ["--import", resolveJitiImport(), cliPath, ...args], {
+  let tsLoader: string;
+  try {
+    tsLoader = resolveJitiImport();
+  } catch {
+    tsLoader = "tsx";
+  }
+
+  const child = spawn(process.execPath, ["--import", tsLoader, cliPath, ...args], {
     detached: true,
     stdio: "ignore",
     env: { ...process.env },
