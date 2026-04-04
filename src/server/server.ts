@@ -43,8 +43,12 @@ export interface ServerConfig {
   tunnel: boolean;
   tunnelReservedToken?: string;
   authConfig?: AuthConfig;
-  /** Override WS ping interval for pi-gateway (ms). Default 30000. Set 0 to disable. */
+  /** Override WS ping interval for pi-gateway (ms). Default 60000. Set 0 to disable. */
   pingInterval?: number;
+  /** Memory limit overrides from config */
+  maxEventsPerSession?: number;
+  maxStringFieldSize?: number;
+  maxWsBufferBytes?: number;
 }
 
 export interface DashboardServer {
@@ -125,11 +129,14 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     ...(config.pingInterval !== undefined ? { pingInterval: config.pingInterval } : {}),
   });
 
-  // Create event store with pinning callback
+  // Create event store with pinning callback and configurable limits
   const eventStore = createMemoryEventStore(
     (sessionId) =>
       piGateway.isSessionConnected(sessionId) ||
       browserGateway.getSubscriberCount(sessionId) > 0,
+    undefined, // maxCachedSessions (use default)
+    config.maxEventsPerSession,
+    config.maxStringFieldSize,
   );
 
   // Create terminal manager with exit callback
@@ -149,7 +156,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   const terminalGateway = createTerminalGateway(terminalManager);
 
-  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns);
+  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes);
 
 
   // Wire up event forwarding from pi gateway to browser gateway

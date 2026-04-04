@@ -26,6 +26,12 @@ interface AuthConfig {
   bypassHosts?: string[];
 }
 
+interface MemoryLimitsConfig {
+  maxEventsPerSession: number;
+  maxStringFieldSize: number;
+  maxWsBufferBytes: number;
+}
+
 interface Config {
   port: number;
   piPort: number;
@@ -36,6 +42,7 @@ interface Config {
   tunnel: { enabled: boolean };
   devBuildOnReload: boolean;
   auth?: AuthConfig;
+  memoryLimits: MemoryLimitsConfig;
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -374,6 +381,38 @@ export function SettingsPanel() {
               }}
             />
           </div>
+        </Section>
+
+        {/* Memory Limits */}
+        <Section title="Memory Limits">
+          <p className="text-xs text-[var(--text-tertiary)] mb-2">
+            Controls for bounding server memory usage. Set to 0 to disable a limit.
+            Requires server restart.
+          </p>
+          <NumberField
+            label="Max Events Per Session"
+            value={config.memoryLimits?.maxEventsPerSession ?? 200}
+            onChange={(v) => update((c) => {
+              if (!c.memoryLimits) c.memoryLimits = { maxEventsPerSession: 200, maxStringFieldSize: 4000, maxWsBufferBytes: 4194304 };
+              c.memoryLimits.maxEventsPerSession = v;
+            })}
+          />
+          <NumberField
+            label="Max String Truncation (chars)"
+            value={config.memoryLimits?.maxStringFieldSize ?? 4000}
+            onChange={(v) => update((c) => {
+              if (!c.memoryLimits) c.memoryLimits = { maxEventsPerSession: 200, maxStringFieldSize: 4000, maxWsBufferBytes: 4194304 };
+              c.memoryLimits.maxStringFieldSize = v;
+            })}
+          />
+          <NumberField
+            label="Max WebSocket Buffer (bytes)"
+            value={config.memoryLimits?.maxWsBufferBytes ?? 4194304}
+            onChange={(v) => update((c) => {
+              if (!c.memoryLimits) c.memoryLimits = { maxEventsPerSession: 200, maxStringFieldSize: 4000, maxWsBufferBytes: 4194304 };
+              c.memoryLimits.maxWsBufferBytes = v;
+            })}
+          />
         </Section>
 
         {/* Developer */}

@@ -62,6 +62,7 @@ export function createBrowserGateway(
   directoryService?: DirectoryService,
   terminalManager?: TerminalManager,
   pendingDashboardSpawns?: Map<string, number>,
+  maxWsBufferBytes?: number,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -126,13 +127,13 @@ export function createBrowserGateway(
     return result;
   }
 
-  /** Max buffered bytes per browser WebSocket before dropping messages */
-  const MAX_WS_BUFFER = 4 * 1024 * 1024; // 4MB
+  /** Max buffered bytes per browser WebSocket before dropping messages (0 = no limit) */
+  const MAX_WS_BUFFER = maxWsBufferBytes ?? 4 * 1024 * 1024; // 4MB default
 
   function sendTo(ws: WebSocket, msg: ServerToBrowserMessage) {
     if (ws.readyState === WebSocket.OPEN) {
       // Drop messages if the send buffer is full (browser not consuming)
-      if (ws.bufferedAmount > MAX_WS_BUFFER) return;
+      if (MAX_WS_BUFFER > 0 && ws.bufferedAmount > MAX_WS_BUFFER) return;
       ws.send(JSON.stringify(msg));
     }
   }

@@ -26,6 +26,21 @@ export interface AuthConfig {
   bypassHosts?: string[];
 }
 
+export interface MemoryLimitsConfig {
+  /** Max events stored per session (0 = unlimited). Default: 200 */
+  maxEventsPerSession: number;
+  /** Max chars before truncating string fields in events (0 = no truncation). Default: 4000 */
+  maxStringFieldSize: number;
+  /** Max bytes in browser WebSocket send buffer before dropping messages (0 = no limit). Default: 4194304 (4MB) */
+  maxWsBufferBytes: number;
+}
+
+export const DEFAULT_MEMORY_LIMITS: MemoryLimitsConfig = {
+  maxEventsPerSession: 200,
+  maxStringFieldSize: 4000,
+  maxWsBufferBytes: 4 * 1024 * 1024,
+};
+
 export interface DashboardConfig {
   port: number;
   piPort: number;
@@ -36,6 +51,7 @@ export interface DashboardConfig {
   tunnel: { enabled: boolean; reservedToken?: string };
   devBuildOnReload: boolean;
   auth?: AuthConfig;
+  memoryLimits: MemoryLimitsConfig;
 }
 
 const VALID_SPAWN_STRATEGIES: SpawnStrategy[] = ["tmux", "headless"];
@@ -49,6 +65,7 @@ const DEFAULTS: DashboardConfig = {
   spawnStrategy: "headless",
   tunnel: { enabled: true },
   devBuildOnReload: false,
+  memoryLimits: { ...DEFAULT_MEMORY_LIMITS },
 };
 
 /**
@@ -84,6 +101,15 @@ function parseAuthConfig(raw: any): AuthConfig | undefined {
   };
 }
 
+function parseMemoryLimits(raw: any): MemoryLimitsConfig {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_MEMORY_LIMITS };
+  return {
+    maxEventsPerSession: typeof raw.maxEventsPerSession === "number" ? raw.maxEventsPerSession : DEFAULT_MEMORY_LIMITS.maxEventsPerSession,
+    maxStringFieldSize: typeof raw.maxStringFieldSize === "number" ? raw.maxStringFieldSize : DEFAULT_MEMORY_LIMITS.maxStringFieldSize,
+    maxWsBufferBytes: typeof raw.maxWsBufferBytes === "number" ? raw.maxWsBufferBytes : DEFAULT_MEMORY_LIMITS.maxWsBufferBytes,
+  };
+}
+
 /**
  * Load configuration from ~/.pi/dashboard/config.json.
  * Returns defaults for missing fields, malformed JSON, or missing file.
@@ -115,6 +141,7 @@ export function loadConfig(): DashboardConfig {
       },
       devBuildOnReload: parsed.devBuildOnReload ?? defaults.devBuildOnReload,
       auth: parseAuthConfig(parsed.auth),
+      memoryLimits: parseMemoryLimits(parsed.memoryLimits),
     };
   } catch {
     return defaults;

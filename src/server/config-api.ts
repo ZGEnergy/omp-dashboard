@@ -108,6 +108,12 @@ export function writeConfigPartial(partial: Record<string, any>): WriteConfigRes
       partial.tunnel = { ...existing.tunnel, ...partial.tunnel };
     }
 
+    // Merge memoryLimits sub-object
+    if (partial.memoryLimits) {
+      partial.memoryLimits = { ...existing.memoryLimits, ...partial.memoryLimits };
+      restartRequired = true;
+    }
+
     const merged = { ...existing, ...partial };
 
     // Write

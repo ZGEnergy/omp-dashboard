@@ -82,6 +82,9 @@ export function buildConfig(flags: Partial<ServerConfig>): ServerConfig {
     tunnel: flags.tunnel ?? fileConfig.tunnel.enabled,
     tunnelReservedToken: fileConfig.tunnel.reservedToken,
     authConfig: fileConfig.auth,
+    maxEventsPerSession: fileConfig.memoryLimits.maxEventsPerSession,
+    maxStringFieldSize: fileConfig.memoryLimits.maxStringFieldSize,
+    maxWsBufferBytes: fileConfig.memoryLimits.maxWsBufferBytes,
   };
 }
 
