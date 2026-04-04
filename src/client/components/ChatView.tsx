@@ -84,6 +84,9 @@ function hasMermaid(content: string): boolean {
 
 const SCROLL_THRESHOLD = 50;
 
+// Per-session scroll state, persisted across session switches
+const scrollStateMap = new Map<string, { scrollTop: number; nearBottom: boolean }>();
+
 export function ChatView({ sessionId, state, toolContext, onCancelPending, onRespondToUi }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottom = useRef(true);
@@ -100,7 +103,11 @@ export function ChatView({ sessionId, state, toolContext, onCancelPending, onRes
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
     isNearBottom.current = nearBottom;
     setShowScrollButton(!nearBottom);
-  }, []);
+    // Persist scroll position for this session
+    if (sessionId) {
+      scrollStateMap.set(sessionId, { scrollTop: el.scrollTop, nearBottom });
+    }
+  }, [sessionId]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -108,25 +115,47 @@ export function ChatView({ sessionId, state, toolContext, onCancelPending, onRes
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     isNearBottom.current = true;
     setShowScrollButton(false);
-  }, []);
+    if (sessionId) {
+      scrollStateMap.set(sessionId, { scrollTop: el.scrollHeight, nearBottom: true });
+    }
+  }, [sessionId]);
 
-  // Scroll to bottom on session switch
+  // Save scroll state when leaving, restore when arriving
   useEffect(() => {
     if (sessionId !== prevSessionRef.current) {
+      // Save outgoing session scroll position
+      const prevId = prevSessionRef.current;
+      if (prevId && scrollRef.current) {
+        scrollStateMap.set(prevId, {
+          scrollTop: scrollRef.current.scrollTop,
+          nearBottom: isNearBottom.current,
+        });
+      }
       prevSessionRef.current = sessionId;
-      isNearBottom.current = true;
-      setShowScrollButton(false);
-      // Use rAF to ensure DOM has rendered the new session's content
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo(0, scrollRef.current!.scrollHeight);
-      });
+
+      // Restore incoming session scroll state
+      const saved = sessionId ? scrollStateMap.get(sessionId) : undefined;
+      if (saved && !saved.nearBottom) {
+        // Scroll-locked: restore exact position
+        isNearBottom.current = false;
+        setShowScrollButton(true);
+        requestAnimationFrame(() => {
+          scrollRef.current?.scrollTo(0, saved.scrollTop);
+        });
+      } else {
+        // Near bottom or first visit: scroll to end
+        isNearBottom.current = true;
+        setShowScrollButton(false);
+        requestAnimationFrame(() => {
+          scrollRef.current?.scrollTo(0, scrollRef.current!.scrollHeight);
+        });
+      }
     }
   }, [sessionId]);
 
   // Auto-scroll on new content when near bottom
   useEffect(() => {
     if (isNearBottom.current) {
-      // Use rAF to scroll after DOM update
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo(0, scrollRef.current!.scrollHeight);
       });
