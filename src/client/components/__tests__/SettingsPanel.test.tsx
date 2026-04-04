@@ -151,7 +151,7 @@ describe("SettingsPanel", () => {
     fireEvent.click(screen.getAllByTestId("save-btn")[0]);
 
     await waitFor(() => {
-      expect(screen.getByText(/restart/i)).toBeTruthy();
+      expect(screen.getByText(/require.*restart/i)).toBeTruthy();
     });
   });
 });

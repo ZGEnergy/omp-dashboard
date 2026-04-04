@@ -46,6 +46,7 @@ describe("Smoke integration", () => {
     bridge.send(JSON.stringify({
       type: "session_register", sessionId: "s1", cwd: "/tmp", source: "tui", name: "Test",
     }));
+    bridge.send(JSON.stringify({ type: "replay_complete", sessionId: "s1" }));
     await delay(150);
 
     // Browser connects, subscribes, receives event

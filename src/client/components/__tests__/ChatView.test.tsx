@@ -224,7 +224,7 @@ describe("ChatView", () => {
       return container.querySelector("[class*='overflow-y-auto']")!;
     }
 
-    it("auto-scrolls when near bottom (default behavior)", () => {
+    it("auto-scrolls when near bottom (default behavior)", async () => {
       const state = stateWithMessages([
         { id: "1", role: "user", content: "Hello" },
       ]);
@@ -238,7 +238,10 @@ describe("ChatView", () => {
       ]);
       rerender(<ThemeProvider><ChatView state={state2} toolContext={defaultToolContext} /></ThemeProvider>);
 
-      expect(scrollToSpy).toHaveBeenCalled();
+      // scrollTo is called inside requestAnimationFrame — flush it
+      await vi.waitFor(() => {
+        expect(scrollToSpy).toHaveBeenCalled();
+      });
     });
 
     it("does NOT auto-scroll when scrolled away from bottom", () => {

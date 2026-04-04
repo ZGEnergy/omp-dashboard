@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import path from "node:path";
+import { describe, it, expect } from "vitest";
 
 describe("resolveJitiImport", () => {
   it("throws with clear error when pi-coding-agent is not resolvable", async () => {
@@ -7,18 +6,12 @@ describe("resolveJitiImport", () => {
     // peer deps are not resolvable — should throw
     const { resolveJitiImport } = await import("../resolve-jiti.js");
 
-    expect(() => resolveJitiImport()).toThrow("Cannot resolve jiti");
+    expect(() => resolveJitiImport()).toThrow("Cannot find pi's TypeScript loader");
   });
 
   it("error message mentions pi-coding-agent", async () => {
     const { resolveJitiImport } = await import("../resolve-jiti.js");
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    try { resolveJitiImport(); } catch {}
-
-    expect(spy).toHaveBeenCalledWith(
-      expect.stringContaining("pi-coding-agent"),
-    );
-    spy.mockRestore();
+    expect(() => resolveJitiImport()).toThrow("pi-coding-agent");
   });
 });
