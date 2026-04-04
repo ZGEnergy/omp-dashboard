@@ -162,6 +162,7 @@ export interface ProviderAuthStatus {
   flowType: "auth_code" | "device_code" | "api_key";
   authenticated: boolean;
   expires?: number;
+  maskedKey?: string;
 }
 
 export interface AuthorizeResponse {

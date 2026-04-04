@@ -165,12 +165,20 @@ export function getAuthStatus(): ProviderAuthStatus[] {
     const cred = data[p.authJsonKey];
     // If key is already listed as OAuth provider (e.g., "anthropic"), skip the API key variant
     if (OAUTH_PROVIDERS.some((op) => op.id === p.authJsonKey) && cred?.type === "oauth") continue;
-    statuses.push({
+    const hasKey = !!(cred && cred.type === "api_key" && (cred as ApiKeyCredential).key);
+    const entry: ProviderAuthStatus = {
       id: p.id,
       name: p.name,
       flowType: "api_key",
-      authenticated: !!(cred && cred.type === "api_key" && (cred as ApiKeyCredential).key),
-    });
+      authenticated: hasKey,
+    };
+    if (hasKey) {
+      const key = (cred as ApiKeyCredential).key;
+      const last4 = key.length > 4 ? key.slice(-4) : "****";
+      const prefix = key.includes("-") ? key.slice(0, key.indexOf("-") + 1) : "";
+      entry.maskedKey = `${prefix}...${last4}`;
+    }
+    statuses.push(entry);
   }
 
   return statuses;

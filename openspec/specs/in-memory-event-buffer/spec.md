@@ -46,6 +46,21 @@ The in-memory event buffer SHALL enforce a maximum number of cached sessions (de
 - **WHEN** events are read for a session (getEvents or getEvent)
 - **THEN** the `lastAccess` timestamp SHALL be updated to prevent premature eviction
 
+### Requirement: Image data preservation during truncation
+The event store string truncation SHALL preserve base64 image data fields. When truncating object fields, if a key is `"data"` and the parent object contains a `"mimeType"` key, the value SHALL NOT be truncated.
+
+#### Scenario: Image base64 data preserved
+- **WHEN** a `message_start` event contains a user message with an image content block `{ type: "image", data: "<200KB base64>", mimeType: "image/png" }`
+- **THEN** the event store SHALL store the full `data` string without truncation
+
+#### Scenario: Non-image data fields still truncated
+- **WHEN** an event contains an object with `{ data: "<large string>" }` but no `mimeType` key
+- **THEN** the `data` field SHALL be truncated per the normal max string size limit
+
+#### Scenario: Other string fields still truncated alongside images
+- **WHEN** a `message_start` event contains both an image content block and a large `thinking` field
+- **THEN** the `data` field in the image block SHALL be preserved AND the `thinking` field SHALL be truncated normally
+
 ### Requirement: Subscriber-count awareness for pinning
 The in-memory event store SHALL receive an `isSessionPinned(sessionId): boolean` callback at creation time. The callback SHALL return true when a session has an active bridge connection OR has browser subscribers > 0. Pinned sessions SHALL never be evicted.
 

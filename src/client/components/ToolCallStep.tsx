@@ -2,7 +2,6 @@ import React, { useState, type ReactNode } from "react";
 import { Icon } from "@mdi/react";
 import { mdiLoading, mdiCheck, mdiAlertCircle, mdiChevronRight, mdiChevronDown } from "@mdi/js";
 import { getToolRenderer, type ToolContext } from "./tool-renderers/index.js";
-import { getInteractiveRenderer } from "./interactive-renderers/registry.js";
 import { useMobile } from "../hooks/useMobile.js";
 import { ElapsedBadge } from "./ElapsedBadge.js";
 import { ErrorBoundary } from "./ErrorBoundary.js";
@@ -41,52 +40,10 @@ const statusIcons: Record<string, ReactNode> = {
   error: <Icon path={mdiAlertCircle} size={0.55} />,
 };
 
-/** Parse ask_user result text and map to the shape interactive renderers expect */
-function parseAskUserResult(method: string, result?: string): Record<string, unknown> | undefined {
-  if (!result) return undefined;
-  // Result format: 'User responded: "value"' or 'User responded: true'
-  const match = result.match(/^User responded:\s*(.+)$/s);
-  if (!match) return undefined;
-  let raw: unknown;
-  try { raw = JSON.parse(match[1]); } catch { raw = match[1]; }
-  // Map raw value to the shape each renderer expects
-  switch (method) {
-    case "confirm": return { confirmed: raw };
-    case "select": return { value: raw };
-    case "input": return { value: raw };
-    case "multiselect": return { values: raw };
-    default: return { value: raw };
-  }
-}
-
 export function ToolCallStep({ toolName, toolCallId, args, status, result, context, startedAt, duration }: Props) {
   const isMobile = useMobile();
   const [expanded, setExpanded] = useState(false);
   const Renderer = getToolRenderer(toolName);
-
-  // Render ask_user tool calls using interactive renderers (same as live UI)
-  if (toolName === "ask_user" && args?.method) {
-    const method = args.method as string;
-    const InteractiveRenderer = getInteractiveRenderer(method);
-    const isError = status === "error";
-    const resolvedStatus = status === "complete" ? "resolved" : status === "error" ? "cancelled" : "pending";
-    const responseValue = parseAskUserResult(method, result);
-    const noop = () => {};
-
-    return (
-      <ErrorBoundary>
-        <InteractiveRenderer
-          requestId={toolCallId}
-          method={method}
-          params={args as Record<string, unknown>}
-          status={resolvedStatus}
-          result={responseValue}
-          onRespond={noop}
-          onCancel={noop}
-        />
-      </ErrorBoundary>
-    );
-  }
 
   return (
     <div className={`${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3`}>

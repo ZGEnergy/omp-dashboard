@@ -166,6 +166,10 @@ export function ChatView({ sessionId, state, toolContext, onCancelPending, onRes
     <div className="flex-1 relative overflow-hidden">
     <div ref={scrollRef} onScroll={handleScroll} className={`h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"} space-y-1`}>
       {state.messages.map((msg) => {
+        if (msg.role === "turnSeparator") {
+          return <div key={msg.id} className="mx-4 my-2 border-t border-[var(--border-subtle)]" />;
+        }
+
         if (msg.role === "user") {
           return (
             <div key={msg.id} className="mt-4 mb-4 flex justify-end">

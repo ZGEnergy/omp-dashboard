@@ -12,35 +12,54 @@ The sidebar header SHALL include a gear icon button positioned at the end of the
 - **THEN** the app SHALL navigate to `/settings` and the main content area SHALL show the settings panel
 
 ### Requirement: Settings panel view
-The settings panel SHALL render as a full-page view in the main content area (replacing the session/chat view) when the route is `/settings`. It SHALL display form fields for all editable `DashboardConfig` fields, grouped by category.
+The settings panel SHALL render as a full-page view in the main content area when the route is `/settings`. It SHALL display a fixed header (back button, title, Restart and Save buttons), a tab bar, and a scrollable content area for the active tab. The header and tab bar SHALL remain visible at all times regardless of scroll position.
 
-#### Scenario: Settings panel layout
+The panel SHALL provide 4 tabs:
+- **General**: Server (`port`, `piPort`, `autoShutdown`, `shutdownIdleSeconds`), Sessions (`spawnStrategy`), Tunnel (`tunnel.enabled`), Developer (`devBuildOnReload`)
+- **Providers**: Provider Authentication (ProviderAuthSection) and LLM Providers (custom OpenAI-compatible endpoints)
+- **Security**: OAuth dashboard access (`auth.providers` per-provider config, `auth.allowedUsers`, `auth.bypassUrls`, `auth.bypassHosts`)
+- **Advanced**: Memory Limits (`memoryLimits.maxEventsPerSession`, `memoryLimits.maxStringFieldSize`, `memoryLimits.maxWsBufferBytes`)
+
+#### Scenario: Settings panel layout with tabs
 - **WHEN** the user navigates to `/settings`
-- **THEN** the panel SHALL display the following groups:
-  - **Server**: `port`, `piPort`, `autoShutdown`, `shutdownIdleSeconds`
-  - **Sessions**: `spawnStrategy`
-  - **Tunnel**: `tunnel.enabled`
-  - **Authentication**: `auth.providers` (per-provider clientId/clientSecret/issuerUrl), `auth.allowedUsers` (usernames, emails, domain wildcards), `auth.bypassUrls` (URL path prefixes that skip authentication), `auth.bypassHosts` (trusted source IPs/hosts that skip authentication — supports exact IP, wildcards, CIDR)
-  - **Developer**: `devBuildOnReload`
+- **THEN** the panel SHALL display a fixed header with back button, "Settings" title, Restart button, and Save button
+- **AND** below the header, a tab bar with 4 tabs: General, Providers, Security, Advanced
+- **AND** below the tab bar, the active tab's content in a scrollable area
+- **AND** the General tab SHALL be selected by default
 
-#### Scenario: bypassUrls field display
-- **WHEN** the Settings panel is open and auth is configured
-- **THEN** the Authentication group SHALL show a textarea labelled "Bypass URLs" containing one URL prefix per line (e.g. `/webhooks/`)
+#### Scenario: Fixed header stays visible on scroll
+- **WHEN** the active tab's content is long enough to scroll
+- **THEN** the header and tab bar SHALL remain fixed at the top
+- **AND** only the tab content area SHALL scroll
 
-#### Scenario: bypassUrls field save
-- **WHEN** the user edits the Bypass URLs textarea and clicks Save
-- **THEN** the client SHALL POST `{ auth: { bypassUrls: <array of trimmed non-empty lines> } }` to `/api/config` and the server SHALL merge it into the running config
+#### Scenario: Tab switching
+- **WHEN** the user clicks a different tab
+- **THEN** the content area SHALL display that tab's settings sections
+- **AND** the clicked tab SHALL show an active indicator (accent underline)
+- **AND** the previously active tab SHALL lose its active indicator
 
-#### Scenario: bypassHosts field display
-- **WHEN** the Settings panel is open and auth is configured
-- **THEN** the Authentication group SHALL show a textarea labelled "Trusted Hosts" containing one IP/host per line, with placeholder examples showing wildcard and CIDR notation
+#### Scenario: General tab content
+- **WHEN** the General tab is active
+- **THEN** the content SHALL display Server, Sessions, Tunnel, and Developer sections with their respective fields
 
-#### Scenario: bypassHosts field save
-- **WHEN** the user edits the Trusted Hosts textarea and clicks Save
-- **THEN** the client SHALL POST `{ auth: { bypassHosts: <array of trimmed non-empty lines> } }` to `/api/config` and the server SHALL merge it into the running config
+#### Scenario: Providers tab content
+- **WHEN** the Providers tab is active
+- **THEN** the content SHALL display the Provider Authentication section (ProviderAuthSection component) and the LLM Providers section (custom endpoint cards with add/remove)
+
+#### Scenario: Security tab content
+- **WHEN** the Security tab is active
+- **THEN** the content SHALL display OAuth provider configuration (GitHub, Google, Keycloak, OIDC), Allowed Users textarea, Bypass URLs textarea, and Trusted Hosts textarea
+
+#### Scenario: Advanced tab content
+- **WHEN** the Advanced tab is active
+- **THEN** the content SHALL display Memory Limits fields (max events per session, max string truncation, max WebSocket buffer)
+
+#### Scenario: Save applies across all tabs
+- **WHEN** the user modifies fields on multiple tabs and clicks Save
+- **THEN** the panel SHALL send all changed fields (from any tab) in a single save operation
 
 #### Scenario: Settings panel back navigation
-- **WHEN** the user clicks a back button or the π logo in the sidebar
+- **WHEN** the user clicks the back button in the header
 - **THEN** the app SHALL navigate away from `/settings` to the previous view
 
 ### Requirement: Config read endpoint

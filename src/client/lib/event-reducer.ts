@@ -12,7 +12,7 @@ export interface ChatImage {
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | "toolResult" | "thinking" | "bashOutput" | "commandFeedback" | "interactiveUi";
+  role: "user" | "assistant" | "toolResult" | "thinking" | "bashOutput" | "commandFeedback" | "interactiveUi" | "turnSeparator";
   content: string;
   images?: ChatImage[];
   toolName?: string;
@@ -326,17 +326,34 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
 
     case "message_end": {
       const msg = data.message as any;
-      if (msg?.role === "assistant" && next.streamingText) {
-        next.messages = [
-          ...next.messages,
-          {
-            id: `msg-${next.messages.length}`,
-            role: "assistant",
-            content: next.streamingText,
-            timestamp: event.timestamp,
-          },
-        ];
-        next.streamingText = "";
+      if (msg?.role === "assistant") {
+        if (next.streamingText) {
+          next.messages = [
+            ...next.messages,
+            {
+              id: `msg-${next.messages.length}`,
+              role: "assistant",
+              content: next.streamingText,
+              timestamp: event.timestamp,
+            },
+          ];
+          next.streamingText = "";
+        } else {
+          // Tool-only assistant turn (no prose) — add a thin separator
+          // so consecutive tool call groups don't blend together
+          const lastMsg = next.messages[next.messages.length - 1];
+          if (lastMsg?.role === "toolResult") {
+            next.messages = [
+              ...next.messages,
+              {
+                id: `sep-${next.messages.length}`,
+                role: "turnSeparator",
+                content: "",
+                timestamp: event.timestamp,
+              },
+            ];
+          }
+        }
       }
       break;
     }

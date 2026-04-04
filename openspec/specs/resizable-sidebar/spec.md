@@ -14,26 +14,35 @@ The sidebar SHALL be resizable by dragging a handle on its right edge. The width
 - **THEN** the sidebar width remains at 500px
 
 ### Requirement: Sidebar collapse via toggle button
-The sidebar header SHALL display a collapse toggle button. Clicking it SHALL collapse the sidebar. When collapsed, clicking the expand button SHALL restore it.
+The sidebar drag handle area SHALL display a collapse chevron button, vertically centered on the right edge of the sidebar, visible on hover. Clicking it SHALL collapse the sidebar. When collapsed, the expand button SHALL be vertically centered on the collapsed strip.
 
-#### Scenario: Collapse via header button
-- **WHEN** user clicks the collapse toggle (`«`) in the sidebar header
-- **THEN** the sidebar collapses to a thin vertical strip (~28px)
+#### Scenario: Collapse button always visible
+- **WHEN** the sidebar is expanded
+- **THEN** a subtle left-chevron collapse button SHALL be always visible, vertically centered on the drag handle edge
 
-#### Scenario: Expand via strip button
-- **WHEN** user clicks the expand button (`»`) on the collapsed strip
-- **THEN** the sidebar expands to its previously saved width
+#### Scenario: Click collapse button
+- **WHEN** user clicks the collapse chevron on the sidebar edge
+- **THEN** the sidebar SHALL collapse to the thin vertical strip (~28px)
 
-### Requirement: Sidebar collapse via double-click
-Double-clicking the drag handle SHALL toggle the sidebar between collapsed and expanded states.
+#### Scenario: Expand via collapsed strip
+- **WHEN** user clicks the expand button on the collapsed strip
+- **THEN** the sidebar SHALL expand to its previously saved width
+- **AND** the expand button SHALL be vertically centered in the collapsed strip
 
-#### Scenario: Double-click to collapse
-- **WHEN** user double-clicks the drag handle while sidebar is expanded
-- **THEN** the sidebar collapses to the thin vertical strip
+#### Scenario: Collapse button does not interfere with drag
+- **WHEN** user presses mouse down on the drag handle area outside the collapse button
+- **THEN** drag-to-resize SHALL work normally
 
-#### Scenario: Double-click to expand
-- **WHEN** user double-clicks the drag handle while sidebar is collapsed
-- **THEN** the sidebar expands to its previously saved width
+### Requirement: Sidebar default width is maximum
+The sidebar default width for first-time users (no localStorage value) SHALL be 500px, equal to the maximum width.
+
+#### Scenario: First-time user sidebar width
+- **WHEN** a user opens the dashboard for the first time (no saved sidebar width)
+- **THEN** the sidebar SHALL render at 500px width
+
+#### Scenario: Existing user sidebar width preserved
+- **WHEN** a user has a previously saved sidebar width of 300px in localStorage
+- **THEN** the sidebar SHALL render at 300px width
 
 ### Requirement: Sidebar state persistence
 The sidebar width and collapsed state SHALL be persisted to localStorage and restored on page reload.

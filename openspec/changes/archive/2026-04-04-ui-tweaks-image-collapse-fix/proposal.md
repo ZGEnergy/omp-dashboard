@@ -8,7 +8,7 @@ Five UI issues to address:
 2. **Sidebar collapse icon is in the header** — The collapse chevron sits in the `SessionList` header toolbar, hard to find. Should be on the sidebar edge.
 3. **Sidebar default width too narrow** — Default is 256px but max is 500px. Should default to 500px (the max) so users see full content without resizing.
 4. **Folder card pin icons are redundant** — Pinned folders show a yellow 📌 icon on the left AND an unpin button on the right. The right-side pin icon alone is sufficient: yellow = pinned (click to unpin), muted = unpinned (click to pin). The left icon should instead be a folder open/closed indicator matching the collapse state.
-5. **Mermaid diagrams use wrong font** — Mermaid renders with its built-in default font instead of the dashboard's system font stack (`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`). Sequence diagrams, flowcharts, and other diagram types all show mismatched fonts.
+5. **Mermaid diagrams use wrong font** — Mermaid renders with its built-in default font, and the `.markdown-content pre *` CSS rule forces monospace `!important` on everything inside `<pre>` (where MermaidBlock renders). Two-layer fix: set font in mermaid config so it sizes boxes correctly, and CSS override to break the monospace inheritance chain.
 6. **Selected session card barely visible** — The selected session card only has a `border-l-2 border-l-blue-500/40` (2px left border at 40% opacity). This is too subtle to quickly identify which session is active. Needs a stronger visual indicator.
 
 

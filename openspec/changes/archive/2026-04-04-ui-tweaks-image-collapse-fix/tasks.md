@@ -27,3 +27,10 @@
 - [x] 5.2 Add always-visible collapse chevron to `ResizableSidebar` drag handle, vertically centered
 - [x] 5.3 Vertically center the expand button in collapsed strip (replace `mt-3` with flex centering)
 - [x] 5.4 Verify drag-to-resize still works alongside the collapse button (stopPropagation on button)
+- [x] 5.5 Remove double-click-to-collapse on drag handle (caused accidental toggles)
+
+## 6. Mermaid diagram font fix
+
+- [x] 6.1 Set system sans-serif font family in mermaid initialize config and themeVariables
+- [x] 6.2 Add CSS override to undo monospace inheritance from `.markdown-content pre` for `.mermaid-diagram` elements
+- [x] 6.3 Clear SVG cache on mermaid re-init to pick up font changes

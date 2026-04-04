@@ -388,6 +388,9 @@ function ApiKeyRow({ provider, onChanged }: { provider: ProviderAuthStatus; onCh
         </div>
         {provider.authenticated && !editing ? (
           <div className="flex items-center gap-2">
+            {provider.maskedKey && (
+              <code className="text-xs text-[var(--text-muted)] font-mono">{provider.maskedKey}</code>
+            )}
             <span className="flex items-center gap-1 text-xs text-green-400">
               <Icon path={mdiCheck} size={0.5} /> Configured
             </span>
