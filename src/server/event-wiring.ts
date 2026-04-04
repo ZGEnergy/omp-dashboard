@@ -323,11 +323,13 @@ export function wireEvents(deps: EventWiringDeps): void {
     }
 
     if (msg.type === "models_list") {
-      browserGateway.sendToSubscribers(sessionId, {
+      // Broadcast to all browsers (not just subscribers) so model selector
+      // is available even before the user opens the session
+      browserGateway.broadcastToAll({
         type: "models_list",
         sessionId,
         models: msg.models,
-      });
+      } as any);
     }
 
     if (msg.type === "model_update") {
