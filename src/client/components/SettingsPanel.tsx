@@ -245,12 +245,15 @@ export function SettingsPanel() {
               const data = await res.json();
               if (data.ok) {
                 setMessage({ type: "success", text: "Server restarting…" });
+                setTimeout(() => navigate("/"), 1500);
               } else {
                 setMessage({ type: "error", text: data.error || "Restart failed" });
                 setRestarting(false);
               }
             } catch {
-              setMessage({ type: "warn", text: "Server shutting down…" });
+              // fetch fails when server exits — that's expected
+              setMessage({ type: "success", text: "Server restarting…" });
+              setTimeout(() => navigate("/"), 1500);
             }
           }}
           disabled={restarting || saving}
