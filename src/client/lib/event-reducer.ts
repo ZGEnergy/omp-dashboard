@@ -2,7 +2,7 @@
  * Event reducer: builds session UI state from a stream of events.
  * (state, event) → new state
  */
-import type { DashboardEvent } from "../../shared/types.js";
+import type { DashboardEvent, FlowState } from "../../shared/types.js";
 import { isFlowEvent, reduceFlowEvent } from "./flow-reducer.js";
 
 export interface ChatImage {
