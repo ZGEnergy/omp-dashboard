@@ -35,6 +35,8 @@ import { registerFileRoutes } from "./routes/file-routes.js";
 import { registerOpenSpecRoutes } from "./routes/openspec-routes.js";
 import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerProviderAuthRoutes } from "./routes/provider-auth-routes.js";
+import { registerPackageRoutes } from "./routes/package-routes.js";
+import { PackageManagerWrapper } from "./package-manager-wrapper.js";
 
 export interface ServerConfig {
   port: number;
@@ -206,6 +208,48 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   registerFileRoutes(fastify, { sessionManager, preferencesStore });
   registerOpenSpecRoutes(fastify, { sessionManager, preferencesStore, directoryService });
   registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config });
+  // Package management
+  const packageManagerWrapper = new PackageManagerWrapper();
+
+  // Forward progress events to all browser clients
+  packageManagerWrapper.setProgressListener((operationId, event) => {
+    browserGateway.broadcastToAll({ type: "package_progress", operationId, event } as any);
+  });
+
+  // On completion: broadcast to browsers
+  packageManagerWrapper.setCompleteListener((result) => {
+    browserGateway.broadcastToAll({
+      type: "package_operation_complete",
+      operationId: result.operationId,
+      action: result.action,
+      source: result.source,
+      scope: result.scope,
+      success: result.success,
+      error: result.error,
+      sessionsReloaded: (result as any).sessionsReloaded,
+    } as any);
+  });
+
+  // Reload all active sessions after a successful package operation
+  packageManagerWrapper.setReloadSessions(async () => {
+    const connectedIds = piGateway.getConnectedSessionIds();
+    let count = 0;
+    for (const sid of connectedIds) {
+      const session = sessionManager.get(sid);
+      if (session && session.status !== "ended") {
+        piGateway.sendToSession(sid, {
+          type: "send_prompt",
+          sessionId: sid,
+          text: "/reload",
+        });
+        count++;
+      }
+    }
+    return count;
+  });
+
+  registerPackageRoutes(fastify, { packageManagerWrapper });
+
   registerProviderAuthRoutes(fastify, { piGateway });
 
   // Serve static files / SPA fallback

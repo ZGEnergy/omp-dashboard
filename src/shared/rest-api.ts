@@ -100,6 +100,8 @@ export interface PiPackageInfo {
   description?: string;
   source: string; // e.g. "npm:pi-web-access", "git:github.com/user/repo", "../relative"
   resources: PiResourceScope;
+  /** Which scope this package was resolved from */
+  scope?: "local" | "global";
 }
 
 export interface PiResourcesResult {
@@ -177,3 +179,69 @@ export interface DeviceCodeResponse {
   expiresIn: number;
   interval: number;
 }
+
+// ── Package Management ──────────────────────────────────────────────
+
+/** A single result from the npm registry search. */
+export interface NpmPackageResult {
+  name: string;
+  description?: string;
+  version: string;
+  keywords: string[];
+  date: string;
+  publisher?: { username: string; email?: string };
+  links?: { npm?: string; homepage?: string; repository?: string };
+  downloads?: { weekly: number; monthly: number };
+  /** Derived from keywords: extension, skill, theme, prompt */
+  types: string[];
+}
+
+export interface NpmSearchResponse {
+  packages: NpmPackageResult[];
+  total: number;
+}
+
+export type NpmSearchApiResponse = ApiResponse<NpmSearchResponse>;
+
+export interface NpmReadmeResponse {
+  readme: string;
+  name: string;
+  version: string;
+}
+
+export type NpmReadmeApiResponse = ApiResponse<NpmReadmeResponse>;
+
+/** An installed pi package as returned by the list endpoint. */
+export interface InstalledPackage {
+  source: string;
+  scope: "user" | "project";
+  filtered: boolean;
+  installedPath?: string;
+  /** Set after check-updates: true if newer version available */
+  updateAvailable?: boolean;
+}
+
+export type InstalledPackagesResponse = ApiResponse<InstalledPackage[]>;
+
+/** Request body for install / remove / update operations. */
+export interface PackageOperationRequest {
+  source: string;
+  scope: "global" | "local";
+  cwd?: string;
+}
+
+/** Response returned immediately (202) when an operation starts. */
+export interface PackageOperationResponse {
+  operationId: string;
+}
+
+export type PackageOperationApiResponse = ApiResponse<PackageOperationResponse>;
+
+/** Result of check-updates. */
+export interface PackageUpdateInfo {
+  source: string;
+  displayName: string;
+  type: "npm" | "git";
+}
+
+export type CheckUpdatesResponse = ApiResponse<PackageUpdateInfo[]>;

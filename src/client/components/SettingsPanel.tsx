@@ -3,6 +3,12 @@ import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiContentSave, mdiAlert, mdiPlus, mdiDelete, mdiRestart } from "@mdi/js";
 import { useLocation } from "wouter";
 import { ProviderAuthSection } from "./ProviderAuthSection.js";
+import { PackageBrowser } from "./PackageBrowser.js";
+import { PackageInstallConfirmDialog } from "./PackageInstallConfirmDialog.js";
+import { PackageReadmeDialog } from "./PackageReadmeDialog.js";
+import { useInstalledPackages } from "../hooks/useInstalledPackages.js";
+import { usePackageOperations } from "../hooks/usePackageOperations.js";
+import type { NpmPackageResult } from "../../shared/rest-api.js";
 
 interface ProviderConfig {
   clientId: string;
@@ -227,6 +233,7 @@ export function SettingsPanel() {
 
   const tabs = [
     { id: "general", label: "General" },
+    { id: "packages", label: "Packages" },
     { id: "providers", label: "Providers" },
     { id: "security", label: "Security" },
     { id: "advanced", label: "Advanced" },
@@ -467,6 +474,10 @@ export function SettingsPanel() {
           )}
 
           {/* Advanced Tab */}
+          {activeTab === "packages" && (
+            <GlobalPackagesSection />
+          )}
+
           {activeTab === "advanced" && (
             <>
               <Section title="Memory Limits">
@@ -640,6 +651,123 @@ const API_TYPE_OPTIONS = [
   { value: "openai-completions", label: "OpenAI Completions" },
   { value: "anthropic", label: "Anthropic" },
 ];
+
+// ─── Global Packages Section ──────────────────────────────────────────────────
+
+function GlobalPackagesSection() {
+  const installed = useInstalledPackages("global");
+  const operations = usePackageOperations("global", undefined, installed.refresh);
+  const [confirmInstall, setConfirmInstall] = useState<{ source: string; pkg?: NpmPackageResult } | null>(null);
+  const [readmePkg, setReadmePkg] = useState<NpmPackageResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [updatesAvailable, setUpdatesAvailable] = useState<Set<string>>(new Set());
+
+  const handleCheckUpdates = async () => {
+    setChecking(true);
+    try {
+      const res = await fetch("/api/packages/check-updates", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const body = await res.json();
+      if (body.success) {
+        setUpdatesAvailable(new Set(body.data.map((u: any) => u.source)));
+      }
+    } catch { /* ignore */ }
+    setChecking(false);
+  };
+
+  const handleConfirmInstall = (source: string, pkg?: NpmPackageResult) => {
+    setConfirmInstall({ source, pkg });
+  };
+
+  const doInstall = () => {
+    if (!confirmInstall) return;
+    operations.install(confirmInstall.source);
+    setConfirmInstall(null);
+  };
+
+  return (
+    <>
+      {/* Installed packages */}
+      <Section title="Installed Global Packages">
+        <div className="flex items-center gap-2 mb-2">
+          <button
+            onClick={handleCheckUpdates}
+            disabled={checking}
+            className="text-xs px-2 py-1 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-primary)] disabled:opacity-50"
+          >
+            {checking ? "Checking..." : "Check for Updates"}
+          </button>
+        </div>
+        {installed.packages.length === 0 ? (
+          <p className="text-xs text-[var(--text-muted)] italic">No global packages installed.</p>
+        ) : (
+          <div className="space-y-1">
+            {installed.packages.map((pkg) => (
+              <div key={pkg.source} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-[var(--bg-hover)] text-xs">
+                <span className="text-[var(--text-primary)] font-mono">{pkg.source}</span>
+                <div className="flex items-center gap-1.5">
+                  {updatesAvailable.has(pkg.source) && (
+                    <button
+                      onClick={() => operations.update(pkg.source)}
+                      disabled={operations.operation.status === "running"}
+                      className="px-2 py-0.5 rounded bg-[var(--accent-primary)]/20 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/30 disabled:opacity-50"
+                    >
+                      Update
+                    </button>
+                  )}
+                  <button
+                    onClick={() => operations.remove(pkg.source)}
+                    disabled={operations.operation.status === "running"}
+                    className="px-2 py-0.5 rounded text-red-400 hover:bg-red-400/10 disabled:opacity-50"
+                  >
+                    Uninstall
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {operations.operation.status !== "idle" && (
+          <div className={`mt-2 text-xs px-2 py-1 rounded ${
+            operations.operation.status === "running" ? "bg-blue-500/10 text-blue-400"
+              : operations.operation.status === "success" ? "bg-green-500/10 text-green-400"
+                : "bg-red-500/10 text-red-400"
+          }`}>
+            {operations.operation.message}
+          </div>
+        )}
+      </Section>
+
+      {/* Browse packages */}
+      <Section title="Browse Packages">
+        <PackageBrowser
+          scope="global"
+          onViewReadme={setReadmePkg}
+          onConfirmInstall={handleConfirmInstall}
+        />
+      </Section>
+
+      {/* Dialogs */}
+      {confirmInstall && (
+        <PackageInstallConfirmDialog
+          source={confirmInstall.source}
+          packageName={confirmInstall.pkg?.name}
+          scope="global"
+          onConfirm={doInstall}
+          onCancel={() => setConfirmInstall(null)}
+        />
+      )}
+      {readmePkg && (
+        <PackageReadmeDialog
+          pkg={readmePkg}
+          installed={installed.packages.some((p) => p.source === `npm:${readmePkg.name}`)}
+          onInstall={() => { handleConfirmInstall(`npm:${readmePkg.name}`, readmePkg); setReadmePkg(null); }}
+          onUninstall={() => { operations.remove(`npm:${readmePkg.name}`); setReadmePkg(null); }}
+          onClose={() => setReadmePkg(null)}
+        />
+      )}
+    </>
+  );
+}
 
 function LlmProviderCard({ provider, onChange, onRemove }: {
   provider: LlmProvider;

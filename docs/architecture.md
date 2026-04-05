@@ -196,9 +196,21 @@ Metadata is parsed from SKILL.md YAML frontmatter (`name`, `description`), promp
 - `GET /api/pi-resources?cwd=...` — returns grouped resources (local, global, packages) from cache
 - `GET /api/pi-resource-file?path=...` — reads resource files from allowed locations (`.pi/`, `~/.pi/agent/`, `node_modules/`, `.pi/git/`)
 
+**Package Management:**
+- `GET /api/packages/search?q=&type=` — proxied npm search for `keywords:pi-package`, cached 5min
+- `GET /api/packages/readme?pkg=` — fetch package README from npm registry
+- `GET /api/packages/installed?scope=global|local&cwd=` — list installed packages via pi's `PackageManager`
+- `POST /api/packages/install` — install package (returns 202 + operationId, streams progress via WS)
+- `POST /api/packages/remove` — remove package (same async pattern)
+- `POST /api/packages/update` — update packages (same async pattern)
+- `POST /api/packages/check-updates` — check for available updates (on-demand)
+
+Package operations use pi's `DefaultPackageManager` API on the server, serialized (one at a time, 409 on concurrent). Progress events are forwarded to browsers via `package_progress` WebSocket messages. After any successful operation, the server sends `/reload` to all connected pi sessions.
+
 **Client navigation stack:**
-- Puzzle icon button in folder header → PiResourcesView (content area)
+- Puzzle icon button in folder header → PiResourcesView (content area, "Installed" / "Packages" tabs)
 - "View" button on resource → MarkdownPreviewView (`.md` as markdown, `.ts` as code block)
+- Settings → Packages tab → inline PackageBrowser for global package management
 - Back buttons pop the stack: Preview → Resources → Chat
 
 ### Git Branch Selector

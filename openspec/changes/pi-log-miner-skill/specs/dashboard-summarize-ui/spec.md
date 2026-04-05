@@ -63,6 +63,24 @@ The dashboard SHALL display session summaries in a content-area view with collap
 - **WHEN** the session has new activity since the last summary
 - **THEN** a "Re-analyze" button is shown with a staleness indicator
 
+### Requirement: Live tracking toggle in session header
+The session content-area header SHALL include a toggle switch for live knowledge tracking. The toggle SHALL be visible only for active sessions (not ended). It SHALL show green when active.
+
+#### Scenario: Active session header
+- **WHEN** the user views an active session
+- **THEN** a compact toggle (brain icon + switch) appears in the header action area
+
+#### Scenario: Ended session header
+- **WHEN** the user views an ended session
+- **THEN** no live tracking toggle is shown
+
+### Requirement: Live tracking default toggle in Settings
+The Settings panel Honcho section SHALL include a "Live Knowledge Tracking" ToggleField controlling `honcho.liveTrackingDefault`.
+
+#### Scenario: Toggle in settings
+- **WHEN** the user opens Settings
+- **THEN** the Honcho section shows a "Live Knowledge Tracking" toggle with the current default value
+
 ### Requirement: Honcho status indicator
 The dashboard settings or footer SHALL show the Honcho connection state: "Docker running", "External", or "Offline".
 

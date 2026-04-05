@@ -328,7 +328,7 @@ export function resolvePackages(
     }
 
     const resources = scanPackageDir(realDir);
-    packages.push({ name, description, source: resolved.source, resources });
+    packages.push({ name, description, source: resolved.source, resources, scope });
   }
 
   return packages;

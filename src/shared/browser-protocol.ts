@@ -145,6 +145,31 @@ export interface SessionStateResetMessage {
   sessionId: string;
 }
 
+/** Progress event streamed during a package install/remove/update operation. */
+export interface PackageProgressMessage {
+  type: "package_progress";
+  operationId: string;
+  event: {
+    type: "start" | "progress" | "complete" | "error";
+    action: "install" | "remove" | "update" | "clone" | "pull";
+    source: string;
+    message?: string;
+  };
+}
+
+/** Sent when a package operation finishes (success or failure). */
+export interface PackageOperationCompleteMessage {
+  type: "package_operation_complete";
+  operationId: string;
+  action: "install" | "remove" | "update";
+  source: string;
+  scope: "global" | "local";
+  success: boolean;
+  error?: string;
+  /** Number of sessions reloaded (only on success). */
+  sessionsReloaded?: number;
+}
+
 export type ServerToBrowserMessage =
   | SessionAddedMessage
   | SessionUpdatedMessage
@@ -166,7 +191,9 @@ export type ServerToBrowserMessage =
   | TerminalAddedMessage
   | TerminalRemovedMessage
   | TerminalUpdatedMessage
-  | SessionStateResetMessage;
+  | SessionStateResetMessage
+  | PackageProgressMessage
+  | PackageOperationCompleteMessage;
 
 // ── Browser → Server ────────────────────────────────────────────────
 
@@ -335,6 +362,12 @@ export interface FlowControlBrowserMessage {
   type: "flow_control";
   sessionId: string;
   action: "abort" | "toggle_autonomous";
+}
+
+export interface RequestInstalledPackagesBrowserMessage {
+  type: "request_installed_packages";
+  scope: "global" | "local";
+  cwd?: string;
 }
 
 export type BrowserToServerMessage =

@@ -1,7 +1,7 @@
 ## 1. Shared Types & Config
 
 - [ ] 1.1 Create `src/shared/summary-types.ts` with RollingSummary, TopicSection, ChunkAnalysis, SummaryReport, SummaryStatus types
-- [ ] 1.2 Add `honcho` section to DashboardConfig in `src/shared/config.ts` (enabled, port, mode, externalUrl, proxyPort) with defaults
+- [ ] 1.2 Add `honcho` section to DashboardConfig in `src/shared/config.ts` (enabled, port, mode, externalUrl, proxyPort, liveTrackingDefault) with defaults
 - [ ] 1.3 Add summary WebSocket event types to `src/shared/browser-protocol.ts` (summary_progress, summary_complete)
 
 ## 2. Topic-Aware Chunking
@@ -60,37 +60,51 @@
 - [ ] 7.8 Integrate Honcho client into rolling-analyzer.ts (store conclusions after pipeline completes)
 - [ ] 7.9 Write tests for Honcho client (mock SDK — workspace creation, conclusion storage, graceful degradation)
 
-## 8. Dashboard Server Routes
+## 8. Live Automatic Tracking
 
-- [ ] 8.1 Create `src/server/routes/summary-routes.ts` — POST /api/session/:id/summarize, GET /api/session/:id/summary
-- [ ] 8.2 Create `src/server/routes/honcho-routes.ts` — GET /api/honcho/status
-- [ ] 8.3 Create `src/server/summary-pipeline.ts` — background pipeline runner that wires chunker → seed → analyzer → formatter → Honcho storage
-- [ ] 8.4 Implement WebSocket progress events (summary_progress, summary_complete) via browser gateway
-- [ ] 8.5 Implement summary status tracking (pending/processing/ready/error) with in-memory state
-- [ ] 8.6 Register new routes in server.ts
-- [ ] 8.7 Write tests for summary routes (trigger, status polling, progress events)
+- [ ] 8.1 Create `src/server/log-miner/live-tracker.ts` — per-session accumulator with in-memory round buffer and rolling summary
+- [ ] 8.2 Implement debounced analysis trigger (topic change OR 3-round threshold OR 30s idle timeout)
+- [ ] 8.3 Implement incremental pipeline: fork knowledge seed, analyze buffered rounds, update rolling summary
+- [ ] 8.4 Implement dual output: write Honcho conclusions per batch + persist markdown on session end or toggle-off
+- [ ] 8.5 Implement per-session toggle state map with global default from `honcho.liveTrackingDefault`
+- [ ] 8.6 Wire into `event-wiring.ts`: add `liveTracker.onRoundComplete(sessionId, event)` call in `agent_end` case
+- [ ] 8.7 Wire session unregister: persist rolling summary as markdown report when session ends
+- [ ] 8.8 Add WebSocket message for toggle state: browser sends toggle command, server updates per-session state
+- [ ] 8.9 Write tests for live-tracker (accumulation, debounce triggers, toggle on/off, session end persistence)
 
-## 9. Dashboard Client UI
+## 9. Dashboard Server Routes
 
-- [ ] 9.1 Create `src/client/components/SummarizeButton.tsx` — button for session header and mobile action menu
-- [ ] 9.2 Add "Summarize"/"Re-analyze" option to MobileActionMenu kebab menu
-- [ ] 9.3 Add summarize action to SessionHeader actions
-- [ ] 9.4 Create `src/client/components/SummaryView.tsx` — content-area view with collapsible topic sections, colored badges
-- [ ] 9.5 Implement summary progress indicator on session card during processing
-- [ ] 9.6 Implement re-analyze staleness detection (session has new events since last summary)
-- [ ] 9.7 Add Honcho status indicator to SettingsPanel
-- [ ] 9.8 Handle summary WebSocket events in useMessageHandler.ts
-- [ ] 9.9 Add summary fetch hook (`useSessionSummary.ts`)
+- [ ] 9.1 Create `src/server/routes/summary-routes.ts` — POST /api/session/:id/summarize, GET /api/session/:id/summary
+- [ ] 9.2 Create `src/server/routes/honcho-routes.ts` — GET /api/honcho/status
+- [ ] 9.3 Create `src/server/summary-pipeline.ts` — background pipeline runner that wires chunker → seed → analyzer → formatter → Honcho storage
+- [ ] 9.4 Implement WebSocket progress events (summary_progress, summary_complete) via browser gateway
+- [ ] 9.5 Implement summary status tracking (pending/processing/ready/error) with in-memory state
+- [ ] 9.6 Register new routes in server.ts
+- [ ] 9.7 Write tests for summary routes (trigger, status polling, progress events)
 
-## 10. Skill Definition
+## 10. Dashboard Client UI
 
-- [ ] 10.1 Create `.pi/skills/pi-log-miner/SKILL.md` with skill metadata, description, and usage instructions
-- [ ] 10.2 Create `.pi/skills/pi-log-miner/references/extraction-prompts.md` with prompt templates for seed system prompt and chunk analysis
-- [ ] 10.3 Create `.pi/skills/pi-log-miner/references/output-schema.md` with JSON schema for chunk analysis response
-- [ ] 10.4 Create `.pi/skills/pi-log-miner/references/honcho-integration.md` with Honcho setup guide and two-peer model docs
+- [ ] 10.1 Create `src/client/components/SummarizeButton.tsx` — button for session header and mobile action menu
+- [ ] 10.2 Add "Summarize"/"Re-analyze" option to MobileActionMenu kebab menu
+- [ ] 10.3 Add summarize action to SessionHeader actions
+- [ ] 10.4 Create `src/client/components/LiveTrackingToggle.tsx` — compact toggle (brain icon + switch) for session header, green when active
+- [ ] 10.5 Wire LiveTrackingToggle into SessionHeader — visible only for active sessions, sends toggle command via WebSocket
+- [ ] 10.6 Create `src/client/components/SummaryView.tsx` — content-area view with collapsible topic sections, colored badges
+- [ ] 10.7 Implement summary progress indicator on session card during processing
+- [ ] 10.8 Implement re-analyze staleness detection (session has new events since last summary)
+- [ ] 10.9 Add Honcho section to SettingsPanel with: Honcho status indicator, Live Knowledge Tracking toggle (`liveTrackingDefault`)
+- [ ] 10.10 Handle summary + live tracking WebSocket events in useMessageHandler.ts
+- [ ] 10.11 Add summary fetch hook (`useSessionSummary.ts`)
 
-## 11. Documentation
+## 11. Skill Definition
 
-- [ ] 11.1 Update AGENTS.md with new key files (honcho-docker.ts, honcho-client.ts, summary-pipeline.ts, log-miner/ modules)
-- [ ] 11.2 Update docs/architecture.md with log-miner pipeline data flow and Honcho Docker lifecycle
-- [ ] 11.3 Update README.md with Honcho setup section (Docker requirement, pi-model-proxy dependency, config options)
+- [ ] 11.1 Create `.pi/skills/pi-log-miner/SKILL.md` with skill metadata, description, and usage instructions
+- [ ] 11.2 Create `.pi/skills/pi-log-miner/references/extraction-prompts.md` with prompt templates for seed system prompt and chunk analysis
+- [ ] 11.3 Create `.pi/skills/pi-log-miner/references/output-schema.md` with JSON schema for chunk analysis response
+- [ ] 11.4 Create `.pi/skills/pi-log-miner/references/honcho-integration.md` with Honcho setup guide and two-peer model docs
+
+## 12. Documentation
+
+- [ ] 12.1 Update AGENTS.md with new key files (honcho-docker.ts, honcho-client.ts, summary-pipeline.ts, live-tracker.ts, log-miner/ modules)
+- [ ] 12.2 Update docs/architecture.md with log-miner pipeline data flow, live tracking event hook, and Honcho Docker lifecycle
+- [ ] 12.3 Update README.md with Honcho setup section (Docker requirement, pi-model-proxy dependency, config options, live tracking toggle)

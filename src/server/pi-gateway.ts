@@ -6,7 +6,7 @@ import type { ExtensionToServerMessage, ServerToExtensionMessage } from "../shar
 import type { DashboardSession } from "../shared/types.js";
 import type { SessionManager } from "./memory-session-manager.js";
 
-export const HEARTBEAT_TIMEOUT = 90_000;
+export const HEARTBEAT_TIMEOUT = 180_000;
 export const WS_PING_INTERVAL = 60_000;
 
 export interface PiGatewayOptions {
@@ -70,6 +70,15 @@ export function createPiGateway(
     heartbeatTimers.set(
       sessionId,
       setTimeout(() => {
+        // If the WebSocket TCP connection is still open, don't kill the session.
+        // The bridge is just busy (e.g. running a long tool execution) and can't
+        // send heartbeats, but the connection itself is alive. Reschedule.
+        const ws = connections.get(sessionId);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          resetHeartbeat(sessionId);
+          return;
+        }
+
         const meta = heartbeatMeta.get(sessionId);
         const elapsed = Date.now() - (meta?.setAt ?? now);
 
@@ -81,6 +90,11 @@ export function createPiGateway(
           heartbeatTimers.set(
             sessionId,
             setTimeout(() => {
+              const ws2 = connections.get(sessionId);
+              if (ws2 && ws2.readyState === WebSocket.OPEN) {
+                resetHeartbeat(sessionId);
+                return;
+              }
               console.error(`[gateway] session timed out: ${sessionId} (sleep recovery failed)`);
               sessionManager.unregister(sessionId);
               connections.delete(sessionId);
@@ -126,17 +140,28 @@ export function createPiGateway(
     start(port: number) {
       wss = new WebSocketServer({ port });
 
-      // WS-level ping/pong: detect dead connections.
-      // Require 2 consecutive missed pongs before killing — a single miss
-      // can happen when the pi agent blocks the event loop running a
-      // long bash command (e.g. test suite).
-      const PING_MISS_THRESHOLD = 2;
+      // WS-level ping/pong: detect truly dead connections.
+      // Pong responses are processed in the event loop, so a busy bridge
+      // won't respond to pings. We check the underlying TCP socket's
+      // writable state as a fallback — if TCP is alive, the bridge is just
+      // busy, not dead.
+      const PING_MISS_THRESHOLD = 3;
       if (pingMs > 0) pingTimer = setInterval(() => {
         if (!wss) return;
         for (const client of wss.clients) {
           const misses = aliveMisses.get(client) ?? 0;
           if (misses >= PING_MISS_THRESHOLD) {
-            // No pong for multiple intervals — connection is dead
+            // Check if the underlying TCP socket is still alive.
+            // If the socket is writable, the connection is physically intact —
+            // the bridge is just too busy to process pong frames.
+            const socket = (client as any)._socket;
+            if (socket && !socket.destroyed && socket.writable) {
+              // TCP alive but no pong — bridge is busy. Reset counter, keep alive.
+              aliveMisses.set(client, 0);
+              client.ping();
+              continue;
+            }
+            // TCP is dead — clean up
             for (const [sid, ws] of connections) {
               if (ws === client) {
                 console.error(`[gateway] connection dead (ping timeout, ${misses} misses): ${sid}`);

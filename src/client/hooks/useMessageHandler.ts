@@ -247,6 +247,12 @@ export function useMessageHandler(
           return next;
         });
         break;
+
+      case "package_progress":
+      case "package_operation_complete":
+        // Dispatch to component-level hooks via custom DOM event
+        window.dispatchEvent(new CustomEvent("pi-package-event", { detail: msg }));
+        break;
     }
   }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef]);
 }

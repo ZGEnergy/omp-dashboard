@@ -46,12 +46,21 @@ Honcho provides the memory infrastructure — background reasoning, semantic sea
       "port": 8008,
       "mode": "docker",
       "externalUrl": null,
-      "proxyPort": 9876
+      "proxyPort": 9876,
+      "liveTrackingDefault": true
     }
   }
   ```
   `mode: "docker"` (managed) or `mode: "external"` (user-managed instance at `externalUrl`). Supports hosted `api.honcho.dev` via external mode too. `proxyPort` points to the pi-model-proxy port (default 9876).
 - **pi-model-proxy dependency**: The Docker-managed mode requires `pi-model-proxy` to be installed and running in the active pi session. The dashboard checks proxy health (`GET localhost:9876/health`) before starting Honcho's Docker stack. If the proxy is not available, Honcho starts without reasoning features (CRUD-only, no deriver/summarizer/dream) — the pipeline still works but without Honcho's supplemental background insights.
+
+### Live Automatic Tracking
+- **Per-session live tracking toggle**: A toggle switch in the session content-area header enables/disables live knowledge tracking for that session. Default value comes from the global setting `honcho.liveTrackingDefault` (boolean, default false).
+- **Event-driven accumulation**: When live tracking is on, the server hooks into `agent_end` events in `event-wiring.ts`. Each completed agent round is accumulated in a per-session buffer.
+- **Debounced analysis**: Analysis triggers when: topic changes (heuristic detection), N rounds buffered (default 3), or session goes idle for 30 seconds — whichever comes first.
+- **Incremental pipeline**: Same core modules as post-hoc (topic detector, knowledge seed fork, rolling analyzer). The knowledge seed is created once per project and reused across all live sessions.
+- **Dual output**: Each analysis batch writes conclusions to Honcho (if available) AND appends to an in-memory rolling summary. On session end (or when tracking is toggled off), the rolling summary is persisted to `.pi/memories/session-summaries/<session-id>.md`.
+- **Cost-bounded**: One Haiku fork per batch of rounds (not per turn). A typical 20-round session produces ~4-6 Haiku calls ≈ $0.008.
 
 ### Dashboard Integration
 - **Summarize button**: Appears on ended session cards (kebab menu) AND active sessions (partial "in-progress" summary). Also in session header actions.
@@ -60,6 +69,8 @@ Honcho provides the memory infrastructure — background reasoning, semantic sea
 - **Summary view**: New content-area view showing the markdown summary with collapsible topic sections, colored badges for surprises/contradictions, and a "re-analyze" button when the session has new activity since last summarization
 - **Re-analyze badge**: If a session gets more activity after summarization, show staleness indicator
 - **Honcho status indicator**: Small indicator in dashboard footer/settings showing Honcho connection state (Docker running / external / offline)
+- **Live tracking toggle in session header**: Toggle switch in the content-area session header (next to existing action buttons). Green when active. Per-session override of the global default. State stored in-memory (not persisted — resets to global default on server restart).
+- **Live tracking default in Settings**: ToggleField in the Honcho settings section: "Live Knowledge Tracking" on/off. Controls the default state for new sessions.
 
 ## Capabilities
 
@@ -71,10 +82,11 @@ Honcho provides the memory infrastructure — background reasoning, semantic sea
 - `honcho-docker-lifecycle`: Docker Compose stack generation, auto-start/stop with dashboard, health probing, named volume persistence, pi-model-proxy connectivity check, `host.docker.internal` routing for LLM calls, port configuration, external mode support
 - `honcho-memory-integration`: Two-peer model (project + developer), conclusion storage with category/importance/topic metadata, semantic search via conclusions.query(), peer representation queries, knowledge feedback loop into seed creation, Honcho session per analysis with built-in summarization, community extension interop
 - `memory-portability`: Export project knowledge to human-readable markdown in `.pi/memories/`, Honcho conclusions available via API for external tools
-- `dashboard-summarize-ui`: Summarize button on session cards/header, background pipeline with WebSocket progress, content-area summary view with collapsible topics and re-analyze support, Honcho status indicator
+- `live-automatic-tracking`: Event-driven per-session accumulator hooked into agent_end events, debounced analysis trigger (topic change / N rounds / idle timeout), incremental rolling summary, dual output to markdown + Honcho, per-session toggle with global default from settings
+- `dashboard-summarize-ui`: Summarize button on session cards/header, background pipeline with WebSocket progress, content-area summary view with collapsible topics and re-analyze support, Honcho status indicator, live tracking toggle in session header
 
 ### Modified Capabilities
-- `dashboard-config`: New `honcho` section in config schema (enabled, port, mode, externalUrl)
+- `dashboard-config`: New `honcho` section in config schema (enabled, port, mode, externalUrl, liveTrackingDefault)
 - `dashboard-server-lifecycle`: Docker Compose start/stop integrated into server startup/shutdown hooks
 
 ## Impact

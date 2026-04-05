@@ -86,6 +86,36 @@ Create a fresh instance per operation (install/remove/update) rather than cachin
 
 **Why:** Pi's `PackageManager` modifies `settings.json` and runs npm/git commands. Concurrent operations could corrupt state. Simplest to serialize.
 
+### 8. PackageBrowser as inline side panel
+
+**Decision:** The PackageBrowser renders inline within the Settings panel (global) or the Resources "Packages" tab (local) — not as a dialog or content-area view.
+
+**Why:** Keeps context visible. Users can see their installed packages alongside the browse results without navigating away.
+
+### 9. README preview as dialog
+
+**Decision:** Clicking a package card opens a dialog overlay with the rendered README, an Install/Uninstall button, and a close button.
+
+**Why:** READMEs can be long. A dialog gives full-screen focus without losing the browse state underneath. Reuses the existing `DialogPortal` pattern.
+
+### 10. Install requires confirmation
+
+**Decision:** Clicking "Install" on a package card shows a confirmation dialog displaying the package name, source, and target scope before proceeding.
+
+**Why:** Installing modifies settings and triggers a reload of all sessions. Users should confirm before a side-effect that affects all their pi sessions.
+
+### 11. Git URL input for manual install
+
+**Decision:** The PackageBrowser includes a text input field where users can paste an npm or git URL (e.g., `npm:@foo/bar`, `git:github.com/user/repo`) and click Install. This is separate from the npm search grid.
+
+**Why:** Not all packages are on npm. Git-hosted packages are a first-class pi install source and should be accessible from the UI.
+
+### 12. Explicit "Check for Updates" button (no proactive badges)
+
+**Decision:** The installed packages list includes a "Check for Updates" button. Clicking it calls `checkForAvailableUpdates()` and marks packages with available updates. No proactive polling or badges.
+
+**Why:** `checkForAvailableUpdates()` hits npm/git for each package and is slow. Running it on-demand avoids unnecessary network traffic and keeps the UI responsive.
+
 ## Risks / Trade-offs
 
 - **[Coupling to pi internals]** → `DefaultPackageManager` API could change across pi versions. Mitigation: wrap in a thin adapter (`package-manager-wrapper.ts`) so breakage is localized to one file. The dashboard already depends on pi as a dependency.

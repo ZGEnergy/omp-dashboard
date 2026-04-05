@@ -91,6 +91,9 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/client/lib/browse-api.ts` | Client-side browse API helper for PathPicker |
 | `src/server/browse.ts` | Directory listing logic for browse API endpoint |
 | `src/server/pi-resource-scanner.ts` | Discovers pi extensions, skills, prompts from local, global, and package sources |
+| `src/server/package-manager-wrapper.ts` | Thin adapter around pi's `DefaultPackageManager` with operation serialization, progress forwarding, and session reload |
+| `src/server/npm-search-proxy.ts` | Cached proxy for npm registry search (`keywords:pi-package`) and README fetch |
+| `src/server/routes/package-routes.ts` | REST routes: search, readme, installed, install, remove, update, check-updates |
 | `src/client/components/SortablePinnedGroup.tsx` | Drag-to-reorder wrapper for pinned directory groups |
 | `src/server/preferences-store.ts` | Global UI preferences (pinned dirs, session order) in `preferences.json` |
 | `src/server/meta-persistence.ts` | Per-session debounced `.meta.json` writer |
@@ -128,7 +131,14 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/server/cli.ts` | CLI entry point with subcommands (start/stop/restart/status) |
 | `src/shared/rest-api.ts` | REST API type definitions |
 | `scripts/reload-all.sh` | Build bridge + reload all pi sessions |
-| `src/client/components/PiResourcesView.tsx` | Content area view for browsing pi extensions, skills, and prompts |
+| `src/client/components/PiResourcesView.tsx` | Content area view for browsing pi extensions, skills, and prompts (with Installed/Packages tabs) |
+| `src/client/components/PackageBrowser.tsx` | Reusable inline package browser: npm search, type filters, install/uninstall, manual URL input |
+| `src/client/components/PackageCard.tsx` | Package card with type badges, downloads, install/uninstall actions |
+| `src/client/components/PackageReadmeDialog.tsx` | Dialog overlay showing package README with install/uninstall action |
+| `src/client/components/PackageInstallConfirmDialog.tsx` | Confirmation dialog before package install (name, source, scope) |
+| `src/client/hooks/usePackageSearch.ts` | Debounced fetch hook for `/api/packages/search` |
+| `src/client/hooks/useInstalledPackages.ts` | Fetch hook for `/api/packages/installed` |
+| `src/client/hooks/usePackageOperations.ts` | Install/remove/update actions with WebSocket progress listening |
 | `src/client/hooks/usePiResources.ts` | Fetch + 30s polling hook for pi resources API |
 | `src/client/components/MarkdownPreviewView.tsx` | Generic reusable markdown preview with back button, tabs, loading/error states |
 | `src/client/hooks/useOpenSpecReader.ts` | Maps OpenSpec artifacts to file paths, fetches content, concatenates specs |

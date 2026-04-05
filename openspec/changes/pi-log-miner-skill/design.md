@@ -83,11 +83,27 @@ The dashboard server already manages external processes (zrok tunnel via subproc
 
 **Rationale**: Markdown files work without Honcho (graceful degradation), are git-friendly, and human-readable. Honcho conclusions enable semantic search ("what do we know about auth?") and feed back into future knowledge seeds. Both outputs are generated from the same rolling summary data.
 
-### 8. Dashboard summarize button on both ended and active sessions
+### 8. Live automatic tracking as event-wiring hook
 
-**Decision**: Show summarize action for ended sessions (full analysis) and active sessions (partial analysis of activity so far).
+**Decision**: Hook into `agent_end` events in `event-wiring.ts` to drive incremental analysis. Per-session accumulator buffers rounds, triggers Haiku fork analysis on topic change, N-round threshold, or idle timeout.
 
-**Rationale**: Active session summaries are useful for long-running sessions — "what has this agent done in the last 2 hours?" Active summaries are marked as "in-progress" and can be re-analyzed after the session ends.
+**Rationale**: The event-wiring already sees every `agent_end` — adding one call to a live tracker is a single-line integration point. The tracker reuses the same core modules (topic detector, seed, analyzer, Honcho client) as the post-hoc pipeline. This means live tracking and manual summarization share code, not duplicate it.
+
+**Alternative considered**: Bridge extension-side tracking (analyze in the pi session process). Rejected — would add LLM calls to the user's session, competing for context window and compute. Server-side tracking is invisible to the session.
+
+### 9. Per-session toggle with global default
+
+**Decision**: Toggle switch in the session content-area header, defaulting to `honcho.liveTrackingDefault` from settings. Per-session state is in-memory only (resets on server restart).
+
+**Rationale**: Some sessions don't need tracking (quick one-off questions). Some always do (long implementation sessions). The toggle gives per-session control. In-memory state is sufficient — if the server restarts, sessions reconnect and the default applies again. No need to persist toggle state.
+
+**Alternative considered**: Persist toggle state per session in `.meta.json`. Adds complexity for minimal value — the default setting covers the common case.
+
+### 10. Dashboard summarize button on both ended and active sessions
+
+**Decision**: Show summarize action for ended sessions (full analysis) and active sessions (partial analysis of activity so far). This complements live tracking — manual summarize does a full re-analysis from scratch.
+
+**Rationale**: Live tracking gives incremental updates. Manual summarize gives a complete fresh analysis. Both produce the same output format. Users who keep live tracking off can still manually summarize when needed.
 
 ## Risks / Trade-offs
 
@@ -110,6 +126,10 @@ The dashboard server already manages external processes (zrok tunnel via subproc
 ### Haiku model availability
 **Risk**: User may not have Anthropic API key or Haiku access.
 **Mitigation**: Pipeline should fall back to any available cheap model via `modelRegistry.getAvailable()`. The seed and chunk analysis don't need a specific model — any fast, cheap model works.
+
+### Live tracking cost accumulation
+**Risk**: Users forget live tracking is on, accumulating unexpected LLM costs across many sessions.
+**Mitigation**: Default is ON (`liveTrackingDefault: true`) but the toggle is prominent in the session header, making it easy to disable per-session. Toggle is visible in session header with green indicator when active. Cost per session is bounded (~$0.008 for 20 rounds). Settings panel shows the global default prominently.
 
 ### Knowledge seed staleness
 **Risk**: Seed becomes outdated as project evolves, leading to false "surprise" detections.
