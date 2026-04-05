@@ -209,6 +209,7 @@ export function ChatView({ sessionId, state, toolContext, onCancelPending, onRes
               args={msg.args}
               status={msg.toolStatus ?? "running"}
               result={msg.result}
+              images={msg.images}
               context={toolContext}
               startedAt={msg.startedAt}
               duration={msg.duration}

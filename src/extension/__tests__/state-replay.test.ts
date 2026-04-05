@@ -241,4 +241,83 @@ describe("replayEntriesAsEvents", () => {
       "message_end",          // final assistant message (finalize)
     ]);
   });
+
+  it("should extract image blocks from toolResult into images field", () => {
+    const entries = [
+      {
+        type: "message",
+        id: "e1",
+        parentId: null,
+        timestamp: "2025-01-01T00:00:00Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc-1",
+          toolName: "read",
+          content: [
+            { type: "text", text: "Read image file [image/png]" },
+            { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+          ],
+          isError: false,
+        },
+      },
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries);
+    expect(events).toHaveLength(1);
+    const data = events[0].event.data as any;
+    expect(data.result).toBe("Read image file [image/png]");
+    expect(data.images).toEqual([{ data: "iVBORw0KGgo=", mimeType: "image/png" }]);
+  });
+
+  it("should not include images field for text-only toolResult", () => {
+    const entries = [
+      {
+        type: "message",
+        id: "e1",
+        parentId: null,
+        timestamp: "2025-01-01T00:00:00Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc-1",
+          toolName: "read",
+          content: [{ type: "text", text: "file contents here" }],
+          isError: false,
+        },
+      },
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries);
+    const data = events[0].event.data as any;
+    expect(data.result).toBe("file contents here");
+    expect(data.images).toBeUndefined();
+  });
+
+  it("should extract multiple image blocks from toolResult", () => {
+    const entries = [
+      {
+        type: "message",
+        id: "e1",
+        parentId: null,
+        timestamp: "2025-01-01T00:00:00Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc-1",
+          toolName: "read",
+          content: [
+            { type: "text", text: "Read image file" },
+            { type: "image", data: "abc123", mimeType: "image/png" },
+            { type: "image", data: "def456", mimeType: "image/jpeg" },
+          ],
+          isError: false,
+        },
+      },
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries);
+    const data = events[0].event.data as any;
+    expect(data.images).toEqual([
+      { data: "abc123", mimeType: "image/png" },
+      { data: "def456", mimeType: "image/jpeg" },
+    ]);
+  });
 });

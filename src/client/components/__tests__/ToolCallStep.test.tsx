@@ -79,4 +79,50 @@ describe("ToolCallStep", () => {
     const button = container.querySelector("button");
     expect(button!.textContent).toContain("echo hello");
   });
+
+  it("auto-expands when images are present", () => {
+    const { container } = renderStep({
+      toolName: "read",
+      toolCallId: "tc-img-1",
+      args: { path: "photo.png" },
+      status: "complete",
+      result: "Read image file [image/png]",
+      images: [{ data: "iVBORw0KGgo=", mimeType: "image/png" }],
+    });
+
+    // Should be expanded by default — renderer content should be visible
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toContain("data:image/png;base64,iVBORw0KGgo=");
+  });
+
+  it("stays collapsed when no images", () => {
+    const { container } = renderStep({
+      toolName: "read",
+      toolCallId: "tc-txt-1",
+      args: { path: "file.ts" },
+      status: "complete",
+      result: "const x = 1;",
+    });
+
+    // Should be collapsed — no img or code block visible
+    const img = container.querySelector("img");
+    expect(img).toBeNull();
+  });
+
+  it("renders image in ReadToolRenderer when expanded", () => {
+    const { container } = renderStep({
+      toolName: "read",
+      toolCallId: "tc-img-2",
+      args: { path: "screenshot.jpg" },
+      status: "complete",
+      result: "Read image file [image/jpeg]",
+      images: [{ data: "abc123", mimeType: "image/jpeg" }],
+    });
+
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("alt")).toBe("screenshot.jpg");
+    expect(img!.className).toContain("max-w-[512px]");
+  });
 });

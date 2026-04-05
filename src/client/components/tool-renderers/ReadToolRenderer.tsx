@@ -6,13 +6,14 @@ import type { ToolRendererProps } from "./types.js";
 import { OpenFileButton } from "./OpenFileButton.js";
 import { detectLanguage } from "./lang-detect.js";
 
-export function ReadToolRenderer({ args, status, result, context }: ToolRendererProps) {
+export function ReadToolRenderer({ args, status, result, images, context }: ToolRendererProps) {
   const { resolved: theme, themeName } = useThemeContext();
   const syntaxStyle = getSyntaxTheme(theme, themeName);
   const filePath = args?.path as string | undefined;
   const offset = args?.offset as number | undefined;
   const limit = args?.limit as number | undefined;
   const language = detectLanguage(filePath);
+  const hasImages = images && images.length > 0;
 
   const subtitle = [
     offset && `from line ${offset}`,
@@ -27,11 +28,24 @@ export function ReadToolRenderer({ args, status, result, context }: ToolRenderer
         <OpenFileButton filePath={filePath} line={offset} context={context} />
       </div>
 
-      {status === "running" && !result && (
+      {status === "running" && !result && !hasImages && (
         <div className="text-xs text-[var(--text-muted)] italic">Reading…</div>
       )}
 
-      {result && (
+      {hasImages && (
+        <div className="flex gap-2 flex-wrap">
+          {images!.map((img, i) => (
+            <img
+              key={i}
+              src={`data:${img.mimeType};base64,${img.data}`}
+              alt={filePath ?? `Image ${i + 1}`}
+              className="max-w-[512px] max-h-[512px] rounded border border-white/20 object-contain"
+            />
+          ))}
+        </div>
+      )}
+
+      {!hasImages && result && (
         <div className="max-h-80 overflow-auto rounded text-xs">
           {language ? (
             <SyntaxHighlighter

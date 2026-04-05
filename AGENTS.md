@@ -182,6 +182,9 @@ pi-dashboard --dev   # Start with Vite proxy
 | `.pi/skills/code-review/references/` | On-demand language guides (React, TypeScript, Vue, Rust, Go, Java, Python, C/C++, CSS, Qt) + architecture/performance/security reviews |
 | `.pi/skills/nano-banana-imagegen/SKILL.md` | Skill: AI image generation/editing via Google Gemini (nano-banana CLI) |
 | `.pi/skills/nano-banana-imagegen/references/` | Prompting guide, example prompts (headers, icons, illustrations, photography) |
+| `.pi/skills/browser-visual-debug/SKILL.md` | Skill: visual debugging with a real browser (screenshots, interaction, responsive testing) via pi-agent-browser |
+| `.pi/skills/browser-visual-debug/references/` | Dashboard recipes, responsive testing presets, agent-browser commands cheatsheet |
+| `.pi/skills/browser-visual-debug/scripts/detect-dashboard.sh` | Auto-detect dashboard URL, mode, and Vite dev server status |
 
 ## Build & Restart Workflow
 

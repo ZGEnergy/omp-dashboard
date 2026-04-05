@@ -1,4 +1,5 @@
 import type { DetectedEditor } from "../../lib/editor-api.js";
+import type { ChatImage } from "../../lib/event-reducer.js";
 
 /** Context passed to every tool renderer */
 export interface ToolContext {
@@ -12,6 +13,7 @@ export interface ToolRendererProps {
   args?: Record<string, unknown>;
   status: "running" | "complete" | "error";
   result?: string;
+  images?: ChatImage[];
   context: ToolContext;
 }
 

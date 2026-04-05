@@ -368,6 +368,16 @@ export default function App() {
           onDetachProposal: () => handleDetachProposal(selectedId),
           onSendPrompt: (text) => wrappedHandleSend(text),
           onReadArtifact: (changeName, artifactId) => handleReadArtifact(selectedCwd!, changeName, artifactId),
+          onRefresh: () => {
+            setSessionStates((prev) => {
+              const next = new Map(prev);
+              next.set(selectedId, createInitialState());
+              return next;
+            });
+            subscribedRef.current.delete(selectedId);
+            subscribedRef.current.add(selectedId);
+            send({ type: "subscribe", sessionId: selectedId, lastSeq: 0 });
+          },
         } : undefined}
         commands={selectedCommands}
         flows={selectedFlows}
@@ -377,6 +387,16 @@ export default function App() {
         onDetachProposal={() => handleDetachProposal(selectedId)}
         hasFileChanges={selectedState.hasFileChanges}
         onOpenDiffView={() => setDiffViewSessionId(selectedId)}
+        onRefresh={() => {
+          setSessionStates((prev) => {
+            const next = new Map(prev);
+            next.set(selectedId, createInitialState());
+            return next;
+          });
+          subscribedRef.current.delete(selectedId);
+          subscribedRef.current.add(selectedId);
+          send({ type: "subscribe", sessionId: selectedId, lastSeq: 0 });
+        }}
       />
       {/* Mobile info strip */}
       {isMobile && selectedSession && (

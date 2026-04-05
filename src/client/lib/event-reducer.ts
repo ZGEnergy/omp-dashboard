@@ -114,6 +114,35 @@ function extractContentBlockText(blocks: unknown[]): string | null {
   return texts.length > 0 ? texts.join("\n") : null;
 }
 
+/**
+ * Extract image attachments from tool_execution_end event data.
+ * Handles two sources:
+ * - Live events: data.result is {content: [{type:"image", data, mimeType}, ...]}
+ * - Replayed events: data.images is already extracted by state-replay
+ */
+function extractToolResultImages(data: Record<string, unknown>): ChatImage[] | undefined {
+  // Check pre-extracted images (from state-replay)
+  if (Array.isArray(data.images) && data.images.length > 0) {
+    return data.images
+      .filter((img: any) => img?.data && img?.mimeType)
+      .map((img: any) => ({ data: img.data as string, mimeType: img.mimeType as string }));
+  }
+  // Check live event: result.content array with image blocks
+  const result = data.result;
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const content = (result as Record<string, unknown>).content;
+    if (Array.isArray(content)) {
+      const imageBlocks = content.filter(
+        (c: any) => c?.type === "image" && c?.data && c?.mimeType,
+      );
+      if (imageBlocks.length > 0) {
+        return imageBlocks.map((c: any) => ({ data: c.data as string, mimeType: c.mimeType as string }));
+      }
+    }
+  }
+  return undefined;
+}
+
 /** Convert an unknown value to a display string (handles objects/arrays). */
 export function toDisplayString(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -421,6 +450,9 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       }
       next.currentTool = undefined;
 
+      // Extract images from tool result (live events have result.content, replayed have data.images)
+      const images = extractToolResultImages(data);
+
       // Update existing tool message in-place
       const idx = next.messages.findLastIndex((m) => m.toolCallId === toolCallId);
       if (idx !== -1) {
@@ -432,6 +464,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
           toolStatus: (data.isError as boolean) ? "error" : "complete",
           result: result ? truncateLines(result, 30) : next.messages[idx].result,
           duration: msgStartedAt ? event.timestamp - msgStartedAt : undefined,
+          ...(images ? { images } : {}),
         };
       }
       break;

@@ -10,9 +10,10 @@ export function usePiResources(cwd: string | null) {
   const cwdRef = useRef(cwd);
   cwdRef.current = cwd;
 
-  const fetchResources = useCallback(async (targetCwd: string) => {
+  const fetchResources = useCallback(async (targetCwd: string, forceRefresh = false) => {
     try {
-      const res = await fetch(`/api/pi-resources?cwd=${encodeURIComponent(targetCwd)}`);
+      const url = `/api/pi-resources?cwd=${encodeURIComponent(targetCwd)}${forceRefresh ? "&refresh=true" : ""}`;
+      const res = await fetch(url);
       const body = await res.json();
       if (cwdRef.current !== targetCwd) return; // stale
       if (body.success) {
@@ -44,7 +45,7 @@ export function usePiResources(cwd: string | null) {
   const refresh = useCallback(() => {
     if (cwd) {
       setIsLoading(true);
-      fetchResources(cwd).finally(() => setIsLoading(false));
+      fetchResources(cwd, true).finally(() => setIsLoading(false));
     }
   }, [cwd, fetchResources]);
 

@@ -93,12 +93,20 @@ export function replayEntriesAsEvents(
               .map((c: any) => c.text)
               .join("")
           : typeof msg.content === "string" ? msg.content : "";
-        messages.push(makeEvent(sessionId, "tool_execution_end", ts, {
+        // Extract image content blocks if present
+        const imageBlocks = Array.isArray(msg.content)
+          ? msg.content.filter((c: any) => c.type === "image" && c.data && c.mimeType)
+          : [];
+        const eventData: Record<string, unknown> = {
           toolCallId: msg.toolCallId,
           toolName: msg.toolName ?? "unknown",
           result: resultText,
           isError: msg.isError ?? false,
-        }));
+        };
+        if (imageBlocks.length > 0) {
+          eventData.images = imageBlocks.map((c: any) => ({ data: c.data, mimeType: c.mimeType }));
+        }
+        messages.push(makeEvent(sessionId, "tool_execution_end", ts, eventData));
         openToolCalls.delete(msg.toolCallId);
       }
     }

@@ -17,6 +17,7 @@ import {
   mdiCheckCircleOutline,
   mdiArchiveOutline,
   mdiChevronRight,
+  mdiRefresh,
 } from "@mdi/js";
 import type { DashboardSession, OpenSpecChange } from "../../shared/types.js";
 import { ChangeState, deriveChangeState } from "../../shared/types.js";
@@ -39,6 +40,7 @@ interface Props {
   onDetachProposal?: () => void;
   onSendPrompt?: (text: string) => void;
   onReadArtifact?: (changeName: string, artifactId: string) => void;
+  onRefresh?: () => void;
 }
 
 function MenuRow({ icon, label, onClick, danger, disabled }: {
@@ -66,7 +68,7 @@ function MenuRow({ icon, label, onClick, danger, disabled }: {
   );
 }
 
-export function MobileActionMenu({ session, editors, openspecChanges, onRename, onHide, onUnhide, onResume, onShutdown, onOpenEditor, onAttachProposal, onDetachProposal, onSendPrompt, onReadArtifact }: Props) {
+export function MobileActionMenu({ session, editors, openspecChanges, onRename, onHide, onUnhide, onResume, onShutdown, onOpenEditor, onAttachProposal, onDetachProposal, onSendPrompt, onReadArtifact, onRefresh }: Props) {
   const [open, setOpen] = useState(false);
   const [exploreOpen, setExploreOpen] = useState(false);
   const [newChangeOpen, setNewChangeOpen] = useState(false);
@@ -223,6 +225,11 @@ export function MobileActionMenu({ session, editors, openspecChanges, onRename, 
           {/* OpenSpec detach */}
           {session.attachedProposal && onDetachProposal && (
             <MenuRow icon={mdiLinkVariant} label={`Detach: ${session.attachedProposal}`} onClick={() => act(onDetachProposal)} />
+          )}
+
+          {/* Refresh Chat */}
+          {onRefresh && (
+            <MenuRow icon={mdiRefresh} label="Refresh Chat" onClick={() => act(onRefresh)} />
           )}
 
           {/* Exit */}

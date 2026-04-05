@@ -483,6 +483,80 @@ describe("eventReducer", () => {
     const toolMsg = state.messages.find((m) => m.toolCallId === "tc-wrap");
     expect(toolMsg?.result).toBe("hi\n");
   });
+
+  it("should extract images from tool_execution_end with image content blocks", () => {
+    const state = applyEvents([
+      {
+        eventType: "tool_execution_start",
+        timestamp: Date.now(),
+        data: { toolCallId: "tc-img", toolName: "read", args: { path: "photo.png" } },
+      },
+      {
+        eventType: "tool_execution_end",
+        timestamp: Date.now(),
+        data: {
+          toolCallId: "tc-img",
+          result: {
+            content: [
+              { type: "text", text: "Read image file [image/png]" },
+              { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+            ],
+          },
+          isError: false,
+        },
+      },
+    ]);
+
+    const toolMsg = state.messages.find((m) => m.toolCallId === "tc-img");
+    expect(toolMsg?.result).toBe("Read image file [image/png]");
+    expect(toolMsg?.images).toEqual([{ data: "iVBORw0KGgo=", mimeType: "image/png" }]);
+  });
+
+  it("should not set images for text-only tool_execution_end", () => {
+    const state = applyEvents([
+      {
+        eventType: "tool_execution_start",
+        timestamp: Date.now(),
+        data: { toolCallId: "tc-txt", toolName: "read", args: { path: "file.ts" } },
+      },
+      {
+        eventType: "tool_execution_end",
+        timestamp: Date.now(),
+        data: {
+          toolCallId: "tc-txt",
+          result: { content: [{ type: "text", text: "const x = 1;" }] },
+          isError: false,
+        },
+      },
+    ]);
+
+    const toolMsg = state.messages.find((m) => m.toolCallId === "tc-txt");
+    expect(toolMsg?.result).toBe("const x = 1;");
+    expect(toolMsg?.images).toBeUndefined();
+  });
+
+  it("should extract images from pre-extracted images field (state-replay)", () => {
+    const state = applyEvents([
+      {
+        eventType: "tool_execution_start",
+        timestamp: Date.now(),
+        data: { toolCallId: "tc-replay", toolName: "read", args: { path: "img.jpg" } },
+      },
+      {
+        eventType: "tool_execution_end",
+        timestamp: Date.now(),
+        data: {
+          toolCallId: "tc-replay",
+          result: "Read image file [image/jpeg]",
+          images: [{ data: "abc123", mimeType: "image/jpeg" }],
+          isError: false,
+        },
+      },
+    ]);
+
+    const toolMsg = state.messages.find((m) => m.toolCallId === "tc-replay");
+    expect(toolMsg?.images).toEqual([{ data: "abc123", mimeType: "image/jpeg" }]);
+  });
 });
 
 describe("model_select event", () => {

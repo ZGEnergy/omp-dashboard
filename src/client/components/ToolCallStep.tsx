@@ -2,6 +2,7 @@ import React, { useState, type ReactNode } from "react";
 import { Icon } from "@mdi/react";
 import { mdiLoading, mdiCheck, mdiAlertCircle, mdiChevronRight, mdiChevronDown } from "@mdi/js";
 import { getToolRenderer, type ToolContext } from "./tool-renderers/index.js";
+import type { ChatImage } from "../lib/event-reducer.js";
 import { useMobile } from "../hooks/useMobile.js";
 import { ElapsedBadge } from "./ElapsedBadge.js";
 import { ErrorBoundary } from "./ErrorBoundary.js";
@@ -12,6 +13,7 @@ interface Props {
   args?: Record<string, unknown>;
   status: "running" | "complete" | "error";
   result?: string;
+  images?: ChatImage[];
   context: ToolContext;
   startedAt?: number;
   duration?: number;
@@ -40,9 +42,10 @@ const statusIcons: Record<string, ReactNode> = {
   error: <Icon path={mdiAlertCircle} size={0.55} />,
 };
 
-export function ToolCallStep({ toolName, toolCallId, args, status, result, context, startedAt, duration }: Props) {
+export function ToolCallStep({ toolName, toolCallId, args, status, result, images, context, startedAt, duration }: Props) {
   const isMobile = useMobile();
-  const [expanded, setExpanded] = useState(false);
+  const hasImages = images && images.length > 0;
+  const [expanded, setExpanded] = useState(hasImages);
   const Renderer = getToolRenderer(toolName);
 
   return (
@@ -68,6 +71,7 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, conte
               args={args}
               status={status}
               result={result}
+              images={images}
               context={context}
             />
           </ErrorBoundary>

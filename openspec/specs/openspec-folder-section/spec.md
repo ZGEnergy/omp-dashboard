@@ -16,11 +16,11 @@ Each folder group in the session list SHALL render a `FolderOpenSpecSection` com
 - **THEN** the `FolderOpenSpecSection` SHALL still be rendered showing change list and folder-level actions
 
 ### Requirement: Collapsible change list in folder section
-The folder OpenSpec section SHALL be collapsed by default, showing a header line with chevron, label, change count, and action buttons. The header SHALL include Refresh and Bulk Archive buttons. Clicking the header toggles expansion to show the full change list.
+The folder OpenSpec section SHALL be collapsed by default, showing a header line with chevron, label, change count, and action buttons. The header SHALL include a Refresh button on the left and a Specs button on the right. Clicking the header toggles expansion to show the full change list.
 
 #### Scenario: Collapsed by default
 - **WHEN** the folder OpenSpec section is first rendered
-- **THEN** it SHALL show only the header line: `▶ OpenSpec (N changes)` with Refresh and Bulk Archive buttons
+- **THEN** it SHALL show only the header line: `▶ OpenSpec (N changes)` with a Refresh button and a Specs button
 
 #### Scenario: Expand on click
 - **WHEN** the user clicks the folder OpenSpec header
@@ -67,20 +67,20 @@ The folder OpenSpec section header SHALL include a refresh button that triggers 
 - **WHEN** the user clicks the refresh button on folder `/project/foo`
 - **THEN** the browser SHALL send `{ type: "openspec_refresh", cwd: "/project/foo" }`
 
-### Requirement: Folder-level Bulk Archive button with confirmation
-The folder OpenSpec section header SHALL include a Bulk Archive button. Clicking it SHALL show a confirmation dialog. On confirm, it SHALL send an `openspec_bulk_archive` message to the server with the directory's cwd.
+### Requirement: Folder-level Specs button opens specs browser
+The folder OpenSpec section header SHALL include a "Specs" button on the right side of the header row. Clicking it SHALL open the specs browser view in the content area for that folder's cwd.
 
-#### Scenario: Bulk Archive confirmation
-- **WHEN** the user clicks "Bulk Archive" on folder `/project/foo`
-- **THEN** a confirmation dialog SHALL appear with message "Bulk archive all completed changes?"
+#### Scenario: Specs button visible in header
+- **WHEN** the folder OpenSpec section is rendered
+- **THEN** a "Specs" button SHALL appear on the right side of the header row
 
-#### Scenario: Bulk Archive confirmed
-- **WHEN** the user confirms the Bulk Archive dialog
-- **THEN** the browser SHALL send `{ type: "openspec_bulk_archive", cwd: "/project/foo" }`
+#### Scenario: Specs button opens specs browser
+- **WHEN** the user clicks the "Specs" button on folder `/project/foo`
+- **THEN** the content area SHALL switch to the `SpecsBrowserView` showing all specs from `openspec/specs/` in cwd `/project/foo`
 
-#### Scenario: Bulk Archive cancelled
-- **WHEN** the user cancels the Bulk Archive dialog
-- **THEN** no action SHALL be taken
+#### Scenario: Specs button click does not toggle collapse
+- **WHEN** the user clicks the "Specs" button
+- **THEN** the click SHALL NOT toggle the collapsible change list (event propagation is stopped)
 
 ### Requirement: Archive button in folder OpenSpec section
 The folder OpenSpec section header SHALL include an "Archive" button next to the existing "Specs" button, visible only when OpenSpec is initialized.

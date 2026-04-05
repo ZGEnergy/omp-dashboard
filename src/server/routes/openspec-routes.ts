@@ -37,7 +37,7 @@ export function registerOpenSpecRoutes(
   );
 
   // Pi Resources endpoint — returns discovered extensions, skills, prompts
-  fastify.get<{ Querystring: { cwd?: string } }>(
+  fastify.get<{ Querystring: { cwd?: string; refresh?: string } }>(
     "/api/pi-resources",
     { preHandler: localhostGuard },
     async (request, reply) => {
@@ -46,7 +46,8 @@ export function registerOpenSpecRoutes(
         reply.code(400);
         return { success: false, error: "cwd parameter required" } satisfies ApiResponse;
       }
-      let data = directoryService.getPiResources(cwd);
+      const forceRefresh = request.query.refresh === "true" || request.query.refresh === "1";
+      let data = forceRefresh ? undefined : directoryService.getPiResources(cwd);
       if (!data) {
         data = await directoryService.refreshPiResources(cwd);
       }

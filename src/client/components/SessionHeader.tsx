@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Icon } from "@mdi/react";
-import { mdiPencilOutline, mdiArrowLeft, mdiPaperclip } from "@mdi/js";
+import { mdiPencilOutline, mdiArrowLeft, mdiPaperclip, mdiRefresh } from "@mdi/js";
 import type { DashboardSession, OpenSpecChange, CommandInfo, FlowInfo } from "../../shared/types.js";
 import type { SessionState } from "../lib/event-reducer.js";
 import type { DetectedEditor } from "../lib/editor-api.js";
@@ -25,6 +25,7 @@ interface Props {
   onDetachProposal?: () => void;
   hasFileChanges?: boolean;
   onOpenDiffView?: () => void;
+  onRefresh?: () => void;
   /** Mobile action menu props (only used on mobile) */
   mobileActions?: {
     editors?: DetectedEditor[];
@@ -38,6 +39,7 @@ interface Props {
     onDetachProposal?: () => void;
     onSendPrompt?: (text: string) => void;
     onReadArtifact?: (changeName: string, artifactId: string) => void;
+    onRefresh?: () => void;
   };
 }
 
@@ -177,6 +179,7 @@ function MobileHeader({ session, showBack, onBack, isRenaming, onConfirmRename, 
           onDetachProposal={mobileActions.onDetachProposal}
           onSendPrompt={mobileActions.onSendPrompt}
           onReadArtifact={mobileActions.onReadArtifact}
+          onRefresh={mobileActions.onRefresh}
         />
       )}
     </div>
@@ -196,9 +199,10 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
-export function SessionHeader({ session, state, onRename, showBack, onBack, mobileActions, commands, flows, onSendPrompt, openspecChanges, onAttachProposal, onDetachProposal, hasFileChanges, onOpenDiffView }: Props) {
+export function SessionHeader({ session, state, onRename, showBack, onBack, mobileActions, commands, flows, onSendPrompt, openspecChanges, onAttachProposal, onDetachProposal, hasFileChanges, onOpenDiffView, onRefresh }: Props) {
   const [now, setNow] = useState(Date.now());
   const [isRenaming, setIsRenaming] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [flowPickerOpen, setFlowPickerOpen] = useState(false);
   const [flowLaunchTarget, setFlowLaunchTarget] = useState<FlowInfo | null>(null);
   const [openspecPickerOpen, setOpenspecPickerOpen] = useState(false);
@@ -351,6 +355,15 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
         </button>
       )}
       <span className="text-[var(--text-muted)]">{formatDuration(duration)}</span>
+      {onRefresh && (
+        <button
+          onClick={() => { onRefresh(); setRefreshing(true); setTimeout(() => setRefreshing(false), 500); }}
+          className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] p-0.5"
+          title="Refresh chat"
+        >
+          <Icon path={mdiRefresh} size={0.6} className={refreshing ? "animate-spin" : ""} />
+        </button>
+      )}
       {openspecPickerOpen && onAttachProposal && (
         <SearchableSelectDialog
           title="Attach OpenSpec Change"
