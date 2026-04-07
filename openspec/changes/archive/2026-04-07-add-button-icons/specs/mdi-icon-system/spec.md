@@ -55,6 +55,42 @@ The system SHALL use Material Design Icons (`@mdi/js` + `@mdi/react`) for all ic
 - **WHEN** DiffPanel renders Diff/File and Split/Unified toggle buttons
 - **THEN** they SHALL display MDI icons (mdiCompare, mdiFileOutline, mdiViewSplitVertical, mdiViewSequential)
 
+#### Scenario: OpenSpec action buttons show MDI icons
+- **WHEN** SessionOpenSpecActions renders action buttons (Explore, Continue, FF, Apply, Verify, Archive, Detach, Bulk Archive, Attach, Change)
+- **THEN** each button SHALL display an appropriate MDI icon (mdiCompassOutline, mdiChevronRight, mdiFastForward, mdiPlayCircleOutline, mdiCheckCircleOutline, mdiArchiveOutline, mdiLinkOff, mdiArchiveArrowUp, mdiPaperclip, mdiPlus)
+
+#### Scenario: OpenSpec activity badge shows MDI icon
+- **WHEN** OpenSpecActivityBadge renders the 📋 indicator
+- **THEN** it SHALL display `<Icon path={mdiClipboardTextOutline} />` instead of emoji
+
+#### Scenario: Thinking level selector shows MDI icon
+- **WHEN** ThinkingLevelSelector or SessionHeader renders the thinking level indicator
+- **THEN** it SHALL display `<Icon path={mdiHeadLightbulb} />` instead of 💭 emoji
+
+#### Scenario: Flow activity badge shows MDI icons
+- **WHEN** FlowActivityBadge renders status indicators (running, success, error, aborted)
+- **THEN** it SHALL display MDI icons (mdiLoading, mdiCheckCircle, mdiAlertCircle, mdiStopCircle) instead of emoji/text
+
+#### Scenario: Flow agent card shows MDI status icons
+- **WHEN** FlowAgentCard renders agent status (pending, running, complete, error, blocked)
+- **THEN** it SHALL display MDI icons (mdiCircleOutline, mdiLoading, mdiCheckCircle, mdiCloseCircle, mdiAlertCircle) and loop indicator SHALL use mdiRefresh instead of ↻
+
+#### Scenario: Flow agent detail shows MDI status icons
+- **WHEN** FlowAgentDetail renders agent status in the header
+- **THEN** it SHALL display MDI icons (mdiCheckCircle, mdiCloseCircle, mdiAlertCircle, mdiCircle, mdiCircleOutline) instead of text symbols
+
+#### Scenario: Flow summary shows MDI status icons
+- **WHEN** FlowSummary renders flow and per-agent status
+- **THEN** it SHALL display MDI icons for both flow-level (mdiCheckCircle, mdiAlertCircle, mdiStopCircle) and agent-level status
+
+#### Scenario: Model selector shows MDI loading icon
+- **WHEN** ModelSelector shows a pending model change
+- **THEN** it SHALL display `<Icon path={mdiLoading} />` with spin animation instead of ⏳ emoji
+
+#### Scenario: Pin directory button shows MDI icons
+- **WHEN** SessionList renders the pin-a-directory button
+- **THEN** it SHALL display `<Icon path={mdiPin} />` and `<Icon path={mdiPlus} />` instead of 📌+ emoji
+
 ## ADDED Requirements
 
 ### Requirement: Labeled action buttons use icon + text pattern
@@ -79,6 +115,24 @@ Action buttons with visible text labels SHALL display an MDI icon inline before 
 #### Scenario: Attach button has icon and text
 - **WHEN** SessionHeader renders the Attach OpenSpec button
 - **THEN** it SHALL display `<Icon path={mdiPaperclip} size={0.4} />` followed by text "Attach"
+
+### Requirement: OpenSpec ActionButton accepts optional icon prop
+The SessionOpenSpecActions ActionButton helper SHALL accept an optional `icon` string prop (MDI path). When provided, it SHALL render `<Icon path={icon} size={0.4} className="inline mr-0.5" />` before the label text.
+
+#### Scenario: ActionButton renders icon when provided
+- **WHEN** ActionButton receives an `icon` prop
+- **THEN** it SHALL display the MDI icon inline before the label
+
+#### Scenario: ActionButton renders text-only when no icon
+- **WHEN** ActionButton does not receive an `icon` prop
+- **THEN** it SHALL display only the label text
+
+### Requirement: Flow status maps use ReactNode icons
+All flow status icon maps (FlowActivityBadge, FlowAgentCard, FlowSummary) SHALL return `ReactNode` values containing MDI `<Icon>` components instead of string emoji/text values.
+
+#### Scenario: Flow status maps render SVG icons
+- **WHEN** a flow component looks up a status icon from its config map
+- **THEN** the returned value SHALL be an MDI `<Icon>` React element
 
 ### Requirement: Cancel buttons remain text-only
 Cancel buttons in dialogs SHALL NOT have icons. They are secondary actions and SHALL use text-only styling to maintain visual hierarchy with the primary action button.

@@ -34,3 +34,16 @@
 - [x] 6.2 ProviderAuthSection: add `mdiArrowRight` to Continue button; add `mdiKeyPlus` to Add Key button
 - [x] 6.3 SettingsPanel: add `mdiUpdate` to Check for Updates button
 - [x] 6.4 SessionHeader detach (×): replace with `mdiLinkOff` icon (done in 2.2)
+
+## 7. Extended emoji/symbol cleanup (added during implementation)
+
+- [x] 7.1 SessionOpenSpecActions: add icons to all ActionButtons (Explore, Continue, FF, Apply, Verify, Archive, Detach, Bulk Archive, Attach, Change); replace 📋 badges with `mdiPaperclip`
+- [x] 7.2 SessionList: replace 📌+ emoji with `mdiPin` + `mdiPlus` icons
+- [x] 7.3 ThinkingLevelSelector: replace 💭 emoji with `mdiHeadLightbulb`
+- [x] 7.4 SessionHeader: replace 💭 emoji with `mdiHeadLightbulb`; replace 📋 in mobile attach menu with `mdiPaperclip`
+- [x] 7.5 OpenSpecActivityBadge: replace 📋 emoji with `mdiClipboardTextOutline`
+- [x] 7.6 FlowActivityBadge: replace 🔄✓⚠■ with MDI icons (mdiLoading, mdiCheckCircle, mdiAlertCircle, mdiStopCircle)
+- [x] 7.7 FlowAgentCard: replace ○⠋✓✗⚠ with MDI icons; replace ↻ with `mdiRefresh`
+- [x] 7.8 FlowAgentDetail: replace ✓✗⚠●○ with MDI icons
+- [x] 7.9 FlowSummary: replace ✓⚠■✗○ with MDI icons for flow and agent status
+- [x] 7.10 ModelSelector: replace ⏳ with `mdiLoading` spinning icon
