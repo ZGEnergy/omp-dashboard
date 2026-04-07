@@ -1,4 +1,6 @@
 import React from "react";
+import { Icon } from "@mdi/react";
+import { mdiCheck } from "@mdi/js";
 
 interface Props {
   message: string;
@@ -26,7 +28,7 @@ export function ConfirmDialog({ message, confirmLabel = "Confirm", onConfirm, on
             className="text-xs px-3 py-1.5 rounded bg-red-600 text-[var(--text-primary)] hover:bg-red-500"
             data-testid="confirm-ok"
           >
-            {confirmLabel}
+            <Icon path={mdiCheck} size={0.45} className="inline mr-0.5" />{confirmLabel}
           </button>
         </div>
       </div>

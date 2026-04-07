@@ -1,6 +1,6 @@
 import React, { useState, useEffect, type ReactNode } from "react";
 import { Icon } from "@mdi/react";
-import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiConsoleLine, mdiRobotOutline, mdiCodeTags, mdiApplicationOutline, mdiCommentQuestion } from "@mdi/js";
+import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiConsoleLine, mdiRobotOutline, mdiCodeTags, mdiApplicationOutline, mdiCommentQuestion, mdiPlayCircleOutline, mdiSourceFork } from "@mdi/js";
 import type { DashboardSession } from "../../shared/types.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
 import { formatRelativeTime, formatTokens } from "../lib/format.js";
@@ -505,7 +505,7 @@ export function SessionCard({
                 className="text-[10px] px-1.5 py-0.5 rounded border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Resume session (continue same session)"
               >
-                Resume
+                <Icon path={mdiPlayCircleOutline} size={0.4} className="inline mr-0.5" />Resume
               </button>
             )}
             <button
@@ -514,7 +514,7 @@ export function SessionCard({
               className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Fork session (new session from this point)"
             >
-              Fork
+              <Icon path={mdiSourceFork} size={0.4} className="inline mr-0.5" />Fork
             </button>
           </>
         )}

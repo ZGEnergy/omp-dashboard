@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Icon } from "@mdi/react";
-import { mdiRefresh } from "@mdi/js";
+import { mdiRefresh, mdiChevronDown, mdiChevronRight, mdiArchiveOutline, mdiFileDocumentOutline } from "@mdi/js";
 import type { OpenSpecData, DashboardSession } from "../../shared/types.js";
 import { ArtifactLettersButton } from "./openspec-helpers.js";
 
@@ -38,7 +38,7 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, se
           onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
           className="flex items-center gap-1 text-[10px] font-semibold text-[var(--text-tertiary)] uppercase hover:text-[var(--text-secondary)]"
         >
-          <span>{expanded ? "▼" : "▶"}</span>
+          <Icon path={expanded ? mdiChevronDown : mdiChevronRight} size={0.45} />
           <span>OpenSpec ({data.changes.length} changes)</span>
         </button>
         <button
@@ -56,7 +56,7 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, se
             className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-blue-400 hover:border-blue-500/50"
             data-testid="folder-archive-btn"
           >
-            Archive
+            <Icon path={mdiArchiveOutline} size={0.4} className="inline mr-0.5" />Archive
           </button>
         )}
         {onOpenSpecs && (
@@ -65,7 +65,7 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, se
             className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-blue-400 hover:border-blue-500/50"
             data-testid="folder-specs-btn"
           >
-            Specs
+            <Icon path={mdiFileDocumentOutline} size={0.4} className="inline mr-0.5" />Specs
           </button>
         )}
       </div>

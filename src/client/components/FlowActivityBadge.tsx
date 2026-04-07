@@ -1,11 +1,13 @@
-import React from "react";
+import React, { type ReactNode } from "react";
+import { Icon } from "@mdi/react";
+import { mdiLoading, mdiCheckCircle, mdiAlertCircle, mdiStopCircle } from "@mdi/js";
 import type { FlowStatus } from "../../shared/types.js";
 
-const statusConfig: Record<string, { icon: string; color: string }> = {
-  running: { icon: "🔄", color: "text-blue-400" },
-  success: { icon: "✓", color: "text-green-400" },
-  error: { icon: "⚠", color: "text-red-400" },
-  aborted: { icon: "■", color: "text-orange-400" },
+const statusConfig: Record<string, { icon: ReactNode; color: string }> = {
+  running: { icon: <Icon path={mdiLoading} size={0.45} className="animate-spin" />, color: "text-blue-400" },
+  success: { icon: <Icon path={mdiCheckCircle} size={0.45} />, color: "text-green-400" },
+  error: { icon: <Icon path={mdiAlertCircle} size={0.45} />, color: "text-red-400" },
+  aborted: { icon: <Icon path={mdiStopCircle} size={0.45} />, color: "text-orange-400" },
 };
 
 export function FlowActivityBadge({
@@ -24,7 +26,7 @@ export function FlowActivityBadge({
 
   return (
     <div className={`text-[11px] mt-0.5 ml-4 flex items-center gap-1 ${color}`}>
-      <span>{icon}</span>
+      <span className="inline-flex">{icon}</span>
       <span className="truncate">
         {flowName}
         {isRunning && agentsTotal != null && agentsTotal > 0 && (

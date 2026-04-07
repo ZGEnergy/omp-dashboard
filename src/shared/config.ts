@@ -41,6 +41,20 @@ export const DEFAULT_MEMORY_LIMITS: MemoryLimitsConfig = {
   maxWsBufferBytes: 4 * 1024 * 1024,
 };
 
+export interface EditorConfig {
+  /** Override path to code-server binary */
+  binary?: string;
+  /** Minutes before idle instance is killed (default: 10) */
+  idleTimeoutMinutes: number;
+  /** Maximum concurrent code-server instances (default: 3) */
+  maxInstances: number;
+}
+
+export const DEFAULT_EDITOR_CONFIG: EditorConfig = {
+  idleTimeoutMinutes: 10,
+  maxInstances: 3,
+};
+
 export interface DashboardConfig {
   port: number;
   piPort: number;
@@ -52,6 +66,7 @@ export interface DashboardConfig {
   devBuildOnReload: boolean;
   auth?: AuthConfig;
   memoryLimits: MemoryLimitsConfig;
+  editor: EditorConfig;
 }
 
 const VALID_SPAWN_STRATEGIES: SpawnStrategy[] = ["tmux", "headless"];
@@ -66,6 +81,7 @@ const DEFAULTS: DashboardConfig = {
   tunnel: { enabled: true },
   devBuildOnReload: false,
   memoryLimits: { ...DEFAULT_MEMORY_LIMITS },
+  editor: { ...DEFAULT_EDITOR_CONFIG },
 };
 
 /**
@@ -98,6 +114,15 @@ function parseAuthConfig(raw: any): AuthConfig | undefined {
     ...(Array.isArray(raw.allowedUsers) ? { allowedUsers: raw.allowedUsers } : Array.isArray(raw.allowedEmails) ? { allowedUsers: raw.allowedEmails } : {}),
     bypassUrls: Array.isArray(raw.bypassUrls) ? raw.bypassUrls.filter((u: unknown) => typeof u === "string") : [],
     bypassHosts: Array.isArray(raw.bypassHosts) ? raw.bypassHosts.filter((u: unknown) => typeof u === "string") : [],
+  };
+}
+
+function parseEditorConfig(raw: any): EditorConfig {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_EDITOR_CONFIG };
+  return {
+    ...(typeof raw.binary === "string" ? { binary: raw.binary } : {}),
+    idleTimeoutMinutes: typeof raw.idleTimeoutMinutes === "number" ? raw.idleTimeoutMinutes : DEFAULT_EDITOR_CONFIG.idleTimeoutMinutes,
+    maxInstances: typeof raw.maxInstances === "number" ? raw.maxInstances : DEFAULT_EDITOR_CONFIG.maxInstances,
   };
 }
 
@@ -142,6 +167,7 @@ export function loadConfig(): DashboardConfig {
       devBuildOnReload: parsed.devBuildOnReload ?? defaults.devBuildOnReload,
       auth: parseAuthConfig(parsed.auth),
       memoryLimits: parseMemoryLimits(parsed.memoryLimits),
+      editor: parseEditorConfig(parsed.editor),
     };
   } catch {
     return defaults;

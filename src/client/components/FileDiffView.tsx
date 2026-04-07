@@ -3,6 +3,8 @@
  * Replaces ChatView in the content area when activated.
  */
 import React, { useState, useCallback, useRef, useEffect } from "react";
+import { Icon } from "@mdi/react";
+import { mdiArrowLeft, mdiRefresh, mdiFileTreeOutline } from "@mdi/js";
 import { useSessionDiff } from "../hooks/useSessionDiff.js";
 import { DiffFileTree, type FileSelection } from "./DiffFileTree.js";
 import { DiffPanel } from "./DiffPanel.js";
@@ -43,7 +45,7 @@ export function FileDiffView({ sessionId, onBack }: FileDiffViewProps) {
           className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] text-sm"
           title="Back to chat"
         >
-          ← Back
+          <Icon path={mdiArrowLeft} size={0.6} className="inline mr-0.5" />Back
         </button>
         <span className="text-sm font-medium">Changed Files</span>
         {!data?.isGitRepo && data && (
@@ -55,7 +57,7 @@ export function FileDiffView({ sessionId, onBack }: FileDiffViewProps) {
             onClick={() => setMobileShowTree(true)}
             className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
           >
-            Files
+            <Icon path={mdiFileTreeOutline} size={0.45} className="inline mr-0.5" />Files
           </button>
         )}
         <button
@@ -63,7 +65,7 @@ export function FileDiffView({ sessionId, onBack }: FileDiffViewProps) {
           className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
           title="Refresh"
         >
-          ↻ Refresh
+          <Icon path={mdiRefresh} size={0.5} className="inline mr-0.5" />Refresh
         </button>
       </div>
 
@@ -82,7 +84,7 @@ export function FileDiffView({ sessionId, onBack }: FileDiffViewProps) {
             onClick={refresh}
             className="text-xs px-3 py-1 rounded border border-[var(--border-primary)] hover:bg-[var(--bg-tertiary)]"
           >
-            Retry
+            <Icon path={mdiRefresh} size={0.5} className="inline mr-0.5" />Retry
           </button>
         </div>
       )}

@@ -45,7 +45,7 @@ const defaultProps = {
 describe("FolderOpenSpecSection", () => {
   it("renders collapsed by default", () => {
     render(<FolderOpenSpecSection {...defaultProps} />);
-    expect(screen.getByText("▶")).toBeTruthy();
+    expect(screen.getByTestId("folder-openspec-header")).toBeTruthy();
     expect(screen.getByText("OpenSpec (2 changes)")).toBeTruthy();
     expect(screen.queryByTestId("folder-openspec-changes")).toBeNull();
   });
@@ -62,11 +62,9 @@ describe("FolderOpenSpecSection", () => {
     const header = screen.getByTestId("folder-openspec-header");
 
     fireEvent.click(header);
-    expect(screen.getByText("▼")).toBeTruthy();
     expect(screen.getByTestId("folder-openspec-changes")).toBeTruthy();
 
     fireEvent.click(header);
-    expect(screen.getByText("▶")).toBeTruthy();
     expect(screen.queryByTestId("folder-openspec-changes")).toBeNull();
   });
 

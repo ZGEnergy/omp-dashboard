@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from "react";
 import { Icon } from "@mdi/react";
-import { mdiFlash, mdiClipboardText, mdiWrench, mdiFolder, mdiFile, mdiPlay, mdiStop, mdiConsole } from "@mdi/js";
+import { mdiFlash, mdiClipboardText, mdiWrench, mdiFolder, mdiFile, mdiPlay, mdiStop, mdiConsole, mdiClose } from "@mdi/js";
 import type { CommandInfo, ImageContent, FileEntry } from "../../shared/types.js";
 
 /** Built-in pi commands available from the dashboard */
@@ -328,7 +328,7 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
                 onClick={() => removeImage(i)}
                 className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                ×
+                <Icon path={mdiClose} size={0.45} />
               </button>
             </div>
           ))}

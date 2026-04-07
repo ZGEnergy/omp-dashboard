@@ -27,6 +27,9 @@ import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
 import { InstallBanner } from "./components/InstallBanner.js";
 import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { TerminalView } from "./components/TerminalView.js";
+import { TerminalsView } from "./components/TerminalsView.js";
+import { EditorView } from "./components/EditorView.js";
+import { decodeFolderPath, encodeFolderPath } from "./lib/folder-encoding.js";
 import { FileDiffView } from "./components/FileDiffView.js";
 import { createInitialState, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { useMessageHandler } from "./hooks/useMessageHandler.js";
@@ -38,6 +41,7 @@ import type { DashboardSession, CommandInfo, FlowInfo, FileEntry, OpenSpecData, 
 import { SearchableSelectDialog, type SelectOption } from "./components/SearchableSelectDialog.js";
 import { FlowLaunchDialog } from "./components/FlowLaunchDialog.js";
 import type { TerminalSession } from "../shared/terminal-types.js";
+import type { EditorInstanceStatus } from "../shared/editor-types.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import type { ServerToBrowserMessage } from "../shared/browser-protocol.js";
 import type { ToolContext } from "./components/tool-renderers/index.js";
@@ -82,10 +86,14 @@ export default function App() {
   const [, navigate] = useLocation();
   const [match, params] = useRoute("/session/:id");
   const [termMatch, termParams] = useRoute("/terminal/:id");
+  const [folderTermMatch, folderTermParams] = useRoute("/folder/:encodedCwd/terminals");
+  const [folderEditorMatch, folderEditorParams] = useRoute("/folder/:encodedCwd/editor");
   const [settingsMatch] = useRoute("/settings");
   const [tunnelSetupMatch] = useRoute("/tunnel-setup");
   const selectedId = match ? params?.id : undefined;
   const selectedTerminalId = termMatch ? termParams?.id : undefined;
+  const folderTermCwd = folderTermMatch ? decodeFolderPath(folderTermParams?.encodedCwd ?? "") : null;
+  const folderEditorCwd = folderEditorMatch ? decodeFolderPath(folderEditorParams?.encodedCwd ?? "") : null;
   const sidebar = useSidebarState();
   const isMobile = useMobile();
   const installPrompt = useInstallPrompt();
@@ -106,6 +114,8 @@ export default function App() {
   const [pinnedDirectories, setPinnedDirectories] = useState<string[]>([]);
   const [terminals, setTerminals] = useState<Map<string, TerminalSession>>(new Map());
   const pendingTerminalCwdRef = useRef<string | null>(null);
+  const [editorStatuses, setEditorStatuses] = useState<Map<string, { id: string; status: EditorInstanceStatus }>>(new Map());
+  const [editorAvailable, setEditorAvailable] = useState<boolean | undefined>(undefined);
   const subscribedRef = useRef(new Set<string>());
   const [flowDetailAgent, setFlowDetailAgent] = useState<string | null>(null);
   const [previewState, setPreviewState] = useState<{
@@ -141,13 +151,21 @@ export default function App() {
   }, []);
 
   const handleMessage = useMessageHandler(
-    { setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals },
+    { setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses },
     { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef },
   );
 
   useEffect(() => {
     return onMessage(handleMessage);
   }, [onMessage, handleMessage]);
+
+  // Detect code-server binary availability on mount
+  useEffect(() => {
+    fetch("/api/editor/detect")
+      .then((r) => r.json())
+      .then((d) => { if (d.success) setEditorAvailable(d.data.available); })
+      .catch(() => {});
+  }, []);
 
   // Clear subscriptions on reconnect so sessions get re-subscribed
   const prevStatusRef = useRef(status);
@@ -156,6 +174,21 @@ export default function App() {
       subscribedRef.current.clear();
       setSessionOrderMap(new Map());
       setTerminals(new Map());
+      // Fetch current editor statuses
+      fetch("/api/editor/status")
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && Array.isArray(data.data)) {
+            const map = new Map<string, { id: string; status: EditorInstanceStatus }>();
+            for (const inst of data.data) {
+              if (inst.status !== "stopped") {
+                map.set(inst.cwd, { id: inst.id, status: inst.status });
+              }
+            }
+            setEditorStatuses(map);
+          }
+        })
+        .catch(() => {});
     }
     prevStatusRef.current = status;
   }, [status]);
@@ -319,6 +352,10 @@ export default function App() {
       onCollapseSidebar={sidebar.toggleCollapse}
       commandsMap={sessionCommands}
       flowsMap={sessionFlows}
+      onOpenTerminals={(cwd) => navigate(`/folder/${encodeFolderPath(cwd)}/terminals`)}
+      onOpenEditor={(cwd) => navigate(`/folder/${encodeFolderPath(cwd)}/editor`)}
+      editorStatuses={editorStatuses}
+      editorAvailable={editorAvailable}
     />
   );
 
@@ -641,7 +678,7 @@ export default function App() {
     </div>
   ) : null;
 
-  // Terminal keep-alive views — always mounted, CSS toggled
+  // Terminal keep-alive views — always mounted, CSS toggled (for legacy /terminal/:id route)
   const terminalViews = useMemo(() => {
     return Array.from(terminals.values()).map((t) => (
       <TerminalView
@@ -654,6 +691,35 @@ export default function App() {
       />
     ));
   }, [terminals, selectedTerminalId, handleTerminalTitle, handleKillTerminal]);
+
+  // Get terminals for a specific folder cwd
+  const getTerminalsForCwd = useCallback((cwd: string) => {
+    return Array.from(terminals.values()).filter((t) => t.cwd === cwd);
+  }, [terminals]);
+
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  const handleEditorClose = useCallback(() => navigateRef.current("/"), []);
+
+  // Folder view content (TerminalsView or EditorView)
+  const folderViewContent = useMemo(() => {
+    if (folderTermCwd) {
+      return (
+        <TerminalsView
+          cwd={folderTermCwd}
+          terminals={getTerminalsForCwd(folderTermCwd)}
+          onCreateTerminal={handleCreateTerminal}
+          onKillTerminal={handleKillTerminal}
+          onRenameTerminal={handleRenameTerminal}
+          onTerminalTitle={handleTerminalTitle}
+        />
+      );
+    }
+    if (folderEditorCwd) {
+      return <EditorView cwd={folderEditorCwd} onClose={handleEditorClose} />;
+    }
+    return null;
+  }, [folderTermCwd, folderEditorCwd, getTerminalsForCwd, handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleTerminalTitle, handleEditorClose]);
 
   // Navigate away from terminal when it's removed
   useEffect(() => {
@@ -675,6 +741,8 @@ export default function App() {
     const mobileDepth = getMobileDepth({
       selectedId,
       selectedTerminalId,
+      folderTermCwd,
+      folderEditorCwd,
       settingsMatch: !!settingsMatch,
       tunnelSetupMatch: !!tunnelSetupMatch,
       hasPreview: !!previewState || !!piResourcesState || !!piResourceFilePreview || !!readmePreview || !!specsBrowserCwd || !!archiveBrowserCwd || !!diffViewSessionId,
@@ -759,6 +827,17 @@ export default function App() {
                 artifacts={previewState.artifacts}
                 onBack={() => setPreviewState(null)}
               />
+            ) : folderTermCwd ? (
+              <TerminalsView
+                cwd={folderTermCwd}
+                terminals={getTerminalsForCwd(folderTermCwd)}
+                onCreateTerminal={handleCreateTerminal}
+                onKillTerminal={handleKillTerminal}
+                onRenameTerminal={handleRenameTerminal}
+                onTerminalTitle={handleTerminalTitle}
+              />
+            ) : folderEditorCwd ? (
+              <EditorView cwd={folderEditorCwd} onClose={handleEditorClose} />
             ) : selectedTerminalId ? (
               <div className="flex-1 flex flex-col min-w-0 h-full">
                 {terminalViews}
@@ -784,12 +863,16 @@ export default function App() {
         {sessionList}
       </MobileOverlay>
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {connectionBanner}
         {/* Terminal views are always mounted (keep-alive), CSS hidden/shown */}
         {terminalViews}
-        {/* Show session detail or landing page when no terminal is selected */}
-        {!selectedTerminalId && !settingsMatch && !tunnelSetupMatch && (
+        {/* Folder views (TerminalsView or EditorView) */}
+        {folderViewContent && (
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">{folderViewContent}</div>
+        )}
+        {/* Show session detail or landing page when no terminal/folder view is selected */}
+        {!selectedTerminalId && !folderTermCwd && !folderEditorCwd && !settingsMatch && !tunnelSetupMatch && (
           archiveBrowserCwd ? (
             <ArchiveBrowserView
               cwd={archiveBrowserCwd}

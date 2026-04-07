@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Icon } from "@mdi/react";
-import { mdiArrowLeft, mdiContentSave, mdiAlert, mdiPlus, mdiDelete, mdiRestart } from "@mdi/js";
+import { mdiArrowLeft, mdiContentSave, mdiAlert, mdiPlus, mdiDelete, mdiRestart, mdiUpdate } from "@mdi/js";
 import { useLocation } from "wouter";
 import { ProviderAuthSection } from "./ProviderAuthSection.js";
 import { PackageBrowser } from "./PackageBrowser.js";
@@ -50,6 +50,11 @@ interface Config {
   devBuildOnReload: boolean;
   auth?: AuthConfig;
   memoryLimits: MemoryLimitsConfig;
+  editor?: {
+    binary?: string;
+    idleTimeoutMinutes?: number;
+    maxInstances?: number;
+  };
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -121,6 +126,11 @@ export function SettingsPanel() {
     // Memory limits diff
     if (JSON.stringify(config.memoryLimits) !== JSON.stringify(original.memoryLimits)) {
       partial.memoryLimits = config.memoryLimits;
+    }
+
+    // Editor config diff
+    if (JSON.stringify(config.editor) !== JSON.stringify(original.editor)) {
+      partial.editor = config.editor || null;
     }
 
     // Auth diff
@@ -510,6 +520,36 @@ export function SettingsPanel() {
                   })}
                 />
               </Section>
+              <Section title="Editor (code-server)">
+                <p className="text-xs text-[var(--text-tertiary)] mb-2">
+                  Configure the embedded VS Code editor powered by code-server.
+                </p>
+                <TextField
+                  label="Binary Path (leave empty for auto-detect)"
+                  value={config.editor?.binary ?? ""}
+                  onChange={(v) => update((c) => {
+                    if (!c.editor) c.editor = {};
+                    c.editor.binary = v || undefined;
+                  })}
+                  placeholder="code-server"
+                />
+                <NumberField
+                  label="Idle Timeout (minutes)"
+                  value={config.editor?.idleTimeoutMinutes ?? 10}
+                  onChange={(v) => update((c) => {
+                    if (!c.editor) c.editor = {};
+                    c.editor.idleTimeoutMinutes = v;
+                  })}
+                />
+                <NumberField
+                  label="Max Concurrent Instances"
+                  value={config.editor?.maxInstances ?? 3}
+                  onChange={(v) => update((c) => {
+                    if (!c.editor) c.editor = {};
+                    c.editor.maxInstances = v;
+                  })}
+                />
+              </Section>
             </>
           )}
 
@@ -694,7 +734,7 @@ function GlobalPackagesSection() {
             disabled={checking}
             className="text-xs px-2 py-1 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-primary)] disabled:opacity-50"
           >
-            {checking ? "Checking..." : "Check for Updates"}
+            <Icon path={mdiUpdate} size={0.45} className="inline mr-0.5" />{checking ? "Checking..." : "Check for Updates"}
           </button>
         </div>
         {installed.packages.length === 0 ? (

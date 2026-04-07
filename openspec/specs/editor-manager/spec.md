@@ -79,17 +79,24 @@ The EditorManager SHALL broadcast `editor_status` messages via the browser WebSo
 
 ### Requirement: REST API endpoints
 The server SHALL expose:
-- `POST /api/editor/start` with body `{ cwd }` — starts or returns existing instance
+- `POST /api/editor/start` with body `{ cwd, theme? }` — starts or returns existing instance, writes VS Code settings.json with theme
 - `POST /api/editor/:id/heartbeat` — resets idle timer
 - `POST /api/editor/:id/stop` — stops instance
+- `POST /api/editor/:id/theme` with body `{ theme }` — updates VS Code settings.json with new theme for a running instance
 - `GET /api/editor/status` — returns all editor instances with their status
 - `GET /api/editor/detect` — returns whether code-server binary is available
 
 All endpoints SHALL be localhost-only.
 
 #### Scenario: Start endpoint
-- **WHEN** `POST /api/editor/start` is called with `{ cwd: "/path/to/project" }`
+- **WHEN** `POST /api/editor/start` is called with `{ cwd: "/path/to/project", theme: "dark" }`
+- **THEN** the server SHALL write VS Code settings.json with dark theme
 - **THEN** the server SHALL return `{ success: true, data: { id, status, proxyPath } }`
+
+#### Scenario: Theme endpoint
+- **WHEN** `POST /api/editor/:id/theme` is called with `{ theme: "light" }`
+- **THEN** the server SHALL update VS Code settings.json with the light color theme
+- **THEN** the server SHALL return `{ success: true }`
 
 #### Scenario: Detect endpoint when binary exists
 - **WHEN** `GET /api/editor/detect` is called and code-server is on PATH

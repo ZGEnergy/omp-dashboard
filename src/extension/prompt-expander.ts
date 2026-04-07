@@ -65,7 +65,12 @@ export function expandPromptTemplateFromDisk(text: string, cwd: string): string 
   const argsString = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
 
   const templates = findPromptTemplates(cwd);
-  const filePath = templates.get(templateName);
+  let filePath = templates.get(templateName);
+
+  // Support colon as alias for hyphen (e.g. /opsx:continue → opsx-continue)
+  if (!filePath && templateName.includes(":")) {
+    filePath = templates.get(templateName.replace(/:/g, "-"));
+  }
 
   if (!filePath) return text;
 

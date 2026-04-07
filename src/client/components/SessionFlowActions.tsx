@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { Icon } from "@mdi/react";
+import { mdiPlay, mdiPlus } from "@mdi/js";
 import type { FlowInfo } from "../../shared/types.js";
 import { FlowLaunchDialog } from "./FlowLaunchDialog.js";
 import { SearchableSelectDialog, type SelectOption } from "./SearchableSelectDialog.js";
@@ -34,7 +36,7 @@ export function SessionFlowActions({
               onClick={(e) => { e.stopPropagation(); setPickerOpen(true); }}
               className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
             >
-              ▶ Run Flow...
+              <Icon path={mdiPlay} size={0.4} className="inline mr-0.5" />Run Flow...
             </button>
           )}
           {hasFlowsNew && (
@@ -42,7 +44,7 @@ export function SessionFlowActions({
               onClick={(e) => { e.stopPropagation(); setNewFlowOpen(true); }}
               className="text-[10px] px-1.5 py-0.5 rounded border border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
             >
-              + New Flow
+              <Icon path={mdiPlus} size={0.4} className="inline mr-0.5" />New Flow
             </button>
           )}
         </div>

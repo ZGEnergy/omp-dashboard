@@ -9,6 +9,7 @@ import type { ServerConfig } from "../server.js";
 import type { ApiResponse } from "../../shared/types.js";
 import { localhostGuard } from "../localhost-guard.js";
 import { detectEditors, EDITORS } from "../editor-registry.js";
+import { detectCodeServerBinary, resetDetectionCache } from "../editor-detection.js";
 import { readConfigRedacted, writeConfigPartial } from "../config-api.js";
 import { createTunnel, deleteTunnel, getTunnelStatus } from "../tunnel.js";
 import { spawn } from "node:child_process";
@@ -37,6 +38,17 @@ export function registerSystemRoutes(
       }
       const editors = detectEditors(cwd);
       return { success: true, data: editors } satisfies ApiResponse;
+    },
+  );
+
+  // code-server binary detection endpoint
+  fastify.get(
+    "/api/editor/detect",
+    { preHandler: localhostGuard },
+    async () => {
+      resetDetectionCache();
+      const result = detectCodeServerBinary(config.editor);
+      return { success: true, data: result } satisfies ApiResponse;
     },
   );
 

@@ -23,6 +23,8 @@ describe("server-launcher", () => {
       spawnStrategy: "tmux",
       tunnel: { enabled: true },
       devBuildOnReload: false,
+      memoryLimits: { maxEventsPerSession: 5000, maxStringFieldSize: 0, maxWsBufferBytes: 4194304 },
+      editor: { idleTimeoutMinutes: 10, maxInstances: 3 },
     });
 
     expect(args).toContain("--port");

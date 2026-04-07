@@ -1,4 +1,6 @@
 import React from "react";
+import { Icon } from "@mdi/react";
+import { mdiClipboardTextOutline } from "@mdi/js";
 import type { OpenSpecPhase } from "../../shared/types.js";
 
 const phaseLabels: Record<OpenSpecPhase, string> = {
@@ -42,7 +44,7 @@ export function OpenSpecActivityBadge({
 
   return (
     <div className={`text-[11px] mt-0.5 ml-4 flex items-center gap-1 ${color}`}>
-      <span>📋</span>
+      <Icon path={mdiClipboardTextOutline} size={0.45} />
       <span className="truncate">
         {label}
         {changeName && <span className="text-[var(--text-secondary)]"> · {changeName}</span>}

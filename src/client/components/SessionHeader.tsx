@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Icon } from "@mdi/react";
-import { mdiPencilOutline, mdiArrowLeft, mdiPaperclip, mdiRefresh } from "@mdi/js";
+import { mdiPencilOutline, mdiArrowLeft, mdiPaperclip, mdiRefresh, mdiLinkOff, mdiPlay, mdiFileCompare, mdiHeadLightbulb } from "@mdi/js";
 import type { DashboardSession, OpenSpecChange, CommandInfo, FlowInfo } from "../../shared/types.js";
 import type { SessionState } from "../lib/event-reducer.js";
 import type { DetectedEditor } from "../lib/editor-api.js";
@@ -94,7 +94,7 @@ function MobileAttachButton({ session, openspecChanges, onAttach, onDetach }: {
           {attached ? (
             <>
               <div className="px-4 py-2 text-xs text-blue-400 border-b border-[var(--border-primary)]">
-                📋 {attached}
+                <Icon path={mdiPaperclip} size={0.4} className="inline mr-0.5" />{attached}
               </div>
               {onDetach && (
                 <button
@@ -308,21 +308,21 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
       )}
       {(state.model || session.model) && <span className="text-[var(--text-secondary)]">{state.model || session.model}</span>}
       {(state.thinkingLevel || session.thinkingLevel) && (
-        <span className="text-[var(--text-tertiary)]">💭 {state.thinkingLevel || session.thinkingLevel}</span>
+        <span className="text-[var(--text-tertiary)] inline-flex items-center gap-0.5"><Icon path={mdiHeadLightbulb} size={0.45} /> {state.thinkingLevel || session.thinkingLevel}</span>
       )}
       {/* OpenSpec + Flow buttons */}
       <span className="flex-1" />
       {onAttachProposal && openspecChanges && openspecChanges.length > 0 && (
         attached ? (
           <span className="text-[10px] flex items-center gap-1 mr-2">
-            <span className="text-blue-400">📋 {attached}</span>
+            <span className="text-blue-400"><Icon path={mdiPaperclip} size={0.4} className="inline mr-0.5" />{attached}</span>
             {onDetachProposal && (
               <button
                 onClick={onDetachProposal}
                 className="text-[var(--text-muted)] hover:text-red-400 px-0.5"
                 title="Detach change"
               >
-                ×
+                <Icon path={mdiLinkOff} size={0.45} />
               </button>
             )}
           </span>
@@ -332,7 +332,7 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
             className="text-[10px] px-1.5 py-0.5 rounded border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 mr-1"
             title="Attach OpenSpec change"
           >
-            📋 Attach
+            <Icon path={mdiPaperclip} size={0.4} className="inline mr-0.5" />Attach
           </button>
         )
       )}
@@ -342,7 +342,7 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
           className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 mr-1"
           title="Run a flow"
         >
-          ▶ Flow
+          <Icon path={mdiPlay} size={0.4} className="inline mr-0.5" />Flow
         </button>
       )}
       {hasFileChanges && onOpenDiffView && (
@@ -351,7 +351,7 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
           className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 mr-1"
           title="View changed files"
         >
-          📄 Changed Files
+          <Icon path={mdiFileCompare} size={0.4} className="inline mr-0.5" />Changed Files
         </button>
       )}
       <span className="text-[var(--text-muted)]">{formatDuration(duration)}</span>

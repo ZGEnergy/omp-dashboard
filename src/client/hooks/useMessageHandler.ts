@@ -6,6 +6,7 @@ import { useCallback } from "react";
 import { createInitialState, reduceEvent, addInteractiveRequest, resolveInteractiveRequest, dismissInteractiveRequest, type SessionState } from "../lib/event-reducer.js";
 import type { DashboardSession, CommandInfo, FlowInfo, FileEntry, OpenSpecData, ModelInfo } from "../../shared/types.js";
 import type { TerminalSession } from "../../shared/terminal-types.js";
+import type { EditorInstanceStatus } from "../../shared/editor-types.js";
 import type { ServerToBrowserMessage } from "../../shared/browser-protocol.js";
 
 export interface MessageHandlerSetters {
@@ -20,6 +21,7 @@ export interface MessageHandlerSetters {
   setSessionOrderMap: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   setPinnedDirectories: React.Dispatch<React.SetStateAction<string[]>>;
   setTerminals: React.Dispatch<React.SetStateAction<Map<string, TerminalSession>>>;
+  setEditorStatuses: React.Dispatch<React.SetStateAction<Map<string, { id: string; status: EditorInstanceStatus }>>>;
 }
 
 export interface MessageHandlerDeps {
@@ -38,7 +40,7 @@ export function useMessageHandler(
   const {
     setSessions, setSessionStates, setSessionCommands, setSessionFlows,
     setFileResults, setOpenspecMap, setModelsMap, setSpawnResult,
-    setSessionOrderMap, setPinnedDirectories, setTerminals,
+    setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses,
   } = setters;
   const { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef } = deps;
 
@@ -253,6 +255,18 @@ export function useMessageHandler(
         // Dispatch to component-level hooks via custom DOM event
         window.dispatchEvent(new CustomEvent("pi-package-event", { detail: msg }));
         break;
+
+      case "editor_status":
+        setEditorStatuses((prev) => {
+          const next = new Map(prev);
+          if (msg.status === "stopped") {
+            next.delete(msg.cwd);
+          } else {
+            next.set(msg.cwd, { id: msg.id, status: msg.status });
+          }
+          return next;
+        });
+        break;
     }
-  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef]);
+  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef]);
 }

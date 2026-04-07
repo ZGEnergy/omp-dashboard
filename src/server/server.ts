@@ -37,6 +37,10 @@ import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerProviderAuthRoutes } from "./routes/provider-auth-routes.js";
 import { registerPackageRoutes } from "./routes/package-routes.js";
 import { PackageManagerWrapper } from "./package-manager-wrapper.js";
+import { createEditorManager, type EditorManager } from "./editor-manager.js";
+import { registerEditorRoutes } from "./routes/editor-routes.js";
+import { registerEditorProxy, handleEditorUpgrade } from "./editor-proxy.js";
+import { detectCodeServerBinary } from "./editor-detection.js";
 
 export interface ServerConfig {
   port: number;
@@ -53,6 +57,8 @@ export interface ServerConfig {
   maxEventsPerSession?: number;
   maxStringFieldSize?: number;
   maxWsBufferBytes?: number;
+  /** Editor (code-server) config */
+  editor: import("../shared/config.js").EditorConfig;
 }
 
 export interface DashboardServer {
@@ -160,6 +166,16 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   const terminalGateway = createTerminalGateway(terminalManager);
 
+  // Create editor manager for code-server instances
+  const editorDetection = detectCodeServerBinary(config.editor);
+  const editorManager = createEditorManager({
+    config: config.editor,
+    detection: editorDetection,
+    onStatusChange: (cwd, id, status) => {
+      browserGateway.broadcastToAll({ type: "editor_status", cwd, id, status });
+    },
+  });
+
   const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes);
 
 
@@ -249,6 +265,10 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   });
 
   registerPackageRoutes(fastify, { packageManagerWrapper });
+
+  // Editor (code-server) routes and proxy
+  registerEditorRoutes(fastify, editorManager);
+  registerEditorProxy(fastify, editorManager);
 
   registerProviderAuthRoutes(fastify, { piGateway });
 
@@ -354,6 +374,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
           });
         } else if (request.url?.startsWith("/ws/terminal/")) {
           terminalGateway.handleUpgrade(request, socket, head);
+        } else if (request.url?.startsWith("/editor/")) {
+          handleEditorUpgrade(editorManager, request, socket, head);
         } else {
           socket.destroy();
         }
@@ -403,6 +425,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       for (const t of terminalManager.list()) {
         try { terminalManager.kill(t.id); } catch {}
       }
+      // Stop all code-server instances
+      editorManager.stopAll();
       await fastify.close();
     },
   };

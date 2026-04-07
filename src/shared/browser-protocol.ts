@@ -13,6 +13,7 @@ import type {
   PiSessionInfo,
 } from "./types.js";
 import type { TerminalSession } from "./terminal-types.js";
+import type { EditorInstanceStatus } from "./editor-types.js";
 
 // ── Server → Browser ────────────────────────────────────────────────
 
@@ -145,6 +146,14 @@ export interface SessionStateResetMessage {
   sessionId: string;
 }
 
+/** Notifies browsers of editor instance status changes. */
+export interface EditorStatusMessage {
+  type: "editor_status";
+  cwd: string;
+  id: string;
+  status: EditorInstanceStatus;
+}
+
 /** Progress event streamed during a package install/remove/update operation. */
 export interface PackageProgressMessage {
   type: "package_progress";
@@ -193,7 +202,8 @@ export type ServerToBrowserMessage =
   | TerminalUpdatedMessage
   | SessionStateResetMessage
   | PackageProgressMessage
-  | PackageOperationCompleteMessage;
+  | PackageOperationCompleteMessage
+  | EditorStatusMessage;
 
 // ── Browser → Server ────────────────────────────────────────────────
 

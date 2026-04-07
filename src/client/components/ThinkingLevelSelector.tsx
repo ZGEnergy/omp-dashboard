@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
+import { Icon } from "@mdi/react";
+import { mdiHeadLightbulb } from "@mdi/js";
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
@@ -29,7 +31,7 @@ export function ThinkingLevelSelector({ current, onSelect }: Props) {
         className="flex items-center gap-1 px-2 py-0.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         data-testid="thinking-level-button"
       >
-        <span className="font-mono truncate">💭 {current ?? "off"}</span>
+        <span className="font-mono truncate flex items-center gap-1"><Icon path={mdiHeadLightbulb} size={0.5} /> {current ?? "off"}</span>
       </button>
       {open && (
         <div className="absolute bottom-full left-0 mb-1 w-32 bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded-lg shadow-lg z-50 overflow-hidden" data-testid="thinking-level-dropdown">

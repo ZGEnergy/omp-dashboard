@@ -42,11 +42,11 @@ The content area switches views based on route: `/session/:id` → ChatView, `/t
 
 ### 3. Reverse proxy through dashboard server
 
-**Choice**: Proxy all code-server HTTP/WS traffic through the dashboard's Fastify server at `/editor/:id/*`, using `@fastify/http-proxy`.
+**Choice**: Proxy all code-server HTTP/WS traffic through the dashboard's Fastify server at `/editor/:id/*`, using `@fastify/reply-from` for HTTP proxying and raw `net.connect` TCP piping for WebSocket upgrade.
 
-**Why**: Same-origin eliminates CORS/iframe/cookie issues. Works transparently through the zrok tunnel. The browser only talks to one server. Authentication (if configured) applies automatically.
+**Why**: Same-origin eliminates CORS/iframe/cookie issues. Works transparently through the zrok tunnel. The browser only talks to one server. Authentication (if configured) applies automatically. `@fastify/reply-from` (lower-level than `@fastify/http-proxy`) gives per-request control over the upstream URL, needed because each editor instance has a different port.
 
-**Alternative**: Direct browser-to-code-server connection — requires separate port exposure, breaks through tunnels, needs CORS configuration.
+**Alternative**: `@fastify/http-proxy` — higher-level but designed for static upstream URLs, not dynamic per-request routing. Direct browser-to-code-server connection — requires separate port exposure, breaks through tunnels, needs CORS configuration.
 
 ### 4. Dynamic port allocation
 
@@ -85,6 +85,14 @@ The content area switches views based on route: `/session/:id` → ChatView, `/t
 **Choice**: Add `editor_status` message to browser WebSocket protocol. Server broadcasts status changes (starting/running/stopped) so all connected browsers update the sidebar indicator.
 
 **Why**: Consistent with existing patterns (session_added, terminal_added). Reactive — no polling needed.
+
+### 10. Theme synchronization via settings.json rewrite
+
+**Choice**: Disable `window.autoDetectColorScheme` in VS Code settings and directly set `workbench.colorTheme` to match the dashboard's dark/light mode. On theme change, rewrite `settings.json` and reload the iframe.
+
+**Why**: `autoDetectColorScheme` reads the OS color scheme preference (e.g., macOS light mode), not the dashboard's theme — causing VS Code to show light theme even when the dashboard is dark. The iframe's `color-scheme` CSS property does not propagate `prefers-color-scheme` to iframe content. Directly writing the theme to settings.json and reloading is the only reliable approach. VS Code preserves open files and cursor positions from the user-data-dir, so reloads are non-destructive.
+
+**Alternative**: `color-scheme` CSS property on iframe — tested and confirmed not to work (iframe `prefers-color-scheme` follows the OS, not the parent's CSS). `postMessage` API — code-server does not expose a command API for theme changes.
 
 ### 9. Config fields for editor
 

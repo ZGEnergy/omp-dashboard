@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
+import { Icon } from "@mdi/react";
+import { mdiPlay } from "@mdi/js";
 import { DialogPortal } from "./DialogPortal.js";
 
 export function FlowLaunchDialog({
@@ -56,7 +58,7 @@ export function FlowLaunchDialog({
               type="submit"
               className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-500"
             >
-              Run
+              <Icon path={mdiPlay} size={0.45} className="inline mr-0.5" />Run
             </button>
           </div>
         </form>

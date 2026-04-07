@@ -45,6 +45,7 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/extension/server-probe.ts` | TCP probe to detect running server |
 | `src/extension/server-launcher.ts` | Auto-start server as detached process |
 | `src/extension/command-handler.ts` | Command routing: `!`/`!!` bash, `/compact`, slash commands |
+| `src/extension/prompt-expander.ts` | Slash command → prompt template expansion (supports colon-to-hyphen aliasing: `/opsx:cmd` → `opsx-cmd.md`) |
 | `src/extension/dev-build.ts` | Dev build-on-reload helper (client build + server shutdown) |
 | `src/extension/server-auto-start.ts` | Extracted auto-start logic with retry-probe for concurrent launches |
 | `src/shared/session-meta.ts` | Session metadata sidecar (.meta.json) read/write helpers |
@@ -105,7 +106,11 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/server/pending-resume-registry.ts` | Queues prompts for auto-resume of ended sessions |
 | `src/server/json-store.ts` | Atomic JSON file read/write helpers |
 | `src/server/process-manager.ts` | Session spawning via tmux or headless mode |
-| `src/server/editor-registry.ts` | Detects available editors (running processes + CLI) |
+| `src/server/editor-registry.ts` | Detects available native editors (running processes + CLI) |
+| `src/server/editor-manager.ts` | Lifecycle manager for code-server child processes (spawn, stop, idle, heartbeat) |
+| `src/server/editor-proxy.ts` | Reverse proxy for `/editor/:id/*` to code-server instances |
+| `src/server/editor-detection.ts` | Auto-detect code-server/openvscode-server binary on PATH |
+| `src/server/routes/editor-routes.ts` | REST routes: editor start, stop, heartbeat, status, detect |
 | `src/server/event-status-extraction.ts` | Extracts session status/tool updates from events (incl. flow metadata) |
 | `src/server/headless-pid-registry.ts` | Maps headless child PIDs to session IDs |
 | `src/server/auth.ts` | OAuth2 authentication: provider registry, JWT helpers, user allowlist |
@@ -145,6 +150,12 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/client/components/interactive-renderers/` | Registry + renderers for interactive UI dialogs (confirm, select, multiselect, input, editor, notify) |
 | `src/shared/terminal-types.ts` | TerminalSession type and control messages |
 | `src/client/components/TerminalView.tsx` | xterm.js terminal emulator wrapper with keep-alive |
+| `src/client/components/TerminalsView.tsx` | Tabbed terminal container per folder (tab bar, keep-alive, rename) |
+| `src/client/components/EditorView.tsx` | code-server iframe embedding with lazy start and heartbeat |
+| `src/client/components/EditorInstallGuide.tsx` | Platform-specific code-server installation guide |
+| `src/client/components/FolderActionBar.tsx` | Unified action bar per folder: +Session, +Terminal, Terminals(N), Editor, Zed, Pi Resources |
+| `src/client/lib/folder-encoding.ts` | Base64url encode/decode for folder paths in URL routes |
+| `src/shared/editor-types.ts` | Editor instance types shared across components |
 | `src/client/components/TerminalCard.tsx` | Sidebar card for terminal sessions (cyan accent) |
 | `src/client/App.tsx` | React app with WebSocket integration |
 | `src/client/components/MobileShell.tsx` | Two-panel mobile shell with slide transitions and swipe-back |

@@ -1,12 +1,14 @@
-import React from "react";
+import React, { type ReactNode } from "react";
+import { Icon } from "@mdi/react";
+import { mdiCircleOutline, mdiLoading, mdiCheckCircle, mdiCloseCircle, mdiAlertCircle, mdiRefresh } from "@mdi/js";
 import type { FlowAgentState } from "../../shared/types.js";
 
-const statusIcons: Record<string, { icon: string; color: string }> = {
-  pending: { icon: "○", color: "text-[var(--text-tertiary)]" },
-  running: { icon: "⠋", color: "text-yellow-400" },
-  complete: { icon: "✓", color: "text-green-400" },
-  error: { icon: "✗", color: "text-red-400" },
-  blocked: { icon: "⚠", color: "text-orange-400" },
+const statusIcons: Record<string, { icon: ReactNode; color: string }> = {
+  pending: { icon: <Icon path={mdiCircleOutline} size={0.55} />, color: "text-[var(--text-tertiary)]" },
+  running: { icon: <Icon path={mdiLoading} size={0.55} className="animate-spin" />, color: "text-yellow-400" },
+  complete: { icon: <Icon path={mdiCheckCircle} size={0.55} />, color: "text-green-400" },
+  error: { icon: <Icon path={mdiCloseCircle} size={0.55} />, color: "text-red-400" },
+  blocked: { icon: <Icon path={mdiAlertCircle} size={0.55} />, color: "text-orange-400" },
 };
 
 function formatTokens(n: number): string {
@@ -45,10 +47,10 @@ export function FlowAgentCard({
     >
       {/* Header: icon + name + loop badge */}
       <div className="flex items-center gap-1.5">
-        <span className={`${color} text-sm ${agent.status === "running" ? "animate-spin" : ""}`}>{icon}</span>
+        <span className={`${color} inline-flex`}>{icon}</span>
         <span className="text-sm font-medium text-[var(--text-primary)] truncate flex-1">{displayName}</span>
         {agent.loopIteration != null && agent.loopIteration > 0 && (
-          <span className="text-[10px] text-blue-400 flex-shrink-0">↻ {agent.loopIteration}/{agent.loopMax}</span>
+          <span className="text-[10px] text-blue-400 flex-shrink-0 inline-flex items-center gap-0.5"><Icon path={mdiRefresh} size={0.4} />{agent.loopIteration}/{agent.loopMax}</span>
         )}
       </div>
 

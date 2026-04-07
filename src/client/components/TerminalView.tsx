@@ -1,4 +1,6 @@
 import React, { useRef, useEffect, useCallback } from "react";
+import { Icon } from "@mdi/react";
+import { mdiClose } from "@mdi/js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { AttachAddon } from "@xterm/addon-attach";
@@ -162,7 +164,7 @@ export function TerminalView({ terminalId, visible, onTitle, onClose, terminalNa
           className="text-[var(--text-tertiary)] hover:text-red-400 transition-colors px-1"
           title="Close terminal (SIGTERM)"
         >
-          ✕
+          <Icon path={mdiClose} size={0.6} />
         </button>
       </div>
       {/* xterm.js container */}

@@ -1,58 +1,27 @@
 ## ADDED Requirements
 
 ### Requirement: Spawn terminal from folder group
-The system SHALL provide a terminal spawn button in each folder group header. Clicking it SHALL create a new terminal session with cwd set to that folder's directory.
+The system SHALL provide a `+Terminal` button in the folder action bar. Clicking it SHALL create a new terminal session with cwd set to that folder's directory AND navigate to the TerminalsView content area for that folder.
 
 #### Scenario: User spawns a terminal
-- **WHEN** user clicks the terminal button in a folder group header
+- **WHEN** user clicks the +Terminal button in the folder action bar
 - **THEN** a new terminal session is created with cwd matching the folder
-- **THEN** the terminal card appears at the top of the folder group
-- **THEN** the terminal view is automatically selected and displayed
+- **THEN** the content area navigates to `/folder/:encodedCwd/terminals`
+- **THEN** the newly created terminal is the active tab in the TerminalsView
 
 #### Scenario: Multiple terminals per folder
-- **WHEN** user clicks the terminal button multiple times in the same folder
+- **WHEN** user clicks the +Terminal button multiple times in the same folder
 - **THEN** each click creates an independent terminal session
-- **THEN** all terminal cards appear in the folder group, each independently selectable
-
-### Requirement: Terminal card display
-Terminal sessions SHALL appear as cards in the sidebar, visually distinct from agent session cards. Terminal cards SHALL have a cyan left border accent and a console icon (`>_`).
-
-#### Scenario: Visual distinction from agent cards
-- **WHEN** the sidebar contains both agent and terminal sessions in the same folder group
-- **THEN** terminal cards display a cyan left border accent
-- **THEN** terminal cards display a console icon instead of the robot icon
-- **THEN** agent cards remain unchanged in appearance
-
-#### Scenario: Terminal card information
-- **WHEN** a terminal card is displayed
-- **THEN** it shows the terminal name (from PTY title or shell name)
-- **THEN** it shows the working directory
-
-### Requirement: Terminal card ordering and drag-and-drop
-Terminal cards SHALL be mixed with agent session cards in the same folder group and support the same drag-and-drop reordering. New terminals SHALL be inserted at the top of their folder group.
-
-#### Scenario: New terminal ordering
-- **WHEN** a new terminal is created in a folder group
-- **THEN** its card appears at the top of the group (before existing agent and terminal cards)
-
-#### Scenario: Drag-and-drop reorder
-- **WHEN** user drags a terminal card to a new position within a folder group
-- **THEN** the card moves to the new position
-- **THEN** the order is persisted and survives page reload
+- **THEN** all terminal sessions appear as tabs in the TerminalsView
 
 ### Requirement: Terminal view rendering
-When a terminal card is selected, the main area SHALL display a full terminal emulator using xterm.js with ANSI color support, scrollback, and resize handling.
+When a terminal tab is selected in the TerminalsView, the tab content area SHALL display a full terminal emulator using xterm.js with ANSI color support, scrollback, and resize handling.
 
-#### Scenario: Select terminal card
-- **WHEN** user clicks a terminal card in the sidebar
-- **THEN** the main area displays the xterm.js terminal view
+#### Scenario: Select terminal tab
+- **WHEN** user clicks a terminal tab in the TerminalsView
+- **THEN** the tab content area displays the xterm.js terminal view
 - **THEN** the terminal is interactive (accepts keyboard input)
 - **THEN** ANSI colors and escape sequences render correctly
-
-#### Scenario: Terminal header
-- **WHEN** a terminal view is displayed
-- **THEN** a minimal header shows the terminal name and a close button
-- **THEN** no CommandInput, StatusBar, or TokenStatsBar is shown
 
 #### Scenario: Scrollback
 - **WHEN** terminal output exceeds the visible area

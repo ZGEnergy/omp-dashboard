@@ -117,6 +117,7 @@ TypeScript type definitions shared across all components:
    - `!<cmd>` → bash execution via `pi.exec()`, result as `bash_output` event + send to LLM
    - `/compact [instructions]` → `ctx.compact()`, feedback as `command_feedback` event
    - `/<command>` → `session.prompt()` for extension commands/skills/templates (fallback to `sendUserMessage()`)
+   - Colon-to-hyphen aliasing: `/opsx:continue` resolves to `opsx-continue.md` template (both `:` and `-` forms work)
    - Plain text → `pi.sendUserMessage()` (default)
 5. Pi processes the command, events flow back via event flow
 
@@ -482,9 +483,51 @@ Each terminal maintains a 256KB ring buffer of raw PTY output. When a new WebSoc
 
 Terminal xterm.js instances stay mounted in the DOM (CSS hidden/shown) for instant switching without replay flicker. The binary WebSocket stays open while mounted.
 
-### Sidebar Integration
+### Folder-Scoped View
 
-Terminal cards appear alongside agent session cards, sharing the same folder groups and drag-and-drop ordering. Terminal IDs (`term-*`) coexist with session IDs in the `SessionOrderManager`.
+Terminals are displayed in a tabbed `TerminalsView` per folder, accessed via the folder action bar's `Terminals(N)` button or `+Terminal` button. Terminal cards no longer appear in the sidebar — the sidebar shows only pi session cards. The tab bar supports switching, closing, renaming, and creating new terminals.
+
+## Embedded Editor (code-server)
+
+The dashboard supports embedding VS Code in the browser via code-server.
+
+### Architecture
+
+```
+Browser                     Dashboard Server              code-server
+┌──────────────┐         ┌─────────────────┐         ┌──────────────┐
+│  EditorView  │         │  EditorManager  │         │  VS Code     │
+│  (iframe)    │◄─HTTP──►│  EditorProxy    │◄─HTTP──►│  :10001      │
+│              │  same   │  /editor/:id/*  │  local  │  (per folder)│
+└──────────────┘  origin └─────────────────┘         └──────────────┘
+```
+
+### Lifecycle
+
+1. User clicks `Editor` button in folder action bar → navigates to `/folder/:encodedCwd/editor`
+2. `EditorView` sends `POST /api/editor/start` with `{ cwd }`
+3. `EditorManager` spawns code-server on a free port with `--auth none --bind-addr 127.0.0.1:<port>`
+4. Waits for TCP ready probe → returns `{ id, proxyPath }` → iframe loads
+5. Browser sends heartbeat every 30s → resets idle timer
+6. No heartbeat for 10 min → instance killed via SIGTERM
+
+### Reverse Proxy
+
+All code-server traffic is proxied through `/editor/:id/*` on the dashboard server. This provides same-origin access (no CORS/iframe issues) and works transparently through zrok tunnels.
+
+### Configuration
+
+```json
+{
+  "editor": {
+    "binary": "/usr/local/bin/code-server",
+    "idleTimeoutMinutes": 10,
+    "maxInstances": 3
+  }
+}
+```
+
+Binary auto-detection order: config override → `code-server` on PATH → `openvscode-server` on PATH.
 
 ## Bundled Skill: pi-dashboard
 

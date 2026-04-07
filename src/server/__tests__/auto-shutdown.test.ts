@@ -11,6 +11,7 @@ describe("Server auto-shutdown", () => {
     shutdownIdleSeconds: 2,
     tunnel: false,
     pingInterval: 0, // Disable WS ping to avoid fake/real timer conflicts
+    editor: { idleTimeoutMinutes: 10, maxInstances: 3 },
   };
 
   let testPort = 18700;

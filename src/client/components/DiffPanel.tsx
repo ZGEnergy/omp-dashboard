@@ -4,6 +4,8 @@
  * and git aggregate diff.
  */
 import React, { useState, useMemo, useEffect } from "react";
+import { Icon } from "@mdi/react";
+import { mdiCompare, mdiFileOutline, mdiViewSplitVertical, mdiViewSequential } from "@mdi/js";
 import { DiffView, DiffModeEnum } from "@git-diff-view/react";
 import { generateDiffFile } from "@git-diff-view/file";
 import { highlighter } from "@git-diff-view/lowlight";
@@ -143,13 +145,13 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
             className={`px-2 py-0.5 ${viewMode === "diff" ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}
             onClick={() => setViewMode("diff")}
           >
-            Diff
+            <Icon path={mdiCompare} size={0.45} className="inline mr-0.5" />Diff
           </button>
           <button
             className={`px-2 py-0.5 ${viewMode === "file" ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}
             onClick={() => setViewMode("file")}
           >
-            File
+            <Icon path={mdiFileOutline} size={0.45} className="inline mr-0.5" />File
           </button>
         </div>
 
@@ -160,13 +162,13 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
               className={`px-2 py-0.5 ${diffMode === DiffModeEnum.Split ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}
               onClick={() => setDiffMode(DiffModeEnum.Split)}
             >
-              Split
+              <Icon path={mdiViewSplitVertical} size={0.45} className="inline mr-0.5" />Split
             </button>
             <button
               className={`px-2 py-0.5 ${diffMode === DiffModeEnum.Unified ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}
               onClick={() => setDiffMode(DiffModeEnum.Unified)}
             >
-              Unified
+              <Icon path={mdiViewSequential} size={0.45} className="inline mr-0.5" />Unified
             </button>
           </div>
         )}

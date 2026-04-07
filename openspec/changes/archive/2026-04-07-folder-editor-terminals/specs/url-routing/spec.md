@@ -19,8 +19,15 @@ The client SHALL define a route `/folder/:encodedCwd/editor` that displays the E
 - **WHEN** user navigates to `/folder/:encodedCwd/editor`
 - **THEN** the EditorView SHALL be displayed for the decoded cwd
 
-## REMOVED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Terminal route
-**Reason**: The `/terminal/:id` route is replaced by `/folder/:encodedCwd/terminals` which shows all terminals for a folder in a tabbed view.
-**Migration**: Terminal access is now through the folder-scoped TerminalsView. Navigate to `/folder/:encodedCwd/terminals` instead.
+The `/terminal/:id` route SHALL be kept for backward compatibility but is deprecated. New terminal access SHALL use `/folder/:encodedCwd/terminals`. The legacy route SHALL continue to render the existing `TerminalView` for the selected terminal.
+
+#### Scenario: Legacy terminal route still works
+- **WHEN** user navigates to `/terminal/:id` with a valid terminal ID
+- **THEN** the terminal SHALL be displayed using the existing TerminalView
+
+#### Scenario: New terminal creation uses folder route
+- **WHEN** a new terminal is created via the folder action bar
+- **THEN** the app SHALL navigate to `/folder/:encodedCwd/terminals` (not `/terminal/:id`)

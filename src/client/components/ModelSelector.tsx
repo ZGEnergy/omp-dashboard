@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Icon } from "@mdi/react";
-import { mdiChevronDown } from "@mdi/js";
+import { mdiChevronDown, mdiLoading } from "@mdi/js";
 import type { ModelInfo } from "../../shared/types.js";
 
 interface Props {
@@ -98,7 +98,7 @@ export function ModelSelector({ current, models, onSelect }: Props) {
         data-testid="model-selector-button"
       >
         <span className="font-mono truncate max-w-[200px]">
-          {pendingModel ? `${pendingModel} ⏳` : (current ?? "no model")}
+          {pendingModel ? <>{pendingModel} <Icon path={mdiLoading} size={0.4} className="inline animate-spin" /></> : (current ?? "no model")}
         </span>
         {hasModels && !pendingModel && <Icon path={mdiChevronDown} size={0.5} />}
       </button>

@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { Icon } from "@mdi/react";
+import { mdiRobotOutline, mdiStop, mdiChevronUp } from "@mdi/js";
 import type { FlowState } from "../../shared/types.js";
 import { FlowAgentCard } from "./FlowAgentCard.js";
 import { FlowSummary } from "./FlowSummary.js";
@@ -73,7 +75,7 @@ export function FlowDashboard({
           }`}
           title="Toggle autonomous mode"
         >
-          AUTO
+          <Icon path={mdiRobotOutline} size={0.4} className="inline mr-0.5" />AUTO
         </button>
         {isRunning && (
           <button
@@ -81,7 +83,7 @@ export function FlowDashboard({
             className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10"
             title="Abort flow"
           >
-            Abort
+            <Icon path={mdiStop} size={0.4} className="inline mr-0.5" />Abort
           </button>
         )}
         {isMobile && (
@@ -89,7 +91,7 @@ export function FlowDashboard({
             onClick={() => setMobileExpanded(false)}
             className="text-[10px] text-[var(--text-tertiary)]"
           >
-            collapse
+            <Icon path={mdiChevronUp} size={0.4} className="inline mr-0.5" />collapse
           </button>
         )}
       </div>

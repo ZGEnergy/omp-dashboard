@@ -2,6 +2,8 @@
 export interface MobileDepthInput {
   selectedId?: string;
   selectedTerminalId?: string;
+  folderTermCwd?: string | null;
+  folderEditorCwd?: string | null;
   settingsMatch?: boolean;
   tunnelSetupMatch?: boolean;
   hasPreview?: boolean;
@@ -12,6 +14,6 @@ export interface MobileDepthInput {
  */
 export function getMobileDepth(input: MobileDepthInput): number {
   if (input.hasPreview) return 2;
-  if (input.selectedId || input.selectedTerminalId || input.settingsMatch || input.tunnelSetupMatch) return 1;
+  if (input.selectedId || input.selectedTerminalId || input.folderTermCwd || input.folderEditorCwd || input.settingsMatch || input.tunnelSetupMatch) return 1;
   return 0;
 }

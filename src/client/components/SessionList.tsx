@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import { Icon } from "@mdi/react";
 import { mdiChevronRight, mdiChevronDown, mdiPlus, mdiPin, mdiFolder, mdiFolderOpen, mdiConsoleLine, mdiCog, mdiPuzzleOutline, mdiFileDocumentOutline } from "@mdi/js";
+import { FolderActionBar } from "./FolderActionBar.js";
+import { encodeFolderPath } from "../lib/folder-encoding.js";
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { SortableSessionCard } from "./SortableSessionCard.js";
@@ -12,10 +14,9 @@ import {
   groupSessionsByDirectory,
   filterSessions,
   sortSessionsByOrder,
-  getUnifiedOrder,
   type DirectoryGroup,
 } from "../lib/session-grouping.js";
-import { TerminalCard } from "./TerminalCard.js";
+// TerminalCard removed — terminals now in TerminalsView
 import {
   getActiveOnly,
   setActiveOnly as persistActiveOnly,
@@ -84,6 +85,10 @@ interface Props {
   onOpenSpecs?: (cwd: string) => void;
   onOpenArchive?: (cwd: string) => void;
   onViewReadme?: (cwd: string) => void;
+  onOpenTerminals?: (cwd: string) => void;
+  onOpenEditor?: (cwd: string) => void;
+  editorStatuses?: Map<string, { id: string; status: import("../../shared/editor-types.js").EditorInstanceStatus }>;
+  editorAvailable?: boolean;
 }
 
 // Re-export for backwards compatibility
@@ -112,7 +117,7 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, flowsMap, onOpenSpecs, onOpenArchive, onViewReadme }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onCreateTerminal, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, flowsMap, onOpenSpecs, onOpenArchive, onViewReadme, onOpenTerminals, onOpenEditor, editorStatuses, editorAvailable }: Props) {
   const now = Date.now();
   const [, navigate] = useLocation();
   const { messages, showToast, dismissToast } = useToast();
@@ -258,13 +263,12 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
 
     if (activeType === "session") {
       for (const group of allGroups) {
-        // Unified IDs: sessions + terminals in order
-        const groupTerminals = terminalsByCwd.get(group.cwd) ?? [];
-        const allIds = getUnifiedOrder(group.sessions, groupTerminals, sessionOrderMap?.get(group.cwd));
-        const oldIndex = allIds.indexOf(active.id as string);
-        const newIndex = allIds.indexOf(over.id as string);
+        // Session IDs only (terminals moved to TerminalsView)
+        const sessionIds = group.sessions.map((s) => s.id);
+        const oldIndex = sessionIds.indexOf(active.id as string);
+        const newIndex = sessionIds.indexOf(over.id as string);
         if (oldIndex !== -1 && newIndex !== -1) {
-          const newOrder = arrayMove(allIds, oldIndex, newIndex);
+          const newOrder = arrayMove(sessionIds, oldIndex, newIndex);
           onReorderSessions?.(group.cwd, newOrder);
           break;
         }
@@ -297,7 +301,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             <span className="text-xs font-medium text-[var(--text-secondary)] truncate flex items-center gap-1">
               <Icon path={isCollapsed ? mdiFolder : mdiFolderOpen} size={0.5} className="shrink-0" /> {dirName}
             </span>
-            <span className="text-[10px] text-[var(--text-muted)]">({group.sessions.length + (terminalsByCwd.get(group.cwd)?.length ?? 0)})</span>
+            <span className="text-[10px] text-[var(--text-muted)]">({group.sessions.length})</span>
             {/* Pin/Unpin toggle */}
             {(isPinned || onPinDirectory) && (
               <button
@@ -331,61 +335,24 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               </button>
             )}
           </div>
-          <div className="mt-1 ml-5 flex items-center gap-1">
-            {editorMap.get(group.cwd)?.length ? (
-              <EditorButtons
-                editors={editorMap.get(group.cwd)!}
-                onOpen={(editorId) => handleOpenEditor(group.cwd, editorId)}
-              />
-            ) : null}
-            {onSpawnSession && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSpawnSession(group.cwd);
-                }}
-                disabled={spawningCwds?.has(group.cwd)}
-                className={`text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] ${
-                  spawningCwds?.has(group.cwd)
-                    ? "opacity-50 cursor-not-allowed"
-                    : "hover:text-green-400 hover:border-green-500/50"
-                }`}
-                title="New pi session"
-                data-testid="spawn-session-btn"
-              >
-                <span className="inline-flex items-center gap-0.5">
-                  <Icon path={mdiPlus} size={0.5} /> Session
-                </span>
-              </button>
-            )}
-            {onCreateTerminal && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCreateTerminal(group.cwd);
-                }}
-                className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-cyan-400 hover:border-cyan-500/50"
-                title="New terminal"
-                data-testid="create-terminal-btn"
-              >
-                <span className="inline-flex items-center gap-0.5">
-                  <Icon path={mdiPlus} size={0.5} /> Terminal
-                </span>
-              </button>
-            )}
-            {onOpenPiResources && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenPiResources(group.cwd);
-                }}
-                className="ml-auto text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-muted)] hover:text-purple-400 hover:border-purple-500/50"
-                title="Pi Resources"
-                data-testid="pi-resources-btn"
-              >
-                <Icon path={mdiPuzzleOutline} size={0.5} />
-              </button>
-            )}
+          <div className="mt-1 ml-5">
+            <FolderActionBar
+              cwd={group.cwd}
+              terminalCount={terminalsByCwd.get(group.cwd)?.length ?? 0}
+              editorStatus={editorStatuses?.get(group.cwd)}
+              editorAvailable={editorAvailable}
+              nativeEditors={editorMap.get(group.cwd) ?? []}
+              spawningDisabled={spawningCwds?.has(group.cwd)}
+              onSpawnSession={() => onSpawnSession?.(group.cwd)}
+              onCreateTerminal={() => {
+                onCreateTerminal?.(group.cwd);
+                onOpenTerminals?.(group.cwd);
+              }}
+              onOpenTerminals={() => onOpenTerminals?.(group.cwd)}
+              onOpenEditor={() => onOpenEditor?.(group.cwd)}
+              onOpenNativeEditor={(editorId) => handleOpenEditor(group.cwd, editorId)}
+              onOpenPiResources={() => onOpenPiResources?.(group.cwd)}
+            />
           </div>
           {openspecMap?.get(group.cwd)?.initialized && (
             <FolderOpenSpecSection
@@ -406,59 +373,45 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
         <div className="space-y-1 pt-1">
           {spawningCwds?.has(group.cwd) && <PlaceholderSessionCard />}
           {(() => {
-            const groupTerminals = terminalsByCwd.get(group.cwd) ?? [];
-            const unifiedIds = getUnifiedOrder(group.sessions, groupTerminals, sessionOrderMap?.get(group.cwd));
+            // Only session cards in the sidebar — terminals moved to TerminalsView
+            const sessionIds = group.sessions.map((s) => s.id);
+            const orderedIds = sessionOrderMap?.get(group.cwd)?.filter((id) => sessionIds.includes(id)) ?? sessionIds;
+            // Add any sessions not in the order
+            const orderedSet = new Set(orderedIds);
+            const allIds = [...orderedIds, ...sessionIds.filter((id) => !orderedSet.has(id))];
             const sessionMap = new Map(group.sessions.map((s) => [s.id, s]));
-            const terminalMap = new Map(groupTerminals.map((t) => [t.id, t]));
             return (
-              <SortableContext items={unifiedIds} strategy={verticalListSortingStrategy}>
-                {unifiedIds.map((id) => {
+              <SortableContext items={allIds} strategy={verticalListSortingStrategy}>
+                {allIds.map((id) => {
                   const session = sessionMap.get(id);
-                  if (session) {
-                    return (
-                      <SortableSessionCard key={id} id={id}>
-                        <SessionCard
-                          session={session}
-                          selectedId={selectedId}
-                          onSelect={onSelect}
-                          now={now}
-                          showGitInfo={group.sessions.length === 1 && groupTerminals.length === 0}
-                          isHidden={!!session.hidden}
-                          onHide={handleHide}
-                          onUnhide={handleUnhide}
+                  if (!session) return null;
+                  return (
+                    <SortableSessionCard key={id} id={id}>
+                      <SessionCard
+                        session={session}
+                        selectedId={selectedId}
+                        onSelect={onSelect}
+                        now={now}
+                        showGitInfo={group.sessions.length === 1}
+                        isHidden={!!session.hidden}
+                        onHide={handleHide}
+                        onUnhide={handleUnhide}
 
-                          contextUsage={contextUsageMap?.get(session.id)}
-                          openspecChanges={openspecMap?.get(session.cwd)?.changes}
-                          onSendPrompt={onSendPrompt ? (text) => onSendPrompt(session.id, text) : undefined}
-                          onAttachProposal={onAttachProposal ? (changeName) => onAttachProposal(session.id, changeName) : undefined}
-                          onDetachProposal={onDetachProposal ? () => onDetachProposal(session.id) : undefined}
-                          onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(session.cwd, changeName, artifactId) : undefined}
-                          onBulkArchive={onBulkArchive ? () => onBulkArchive(session.cwd) : undefined}
-                          onRename={onRename ? (name) => onRename(session.id, name) : undefined}
-                          onShutdown={onShutdown}
-                          onResume={onResume ? (mode) => onResume(session.id, mode) : undefined}
-                          commands={commandsMap?.get(session.id)}
-                          flows={flowsMap?.get(session.id)}
-                        />
-                      </SortableSessionCard>
-                    );
-                  }
-                  const terminal = terminalMap.get(id);
-                  if (terminal) {
-                    return (
-                      <SortableSessionCard key={id} id={id}>
-                        <TerminalCard
-                          terminal={terminal}
-                          selectedId={selectedId}
-                          onSelect={(termId) => navigate(`/terminal/${termId}`)}
-                          onClose={onKillTerminal}
-                          onRename={onRenameTerminal}
-                          now={now}
-                        />
-                      </SortableSessionCard>
-                    );
-                  }
-                  return null;
+                        contextUsage={contextUsageMap?.get(session.id)}
+                        openspecChanges={openspecMap?.get(session.cwd)?.changes}
+                        onSendPrompt={onSendPrompt ? (text) => onSendPrompt(session.id, text) : undefined}
+                        onAttachProposal={onAttachProposal ? (changeName) => onAttachProposal(session.id, changeName) : undefined}
+                        onDetachProposal={onDetachProposal ? () => onDetachProposal(session.id) : undefined}
+                        onReadArtifact={onReadArtifact ? (changeName, artifactId) => onReadArtifact(session.cwd, changeName, artifactId) : undefined}
+                        onBulkArchive={onBulkArchive ? () => onBulkArchive(session.cwd) : undefined}
+                        onRename={onRename ? (name) => onRename(session.id, name) : undefined}
+                        onShutdown={onShutdown}
+                        onResume={onResume ? (mode) => onResume(session.id, mode) : undefined}
+                        commands={commandsMap?.get(session.id)}
+                        flows={flowsMap?.get(session.id)}
+                      />
+                    </SortableSessionCard>
+                  );
                 })}
               </SortableContext>
             );
@@ -490,7 +443,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 title="Pin a directory"
                 data-testid="pin-dir-dialog-btn"
               >
-                📌+
+                <Icon path={mdiPin} size={0.45} className="inline" /><Icon path={mdiPlus} size={0.35} className="inline" />
               </button>
             )}
 

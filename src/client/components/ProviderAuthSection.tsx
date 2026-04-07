@@ -14,6 +14,8 @@ import {
   mdiDelete,
   mdiContentSave,
   mdiClockOutline,
+  mdiArrowRight,
+  mdiKeyPlus,
 } from "@mdi/js";
 import type { ProviderAuthStatus, DeviceCodeResponse } from "../../shared/rest-api.js";
 
@@ -294,7 +296,7 @@ function OAuthProviderRow({ provider, onChanged }: { provider: ProviderAuthStatu
             onClick={() => startDeviceCode(enterpriseDomain)}
             className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white"
           >
-            Continue
+            <Icon path={mdiArrowRight} size={0.45} className="inline mr-0.5" />Continue
           </button>
           <button
             onClick={() => setEnterpriseInput(false)}
@@ -408,7 +410,7 @@ function ApiKeyRow({ provider, onChanged }: { provider: ProviderAuthStatus; onCh
             onClick={() => setEditing(true)}
             className="px-3 py-1.5 text-xs rounded bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[var(--border-secondary)]"
           >
-            Add Key
+            <Icon path={mdiKeyPlus} size={0.45} className="inline mr-0.5" />Add Key
           </button>
         ) : null}
       </div>

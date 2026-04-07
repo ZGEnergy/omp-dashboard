@@ -38,6 +38,7 @@ describe("Headless shutdown fallback", () => {
     server = await createServer({
       port: httpPort, piPort, dev: true,
       autoShutdown: false, shutdownIdleSeconds: 999, tunnel: false,
+    editor: { idleTimeoutMinutes: 10, maxInstances: 3 },
     });
     await server.start();
 

@@ -103,3 +103,11 @@ The PiResourcesView SHALL work on mobile using MobileShell patterns.
 - **WHEN** the user navigates to PiResourcesView on mobile
 - **THEN** it SHALL render as a full-screen panel with slide transition
 - **AND** swipe-back gesture SHALL return to the previous view
+
+### Requirement: Pi Resources button icon
+The Pi Resources button in the folder action bar SHALL use `mdiToyBrickOutline` (or `mdiPackageVariantClosed`) from the MDI icon set instead of `mdiPuzzleOutline`.
+
+#### Scenario: Icon displayed
+- **WHEN** the folder action bar is rendered
+- **THEN** the Pi Resources button SHALL display the updated icon
+- **THEN** the button SHALL retain its right-aligned position in the action bar

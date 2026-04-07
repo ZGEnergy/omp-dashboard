@@ -32,6 +32,7 @@
   --accent-red: #ef4444;
   --accent-purple: #a855f7;
   --accent-orange: #f97316;
+  --accent-primary: #3b82f6;
   --link: #60a5fa;
   --link-hover: #93bbfd;
 
@@ -63,6 +64,7 @@
   --border-subtle: rgba(0, 0, 0, 0.06);
 
   /* Accents stay the same */
+  --accent-primary: #2563eb;
   --link: #2563eb;
   --link-hover: #1d4ed8;
 

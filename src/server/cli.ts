@@ -85,6 +85,7 @@ export function buildConfig(flags: Partial<ServerConfig>): ServerConfig {
     maxEventsPerSession: fileConfig.memoryLimits.maxEventsPerSession,
     maxStringFieldSize: fileConfig.memoryLimits.maxStringFieldSize,
     maxWsBufferBytes: fileConfig.memoryLimits.maxWsBufferBytes,
+    editor: fileConfig.editor,
   };
 }
 

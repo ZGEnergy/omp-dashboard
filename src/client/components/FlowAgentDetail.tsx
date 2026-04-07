@@ -1,6 +1,6 @@
 import React from "react";
 import { Icon } from "@mdi/react";
-import { mdiArrowLeft } from "@mdi/js";
+import { mdiArrowLeft, mdiCheckCircle, mdiCloseCircle, mdiAlertCircle, mdiCircle, mdiCircleOutline } from "@mdi/js";
 import type { FlowAgentState, FlowDetailEntry } from "../../shared/types.js";
 import { MarkdownContent } from "./MarkdownContent.js";
 
@@ -99,11 +99,11 @@ export function FlowAgentDetail({
   const displayName = agent.label || agent.agentName;
   const isComplete = agent.status === "complete" || agent.status === "error" || agent.status === "blocked";
 
-  const statusIcon = agent.status === "complete" ? "✓"
-    : agent.status === "error" ? "✗"
-    : agent.status === "blocked" ? "⚠"
-    : agent.status === "running" ? "●"
-    : "○";
+  const statusIconPath = agent.status === "complete" ? mdiCheckCircle
+    : agent.status === "error" ? mdiCloseCircle
+    : agent.status === "blocked" ? mdiAlertCircle
+    : agent.status === "running" ? mdiCircle
+    : mdiCircleOutline;
 
   const statusColor = agent.status === "complete" ? "text-green-400"
     : agent.status === "error" ? "text-red-400"
@@ -121,7 +121,7 @@ export function FlowAgentDetail({
         >
           <Icon path={mdiArrowLeft} size={0.7} />
         </button>
-        <span className={`${statusColor}`}>{statusIcon}</span>
+        <span className={`${statusColor} inline-flex`}><Icon path={statusIconPath} size={0.6} /></span>
         <span className="text-sm font-medium text-[var(--text-primary)]">{displayName}</span>
         {agent.model && (
           <span className="text-[11px] text-[var(--text-tertiary)]">{agent.model}</span>
