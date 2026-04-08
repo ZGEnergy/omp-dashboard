@@ -14,11 +14,4 @@ The bridge extension SHALL use mDNS browsing as the primary mechanism to discove
 #### Scenario: Auto-start with mDNS
 - **WHEN** no server is found via mDNS or fallback and `autoStart` is `true`
 - **THEN** the bridge SHALL launch the server as a detached process
-- **AND** wait for the server's mDNS advertisement (up to 10 seconds) before connecting
-
-### Requirement: Bridge augments PATH for managed installs
-When the bridge extension spawns or connects to processes, it SHALL ensure `~/.pi-dashboard/node_modules/.bin` is on the PATH so managed-install tools are available.
-
-#### Scenario: Managed openspec accessible
-- **WHEN** openspec is installed in `~/.pi-dashboard/node_modules/` and the bridge calls `openspec` CLI
-- **THEN** the call SHALL succeed because the managed bin directory is on PATH
+- **AND** wait for the server's mDNS advertisement (up to 10 seconds, fallback to config probe) before connecting

@@ -15,7 +15,6 @@ The shared config module SHALL read configuration from `~/.pi/dashboard/config.j
 | `devBuildOnReload` | boolean | false | Whether to build client and restart server on `/reload` |
 | `auth` | object \| undefined | undefined | Optional OAuth authentication configuration |
 | `electronMode` | boolean | false | Whether the server was launched by the Electron app |
-| `lastServer` | string \| undefined | undefined | Last-used server address (`host:port`) for reconnection |
 
 Invalid `spawnStrategy` values SHALL fall back to `"headless"`.
 
@@ -37,14 +36,10 @@ When `auth` is undefined or not present, authentication SHALL be completely disa
 - **WHEN** `~/.pi/dashboard/config.json` contains `{ "electronMode": true }`
 - **THEN** `loadConfig()` SHALL return `electronMode: true`
 
-#### Scenario: Config with lastServer
-- **WHEN** `~/.pi/dashboard/config.json` contains `{ "lastServer": "workstation.local:8000" }`
-- **THEN** `loadConfig()` SHALL return `lastServer: "workstation.local:8000"`
-
 #### Scenario: Invalid spawnStrategy
 - **WHEN** `~/.pi/dashboard/config.json` contains `{ "spawnStrategy": "invalid" }`
 - **THEN** `loadConfig()` SHALL return `spawnStrategy: "headless"` (fallback to default)
 
 #### Scenario: ensureConfig creates defaults
 - **WHEN** `ensureConfig()` is called and no config file exists
-- **THEN** it SHALL create the config directory recursively and write all defaults to the file (without `auth` key, without `electronMode`, without `lastServer`)
+- **THEN** it SHALL create the config directory recursively and write all defaults to the file (without `auth` key, without `electronMode`)

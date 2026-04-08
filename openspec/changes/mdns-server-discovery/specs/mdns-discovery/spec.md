@@ -5,25 +5,21 @@ The dashboard server SHALL advertise itself via mDNS as `_pi-dashboard._tcp` on 
 
 #### Scenario: Server advertises on startup
 - **WHEN** the dashboard server starts successfully
-- **THEN** it SHALL publish a `_pi-dashboard._tcp` service with port, hostname, and TXT record containing `{ version, pid }`
+- **THEN** it SHALL publish a `_pi-dashboard._tcp` service with the HTTP port and TXT record containing `{ version, pid, piPort }`
 
 #### Scenario: Server unpublishes on shutdown
 - **WHEN** the dashboard server shuts down
 - **THEN** it SHALL unpublish the mDNS service before closing
 
-#### Scenario: Advertisement includes both ports
-- **WHEN** the service is advertised
-- **THEN** the TXT record SHALL include both `port` (HTTP) and `piPort` (extension WebSocket) values
-
 ### Requirement: mDNS service browsing
-A shared discovery module SHALL browse for `_pi-dashboard._tcp` services and return discovered servers.
+A shared discovery module (`src/shared/mdns-discovery.ts`) SHALL browse for `_pi-dashboard._tcp` services and return discovered servers.
 
 #### Scenario: Discover localhost server
 - **WHEN** `discoverDashboard()` is called and a server is advertising on the local machine
 - **THEN** it SHALL return the server with `host`, `port`, `piPort`, `version`, and `isLocal: true`
 
 #### Scenario: Discover remote LAN server
-- **WHEN** `discoverDashboard()` is called and a server is advertising on another machine on the LAN
+- **WHEN** `discoverDashboard()` is called and a server is advertising on another LAN machine
 - **THEN** it SHALL return the server with `isLocal: false` and the remote hostname
 
 #### Scenario: No server found within timeout
@@ -31,15 +27,15 @@ A shared discovery module SHALL browse for `_pi-dashboard._tcp` services and ret
 - **THEN** it SHALL return an empty result after the specified timeout (default 2 seconds)
 
 ### Requirement: Continuous background browsing
-The discovery module SHALL support continuous browsing mode that emits events when servers appear or disappear on the network.
+The discovery module SHALL support continuous browsing mode that emits events when servers appear or disappear.
 
 #### Scenario: Server appears on network
-- **WHEN** a new dashboard server starts advertising on the LAN during continuous browsing
-- **THEN** the discovery module SHALL emit a `server-up` event with the server details
+- **WHEN** a new dashboard server starts advertising during continuous browsing
+- **THEN** the module SHALL emit a `server-up` event with server details
 
 #### Scenario: Server disappears from network
-- **WHEN** an advertised dashboard server shuts down during continuous browsing
-- **THEN** the discovery module SHALL emit a `server-down` event with the server identifier
+- **WHEN** an advertised server shuts down during continuous browsing
+- **THEN** the module SHALL emit a `server-down` event with the server identifier
 
 ### Requirement: Localhost preference
 When multiple servers are discovered, localhost servers SHALL be preferred over remote servers.

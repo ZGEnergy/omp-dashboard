@@ -1,31 +1,57 @@
 ## ADDED Requirements
 
 ### Requirement: First-run detection
-The Electron app SHALL detect first-run state by checking whether pi and openspec are installed and whether an API key is configured.
+The Electron app SHALL detect first-run state by checking whether a valid installation mode has been completed previously.
 
-#### Scenario: Fresh machine — nothing installed
-- **WHEN** the app launches and neither pi nor openspec is found and no API key exists in `~/.pi/agent/settings.json`
+#### Scenario: Fresh machine — nothing configured
+- **WHEN** the app launches and `~/.pi-dashboard/mode.json` does not exist
 - **THEN** the first-run wizard SHALL be displayed
 
-#### Scenario: Tools installed but no API key
-- **WHEN** pi and openspec are found but no API key is configured
-- **THEN** the wizard SHALL skip dependency installation and show only the API key step
-
-#### Scenario: Everything configured
-- **WHEN** pi, openspec, and API key are all present
+#### Scenario: Previous setup completed
+- **WHEN** the app launches and `~/.pi-dashboard/mode.json` exists with a valid mode
 - **THEN** the wizard SHALL be skipped and the dashboard loads directly
 
-### Requirement: Dependency installation step
-The wizard SHALL show the status of each dependency (pi, openspec) with progress indicators during installation.
+### Requirement: Installation mode selection
+The wizard SHALL present two installation modes as the first step.
 
-#### Scenario: Installing dependencies
-- **WHEN** the wizard installs pi and openspec
-- **THEN** it SHALL show a progress indicator per dependency with status (checking → installing → installed / failed)
+#### Scenario: Standalone mode selected
+- **WHEN** the user selects "Set up everything for me"
+- **THEN** the wizard SHALL proceed to install pi, the dashboard package, openspec, and tsx into `~/.pi-dashboard/node_modules/`
 
-#### Scenario: Installation failure
+#### Scenario: Power user mode selected
+- **WHEN** the user selects "Use my existing pi installation"
+- **THEN** the wizard SHALL verify pi and openspec are on PATH and the dashboard bridge extension is registered with pi
+
+### Requirement: Standalone mode installation
+In standalone mode, the wizard SHALL install all required tools into the managed location.
+
+#### Scenario: Full standalone install
+- **WHEN** standalone mode is active
+- **THEN** the wizard SHALL install `@mariozechner/pi-coding-agent`, `@blackbelt-technology/pi-dashboard`, `@fission-ai/openspec`, and `tsx` into `~/.pi-dashboard/node_modules/`
+- **AND** show progress per dependency (checking → installing → installed / failed)
+
+#### Scenario: Standalone install uses bundled Node when no system Node
+- **WHEN** standalone mode is active and no system Node.js is detected
+- **THEN** the installer SHALL use the bundled Node.js and npm from extraResources
+
+#### Scenario: Installation failure with retry
 - **WHEN** a dependency installation fails
 - **THEN** the wizard SHALL show the error message and a "Retry" button
-- **AND** SHALL allow proceeding to the next step if the failed dependency is openspec (pi is mandatory)
+
+### Requirement: Power user mode verification
+In power user mode, the wizard SHALL verify the existing installation and guide the user to fix any gaps.
+
+#### Scenario: All tools present
+- **WHEN** pi, openspec, and the dashboard package are all detected
+- **THEN** the wizard SHALL show green checkmarks and proceed to the API key step
+
+#### Scenario: Dashboard bridge not registered
+- **WHEN** pi is detected but the dashboard package is not installed/registered
+- **THEN** the wizard SHALL offer to install it via `npm install -g @blackbelt-technology/pi-dashboard`
+
+#### Scenario: pi not found in power user mode
+- **WHEN** pi is not detected on PATH in power user mode
+- **THEN** the wizard SHALL show an error with instructions to install pi or switch to standalone mode
 
 ### Requirement: API key configuration step
 The wizard SHALL prompt for an LLM API key and write it to pi's settings file.
@@ -36,11 +62,15 @@ The wizard SHALL prompt for an LLM API key and write it to pi's settings file.
 
 #### Scenario: User skips API key
 - **WHEN** the user clicks "Skip" on the API key step
-- **THEN** the wizard SHALL proceed to launch the dashboard (pi sessions will fail until configured, but the dashboard itself works)
+- **THEN** the wizard SHALL proceed (pi sessions will fail until configured, but the dashboard itself works)
 
-### Requirement: Wizard completion
-After all steps complete, the wizard SHALL transition to the dashboard view.
+#### Scenario: API key already configured
+- **WHEN** `~/.pi/agent/settings.json` already contains an API key
+- **THEN** the API key step SHALL be pre-filled and show "Already configured"
 
-#### Scenario: Successful completion
-- **WHEN** all wizard steps are complete (or skipped)
-- **THEN** the wizard SHALL close and the dashboard SHALL load normally
+### Requirement: Mode persistence
+The wizard SHALL persist the chosen mode to `~/.pi-dashboard/mode.json` on completion.
+
+#### Scenario: Mode saved on completion
+- **WHEN** the wizard finishes successfully
+- **THEN** it SHALL write `{ "mode": "standalone" | "power-user", "completedAt": "<ISO timestamp>" }` to `~/.pi-dashboard/mode.json`
