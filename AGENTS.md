@@ -62,13 +62,14 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/shared/openspec-poller.ts` | OpenSpec CLI polling (shared, used by server DirectoryService) |
 | `src/shared/state-replay.ts` | Synthesizes events from pi entries (shared, used by server + bridge) |
 | `src/extension/stats-extractor.ts` | Extracts token/cost stats from turn_end events |
+| `src/server/session-stats-reader.ts` | Reads cumulative stats + context usage from session JSONL files at startup |
 | `src/server/server.ts` | HTTP + WebSocket server (composes route modules + wiring) |
 | `src/server/routes/session-routes.ts` | REST routes: sessions, events, session-diff |
 | `src/server/routes/git-routes.ts` | REST routes: git branches, checkout, init, stash-pop |
 | `src/server/routes/file-routes.ts` | REST routes: file read, browse, readme, pinned-dirs |
 | `src/server/routes/openspec-routes.ts` | REST routes: openspec-archive, pi-resources, pi-resource-file |
 | `src/server/routes/system-routes.ts` | REST routes: config, health, shutdown, tunnel, editors |
-| `src/server/event-wiring.ts` | Pi gateway → browser gateway event forwarding (replay suppression, flows refresh dedup) |
+| `src/server/event-wiring.ts` | Pi gateway → browser gateway event forwarding (replay suppression, flows refresh dedup, context usage extraction) |
 | `src/server/idle-timer.ts` | Auto-shutdown idle timer with sleep-wake resilience |
 | `src/server/session-bootstrap.ts` | Startup session discovery and OpenSpec polling init |
 | `src/server/pi-gateway.ts` | Extension WebSocket gateway (port 9999) |

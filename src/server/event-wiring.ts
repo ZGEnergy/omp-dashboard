@@ -152,7 +152,8 @@ export function wireEvents(deps: EventWiringDeps): void {
 
       // Server-side stats extraction from forwarded turn_end events
       if (msg.event.eventType === "turn_end") {
-        const stats = extractTurnStats(msg.event.data);
+        const ctxUsage = msg.event.data.contextUsage as { tokens: number | null; contextWindow: number } | undefined;
+        const stats = extractTurnStats(msg.event.data, ctxUsage);
         if (stats) {
           const session = sessionManager.get(sessionId);
           const statsUpdates: Partial<DashboardSession> = {

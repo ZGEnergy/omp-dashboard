@@ -181,6 +181,16 @@ When a user sends a prompt to an ended session, the server automatically resumes
 6. Thinking level changes (via pi keybinding) are detected when `model_select` events fire, on reconnect, and immediately after `set_thinking_level` commands
 7. Browser can send `set_thinking_level` to change thinking level remotely
 
+### Context Usage Tracking
+1. On each `turn_end`, the bridge calls pi's `ctx.getContextUsage()` API to get real-time context usage (tokens used + actual context window from the provider)
+2. Bridge enriches the `turn_end` event with this `contextUsage` data before forwarding to the server
+3. Server extracts `contextUsage` from the event data and passes it to `extractTurnStats()`, which includes it in the synthesized `stats_update` event
+4. Server updates `session.contextTokens` and `session.contextWindow` and broadcasts to browsers
+5. The `onChange` handler persists these values to `.meta.json` (debounced 1s)
+6. On server restart, the scanner restores `contextTokens`/`contextWindow` from `.meta.json`
+7. Client's event reducer stores `contextUsage` from `stats_update` events; `App.tsx` falls back to `session.contextTokens/contextWindow` for sessions without live reducer state
+8. When real data is unavailable (e.g., old sessions without persisted context data), `state-replay.ts` and `session-stats-reader.ts` use `inferContextWindow()` to estimate context window from the model name
+
 ### Git Polling
 1. Bridge polls git info every 30s (`git-info.ts`): branch, remote URL, PR number
 2. Changes are sent to the server only when values differ from last poll
