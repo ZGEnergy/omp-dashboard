@@ -23,6 +23,8 @@ export interface PiGateway {
   findSessionByCwd(cwd: string): string | undefined;
   getConnectedSessionIds(): string[];
   isSessionConnected(sessionId: string): boolean;
+  /** Force-close the WebSocket connection for a session */
+  closeSession(sessionId: string): boolean;
   onEvent?: (sessionId: string, msg: ExtensionToServerMessage) => void;
   onEmpty?: () => void;
   onConnection?: () => void;
@@ -274,6 +276,7 @@ export function createPiGateway(
                 sessionFile: msg.sessionFile,
                 sessionDir: msg.sessionDir,
                 firstMessage: msg.firstMessage,
+                pid: msg.pid,
               });
               console.error(`[gateway] session registered: ${msg.sessionId} cwd=${msg.cwd}`);
 
@@ -401,6 +404,16 @@ export function createPiGateway(
       return [...connections.keys()].filter(
         (sid) => connections.get(sid)?.readyState === WebSocket.OPEN,
       );
+    },
+
+    closeSession(sessionId: string): boolean {
+      const ws = connections.get(sessionId);
+      if (ws) {
+        ws.close();
+        connections.delete(sessionId);
+        return true;
+      }
+      return false;
     },
   };
 }

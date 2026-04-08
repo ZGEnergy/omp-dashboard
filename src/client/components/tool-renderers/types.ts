@@ -15,6 +15,8 @@ export interface ToolRendererProps {
   result?: string;
   images?: ChatImage[];
   context: ToolContext;
+  /** Structured metadata from tool (e.g. AgentDetails from pi-subagents) */
+  toolDetails?: Record<string, unknown>;
 }
 
 /** A tool renderer is a React component matching this signature */

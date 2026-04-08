@@ -20,6 +20,7 @@ A web-based dashboard for monitoring and interacting with [pi](https://github.co
 - **On-demand session loading** — Browse historical sessions with lazy-loaded content from pi session files
 - **Integrated terminal** — Full browser-based terminal emulator (xterm.js + node-pty) with ANSI color support, scrollback, and keep-alive
 - **pi-flows integration** — Live flow execution dashboard with agent cards, detail views, summary, abort/auto controls. Launch flows and create new ones from the dashboard. Fork decisions and subagent dialogs forwarded via existing UI proxy.
+- **Force kill escalation** — Two-click Stop button (in command bar and on running tool cards): first click sends soft abort, second click force-kills the process (SIGTERM → SIGKILL). Session preserved as "ended" for resume/fork. Repeated tool calls (e.g. health check loops) are auto-collapsed with a count badge.
 - **Searchable select dialogs** — Keyboard-navigable picker with real-time filtering for OpenSpec changes and flow commands
 - **Browser-based provider auth** — Sign in to Anthropic, OpenAI Codex, GitHub Copilot, Gemini CLI, and Antigravity directly from Settings. Enter API keys for other providers. Credentials saved to `~/.pi/agent/auth.json` and live-synced to running sessions.
 - **Package management** — Browse, install, update, and remove pi packages from the dashboard. Search the npm registry for pi-package extensions/skills/themes, install from npm or git URL, manage global packages in Settings and local packages per workspace. All active sessions auto-reload after changes.

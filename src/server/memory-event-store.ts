@@ -20,6 +20,8 @@ export interface EventStore {
   deleteEventsForSession(sessionId: string): number;
   /** Check if session has events in memory */
   hasEvents(sessionId: string): boolean;
+  /** Return the highest seq for a session, or 0 if no events */
+  getMaxSeq(sessionId: string): number;
   /** Number of cached sessions */
   sessionCount(): number;
 }
@@ -176,6 +178,12 @@ export function createMemoryEventStore(
     hasEvents(sessionId: string): boolean {
       const buf = buffers.get(sessionId);
       return buf !== undefined && buf.events.length > 0;
+    },
+
+    getMaxSeq(sessionId: string): number {
+      const buf = buffers.get(sessionId);
+      if (!buf || buf.events.length === 0) return 0;
+      return buf.events[buf.events.length - 1].seq;
     },
 
     sessionCount(): number {

@@ -34,6 +34,10 @@ export function useSessionActions(deps: SessionActionDeps) {
     if (selectedId) send({ type: "abort", sessionId: selectedId });
   }, [selectedId, send]);
 
+  const handleForceKill = useCallback(() => {
+    if (selectedId) send({ type: "force_kill", sessionId: selectedId });
+  }, [selectedId, send]);
+
   const handleCancelPending = useCallback(() => {
     if (selectedId) {
       setSessionStates((prev) => {
@@ -187,7 +191,7 @@ export function useSessionActions(deps: SessionActionDeps) {
   }, [selectedId, send]);
 
   return {
-    handleAbort, handleCancelPending, handleRespondToUi, handleSend,
+    handleAbort, handleForceKill, handleCancelPending, handleRespondToUi, handleSend,
     handleSelect, handleRenameSession, handleShutdownSession,
     handleSendPromptToSession, handleResumeSession, handleSpawnSession,
     handleHideSession, handleUnhideSession,

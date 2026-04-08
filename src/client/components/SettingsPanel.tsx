@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useDebugToolsVisible } from "../hooks/useDebugToolsVisible.js";
 import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiContentSave, mdiAlert, mdiPlus, mdiDelete, mdiRestart, mdiUpdate } from "@mdi/js";
 import { useLocation } from "wouter";
@@ -490,6 +491,12 @@ export function SettingsPanel() {
 
           {activeTab === "advanced" && (
             <>
+              <Section title="Chat Display">
+                <p className="text-xs text-[var(--text-tertiary)] mb-2">
+                  Controls what is shown in the chat message stream.
+                </p>
+                <DebugToolsToggle />
+              </Section>
               <Section title="Memory Limits">
                 <p className="text-xs text-[var(--text-tertiary)] mb-2">
                   Controls for bounding server memory usage. Set to 0 to disable a limit.
@@ -560,6 +567,17 @@ export function SettingsPanel() {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function DebugToolsToggle() {
+  const [visible, setVisible] = useDebugToolsVisible();
+  return (
+    <ToggleField
+      label="Show debug events (raw events, flow:list-flows, resources_discover)"
+      value={visible}
+      onChange={setVisible}
+    />
+  );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (

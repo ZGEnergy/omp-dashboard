@@ -125,4 +125,59 @@ describe("ToolCallStep", () => {
     expect(img!.getAttribute("alt")).toBe("screenshot.jpg");
     expect(img!.className).toContain("max-w-[512px]");
   });
+
+  it("opens lightbox when clicking a tool result image", () => {
+    const { container } = renderStep({
+      toolName: "read",
+      toolCallId: "tc-img-lb",
+      args: { path: "photo.png" },
+      status: "complete",
+      result: "Read image file [image/png]",
+      images: [{ data: "iVBORw0KGgo=", mimeType: "image/png" }],
+    });
+
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.className).toContain("cursor-pointer");
+    fireEvent.click(img!);
+    const lightbox = document.body.querySelector("[data-testid='lightbox-backdrop']");
+    expect(lightbox).not.toBeNull();
+  });
+});
+
+describe("ToolCallStep inline stop button", () => {
+  it("shows stop button when running and onAbort provided", () => {
+    const onAbort = vi.fn();
+    const { container } = renderStep({ status: "running", onAbort });
+    expect(container.querySelector('[data-testid="tool-stop-button"]')).not.toBeNull();
+  });
+
+  it("hides stop button when complete", () => {
+    const onAbort = vi.fn();
+    const { container } = renderStep({ status: "complete", onAbort });
+    expect(container.querySelector('[data-testid="tool-stop-button"]')).toBeNull();
+  });
+
+  it("hides stop button when no onAbort", () => {
+    const { container } = renderStep({ status: "running" });
+    expect(container.querySelector('[data-testid="tool-stop-button"]')).toBeNull();
+  });
+
+  it("calls onAbort and escalates to force-stop on click", () => {
+    const onAbort = vi.fn();
+    const onForceKill = vi.fn();
+    const { container } = renderStep({ status: "running", onAbort, onForceKill });
+
+    // Click stop
+    fireEvent.click(container.querySelector('[data-testid="tool-stop-button"]')!);
+    expect(onAbort).toHaveBeenCalledOnce();
+
+    // Should show force-stop button
+    expect(container.querySelector('[data-testid="tool-stop-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="tool-force-stop-button"]')).not.toBeNull();
+
+    // Click force-stop
+    fireEvent.click(container.querySelector('[data-testid="tool-force-stop-button"]')!);
+    expect(onForceKill).toHaveBeenCalledOnce();
+  });
 });

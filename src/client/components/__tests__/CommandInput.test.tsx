@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, act } from "@testing-library/react";
 import React from "react";
 import { CommandInput } from "../CommandInput.js";
 import type { CommandInfo } from "../../../shared/types.js";
@@ -207,5 +207,112 @@ describe("Play/Stop buttons", () => {
     const stopBtn = container.querySelector('[data-testid="stop-button"]')!;
     fireEvent.click(stopBtn);
     expect(onAbort).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Force kill escalation", () => {
+  it("transitions to Force Stop after first click when onForceKill provided", () => {
+    const onAbort = vi.fn();
+    const onForceKill = vi.fn();
+    const { container } = renderInput({ sessionStatus: "streaming", onAbort, onForceKill });
+
+    // Click Stop
+    const stopBtn = container.querySelector('[data-testid="stop-button"]')!;
+    fireEvent.click(stopBtn);
+    expect(onAbort).toHaveBeenCalledOnce();
+
+    // Stop button should be gone, Force Stop should appear
+    expect(container.querySelector('[data-testid="stop-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="force-stop-button"]')).not.toBeNull();
+  });
+
+  it("calls onForceKill when Force Stop clicked", () => {
+    const onAbort = vi.fn();
+    const onForceKill = vi.fn();
+    const { container } = renderInput({ sessionStatus: "streaming", onAbort, onForceKill });
+
+    // Click Stop first
+    fireEvent.click(container.querySelector('[data-testid="stop-button"]')!);
+
+    // Click Force Stop
+    const forceBtn = container.querySelector('[data-testid="force-stop-button"]')!;
+    fireEvent.click(forceBtn);
+    expect(onForceKill).toHaveBeenCalledOnce();
+
+    // Should show killing state
+    expect(container.querySelector('[data-testid="killing-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="force-stop-button"]')).toBeNull();
+  });
+
+  it("resets state when session stops streaming", () => {
+    const onAbort = vi.fn();
+    const onForceKill = vi.fn();
+    const { container, rerender } = render(
+      <CommandInput commands={commands} onSend={vi.fn()} sessionStatus="streaming" onAbort={onAbort} onForceKill={onForceKill} />
+    );
+
+    // Click Stop to enter aborting state
+    fireEvent.click(container.querySelector('[data-testid="stop-button"]')!);
+    expect(container.querySelector('[data-testid="force-stop-button"]')).not.toBeNull();
+
+    // Session stops streaming
+    rerender(
+      <CommandInput commands={commands} onSend={vi.fn()} sessionStatus="idle" onAbort={onAbort} onForceKill={onForceKill} />
+    );
+
+    // No stop buttons visible (session is idle)
+    expect(container.querySelector('[data-testid="stop-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="force-stop-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="killing-button"]')).toBeNull();
+  });
+
+  it("does not transition to Force Stop without onForceKill prop", () => {
+    const onAbort = vi.fn();
+    const { container } = renderInput({ sessionStatus: "streaming", onAbort });
+
+    fireEvent.click(container.querySelector('[data-testid="stop-button"]')!);
+    expect(onAbort).toHaveBeenCalledOnce();
+
+    // Should still show the stop button (no escalation without onForceKill)
+    expect(container.querySelector('[data-testid="force-stop-button"]')).toBeNull();
+  });
+});
+
+describe("Image lightbox from paste preview", () => {
+  it("opens lightbox when clicking a paste preview image", async () => {
+    // Create a mock FileReader class where readAsDataURL triggers onload asynchronously
+    let pendingOnload: (() => void) | null = null;
+    vi.stubGlobal("FileReader", class {
+      result = "data:image/png;base64,iVBORw0KGgo=";
+      onload: (() => void) | null = null;
+      readAsDataURL() {
+        pendingOnload = () => this.onload?.();
+      }
+    });
+
+    const { container } = renderInput();
+    const textarea = container.querySelector("textarea")!;
+
+    const file = new File([new Uint8Array([137, 80, 78, 71])], "test.png", { type: "image/png" });
+    const dataTransfer = {
+      items: [{ type: "image/png", getAsFile: () => file, kind: "file" }],
+    };
+
+    fireEvent.paste(textarea, { clipboardData: dataTransfer });
+
+    // Trigger the captured onload outside React's event dispatch
+    await act(async () => {
+      pendingOnload?.();
+    });
+
+    // Find the preview image
+    const img = container.querySelector("img.h-16");
+    expect(img).not.toBeNull();
+    expect(img!.className).toContain("cursor-pointer");
+    fireEvent.click(img!);
+    const lightbox = document.body.querySelector("[data-testid='lightbox-backdrop']");
+    expect(lightbox).not.toBeNull();
+
+    vi.restoreAllMocks();
   });
 });

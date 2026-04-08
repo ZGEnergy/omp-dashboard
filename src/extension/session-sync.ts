@@ -26,6 +26,13 @@ export function sendStateSync(
   const sessionDir = bc.lastSessionDir ?? bc.cachedCtx?.sessionManager?.getSessionDir?.() ?? undefined;
   const firstMessage = extractFirstMessage(bc.cachedCtx);
 
+  // Include eventCount so server can skip event wipe on reconnect
+  let eventCount: number | undefined;
+  try {
+    const entries = bc.cachedCtx?.sessionManager?.getBranch?.();
+    if (entries) eventCount = entries.length;
+  } catch { /* ignore */ }
+
   bc.connection.send({
     type: "session_register",
     sessionId: bc.sessionId,
@@ -37,6 +44,8 @@ export function sendStateSync(
     sessionFile,
     sessionDir,
     firstMessage,
+    eventCount,
+    pid: process.pid,
   });
 
   const commands = filterHiddenCommands(bc.pi.getCommands());
@@ -93,6 +102,14 @@ export function handleSessionChange(
   bc.lastModel = getCurrentModelString(bc);
   bc.lastThinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? undefined;
 
+  // Include eventCount for consistency (session switch/fork changes sessionId,
+  // so the server will wipe regardless, but include for completeness)
+  let eventCount: number | undefined;
+  try {
+    const entries = ctx.sessionManager?.getBranch?.();
+    if (entries) eventCount = entries.length;
+  } catch { /* ignore */ }
+
   bc.connection.send({
     type: "session_register",
     sessionId: bc.sessionId,
@@ -104,9 +121,12 @@ export function handleSessionChange(
     sessionFile: bc.lastSessionFile,
     sessionDir: bc.lastSessionDir,
     firstMessage,
+    eventCount,
+    pid: process.pid,
   });
 
   replaySessionEntries(bc);
+  bc.connection.send({ type: "replay_complete", sessionId: bc.sessionId });
 
   // Send git info
   const gitInfo = gatherGitInfo(ctx.cwd);

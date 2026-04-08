@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { replayEntriesAsEvents } from "../../shared/state-replay.js";
+import { createInitialState, reduceEvent } from "../../client/lib/event-reducer.js";
 
 describe("replayEntriesAsEvents", () => {
   it("should convert user message entry to message_start event", () => {
@@ -319,5 +320,138 @@ describe("replayEntriesAsEvents", () => {
       { data: "abc123", mimeType: "image/png" },
       { data: "def456", mimeType: "image/jpeg" },
     ]);
+  });
+
+  it("should replay Agent tool call with args and details", () => {
+    const entries = [
+      {
+        type: "message",
+        id: "e1",
+        parentId: null,
+        timestamp: "2025-01-01T00:00:00Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "tc-agent-1",
+              name: "Agent",
+              arguments: { prompt: "List files", subagent_type: "Explore", description: "File listing" },
+            },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "e2",
+        parentId: "e1",
+        timestamp: "2025-01-01T00:00:06Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc-agent-1",
+          toolName: "Agent",
+          content: [{ type: "text", text: "Found 10 files" }],
+          isError: false,
+          details: {
+            displayName: "Explore",
+            description: "File listing",
+            subagentType: "Explore",
+            status: "completed",
+            toolUses: 1,
+            durationMs: 6000,
+            tokens: "25k token",
+          },
+        },
+      },
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries);
+
+    // Should have: tool_execution_start, message_update, message_end, tool_execution_end
+    const startEvent = events.find(e => e.event.eventType === "tool_execution_start");
+    const endEvent = events.find(e => e.event.eventType === "tool_execution_end");
+
+    expect(startEvent).toBeDefined();
+    expect(endEvent).toBeDefined();
+
+    // Start should have args
+    const startData = startEvent!.event.data as any;
+    expect(startData.toolName).toBe("Agent");
+    expect(startData.args.subagent_type).toBe("Explore");
+    expect(startData.args.prompt).toBe("List files");
+
+    // End should have details
+    const endData = endEvent!.event.data as any;
+    expect(endData.toolName).toBe("Agent");
+    expect(endData.result).toBe("Found 10 files");
+    expect(endData.details).toBeDefined();
+    expect(endData.details.status).toBe("completed");
+    expect(endData.details.displayName).toBe("Explore");
+    expect(endData.details.durationMs).toBe(6000);
+  });
+
+  it("should produce correct Agent card state through full replay → reduce pipeline", () => {
+    const entries = [
+      {
+        type: "message",
+        id: "e1",
+        parentId: null,
+        timestamp: "2025-01-01T00:00:00Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "tc-agent-1",
+              name: "Agent",
+              arguments: { prompt: "Explore codebase", subagent_type: "Explore", description: "Codebase scan" },
+            },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "e2",
+        parentId: "e1",
+        timestamp: "2025-01-01T00:00:06Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc-agent-1",
+          toolName: "Agent",
+          content: [{ type: "text", text: "Found 5 relevant files" }],
+          isError: false,
+          details: {
+            displayName: "Explore",
+            description: "Codebase scan",
+            subagentType: "Explore",
+            status: "completed",
+            toolUses: 3,
+            durationMs: 6000,
+            modelName: "haiku 4.5",
+            tokens: "25k token",
+          },
+        },
+      },
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries);
+    const state = events.reduce(
+      (s, msg) => reduceEvent(s, msg.event),
+      createInitialState(),
+    );
+
+    // Find the Agent tool message
+    const agentMsg = state.messages.find(m => m.toolName === "Agent");
+    expect(agentMsg).toBeDefined();
+    expect(agentMsg!.toolStatus).toBe("complete");
+    expect(agentMsg!.result).toBe("Found 5 relevant files");
+    expect(agentMsg!.args?.subagent_type).toBe("Explore");
+
+    // toolDetails should have the completed status from details
+    expect(agentMsg!.toolDetails).toBeDefined();
+    expect(agentMsg!.toolDetails!.status).toBe("completed");
+    expect(agentMsg!.toolDetails!.displayName).toBe("Explore");
+    expect(agentMsg!.toolDetails!.durationMs).toBe(6000);
+    expect(agentMsg!.toolDetails!.toolUses).toBe(3);
   });
 });

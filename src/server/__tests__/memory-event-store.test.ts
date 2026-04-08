@@ -212,6 +212,38 @@ describe("memory-event-store", () => {
     });
   });
 
+  describe("getMaxSeq", () => {
+    it("returns 0 for unknown session", () => {
+      const store = createMemoryEventStore(neverPinned);
+      expect(store.getMaxSeq("unknown")).toBe(0);
+    });
+
+    it("returns highest seq for session with events", () => {
+      const store = createMemoryEventStore(neverPinned);
+      store.insertEvent("s1", makeEvent());
+      store.insertEvent("s1", makeEvent());
+      store.insertEvent("s1", makeEvent());
+      expect(store.getMaxSeq("s1")).toBe(3);
+    });
+
+    it("returns 0 after deleteEventsForSession", () => {
+      const store = createMemoryEventStore(neverPinned);
+      store.insertEvent("s1", makeEvent());
+      store.insertEvent("s1", makeEvent());
+      store.deleteEventsForSession("s1");
+      expect(store.getMaxSeq("s1")).toBe(0);
+    });
+
+    it("returns correct seq after oldest events trimmed", () => {
+      const store = createMemoryEventStore(neverPinned, 100, 3);
+      store.insertEvent("s1", makeEvent());
+      store.insertEvent("s1", makeEvent());
+      store.insertEvent("s1", makeEvent());
+      store.insertEvent("s1", makeEvent()); // seq 4, oldest (seq 1) trimmed
+      expect(store.getMaxSeq("s1")).toBe(4);
+    });
+  });
+
   it("trims oldest events when per-session limit exceeded", () => {
     const store = createMemoryEventStore(neverPinned, 100, 3);
     store.insertEvent("s1", makeEvent("a"));

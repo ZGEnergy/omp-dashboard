@@ -38,4 +38,8 @@ export interface BrowserHandlerContext {
   trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void;
   /** Replay pending UI requests to a browser */
   replayPendingUiRequests(ws: WebSocket, sessionId: string): void;
+  /** Mark a session as mid-replay for a specific WebSocket (suppresses live events) */
+  markReplaying(ws: WebSocket, sessionId: string): void;
+  /** Clear replay flag and send catch-up events */
+  clearReplaying(ws: WebSocket, sessionId: string, lastReplayedSeq: number): void;
 }

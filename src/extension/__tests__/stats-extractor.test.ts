@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractTurnStats } from "../stats-extractor.js";
+import { extractTurnStats } from "../../shared/stats-extractor.js";
 
 describe("extractTurnStats", () => {
   it("extracts stats from event.message.usage", () => {

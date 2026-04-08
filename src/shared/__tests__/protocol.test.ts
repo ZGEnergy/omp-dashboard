@@ -58,11 +58,6 @@ describe("Protocol message serialization round-trip", () => {
         method: "confirm",
         params: { title: "Allow?", message: "Delete files?" },
       },
-      {
-        type: "stats_update",
-        sessionId: "s1",
-        stats: { tokensIn: 100, tokensOut: 50, cost: 0.01 },
-      },
 
     ];
 

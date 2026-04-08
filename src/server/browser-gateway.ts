@@ -20,7 +20,7 @@ import { createPendingResumeRegistry, type PendingResumeRegistry } from "./pendi
 import type { TerminalManager } from "./terminal-manager.js";
 import type { BrowserHandlerContext } from "./browser-handlers/handler-context.js";
 import { handleSubscribe } from "./browser-handlers/subscription-handler.js";
-import { handleSendPrompt, handleResumeSession, handleSpawnSession, handleShutdown, handleAbort, handleFlowControl } from "./browser-handlers/session-action-handler.js";
+import { handleSendPrompt, handleResumeSession, handleSpawnSession, handleShutdown, handleAbort, handleFlowControl, handleForceKill } from "./browser-handlers/session-action-handler.js";
 import { handleRenameSession, handleHideSession, handleUnhideSession, handleAttachProposal, handleDetachProposal, handleFetchContent, handleListSessions } from "./browser-handlers/session-meta-handler.js";
 import { handleCreateTerminal, handleKillTerminal, handleRenameTerminal } from "./browser-handlers/terminal-handler.js";
 import { handlePinDirectory, handleUnpinDirectory, handleReorderPinnedDirs, handleReorderSessions, handleOpenSpecRefresh, handleOpenSpecBulkArchive, handleExtensionUiResponse, handlePiGatewayForward } from "./browser-handlers/directory-handler.js";
@@ -68,6 +68,8 @@ export function createBrowserGateway(
 
   // Track subscriptions: ws → Set<sessionId>
   const subscriptions = new Map<WebSocket, Set<string>>();
+  // Track which sessions are mid-replay per WebSocket (suppress live events)
+  const replayingSessions = new Map<WebSocket, Set<string>>();
 
   // Track headless child processes with sessionId linkage
   const headlessPidRegistry = createHeadlessPidRegistry();
@@ -201,6 +203,30 @@ export function createBrowserGateway(
           headlessPidRegistry, pendingResumeRegistry, pendingDashboardSpawns,
           sendTo, broadcast, getSubscribers, replayPendingUiRequests,
           trackUiRequest: trackUiRequest,
+          markReplaying(targetWs, sessionId) {
+            let set = replayingSessions.get(targetWs);
+            if (!set) { set = new Set(); replayingSessions.set(targetWs, set); }
+            set.add(sessionId);
+          },
+          clearReplaying(targetWs, sessionId, lastReplayedSeq) {
+            const set = replayingSessions.get(targetWs);
+            if (set) {
+              set.delete(sessionId);
+              if (set.size === 0) replayingSessions.delete(targetWs);
+            }
+            // Send catch-up: any events after lastReplayedSeq
+            if (lastReplayedSeq > 0) {
+              const catchUp = eventStore.getEvents(sessionId, lastReplayedSeq + 1);
+              if (catchUp.length > 0) {
+                sendTo(targetWs, {
+                  type: "event_replay",
+                  sessionId,
+                  events: catchUp.map((e) => ({ seq: e.seq, event: e.event })),
+                  isLast: true,
+                });
+              }
+            }
+          },
         };
 
         switch (msg.type) {
@@ -215,6 +241,9 @@ export function createBrowserGateway(
             break;
           case "abort":
             handleAbort(msg, ctx);
+            break;
+          case "force_kill":
+            await handleForceKill(msg, ctx);
             break;
           case "flow_control":
             handleFlowControl(msg, ctx);
@@ -299,6 +328,7 @@ export function createBrowserGateway(
     ws.on("close", () => {
       console.error(`[browser-gw] browser client disconnected (remaining: ${subscriptions.size - 1})`);
       subscriptions.delete(ws);
+      replayingSessions.delete(ws);
     });
   });
 
@@ -314,6 +344,9 @@ export function createBrowserGateway(
         event,
       };
       for (const ws of subscribers) {
+        // Skip WebSockets that are mid-replay for this session
+        const replaying = replayingSessions.get(ws);
+        if (replaying?.has(sessionId)) continue;
         sendTo(ws, msg);
       }
     },

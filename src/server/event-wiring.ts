@@ -12,6 +12,8 @@ import type { DirectoryService } from "./directory-service.js";
 import { extractSessionUpdates } from "./event-status-extraction.js";
 import { writeSessionMeta } from "../shared/session-meta.js";
 import type { DashboardSession } from "../shared/types.js";
+import { detectOpenSpecActivity } from "../shared/openspec-activity-detector.js";
+import { extractTurnStats } from "../shared/stats-extractor.js";
 
 export interface EventWiringDeps {
   sessionManager: SessionManager;
@@ -89,6 +91,103 @@ export function wireEvents(deps: EventWiringDeps): void {
           browserGateway.broadcastSessionUpdated(sessionId, updates);
         }
       }
+
+      // Server-side OpenSpec activity detection from forwarded events
+      if (msg.event.eventType === "tool_execution_start") {
+        const detected = detectOpenSpecActivity(
+          msg.event.data.toolName as string,
+          msg.event.data.args as Record<string, unknown> | undefined,
+        );
+        if (detected) {
+          const session = sessionManager.get(sessionId);
+          const activityUpdates: Partial<DashboardSession> = {};
+          let changed = false;
+          if (detected.phase && detected.phase !== session?.openspecPhase) {
+            activityUpdates.openspecPhase = detected.phase;
+            changed = true;
+          }
+          if (detected.changeName && detected.changeName !== session?.openspecChange) {
+            activityUpdates.openspecChange = detected.changeName;
+            changed = true;
+          }
+          if (changed) {
+            sessionManager.update(sessionId, activityUpdates);
+            const updatedSession = sessionManager.get(sessionId);
+            // Auto-attach proposal when changeName is detected (phase is optional —
+            // skills loaded via prompt templates don't emit a SKILL.md read event)
+            const attachUpdates: Partial<DashboardSession> = {};
+            if (updatedSession?.openspecChange && !updatedSession.attachedProposal) {
+              attachUpdates.attachedProposal = updatedSession.openspecChange;
+              if (!updatedSession.name?.trim()) {
+                attachUpdates.name = updatedSession.openspecChange;
+                piGateway.sendToSession(sessionId, {
+                  type: "rename_session",
+                  sessionId,
+                  name: updatedSession.openspecChange,
+                });
+              }
+              sessionManager.update(sessionId, attachUpdates);
+            }
+            if (!replayingSessions.has(sessionId)) {
+              browserGateway.broadcastSessionUpdated(sessionId, {
+                ...activityUpdates,
+                ...attachUpdates,
+              });
+            }
+          }
+        }
+      }
+      if (msg.event.eventType === "agent_end") {
+        const session = sessionManager.get(sessionId);
+        if (session?.openspecPhase || session?.openspecChange) {
+          const clearUpdates: Partial<DashboardSession> = {
+            openspecPhase: null as any,
+            openspecChange: null as any,
+          };
+          sessionManager.update(sessionId, clearUpdates);
+          if (!replayingSessions.has(sessionId)) {
+            browserGateway.broadcastSessionUpdated(sessionId, clearUpdates);
+          }
+        }
+      }
+
+      // Server-side stats extraction from forwarded turn_end events
+      if (msg.event.eventType === "turn_end") {
+        const stats = extractTurnStats(msg.event.data);
+        if (stats) {
+          const session = sessionManager.get(sessionId);
+          const statsUpdates: Partial<DashboardSession> = {
+            tokensIn: (session?.tokensIn ?? 0) + stats.tokensIn,
+            tokensOut: (session?.tokensOut ?? 0) + stats.tokensOut,
+            cacheRead: (session?.cacheRead ?? 0) + (stats.turnUsage?.cacheRead ?? 0),
+            cacheWrite: (session?.cacheWrite ?? 0) + (stats.turnUsage?.cacheWrite ?? 0),
+            cost: (session?.cost ?? 0) + stats.cost,
+          };
+          if (stats.contextUsage) {
+            statsUpdates.contextTokens = stats.contextUsage.tokens;
+            statsUpdates.contextWindow = stats.contextUsage.contextWindow;
+          }
+          sessionManager.update(sessionId, statsUpdates);
+
+          // Synthesize a stats_update event for client replay compatibility
+          const statsEvent = {
+            eventType: "stats_update",
+            timestamp: Date.now(),
+            data: {
+              tokensIn: stats.tokensIn,
+              tokensOut: stats.tokensOut,
+              cost: stats.cost,
+              turnUsage: stats.turnUsage,
+              contextUsage: stats.contextUsage,
+            },
+          };
+          const statsSeq = eventStore.insertEvent(sessionId, statsEvent);
+          if (!replayingSessions.has(sessionId)) {
+            browserGateway.broadcastEvent(sessionId, statsSeq, statsEvent);
+            browserGateway.broadcastSessionUpdated(sessionId, statsUpdates);
+          }
+        }
+      }
     }
 
     if (msg.type === "replay_complete") {
@@ -139,8 +238,20 @@ export function wireEvents(deps: EventWiringDeps): void {
           }
         }
       }, 5_000);
-      eventStore.deleteEventsForSession(sessionId);
-      browserGateway.broadcastSessionStateReset(sessionId);
+      // Skip wipe if bridge provides eventCount matching the last known entry count.
+      // This avoids full replay cascade when bridge simply reconnects.
+      // Compare entry counts (apples to apples) — not entries vs stored events.
+      const session = sessionManager.get(sessionId);
+      const lastEntryCount = session?.lastEntryCount;
+      const canSkipWipe = msg.eventCount !== undefined && lastEntryCount !== undefined && msg.eventCount === lastEntryCount && eventStore.hasEvents(sessionId);
+      // Store the bridge's entry count for future reconnect comparisons
+      if (msg.eventCount !== undefined) {
+        sessionManager.update(sessionId, { lastEntryCount: msg.eventCount });
+      }
+      if (!canSkipWipe) {
+        eventStore.deleteEventsForSession(sessionId);
+        browserGateway.broadcastSessionStateReset(sessionId);
+      }
       sessionManager.update(sessionId, { hidden: false, dataUnavailable: false });
 
       if (msg.sessionFile) {
@@ -258,6 +369,11 @@ export function wireEvents(deps: EventWiringDeps): void {
       }
     }
 
+    if (msg.type === "first_message_update") {
+      sessionManager.update(sessionId, { firstMessage: msg.firstMessage });
+      browserGateway.broadcastSessionUpdated(sessionId, { firstMessage: msg.firstMessage });
+    }
+
     if (msg.type === "session_unregister") {
       browserGateway.broadcastSessionRemoved(sessionId);
     }
@@ -312,36 +428,6 @@ export function wireEvents(deps: EventWiringDeps): void {
         sessionId,
         query: msg.query,
         files: msg.files,
-      });
-    }
-
-    if (msg.type === "openspec_activity_update") {
-      const activityUpdates: Partial<DashboardSession> = {};
-      if (msg.phase !== undefined) activityUpdates.openspecPhase = msg.phase;
-      if (msg.changeName !== undefined) activityUpdates.openspecChange = msg.changeName;
-
-      sessionManager.update(sessionId, activityUpdates);
-
-      const session = sessionManager.get(sessionId);
-      const attachUpdates: Partial<DashboardSession> = {};
-      if (session?.openspecPhase && session?.openspecChange && !session.attachedProposal) {
-        attachUpdates.attachedProposal = session.openspecChange;
-        if (!session.name?.trim()) {
-          attachUpdates.name = session.openspecChange;
-          piGateway.sendToSession(sessionId, {
-            type: "rename_session",
-            sessionId,
-            name: session.openspecChange,
-          });
-        }
-        sessionManager.update(sessionId, attachUpdates);
-      }
-
-      browserGateway.broadcastSessionUpdated(sessionId, {
-        openspecPhase: msg.phase ?? null,
-        openspecChange: msg.changeName ?? null,
-        ...(attachUpdates.attachedProposal !== undefined ? { attachedProposal: attachUpdates.attachedProposal } : {}),
-        ...(attachUpdates.name !== undefined ? { name: attachUpdates.name } : {}),
       });
     }
 
@@ -422,34 +508,5 @@ export function wireEvents(deps: EventWiringDeps): void {
       });
     }
 
-    if (msg.type === "stats_update") {
-      const session = sessionManager.get(sessionId);
-      if (session) {
-        const updates: Record<string, unknown> = {
-          tokensIn: session.tokensIn,
-          tokensOut: session.tokensOut,
-          cacheRead: session.cacheRead,
-          cacheWrite: session.cacheWrite,
-          cost: session.cost,
-        };
-        if (session.contextTokens !== undefined) updates.contextTokens = session.contextTokens;
-        if (session.contextWindow !== undefined) updates.contextWindow = session.contextWindow;
-        browserGateway.broadcastSessionUpdated(sessionId, updates);
-      }
-
-      const statsEvent = {
-        eventType: "stats_update",
-        timestamp: Date.now(),
-        data: {
-          tokensIn: msg.stats.tokensIn,
-          tokensOut: msg.stats.tokensOut,
-          cost: msg.stats.cost,
-          turnUsage: msg.stats.turnUsage,
-          contextUsage: msg.stats.contextUsage,
-        },
-      };
-      const seq = eventStore.insertEvent(sessionId, statsEvent);
-      browserGateway.broadcastEvent(sessionId, seq, statsEvent);
-    }
   };
 }

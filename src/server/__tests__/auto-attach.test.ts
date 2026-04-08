@@ -22,15 +22,50 @@ async function connectSession(piPort: number, sessionId: string): Promise<WebSoc
 }
 
 /**
- * Helper: send an openspec_activity_update message.
+ * Helper: send a tool_execution_start event that triggers OpenSpec detection.
+ * Uses a Read tool on a SKILL.md path to trigger phase detection,
+ * or a Read/Write on an openspec/changes/ path for changeName detection.
  */
-function sendActivityUpdate(ws: WebSocket, sessionId: string, opts: { phase?: string; changeName?: string }) {
-  ws.send(JSON.stringify({
-    type: "openspec_activity_update",
-    sessionId,
-    ...(opts.phase !== undefined ? { phase: opts.phase } : {}),
-    ...(opts.changeName !== undefined ? { changeName: opts.changeName } : {}),
-  }));
+function sendToolEvent(ws: WebSocket, sessionId: string, opts: { phase?: string; changeName?: string }) {
+  if (opts.phase) {
+    // Map phase back to skill name suffix for detection
+    const phaseToSuffix: Record<string, string> = {
+      apply: "apply-change",
+      archive: "archive-change",
+      continue: "continue-change",
+      explore: "explore",
+      ff: "ff-change",
+      new: "new-change",
+      verify: "verify-change",
+    };
+    const suffix = phaseToSuffix[opts.phase] ?? opts.phase;
+    ws.send(JSON.stringify({
+      type: "event_forward",
+      sessionId,
+      event: {
+        eventType: "tool_execution_start",
+        timestamp: Date.now(),
+        data: {
+          toolName: "Read",
+          args: { path: `.pi/skills/openspec-${suffix}/SKILL.md` },
+        },
+      },
+    }));
+  }
+  if (opts.changeName) {
+    ws.send(JSON.stringify({
+      type: "event_forward",
+      sessionId,
+      event: {
+        eventType: "tool_execution_start",
+        timestamp: Date.now(),
+        data: {
+          toolName: "Read",
+          args: { path: `openspec/changes/${opts.changeName}/proposal.md` },
+        },
+      },
+    }));
+  }
 }
 
 /**
@@ -80,69 +115,60 @@ describe("Auto-attach from openspec activity", () => {
     await server.stop();
   });
 
-  it("auto-attaches when phase and changeName arrive in separate messages", async () => {
-    // Send phase only
-    sendActivityUpdate(ws, "s1", { phase: "apply" });
+  it("auto-attaches when phase and changeName arrive in separate events", async () => {
+    // Send phase only (via skill file read)
+    sendToolEvent(ws, "s1", { phase: "apply" });
     await new Promise((r) => setTimeout(r, 80));
 
     let session = server.sessionManager.get("s1");
     expect(session?.attachedProposal).toBeFalsy();
 
-    // Send changeName only
-    sendActivityUpdate(ws, "s1", { changeName: "add-auth" });
+    // Send changeName only (via change file read)
+    sendToolEvent(ws, "s1", { changeName: "add-auth" });
     await new Promise((r) => setTimeout(r, 80));
 
     session = server.sessionManager.get("s1");
     expect(session?.attachedProposal).toBe("add-auth");
   });
 
-  it("auto-attaches when both arrive in a single message", async () => {
-    sendActivityUpdate(ws, "s1", { phase: "apply", changeName: "add-auth" });
+  it("auto-attaches when only changeName is detected (no phase)", async () => {
+    // Only send changeName — no phase event at all
+    // This happens when a skill is loaded via prompt template (no SKILL.md read tool event)
+    sendToolEvent(ws, "s1", { changeName: "my-feature" });
+    await new Promise((r) => setTimeout(r, 80));
+
+    const session = server.sessionManager.get("s1");
+    expect(session?.attachedProposal).toBe("my-feature");
+  });
+
+  it("auto-attaches when both arrive from a single tool event", async () => {
+    // A single tool event can only detect one thing at a time (phase OR changeName),
+    // so we send two events in quick succession
+    sendToolEvent(ws, "s1", { phase: "apply" });
+    sendToolEvent(ws, "s1", { changeName: "add-auth" });
     await new Promise((r) => setTimeout(r, 80));
 
     const session = server.sessionManager.get("s1");
     expect(session?.attachedProposal).toBe("add-auth");
   });
 
-  it.skip("does not auto-attach when only phase is known (no changeName) — skipped: test isolation issue with port reuse", async () => {
-    // Verify session starts clean (no openspecChange from prior tests)
-    const before = server.sessionManager.get("s1");
-    expect(before?.openspecChange).toBeFalsy();
-
-    sendActivityUpdate(ws, "s1", { phase: "apply" });
+  it("auto-names session from changeName when name is blank", async () => {
+    sendToolEvent(ws, "s1", { changeName: "cool-feature" });
     await new Promise((r) => setTimeout(r, 80));
 
     const session = server.sessionManager.get("s1");
-    expect(session?.openspecPhase).toBe("apply");
-    // Without changeName, auto-attach should not trigger
-    if (!session?.openspecChange) {
-      expect(session?.attachedProposal).toBeFalsy();
-    }
-  });
-
-  it.skip("does not auto-attach when only changeName is known (no phase) — skipped: test isolation issue with port reuse", async () => {
-    // Verify session starts clean (no openspecPhase from prior tests)
-    const before = server.sessionManager.get("s1");
-    expect(before?.openspecPhase).toBeFalsy();
-
-    sendActivityUpdate(ws, "s1", { changeName: "add-auth" });
-    await new Promise((r) => setTimeout(r, 80));
-
-    const session = server.sessionManager.get("s1");
-    expect(session?.openspecChange).toBe("add-auth");
-    // Without phase, auto-attach should not trigger
-    if (!session?.openspecPhase) {
-      expect(session?.attachedProposal).toBeFalsy();
-    }
+    expect(session?.attachedProposal).toBe("cool-feature");
+    expect(session?.name).toBe("cool-feature");
   });
 
   it("does not auto-attach when proposal is already attached", async () => {
     // First, attach
-    sendActivityUpdate(ws, "s1", { phase: "apply", changeName: "add-auth" });
+    sendToolEvent(ws, "s1", { phase: "apply" });
+    sendToolEvent(ws, "s1", { changeName: "add-auth" });
     await new Promise((r) => setTimeout(r, 80));
 
     // Try to attach a different change
-    sendActivityUpdate(ws, "s1", { changeName: "other-change" });
+    sendToolEvent(ws, "s1", { changeName: "other-change" });
     await new Promise((r) => setTimeout(r, 80));
 
     const session = server.sessionManager.get("s1");
@@ -182,7 +208,8 @@ describe("Detach clears openspec state", () => {
 
   it("clears openspecPhase and openspecChange on detach", async () => {
     // Attach first
-    sendActivityUpdate(ws, "s1", { phase: "apply", changeName: "add-auth" });
+    sendToolEvent(ws, "s1", { phase: "apply" });
+    sendToolEvent(ws, "s1", { changeName: "add-auth" });
     await new Promise((r) => setTimeout(r, 80));
 
     let session = server.sessionManager.get("s1");
@@ -200,7 +227,8 @@ describe("Detach clears openspec state", () => {
 
   it("allows re-attach after detach with new activity", async () => {
     // Attach
-    sendActivityUpdate(ws, "s1", { phase: "apply", changeName: "add-auth" });
+    sendToolEvent(ws, "s1", { phase: "apply" });
+    sendToolEvent(ws, "s1", { changeName: "add-auth" });
     await new Promise((r) => setTimeout(r, 80));
 
     // Detach
@@ -208,9 +236,8 @@ describe("Detach clears openspec state", () => {
     await new Promise((r) => setTimeout(r, 80));
 
     // New activity
-    sendActivityUpdate(ws, "s1", { phase: "ff" });
-    await new Promise((r) => setTimeout(r, 80));
-    sendActivityUpdate(ws, "s1", { changeName: "new-change" });
+    sendToolEvent(ws, "s1", { phase: "ff" });
+    sendToolEvent(ws, "s1", { changeName: "new-change" });
     await new Promise((r) => setTimeout(r, 80));
 
     const session = server.sessionManager.get("s1");

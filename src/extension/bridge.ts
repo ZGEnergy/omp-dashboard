@@ -17,10 +17,8 @@ import { isPortOpen } from "./server-probe.js";
 import { launchServer } from "./server-launcher.js";
 import { autoStartServer } from "./server-auto-start.js";
 import type { ServerToExtensionMessage } from "../shared/protocol.js";
-import { extractTurnStats } from "./stats-extractor.js";
 import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
-import { detectOpenSpecActivity } from "./openspec-activity-detector.js";
-import type { OpenSpecPhase } from "../shared/types.js";
+
 import { createUiProxy } from "./ui-proxy.js";
 import { registerAskUserTool } from "./ask-user-tool.js";
 import { activate as activateProviderRegister, onProviderChanged } from "./provider-register.js";
@@ -30,7 +28,7 @@ import type { BridgeContext } from "./bridge-context.js";
 import { filterHiddenCommands, extractFirstMessage, getCurrentModelString } from "./bridge-context.js";
 import { sendStateSync as _sendStateSync, replaySessionEntries as _replaySessionEntries, handleSessionChange as _handleSessionChange } from "./session-sync.js";
 import { sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged } from "./model-tracker.js";
-import { registerFlowEventListeners } from "./flow-event-wiring.js";
+import { registerFlowEventListeners, FLOW_EVENT_MAP, SUBAGENT_EVENT_MAP } from "./flow-event-wiring.js";
 
 const HEARTBEAT_INTERVAL = 15_000;
 const GIT_POLL_INTERVAL = 30_000;
@@ -48,6 +46,8 @@ interface BridgeState {
   hasUI?: boolean;
   /** Monotonic generation counter — stale listeners bail out when mismatched */
   generation?: number;
+  /** The pi instance that owns the bridge (used to detect subagent re-entry) */
+  pi?: ExtensionAPI;
   /** All connection instances from any bridge incarnation (for cleanup) */
   connections?: ConnectionManager[];
   /** All interval timers from any bridge incarnation (for cleanup) */
@@ -79,6 +79,14 @@ export default function (pi: ExtensionAPI) {
 
 function initBridge(pi: ExtensionAPI) {
   const prev = getBridgeState();
+
+  // If bridge is already active for a different pi instance (e.g. a subagent
+  // loading extensions in the same process), skip initialization to avoid
+  // invalidating the parent session's bridge connection and event forwarding.
+  if (prev.generation && prev.generation > 0 && prev.pi && prev.pi !== pi) {
+    return;
+  }
+
   prev.cleanup?.();
   prev.cleanup = undefined;
 
@@ -100,6 +108,7 @@ function initBridge(pi: ExtensionAPI) {
   // Bump generation so stale listeners from previous initBridge calls bail out
   const generation = (prev.generation ?? 0) + 1;
   prev.generation = generation;
+  prev.pi = pi;
   /** Return true if this bridge instance is still the active one */
   function isActive(): boolean {
     return getBridgeState().generation === generation;
@@ -342,8 +351,9 @@ function initBridge(pi: ExtensionAPI) {
   function sendSessionNameIfChanged() { const bc = syncBc(); _sendSessionNameIfChanged(bc); applyBc(bc); }
   function sendGitInfoIfChanged(cwd: string) { const bc = syncBc(); _sendGitInfoIfChanged(bc, cwd); applyBc(bc); }
 
-  // Forward all relevant pi events
-  const eventTypes = [
+  // Forward all pi core events to the dashboard.
+  // Events with special enrichment logic:
+  const enrichedEventTypes = [
     "agent_start",
     "agent_end",
     "turn_start",
@@ -357,21 +367,33 @@ function initBridge(pi: ExtensionAPI) {
     "session_compact",
     "model_select",
   ] as const;
+  // Pass-through events: forwarded as-is with no special handling.
+  // Unrecognized types render as expandable JSON cards in the dashboard.
+  const passThroughEventTypes = [
+    "tool_call",
+    "tool_result",
+    "user_bash",
+    "input",
+    "before_agent_start",
+    "resources_discover",
+    "session_before_switch",
+    "session_before_fork",
+    "session_before_compact",
+    "session_before_tree",
+    "session_tree",
+  ] as const;
+  // Excluded from subscription (not forwarded):
+  // - `context`: carries full message arrays (very large)
+  // - `before_provider_request`: carries raw API payloads (very large)
+  // - `session_start`: dedicated handler → session_register protocol message
+  // - `session_switch`: dedicated handler → session_register protocol message
+  // - `session_fork`: dedicated handler → session_register protocol message
+  // - `session_shutdown`: dedicated handler → disconnect/cleanup
 
-  // OpenSpec activity tracking
-  let currentOpenSpecPhase: OpenSpecPhase | undefined;
-  let currentOpenSpecChange: string | undefined;
+  // Unified EventBus rename map for the emit intercept (flow + subagent events)
+  const EVENT_BUS_MAP: Record<string, string> = { ...FLOW_EVENT_MAP, ...SUBAGENT_EVENT_MAP };
 
-  function sendOpenSpecActivityUpdate(phase?: OpenSpecPhase, changeName?: string) {
-    connection.send({
-      type: "openspec_activity_update",
-      sessionId,
-      phase,
-      changeName,
-    });
-  }
-
-  for (const eventType of eventTypes) {
+  for (const eventType of enrichedEventTypes) {
     pi.on(eventType as any, safe(async (event: any, ctx: any) => {
       // Bail out if a newer bridge instance has taken over
       if (!isActive()) return;
@@ -384,50 +406,57 @@ function initBridge(pi: ExtensionAPI) {
         const enriched = { ...event, thinkingLevel: (pi as any).getThinkingLevel?.() };
         const msg = mapEventToProtocol(sessionId, enriched);
         connection.send(msg);
-        // Also send a model_update for session-level tracking
-        sendModelUpdateIfChanged();
         return;
       }
 
-      // Detect OpenSpec activity from tool calls
-      if (eventType === "tool_execution_start") {
-        const detected = detectOpenSpecActivity(
-          event.toolName as string,
-          event.args as Record<string, unknown> | undefined,
-        );
-        if (detected) {
-          let changed = false;
-          if (detected.phase && detected.phase !== currentOpenSpecPhase) {
-            currentOpenSpecPhase = detected.phase;
-            changed = true;
-          }
-          if (detected.changeName && detected.changeName !== currentOpenSpecChange) {
-            currentOpenSpecChange = detected.changeName;
-            changed = true;
-          }
-          if (changed) {
-            sendOpenSpecActivityUpdate(currentOpenSpecPhase, currentOpenSpecChange);
-          }
-        }
-      }
-
-      // Clear OpenSpec activity when agent finishes
-      if (eventType === "agent_end") {
-        if (currentOpenSpecPhase || currentOpenSpecChange) {
-          currentOpenSpecPhase = undefined;
-          currentOpenSpecChange = undefined;
-          connection.send({
-            type: "openspec_activity_update",
-            sessionId,
-            phase: null,
-            changeName: null,
-          });
+      // For turn_end, enrich with contextUsage (pi-only API) so server can extract stats
+      if (eventType === "turn_end") {
+        const contextUsage = ctx.getContextUsage?.();
+        if (contextUsage) {
+          const enriched = { ...event, contextUsage };
+          const msg = mapEventToProtocol(sessionId, enriched);
+          connection.send(msg);
+          return;
         }
       }
 
       const msg = mapEventToProtocol(sessionId, event);
       connection.send(msg);
     }));
+  }
+
+  // Pass-through events: forward with no enrichment
+  for (const eventType of passThroughEventTypes) {
+    pi.on(eventType as any, safe(async (event: any, ctx: any) => {
+      if (!isActive()) return;
+      cachedCtx = ctx;
+      if (!sessionReady) return;
+      const msg = mapEventToProtocol(sessionId, event);
+      connection.send(msg);
+    }));
+  }
+
+  // EventBus catch-all: intercept pi.events.emit to forward all EventBus
+  // traffic (flow events, subagent events, custom extension events).
+  // Known channels get renamed via EVENT_BUS_MAP; unknown channels use the
+  // channel name directly as the eventType.
+  let origEventsEmit: ((channel: string, data: unknown) => void) | undefined;
+  if (pi.events) {
+    origEventsEmit = pi.events.emit.bind(pi.events);
+    pi.events.emit = (channel: string, data: unknown) => {
+      if (sessionReady && isActive()) {
+        try {
+          const eventType = EVENT_BUS_MAP[channel] ?? channel;
+          const eventData = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+          connection.send({
+            type: "event_forward",
+            sessionId,
+            event: { eventType, timestamp: Date.now(), data: eventData },
+          });
+        } catch { /* forwarding failure must never break the original emit */ }
+      }
+      origEventsEmit!(channel, data);
+    };
   }
 
   pi.on("session_start", safe(async (_event: any, ctx: any) => {
@@ -488,6 +517,14 @@ function initBridge(pi: ExtensionAPI) {
     const initialThinkingLevel = (pi as any).getThinkingLevel?.() ?? undefined;
     lastModel = initialModel;
     lastThinkingLevel = initialThinkingLevel;
+
+    // Include eventCount so server can skip event wipe on reconnect
+    let eventCount: number | undefined;
+    try {
+      const entries = ctx.sessionManager?.getBranch?.();
+      if (entries) eventCount = entries.length;
+    } catch { /* ignore */ }
+
     connection.send({
       type: "session_register",
       sessionId,
@@ -499,6 +536,7 @@ function initBridge(pi: ExtensionAPI) {
       sessionFile,
       sessionDir,
       firstMessage,
+      eventCount,
     });
 
     // Allow event forwarding now that session_register is buffered
@@ -602,27 +640,13 @@ function initBridge(pi: ExtensionAPI) {
       if (firstMsg) {
         lastFirstMessage = firstMsg;
         connection.send({
-          type: "session_register",
+          type: "first_message_update",
           sessionId,
-          cwd: ctx.cwd,
-          source: detectSessionSource(cachedHasUI, lastSessionFile),
           firstMessage: firstMsg,
         });
       }
     }
 
-    const stats = extractTurnStats(
-      event as Record<string, unknown>,
-      ctx.getContextUsage(),
-    );
-
-    if (stats) {
-      connection.send({
-        type: "stats_update",
-        sessionId,
-        stats: stats as any,
-      });
-    }
   }));
 
   pi.on("session_shutdown", safe(async () => {
@@ -679,6 +703,10 @@ function initBridge(pi: ExtensionAPI) {
       runDevBuild({ packageRoot, serverPort: config.port });
     }
 
+    // Restore original pi.events.emit (EventBus catch-all cleanup)
+    if (origEventsEmit && pi.events) {
+      pi.events.emit = origEventsEmit;
+    }
     connection.disconnect();
   };
 

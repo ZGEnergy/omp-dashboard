@@ -31,6 +31,7 @@ export interface MessageHandlerDeps {
   spawningCwdsRef: React.MutableRefObject<Set<string>>;
   subscribedRef: React.MutableRefObject<Set<string>>;
   pendingTerminalCwdRef: React.MutableRefObject<string | null>;
+  maxSeqMapRef: React.MutableRefObject<Map<string, number>>;
 }
 
 export function useMessageHandler(
@@ -42,7 +43,7 @@ export function useMessageHandler(
     setFileResults, setOpenspecMap, setModelsMap, setSpawnResult,
     setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses,
   } = setters;
-  const { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef } = deps;
+  const { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef } = deps;
 
   return useCallback((msg: ServerToBrowserMessage) => {
     switch (msg.type) {
@@ -63,9 +64,9 @@ export function useMessageHandler(
           clearSpawningCwd(msg.session.cwd);
           navigate(`/session/${msg.session.id}`);
         }
+        // Request commands/models metadata (needed for sidebar actions)
+        // but don't auto-subscribe to events — lazy subscribe on session select
         if (!subscribedRef.current.has(msg.session.id) && msg.session.status !== "ended") {
-          subscribedRef.current.add(msg.session.id);
-          send({ type: "subscribe", sessionId: msg.session.id, lastSeq: 0 });
           send({ type: "request_commands", sessionId: msg.session.id });
           send({ type: "request_models", sessionId: msg.session.id });
         }
@@ -99,6 +100,7 @@ export function useMessageHandler(
           next.set(msg.sessionId, createInitialState());
           return next;
         });
+        maxSeqMapRef.current.set(msg.sessionId, 0);
         break;
 
       case "event":
@@ -108,6 +110,9 @@ export function useMessageHandler(
           next.set(msg.sessionId, reduceEvent(current, msg.event));
           return next;
         });
+        if (msg.seq > (maxSeqMapRef.current.get(msg.sessionId) ?? 0)) {
+          maxSeqMapRef.current.set(msg.sessionId, msg.seq);
+        }
         break;
 
       case "commands_list":
@@ -157,6 +162,13 @@ export function useMessageHandler(
           next.set(msg.sessionId, current);
           return next;
         });
+        // Track highest seq from replay batch
+        if (msg.events.length > 0) {
+          const lastEvt = msg.events[msg.events.length - 1];
+          if (lastEvt.seq > (maxSeqMapRef.current.get(msg.sessionId) ?? 0)) {
+            maxSeqMapRef.current.set(msg.sessionId, lastEvt.seq);
+          }
+        }
         break;
       }
 
@@ -268,5 +280,5 @@ export function useMessageHandler(
         });
         break;
     }
-  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef]);
+  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef]);
 }

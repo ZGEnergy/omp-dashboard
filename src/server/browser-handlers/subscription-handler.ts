@@ -17,14 +17,18 @@ const BACKPRESSURE_THRESHOLD = 1_024 * 1_024;
  * Send stored events to a WebSocket in batches with backpressure handling.
  * Yields between batches to let the event loop flush data and avoid OOM.
  */
+/**
+ * Send stored events to a WebSocket in batches with backpressure handling.
+ * Returns the highest seq sent, or 0 if no events were sent.
+ */
 async function sendEventBatches(
   ws: WebSocket,
   sessionId: string,
   stored: StoredEvent[],
   sendTo: (ws: WebSocket, msg: ServerToBrowserMessage) => void,
-): Promise<void> {
+): Promise<number> {
   for (let i = 0; i < stored.length; i += REPLAY_BATCH_SIZE) {
-    if (ws.readyState !== ws.OPEN) return;
+    if (ws.readyState !== ws.OPEN) return 0;
     const batch = stored.slice(i, i + REPLAY_BATCH_SIZE);
     sendTo(ws, {
       type: "event_replay",
@@ -48,6 +52,7 @@ async function sendEventBatches(
       await new Promise<void>((r) => setImmediate(r));
     }
   }
+  return stored.length > 0 ? stored[stored.length - 1].seq : 0;
 }
 
 export function handleSubscribe(
@@ -55,17 +60,44 @@ export function handleSubscribe(
   subs: Set<string>,
   ctx: BrowserHandlerContext,
 ): void {
-  const { ws, sessionManager, eventStore, directoryService, sendTo, broadcast, getSubscribers, replayPendingUiRequests } = ctx;
+  const { ws, sessionManager, eventStore, directoryService, sendTo, broadcast, getSubscribers, replayPendingUiRequests, markReplaying, clearReplaying } = ctx;
   subs.add(msg.sessionId);
 
   if (eventStore.hasEvents(msg.sessionId)) {
-    let events = eventStore.getEvents(msg.sessionId, (msg.lastSeq ?? 0) + 1);
-    if (MAX_REPLAY_EVENTS > 0 && events.length > MAX_REPLAY_EVENTS) {
-      events = events.slice(events.length - MAX_REPLAY_EVENTS);
+    const lastSeq = msg.lastSeq ?? 0;
+    const maxSeq = eventStore.getMaxSeq(msg.sessionId);
+
+    // Stale lastSeq: client has higher seq than server (e.g. server restarted)
+    if (lastSeq > 0 && lastSeq > maxSeq) {
+      sendTo(ws, { type: "session_state_reset", sessionId: msg.sessionId });
+      // Full replay from seq 1
+      let events = eventStore.getEvents(msg.sessionId, 1);
+      if (MAX_REPLAY_EVENTS > 0 && events.length > MAX_REPLAY_EVENTS) {
+        events = events.slice(events.length - MAX_REPLAY_EVENTS);
+      }
+      markReplaying(ws, msg.sessionId);
+      sendEventBatches(ws, msg.sessionId, events, sendTo).then((lastSent) => {
+        clearReplaying(ws, msg.sessionId, lastSent);
+        replayPendingUiRequests(ws, msg.sessionId);
+      });
+    } else {
+      let events = eventStore.getEvents(msg.sessionId, lastSeq + 1);
+      if (MAX_REPLAY_EVENTS > 0 && events.length > MAX_REPLAY_EVENTS) {
+        events = events.slice(events.length - MAX_REPLAY_EVENTS);
+      }
+      // Suppress live events during delta replay to prevent out-of-order delivery
+      if (lastSeq > 0 && events.length > 0) {
+        markReplaying(ws, msg.sessionId);
+        sendEventBatches(ws, msg.sessionId, events, sendTo).then((lastSent) => {
+          clearReplaying(ws, msg.sessionId, lastSent);
+          replayPendingUiRequests(ws, msg.sessionId);
+        });
+      } else {
+        sendEventBatches(ws, msg.sessionId, events, sendTo).then(() => {
+          replayPendingUiRequests(ws, msg.sessionId);
+        });
+      }
     }
-    sendEventBatches(ws, msg.sessionId, events, sendTo).then(() => {
-      replayPendingUiRequests(ws, msg.sessionId);
-    });
   } else if (directoryService) {
     const session = sessionManager.get(msg.sessionId);
     if (session?.sessionFile) {

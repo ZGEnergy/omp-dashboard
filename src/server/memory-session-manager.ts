@@ -15,6 +15,7 @@ export interface RegisterSessionParams {
   sessionDir?: string;
   firstMessage?: string;
   startedAt?: number;
+  pid?: number;
 }
 
 export interface SessionManager {
@@ -76,6 +77,7 @@ export function createMemorySessionManager(): SessionManager {
         hidden: false,
         firstMessage: params.firstMessage ?? existing?.firstMessage,
         dataUnavailable: false,
+        pid: params.pid,
       };
       sessions.set(params.id, session);
       mgr.onChange?.(params.id);

@@ -163,3 +163,89 @@ export function handleFlowControl(
 ): void {
   ctx.piGateway.sendToSession(msg.sessionId, { type: "flow_control", sessionId: msg.sessionId, action: msg.action });
 }
+
+/**
+ * Check if a PID belongs to a pi/node process (safety check before SIGKILL).
+ * Returns true if the process looks like a pi-related process, false otherwise.
+ */
+function isPiProcess(pid: number): boolean {
+  try {
+    const cmd = process.platform === "darwin"
+      ? `ps -p ${pid} -o command=`
+      : `cat /proc/${pid}/cmdline 2>/dev/null || ps -p ${pid} -o command=`;
+    const output = execSync(cmd, { encoding: "utf8", timeout: 2000 }).trim();
+    return /\bpi\b|\bnode\b/.test(output);
+  } catch {
+    // Process already exited — treat as dead
+    return false;
+  }
+}
+
+/**
+ * Check if a process is still alive.
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function handleForceKill(
+  msg: Extract<BrowserToServerMessage, { type: "force_kill" }>,
+  ctx: BrowserHandlerContext,
+): Promise<void> {
+  const { sessionManager, piGateway, headlessPidRegistry, broadcast, sendTo, ws } = ctx;
+  const session = sessionManager.get(msg.sessionId);
+  if (!session) {
+    sendTo(ws, { type: "force_kill_result", sessionId: msg.sessionId, success: false, message: "Session not found" });
+    return;
+  }
+
+  // Force-close the bridge WebSocket regardless of PID availability
+  piGateway.closeSession(msg.sessionId);
+
+  const pid = session?.pid;
+  if (!pid) {
+    // No PID — we can only close the WebSocket
+    sessionManager.update(msg.sessionId, { status: "ended", endedAt: Date.now() });
+    broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { status: "ended", endedAt: Date.now() } });
+    sendTo(ws, { type: "force_kill_result", sessionId: msg.sessionId, success: true, message: "WebSocket closed (no PID available)" });
+    return;
+  }
+
+  // Step 1: SIGTERM
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // Process already dead
+    sessionManager.update(msg.sessionId, { status: "ended", endedAt: Date.now() });
+    broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { status: "ended", endedAt: Date.now() } });
+    sendTo(ws, { type: "force_kill_result", sessionId: msg.sessionId, success: true, message: "Process already exited" });
+    return;
+  }
+
+  // Also kill via headless registry if applicable
+  headlessPidRegistry.killBySessionId(msg.sessionId);
+
+  // Step 2: Wait 2s, then SIGKILL if still alive
+  await new Promise<void>((resolve) => {
+    setTimeout(() => {
+      if (isProcessAlive(pid)) {
+        // Safety check: verify PID still belongs to a pi process
+        if (isPiProcess(pid)) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch { /* already dead */ }
+        }
+      }
+      resolve();
+    }, 2000);
+  });
+
+  sessionManager.update(msg.sessionId, { status: "ended", endedAt: Date.now() });
+  broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { status: "ended", endedAt: Date.now() } });
+  sendTo(ws, { type: "force_kill_result", sessionId: msg.sessionId, success: true });
+}

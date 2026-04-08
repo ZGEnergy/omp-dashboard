@@ -106,6 +106,10 @@ export function replayEntriesAsEvents(
         if (imageBlocks.length > 0) {
           eventData.images = imageBlocks.map((c: any) => ({ data: c.data, mimeType: c.mimeType }));
         }
+        // Include tool details (e.g. AgentDetails from pi-subagents) if present
+        if (msg.details && typeof msg.details === "object") {
+          eventData.details = msg.details;
+        }
         messages.push(makeEvent(sessionId, "tool_execution_end", ts, eventData));
         openToolCalls.delete(msg.toolCallId);
       }

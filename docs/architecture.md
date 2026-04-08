@@ -28,8 +28,9 @@ A global pi extension that runs in every pi session. It:
 - Sends heartbeats every 15s with process metrics (CPU%, RSS, heap, event loop max delay, load average); server responds with `heartbeat_ack`
 - Server liveness watchdog: forces reconnect if no message received for 60s
 - Server-side WS ping/pong (60s interval) detects dead TCP connections; requires 2 consecutive missed pongs before killing (tolerates long-running bash commands that block the event loop)
-- Detects OpenSpec activity (phase/change) from tool events
+- Detects OpenSpec activity (phase/change) from tool events; server auto-attaches the change when `changeName` is detected (phase is not required — skills loaded via prompt templates don't emit a SKILL.md read event)
 - **Duplicate bridge prevention**: Uses `process`-level shared state (not `globalThis`) with a monotonic generation counter. When the extension is loaded multiple times (e.g., local + global npm package), only the latest instance's event handlers are active — stale listeners bail out immediately. All previous connections and timers are tracked and cleaned up on re-init.
+- **Subagent re-entry guard**: When pi-subagents launches an Agent tool, the subagent creates its own `AgentSession` which loads extensions (including the bridge) in the same process. Without protection, this would overwrite the parent bridge's global state, disconnect its WebSocket, and prevent `tool_execution_end`/`agent_end` from being forwarded — leaving the parent session stuck at "streaming" forever. The bridge stores a reference to its owning `pi` instance and skips initialization when called from a different instance (subagent).
 - Proxies `ctx.ui` dialog methods (confirm, select, input, editor) to the dashboard via `ui-proxy.ts`
   - TUI sessions: races terminal dialog against dashboard response (first wins)
   - Race cancellation: when dashboard wins, TUI dialog is aborted via `AbortSignal`; when TUI wins, dashboard dialog is dismissed via `extension_ui_dismiss` message
@@ -133,6 +134,18 @@ pi-flows runs multi-agent workflows in-process. Subagent sessions use `SessionMa
 **Flow controls (browser → pi-flows):**
 - Abort: browser sends `flow_control { action: "abort" }` → server → bridge → `pi.events.emit("flow:abort")` → `flowManager.abort()`
 - Autonomous toggle: browser sends `flow_control { action: "toggle_autonomous" }` → same path → `setAutonomousMode()`
+
+### Force Kill Escalation
+The Stop button supports two-click escalation for stuck sessions:
+1. **Click 1 (Abort)**: Sends `abort` → bridge → `ctx.abort()`. Button transitions to orange pulsing "Force Stop".
+2. **Click 2 (Force Kill)**: Sends `force_kill` → server kills the process via SIGTERM → 2s wait → SIGKILL (with PID safety check). Session marked "ended" (not removed), resumable via fork/continue.
+
+The bridge includes `process.pid` in `session_register` so the server can kill the process. The server also force-closes the bridge WebSocket and uses the headless PID registry as a fallback. If no PID is available, only the WebSocket is closed.
+
+Inline stop buttons also appear on running tool cards in `ToolCallStep`, providing contextual abort access right where the stuck command is visible.
+
+### Repeated Tool Call Collapsing
+Consecutive tool calls with the same name and identical args (e.g. health check polling loops) are collapsed into a single expandable group showing a count badge (e.g. "×24"). Implemented via `groupConsecutiveToolCalls()` in the chat rendering pipeline. Groups require 3+ calls; running tools are never grouped.
 
 **Fork decisions and subagent ask_user:**
 - Already work through existing UI proxy — `TuiFlowIOAdapter` calls `ctx.ui.select/confirm/input` which the bridge wraps and races between TUI and dashboard

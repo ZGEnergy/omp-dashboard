@@ -1,7 +1,7 @@
 /**
  * Extension ↔ Server WebSocket protocol messages.
  */
-import type { DashboardEvent, CommandInfo, FlowInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, PiSessionInfo, OpenSpecPhase } from "./types.js";
+import type { DashboardEvent, CommandInfo, FlowInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, PiSessionInfo } from "./types.js";
 
 // ── Extension → Server ──────────────────────────────────────────────
 
@@ -18,6 +18,10 @@ export interface SessionRegisterMessage {
   firstMessage?: string;
   /** True when this is a fresh session start (not a reconnection) */
   isNew?: boolean;
+  /** Number of conversation entries — used by server to skip event wipe on reconnect */
+  eventCount?: number;
+  /** OS process ID of the pi agent — used for force-kill escalation */
+  pid?: number;
 }
 
 export interface SessionUnregisterMessage {
@@ -73,17 +77,7 @@ export interface ExtensionUiRequestMessage {
   params: Record<string, unknown>;
 }
 
-export interface StatsUpdateMessage {
-  type: "stats_update";
-  sessionId: string;
-  stats: {
-    tokensIn: number;
-    tokensOut: number;
-    cost: number;
-    turnUsage?: TurnUsage;
-    contextUsage?: ContextUsage;
-  };
-}
+// StatsUpdateMessage removed — server extracts stats directly from forwarded turn_end events
 
 export interface FilesListMessage {
   type: "files_list";
@@ -123,13 +117,7 @@ export interface SessionsListExtensionMessage {
 }
 
 // SessionHistorySyncMessage removed — server reads history directly via DirectoryService
-
-export interface OpenSpecActivityUpdateMessage {
-  type: "openspec_activity_update";
-  sessionId: string;
-  phase?: OpenSpecPhase | null;
-  changeName?: string | null;
-}
+// OpenSpecActivityUpdateMessage removed — server detects OpenSpec activity from forwarded events
 
 export interface ModelUpdateMessage {
   type: "model_update";
@@ -141,6 +129,12 @@ export interface ModelUpdateMessage {
 export interface ReplayCompleteMessage {
   type: "replay_complete";
   sessionId: string;
+}
+
+export interface FirstMessageUpdateMessage {
+  type: "first_message_update";
+  sessionId: string;
+  firstMessage: string;
 }
 
 export interface ExtensionUiDismissMessage {
@@ -159,16 +153,15 @@ export type ExtensionToServerMessage =
   | CommandsListMessage
   | FlowsListMessage
   | ExtensionUiRequestMessage
-  | StatsUpdateMessage
   | FilesListMessage
   | GitInfoUpdateMessage
   | SessionNameUpdateMessage
   | ModelsListMessage
   | ModelUpdateMessage
-  | OpenSpecActivityUpdateMessage
   | SessionsListExtensionMessage
   | ExtensionUiDismissMessage
-  | ReplayCompleteMessage;
+  | ReplayCompleteMessage
+  | FirstMessageUpdateMessage;
 
 // ── Server → Extension ──────────────────────────────────────────────
 

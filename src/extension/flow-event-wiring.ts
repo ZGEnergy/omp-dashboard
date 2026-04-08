@@ -8,7 +8,7 @@ import { filterHiddenCommands } from "./bridge-context.js";
 import type { FlowInfo } from "../shared/types.js";
 
 /** Map of pi-flows event names to dashboard protocol event types */
-const FLOW_EVENT_MAP: Record<string, string> = {
+export const FLOW_EVENT_MAP: Record<string, string> = {
   "flow:flow-started": "flow_started",
   "flow:agent-started": "flow_agent_started",
   "flow:agent-complete": "flow_agent_complete",
@@ -19,6 +19,14 @@ const FLOW_EVENT_MAP: Record<string, string> = {
   "flow:loop-iteration": "flow_loop_iteration",
   "flow:auto-decision": "flow_auto_decision",
   "flow:complete": "flow_complete",
+};
+
+/** Map of pi-subagents event names to dashboard protocol event types */
+export const SUBAGENT_EVENT_MAP: Record<string, string> = {
+  "subagents:created": "subagent_created",
+  "subagents:started": "subagent_started",
+  "subagents:completed": "subagent_completed",
+  "subagents:failed": "subagent_failed",
 };
 
 /**
@@ -48,19 +56,6 @@ export function registerFlowEventListeners(
   pi.events.on("flow:rediscover", resendCommandsAndFlows);
   pi.events.on("flow:complete", resendCommandsAndFlows);
 
-  for (const [piEvent, eventType] of Object.entries(FLOW_EVENT_MAP)) {
-    pi.events.on(piEvent, (data: unknown) => {
-      if (!isSessionReady()) return;
-      const eventData = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
-      connection.send({
-        type: "event_forward",
-        sessionId: bc.sessionId,
-        event: {
-          eventType,
-          timestamp: Date.now(),
-          data: eventData,
-        },
-      });
-    });
-  }
+  // Note: event_forward sending for flow and subagent events is handled by
+  // the EventBus emit intercept in bridge.ts (catch-all forwarding).
 }

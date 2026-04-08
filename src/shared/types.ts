@@ -44,6 +44,10 @@ export interface DashboardSession {
   flowAgentsTotal?: number;
   /** Flow execution status */
   flowStatus?: FlowStatus;
+  /** Last known bridge entry count (for skip-wipe comparison on reconnect) */
+  lastEntryCount?: number;
+  /** OS process ID of the pi agent — used for force-kill escalation */
+  pid?: number;
   /** Latest process metrics from the pi agent */
   processMetrics?: {
     rss: number;

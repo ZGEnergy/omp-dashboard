@@ -198,6 +198,24 @@ describe("ChatView", () => {
     expect(img!.getAttribute("src")).toContain("data:image/png;base64,abc123");
   });
 
+  it("opens lightbox when clicking a user message image", () => {
+    const state = createInitialState();
+    state.messages.push({
+      id: "img-msg",
+      role: "user",
+      content: "See this",
+      timestamp: Date.now(),
+      images: [{ data: "abc123", mimeType: "image/png" }],
+    });
+    const { container } = render(<ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>);
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.className).toContain("cursor-pointer");
+    fireEvent.click(img!);
+    const lightbox = document.body.querySelector("[data-testid='lightbox-backdrop']");
+    expect(lightbox).not.toBeNull();
+  });
+
   it("hides empty-state message when pendingPrompt is set", () => {
     const state = createInitialState();
     state.pendingPrompt = { text: "Hello" };

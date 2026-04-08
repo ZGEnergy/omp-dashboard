@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectOpenSpecActivity } from "../openspec-activity-detector.js";
+import { detectOpenSpecActivity } from "../../shared/openspec-activity-detector.js";
 
 describe("detectOpenSpecActivity", () => {
   describe("phase detection from skill file reads", () => {

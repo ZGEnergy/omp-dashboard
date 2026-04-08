@@ -58,7 +58,7 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/client/lib/git-api.ts` | Client-side fetch helpers for git API endpoints |
 | `src/extension/ui-proxy.ts` | Proxies ctx.ui dialogs to dashboard (confirm/select/input/editor/notify) |
 | `src/extension/ask-user-tool.ts` | `ask_user` tool registration (bundled in bridge, registered at session_start to avoid static tool-name conflicts with other extensions) |
-| `src/extension/openspec-activity-detector.ts` | Detects OpenSpec activity from tool events |
+| `src/extension/openspec-activity-detector.ts` | Detects OpenSpec activity from tool events; auto-attach requires only changeName (phase optional) |
 | `src/shared/openspec-poller.ts` | OpenSpec CLI polling (shared, used by server DirectoryService) |
 | `src/shared/state-replay.ts` | Synthesizes events from pi entries (shared, used by server + bridge) |
 | `src/extension/stats-extractor.ts` | Extracts token/cost stats from turn_end events |
@@ -75,7 +75,10 @@ pi-dashboard --dev   # Start with Vite proxy
 | `src/server/browser-gateway.ts` | Browser WebSocket gateway (dispatches to handler modules) |
 | `src/server/browser-handlers/handler-context.ts` | Shared context type for browser message handlers |
 | `src/server/browser-handlers/subscription-handler.ts` | Subscribe/unsubscribe with async batched replay, backpressure, lazy loading |
-| `src/server/browser-handlers/session-action-handler.ts` | Send prompt, abort, resume, spawn, shutdown, flow control |
+| `src/server/browser-handlers/session-action-handler.ts` | Send prompt, abort, resume, spawn, shutdown, force kill, flow control |
+| `src/client/components/ImageLightbox.tsx` | Full-size image lightbox with zoom/pan (useZoomPan), Esc/backdrop close |
+| `src/client/components/CollapsedToolGroup.tsx` | Collapsed group of repeated tool calls with expand toggle |
+| `src/client/lib/group-tool-calls.ts` | Groups consecutive identical tool calls for chat display |
 | `src/server/browser-handlers/session-meta-handler.ts` | Rename, hide, unhide, attach/detach proposal, fetch, list |
 | `src/server/browser-handlers/terminal-handler.ts` | Create, kill, rename terminals |
 | `src/server/browser-handlers/directory-handler.ts` | Pin/unpin dirs, reorder, openspec refresh, pi-gateway forwards |

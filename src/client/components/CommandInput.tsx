@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from "react";
 import { Icon } from "@mdi/react";
-import { mdiFlash, mdiClipboardText, mdiWrench, mdiFolder, mdiFile, mdiPlay, mdiStop, mdiConsole, mdiClose } from "@mdi/js";
+import { mdiFlash, mdiClipboardText, mdiWrench, mdiFolder, mdiFile, mdiPlay, mdiStop, mdiAlert, mdiConsole, mdiClose } from "@mdi/js";
 import type { CommandInfo, ImageContent, FileEntry } from "../../shared/types.js";
+import { ImageLightbox } from "./ImageLightbox.js";
 
 /** Built-in pi commands available from the dashboard */
 const BUILTIN_COMMANDS: CommandInfo[] = [
@@ -20,6 +21,7 @@ interface Props {
   disabled?: boolean;
   sessionStatus?: "idle" | "streaming" | "ended";
   onAbort?: () => void;
+  onForceKill?: () => void;
   pendingPrompt?: boolean;
   onCancelPending?: () => void;
 }
@@ -58,7 +60,9 @@ function extractAtQuery(text: string): string | null {
   return null;
 }
 
-export function CommandInput({ commands: externalCommands, onSend, onListFiles, fileResults, disabled, sessionStatus, onAbort, pendingPrompt, onCancelPending }: Props) {
+type StopState = "idle" | "aborting" | "killing";
+
+export function CommandInput({ commands: externalCommands, onSend, onListFiles, fileResults, disabled, sessionStatus, onAbort, onForceKill, pendingPrompt, onCancelPending }: Props) {
   // Merge server commands with built-in commands, avoiding duplicates
   const commands = useMemo(() => {
     const names = new Set(externalCommands.map((c) => c.name));
@@ -67,8 +71,15 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
   }, [externalCommands]);
   const [text, setText] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [stopState, setStopState] = useState<StopState>("idle");
+
+  // Reset stop state when session stops streaming
+  useEffect(() => {
+    if (sessionStatus !== "streaming") setStopState("idle");
+  }, [sessionStatus]);
   const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<{ src: string; alt: string } | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null); // text value when Escape was pressed
   const prevDropdownKeyRef = useRef<string>(""); // tracks mode+filter to reset selectedIndex
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -322,7 +333,8 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
               <img
                 src={`data:${img.mimeType};base64,${img.data}`}
                 alt={`Attachment ${i + 1}`}
-                className="h-16 w-16 object-cover rounded border border-[var(--border-secondary)]"
+                className="h-16 w-16 object-cover rounded border border-[var(--border-secondary)] cursor-pointer"
+                onClick={() => setLightboxSrc({ src: `data:${img.mimeType};base64,${img.data}`, alt: `Attachment ${i + 1}` })}
               />
               <button
                 onClick={() => removeImage(i)}
@@ -362,9 +374,16 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
         >
           <Icon path={mdiPlay} size={0.7} />
         </button>
-        {(sessionStatus === "streaming" || pendingPrompt) && (onAbort || onCancelPending) && (
+        {(sessionStatus === "streaming" || pendingPrompt) && (onAbort || onCancelPending) && stopState === "idle" && (
           <button
-            onClick={pendingPrompt ? onCancelPending : onAbort}
+            onClick={() => {
+              if (pendingPrompt) {
+                onCancelPending?.();
+              } else {
+                onAbort?.();
+                if (onForceKill) setStopState("aborting");
+              }
+            }}
             className="p-2 bg-red-600 rounded-lg hover:bg-red-500 self-end"
             title="Stop"
             data-testid="stop-button"
@@ -372,7 +391,30 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
             <Icon path={mdiStop} size={0.7} />
           </button>
         )}
+        {sessionStatus === "streaming" && stopState === "aborting" && onForceKill && (
+          <button
+            onClick={() => { onForceKill(); setStopState("killing"); }}
+            className="p-2 bg-orange-600 rounded-lg hover:bg-orange-500 self-end animate-pulse"
+            title="Force Stop — kill the process"
+            data-testid="force-stop-button"
+          >
+            <Icon path={mdiAlert} size={0.7} />
+          </button>
+        )}
+        {sessionStatus === "streaming" && stopState === "killing" && (
+          <button
+            disabled
+            className="p-2 bg-orange-800 rounded-lg opacity-60 cursor-not-allowed self-end"
+            title="Killing process..."
+            data-testid="killing-button"
+          >
+            <Icon path={mdiStop} size={0.7} />
+          </button>
+        )}
       </div>
+      {lightboxSrc && (
+        <ImageLightbox src={lightboxSrc.src} alt={lightboxSrc.alt} onClose={() => setLightboxSrc(null)} />
+      )}
     </div>
   );
 }

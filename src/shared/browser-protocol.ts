@@ -203,7 +203,8 @@ export type ServerToBrowserMessage =
   | SessionStateResetMessage
   | PackageProgressMessage
   | PackageOperationCompleteMessage
-  | EditorStatusMessage;
+  | EditorStatusMessage
+  | ForceKillResultMessage;
 
 // ── Browser → Server ────────────────────────────────────────────────
 
@@ -279,6 +280,18 @@ export interface SetModelBrowserMessage {
 export interface ShutdownBrowserMessage {
   type: "shutdown";
   sessionId: string;
+}
+
+export interface ForceKillBrowserMessage {
+  type: "force_kill";
+  sessionId: string;
+}
+
+export interface ForceKillResultMessage {
+  type: "force_kill_result";
+  sessionId: string;
+  success: boolean;
+  message?: string;
 }
 
 export interface ListSessionsBrowserMessage {
@@ -410,4 +423,5 @@ export type BrowserToServerMessage =
   | CreateTerminalBrowserMessage
   | KillTerminalBrowserMessage
   | RenameTerminalBrowserMessage
-  | FlowControlBrowserMessage;
+  | FlowControlBrowserMessage
+  | ForceKillBrowserMessage;

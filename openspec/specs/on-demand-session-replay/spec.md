@@ -40,3 +40,15 @@ When the browser receives a full `event_replay` (first event has `seq === 1`), t
 #### Scenario: Live events not affected by loading
 - **WHEN** live `event_forward` messages arrive for an active session while a different session is being loaded
 - **THEN** the live events SHALL be broadcast normally to subscribers — loading only applies to the specific session being loaded
+
+### Requirement: Stale lastSeq detection on subscribe
+The subscription handler SHALL detect when a browser's `lastSeq` exceeds the server's max stored seq, and trigger a full reset-and-replay.
+
+#### Scenario: Stale lastSeq triggers reset
+- **WHEN** a browser subscribes with `lastSeq: 500` and the server has events up to seq `10` for that session
+- **THEN** the server SHALL send `session_state_reset` to that browser WebSocket
+- **AND** replay all events from seq 1
+
+#### Scenario: Valid lastSeq returns delta
+- **WHEN** a browser subscribes with `lastSeq: 50` and the server has events up to seq `100`
+- **THEN** the server SHALL replay events with seq 51–100 without sending `session_state_reset`

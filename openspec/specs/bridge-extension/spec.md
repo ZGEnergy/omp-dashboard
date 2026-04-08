@@ -177,3 +177,25 @@ The bridge extension SHALL treat incoming `heartbeat_ack` messages as server liv
 - **WHEN** the bridge sends a `session_heartbeat` to the server
 - **THEN** the server SHALL respond with `heartbeat_ack`
 - **AND** the bridge SHALL receive it within the normal WebSocket delivery time
+
+### Requirement: Event subscription model change
+The bridge extension's event subscription SHALL change from a curated whitelist to a comprehensive subscription of all pi core event types (minus exclusions). The `model_select` enrichment (adding `thinkingLevel`) and `turn_end` enrichment (adding `contextUsage`) SHALL be preserved. OpenSpec detection and stats extraction are handled server-side.
+
+#### Scenario: All core events forwarded
+- **WHEN** any pi core event fires (except `context` and `before_provider_request`)
+- **THEN** it SHALL be forwarded as an `event_forward` protocol message
+
+#### Scenario: model_select enrichment preserved
+- **WHEN** a `model_select` event fires
+- **THEN** it SHALL be enriched with `thinkingLevel` and forwarded as `event_forward`
+
+### Requirement: Bridge sends process PID at registration
+The bridge SHALL include `process.pid` (the Node.js process ID) in the `session_register` message sent to the server.
+
+#### Scenario: PID included in registration
+- **WHEN** the bridge sends a `session_register` message
+- **THEN** the message SHALL include a `pid` field set to `process.pid`
+
+#### Scenario: PID is a positive integer
+- **WHEN** the bridge registers
+- **THEN** the `pid` value SHALL be a positive integer
