@@ -108,6 +108,23 @@ export function extractSessionUpdates(event: DashboardEvent): SessionUpdates | n
       };
     }
 
+    // ── Architect events ──
+    case "architect_started": {
+      const mode = (event.data.mode as string) || "new";
+      return {
+        activeFlowName: mode === "edit" ? "Editing flow..." : "Designing flow...",
+        flowStatus: "running" as FlowStatus,
+      };
+    }
+
+    case "architect_complete":
+    case "architect_cancelled": {
+      return {
+        activeFlowName: null,
+        flowStatus: null,
+      };
+    }
+
     default:
       return null;
   }

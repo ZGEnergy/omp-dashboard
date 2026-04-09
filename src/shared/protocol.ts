@@ -1,7 +1,7 @@
 /**
  * Extension ↔ Server WebSocket protocol messages.
  */
-import type { DashboardEvent, CommandInfo, FlowInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, PiSessionInfo } from "./types.js";
+import type { DashboardEvent, CommandInfo, FlowInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, PiSessionInfo, OpenSpecPhase, RoleInfo } from "./types.js";
 
 // ── Extension → Server ──────────────────────────────────────────────
 
@@ -137,10 +137,24 @@ export interface FirstMessageUpdateMessage {
   firstMessage: string;
 }
 
+export interface RolesListMessage {
+  type: "roles_list";
+  sessionId: string;
+  roles: Record<string, string>;
+  presets: Array<{ name: string; roles: Record<string, string> }>;
+  activePreset: string | null;
+}
+
 export interface ExtensionUiDismissMessage {
   type: "extension_ui_dismiss";
   sessionId: string;
   requestId: string;
+}
+
+export interface SpawnNewSessionMessage {
+  type: "spawn_new_session";
+  sessionId: string;
+  cwd: string;
 }
 
 // LoadSessionEventsResultMessage and LoadSessionEventsErrorMessage removed — server loads directly
@@ -161,7 +175,9 @@ export type ExtensionToServerMessage =
   | SessionsListExtensionMessage
   | ExtensionUiDismissMessage
   | ReplayCompleteMessage
-  | FirstMessageUpdateMessage;
+  | FirstMessageUpdateMessage
+  | RolesListMessage
+  | SpawnNewSessionMessage;
 
 // ── Server → Extension ──────────────────────────────────────────────
 
@@ -233,7 +249,7 @@ export interface ShutdownExtensionMessage {
 export interface FlowControlExtensionMessage {
   type: "flow_control";
   sessionId: string;
-  action: "abort" | "toggle_autonomous";
+  action: "abort" | "toggle_autonomous" | "dismiss_summary";
 }
 
 // LoadSessionEventsMessage removed — server loads directly via DirectoryService
@@ -249,6 +265,53 @@ export interface RequestFlowsRefreshMessage {
 
 export interface CredentialsUpdatedMessage {
   type: "credentials_updated";
+}
+
+export interface FlowManagementExtensionMessage {
+  type: "flow_management";
+  sessionId: string;
+  action: "run" | "new" | "edit" | "delete";
+  flowName?: string;
+  task?: string;
+  description?: string;
+}
+
+export interface ArchitectPromptResponseExtensionMessage {
+  type: "architect_prompt_response";
+  sessionId: string;
+  promptId: string;
+  answer?: string;
+  cancelled?: boolean;
+}
+
+export interface RoleSetExtensionMessage {
+  type: "role_set";
+  sessionId: string;
+  role: string;
+  modelId: string;
+}
+
+export interface RolePresetLoadExtensionMessage {
+  type: "role_preset_load";
+  sessionId: string;
+  presetName: string;
+}
+
+export interface RolePresetSaveExtensionMessage {
+  type: "role_preset_save";
+  sessionId: string;
+  presetName: string;
+}
+
+export interface RolePresetDeleteExtensionMessage {
+  type: "role_preset_delete";
+  sessionId: string;
+  presetName: string;
+}
+
+export interface RequestRolesMessage {
+  type: "request_roles";
+  sessionId: string;
 }
 
 export interface ExtensionUiResponseMessage {
@@ -275,4 +338,11 @@ export type ServerToExtensionMessage =
   | FlowControlExtensionMessage
   | HeartbeatAckMessage
   | RequestFlowsRefreshMessage
-  | CredentialsUpdatedMessage;
+  | CredentialsUpdatedMessage
+  | FlowManagementExtensionMessage
+  | ArchitectPromptResponseExtensionMessage
+  | RoleSetExtensionMessage
+  | RolePresetLoadExtensionMessage
+  | RolePresetSaveExtensionMessage
+  | RolePresetDeleteExtensionMessage
+  | RequestRolesMessage;

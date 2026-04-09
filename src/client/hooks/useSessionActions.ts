@@ -74,6 +74,17 @@ export function useSessionActions(deps: SessionActionDeps) {
     }
   }, [selectedId, send, setSessionStates, setSessions]);
 
+  const handleFlowAction = useCallback((sessionId: string, action: string, opts?: { flowName?: string; task?: string; description?: string }) => {
+    send({
+      type: "flow_management",
+      sessionId,
+      action,
+      flowName: opts?.flowName,
+      task: opts?.task,
+      description: opts?.description,
+    });
+  }, [send]);
+
   const handleSend = useCallback((text: string, images?: ImageContent[]) => {
     if (selectedId) {
       send({ type: "send_prompt", sessionId: selectedId, text, images });
@@ -191,7 +202,7 @@ export function useSessionActions(deps: SessionActionDeps) {
   }, [selectedId, send]);
 
   return {
-    handleAbort, handleForceKill, handleCancelPending, handleRespondToUi, handleSend,
+    handleAbort, handleForceKill, handleCancelPending, handleRespondToUi, handleFlowAction, handleSend,
     handleSelect, handleRenameSession, handleShutdownSession,
     handleSendPromptToSession, handleResumeSession, handleSpawnSession,
     handleHideSession, handleUnhideSession,

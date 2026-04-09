@@ -9,6 +9,8 @@ import { ConnectionManager } from "./connection.js";
 import { detectSessionSource } from "./source-detector.js";
 import { mapEventToProtocol } from "./event-forwarder.js";
 import { createCommandHandler } from "./command-handler.js";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, ensureConfig } from "../shared/config.js";
@@ -188,12 +190,131 @@ function initBridge(pi: ExtensionAPI) {
         try { cachedModelRegistry?.authStorage?.reload?.(); } catch { /* ignore */ }
         return;
       }
+      // Route flow management actions from dashboard buttons
+      if (msg.type === "flow_management" && pi.events) {
+        if (msg.action === "run") {
+          pi.events.emit("flow:run", { flowName: msg.flowName, task: msg.task || undefined });
+        } else if (msg.action === "new") {
+          pi.events.emit("flows:new-request", { description: msg.description || "" });
+        } else if (msg.action === "edit") {
+          const editFlows = getFlowsList() as Array<{ name: string; source?: string }>;
+          const editMatch = editFlows.find(f => f.name === msg.flowName);
+          const resolvedPath = editMatch?.source || "";
+          if (!resolvedPath) {
+            console.error(`[dashboard] flow_management edit: could not resolve path for "${msg.flowName}" (${editFlows.length} flows)`);
+          }
+          pi.events.emit("flows:edit-request", { flowName: msg.flowName || "", flowPath: resolvedPath, modificationRequest: msg.description || "" });
+        } else if (msg.action === "delete") {
+          // Dashboard already confirmed upfront — delete directly
+          pi.events.emit("flow:delete-request", { flowName: msg.flowName });
+          pi.events.emit("flow:notify", { message: `Flow "${msg.flowName}" deleted.`, level: "info" });
+        }
+        return;
+      }
+      // Route role management from dashboard
+      if (msg.type === "role_set" && pi.events) {
+        const data: any = { role: (msg as any).role, modelId: (msg as any).modelId };
+        pi.events.emit("flow:role-set", data);
+        if (data.success) {
+          const rolesData: any = {};
+          pi.events.emit("flow:role-get-all", rolesData);
+          connection.send({
+            type: "roles_list",
+            sessionId,
+            roles: rolesData.roles ?? {},
+            presets: rolesData.presets ?? [],
+            activePreset: rolesData.activePreset ?? null,
+          });
+        }
+        return;
+      }
+      if (msg.type === "role_preset_load" && pi.events) {
+        const data: any = { name: (msg as any).presetName };
+        pi.events.emit("flow:role-preset-load", data);
+        if (data.success) {
+          const rolesData: any = {};
+          pi.events.emit("flow:role-get-all", rolesData);
+          connection.send({
+            type: "roles_list",
+            sessionId,
+            roles: rolesData.roles ?? {},
+            presets: rolesData.presets ?? [],
+            activePreset: rolesData.activePreset ?? null,
+          });
+        }
+        return;
+      }
+      if (msg.type === "role_preset_save" && pi.events) {
+        const data: any = { name: (msg as any).presetName };
+        pi.events.emit("flow:role-preset-save", data);
+        if (data.success) {
+          const rolesData: any = {};
+          pi.events.emit("flow:role-get-all", rolesData);
+          connection.send({
+            type: "roles_list",
+            sessionId,
+            roles: rolesData.roles ?? {},
+            presets: rolesData.presets ?? [],
+            activePreset: rolesData.activePreset ?? null,
+          });
+        }
+        return;
+      }
+      if (msg.type === "role_preset_delete" && pi.events) {
+        const data: any = { name: (msg as any).presetName };
+        pi.events.emit("flow:role-preset-delete", data);
+        if (data.success) {
+          const rolesData: any = {};
+          pi.events.emit("flow:role-get-all", rolesData);
+          connection.send({
+            type: "roles_list",
+            sessionId,
+            roles: rolesData.roles ?? {},
+            presets: rolesData.presets ?? [],
+            activePreset: rolesData.activePreset ?? null,
+          });
+        }
+        return;
+      }
+      if (msg.type === "request_roles" && pi.events) {
+        const rolesData: any = {};
+        pi.events.emit("flow:role-get-all", rolesData);
+        connection.send({
+          type: "roles_list",
+          sessionId,
+          roles: rolesData.roles ?? {},
+          presets: rolesData.presets ?? [],
+          activePreset: rolesData.activePreset ?? null,
+        });
+        return;
+      }
+      // Route architect prompt responses back to flow-workspace via pi.events
+      if (msg.type === "architect_prompt_response" && pi.events) {
+        pi.events.emit("flow:prompt-response", {
+          id: msg.promptId,
+          answer: msg.answer,
+          cancelled: msg.cancelled,
+        });
+        // Cancel any pending ui-proxy dialogs so the TUI selector is dismissed.
+        // The architect prompt was also forwarded via the ui-proxy (through
+        // flow-tui’s prompt-request handler calling uiCtx.select()), but the
+        // dashboard client suppresses the duplicate extension_ui_request when
+        // an architect_prompt_request is pending. So the proxy’s dashPromise
+        // would never resolve, leaving the TUI dialog open forever.
+        uiProxy?.cancelAllPending();
+        return;
+      }
       // Route flow control messages to pi-flows via pi.events
       if (msg.type === "flow_control" && pi.events) {
         if (msg.action === "abort") {
           pi.events.emit("flow:abort", {});
+          // Also abort architect if running (mutually exclusive with flow execution;
+          // the irrelevant emit is a no-op due to guard checks on both listeners)
+          pi.events.emit("flow:architect-abort", {});
         } else if (msg.action === "toggle_autonomous") {
           pi.events.emit("flow:toggle-autonomous", {});
+        } else if (msg.action === "dismiss_summary") {
+          pi.events.emit("flow:summary-dismissed", {});
         }
         return;
       }
@@ -264,6 +385,9 @@ function initBridge(pi: ExtensionAPI) {
         console.error("[dashboard] reload not available — type /__dashboard_reload in pi TUI once to bootstrap");
       }
     },
+    spawnNew: () => {
+      connection.send({ type: "spawn_new_session", sessionId, cwd: process.cwd() });
+    },
     sessionPrompt: (text) => {
       // Route slash commands: management events, flow:run, then fallback
       if (text.startsWith("/") && pi.events) {
@@ -272,21 +396,10 @@ function initBridge(pi: ExtensionAPI) {
         const cmdName = spaceIdx === -1 ? cmdText : cmdText.slice(0, spaceIdx);
         const cmdArgs = spaceIdx === -1 ? "" : cmdText.slice(spaceIdx + 1);
 
-        // Route flow management commands via direct event emission.
-        // Pass cachedCtx as fallback context for pi-flows handlers
-        // where lastCtx may not yet be set.
-        if (cmdName === "flows:new") {
-          pi.events.emit("flows:new-request", { description: cmdArgs.trim(), ctx: cachedCtx });
-          return;
-        }
-        if (cmdName === "flows:edit") {
-          pi.events.emit("flows:edit-request", { flowName: cmdArgs.trim(), ctx: cachedCtx });
-          return;
-        }
-        if (cmdName === "flows:delete") {
-          pi.events.emit("flow:delete-request", { flowName: cmdArgs.trim(), ctx: cachedCtx });
-          return;
-        }
+        // Flow management commands from buttons use flow_management message type.
+        // Typed /flows:new, /flows:edit, /flows:delete in chat input fall through
+        // to the slash command handler below, which invokes pi's command system
+        // via pi.sendUserMessage (with ui-proxy handling ctx.ui calls).
 
         // Check if it's a user-defined flow via flow:list-flows
         const flowsList = getFlowsList();
@@ -580,6 +693,21 @@ function initBridge(pi: ExtensionAPI) {
       } catch { /* modelRegistry not available */ }
     }
 
+    // Send initial roles
+    if (pi.events) {
+      const rolesData: any = {};
+      pi.events.emit("flow:role-get-all", rolesData);
+      if (rolesData.roles) {
+        connection.send({
+          type: "roles_list",
+          sessionId,
+          roles: rolesData.roles ?? {},
+          presets: rolesData.presets ?? [],
+          activePreset: rolesData.activePreset ?? null,
+        });
+      }
+    }
+
     // Auto-start server if not running (non-blocking — connection will reconnect)
     autoStartServer(config, {
       isPortOpen,
@@ -692,6 +820,25 @@ function initBridge(pi: ExtensionAPI) {
         }));
         connection.send({ type: "models_list", sessionId, models });
       } catch { /* ignore */ }
+
+      // Restore saved default model if it's from a custom provider that just became available
+      try {
+        const settingsPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
+        const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+        const { defaultProvider, defaultModel: defaultModelId } = settings;
+        if (defaultProvider && defaultModelId) {
+          const currentModel = getCurrentModelString({ cachedCtx } as any);
+          const savedModel = `${defaultProvider}/${defaultModelId}`;
+          if (currentModel !== savedModel) {
+            const found = cachedModelRegistry.find(defaultProvider, defaultModelId);
+            if (found) {
+              (pi as any).setModel(found).then(() => {
+                setTimeout(() => sendModelUpdateIfChanged(), 50);
+              }).catch(() => {});
+            }
+          }
+        }
+      } catch { /* settings file missing or unreadable */ }
     }
   });
 

@@ -19,6 +19,23 @@ export const FLOW_EVENT_MAP: Record<string, string> = {
   "flow:loop-iteration": "flow_loop_iteration",
   "flow:auto-decision": "flow_auto_decision",
   "flow:complete": "flow_complete",
+  "flow:summary-started": "flow_summary_started",
+  "flow:summary-ready": "flow_summary_ready",
+  "flow:summary-dismissed": "flow_summary_dismissed",
+  // Architect lifecycle events
+  "flow:architect-started": "architect_started",
+  "flow:architect-tool-call": "architect_tool_call",
+  "flow:architect-tool-result": "architect_tool_result",
+  "flow:architect-text": "architect_text",
+  "flow:architect-preview": "architect_preview",
+  "flow:architect-complete": "architect_complete",
+  "flow:architect-replan": "architect_replan",
+  "flow:architect-cancelled": "architect_cancelled",
+  "flow:architect-saved": "architect_saved",
+  "flow:architect-error": "architect_error",
+  "flow:architect-context-generating": "architect_context_generating",
+  "flow:architect-context-ready": "architect_context_ready",
+  "flow:architect-run-handoff": "architect_run_handoff",
 };
 
 /** Map of pi-subagents event names to dashboard protocol event types */
@@ -58,4 +75,28 @@ export function registerFlowEventListeners(
 
   // Note: event_forward sending for flow and subagent events is handled by
   // the EventBus emit intercept in bridge.ts (catch-all forwarding).
+
+  // Forward architect prompt requests directly to the dashboard widget bar.
+  // Non-architect prompts still go through ui-proxy (flow-tui -> ctx.ui.select -> extension_ui_request).
+  // Both paths race -- first response wins via emitPromptAndAwait's resolved guard.
+  pi.events.on("flow:prompt-request", (data: unknown) => {
+    if (!isSessionReady()) return;
+    const req = data as { id?: string; pipeline?: string; type?: string; question?: string; options?: string[]; defaultValue?: string };
+    if (!req.id || !req.pipeline?.startsWith("architect-")) return;
+    connection.send({
+      type: "event_forward",
+      sessionId: bc.sessionId,
+      event: {
+        eventType: "architect_prompt_request",
+        timestamp: Date.now(),
+        data: {
+          id: req.id,
+          promptType: req.type,
+          question: req.question,
+          options: req.options,
+          defaultValue: req.defaultValue,
+        },
+      },
+    });
+  });
 }

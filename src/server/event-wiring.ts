@@ -10,6 +10,8 @@ import type { SessionOrderManager } from "./session-order-manager.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { DirectoryService } from "./directory-service.js";
 import { extractSessionUpdates } from "./event-status-extraction.js";
+import { spawnPiSession } from "./process-manager.js";
+import { loadConfig } from "../shared/config.js";
 import { writeSessionMeta } from "../shared/session-meta.js";
 import type { DashboardSession } from "../shared/types.js";
 import { detectOpenSpecActivity } from "../shared/openspec-activity-detector.js";
@@ -451,6 +453,16 @@ export function wireEvents(deps: EventWiringDeps): void {
       } as any);
     }
 
+    if (msg.type === "roles_list") {
+      browserGateway.broadcastToAll({
+        type: "roles_list",
+        sessionId,
+        roles: (msg as any).roles,
+        presets: (msg as any).presets,
+        activePreset: (msg as any).activePreset,
+      } as any);
+    }
+
     if (msg.type === "model_update") {
       const modelUpdates: Partial<DashboardSession> = {
         model: msg.model,
@@ -487,6 +499,20 @@ export function wireEvents(deps: EventWiringDeps): void {
       const nameUpdates = { name: msg.name || undefined };
       sessionManager.update(sessionId, nameUpdates);
       browserGateway.broadcastSessionUpdated(sessionId, nameUpdates);
+    }
+
+    if (msg.type === "spawn_new_session") {
+      spawnPiSession(msg.cwd, { strategy: loadConfig().spawnStrategy }).then((result) => {
+        if (result.process && result.pid) {
+          browserGateway.headlessPidRegistry.register(result.pid, msg.cwd, result.process);
+        }
+        browserGateway.broadcastToAll({
+          type: "spawn_result",
+          cwd: msg.cwd,
+          success: result.success,
+          message: result.message,
+        } as any);
+      }).catch(() => { /* ignore spawn errors */ });
     }
 
     if (msg.type === "sessions_list") {

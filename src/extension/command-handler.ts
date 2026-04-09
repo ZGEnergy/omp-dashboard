@@ -8,6 +8,7 @@ import type {
   ExtensionToServerMessage,
 } from "../shared/protocol.js";
 import type { FileEntry, PiSessionInfo } from "../shared/types.js";
+import { filterHiddenCommands } from "./bridge-context.js";
 
 /** Escape regex special characters for fd pattern */
 function escapeRegex(value: string): string {
@@ -58,6 +59,7 @@ export type ParsedPrompt =
   | { type: "model"; provider: string; modelId: string }
   | { type: "shutdown" }
   | { type: "reload" }
+  | { type: "new" }
   | { type: "mgmt"; event: string; data: Record<string, unknown> }
   | { type: "slash"; text: string }
   | { type: "passthrough"; text: string };
@@ -104,7 +106,12 @@ export function parseSendPrompt(text: string): ParsedPrompt {
     return { type: "reload" };
   }
 
-  // 4c. Check /model <provider/id>
+  // 4c. Check /new
+  if (text === "/new") {
+    return { type: "new" };
+  }
+
+  // 4d. Check /model <provider/id>
   if (text.startsWith("/model ")) {
     const modelStr = text.slice(7).trim();
     const slashIdx = modelStr.indexOf("/");
@@ -156,6 +163,8 @@ export function createCommandHandler(
     compact?: (options: { customInstructions?: string }) => void;
     /** Trigger session reload (extensions, settings, skills, etc.) */
     reload?: () => void;
+    /** Spawn a new session in the same cwd */
+    spawnNew?: () => void;
     /** Switch model via pi.setModel() */
     setModel?: (provider: string, modelId: string) => Promise<void>;
     /** Route slash commands through session.prompt() */
@@ -206,6 +215,22 @@ export function createCommandHandler(
                 eventType: "command_feedback",
                 timestamp: Date.now(),
                 data: { command: "/reload", status: "completed" },
+              },
+            });
+            return undefined;
+          }
+
+          if (parsed.type === "new") {
+            if (options?.spawnNew) {
+              options.spawnNew();
+            }
+            options?.eventSink?.({
+              type: "event_forward",
+              sessionId,
+              event: {
+                eventType: "command_feedback",
+                timestamp: Date.now(),
+                data: { command: "/new", status: "completed" },
               },
             });
             return undefined;
@@ -274,7 +299,7 @@ export function createCommandHandler(
           return undefined;
 
         case "request_commands": {
-          const commands = pi.getCommands().filter((cmd: any) => !cmd.name.startsWith("__"));
+          const commands = filterHiddenCommands(pi.getCommands());
           // Also send flows list alongside commands
           if (options?.eventSink) {
             const probe: any = {};

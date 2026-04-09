@@ -73,6 +73,7 @@ export interface FlowInfo {
   name: string;
   description: string;
   taskRequired: boolean;
+  source?: string;
 }
 
 /** Info about an available command */
@@ -115,6 +116,13 @@ export interface ContextUsage {
 export interface ModelInfo {
   provider: string;
   id: string;
+}
+
+/** Role assignment info (from pi-flows role-manager) */
+export interface RoleInfo {
+  roles: Record<string, string>;
+  presets: Array<{ name: string; roles: Record<string, string> }>;
+  activePreset: string | null;
 }
 
 /** OpenSpec artifact status */
@@ -256,10 +264,80 @@ export interface FlowState {
   task: string;
   status: FlowStatus;
   autonomousMode: boolean;
+  /** Path to the flow YAML file (for YAML viewer) */
+  flowSource?: string;
   /** Ordered map — insertion order matches step order from flow config */
   agents: Map<string, FlowAgentState>;
   /** Set after flow_complete event */
   flowResult?: Record<string, unknown>;
+
+  /** Next flow to run (workflow stage resolution) */
+  nextStep?: string | null;
+  /** Pre-computed summary stats */
+  summaryStats?: {
+    agentCount: number;
+    duration: string;
+    fileCount: number;
+    perAgent: Array<{ name: string; status: string; fileCount: number }>;
+  };
+}
+
+// ── Architect Dashboard Types ───────────────────────────────────────
+
+/** Phase of the architect lifecycle */
+export type ArchitectPhase = "context" | "designing" | "preview" | "complete" | "cancelled";
+
+/** Agent entry tracked during architect design */
+export interface ArchitectAgentEntry {
+  name: string;
+  type: "built-in" | "local" | "custom";
+  status: "pending" | "creating" | "done" | "error";
+  statusText?: string;
+}
+
+/** Step in the designed flow DAG */
+export interface ArchitectDagStep {
+  id: string;
+  agentName?: string;
+  blockedBy: string[];
+}
+
+/** Parsed flow metadata from architect preview */
+export interface ArchitectParsedFlow {
+  name: string;
+  description: string;
+  maxConcurrent: number;
+  steps: ArchitectDagStep[];
+}
+
+/** Architect state tracked client-side by the architect reducer */
+export interface ArchitectPrompt {
+  id: string;
+  type: "select" | "input" | "confirm";
+  question: string;
+  options?: string[];
+  defaultValue?: string;
+}
+
+export interface ArchitectState {
+  phase: ArchitectPhase;
+  architectMode: "new" | "edit";
+  flowName: string;
+  agents: ArchitectAgentEntry[];
+  dagSteps: ArchitectDagStep[];
+  parsedFlows: ArchitectParsedFlow[];
+  lastToolCall: { toolName: string; inputPreview: string } | null;
+  /** Rolling window of recent tool calls for card display */
+  recentTools: FlowRecentTool[];
+  /** Full detail history (tool calls, text, thinking) for detail view */
+  detailHistory: FlowDetailEntry[];
+  iteration: number;
+  catalogSummary?: string;
+  error?: string;
+  /** Pending architect prompt (Save/Replan/Cancel etc.) rendered in widget bar */
+  pendingPrompt: ArchitectPrompt | null;
+  /** Raw flow YAML content for the YAML viewer */
+  flowYamlContent?: string;
 }
 
 /** REST API response envelope */

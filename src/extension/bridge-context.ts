@@ -23,9 +23,16 @@ export interface BridgeContext {
   lastSessionName: string | undefined;
 }
 
-/** Filter out hidden commands (names starting with __) from commands list */
+// Commands that the dashboard handles natively with superior UX.
+// These are filtered from the command list sent to dashboard clients.
+const DASHBOARD_NATIVE_COMMANDS = new Set(["roles"]);
+
+/** Filter out hidden commands (names starting with __) and dashboard-native commands from commands list */
 export function filterHiddenCommands(commands: any[]): any[] {
-  return commands.filter((cmd) => !cmd.name.startsWith("__"));
+  return commands.filter((cmd) =>
+    !cmd.name.startsWith("__") &&
+    !DASHBOARD_NATIVE_COMMANDS.has(cmd.name)
+  );
 }
 
 /** Extract first user message text from session entries */

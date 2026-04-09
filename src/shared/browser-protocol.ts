@@ -92,6 +92,14 @@ export interface BrowserModelsListMessage {
   models: ModelInfo[];
 }
 
+export interface BrowserRolesListMessage {
+  type: "roles_list";
+  sessionId: string;
+  roles: Record<string, string>;
+  presets: Array<{ name: string; roles: Record<string, string> }>;
+  activePreset: string | null;
+}
+
 export interface SessionsListBrowserMessage {
   type: "sessions_list";
   sessionId: string;
@@ -204,7 +212,8 @@ export type ServerToBrowserMessage =
   | PackageProgressMessage
   | PackageOperationCompleteMessage
   | EditorStatusMessage
-  | ForceKillResultMessage;
+  | ForceKillResultMessage
+  | BrowserRolesListMessage;
 
 // ── Browser → Server ────────────────────────────────────────────────
 
@@ -386,13 +395,60 @@ export interface BrowserExtensionUiResponseMessage {
 export interface FlowControlBrowserMessage {
   type: "flow_control";
   sessionId: string;
-  action: "abort" | "toggle_autonomous";
+  action: "abort" | "toggle_autonomous" | "dismiss_summary";
 }
 
 export interface RequestInstalledPackagesBrowserMessage {
   type: "request_installed_packages";
   scope: "global" | "local";
   cwd?: string;
+}
+
+export interface FlowManagementBrowserMessage {
+  type: "flow_management";
+  sessionId: string;
+  action: "run" | "new" | "edit" | "delete";
+  flowName?: string;
+  task?: string;
+  description?: string;
+}
+
+export interface ArchitectPromptResponseBrowserMessage {
+  type: "architect_prompt_response";
+  sessionId: string;
+  promptId: string;
+  answer?: string;
+  cancelled?: boolean;
+}
+
+export interface RoleSetBrowserMessage {
+  type: "role_set";
+  sessionId: string;
+  role: string;
+  modelId: string;
+}
+
+export interface RolePresetLoadBrowserMessage {
+  type: "role_preset_load";
+  sessionId: string;
+  presetName: string;
+}
+
+export interface RolePresetSaveBrowserMessage {
+  type: "role_preset_save";
+  sessionId: string;
+  presetName: string;
+}
+
+export interface RolePresetDeleteBrowserMessage {
+  type: "role_preset_delete";
+  sessionId: string;
+  presetName: string;
+}
+
+export interface RequestRolesBrowserMessage {
+  type: "request_roles";
+  sessionId: string;
 }
 
 export type BrowserToServerMessage =
@@ -426,4 +482,11 @@ export type BrowserToServerMessage =
   | KillTerminalBrowserMessage
   | RenameTerminalBrowserMessage
   | FlowControlBrowserMessage
-  | ForceKillBrowserMessage;
+  | ForceKillBrowserMessage
+  | FlowManagementBrowserMessage
+  | ArchitectPromptResponseBrowserMessage
+  | RoleSetBrowserMessage
+  | RolePresetLoadBrowserMessage
+  | RolePresetSaveBrowserMessage
+  | RolePresetDeleteBrowserMessage
+  | RequestRolesBrowserMessage;

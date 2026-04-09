@@ -508,6 +508,25 @@ describe("CommandHandler", () => {
       expect(pi.sendUserMessage).not.toHaveBeenCalled();
     });
 
+    it("should route /new to spawnNew callback", async () => {
+      const pi = createMockPi();
+      const spawnNew = vi.fn();
+      const eventSink = vi.fn();
+      const handler = createCommandHandler(pi as any, "s1", { spawnNew, eventSink });
+
+      await handler.handle({ type: "send_prompt", sessionId: "s1", text: "/new" });
+
+      expect(spawnNew).toHaveBeenCalled();
+      expect(pi.sendUserMessage).not.toHaveBeenCalled();
+      expect(eventSink).toHaveBeenCalledWith(expect.objectContaining({
+        type: "event_forward",
+        event: expect.objectContaining({
+          eventType: "command_feedback",
+          data: expect.objectContaining({ command: "/new", status: "completed" }),
+        }),
+      }));
+    });
+
     it("should pass plain text through to sendUserMessage", async () => {
       const pi = createMockPi();
       const handler = createCommandHandler(pi as any, "s1");
@@ -655,6 +674,10 @@ describe("parseSendPrompt", () => {
 
   it("should detect /reload as reload", () => {
     expect(parseSendPrompt("/reload")).toEqual({ type: "reload" });
+  });
+
+  it("should detect /new as new", () => {
+    expect(parseSendPrompt("/new")).toEqual({ type: "new" });
   });
 
   it("should detect /model provider/id as model command", () => {

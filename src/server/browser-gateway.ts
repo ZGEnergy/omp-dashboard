@@ -306,6 +306,68 @@ export function createBrowserGateway(
             handleExtensionUiResponse(msg, ctx);
             break;
           }
+
+          case "flow_management": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "flow_management",
+              sessionId: msg.sessionId,
+              action: msg.action,
+              flowName: msg.flowName,
+              task: msg.task,
+              description: msg.description,
+            });
+            break;
+          }
+          case "architect_prompt_response": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "architect_prompt_response",
+              sessionId: msg.sessionId,
+              promptId: msg.promptId,
+              answer: msg.answer,
+              cancelled: msg.cancelled,
+            });
+            break;
+          }
+          case "role_set": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "role_set",
+              sessionId: msg.sessionId,
+              role: (msg as any).role,
+              modelId: (msg as any).modelId,
+            });
+            break;
+          }
+          case "role_preset_load": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "role_preset_load",
+              sessionId: msg.sessionId,
+              presetName: (msg as any).presetName,
+            });
+            break;
+          }
+          case "role_preset_save": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "role_preset_save",
+              sessionId: msg.sessionId,
+              presetName: (msg as any).presetName,
+            });
+            break;
+          }
+          case "role_preset_delete": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "role_preset_delete",
+              sessionId: msg.sessionId,
+              presetName: (msg as any).presetName,
+            });
+            break;
+          }
+          case "request_roles": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "request_roles",
+              sessionId: msg.sessionId,
+            });
+            break;
+          }
           case "create_terminal":
             handleCreateTerminal(msg, ctx);
             break;

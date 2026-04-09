@@ -236,5 +236,28 @@ export function createUiProxy(options: UiProxyOptions) {
     entry.resolve(extractResult(entry.method, response));
   }
 
-  return { wrappedUi, handleResponse, resendPending };
+  /**
+   * Cancel all pending UI requests. Resolves each pending promise with a
+   * "cancelled" result so the TUI dialogs are dismissed.
+   *
+   * Used when an external channel (e.g. architect_prompt_response) answers a
+   * question that was also forwarded through the ui-proxy. Without this, the
+   * TUI dialog would stay open forever because the proxy’s dashPromise never
+   * resolves.
+   */
+  function cancelAllPending(): void {
+    for (const [requestId, entry] of pending) {
+      const cancelled: ExtensionUiResponseMessage = {
+        type: "extension_ui_response",
+        sessionId: getSessionId(),
+        requestId,
+        cancelled: true,
+      };
+      entry.resolve(extractResult(entry.method, cancelled));
+      sendDismiss(requestId);
+    }
+    pending.clear();
+  }
+
+  return { wrappedUi, handleResponse, resendPending, cancelAllPending };
 }
