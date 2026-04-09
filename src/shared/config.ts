@@ -65,6 +65,7 @@ export interface DashboardConfig {
   tunnel: { enabled: boolean; reservedToken?: string };
   devBuildOnReload: boolean;
   auth?: AuthConfig;
+  defaultModel: string;
   memoryLimits: MemoryLimitsConfig;
   editor: EditorConfig;
 }
@@ -80,6 +81,7 @@ const DEFAULTS: DashboardConfig = {
   spawnStrategy: "headless",
   tunnel: { enabled: true },
   devBuildOnReload: false,
+  defaultModel: "",
   memoryLimits: { ...DEFAULT_MEMORY_LIMITS },
   editor: { ...DEFAULT_EDITOR_CONFIG },
 };
@@ -165,6 +167,7 @@ export function loadConfig(): DashboardConfig {
         ...(parsed.tunnel?.reservedToken ? { reservedToken: parsed.tunnel.reservedToken } : {}),
       },
       devBuildOnReload: parsed.devBuildOnReload ?? defaults.devBuildOnReload,
+      defaultModel: typeof parsed.defaultModel === "string" ? parsed.defaultModel : defaults.defaultModel,
       auth: parseAuthConfig(parsed.auth),
       memoryLimits: parseMemoryLimits(parsed.memoryLimits),
       editor: parseEditorConfig(parsed.editor),

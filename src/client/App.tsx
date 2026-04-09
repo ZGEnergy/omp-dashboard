@@ -1079,7 +1079,17 @@ export default function App() {
             sessionDetail ?? <LandingPage />
           )
         )}
-        {settingsMatch && <SettingsPanel />}
+        {settingsMatch && <SettingsPanel availableModels={(() => {
+          const seen = new Set<string>();
+          const models: Array<{ provider: string; id: string }> = [];
+          for (const list of modelsMap.values()) {
+            for (const m of list) {
+              const key = `${m.provider}/${m.id}`;
+              if (!seen.has(key)) { seen.add(key); models.push(m); }
+            }
+          }
+          return models;
+        })()} />}
         {tunnelSetupMatch && <ZrokInstallGuide onBack={() => navigate("/")} />}
       </div>
     </div>

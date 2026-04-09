@@ -49,6 +49,7 @@ interface Config {
   spawnStrategy: string;
   tunnel: { enabled: boolean };
   devBuildOnReload: boolean;
+  defaultModel: string;
   auth?: AuthConfig;
   memoryLimits: MemoryLimitsConfig;
   editor?: {
@@ -67,7 +68,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 const NEEDS_ISSUER = new Set(["keycloak", "oidc"]);
 
-export function SettingsPanel() {
+export function SettingsPanel({ availableModels }: { availableModels?: Array<{ provider: string; id: string }> }) {
   const [, navigate] = useLocation();
   const [config, setConfig] = useState<Config | null>(null);
   const [original, setOriginal] = useState<Config | null>(null);
@@ -123,6 +124,7 @@ export function SettingsPanel() {
     if (config.spawnStrategy !== original.spawnStrategy) partial.spawnStrategy = config.spawnStrategy;
     if (config.tunnel.enabled !== original.tunnel.enabled) partial.tunnel = { enabled: config.tunnel.enabled };
     if (config.devBuildOnReload !== original.devBuildOnReload) partial.devBuildOnReload = config.devBuildOnReload;
+    if (config.defaultModel !== original.defaultModel) partial.defaultModel = config.defaultModel;
 
     // Memory limits diff
     if (JSON.stringify(config.memoryLimits) !== JSON.stringify(original.memoryLimits)) {
@@ -355,6 +357,22 @@ export function SettingsPanel() {
                   value={config.spawnStrategy}
                   options={[{ value: "headless", label: "Headless" }, { value: "tmux", label: "Tmux" }]}
                   onChange={(v) => update((c) => { c.spawnStrategy = v; })}
+                />
+                <SelectField
+                  label="Default Model"
+                  value={config.defaultModel}
+                  options={[
+                    { value: "", label: "None (use pi default)" },
+                    ...(availableModels ?? []).map((m) => ({
+                      value: `${m.provider}/${m.id}`,
+                      label: `${m.provider}/${m.id}`,
+                    })),
+                    // Show the saved value even if not in available models
+                    ...((config.defaultModel && !(availableModels ?? []).some((m) => `${m.provider}/${m.id}` === config.defaultModel))
+                      ? [{ value: config.defaultModel, label: `${config.defaultModel} (not available)` }]
+                      : []),
+                  ]}
+                  onChange={(v) => update((c) => { c.defaultModel = v; })}
                 />
               </Section>
 

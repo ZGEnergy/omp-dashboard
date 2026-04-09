@@ -121,8 +121,27 @@ function initBridge(pi: ExtensionAPI) {
   let lastSessionFile: string | undefined;
   let lastSessionDir: string | undefined;
   let lastFirstMessage: string | undefined;
+  let pendingDefaultModel: string | null = null; // non-null if default model not yet applied (custom provider not ready)
 
-
+  /** Try to apply the default model from config. Returns the model string if not found (pending), null if applied or no default. */
+  function applyDefaultModel(): string | null {
+    const freshConfig = loadConfig();
+    if (!freshConfig.defaultModel || !cachedModelRegistry) return null;
+    const slashIdx = freshConfig.defaultModel.indexOf("/");
+    if (slashIdx <= 0) return null;
+    const provider = freshConfig.defaultModel.slice(0, slashIdx);
+    const modelId = freshConfig.defaultModel.slice(slashIdx + 1);
+    try {
+      const found = cachedModelRegistry.find(provider, modelId);
+      if (found) {
+        (pi as any).setModel(found).then(() => {
+          setTimeout(() => sendModelUpdateIfChanged(), 50);
+        }).catch(() => {});
+        return null; // applied
+      }
+    } catch { /* ignore */ }
+    return freshConfig.defaultModel; // not found yet — pending
+  }
 
   /** Query pi-flows for available flows via synchronous event RPC */
   function getFlowsList(): FlowInfo[] {
@@ -693,6 +712,11 @@ function initBridge(pi: ExtensionAPI) {
       } catch { /* modelRegistry not available */ }
     }
 
+    // Apply default model on new sessions only (not reload/resume/fork)
+    if (_event?.reason === "startup" && cachedModelRegistry) {
+      pendingDefaultModel = applyDefaultModel();
+    }
+
     // Send initial roles
     if (pi.events) {
       const rolesData: any = {};
@@ -821,24 +845,10 @@ function initBridge(pi: ExtensionAPI) {
         connection.send({ type: "models_list", sessionId, models });
       } catch { /* ignore */ }
 
-      // Restore saved default model if it's from a custom provider that just became available
-      try {
-        const settingsPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
-        const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-        const { defaultProvider, defaultModel: defaultModelId } = settings;
-        if (defaultProvider && defaultModelId) {
-          const currentModel = getCurrentModelString({ cachedCtx } as any);
-          const savedModel = `${defaultProvider}/${defaultModelId}`;
-          if (currentModel !== savedModel) {
-            const found = cachedModelRegistry.find(defaultProvider, defaultModelId);
-            if (found) {
-              (pi as any).setModel(found).then(() => {
-                setTimeout(() => sendModelUpdateIfChanged(), 50);
-              }).catch(() => {});
-            }
-          }
-        }
-      } catch { /* settings file missing or unreadable */ }
+      // Retry pending default model — custom provider may now have its models
+      if (pendingDefaultModel) {
+        pendingDefaultModel = applyDefaultModel();
+      }
     }
   });
 

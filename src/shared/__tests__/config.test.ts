@@ -118,6 +118,24 @@ describe("loadConfig", () => {
     expect(config.devBuildOnReload).toBe(false);
   });
 
+  it("should return defaultModel when set", () => {
+    fs.writeFileSync(configFile, JSON.stringify({ defaultModel: "anthropic/claude-opus-4-6" }));
+    const config = loadConfig();
+    expect(config.defaultModel).toBe("anthropic/claude-opus-4-6");
+  });
+
+  it("should default defaultModel to empty string when missing", () => {
+    fs.writeFileSync(configFile, JSON.stringify({ port: 3000 }));
+    const config = loadConfig();
+    expect(config.defaultModel).toBe("");
+  });
+
+  it("should default defaultModel to empty string when not a string", () => {
+    fs.writeFileSync(configFile, JSON.stringify({ defaultModel: 123 }));
+    const config = loadConfig();
+    expect(config.defaultModel).toBe("");
+  });
+
   it("should return auth undefined when no auth key", () => {
     fs.writeFileSync(configFile, JSON.stringify({ port: 3000 }));
     const config = loadConfig();
