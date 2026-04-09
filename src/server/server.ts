@@ -36,6 +36,7 @@ import { registerOpenSpecRoutes } from "./routes/openspec-routes.js";
 import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerProviderAuthRoutes } from "./routes/provider-auth-routes.js";
 import { registerPackageRoutes } from "./routes/package-routes.js";
+import { registerProviderRoutes } from "./routes/provider-routes.js";
 import { PackageManagerWrapper } from "./package-manager-wrapper.js";
 import { createEditorManager, type EditorManager } from "./editor-manager.js";
 import { registerEditorRoutes } from "./routes/editor-routes.js";
@@ -271,6 +272,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   registerEditorProxy(fastify, editorManager);
 
   registerProviderAuthRoutes(fastify, { piGateway });
+  registerProviderRoutes(fastify);
 
   // Serve static files / SPA fallback
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
