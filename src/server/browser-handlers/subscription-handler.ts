@@ -60,8 +60,14 @@ export function handleSubscribe(
   subs: Set<string>,
   ctx: BrowserHandlerContext,
 ): void {
-  const { ws, sessionManager, eventStore, directoryService, sendTo, broadcast, getSubscribers, replayPendingUiRequests, markReplaying, clearReplaying } = ctx;
+  const { ws, sessionManager, eventStore, directoryService, piGateway, sendTo, broadcast, getSubscribers, replayPendingUiRequests, markReplaying, clearReplaying } = ctx;
   subs.add(msg.sessionId);
+
+  // Request metadata from the extension so commands/flows/models/roles arrive
+  // while the browser is actually subscribed (responses use sendToSubscribers).
+  piGateway.sendToSession(msg.sessionId, { type: "request_commands", sessionId: msg.sessionId });
+  piGateway.sendToSession(msg.sessionId, { type: "request_models", sessionId: msg.sessionId });
+  piGateway.sendToSession(msg.sessionId, { type: "request_roles", sessionId: msg.sessionId });
 
   if (eventStore.hasEvents(msg.sessionId)) {
     const lastSeq = msg.lastSeq ?? 0;

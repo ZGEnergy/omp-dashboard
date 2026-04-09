@@ -15,7 +15,7 @@ function createMockContext(overrides: Partial<BrowserHandlerContext> = {}): Brow
     ws: { readyState: 1, OPEN: 1, bufferedAmount: 0 } as any,
     sessionManager: createMemorySessionManager(),
     eventStore: createMemoryEventStore(() => false),
-    piGateway: {} as any,
+    piGateway: { sendToSession: vi.fn() } as any,
     headlessPidRegistry: {} as any,
     pendingResumeRegistry: {} as any,
     sendTo: vi.fn(),
@@ -28,6 +28,20 @@ function createMockContext(overrides: Partial<BrowserHandlerContext> = {}): Brow
     ...overrides,
   };
 }
+
+describe("handleSubscribe — metadata requests on subscribe", () => {
+  it("sends request_commands, request_models, and request_roles to piGateway", () => {
+    const ctx = createMockContext();
+    const subs = new Set<string>();
+    handleSubscribe({ type: "subscribe", sessionId: "s1" }, subs, ctx);
+
+    const calls = (ctx.piGateway.sendToSession as any).mock.calls;
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toEqual(["s1", { type: "request_commands", sessionId: "s1" }]);
+    expect(calls[1]).toEqual(["s1", { type: "request_models", sessionId: "s1" }]);
+    expect(calls[2]).toEqual(["s1", { type: "request_roles", sessionId: "s1" }]);
+  });
+});
 
 describe("handleSubscribe — stale lastSeq detection", () => {
   it("replays delta when lastSeq is within server range", async () => {

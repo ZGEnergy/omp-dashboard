@@ -4,7 +4,7 @@
  */
 import { useCallback } from "react";
 import { createInitialState, reduceEvent, addInteractiveRequest, resolveInteractiveRequest, dismissInteractiveRequest, type SessionState } from "../lib/event-reducer.js";
-import type { DashboardSession, CommandInfo, FlowInfo, FileEntry, OpenSpecData, ModelInfo } from "../../shared/types.js";
+import type { DashboardSession, CommandInfo, FlowInfo, FileEntry, OpenSpecData, ModelInfo, RoleInfo } from "../../shared/types.js";
 import type { TerminalSession } from "../../shared/terminal-types.js";
 import type { EditorInstanceStatus } from "../../shared/editor-types.js";
 import type { ServerToBrowserMessage } from "../../shared/browser-protocol.js";
@@ -17,6 +17,7 @@ export interface MessageHandlerSetters {
   setFileResults: React.Dispatch<React.SetStateAction<{ query: string; files: FileEntry[] } | null>>;
   setOpenspecMap: React.Dispatch<React.SetStateAction<Map<string, OpenSpecData>>>;
   setModelsMap: React.Dispatch<React.SetStateAction<Map<string, ModelInfo[]>>>;
+  setRolesMap: React.Dispatch<React.SetStateAction<Map<string, RoleInfo>>>;
   setSpawnResult: React.Dispatch<React.SetStateAction<{ success: boolean; message: string } | null>>;
   setSessionOrderMap: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   setPinnedDirectories: React.Dispatch<React.SetStateAction<string[]>>;
@@ -40,7 +41,7 @@ export function useMessageHandler(
 ): (msg: ServerToBrowserMessage) => void {
   const {
     setSessions, setSessionStates, setSessionCommands, setSessionFlows,
-    setFileResults, setOpenspecMap, setModelsMap, setSpawnResult,
+    setFileResults, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult,
     setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses,
   } = setters;
   const { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef } = deps;
@@ -64,12 +65,8 @@ export function useMessageHandler(
           clearSpawningCwd(msg.session.cwd);
           navigate(`/session/${msg.session.id}`);
         }
-        // Request commands/models metadata (needed for sidebar actions)
-        // but don't auto-subscribe to events — lazy subscribe on session select
-        if (!subscribedRef.current.has(msg.session.id) && msg.session.status !== "ended") {
-          send({ type: "request_commands", sessionId: msg.session.id });
-          send({ type: "request_models", sessionId: msg.session.id });
-        }
+        // Commands/models/roles metadata is now requested server-side on subscribe
+        // (see subscription-handler.ts) so it arrives while the browser is subscribed.
         break;
 
       case "session_updated":
@@ -139,6 +136,18 @@ export function useMessageHandler(
         setModelsMap((prev) => {
           const next = new Map(prev);
           next.set(msg.sessionId, msg.models);
+          return next;
+        });
+        break;
+
+      case "roles_list":
+        setRolesMap((prev) => {
+          const next = new Map(prev);
+          next.set(msg.sessionId, {
+            roles: msg.roles,
+            presets: msg.presets,
+            activePreset: msg.activePreset,
+          });
           return next;
         });
         break;
@@ -280,5 +289,5 @@ export function useMessageHandler(
         });
         break;
     }
-  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef]);
+  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef]);
 }
