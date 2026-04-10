@@ -1,6 +1,6 @@
 import React, { useState, type ReactNode } from "react";
 import { Icon } from "@mdi/react";
-import { mdiCloseCircleOutline, mdiCheckCircle, mdiAlertCircle, mdiStopCircle, mdiCloseCircle, mdiCircleOutline, mdiChevronRight, mdiChevronDown } from "@mdi/js";
+import { mdiCloseCircleOutline, mdiCheckCircle, mdiAlertCircle, mdiStopCircle, mdiCloseCircle, mdiCircleOutline, mdiChevronRight, mdiChevronDown, mdiFileDocumentOutline } from "@mdi/js";
 import type { FlowState } from "../../shared/types.js";
 import { FlowGraph, type FlowGraphStep } from "./FlowGraph.js";
 
@@ -85,8 +85,18 @@ export function FlowSummary({
           {/* DAG graph showing final state */}
           <FlowGraph
             steps={agentsToGraphSteps(flowState)}
-            onGraphClick={onViewYaml}
           />
+          {onViewYaml && (
+            <div className="mt-1">
+              <button
+                onClick={onViewYaml}
+                className="text-[var(--text-tertiary)] hover:text-blue-400 transition-colors p-0.5 rounded hover:bg-[var(--bg-surface)] inline-flex items-center"
+                title="View flow YAML"
+              >
+                <Icon path={mdiFileDocumentOutline} size={0.5} />
+              </button>
+            </div>
+          )}
 
           {/* Per-agent status list */}
           <div className="space-y-0.5">

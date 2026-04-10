@@ -349,6 +349,8 @@ export interface ArchitectState {
   pendingPrompt: ArchitectPrompt | null;
   /** Raw flow YAML content for the YAML viewer */
   flowYamlContent?: string;
+  /** Whether the last flow_write succeeded (file written to disk) */
+  flowWriteStatus?: "written" | "validation-error";
 }
 
 /** REST API response envelope */

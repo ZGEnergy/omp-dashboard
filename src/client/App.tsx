@@ -590,6 +590,7 @@ export default function App() {
                 onClick={() => setArchitectDetailOpen(true)}
                 onPromptRespond={(promptId, answer) => selectedId && send({ type: "architect_prompt_response" as any, sessionId: selectedId, promptId, answer })}
                 onViewYaml={() => selectedId && openFlowYaml(selectedId)}
+                onViewAgentSource={(name, source) => setFlowYamlPreview({ content: "```yaml\n" + source + "\n```", title: name })}
               />
             </div>
           )}
@@ -608,6 +609,7 @@ export default function App() {
                 onClick={() => setArchitectDetailOpen(true)}
                 onPromptRespond={(promptId, answer) => selectedId && send({ type: "architect_prompt_response" as any, sessionId: selectedId, promptId, answer })}
                 onViewYaml={() => selectedId && openFlowYaml(selectedId)}
+                onViewAgentSource={(name, source) => setFlowYamlPreview({ content: "```yaml\n" + source + "\n```", title: name })}
               />
             </div>
           )}
@@ -615,6 +617,7 @@ export default function App() {
             <div className={`sticky ${selectedState.architectState ? 'top-auto' : 'top-0'} z-10`}>
               <FlowDashboard
                 flowState={selectedState.flowState}
+                flowStates={selectedState.flowStates}
                 onAgentClick={setFlowDetailAgent}
                 onAbort={() => selectedId && send({ type: "flow_control" as any, sessionId: selectedId, action: "abort" })}
                 onToggleAutonomous={() => selectedId && send({ type: "flow_control" as any, sessionId: selectedId, action: "toggle_autonomous" })}
@@ -642,6 +645,7 @@ export default function App() {
                 onClick={() => setArchitectDetailOpen(true)}
                 onPromptRespond={(promptId, answer) => selectedId && send({ type: "architect_prompt_response" as any, sessionId: selectedId, promptId, answer })}
                 onViewYaml={() => selectedId && openFlowYaml(selectedId)}
+                onViewAgentSource={(name, source) => setFlowYamlPreview({ content: "```yaml\n" + source + "\n```", title: name })}
               />
             </div>
           )}
@@ -649,6 +653,7 @@ export default function App() {
             <div className={`sticky ${selectedState.architectState ? 'top-auto' : 'top-0'} z-10`}>
               <FlowDashboard
                 flowState={selectedState.flowState}
+                flowStates={selectedState.flowStates}
                 onAgentClick={setFlowDetailAgent}
                 onAbort={() => selectedId && send({ type: "flow_control" as any, sessionId: selectedId, action: "abort" })}
                 onToggleAutonomous={() => selectedId && send({ type: "flow_control" as any, sessionId: selectedId, action: "toggle_autonomous" })}

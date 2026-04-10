@@ -255,6 +255,14 @@ export function reduceFlowEvent(
       return null;
     }
 
+    case "flow_autonomous_changed": {
+      if (!flowState) return null;
+      return {
+        ...flowState,
+        autonomousMode: (data.enabled as boolean) ?? flowState.autonomousMode,
+      };
+    }
+
     default:
       return flowState;
   }

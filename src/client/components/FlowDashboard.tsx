@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Icon } from "@mdi/react";
-import { mdiRobotOutline, mdiStop, mdiChevronUp, mdiChevronRight, mdiChevronDown } from "@mdi/js";
+import { mdiRobotOutline, mdiStop, mdiChevronUp, mdiChevronRight, mdiChevronDown, mdiFileDocumentOutline } from "@mdi/js";
 import type { FlowState } from "../../shared/types.js";
 import { FlowAgentCard } from "./FlowAgentCard.js";
 import { FlowGraph, type FlowGraphStep } from "./FlowGraph.js";
 import { FlowSummary } from "./FlowSummary.js";
+import { FlowTabBar, type FlowTab } from "./FlowTabBar.js";
 import { useMobile } from "../hooks/useMobile.js";
 
 /** Map FlowState agents to FlowGraphStep array.
@@ -38,6 +39,7 @@ function agentsToGraphSteps(flowState: FlowState): FlowGraphStep[] {
 
 export function FlowDashboard({
   flowState,
+  flowStates,
   onAgentClick,
   onAbort,
   onToggleAutonomous,
@@ -46,20 +48,52 @@ export function FlowDashboard({
   onViewYaml,
 }: {
   flowState: FlowState;
-    onAgentClick: (agentName: string) => void;
-    onAbort: () => void;
-    onToggleAutonomous: () => void;
-    onDismiss: () => void;
-    onSendPrompt?: (text: string) => void;
-    onViewYaml?: () => void;
+  /** All flow states (main + subflows) for tab navigation */
+  flowStates?: Map<string, FlowState>;
+  onAgentClick: (agentName: string) => void;
+  onAbort: () => void;
+  onToggleAutonomous: () => void;
+  onDismiss: () => void;
+  onSendPrompt?: (text: string) => void;
+  onViewYaml?: () => void;
 }) {
   const isMobile = useMobile();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
+  const [activeTabId, setActiveTabId] = useState<string>(flowState.flowName);
+  const [followMode, setFollowMode] = useState(true);
+  const prevFlowNameRef = useRef(flowState.flowName);
 
-  const agents = Array.from(flowState.agents.values());
-  const doneCount = agents.filter(a => a.status === "complete" || a.status === "error" || a.status === "blocked").length;
-  const totalCount = agents.length;
+  // Build tab list from flowStates
+  const tabs: FlowTab[] = useMemo(() => {
+    if (!flowStates || flowStates.size <= 1) return [];
+    return Array.from(flowStates.keys()).map(name => ({
+      id: name,
+      label: name,
+      isActive: name === flowState.flowName,
+    }));
+  }, [flowStates, flowState.flowName]);
+
+  // Follow mode: auto-switch to latest active flow
+  useEffect(() => {
+    if (followMode && flowState.flowName !== prevFlowNameRef.current) {
+      setActiveTabId(flowState.flowName);
+    }
+    prevFlowNameRef.current = flowState.flowName;
+  }, [followMode, flowState.flowName]);
+
+  // Determine which flow state to display based on active tab
+  const displayState = useMemo(() => {
+    if (flowStates && activeTabId !== flowState.flowName) {
+      return flowStates.get(activeTabId) || flowState;
+    }
+    return flowState;
+  }, [flowStates, activeTabId, flowState]);
+
+  const agents = Array.from(displayState.agents.values());
+  const allAgents = Array.from(flowState.agents.values());
+  const doneCount = allAgents.filter(a => a.status === "complete" || a.status === "error" || a.status === "blocked").length;
+  const totalCount = allAgents.length;
   const isRunning = flowState.status === "running";
   const isComplete = !isRunning;
 
@@ -75,6 +109,20 @@ export function FlowDashboard({
       />
     );
   }
+
+  const handleTabClick = (tabId: string) => {
+    setActiveTabId(tabId);
+    setFollowMode(false); // Manual click disables follow
+  };
+
+  const handleToggleFollow = () => {
+    const newFollow = !followMode;
+    setFollowMode(newFollow);
+    if (newFollow) {
+      // Re-enable: jump to latest active flow
+      setActiveTabId(flowState.flowName);
+    }
+  };
 
   // Mobile collapsed bar
   if (isMobile && !mobileExpanded) {
@@ -142,10 +190,29 @@ export function FlowDashboard({
       {/* DAG graph — structural minimap */}
       <div className={`group-collapse ${collapsed ? "collapsed" : "expanded"}`}>
         <div>
-          <FlowGraph
-            steps={agentsToGraphSteps(flowState)}
-            onGraphClick={onViewYaml}
+          {/* Tab bar for multi-flow navigation */}
+          <FlowTabBar
+            tabs={tabs}
+            activeTabId={activeTabId}
+            followMode={followMode}
+            onTabClick={handleTabClick}
+            onToggleFollow={handleToggleFollow}
           />
+
+          <FlowGraph
+            steps={agentsToGraphSteps(displayState)}
+          />
+          {onViewYaml && (
+            <div className="mt-1">
+              <button
+                onClick={onViewYaml}
+                className="text-[var(--text-tertiary)] hover:text-blue-400 transition-colors p-0.5 rounded hover:bg-[var(--bg-surface)] inline-flex items-center"
+                title="View flow YAML"
+              >
+                <Icon path={mdiFileDocumentOutline} size={0.5} />
+              </button>
+            </div>
+          )}
 
           {/* Agent card grid — detailed per-agent info */}
           <div

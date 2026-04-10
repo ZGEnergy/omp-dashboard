@@ -101,6 +101,8 @@ export interface SessionState {
   pendingPrompt?: PendingPrompt;
   interactiveRequests: InteractiveUiRequest[];
   flowState: FlowState | null;
+  /** All flow states seen during execution (main + subflows), keyed by flowName */
+  flowStates: Map<string, FlowState>;
   architectState: ArchitectState | null;
   /** Whether any Write/Edit tool calls have been seen (for Changed Files button) */
   hasFileChanges: boolean;
@@ -126,6 +128,7 @@ export function createInitialState(): SessionState {
     turnStats: [],
     interactiveRequests: [],
     flowState: null,
+    flowStates: new Map(),
     architectState: null,
     hasFileChanges: false,
     subagents: new Map(),
@@ -688,6 +691,13 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       // Delegate flow events to flow reducer
       if (isFlowEvent(event.eventType)) {
         next.flowState = reduceFlowEvent(next.flowState, event);
+        // Keep flowStates map in sync — store each flow by name
+        if (next.flowState) {
+          next.flowStates = new Map(next.flowStates);
+          next.flowStates.set(next.flowState.flowName, next.flowState);
+        } else if (event.eventType === "flow_summary_dismissed") {
+          next.flowStates = new Map();
+        }
       } else {
         // Unknown event type — render as expandable raw JSON
         next.messages = [...next.messages, {

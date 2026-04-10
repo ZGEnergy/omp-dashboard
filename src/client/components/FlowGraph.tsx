@@ -1,4 +1,6 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
+import { useZoomPan } from "../hooks/useZoomPan.js";
+import { ZoomControls } from "./ZoomControls.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -165,126 +167,149 @@ function buildEdgePath(points: Array<{ x: number; y: number }>): string {
 
 // ── Component ───────────────────────────────────────────────────────
 
-export function FlowGraph({
-  steps,
-  onGraphClick,
-  onNodeClick,
-}: {
-  steps: FlowGraphStep[];
-  /** Click on the SVG background (opens YAML viewer) */
-  onGraphClick?: () => void;
-  /** Click on a specific node */
-  onNodeClick?: (stepId: string) => void;
-}) {
+export function FlowGraph({ steps }: { steps: FlowGraphStep[] }) {
   const layout = useMemo(() => {
     if (steps.length === 0) return null;
-    return computeLayout(steps);
+    try {
+      return computeLayout(steps);
+    } catch {
+      return null;
+    }
   }, [steps]);
+
+  const { state: zoom, handlers, zoomIn, zoomOut, reset } = useZoomPan();
+  const [hovered, setHovered] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Attach non-passive wheel listener (React onWheel is passive and can't preventDefault)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const wheelHandler = handlers.onWheel as EventListener;
+    el.addEventListener("wheel", wheelHandler, { passive: false });
+    return () => el.removeEventListener("wheel", wheelHandler);
+  }, [handlers.onWheel]);
 
   if (!layout || layout.nodes.length === 0) return null;
 
-  // Fixed-scale: use actual pixel dimensions, wrap in scrollable container
   const svgWidth = Math.max(layout.width, 150);
   const svgHeight = Math.max(layout.height, 50);
+  const containerHeight = Math.min(svgHeight + 8, 200);
 
   return (
     <div
-      className="flow-dag-graph-container overflow-auto"
-      style={{ maxHeight: 140 }}
+      ref={containerRef}
+      className="flow-dag-graph-container relative"
+      style={{ height: containerHeight, overflow: "hidden" }}
+      onPointerDown={handlers.onPointerDown}
+      onPointerMove={handlers.onPointerMove}
+      onPointerUp={handlers.onPointerUp}
+      onDoubleClick={handlers.onDoubleClick}
+      onTouchMove={handlers.onTouchMove}
+      onTouchEnd={handlers.onTouchEnd}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-    <svg
-      width={svgWidth}
-      height={svgHeight}
-      className="flow-dag-graph"
-      onClick={(e) => {
-        // Only fire onGraphClick if clicking the background (not a node)
-        if ((e.target as Element).tagName === "svg" || (e.target as Element).tagName === "rect" && !(e.target as Element).closest("g[data-node]")) {
-          onGraphClick?.();
-        }
-      }}
-      style={{ cursor: onGraphClick ? "pointer" : "default", display: "block", margin: svgWidth < 300 ? "0 auto" : undefined }}
-    >
-      <defs>
-        {["#444", "#666", "#22c55e", "#eab308", "#ef4444"].map((color) => (
-          <marker
-            key={color}
-            id={`arrow-${color.replace("#", "")}`}
-            viewBox={`0 0 ${ARROW_SIZE * 2} ${ARROW_SIZE * 2}`}
-            refX={ARROW_SIZE * 2 - 1}
-            refY={ARROW_SIZE}
-            markerWidth={ARROW_SIZE}
-            markerHeight={ARROW_SIZE}
-            orient="auto-start-reverse"
-          >
-            <path d={`M0,0 L${ARROW_SIZE * 2},${ARROW_SIZE} L0,${ARROW_SIZE * 2} Z`} fill={color} />
-          </marker>
-        ))}
-      </defs>
+      {hovered && (
+        <ZoomControls
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onReset={reset}
+          scale={zoom.scale}
+        />
+      )}
+      <div
+        style={{
+          transform: `translate(${zoom.translateX}px, ${zoom.translateY}px) scale(${zoom.scale})`,
+          transformOrigin: "0 0",
+        }}
+      >
+        <svg
+          width={svgWidth}
+          height={svgHeight}
+          className="flow-dag-graph"
+          style={{ display: "block", margin: svgWidth < 300 ? "0 auto" : undefined }}
+        >
+          <defs>
+            {["#444", "#666", "#22c55e", "#eab308", "#ef4444"].map((color) => (
+              <marker
+                key={color}
+                id={`arrow-${color.replace("#", "")}`}
+                viewBox={`0 0 ${ARROW_SIZE * 2} ${ARROW_SIZE * 2}`}
+                refX={ARROW_SIZE * 2 - 1}
+                refY={ARROW_SIZE}
+                markerWidth={ARROW_SIZE}
+                markerHeight={ARROW_SIZE}
+                orient="auto-start-reverse"
+              >
+                <path d={`M0,0 L${ARROW_SIZE * 2},${ARROW_SIZE} L0,${ARROW_SIZE * 2} Z`} fill={color} />
+              </marker>
+            ))}
+          </defs>
 
-      {/* Edges */}
-      {layout.edges.map((edge, i) => {
-        const { stroke, animated, dashed } = getEdgeColor(edge.sourceStatus, edge.targetStatus);
-        return (
-          <path
-            key={`edge-${i}`}
-            d={buildEdgePath(edge.points)}
-            fill="none"
-            stroke={stroke}
-            strokeWidth={1.5}
-            strokeDasharray={dashed ? "4 3" : animated ? "6 3" : "none"}
-            markerEnd={`url(#arrow-${stroke.replace("#", "")})`}
-            className={animated ? "flow-edge-animated" : ""}
-          />
-        );
-      })}
+          {/* Edges */}
+          {layout.edges.map((edge, i) => {
+            const { stroke, animated, dashed } = getEdgeColor(edge.sourceStatus, edge.targetStatus);
+            return (
+              <path
+                key={`edge-${i}`}
+                d={buildEdgePath(edge.points)}
+                fill="none"
+                stroke={stroke}
+                strokeWidth={1.5}
+                strokeDasharray={dashed ? "4 3" : animated ? "6 3" : "none"}
+                markerEnd={`url(#arrow-${stroke.replace("#", "")})`}
+                className={animated ? "flow-edge-animated" : ""}
+              />
+            );
+          })}
 
-      {/* Nodes — name only, status via border color */}
-      {layout.nodes.map((node) => {
-        const style = STATUS_COLORS[node.status] || STATUS_COLORS.pending;
-        const isRunning = node.status === "running";
-        const isFlowRef = node.type === "flow-ref";
-        // Shrink font to fit: available width = node width - left/right padding
-        const availW = node.width - 16;
-        const naturalW = node.label.length * FONT_SIZE * 0.6;
-        const labelFontSize = naturalW > availW
-          ? Math.max(7, FONT_SIZE * (availW / naturalW))
-          : FONT_SIZE;
+          {/* Nodes */}
+          {layout.nodes.map((node) => {
+            const style = STATUS_COLORS[node.status] || STATUS_COLORS.pending;
+            const isRunning = node.status === "running";
+            const isFlowRef = node.type === "flow-ref";
+            const availW = node.width - 16;
+            const naturalW = node.label.length * FONT_SIZE * 0.6;
+            const labelFontSize = naturalW > availW
+              ? Math.max(7, FONT_SIZE * (availW / naturalW))
+              : FONT_SIZE;
 
-        return (
-          <g
-            key={node.id}
-            data-node={node.id}
-            onClick={(e) => { e.stopPropagation(); onGraphClick?.(); }}
-            style={{ cursor: onGraphClick ? "pointer" : "default" }}
-            className={isRunning ? "flow-node-running" : ""}
-          >
-            <rect
-              x={node.x}
-              y={node.y}
-              width={node.width}
-              height={node.height}
-              rx={5}
-              ry={5}
-              fill={style.fill}
-              stroke={style.border}
-              strokeWidth={1.5}
-              strokeDasharray={isFlowRef ? "4 3" : "none"}
-            />
-            <text
-              x={node.x + node.width / 2}
-              y={node.y + node.height / 2 + 1}
-              fontSize={labelFontSize}
-              fill={style.text}
-              dominantBaseline="middle"
-              textAnchor="middle"
-              fontFamily="system-ui, -apple-system, sans-serif"
-            >
-              {node.label}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+            return (
+              <g
+                key={node.id}
+                data-node={node.id}
+                style={{ cursor: "default" }}
+                className={isRunning ? "flow-node-running" : ""}
+              >
+                <rect
+                  x={node.x}
+                  y={node.y}
+                  width={node.width}
+                  height={node.height}
+                  rx={5}
+                  ry={5}
+                  fill={style.fill}
+                  stroke={style.border}
+                  strokeWidth={1.5}
+                  strokeDasharray={isFlowRef ? "4 3" : "none"}
+                />
+                <text
+                  x={node.x + node.width / 2}
+                  y={node.y + node.height / 2 + 1}
+                  fontSize={labelFontSize}
+                  fill={style.text}
+                  dominantBaseline="middle"
+                  textAnchor="middle"
+                  fontFamily="system-ui, -apple-system, sans-serif"
+                >
+                  {node.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
     </div>
   );
 }

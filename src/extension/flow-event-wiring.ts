@@ -36,6 +36,8 @@ export const FLOW_EVENT_MAP: Record<string, string> = {
   "flow:architect-context-generating": "architect_context_generating",
   "flow:architect-context-ready": "architect_context_ready",
   "flow:architect-run-handoff": "architect_run_handoff",
+  // Autonomous mode feedback
+  "flow:autonomous-mode-changed": "flow_autonomous_changed",
 };
 
 /** Map of pi-subagents event names to dashboard protocol event types */

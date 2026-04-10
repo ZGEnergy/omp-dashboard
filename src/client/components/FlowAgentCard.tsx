@@ -1,6 +1,6 @@
 import React from "react";
 import { Icon } from "@mdi/react";
-import { mdiRefresh } from "@mdi/js";
+import { mdiRefresh, mdiEyeOutline } from "@mdi/js";
 import type { FlowAgentState } from "../../shared/types.js";
 import { AgentCardShell } from "./AgentCardShell.js";
 import { formatTokens, formatDuration } from "./agent-card-utils.js";
@@ -44,32 +44,44 @@ export function FlowAgentCard({
       status={agent.status}
       headerRight={headerRight}
       stats={stats}
-      onClick={onClick}
       selected={selected}
     >
-      {/* Model alias line (when model uses @role alias) */}
-      {hasAlias && (
-        <div className="text-[10px] text-[var(--text-tertiary)] truncate">{rawModel}</div>
-      )}
+      <div className="relative">
+        {/* Model alias line (when model uses @role alias) */}
+        {hasAlias && (
+          <div className="text-[10px] text-[var(--text-tertiary)] truncate">{rawModel}</div>
+        )}
 
-      {/* Metric / waiting line */}
-      <div className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate">
-        {agent.status === "pending" && agent.blockedBy.length > 0 ? (
-          <span>waiting: {agent.blockedBy.join(", ")}</span>
-        ) : null}
-      </div>
+        {/* Metric / waiting line */}
+        <div className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate">
+          {agent.status === "pending" && agent.blockedBy.length > 0 ? (
+            <span>waiting: {agent.blockedBy.join(", ")}</span>
+          ) : null}
+        </div>
 
-      {/* Recent tools */}
-      <div className="mt-1 space-y-0">
-        {agent.recentTools.map((tool, i) => (
-          <div key={i} className="text-[10px] text-[var(--text-tertiary)] truncate">
-            {i === agent.recentTools.length - 1 ? "▸" : "·"} {tool.toolName} {tool.inputPreview}
-          </div>
-        ))}
-        {/* Pad to 3 lines for consistent height */}
-        {Array.from({ length: Math.max(0, 3 - agent.recentTools.length) }).map((_, i) => (
-          <div key={`pad-${i}`} className="text-[10px]">&nbsp;</div>
-        ))}
+        {/* Recent tools */}
+        <div className="mt-1 space-y-0">
+          {agent.recentTools.map((tool, i) => (
+            <div key={i} className="text-[10px] text-[var(--text-tertiary)] truncate">
+              {i === agent.recentTools.length - 1 ? "▸" : "·"} {tool.toolName} {tool.inputPreview}
+            </div>
+          ))}
+          {/* Pad to 3 lines for consistent height */}
+          {Array.from({ length: Math.max(0, 3 - agent.recentTools.length) }).map((_, i) => (
+            <div key={`pad-${i}`} className="text-[10px]">&nbsp;</div>
+          ))}
+        </div>
+
+        {/* View detail icon — always bottom-right */}
+        {onClick && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onClick(); }}
+            className="absolute bottom-0 right-0 text-[var(--text-tertiary)] hover:text-blue-400 transition-colors p-0.5 rounded hover:bg-[var(--bg-surface)] inline-flex items-center"
+            title={`View ${displayName} detail`}
+          >
+            <Icon path={mdiEyeOutline} size={0.45} />
+          </button>
+        )}
       </div>
     </AgentCardShell>
   );

@@ -256,6 +256,18 @@ export function reduceArchitectEvent(
           break;
         }
 
+        case "flow_write": {
+          // The tool result output is { written: boolean, path, diagnostics? }
+          // Already parsed by execution.ts (JSON.parse on content[0].text)
+          const output = data.output;
+          if (output && typeof output === "object" && "written" in output) {
+            next.flowWriteStatus = output.written ? "written" : "validation-error";
+          } else if (isError) {
+            next.flowWriteStatus = "validation-error";
+          }
+          break;
+        }
+
         case "agent_write": {
           // Find the agent that was being created and mark done/error
           const agents = [...next.agents];

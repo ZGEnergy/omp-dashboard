@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import { Icon } from "@mdi/react";
-import { mdiChevronRight, mdiChevronDown, mdiLoading, mdiArrowLeft } from "@mdi/js";
-import type { ArchitectState, ArchitectPrompt, FlowDetailEntry } from "../../shared/types.js";
+import { mdiChevronRight, mdiChevronDown, mdiLoading, mdiArrowLeft, mdiFileDocumentOutline, mdiEyeOutline } from "@mdi/js";
+import type { ArchitectState, ArchitectPrompt, ArchitectAgentEntry, FlowDetailEntry } from "../../shared/types.js";
 import { MarkdownContent } from "./MarkdownContent.js";
 import { FlowGraph, type FlowGraphStep } from "./FlowGraph.js";
+import { AgentCardShell } from "./AgentCardShell.js";
 
 /** Map ArchitectState.dagSteps to FlowGraphStep array (all pending) */
 function architectStepsToGraphSteps(state: ArchitectState): FlowGraphStep[] {
@@ -166,8 +167,6 @@ export function FlowArchitectDetail({
   );
 }
 
-// ── Card (shown in the sticky header bar) ─────────────────────────
-
 // ── Inline prompt renderers ───────────────────────────────────────
 
 function ArchitectSelectPrompt({
@@ -283,65 +282,49 @@ function ArchitectPromptInline({
   }
 }
 
-// ── Collapsible section component ─────────────────────────────────
+// ── Agent card for architect (similar to FlowAgentCard) ──────────
 
-function AccordionSection({
-  title,
-  badge,
-  expanded,
-  onToggle,
-  maxHeight = 200,
-  children,
-}: {
-  title: string;
-  badge?: React.ReactNode;
-  expanded: boolean;
-  onToggle: () => void;
-  maxHeight?: number;
-  children: React.ReactNode;
-}) {
+const AGENT_STATUS_MAP: Record<string, "pending" | "running" | "complete" | "error"> = {
+  pending: "pending",
+  creating: "running",
+  done: "complete",
+  error: "error",
+};
+
+function ArchitectAgentCard({ agent, onViewSource }: { agent: ArchitectAgentEntry; onViewSource?: () => void }) {
   return (
-    <div className="border border-[var(--border-subtle)] rounded mt-1.5">
-      <div
-        className="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors"
-        onClick={onToggle}
-      >
-        <Icon path={expanded ? mdiChevronDown : mdiChevronRight} size={0.5} className="text-[var(--text-muted)] shrink-0" />
-        <span className="text-[11px] font-medium text-[var(--text-secondary)] truncate">{title}</span>
-        {badge && <span className="ml-auto shrink-0">{badge}</span>}
+    <AgentCardShell
+      name={agent.name}
+      status={AGENT_STATUS_MAP[agent.status] || "pending"}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-[var(--text-muted)] truncate">
+          {agent.type === "custom" ? "custom agent" : agent.type}
+        </span>
+        {onViewSource && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onViewSource(); }}
+            className="text-[var(--text-tertiary)] hover:text-purple-400 transition-colors p-0.5 rounded hover:bg-[var(--bg-surface)]"
+            title={`View ${agent.name} source`}
+          >
+            <Icon path={mdiFileDocumentOutline} size={0.5} />
+          </button>
+        )}
       </div>
-      {expanded && (
-        <div className="px-2 pb-2 overflow-y-auto" style={{ maxHeight }}>
-          {children}
-        </div>
-      )}
-    </div>
+    </AgentCardShell>
   );
 }
 
-// ── Agent chip component ─────────────────────────────────────────
-
-function AgentChip({ agent }: { agent: import("../../shared/types.js").ArchitectAgentEntry }) {
-  const [expanded, setExpanded] = useState(false);
-  const icon = agent.status === "done" ? "✓" : agent.status === "creating" ? "…" : agent.status === "error" ? "✗" : "○";
-  const color = agent.status === "done" ? "text-green-400" : agent.status === "creating" ? "text-yellow-400" : agent.status === "error" ? "text-red-400" : "text-[var(--text-muted)]";
-
+/** Small icon button for viewing files (YAML, agent source, etc.) */
+function ViewFileButton({ title, onClick }: { title: string; onClick: () => void }) {
   return (
-    <div>
-      <span
-        onClick={() => agent.source && setExpanded(!expanded)}
-        className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-[var(--border-subtle)] ${agent.source ? "cursor-pointer hover:bg-[var(--bg-tertiary)]" : ""}`}
-      >
-        <span className={color}>{icon}</span>
-        <span className="text-[var(--text-primary)]">{agent.name}</span>
-        {agent.source && <span className="text-[var(--text-muted)]">{expanded ? "▾" : "▸"}</span>}
-      </span>
-      {expanded && agent.source && (
-        <pre className="text-[10px] text-[var(--text-secondary)] mt-1 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-words bg-[var(--bg-tertiary)] rounded p-2 border border-[var(--border-subtle)]">
-          {agent.source}
-        </pre>
-      )}
-    </div>
+    <button
+      onClick={onClick}
+      className="text-[var(--text-tertiary)] hover:text-purple-400 transition-colors p-0.5 rounded hover:bg-[var(--bg-surface)] inline-flex items-center"
+      title={title}
+    >
+      <Icon path={mdiFileDocumentOutline} size={0.5} />
+    </button>
   );
 }
 
@@ -353,34 +336,19 @@ export function FlowArchitect({
   onClick,
   onPromptRespond,
   onViewYaml,
+  onViewAgentSource,
 }: {
   state: ArchitectState;
   onAbort: () => void;
   onClick?: () => void;
   onPromptRespond?: (promptId: string, answer: string) => void;
   onViewYaml?: () => void;
+  onViewAgentSource?: (agentName: string, source: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const isActive = state.phase === "context" || state.phase === "designing";
   const isPreview = state.phase === "preview";
-
-  // Accordion section states — flow expanded during preview, process during designing
-  const [flowExpanded, setFlowExpanded] = useState(isPreview);
-  const [agentsExpanded, setAgentsExpanded] = useState(false);
-  const [processExpanded, setProcessExpanded] = useState(isActive);
-
-  // Sync defaults when phase changes
-  React.useEffect(() => {
-    if (isPreview) {
-      setFlowExpanded(true);
-      setProcessExpanded(false);
-    } else if (isActive) {
-      setProcessExpanded(true);
-    }
-  }, [state.phase]);
-
   const customAgents = state.agents.filter(a => a.type === "custom");
-  const customDoneCount = customAgents.filter(a => a.status === "done").length;
   const firstFlow = state.parsedFlows[0];
 
   return (
@@ -430,7 +398,7 @@ export function FlowArchitect({
           {state.architectMode === "edit" ? "Edit" : "New"}
         </span>
 
-        {/* Abort button - show during active design, preview, or when prompt is pending */}
+        {/* Abort button */}
         {(isActive || isPreview || state.pendingPrompt) && (
           <button
             onClick={(e) => { e.stopPropagation(); onAbort(); }}
@@ -442,91 +410,84 @@ export function FlowArchitect({
         )}
       </div>
 
-      {/* Accordion sections — collapsible */}
+      {/* Content — always shown, flat layout */}
       <div className={`group-collapse ${collapsed ? "collapsed" : "expanded"}`}>
         <div>
-          {/* Section 1: Designed Flow (primary) */}
-          {state.dagSteps.length > 0 && (
-            <AccordionSection
-              title="Designed Flow"
-              badge={firstFlow && (
-                <span className="text-[10px] text-[var(--text-muted)]">
-                  {firstFlow.steps.length} steps · max {firstFlow.maxConcurrent}
-                </span>
-              )}
-              expanded={flowExpanded}
-              onToggle={() => setFlowExpanded(!flowExpanded)}
-              maxHeight={180}
-            >
-              <div
-                onClick={onViewYaml}
-                style={{ cursor: onViewYaml ? "pointer" : "default" }}
-              >
-                <FlowGraph
-                  steps={architectStepsToGraphSteps(state)}
-                  onGraphClick={onViewYaml}
-                />
-              </div>
-            </AccordionSection>
-          )}
-
-          {/* Section 2: Created Agents (secondary) */}
-          {customAgents.length > 0 && (
-            <AccordionSection
-              title="Created Agents"
-              badge={
-                <span className="text-[10px] text-[var(--text-muted)]">
-                  new: {customDoneCount}
-                </span>
-              }
-              expanded={agentsExpanded}
-              onToggle={() => setAgentsExpanded(!agentsExpanded)}
-              maxHeight={200}
-            >
-              <div className="flex flex-wrap gap-1.5">
-                {customAgents.map(agent => (
-                  <AgentChip key={agent.name} agent={agent} />
-                ))}
-              </div>
-            </AccordionSection>
-          )}
-
-          {/* Section 3: Architect Process (tertiary) — clickable for full detail */}
-          <AccordionSection
-            title="Architect Process"
-            badge={state.lastToolCall && (
-              <span className="text-[10px] text-[var(--text-tertiary)] truncate max-w-[200px] inline-block">
-                {state.lastToolCall.toolName}
+          {/* Loading indicator when active but no content yet */}
+          {isActive && state.dagSteps.length === 0 && customAgents.length === 0 && state.recentTools.length === 0 && (
+            <div className="flex items-center gap-2 py-3 text-[var(--text-muted)]">
+              <Icon path={mdiLoading} size={0.55} className="text-purple-400 animate-spin" />
+              <span className="text-[11px]">
+                {state.phase === "context" ? "Generating session summary..." : "Initializing architect agent..."}
               </span>
-            )}
-            expanded={processExpanded}
-            onToggle={() => setProcessExpanded(!processExpanded)}
-            maxHeight={200}
-          >
+            </div>
+          )}
+
+          {/* Flow graph + view YAML icon (only when file exists) */}
+          {state.dagSteps.length > 0 && (
             <div>
-              {/* Summary info */}
-              {state.catalogSummary && (
-                <div className="text-[10px] text-[var(--text-muted)] mb-1">{state.catalogSummary}</div>
-              )}
-              {/* Recent tool calls */}
-              <div className="space-y-0">
-                {state.recentTools.map((tool, i) => (
-                  <div key={i} className="text-[10px] text-[var(--text-tertiary)] truncate">
-                    {i === state.recentTools.length - 1 ? "▸" : "·"} {tool.toolName} {tool.inputPreview}
-                  </div>
+              <FlowGraph steps={architectStepsToGraphSteps(state)} />
+              <div className="flex items-center gap-2 mt-1">
+                {firstFlow && (
+                  <span className="text-[10px] text-[var(--text-muted)]">
+                    {firstFlow.steps.length} steps · max {firstFlow.maxConcurrent}
+                  </span>
+                )}
+                {state.flowWriteStatus === "validation-error" && (
+                  <span className="text-red-400 text-[11px]" title="Flow has validation errors">✗</span>
+                )}
+                {onViewYaml && state.flowYamlContent && (
+                  <ViewFileButton title="View flow YAML" onClick={onViewYaml} />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Agent cards grid with view-source icon per card */}
+          {customAgents.length > 0 && (
+            <div className="mt-2">
+              <div className="text-[10px] text-[var(--text-muted)] mb-1">
+                Created Agents · new: {customAgents.filter(a => a.status === "done").length}
+              </div>
+              <div
+                className="grid gap-2"
+                style={{ gridTemplateColumns: `repeat(auto-fill, minmax(180px, 1fr))` }}
+              >
+                {customAgents.map(agent => (
+                  <ArchitectAgentCard
+                    key={agent.name}
+                    agent={agent}
+                    onViewSource={agent.source && onViewAgentSource ? () => onViewAgentSource(agent.name, agent.source!) : undefined}
+                  />
                 ))}
               </div>
-              {/* Link to full detail view */}
-              {onClick && (
-                <div
-                  onClick={onClick}
-                  className="text-[10px] text-purple-400 mt-1.5 cursor-pointer hover:underline"
-                >
-                  View full detail →
-                </div>
-              )}
             </div>
-          </AccordionSection>
+          )}
+
+          {/* Process status + view detail icon */}
+          <div className="mt-2">
+            {state.catalogSummary && (
+              <div className="text-[10px] text-[var(--text-muted)]">{state.catalogSummary}</div>
+            )}
+            <div className="space-y-0 mt-0.5">
+              {state.recentTools.map((tool, i) => (
+                <div key={i} className="text-[10px] text-[var(--text-tertiary)] truncate">
+                  {i === state.recentTools.length - 1 ? "▸" : "·"} {tool.toolName} {tool.inputPreview}
+                </div>
+              ))}
+            </div>
+            {onClick && (
+              <div className="mt-1">
+                <button
+                  onClick={onClick}
+                  className="text-[var(--text-tertiary)] hover:text-purple-400 transition-colors p-0.5 rounded hover:bg-[var(--bg-surface)] inline-flex items-center"
+                  title="View full architect detail"
+                >
+                  <Icon path={mdiEyeOutline} size={0.5} />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
