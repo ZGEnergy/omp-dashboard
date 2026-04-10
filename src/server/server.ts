@@ -5,6 +5,8 @@ import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import os from "node:os";
+import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { createMemoryEventStore, type EventStore } from "./memory-event-store.js";
 import { createMemorySessionManager, type SessionManager } from "./memory-session-manager.js";
@@ -187,14 +189,25 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes);
 
-  // Send discovered peer servers to new browser connections
+  // Resolve package version once at startup
+  const __require = createRequire(import.meta.url);
+  let pkgVersion = "unknown";
+  try { pkgVersion = __require("../../package.json").version ?? "unknown"; } catch {}
+  const selfHostname = os.hostname();
+
+  // Send this server + discovered peers to new browser connections
   browserGateway.onConnect = (ws) => {
-    if (peerServers.size > 0) {
-      browserGateway.sendToClient(ws, {
-        type: "servers_discovered",
-        servers: Array.from(peerServers.values()),
-      });
-    }
+    const selfServer: DiscoveredServer = {
+      host: selfHostname,
+      port: config.port,
+      piPort: config.piPort,
+      version: pkgVersion,
+      pid: process.pid,
+      isLocal: true,
+      source: "mdns",
+    };
+    const all = [selfServer, ...Array.from(peerServers.values())];
+    browserGateway.sendToClient(ws, { type: "servers_discovered", servers: all });
   };
 
   // Wire up event forwarding from pi gateway to browser gateway

@@ -12,13 +12,12 @@ describe("ServerSelector logic", () => {
     expect(url).toBe("ws://remote.local:8000/ws");
   });
 
-  it("filters out single localhost server (no dropdown needed)", () => {
+  it("shows selector when at least one server exists", () => {
     const servers: DiscoveredServerInfo[] = [
       { host: "localhost", port: 8000, piPort: 9999, version: "1.0", pid: 123, isLocal: true, source: "mdns" },
     ];
-    // ServerSelector returns null when only single local server
-    const shouldShow = !(servers.length <= 1 && servers.every(s => s.isLocal));
-    expect(shouldShow).toBe(false);
+    const shouldShow = servers.length > 0;
+    expect(shouldShow).toBe(true);
   });
 
   it("shows dropdown when remote servers are present", () => {

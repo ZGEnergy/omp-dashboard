@@ -53,11 +53,7 @@ export function ServerSelector({ servers, currentHost, currentPort, connected, o
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  // Don't show if no remote servers discovered AND we're already on localhost
-  const isCurrentLocal = currentHost === "localhost" || currentHost === "127.0.0.1";
-  if (servers.length <= 1 && servers.every(s => s.isLocal) && isCurrentLocal) {
-    return null;
-  }
+  if (servers.length === 0) return null;
 
   // Ensure localhost is always in the list when current server is remote
   const effectiveServers = [...servers];
