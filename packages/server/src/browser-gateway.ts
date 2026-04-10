@@ -1,0 +1,495 @@
+/**
+ * Browser Gateway - WebSocket handler for browser client connections.
+ * Runs on the HTTP server port via upgrade handling.
+ */
+import { WebSocketServer, WebSocket } from "ws";
+import type {
+  ServerToBrowserMessage,
+  BrowserToServerMessage,
+} from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import type { SessionManager } from "./memory-session-manager.js";
+import type { EventStore } from "./memory-event-store.js";
+import type { PiGateway } from "./pi-gateway.js";
+// PendingLoadManager removed — server loads sessions directly via DirectoryService
+import { createHeadlessPidRegistry, type HeadlessPidRegistry } from "./headless-pid-registry.js";
+import type { PendingForkRegistry } from "./pending-fork-registry.js";
+import type { SessionOrderManager } from "./session-order-manager.js";
+import type { PreferencesStore } from "./preferences-store.js";
+import type { DirectoryService } from "./directory-service.js";
+import { createPendingResumeRegistry, type PendingResumeRegistry } from "./pending-resume-registry.js";
+import type { TerminalManager } from "./terminal-manager.js";
+import type { BrowserHandlerContext } from "./browser-handlers/handler-context.js";
+import { handleSubscribe } from "./browser-handlers/subscription-handler.js";
+import { handleSendPrompt, handleResumeSession, handleSpawnSession, handleShutdown, handleAbort, handleFlowControl, handleForceKill, handleKillProcess } from "./browser-handlers/session-action-handler.js";
+import { handleRenameSession, handleHideSession, handleUnhideSession, handleAttachProposal, handleDetachProposal, handleFetchContent, handleListSessions } from "./browser-handlers/session-meta-handler.js";
+import { handleCreateTerminal, handleKillTerminal, handleRenameTerminal } from "./browser-handlers/terminal-handler.js";
+import { handlePinDirectory, handleUnpinDirectory, handleReorderPinnedDirs, handleReorderSessions, handleOpenSpecRefresh, handleOpenSpecBulkArchive, handleExtensionUiResponse, handlePiGatewayForward } from "./browser-handlers/directory-handler.js";
+
+
+
+export interface BrowserGateway {
+  wss: WebSocketServer;
+  broadcastEvent(sessionId: string, seq: number, event: any): void;
+  broadcastSessionAdded(session: any): void;
+  broadcastSessionUpdated(sessionId: string, updates: any): void;
+  broadcastSessionRemoved(sessionId: string): void;
+  sendToSubscribers(sessionId: string, msg: ServerToBrowserMessage): void;
+  broadcastToAll(msg: ServerToBrowserMessage): void;
+  /** Get number of browser subscribers for a session */
+  getSubscriberCount(sessionId: string): number;
+  /** Track a pending interactive UI request for replay on reconnect */
+  trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void;
+  /** Clear a pending interactive UI request (resolved or cancelled) */
+  clearUiRequest(sessionId: string, requestId: string): void;
+  /** Tell browser subscribers to reset accumulated state for a session (bridge reconnected) */
+  broadcastSessionStateReset(sessionId: string): void;
+  /** Shut down all tracked headless child processes */
+  shutdownHeadlessProcesses(): void;
+  /** Registry for linking headless PIDs to session IDs */
+  headlessPidRegistry: HeadlessPidRegistry;
+  /** Registry for pending auto-resume prompts */
+  pendingResumeRegistry: PendingResumeRegistry;
+  /** Send a message to a specific WebSocket client */
+  sendToClient(ws: WebSocket, msg: ServerToBrowserMessage): void;
+  /** Callback invoked when a new browser client connects */
+  onConnect?: (ws: WebSocket) => void;
+  /** Broadcast a message to all connected clients */
+  broadcast(msg: ServerToBrowserMessage): void;
+}
+
+export function createBrowserGateway(
+  sessionManager: SessionManager,
+  eventStore: EventStore,
+  piGateway: PiGateway,
+  _pendingLoadManager?: unknown,
+  pendingForkRegistry?: PendingForkRegistry,
+  sessionOrderManager?: SessionOrderManager,
+  preferencesStore?: PreferencesStore,
+  directoryService?: DirectoryService,
+  terminalManager?: TerminalManager,
+  pendingDashboardSpawns?: Map<string, number>,
+  maxWsBufferBytes?: number,
+): BrowserGateway {
+  const wss = new WebSocketServer({ noServer: true });
+
+  // Track subscriptions: ws → Set<sessionId>
+  const subscriptions = new Map<WebSocket, Set<string>>();
+  // Track which sessions are mid-replay per WebSocket (suppress live events)
+  const replayingSessions = new Map<WebSocket, Set<string>>();
+
+  // Track headless child processes with sessionId linkage
+  const headlessPidRegistry = createHeadlessPidRegistry();
+
+  // Track pending interactive UI requests per session for replay on reconnect
+  const pendingUiRequests = new Map<string, Map<string, { requestId: string; method: string; params: Record<string, unknown> }>>();
+
+  // Track pending auto-resume prompts for ended sessions
+  const pendingResumeRegistry = createPendingResumeRegistry({
+    onTimeout(oldSessionId) {
+      // Clear resuming flag when resume times out
+      sessionManager.update(oldSessionId, { resuming: false });
+      broadcast({ type: "session_updated", sessionId: oldSessionId, updates: { resuming: false } });
+    },
+  });
+
+  /** Send any pending interactive UI requests to a specific browser socket */
+  function replayPendingUiRequests(ws: WebSocket, sessionId: string) {
+    const sessionPending = pendingUiRequests.get(sessionId);
+    if (!sessionPending) return;
+    for (const req of sessionPending.values()) {
+      sendTo(ws, {
+        type: "extension_ui_request",
+        sessionId,
+        requestId: req.requestId,
+        method: req.method,
+        params: req.params,
+      });
+    }
+  }
+
+  function trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void {
+    let sessionMap = pendingUiRequests.get(sessionId);
+    if (!sessionMap) {
+      sessionMap = new Map();
+      pendingUiRequests.set(sessionId, sessionMap);
+    }
+    const title = params.title;
+    if (title !== undefined) {
+      for (const existing of sessionMap.values()) {
+        if (existing.method === method && existing.params.title === title) {
+          return false;
+        }
+      }
+    }
+    sessionMap.set(requestId, { requestId, method, params });
+    return true;
+  }
+
+  function getSubscribers(sessionId: string): WebSocket[] {
+    const result: WebSocket[] = [];
+    for (const [ws, subs] of subscriptions) {
+      if (subs.has(sessionId) && ws.readyState === WebSocket.OPEN) {
+        result.push(ws);
+      }
+    }
+    return result;
+  }
+
+  /** Max buffered bytes per browser WebSocket before dropping messages (0 = no limit) */
+  const MAX_WS_BUFFER = maxWsBufferBytes ?? 4 * 1024 * 1024; // 4MB default
+
+  function sendTo(ws: WebSocket, msg: ServerToBrowserMessage) {
+    if (ws.readyState === WebSocket.OPEN) {
+      // Drop messages if the send buffer is full (browser not consuming)
+      if (MAX_WS_BUFFER > 0 && ws.bufferedAmount > MAX_WS_BUFFER) return;
+      ws.send(JSON.stringify(msg));
+    }
+  }
+
+  function broadcast(msg: ServerToBrowserMessage) {
+    for (const [ws] of subscriptions) {
+      sendTo(ws, msg);
+    }
+  }
+
+  wss.on("connection", (ws, req) => {
+    const remoteAddr = req?.socket?.remoteAddress ?? 'unknown';
+    const origin = req?.headers?.origin ?? 'no-origin';
+    const ua = req?.headers?.['user-agent'] ?? 'no-ua';
+    console.error(`[browser-gw] browser client connected from ${remoteAddr} origin=${origin} ua=${ua.slice(0, 80)} (total: ${subscriptions.size + 1})`);
+    const subs = new Set<string>();
+    subscriptions.set(ws, subs);
+
+    // Send all sessions on connect (client filters by hidden flag)
+    const allSessions = sessionManager.listAll();
+    for (const session of allSessions) {
+      sendTo(ws, { type: "session_added", session });
+    }
+
+    // Send pinned directories on connect
+    if (preferencesStore) {
+      sendTo(ws, { type: "pinned_dirs_updated", paths: preferencesStore.getPinnedDirectories() });
+    }
+
+    // Send session orders for all cwds
+    if (sessionOrderManager) {
+      const allOrders = sessionOrderManager.getAllOrders();
+      for (const [cwd, sessionIds] of Object.entries(allOrders)) {
+        if (sessionIds.length > 0) {
+          sendTo(ws, { type: "sessions_reordered", cwd, sessionIds });
+        }
+      }
+    }
+
+    // Send cached OpenSpec data for all known directories
+    if (directoryService) {
+      for (const cwd of directoryService.knownDirectories()) {
+        const data = directoryService.getOpenSpecData(cwd);
+        if (data && data.initialized) {
+          sendTo(ws, { type: "openspec_update", cwd, data });
+        }
+      }
+    }
+
+    // Send active terminals on connect
+    if (terminalManager) {
+      for (const terminal of terminalManager.list()) {
+        sendTo(ws, { type: "terminal_added", terminal });
+      }
+    }
+
+    // Notify server of new connection (for mDNS peer list etc.)
+    if (gateway.onConnect) {
+      gateway.onConnect(ws);
+    }
+
+
+    ws.on("message", async (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString()) as BrowserToServerMessage;
+        const ctx: BrowserHandlerContext = {
+          ws, sessionManager, eventStore, piGateway,
+          pendingForkRegistry, sessionOrderManager, preferencesStore,
+          directoryService, terminalManager,
+          headlessPidRegistry, pendingResumeRegistry, pendingDashboardSpawns,
+          sendTo, broadcast, getSubscribers, replayPendingUiRequests,
+          trackUiRequest: trackUiRequest,
+          markReplaying(targetWs, sessionId) {
+            let set = replayingSessions.get(targetWs);
+            if (!set) { set = new Set(); replayingSessions.set(targetWs, set); }
+            set.add(sessionId);
+          },
+          clearReplaying(targetWs, sessionId, lastReplayedSeq) {
+            const set = replayingSessions.get(targetWs);
+            if (set) {
+              set.delete(sessionId);
+              if (set.size === 0) replayingSessions.delete(targetWs);
+            }
+            // Send catch-up: any events after lastReplayedSeq
+            if (lastReplayedSeq > 0) {
+              const catchUp = eventStore.getEvents(sessionId, lastReplayedSeq + 1);
+              if (catchUp.length > 0) {
+                sendTo(targetWs, {
+                  type: "event_replay",
+                  sessionId,
+                  events: catchUp.map((e) => ({ seq: e.seq, event: e.event })),
+                  isLast: true,
+                });
+              }
+            }
+          },
+        };
+
+        switch (msg.type) {
+          case "subscribe":
+            handleSubscribe(msg, subs, ctx);
+            break;
+          case "unsubscribe":
+            subs.delete(msg.sessionId);
+            break;
+          case "send_prompt":
+            await handleSendPrompt(msg, ctx);
+            break;
+          case "abort":
+            handleAbort(msg, ctx);
+            break;
+          case "force_kill":
+            await handleForceKill(msg, ctx);
+            break;
+          case "flow_control":
+            handleFlowControl(msg, ctx);
+            break;
+          case "kill_process":
+            handleKillProcess(msg, ctx);
+            break;
+          case "shutdown":
+            handleShutdown(msg, ctx);
+            break;
+          case "rename_session":
+            handleRenameSession(msg, ctx);
+            break;
+          case "hide_session":
+            handleHideSession(msg, ctx);
+            break;
+          case "unhide_session":
+            handleUnhideSession(msg, ctx);
+            break;
+          case "attach_proposal":
+            handleAttachProposal(msg, ctx);
+            break;
+          case "detach_proposal":
+            handleDetachProposal(msg, ctx);
+            break;
+          case "fetch_content":
+            handleFetchContent(msg, ctx);
+            break;
+          case "list_sessions":
+            handleListSessions(msg, ctx);
+            break;
+          case "resume_session":
+            await handleResumeSession(msg, ctx);
+            break;
+          case "spawn_session":
+            await handleSpawnSession(msg, ctx);
+            break;
+          case "reorder_sessions":
+            handleReorderSessions(msg, ctx);
+            break;
+          case "pin_directory":
+            handlePinDirectory(msg, ctx);
+            break;
+          case "unpin_directory":
+            handleUnpinDirectory(msg, ctx);
+            break;
+          case "reorder_pinned_dirs":
+            handleReorderPinnedDirs(msg, ctx);
+            break;
+          case "openspec_refresh":
+            handleOpenSpecRefresh(msg, ctx);
+            break;
+          case "openspec_bulk_archive":
+            handleOpenSpecBulkArchive(msg, ctx);
+            break;
+          case "extension_ui_response": {
+            // Clear pending UI request tracking
+            const sessionMap = pendingUiRequests.get(msg.sessionId);
+            if (sessionMap) {
+              sessionMap.delete(msg.requestId);
+              if (sessionMap.size === 0) pendingUiRequests.delete(msg.sessionId);
+            }
+            handleExtensionUiResponse(msg, ctx);
+            break;
+          }
+
+          case "flow_management": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "flow_management",
+              sessionId: msg.sessionId,
+              action: msg.action,
+              flowName: msg.flowName,
+              task: msg.task,
+              description: msg.description,
+            });
+            break;
+          }
+          case "architect_prompt_response": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "architect_prompt_response",
+              sessionId: msg.sessionId,
+              promptId: msg.promptId,
+              answer: msg.answer,
+              cancelled: msg.cancelled,
+            });
+            break;
+          }
+          case "role_set": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "role_set",
+              sessionId: msg.sessionId,
+              role: (msg as any).role,
+              modelId: (msg as any).modelId,
+            });
+            break;
+          }
+          case "role_preset_load": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "role_preset_load",
+              sessionId: msg.sessionId,
+              presetName: (msg as any).presetName,
+            });
+            break;
+          }
+          case "role_preset_save": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "role_preset_save",
+              sessionId: msg.sessionId,
+              presetName: (msg as any).presetName,
+            });
+            break;
+          }
+          case "role_preset_delete": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "role_preset_delete",
+              sessionId: msg.sessionId,
+              presetName: (msg as any).presetName,
+            });
+            break;
+          }
+          case "request_roles": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "request_roles",
+              sessionId: msg.sessionId,
+            });
+            break;
+          }
+          case "create_terminal":
+            handleCreateTerminal(msg, ctx);
+            break;
+          case "kill_terminal":
+            handleKillTerminal(msg, ctx);
+            break;
+          case "rename_terminal":
+            handleRenameTerminal(msg, ctx);
+            break;
+          default:
+            // Forward simple pi-gateway commands
+            handlePiGatewayForward(msg, ctx);
+            break;
+        }
+      } catch {
+        // Ignore malformed messages
+      }
+    });
+
+    ws.on("close", () => {
+      console.error(`[browser-gw] browser client disconnected (remaining: ${subscriptions.size - 1})`);
+      subscriptions.delete(ws);
+      replayingSessions.delete(ws);
+    });
+  });
+
+  const gateway: BrowserGateway = {
+    wss,
+
+    sendToClient(ws: WebSocket, msg: ServerToBrowserMessage) {
+      sendTo(ws, msg);
+    },
+
+    broadcast(msg: ServerToBrowserMessage) {
+      broadcast(msg);
+    },
+
+    broadcastEvent(sessionId: string, seq: number, event: any) {
+      const subscribers = getSubscribers(sessionId);
+      const msg: ServerToBrowserMessage = {
+        type: "event",
+        sessionId,
+        seq,
+        event,
+      };
+      for (const ws of subscribers) {
+        // Skip WebSockets that are mid-replay for this session
+        const replaying = replayingSessions.get(ws);
+        if (replaying?.has(sessionId)) continue;
+        sendTo(ws, msg);
+      }
+    },
+
+    broadcastSessionAdded(session: any) {
+      broadcast({ type: "session_added", session });
+    },
+
+    broadcastSessionUpdated(sessionId: string, updates: any) {
+      broadcast({ type: "session_updated", sessionId, updates });
+    },
+
+    broadcastSessionRemoved(sessionId: string) {
+      broadcast({ type: "session_removed", sessionId });
+    },
+
+    broadcastSessionStateReset(sessionId: string) {
+      const subscribers = getSubscribers(sessionId);
+      const msg: ServerToBrowserMessage = { type: "session_state_reset", sessionId };
+      for (const ws of subscribers) {
+        sendTo(ws, msg);
+      }
+    },
+
+    sendToSubscribers(sessionId: string, msg: ServerToBrowserMessage) {
+      const subscribers = getSubscribers(sessionId);
+      for (const ws of subscribers) {
+        sendTo(ws, msg);
+      }
+    },
+
+    broadcastToAll(msg: ServerToBrowserMessage) {
+      broadcast(msg);
+    },
+
+    getSubscriberCount(sessionId: string): number {
+      return getSubscribers(sessionId).length;
+    },
+
+    trackUiRequest,
+
+    clearUiRequest(sessionId: string, requestId: string) {
+      const sessionMap = pendingUiRequests.get(sessionId);
+      if (sessionMap) {
+        sessionMap.delete(requestId);
+        if (sessionMap.size === 0) {
+          pendingUiRequests.delete(sessionId);
+        }
+      }
+    },
+
+    shutdownHeadlessProcesses() {
+      headlessPidRegistry.killAll();
+    },
+
+    headlessPidRegistry,
+
+    pendingResumeRegistry,
+  };
+
+  return gateway;
+}

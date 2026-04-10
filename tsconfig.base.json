@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "sourceMap": true,
+    "lib": ["ES2023"],
+    "paths": {
+      "@mariozechner/pi-coding-agent": [
+        "./node_modules/@mariozechner/pi-coding-agent",
+        "./node_modules/@oh-my-pi/pi-coding-agent"
+      ],
+      "@mariozechner/pi-ai": [
+        "./node_modules/@mariozechner/pi-ai",
+        "./node_modules/@oh-my-pi/pi-ai"
+      ],
+      "@mariozechner/pi-tui": [
+        "./node_modules/@mariozechner/pi-tui",
+        "./node_modules/@oh-my-pi/pi-tui"
+      ]
+    }
+  }
+}

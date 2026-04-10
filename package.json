@@ -1,36 +1,35 @@
 {
   "name": "@blackbelt-technology/pi-dashboard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Web dashboard for monitoring and interacting with pi agent sessions",
   "keywords": [
     "pi-package"
   ],
   "type": "module",
-  "main": "src/server/cli.ts",
+  "workspaces": [
+    "packages/*"
+  ],
+  "main": "packages/server/src/cli.ts",
   "bin": {
-    "pi-dashboard": "src/server/cli.ts"
+    "pi-dashboard": "packages/server/src/cli.ts"
   },
   "pi": {
     "extensions": [
-      "src/extension/bridge.ts"
+      "packages/extension/src/bridge.ts"
     ],
     "skills": [
-      ".pi/skills/pi-dashboard"
+      "packages/extension/.pi/skills/pi-dashboard"
     ]
   },
   "files": [
-    "src/",
-    "dist/client/",
+    "packages/",
     "docs/",
-    ".pi/skills/pi-dashboard/",
     "AGENTS.md",
     "README.md"
   ],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "postinstall": "node scripts/fix-pty-permissions.cjs",
-    "prepare": "vite build",
+    "dev": "npm run dev --workspace=@blackbelt-technology/pi-dashboard-web",
+    "build": "npm run build --workspace=@blackbelt-technology/pi-dashboard-web",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
@@ -38,60 +37,14 @@
     "reload:check": "./scripts/reload-all.sh --check"
   },
   "dependencies": {
-    "@dnd-kit/core": "^6.3.1",
-    "@dnd-kit/sortable": "^10.0.0",
-    "@dnd-kit/utilities": "^3.2.2",
-    "@fastify/cookie": "^11.0.2",
-    "@fastify/http-proxy": "^11.4.3",
-    "@fastify/reply-from": "^12.6.1",
-    "@fastify/static": "^8.0.0",
-    "@fastify/websocket": "^11.0.0",
-    "@git-diff-view/core": "^0.1.3",
-    "@git-diff-view/file": "^0.1.3",
-    "@git-diff-view/lowlight": "^0.1.3",
-    "@git-diff-view/react": "^0.1.3",
-    "@mdi/js": "^7.4.47",
-    "@mdi/react": "^1.6.1",
-    "@types/dompurify": "^3.0.5",
-    "@types/qrcode": "^1.5.6",
-    "@types/react-syntax-highlighter": "^15.5.13",
-    "@xterm/addon-attach": "^0.12.0",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
-    "ansi-to-react": "^6.2.6",
-    "bonjour-service": "^1.3.0",
-    "diff": "^8.0.3",
-    "dompurify": "^3.3.3",
-    "fastify": "^5.0.0",
-    "fuse.js": "^7.1.0",
-    "jsonwebtoken": "^9.0.3",
-    "mermaid": "^11.13.0",
-    "node-pty": "^1.1.0",
-    "qrcode": "^1.5.4",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-markdown": "^10.1.0",
-    "react-syntax-highlighter": "^16.1.1",
-    "rehype-raw": "^7.0.0",
-    "remark-gfm": "^4.0.1",
-    "wouter": "^3.9.0",
-    "ws": "^8.18.0"
+    "@blackbelt-technology/pi-dashboard-extension": "*",
+    "@blackbelt-technology/pi-dashboard-server": "*",
+    "@blackbelt-technology/pi-dashboard-web": "*"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.0.0",
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.2",
-    "@types/diff": "^7.0.2",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@types/ws": "^8.5.0",
-    "@vitejs/plugin-react": "^6.0.0",
-    "jsdom": "^29.0.1",
-    "tailwindcss": "^4.0.0",
+    "jsdom": "^29.0.2",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
-    "vite": "^8.0.0",
     "vitest": "^4.0.0"
   },
   "peerDependencies": {

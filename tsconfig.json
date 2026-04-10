@@ -1,35 +1,17 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
     "jsx": "react-jsx",
-    "outDir": "dist",
-    "rootDir": "src",
-    "declaration": true,
-    "sourceMap": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "paths": {
-      "@mariozechner/pi-coding-agent": [
-        "./node_modules/@mariozechner/pi-coding-agent",
-        "./node_modules/@oh-my-pi/pi-coding-agent"
-      ],
-      "@mariozechner/pi-ai": [
-        "./node_modules/@mariozechner/pi-ai",
-        "./node_modules/@oh-my-pi/pi-ai"
-      ],
-      "@mariozechner/pi-tui": [
-        "./node_modules/@mariozechner/pi-tui",
-        "./node_modules/@oh-my-pi/pi-tui"
-      ]
-    }
+    "outDir": "dist",
+    "rootDir": "."
   },
-  "include": ["src"],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/server" },
+    { "path": "packages/extension" },
+    { "path": "packages/client" }
+  ],
+  "include": ["packages/*/src"],
   "exclude": ["node_modules", "dist"]
 }

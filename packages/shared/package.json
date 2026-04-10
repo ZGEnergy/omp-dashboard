@@ -1,0 +1,15 @@
+{
+  "name": "@blackbelt-technology/pi-dashboard-shared",
+  "version": "0.2.0",
+  "description": "Shared types and utilities for pi-dashboard",
+  "type": "module",
+  "exports": {
+    "./*.js": "./src/*.ts",
+    "./*": "./src/*"
+  },
+  "files": [
+    "src/"
+  ],
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -1,0 +1,1027 @@
+import React, { useState, useEffect, useCallback } from "react";
+import { getApiBase } from "../lib/api-context.js";
+import { useDebugToolsVisible } from "../hooks/useDebugToolsVisible.js";
+import { Icon } from "@mdi/react";
+import { mdiArrowLeft, mdiContentSave, mdiAlert, mdiPlus, mdiDelete, mdiRestart, mdiUpdate } from "@mdi/js";
+import { useLocation } from "wouter";
+import { ProviderAuthSection } from "./ProviderAuthSection.js";
+import { PackageBrowser } from "./PackageBrowser.js";
+import { PackageInstallConfirmDialog } from "./PackageInstallConfirmDialog.js";
+import { PackageReadmeDialog } from "./PackageReadmeDialog.js";
+import { useInstalledPackages } from "../hooks/useInstalledPackages.js";
+import { usePackageOperations } from "../hooks/usePackageOperations.js";
+import type { NpmPackageResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+
+interface ProviderConfig {
+  clientId: string;
+  clientSecret: string;
+  issuerUrl?: string;
+  name?: string;
+}
+
+interface LlmProvider {
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  api: string;
+  isNew?: boolean; // true for newly added providers (name is editable)
+}
+
+interface AuthConfig {
+  secret: string;
+  providers: Record<string, ProviderConfig>;
+  allowedUsers?: string[];
+  bypassUrls?: string[];
+  bypassHosts?: string[];
+}
+
+interface MemoryLimitsConfig {
+  maxEventsPerSession: number;
+  maxStringFieldSize: number;
+  maxWsBufferBytes: number;
+}
+
+interface NetworkInterfaceInfo {
+  name: string;
+  address: string;
+  netmask: string;
+  cidr: string;
+}
+
+interface Config {
+  port: number;
+  piPort: number;
+  autoStart: boolean;
+  autoShutdown: boolean;
+  shutdownIdleSeconds: number;
+  spawnStrategy: string;
+  tunnel: { enabled: boolean };
+  devBuildOnReload: boolean;
+  defaultModel: string;
+  auth?: AuthConfig;
+  memoryLimits: MemoryLimitsConfig;
+  trustedNetworks?: string[];
+  editor?: {
+    binary?: string;
+    idleTimeoutMinutes?: number;
+    maxInstances?: number;
+  };
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  github: "GitHub",
+  google: "Google",
+  keycloak: "Keycloak",
+  oidc: "OIDC (Generic)",
+};
+
+const NEEDS_ISSUER = new Set(["keycloak", "oidc"]);
+
+export function SettingsPanel({ availableModels }: { availableModels?: Array<{ provider: string; id: string }> }) {
+  const [, navigate] = useLocation();
+  const [config, setConfig] = useState<Config | null>(null);
+  const [original, setOriginal] = useState<Config | null>(null);
+  const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([]);
+  const [originalLlmProviders, setOriginalLlmProviders] = useState<LlmProvider[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error" | "warn"; text: string } | null>(null);
+  const [activeTab, setActiveTab] = useState("general");
+
+  useEffect(() => {
+    const configPromise = fetch(`${getApiBase()}/api/config`).then((res) => res.json());
+    const providersPromise = fetch(`${getApiBase()}/api/providers`)
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null);
+
+    Promise.all([configPromise, providersPromise])
+      .then(([configData, providersData]) => {
+        if (configData.success) {
+          setConfig(configData.data);
+          setOriginal(JSON.parse(JSON.stringify(configData.data)));
+        }
+        if (providersData?.success && providersData.providers) {
+          const list: LlmProvider[] = Object.entries(providersData.providers).map(
+            ([name, entry]: [string, any]) => ({
+              name,
+              baseUrl: entry.baseUrl || "",
+              apiKey: entry.apiKey || "",
+              api: entry.api || "openai-completions",
+            })
+          );
+          setLlmProviders(list);
+          setOriginalLlmProviders(JSON.parse(JSON.stringify(list)));
+        }
+      })
+      .catch(() => setMessage({ type: "error", text: "Failed to load settings" }))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!config || !original) return;
+    setSaving(true);
+    setMessage(null);
+
+    // Build partial diff
+    const partial: Record<string, any> = {};
+    if (config.port !== original.port) partial.port = config.port;
+    if (config.piPort !== original.piPort) partial.piPort = config.piPort;
+    if (config.autoStart !== original.autoStart) partial.autoStart = config.autoStart;
+    if (config.autoShutdown !== original.autoShutdown) partial.autoShutdown = config.autoShutdown;
+    if (config.shutdownIdleSeconds !== original.shutdownIdleSeconds) partial.shutdownIdleSeconds = config.shutdownIdleSeconds;
+    if (config.spawnStrategy !== original.spawnStrategy) partial.spawnStrategy = config.spawnStrategy;
+    if (config.tunnel.enabled !== original.tunnel.enabled) partial.tunnel = { enabled: config.tunnel.enabled };
+    if (config.devBuildOnReload !== original.devBuildOnReload) partial.devBuildOnReload = config.devBuildOnReload;
+    if (config.defaultModel !== original.defaultModel) partial.defaultModel = config.defaultModel;
+
+    // Trusted networks diff
+    if (JSON.stringify(config.trustedNetworks) !== JSON.stringify(original.trustedNetworks)) {
+      partial.trustedNetworks = config.trustedNetworks ?? [];
+    }
+
+    // Memory limits diff
+    if (JSON.stringify(config.memoryLimits) !== JSON.stringify(original.memoryLimits)) {
+      partial.memoryLimits = config.memoryLimits;
+    }
+
+    // Editor config diff
+    if (JSON.stringify(config.editor) !== JSON.stringify(original.editor)) {
+      partial.editor = config.editor || null;
+    }
+
+    // Auth diff
+    if (JSON.stringify(config.auth) !== JSON.stringify(original.auth)) {
+      partial.auth = config.auth || null;
+    }
+
+    // Check if LLM providers changed
+    const llmChanged = JSON.stringify(llmProviders) !== JSON.stringify(originalLlmProviders);
+
+    if (Object.keys(partial).length === 0 && !llmChanged) {
+      setMessage({ type: "warn", text: "No changes to save" });
+      setSaving(false);
+      return;
+    }
+
+    try {
+      let restartRequired = false;
+
+      // Save config changes
+      if (Object.keys(partial).length > 0) {
+        const res = await fetch(`${getApiBase()}/api/config`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(partial),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          setMessage({ type: "error", text: data.error || "Failed to save config" });
+          setSaving(false);
+          return;
+        }
+        restartRequired = data.restartRequired;
+        setOriginal(JSON.parse(JSON.stringify(config)));
+      }
+
+      // Save LLM providers
+      if (llmChanged) {
+        const validProviders = llmProviders.filter((p) => p.name.trim() !== "");
+        const providersObj: Record<string, any> = {};
+        for (const p of validProviders) {
+          providersObj[p.name] = {
+            baseUrl: p.baseUrl,
+            apiKey: p.apiKey,
+            api: p.api,
+          };
+        }
+        const res = await fetch(`${getApiBase()}/api/providers`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ providers: providersObj }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          setMessage({ type: "error", text: data.error || "Failed to save providers" });
+          setSaving(false);
+          return;
+        }
+        // Update state: strip isNew flag, update original
+        const saved = validProviders.map(({ isNew, ...rest }) => rest);
+        setLlmProviders(saved);
+        setOriginalLlmProviders(JSON.parse(JSON.stringify(saved)));
+      }
+
+      if (restartRequired) {
+        setMessage({ type: "warn", text: "Saved. Some changes require a server restart to take effect." });
+      } else {
+        setMessage({ type: "success", text: "Settings saved" });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Failed to save settings" });
+    } finally {
+      setSaving(false);
+    }
+  }, [config, original, llmProviders, originalLlmProviders]);
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-[var(--text-tertiary)]">
+        Loading settings...
+      </div>
+    );
+  }
+
+  if (!config) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-red-400">
+        Failed to load settings
+      </div>
+    );
+  }
+
+  const update = (fn: (c: Config) => void) => {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const next = JSON.parse(JSON.stringify(prev));
+      fn(next);
+      return next;
+    });
+  };
+
+  const ensureAuth = (): AuthConfig => {
+    if (!config.auth) {
+      const auth: AuthConfig = { secret: "", providers: {}, allowedUsers: [] };
+      update((c) => { c.auth = auth; });
+      return auth;
+    }
+    return config.auth;
+  };
+
+  const tabs = [
+    { id: "general", label: "General" },
+    { id: "packages", label: "Packages" },
+    { id: "providers", label: "Providers" },
+    { id: "security", label: "Security" },
+    { id: "advanced", label: "Advanced" },
+  ];
+
+  return (
+    <div className="flex-1 flex flex-col min-w-0 h-full">
+      {/* Header */}
+      <div data-testid="settings-header" className="flex items-center gap-3 p-4 border-b border-[var(--border-primary)] shrink-0">
+        <button
+          onClick={() => navigate("/")}
+          className="text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+          title="Back"
+        >
+          <Icon path={mdiArrowLeft} size={0.8} />
+        </button>
+        <h1 className="text-lg font-bold text-[var(--text-primary)]">Settings</h1>
+        <div className="flex-1" />
+        <button
+          onClick={async () => {
+            setRestarting(true);
+            setMessage(null);
+            try {
+              const res = await fetch(`${getApiBase()}/api/restart`, { method: "POST" });
+              const data = await res.json();
+              if (data.ok) {
+                setMessage({ type: "success", text: "Server restarting…" });
+                setTimeout(() => navigate("/"), 1500);
+              } else {
+                setMessage({ type: "error", text: data.error || "Restart failed" });
+                setRestarting(false);
+              }
+            } catch {
+              // fetch fails when server exits — that's expected
+              setMessage({ type: "success", text: "Server restarting…" });
+              setTimeout(() => navigate("/"), 1500);
+            }
+          }}
+          disabled={restarting || saving}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[var(--bg-tertiary)] hover:bg-[var(--bg-secondary)] text-[var(--text-secondary)] text-sm font-medium disabled:opacity-50 border border-[var(--border-secondary)]"
+          title="Restart server"
+        >
+          <Icon path={mdiRestart} size={0.6} />
+          {restarting ? "Restarting…" : "Restart"}
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving || restarting}
+          data-testid="save-btn"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium disabled:opacity-50"
+        >
+          <Icon path={mdiContentSave} size={0.6} />
+          {saving ? "Saving..." : "Save"}
+        </button>
+      </div>
+
+      {/* Tab Bar */}
+      <div data-testid="settings-tab-bar" className="flex gap-0 border-b border-[var(--border-primary)] shrink-0 px-4">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 text-sm font-medium transition-colors relative ${
+              activeTab === tab.id
+                ? "text-[var(--text-primary)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+            }`}
+          >
+            {tab.label}
+            {activeTab === tab.id && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Message */}
+      {message && (
+        <div className={`px-4 py-2 text-sm shrink-0 ${
+          message.type === "success" ? "bg-green-600/20 text-green-400" :
+          message.type === "warn" ? "bg-amber-600/20 text-amber-400" :
+          "bg-red-600/20 text-red-400"
+        }`}>
+          {message.type === "warn" && <Icon path={mdiAlert} size={0.5} className="inline mr-1" />}
+          {message.text}
+        </div>
+      )}
+
+      {/* Tab Content */}
+      <div data-testid="settings-content" className="flex-1 overflow-y-auto">
+        <div className="p-4 space-y-6 max-w-2xl">
+
+          {/* General Tab */}
+          {activeTab === "general" && (
+            <>
+              <Section title="Server">
+                <NumberField label="HTTP Port" value={config.port} onChange={(v) => update((c) => { c.port = v; })} />
+                <NumberField label="Pi Gateway Port" value={config.piPort} onChange={(v) => update((c) => { c.piPort = v; })} />
+                <ToggleField label="Auto Shutdown" value={config.autoShutdown} onChange={(v) => update((c) => { c.autoShutdown = v; })} />
+                {config.autoShutdown && (
+                  <NumberField label="Idle Seconds Before Shutdown" value={config.shutdownIdleSeconds} onChange={(v) => update((c) => { c.shutdownIdleSeconds = v; })} />
+                )}
+              </Section>
+
+              <Section title="Sessions">
+                <SelectField
+                  label="Spawn Strategy"
+                  value={config.spawnStrategy}
+                  options={[{ value: "headless", label: "Headless" }, { value: "tmux", label: "Tmux" }]}
+                  onChange={(v) => update((c) => { c.spawnStrategy = v; })}
+                />
+                <SelectField
+                  label="Default Model"
+                  value={config.defaultModel}
+                  options={[
+                    { value: "", label: "None (use pi default)" },
+                    ...(availableModels ?? []).map((m) => ({
+                      value: `${m.provider}/${m.id}`,
+                      label: `${m.provider}/${m.id}`,
+                    })),
+                    // Show the saved value even if not in available models
+                    ...((config.defaultModel && !(availableModels ?? []).some((m) => `${m.provider}/${m.id}` === config.defaultModel))
+                      ? [{ value: config.defaultModel, label: `${config.defaultModel} (not available)` }]
+                      : []),
+                  ]}
+                  onChange={(v) => update((c) => { c.defaultModel = v; })}
+                />
+              </Section>
+
+              <Section title="Tunnel">
+                <ToggleField label="Enable Zrok Tunnel" value={config.tunnel.enabled} onChange={(v) => update((c) => { c.tunnel.enabled = v; })} />
+              </Section>
+
+              <TrustedNetworksSection
+                networks={config.trustedNetworks ?? []}
+                onChange={(nets) => update((c) => { c.trustedNetworks = nets; })}
+              />
+
+              <Section title="Developer">
+                <ToggleField label="Dev Build on Reload" value={config.devBuildOnReload} onChange={(v) => update((c) => { c.devBuildOnReload = v; })} />
+              </Section>
+            </>
+          )}
+
+          {/* Providers Tab */}
+          {activeTab === "providers" && (
+            <>
+              <Section title="Provider Authentication">
+                <ProviderAuthSection />
+              </Section>
+
+              <Section title="LLM Providers">
+                <p className="text-xs text-[var(--text-tertiary)] mb-3">
+                  Register custom OpenAI-compatible API endpoints for model access.
+                </p>
+                {llmProviders.map((provider, index) => (
+                  <LlmProviderCard
+                    key={`${provider.name}-${index}`}
+                    provider={provider}
+                    onChange={(updated) => {
+                      setLlmProviders((prev) => prev.map((p, i) => (i === index ? updated : p)));
+                    }}
+                    onRemove={() => {
+                      setLlmProviders((prev) => prev.filter((_, i) => i !== index));
+                    }}
+                  />
+                ))}
+                <button
+                  onClick={() => setLlmProviders((prev) => [...prev, { name: "", baseUrl: "", apiKey: "", api: "openai-completions", isNew: true }])}
+                  className="flex items-center gap-1.5 text-sm text-[var(--accent-blue)] hover:text-blue-400 mt-1"
+                >
+                  <Icon path={mdiPlus} size={0.6} />
+                  Add Provider
+                </button>
+              </Section>
+            </>
+          )}
+
+          {/* Security Tab */}
+          {activeTab === "security" && (
+            <>
+              <Section title="Authentication">
+                <p className="text-xs text-[var(--text-tertiary)] mb-3">
+                  Configure OAuth providers to protect external (tunnel) access. Localhost is always open.
+                </p>
+                {["github", "google", "keycloak", "oidc"].map((key) => (
+                  <ProviderSection
+                    key={key}
+                    providerKey={key}
+                    provider={config.auth?.providers[key]}
+                    onChange={(p) => update((c) => {
+                      if (!c.auth) c.auth = { secret: "", providers: {}, allowedUsers: [] };
+                      if (p) {
+                        c.auth.providers[key] = p;
+                      } else {
+                        delete c.auth.providers[key];
+                      }
+                    })}
+                  />
+                ))}
+                <div className="mt-3">
+                  <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+                    Allowed Users <span className="text-[var(--text-tertiary)]">(one per line: username, email, or *@domain)</span>
+                  </label>
+                  <textarea
+                    className="w-full bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1.5 text-sm text-[var(--text-primary)] font-mono resize-y"
+                    rows={3}
+                    placeholder={"octocat\nuser@example.com\n*@company.com"}
+                    value={(config.auth?.allowedUsers || []).join("\n")}
+                    onChange={(e) => {
+                      const users = e.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
+                      update((c) => {
+                        if (!c.auth) c.auth = { secret: "", providers: {}, allowedUsers: [] };
+                        c.auth.allowedUsers = users;
+                      });
+                    }}
+                  />
+                </div>
+                <div className="mt-3">
+                  <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+                    Bypass URL Prefixes <span className="text-[var(--text-tertiary)]">(one per line — requests to these paths skip auth)</span>
+                  </label>
+                  <textarea
+                    className="w-full bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1.5 text-sm text-[var(--text-primary)] font-mono resize-y"
+                    rows={2}
+                    data-testid="bypass-urls-textarea"
+                    placeholder={"/webhooks/\n/metrics"}
+                    value={(config.auth?.bypassUrls || []).join("\n")}
+                    onChange={(e) => {
+                      const urls = e.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
+                      update((c) => {
+                        if (!c.auth) c.auth = { secret: "", providers: {} };
+                        c.auth.bypassUrls = urls;
+                      });
+                    }}
+                  />
+                </div>
+                <div className="mt-3">
+                  <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+                    Trusted Hosts <span className="text-[var(--text-tertiary)]">(one per line — requests from these IPs/hosts skip auth. Supports exact IP, wildcards like 10.0.0.*, CIDR like 192.168.1.0/24)</span>
+                  </label>
+                  <textarea
+                    className="w-full bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1.5 text-sm text-[var(--text-primary)] font-mono resize-y"
+                    rows={2}
+                    data-testid="bypass-hosts-textarea"
+                    placeholder={"10.0.0.*\n192.168.1.0/24"}
+                    value={(config.auth?.bypassHosts || []).join("\n")}
+                    onChange={(e) => {
+                      const hosts = e.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
+                      update((c) => {
+                        if (!c.auth) c.auth = { secret: "", providers: {} };
+                        c.auth.bypassHosts = hosts;
+                      });
+                    }}
+                  />
+                </div>
+              </Section>
+            </>
+          )}
+
+          {/* Advanced Tab */}
+          {activeTab === "packages" && (
+            <GlobalPackagesSection />
+          )}
+
+          {activeTab === "advanced" && (
+            <>
+              <Section title="Chat Display">
+                <p className="text-xs text-[var(--text-tertiary)] mb-2">
+                  Controls what is shown in the chat message stream.
+                </p>
+                <DebugToolsToggle />
+              </Section>
+              <Section title="Memory Limits">
+                <p className="text-xs text-[var(--text-tertiary)] mb-2">
+                  Controls for bounding server memory usage. Set to 0 to disable a limit.
+                  Requires server restart.
+                </p>
+                <NumberField
+                  label="Max Events Per Session"
+                  value={config.memoryLimits?.maxEventsPerSession ?? 200}
+                  onChange={(v) => update((c) => {
+                    if (!c.memoryLimits) c.memoryLimits = { maxEventsPerSession: 200, maxStringFieldSize: 4000, maxWsBufferBytes: 4194304 };
+                    c.memoryLimits.maxEventsPerSession = v;
+                  })}
+                />
+                <NumberField
+                  label="Max String Truncation (chars)"
+                  value={config.memoryLimits?.maxStringFieldSize ?? 4000}
+                  onChange={(v) => update((c) => {
+                    if (!c.memoryLimits) c.memoryLimits = { maxEventsPerSession: 200, maxStringFieldSize: 4000, maxWsBufferBytes: 4194304 };
+                    c.memoryLimits.maxStringFieldSize = v;
+                  })}
+                />
+                <NumberField
+                  label="Max WebSocket Buffer (bytes)"
+                  value={config.memoryLimits?.maxWsBufferBytes ?? 4194304}
+                  onChange={(v) => update((c) => {
+                    if (!c.memoryLimits) c.memoryLimits = { maxEventsPerSession: 200, maxStringFieldSize: 4000, maxWsBufferBytes: 4194304 };
+                    c.memoryLimits.maxWsBufferBytes = v;
+                  })}
+                />
+              </Section>
+              <Section title="Editor (code-server)">
+                <p className="text-xs text-[var(--text-tertiary)] mb-2">
+                  Configure the embedded VS Code editor powered by code-server.
+                </p>
+                <TextField
+                  label="Binary Path (leave empty for auto-detect)"
+                  value={config.editor?.binary ?? ""}
+                  onChange={(v) => update((c) => {
+                    if (!c.editor) c.editor = {};
+                    c.editor.binary = v || undefined;
+                  })}
+                  placeholder="code-server"
+                />
+                <NumberField
+                  label="Idle Timeout (minutes)"
+                  value={config.editor?.idleTimeoutMinutes ?? 10}
+                  onChange={(v) => update((c) => {
+                    if (!c.editor) c.editor = {};
+                    c.editor.idleTimeoutMinutes = v;
+                  })}
+                />
+                <NumberField
+                  label="Max Concurrent Instances"
+                  value={config.editor?.maxInstances ?? 3}
+                  onChange={(v) => update((c) => {
+                    if (!c.editor) c.editor = {};
+                    c.editor.maxInstances = v;
+                  })}
+                />
+              </Section>
+            </>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function DebugToolsToggle() {
+  const [visible, setVisible] = useDebugToolsVisible();
+  return (
+    <ToggleField
+      label="Show debug events (raw events, flow:list-flows, resources_discover)"
+      value={visible}
+      onChange={setVisible}
+    />
+  );
+}
+
+function TrustedNetworksSection({ networks, onChange }: { networks: string[]; onChange: (nets: string[]) => void }) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [interfaces, setInterfaces] = useState<NetworkInterfaceInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  React.useEffect(() => {
+    if (!dropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [dropdownOpen]);
+
+  const fetchInterfaces = async () => {
+    if (dropdownOpen) { setDropdownOpen(false); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`${getApiBase()}/api/network-interfaces`);
+      const data = await res.json();
+      if (data.success) setInterfaces(data.data);
+    } catch { /* ignore */ }
+    setLoading(false);
+    setDropdownOpen(true);
+  };
+
+  const addNetwork = (cidr: string) => {
+    if (!networks.includes(cidr)) {
+      onChange([...networks, cidr]);
+    }
+    setDropdownOpen(false);
+  };
+
+  const removeNetwork = (cidr: string) => {
+    onChange(networks.filter((n) => n !== cidr));
+  };
+
+  return (
+    <Section title="Trusted Networks">
+      <p className="text-xs text-[var(--text-tertiary)] mb-2">
+        Devices on these networks can access the dashboard without authentication.
+      </p>
+
+      {networks.length > 0 && (
+        <div className="space-y-1 mb-2">
+          {networks.map((net) => (
+            <div key={net} className="flex items-center justify-between bg-[var(--bg-secondary)] rounded px-2 py-1">
+              <span className="text-sm text-[var(--text-primary)] font-mono">{net}</span>
+              <button
+                onClick={() => removeNetwork(net)}
+                className="text-red-400 hover:text-red-300 text-xs px-1 cursor-pointer"
+                title="Remove"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="relative" ref={dropdownRef}>
+        <button
+          onClick={fetchInterfaces}
+          className="text-xs px-2 py-1 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+        >
+          {loading ? "Detecting…" : "+ Add Local Network"}
+        </button>
+        {dropdownOpen && interfaces.length > 0 && (
+          <div className="absolute left-0 top-full mt-1 z-50 min-w-[260px] bg-[var(--bg-surface)] border border-[var(--border-primary)] rounded-lg shadow-xl py-1">
+            {interfaces.map((iface) => (
+              <button
+                key={`${iface.name}-${iface.cidr}`}
+                onClick={() => addNetwork(iface.cidr)}
+                disabled={networks.includes(iface.cidr)}
+                className={`w-full flex items-center justify-between px-3 py-1.5 text-xs text-left hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer ${
+                  networks.includes(iface.cidr) ? "opacity-40" : ""
+                }`}
+              >
+                <span className="font-mono text-[var(--text-primary)]">{iface.cidr}</span>
+                <span className="text-[var(--text-tertiary)] ml-2">{iface.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <p className="text-xs text-amber-400/80 mt-2">
+        ⚠ Anyone on a trusted network has full access to the dashboard without authentication. Only use on private networks you control.
+      </p>
+    </Section>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-3 pb-1 border-b border-[var(--border-secondary)]">
+        {title}
+      </h2>
+      <div className="space-y-3">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <label className="text-sm text-[var(--text-secondary)]">{label}</label>
+      <input
+        type="number"
+        className="w-24 bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-sm text-[var(--text-primary)] text-right"
+        value={value}
+        onChange={(e) => onChange(parseInt(e.target.value, 10) || 0)}
+      />
+    </div>
+  );
+}
+
+function ToggleField({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <label className="text-sm text-[var(--text-secondary)]">{label}</label>
+      <button
+        onClick={() => onChange(!value)}
+        className={`relative w-10 h-5 rounded-full transition-colors ${value ? "bg-blue-600" : "bg-[var(--bg-tertiary)]"}`}
+      >
+        <span className={`absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${value ? "translate-x-5" : "translate-x-0"}`} />
+      </button>
+    </div>
+  );
+}
+
+function SelectField({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <label className="text-sm text-[var(--text-secondary)]">{label}</label>
+      <select
+        className="bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-sm text-[var(--text-primary)]"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function ProviderSection({ providerKey, provider, onChange }: {
+  providerKey: string;
+  provider?: ProviderConfig;
+  onChange: (p: ProviderConfig | null) => void;
+}) {
+  const enabled = !!provider;
+  const label = PROVIDER_LABELS[providerKey] || providerKey;
+  const needsIssuer = NEEDS_ISSUER.has(providerKey);
+
+  return (
+    <div className="border border-[var(--border-secondary)] rounded p-3 mb-2">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-medium text-[var(--text-primary)]">{label}</span>
+        <button
+          onClick={() => {
+            if (enabled) {
+              onChange(null);
+            } else {
+              onChange({ clientId: "", clientSecret: "", ...(needsIssuer ? { issuerUrl: "" } : {}) });
+            }
+          }}
+          className={`text-xs px-2 py-0.5 rounded ${enabled ? "bg-red-600/20 text-red-400 hover:bg-red-600/30" : "bg-green-600/20 text-green-400 hover:bg-green-600/30"}`}
+        >
+          {enabled ? "Remove" : "Enable"}
+        </button>
+      </div>
+      {enabled && (
+        <div className="space-y-2">
+          <TextField
+            label="Client ID"
+            value={provider!.clientId}
+            onChange={(v) => onChange({ ...provider!, clientId: v })}
+          />
+          <TextField
+            label="Client Secret"
+            value={provider!.clientSecret}
+            onChange={(v) => onChange({ ...provider!, clientSecret: v })}
+            type="password"
+          />
+          {needsIssuer && (
+            <TextField
+              label="Issuer URL"
+              value={provider!.issuerUrl || ""}
+              onChange={(v) => onChange({ ...provider!, issuerUrl: v })}
+              placeholder="https://keycloak.example.com/realms/myrealm"
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TextField({ label, value, onChange, type = "text", placeholder }: {
+  label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-xs text-[var(--text-tertiary)] mb-0.5">{label}</label>
+      <input
+        type={type}
+        className="w-full bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-sm text-[var(--text-primary)]"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+}
+
+const API_TYPE_OPTIONS = [
+  { value: "openai-completions", label: "OpenAI Completions" },
+  { value: "openai-responses", label: "OpenAI Responses" },
+  { value: "anthropic-messages", label: "Anthropic Messages" },
+  { value: "azure-openai-responses", label: "Azure OpenAI" },
+  { value: "mistral-conversations", label: "Mistral" },
+  { value: "bedrock-converse-stream", label: "AWS Bedrock" },
+  { value: "google-generative-ai", label: "Google Gemini" },
+  { value: "google-vertex", label: "Google Vertex AI" },
+];
+
+// ─── Global Packages Section ──────────────────────────────────────────────────
+
+function GlobalPackagesSection() {
+  const installed = useInstalledPackages("global");
+  const operations = usePackageOperations("global", undefined, installed.refresh);
+  const [confirmInstall, setConfirmInstall] = useState<{ source: string; pkg?: NpmPackageResult } | null>(null);
+  const [readmePkg, setReadmePkg] = useState<NpmPackageResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [updatesAvailable, setUpdatesAvailable] = useState<Set<string>>(new Set());
+
+  const handleCheckUpdates = async () => {
+    setChecking(true);
+    try {
+      const res = await fetch(`${getApiBase()}/api/packages/check-updates`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const body = await res.json();
+      if (body.success) {
+        setUpdatesAvailable(new Set(body.data.map((u: any) => u.source)));
+      }
+    } catch { /* ignore */ }
+    setChecking(false);
+  };
+
+  const handleConfirmInstall = (source: string, pkg?: NpmPackageResult) => {
+    setConfirmInstall({ source, pkg });
+  };
+
+  const doInstall = () => {
+    if (!confirmInstall) return;
+    operations.install(confirmInstall.source);
+    setConfirmInstall(null);
+  };
+
+  return (
+    <>
+      {/* Installed packages */}
+      <Section title="Installed Global Packages">
+        <div className="flex items-center gap-2 mb-2">
+          <button
+            onClick={handleCheckUpdates}
+            disabled={checking}
+            className="text-xs px-2 py-1 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-primary)] disabled:opacity-50"
+          >
+            <Icon path={mdiUpdate} size={0.45} className="inline mr-0.5" />{checking ? "Checking..." : "Check for Updates"}
+          </button>
+        </div>
+        {installed.packages.length === 0 ? (
+          <p className="text-xs text-[var(--text-muted)] italic">No global packages installed.</p>
+        ) : (
+          <div className="space-y-1">
+            {installed.packages.map((pkg) => (
+              <div key={pkg.source} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-[var(--bg-hover)] text-xs">
+                <span className="text-[var(--text-primary)] font-mono">{pkg.source}</span>
+                <div className="flex items-center gap-1.5">
+                  {updatesAvailable.has(pkg.source) && (
+                    <button
+                      onClick={() => operations.update(pkg.source)}
+                      disabled={operations.operation.status === "running"}
+                      className="px-2 py-0.5 rounded bg-[var(--accent-primary)]/20 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/30 disabled:opacity-50"
+                    >
+                      Update
+                    </button>
+                  )}
+                  <button
+                    onClick={() => operations.remove(pkg.source)}
+                    disabled={operations.operation.status === "running"}
+                    className="px-2 py-0.5 rounded text-red-400 hover:bg-red-400/10 disabled:opacity-50"
+                  >
+                    Uninstall
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {operations.operation.status !== "idle" && (
+          <div className={`mt-2 text-xs px-2 py-1 rounded ${
+            operations.operation.status === "running" ? "bg-blue-500/10 text-blue-400"
+              : operations.operation.status === "success" ? "bg-green-500/10 text-green-400"
+                : "bg-red-500/10 text-red-400"
+          }`}>
+            {operations.operation.message}
+          </div>
+        )}
+      </Section>
+
+      {/* Browse packages */}
+      <Section title="Browse Packages">
+        <PackageBrowser
+          scope="global"
+          onViewReadme={setReadmePkg}
+          onConfirmInstall={handleConfirmInstall}
+        />
+      </Section>
+
+      {/* Dialogs */}
+      {confirmInstall && (
+        <PackageInstallConfirmDialog
+          source={confirmInstall.source}
+          packageName={confirmInstall.pkg?.name}
+          scope="global"
+          onConfirm={doInstall}
+          onCancel={() => setConfirmInstall(null)}
+        />
+      )}
+      {readmePkg && (
+        <PackageReadmeDialog
+          pkg={readmePkg}
+          installed={installed.packages.some((p) => p.source === `npm:${readmePkg.name}`)}
+          onInstall={() => { handleConfirmInstall(`npm:${readmePkg.name}`, readmePkg); setReadmePkg(null); }}
+          onUninstall={() => { operations.remove(`npm:${readmePkg.name}`); setReadmePkg(null); }}
+          onClose={() => setReadmePkg(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function LlmProviderCard({ provider, onChange, onRemove }: {
+  provider: LlmProvider;
+  onChange: (p: LlmProvider) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="border border-[var(--border-secondary)] rounded p-3 mb-2">
+      <div className="flex items-center justify-between mb-2">
+        {provider.isNew ? (
+          <input
+            type="text"
+            className="bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-0.5 text-sm font-medium text-[var(--text-primary)] w-48"
+            placeholder="Provider name"
+            value={provider.name}
+            onChange={(e) => onChange({ ...provider, name: e.target.value })}
+            autoFocus
+          />
+        ) : (
+          <span className="text-sm font-medium text-[var(--text-primary)]">{provider.name}</span>
+        )}
+        <button
+          onClick={onRemove}
+          className="text-xs px-2 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 flex items-center gap-1"
+        >
+          <Icon path={mdiDelete} size={0.45} />
+          Remove
+        </button>
+      </div>
+      <div className="space-y-2">
+        <TextField
+          label="Base URL"
+          value={provider.baseUrl}
+          onChange={(v) => onChange({ ...provider, baseUrl: v })}
+          placeholder="https://api.example.com/v1"
+        />
+        <TextField
+          label="API Key"
+          value={provider.apiKey}
+          onChange={(v) => onChange({ ...provider, apiKey: v })}
+          type="password"
+          placeholder="sk-... or $ENV_VAR_NAME"
+        />
+        <div>
+          <label className="block text-xs text-[var(--text-tertiary)] mb-0.5">API Type</label>
+          <select
+            className="w-full bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-sm text-[var(--text-primary)]"
+            value={provider.api}
+            onChange={(e) => onChange({ ...provider, api: e.target.value })}
+          >
+            {API_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}

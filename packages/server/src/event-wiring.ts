@@ -1,0 +1,559 @@
+/**
+ * Event wiring: connects pi gateway events to browser gateway and session management.
+ * Extracted from server.ts for clarity.
+ */
+import type { SessionManager } from "./memory-session-manager.js";
+import type { EventStore } from "./memory-event-store.js";
+import type { PiGateway } from "./pi-gateway.js";
+import type { BrowserGateway } from "./browser-gateway.js";
+import type { SessionOrderManager } from "./session-order-manager.js";
+import type { PendingForkRegistry } from "./pending-fork-registry.js";
+import type { DirectoryService } from "./directory-service.js";
+import { extractSessionUpdates } from "./event-status-extraction.js";
+import { spawnPiSession } from "./process-manager.js";
+import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
+import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { detectOpenSpecActivity } from "@blackbelt-technology/pi-dashboard-shared/openspec-activity-detector.js";
+import { extractTurnStats } from "@blackbelt-technology/pi-dashboard-shared/stats-extractor.js";
+
+export interface EventWiringDeps {
+  sessionManager: SessionManager;
+  eventStore: EventStore;
+  piGateway: PiGateway;
+  browserGateway: BrowserGateway;
+  sessionOrderManager: SessionOrderManager;
+  pendingForkRegistry: PendingForkRegistry;
+  directoryService: DirectoryService;
+  knownSessionIds: Set<string>;
+  pendingDashboardSpawns: Map<string, number>;
+}
+
+/**
+ * Wire up all event forwarding from pi gateway to browser gateway.
+ * Sets piGateway.onEvent and sessionManager.onUnregister.
+ */
+export function wireEvents(deps: EventWiringDeps): void {
+  const {
+    sessionManager,
+    eventStore,
+    piGateway,
+    browserGateway,
+    sessionOrderManager,
+    pendingForkRegistry,
+    directoryService,
+    knownSessionIds,
+    pendingDashboardSpawns,
+  } = deps;
+
+  // Broadcast placeholder session to browsers when auto-created from early events
+  piGateway.onSessionCreated = (sessionId) => {
+    const session = sessionManager.get(sessionId);
+    if (session) {
+      browserGateway.broadcastSessionAdded(session);
+    }
+  };
+
+  // Broadcast session ended to browsers when sessions are unregistered
+  sessionManager.onUnregister = (sessionId) => {
+    const session = sessionManager.get(sessionId);
+    if (session) {
+      browserGateway.broadcastSessionUpdated(sessionId, {
+        status: "ended",
+        endedAt: session.endedAt,
+        currentTool: null,
+      });
+    }
+  };
+
+  // Track sessions replaying history — suppress status broadcasts to avoid card flicker
+  const replayingSessions = new Set<string>();
+  // Debounce flows refresh to prevent infinite loop between sessions in same cwd
+  const recentFlowsRefresh = new Set<string>();
+
+  piGateway.onEvent = (sessionId, msg) => {
+    if (msg.type === "event_forward") {
+      const seq = eventStore.insertEvent(sessionId, msg.event);
+      // Skip broadcasting during replay — browser gets events via subscribe replay
+      if (!replayingSessions.has(sessionId)) {
+        const storedEvent = eventStore.getEvent(sessionId, seq) ?? msg.event;
+        browserGateway.broadcastEvent(sessionId, seq, storedEvent);
+      }
+
+      const updates = extractSessionUpdates(msg.event);
+      if (updates) {
+        if (updates.flowAgentsDone === -1) {
+          const session = sessionManager.get(sessionId);
+          updates.flowAgentsDone = (session?.flowAgentsDone ?? 0) + 1;
+        }
+        sessionManager.update(sessionId, updates);
+        // During replay, accumulate in sessionManager but don't broadcast
+        // to avoid rapid status flickers on the session card
+        if (!replayingSessions.has(sessionId)) {
+          browserGateway.broadcastSessionUpdated(sessionId, updates);
+        }
+      }
+
+      // Server-side OpenSpec activity detection from forwarded events
+      // Skip during replay — replayed events from a forked session would set stale phase/change
+      if (msg.event.eventType === "tool_execution_start" && !replayingSessions.has(sessionId)) {
+        const detected = detectOpenSpecActivity(
+          msg.event.data.toolName as string,
+          msg.event.data.args as Record<string, unknown> | undefined,
+        );
+        if (detected) {
+          const session = sessionManager.get(sessionId);
+          const activityUpdates: Partial<DashboardSession> = {};
+          let changed = false;
+          if (detected.phase && detected.phase !== session?.openspecPhase) {
+            activityUpdates.openspecPhase = detected.phase;
+            changed = true;
+          }
+          if (detected.changeName && detected.changeName !== session?.openspecChange) {
+            activityUpdates.openspecChange = detected.changeName;
+            changed = true;
+          }
+          if (changed) {
+            sessionManager.update(sessionId, activityUpdates);
+            const updatedSession = sessionManager.get(sessionId);
+            // Auto-attach proposal when changeName is detected (phase is optional —
+            // skills loaded via prompt templates don't emit a SKILL.md read event)
+            const attachUpdates: Partial<DashboardSession> = {};
+            if (updatedSession?.openspecChange && !updatedSession.attachedProposal) {
+              attachUpdates.attachedProposal = updatedSession.openspecChange;
+              if (!updatedSession.name?.trim()) {
+                attachUpdates.name = updatedSession.openspecChange;
+                piGateway.sendToSession(sessionId, {
+                  type: "rename_session",
+                  sessionId,
+                  name: updatedSession.openspecChange,
+                });
+              }
+              sessionManager.update(sessionId, attachUpdates);
+            }
+            if (!replayingSessions.has(sessionId)) {
+              browserGateway.broadcastSessionUpdated(sessionId, {
+                ...activityUpdates,
+                ...attachUpdates,
+              });
+            }
+          }
+        }
+      }
+      if (msg.event.eventType === "agent_end" && !replayingSessions.has(sessionId)) {
+        const session = sessionManager.get(sessionId);
+        if (session?.openspecPhase || session?.openspecChange) {
+          const clearUpdates: Partial<DashboardSession> = {
+            openspecPhase: null as any,
+            openspecChange: null as any,
+          };
+          sessionManager.update(sessionId, clearUpdates);
+          browserGateway.broadcastSessionUpdated(sessionId, clearUpdates);
+        }
+      }
+
+      // Server-side stats extraction from forwarded turn_end events
+      if (msg.event.eventType === "turn_end") {
+        const ctxUsage = msg.event.data.contextUsage as { tokens: number | null; contextWindow: number } | undefined;
+        const stats = extractTurnStats(msg.event.data, ctxUsage);
+        if (stats) {
+          const session = sessionManager.get(sessionId);
+          const statsUpdates: Partial<DashboardSession> = {
+            tokensIn: (session?.tokensIn ?? 0) + stats.tokensIn,
+            tokensOut: (session?.tokensOut ?? 0) + stats.tokensOut,
+            cacheRead: (session?.cacheRead ?? 0) + (stats.turnUsage?.cacheRead ?? 0),
+            cacheWrite: (session?.cacheWrite ?? 0) + (stats.turnUsage?.cacheWrite ?? 0),
+            cost: (session?.cost ?? 0) + stats.cost,
+          };
+          if (stats.contextUsage) {
+            statsUpdates.contextTokens = stats.contextUsage.tokens;
+            statsUpdates.contextWindow = stats.contextUsage.contextWindow;
+          }
+          sessionManager.update(sessionId, statsUpdates);
+
+          // Synthesize a stats_update event for client replay compatibility
+          const statsEvent = {
+            eventType: "stats_update",
+            timestamp: Date.now(),
+            data: {
+              tokensIn: stats.tokensIn,
+              tokensOut: stats.tokensOut,
+              cost: stats.cost,
+              turnUsage: stats.turnUsage,
+              contextUsage: stats.contextUsage,
+            },
+          };
+          const statsSeq = eventStore.insertEvent(sessionId, statsEvent);
+          if (!replayingSessions.has(sessionId)) {
+            browserGateway.broadcastEvent(sessionId, statsSeq, statsEvent);
+            browserGateway.broadcastSessionUpdated(sessionId, statsUpdates);
+          }
+        }
+      }
+    }
+
+    if (msg.type === "replay_complete") {
+      replayingSessions.delete(sessionId);
+      // Clear any stale OpenSpec activity state that may have leaked
+      // (e.g. from events forwarded before the replay flag was set)
+      const preSession = sessionManager.get(sessionId);
+      if (preSession?.openspecPhase || preSession?.openspecChange) {
+        sessionManager.update(sessionId, {
+          openspecPhase: null as any,
+          openspecChange: null as any,
+        });
+      }
+      // Broadcast the final accumulated status after replay
+      const session = sessionManager.get(sessionId);
+      if (session) {
+        browserGateway.broadcastSessionUpdated(sessionId, {
+          status: session.status,
+          currentTool: session.currentTool ?? null,
+          openspecPhase: null,
+          openspecChange: null,
+        });
+      }
+      // Send replayed events to browser subscribers.
+      // During replay, event_forward messages were stored but not broadcast.
+      // Subscribers who received session_state_reset need the events to rebuild chat.
+      const storedEvents = eventStore.getEvents(sessionId, 1);
+      if (storedEvents.length > 0) {
+        browserGateway.sendToSubscribers(sessionId, {
+          type: "event_replay",
+          sessionId,
+          events: storedEvents.map((e) => ({ seq: e.seq, event: e.event })),
+          isLast: true,
+        } as any);
+      }
+    }
+
+    if (msg.type === "session_register") {
+      replayingSessions.add(sessionId);
+      // Safety timeout: clear replay flag after 5s if replay_complete never arrives
+      setTimeout(() => {
+        if (replayingSessions.delete(sessionId)) {
+          const session = sessionManager.get(sessionId);
+          if (session) {
+            browserGateway.broadcastSessionUpdated(sessionId, {
+              status: session.status,
+              currentTool: session.currentTool ?? null,
+            });
+          }
+          // Send any accumulated events to browser subscribers
+          const fallbackEvents = eventStore.getEvents(sessionId, 1);
+          if (fallbackEvents.length > 0) {
+            browserGateway.sendToSubscribers(sessionId, {
+              type: "event_replay",
+              sessionId,
+              events: fallbackEvents.map((e) => ({ seq: e.seq, event: e.event })),
+              isLast: true,
+            } as any);
+          }
+        }
+      }, 5_000);
+      // Skip wipe if bridge provides eventCount matching the last known entry count.
+      // This avoids full replay cascade when bridge simply reconnects.
+      // Compare entry counts (apples to apples) — not entries vs stored events.
+      const session = sessionManager.get(sessionId);
+      const lastEntryCount = session?.lastEntryCount;
+      const canSkipWipe = msg.eventCount !== undefined && lastEntryCount !== undefined && msg.eventCount === lastEntryCount && eventStore.hasEvents(sessionId);
+      // Store the bridge's entry count for future reconnect comparisons
+      if (msg.eventCount !== undefined) {
+        sessionManager.update(sessionId, { lastEntryCount: msg.eventCount });
+      }
+      if (!canSkipWipe) {
+        eventStore.deleteEventsForSession(sessionId);
+        browserGateway.broadcastSessionStateReset(sessionId);
+      }
+      sessionManager.update(sessionId, { hidden: false, dataUnavailable: false });
+
+      if (msg.sessionFile) {
+        for (const other of sessionManager.listAll()) {
+          if (other.id !== sessionId && other.sessionFile === msg.sessionFile) {
+            sessionManager.update(other.id, { sessionFile: undefined });
+            browserGateway.broadcastSessionUpdated(other.id, { sessionFile: null });
+          }
+        }
+      }
+
+      // Dedup: clean up ghost sessions in the same cwd that were auto-created
+      // by duplicate bridge connections (e.g. extension loaded twice).
+      // A ghost is active, has no sessionFile, no events, is not connected
+      // to the pi-gateway, and was created very recently.
+      const now = Date.now();
+      for (const other of sessionManager.listAll()) {
+        if (
+          other.id !== sessionId &&
+          other.cwd === msg.cwd &&
+          other.status !== "ended" &&
+          !other.sessionFile &&
+          !piGateway.isSessionConnected(other.id) &&
+          !eventStore.hasEvents(other.id) &&
+          Math.abs(now - other.startedAt) < 30_000
+        ) {
+          console.error(`[event-wiring] Cleaning up ghost session ${other.id} (dup of ${sessionId} in ${msg.cwd})`);
+          sessionManager.unregister(other.id);
+          browserGateway.broadcastSessionRemoved(other.id);
+        }
+      }
+
+      browserGateway.headlessPidRegistry.linkSession(sessionId, msg.cwd);
+
+      const isNewSession = !knownSessionIds.has(sessionId);
+      knownSessionIds.add(sessionId);
+      const pendingCount = pendingDashboardSpawns.get(msg.cwd) ?? 0;
+      if (pendingCount > 0 && isNewSession) {
+        if (pendingCount <= 1) pendingDashboardSpawns.delete(msg.cwd);
+        else pendingDashboardSpawns.set(msg.cwd, pendingCount - 1);
+        sessionManager.update(sessionId, { source: "dashboard" });
+        browserGateway.broadcastSessionUpdated(sessionId, { source: "dashboard" });
+        if (msg.sessionFile) {
+          try {
+            writeSessionMeta(msg.sessionFile, { source: "dashboard" });
+          } catch { /* best-effort */ }
+        }
+      }
+
+      const forkParent = pendingForkRegistry.consumeFork(msg.cwd);
+      sessionOrderManager.insert(msg.cwd, sessionId);
+
+      if (forkParent) {
+        const session = sessionManager.get(sessionId);
+        if (session && !session.attachedProposal) {
+          // Use the actual parent session's proposal, not any random ended session
+          const parent = sessionManager.get(forkParent);
+          if (parent?.attachedProposal) {
+            sessionManager.update(sessionId, { attachedProposal: parent.attachedProposal });
+          }
+        }
+      }
+
+      const validIds = new Set(sessionManager.listAll().filter((s) => s.cwd === msg.cwd).map((s) => s.id));
+      const order = sessionOrderManager.getOrder(msg.cwd, validIds);
+      browserGateway.broadcastToAll({ type: "sessions_reordered", cwd: msg.cwd, sessionIds: order });
+
+      const updatedSession = sessionManager.get(sessionId);
+      if (updatedSession) {
+        browserGateway.broadcastSessionAdded(updatedSession);
+      }
+
+      const isNewCwd = !sessionManager.listAll().some(
+        (s) => s.id !== sessionId && s.cwd === msg.cwd,
+      );
+      if (isNewCwd) {
+        directoryService.onDirectoryAdded(msg.cwd).then(({ sessions, openspecData }) => {
+          for (const hist of sessions) {
+            if (!sessionManager.get(hist.id)) {
+              sessionManager.register({
+                id: hist.id,
+                cwd: hist.cwd,
+                name: hist.name,
+                source: "tui",
+                sessionFile: hist.sessionFile,
+                sessionDir: hist.sessionDir,
+                firstMessage: hist.firstMessage,
+                startedAt: hist.startedAt,
+              });
+              sessionManager.unregister(hist.id);
+              sessionManager.update(hist.id, { hidden: true });
+              const s = sessionManager.get(hist.id);
+              if (s) browserGateway.broadcastSessionAdded(s);
+            }
+          }
+          browserGateway.broadcastToAll({
+            type: "openspec_update",
+            cwd: msg.cwd,
+            data: openspecData,
+          } as any);
+        }).catch(() => {});
+      }
+
+      const pendingResume = browserGateway.pendingResumeRegistry.consume(msg.cwd);
+      if (pendingResume) {
+        piGateway.sendToSession(sessionId, {
+          type: "send_prompt",
+          sessionId,
+          text: pendingResume.text,
+          images: pendingResume.images,
+        });
+        sessionManager.update(sessionId, { resuming: false });
+        browserGateway.broadcastSessionUpdated(sessionId, { resuming: false });
+      }
+    }
+
+    if (msg.type === "first_message_update") {
+      sessionManager.update(sessionId, { firstMessage: msg.firstMessage });
+      browserGateway.broadcastSessionUpdated(sessionId, { firstMessage: msg.firstMessage });
+    }
+
+    if (msg.type === "session_unregister") {
+      browserGateway.broadcastSessionRemoved(sessionId);
+    }
+
+    if (msg.type === "commands_list") {
+      browserGateway.sendToSubscribers(sessionId, {
+        type: "commands_list",
+        sessionId,
+        commands: msg.commands,
+      });
+    }
+
+    if (msg.type === "flows_list") {
+      browserGateway.sendToSubscribers(sessionId, {
+        type: "flows_list",
+        sessionId,
+        flows: msg.flows,
+      });
+
+      // Tell other connected sessions in the same cwd to rediscover flows
+      // (debounced to avoid infinite loop: A→refresh B→B sends flows→refresh A→...)
+      if (!recentFlowsRefresh.has(sessionId)) {
+        recentFlowsRefresh.add(sessionId);
+        setTimeout(() => recentFlowsRefresh.delete(sessionId), 5_000);
+        const session = sessionManager.get(sessionId);
+        if (session) {
+          for (const sid of piGateway.getConnectedSessionIds()) {
+            if (sid === sessionId || recentFlowsRefresh.has(sid)) continue;
+            const other = sessionManager.get(sid);
+            if (other && other.cwd === session.cwd) {
+              piGateway.sendToSession(sid, { type: "request_flows_refresh", sessionId: sid });
+            }
+          }
+        }
+      }
+    }
+
+    if (msg.type === "git_info_update") {
+      const gitUpdates = {
+        gitBranch: msg.gitBranch,
+        gitBranchUrl: msg.gitBranchUrl,
+        gitPrNumber: msg.gitPrNumber,
+        gitPrUrl: msg.gitPrUrl,
+      };
+      sessionManager.update(sessionId, gitUpdates);
+      browserGateway.broadcastSessionUpdated(sessionId, gitUpdates);
+    }
+
+    if (msg.type === "files_list") {
+      browserGateway.sendToSubscribers(sessionId, {
+        type: "files_list",
+        sessionId,
+        query: msg.query,
+        files: msg.files,
+      });
+    }
+
+    if (msg.type === "models_list") {
+      // Broadcast to all browsers (not just subscribers) so model selector
+      // is available even before the user opens the session
+      browserGateway.broadcastToAll({
+        type: "models_list",
+        sessionId,
+        models: msg.models,
+      } as any);
+    }
+
+    if (msg.type === "roles_list") {
+      browserGateway.broadcastToAll({
+        type: "roles_list",
+        sessionId,
+        roles: (msg as any).roles,
+        presets: (msg as any).presets,
+        activePreset: (msg as any).activePreset,
+      } as any);
+    }
+
+    if (msg.type === "model_update") {
+      const modelUpdates: Partial<DashboardSession> = {
+        model: msg.model,
+      };
+      if (msg.thinkingLevel !== undefined) {
+        modelUpdates.thinkingLevel = msg.thinkingLevel;
+      }
+      sessionManager.update(sessionId, modelUpdates);
+      browserGateway.broadcastSessionUpdated(sessionId, modelUpdates);
+    }
+
+    if (msg.type === "extension_ui_request") {
+      const tracked = browserGateway.trackUiRequest(sessionId, msg.requestId, msg.method, msg.params);
+      if (tracked !== false) {
+        browserGateway.sendToSubscribers(sessionId, {
+          type: "extension_ui_request",
+          sessionId,
+          requestId: msg.requestId,
+          method: msg.method,
+          params: msg.params,
+        });
+      }
+    }
+
+    if (msg.type === "extension_ui_dismiss") {
+      browserGateway.sendToSubscribers(sessionId, {
+        type: "ui_dismiss",
+        sessionId,
+        requestId: msg.requestId,
+      });
+    }
+
+    if (msg.type === "session_name_update") {
+      const nameUpdates = { name: msg.name || undefined };
+      sessionManager.update(sessionId, nameUpdates);
+      browserGateway.broadcastSessionUpdated(sessionId, nameUpdates);
+    }
+
+    if (msg.type === "spawn_new_session") {
+      spawnPiSession(msg.cwd, { strategy: loadConfig().spawnStrategy }).then((result) => {
+        if (result.process && result.pid) {
+          browserGateway.headlessPidRegistry.register(result.pid, msg.cwd, result.process);
+        }
+        browserGateway.broadcastToAll({
+          type: "spawn_result",
+          cwd: msg.cwd,
+          success: result.success,
+          message: result.message,
+        } as any);
+      }).catch(() => { /* ignore spawn errors */ });
+    }
+
+    if (msg.type === "sessions_list") {
+      for (const piSession of msg.sessions) {
+        const existing = sessionManager.get(piSession.id);
+        if (!existing) {
+          sessionManager.register({
+            id: piSession.id,
+            cwd: piSession.cwd,
+            name: piSession.name,
+            source: "unknown",
+            sessionFile: piSession.path,
+            sessionDir: piSession.cwd,
+            firstMessage: piSession.firstMessage,
+          });
+          sessionManager.unregister(piSession.id);
+        } else if (existing.sessionFile !== piSession.path) {
+          sessionManager.update(piSession.id, {
+            sessionFile: piSession.path,
+            sessionDir: piSession.cwd,
+          });
+        }
+      }
+      browserGateway.broadcastToAll({
+        type: "sessions_list",
+        sessionId,
+        cwd: msg.cwd,
+        sessions: msg.sessions,
+      });
+    }
+
+    // Forward process list from bridge to subscribed browsers
+    if (msg.type === "process_list") {
+      // Store on session so new subscribers get current processes
+      sessionManager.update(sessionId, { processes: msg.processes });
+      browserGateway.sendToSubscribers(sessionId, {
+        type: "process_list_update",
+        sessionId,
+        processes: msg.processes,
+      });
+    }
+
+  };
+}
