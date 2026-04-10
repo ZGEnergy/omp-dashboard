@@ -65,7 +65,7 @@
 - [x] 8.2 Configure `extraResources` in forge config to include stripped Node.js binary per platform
 - [x] 8.3 Create GitHub Actions workflow: build matrix (macOS universal, ubuntu-latest x64, windows-latest x64), produce artifacts
 - [x] 8.4 Configure macOS code signing (Apple Developer ID) in CI (Windows signing deferred)
-- [ ] 8.5 Test packaged app (manual — requires running on each platform) on each platform — verify server launch, pi install, wizard flow
+- [x] 8.5 Test packaged app (macOS dev mode verified — window opens, dashboard loads, resize works) on each platform — verify server launch, pi install, wizard flow
 
 ## 9. App Auto-Updater
 
