@@ -42,6 +42,13 @@ describe("isBypassedHost", () => {
   it("should match any entry in the list", () => {
     expect(isBypassedHost("10.0.0.5", ["192.168.1.0/24", "10.0.0.*"])).toBe(true);
   });
+
+  it("should strip ::ffff: IPv4-mapped prefix", () => {
+    expect(isBypassedHost("::ffff:192.168.1.42", ["192.168.1.0/24"])).toBe(true);
+    expect(isBypassedHost("::ffff:10.0.0.5", ["10.0.0.*"])).toBe(true);
+    expect(isBypassedHost("::ffff:10.0.0.5", ["10.0.0.5"])).toBe(true);
+    expect(isBypassedHost("::ffff:192.168.2.1", ["192.168.1.0/24"])).toBe(false);
+  });
 });
 
 describe("matchCidr", () => {

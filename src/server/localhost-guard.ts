@@ -19,14 +19,16 @@ export function isLoopback(ip: string): boolean {
  * Supports exact match, wildcard (e.g. "10.0.0.*"), and CIDR notation (e.g. "192.168.1.0/24").
  */
 export function isBypassedHost(sourceIp: string, bypassHosts: string[]): boolean {
+  // Strip IPv4-mapped IPv6 prefix (e.g. ::ffff:192.168.1.1 → 192.168.1.1)
+  const ip = sourceIp.startsWith("::ffff:") ? sourceIp.slice(7) : sourceIp;
   for (const entry of bypassHosts) {
     if (entry.includes("/")) {
-      if (matchCidr(sourceIp, entry)) return true;
+      if (matchCidr(ip, entry)) return true;
     } else if (entry.includes("*")) {
       const pattern = new RegExp("^" + entry.replace(/\./g, "\\.").replace(/\*/g, "\\d+") + "$");
-      if (pattern.test(sourceIp)) return true;
+      if (pattern.test(ip)) return true;
     } else {
-      if (sourceIp === entry) return true;
+      if (ip === entry) return true;
     }
   }
   return false;
