@@ -45,6 +45,7 @@ const API_KEY_PROVIDERS = [
   { id: "groq", authJsonKey: "groq", name: "Groq" },
   { id: "xai", authJsonKey: "xai", name: "xAI" },
   { id: "openrouter", authJsonKey: "openrouter", name: "OpenRouter" },
+  { id: "zai", authJsonKey: "zai", name: "Z.ai" },
 ];
 
 // ── Lock helpers ─────────────────────────────────────────────────────────────
@@ -174,9 +175,7 @@ export function getAuthStatus(): ProviderAuthStatus[] {
     };
     if (hasKey) {
       const key = (cred as ApiKeyCredential).key;
-      const last4 = key.length > 4 ? key.slice(-4) : "****";
-      const prefix = key.includes("-") ? key.slice(0, key.indexOf("-") + 1) : "";
-      entry.maskedKey = `${prefix}...${last4}`;
+      entry.maskedKey = key.length >= 12 ? `${key.slice(0, 5)}...${key.slice(-3)}` : "****";
     }
     statuses.push(entry);
   }

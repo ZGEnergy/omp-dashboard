@@ -65,4 +65,50 @@ describe("provider-auth-storage", () => {
     expect(oauthIds).toContain("google-gemini-cli");
     expect(oauthIds).toContain("google-antigravity");
   });
+
+  it("getAuthStatus includes zai provider with flowType api_key", async () => {
+    const { getAuthStatus } = await import("../provider-auth-storage.js");
+    const statuses = getAuthStatus();
+    const zai = statuses.find((s) => s.id === "zai");
+    expect(zai).toBeDefined();
+    expect(zai!.name).toBe("Z.ai");
+    expect(zai!.flowType).toBe("api_key");
+  });
+
+  it("masking shows first 5 + ... + last 3 for keys >= 12 chars", async () => {
+    const { writeCredential, getAuthStatus, removeCredential } = await import("../provider-auth-storage.js");
+    writeCredential("openai", { type: "api_key", key: "sk-abc123xyz789" });
+    try {
+      const statuses = getAuthStatus();
+      const openai = statuses.find((s) => s.id === "openai");
+      expect(openai!.maskedKey).toBe("sk-ab...789");
+    } finally {
+      removeCredential("openai");
+    }
+  });
+
+  it("masking returns **** for keys < 12 chars", async () => {
+    const { writeCredential, getAuthStatus, removeCredential } = await import("../provider-auth-storage.js");
+    writeCredential("openai", { type: "api_key", key: "shortkey" });
+    try {
+      const statuses = getAuthStatus();
+      const openai = statuses.find((s) => s.id === "openai");
+      expect(openai!.maskedKey).toBe("****");
+    } finally {
+      removeCredential("openai");
+    }
+  });
+
+  it("empty key string results in authenticated false with no maskedKey", async () => {
+    const { writeCredential, getAuthStatus, removeCredential } = await import("../provider-auth-storage.js");
+    writeCredential("openai", { type: "api_key", key: "" });
+    try {
+      const statuses = getAuthStatus();
+      const openai = statuses.find((s) => s.id === "openai");
+      expect(openai!.authenticated).toBe(false);
+      expect(openai!.maskedKey).toBeUndefined();
+    } finally {
+      removeCredential("openai");
+    }
+  });
 });
