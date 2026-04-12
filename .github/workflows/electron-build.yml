@@ -40,6 +40,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Linux: install system deps for DEB and AppImage makers
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg fakeroot libarchive-tools
+
       - name: Download Node.js binary (Unix)
         if: matrix.platform != 'win32'
         run: |
@@ -73,9 +80,6 @@ jobs:
         with:
           name: electron-${{ matrix.platform }}-${{ matrix.arch }}
           path: packages/electron/out/make/**/*
-
-  # macOS universal binary (combine arm64 + x64)
-  # TODO: Add universal binary step using @electron/universal
 
   release:
     needs: build

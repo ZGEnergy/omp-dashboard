@@ -1,8 +1,9 @@
 /**
  * Installs pi, dashboard, openspec, and tsx into the managed location.
  * Uses system npm when available, falls back to bundled npm.
+ * All installs run async (child_process.exec) to avoid blocking Electron's main process.
  */
-import { execSync } from "node:child_process";
+import { exec, spawn as cpSpawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -15,6 +16,8 @@ export interface InstallProgress {
   step: string;
   status: "pending" | "running" | "done" | "error";
   error?: string;
+  /** Last line of npm output (for streaming progress) */
+  output?: string;
 }
 
 export type ProgressCallback = (progress: InstallProgress) => void;
@@ -43,9 +46,63 @@ function resolveNpm(): string {
   throw new Error("No Node.js available. Cannot install dependencies.");
 }
 
-function runNpmInstall(packages: string[], cwd: string, npmCmd: string): void {
-  const cmd = `${npmCmd} install ${packages.join(" ")}`;
-  execSync(cmd, { cwd, stdio: "pipe", timeout: 120_000 });
+/** Build env with bundled Node on PATH so postinstall scripts can find `node`. */
+function buildInstallEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  const nodePath = getBundledNodePath();
+  if (nodePath) {
+    const binDir = path.dirname(nodePath);
+    env.PATH = `${binDir}${path.delimiter}${env.PATH || ""}`;
+  }
+  return env;
+}
+
+/** Run npm install asynchronously with streaming output. */
+function runNpmInstall(
+  packages: string[],
+  cwd: string,
+  npmCmd: string,
+  onOutput?: (line: string) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const env = buildInstallEnv();
+    // Parse npmCmd into command + args (handles "node" "npm-cli.js" form)
+    const parts = npmCmd.match(/"[^"]+"|\S+/g)?.map(s => s.replace(/^"|"$/g, "")) || [npmCmd];
+    const cmd = parts[0];
+    const args = [...parts.slice(1), "install", ...packages];
+
+    const child = cpSpawn(cmd, args, {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 300_000,
+    });
+
+    let stderr = "";
+
+    const handleData = (data: Buffer) => {
+      const text = data.toString();
+      stderr += text;
+      // Forward last meaningful line to UI
+      const lines = text.split("\n").filter(l => l.trim());
+      const last = lines[lines.length - 1];
+      if (last && onOutput) {
+        onOutput(last.trim().substring(0, 120));
+      }
+    };
+
+    child.stdout?.on("data", handleData);
+    child.stderr?.on("data", handleData);
+
+    child.on("error", (err) => reject(new Error(err.message)));
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.slice(-500) || `npm install exited with code ${code}`));
+      } else {
+        resolve();
+      }
+    });
+  });
 }
 
 /**
@@ -55,9 +112,10 @@ export async function installStandalone(onProgress?: ProgressCallback): Promise<
   ensureManagedDir();
   const npmCmd = resolveNpm();
 
+  // Note: @blackbelt-technology/pi-dashboard is bundled with the Electron app
+  // (server CLI in extraResources), so it's not installed via npm.
   const packages = [
     "@mariozechner/pi-coding-agent",
-    "@blackbelt-technology/pi-dashboard",
     "@fission-ai/openspec",
     "tsx",
   ];
@@ -66,7 +124,9 @@ export async function installStandalone(onProgress?: ProgressCallback): Promise<
     const step = pkg.split("/").pop() || pkg;
     onProgress?.({ step, status: "running" });
     try {
-      runNpmInstall([pkg], MANAGED_DIR, npmCmd);
+      await runNpmInstall([pkg], MANAGED_DIR, npmCmd, (output) => {
+        onProgress?.({ step, status: "running", output });
+      });
       onProgress?.({ step, status: "done" });
     } catch (err: any) {
       onProgress?.({ step, status: "error", error: err.message });
@@ -81,7 +141,7 @@ export async function installStandalone(onProgress?: ProgressCallback): Promise<
 export async function installDashboardGlobal(onProgress?: ProgressCallback): Promise<void> {
   onProgress?.({ step: "pi-dashboard", status: "running" });
   try {
-    execSync("npm install -g @blackbelt-technology/pi-dashboard", { stdio: "pipe", timeout: 120_000 });
+    await runNpmInstall(["@blackbelt-technology/pi-dashboard"], process.cwd(), "npm install -g");
     onProgress?.({ step: "pi-dashboard", status: "done" });
   } catch (err: any) {
     onProgress?.({ step: "pi-dashboard", status: "error", error: err.message });

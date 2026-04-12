@@ -3,23 +3,27 @@
   "version": "0.2.0",
   "description": "Electron desktop app for pi-dashboard",
   "type": "module",
-  "main": "src/main.ts",
+  "main": ".vite/build/main.js",
   "scripts": {
     "start": "electron-forge start",
     "start:dev": "ELECTRON_DEV=1 NODE_OPTIONS='--import tsx' electron src/main.ts",
     "make": "electron-forge make",
-    "package": "electron-forge package"
+    "package": "electron-forge package",
+    "icons": "electron-icon-builder --input=resources/icon.png --output=resources --flatten"
   },
   "dependencies": {
     "@blackbelt-technology/pi-dashboard-shared": "*",
     "electron-updater": "^6.3.0"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
     "@electron-forge/cli": "^7.6.0",
-    "@electron-forge/maker-dmg": "^7.6.0",
     "@electron-forge/maker-deb": "^7.6.0",
-    "@electron-forge/maker-squirrel": "^7.6.0",
-    "@electron-forge/plugin-vite": "^7.6.0"
+    "@electron-forge/maker-dmg": "^7.6.0",
+    "@electron-forge/plugin-vite": "^7.6.0",
+    "@felixrieseberg/electron-forge-maker-nsis": "^7.2.0",
+    "@pengx17/electron-forge-maker-appimage": "^1.2.1",
+    "electron": "^32.0.0",
+    "electron-builder": "^26.8.1",
+    "electron-icon-builder": "^2.0.1"
   }
 }

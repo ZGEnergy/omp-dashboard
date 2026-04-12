@@ -22,7 +22,7 @@ export interface WizardApi {
   /** Complete wizard and persist mode */
   completeWizard: (mode: "standalone" | "power-user") => Promise<void>;
   /** Listen for install progress events */
-  onInstallProgress: (callback: (progress: { step: string; status: string; error?: string }) => void) => void;
+  onInstallProgress: (callback: (progress: { step: string; status: string; error?: string; output?: string }) => void) => void;
 }
 
 const api: WizardApi = {

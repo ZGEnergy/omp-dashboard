@@ -83,14 +83,29 @@ function tryResolveJitiFrom(piPkgJsonPath: string): string | null {
 
 /** Resolve tsx ESM loader from managed install or global. */
 function resolveTsx(): string | null {
-  // Managed install
-  const managedTsx = path.join(MANAGED_DIR, "node_modules", "tsx", "dist", "esm", "index.mjs");
-  if (existsSync(managedTsx)) return managedTsx;
+  // Prefer the CJS register hook — it shims __dirname/__filename
+  // which the ESM-only loader does not.
+  const cjsCandidates = [
+    path.join(MANAGED_DIR, "node_modules", "tsx", "dist", "register.js"),
+    path.join(MANAGED_DIR, "node_modules", "tsx", "dist", "cjs", "index.js"),
+  ];
+  for (const p of cjsCandidates) {
+    if (existsSync(p)) return p;
+  }
+
+  // Fallback to ESM loader
+  const managedEsm = path.join(MANAGED_DIR, "node_modules", "tsx", "dist", "esm", "index.mjs");
+  if (existsSync(managedEsm)) return managedEsm;
 
   // Global
   try {
     const tsxMain = require.resolve("tsx");
-    const esmPath = path.join(path.dirname(tsxMain), "esm", "index.mjs");
+    const tsxDir = path.dirname(tsxMain);
+    // Try CJS register first
+    const cjsPath = path.join(tsxDir, "register.js");
+    if (existsSync(cjsPath)) return cjsPath;
+    // Then ESM
+    const esmPath = path.join(tsxDir, "esm", "index.mjs");
     if (existsSync(esmPath)) return esmPath;
   } catch { /* not installed globally */ }
 

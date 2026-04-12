@@ -20,9 +20,13 @@
     .progress-item .icon { font-size: 1.25rem; width: 1.5rem; text-align: center; }
     .progress-item .name { flex: 1; }
     .status-pending { color: #64748b; }
-    .status-running { color: #f59e0b; }
+    .status-running { color: #f59e0b; animation: pulse 1.2s ease-in-out infinite; }
     .status-done { color: #22c55e; }
     .status-error { color: #ef4444; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .progress-item .elapsed { color: #64748b; font-size: 0.8rem; min-width: 3rem; text-align: right; }
+    .progress-item .output { color: #64748b; font-size: 0.75rem; margin-top: 0.25rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
+    .progress-wrap { flex: 1; }
     .form-group { margin: 1rem 0; }
     .form-group label { display: block; margin-bottom: 0.5rem; color: #94a3b8; font-size: 0.875rem; }
     .form-group select, .form-group input { width: 100%; padding: 0.75rem; border: 1px solid #334155; border-radius: 0.5rem; background: #1e293b; color: #e2e8f0; font-size: 1rem; }
@@ -133,18 +137,46 @@
       const list = document.getElementById('progress-list');
       const items = ['pi-coding-agent', 'pi-dashboard', 'openspec', 'tsx'];
       list.innerHTML = items.map(name =>
-        `<div class="progress-item" id="prog-${name}"><span class="icon status-pending">○</span><span class="name">${name}</span></div>`
+        `<div class="progress-item" id="prog-${name}"><span class="icon status-pending">○</span><div class="progress-wrap"><span class="name">${name}</span></div><span class="elapsed"></span></div>`
       ).join('');
       document.getElementById('install-error').style.display = 'none';
       document.getElementById('install-retry').style.display = 'none';
       document.getElementById('install-next').style.display = 'none';
 
-      api.onInstallProgress(({ step, status, error }) => {
+      const timers = {};
+      api.onInstallProgress(({ step, status, error, output }) => {
         const el = document.getElementById('prog-' + step);
         if (!el) return;
         const icon = el.querySelector('.icon');
         icon.className = 'icon status-' + status;
         icon.textContent = status === 'done' ? '✓' : status === 'running' ? '◎' : status === 'error' ? '✗' : '○';
+        // Elapsed timer
+        const elapsedEl = el.querySelector('.elapsed');
+        if (status === 'running' && !timers[step]) {
+          const start = Date.now();
+          timers[step] = setInterval(() => {
+            const s = Math.floor((Date.now() - start) / 1000);
+            if (elapsedEl) elapsedEl.textContent = s + 's';
+          }, 1000);
+        }
+        if (status === 'done' || status === 'error') {
+          clearInterval(timers[step]);
+          delete timers[step];
+        }
+        // npm output line
+        if (output) {
+          let outEl = el.querySelector('.output');
+          if (!outEl) {
+            outEl = document.createElement('div');
+            outEl.className = 'output';
+            el.querySelector('.progress-wrap').appendChild(outEl);
+          }
+          outEl.textContent = output;
+        }
+        if (status === 'done') {
+          const outEl = el.querySelector('.output');
+          if (outEl) outEl.remove();
+        }
         if (error) {
           document.getElementById('install-error').textContent = error;
           document.getElementById('install-error').style.display = 'block';
