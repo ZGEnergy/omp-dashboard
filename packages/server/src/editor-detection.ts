@@ -5,12 +5,15 @@
 import { execSync } from "node:child_process";
 import type { EditorDetectionResult } from "@blackbelt-technology/pi-dashboard-shared/editor-types.js";
 import type { EditorConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { buildSpawnEnv } from "./process-manager.js";
 
 export const BINARIES_TO_CHECK = ["code-server", "openvscode-server"] as const;
 
 export function whichBinary(name: string): string | null {
   try {
-    return execSync(`which ${name}`, { stdio: "pipe", encoding: "utf-8" }).trim() || null;
+    // Use buildSpawnEnv to include ~/.local/bin and other user dirs
+    // that Electron apps miss (no shell profile sourced)
+    return execSync(`which ${name}`, { stdio: "pipe", encoding: "utf-8", env: buildSpawnEnv() }).trim() || null;
   } catch {
     return null;
   }

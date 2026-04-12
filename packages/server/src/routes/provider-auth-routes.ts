@@ -15,6 +15,7 @@ import {
   removeCredential,
   getAuthStatus,
   getOAuthProvidersMeta,
+  resolveAuthJsonKey,
   type ApiKeyCredential,
 } from "../provider-auth-storage.js";
 import type { PiGateway } from "../pi-gateway.js";
@@ -216,10 +217,17 @@ export function registerProviderAuthRoutes(
     async (request, reply) => {
       const { provider, key } = request.body ?? {};
       if (!provider || !key) return reply.code(400).send({ error: "provider and key required" });
-      const credential: ApiKeyCredential = { type: "api_key", key };
-      writeCredential(provider, credential);
-      notifyBridges();
-      return { ok: true };
+      try {
+        // Resolve the authJsonKey for API key providers (e.g., "anthropic-api" → "anthropic")
+        const authJsonKey = resolveAuthJsonKey(provider);
+        const credential: ApiKeyCredential = { type: "api_key", key };
+        writeCredential(authJsonKey, credential);
+        notifyBridges();
+        return { ok: true };
+      } catch (err: any) {
+        request.log.error(err, "Failed to save API key");
+        return reply.code(500).send({ error: err.message || "Failed to save API key" });
+      }
     },
   );
 
@@ -227,7 +235,8 @@ export function registerProviderAuthRoutes(
   fastify.delete<{ Params: { provider: string } }>(
     "/api/provider-auth/:provider",
     async (request) => {
-      removeCredential(request.params.provider);
+      const authJsonKey = resolveAuthJsonKey(request.params.provider);
+      removeCredential(authJsonKey);
       notifyBridges();
       return { ok: true };
     },

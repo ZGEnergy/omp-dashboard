@@ -91,7 +91,7 @@ const DEFAULTS: DashboardConfig = {
   port: 8000,
   piPort: 9999,
   autoStart: true,
-  autoShutdown: true,
+  autoShutdown: false,
   shutdownIdleSeconds: 300,
   spawnStrategy: "headless",
   tunnel: { enabled: true },

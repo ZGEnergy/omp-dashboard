@@ -35,8 +35,15 @@
 - [ ] 6.1 Create `docker/.env.example` with all knobs: API keys, ports, gateway bind, zrok token, tunnel flag, spawn strategy, resource limits — each with explanatory comments
 - [ ] 6.2 Add `docker/.gitignore` to exclude `.env` and `compose.override.yml` (user-specific files)
 
-## 7. Documentation
+## 7. Electron Remote Mode
 
-- [ ] 7.1 Create `docker/README.md` with quick-start guide, volume profiles explanation, workspace setup, dev mode, external gateway configuration
-- [ ] 7.2 Update project `AGENTS.md` with Docker section (key files, build/run commands)
-- [ ] 7.3 Update project `README.md` with Docker deployment section
+- [ ] 7.1 Extend `ModeConfig` type in `packages/electron/src/lib/wizard-state.ts`: add `"remote"` to mode union, add optional `remoteUrl` field, update `readModeFile()` and `writeModeFile()` to handle the new mode
+- [ ] 7.2 Modify `ensureServer()` in `packages/electron/src/lib/server-lifecycle.ts`: when mode is `"remote"`, return `remoteUrl` directly (skip mDNS, health check, spawn)
+- [ ] 7.3 Add "Remote" radio option to wizard renderer with URL input field and "Test Connection" button (calls `GET <url>/api/health`)
+- [ ] 7.4 Test: wizard saves remote mode to `mode.json`, `ensureServer()` returns URL, `didWeStartServer()` returns false, quit sends no shutdown request
+
+## 8. Documentation
+
+- [ ] 8.1 Create `docker/README.md` with quick-start guide, volume profiles explanation, workspace setup, dev mode, external gateway configuration, Electron remote-mode connection
+- [ ] 8.2 Update project `AGENTS.md` with Docker section (key files, build/run commands)
+- [ ] 8.3 Update project `README.md` with Docker deployment section

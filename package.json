@@ -37,7 +37,8 @@
     "reload:check": "./scripts/reload-all.sh --check",
     "electron:dev": "npm run start:dev --workspace=@blackbelt-technology/pi-dashboard-electron",
     "electron:start": "npm run start --workspace=@blackbelt-technology/pi-dashboard-electron",
-    "electron:make": "npm run make --workspace=@blackbelt-technology/pi-dashboard-electron"
+    "electron:make": "npm run make --workspace=@blackbelt-technology/pi-dashboard-electron",
+    "electron:build": "bash packages/electron/scripts/build-installer.sh"
   },
   "dependencies": {
     "@blackbelt-technology/pi-dashboard-extension": "*",

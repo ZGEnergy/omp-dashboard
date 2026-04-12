@@ -11,6 +11,7 @@ import os from "node:os";
 import type { EditorInstanceStatus, EditorDetectionResult } from "@blackbelt-technology/pi-dashboard-shared/editor-types.js";
 import type { EditorConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { detectCodeServerBinary, resetDetectionCache } from "./editor-detection.js";
+import { buildSpawnEnv } from "./process-manager.js";
 
 export interface EditorInstanceInfo {
   id: string;
@@ -266,9 +267,11 @@ export function createEditorManager(options: EditorManagerOptions): EditorManage
       cwd,
     ];
 
+    // Use buildSpawnEnv to ensure node and user bin dirs are on PATH
     const child = spawn(detection.binary, args, {
       stdio: "ignore",
       detached: false,
+      env: buildSpawnEnv(),
     });
 
     inst.process = child;

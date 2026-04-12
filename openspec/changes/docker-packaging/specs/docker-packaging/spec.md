@@ -103,3 +103,29 @@ A `.env.example` file SHALL document all configurable environment variables with
 #### Scenario: User copies .env.example to .env
 - **WHEN** the user copies `.env.example` to `.env` and fills in their API key
 - **THEN** the container starts with that key seeded into auth.json
+
+### Requirement: Electron remote mode in wizard
+The Electron first-run wizard SHALL offer a third mode "Remote" alongside "Standalone" and "Power User". The remote mode SHALL present a URL input field and a "Test Connection" button. The `ModeConfig` type SHALL be extended with `mode: "remote"` and an optional `remoteUrl: string` field. The mode SHALL be persisted to `~/.pi-dashboard/mode.json`.
+
+#### Scenario: User selects remote mode with valid URL
+- **WHEN** the user selects "Remote" mode, enters `http://docker-host:8000`, and clicks "Test Connection"
+- **THEN** the wizard calls `GET http://docker-host:8000/api/health`, shows success, and enables the "Continue" button
+
+#### Scenario: User selects remote mode with unreachable URL
+- **WHEN** the user selects "Remote" mode, enters a URL, and the health check fails
+- **THEN** the wizard shows an error message and the "Continue" button remains disabled
+
+#### Scenario: Remote mode persisted to mode.json
+- **WHEN** the user completes the wizard in remote mode with URL `http://docker-host:8000`
+- **THEN** `~/.pi-dashboard/mode.json` contains `{ "mode": "remote", "remoteUrl": "http://docker-host:8000" }`
+
+### Requirement: Electron ensureServer skips local discovery in remote mode
+When `mode.json` specifies `mode: "remote"`, the `ensureServer()` function SHALL return the configured `remoteUrl` directly without performing mDNS discovery, localhost health checks, or local server spawning. The `didWeStartServer()` function SHALL return `false` in remote mode, so `stopServerIfNeeded()` is a no-op on quit.
+
+#### Scenario: Electron starts in remote mode
+- **WHEN** the Electron app starts with `mode.json` set to `{ "mode": "remote", "remoteUrl": "http://docker-host:8000" }`
+- **THEN** `ensureServer()` returns `http://docker-host:8000` without any network probing or process spawning
+
+#### Scenario: Electron quit does not stop remote server
+- **WHEN** the Electron app is quit in remote mode
+- **THEN** no shutdown request is sent to the remote server

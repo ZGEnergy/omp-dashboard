@@ -4,7 +4,7 @@ The pi-dashboard is a multi-component system (server, bridge extension, pi agent
 
 ## What Changes
 
-Add a `docker/` directory with a complete containerization setup. No changes to existing application code.
+Add a `docker/` directory with a complete containerization setup. Add a "Remote" mode to the Electron app's first-run wizard so the desktop app can connect to a Docker-hosted (or any remote) dashboard server without requiring any local installation of pi, Node.js, or other tools.
 
 ### Files
 
@@ -49,6 +49,25 @@ Add a `docker/` directory with a complete containerization setup. No changes to 
 - Spawn strategy (headless/tmux)
 - Resource limits
 
+### Electron Remote Mode
+
+The Electron desktop app (`packages/electron/`) gains a third wizard mode alongside "standalone" and "power user":
+
+**`packages/electron/src/lib/wizard-state.ts`** — Extended `ModeConfig`:
+- Add `"remote"` to the mode union type
+- Add optional `remoteUrl` field (e.g. `http://docker-host:8000`)
+
+**`packages/electron/src/lib/server-lifecycle.ts`** — Modified `ensureServer()`:
+- When mode is `"remote"`, return `remoteUrl` directly — skip mDNS discovery, health check fallback, and local server spawning entirely
+- `didWeStartServer()` always returns `false` in remote mode (never stop remote server on quit)
+
+**Wizard renderer** — Third radio option in the mode selection step:
+- "Remote" option with a URL input field and "Test Connection" button
+- Test calls `GET <url>/api/health` and shows success/failure
+- On success, saves `{ mode: "remote", remoteUrl: "..." }` to `mode.json`
+
+No changes needed to the web client — it already supports remote servers via `ServerSelector`, dynamic WebSocket URL construction, and `ApiContext` that derives all REST API URLs from the connection URL.
+
 ### Volume Performance Profiles
 
 The `compose.yml` includes commented volume configurations for three profiles:
@@ -85,4 +104,4 @@ The dashboard's components are inherently colocated — pi sessions, terminals (
 
 ### Existing Capabilities Modified
 
-None. This is a purely additive change — a new `docker/` directory. No existing code is modified.
+- `electron-shell`: Add "Remote" mode to first-run wizard and `ensureServer()` flow. In remote mode, Electron connects directly to a configured URL (Docker container or any remote server) without local server discovery or spawning. ~50 lines of logic across 2-3 files.

@@ -18,8 +18,8 @@ The dashboard server already manages the lifecycle of these tools (spawning pi s
 - Multi-container architecture (components are inherently colocated)
 - Kubernetes manifests or Helm charts (Docker Compose only)
 - Custom filesystem images or block device management (use host FS via mount options)
-- Modifying any existing application code
 - Windows container support
+- Modifying the web client (it already supports remote servers)
 
 ## Decisions
 
@@ -95,3 +95,22 @@ Writing with Node.js (not bash) avoids fragile JSON construction in shell script
 **[Volume data loss with ephemeral profile]** → Clearly documented. tmpfs data is lost on container restart. Only recommended for CI/CD.
 
 **[code-server/zrok version pinning]** → Pinned via build args with sensible defaults. Users can override at build time.
+
+### Decision 8: Electron "Remote" mode for Docker-hosted servers
+
+**Choice**: Add a third mode (`"remote"`) to the Electron wizard alongside `"standalone"` and `"power-user"`. In remote mode, `ensureServer()` returns the configured URL directly, skipping all local discovery and spawning.
+
+**Alternatives considered**:
+- **Use ServerSelector only (rejected)**: `ServerSelector` is a runtime switch in the web UI, but `ensureServer()` runs before the BrowserWindow loads. Without a remote mode, Electron would still try to discover/spawn a local server first, which fails or is unnecessary.
+- **Auto-detect Docker via mDNS (deferred)**: mDNS can discover Docker containers on the LAN, but requires `network_mode: host` or UDP port 5353 forwarding. Better as a future enhancement — for now, explicit URL is reliable.
+
+**Rationale**: The Electron app is already a thin shell — it discovers a server URL and opens a BrowserWindow. Adding a remote mode is ~50 lines: extend `ModeConfig` type, short-circuit `ensureServer()`, add a URL input to the wizard. The web client inside the BrowserWindow already handles everything else (dynamic WS URL, `ApiContext`, `ServerSelector`).
+
+**What doesn't need to change**:
+- Web client (`App.tsx`) — already constructs WS/API URLs from `window.location`
+- `ServerSelector` — already shows remote servers and allows switching
+- Terminal emulator — binary WS connections are relative to server URL
+- code-server — iframe proxied through dashboard server
+- File browsing — all REST API calls go through `ApiContext`
+
+**[Risk] Remote server unreachable** → `showLoadingPage()` already handles this with retry + error display. No additional work needed.

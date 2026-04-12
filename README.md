@@ -500,6 +500,90 @@ pi.events.emit("dashboard:ui", {
 
 Supported methods: `confirm`, `select`, `input`, `notify`.
 
+## Electron Desktop App
+
+The project includes an Electron wrapper at `packages/electron/` that bundles the dashboard as a native desktop app.
+
+### Prerequisites
+
+- **Node.js 22.12+** (required for building — the Vite plugin and native dependencies need it)
+- Platform-specific tools are handled by Electron Forge automatically
+
+### Building for Your Platform
+
+The easiest way — one command that handles everything (client build, Node.js bundling, installer creation):
+
+```bash
+npm run electron:build              # Build for current platform & arch
+npm run electron:build -- --arch x64 # Override architecture
+npm run electron:build -- --skip-client # Skip client rebuild
+```
+
+Or step by step:
+
+```bash
+npm run build                        # Build web client
+cd packages/electron
+bash scripts/download-node.sh        # Download Node.js for bundling
+npm run make                         # Build installer
+```
+
+Output by platform:
+
+| Platform | Output | Location |
+|----------|--------|----------|
+| macOS | `.dmg` | `packages/electron/out/make/` |
+| Linux | `.deb` + `.AppImage` | `packages/electron/out/make/` |
+| Windows | `.exe` (NSIS installer) | `packages/electron/out/make/` |
+
+### Cross-Platform Builds (via Docker)
+
+From macOS or Linux, you can build installers for **all platforms** using Docker:
+
+```bash
+npm run electron:build -- --all        # macOS (native) + Linux + Windows (Docker)
+npm run electron:build -- --linux       # Linux .deb + .AppImage only
+npm run electron:build -- --windows     # Windows .exe (NSIS) only
+npm run electron:build -- --linux --windows  # Both, skip native
+```
+
+Docker builds use a Node 22 Debian container with NSIS installed for Windows cross-compilation.
+All output goes to `packages/electron/out/make/`.
+
+> **Note:** Native builds (no flags) build for the current platform only. Docker is required for `--linux`, `--windows`, and `--all`.
+
+### Development Mode
+
+```bash
+# Start the dashboard server and Vite dev server first
+pi-dashboard start --dev
+npm run dev
+
+# Then launch Electron pointing at the dev server
+cd packages/electron
+npm run start:dev
+```
+
+### Regenerating Icons
+
+All platform icon variants are generated from the master icon at `packages/electron/resources/icon.png`:
+
+```bash
+cd packages/electron
+npm run icons    # Generates .icns (macOS), .ico (Windows), and resized PNGs
+```
+
+### CI Builds
+
+The Electron build workflow (`.github/workflows/electron-build.yml`) builds installers for all platforms using GitHub-hosted runners:
+
+- **macOS arm64** — `macos-14` runner → `.dmg`
+- **macOS x64** — `macos-13` runner → `.dmg`
+- **Linux x64** — `ubuntu-latest` runner → `.deb` + `.AppImage`
+- **Windows x64** — `windows-latest` runner → `.exe` (NSIS)
+
+Triggered by version tags (`v*`) or manually via GitHub Actions → "Run workflow".
+
 ## CI/CD
 
 ### Continuous Integration

@@ -166,12 +166,32 @@ function OAuthProviderRow({ provider, onChanged }: { provider: ProviderAuthStatu
         channel?.close();
       };
 
-      // If popup was blocked, provide fallback (TODO: manual URL input)
+      // If popup was blocked, provide fallback
       if (!popup) {
         cleanup();
         setError("Popup blocked. Please allow popups and try again.");
         setBusy(false);
+        return;
       }
+
+      // Detect popup closed without completing OAuth (e.g. Claude without Pro plan
+      // redirects to chat instead of OAuth callback, user closes the window)
+      const popupPoll = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(popupPoll);
+          // Give a brief delay for any last-second callback relay
+          setTimeout(() => {
+            // Only cancel if still busy (callback didn't fire)
+            setBusy((prev) => {
+              if (prev) {
+                cleanup();
+                setError("Login window was closed. If your provider requires a paid plan for API access, please check your subscription.");
+              }
+              return false;
+            });
+          }, 1000);
+        }
+      }, 500);
     } catch (err: any) {
       setError(err.message);
       setBusy(false);

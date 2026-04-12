@@ -51,6 +51,8 @@ const API_KEY_PROVIDERS = [
 // ── Lock helpers ─────────────────────────────────────────────────────────────
 
 function acquireLock(): void {
+  // Ensure parent directory exists (fresh install may not have ~/.pi/agent/)
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
   for (let i = 0; i < LOCK_MAX_RETRIES; i++) {
     try {
       fs.mkdirSync(LOCK_PATH, { recursive: false });
@@ -185,4 +187,14 @@ export function getAuthStatus(): ProviderAuthStatus[] {
 
 export function getOAuthProvidersMeta(): OAuthProviderMeta[] {
   return OAUTH_PROVIDERS;
+}
+
+/**
+ * Resolve a UI provider ID to the auth.json key.
+ * API key providers have an `authJsonKey` mapping (e.g., "anthropic-api" → "anthropic").
+ * OAuth providers and unknown IDs pass through unchanged.
+ */
+export function resolveAuthJsonKey(providerId: string): string {
+  const apiKeyProvider = API_KEY_PROVIDERS.find(p => p.id === providerId);
+  return apiKeyProvider?.authJsonKey ?? providerId;
 }

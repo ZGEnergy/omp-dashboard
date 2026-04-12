@@ -1,6 +1,6 @@
 import React from "react";
 import { Icon } from "@mdi/react";
-import { mdiCodeBraces, mdiApple, mdiLinux, mdiLanguageJavascript } from "@mdi/js";
+import { mdiCodeBraces, mdiApple, mdiLinux, mdiLanguageJavascript, mdiMicrosoftVisualStudioCode } from "@mdi/js";
 
 interface Props {
   onRetry?: () => void;
@@ -50,6 +50,20 @@ export function EditorInstallGuide({ onRetry }: Props) {
             <code className="block bg-[var(--bg-primary)] rounded px-3 py-2 text-xs font-mono text-green-400">
               npm install -g code-server
             </code>
+          </div>
+
+          {/* openvscode-server */}
+          <div className="bg-[var(--bg-surface)] rounded-lg p-4 border border-[var(--border-subtle)]">
+            <div className="flex items-center gap-2 mb-2">
+              <Icon path={mdiMicrosoftVisualStudioCode} size={0.7} />
+              <span className="font-medium text-sm">Open VSCode Server (alternative)</span>
+            </div>
+            <code className="block bg-[var(--bg-primary)] rounded px-3 py-2 text-xs font-mono text-green-400 whitespace-pre-wrap">
+              {'npm install -g @anthropic-ai/claude-code-vscode-server'}
+            </code>
+            <p className="text-xs text-[var(--text-muted)] mt-2">
+              Alternative to code-server. Also auto-detected.
+            </p>
           </div>
         </div>
 
