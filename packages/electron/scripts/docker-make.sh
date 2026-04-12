@@ -105,7 +105,7 @@ if [ "$PLATFORM" = "win32" ]; then
   echo "  ✓ Found: $PACKAGED_DIR"
   ls "$PACKAGED_DIR/" | head -10
 
-  # Create a ZIP of the packaged app (simple, no Wine/NSIS needed)
+  # 1. ZIP archive (always works, no extra deps)
   echo "→ Creating ZIP archive..."
   ZIP_DIR="out/make/zip/$ARCH"
   mkdir -p "$ZIP_DIR"
@@ -113,6 +113,42 @@ if [ "$PLATFORM" = "win32" ]; then
   cd out
   zip -r -q "../out/make/zip/$ARCH/$ZIP_NAME" "PI Dashboard-win32-$ARCH/"
   cd /build/packages/electron
+
+  # 2. Portable exe (self-extracting, no install needed)
+  echo "→ Building portable exe..."
+  npx electron-builder --win portable --x64 \
+    --prepackaged "$PACKAGED_DIR" \
+    --config <(cat <<EOF
+{
+  "appId": "com.blackbelt-technology.pi-dashboard",
+  "productName": "PI Dashboard",
+  "directories": { "output": "out/make/portable/$ARCH" },
+  "portable": { "artifactName": "PI-Dashboard-portable.exe" },
+  "win": { "icon": "resources/icon.ico", "target": ["portable"] }
+}
+EOF
+) || echo "  ⚠ Portable build failed (non-fatal)"
+
+  # 3. NSIS installer (requires Wine for uninstaller extraction)
+  if command -v wine &>/dev/null; then
+    echo "→ Building NSIS installer..."
+    export WINEPREFIX=/tmp/wine WINEDEBUG=-all
+    wineboot --init 2>/dev/null || true
+    npx electron-builder --win nsis --x64 \
+      --prepackaged "$PACKAGED_DIR" \
+      --config <(cat <<EOF
+{
+  "appId": "com.blackbelt-technology.pi-dashboard",
+  "productName": "PI Dashboard",
+  "directories": { "output": "out/make/nsis/$ARCH" },
+  "nsis": { "oneClick": true, "perMachine": false, "artifactName": "PI-Dashboard-Setup.exe" },
+  "win": { "icon": "resources/icon.ico", "target": ["nsis"] }
+}
+EOF
+) || echo "  ⚠ NSIS build failed (Wine may not support 32-bit uninstaller extraction)"
+  else
+    echo "  ℹ Skipping NSIS installer (Wine not installed)"
+  fi
 
   echo ""
   echo "✓ Build complete for win32-$ARCH"
