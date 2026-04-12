@@ -110,20 +110,31 @@ export async function ensureServer(): Promise<string> {
 
 const MANAGED_DIR = path.join(os.homedir(), ".pi-dashboard");
 
-/** Find the tsx binary (managed install or system). */
-function findTsxBinary(): string | null {
-  const ext = process.platform === "win32" ? ".cmd" : "";
+/** Resolve tsx as [command, ...prefixArgs] to avoid .cmd and shell:true on Windows.
+ *  On Unix: returns ["path/to/tsx"]
+ *  On Windows: returns ["path/to/node.exe", "path/to/tsx/dist/cli.mjs"]
+ *  This avoids spawning .cmd batch files which need shell:true and flash a console window.
+ */
+function resolveTsxCommand(): string[] | null {
+  // Try managed install first
+  const managedTsxCli = path.join(MANAGED_DIR, "node_modules", "tsx", "dist", "cli.mjs");
+  if (process.platform === "win32" && existsSync(managedTsxCli)) {
+    // On Windows, find node.exe and run tsx's entry point directly
+    const nodePath = getBundledNodePath() || detectSystemNode().path;
+    if (nodePath) return [nodePath, managedTsxCli];
+  }
 
-  // Managed install
+  // Unix or fallback: use the tsx binary directly
+  const ext = process.platform === "win32" ? ".cmd" : "";
   const managed = path.join(MANAGED_DIR, "node_modules", ".bin", "tsx" + ext);
-  if (existsSync(managed)) return managed;
+  if (existsSync(managed)) return [managed];
 
   // System PATH
   try {
     const { execSync } = require("node:child_process");
     const whichCmd = process.platform === "win32" ? "where" : "which";
     const result = execSync(`${whichCmd} tsx`, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-    if (result) return result.split("\n")[0];
+    if (result) return [result.split("\n")[0]];
   } catch { /* not found */ }
 
   return null;
@@ -151,9 +162,9 @@ function findServerCli(): string | null {
 
 /** Launch the dashboard server as a detached background process. */
 async function launchServer(port: number, piPort: number): Promise<void> {
-  // Find tsx binary — this is what actually works for __dirname shimming
-  const tsxBin = findTsxBinary();
-  if (!tsxBin) {
+  // Resolve tsx command (avoids .cmd on Windows — no shell needed, no cmd window)
+  const tsxCmd = resolveTsxCommand();
+  if (!tsxCmd) {
     throw new Error("tsx not found. Run the setup wizard to install dependencies.");
   }
 
@@ -172,7 +183,8 @@ async function launchServer(port: number, piPort: number): Promise<void> {
   const env = { ...process.env };
 
   // Ensure node + tsx are on PATH
-  const extraPath = [nodeBinDir, path.dirname(tsxBin)].filter(Boolean).join(path.delimiter);
+  const tsxBinDir = path.dirname(tsxCmd[0]);
+  const extraPath = [nodeBinDir, tsxBinDir].filter(Boolean).join(path.delimiter);
   env.PATH = `${extraPath}${path.delimiter}${env.PATH || ""}`;
 
   // Ensure NODE_PATH includes bundled server's node_modules
@@ -182,7 +194,9 @@ async function launchServer(port: number, piPort: number): Promise<void> {
   env.NODE_PATH = [bundledModules, managedModules, env.NODE_PATH || ""].filter(Boolean).join(path.delimiter);
 
   const cwd = serverRoot;
-  const args = [cliPath, "--port", String(port), "--pi-port", String(piPort)];
+  // tsxCmd is [node, tsx-cli.mjs] or [tsx]; append server CLI args
+  const spawnBin = tsxCmd[0];
+  const spawnArgs = [...tsxCmd.slice(1), cliPath, "--port", String(port), "--pi-port", String(piPort)];
 
   // Log server startup for debugging
   const logDir = MANAGED_DIR;
@@ -191,12 +205,10 @@ async function launchServer(port: number, piPort: number): Promise<void> {
 
   const launchInfo = [
     `[${new Date().toISOString()}] Launching dashboard server`,
-    `  tsx: ${tsxBin}`,
-    `  cli: ${cliPath}`,
+    `  command: ${spawnBin} ${spawnArgs.join(" ")}`,
     `  cwd: ${cwd}`,
     `  PATH: ${env.PATH?.split(path.delimiter).slice(0, 3).join(path.delimiter)}...`,
     `  NODE_PATH: ${env.NODE_PATH}`,
-    `  command: ${tsxBin} ${args.join(" ")}`,
     "",
   ].join("\n");
   try { writeFileSync(logPath, launchInfo); } catch { /* ignore */ }
@@ -208,16 +220,12 @@ async function launchServer(port: number, piPort: number): Promise<void> {
   } catch { /* can't write log, use ignore */ }
 
   // Launch: tsx <cli.ts> (tsx handles all TypeScript loading + __dirname shimming)
-  // Windows: .cmd files require shell:true; paths with spaces must be quoted
-  const isWin = process.platform === "win32";
-  const spawnCmd = isWin ? `"${tsxBin}"` : tsxBin;
-  const spawnArgs = isWin ? args.map(a => `"${a}"`) : args;
-  const child = spawn(spawnCmd, spawnArgs, {
+  // On Windows, spawnBin is node.exe (not .cmd) so no shell needed = no cmd window
+  const child = spawn(spawnBin, spawnArgs, {
     detached: true,
     stdio,
     env,
     cwd,
-    shell: isWin,
     windowsHide: true,
   });
 
@@ -243,7 +251,7 @@ async function launchServer(port: number, piPort: number): Promise<void> {
 
   throw new Error(
     `Server failed to start within 15 seconds.\n` +
-    `Command: ${tsxBin} ${args.join(" ")}\n` +
+    `Command: ${spawnBin} ${spawnArgs.join(" ")}\n` +
     `CWD: ${cwd}\n` +
     (lastLines ? `\nServer log:\n${lastLines}` : "\nNo server log available.")
   );

@@ -133,12 +133,25 @@ export function buildHeadlessArgs(options?: SessionOptions): string[] {
   return args;
 }
 
-/** Resolve the full path to the pi binary. */
-function findPiBinary(): string | null {
-  const ext = process.platform === "win32" ? ".cmd" : "";
-  // Managed install
-  const managed = path.join(MANAGED_BIN, "pi" + ext);
-  if (existsSync(managed)) return managed;
+/** Resolve the pi command as [command, ...prefixArgs].
+ *  On Unix: returns ["path/to/pi"]
+ *  On Windows: returns ["path/to/node.exe", "path/to/pi/dist/cli.mjs"] to avoid .cmd
+ */
+function resolvePiCommand(): string[] | null {
+  if (process.platform === "win32") {
+    // Try to resolve pi's CLI entry point directly (avoids .cmd → no cmd window)
+    const piCli = path.join(MANAGED_BIN, "..", "@mariozechner", "pi-coding-agent", "dist", "cli.js");
+    if (existsSync(piCli)) {
+      // Find node.exe: process.execPath is the current node binary
+      return [process.execPath, piCli];
+    }
+    // Fallback to .cmd
+    const managed = path.join(MANAGED_BIN, "pi.cmd");
+    if (existsSync(managed)) return [managed];
+  } else {
+    const managed = path.join(MANAGED_BIN, "pi");
+    if (existsSync(managed)) return [managed];
+  }
   // System PATH
   try {
     const whichCmd = process.platform === "win32" ? "where" : "which";
@@ -147,7 +160,7 @@ function findPiBinary(): string | null {
       stdio: ["pipe", "pipe", "pipe"],
       env: buildSpawnEnv(),
     }).trim();
-    if (result) return result.split("\n")[0];
+    if (result) return [result.split("\n")[0]];
   } catch { /* not found */ }
   return null;
 }
@@ -158,8 +171,8 @@ function spawnHeadless(cwd: string, options?: SessionOptions): SpawnResult {
     const env = buildSpawnEnv();
 
     // Pre-check: verify pi binary exists
-    const piBin = findPiBinary();
-    if (!piBin) {
+    const piCmd_ = resolvePiCommand();
+    if (!piCmd_) {
       return {
         success: false,
         message: `pi binary not found. Checked: ${MANAGED_BIN}/pi and system PATH.`,
@@ -167,13 +180,19 @@ function spawnHeadless(cwd: string, options?: SessionOptions): SpawnResult {
     }
 
     if (process.platform === "win32") {
-      // Windows: .cmd files require shell:true; quote paths with spaces
-      const child = spawn(`"${piBin}"`, args.map(a => `"${a}"`), {
+      // Windows: spawn node.exe directly with pi's CLI entry point (no .cmd, no cmd window)
+      const [bin, ...prefixArgs] = piCmd_;
+      const needsShell = bin.endsWith(".cmd");
+      const spawnBin = needsShell ? `"${bin}"` : bin;
+      const spawnArgs = needsShell
+        ? [...prefixArgs, ...args].map(a => `"${a}"`)
+        : [...prefixArgs, ...args];
+      const child = spawn(spawnBin, spawnArgs, {
         cwd,
         detached: true,
         stdio: ["pipe", "ignore", "ignore"],
         env,
-        shell: true,
+        shell: needsShell,
         windowsHide: true,
       });
       child.unref();
@@ -188,12 +207,10 @@ function spawnHeadless(cwd: string, options?: SessionOptions): SpawnResult {
       };
     }
 
-    // Unix (macOS / Linux / WSL): wrap with "sleep infinity | pi" so stdin
+    // Unix (macOS / Linux / WSL): wrap with "tail -f /dev/null | pi" so stdin
     // is an internal pipe that survives GC and server restarts.
-    // "sleep 2147483647" is used instead of "sleep infinity" for compatibility
-    // with older macOS versions whose BSD sleep doesn't support "infinity".
     // detached: true creates a new process group; we kill via -pid later.
-    // Using the resolved pi path avoids shell PATH lookup issues.
+    const piBin = piCmd_[0];
     const piCmd = [shellEscape(piBin), ...args.map(shellEscape)].join(" ");
     // Use "tail -f /dev/null" to keep stdin pipe open for pi.
     // Unlike "sleep N", tail -f /dev/null works correctly even when
