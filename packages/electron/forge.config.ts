@@ -11,7 +11,7 @@ const extraResource = fs.existsSync(bundledNodePath) ? [bundledNodePath] : [];
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    name: "PI Dashboard",
+    name: "PI-Dashboard",
     executableName: "pi-dashboard",
     icon: path.resolve(__dirname, "resources/icon"),
     appBundleId: "com.blackbelt-technology.pi-dashboard",
