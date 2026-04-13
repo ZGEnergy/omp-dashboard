@@ -1,7 +1,11 @@
 {
   "name": "@blackbelt-technology/pi-agent-dashboard",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Web dashboard for monitoring and interacting with pi agent sessions",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard"
+  },
   "publishConfig": {
     "access": "public"
   },
