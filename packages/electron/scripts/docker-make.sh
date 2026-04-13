@@ -24,6 +24,20 @@ echo "→ Installing server dependencies..."
 cd "$ELECTRON_DIR/resources/server"
 npm install --omit=dev --no-audit --no-fund 2>&1 | tail -5 || true
 
+# Replace workspace symlinks with actual copies.
+# npm workspaces create symlinks in node_modules/ pointing to packages/.
+# These symlinks break when extracted from archives (7z portable, asar).
+for link in node_modules/@blackbelt-technology/pi-dashboard-shared \
+           node_modules/@blackbelt-technology/pi-dashboard-extension \
+           node_modules/@blackbelt-technology/pi-dashboard-server; do
+  if [ -L "$link" ]; then
+    target=$(readlink -f "$link")
+    rm "$link"
+    cp -R "$target" "$link"
+    echo "  ✓ Replaced symlink: $(basename $link)"
+  fi
+done
+
 # Platform-specific native module handling
 if [ "$PLATFORM" = "linux" ]; then
   # Linux: copy built-from-source pty.node into prebuilds, remove other platforms
