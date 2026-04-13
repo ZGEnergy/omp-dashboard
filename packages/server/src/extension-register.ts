@@ -72,8 +72,11 @@ export function ensureBridgeExtensionRegistered(): void {
   // Remove any stale dashboard extension paths (different install location)
   const cleaned = packages.filter((p) => {
     if (typeof p !== "string") return true;
-    // Keep non-local-path entries (npm:, git:, etc.) and entries unrelated to dashboard
-    if (!p.startsWith("/")) return true;
+    // Keep non-local-path entries (npm:, git:, etc.)
+    // Local paths start with / (Unix) or X:\ (Windows)
+    const isLocalPath = p.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(p);
+    if (!isLocalPath) return true;
+    // Remove stale dashboard extension paths
     return !p.includes("pi-dashboard");
   });
 
