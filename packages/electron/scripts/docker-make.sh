@@ -105,7 +105,7 @@ if [ "$PLATFORM" = "win32" ]; then
   echo "  ✓ Found: $PACKAGED_DIR"
   ls "$PACKAGED_DIR/" | head -10
 
-  # ZIP archive (reliable, no extra deps needed)
+  # 1. ZIP archive (always works)
   echo "→ Creating ZIP archive..."
   ZIP_DIR="out/make/zip/$ARCH"
   mkdir -p "$ZIP_DIR"
@@ -113,6 +113,25 @@ if [ "$PLATFORM" = "win32" ]; then
   cd out
   zip -r -q "../out/make/zip/$ARCH/$ZIP_NAME" "PI Dashboard-win32-$ARCH/"
   cd /build/packages/electron
+
+  # 2. Portable exe (self-extracting)
+  echo "→ Building portable exe..."
+  npx electron-builder --win portable --x64 \
+    --prepackaged "$PACKAGED_DIR" \
+    --config <(cat <<EOF
+{
+  "appId": "com.blackbelt-technology.pi-dashboard",
+  "productName": "PI Dashboard",
+  "executableName": "pi-dashboard",
+  "directories": { "output": "out/make/portable/$ARCH" },
+  "portable": { "artifactName": "PI-Dashboard-portable.exe" },
+  "win": {
+    "icon": "resources/icon.ico",
+    "target": ["portable"]
+  }
+}
+EOF
+) || echo "  ⚠ Portable build failed (non-fatal)"
 
   echo ""
   echo "✓ Build complete for win32-$ARCH"
