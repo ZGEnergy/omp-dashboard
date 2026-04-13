@@ -29,6 +29,10 @@ export function generateState(): string {
 export interface AuthCodeHandler {
   flowType: "auth_code";
   providerId: string;
+  /** Port registered with the OAuth provider for the redirect URI */
+  callbackPort: number;
+  /** Path registered with the OAuth provider for the redirect URI */
+  callbackPath: string;
   buildAuthUrl(redirectUri: string, state: string, pkce: PKCEPair): string;
   exchangeCode(code: string, redirectUri: string, pkce: PKCEPair, state: string): Promise<OAuthCredential>;
 }
@@ -89,6 +93,8 @@ const ANTHROPIC_SCOPES = "org:create_api_key user:profile user:inference user:se
 export const anthropicHandler: AuthCodeHandler = {
   flowType: "auth_code",
   providerId: "anthropic",
+  callbackPort: 53692,
+  callbackPath: "/callback",
 
   buildAuthUrl(redirectUri, state, pkce) {
     const params = new URLSearchParams({
@@ -140,6 +146,8 @@ const CODEX_SCOPE = "openid profile email offline_access";
 export const codexHandler: AuthCodeHandler = {
   flowType: "auth_code",
   providerId: "openai-codex",
+  callbackPort: 1455,
+  callbackPath: "/auth/callback",
 
   buildAuthUrl(redirectUri, state, pkce) {
     const params = new URLSearchParams({
@@ -328,6 +336,8 @@ const GEMINI_SCOPES = [
 export const geminiCliHandler: AuthCodeHandler = {
   flowType: "auth_code",
   providerId: "google-gemini-cli",
+  callbackPort: 8085,
+  callbackPath: "/oauth2callback",
 
   buildAuthUrl(redirectUri, state, pkce) {
     const params = new URLSearchParams({
@@ -374,6 +384,8 @@ const AG_SCOPES = [
 export const antigravityHandler: AuthCodeHandler = {
   flowType: "auth_code",
   providerId: "google-antigravity",
+  callbackPort: 51121,
+  callbackPath: "/oauth-callback",
 
   buildAuthUrl(redirectUri, state, pkce) {
     const params = new URLSearchParams({

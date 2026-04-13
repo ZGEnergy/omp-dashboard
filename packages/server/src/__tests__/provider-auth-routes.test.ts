@@ -12,6 +12,20 @@ vi.mock("../provider-auth-storage.js", () => ({
   ],
   writeCredential: vi.fn(),
   removeCredential: vi.fn(),
+  resolveAuthJsonKey: (id: string) => id,
+}));
+
+// Mock the callback server to avoid opening real ports
+vi.mock("../oauth-callback-server.js", () => ({
+  startCallbackServer: vi.fn().mockResolvedValue({
+    closed: new Promise(() => {}),
+    close: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
+// Mock child_process.exec to avoid opening a browser
+vi.mock("node:child_process", () => ({
+  exec: vi.fn(),
 }));
 
 import Fastify from "fastify";
@@ -58,7 +72,8 @@ describe("provider-auth-routes", () => {
     expect(data[1].authenticated).toBe(true);
   });
 
-  it("POST /api/provider-auth/authorize returns authUrl for valid provider", async () => {
+  it("POST /api/provider-auth/authorize returns authUrl with correct redirect URI", async () => {
+    const { startCallbackServer } = await import("../oauth-callback-server.js");
     const res = await app.inject({
       method: "POST",
       url: "/api/provider-auth/authorize",
@@ -68,6 +83,16 @@ describe("provider-auth-routes", () => {
     const data = JSON.parse(res.payload);
     expect(data.flowId).toBeTruthy();
     expect(data.authUrl).toContain("claude.ai/oauth/authorize");
+    // Verify redirect URI uses the registered callback port/path
+    expect(data.authUrl).toContain(encodeURIComponent("http://localhost:53692/callback"));
+    // Verify callback server was started
+    expect(startCallbackServer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "anthropic",
+        port: 53692,
+        path: "/callback",
+      }),
+    );
   });
 
   it("POST /api/provider-auth/authorize rejects unknown provider", async () => {
@@ -79,16 +104,7 @@ describe("provider-auth-routes", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("POST /api/provider-auth/exchange rejects invalid flowId", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/provider-auth/exchange",
-      payload: { flowId: "nonexistent", code: "abc" },
-    });
-    expect(res.statusCode).toBe(400);
-    const data = JSON.parse(res.payload);
-    expect(data.error).toContain("Invalid or expired flow");
-  });
+  // /exchange endpoint removed — token exchange happens in the callback server's onCode
 
   it("PUT /api/provider-auth/api-key saves and notifies", async () => {
     const { writeCredential } = await import("../provider-auth-storage.js");
@@ -114,19 +130,7 @@ describe("provider-auth-routes", () => {
     expect(piGateway.broadcast).toHaveBeenCalledWith({ type: "credentials_updated" });
   });
 
-  it("GET /api/provider-auth/callback/:provider returns HTML with postMessage relay", async () => {
-    const res = await app.inject({
-      method: "GET",
-      url: "/api/provider-auth/callback/anthropic?code=testcode&state=teststate",
-    });
-    expect(res.statusCode).toBe(200);
-    expect(res.headers["content-type"]).toContain("text/html");
-    expect(res.payload).toContain("provider_oauth_callback");
-    expect(res.payload).toContain("testcode");
-    expect(res.payload).toContain("postMessage");
-    expect(res.payload).toContain("BroadcastChannel");
-    expect(res.payload).toContain("localStorage");
-  });
+  // /callback/:provider route removed — temp callback server handles this directly
 
   it("POST /api/provider-auth/device-code rejects auth_code provider", async () => {
     const res = await app.inject({

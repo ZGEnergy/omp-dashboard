@@ -1,6 +1,7 @@
 /**
  * REST routes for browser-based pi provider authentication.
  */
+import { exec } from "node:child_process";
 import type { FastifyInstance } from "fastify";
 import {
   getProviderHandler,
@@ -18,6 +19,7 @@ import {
   resolveAuthJsonKey,
   type ApiKeyCredential,
 } from "../provider-auth-storage.js";
+import { startCallbackServer } from "../oauth-callback-server.js";
 import type { PiGateway } from "../pi-gateway.js";
 
 // ── In-memory flow store (short-lived PKCE + device code state) ──────────────
@@ -61,25 +63,18 @@ function makeFlowId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-// ── Callback HTML ────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-function callbackHtml(params: Record<string, string | null>): string {
-  const data = JSON.stringify(params);
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>OAuth Callback</title>
-<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0;}
-.card{background:#1e293b;padding:40px;border-radius:12px;text-align:center;max-width:400px;}
-.ok{color:#22c55e;font-size:48px;margin-bottom:16px;}</style>
-</head><body><div class="card"><div class="ok">✓</div><h2>Authorization received</h2><p>This window will close automatically.</p></div>
-<script>
-(function(){
-  var d=${data};
-  try{window.opener&&window.opener.postMessage({type:"provider_oauth_callback",data:d},"*")}catch(e){}
-  try{var c=new BroadcastChannel("provider_oauth_callback");c.postMessage(d);c.close()}catch(e){}
-  try{localStorage.setItem("provider_oauth_callback",JSON.stringify(Object.assign({},d,{ts:Date.now()})))}catch(e){}
-  setTimeout(function(){window.close();},1500);
-})();
-</script></body></html>`;
+/** Open a URL in the system's default browser */
+function openInBrowser(url: string): void {
+  const cmd = process.platform === "darwin"
+    ? `open ${JSON.stringify(url)}`
+    : process.platform === "win32"
+      ? `start "" ${JSON.stringify(url)}`
+      : `xdg-open ${JSON.stringify(url)}`;
+  exec(cmd, (err) => {
+    if (err) console.error("[provider-auth] Failed to open browser:", err.message);
+  });
 }
 
 // ── Route registration ───────────────────────────────────────────────────────
@@ -104,7 +99,7 @@ export function registerProviderAuthRoutes(
     return getAuthStatus();
   });
 
-  // Start auth-code flow
+  // Start auth-code flow — opens system browser, starts temp callback server
   fastify.post<{ Body: { provider: string } }>("/api/provider-auth/authorize", async (request, reply) => {
     pruneFlows();
     const { provider } = request.body ?? {};
@@ -115,53 +110,40 @@ export function registerProviderAuthRoutes(
     const h = handler as AuthCodeHandler;
     const pkce = await generatePKCE();
     const state = generateState();
-    const port = (request.server as any).addresses?.()[0]?.port ?? 9998;
-    const redirectUri = `http://localhost:${port}/api/provider-auth/callback/${provider}`;
+    const redirectUri = `http://localhost:${h.callbackPort}${h.callbackPath}`;
     const authUrl = h.buildAuthUrl(redirectUri, state, pkce);
     const flowId = makeFlowId();
     authCodeFlows.set(flowId, { providerId: provider, pkce, state, redirectUri, createdAt: Date.now() });
+
+    // Start temp callback server to receive the OAuth redirect
+    try {
+      await startCallbackServer({
+        providerId: provider,
+        port: h.callbackPort,
+        path: h.callbackPath,
+        onCode: async (code, cbState) => {
+          const flow = Array.from(authCodeFlows.values()).find(
+            (f) => f.providerId === provider && f.state === (cbState || state),
+          );
+          if (!flow) throw new Error("Unknown or expired flow");
+          // Remove the flow
+          for (const [id, f] of authCodeFlows) {
+            if (f === flow) { authCodeFlows.delete(id); break; }
+          }
+          const credential = await h.exchangeCode(code, flow.redirectUri, flow.pkce, flow.state);
+          writeCredential(flow.providerId, credential);
+          notifyBridges();
+        },
+      });
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message });
+    }
+
+    // Open the auth URL in the system browser
+    openInBrowser(authUrl);
+
     return { flowId, authUrl };
   });
-
-  // OAuth callback (serves HTML that relays code back to opener)
-  fastify.get<{ Params: { provider: string }; Querystring: Record<string, string> }>(
-    "/api/provider-auth/callback/:provider",
-    async (request, reply) => {
-      const q = request.query;
-      reply.type("text/html").send(callbackHtml({
-        code: q.code ?? null,
-        state: q.state ?? null,
-        error: q.error ?? null,
-        error_description: q.error_description ?? null,
-      }));
-    },
-  );
-
-  // Exchange code for tokens
-  fastify.post<{ Body: { flowId: string; code: string; state?: string } }>(
-    "/api/provider-auth/exchange",
-    async (request, reply) => {
-      const { flowId, code, state } = request.body ?? {};
-      const flow = authCodeFlows.get(flowId);
-      if (!flow) return reply.code(400).send({ error: "Invalid or expired flow" });
-      authCodeFlows.delete(flowId);
-
-      // Validate state if provided
-      if (state && state !== flow.state) {
-        return reply.code(400).send({ error: "State mismatch" });
-      }
-
-      const handler = getProviderHandler(flow.providerId) as AuthCodeHandler;
-      try {
-        const credential = await handler.exchangeCode(code, flow.redirectUri, flow.pkce, flow.state);
-        writeCredential(flow.providerId, credential);
-        notifyBridges();
-        return { ok: true, provider: flow.providerId };
-      } catch (err: any) {
-        return reply.code(400).send({ error: err.message });
-      }
-    },
-  );
 
   // Start device-code flow
   fastify.post<{ Body: { provider: string; enterpriseDomain?: string } }>(

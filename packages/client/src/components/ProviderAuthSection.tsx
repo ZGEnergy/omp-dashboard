@@ -93,9 +93,13 @@ function OAuthProviderRow({ provider, onChanged }: { provider: ProviderAuthStatu
   const [enterpriseInput, setEnterpriseInput] = useState(false);
   const [enterpriseDomain, setEnterpriseDomain] = useState("");
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Cleanup polling on unmount
-  useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current); }, []);
+  // Cleanup polling and timeouts on unmount
+  useEffect(() => () => {
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+  }, []);
 
   const startAuthCode = async () => {
     setBusy(true);
@@ -109,89 +113,33 @@ function OAuthProviderRow({ provider, onChanged }: { provider: ProviderAuthStatu
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      // Open popup
-      const popup = window.open(data.authUrl, "provider_oauth", "width=600,height=700");
+      // Server opens system browser and starts temp callback server.
+      // Poll status until the provider shows as authenticated.
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
 
-      // Listen for callback
-      const handleCallback = async (cbData: any) => {
-        cleanup();
-        if (cbData.error) {
-          setError(cbData.error_description || cbData.error);
-          setBusy(false);
-          return;
-        }
-        if (cbData.code) {
-          try {
-            const exRes = await fetch(`${getApiBase()}/api/provider-auth/exchange`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ flowId: data.flowId, code: cbData.code, state: cbData.state }),
-            });
-            const exData = await exRes.json();
-            if (!exRes.ok) throw new Error(exData.error);
+      pollingRef.current = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${getApiBase()}/api/provider-auth/status`);
+          const statuses: ProviderAuthStatus[] = await statusRes.json();
+          const updated = statuses.find((s) => s.id === provider.id);
+          if (updated?.authenticated) {
+            if (pollingRef.current) clearInterval(pollingRef.current);
+            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+            setBusy(false);
             onChanged();
-          } catch (err: any) {
-            setError(err.message);
           }
-        }
-        setBusy(false);
-      };
+        } catch { /* retry */ }
+      }, 2000);
 
-      // Triple relay: postMessage + BroadcastChannel + localStorage
-      const onMessage = (e: MessageEvent) => {
-        if (e.data?.type === "provider_oauth_callback") handleCallback(e.data.data);
-      };
-      window.addEventListener("message", onMessage);
-
-      let channel: BroadcastChannel | null = null;
-      try {
-        channel = new BroadcastChannel("provider_oauth_callback");
-        channel.onmessage = (e) => handleCallback(e.data);
-      } catch { /* unsupported */ }
-
-      const onStorage = (e: StorageEvent) => {
-        if (e.key === "provider_oauth_callback" && e.newValue) {
-          try {
-            const d = JSON.parse(e.newValue);
-            handleCallback(d);
-            localStorage.removeItem("provider_oauth_callback");
-          } catch { /* ignore */ }
-        }
-      };
-      window.addEventListener("storage", onStorage);
-
-      const cleanup = () => {
-        window.removeEventListener("message", onMessage);
-        window.removeEventListener("storage", onStorage);
-        channel?.close();
-      };
-
-      // If popup was blocked, provide fallback
-      if (!popup) {
-        cleanup();
-        setError("Popup blocked. Please allow popups and try again.");
-        setBusy(false);
-        return;
-      }
-
-      // Detect popup closed without completing OAuth (e.g. Claude without Pro plan
-      // redirects to chat instead of OAuth callback, user closes the window)
-      const popupPoll = setInterval(() => {
-        if (popup.closed) {
-          clearInterval(popupPoll);
-          // Give a brief delay for any last-second callback relay
-          setTimeout(() => {
-            // Only cancel if still busy (callback didn't fire)
-            setBusy((prev) => {
-              if (prev) {
-                cleanup();
-                setError("Login window was closed. If your provider requires a paid plan for API access, please check your subscription.");
-              }
-              return false;
-            });
-          }, 1000);
-        }
-      }, 500);
+      // Stop polling after 5 minutes (matches callback server timeout)
+      timeoutRef.current = setTimeout(() => {
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        setBusy((prev) => {
+          if (prev) setError("Login timed out. Please try again.");
+          return false;
+        });
+      }, 5 * 60 * 1000);
     } catch (err: any) {
       setError(err.message);
       setBusy(false);

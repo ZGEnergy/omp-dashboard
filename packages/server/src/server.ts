@@ -543,6 +543,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       }
       // Stop all code-server instances
       editorManager.stopAll();
+      // Close any pending OAuth callback servers
+      try { const { closeAllCallbackServers } = await import("./oauth-callback-server.js"); await closeAllCallbackServers(); } catch {}
       await fastify.close();
     },
   };
