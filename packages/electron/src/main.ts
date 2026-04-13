@@ -83,7 +83,50 @@ import { setupAppMenu } from "./lib/app-menu.js";
 log("All imports loaded");
 
 let mainWindow: BrowserWindow | null = null;
+let splashWindow: BrowserWindow | null = null;
 let isStartingUp = true;
+
+/** Show a splash screen immediately while the app boots. */
+function showSplash(): void {
+  splashWindow = new BrowserWindow({
+    width: 320,
+    height: 320,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    center: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  });
+  const html = `<html><head><style>
+    body { margin:0; display:flex; align-items:center; justify-content:center;
+           height:100vh; background:transparent; -webkit-app-region:drag; }
+    .card { background:#0d1117; border-radius:20px; padding:48px 56px;
+            box-shadow:0 8px 32px rgba(0,0,0,0.5); text-align:center; }
+    .pi { font-size:80px; color:#4a90d9; margin-bottom:12px; font-weight:bold;
+          font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+    .text { font-size:13px; color:#8b949e;
+            font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+    .dot { animation:blink 1.4s infinite; }
+    .dot:nth-child(2) { animation-delay:0.2s; }
+    .dot:nth-child(3) { animation-delay:0.4s; }
+    @keyframes blink { 0%,20%{opacity:0} 50%{opacity:1} 100%{opacity:0} }
+  </style></head><body><div class="card">
+    <div class="pi">π</div>
+    <div class="text">Starting<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div>
+  </div></body></html>`;
+  splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  splashWindow.on("closed", () => { splashWindow = null; });
+}
+
+/** Close the splash screen. */
+function closeSplash(): void {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.close();
+  }
+  splashWindow = null;
+}
 
 /** Show a loading page that retries connecting to the server. */
 function showLoadingPage(win: BrowserWindow, serverUrl: string): void {
@@ -245,6 +288,9 @@ async function main(): Promise<void> {
 
   await app.whenReady();
 
+  // Show splash screen immediately
+  showSplash();
+
   // Set proper app name (overrides package.json name in dev mode)
   app.name = "PI Dashboard";
 
@@ -263,6 +309,7 @@ async function main(): Promise<void> {
   const firstRun = isFirstRun();
   log(`isFirstRun=${firstRun}`);
   if (firstRun) {
+    closeSplash();
     log("Opening wizard window...");
     await openWizardWindow();
     log("Wizard window closed");
@@ -297,6 +344,7 @@ async function main(): Promise<void> {
       console.error(`ensureServer attempt ${attempt + 1} failed:`, err.message);
       log(`ensureServer failed: ${err.message}`);
 
+      closeSplash();
       const { response } = await dialog.showMessageBox({
         type: "error",
         title: "PI Dashboard",
@@ -326,6 +374,7 @@ async function main(): Promise<void> {
   }
 
   const win = createMainWindow(serverUrl);
+  closeSplash();
   showLoadingPage(win, serverUrl);
   createTray(() => mainWindow, quit);
   startUpdaters();
@@ -350,6 +399,7 @@ app.on("window-all-closed", () => {
 
 main().catch(async (err) => {
   log(`FATAL: ${err?.message || err}`);
+  closeSplash();
   console.error("Failed to start:", err);
   try {
     await dialog.showMessageBox({
