@@ -2,6 +2,10 @@
   "name": "@blackbelt-technology/pi-dashboard-electron",
   "version": "0.2.0",
   "description": "Electron desktop app for pi-dashboard",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard.git"
+  },
   "type": "module",
   "main": ".vite/build/main.js",
   "scripts": {
