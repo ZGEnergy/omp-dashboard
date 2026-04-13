@@ -110,6 +110,7 @@ jobs:
 
   # ── GitHub Release (waits for all builds) ─────────────────────
   github-release:
+    if: always() && needs.electron.result == 'success'
     needs: [publish, electron]
     runs-on: ubuntu-latest
     permissions:
