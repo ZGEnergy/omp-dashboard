@@ -3,9 +3,11 @@ import { Icon } from "@mdi/react";
 import { mdiCheckCircle, mdiFormTextbox } from "@mdi/js";
 import type { InteractiveRendererProps } from "./types.js";
 import { InlineMarkdown } from "./InlineMarkdown.js";
+import { MarkdownContent } from "../MarkdownContent.js";
 
 export function InputRenderer({ params, status, result, onRespond, onCancel }: InteractiveRendererProps) {
   const title = params.title as string;
+  const message = params.message as string | undefined;
   const placeholder = params.placeholder as string | undefined;
   const enteredValue = (result as any)?.value as string | undefined;
   const [text, setText] = useState("");
@@ -36,6 +38,9 @@ export function InputRenderer({ params, status, result, onRespond, onCancel }: I
         <Icon path={mdiFormTextbox} size={0.6} className="text-blue-400 shrink-0" />
         <span className="text-sm font-medium text-[var(--text-primary)]"><InlineMarkdown content={title} /></span>
       </div>
+      {message && (
+        <div className="text-xs text-[var(--text-secondary)] mb-3 ml-6"><MarkdownContent content={message} /></div>
+      )}
       <div className="flex gap-2 ml-6">
         <input
           type="text"

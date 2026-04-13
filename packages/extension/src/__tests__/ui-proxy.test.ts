@@ -432,6 +432,92 @@ describe("createUiProxy", () => {
     });
   });
 
+  describe("message forwarding", () => {
+    it("should include message in input params when provided via opts", () => {
+      setup(false);
+      proxy.wrappedUi.input("Name:", "placeholder", { message: "Detailed question" });
+
+      expect(mockConnection.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "extension_ui_request",
+          method: "input",
+          params: { title: "Name:", placeholder: "placeholder", message: "Detailed question" },
+        }),
+      );
+    });
+
+    it("should include message in select params when provided via opts", () => {
+      setup(false);
+      proxy.wrappedUi.select("Pick:", ["A", "B"], { message: "Context info" });
+
+      expect(mockConnection.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "extension_ui_request",
+          method: "select",
+          params: { title: "Pick:", options: ["A", "B"], message: "Context info" },
+        }),
+      );
+    });
+
+    it("should include message in multiselect params when provided via opts", () => {
+      setup(false);
+      proxy.wrappedUi.multiselect("Pick:", ["A", "B"], { message: "Select carefully" });
+
+      expect(mockConnection.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "extension_ui_request",
+          method: "multiselect",
+          params: { title: "Pick:", options: ["A", "B"], message: "Select carefully" },
+        }),
+      );
+    });
+
+    it("should not include message key when opts has no message", () => {
+      setup(false);
+      proxy.wrappedUi.input("Name:", "placeholder");
+
+      const params = mockConnection.send.mock.calls[0][0].params;
+      expect(params).toEqual({ title: "Name:", placeholder: "placeholder" });
+      expect("message" in params).toBe(false);
+    });
+
+    it("should concatenate message into TUI title for input when hasUI=true", async () => {
+      mockUi.input.mockResolvedValue("answer");
+      setup(true);
+      await proxy.wrappedUi.input("Title", "ph", { message: "Body text" });
+
+      expect(mockUi.input).toHaveBeenCalledWith(
+        "Title\n\nBody text",
+        "ph",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+
+    it("should concatenate message into TUI title for select when hasUI=true", async () => {
+      mockUi.select.mockResolvedValue("A");
+      setup(true);
+      await proxy.wrappedUi.select("Pick", ["A"], { message: "Extra context" });
+
+      expect(mockUi.select).toHaveBeenCalledWith(
+        "Pick\n\nExtra context",
+        ["A"],
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+
+    it("should concatenate message into TUI title for multiselect when hasUI=true", async () => {
+      mockUi.input.mockResolvedValue("1");
+      setup(true);
+      await proxy.wrappedUi.multiselect("Pick", ["A", "B"], { message: "Choose wisely" });
+
+      expect(mockUi.input).toHaveBeenCalledWith(
+        expect.stringContaining("Pick\n\nChoose wisely"),
+        expect.any(String),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+  });
+
   describe("unknown requestId", () => {
     it("should silently ignore responses with unknown requestId", () => {
       setup(false);

@@ -159,28 +159,32 @@ export function createUiProxy(options: UiProxyOptions) {
     },
 
     select: (title: string, selectOptions: string[], opts?: any): Promise<string | undefined> => {
-      const params = { title, options: selectOptions };
+      const message = opts?.message as string | undefined;
+      const params = { title, options: selectOptions, ...(message ? { message } : {}) };
       const requestId = sendRequest("select", params);
       const dashPromise = createDashboardPromise<string | undefined>(requestId, "select", params);
 
       if (hasUI && !inProxy) {
         const ac = new AbortController();
         inProxy = true;
-        const originalPromise = originalSelect(title, selectOptions, { ...opts, signal: ac.signal }).finally(() => { inProxy = false; });
+        const tuiTitle = message ? `${title}\n\n${message}` : title;
+        const originalPromise = originalSelect(tuiTitle, selectOptions, { ...opts, signal: ac.signal }).finally(() => { inProxy = false; });
         return raceWithCancellation(requestId, originalPromise, dashPromise, ac);
       }
       return dashPromise;
     },
 
     input: (title: string, placeholder?: string, opts?: any): Promise<string | undefined> => {
-      const params = { title, placeholder };
+      const message = opts?.message as string | undefined;
+      const params = { title, placeholder, ...(message ? { message } : {}) };
       const requestId = sendRequest("input", params);
       const dashPromise = createDashboardPromise<string | undefined>(requestId, "input", params);
 
       if (hasUI && !inProxy) {
         const ac = new AbortController();
         inProxy = true;
-        const originalPromise = originalInput(title, placeholder, { ...opts, signal: ac.signal }).finally(() => { inProxy = false; });
+        const tuiTitle = message ? `${title}\n\n${message}` : title;
+        const originalPromise = originalInput(tuiTitle, placeholder, { ...opts, signal: ac.signal }).finally(() => { inProxy = false; });
         return raceWithCancellation(requestId, originalPromise, dashPromise, ac);
       }
       return dashPromise;
@@ -200,8 +204,9 @@ export function createUiProxy(options: UiProxyOptions) {
       return dashPromise;
     },
 
-    multiselect: (title: string, selectOptions: string[]): Promise<string[]> => {
-      const params = { title, options: selectOptions };
+    multiselect: (title: string, selectOptions: string[], opts?: any): Promise<string[]> => {
+      const message = opts?.message as string | undefined;
+      const params = { title, options: selectOptions, ...(message ? { message } : {}) };
       const requestId = sendRequest("multiselect", params);
       const dashPromise = createDashboardPromise<string[]>(requestId, "multiselect", params);
 
@@ -209,7 +214,8 @@ export function createUiProxy(options: UiProxyOptions) {
         const ac = new AbortController();
         inProxy = true;
         const numbered = selectOptions.map((o, i) => `${i + 1}. ${o}`).join("\n");
-        const tuiPromise = originalInput(`${title}\n${numbered}`, "e.g. 1,3", { signal: ac.signal }).then((raw) => {
+        const tuiBase = message ? `${title}\n\n${message}` : title;
+        const tuiPromise = originalInput(`${tuiBase}\n${numbered}`, "e.g. 1,3", { signal: ac.signal }).then((raw) => {
           if (!raw) return [] as string[];
           return raw
             .split(",")

@@ -3,9 +3,11 @@ import { Icon } from "@mdi/react";
 import { mdiCheckCircle, mdiCheckboxMarkedOutline } from "@mdi/js";
 import type { InteractiveRendererProps } from "./types.js";
 import { InlineMarkdown } from "./InlineMarkdown.js";
+import { MarkdownContent } from "../MarkdownContent.js";
 
 export function MultiselectRenderer({ params, status, result, onRespond, onCancel }: InteractiveRendererProps) {
   const title = params.title as string;
+  const message = params.message as string | undefined;
   const options = (params.options as string[]) ?? [];
   const selectedValues = (result as any)?.values as string[] | undefined;
 
@@ -49,6 +51,9 @@ export function MultiselectRenderer({ params, status, result, onRespond, onCance
         <Icon path={mdiCheckboxMarkedOutline} size={0.6} className="text-blue-400 shrink-0" />
         <span className="text-sm font-medium text-[var(--text-primary)]"><InlineMarkdown content={title} /></span>
       </div>
+      {message && (
+        <div className="text-xs text-[var(--text-secondary)] mb-3 ml-6"><MarkdownContent content={message} /></div>
+      )}
       <div className="flex flex-col gap-1 ml-6 mb-2">
         {options.map((option) => (
           <label
