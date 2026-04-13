@@ -42,7 +42,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends dpkg fakeroot libarchive-tools
+          sudo apt-get install -y --no-install-recommends dpkg fakeroot libarchive-tools libfuse2
 
       - name: Download Node.js binary (Unix)
         if: matrix.platform != 'win32'
