@@ -23,6 +23,11 @@ const config: ForgeConfig = {
       ...extraResource,
       "./src/renderer",
       "./resources/dirname-shim.js",
+      // Tray icons for macOS (template images) and Windows/Linux
+      "./resources/trayTemplate.png",
+      "./resources/trayTemplate@2x.png",
+      "./resources/icon.png",
+      "./resources/icon.ico",
       // Bundled server (created by scripts/bundle-server.sh)
       ...(fs.existsSync(path.resolve(__dirname, "resources/server")) ? ["./resources/server"] : []),
     ],
