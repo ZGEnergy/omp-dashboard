@@ -36,15 +36,28 @@ export interface ReadmePreview {
   error?: string;
 }
 
-export function useContentViews() {
+export interface UseContentViewsOptions {
+  /** Called before opening a new top-level content view, so the caller can clear other views. */
+  onBeforeOpen?: () => void;
+}
+
+export function useContentViews(options?: UseContentViewsOptions) {
   const [piResourcesState, setPiResourcesState] = useState<{ cwd: string } | null>(null);
   const [piResourceFilePreview, setPiResourceFilePreview] = useState<PiResourceFilePreview | null>(null);
   const [readmePreview, setReadmePreview] = useState<ReadmePreview | null>(null);
 
+  const clearAll = useCallback(() => {
+    setPiResourcesState(null);
+    setPiResourceFilePreview(null);
+    setReadmePreview(null);
+  }, []);
+
   const handleOpenPiResources = useCallback((cwd: string) => {
+    options?.onBeforeOpen?.();
     setPiResourcesState({ cwd });
     setPiResourceFilePreview(null);
-  }, []);
+    setReadmePreview(null);
+  }, [options?.onBeforeOpen]);
 
   const handleViewPiResourceFile = useCallback(async (filePath: string, title: string) => {
     setPiResourceFilePreview({ filePath, title, isLoading: true });
@@ -66,6 +79,9 @@ export function useContentViews() {
   }, []);
 
   const handleViewReadme = useCallback(async (cwd: string) => {
+    options?.onBeforeOpen?.();
+    setPiResourcesState(null);
+    setPiResourceFilePreview(null);
     setReadmePreview({ cwd, isLoading: true });
     try {
       const res = await fetch(`${getApiBase()}/api/readme?cwd=${encodeURIComponent(cwd)}`);
@@ -84,6 +100,7 @@ export function useContentViews() {
     piResourcesState, setPiResourcesState,
     piResourceFilePreview, setPiResourceFilePreview,
     readmePreview, setReadmePreview,
+    clearAll,
     handleOpenPiResources,
     handleViewPiResourceFile,
     handleViewReadme,

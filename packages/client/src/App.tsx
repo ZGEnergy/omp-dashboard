@@ -162,14 +162,34 @@ export default function App() {
   const [diffViewSessionId, setDiffViewSessionId] = useState<string | null>(null);
   const [flowYamlPreview, setFlowYamlPreview] = useState<{ content: string; title: string } | null>(null);
   const [sourceOpenAgent, setSourceOpenAgent] = useState<string | null>(null);
+
+  // Clear all App-level content view states (everything except useContentViews-owned states)
+  const clearAppContentViews = useCallback(() => {
+    setPreviewState(null);
+    setSpecsBrowserCwd(null);
+    setArchiveBrowserCwd(null);
+    setDiffViewSessionId(null);
+    setFlowYamlPreview(null);
+    setSourceOpenAgent(null);
+    setFlowDetailAgent(null);
+    setArchitectDetailOpen(false);
+  }, []);
+
   const {
     piResourcesState, setPiResourcesState,
     piResourceFilePreview, setPiResourceFilePreview,
     readmePreview, setReadmePreview,
+    clearAll: clearContentViews,
     handleOpenPiResources,
     handleViewPiResourceFile,
     handleViewReadme,
-  } = useContentViews();
+  } = useContentViews({ onBeforeOpen: clearAppContentViews });
+
+  /** Clear every content view — App-level + useContentViews-owned. */
+  const clearAllContentViews = useCallback(() => {
+    clearAppContentViews();
+    clearContentViews();
+  }, [clearAppContentViews, clearContentViews]);
 
   const handleServerSwitch = useCallback((host: string, port: number) => {
     const newUrl = `${wsProtocol}//${host}:${port}/ws`;
@@ -274,11 +294,7 @@ export default function App() {
   const prevSelectedRef = useRef(selectedId);
   useEffect(() => {
     if (selectedId !== prevSelectedRef.current) {
-      setPreviewState(null);
-      setSpecsBrowserCwd(null);
-      setArchiveBrowserCwd(null);
-      setDiffViewSessionId(null);
-      setFlowYamlPreview(null);
+      clearAllContentViews();
       prevSelectedRef.current = selectedId;
     }
     // Lazy subscribe: load events for ended sessions when first selected.
@@ -390,7 +406,7 @@ export default function App() {
     handleSend(text, images);
   }, [handleSend]);
 
-  const openspecActions = useOpenSpecActions({ send, openspecMap, setPreviewState });
+  const openspecActions = useOpenSpecActions({ send, openspecMap, setPreviewState, clearAllContentViews });
   const {
     handleOpenSpecRefresh, handleBulkArchive, handleReadArtifact,
     handleAttachProposal, handleDetachProposal,
@@ -402,6 +418,7 @@ export default function App() {
     if (!state) return;
     // Architect: use stored YAML content
     if (state.architectState?.flowYamlContent) {
+      clearAllContentViews();
       setFlowYamlPreview({
         content: "```yaml\n" + state.architectState.flowYamlContent + "\n```",
         title: state.architectState.flowName || "Flow YAML",
@@ -416,6 +433,7 @@ export default function App() {
         const res = await fetch(`${apiBase}/api/file?cwd=${encodeURIComponent(session.cwd)}&path=${encodeURIComponent(flowSource)}`);
         const body = await res.json();
         if (body.success && body.data?.content) {
+          clearAllContentViews();
           setFlowYamlPreview({
             content: "```yaml\n" + body.data.content + "\n```",
             title: state.flowState?.flowName || "Flow YAML",
@@ -423,7 +441,7 @@ export default function App() {
         }
       } catch { /* ignore fetch errors */ }
     }
-  }, [sessionStates, sessions]);
+  }, [sessionStates, sessions, clearAllContentViews]);
 
   // Flow agent source viewer — toggle: fetch on open, clear on close
   const toggleFlowAgentSource = useCallback(async (sourcePath: string, agentName: string) => {
@@ -439,11 +457,12 @@ export default function App() {
       const res = await fetch(`${apiBase}/api/file?cwd=${encodeURIComponent(session.cwd)}&path=${encodeURIComponent(sourcePath)}`);
       const body = await res.json();
       if (body.success && body.data?.content) {
+        clearAllContentViews();
         setSourceOpenAgent(agentName);
         setFlowYamlPreview({ content: body.data.content, title: agentName });
       }
     } catch { /* ignore fetch errors */ }
-  }, [selectedId, sessions, sourceOpenAgent]);
+  }, [selectedId, sessions, sourceOpenAgent, clearAllContentViews]);
 
   // Compute set of session IDs that have active errors
   const errorSessionIds = useMemo(() => {
@@ -477,8 +496,8 @@ export default function App() {
       onBulkArchive={handleBulkArchive}
       onReadArtifact={handleReadArtifact}
       onOpenPiResources={handleOpenPiResources}
-      onOpenSpecs={(cwd) => setSpecsBrowserCwd(cwd)}
-      onOpenArchive={(cwd) => setArchiveBrowserCwd(cwd)}
+      onOpenSpecs={(cwd) => { clearAllContentViews(); setSpecsBrowserCwd(cwd); }}
+      onOpenArchive={(cwd) => { clearAllContentViews(); setArchiveBrowserCwd(cwd); }}
       onViewReadme={handleViewReadme}
       onAttachProposal={handleAttachProposal}
       onDetachProposal={handleDetachProposal}
@@ -522,11 +541,11 @@ export default function App() {
       onDismissResumeError={(id) => setResumeErrors((prev) => { const next = new Map(prev); next.delete(id); return next; })}
       headerExtra={
         <ServerSelector
-          servers={discoveredServers}
           currentHost={currentServerHost}
           currentPort={currentServerPort}
           connected={status === "connected"}
           onSwitch={handleServerSwitch}
+          onManageServers={() => navigate("/settings?tab=servers")}
         />
       }
     />
@@ -597,7 +616,7 @@ export default function App() {
         onAttachProposal={(changeName) => handleAttachProposal(selectedId, changeName)}
         onDetachProposal={() => handleDetachProposal(selectedId)}
         hasFileChanges={selectedState.hasFileChanges}
-        onOpenDiffView={() => setDiffViewSessionId(selectedId)}
+        onOpenDiffView={() => { clearAllContentViews(); setDiffViewSessionId(selectedId); }}
         onRefresh={() => {
           setSessionStates((prev) => {
             const next = new Map(prev);
@@ -721,7 +740,7 @@ export default function App() {
                 isDetailOpen={architectDetailOpen}
                 onPromptRespond={(promptId, answer) => selectedId && send({ type: "architect_prompt_response" as any, sessionId: selectedId, promptId, answer })}
                 onViewYaml={() => selectedId && openFlowYaml(selectedId)}
-                onViewAgentSource={(name, source) => setFlowYamlPreview({ content: "```yaml\n" + source + "\n```", title: name })}
+                onViewAgentSource={(name, source) => { clearAllContentViews(); setFlowYamlPreview({ content: "```yaml\n" + source + "\n```", title: name }); }}
               />
             </div>
           )}
@@ -741,7 +760,7 @@ export default function App() {
                 isDetailOpen={architectDetailOpen}
                 onPromptRespond={(promptId, answer) => selectedId && send({ type: "architect_prompt_response" as any, sessionId: selectedId, promptId, answer })}
                 onViewYaml={() => selectedId && openFlowYaml(selectedId)}
-                onViewAgentSource={(name, source) => setFlowYamlPreview({ content: "```yaml\n" + source + "\n```", title: name })}
+                onViewAgentSource={(name, source) => { clearAllContentViews(); setFlowYamlPreview({ content: "```yaml\n" + source + "\n```", title: name }); }}
               />
             </div>
           )}
@@ -781,7 +800,7 @@ export default function App() {
                 isDetailOpen={architectDetailOpen}
                 onPromptRespond={(promptId, answer) => selectedId && send({ type: "architect_prompt_response" as any, sessionId: selectedId, promptId, answer })}
                 onViewYaml={() => selectedId && openFlowYaml(selectedId)}
-                onViewAgentSource={(name, source) => setFlowYamlPreview({ content: "```yaml\n" + source + "\n```", title: name })}
+                onViewAgentSource={(name, source) => { clearAllContentViews(); setFlowYamlPreview({ content: "```yaml\n" + source + "\n```", title: name }); }}
               />
             </div>
           )}

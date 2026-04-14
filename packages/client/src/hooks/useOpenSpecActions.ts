@@ -13,6 +13,7 @@ export interface OpenSpecActionDeps {
     artifactId: string;
     artifacts: OpenSpecArtifact[];
   } | null>>;
+  clearAllContentViews?: () => void;
 }
 
 export function useOpenSpecActions(deps: OpenSpecActionDeps) {
@@ -30,8 +31,9 @@ export function useOpenSpecActions(deps: OpenSpecActionDeps) {
     const openspecData = openspecMap.get(cwd);
     const change = openspecData?.changes.find((c) => c.name === changeName);
     const artifacts = change?.artifacts ?? [];
+    deps.clearAllContentViews?.();
     setPreviewState({ cwd, changeName, artifactId, artifacts });
-  }, [openspecMap, setPreviewState]);
+  }, [openspecMap, setPreviewState, deps.clearAllContentViews]);
 
   const handleAttachProposal = useCallback((sessionId: string, changeName: string) => {
     send({ type: "attach_proposal", sessionId, changeName });

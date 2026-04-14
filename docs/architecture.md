@@ -293,6 +293,18 @@ The web client includes a generic `MarkdownPreviewView` component that replaces 
 ### Archive Browser
 The `ArchiveBrowserView` provides a searchable, date-grouped listing of archived OpenSpec changes. It uses a dedicated `GET /api/openspec-archive?cwd=<path>` endpoint that scans `openspec/changes/archive/` and returns entry metadata (name, date, artifacts). The view uses two-level navigation: the list is the first level, and clicking an artifact letter (P/D/S/T) opens the reader as the second level. Back from the reader returns to the list (preserving search and scroll), and back from the list returns to the session view. Entry point is the `[Archive]` button in `FolderOpenSpecSection`.
 
+### Content View Management
+
+The content area (right panel) shows one view at a time: ChatView, ArchiveBrowserView, SpecsBrowserView, PiResourcesView, MarkdownPreviewView (readme, pi resource file, flow YAML, OpenSpec artifact), FileDiffView, FlowArchitectDetail, or FlowAgentDetail. Each view is controlled by independent state in `App.tsx` and `useContentViews`. A priority chain in the JSX determines which view renders (first truthy state wins).
+
+**Mutual exclusivity**: A `clearAllContentViews()` helper resets all content view states. It is called before opening any new content view, ensuring the previous view is always dismissed. This combines `clearAppContentViews()` (App-level states: preview, specs browser, archive browser, diff view, flow YAML, architect detail, flow agent detail) with `clearContentViews()` from `useContentViews` (pi resources, pi resource file preview, readme preview).
+
+**Session switch**: When the selected session changes, `clearAllContentViews()` is called to dismiss any open content view.
+
+**Sub-navigation**: `handleViewPiResourceFile` (viewing a file within PiResourcesView) does not clear other views — it's sub-navigation within an already-active content view.
+
+**`onBeforeOpen` callback**: `useContentViews` accepts an optional `onBeforeOpen` callback. When `handleOpenPiResources` or `handleViewReadme` opens a new top-level view, it calls `onBeforeOpen` first so App.tsx can clear its own states, then clears the hook's sibling states internally.
+
 ### Network Access Control
 
 The server has a two-layer access model:
