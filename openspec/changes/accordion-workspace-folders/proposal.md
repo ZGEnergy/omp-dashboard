@@ -21,7 +21,7 @@ _(none — this modifies an existing capability)_
 
 ## Impact
 
-- **Code**: `SessionList.tsx` — `handleToggleCollapse` logic changes from toggling a set to setting a single expanded key (or null).
-- **Storage**: `session-filter-storage.ts` — persistence format changes from a set of collapsed cwds to a single expanded cwd string (or null). Migration needed for existing localStorage data.
+- **Code**: `packages/client/src/components/SessionList.tsx` — `handleToggleCollapse` logic changes from toggling a set to setting a single expanded key (or null).
+- **Storage**: `packages/client/src/lib/session-filter-storage.ts` — persistence format changes from a set of collapsed cwds to a single expanded cwd string (or null). Migration needed for existing localStorage data.
 - **Tests**: Existing collapsible-groups tests need updating for accordion semantics.
 - **UX**: Users who relied on having multiple folders open simultaneously will need to adapt. This is a minor behavioral **BREAKING** change in the sidebar.

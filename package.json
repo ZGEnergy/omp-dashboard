@@ -6,6 +6,7 @@
     "type": "git",
     "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard"
   },
+  "license": "MIT",
   "publishConfig": {
     "access": "public"
   },
@@ -41,7 +42,8 @@
     "packages/dist/",
     "docs/architecture.md",
     "AGENTS.md",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=@blackbelt-technology/pi-dashboard-web",

@@ -1,0 +1,368 @@
+{
+  "lastChecked": "2026-04-14T23:10:00.000Z",
+  "lastSweepSummary": "0 broken, 2 stale, 10 ok, 0 obsolete, 0 empty",
+  "proposals": [
+    {
+      "name": "known-servers-management",
+      "status": "ok",
+      "priority": 15,
+      "complexity": "minor",
+      "createdAt": "2026-04-14",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [],
+      "dependsOn": [],
+      "blockedBy": [],
+      "conflictsWith": [],
+      "touchesFiles": [
+        "packages/shared/src/config.ts",
+        "packages/server/src/routes/known-servers-routes.ts",
+        "packages/server/src/config-api.ts",
+        "packages/client/src/components/KnownServersSection.tsx",
+        "packages/client/src/components/NetworkDiscoverySection.tsx",
+        "packages/client/src/components/ServerSelector.tsx",
+        "packages/client/src/lib/known-servers-api.ts"
+      ],
+      "touchesCapabilities": [
+        "known-servers",
+        "server-selector"
+      ],
+      "notes": "Complete (18/18 tasks). Ready to archive."
+    },
+    {
+      "name": "electron-wizard-smart-detection",
+      "status": "ok",
+      "priority": 20,
+      "complexity": "major",
+      "createdAt": "2026-04-14",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [],
+      "dependsOn": [],
+      "blockedBy": [],
+      "conflictsWith": [
+        "replace-tsx-with-jiti",
+        "docker-packaging"
+      ],
+      "touchesFiles": [
+        "packages/electron/src/lib/dependency-detector.ts",
+        "packages/electron/src/lib/server-lifecycle.ts",
+        "packages/electron/src/main.ts",
+        "packages/electron/src/lib/wizard-state.ts",
+        "packages/electron/src/lib/bridge-register.ts",
+        "packages/shared/src/bridge-register.ts"
+      ],
+      "touchesCapabilities": [
+        "electron-smart-startup"
+      ],
+      "notes": "Nearly complete (56/57 tasks). Only manual smoke test remaining."
+    },
+    {
+      "name": "cross-platform-qa-vms",
+      "status": "ok",
+      "priority": 20,
+      "complexity": "major",
+      "createdAt": "2026-04-13",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [],
+      "dependsOn": [],
+      "blockedBy": [],
+      "conflictsWith": [],
+      "touchesFiles": [
+        "qa/Makefile",
+        "qa/packer/",
+        "qa/tests/",
+        "qa/scripts/"
+      ],
+      "touchesCapabilities": [],
+      "notes": "Complete (44/44 tasks). Ready to archive."
+    },
+    {
+      "name": "npm-trusted-publishing",
+      "status": "stale",
+      "priority": 20,
+      "complexity": "trivial",
+      "createdAt": "2026-04-03",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [
+        {
+          "severity": "stale",
+          "description": "LICENSE file still missing \u2014 proposal says 'Add MIT LICENSE file' but file doesn't exist. publish.yml OIDC, provenance, version extraction, and GitHub Release are all already implemented.",
+          "artifact": "proposal.md",
+          "causedBy": "Partial implementation \u2014 publish.yml updated but LICENSE file not created",
+          "autoFixable": false
+        }
+      ],
+      "dependsOn": [],
+      "blockedBy": [],
+      "conflictsWith": [],
+      "touchesFiles": [
+        ".github/workflows/publish.yml",
+        "LICENSE",
+        "package.json"
+      ],
+      "touchesCapabilities": [
+        "ci-cd-pipeline"
+      ],
+      "notes": "Most of the work is done. Only LICENSE file creation + adding to package.json files array remains."
+    },
+    {
+      "name": "session-card-attached-change-link",
+      "status": "ok",
+      "priority": 25,
+      "complexity": "trivial",
+      "createdAt": "2026-03-27",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [],
+      "dependsOn": [],
+      "blockedBy": [],
+      "conflictsWith": [],
+      "touchesFiles": [
+        "packages/client/src/components/SessionCard.tsx"
+      ],
+      "touchesCapabilities": [
+        "openspec-card-section"
+      ],
+      "notes": ""
+    },
+    {
+      "name": "replace-tsx-with-jiti",
+      "status": "ok",
+      "priority": 25,
+      "complexity": "minor",
+      "createdAt": "2026-04-03",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [],
+      "dependsOn": [
+        "electron-wizard-smart-detection"
+      ],
+      "blockedBy": [],
+      "conflictsWith": [
+        "electron-wizard-smart-detection",
+        "docker-packaging"
+      ],
+      "touchesFiles": [
+        "packages/server/src/cli.ts",
+        "packages/extension/src/server-launcher.ts",
+        "package.json"
+      ],
+      "touchesCapabilities": [
+        "jiti-loader",
+        "dashboard-server",
+        "bridge-extension",
+        "packaging"
+      ],
+      "notes": ""
+    },
+    {
+      "name": "worktree-awareness",
+      "status": "ok",
+      "priority": 30,
+      "complexity": "minor",
+      "createdAt": "2026-03-23",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [],
+      "dependsOn": [],
+      "blockedBy": [],
+      "conflictsWith": [
+        "workspace-actions"
+      ],
+      "touchesFiles": [
+        "packages/extension/src/git-info.ts",
+        "packages/shared/src/types.ts",
+        "packages/client/src/components/SessionCard.tsx",
+        "packages/server/src/server.ts"
+      ],
+      "touchesCapabilities": [
+        "git-context",
+        "session-sidebar",
+        "open-in-editor"
+      ],
+      "notes": ""
+    },
+    {
+      "name": "new-spec-spawn",
+      "status": "ok",
+      "priority": 30,
+      "complexity": "minor",
+      "createdAt": "2026-03-27",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [],
+      "dependsOn": [],
+      "blockedBy": [],
+      "conflictsWith": [
+        "workspace-actions"
+      ],
+      "touchesFiles": [
+        "packages/server/src/process-manager.ts",
+        "packages/shared/src/openspec-activity-detector.ts",
+        "packages/shared/src/browser-protocol.ts",
+        "packages/client/src/components/FolderOpenSpecSection.tsx"
+      ],
+      "touchesCapabilities": [
+        "new-spec-spawn",
+        "process-manager",
+        "proposal-attachment"
+      ],
+      "notes": ""
+    },
+    {
+      "name": "workspace-actions",
+      "status": "ok",
+      "priority": 30,
+      "complexity": "minor",
+      "createdAt": "2026-03-23",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [],
+      "dependsOn": [
+        "worktree-awareness"
+      ],
+      "blockedBy": [],
+      "conflictsWith": [
+        "worktree-awareness",
+        "new-spec-spawn"
+      ],
+      "touchesFiles": [
+        "packages/server/src/server.ts",
+        "packages/server/src/routes/git-routes.ts",
+        "packages/client/src/components/FolderActionBar.tsx"
+      ],
+      "touchesCapabilities": [
+        "workspace-actions",
+        "session-sidebar",
+        "process-manager"
+      ],
+      "notes": ""
+    },
+    {
+      "name": "accordion-workspace-folders",
+      "status": "ok",
+      "priority": 35,
+      "complexity": "trivial",
+      "createdAt": "2026-03-26",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [],
+      "dependsOn": [],
+      "blockedBy": [],
+      "conflictsWith": [],
+      "touchesFiles": [
+        "packages/client/src/components/SessionList.tsx",
+        "packages/client/src/lib/session-filter-storage.ts"
+      ],
+      "touchesCapabilities": [
+        "collapsible-groups"
+      ],
+      "notes": "Proposal-only \u2014 needs design.md and tasks.md artifacts before implementation."
+    },
+    {
+      "name": "docker-packaging",
+      "status": "stale",
+      "priority": 45,
+      "complexity": "fundamental",
+      "createdAt": "2026-04-08",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [
+        {
+          "severity": "stale",
+          "description": "Impact references src/ paths for new dashboard files \u2014 would be under packages/",
+          "artifact": "proposal.md",
+          "causedBy": "2026-04-10-monorepo-split",
+          "autoFixable": true
+        },
+        {
+          "severity": "stale",
+          "description": "Electron 'Remote' mode section needs to integrate with electron-wizard-smart-detection's mode-aware ensureServer() logic which was substantially rewritten",
+          "artifact": "proposal.md",
+          "causedBy": "2026-04-14-electron-wizard-smart-detection (active, nearly complete)",
+          "autoFixable": false
+        }
+      ],
+      "dependsOn": [
+        "electron-wizard-smart-detection"
+      ],
+      "blockedBy": [],
+      "conflictsWith": [
+        "electron-wizard-smart-detection",
+        "replace-tsx-with-jiti"
+      ],
+      "touchesFiles": [
+        "docker/Dockerfile",
+        "docker/entrypoint.sh",
+        "docker/compose.yml",
+        "packages/electron/src/lib/wizard-state.ts",
+        "packages/electron/src/lib/server-lifecycle.ts"
+      ],
+      "touchesCapabilities": [
+        "docker-packaging",
+        "electron-shell"
+      ],
+      "notes": ""
+    },
+    {
+      "name": "pi-log-miner-skill",
+      "status": "ok",
+      "priority": 55,
+      "complexity": "fundamental",
+      "createdAt": "2026-03-27",
+      "checkedAt": "2026-04-14T23:00:00.000Z",
+      "issues": [],
+      "dependsOn": [
+        "docker-packaging"
+      ],
+      "blockedBy": [],
+      "conflictsWith": [],
+      "touchesFiles": [
+        ".pi/skills/pi-log-miner/",
+        "packages/server/src/honcho-docker.ts",
+        "packages/server/src/honcho-client.ts",
+        "packages/server/src/routes/summary-routes.ts",
+        "packages/client/src/components/SummaryView.tsx",
+        "packages/shared/src/summary-types.ts"
+      ],
+      "touchesCapabilities": [
+        "knowledge-seed-management",
+        "rolling-summarization-pipeline",
+        "honcho-docker-lifecycle",
+        "dashboard-summarize-ui"
+      ],
+      "notes": ""
+    }
+  ],
+  "conflicts": [
+    {
+      "proposals": [
+        "new-spec-spawn",
+        "workspace-actions"
+      ],
+      "area": "packages/server/src/process-manager.ts",
+      "severity": "low",
+      "resolution": "Both add to process-manager (initialPrompt vs worktree creation). Additive changes, no ordering constraint needed."
+    },
+    {
+      "proposals": [
+        "replace-tsx-with-jiti",
+        "docker-packaging",
+        "electron-wizard-smart-detection"
+      ],
+      "area": "packages/electron/src/lib/server-lifecycle.ts",
+      "severity": "medium",
+      "resolution": "electron-wizard-smart-detection is nearly complete (56/57). replace-tsx-with-jiti and docker-packaging should wait for it to finish and archive before modifying server-lifecycle."
+    },
+    {
+      "proposals": [
+        "docker-packaging",
+        "electron-wizard-smart-detection"
+      ],
+      "area": "packages/electron/src/lib/wizard-state.ts",
+      "severity": "medium",
+      "resolution": "docker-packaging adds 'remote' mode to wizard-state. Implement after electron-wizard-smart-detection is archived."
+    },
+    {
+      "proposals": [
+        "worktree-awareness",
+        "workspace-actions"
+      ],
+      "area": "git capabilities (git-info.ts, git-routes.ts)",
+      "severity": "low",
+      "resolution": "worktree-awareness establishes detection that workspace-actions' worktree creation can use. Implement worktree-awareness first."
+    }
+  ]
+}

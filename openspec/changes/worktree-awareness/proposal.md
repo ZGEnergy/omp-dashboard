@@ -24,6 +24,6 @@ _(none)_
 
 ## Impact
 
-- **Files**: `src/extension/git-info.ts`, `src/shared/types.ts`, `src/client/components/SessionCard.tsx`, `src/server/server.ts` (open-editor endpoint — Zed `-n` flag)
+- **Files**: `packages/extension/src/git-info.ts`, `packages/shared/src/types.ts`, `packages/client/src/components/SessionCard.tsx`, `packages/server/src/server.ts` (open-editor endpoint — Zed `-n` flag)
 - **Tests**: `git-info.test.ts`, `SessionCard.test.tsx`
 - **Protocol**: `session_added` / `session_updated` messages gain optional `isWorktree` field (backward compatible).

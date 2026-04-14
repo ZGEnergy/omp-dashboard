@@ -22,7 +22,8 @@ The sidebar group headers currently only show editor buttons. Users need quick a
 
 ## Impact
 
-- **Files**: `src/server/server.ts` (new endpoints), `src/client/components/SessionList.tsx` (action buttons in folder group headers), new `src/client/components/AddWorktreeDialog.tsx`, new API client functions.
-- **Note**: The workspace system was replaced by pinned directories (`2026-03-27-pinned-directories`). `AddWorkspaceDialog.tsx` no longer exists — group headers now use `PinDirectoryDialog.tsx`. Action buttons integrate with the current pinned/unpinned group header structure.
+- **Files**: `packages/server/src/routes/git-routes.ts` (new worktree endpoint), `packages/client/src/components/FolderActionBar.tsx` (worktree button), new `packages/client/src/components/AddWorktreeDialog.tsx`, new API client functions.
+- **Note**: The workspace system was replaced by pinned directories (`2026-03-27-pinned-directories`). `AddWorkspaceDialog.tsx` no longer exists — group headers now use `PinDirectoryDialog.tsx`. Action buttons integrate with the current pinned/unpinned group header structure via `FolderActionBar.tsx`.
+- **Note**: "Add pi-agent" spawning is already implemented (`FolderActionBar.tsx` `onSpawnSession`). Remaining scope is only the "Add worktree" button and `POST /api/git/worktree` endpoint.
 - **Tests**: New endpoint tests, dialog tests, SessionList action tests.
 - **Dependencies**: None. Uses existing `process-manager.ts` and `git` CLI.

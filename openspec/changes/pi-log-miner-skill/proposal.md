@@ -94,7 +94,7 @@ Honcho provides the memory infrastructure — background reasoning, semantic sea
 - **New dependency**: Docker (for managed Honcho mode). Optional — external mode or graceful degradation without it.
 - **New npm dependency**: `@honcho-ai/sdk` for TypeScript client
 - **New skill files**: `.pi/skills/pi-log-miner/` with scripts, lib, prompts, and references
-- **New dashboard files**: `src/server/honcho-docker.ts` (Docker lifecycle), `src/server/honcho-client.ts` (SDK wrapper), `src/server/routes/summary-routes.ts`, `src/server/routes/honcho-routes.ts`, `src/server/summary-pipeline.ts`, `src/client/components/SummaryView.tsx`, `src/client/components/SummarizeButton.tsx`, `src/shared/summary-types.ts`
+- **New dashboard files**: `packages/server/src/honcho-docker.ts` (Docker lifecycle), `packages/server/src/honcho-client.ts` (SDK wrapper), `packages/server/src/routes/summary-routes.ts`, `packages/server/src/routes/honcho-routes.ts`, `packages/server/src/summary-pipeline.ts`, `packages/client/src/components/SummaryView.tsx`, `packages/client/src/components/SummarizeButton.tsx`, `packages/shared/src/summary-types.ts`
 - **New generated files**: `~/.pi/dashboard/honcho/docker-compose.yml`
 - **Docker resources**: Two containers (PostgreSQL + Honcho), one named volume, ~500MB disk for images
 - **pi-model-proxy dependency**: `@blackbelt-technology/pi-model-proxy` must be installed as a pi package for Honcho's reasoning features. Install via `pi install npm:@blackbelt-technology/pi-model-proxy`. Without it, Honcho runs in CRUD-only mode (storage works, reasoning disabled).

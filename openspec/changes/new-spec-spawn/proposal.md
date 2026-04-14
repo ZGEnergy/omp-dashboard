@@ -22,7 +22,7 @@ Depends on: `openspec-folder-card-ui` (provides the folder-level UI where the bu
 
 ## Impact
 
-- **Server** (`src/server/`): `process-manager.ts` gains `initialPrompt` option. `browser-gateway.ts` handles new `spawn_spec_session` message type (or extends `spawn_session` with prompt field).
-- **Extension** (`src/extension/`): *(Already done)* `openspec-activity-detector.ts` already has `CLI_NEW_CHANGE_RE` regex (added by `fix-openspec-activity-detection`).
-- **Client** (`src/client/`): "New Spec" button in folder OpenSpec section triggers spawn with prompt.
-- **Protocol** (`src/shared/`): `browser-protocol.ts` — `spawn_session` message extended or new message type for prompt-based spawn.
+- **Server** (`packages/server/src/`): `process-manager.ts` gains `initialPrompt` option. `browser-gateway.ts` handles new `spawn_spec_session` message type (or extends `spawn_session` with prompt field).
+- **Extension** (`packages/extension/src/`): *(Already done)* `openspec-activity-detector.ts` already has `CLI_NEW_CHANGE_RE` regex (in `packages/shared/src/openspec-activity-detector.ts`).
+- **Client** (`packages/client/src/`): "New Spec" button in folder OpenSpec section triggers spawn with prompt.
+- **Protocol** (`packages/shared/src/`): `browser-protocol.ts` — `spawn_session` message extended or new message type for prompt-based spawn.

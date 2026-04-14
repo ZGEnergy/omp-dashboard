@@ -18,4 +18,4 @@ _(none)_
 
 ## Impact
 
-- **Client** (`src/client/components/SessionCard.tsx`): Update card rendering to show attached change name.
+- **Client** (`packages/client/src/components/SessionCard.tsx`): Update card rendering to show attached change name.
