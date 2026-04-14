@@ -424,6 +424,19 @@ export default function App() {
     }
   }, [sessionStates, sessions]);
 
+  // Flow agent source viewer — fetch agent .md file on demand
+  const openFlowAgentSource = useCallback(async (sourcePath: string, agentName: string) => {
+    const session = selectedId ? sessions.get(selectedId) : undefined;
+    if (!session?.cwd) return;
+    try {
+      const res = await fetch(`${apiBase}/api/file?cwd=${encodeURIComponent(session.cwd)}&path=${encodeURIComponent(sourcePath)}`);
+      const body = await res.json();
+      if (body.success && body.data?.content) {
+        setFlowYamlPreview({ content: body.data.content, title: agentName });
+      }
+    } catch { /* ignore fetch errors */ }
+  }, [selectedId, sessions]);
+
   // Compute set of session IDs that have active errors
   const errorSessionIds = useMemo(() => {
     const ids = new Set<string>();
@@ -736,6 +749,7 @@ export default function App() {
                 }}
                 onSendPrompt={(text) => handleSend(text)}
                 onViewYaml={() => selectedId && openFlowYaml(selectedId)}
+                onViewAgentSource={openFlowAgentSource}
               />
             </div>
           )}
@@ -771,6 +785,7 @@ export default function App() {
                 }}
                 onSendPrompt={(text) => handleSend(text)}
                 onViewYaml={() => selectedId && openFlowYaml(selectedId)}
+                onViewAgentSource={openFlowAgentSource}
               />
             </div>
           )}

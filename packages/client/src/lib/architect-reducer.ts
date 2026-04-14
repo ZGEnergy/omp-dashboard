@@ -65,7 +65,7 @@ function extractStepsFromYaml(content: string): ArchitectDagStep[] {
     const block = stepBlocks[i];
     const agentMatch = block.match(/^\s+agent:\s*(.+)$/m);
     if (agentMatch) steps[i].agentName = agentMatch[1].trim();
-    const blockedMatch = block.match(/^\s+blocked_by:\s*\[([^\]]*)\]/m);
+    const blockedMatch = block.match(/^\s+blockedBy:\s*\[([^\]]*)\]/m);
     if (blockedMatch) {
       steps[i].blockedBy = blockedMatch[1].split(",").map(s => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
     }

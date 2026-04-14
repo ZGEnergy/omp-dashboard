@@ -1,14 +1,14 @@
 /**
- * Tests for TuiPromptAdapter behavior.
+ * Tests for the bridge's built-in TUI adapter behavior.
  * Tests the adapter contract using the same mock pattern as the wiring tests.
- * The real TuiPromptAdapter lives in pi-flows but follows the same interface.
+ * The TUI adapter is defined inline in bridge.ts session_start.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PromptBus, type PromptAdapter, type PromptRequest, type PromptResponse, type PromptClaim } from "../prompt-bus.js";
 
-// Minimal TuiPromptAdapter reimplementation for testing the contract
-// (mirrors pi-flows/extensions/flow-engine/tui-prompt-adapter.ts)
+// Minimal TUI adapter reimplementation for testing the contract
+// (mirrors the inline adapter in bridge.ts session_start)
 function createTestTuiAdapter(mockUi: any, bus: PromptBus): PromptAdapter {
   const controllers = new Map<string, AbortController>();
 
@@ -79,7 +79,7 @@ function createMockUi() {
   };
 }
 
-describe("TuiPromptAdapter", () => {
+describe("Bridge TUI adapter", () => {
   let bus: PromptBus;
   let mockUi: ReturnType<typeof createMockUi>;
 

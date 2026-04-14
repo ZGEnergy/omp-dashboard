@@ -41,7 +41,7 @@ export function deriveApiBase(wsUrl: string): string {
 /**
  * Build-time default API URL from VITE_API_URL env var.
  */
-export const VITE_API_URL: string = import.meta.env?.VITE_API_URL ?? "";
+export const VITE_API_URL: string = (import.meta as any).env?.VITE_API_URL ?? "";
 
 // ── Module-level API base for non-React code ──────────────────────
 // Set once by App.tsx when the WebSocket URL is known.

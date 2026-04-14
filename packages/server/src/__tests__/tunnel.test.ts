@@ -7,7 +7,7 @@ vi.mock("node:fs", async (importOriginal) => {
   return {
     ...actual,
     default: {
-      ...actual.default,
+      ...(actual as any).default,
       existsSync: vi.fn(),
       readFileSync: vi.fn(),
       writeFileSync: vi.fn(),
@@ -25,7 +25,7 @@ vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:os")>();
   return {
     ...actual,
-    default: { ...actual.default, homedir: vi.fn(() => "/home/testuser") },
+    default: { ...(actual as any).default, homedir: vi.fn(() => "/home/testuser") },
     homedir: vi.fn(() => "/home/testuser"),
   };
 });

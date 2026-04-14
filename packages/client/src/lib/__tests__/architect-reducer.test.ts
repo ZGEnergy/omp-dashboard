@@ -77,7 +77,7 @@ describe("architect-reducer state transitions", () => {
       toolName: "flow_write",
       input: {
         path: "/tmp/flows/test.yaml",
-        content: "name: test-flow\nsteps:\n  - id: analyze\n    agent: analyzer\n  - id: report\n    agent: reviewer\n    blocked_by: [analyze]\n",
+        content: "name: test-flow\nsteps:\n  - id: analyze\n    agent: analyzer\n  - id: report\n    agent: reviewer\n    blockedBy: [analyze]\n",
       },
     }));
     expect(state!.flowName).toBe("test-flow");
@@ -105,6 +105,21 @@ describe("architect-reducer state transitions", () => {
     // Complete
     state = reduceArchitectEvent(state, makeEvent("architect_complete", { choice: "save" }));
     expect(state).toBeNull();
+  });
+
+  it("extracts blockedBy from camelCase YAML (pi-flows format)", () => {
+    let state = reduceArchitectEvent(null, makeEvent("architect_context_generating", { mode: "new" }));
+    state = reduceArchitectEvent(state, makeEvent("architect_started", { mode: "new", iteration: 1 }));
+    state = reduceArchitectEvent(state, makeEvent("architect_tool_call", {
+      toolName: "flow_write",
+      input: {
+        path: "/tmp/flows/pipeline.yaml",
+        content: "name: pipeline\nsteps:\n  - id: researcher\n    agent: test-researcher\n  - id: summarizer\n    agent: test-summarizer\n    blockedBy: [researcher]\n",
+      },
+    }));
+    expect(state!.dagSteps).toHaveLength(2);
+    expect(state!.dagSteps[0].blockedBy).toEqual([]);
+    expect(state!.dagSteps[1].blockedBy).toEqual(["researcher"]);
   });
 
   it("architect_started captures resolvedModel and modelAlias", () => {

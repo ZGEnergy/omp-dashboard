@@ -24,9 +24,11 @@ describe("event-reducer flow events", () => {
     expect(next.flowState!.flowName).toBe("research");
     expect(next.flowState!.task).toBe("Find bugs");
     expect(next.flowState!.status).toBe("running");
-    expect(next.flowState!.agents.size).toBe(2); // fork step excluded
-    expect(next.flowState!.agents.get("researcher")!.status).toBe("pending");
-    expect(next.flowState!.agents.get("developer")!.blockedBy).toEqual(["r"]);
+    expect(next.flowState!.agents.size).toBe(2); // fork step excluded (no agent field)
+    // Agents are keyed by step ID
+    expect(next.flowState!.agents.get("r")!.status).toBe("pending");
+    expect(next.flowState!.agents.get("r")!.agentName).toBe("researcher");
+    expect(next.flowState!.agents.get("d")!.blockedBy).toEqual(["r"]);
   });
 
   it("flow_agent_started sets agent to running with config", () => {
@@ -39,7 +41,7 @@ describe("event-reducer flow events", () => {
       stepId: "r",
       config: { name: "researcher", model: "@research", card: { label: "Research", role: "@research" } },
     }));
-    const agent = state.flowState!.agents.get("researcher")!;
+    const agent = state.flowState!.agents.get("r")!;
     expect(agent.status).toBe("running");
     expect(agent.label).toBe("Research");
     expect(agent.model).toBe("@research");
@@ -55,7 +57,7 @@ describe("event-reducer flow events", () => {
       stepId: "r",
       result: { success: true, status: "complete", tokens: { input: 3000, output: 1000 }, duration: 12000, files: ["a.ts"] },
     }));
-    const agent = state.flowState!.agents.get("researcher")!;
+    const agent = state.flowState!.agents.get("r")!;
     expect(agent.status).toBe("complete");
     expect(agent.tokens).toEqual({ input: 3000, output: 1000 });
     expect(agent.duration).toBe(12000);
@@ -71,7 +73,7 @@ describe("event-reducer flow events", () => {
       agentName: "researcher",
       result: { success: false, status: "error", tokens: { input: 100, output: 50 }, duration: 1000 },
     }));
-    expect(state.flowState!.agents.get("researcher")!.status).toBe("error");
+    expect(state.flowState!.agents.get("r")!.status).toBe("error");
   });
 
   it("flow_tool_call adds to recentTools and detailHistory", () => {
@@ -82,7 +84,7 @@ describe("event-reducer flow events", () => {
     state = reduceEvent(state, makeEvent("flow_tool_call", {
       agentName: "researcher", toolName: "read", input: { path: "src/foo.ts" },
     }));
-    const agent = state.flowState!.agents.get("researcher")!;
+    const agent = state.flowState!.agents.get("r")!;
     expect(agent.recentTools).toHaveLength(1);
     expect(agent.recentTools[0].toolName).toBe("read");
     expect(agent.recentTools[0].inputPreview).toBe("foo.ts");
@@ -101,7 +103,7 @@ describe("event-reducer flow events", () => {
     state = reduceEvent(state, makeEvent("flow_tool_result", {
       agentName: "researcher", toolName: "read", output: "file contents", isError: false,
     }));
-    const entry = state.flowState!.agents.get("researcher")!.detailHistory[0];
+    const entry = state.flowState!.agents.get("r")!.detailHistory[0];
     expect(entry.kind).toBe("tool");
     if (entry.kind === "tool") {
       expect(entry.output).toBe("file contents");
@@ -116,7 +118,7 @@ describe("event-reducer flow events", () => {
     }));
     state = reduceEvent(state, makeEvent("flow_assistant_text", { agentName: "researcher", text: "I found..." }));
     state = reduceEvent(state, makeEvent("flow_thinking_text", { agentName: "researcher", text: "Let me think..." }));
-    const history = state.flowState!.agents.get("researcher")!.detailHistory;
+    const history = state.flowState!.agents.get("r")!.detailHistory;
     expect(history).toHaveLength(2);
     expect(history[0].kind).toBe("text");
     expect(history[1].kind).toBe("thinking");
@@ -130,7 +132,7 @@ describe("event-reducer flow events", () => {
     state = reduceEvent(state, makeEvent("flow_loop_iteration", {
       stepId: "verify", loopTarget: "developer", iteration: 2, maxIterations: 3,
     }));
-    const agent = state.flowState!.agents.get("developer")!;
+    const agent = state.flowState!.agents.get("d")!;
     expect(agent.loopIteration).toBe(2);
     expect(agent.loopMax).toBe(3);
   });
@@ -157,14 +159,61 @@ describe("event-reducer flow events", () => {
         agentName: "researcher", toolName: `tool${i}`, input: {},
       }));
     }
-    expect(state.flowState!.agents.get("researcher")!.recentTools).toHaveLength(3);
-    expect(state.flowState!.agents.get("researcher")!.recentTools[2].toolName).toBe("tool4");
+    expect(state.flowState!.agents.get("r")!.recentTools).toHaveLength(3);
+    expect(state.flowState!.agents.get("r")!.recentTools[2].toolName).toBe("tool4");
   });
 
   it("flow events without flow_started are ignored", () => {
     const state = createInitialState();
     const next = reduceEvent(state, makeEvent("flow_agent_started", { agentName: "x" }));
     expect(next.flowState).toBeNull();
+  });
+});
+
+describe("flow dagSteps — all step types in graph", () => {
+  it("flow_started stores all steps including non-agent types in dagSteps", () => {
+    const state = createInitialState();
+    const next = reduceEvent(state, makeEvent("flow_started", {
+      flowName: "complex-flow",
+      task: "Test",
+      steps: [
+        { id: "generate", stepType: "agent", agent: "generator", blockedBy: [] },
+        { id: "pick-style", stepType: "fork", blockedBy: ["generate"] },
+        { id: "branch-a", stepType: "agent", agent: "transformer", blockedBy: ["pick-style"] },
+        { id: "branch-b", stepType: "agent", agent: "transformer", blockedBy: ["pick-style"] },
+        { id: "validate", stepType: "agent", agent: "validator", blockedBy: ["branch-a", "branch-b"] },
+        { id: "loop-check", stepType: "agent-loop-decision", agent: "checker", blockedBy: ["validate"] },
+      ],
+    }));
+    // dagSteps should have ALL 6 steps
+    expect(next.flowState!.dagSteps).toHaveLength(6);
+    expect(next.flowState!.dagSteps![0].id).toBe("generate");
+    expect(next.flowState!.dagSteps![1].stepType).toBe("fork");
+    expect(next.flowState!.dagSteps![5].stepType).toBe("agent-loop-decision");
+    // agents map keyed by step ID — all steps with an agent field (fork without agent excluded)
+    expect(next.flowState!.agents.size).toBe(5); // generate, branch-a, branch-b, validate, loop-check
+    expect(next.flowState!.agents.has("generate")).toBe(true);
+    expect(next.flowState!.agents.has("loop-check")).toBe(true);
+    expect(next.flowState!.agents.get("loop-check")!.agentName).toBe("checker");
+    // stepType is populated from dagSteps
+    expect(next.flowState!.agents.get("generate")!.stepType).toBe("agent");
+    expect(next.flowState!.agents.get("loop-check")!.stepType).toBe("agent-loop-decision");
+    expect(next.flowState!.agents.get("branch-a")!.stepType).toBe("agent");
+  });
+
+  it("dagSteps preserves blockedBy for non-agent steps", () => {
+    const state = createInitialState();
+    const next = reduceEvent(state, makeEvent("flow_started", {
+      flowName: "fork-flow",
+      task: "Test",
+      steps: [
+        { id: "init", stepType: "agent", agent: "initializer", blockedBy: [] },
+        { id: "fork1", stepType: "fork", blockedBy: ["init"] },
+        { id: "a", stepType: "agent", agent: "worker-a", blockedBy: ["fork1"] },
+      ],
+    }));
+    expect(next.flowState!.dagSteps![1].id).toBe("fork1");
+    expect(next.flowState!.dagSteps![1].blockedBy).toEqual(["init"]);
   });
 });
 

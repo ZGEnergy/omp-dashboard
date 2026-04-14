@@ -279,7 +279,7 @@ export function useMessageHandler(
         break;
 
       // ── PromptBus protocol messages ──
-      case "prompt_request":
+      case "prompt_request" as any:
         setSessionStates((prev) => {
           const next = new Map(prev);
           const current = next.get((msg as any).sessionId) ?? createInitialState();
@@ -303,7 +303,7 @@ export function useMessageHandler(
         });
         break;
 
-      case "prompt_dismiss":
+      case "prompt_dismiss" as any:
         setSessionStates((prev) => {
           const next = new Map(prev);
           const current = next.get((msg as any).sessionId);
@@ -315,7 +315,7 @@ export function useMessageHandler(
         });
         break;
 
-      case "prompt_cancel":
+      case "prompt_cancel" as any:
         setSessionStates((prev) => {
           const next = new Map(prev);
           const current = next.get((msg as any).sessionId);

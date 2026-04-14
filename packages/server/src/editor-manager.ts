@@ -207,7 +207,7 @@ export function createEditorManager(options: EditorManagerOptions): EditorManage
         if (inst.status === "starting") {
           // Wait for it to become ready
           const ready = await waitForPort(inst.port);
-          if (ready && inst.status !== "stopped") {
+          if (ready && (inst.status as string) !== "stopped") {
             setStatus(inst, "ready");
             startIdleTimer(inst);
           }

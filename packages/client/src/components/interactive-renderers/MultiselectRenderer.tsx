@@ -79,7 +79,7 @@ export function MultiselectRenderer({ params, status, result, onRespond, onCance
         </button>
         <button
           onClick={onCancel}
-          className="px-3 py-1 text-xs rounded bg-[var(--bg-tertiary)] hover:bg-[var(--bg-surface)] text-[var(--text-secondary)] transition-colors"
+          className="px-3 py-1 text-xs rounded bg-transparent hover:bg-[var(--bg-surface)] text-[var(--text-tertiary)] border border-[var(--border-secondary)] transition-colors"
         >
           Cancel
         </button>

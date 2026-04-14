@@ -1,23 +1,34 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useZoomPan } from "../hooks/useZoomPan.js";
 import { ZoomControls } from "./ZoomControls.js";
+import { graphlib } from "dagre-d3-es";
+import { layout as dagreLayout } from "dagre-d3-es/src/dagre/index.js";
 
 // ── Types ───────────────────────────────────────────────────────────
+
+/** Step type determines visual rendering:
+ *  - "agent" (default): solid rounded rect
+ *  - "fork": diamond-shaped (rotated rect) for decision points
+ *  - "loop": rounded rect with loop icon/double border
+ *  - "flow-ref": dashed border for subflows
+ */
+export type FlowStepType = "agent" | "fork" | "loop" | "conditional" | "flow-ref";
 
 export interface FlowGraphStep {
   id: string;
   label: string;
   status: "pending" | "running" | "complete" | "error" | "blocked";
   blockedBy: string[];
-  /** Step type — "flow-ref" nodes render with dashed border */
-  type?: "agent" | "flow-ref";
+  type?: FlowStepType;
+  /** For loop steps: the step ID to loop back to (rendered as a backward arrow) */
+  loopTarget?: string;
 }
 
 interface PositionedNode {
   id: string;
   label: string;
   status: FlowGraphStep["status"];
-  type?: "agent" | "flow-ref";
+  type?: FlowStepType;
   x: number;
   y: number;
   width: number;
@@ -32,9 +43,18 @@ interface PositionedEdge {
   targetStatus: FlowGraphStep["status"];
 }
 
+interface LoopBackEdge {
+  source: string;
+  target: string;
+  sourceStatus: FlowGraphStep["status"];
+  targetStatus: FlowGraphStep["status"];
+  path: string;
+}
+
 interface LayoutResult {
   nodes: PositionedNode[];
   edges: PositionedEdge[];
+  loopEdges: LoopBackEdge[];
   width: number;
   height: number;
 }
@@ -73,13 +93,8 @@ const FONT_SIZE = 11;
 const ARROW_SIZE = 6;
 
 export function computeLayout(steps: FlowGraphStep[]): LayoutResult {
-  // Lazy import dagre-d3-es (already bundled via mermaid)
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { graphlib } = require("dagre-d3-es");
-  const dagre = require("dagre-d3-es/src/dagre/index.js");
-
   if (steps.length === 0) {
-    return { nodes: [], edges: [], width: 0, height: 0 };
+    return { nodes: [], edges: [], loopEdges: [], width: 0, height: 0 };
   }
 
   const g = new graphlib.Graph().setDefaultEdgeLabel(() => ({}));
@@ -99,7 +114,7 @@ export function computeLayout(steps: FlowGraphStep[]): LayoutResult {
     }
   }
 
-  dagre.layout(g);
+  dagreLayout(g, {});
 
   const graphMeta = g.graph();
   const nodes: PositionedNode[] = steps.map((step) => {
@@ -134,11 +149,69 @@ export function computeLayout(steps: FlowGraphStep[]): LayoutResult {
     }
   }
 
+  // Compute loop-back edges (backward arrows that skip dagre to avoid cycles)
+  const loopEdges: LoopBackEdge[] = [];
+  const nodeById = new Map(nodes.map(n => [n.id, n]));
+  const LOOP_MARGIN = 24; // vertical space above the graph for loop arcs
+
+  // Find the topmost node edge to route arcs above everything
+  let minY = Infinity;
+  for (const n of nodes) {
+    if (n.y < minY) minY = n.y;
+  }
+
+  for (const step of steps) {
+    if (step.loopTarget && nodeById.has(step.loopTarget)) {
+      const src = nodeById.get(step.id)!;
+      const tgt = nodeById.get(step.loopTarget)!;
+      // Arc above the entire graph so it doesn't overlap any nodes
+      const srcCx = src.x + src.width / 2;
+      const srcTop = src.y;
+      const tgtCx = tgt.x + tgt.width / 2;
+      const tgtTop = tgt.y;
+      const arcY = minY - LOOP_MARGIN;
+      const path = `M${srcCx},${srcTop} C${srcCx},${arcY} ${tgtCx},${arcY} ${tgtCx},${tgtTop}`;
+      loopEdges.push({
+        source: step.id,
+        target: step.loopTarget,
+        sourceStatus: step.status,
+        targetStatus: statusMap.get(step.loopTarget) || "pending",
+        path,
+      });
+    }
+  }
+
+  // Compute bounding box including loop arcs
+  const graphWidth = graphMeta.width || 200;
+  const graphHeight = graphMeta.height || 50;
+  const loopArcTop = loopEdges.length > 0 ? minY - LOOP_MARGIN - ARROW_SIZE : 0;
+  const yOffset = loopArcTop < 0 ? -loopArcTop : 0;
+
+  // Shift all geometry down to make room for arcs above
+  if (yOffset > 0) {
+    for (const n of nodes) n.y += yOffset;
+    for (const e of edges) {
+      for (const p of e.points) p.y += yOffset;
+    }
+    for (const le of loopEdges) {
+      // Recompute path with shifted coordinates
+      const src = nodeById.get(le.source)!;
+      const tgt = nodeById.get(le.target)!;
+      const srcCx = src.x + src.width / 2;
+      const srcTop = src.y;
+      const tgtCx = tgt.x + tgt.width / 2;
+      const tgtTop = tgt.y;
+      const arcY = ARROW_SIZE; // top of SVG with small padding
+      le.path = `M${srcCx},${srcTop} C${srcCx},${arcY} ${tgtCx},${arcY} ${tgtCx},${tgtTop}`;
+    }
+  }
+
   return {
     nodes,
     edges,
-    width: graphMeta.width || 200,
-    height: graphMeta.height || 50,
+    loopEdges,
+    width: graphWidth,
+    height: graphHeight + yOffset,
   };
 }
 
@@ -172,7 +245,8 @@ export function FlowGraph({ steps }: { steps: FlowGraphStep[] }) {
     if (steps.length === 0) return null;
     try {
       return computeLayout(steps);
-    } catch {
+    } catch (err) {
+      console.error("[FlowGraph] computeLayout failed:", err, "steps:", steps);
       return null;
     }
   }, [steps]);
@@ -231,7 +305,7 @@ export function FlowGraph({ steps }: { steps: FlowGraphStep[] }) {
           style={{ display: "block", margin: svgWidth < 300 ? "0 auto" : undefined }}
         >
           <defs>
-            {["#444", "#666", "#22c55e", "#eab308", "#ef4444"].map((color) => (
+            {["#444", "#666", "#22c55e", "#eab308", "#ef4444", "#a855f7"].map((color) => (
               <marker
                 key={color}
                 id={`arrow-${color.replace("#", "")}`}
@@ -264,13 +338,32 @@ export function FlowGraph({ steps }: { steps: FlowGraphStep[] }) {
             );
           })}
 
+          {/* Loop-back edges (backward arrows below the graph) */}
+          {layout.loopEdges.map((edge, i) => (
+            <path
+              key={`loop-${i}`}
+              d={edge.path}
+              fill="none"
+              stroke="#a855f7"
+              strokeWidth={1.5}
+              strokeDasharray="5 3"
+              markerEnd="url(#arrow-a855f7)"
+              opacity={0.7}
+            />
+          ))}
+
           {/* Nodes */}
           {layout.nodes.map((node) => {
             const style = STATUS_COLORS[node.status] || STATUS_COLORS.pending;
             const isRunning = node.status === "running";
-            const isFlowRef = node.type === "flow-ref";
+            // Add type prefix icon to label
+            const typePrefix = node.type === "fork" ? "◇ "
+              : node.type === "loop" ? "↻ "
+              : node.type === "conditional" ? "? "
+              : "";
+            const displayLabel = typePrefix + node.label;
             const availW = node.width - 16;
-            const naturalW = node.label.length * FONT_SIZE * 0.6;
+            const naturalW = displayLabel.length * FONT_SIZE * 0.6;
             const labelFontSize = naturalW > availW
               ? Math.max(7, FONT_SIZE * (availW / naturalW))
               : FONT_SIZE;
@@ -292,7 +385,6 @@ export function FlowGraph({ steps }: { steps: FlowGraphStep[] }) {
                   fill={style.fill}
                   stroke={style.border}
                   strokeWidth={1.5}
-                  strokeDasharray={isFlowRef ? "4 3" : "none"}
                 />
                 <text
                   x={node.x + node.width / 2}
@@ -303,7 +395,7 @@ export function FlowGraph({ steps }: { steps: FlowGraphStep[] }) {
                   textAnchor="middle"
                   fontFamily="system-ui, -apple-system, sans-serif"
                 >
-                  {node.label}
+                  {displayLabel}
                 </text>
               </g>
             );

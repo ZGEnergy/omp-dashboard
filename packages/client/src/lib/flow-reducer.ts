@@ -32,6 +32,32 @@ function extractToolInputPreview(toolName: string, input: unknown): string {
 }
 
 /**
+ * Find an agent entry by agentName or stepId.
+ * Agents map is keyed by step ID, but events reference by agent name.
+ * Also accepts stepId for flow_loop_iteration which uses loopTarget (a step ID).
+ * Returns [mapKey, agent] or [undefined, undefined].
+ */
+function findAgent(
+  agents: Map<string, FlowAgentState>,
+  nameOrStepId: string,
+  stepId?: string,
+): [string | undefined, FlowAgentState | undefined] {
+  // Direct key lookup (step ID)
+  if (agents.has(nameOrStepId)) return [nameOrStepId, agents.get(nameOrStepId)!];
+  // If stepId provided, try that
+  if (stepId && agents.has(stepId)) return [stepId, agents.get(stepId)!];
+  // Search by agentName field
+  for (const [key, agent] of agents) {
+    if (agent.agentName === nameOrStepId) return [key, agent];
+  }
+  // Search by stepId field
+  for (const [key, agent] of agents) {
+    if (agent.stepId === nameOrStepId) return [key, agent];
+  }
+  return [undefined, undefined];
+}
+
+/**
  * Returns true if the event type is a flow event handled by this reducer.
  */
 export function isFlowEvent(eventType: string): boolean {
@@ -56,14 +82,20 @@ export function reduceFlowEvent(
         stepType: string;
         agent?: string;
         blockedBy?: string[];
+        loopTarget?: string;
+        exitTarget?: string;
       }> | undefined;
       const agents = new Map<string, FlowAgentState>();
       if (steps) {
         for (const step of steps) {
-          if (step.stepType === "agent" && step.agent) {
-            agents.set(step.agent, {
+          // Include all steps that have an agent (not just stepType "agent")
+          // This covers fork (with agent), agent-loop-decision, agent-decision, etc.
+          if (step.agent) {
+            // Key by step ID to avoid deduplication when multiple steps share an agent
+            agents.set(step.id, {
               agentName: step.agent,
               stepId: step.id,
+              stepType: step.stepType,
               status: "pending",
               blockedBy: step.blockedBy || [],
               recentTools: [],
@@ -72,6 +104,16 @@ export function reduceFlowEvent(
           }
         }
       }
+      // Store all steps for DAG graph (including non-agent types)
+      const dagSteps = steps?.map(step => ({
+        id: step.id,
+        stepType: step.stepType,
+        agent: step.agent,
+        blockedBy: step.blockedBy || [],
+        loopTarget: step.loopTarget,
+        exitTarget: step.exitTarget,
+      }));
+
       return {
         flowName: data.flowName as string,
         task: (data.task as string) || "",
@@ -79,19 +121,22 @@ export function reduceFlowEvent(
         autonomousMode: (data.autonomousMode as boolean) || false,
         flowSource: (data.source as string) || undefined,
         agents,
+        dagSteps,
       };
     }
 
     case "flow_agent_started": {
       if (!flowState) return null;
       const agentName = data.agentName as string;
+      const stepId = (data.stepId as string) || agentName;
       const config = data.config as FlowAgentCardConfig | undefined;
       const agents = new Map(flowState.agents);
-      const existing = agents.get(agentName);
-      agents.set(agentName, {
+      const [key, existing] = findAgent(agents, agentName, stepId);
+      const mapKey = key || stepId;
+      agents.set(mapKey, {
         ...(existing || {
           agentName,
-          stepId: (data.stepId as string) || agentName,
+          stepId,
           blockedBy: [],
           recentTools: [],
           detailHistory: [],
@@ -101,6 +146,7 @@ export function reduceFlowEvent(
         model: config?.model,
         resolvedModel: (data.resolvedModel as string) || undefined,
         cardRole: config?.card?.role,
+        sourcePath: config?.sourcePath,
       });
       return { ...flowState, agents };
     }
@@ -108,6 +154,7 @@ export function reduceFlowEvent(
     case "flow_agent_complete": {
       if (!flowState) return null;
       const agentName = data.agentName as string;
+      const stepId = data.stepId as string | undefined;
       const result = data.result as {
         success: boolean;
         status?: string;
@@ -117,9 +164,9 @@ export function reduceFlowEvent(
         duration?: number;
       } | undefined;
       const agents = new Map(flowState.agents);
-      const existing = agents.get(agentName);
-      if (existing) {
-        agents.set(agentName, {
+      const [key, existing] = findAgent(agents, agentName, stepId);
+      if (key && existing) {
+        agents.set(key, {
           ...existing,
           status: result?.status === "blocked" ? "blocked" : result?.success ? "complete" : "error",
           tokens: result?.tokens,
@@ -134,11 +181,12 @@ export function reduceFlowEvent(
     case "flow_tool_call": {
       if (!flowState) return null;
       const agentName = data.agentName as string;
+      const stepId = data.stepId as string | undefined;
       const toolName = data.toolName as string;
       const input = data.input;
       const agents = new Map(flowState.agents);
-      const existing = agents.get(agentName);
-      if (existing) {
+      const [key, existing] = findAgent(agents, agentName, stepId);
+      if (key && existing) {
         const preview = extractToolInputPreview(toolName, input);
         const recentTools: FlowRecentTool[] = [
           ...existing.recentTools,
@@ -148,7 +196,7 @@ export function reduceFlowEvent(
           ...existing.detailHistory,
           { kind: "tool", toolName, input, isError: false },
         ];
-        agents.set(agentName, { ...existing, recentTools, detailHistory });
+        agents.set(key, { ...existing, recentTools, detailHistory });
       }
       return { ...flowState, agents };
     }
@@ -156,9 +204,10 @@ export function reduceFlowEvent(
     case "flow_tool_result": {
       if (!flowState) return null;
       const agentName = data.agentName as string;
+      const stepId = data.stepId as string | undefined;
       const agents = new Map(flowState.agents);
-      const existing = agents.get(agentName);
-      if (existing) {
+      const [key, existing] = findAgent(agents, agentName, stepId);
+      if (key && existing) {
         const detailHistory = [...existing.detailHistory];
         for (let i = detailHistory.length - 1; i >= 0; i--) {
           const entry = detailHistory[i];
@@ -171,7 +220,7 @@ export function reduceFlowEvent(
             break;
           }
         }
-        agents.set(agentName, { ...existing, detailHistory });
+        agents.set(key, { ...existing, detailHistory });
       }
       return { ...flowState, agents };
     }
@@ -179,16 +228,17 @@ export function reduceFlowEvent(
     case "flow_assistant_text": {
       if (!flowState) return null;
       const agentName = data.agentName as string;
+      const stepId = data.stepId as string | undefined;
       const text = data.text as string;
       if (!text) return flowState;
       const agents = new Map(flowState.agents);
-      const existing = agents.get(agentName);
-      if (existing) {
+      const [key, existing] = findAgent(agents, agentName, stepId);
+      if (key && existing) {
         const detailHistory: FlowDetailEntry[] = [
           ...existing.detailHistory,
           { kind: "text", text },
         ];
-        agents.set(agentName, { ...existing, detailHistory });
+        agents.set(key, { ...existing, detailHistory });
       }
       return { ...flowState, agents };
     }
@@ -196,16 +246,17 @@ export function reduceFlowEvent(
     case "flow_thinking_text": {
       if (!flowState) return null;
       const agentName = data.agentName as string;
+      const stepId = data.stepId as string | undefined;
       const text = data.text as string;
       if (!text) return flowState;
       const agents = new Map(flowState.agents);
-      const existing = agents.get(agentName);
-      if (existing) {
+      const [key, existing] = findAgent(agents, agentName, stepId);
+      if (key && existing) {
         const detailHistory: FlowDetailEntry[] = [
           ...existing.detailHistory,
           { kind: "thinking", text },
         ];
-        agents.set(agentName, { ...existing, detailHistory });
+        agents.set(key, { ...existing, detailHistory });
       }
       return { ...flowState, agents };
     }
@@ -217,9 +268,9 @@ export function reduceFlowEvent(
       const maxIterations = data.maxIterations as number;
       if (!loopTarget) return flowState;
       const agents = new Map(flowState.agents);
-      const existing = agents.get(loopTarget);
-      if (existing) {
-        agents.set(loopTarget, {
+      const [key, existing] = findAgent(agents, loopTarget);
+      if (key && existing) {
+        agents.set(key, {
           ...existing,
           loopIteration: iteration,
           loopMax: maxIterations,

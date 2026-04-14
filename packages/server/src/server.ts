@@ -131,7 +131,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       cacheRead: session.cacheRead,
       cacheWrite: session.cacheWrite,
       cost: session.cost,
-      contextTokens: session.contextTokens,
+      contextTokens: session.contextTokens ?? undefined,
       contextWindow: session.contextWindow,
       firstMessage: session.firstMessage,
       cachedAt: Date.now(),

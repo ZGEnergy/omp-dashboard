@@ -12,15 +12,15 @@ function createMockAdapter(name: string, claim: any = {}) {
 
 describe("PromptBus", () => {
   let bus: PromptBus;
-  let onDashboardRequest: ReturnType<typeof vi.fn>;
-  let onDashboardDismiss: ReturnType<typeof vi.fn>;
-  let onDashboardCancel: ReturnType<typeof vi.fn>;
+  let onDashboardRequest: any;
+  let onDashboardDismiss: any;
+  let onDashboardCancel: any;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    onDashboardRequest = vi.fn();
-    onDashboardDismiss = vi.fn();
-    onDashboardCancel = vi.fn();
+    onDashboardRequest = vi.fn() as any;
+    onDashboardDismiss = vi.fn() as any;
+    onDashboardCancel = vi.fn() as any;
     bus = new PromptBus({
       timeoutMs: 5000,
       onDashboardRequest,
@@ -388,6 +388,82 @@ describe("PromptBus", () => {
     it("should silently ignore response for unknown prompt id", () => {
       bus.respond({ id: "nonexistent", answer: "A", source: "tui" });
       // No error
+    });
+  });
+
+  describe("getPendingRequests", () => {
+    it("should return empty array when no prompts are pending", () => {
+      expect(bus.getPendingRequests()).toEqual([]);
+    });
+
+    it("should return pending prompt with resolved component", () => {
+      const adapter = createMockAdapter("a", {
+        component: { type: "custom-ui", props: { x: 1 } },
+        placement: "widget-bar",
+      });
+      bus.registerAdapter(adapter);
+
+      bus.request({ pipeline: "command", type: "select", question: "Pick:", options: ["A"] });
+
+      const pending = bus.getPendingRequests();
+      expect(pending).toHaveLength(1);
+      expect(pending[0].request).toEqual(expect.objectContaining({
+        pipeline: "command",
+        type: "select",
+        question: "Pick:",
+      }));
+      expect(pending[0].component).toEqual({ type: "custom-ui", props: { x: 1 } });
+      expect(pending[0].placement).toBe("widget-bar");
+    });
+
+    it("should return generic-dialog component when no adapter claims with component", () => {
+      const adapter = createMockAdapter("tui", {}); // no component
+      bus.registerAdapter(adapter);
+
+      bus.request({ pipeline: "command", type: "select", question: "Pick:", options: ["A"] });
+
+      const pending = bus.getPendingRequests();
+      expect(pending).toHaveLength(1);
+      expect(pending[0].component.type).toBe("generic-dialog");
+      expect(pending[0].placement).toBe("inline");
+    });
+
+    it("should omit resolved prompts", async () => {
+      const adapter = createMockAdapter("a");
+      bus.registerAdapter(adapter);
+
+      const promise = bus.request({ pipeline: "command", type: "select", question: "Q", options: [] });
+      expect(bus.getPendingRequests()).toHaveLength(1);
+
+      const id = (adapter.onRequest.mock.calls[0][0] as PromptRequest).id;
+      bus.respond({ id, answer: "A", source: "a" });
+      await promise;
+
+      expect(bus.getPendingRequests()).toEqual([]);
+    });
+
+    it("should omit cancelled prompts", async () => {
+      const adapter = createMockAdapter("a");
+      bus.registerAdapter(adapter);
+
+      const promise = bus.request({ pipeline: "command", type: "select", question: "Q", options: [] });
+      expect(bus.getPendingRequests()).toHaveLength(1);
+
+      const id = (adapter.onRequest.mock.calls[0][0] as PromptRequest).id;
+      bus.cancel(id);
+      await promise;
+
+      expect(bus.getPendingRequests()).toEqual([]);
+    });
+
+    it("should return multiple pending prompts", () => {
+      const adapter = createMockAdapter("a");
+      bus.registerAdapter(adapter);
+
+      bus.request({ pipeline: "command", type: "select", question: "Q1", options: ["A"] });
+      bus.request({ pipeline: "command", type: "input", question: "Q2" });
+
+      expect(bus.getPendingRequests()).toHaveLength(2);
     });
   });
 });

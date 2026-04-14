@@ -43,7 +43,7 @@ describe("Session lifecycle logging", () => {
     }));
     await delay(100);
 
-    const logs = errorSpy.mock.calls.map((c) => c[0]);
+    const logs = errorSpy.mock.calls.map((c: any) => c[0]);
     expect(logs).toContainEqual(expect.stringContaining("[gateway] session registered: log-reg cwd=/tmp/test"));
     ws.close();
   }, 10000);
@@ -64,7 +64,7 @@ describe("Session lifecycle logging", () => {
     ws.send(JSON.stringify({ type: "session_unregister", sessionId: "log-unreg" }));
     await delay(100);
 
-    const logs = errorSpy.mock.calls.map((c) => c[0]);
+    const logs = errorSpy.mock.calls.map((c: any) => c[0]);
     expect(logs).toContainEqual(expect.stringContaining("[gateway] session unregistered: log-unreg (explicit)"));
     ws.close();
   }, 10000);
@@ -87,7 +87,7 @@ describe("Session lifecycle logging", () => {
     ws.close();
     await delay(SHORT_HB + 300);
 
-    const logs = errorSpy.mock.calls.map((c) => c[0]);
+    const logs = errorSpy.mock.calls.map((c: any) => c[0]);
     expect(logs).toContainEqual(expect.stringContaining("[gateway] session timed out: log-timeout (no heartbeat for"));
   }, 10000);
 
@@ -107,7 +107,7 @@ describe("Session lifecycle logging", () => {
     ws.close();
     await delay(200);
 
-    const logs = errorSpy.mock.calls.map((c) => c[0]);
+    const logs = errorSpy.mock.calls.map((c: any) => c[0]);
     expect(logs).toContainEqual(expect.stringContaining("[gateway] connection closed: log-close"));
   }, 10000);
 
@@ -132,7 +132,7 @@ describe("Session lifecycle logging", () => {
     (ws as any)._socket?.pause();
     await delay(200 * 4);
 
-    const logs = errorSpy.mock.calls.map((c) => c[0]);
+    const logs = errorSpy.mock.calls.map((c: any) => c[0]);
     expect(logs).toContainEqual(expect.stringContaining("[gateway] connection dead (ping timeout, 2 misses): log-ping"));
   }, 10000);
 });

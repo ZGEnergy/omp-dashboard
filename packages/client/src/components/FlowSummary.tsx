@@ -2,11 +2,70 @@ import React, { useState, type ReactNode } from "react";
 import { Icon } from "@mdi/react";
 import { mdiCloseCircleOutline, mdiCheckCircle, mdiAlertCircle, mdiStopCircle, mdiCloseCircle, mdiCircleOutline, mdiChevronRight, mdiChevronDown, mdiFileDocumentOutline } from "@mdi/js";
 import type { FlowState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { FlowGraph, type FlowGraphStep } from "./FlowGraph.js";
+import { FlowGraph, type FlowGraphStep, type FlowStepType } from "./FlowGraph.js";
 
-/** Map FlowState agents to FlowGraphStep array for summary view.
- *  blockedBy contains step IDs, but graph nodes use agent names — translate. */
+const SEPARATOR_STEP_TYPES = new Set(["fork", "conditional", "agent-decision", "agent-loop-decision", "flow-ref"]);
+
+function synthesizeImplicitEdges(
+  steps: FlowGraphStep[],
+  dagSteps: NonNullable<FlowState["dagSteps"]>,
+): void {
+  const allStepIds = new Set(steps.map(s => s.id));
+  const stepById = new Map(steps.map(s => [s.id, s]));
+  for (const ds of dagSteps) {
+    if (ds.exitTarget && allStepIds.has(ds.exitTarget)) {
+      const target = stepById.get(ds.exitTarget);
+      if (target && !target.blockedBy.includes(ds.id)) {
+        target.blockedBy = [...target.blockedBy, ds.id];
+      }
+    }
+  }
+  for (let i = 1; i < dagSteps.length; i++) {
+    const curr = stepById.get(dagSteps[i].id);
+    if (!curr || curr.blockedBy.length > 0) continue;
+    for (let j = i - 1; j >= 0; j--) {
+      const prev = dagSteps[j];
+      if ((SEPARATOR_STEP_TYPES.has(prev.stepType) || prev.stepType === "agent") && allStepIds.has(prev.id)) {
+        curr.blockedBy = [prev.id];
+        break;
+      }
+    }
+  }
+}
+
+function mapStepType(stepType: string): FlowStepType | undefined {
+  switch (stepType) {
+    case "fork": case "conditional": case "agent-decision": return "fork";
+    case "agent-loop-decision": return "loop";
+    case "flow-ref": return "flow-ref";
+    default: return undefined;
+  }
+}
+
+/** Map FlowState to FlowGraphStep array for summary view.
+ *  Uses dagSteps when available for full graph, falls back to agents map. */
 function agentsToGraphSteps(flowState: FlowState): FlowGraphStep[] {
+  if (flowState.dagSteps && flowState.dagSteps.length > 0) {
+    const stepStatus = new Map<string, FlowGraphStep["status"]>();
+    for (const [key, agent] of flowState.agents) {
+      stepStatus.set(key, agent.status);
+      if (agent.stepId) stepStatus.set(agent.stepId, agent.status);
+      stepStatus.set(agent.agentName, agent.status);
+    }
+    const allStepIds = new Set(flowState.dagSteps.map(s => s.id));
+    const steps = flowState.dagSteps.map(step => ({
+      id: step.id,
+      label: step.id,
+      status: stepStatus.get(step.id) || stepStatus.get(step.agent || "") || "pending",
+      blockedBy: step.blockedBy.filter(dep => allStepIds.has(dep)),
+      type: mapStepType(step.stepType),
+      loopTarget: step.loopTarget && allStepIds.has(step.loopTarget) ? step.loopTarget : undefined,
+    }));
+    // Synthesize implicit edges (exit_target, segment ordering)
+    synthesizeImplicitEdges(steps, flowState.dagSteps);
+    return steps;
+  }
+  // Fallback: agents-only
   const stepToAgent = new Map<string, string>();
   for (const agent of flowState.agents.values()) {
     if (agent.stepId) stepToAgent.set(agent.stepId, agent.agentName);
@@ -66,7 +125,7 @@ export function FlowSummary({
         <span className="text-sm text-[var(--text-primary)] flex-1">
           {flowState.flowName} {label}
           <span className="text-[var(--text-tertiary)] ml-1.5">
-            · {agents.length} agents
+            · {agents.length} steps
             {totalDuration ? ` · ${formatDuration(totalDuration)}` : ""}
             {totalFiles > 0 ? ` · ${totalFiles} files` : ""}
           </span>
@@ -113,12 +172,18 @@ export function FlowSummary({
 
               return (
                 <div
-                  key={agent.agentName}
-                  onClick={() => onAgentClick(agent.agentName)}
+                  key={agent.stepId || agent.agentName}
+                  onClick={() => onAgentClick(agent.stepId || agent.agentName)}
                   className="flex items-center gap-1.5 text-[11px] cursor-pointer hover:bg-[var(--bg-tertiary)] rounded px-1 py-0.5"
                 >
                   <span className={`${agentColor} inline-flex`}><Icon path={agentIconPath} size={0.45} /></span>
-                  <span className="text-[var(--text-primary)]">{agent.label || agent.agentName}</span>
+                  <span className="text-[var(--text-primary)]">{agent.label || agent.stepId || agent.agentName}</span>
+                  {(agent.stepType === "fork" || agent.stepType === "agent-decision") && (
+                    <span className="text-[9px] text-amber-400/60">◇</span>
+                  )}
+                  {agent.stepType === "agent-loop-decision" && (
+                    <span className="text-[9px] text-purple-400/60">↻</span>
+                  )}
                   {fileCount > 0 && (
                     <span className="text-[var(--text-muted)]">({fileCount} files)</span>
                   )}

@@ -85,7 +85,7 @@ export function wireEvents(deps: EventWiringDeps): void {
             const session = sessionManager.get(sessionId);
             updates.flowAgentsDone = (session?.flowAgentsDone ?? 0) + 1;
           }
-          sessionManager.update(sessionId, updates);
+          sessionManager.update(sessionId, updates as Partial<DashboardSession>);
         }
         // Skip insert + broadcast — events are already in store
         // Still need to continue to the rest of the handler for openspec/stats
@@ -105,7 +105,7 @@ export function wireEvents(deps: EventWiringDeps): void {
           const session = sessionManager.get(sessionId);
           updates.flowAgentsDone = (session?.flowAgentsDone ?? 0) + 1;
         }
-        sessionManager.update(sessionId, updates);
+        sessionManager.update(sessionId, updates as Partial<DashboardSession>);
         // During replay, accumulate in sessionManager but don't broadcast
         // to avoid rapid status flickers on the session card
         if (!replayingSessions.has(sessionId)) {
@@ -508,14 +508,17 @@ export function wireEvents(deps: EventWiringDeps): void {
 
     // ── PromptBus protocol messages (extension → browser) ──
     if ((msg as any).type === "prompt_request") {
+      browserGateway.trackPromptRequest(sessionId, msg as any);
       browserGateway.sendToSubscribers(sessionId, msg as any);
     }
 
     if ((msg as any).type === "prompt_dismiss") {
+      browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
       browserGateway.sendToSubscribers(sessionId, msg as any);
     }
 
     if ((msg as any).type === "prompt_cancel") {
+      browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
       browserGateway.sendToSubscribers(sessionId, msg as any);
     }
 

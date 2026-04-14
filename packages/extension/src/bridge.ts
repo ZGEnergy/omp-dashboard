@@ -352,12 +352,33 @@ function initBridge(pi: ExtensionAPI) {
       if (!isActive()) return; // Stale listener guard
       sendStateSync();
       replaySessionEntries();
+      // Re-send pending PromptBus requests so dashboard dialogs survive browser refresh.
+      // Synchronous within this tick to prevent TUI respond() from interleaving.
+      // Client-side dedup by requestId prevents double-rendering.
+      if (promptBus) {
+        for (const { request, component, placement } of promptBus.getPendingRequests()) {
+          connection.send({
+            type: "prompt_request" as any,
+            sessionId,
+            promptId: request.id,
+            prompt: {
+              type: request.type,
+              question: request.question,
+              options: request.options,
+              defaultValue: request.defaultValue,
+              pipeline: request.pipeline,
+              metadata: request.metadata,
+            },
+            component,
+            placement,
+          });
+        }
+      }
       connection.send({ type: "replay_complete", sessionId });
       // If agent is mid-turn, send synthetic agent_start so server sets status to "streaming"
       if (getBridgeState().isAgentStreaming) {
         connection.send(mapEventToProtocol(sessionId, { type: "agent_start" }));
       }
-      // TODO: Re-send pending PromptBus requests on reconnect if needed
     }),
   });
 
@@ -671,17 +692,81 @@ function initBridge(pi: ExtensionAPI) {
 
     // Capture original ctx.ui method references BEFORE patching
     const originalNotify = ctx.ui.notify?.bind(ctx.ui);
+    const originals = {
+      select: ctx.ui.select?.bind(ctx.ui) as ((q: string, opts: string[], extra?: any) => Promise<string | undefined>) | undefined,
+      input: ctx.ui.input?.bind(ctx.ui) as ((q: string, placeholder?: string, extra?: any) => Promise<string | undefined>) | undefined,
+      confirm: ctx.ui.confirm?.bind(ctx.ui) as ((q: string, msg: string, extra?: any) => Promise<boolean>) | undefined,
+      editor: ctx.ui.editor?.bind(ctx.ui) as ((q: string, prefill?: string, extra?: any) => Promise<string | undefined>) | undefined,
+    };
 
-    // Emit originals so TUI adapters can capture them
-    if (pi.events) {
-      pi.events.emit("prompt:ctx-originals", {
-        select: ctx.ui.select?.bind(ctx.ui),
-        input: ctx.ui.input?.bind(ctx.ui),
-        confirm: ctx.ui.confirm?.bind(ctx.ui),
-        editor: ctx.ui.editor?.bind(ctx.ui),
-        notify: originalNotify,
-        custom: ctx.ui.custom?.bind(ctx.ui),
-        onTerminalInput: ctx.ui.onTerminalInput?.bind(ctx.ui),
+    // Register TUI adapter — presents prompts in the terminal using original
+    // (unpatched) ctx.ui methods. Must be registered BEFORE patching ctx.ui.
+    if (ctx.hasUI) {
+      const activeControllers = new Map<string, AbortController>();
+      const bus = promptBus;
+
+      bus.registerAdapter({
+        name: "tui",
+
+        onRequest(prompt: any) {
+          const ac = new AbortController();
+          activeControllers.set(prompt.id, ac);
+
+          const present = async () => {
+            try {
+              let answer: string | boolean | undefined;
+
+              if (prompt.type === "select" && prompt.options && originals.select) {
+                answer = await originals.select(prompt.question, prompt.options, { signal: ac.signal });
+              } else if (prompt.type === "input" && originals.input) {
+                answer = await originals.input(prompt.question, prompt.defaultValue || "", { signal: ac.signal });
+              } else if (prompt.type === "confirm" && originals.confirm) {
+                answer = await originals.confirm(prompt.question, "", { signal: ac.signal });
+              } else if (prompt.type === "editor" && originals.editor) {
+                answer = await originals.editor(prompt.question, prompt.defaultValue || "", { signal: ac.signal });
+              } else {
+                return;
+              }
+
+              if (!ac.signal.aborted) {
+                const answerStr = typeof answer === "boolean" ? (answer ? "true" : "false") : answer;
+                bus.respond({
+                  id: prompt.id,
+                  answer: answerStr ?? undefined,
+                  cancelled: answerStr == null,
+                  source: "tui",
+                });
+              }
+            } catch {
+              if (!ac.signal.aborted) {
+                bus.respond({ id: prompt.id, cancelled: true, source: "tui" });
+              }
+            } finally {
+              activeControllers.delete(prompt.id);
+            }
+          };
+
+          present();
+          return {}; // Claim without component (TUI-only)
+        },
+
+        onResponse(response: any) {
+          if (response.source !== "tui") {
+            const ac = activeControllers.get(response.id);
+            if (ac) {
+              ac.abort();
+              activeControllers.delete(response.id);
+            }
+          }
+        },
+
+        onCancel(id: string) {
+          const ac = activeControllers.get(id);
+          if (ac) {
+            ac.abort();
+            activeControllers.delete(id);
+          }
+        },
       });
     }
 

@@ -59,6 +59,10 @@ interface PendingPrompt {
   resolve: (response: PromptResponse) => void;
   timer: ReturnType<typeof setTimeout>;
   claims: Array<{ adapter: PromptAdapter; claim: PromptClaim }>;
+  /** Resolved component sent to dashboard at request time (for reconnect replay) */
+  resolvedComponent: PromptComponent | undefined;
+  /** Resolved placement sent to dashboard at request time (for reconnect replay) */
+  resolvedPlacement: string | undefined;
 }
 
 export interface PromptBusOptions {
@@ -125,20 +129,15 @@ export class PromptBus {
         }
       }
 
-      // Store pending state
-      this.pending.set(id, { request, resolve, timer, claims });
-
       // Resolve dashboard rendering: first adapter with a component wins
       const componentClaim = claims.find(c => c.claim.component);
-      if (componentClaim && this.options.onDashboardRequest) {
-        this.options.onDashboardRequest(
-          request,
-          componentClaim.claim.component!,
-          componentClaim.claim.placement ?? "inline",
-        );
+      let resolvedComponent: PromptComponent | undefined;
+      let resolvedPlacement: string | undefined;
+      if (componentClaim) {
+        resolvedComponent = componentClaim.claim.component!;
+        resolvedPlacement = componentClaim.claim.placement ?? "inline";
       } else if (this.options.onDashboardRequest) {
-        // No custom component — use default generic dialog
-        const defaultComponent: PromptComponent = {
+        resolvedComponent = {
           type: "generic-dialog",
           props: {
             question: request.question,
@@ -147,7 +146,15 @@ export class PromptBus {
             defaultValue: request.defaultValue,
           },
         };
-        this.options.onDashboardRequest(request, defaultComponent, "inline");
+        resolvedPlacement = "inline";
+      }
+
+      // Store pending state (with resolved component for reconnect replay)
+      this.pending.set(id, { request, resolve, timer, claims, resolvedComponent, resolvedPlacement });
+
+      // Send to dashboard
+      if (resolvedComponent && this.options.onDashboardRequest) {
+        this.options.onDashboardRequest(request, resolvedComponent, resolvedPlacement!);
       }
     });
   }
@@ -204,6 +211,21 @@ export class PromptBus {
     }
 
     entry.resolve({ id, cancelled: true, source: "__bus__" });
+  }
+
+  /** Get pending requests with their resolved dashboard components (for reconnect replay). */
+  getPendingRequests(): Array<{ request: PromptRequest; component: PromptComponent; placement: string }> {
+    const result: Array<{ request: PromptRequest; component: PromptComponent; placement: string }> = [];
+    for (const entry of this.pending.values()) {
+      if (entry.resolvedComponent && entry.resolvedPlacement) {
+        result.push({
+          request: entry.request,
+          component: entry.resolvedComponent,
+          placement: entry.resolvedPlacement,
+        });
+      }
+    }
+    return result;
   }
 
   /** Get the number of pending prompts (for testing/diagnostics). */

@@ -228,7 +228,7 @@ describe("ChatView", () => {
 
     beforeEach(() => {
       scrollToSpy = vi.fn();
-      Element.prototype.scrollTo = scrollToSpy;
+      Element.prototype.scrollTo = scrollToSpy as any;
     });
 
     /** Helper to set scroll geometry on the scroll container */

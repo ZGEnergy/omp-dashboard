@@ -32,7 +32,12 @@ describe("server-launcher", () => {
         devBuildOnReload: false,
         memoryLimits: { maxEventsPerSession: 5000, maxStringFieldSize: 0, maxWsBufferBytes: 4194304 },
         editor: { idleTimeoutMinutes: 10, maxInstances: 3 },
-      });
+        defaultModel: "",
+        trustedNetworks: [],
+        resolvedTrustedNetworks: [],
+        cors: { allowedOrigins: [] },
+        electronMode: false,
+      } as any);
 
       expect(args).toEqual(["--port", "3000", "--pi-port", "4000"]);
     });
