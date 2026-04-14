@@ -64,7 +64,7 @@ export function advertiseDashboard(port: number, piPort: number): void {
  */
 export function stopAdvertising(): void {
   if (publishedService) {
-    publishedService.stop(() => {});
+    publishedService.stop?.(() => {});
     publishedService = null;
   }
   if (bonjourInstance) {

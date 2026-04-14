@@ -101,6 +101,8 @@ export interface SessionState {
   pendingPrompt?: PendingPrompt;
   interactiveRequests: InteractiveUiRequest[];
   flowState: FlowState | null;
+  /** All flow states seen during execution (main + subflows), keyed by flowName */
+  flowStates: Map<string, FlowState>;
   architectState: ArchitectState | null;
   /** Whether any Write/Edit tool calls have been seen (for Changed Files button) */
   hasFileChanges: boolean;
@@ -128,6 +130,7 @@ export function createInitialState(): SessionState {
     turnStats: [],
     interactiveRequests: [],
     flowState: null,
+    flowStates: new Map(),
     architectState: null,
     hasFileChanges: false,
     subagents: new Map(),
@@ -207,23 +210,10 @@ export function addInteractiveRequest(
   method: string,
   params: Record<string, unknown>,
 ): SessionState {
-  // Suppress prompts that belong in the architect widget bar.
-  // Match by pendingPrompt question (exact match) OR by architect being in
-  // preview/designing phase with a select/confirm prompt (those are always architect prompts).
-  if (state.architectState) {
-    const arch = state.architectState;
-    const requestTitle = String(params.title || "");
-    // Exact match: pendingPrompt question matches the incoming request title
-    if (arch.pendingPrompt && requestTitle && requestTitle === arch.pendingPrompt.question) {
-      return state;
-    }
-    // Phase-based: suppress select/confirm prompts while architect is active
-    // (preview phase shows Save/Replan/Cancel; designing may show retry prompts)
-    if ((arch.phase === "preview" || arch.phase === "designing") &&
-        (method === "select" || method === "confirm")) {
-      return state;
-    }
-  }
+  // Architect suppression logic REMOVED — the PromptBus now ensures each prompt
+  // is sent to the dashboard exactly once, with the correct component.
+  // No more client-side guessing about which prompts to suppress.
+
   // Deduplicate by requestId (re-sent on reconnect) or by content
   // (recursive proxy generates multiple requestIds for the same dialog)
   if (state.interactiveRequests.some((r) =>
@@ -719,6 +709,13 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       // Delegate flow events to flow reducer
       if (isFlowEvent(event.eventType)) {
         next.flowState = reduceFlowEvent(next.flowState, event);
+        // Keep flowStates map in sync — store each flow by name
+        if (next.flowState) {
+          next.flowStates = new Map(next.flowStates);
+          next.flowStates.set(next.flowState.flowName, next.flowState);
+        } else if (event.eventType === "flow_summary_dismissed") {
+          next.flowStates = new Map();
+        }
       } else {
         // Unknown event type — render as expandable raw JSON
         next.messages = [...next.messages, {

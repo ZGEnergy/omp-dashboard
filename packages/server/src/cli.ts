@@ -218,7 +218,7 @@ function findPortHolders(port: number): number[] {
   try {
     const { execSync } = require("node:child_process");
     const output = execSync(`lsof -t -i :${port} -sTCP:LISTEN 2>/dev/null`, { encoding: "utf-8" });
-    return output.trim().split("\n").map(Number).filter(n => n > 0 && n !== process.pid);
+    return output.trim().split("\n").map(Number).filter((n: number) => n > 0 && n !== process.pid);
   } catch { return []; }
 }
 

@@ -65,7 +65,7 @@ function extractStepsFromYaml(content: string): ArchitectDagStep[] {
     const block = stepBlocks[i];
     const agentMatch = block.match(/^\s+agent:\s*(.+)$/m);
     if (agentMatch) steps[i].agentName = agentMatch[1].trim();
-    const blockedMatch = block.match(/^\s+blocked_by:\s*\[([^\]]*)\]/m);
+    const blockedMatch = block.match(/^\s+blockedBy:\s*\[([^\]]*)\]/m);
     if (blockedMatch) {
       steps[i].blockedBy = blockedMatch[1].split(",").map(s => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
     }
@@ -128,6 +128,8 @@ export function reduceArchitectEvent(
     case "architect_started": {
       const mode = (data.mode as "new" | "edit") || "new";
       const iteration = (data.iteration as number) || 1;
+      const resolvedModel = data.resolvedModel as string | undefined;
+      const modelAlias = data.modelAlias as string | undefined;
       // If we already have state (from context_generating), just update phase
       if (state) {
         return {
@@ -135,6 +137,8 @@ export function reduceArchitectEvent(
           phase: "designing",
           architectMode: mode,
           iteration,
+          resolvedModel,
+          modelAlias,
           pendingPrompt: null,
         };
       }
@@ -142,6 +146,8 @@ export function reduceArchitectEvent(
         phase: "designing",
         architectMode: mode,
         flowName: "",
+        resolvedModel,
+        modelAlias,
         agents: [],
         dagSteps: [],
         parsedFlows: [],
@@ -177,14 +183,16 @@ export function reduceArchitectEvent(
 
         case "agent_write": {
           const name = input ? extractAgentName(input) : "unknown";
+          const source = input ? String(input.content || "") : "";
           const agents = [...next.agents];
           const existing = agents.find(a => a.name === name);
           if (existing) {
             existing.type = "custom";
             existing.status = "creating";
             existing.statusText = "Writing…";
+            if (source) existing.source = source;
           } else {
-            agents.push({ name, type: "custom", status: "creating", statusText: "Writing…" });
+            agents.push({ name, type: "custom", status: "creating", statusText: "Writing…", ...(source ? { source } : {}) });
           }
           next.agents = agents;
           break;
@@ -244,6 +252,18 @@ export function reduceArchitectEvent(
             }
           } catch {
             next.catalogSummary = "Catalog loaded";
+          }
+          break;
+        }
+
+        case "flow_write": {
+          // The tool result output is { written: boolean, path, diagnostics? }
+          // Already parsed by execution.ts (JSON.parse on content[0].text)
+          const output = data.output;
+          if (output && typeof output === "object" && "written" in output) {
+            next.flowWriteStatus = output.written ? "written" : "validation-error";
+          } else if (isError) {
+            next.flowWriteStatus = "validation-error";
           }
           break;
         }

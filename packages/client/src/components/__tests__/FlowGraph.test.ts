@@ -117,6 +117,25 @@ describe("computeLayout", () => {
     expect(result.edges[0].targetStatus).toBe("running");
   });
 
+  it("layout dimensions are consistent regardless of step count", () => {
+    // Single node
+    const single = computeLayout([
+      { id: "a", label: "step-a", status: "pending", blockedBy: [] },
+    ]);
+    // Many nodes
+    const many = computeLayout([
+      { id: "a", label: "step-a", status: "pending", blockedBy: [] },
+      { id: "b", label: "step-b", status: "pending", blockedBy: ["a"] },
+      { id: "c", label: "step-c", status: "pending", blockedBy: ["b"] },
+      { id: "d", label: "step-d", status: "pending", blockedBy: ["c"] },
+    ]);
+    // Nodes should have identical dimensions in both layouts (fixed-scale)
+    expect(single.nodes[0].width).toBe(many.nodes[0].width);
+    expect(single.nodes[0].height).toBe(many.nodes[0].height);
+    // Multi-node layout should be wider
+    expect(many.width).toBeGreaterThan(single.width);
+  });
+
   it("ignores blockedBy references to non-existent steps", () => {
     const steps: FlowGraphStep[] = [
       { id: "a", label: "step-a", status: "pending", blockedBy: ["nonexistent"] },
@@ -125,5 +144,16 @@ describe("computeLayout", () => {
     const result = computeLayout(steps);
     expect(result.nodes).toHaveLength(1);
     expect(result.edges).toHaveLength(0); // no edge for missing dep
+  });
+
+  it("preserves type field on positioned nodes for flow-ref steps", () => {
+    const steps: FlowGraphStep[] = [
+      { id: "a", label: "agent-step", status: "pending", blockedBy: [], type: "agent" },
+      { id: "b", label: "subflow-step", status: "pending", blockedBy: ["a"], type: "flow-ref" },
+    ];
+
+    const result = computeLayout(steps);
+    expect(result.nodes.find(n => n.id === "a")!.type).toBe("agent");
+    expect(result.nodes.find(n => n.id === "b")!.type).toBe("flow-ref");
   });
 });

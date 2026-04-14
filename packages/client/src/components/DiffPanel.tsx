@@ -220,7 +220,7 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
 }
 
 /** Build a DiffFile from a single change event (Edit or Write) */
-function buildChangeDiffFile(filePath: string, change: FileChangeEvent): DiffFile | null {
+function buildChangeDiffFile(filePath: string, change: FileChangeEvent): ReturnType<typeof generateDiffFile> | null {
   const lang = getLang(filePath);
 
   if (change.type === "edit" && change.edits?.length) {

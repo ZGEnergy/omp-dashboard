@@ -41,6 +41,10 @@ export interface BrowserGateway {
   trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void;
   /** Clear a pending interactive UI request (resolved or cancelled) */
   clearUiRequest(sessionId: string, requestId: string): void;
+  /** Track a pending PromptBus request for replay on browser refresh */
+  trackPromptRequest(sessionId: string, msg: Record<string, unknown>): void;
+  /** Clear a pending PromptBus request (dismissed or cancelled) */
+  clearPromptRequest(sessionId: string, promptId: string): void;
   /** Tell browser subscribers to reset accumulated state for a session (bridge reconnected) */
   broadcastSessionStateReset(sessionId: string): void;
   /** Shut down all tracked headless child processes */
@@ -83,6 +87,9 @@ export function createBrowserGateway(
   // Track pending interactive UI requests per session for replay on reconnect
   const pendingUiRequests = new Map<string, Map<string, { requestId: string; method: string; params: Record<string, unknown> }>>();
 
+  // Track pending PromptBus requests per session for replay on browser refresh
+  const pendingPromptRequests = new Map<string, Map<string, Record<string, unknown>>>();
+
   // Track pending auto-resume prompts for ended sessions
   const pendingResumeRegistry = createPendingResumeRegistry({
     onTimeout(oldSessionId) {
@@ -95,15 +102,23 @@ export function createBrowserGateway(
   /** Send any pending interactive UI requests to a specific browser socket */
   function replayPendingUiRequests(ws: WebSocket, sessionId: string) {
     const sessionPending = pendingUiRequests.get(sessionId);
-    if (!sessionPending) return;
-    for (const req of sessionPending.values()) {
-      sendTo(ws, {
-        type: "extension_ui_request",
-        sessionId,
-        requestId: req.requestId,
-        method: req.method,
-        params: req.params,
-      });
+    if (sessionPending) {
+      for (const req of sessionPending.values()) {
+        sendTo(ws, {
+          type: "extension_ui_request",
+          sessionId,
+          requestId: req.requestId,
+          method: req.method,
+          params: req.params,
+        });
+      }
+    }
+    // Also replay pending PromptBus requests
+    const sessionPrompts = pendingPromptRequests.get(sessionId);
+    if (sessionPrompts) {
+      for (const msg of sessionPrompts.values()) {
+        sendTo(ws, msg as any);
+      }
     }
   }
 
@@ -123,6 +138,26 @@ export function createBrowserGateway(
     }
     sessionMap.set(requestId, { requestId, method, params });
     return true;
+  }
+
+  function trackPromptRequest(sessionId: string, msg: Record<string, unknown>): void {
+    let sessionMap = pendingPromptRequests.get(sessionId);
+    if (!sessionMap) {
+      sessionMap = new Map();
+      pendingPromptRequests.set(sessionId, sessionMap);
+    }
+    const promptId = msg.promptId as string;
+    if (promptId) {
+      sessionMap.set(promptId, msg);
+    }
+  }
+
+  function clearPromptRequest(sessionId: string, promptId: string): void {
+    const sessionMap = pendingPromptRequests.get(sessionId);
+    if (sessionMap) {
+      sessionMap.delete(promptId);
+      if (sessionMap.size === 0) pendingPromptRequests.delete(sessionId);
+    }
   }
 
   function getSubscribers(sessionId: string): WebSocket[] {
@@ -321,6 +356,12 @@ export function createBrowserGateway(
             break;
           }
 
+          case "prompt_response": {
+            // Route PromptBus response from browser to extension
+            ctx.piGateway.sendToSession((msg as any).sessionId, msg as any);
+            break;
+          }
+
           case "flow_management": {
             ctx.piGateway.sendToSession(msg.sessionId, {
               type: "flow_management",
@@ -333,13 +374,8 @@ export function createBrowserGateway(
             break;
           }
           case "architect_prompt_response": {
-            ctx.piGateway.sendToSession(msg.sessionId, {
-              type: "architect_prompt_response",
-              sessionId: msg.sessionId,
-              promptId: msg.promptId,
-              answer: msg.answer,
-              cancelled: msg.cancelled,
-            });
+            // Legacy: now handled by prompt_response via PromptBus.
+            // Keep case to avoid "unhandled message" warnings from old clients.
             break;
           }
           case "role_set": {
@@ -481,6 +517,9 @@ export function createBrowserGateway(
         }
       }
     },
+
+    trackPromptRequest,
+    clearPromptRequest,
 
     shutdownHeadlessProcesses() {
       headlessPidRegistry.killAll();

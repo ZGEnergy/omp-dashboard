@@ -178,8 +178,8 @@ export function createCommandHandler(
       const sessionId = getSessionId();
 
       // Ignore messages for other sessions (skip session-less messages like heartbeat_ack)
-      if (msg.sessionId !== undefined && msg.sessionId !== sessionId) {
-        console.error(`[dashboard] Ignoring message type=${msg.type} for session ${msg.sessionId}, current session is ${sessionId}`);
+      if ((msg as any).sessionId !== undefined && (msg as any).sessionId !== sessionId) {
+        console.error(`[dashboard] Ignoring message type=${msg.type} for session ${(msg as any).sessionId}, current session is ${sessionId}`);
         return undefined;
       }
 

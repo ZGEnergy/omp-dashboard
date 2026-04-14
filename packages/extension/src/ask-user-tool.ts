@@ -34,7 +34,7 @@ export function registerAskUserTool(pi: ExtensionAPI): void {
       ),
       placeholder: Type.Optional(Type.String({ description: "Placeholder text (for input)" })),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {
       let result: unknown;
 
       const msgOpts = params.message ? { message: params.message } : undefined;

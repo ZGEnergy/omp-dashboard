@@ -55,6 +55,11 @@ export function useSessionActions(deps: SessionActionDeps) {
   const handleRespondToUi = useCallback((requestId: string, result?: unknown, cancelled?: boolean) => {
     if (selectedId) {
       send({ type: "extension_ui_response", sessionId: selectedId, requestId, result, cancelled });
+      // Also send via PromptBus protocol for new-style prompts
+      const answer = cancelled ? undefined : (typeof result === "object" && result !== null
+        ? ((result as any).value ?? (result as any).confirmed?.toString())
+        : String(result ?? ""));
+      send({ type: "prompt_response", sessionId: selectedId, promptId: requestId, answer, cancelled, source: "dashboard-default" } as any);
       setSessionStates((prev) => {
         const next = new Map(prev);
         const current = next.get(selectedId);

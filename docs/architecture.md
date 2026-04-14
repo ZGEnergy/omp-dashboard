@@ -31,12 +31,12 @@ A global pi extension that runs in every pi session. It:
 - Detects OpenSpec activity (phase/change) from tool events; server auto-attaches the change when `changeName` is detected (phase is not required — skills loaded via prompt templates don't emit a SKILL.md read event). The session card's OpenSpec activity badge displays when either `openspecPhase` or `openspecChange` is detected (not just phase).
 - **Duplicate bridge prevention**: Uses `process`-level shared state (not `globalThis`) with a monotonic generation counter. When the extension is loaded multiple times (e.g., local + global npm package), only the latest instance's event handlers are active — stale listeners bail out immediately. All previous connections and timers are tracked and cleaned up on re-init.
 - **Subagent re-entry guard**: When pi-subagents launches an Agent tool, the subagent creates its own `AgentSession` which loads extensions (including the bridge) in the same process. Without protection, this would overwrite the parent bridge's global state, disconnect its WebSocket, and prevent `tool_execution_end`/`agent_end` from being forwarded — leaving the parent session stuck at "streaming" forever. The bridge stores a reference to its owning `pi` instance and skips initialization when called from a different instance (subagent).
-- Proxies `ctx.ui` dialog methods (confirm, select, input, editor) to the dashboard via `ui-proxy.ts`
-  - TUI sessions: races terminal dialog against dashboard response (first wins)
-  - Race cancellation: when dashboard wins, TUI dialog is aborted via `AbortSignal`; when TUI wins, dashboard dialog is dismissed via `extension_ui_dismiss` message
-  - Headless sessions: only dashboard can respond
-  - Fire-and-forget methods (notify) are forwarded alongside the original call
-  - Re-sends pending UI requests on WebSocket reconnect (server restart resilience)
+- Routes `ctx.ui` dialog methods (confirm, select, input, editor, notify) through `PromptBus` (`prompt-bus.ts`)
+  - Adapters register to handle prompts: `DashboardDefaultAdapter` renders generic dialogs inline; extensions (e.g. pi-flows) can register custom adapters via `prompt:register-adapter` event
+  - First-response-wins: multiple adapters (TUI, dashboard, custom) can claim a prompt; the first to respond resolves it, others are dismissed
+  - Bridge emits `prompt:ctx-originals` so TUI adapters can capture original ctx.ui methods before patching
+  - Client-side `prompt-component-registry.ts` maps component type strings to render placement (inline, widget-bar, overlay)
+  - Protocol messages: `prompt_request`, `prompt_dismiss`, `prompt_cancel`, `prompt_response`
 
 ### 2. Dashboard Server (`src/server/`)
 A Node.js HTTP + WebSocket server that:
@@ -90,25 +90,32 @@ TypeScript type definitions shared across all components:
 4. Server broadcasts to all subscribed browsers via `event` message
 5. Browser's event reducer processes event, React renders update
 
-### Interactive UI Flow (extension dialog → browser → response)
+### Interactive UI Flow (PromptBus — extension dialog → browser → response)
 1. Extension calls `ctx.ui.confirm()` / `select()` / `input()` / `editor()`
-2. Bridge UI proxy intercepts, sends `extension_ui_request` to server
-3. Server tracks the request in `pendingUiRequests` map and forwards to subscribed browsers
-4. Browser renders interactive card inline in chat (renderers in `interactive-renderers/`)
-5. User clicks Allow/Deny/option/submits text
-6. Browser sends `extension_ui_response` to server, optimistically clears "Waiting for input" on session card
-7. Server clears the request from `pendingUiRequests` and routes response to bridge extension
-8. Bridge UI proxy resolves the original dialog promise
+2. Bridge PromptBus intercepts via patched `ctx.ui` methods, creates a `PromptRequest` with a unique `promptId` and `pipeline` tag (e.g. `"command"`, `"architect"`)
+3. Registered adapters claim the prompt:
+   - `DashboardDefaultAdapter` (always registered) returns a `PromptClaim` with `component: { type: "generic-dialog", props }` and `placement: "inline"`
+   - Custom adapters (e.g. `ArchitectUIAdapter` from pi-flows) can claim with custom component types and widget-bar placement
+   - TUI adapters (registered via `prompt:register-adapter` event) can claim to show a terminal dialog
+4. Bus sends `prompt_request` to server with the winning adapter's component info
+5. Server forwards to subscribed browsers
+6. Browser's `prompt-component-registry.ts` resolves the component type to a React renderer and placement
+7. User responds in browser → `prompt_response` sent to server → routed to bridge
+8. Bus resolves the original dialog promise and calls `onResponse()` on all adapters for cleanup
 
-**Race cancellation (TUI sessions):**
-- TUI and dashboard both show the dialog simultaneously via `Promise.race`
-- When dashboard answers first: TUI dialog is dismissed via `AbortSignal` (passed in `ExtensionUIDialogOptions.signal`)
-- When TUI answers first: bridge sends `extension_ui_dismiss` to server → forwarded as `ui_dismiss` to browsers → dashboard transitions dialog to "dismissed" ("Answered in terminal")
-- Pending Map entry is cleaned up immediately when TUI wins, preventing memory leaks
+**First-response-wins (multi-adapter):**
+- Multiple adapters can claim the same prompt (e.g. TUI + dashboard)
+- The first adapter to respond wins; the bus sends `prompt_dismiss` to the server for the losing adapter's dashboard component
+- Adapters implement `onCancel()` for cleanup when another adapter wins
+
+**Custom UI components:**
+- Extensions register adapters via `pi.events.emit("prompt:register-adapter", adapter)`
+- Adapters return custom `PromptClaim` with arbitrary component types (e.g. `"architect-prompt"`)
+- Client-side registry maps type strings to render placement; unknown types fall back to `"generic-dialog"`
 
 **Resilience:**
-- **Page refresh**: Server replays pending `extension_ui_request` messages when a browser subscribes, so interactive dialogs survive page refreshes.
-- **Server restart**: Bridge UI proxy re-sends all pending requests on WebSocket reconnect (`resendPending()`), so dialogs survive server restarts.
+- **Page refresh**: Server replays pending `prompt_request` messages when a browser subscribes.
+- **Server restart**: TODO — PromptBus reconnect resend not yet implemented.
 
 ### Command Flow (browser → pi)
 1. User types prompt or command in browser
@@ -149,7 +156,7 @@ Inline stop buttons also appear on running tool cards in `ToolCallStep`, providi
 Consecutive tool calls with the same name and identical args (e.g. health check polling loops) are collapsed into a single expandable group showing a count badge (e.g. "×24"). Implemented via `groupConsecutiveToolCalls()` in the chat rendering pipeline. Groups require 3+ calls; running tools are never grouped.
 
 **Fork decisions and subagent ask_user:**
-- Already work through existing UI proxy — `TuiFlowIOAdapter` calls `ctx.ui.select/confirm/input` which the bridge wraps and races between TUI and dashboard
+- Work through PromptBus — `TuiFlowIOAdapter` calls `ctx.ui.select/confirm/input` which the bridge routes through the bus to registered adapters (dashboard, TUI, or custom)
 
 **Flow launcher:**
 - Available flows detected from session commands list (heuristic: `source: "extension"`, excluding management commands)

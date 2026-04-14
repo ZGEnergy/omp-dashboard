@@ -36,6 +36,8 @@ export const FLOW_EVENT_MAP: Record<string, string> = {
   "flow:architect-context-generating": "architect_context_generating",
   "flow:architect-context-ready": "architect_context_ready",
   "flow:architect-run-handoff": "architect_run_handoff",
+  // Autonomous mode feedback
+  "flow:autonomous-mode-changed": "flow_autonomous_changed",
 };
 
 /** Map of pi-subagents event names to dashboard protocol event types */
@@ -76,27 +78,8 @@ export function registerFlowEventListeners(
   // Note: event_forward sending for flow and subagent events is handled by
   // the EventBus emit intercept in bridge.ts (catch-all forwarding).
 
-  // Forward architect prompt requests directly to the dashboard widget bar.
-  // Non-architect prompts still go through ui-proxy (flow-tui -> ctx.ui.select -> extension_ui_request).
-  // Both paths race -- first response wins via emitPromptAndAwait's resolved guard.
-  pi.events.on("flow:prompt-request", (data: unknown) => {
-    if (!isSessionReady()) return;
-    const req = data as { id?: string; pipeline?: string; type?: string; question?: string; options?: string[]; defaultValue?: string };
-    if (!req.id || !req.pipeline?.startsWith("architect-")) return;
-    connection.send({
-      type: "event_forward",
-      sessionId: bc.sessionId,
-      event: {
-        eventType: "architect_prompt_request",
-        timestamp: Date.now(),
-        data: {
-          id: req.id,
-          promptType: req.type,
-          question: req.question,
-          options: req.options,
-          defaultValue: req.defaultValue,
-        },
-      },
-    });
-  });
+  // Legacy architect prompt forwarding REMOVED.
+  // Previously forwarded flow:prompt-request events with architect-* pipelines
+  // as architect_prompt_request to the dashboard. Now handled by
+  // ArchitectUIAdapter registered with the PromptBus (see architect-ui-adapter.ts).
 }

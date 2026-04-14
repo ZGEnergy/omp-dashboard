@@ -236,12 +236,15 @@ export interface FlowAgentCardConfig {
   description?: string;
   model?: string;
   card?: { label?: string; metric?: string; role?: string };
+  sourcePath?: string;
 }
 
 /** Per-agent state tracked in flow state */
 export interface FlowAgentState {
   agentName: string;
   stepId: string;
+  /** Step type from the flow config (agent, fork, agent-decision, agent-loop-decision, etc.) */
+  stepType?: string;
   status: FlowAgentStatus;
   label?: string;
   model?: string;
@@ -256,6 +259,7 @@ export interface FlowAgentState {
   detailHistory: FlowDetailEntry[];
   loopIteration?: number;
   loopMax?: number;
+  sourcePath?: string;
 }
 
 /** Overall flow execution status */
@@ -271,6 +275,11 @@ export interface FlowState {
   flowSource?: string;
   /** Ordered map — insertion order matches step order from flow config */
   agents: Map<string, FlowAgentState>;
+  /** All steps from the flow configuration — used for DAG graph rendering.
+   *  Includes non-agent steps (fork, conditional, agent-loop-decision). */
+  dagSteps?: Array<{ id: string; stepType: string; agent?: string; blockedBy: string[]; loopTarget?: string; exitTarget?: string }>;
+  /** Flow-ref steps from the flow configuration (subflows) */
+  flowRefSteps?: Array<{ id: string; label: string; blockedBy: string[] }>;
   /** Set after flow_complete event */
   flowResult?: Record<string, unknown>;
 
@@ -296,6 +305,8 @@ export interface ArchitectAgentEntry {
   type: "built-in" | "local" | "custom";
   status: "pending" | "creating" | "done" | "error";
   statusText?: string;
+  /** Raw markdown source from agent_write (only for custom agents) */
+  source?: string;
 }
 
 /** Step in the designed flow DAG */
@@ -303,6 +314,8 @@ export interface ArchitectDagStep {
   id: string;
   agentName?: string;
   blockedBy: string[];
+  /** Step type — "flow-ref" for subflow references */
+  stepType?: "agent" | "flow-ref";
 }
 
 /** Parsed flow metadata from architect preview */
@@ -326,6 +339,10 @@ export interface ArchitectState {
   phase: ArchitectPhase;
   architectMode: "new" | "edit";
   flowName: string;
+  /** Resolved model ID (e.g., "anthropic/claude-opus-4-6") */
+  resolvedModel?: string;
+  /** Model alias (e.g., "@planning") */
+  modelAlias?: string;
   agents: ArchitectAgentEntry[];
   dagSteps: ArchitectDagStep[];
   parsedFlows: ArchitectParsedFlow[];
@@ -341,6 +358,8 @@ export interface ArchitectState {
   pendingPrompt: ArchitectPrompt | null;
   /** Raw flow YAML content for the YAML viewer */
   flowYamlContent?: string;
+  /** Whether the last flow_write succeeded (file written to disk) */
+  flowWriteStatus?: "written" | "validation-error";
 }
 
 /** REST API response envelope */

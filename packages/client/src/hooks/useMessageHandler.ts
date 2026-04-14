@@ -278,6 +278,56 @@ export function useMessageHandler(
         });
         break;
 
+      // ── PromptBus protocol messages ──
+      case "prompt_request" as any:
+        setSessionStates((prev) => {
+          const next = new Map(prev);
+          const current = next.get((msg as any).sessionId) ?? createInitialState();
+          // Reuse addInteractiveRequest for now — maps prompt_request to the existing UI
+          const updated = addInteractiveRequest(
+            current,
+            (msg as any).promptId,
+            (msg as any).prompt?.type ?? "select",
+            {
+              title: (msg as any).prompt?.question,
+              options: (msg as any).prompt?.options,
+              defaultValue: (msg as any).prompt?.defaultValue,
+              // Store component info for future custom rendering
+              _promptBusComponent: (msg as any).component,
+              _promptBusPlacement: (msg as any).placement,
+            },
+          );
+          if (updated === current) return prev;
+          next.set((msg as any).sessionId, updated);
+          return next;
+        });
+        break;
+
+      case "prompt_dismiss" as any:
+        setSessionStates((prev) => {
+          const next = new Map(prev);
+          const current = next.get((msg as any).sessionId);
+          if (!current) return prev;
+          const updated = dismissInteractiveRequest(current, (msg as any).promptId);
+          if (updated === current) return prev;
+          next.set((msg as any).sessionId, updated);
+          return next;
+        });
+        break;
+
+      case "prompt_cancel" as any:
+        setSessionStates((prev) => {
+          const next = new Map(prev);
+          const current = next.get((msg as any).sessionId);
+          if (!current) return prev;
+          // Cancel = remove from pending
+          const updated = dismissInteractiveRequest(current, (msg as any).promptId);
+          if (updated === current) return prev;
+          next.set((msg as any).sessionId, updated);
+          return next;
+        });
+        break;
+
       case "terminal_added":
         setTerminals((prev) => {
           const next = new Map(prev);

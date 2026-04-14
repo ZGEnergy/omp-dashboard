@@ -117,6 +117,13 @@ export function extractSessionUpdates(event: DashboardEvent): SessionUpdates | n
       };
     }
 
+    case "flow_summary_dismissed": {
+      return {
+        activeFlowName: null,
+        flowStatus: null,
+      };
+    }
+
     case "architect_complete":
     case "architect_cancelled": {
       return {

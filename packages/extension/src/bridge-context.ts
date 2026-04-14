@@ -8,7 +8,7 @@ import type { ConnectionManager } from "./connection.js";
 export interface BridgeContext {
   pi: ExtensionAPI;
   connection: ConnectionManager;
-  /** Current session ID (mutated on session_switch/fork) */
+  /** Current session ID (mutated on session change: new/fork/resume) */
   sessionId: string;
   cachedCtx: any;
   cachedModelRegistry: any;

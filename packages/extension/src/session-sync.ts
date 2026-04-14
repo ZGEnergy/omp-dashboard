@@ -81,7 +81,8 @@ export function replaySessionEntries(bc: BridgeContext): void {
 }
 
 /**
- * Handle session_switch or session_fork: unregister old, register new, replay, sync.
+ * Handle session change (new/fork/resume): unregister old, register new, replay, sync.
+ * Called from session_start when event.reason indicates a session switch.
  */
 export function handleSessionChange(
   bc: BridgeContext,

@@ -22,7 +22,8 @@ import { autoStartServer } from "./server-auto-start.js";
 import type { ServerToExtensionMessage } from "@blackbelt-technology/pi-dashboard-shared/protocol.js";
 import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
 
-import { createUiProxy } from "./ui-proxy.js";
+import { PromptBus } from "./prompt-bus.js";
+import { DashboardDefaultAdapter } from "./dashboard-default-adapter.js";
 import { registerAskUserTool } from "./ask-user-tool.js";
 import { activate as activateProviderRegister, onProviderChanged } from "./provider-register.js";
 import type { FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -178,7 +179,7 @@ function initBridge(pi: ExtensionAPI) {
   let cachedCtx: any | undefined = prev.ctx;
   let lastModel: string | undefined;
   let lastThinkingLevel: string | undefined;
-  let uiProxy: ReturnType<typeof createUiProxy> | undefined;
+  let promptBus: PromptBus | undefined;
 
   /** Wrap a callback so errors log instead of crashing the host pi agent. */
   function safe<T extends (...args: any[]) => any>(fn: T): T {
@@ -207,11 +208,7 @@ function initBridge(pi: ExtensionAPI) {
     onMessage: safe(async (data: unknown) => {
       if (!isActive()) return; // Stale listener guard
       const msg = data as ServerToExtensionMessage;
-      // Route UI responses to the proxy
-      if (msg.type === "extension_ui_response" && uiProxy) {
-        uiProxy.handleResponse(msg);
-        return;
-      }
+      // Legacy extension_ui_response removed — now handled by prompt_response → promptBus.respond()
       // Reload auth credentials when dashboard notifies of changes
       if (msg.type === "credentials_updated") {
         try { cachedModelRegistry?.authStorage?.reload?.(); } catch { /* ignore */ }
@@ -315,22 +312,20 @@ function initBridge(pi: ExtensionAPI) {
         });
         return;
       }
-      // Route architect prompt responses back to flow-workspace via pi.events
-      if (msg.type === "architect_prompt_response" && pi.events) {
-        pi.events.emit("flow:prompt-response", {
-          id: msg.promptId,
-          answer: msg.answer,
-          cancelled: msg.cancelled,
+      // Route PromptBus responses from dashboard client
+      if (msg.type === "prompt_response" && promptBus) {
+        promptBus.respond({
+          id: (msg as any).promptId,
+          answer: (msg as any).answer,
+          cancelled: (msg as any).cancelled,
+          source: (msg as any).source ?? "dashboard-default",
         });
-        // Cancel any pending ui-proxy dialogs so the TUI selector is dismissed.
-        // The architect prompt was also forwarded via the ui-proxy (through
-        // flow-tui’s prompt-request handler calling uiCtx.select()), but the
-        // dashboard client suppresses the duplicate extension_ui_request when
-        // an architect_prompt_request is pending. So the proxy’s dashPromise
-        // would never resolve, leaving the TUI dialog open forever.
-        uiProxy?.cancelAllPending();
         return;
       }
+      // Legacy architect_prompt_response routing REMOVED.
+      // Previously routed to flow:prompt-response + cancelAllPending().
+      // Now handled by PromptBus: dashboard sends prompt_response,
+      // bus calls respond(), adapters get onResponse() for cross-cancellation.
       // Route flow control messages to pi-flows via pi.events
       if (msg.type === "flow_control" && pi.events) {
         if (msg.action === "abort") {
@@ -357,13 +352,33 @@ function initBridge(pi: ExtensionAPI) {
       if (!isActive()) return; // Stale listener guard
       sendStateSync();
       replaySessionEntries();
+      // Re-send pending PromptBus requests so dashboard dialogs survive browser refresh.
+      // Synchronous within this tick to prevent TUI respond() from interleaving.
+      // Client-side dedup by requestId prevents double-rendering.
+      if (promptBus) {
+        for (const { request, component, placement } of promptBus.getPendingRequests()) {
+          connection.send({
+            type: "prompt_request" as any,
+            sessionId,
+            promptId: request.id,
+            prompt: {
+              type: request.type,
+              question: request.question,
+              options: request.options,
+              defaultValue: request.defaultValue,
+              pipeline: request.pipeline,
+              metadata: request.metadata,
+            },
+            component,
+            placement,
+          });
+        }
+      }
       connection.send({ type: "replay_complete", sessionId });
       // If agent is mid-turn, send synthetic agent_start so server sets status to "streaming"
       if (getBridgeState().isAgentStreaming) {
         connection.send(mapEventToProtocol(sessionId, { type: "agent_start" }));
       }
-      // Re-send pending interactive UI requests so the new server can track them
-      uiProxy?.resendPending();
     }),
   });
 
@@ -530,8 +545,7 @@ function initBridge(pi: ExtensionAPI) {
   // - `context`: carries full message arrays (very large)
   // - `before_provider_request`: carries raw API payloads (very large)
   // - `session_start`: dedicated handler → session_register protocol message
-  // - `session_switch`: dedicated handler → session_register protocol message
-  // - `session_fork`: dedicated handler → session_register protocol message
+  // - session change (new/fork/resume): handled inside session_start via event.reason
   // - `session_shutdown`: dedicated handler → disconnect/cleanup
 
   // Unified EventBus rename map for the emit intercept (flow + subagent events)
@@ -623,6 +637,13 @@ function initBridge(pi: ExtensionAPI) {
     if (!isActive()) return;
     const newSessionId = ctx.sessionManager.getSessionId();
 
+    // On session switch/fork (0.65.0+: event.reason replaces session_switch/session_fork events),
+    // unregister the old session before re-registering the new one.
+    const reason = _event?.reason;
+    if ((reason === "new" || reason === "fork" || reason === "resume") && sessionId && sessionId !== newSessionId) {
+      handleSessionChange(ctx);
+    }
+
     cachedHasUI = ctx.hasUI;
     cachedCtx = ctx;
     sessionId = newSessionId;
@@ -637,30 +658,173 @@ function initBridge(pi: ExtensionAPI) {
     lastSessionFile = sessionFile;
     lastSessionDir = sessionDir;
 
-    // Set up UI proxy to forward dialogs to dashboard.
-    // For dashboard-spawned sessions (tmux or headless), skip the TUI race —
-    // the dashboard is the primary UI, and the TUI dialog in an unattended
-    // tmux window would auto-resolve/flood.
-    const dashboardSpawned = detectSessionSource(cachedHasUI, sessionFile) === "dashboard";
-    uiProxy = createUiProxy({
-      ui: ctx.ui as any,
-      hasUI: ctx.hasUI && !dashboardSpawned,
-      getSessionId: () => sessionId,
-      send: (msg: any) => connection.send(msg),
+    // ── PromptBus setup ──
+    // Create bus with dashboard connection wiring.
+    // Replaces the old ui-proxy race pattern.
+    promptBus = new PromptBus({
+      onDashboardRequest: (prompt, component, placement) => {
+        connection.send({
+          type: "prompt_request" as any,
+          sessionId,
+          promptId: prompt.id,
+          prompt: {
+            question: prompt.question,
+            type: prompt.type,
+            options: prompt.options,
+            defaultValue: prompt.defaultValue,
+            pipeline: prompt.pipeline,
+            metadata: prompt.metadata,
+          },
+          component,
+          placement,
+        });
+      },
+      onDashboardDismiss: (id) => {
+        connection.send({ type: "prompt_dismiss" as any, sessionId, promptId: id });
+      },
+      onDashboardCancel: (id) => {
+        connection.send({ type: "prompt_cancel" as any, sessionId, promptId: id });
+      },
     });
-    // Replace ctx.ui methods with proxied versions.
-    // The ui-proxy has a recursion guard (inProxy flag) so even if ctx.ui
-    // is already patched from a previous /reload, the TUI race path won't
-    // recurse — it falls back to dashboard-only on re-entry.
-    // Replace ctx.ui methods with proxied versions.
-    // The ui-proxy has a recursion guard (inProxy flag) so even if ctx.ui
-    // is already patched from a previous /reload, the TUI race path won't
-    // recurse — it falls back to dashboard-only on re-entry.
-    (ctx.ui as any).confirm = uiProxy.wrappedUi.confirm;
-    (ctx.ui as any).select = uiProxy.wrappedUi.select;
-    (ctx.ui as any).input = uiProxy.wrappedUi.input;
-    (ctx.ui as any).editor = uiProxy.wrappedUi.editor;
-    (ctx.ui as any).notify = uiProxy.wrappedUi.notify;
+
+    // Register built-in default adapter (always present, works without pi-flows)
+    promptBus.registerAdapter(new DashboardDefaultAdapter());
+
+    // Capture original ctx.ui method references BEFORE patching
+    const originalNotify = ctx.ui.notify?.bind(ctx.ui);
+    const originals = {
+      select: ctx.ui.select?.bind(ctx.ui) as ((q: string, opts: string[], extra?: any) => Promise<string | undefined>) | undefined,
+      input: ctx.ui.input?.bind(ctx.ui) as ((q: string, placeholder?: string, extra?: any) => Promise<string | undefined>) | undefined,
+      confirm: ctx.ui.confirm?.bind(ctx.ui) as ((q: string, msg: string, extra?: any) => Promise<boolean>) | undefined,
+      editor: ctx.ui.editor?.bind(ctx.ui) as ((q: string, prefill?: string, extra?: any) => Promise<string | undefined>) | undefined,
+    };
+
+    // Register TUI adapter — presents prompts in the terminal using original
+    // (unpatched) ctx.ui methods. Must be registered BEFORE patching ctx.ui.
+    if (ctx.hasUI) {
+      const activeControllers = new Map<string, AbortController>();
+      const bus = promptBus;
+
+      bus.registerAdapter({
+        name: "tui",
+
+        onRequest(prompt: any) {
+          const ac = new AbortController();
+          activeControllers.set(prompt.id, ac);
+
+          const present = async () => {
+            try {
+              let answer: string | boolean | undefined;
+
+              if (prompt.type === "select" && prompt.options && originals.select) {
+                answer = await originals.select(prompt.question, prompt.options, { signal: ac.signal });
+              } else if (prompt.type === "input" && originals.input) {
+                answer = await originals.input(prompt.question, prompt.defaultValue || "", { signal: ac.signal });
+              } else if (prompt.type === "confirm" && originals.confirm) {
+                answer = await originals.confirm(prompt.question, "", { signal: ac.signal });
+              } else if (prompt.type === "editor" && originals.editor) {
+                answer = await originals.editor(prompt.question, prompt.defaultValue || "", { signal: ac.signal });
+              } else {
+                return;
+              }
+
+              if (!ac.signal.aborted) {
+                const answerStr = typeof answer === "boolean" ? (answer ? "true" : "false") : answer;
+                bus.respond({
+                  id: prompt.id,
+                  answer: answerStr ?? undefined,
+                  cancelled: answerStr == null,
+                  source: "tui",
+                });
+              }
+            } catch {
+              if (!ac.signal.aborted) {
+                bus.respond({ id: prompt.id, cancelled: true, source: "tui" });
+              }
+            } finally {
+              activeControllers.delete(prompt.id);
+            }
+          };
+
+          present();
+          return {}; // Claim without component (TUI-only)
+        },
+
+        onResponse(response: any) {
+          if (response.source !== "tui") {
+            const ac = activeControllers.get(response.id);
+            if (ac) {
+              ac.abort();
+              activeControllers.delete(response.id);
+            }
+          }
+        },
+
+        onCancel(id: string) {
+          const ac = activeControllers.get(id);
+          if (ac) {
+            ac.abort();
+            activeControllers.delete(id);
+          }
+        },
+      });
+    }
+
+    // Replace ctx.ui dialog methods with PromptBus wrappers.
+    // All extension commands that call ctx.ui.select/input/confirm/editor
+    // now route through the bus, which distributes to all registered adapters.
+    {
+      const bus = promptBus;
+      (ctx.ui as any).select = (title: string, options: string[], _opts?: any) =>
+        bus.request({ pipeline: "command", type: "select", question: title, options })
+          .then(r => r.cancelled ? undefined : r.answer);
+
+      (ctx.ui as any).input = (title: string, placeholder?: string, _opts?: any) =>
+        bus.request({ pipeline: "command", type: "input", question: title, defaultValue: placeholder })
+          .then(r => r.cancelled ? undefined : r.answer);
+
+      (ctx.ui as any).confirm = (title: string, _message: string, _opts?: any) =>
+        bus.request({ pipeline: "command", type: "confirm", question: title })
+          .then(r => !r.cancelled && r.answer === "true");
+
+      (ctx.ui as any).editor = (title: string, prefill?: string, _opts?: any) =>
+        bus.request({ pipeline: "command", type: "editor", question: title, defaultValue: prefill })
+          .then(r => r.cancelled ? undefined : r.answer);
+
+      // Notify is fire-and-forget: call original + forward to dashboard
+      (ctx.ui as any).notify = (message: string, level?: string) => {
+        originalNotify?.(message, level);
+        connection.send({
+          type: "prompt_request" as any,
+          sessionId,
+          promptId: crypto.randomUUID(),
+          prompt: { question: message, type: "notify" },
+          component: { type: "notify", props: { message, level } },
+          placement: "inline",
+        });
+      };
+    }
+
+    // Listen for adapter registrations from other extensions (e.g. pi-flows)
+    if (pi.events) {
+      pi.events.on("prompt:register-adapter", (adapter: any) => {
+        if (promptBus && adapter && typeof adapter.name === "string") {
+          promptBus.registerAdapter(adapter);
+          // Inject respond/cancel functions so cross-package adapters can talk back
+          if (typeof adapter.setRespond === "function") {
+            adapter.setRespond((response: any) => promptBus!.respond(response));
+          }
+          if (typeof adapter.setCancel === "function") {
+            adapter.setCancel((id: string) => promptBus!.cancel(id));
+          }
+        }
+      });
+
+      // Expose bus request function for pi-flows to use via emitPromptAndAwait
+      pi.events.emit("prompt:set-bus-request", {
+        request: (options: any) => promptBus!.request(options),
+      });
+    }
 
     // Connect first, then auto-start if needed.
     // session_register must be buffered before any event_forward messages.
@@ -810,7 +974,7 @@ function initBridge(pi: ExtensionAPI) {
     registerFlowEventListeners(syncBc(), () => sessionReady, getFlowsList);
   }));
 
-  // Shared handler for session_switch and session_fork
+  // Shared handler for session changes (new/fork/resume)
   function handleSessionChange(ctx: any) {
     const bc = syncBc();
     _handleSessionChange(bc, ctx, getFlowsList);
@@ -823,17 +987,8 @@ function initBridge(pi: ExtensionAPI) {
     }, GIT_POLL_INTERVAL);
   }
 
-  pi.on("session_switch" as any, safe(async (_event: any, ctx: any) => {
-    if (!isActive()) return;
-    cachedCtx = ctx;
-    handleSessionChange(ctx);
-  }));
-
-  pi.on("session_fork" as any, safe(async (_event: any, ctx: any) => {
-    if (!isActive()) return;
-    cachedCtx = ctx;
-    handleSessionChange(ctx);
-  }));
+  // session_switch and session_fork events removed in pi 0.65.0.
+  // Now handled via session_start with event.reason ("new"|"fork"|"resume").
 
   pi.on("turn_end", safe(async (event: any, ctx: any) => {
     if (!isActive()) return;

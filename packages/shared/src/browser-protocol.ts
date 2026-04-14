@@ -462,6 +462,15 @@ export interface ArchitectPromptResponseBrowserMessage {
   cancelled?: boolean;
 }
 
+export interface PromptResponseBrowserMessage {
+  type: "prompt_response";
+  sessionId: string;
+  promptId: string;
+  answer?: string;
+  cancelled?: boolean;
+  source: string;
+}
+
 export interface RoleSetBrowserMessage {
   type: "role_set";
   sessionId: string;
@@ -526,6 +535,7 @@ export type BrowserToServerMessage =
   | ForceKillBrowserMessage
   | FlowManagementBrowserMessage
   | ArchitectPromptResponseBrowserMessage
+  | PromptResponseBrowserMessage
   | RoleSetBrowserMessage
   | RolePresetLoadBrowserMessage
   | RolePresetSaveBrowserMessage

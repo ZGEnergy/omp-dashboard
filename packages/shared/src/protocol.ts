@@ -157,6 +157,39 @@ export interface SpawnNewSessionMessage {
   cwd: string;
 }
 
+// ── PromptBus protocol messages ─────────────────────────────────────
+
+export interface PromptRequestMessage {
+  type: "prompt_request";
+  sessionId: string;
+  promptId: string;
+  prompt: {
+    question: string;
+    type: string;
+    options?: string[];
+    defaultValue?: string;
+    pipeline?: string;
+    metadata?: Record<string, unknown>;
+  };
+  component: {
+    type: string;
+    props: Record<string, unknown>;
+  };
+  placement: string;
+}
+
+export interface PromptDismissMessage {
+  type: "prompt_dismiss";
+  sessionId: string;
+  promptId: string;
+}
+
+export interface PromptCancelMessage {
+  type: "prompt_cancel";
+  sessionId: string;
+  promptId: string;
+}
+
 export interface ProcessInfo {
   pid: number;
   pgid: number;
@@ -187,6 +220,9 @@ export type ExtensionToServerMessage =
   | ModelUpdateMessage
   | SessionsListExtensionMessage
   | ExtensionUiDismissMessage
+  | PromptRequestMessage
+  | PromptDismissMessage
+  | PromptCancelMessage
   | ReplayCompleteMessage
   | FirstMessageUpdateMessage
   | RolesListMessage
@@ -342,6 +378,15 @@ export interface ExtensionUiResponseMessage {
   cancelled?: boolean;
 }
 
+export interface PromptResponseServerMessage {
+  type: "prompt_response";
+  sessionId: string;
+  promptId: string;
+  answer?: string;
+  cancelled?: boolean;
+  source: string;
+}
+
 export type ServerToExtensionMessage =
   | SendPromptToExtensionMessage
   | AbortToExtensionMessage
@@ -361,6 +406,7 @@ export type ServerToExtensionMessage =
   | CredentialsUpdatedMessage
   | FlowManagementExtensionMessage
   | ArchitectPromptResponseExtensionMessage
+  | PromptResponseServerMessage
   | RoleSetExtensionMessage
   | RolePresetLoadExtensionMessage
   | RolePresetSaveExtensionMessage

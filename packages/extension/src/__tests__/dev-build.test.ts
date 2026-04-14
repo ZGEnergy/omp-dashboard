@@ -42,7 +42,7 @@ describe("runDevBuild", () => {
   it("should log progress messages", () => {
     run();
 
-    const logs = logSpy.mock.calls.map((c) => c[0]);
+    const logs = logSpy.mock.calls.map((c: any) => c[0]);
     expect(logs).toContain("🔨 Dashboard: building client...");
     expect(logs).toContain("✅ Dashboard: client built");
     expect(logs).toContain("🛑 Dashboard: stopping server...");
@@ -54,7 +54,7 @@ describe("runDevBuild", () => {
 
     run();
 
-    const logs = logSpy.mock.calls.map((c) => c[0]);
+    const logs = logSpy.mock.calls.map((c: any) => c[0]);
     expect(logs).toContain("❌ Dashboard: build failed — build error");
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/shutdown",

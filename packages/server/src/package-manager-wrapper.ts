@@ -23,7 +23,7 @@ async function loadPiPackageManager() {
 
   // Try direct import first (works if installed as a dependency)
   try {
-    const mod = await import("@mariozechner/pi-coding-agent");
+    const mod = await import("@mariozechner/pi-coding-agent") as any;
     if (mod.DefaultPackageManager) {
       piModuleCache = { DefaultPackageManager: mod.DefaultPackageManager, SettingsManager: mod.SettingsManager };
       return piModuleCache;

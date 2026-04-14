@@ -28,7 +28,7 @@ export function AgentCardShell({ name, status, headerRight, stats, onClick, sele
   return (
     <div
       onClick={onClick}
-      className={`rounded-lg border p-2.5 transition-all duration-150
+      className={`rounded-lg border p-2.5 transition-all duration-150 flex flex-col
         ${onClick ? "cursor-pointer hover:shadow-md" : ""}
         ${selected ? "border-blue-500/60 bg-[var(--bg-surface)]" : "border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"}
         ${status === "running" ? "border-yellow-500/30" : ""}
@@ -50,7 +50,7 @@ export function AgentCardShell({ name, status, headerRight, stats, onClick, sele
       )}
 
       {/* Tool-specific content */}
-      {children}
+      <div className="flex-1 flex flex-col">{children}</div>
     </div>
   );
 }
