@@ -41,21 +41,29 @@ export function SelectRenderer({ params, status, result, onRespond, onCancel }: 
         <div className="text-xs text-[var(--text-secondary)] mb-3 ml-6"><MarkdownContent content={message} /></div>
       )}
       <div className="flex flex-wrap gap-2 ml-6">
-        {options.map((option) => (
+        {options.map((option) => {
+          const isCancel = /^cancel$/i.test(option.trim());
+          return (
+            <button
+              key={option}
+              onClick={() => isCancel ? onCancel() : onRespond({ value: option })}
+              className={isCancel
+                ? "px-3 py-1 text-xs rounded bg-transparent hover:bg-[var(--bg-surface)] text-[var(--text-tertiary)] border border-[var(--border-secondary)] transition-colors"
+                : "px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+              }
+            >
+              {option}
+            </button>
+          );
+        })}
+        {!options.some((o) => /^cancel$/i.test(o.trim())) && (
           <button
-            key={option}
-            onClick={() => onRespond({ value: option })}
-            className="px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+            onClick={onCancel}
+            className="px-3 py-1 text-xs rounded bg-transparent hover:bg-[var(--bg-surface)] text-[var(--text-tertiary)] border border-[var(--border-secondary)] transition-colors"
           >
-            {option}
+            Cancel
           </button>
-        ))}
-        <button
-          onClick={onCancel}
-          className="px-3 py-1 text-xs rounded bg-transparent hover:bg-[var(--bg-surface)] text-[var(--text-tertiary)] border border-[var(--border-secondary)] transition-colors"
-        >
-          Cancel
-        </button>
+        )}
       </div>
     </div>
   );

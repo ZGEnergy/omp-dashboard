@@ -79,19 +79,29 @@ export function AskUserToolRenderer({ args, status, result }: ToolRendererProps)
         </div>
       )}
 
-      {/* Options list (for select/multiselect) */}
-      {options && options.length > 0 && (
+      {/* Options list — only show when complete (running state has interactive dialog below) */}
+      {options && options.length > 0 && status !== "running" && (
         <div className="flex flex-wrap gap-1">
-          {options.map((opt, i) => (
-            <span key={i} className="px-1.5 py-0.5 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border-secondary)] text-[var(--text-secondary)]">
-              {opt}
-            </span>
-          ))}
+          {options.map((opt, i) => {
+            const isSelected = isComplete && userResponse === opt;
+            return (
+              <span
+                key={i}
+                className={isSelected
+                  ? "px-1.5 py-0.5 text-xs rounded bg-green-600/20 border border-green-500/40 text-green-400 font-medium"
+                  : "px-1.5 py-0.5 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border-secondary)] text-[var(--text-tertiary)]"
+                }
+              >
+                {isSelected && <Icon path={mdiCheckCircle} size={0.4} className="inline mr-0.5 -mt-0.5" />}
+                {opt}
+              </span>
+            );
+          })}
         </div>
       )}
 
-      {/* Response */}
-      {isComplete && userResponse !== undefined && (
+      {/* Response (for non-select methods like input/confirm) */}
+      {isComplete && userResponse !== undefined && !(options && options.length > 0) && (
         <div className="flex items-center gap-1.5 text-xs">
           <Icon path={mdiCheckCircle} size={0.45} className="text-green-400 shrink-0" />
           <span className="text-green-400 font-medium">Response:</span>
