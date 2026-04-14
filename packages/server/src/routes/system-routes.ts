@@ -26,9 +26,10 @@ export function registerSystemRoutes(
     metaPersistence: MetaPersistence;
     config: ServerConfig;
     networkGuard: NetworkGuard;
+    version?: string;
   },
 ) {
-  const { sessionManager, preferencesStore, metaPersistence, config, networkGuard } = deps;
+  const { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version } = deps;
   const serverStartTime = Date.now();
 
   // Editor detection endpoint
@@ -164,6 +165,7 @@ export function registerSystemRoutes(
     return {
       ok: true,
       pid: process.pid,
+      version: version ?? "unknown",
       uptime: Math.floor((Date.now() - serverStartTime) / 1000),
       mode: config.dev ? "dev" : "production",
       server: {

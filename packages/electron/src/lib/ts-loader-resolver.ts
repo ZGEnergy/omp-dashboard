@@ -5,11 +5,9 @@
  * - Power user mode: jiti from pi's install, falling back to tsx
  */
 import path from "node:path";
-import os from "node:os";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-
-const MANAGED_DIR = path.join(os.homedir(), ".pi-dashboard");
+import { MANAGED_DIR } from "./managed-paths.js";
 
 export type InstallMode = "standalone" | "power-user";
 

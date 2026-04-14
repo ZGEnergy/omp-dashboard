@@ -9,8 +9,7 @@ import path from "node:path";
 import os from "node:os";
 import { detectSystemNode } from "./dependency-detector.js";
 import { getBundledNodePath, getBundledNpmPath } from "./bundled-node.js";
-
-const MANAGED_DIR = path.join(os.homedir(), ".pi-dashboard");
+import { MANAGED_DIR } from "./managed-paths.js";
 
 export interface InstallProgress {
   step: string;
@@ -108,7 +107,7 @@ function runNpmInstall(
 /**
  * Standalone mode: install all tools into ~/.pi-dashboard/.
  */
-export async function installStandalone(onProgress?: ProgressCallback): Promise<void> {
+export async function installStandalone(onProgress?: ProgressCallback, skipPackages?: string[]): Promise<void> {
   ensureManagedDir();
   const npmCmd = resolveNpm();
 
@@ -120,8 +119,17 @@ export async function installStandalone(onProgress?: ProgressCallback): Promise<
     "tsx",
   ];
 
+  const skipSet = new Set(skipPackages || []);
+
   for (const pkg of packages) {
     const step = pkg.split("/").pop() || pkg;
+
+    // Skip packages already installed on the system
+    if (skipSet.has(pkg)) {
+      onProgress?.({ step, status: "done", output: "Already installed (system)" });
+      continue;
+    }
+
     onProgress?.({ step, status: "running" });
     try {
       await runNpmInstall([pkg], MANAGED_DIR, npmCmd, (output) => {

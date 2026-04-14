@@ -6,53 +6,17 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { SpawnStrategy } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { MANAGED_BIN } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
+import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/tool-resolver.js";
 
-/** Path to managed install bin directory */
-const MANAGED_BIN = path.join(os.homedir(), ".pi-dashboard", "node_modules", ".bin");
-
-/** Common user bin directories that may not be on PATH when launched from
- *  a desktop .desktop file or Electron app (shell profiles not sourced). */
-function getUserBinDirs(): string[] {
-  const home = os.homedir();
-  const dirs = [
-    path.join(home, ".local", "bin"),           // pip, install.sh scripts
-    path.join(home, ".npm-global", "bin"),       // npm config prefix
-    "/usr/local/bin",                            // brew, manual installs
-  ];
-  return dirs.filter(d => existsSync(d));
-}
+/** Server-side resolver — knows the current process node binary. */
+const resolver = new ToolResolver({ processExecPath: process.execPath });
 
 /** Build env with managed install bin + current node binary dir prepended to PATH.
- *  Ensures `pi`, `node`, and user-installed tools (code-server) are findable.
- *  This is critical when launched from Electron (no shell profile sourced).
+ *  Delegates to ToolResolver.buildSpawnEnv().
  */
 export function buildSpawnEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const currentPath = baseEnv.PATH || "";
-  const parts: string[] = [];
-
-  // Always ensure managed bin is on PATH (for pi, openspec, tsx)
-  if (!currentPath.includes(MANAGED_BIN)) {
-    parts.push(MANAGED_BIN);
-  }
-
-  // Always ensure the current node binary's directory is on PATH.
-  // Handles bundled Node.js (e.g., /usr/lib/pi-dashboard/resources/node/bin/node)
-  // where spawned scripts use #!/usr/bin/env node.
-  const nodeBinDir = path.dirname(process.execPath);
-  if (!currentPath.includes(nodeBinDir)) {
-    parts.push(nodeBinDir);
-  }
-
-  // Add common user bin directories that Electron apps miss
-  // (desktop launchers don't source ~/.bashrc / ~/.profile)
-  for (const dir of getUserBinDirs()) {
-    if (!currentPath.includes(dir)) {
-      parts.push(dir);
-    }
-  }
-
-  if (parts.length === 0) return baseEnv;
-  return { ...baseEnv, PATH: `${parts.join(path.delimiter)}${path.delimiter}${currentPath}` };
+  return resolver.buildSpawnEnv(baseEnv);
 }
 
 export interface PlatformInfo {
@@ -134,35 +98,10 @@ export function buildHeadlessArgs(options?: SessionOptions): string[] {
 }
 
 /** Resolve the pi command as [command, ...prefixArgs].
- *  On Unix: returns ["path/to/pi"]
- *  On Windows: returns ["path/to/node.exe", "path/to/pi/dist/cli.mjs"] to avoid .cmd
+ *  Delegates to ToolResolver.resolvePi().
  */
 function resolvePiCommand(): string[] | null {
-  if (process.platform === "win32") {
-    // Try to resolve pi's CLI entry point directly (avoids .cmd → no cmd window)
-    const piCli = path.join(MANAGED_BIN, "..", "@mariozechner", "pi-coding-agent", "dist", "cli.js");
-    if (existsSync(piCli)) {
-      // Find node.exe: process.execPath is the current node binary
-      return [process.execPath, piCli];
-    }
-    // Fallback to .cmd
-    const managed = path.join(MANAGED_BIN, "pi.cmd");
-    if (existsSync(managed)) return [managed];
-  } else {
-    const managed = path.join(MANAGED_BIN, "pi");
-    if (existsSync(managed)) return [managed];
-  }
-  // System PATH
-  try {
-    const whichCmd = process.platform === "win32" ? "where" : "which";
-    const result = execSync(`${whichCmd} pi`, {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      env: buildSpawnEnv(),
-    }).trim();
-    if (result) return [result.split("\n")[0]];
-  } catch { /* not found */ }
-  return null;
+  return resolver.resolvePi();
 }
 
 function spawnHeadless(cwd: string, options?: SessionOptions): SpawnResult {

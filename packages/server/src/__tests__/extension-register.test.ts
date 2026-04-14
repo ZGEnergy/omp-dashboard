@@ -1,12 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+/**
+ * Tests for the shared bridge extension registration (server context).
+ */
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-// We test the module's exported function
-import { ensureBridgeExtensionRegistered } from "../extension-register.js";
+import { registerBridgeExtension, findBundledExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
 
-describe("ensureBridgeExtensionRegistered", () => {
+describe("bridge extension registration (server context)", () => {
   let tmpDir: string;
   let settingsPath: string;
   let origHome: string | undefined;
@@ -23,39 +25,41 @@ describe("ensureBridgeExtensionRegistered", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("should be a no-op when no bundled extension exists", () => {
-    // In dev mode, the extension directory relative to server/src is the real
-    // packages/extension, but in test context __dirname doesn't point to a bundle.
-    // The function should not crash and should not create settings.json
-    ensureBridgeExtensionRegistered();
-    // No assertion needed — just verify no crash
+  it("findBundledExtension returns null when extension dir does not exist", () => {
+    const result = findBundledExtension(tmpDir);
+    expect(result).toBeNull();
   });
 
-  it("should add extension path to empty settings file", () => {
-    // Create a fake bundled extension at the expected relative path
-    // extension-register.ts resolves __dirname/../../../extension relative to server/src
-    // We can't easily test the real path detection, so we test the settings write logic
-    // by directly calling with a mocked path
+  it("findBundledExtension finds extension under base dir", () => {
+    const extDir = path.join(tmpDir, "packages", "extension");
+    fs.mkdirSync(extDir, { recursive: true });
+    fs.writeFileSync(path.join(extDir, "package.json"), "{}");
+    expect(findBundledExtension(tmpDir)).toBe(extDir);
+  });
 
-    // Create settings dir
+  it("registerBridgeExtension adds extension to empty settings file", () => {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     fs.writeFileSync(settingsPath, "{}");
 
-    // Since we can't mock __dirname easily, we test the settings logic directly
+    registerBridgeExtension("/test/extension");
     const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-    expect(settings.packages).toBeUndefined();
+    expect(settings.packages).toContain("/test/extension");
   });
 
   it("should not crash on malformed settings.json", () => {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     fs.writeFileSync(settingsPath, "not valid json{{{");
-    ensureBridgeExtensionRegistered();
-    // Should not throw
+    // Should not throw — starts fresh
+    registerBridgeExtension("/test/extension");
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    expect(settings.packages).toContain("/test/extension");
   });
 
   it("should not crash when settings directory does not exist", () => {
     // HOME points to tmpDir but .pi/agent/ doesn't exist
-    ensureBridgeExtensionRegistered();
-    // Should not throw
+    registerBridgeExtension("/test/extension");
+    // Should create the directory and write
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    expect(settings.packages).toContain("/test/extension");
   });
 });

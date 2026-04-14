@@ -31,7 +31,7 @@ import { scanAllSessions } from "./session-scanner.js";
 import { needsMigration, runMigration } from "./migrate-persistence.js";
 import { detectZrokBinary, cleanupStaleZrok, createTunnel, deleteTunnel } from "./tunnel.js";
 import { registerAuthPlugin, validateWsUpgrade } from "./auth-plugin.js";
-import { ensureBridgeExtensionRegistered } from "./extension-register.js";
+import { findBundledExtension, registerBridgeExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
 import { createNetworkGuard, isLoopback, isBypassedHost } from "./localhost-guard.js";
 import type { AuthConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { registerSessionApi } from "./session-api.js";
@@ -83,7 +83,9 @@ export interface DashboardServer {
 export async function createServer(config: ServerConfig): Promise<DashboardServer> {
   // Ensure bridge extension is registered in pi's global settings
   // (needed for bundled installs where pi can't discover it from package.json)
-  ensureBridgeExtensionRegistered();
+  const __serverDir = path.dirname(fileURLToPath(import.meta.url));
+  const extPath = findBundledExtension(path.resolve(__serverDir, "..", ".."));
+  if (extPath) registerBridgeExtension(extPath);
 
   // Run migration from sessions.json + state.json if needed
   if (needsMigration()) {
@@ -292,7 +294,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   registerGitRoutes(fastify, { networkGuard });
   registerFileRoutes(fastify, { sessionManager, preferencesStore, networkGuard });
   registerOpenSpecRoutes(fastify, { sessionManager, preferencesStore, directoryService, networkGuard });
-  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard });
+  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion });
   // Package management
   const packageManagerWrapper = new PackageManagerWrapper();
 

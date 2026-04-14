@@ -168,7 +168,10 @@ describe("Process Manager", () => {
     it("should not duplicate managed bin if already present", () => {
       const managedBin = require("path").join(require("os").homedir(), ".pi-dashboard", "node_modules", ".bin");
       const env = buildSpawnEnv({ PATH: `${managedBin}:/usr/bin` });
-      expect(env.PATH).toBe(`${managedBin}:/usr/bin`);
+      // Managed bin should appear exactly once
+      const parts = env.PATH!.split(":");
+      const managedCount = parts.filter(p => p === managedBin).length;
+      expect(managedCount).toBe(1);
     });
   });
 

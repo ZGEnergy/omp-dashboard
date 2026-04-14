@@ -11,8 +11,7 @@ import { app } from "electron";
 import { detectPi, detectOpenSpec, detectSystemNode, detectDashboardPackage } from "./dependency-detector.js";
 import { getBundledNodePath, getBundledNpmPath } from "./bundled-node.js";
 import { isApiKeyConfigured, readModeFile } from "./wizard-state.js";
-
-const MANAGED_DIR = path.join(os.homedir(), ".pi-dashboard");
+import { MANAGED_DIR } from "./managed-paths.js";
 
 export interface DoctorCheck {
   name: string;
