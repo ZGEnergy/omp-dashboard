@@ -18,10 +18,10 @@ export interface LaunchResult {
 
 /**
  * Resolve the dashboard server CLI script path relative to this extension file.
- * From src/extension/server-launcher.ts → src/server/cli.ts
+ * From packages/extension/src/server-launcher.ts → packages/server/src/cli.ts
  */
 export function resolveServerCliPath(): string {
-  return path.resolve(__dirname, "..", "server", "cli.ts");
+  return path.resolve(__dirname, "..", "..", "server", "src", "cli.ts");
 }
 
 /**
