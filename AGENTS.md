@@ -266,7 +266,7 @@ make clean              # Destroy all cloned VMs
 | `packages/electron/scripts/test-electron-install.sh` | Full e2e Docker test: install, wizard, server launch, health check |
 | `packages/electron/scripts/test-electron-install-inner.sh` | Inner test script run inside Docker container |
 | `packages/electron/resources/icon.png` | Master 1024×1024 app icon (π on dark navy) |
-| `.github/workflows/electron-build.yml` | CI: builds DMG (macOS), DEB+AppImage (Linux), NSIS (Windows) on native runners |
+| `.github/workflows/publish.yml` | CI: builds DMG (macOS), DEB+AppImage (Linux), NSIS+ZIP+portable (Windows) on native runners; publishes npm + GitHub Release |
 
 ## Build & Restart Workflow
 

@@ -534,7 +534,7 @@ Output by platform:
 |----------|--------|----------|
 | macOS | `.dmg` | `packages/electron/out/make/` |
 | Linux | `.deb` + `.AppImage` | `packages/electron/out/make/` |
-| Windows | `.exe` (NSIS installer) | `packages/electron/out/make/` |
+| Windows | `.exe` (NSIS installer) + `.zip` + portable `.exe` | `packages/electron/out/make/` |
 
 ### Cross-Platform Builds (via Docker)
 
