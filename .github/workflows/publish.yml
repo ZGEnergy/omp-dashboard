@@ -115,7 +115,7 @@ jobs:
         shell: pwsh
         run: |
           $arch = "${{ matrix.arch }}"
-          $packaged = "packages/electron/out/PI Dashboard-win32-$arch"
+          $packaged = "packages/electron/out/PI-Dashboard-win32-$arch"
           # ZIP archive
           $zipDir = "packages/electron/out/make/zip/$arch"
           New-Item -ItemType Directory -Force -Path $zipDir
@@ -123,7 +123,7 @@ jobs:
           # Portable exe via electron-builder
           cd packages/electron
           npx electron-builder --win portable --$arch `
-            --prepackaged "out/PI Dashboard-win32-$arch" `
+            --prepackaged "out/PI-Dashboard-win32-$arch" `
             --config.appId=com.blackbelt-technology.pi-dashboard `
             --config.productName="PI Dashboard" `
             --config.directories.output="out/make/portable/$arch" `
