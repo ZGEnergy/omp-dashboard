@@ -5,6 +5,7 @@ import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiContentSave, mdiAlert, mdiPlus, mdiDelete, mdiRestart, mdiUpdate } from "@mdi/js";
 import { useLocation } from "wouter";
 import { ProviderAuthSection } from "./ProviderAuthSection.js";
+import { ModelSelector } from "./ModelSelector.js";
 import { KnownServersSection } from "./KnownServersSection.js";
 import { NetworkDiscoverySection } from "./NetworkDiscoverySection.js";
 import { PackageBrowser } from "./PackageBrowser.js";
@@ -379,22 +380,14 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
                   options={[{ value: "headless", label: "Headless" }, { value: "tmux", label: "Tmux" }]}
                   onChange={(v) => update((c) => { c.spawnStrategy = v; })}
                 />
-                <SelectField
-                  label="Default Model"
-                  value={config.defaultModel}
-                  options={[
-                    { value: "", label: "None (use pi default)" },
-                    ...(availableModels ?? []).map((m) => ({
-                      value: `${m.provider}/${m.id}`,
-                      label: `${m.provider}/${m.id}`,
-                    })),
-                    // Show the saved value even if not in available models
-                    ...((config.defaultModel && !(availableModels ?? []).some((m) => `${m.provider}/${m.id}` === config.defaultModel))
-                      ? [{ value: config.defaultModel, label: `${config.defaultModel} (not available)` }]
-                      : []),
-                  ]}
-                  onChange={(v) => update((c) => { c.defaultModel = v; })}
-                />
+                <div className="flex items-center justify-between">
+                  <label className="text-sm text-[var(--text-secondary)]">Default Model</label>
+                  <ModelSelector
+                    current={config.defaultModel || undefined}
+                    models={availableModels}
+                    onSelect={(v) => update((c) => { c.defaultModel = v; })}
+                  />
+                </div>
               </Section>
 
               <Section title="Tunnel">
