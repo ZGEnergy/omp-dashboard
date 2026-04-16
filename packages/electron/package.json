@@ -1,7 +1,7 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-electron",
   "productName": "pi-dashboard-electron",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Electron desktop app for pi-dashboard",
   "repository": {
     "type": "git",

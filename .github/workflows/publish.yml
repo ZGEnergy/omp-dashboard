@@ -67,8 +67,17 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci ${{ matrix.arch == 'arm64' && '--ignore-scripts' || '' }}
         timeout-minutes: 15
+
+      - name: Rebuild native modules (arm64)
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          # phantomjs-prebuilt has no arm64 binary and fails install scripts
+          # Rebuild only the native modules we actually need
+          npm rebuild node-pty 2>&1 | tail -5 || true
+          cd packages/electron/node_modules/electron && node install.js 2>&1 | tail -5
 
       - name: Set version from tag
         shell: bash
