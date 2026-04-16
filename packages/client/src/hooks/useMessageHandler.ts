@@ -5,6 +5,7 @@
 import { useCallback } from "react";
 import { createInitialState, reduceEvent, addInteractiveRequest, resolveInteractiveRequest, dismissInteractiveRequest, type SessionState } from "../lib/event-reducer.js";
 import type { DashboardSession, CommandInfo, FlowInfo, FileEntry, OpenSpecData, ModelInfo, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { encodeFolderPath } from "../lib/folder-encoding.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { EditorInstanceStatus } from "@blackbelt-technology/pi-dashboard-shared/editor-types.js";
 import type { DiscoveredServerInfo } from "../components/ServerSelector.js";
@@ -36,6 +37,7 @@ export interface MessageHandlerDeps {
   spawningCwdsRef: React.MutableRefObject<Set<string>>;
   subscribedRef: React.MutableRefObject<Set<string>>;
   pendingTerminalCwdRef: React.MutableRefObject<string | null>;
+  lastCreatedTerminalIdRef: React.MutableRefObject<string | null>;
   maxSeqMapRef: React.MutableRefObject<Map<string, number>>;
 }
 
@@ -49,7 +51,7 @@ export function useMessageHandler(
     setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses,
     setDiscoveredServers, setSpawnErrors, setResumeErrors,
   } = setters;
-  const { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef } = deps;
+  const { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef } = deps;
 
   return useCallback((msg: ServerToBrowserMessage) => {
     switch (msg.type) {
@@ -334,7 +336,8 @@ export function useMessageHandler(
         });
         if (pendingTerminalCwdRef.current === msg.terminal.cwd) {
           pendingTerminalCwdRef.current = null;
-          navigate(`/terminal/${msg.terminal.id}`);
+          lastCreatedTerminalIdRef.current = msg.terminal.id;
+          navigate(`/folder/${encodeFolderPath(msg.terminal.cwd)}/terminals`);
         }
         break;
 

@@ -144,6 +144,7 @@ export default function App() {
   const [pinnedDirectories, setPinnedDirectories] = useState<string[]>([]);
   const [terminals, setTerminals] = useState<Map<string, TerminalSession>>(new Map());
   const pendingTerminalCwdRef = useRef<string | null>(null);
+  const lastCreatedTerminalIdRef = useRef<string | null>(null);
   const [editorStatuses, setEditorStatuses] = useState<Map<string, { id: string; status: EditorInstanceStatus }>>(new Map());
   const [editorAvailable, setEditorAvailable] = useState<boolean | undefined>(undefined);
   const [discoveredServers, setDiscoveredServers] = useState<import("./components/ServerSelector.js").DiscoveredServerInfo[]>([]);
@@ -241,7 +242,7 @@ export default function App() {
 
   const handleMessage = useMessageHandler(
     { setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses, setDiscoveredServers, setSpawnErrors, setResumeErrors },
-    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef },
+    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef },
   );
 
   useEffect(() => {
@@ -1030,10 +1031,13 @@ export default function App() {
   // Folder view content (TerminalsView or EditorView)
   const folderViewContent = useMemo(() => {
     if (folderTermCwd) {
+      const pendingTermId = lastCreatedTerminalIdRef.current;
+      if (pendingTermId) lastCreatedTerminalIdRef.current = null;
       return (
         <TerminalsView
           cwd={folderTermCwd}
           terminals={getTerminalsForCwd(folderTermCwd)}
+          activeTerminalId={pendingTermId ?? undefined}
           onCreateTerminal={handleCreateTerminal}
           onKillTerminal={handleKillTerminal}
           onRenameTerminal={handleRenameTerminal}
@@ -1169,6 +1173,7 @@ export default function App() {
               <TerminalsView
                 cwd={folderTermCwd}
                 terminals={getTerminalsForCwd(folderTermCwd)}
+                activeTerminalId={lastCreatedTerminalIdRef.current ?? undefined}
                 onCreateTerminal={handleCreateTerminal}
                 onKillTerminal={handleKillTerminal}
                 onRenameTerminal={handleRenameTerminal}

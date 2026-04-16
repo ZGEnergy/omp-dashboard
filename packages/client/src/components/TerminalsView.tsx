@@ -97,7 +97,7 @@ export function TerminalsView({
               key={t.id}
               onClick={() => setActiveTabId(t.id)}
               onDoubleClick={() => setRenamingId(t.id)}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-t-md text-xs cursor-pointer transition-colors ${
+              className={`group flex items-center gap-1 px-3 py-1.5 rounded-t-md text-xs cursor-pointer transition-colors ${
                 isActive
                   ? "bg-[var(--bg-surface)] text-[var(--text-primary)] border-b-2 border-cyan-500"
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
