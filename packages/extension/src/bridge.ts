@@ -26,6 +26,7 @@ import { PromptBus } from "./prompt-bus.js";
 import { DashboardDefaultAdapter } from "./dashboard-default-adapter.js";
 import { registerAskUserTool } from "./ask-user-tool.js";
 import { activate as activateProviderRegister, onProviderChanged } from "./provider-register.js";
+import { activateAnthropicTransform } from "./anthropic-transform.js";
 import type { FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { startMetricsMonitor, stopMetricsMonitor, collectMetrics } from "./process-metrics.js";
 import { scanChildProcesses } from "./process-scanner.js";
@@ -73,6 +74,11 @@ export default function (pi: ExtensionAPI) {
     // Activate provider management before bridge init so providers are
     // registered before session_start fires and models_list is sent.
     activateProviderRegister(pi);
+
+    // Activate Anthropic payload transform (system prompt rewrite + tool filtering)
+    // for all anthropic-messages providers (direct OAuth, API key, and proxies).
+    // Replaces @benvargas/pi-claude-code-use for the main session.
+    activateAnthropicTransform(pi);
 
     initBridge(pi);
   } catch (err) {
@@ -211,7 +217,20 @@ function initBridge(pi: ExtensionAPI) {
       // Legacy extension_ui_response removed — now handled by prompt_response → promptBus.respond()
       // Reload auth credentials when dashboard notifies of changes
       if (msg.type === "credentials_updated") {
-        try { cachedModelRegistry?.authStorage?.reload?.(); } catch { /* ignore */ }
+        try {
+          cachedModelRegistry?.authStorage?.reload?.();
+          cachedModelRegistry?.refresh?.();
+        } catch { /* ignore */ }
+        // Push updated models list to dashboard client
+        if (cachedModelRegistry && sessionReady) {
+          try {
+            const models = cachedModelRegistry.getAvailable().map((m: any) => ({
+              provider: m.provider,
+              id: m.id,
+            }));
+            connection.send({ type: "models_list", sessionId, models });
+          } catch { /* ignore */ }
+        }
         return;
       }
       // Route flow management actions from dashboard buttons
@@ -456,7 +475,9 @@ function initBridge(pi: ExtensionAPI) {
       }
       // Fallback: send as user message (template-expanded).
       // Uses deliverAs:followUp so it queues properly when agent is streaming.
-      const expanded = expandPromptTemplateFromDisk(text, process.cwd());
+      // expandPromptTemplateFromDisk handles skill commands (/skill:xxx) and
+      // prompt templates by reading the file content from disk.
+      const expanded = expandPromptTemplateFromDisk(text, process.cwd(), pi);
       (pi.sendUserMessage as any)(expanded, { deliverAs: "followUp" });
     },
   });
