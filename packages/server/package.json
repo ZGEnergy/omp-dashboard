@@ -1,6 +1,6 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-server",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Dashboard server for monitoring and interacting with pi agent sessions",
   "type": "module",
   "main": "src/cli.ts",

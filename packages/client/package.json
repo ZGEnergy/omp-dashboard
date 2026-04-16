@@ -1,6 +1,6 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-web",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Web client for pi-dashboard",
   "type": "module",
   "files": [
