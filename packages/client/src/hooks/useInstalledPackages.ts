@@ -36,5 +36,17 @@ export function useInstalledPackages(scope: "global" | "local", cwd?: string) {
     return () => { mountedRef.current = false; };
   }, [fetchInstalled]);
 
+  // Auto-refresh when any package operation completes successfully
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent).detail;
+      if (msg?.type === "package_operation_complete" && msg.success) {
+        fetchInstalled();
+      }
+    };
+    window.addEventListener("pi-package-event", handler);
+    return () => window.removeEventListener("pi-package-event", handler);
+  }, [fetchInstalled]);
+
   return { packages, isLoading, error, refresh: fetchInstalled };
 }
