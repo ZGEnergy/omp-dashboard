@@ -25,6 +25,24 @@ export interface WizardApi {
   completeWizard: (mode: "standalone" | "power-user") => Promise<void>;
   /** Listen for install progress events */
   onInstallProgress: (callback: (progress: { step: string; status: string; error?: string; output?: string }) => void) => void;
+  /** Get the static recommended-extensions manifest + persisted skipped ids */
+  getRecommendedExtensions: () => Promise<{
+    recommended: Array<{
+      id: string;
+      source: string;
+      displayName: string;
+      fallbackDescription: string;
+      status: "required" | "strongly-suggested" | "optional";
+      unlocks: string[];
+      toolsRegistered?: string[];
+      autowired?: boolean;
+    }>;
+    skipped: string[];
+  }>;
+  /** Install the selected recommended extensions by id */
+  installRecommendedExtensions: (ids: string[]) => Promise<{ installed: number }>;
+  /** Persist the list of skipped recommended ids */
+  persistRecommendedSkipped: (skippedIds: string[]) => Promise<void>;
 }
 
 const api: WizardApi = {
@@ -37,6 +55,9 @@ const api: WizardApi = {
   onInstallProgress: (callback) => {
     ipcRenderer.on("wizard:progress", (_event, progress) => callback(progress));
   },
+  getRecommendedExtensions: () => ipcRenderer.invoke("wizard:get-recommended"),
+  installRecommendedExtensions: (ids) => ipcRenderer.invoke("wizard:install-recommended", ids),
+  persistRecommendedSkipped: (skippedIds) => ipcRenderer.invoke("wizard:persist-recommended-skipped", skippedIds),
 };
 
 contextBridge.exposeInMainWorld("wizardApi", api);

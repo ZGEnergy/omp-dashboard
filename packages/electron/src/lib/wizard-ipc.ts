@@ -4,8 +4,8 @@
  */
 import { ipcMain, type BrowserWindow } from "electron";
 import { detectPi, detectOpenSpec, detectDashboardPackage, detectSystemNode, detectBridgeExtension, detectPiDashboardCli } from "./dependency-detector.js";
-import { installStandalone, installDashboardGlobal } from "./dependency-installer.js";
-import { readModeFile, writeModeFile, isApiKeyConfigured, writeApiKey } from "./wizard-state.js";
+import { installStandalone, installDashboardGlobal, installRecommendedExtensions } from "./dependency-installer.js";
+import { readModeFile, writeModeFile, isApiKeyConfigured, writeApiKey, readRecommendedWizardState, writeRecommendedWizardState } from "./wizard-state.js";
 import { registerBundledBridgeExtension } from "./bridge-register.js";
 
 /**
@@ -63,4 +63,59 @@ export function registerWizardIpc(getWizardWindow: () => BrowserWindow | null): 
       } catch { /* non-fatal — server will re-register on start */ }
     }
   });
+
+  // ── Recommended extensions ────────────────────────────────
+
+  /**
+   * Return the static manifest entries plus the previously-persisted
+   * skipped list. The renderer enriches via the server's
+   * /api/packages/recommended route once the server is reachable; this
+   * IPC is the bootstrap view available during first-launch when the
+   * server isn't up yet.
+   */
+  ipcMain.handle("wizard:get-recommended", async () => {
+    const { RECOMMENDED_EXTENSIONS } = await import(
+      "@blackbelt-technology/pi-dashboard-shared/recommended-extensions.js"
+    );
+    const { enrichRecommendedEntries } = await import("./recommended-enricher.js");
+    const state = readRecommendedWizardState();
+    // Enrichment is pi-gated + global-scope only. If pi isn't installed,
+    // enriched fields are undefined and the renderer behaves as before.
+    const recommended = enrichRecommendedEntries(RECOMMENDED_EXTENSIONS);
+    return {
+      recommended,
+      skipped: state.skippedRecommended,
+    };
+  });
+
+  /**
+   * Install the selected recommended extensions. `ids` are manifest ids.
+   * Progress is forwarded to the wizard renderer via the same
+   * `wizard:progress` channel used by `installStandalone`.
+   */
+  ipcMain.handle(
+    "wizard:install-recommended",
+    async (_event, ids: string[]) => {
+      const win = getWizardWindow();
+      const installed = await installRecommendedExtensions(ids, (progress) => {
+        win?.webContents.send("wizard:progress", progress);
+      });
+      return { installed };
+    },
+  );
+
+  /**
+   * Persist the wizard's recommended-extensions state — the list of
+   * manifest ids the user explicitly skipped. Marks the step complete so
+   * it isn't shown again on next launch (though the Packages tab's
+   * Recommended section always surfaces current state).
+   */
+  ipcMain.handle(
+    "wizard:persist-recommended-skipped",
+    async (_event, skippedIds: string[]) => {
+      writeRecommendedWizardState({
+        skippedRecommended: Array.isArray(skippedIds) ? skippedIds : [],
+      });
+    },
+  );
 }

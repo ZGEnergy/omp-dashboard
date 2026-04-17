@@ -8,10 +8,17 @@ import os from "node:os";
 function getManagedDir() { return path.join(os.homedir(), ".pi-dashboard"); }
 function getModeFile() { return path.join(getManagedDir(), "mode.json"); }
 function getPiSettings() { return path.join(os.homedir(), ".pi", "agent", "settings.json"); }
+function getRecommendedStateFile() { return path.join(getManagedDir(), "recommended.json"); }
 
 export interface ModeConfig {
   mode: "standalone" | "power-user";
   completedAt: string;
+}
+
+export interface RecommendedWizardState {
+  /** Recommended-extension ids the user explicitly skipped during the wizard. */
+  skippedRecommended: string[];
+  completedAt?: string;
 }
 
 /** Check if the first-run wizard has been completed. */
@@ -80,4 +87,40 @@ export function writeApiKey(provider: string, key: string): void {
   }
 
   writeFileSync(getPiSettings(), JSON.stringify(data, null, 2) + "\n");
+}
+
+// ── Recommended extensions wizard state ─────────────────────────
+
+/** Read persisted recommended-extensions wizard state, or defaults. */
+export function readRecommendedWizardState(): RecommendedWizardState {
+  try {
+    if (!existsSync(getRecommendedStateFile())) return { skippedRecommended: [] };
+    const data = JSON.parse(readFileSync(getRecommendedStateFile(), "utf-8"));
+    const skipped = Array.isArray(data?.skippedRecommended)
+      ? (data.skippedRecommended as unknown[]).filter((s): s is string => typeof s === "string")
+      : [];
+    return { skippedRecommended: skipped, completedAt: data?.completedAt };
+  } catch { /* corrupt file */ }
+  return { skippedRecommended: [] };
+}
+
+/**
+ * Persist the recommended-extensions wizard state.
+ *
+ * `skippedRecommended` is the list of manifest ids the user chose NOT to
+ * install and which should suppress future wizard nagging. The list is
+ * replaced on each write (not merged).
+ */
+export function writeRecommendedWizardState(state: RecommendedWizardState): void {
+  mkdirSync(getManagedDir(), { recursive: true });
+  const payload: RecommendedWizardState = {
+    skippedRecommended: [...state.skippedRecommended],
+    completedAt: state.completedAt ?? new Date().toISOString(),
+  };
+  writeFileSync(getRecommendedStateFile(), JSON.stringify(payload, null, 2) + "\n");
+}
+
+/** True when the wizard has already run its recommended-extensions step. */
+export function isRecommendedWizardCompleted(): boolean {
+  return existsSync(getRecommendedStateFile());
 }

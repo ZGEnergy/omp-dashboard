@@ -112,7 +112,20 @@
       </div>
     </div>
 
-    <!-- Step 4: Done -->
+    <!-- Step 4: Recommended extensions -->
+    <div id="step-recommended" class="step">
+      <h1>Recommended extensions</h1>
+      <h2>Pi works out of the box, but these extensions add significant capabilities the dashboard is built around. You can always add or remove them later from the Packages tab.</h2>
+      <div id="recommended-list" style="margin: 1rem 0; max-height: 48vh; overflow-y: auto;"></div>
+      <div id="recommended-progress" style="margin: 0.5rem 0; display:none;"></div>
+      <p id="recommended-error" class="error-msg" style="display:none;"></p>
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="recommended-skip-btn" onclick="skipRecommended()">Skip</button>
+        <button class="btn btn-primary" id="recommended-install-btn" onclick="installRecommended()">Install selected</button>
+      </div>
+    </div>
+
+    <!-- Step 5: Done -->
     <div id="step-done" class="step">
       <div class="success">
         <div class="icon">✅</div>
@@ -321,11 +334,173 @@
       if (!key) return;
       await api.saveApiKey(provider, key);
       await api.completeWizard(selectedMode);
-      goToStep('step-done');
+      await goToRecommended();
     }
 
-    function skipApiKey() {
-      api.completeWizard(selectedMode);
+    async function skipApiKey() {
+      await api.completeWizard(selectedMode);
+      await goToRecommended();
+    }
+
+    // ── Recommended extensions step ─────────────────────────────
+
+    let recommendedEntries = [];
+
+    async function goToRecommended() {
+      try {
+        const data = await api.getRecommendedExtensions();
+        recommendedEntries = data?.recommended ?? [];
+        const alreadySkipped = new Set(data?.skipped ?? []);
+        const list = document.getElementById('recommended-list');
+        list.innerHTML = '';
+        for (const entry of recommendedEntries) {
+          // Enrichment signals from the IPC handler (undefined on machines
+          // where pi isn't installed yet — enrichment is pi-gated). When
+          // activeInPi is true the package is already listed globally in
+          // ~/.pi/agent/settings.json; we show the entry in the list for
+          // completeness but grey it out + disable its checkbox so the
+          // user can't accidentally trigger a redundant re-install.
+          const isActiveGlobally = entry.activeInPi === true;
+
+          const row = document.createElement('div');
+          // Greyed-out visual treatment for already-installed entries.
+          // Kept in the DOM so users see the full recommendation set and
+          // understand what's already handled — just non-interactive.
+          const rowOpacity = isActiveGlobally ? '0.55' : '1';
+          const rowCursor = isActiveGlobally ? 'not-allowed' : 'default';
+          row.style.cssText =
+            'display:flex;gap:0.75rem;align-items:flex-start;' +
+            'padding:0.6rem 0;border-bottom:1px solid #1e293b;' +
+            'opacity:' + rowOpacity + ';cursor:' + rowCursor + ';';
+
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.id = 'rec-' + entry.id;
+          // Checkbox default:
+          //   - Already active globally        → unchecked + disabled
+          //                                     (redundant re-install blocked)
+          //   - Previously explicitly skipped  → unchecked
+          //   - Required / strongly-suggested → checked
+          //   - Optional                       → unchecked
+          if (isActiveGlobally) {
+            cb.checked = false;
+            cb.disabled = true;
+          } else if (alreadySkipped.has(entry.id)) {
+            cb.checked = false;
+          } else {
+            cb.checked = entry.status !== 'optional';
+          }
+          cb.style.marginTop = '0.25rem';
+          if (isActiveGlobally) cb.style.cursor = 'not-allowed';
+
+          const body = document.createElement('div');
+          body.style.flex = '1';
+          const pillColor = entry.status === 'required' ? '#ef4444' : entry.status === 'strongly-suggested' ? '#f59e0b' : '#64748b';
+          const pillLabel = entry.status === 'required' ? 'Required' : entry.status === 'strongly-suggested' ? 'Suggested' : 'Optional';
+          const installedBadge = isActiveGlobally
+            ? '<span style="font-size:0.72rem;padding:0.12rem 0.45rem;border-radius:99px;background:#10b98120;color:#10b981;border:1px solid #10b98166;">✓ Installed globally</span>'
+            : '';
+          body.innerHTML =
+            '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">' +
+              '<strong style="color:#f8fafc">' + entry.displayName + '</strong>' +
+              '<span style="font-size:0.72rem;padding:0.12rem 0.45rem;border-radius:99px;background:' + pillColor + '20;color:' + pillColor + ';border:1px solid ' + pillColor + '66;">' + pillLabel + '</span>' +
+              installedBadge +
+            '</div>' +
+            '<div style="color:#94a3b8;font-size:0.82rem;margin-top:0.15rem;">' + (entry.fallbackDescription || '') + '</div>' +
+            (Array.isArray(entry.unlocks) && entry.unlocks.length > 0
+              ? '<div style="color:#64748b;font-size:0.72rem;margin-top:0.2rem;">Unlocks: ' + entry.unlocks.join(', ') + '</div>'
+              : '');
+
+          row.appendChild(cb);
+          row.appendChild(body);
+          list.appendChild(row);
+        }
+      } catch (err) {
+        const errEl = document.getElementById('recommended-error');
+        errEl.textContent = 'Could not load recommended extensions: ' + (err?.message ?? err);
+        errEl.style.display = 'block';
+      }
+      goToStep('step-recommended');
+    }
+
+    function collectRecommendedSelections() {
+      const selected = [];
+      const skipped = [];
+      for (const entry of recommendedEntries) {
+        // Already-installed (disabled) entries are neither selected nor
+        // skipped — they shouldn't get re-installed and they shouldn't
+        // pollute the persisted skippedRecommended list (which would
+        // make a future uninstall + wizard re-run silently drop them).
+        if (entry.activeInPi === true) continue;
+        const cb = document.getElementById('rec-' + entry.id);
+        if (cb && cb.checked) selected.push(entry.id);
+        else skipped.push(entry.id);
+      }
+      return { selected, skipped };
+    }
+
+    async function installRecommended() {
+      const { selected, skipped } = collectRecommendedSelections();
+      const errEl = document.getElementById('recommended-error');
+      errEl.style.display = 'none';
+      const installBtn = document.getElementById('recommended-install-btn');
+      const skipBtn = document.getElementById('recommended-skip-btn');
+      installBtn.disabled = true;
+      skipBtn.disabled = true;
+      const progress = document.getElementById('recommended-progress');
+      progress.style.display = 'block';
+      progress.innerHTML = '';
+
+      if (selected.length === 0) {
+        // User deselected all—skip all.
+        await api.persistRecommendedSkipped(skipped);
+        goToStep('step-done');
+        return;
+      }
+
+      // Stream progress to the progress div.
+      api.onInstallProgress((p) => {
+        const id = 'rec-prog-' + p.step;
+        let row = document.getElementById(id);
+        if (!row) {
+          row = document.createElement('div');
+          row.id = id;
+          row.className = 'progress-item';
+          row.innerHTML = '<span class="icon"></span><div class="progress-wrap"><div class="name">' + p.step + '</div><div class="output"></div></div>';
+          progress.appendChild(row);
+        }
+        const icon = row.querySelector('.icon');
+        const out = row.querySelector('.output');
+        if (p.status === 'running') { icon.textContent = '○'; icon.className = 'icon status-running'; if (p.output) out.textContent = p.output; }
+        else if (p.status === 'done') { icon.textContent = '✓'; icon.className = 'icon status-done'; out.textContent = ''; }
+        else if (p.status === 'error') { icon.textContent = '✗'; icon.className = 'icon status-error'; out.textContent = p.error || ''; }
+      });
+
+      try {
+        await api.installRecommendedExtensions(selected);
+        // Non-selected items are user intent to skip—persist so we don't re-nag.
+        if (skipped.length > 0) {
+          await api.persistRecommendedSkipped(skipped);
+        } else {
+          await api.persistRecommendedSkipped([]);
+        }
+        goToStep('step-done');
+      } catch (err) {
+        const msg = String(err?.message ?? err ?? 'install failed');
+        errEl.textContent = msg;
+        if (/publickey|permission denied|authentication/i.test(msg)) {
+          errEl.innerHTML = msg + '<br><br>If this is a GitHub SSH clone failure, set up your key at <a style="color:#93c5fd" href="https://docs.github.com/en/authentication/connecting-to-github-with-ssh" target="_blank">docs.github.com/en/authentication/connecting-to-github-with-ssh</a>';
+        }
+        errEl.style.display = 'block';
+        installBtn.disabled = false;
+        skipBtn.disabled = false;
+      }
+    }
+
+    async function skipRecommended() {
+      // Persist every id as skipped so the wizard doesn't re-nag.
+      const skipped = recommendedEntries.map(e => e.id);
+      await api.persistRecommendedSkipped(skipped);
       goToStep('step-done');
     }
 

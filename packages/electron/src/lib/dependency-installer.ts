@@ -156,3 +156,88 @@ export async function installDashboardGlobal(onProgress?: ProgressCallback): Pro
     throw err;
   }
 }
+
+// ── Recommended extensions installer ───────────────────────────
+
+// Lazy-imported to keep the startup path light.
+async function loadPiPackageManager() {
+  const globalModulePath = path.join(
+    MANAGED_DIR,
+    "node_modules",
+    "@mariozechner",
+    "pi-coding-agent",
+    "dist",
+    "index.js",
+  );
+  if (existsSync(globalModulePath)) {
+    const mod = await import(`file://${globalModulePath}`);
+    if (mod?.DefaultPackageManager && mod?.SettingsManager) return mod;
+  }
+  // Fallback to the system install.
+  const mod = await import("@mariozechner/pi-coding-agent" as any);
+  return mod as any;
+}
+
+/**
+ * Install a list of recommended extensions sequentially via pi's
+ * DefaultPackageManager. Each entry is identified by its manifest `id`;
+ * the source is resolved from `@blackbelt-technology/pi-dashboard-shared`'s
+ * `RECOMMENDED_EXTENSIONS`. Stops on first failure and reports the error
+ * through `onProgress` in the standard `InstallProgress` shape.
+ *
+ * @returns the number of entries successfully installed.
+ */
+export async function installRecommendedExtensions(
+  ids: string[],
+  onProgress?: ProgressCallback,
+): Promise<number> {
+  if (ids.length === 0) return 0;
+
+  const { RECOMMENDED_EXTENSIONS } = await import(
+    "@blackbelt-technology/pi-dashboard-shared/recommended-extensions.js"
+  );
+
+  const pm = await loadPiPackageManager();
+  if (!pm?.DefaultPackageManager || !pm?.SettingsManager) {
+    throw new Error(
+      "pi-coding-agent is not installed. Install recommended extensions failed.",
+    );
+  }
+
+  const agentDir = path.join(os.homedir(), ".pi", "agent");
+  const cwd = os.homedir();
+  const settingsManager = pm.SettingsManager.create(cwd, agentDir);
+  const manager = new pm.DefaultPackageManager({ cwd, agentDir, settingsManager });
+
+  let installed = 0;
+  for (const id of ids) {
+    const entry = RECOMMENDED_EXTENSIONS.find((e: any) => e.id === id);
+    if (!entry) {
+      onProgress?.({
+        step: id,
+        status: "error",
+        error: `Unknown recommended id: ${id}`,
+      });
+      throw new Error(`Unknown recommended id: ${id}`);
+    }
+
+    const step = entry.displayName;
+    onProgress?.({ step, status: "running" });
+    try {
+      manager.setProgressCallback?.((event: any) => {
+        if (event?.message) {
+          onProgress?.({ step, status: "running", output: String(event.message).slice(0, 120) });
+        }
+      });
+      await manager.installAndPersist(entry.source, { local: false });
+      onProgress?.({ step, status: "done" });
+      installed++;
+    } catch (err: any) {
+      const msg = String(err?.message ?? err ?? "install failed");
+      onProgress?.({ step, status: "error", error: msg });
+      throw err;
+    }
+  }
+
+  return installed;
+}
