@@ -6,6 +6,9 @@ import type {
   DashboardEvent,
   ApiResponse,
 } from "./types.js";
+import type { EnrichedRecommendedExtension } from "./recommended-extensions.js";
+
+export type { EnrichedRecommendedExtension } from "./recommended-extensions.js";
 
 // ── Sessions ────────────────────────────────────────────────────────
 
@@ -281,3 +284,9 @@ export interface NetworkInterface {
   netmask: string;
   cidr: string;
 }
+
+// ── Recommended extensions ───────────────────────────
+
+export type ListRecommendedExtensionsResponse = ApiResponse<{
+  recommended: EnrichedRecommendedExtension[];
+}>;
