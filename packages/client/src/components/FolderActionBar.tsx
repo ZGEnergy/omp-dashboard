@@ -1,6 +1,6 @@
 /**
  * Unified action bar for folder groups in the sidebar.
- * Buttons: +Session | +Terminal | Terminals(N) | Editor | Zed | Pi Resources
+ * Buttons: +Session | Terminals(N) | Editor | Zed | Pi Resources
  */
 import React from "react";
 import { Icon } from "@mdi/react";
@@ -24,7 +24,6 @@ interface Props {
   nativeEditors: DetectedEditor[];
   spawningDisabled?: boolean;
   onSpawnSession: () => void;
-  onCreateTerminal: () => void;
   onOpenTerminals: () => void;
   onOpenEditor: () => void;
   onOpenNativeEditor: (editorId: string) => void;
@@ -44,7 +43,6 @@ export function FolderActionBar({
   nativeEditors,
   spawningDisabled,
   onSpawnSession,
-  onCreateTerminal,
   onOpenTerminals,
   onOpenEditor,
   onOpenNativeEditor,
@@ -66,17 +64,6 @@ export function FolderActionBar({
       >
         <span className="inline-flex items-center gap-0.5">
           <Icon path={mdiPlus} size={0.5} /> Session
-        </span>
-      </button>
-
-      {/* +Terminal */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onCreateTerminal(); }}
-        className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-cyan-400 hover:border-cyan-500/50"
-        title="New terminal"
-      >
-        <span className="inline-flex items-center gap-0.5">
-          <Icon path={mdiPlus} size={0.5} /> Terminal
         </span>
       </button>
 
