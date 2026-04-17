@@ -30,6 +30,19 @@ async function loadPiPackageManager() {
     }
   } catch { /* fall through to global resolution */ }
 
+  // Try managed install at ~/.pi-dashboard/node_modules/ (Electron portable/standalone)
+  const managedDir = path.join(os.homedir(), ".pi-dashboard");
+  for (const pkgName of ["@mariozechner/pi-coding-agent", "@oh-my-pi/pi-coding-agent"]) {
+    try {
+      const entryPath = path.join(managedDir, "node_modules", pkgName, "dist", "index.js");
+      const mod = await import(pathToFileURL(entryPath).href);
+      if (mod.DefaultPackageManager) {
+        piModuleCache = { DefaultPackageManager: mod.DefaultPackageManager, SettingsManager: mod.SettingsManager };
+        return piModuleCache;
+      }
+    } catch { /* fall through */ }
+  }
+
   // Resolve from global npm install (pi is typically installed globally)
   for (const pkgName of ["@mariozechner/pi-coding-agent", "@oh-my-pi/pi-coding-agent"]) {
     try {
