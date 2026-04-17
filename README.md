@@ -92,7 +92,8 @@ On first launch, a setup wizard guides you through:
    - **Standalone** — Bundles Node.js and auto-installs pi + dashboard + openspec into `~/.pi-dashboard/`. No Node.js, npm, or build tools needed.
    - **Power User** — Uses your existing system-installed pi and dashboard.
 2. **Configure an API key** — Enter your Anthropic/OpenAI key or sign in via browser-based OAuth.
-3. **Done** — The app discovers or spawns a dashboard server automatically.
+3. **Recommended extensions** — Install the curated set of pi extensions the dashboard is built to work with (see [Recommended extensions](#recommended-extensions) below). You can skip and manage them later from the Packages tab.
+4. **Done** — The app discovers or spawns a dashboard server automatically.
 
 > **No terminal, no npm, no Node.js required.** The Electron app is fully self-contained in standalone mode. It bundles a Node.js runtime, spawns the dashboard server internally, and manages all dependencies. System tray integration keeps it running in the background.
 
@@ -121,6 +122,37 @@ cd pi-agent-dashboard
 npm install
 pi install /path/to/pi-agent-dashboard
 ```
+
+## Recommended extensions
+
+The dashboard integrates tightly with a small, curated set of pi extensions
+— for custom tool rendering, the Flow dashboard, and anthropic-messages
+protocol compatibility. The wizard's Recommended-extensions step installs
+them in one go; the **Packages** tab and a top-of-page **banner** keep
+them discoverable afterwards.
+
+| Extension | Source | Status | Unlocks |
+|---|---|---|---|
+| `pi-anthropic-messages` | `git@github.com:BlackBeltTechnology/pi-anthropic-messages.git` | **required** | Tool calls on Claude-model Anthropic OAuth / 9Router `cc/*` / pi-model-proxy providers. Without it, tool calls fall back to Claude Code's built-in `bash_ide` sandbox and fail. |
+| `@tintinweb/pi-subagents` | `npm:@tintinweb/pi-subagents` | strongly suggested | `Agent` tool card UI, subagent activity badge, `get_subagent_result` / `steer_subagent` renderers. |
+| `pi-flows` | `git@github.com:BlackBeltTechnology/pi-flows.git` | strongly suggested | Flow dashboard, role aliases (`@planning`, `@coding`, …), subagent / flow_write / flow_results / agent_write / ask_user / skill_read / finish tools. |
+| `pi-web-access` | `npm:pi-web-access` | strongly suggested | `web_search`, `code_search`, `fetch_content`, `get_search_content`. |
+| `pi-agent-browser` | `npm:pi-agent-browser` | optional | `browser` tool (open, snapshot, click, screenshot). |
+
+Authoritative source of truth: `packages/shared/src/recommended-extensions.ts`.
+Descriptions, versions, and installed-state are enriched live at runtime via
+`GET /api/packages/recommended` (falling back to offline descriptions on
+network failure).
+
+### GitHub SSH notes
+
+The `pi-flows` and `pi-anthropic-messages` entries install via `pi install
+git@github.com:…` (SSH). If your system doesn't have a GitHub SSH key
+configured the clone will fail with a "Permission denied (publickey)"
+error. Set up a key by following
+[GitHub's SSH docs](https://docs.github.com/en/authentication/connecting-to-github-with-ssh),
+or substitute the equivalent HTTPS URL in the manifest if your fork is
+public.
 
 ### Quick test (without installing)
 

@@ -181,6 +181,11 @@ make clean              # Destroy all cloned VMs
 | `src/client/components/PackageInstallConfirmDialog.tsx` | Confirmation dialog before package install (name, source, scope) |
 | `src/client/hooks/usePackageSearch.ts` | Debounced fetch hook for `/api/packages/search` |
 | `src/client/hooks/useInstalledPackages.ts` | Fetch hook for `/api/packages/installed` |
+| `src/client/hooks/useRecommendedExtensions.ts` | Fetch hook for `/api/packages/recommended`; auto-refreshes on `package_operation_complete` |
+| `src/client/components/RecommendedExtensions.tsx` | Curated-recommended-extensions card grid, rendered above search in Packages tab |
+| `src/client/components/MissingRequiredBanner.tsx` | Top-of-page banner when any `required` recommended extension is missing from `~/.pi/agent/settings.json` `packages[]` |
+| `src/shared/recommended-extensions.ts` | Static `RECOMMENDED_EXTENSIONS` manifest (pi-anthropic-messages, @tintinweb/pi-subagents, pi-flows, pi-web-access, pi-agent-browser); enriched server-side with live description/version and installed/active cross-reference |
+| `src/server/routes/recommended-routes.ts` | `GET /api/packages/recommended` — enrichment + 60s cache, invalidated on successful install/remove/update |
 | `src/client/hooks/usePackageOperations.ts` | Install/remove/update actions with WebSocket progress listening |
 | `src/client/hooks/usePiResources.ts` | Fetch + 30s polling hook for pi resources API |
 | `src/client/components/MarkdownPreviewView.tsx` | Generic reusable markdown preview with back button, tabs, loading/error states |
