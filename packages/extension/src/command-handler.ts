@@ -11,6 +11,7 @@ import type {
 import { killProcessByPgid } from "./process-scanner.js";
 import type { FileEntry, PiSessionInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { filterHiddenCommands } from "./bridge-context.js";
+import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
 
 const IGNORE_DIRS = new Set([".git", "node_modules", ".next", "dist", "build", ".cache", "__pycache__", ".venv"]);
 const MAX_RESULTS = 20;
@@ -274,8 +275,15 @@ export function createCommandHandler(
             return undefined;
           }
 
-          // Passthrough: send as regular user message (with image handling)
-          sendUserMessageWithImages(pi, msg.text, msg.images);
+          // Passthrough: send as regular user message (with image handling).
+          // Multi-line slash commands (e.g. "/skill:foo\nuser text") are classified as
+          // passthrough by parseSendPrompt to preserve images (the slash route strips them),
+          // so we expand prompt templates / skills here before sending.
+          let outgoing = msg.text;
+          if (outgoing.startsWith("/")) {
+            outgoing = expandPromptTemplateFromDisk(outgoing, process.cwd(), pi);
+          }
+          sendUserMessageWithImages(pi, outgoing, msg.images);
           return undefined;
         }
 
@@ -324,6 +332,7 @@ export function createCommandHandler(
           const registry = options?.getModelRegistry?.();
           if (registry) {
             try {
+              registry.authStorage?.reload?.();
               registry.refresh();
               const models = registry.getAvailable().map((m: any) => ({
                 provider: m.provider,
