@@ -68,7 +68,7 @@ make clean              # Destroy all cloned VMs
 | `src/extension/server-probe.ts` | TCP probe to detect running server |
 | `src/shared/server-identity.ts` | Identity-verified health check (`isDashboardRunning`) replacing bare TCP probes |
 | `src/shared/mdns-discovery.ts` | mDNS advertise/discover/browse for `_pi-dashboard._tcp` services |
-| `src/extension/server-launcher.ts` | Auto-start server as detached process |
+| `src/extension/server-launcher.ts` | Auto-start server as detached process; captures stdout/stderr to `~/.pi/dashboard/server.log` (append mode) so launch failures are visible |
 | `src/extension/command-handler.ts` | Command routing: `!`/`!!` bash, `/compact`, slash commands |
 | `src/extension/prompt-expander.ts` | Slash command → prompt template expansion (supports colon-to-hyphen aliasing: `/opsx:cmd` → `opsx-cmd.md`) |
 | `src/extension/dev-build.ts` | Dev build-on-reload helper (client build + server shutdown) |
@@ -171,7 +171,9 @@ make clean              # Destroy all cloned VMs
 | `public/manifest.json` | PWA web app manifest for installability |
 | `public/sw.js` | Minimal service worker for PWA installability |
 | `src/client/components/ZrokInstallGuide.tsx` | OS-aware zrok installation guide view (macOS/Linux/Windows) |
-| `src/server/cli.ts` | CLI entry point with subcommands (start/stop/restart/status) |
+| `src/server/cli.ts` | CLI entry point with subcommands (start/stop/restart/status); `findPortHolders` is cross-platform (netstat/taskkill on Windows, lsof on Unix) and `server.log` is opened append-mode with timestamped headers |
+| `src/server/restart-helper.ts` | Cross-platform `/api/restart` orchestrator: spawns a detached `node -e` child using only Node built-ins (net, http) — no sh/lsof/curl dependency; exports pure `buildOrchestratorScript(params)` for testing |
+| `src/shared/resolve-jiti.ts` | Resolves pi's jiti register hook as a `file://` URL (required for `node --import` on Windows); exports pure `buildJitiRegisterUrl(pkgJsonPath)` helper |
 | `src/shared/rest-api.ts` | REST API type definitions |
 | `scripts/reload-all.sh` | Build bridge + reload all pi sessions |
 | `src/client/components/PiResourcesView.tsx` | Content area view for browsing pi extensions, skills, and prompts (with Installed/Packages tabs) |

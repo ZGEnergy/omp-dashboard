@@ -465,15 +465,38 @@ When started with `--dev`, the server proxies client requests to the Vite dev se
 
 ### Graceful Restart
 
-The `POST /api/restart` endpoint and `pi-dashboard restart` command perform fault-tolerant restarts:
+The `POST /api/restart` endpoint and `pi-dashboard restart` command perform fault-tolerant restarts. Implemented in `packages/server/src/restart-helper.ts`: a small orchestrator runs as a detached `node -e <script>` child process using only Node built-ins (`net`, `http`, `child_process`) — **no dependency on `sh`, `lsof`, or `curl`**, so it works identically on Windows, macOS, and Linux.
+
 1. Flush all pending state (meta persistence, preferences)
-2. Spawn new server process
-3. Wait for old server's port to become free (up to 10s)
-4. Start new server with the same (or overridden) flags
-5. Verify health via `/api/health` (up to 10s)
-6. `pi-dashboard stop` also kills any stale processes holding the port (via `lsof`)
+2. Spawn a detached Node orchestrator (inherits the same TypeScript loader from `process.execArgv`)
+3. Orchestrator polls the port via `net.createConnection` (with short timeouts) until the old server releases it (up to 10s)
+4. Orchestrator spawns the new server with the same (or overridden) flags
+5. Orchestrator polls `/api/health` via `http.get` until `{ ok: true }` (up to 10s)
+6. On health-check failure, the orchestrator appends a timestamped line to `~/.pi/dashboard/restart.log`
+7. `pi-dashboard stop` also kills stale processes holding the port: `lsof -t -i :<port>` + `process.kill` on Unix, `netstat -ano` + `taskkill /F /T /PID` on Windows
 
 The restart endpoint accepts `{ dev: boolean }` to switch between dev/production mode.
+
+### Cross-Platform Server Launch
+
+The dashboard server is spawned via `node --import <loader> <cli.ts>` from three call sites (`packages/server/src/cli.ts` `cmdStart`, `packages/extension/src/server-launcher.ts` `launchServer`, `packages/electron/src/lib/server-lifecycle.ts` `launchServer`). On Node ≥ 20, Windows rejects raw absolute paths passed to `--import` because it parses the drive-letter prefix (e.g. `B:`) as a URL scheme (`ERR_UNSUPPORTED_ESM_URL_SCHEME`). Every resolver therefore returns a `file://` URL, not a raw path:
+
+- `packages/shared/src/resolve-jiti.ts` — `resolveJitiImport()` returns `pathToFileURL(registerPath).href`
+- `packages/electron/src/lib/server-lifecycle.ts` — `resolveJitiFromAnchor()` returns the same shape
+- `packages/server/src/cli.ts` — the tsx fallback wraps `esm/index.mjs` the same way
+
+The URL form is cross-platform safe (Linux/macOS accept both raw paths and `file://` URLs) so no platform gating is needed in the resolvers.
+
+### Server Log Hygiene
+
+The daemon log at `~/.pi/dashboard/server.log` is opened in **append mode** (`"a"`) so crash output from prior start attempts survives subsequent retries — essential for diagnosing silent failures. Each attempt writes a timestamped header to distinguish runs:
+
+```
+[2026-04-18T14:30:00.000Z] pi-dashboard start (parent pid 12345, port 8000)
+[2026-04-18T14:30:02.000Z] bridge auto-start (parent pid 23456, port 8000)
+```
+
+Both `pi-dashboard start` (CLI) and the bridge extension's `launchServer` write to this file. Previously the extension used `stdio: "ignore"` (losing all error output) and the CLI opened the log with `"w"` (truncating prior runs); both were fixed in `fix-windows-server-parity`. On auto-start failure, the bridge now surfaces the log path in its `ui.notify` message so users can open the file directly.
 
 ### Auto-Start Flow
 
