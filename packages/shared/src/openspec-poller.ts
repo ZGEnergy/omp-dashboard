@@ -17,6 +17,8 @@ function runOpenSpecSync(args: string[], cwd: string): unknown | null {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 10_000,
+      // Suppress the cmd.exe flash on Windows when spawning openspec.cmd.
+      windowsHide: true,
     });
     if (result.status !== 0 || !result.stdout) return null;
     return JSON.parse(result.stdout);
@@ -32,6 +34,10 @@ async function runOpenSpecAsync(args: string[], cwd: string): Promise<unknown | 
       cwd,
       encoding: "utf-8",
       timeout: 10_000,
+      // Suppress the cmd.exe flash on Windows when spawning openspec.cmd.
+      // Without this, the 30s directory-service poll flashes a console
+      // window per directory per change (15+ times per cycle).
+      windowsHide: true,
     });
     if (!stdout) return null;
     return JSON.parse(stdout);

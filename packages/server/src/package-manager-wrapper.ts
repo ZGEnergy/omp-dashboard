@@ -46,7 +46,12 @@ async function loadPiPackageManager() {
   // Resolve from global npm install (pi is typically installed globally)
   for (const pkgName of ["@mariozechner/pi-coding-agent", "@oh-my-pi/pi-coding-agent"]) {
     try {
-      const npmRoot = execSync("npm root -g", { encoding: "utf-8", timeout: 10_000 }).trim();
+      const npmRoot = execSync("npm root -g", {
+        encoding: "utf-8",
+        timeout: 10_000,
+        // Suppress the cmd.exe flash on Windows when spawning npm.cmd.
+        windowsHide: true,
+      }).trim();
       const entryPath = path.join(npmRoot, pkgName, "dist", "index.js");
       const mod = await import(pathToFileURL(entryPath).href);
       if (mod.DefaultPackageManager) {

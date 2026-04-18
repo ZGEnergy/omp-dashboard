@@ -89,7 +89,12 @@ export function handleOpenSpecBulkArchive(
   ctx: BrowserHandlerContext,
 ): void {
   if (ctx.directoryService) {
-    execFileAsync("openspec", ["archive", "--completed"], { cwd: msg.cwd, timeout: 30000 })
+    execFileAsync("openspec", ["archive", "--completed"], {
+      cwd: msg.cwd,
+      timeout: 30000,
+      // Suppress the cmd.exe flash on Windows when spawning openspec.cmd.
+      windowsHide: true,
+    })
       .catch(() => {})
       .then(() => ctx.directoryService!.refreshOpenSpec(msg.cwd))
       .then((data) => {

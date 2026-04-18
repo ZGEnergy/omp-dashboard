@@ -169,6 +169,8 @@ function whichSync(cmd: string): string | null {
     const raw = execSync(`${whichCmd} ${cmd}`, {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
+      // Suppress any cmd.exe window flash when a resolved binary is a .cmd shim.
+      windowsHide: true,
     });
     const text = typeof raw === "string" ? raw : String(raw);
     return text.trim().split("\n")[0] || null;
@@ -185,6 +187,7 @@ function whichViaLoginShell(cmd: string): string | null {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 5000,
+      windowsHide: true,
     });
     const output = (typeof raw === "string" ? raw : String(raw)).trim();
     // Extract absolute path from potentially noisy login shell output

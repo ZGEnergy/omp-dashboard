@@ -180,7 +180,12 @@ let cachedNpmGlobalRoot: string | null = null;
 function getNpmGlobalRoot(): string | null {
   if (cachedNpmGlobalRoot !== null) return cachedNpmGlobalRoot;
   try {
-    cachedNpmGlobalRoot = execSync("npm root -g", { encoding: "utf-8", timeout: 10_000 }).trim();
+    cachedNpmGlobalRoot = execSync("npm root -g", {
+      encoding: "utf-8",
+      timeout: 10_000,
+      // Suppress the cmd.exe flash on Windows when spawning npm.cmd.
+      windowsHide: true,
+    }).trim();
     return cachedNpmGlobalRoot;
   } catch {
     cachedNpmGlobalRoot = "";
