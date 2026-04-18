@@ -5,7 +5,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { execSync } from "node:child_process";
+import * as npm from "@blackbelt-technology/pi-dashboard-shared/platform/npm.js";
 import type { PiResource, PiResourceScope, PiPackageInfo, PiResourcesResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 
 // ── Frontmatter Parsing ─────────────────────────────────────────────
@@ -179,18 +179,10 @@ let cachedNpmGlobalRoot: string | null = null;
 
 function getNpmGlobalRoot(): string | null {
   if (cachedNpmGlobalRoot !== null) return cachedNpmGlobalRoot;
-  try {
-    cachedNpmGlobalRoot = execSync("npm root -g", {
-      encoding: "utf-8",
-      timeout: 10_000,
-      // Suppress the cmd.exe flash on Windows when spawning npm.cmd.
-      windowsHide: true,
-    }).trim();
-    return cachedNpmGlobalRoot;
-  } catch {
-    cachedNpmGlobalRoot = "";
-    return null;
-  }
+  // Delegate to shared npm module which caches the result itself and
+  // handles windowsHide / timeout. See change: platform-command-executor.
+  cachedNpmGlobalRoot = npm.rootGlobalOr("");
+  return cachedNpmGlobalRoot || null;
 }
 
 /** Visible for testing — reset cached npm root */

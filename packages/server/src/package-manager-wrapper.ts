@@ -7,7 +7,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { execSync } from "node:child_process";
+import * as npm from "@blackbelt-technology/pi-dashboard-shared/platform/npm.js";
 export interface ProgressEvent {
   type: "start" | "progress" | "complete" | "error";
   action: "install" | "remove" | "update" | "clone" | "pull";
@@ -46,12 +46,8 @@ async function loadPiPackageManager() {
   // Resolve from global npm install (pi is typically installed globally)
   for (const pkgName of ["@mariozechner/pi-coding-agent", "@oh-my-pi/pi-coding-agent"]) {
     try {
-      const npmRoot = execSync("npm root -g", {
-        encoding: "utf-8",
-        timeout: 10_000,
-        // Suppress the cmd.exe flash on Windows when spawning npm.cmd.
-        windowsHide: true,
-      }).trim();
+      const npmRoot = npm.rootGlobalOr("");
+      if (!npmRoot) throw new Error("npm root -g failed");
       const entryPath = path.join(npmRoot, pkgName, "dist", "index.js");
       const mod = await import(pathToFileURL(entryPath).href);
       if (mod.DefaultPackageManager) {
