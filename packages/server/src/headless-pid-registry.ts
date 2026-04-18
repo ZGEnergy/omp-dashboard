@@ -6,6 +6,7 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readJsonFile, writeJsonFile } from "./json-store.js";
+import { killPidWithGroup } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 import path from "node:path";
 import os from "node:os";
 
@@ -123,12 +124,9 @@ export function createHeadlessPidRegistry(options?: HeadlessPidRegistryOptions):
       for (const entry of entries.values()) {
         if (entry.sessionId === sessionId) {
           try {
-            // On Unix, kill the entire process group (negative PID) so the
-            // wrapper shell, sleep, and pi processes are all terminated.
-            // On Windows, process groups aren't supported — kill directly.
-            const signal = "SIGTERM";
-            const pid = process.platform === "win32" ? entry.pid : -entry.pid;
-            process.kill(pid, signal);
+            // Delegate platform-specific pid-vs-group-pid handling to the
+            // shared primitive. See change: consolidate-platform-handlers.
+            killPidWithGroup(entry.pid, "SIGTERM");
             entries.delete(entry.pid);
             persist();
             return true;
@@ -148,10 +146,9 @@ export function createHeadlessPidRegistry(options?: HeadlessPidRegistryOptions):
     },
 
     killAll() {
-      const useGroup = process.platform !== "win32";
       for (const [pid] of entries) {
         try {
-          process.kill(useGroup ? -pid : pid, "SIGTERM");
+          killPidWithGroup(pid, "SIGTERM");
         } catch {
           // Process may have already exited
         }
@@ -181,8 +178,7 @@ export function createHeadlessPidRegistry(options?: HeadlessPidRegistryOptions):
         if (age > MAX_ORPHAN_AGE_MS) {
           // Very old orphan — kill (process group on Unix, direct on Windows)
           try {
-            const pid = process.platform === "win32" ? entry.pid : -entry.pid;
-            process.kill(pid, "SIGTERM");
+            killPidWithGroup(entry.pid, "SIGTERM");
           } catch {
             // Already dead
           }
