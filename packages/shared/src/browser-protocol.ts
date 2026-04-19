@@ -226,6 +226,21 @@ export interface PackageProgressMessage {
   };
 }
 
+/** Progress event streamed during a pi core package update. */
+export interface PiCoreUpdateProgressMessage {
+  type: "pi_core_update_progress";
+  name: string;
+  phase: "start" | "output" | "complete" | "error";
+  message?: string;
+}
+
+/** Sent when a full pi core update batch finishes. */
+export interface PiCoreUpdateCompleteMessage {
+  type: "pi_core_update_complete";
+  results: Array<{ name: string; success: boolean; error?: string }>;
+  sessionsReloaded: number;
+}
+
 /** Sent when a package operation finishes (success or failure). */
 export interface PackageOperationCompleteMessage {
   type: "package_operation_complete";
@@ -264,6 +279,8 @@ export type ServerToBrowserMessage =
   | SessionStateResetMessage
   | PackageProgressMessage
   | PackageOperationCompleteMessage
+  | PiCoreUpdateProgressMessage
+  | PiCoreUpdateCompleteMessage
   | EditorStatusMessage
   | ForceKillResultMessage
   | BrowserRolesListMessage

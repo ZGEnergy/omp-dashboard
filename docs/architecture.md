@@ -287,6 +287,16 @@ Metadata is parsed from SKILL.md YAML frontmatter (`name`, `description`), promp
 
 Package operations use pi's `DefaultPackageManager` API on the server, serialized (one at a time, 409 on concurrent). Progress events are forwarded to browsers via `package_progress` WebSocket messages. After any successful operation, the server sends `/reload` to all connected pi sessions.
 
+**Pi Core Version Check (separate from extension management):**
+- `GET /api/pi-core/versions[?refresh=true]` — returns `PiCoreStatus` with all discovered pi ecosystem CLI packages (pi itself, pi-dashboard, pi-model-proxy, bare `pi-*` and scoped `@x/pi-*`), their installed version, latest npm-registry version, `updateAvailable` flag, and `installSource` (`"global"` via `npm list -g --depth=0 --json` vs `"managed"` in `~/.pi-dashboard/node_modules/`). Cached 5 min.
+- `POST /api/pi-core/update` with `{ packages?: string[] }` — updates the listed packages, or all packages with `updateAvailable` when omitted. Runs `npm update -g <pkg>` (global) or `npm update <pkg>` in `~/.pi-dashboard/` (managed). Shares the `PackageManagerWrapper.runExclusive()` busy-lock with extension operations — returns 409 on contention.
+
+Why a separate system? Pi's `DefaultPackageManager` only manages packages listed in `settings.json packages[]` (extensions/skills/prompts/themes). The pi CLI binary itself and the dashboard server package are installed directly via `npm -g` (or into `~/.pi-dashboard/` in the Electron case) and are invisible to pi's manager. `PiCoreChecker` + `PiCoreUpdater` (`pi-core-checker.ts` + `pi-core-updater.ts`) fill that gap.
+
+Progress for core updates is delivered via typed `pi_core_update_progress` / `pi_core_update_complete` browser-protocol messages (not the `package_progress` channel) and fanned out to `PiCoreVersionsSection` and `PiUpdateBadge` via a `pi-core-event` DOM event. After any successful core update the server sends `/reload` to connected pi sessions just like extension updates.
+
+**Header badge**: `PiUpdateBadge` polls `/api/pi-core/versions` on mount + every 30 min. When `updatesAvailable > 0` it renders a small pill-shaped button next to the `ServerSelector` that navigates to `/settings?tab=packages`.
+
 **Client navigation stack:**
 - Puzzle icon button in folder header → PiResourcesView (content area, "Installed" / "Packages" tabs)
 - "View" button on resource → MarkdownPreviewView (`.md` as markdown, `.ts` as code block)

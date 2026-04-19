@@ -259,6 +259,46 @@ export interface PackageUpdateInfo {
 
 export type CheckUpdatesResponse = ApiResponse<PackageUpdateInfo[]>;
 
+// ── Pi core version check ────────────────────────────────────
+
+/** A core pi ecosystem CLI package (not managed by pi's PackageManager). */
+export interface PiCorePackage {
+  name: string;
+  displayName: string;
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  installSource: "global" | "managed";
+}
+
+export interface PiCoreStatus {
+  packages: PiCorePackage[];
+  updatesAvailable: number;
+  lastChecked: string;
+}
+
+export type PiCoreVersionsResponse = ApiResponse<PiCoreStatus>;
+
+/** Request body for POST /api/pi-core/update. Empty packages = update all. */
+export interface PiCoreUpdateRequest {
+  packages?: string[];
+}
+
+/** Result of a single package update. */
+export interface PiCoreUpdateResult {
+  name: string;
+  success: boolean;
+  error?: string;
+}
+
+/** Response from POST /api/pi-core/update (completes synchronously). */
+export interface PiCoreUpdateResponse {
+  results: PiCoreUpdateResult[];
+  sessionsReloaded: number;
+}
+
+export type PiCoreUpdateApiResponse = ApiResponse<PiCoreUpdateResponse>;
+
 // ── Known Servers ─────────────────────────────────────────────
 
 import type { KnownServer } from "./config.js";

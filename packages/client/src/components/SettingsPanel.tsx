@@ -14,6 +14,7 @@ import { PackageInstallConfirmDialog } from "./PackageInstallConfirmDialog.js";
 import { PackageReadmeDialog } from "./PackageReadmeDialog.js";
 import { useInstalledPackages } from "../hooks/useInstalledPackages.js";
 import { usePackageOperations } from "../hooks/usePackageOperations.js";
+import { PiCoreVersionsSection } from "./PiCoreVersionsSection.js";
 import type { NpmPackageResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 
 interface ProviderConfig {
@@ -531,7 +532,10 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
 
           {/* Advanced Tab */}
           {activeTab === "packages" && (
-            <GlobalPackagesSection />
+            <div className="space-y-6">
+              <PiCoreVersionsSection />
+              <GlobalPackagesSection />
+            </div>
           )}
 
           {activeTab === "advanced" && (

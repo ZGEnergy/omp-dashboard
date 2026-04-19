@@ -381,6 +381,12 @@ export function useMessageHandler(
         window.dispatchEvent(new CustomEvent("pi-package-event", { detail: msg }));
         break;
 
+      case "pi_core_update_progress":
+      case "pi_core_update_complete":
+        // Dispatch to PiCore hooks via custom DOM event
+        window.dispatchEvent(new CustomEvent("pi-core-event", { detail: msg }));
+        break;
+
       case "editor_status":
         setEditorStatuses((prev) => {
           const next = new Map(prev);
