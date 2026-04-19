@@ -1,0 +1,86 @@
+---
+export interface Props {
+  title: string;
+  blurb: string;
+  /** Optional image path relative to /public. */
+  image?: string;
+  imageAlt?: string;
+  /** Optional badge (e.g. "Mobile", "Realtime"). */
+  badge?: string;
+  badgeTone?: "accent" | "success" | "warn";
+  /** Tailwind grid span classes, e.g. "md:col-span-6 md:row-span-2". */
+  span?: string;
+  /** Extra classes. */
+  class?: string;
+  /** Zero-based index for reveal stagger timing. */
+  revealIndex?: number;
+}
+
+const {
+  title,
+  blurb,
+  image,
+  imageAlt,
+  badge,
+  badgeTone = "accent",
+  span = "md:col-span-4",
+  class: cls = "",
+  revealIndex = 0,
+} = Astro.props;
+
+const toneColor =
+  badgeTone === "success"
+    ? "bg-emerald-400/10 text-emerald-300 border-emerald-400/20"
+    : badgeTone === "warn"
+      ? "bg-amber-400/10 text-amber-300 border-amber-400/20"
+      : "bg-pi-accent/10 text-pi-accent border-pi-accent/30";
+---
+
+<article
+  data-reveal
+  style={`--reveal-delay: ${revealIndex}`}
+  class:list={[
+    "group pi-gradient-border pi-hover-glow relative rounded-2xl bg-pi-surface/60 backdrop-blur-sm overflow-hidden",
+    "flex flex-col",
+    span,
+    cls,
+  ]}
+>
+  <div class="p-6 flex flex-col gap-3 flex-1">
+    <div class="flex items-center gap-2">
+      <h3 class="text-lg font-semibold tracking-tight text-pi-fg">
+        {title}
+      </h3>
+      {
+        badge && (
+          <span
+            class:list={[
+              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+              toneColor,
+            ]}
+          >
+            <span class="h-1.5 w-1.5 rounded-full bg-current" />
+            {badge}
+          </span>
+        )
+      }
+    </div>
+    <p class="text-sm leading-relaxed text-pi-muted">{blurb}</p>
+    <slot name="extra" />
+  </div>
+
+  {
+    image && (
+      <div class="relative mt-auto">
+        <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-pi-accent/30 to-transparent" />
+        <img
+          src={image}
+          alt={imageAlt ?? title}
+          loading="lazy"
+          decoding="async"
+          class="w-full object-cover object-top max-h-72 group-hover:scale-[1.01] transition-transform duration-500"
+        />
+      </div>
+    )
+  }
+</article>

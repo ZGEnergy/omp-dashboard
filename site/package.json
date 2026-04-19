@@ -1,0 +1,33 @@
+{
+  "name": "@blackbelt-technology/pi-dashboard-site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Marketing site for pi-agent-dashboard — Astro + Tailwind + MDX",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "check": "astro check",
+    "screenshots": "tsx scripts/screenshots/capture.ts",
+    "size": "node ./scripts/check-js-size.mjs"
+  },
+  "dependencies": {
+    "@astrojs/mdx": "^4.0.3",
+    "@astrojs/preact": "^4.0.1",
+    "@astrojs/tailwind": "^5.1.4",
+    "astro": "^5.1.1",
+    "motion": "^11.15.0",
+    "preact": "^10.25.4",
+    "tailwindcss": "^3.4.17"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.5",
+    "playwright": "^1.49.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
