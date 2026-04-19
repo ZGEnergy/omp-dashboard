@@ -180,6 +180,8 @@ make clean              # Destroy all cloned VMs
 | `src/server/cli.ts` | CLI entry point with subcommands (start/stop/restart/status) |
 | `src/shared/rest-api.ts` | REST API type definitions |
 | `scripts/reload-all.sh` | Build bridge + reload all pi sessions |
+| `CHANGELOG.md` | Human-authored release notes per version (Keep a Changelog 1.1.0); source of GitHub Release bodies. Contributors append bullets to `## [Unreleased]`; release author promotes at tag time. |
+| `docs/release-process.md` | Canonical how-to for cutting a release: commit conventions, Unreleased promotion, version bump, tag + push, CI behavior, manual fallback. |
 | `src/client/components/PiResourcesView.tsx` | Content area view for browsing pi extensions, skills, and prompts (with Installed/Packages tabs) |
 | `src/client/components/PackageBrowser.tsx` | Reusable inline package browser: npm search, type filters, install/uninstall, manual URL input |
 | `src/client/components/PackageCard.tsx` | Package card with type badges, downloads, install/uninstall actions |

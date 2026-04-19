@@ -200,11 +200,47 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        shell: bash
+        run: |
+          set -u
+          version="${GITHUB_REF_NAME#v}"
+          echo "Extracting notes for version: ${version}"
+          if [ ! -f CHANGELOG.md ]; then
+            echo "::warning::CHANGELOG.md not found — using fallback body"
+            printf 'See [CHANGELOG.md](https://github.com/%s/blob/main/CHANGELOG.md) for full notes.\n' "${GITHUB_REPOSITORY}" > release-notes.md
+            echo "fallback=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Capture content from '## [<version>]' up to (but not including) the next '## [' heading or EOF.
+          awk -v ver="${version}" '
+            BEGIN { found=0 }
+            /^## \[/ {
+              if (found) exit
+              if ($0 ~ "^## \\[" ver "\\]") { found=1; next }
+            }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::warning::No CHANGELOG section found for ${version} — using fallback body"
+            printf 'See [CHANGELOG.md](https://github.com/%s/blob/main/CHANGELOG.md) for full notes.\n' "${GITHUB_REPOSITORY}" > release-notes.md
+            echo "fallback=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "fallback=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "--- release-notes.md ---"
+          cat release-notes.md
+          echo "--- end ---"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: electron-*/**/*
-          generate_release_notes: true
+          body_path: release-notes.md
+          generate_release_notes: ${{ steps.notes.outputs.fallback == 'true' }}
           draft: true
