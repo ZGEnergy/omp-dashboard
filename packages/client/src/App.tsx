@@ -838,7 +838,7 @@ export default function App() {
               </div>
             </div>
           }>
-            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} onCancelPending={handleCancelPending} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} onDismissError={selectedId ? () => {
+            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} onCancelPending={handleCancelPending} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} onRetryAfterError={selectedId ? () => handleResumeSession(selectedId, "continue") : undefined} onDismissError={selectedId ? () => {
               setSessionStates((prev) => {
                 const next = new Map(prev);
                 const current = next.get(selectedId!);

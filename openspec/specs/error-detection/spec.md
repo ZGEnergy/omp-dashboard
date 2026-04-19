@@ -26,7 +26,7 @@ The `lastError` field SHALL be cleared when a new agent turn begins, indicating 
 - **THEN** `SessionState.lastError` SHALL be cleared to `undefined`
 
 ### Requirement: Error banner in chat view
-The ChatView SHALL render an inline error banner when `SessionState.lastError` is present. The banner SHALL display the error message, a warning icon, and a dismiss button.
+The ChatView SHALL render an inline error banner when `SessionState.lastError` is present. The banner SHALL be implemented by a reusable `ErrorBanner` component (`packages/client/src/components/ErrorBanner.tsx`) and SHALL display the error message, a warning icon, a copy-to-clipboard control, and an optional dismiss button. The banner SHALL preserve the `data-testid` attributes `error-banner` and `error-banner-dismiss` so existing integrations and tests continue to work.
 
 #### Scenario: Error banner shown after LLM error
 - **WHEN** `SessionState.lastError` is set with a message
@@ -39,6 +39,40 @@ The ChatView SHALL render an inline error banner when `SessionState.lastError` i
 #### Scenario: Error banner auto-clears on new turn
 - **WHEN** a new `agent_start` event arrives
 - **THEN** the error banner SHALL disappear
+
+#### Scenario: Error message is copyable
+- **WHEN** the error banner is visible
+- **THEN** a copy control SHALL be present that writes the full untruncated `lastError.message` to the clipboard via `navigator.clipboard.writeText`
+
+### Requirement: Long error messages collapse with toggle
+The error banner SHALL truncate messages longer than a configurable threshold (default 240 characters) to avoid overwhelming the chat view, and SHALL expose a Show more / Show less toggle to reveal the full text.
+
+#### Scenario: Long message is truncated by default
+- **WHEN** `lastError.message` exceeds the collapse threshold
+- **THEN** the rendered text SHALL be truncated with an ellipsis (`…`)
+- **AND** a toggle button labelled "Show more" SHALL be visible
+
+#### Scenario: User expands a truncated message
+- **WHEN** the user clicks the "Show more" toggle
+- **THEN** the full untruncated message SHALL be rendered
+- **AND** the toggle label SHALL change to "Show less"
+
+#### Scenario: Short message has no toggle
+- **WHEN** `lastError.message` is at or below the collapse threshold
+- **THEN** no Show more / Show less toggle SHALL be rendered
+
+### Requirement: Retry action on error banner
+The error banner SHALL render a Retry control when the host view supplies a retry handler. Clicking Retry SHALL trigger a session resume in `"continue"` mode so the model can re-attempt the failed turn (e.g. re-emit a tool call whose JSON arguments were rejected).
+
+#### Scenario: Retry button continues the session
+- **GIVEN** the error banner is visible for a session with `lastError` set
+- **AND** a retry handler is wired (in App.tsx) to `handleResumeSession(selectedId, "continue")`
+- **WHEN** the user clicks the Retry button
+- **THEN** a `resume_session` message with `mode: "continue"` SHALL be sent to the server for that session
+
+#### Scenario: Retry button hidden when no handler is provided
+- **WHEN** the error banner is rendered without an `onRetry` callback
+- **THEN** no Retry button SHALL be rendered
 
 ### Requirement: Error indicator on session card
 The session card in the sidebar SHALL show a red status dot when the session has an active error.

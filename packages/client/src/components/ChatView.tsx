@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState, useMemo, forwardRef, useImperativeHandle } from "react";
 import { Icon } from "@mdi/react";
-import { mdiContentCopy, mdiTextBox, mdiLoading, mdiChevronDown, mdiSourceFork, mdiAlert, mdiClose } from "@mdi/js";
+import { mdiContentCopy, mdiTextBox, mdiLoading, mdiChevronDown, mdiSourceFork } from "@mdi/js";
+import { ErrorBanner } from "./ErrorBanner";
 import type { SessionState, ChatImage, InteractiveUiRequest } from "../lib/event-reducer.js";
 import type { ToolContext } from "./tool-renderers/index.js";
 import { MarkdownContent } from "./MarkdownContent.js";
@@ -28,6 +29,7 @@ interface Props {
   onForceKill?: () => void;
   onForkFromMessage?: (entryId: string) => void;
   onDismissError?: () => void;
+  onRetryAfterError?: () => void;
 }
 
 function ImageAttachments({ images }: { images: ChatImage[] }) {
@@ -119,7 +121,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onCancelPending, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onDismissError }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onCancelPending, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onDismissError, onRetryAfterError }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottom = useRef(true);
   const programmaticScroll = useRef(false);
@@ -387,22 +389,11 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
 
       {/* Error banner */}
       {state.lastError && (
-        <div data-testid="error-banner" className="mt-4 mb-2 mx-auto max-w-2xl">
-          <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-2.5 flex items-start gap-2">
-            <Icon path={mdiAlert} size={0.7} className="text-red-400 shrink-0 mt-0.5" />
-            <span className="flex-1 text-sm text-red-300">{state.lastError.message}</span>
-            {onDismissError && (
-              <button
-                data-testid="error-banner-dismiss"
-                onClick={onDismissError}
-                className="text-red-400 hover:text-red-300 shrink-0"
-                title="Dismiss"
-              >
-                <Icon path={mdiClose} size={0.6} />
-              </button>
-            )}
-          </div>
-        </div>
+        <ErrorBanner
+          message={state.lastError.message}
+          onDismiss={onDismissError}
+          onRetry={onRetryAfterError}
+        />
       )}
 
       {/* Optimistic pending prompt card */}
