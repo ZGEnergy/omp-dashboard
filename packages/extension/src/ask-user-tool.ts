@@ -7,7 +7,6 @@
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { StringEnum } from "@mariozechner/pi-ai";
 
 export function registerAskUserTool(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -22,27 +21,78 @@ export function registerAskUserTool(pi: ExtensionAPI): void {
       "Use method 'confirm' for yes/no questions, 'select' when offering specific choices, 'multiselect' when the user should pick multiple items from a list, and 'input' for open-ended questions.",
       "This applies to all workflows including OpenSpec, planning, and any situation where you need user input before proceeding.",
     ],
-    parameters: Type.Object({
-      method: StringEnum(["confirm", "select", "multiselect", "input"] as const, {
-        description:
-          "Type of question: confirm (yes/no), select (pick from options), multiselect (pick multiple), input (free text)",
-      }),
-      title: Type.Optional(Type.String({ description: "Short title for the question (optional, falls back to message)" })),
-      message: Type.Optional(Type.String({ description: "Additional context or detailed question body (all methods)" })),
-      options: Type.Optional(
-        Type.Array(Type.String(), { description: "Options to choose from (for select)" }),
-      ),
-      placeholder: Type.Optional(Type.String({ description: "Placeholder text (for input)" })),
-    }),
+    parameters: Type.Union(
+      [
+        Type.Object({
+          method: Type.Literal("confirm", { description: "Yes/no question" }),
+          title: Type.String({ description: "The question to confirm" }),
+          message: Type.Optional(Type.String({ description: "Additional context or detailed question body" })),
+        }),
+        Type.Object({
+          method: Type.Literal("select", { description: "Pick one option from a list" }),
+          title: Type.String({ description: "Short title for the question" }),
+          options: Type.Array(Type.String(), {
+            minItems: 2,
+            description: "Options the user chooses between (at least 2; use 'confirm' for yes/no)",
+          }),
+          message: Type.Optional(Type.String({ description: "Additional context" })),
+        }),
+        Type.Object({
+          method: Type.Literal("multiselect", { description: "Pick multiple options from a list" }),
+          title: Type.String({ description: "Short title for the question" }),
+          options: Type.Array(Type.String(), {
+            minItems: 1,
+            description: "Options the user can multi-select",
+          }),
+          message: Type.Optional(Type.String({ description: "Additional context" })),
+        }),
+        Type.Object({
+          method: Type.Literal("input", { description: "Free-text input" }),
+          title: Type.String({ description: "Short title for the question" }),
+          placeholder: Type.Optional(Type.String({ description: "Placeholder text for the input field" })),
+          message: Type.Optional(Type.String({ description: "Additional context" })),
+        }),
+      ],
+      { description: "Parameters for ask_user, discriminated by method." },
+    ),
     prepareArguments(args: unknown) {
-      const obj = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
-      // LLMs sometimes send options as a JSON string instead of an array
+      let obj = (args && typeof args === "object" ? { ...(args as Record<string, unknown>) } : {}) as Record<string, unknown>;
+
+      // 1. LLMs sometimes wrap everything under `params` (stringified or object).
+      //    Unwrap so top-level fields like title/options become available for validation.
+      if (obj.params !== undefined) {
+        let inner: Record<string, unknown> | undefined;
+        if (typeof obj.params === "string") {
+          try {
+            const parsed = JSON.parse(obj.params);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              inner = parsed as Record<string, unknown>;
+            }
+          } catch { /* leave as-is */ }
+        } else if (obj.params && typeof obj.params === "object" && !Array.isArray(obj.params)) {
+          inner = obj.params as Record<string, unknown>;
+        }
+        if (inner) {
+          // Merge inner under existing top-level values (top-level wins).
+          const { params: _omit, ...rest } = obj;
+          obj = { ...inner, ...rest };
+          delete (obj as Record<string, unknown>).params;
+        }
+      }
+
+      // 2. LLMs sometimes use `question` instead of `title`.
+      if (obj.title === undefined && typeof obj.question === "string") {
+        obj.title = obj.question;
+      }
+
+      // 3. LLMs sometimes send options as a JSON string instead of an array.
       if (typeof obj.options === "string") {
         try {
           const parsed = JSON.parse(obj.options);
           if (Array.isArray(parsed)) obj.options = parsed;
         } catch { /* leave as-is, validation will report */ }
       }
+
       return obj as any;
     },
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {
@@ -58,6 +108,16 @@ export function registerAskUserTool(pi: ExtensionAPI): void {
         : typeof params.options === "string"
           ? (() => { try { const p = JSON.parse(params.options); return Array.isArray(p) ? p : []; } catch { return []; } })()
           : [];
+
+      // Defense-in-depth: even if schema validation was bypassed, refuse to render
+      // an unusable dialog. A clear error reaches the LLM so it can correct itself.
+      if ((params.method === "select" || params.method === "multiselect") && options.length === 0) {
+        throw new Error(
+          `ask_user: method "${params.method}" requires a non-empty "options" array. ` +
+          `Received: ${JSON.stringify(params.options)}. ` +
+          `If no choices are available, use method "input" instead.`,
+        );
+      }
 
       switch (params.method) {
         case "confirm":

@@ -7,6 +7,8 @@ vi.mock("@sinclair/typebox", () => ({
     String: vi.fn(() => ({})),
     Optional: vi.fn((x: any) => x),
     Array: vi.fn(() => ({})),
+    Union: vi.fn(() => ({})),
+    Literal: vi.fn(() => ({})),
   },
 }));
 
@@ -100,10 +102,28 @@ describe("registerAskUserTool", () => {
       expect(ctx.ui.select).toHaveBeenCalledWith("Pick", ["A", "B"], undefined);
     });
 
-    it("handles malformed options string gracefully", async () => {
+    it("throws when select reaches execute with unparseable options string", async () => {
       const { tool, ctx } = getToolAndMockCtx();
-      await tool.execute("id", { method: "select", title: "Pick", options: "not json" }, undefined, undefined, ctx);
-      expect(ctx.ui.select).toHaveBeenCalledWith("Pick", [], undefined);
+      await expect(
+        tool.execute("id", { method: "select", title: "Pick", options: "not json" }, undefined, undefined, ctx),
+      ).rejects.toThrow(/options/i);
+      expect(ctx.ui.select).not.toHaveBeenCalled();
+    });
+
+    it("throws when select is invoked with empty options array", async () => {
+      const { tool, ctx } = getToolAndMockCtx();
+      await expect(
+        tool.execute("id", { method: "select", title: "Pick", options: [] }, undefined, undefined, ctx),
+      ).rejects.toThrow(/options.*input/is);
+      expect(ctx.ui.select).not.toHaveBeenCalled();
+    });
+
+    it("throws when multiselect is invoked without options", async () => {
+      const { tool, ctx } = getToolAndMockCtx();
+      await expect(
+        tool.execute("id", { method: "multiselect", title: "Pick" }, undefined, undefined, ctx),
+      ).rejects.toThrow(/options/i);
+      expect(ctx.ui.multiselect).not.toHaveBeenCalled();
     });
   });
 
@@ -130,6 +150,62 @@ describe("registerAskUserTool", () => {
       const tool = getTool();
       const result = tool.prepareArguments({ method: "select", title: "Pick", options: "not json" });
       expect(result.options).toBe("not json");
+    });
+
+    it("unwraps stringified params wrapper", () => {
+      const tool = getTool();
+      const result = tool.prepareArguments({
+        method: "select",
+        params: '{"title":"X","options":["a","b"]}',
+      });
+      expect(result.method).toBe("select");
+      expect(result.title).toBe("X");
+      expect(result.options).toEqual(["a", "b"]);
+      expect(result.params).toBeUndefined();
+    });
+
+    it("unwraps object-form params wrapper", () => {
+      const tool = getTool();
+      const result = tool.prepareArguments({
+        method: "select",
+        params: { title: "X", options: ["a", "b"] },
+      });
+      expect(result.method).toBe("select");
+      expect(result.title).toBe("X");
+      expect(result.options).toEqual(["a", "b"]);
+      expect(result.params).toBeUndefined();
+    });
+
+    it("copies question into title when title is absent", () => {
+      const tool = getTool();
+      const result = tool.prepareArguments({ method: "input", question: "Your name?" });
+      expect(result.title).toBe("Your name?");
+    });
+
+    it("does not overwrite explicit title with question", () => {
+      const tool = getTool();
+      const result = tool.prepareArguments({ method: "input", title: "T", question: "Q" });
+      expect(result.title).toBe("T");
+    });
+
+    it("top-level fields win over params wrapper", () => {
+      const tool = getTool();
+      const result = tool.prepareArguments({
+        method: "select",
+        title: "OuterTitle",
+        params: { title: "InnerTitle", options: ["a", "b"] },
+      });
+      expect(result.title).toBe("OuterTitle");
+      expect(result.options).toEqual(["a", "b"]);
+    });
+
+    it("rescues options JSON string inside params wrapper", () => {
+      const tool = getTool();
+      const result = tool.prepareArguments({
+        method: "select",
+        params: '{"title":"X","options":"[\\"a\\",\\"b\\"]"}',
+      });
+      expect(result.options).toEqual(["a", "b"]);
     });
   });
 });
