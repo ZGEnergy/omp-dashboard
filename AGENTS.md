@@ -128,6 +128,12 @@ make clean              # Destroy all cloned VMs
 | `src/server/package-manager-wrapper.ts` | Thin adapter around pi's `DefaultPackageManager` with operation serialization, progress forwarding, and session reload |
 | `src/server/npm-search-proxy.ts` | Cached proxy for npm registry search (`keywords:pi-package`) and README fetch |
 | `src/server/routes/package-routes.ts` | REST routes: search, readme, installed, install, remove, update, check-updates |
+| `packages/server/src/pi-core-checker.ts` | Discovers pi ecosystem CORE CLI packages (pi itself, pi-dashboard, pi-model-proxy, etc.) from global npm + `~/.pi-dashboard/node_modules/` and compares against the npm registry. Complements PackageManagerWrapper which only manages extensions in `settings.json packages[]`. 5-min cache. |
+| `packages/server/src/pi-core-updater.ts` | Runs `npm update -g <pkg>` (global install) or `npm update <pkg>` in `~/.pi-dashboard/` (managed install), streams progress via listener, acquires `PackageManagerWrapper.runExclusive()` busy-lock, auto-reloads sessions on any successful update. |
+| `packages/server/src/routes/pi-core-routes.ts` | REST routes: `GET /api/pi-core/versions[?refresh=true]`, `POST /api/pi-core/update` with `{ packages?: string[] }` (empty = update all with `updateAvailable`). 409 when busy, 400 on unknown package names. |
+| `packages/client/src/hooks/usePiCoreVersions.ts` | Fetch + 30-min poll hook for pi core version status. Refetches (with `?refresh=true`) when `pi_core_update_complete` arrives via the `pi-core-event` window event. |
+| `packages/client/src/components/PiCoreVersionsSection.tsx` | Settings → Packages tab section showing core packages with current → latest versions, per-package Update button, Update All, Check Now, live progress/error surfaced from WS `pi_core_update_progress`/`complete`. |
+| `packages/client/src/components/PiUpdateBadge.tsx` | Header badge (count of available pi core updates). Hidden when zero. Clicking navigates to `/settings?tab=packages`. Mounted next to `ServerSelector` in `App.tsx` `headerExtra`. |
 | `src/client/components/SortablePinnedGroup.tsx` | Drag-to-reorder wrapper for pinned directory groups |
 | `src/server/preferences-store.ts` | Global UI preferences (pinned dirs, session order) in `preferences.json` |
 | `src/server/meta-persistence.ts` | Per-session debounced `.meta.json` writer |

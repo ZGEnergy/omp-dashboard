@@ -21,6 +21,7 @@ import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
 import type { OpenSpecArtifact } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { SessionHeader } from "./components/SessionHeader.js";
 import { ServerSelector } from "./components/ServerSelector.js";
+import { PiUpdateBadge } from "./components/PiUpdateBadge.js";
 import { TokenStatsBar } from "./components/TokenStatsBar.js";
 
 import { CommandInput } from "./components/CommandInput.js";
@@ -543,13 +544,16 @@ export default function App() {
       resumeErrors={resumeErrors}
       onDismissResumeError={(id) => setResumeErrors((prev) => { const next = new Map(prev); next.delete(id); return next; })}
       headerExtra={
-        <ServerSelector
-          currentHost={currentServerHost}
-          currentPort={currentServerPort}
-          connected={status === "connected"}
-          onSwitch={handleServerSwitch}
-          onManageServers={() => navigate("/settings?tab=servers")}
-        />
+        <div className="flex items-center gap-2">
+          <PiUpdateBadge />
+          <ServerSelector
+            currentHost={currentServerHost}
+            currentPort={currentServerPort}
+            connected={status === "connected"}
+            onSwitch={handleServerSwitch}
+            onManageServers={() => navigate("/settings?tab=servers")}
+          />
+        </div>
       }
     />
   );

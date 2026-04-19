@@ -43,6 +43,9 @@ import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerProviderAuthRoutes } from "./routes/provider-auth-routes.js";
 import { registerPackageRoutes } from "./routes/package-routes.js";
 import { registerRecommendedRoutes, invalidateRecommendedCache } from "./routes/recommended-routes.js";
+import { registerPiCoreRoutes } from "./routes/pi-core-routes.js";
+import { PiCoreChecker } from "./pi-core-checker.js";
+import { PiCoreUpdater } from "./pi-core-updater.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
 import { PackageManagerWrapper } from "./package-manager-wrapper.js";
 import { createEditorManager, type EditorManager } from "./editor-manager.js";
@@ -340,6 +343,37 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   registerPackageRoutes(fastify, { packageManagerWrapper });
   registerRecommendedRoutes(fastify, { packageManagerWrapper });
+
+  // Pi core version check + update (complements the extension package manager).
+  const piCoreChecker = new PiCoreChecker();
+  const piCoreUpdater = new PiCoreUpdater({
+    packageManagerWrapper,
+    onAllComplete: async () => {
+      const connectedIds = piGateway.getConnectedSessionIds();
+      let count = 0;
+      for (const sid of connectedIds) {
+        const session = sessionManager.get(sid);
+        if (session && session.status !== "ended") {
+          piGateway.sendToSession(sid, {
+            type: "send_prompt",
+            sessionId: sid,
+            text: "/reload",
+          });
+          count++;
+        }
+      }
+      return count;
+    },
+  });
+  piCoreUpdater.setProgressListener((event) => {
+    browserGateway.broadcastToAll({
+      type: "pi_core_update_progress",
+      name: event.name,
+      phase: event.phase,
+      message: event.message,
+    });
+  });
+  registerPiCoreRoutes(fastify, { piCoreChecker, piCoreUpdater });
 
   // Editor (code-server) routes and proxy
   registerEditorRoutes(fastify, editorManager, { networkGuard });
