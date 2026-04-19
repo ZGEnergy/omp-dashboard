@@ -1,23 +1,32 @@
 ## Why
 
-When a user clicks "Fork from here" on an assistant message in the dashboard, the new session is created **without** that assistant message. This is because pi core emits the `message_end` event to extensions **before** persisting the entry to the session tree via `sessionManager.appendMessage()`. The bridge extension calls `getLeafId()` at event time, capturing the **previous** entry's ID (the user message), not the assistant's own entry. The forked session file is then pruned to that stale leaf, cutting off the message the user intended to fork from.
+When a user clicks "Fork from here" on a message in the dashboard, the new session frequently ends one entry too early — the clicked message is missing, or a wrong message appears as the last one.
+
+Root cause: pi core persists entries to the session tree via `sessionManager.appendMessage()` **only on `message_end`**, after emitting the event to listeners. The bridge extension captures `entryId` via `getLeafId()`, but the timing is wrong for two reasons:
+
+1. **Assistant messages**: The bridge used to capture on `message_end` *before* `appendMessage` ran (same synchronous tick as `_emit`). A prior fix deferred this via `queueMicrotask`. ✅ Fixed.
+2. **User messages**: The bridge captures on `message_start`, which runs **before any `appendMessage` at all** (user entries are also persisted at their own `message_end`). The captured leaf is the *previous* turn's entry. Forking from a user bubble therefore ends at the preceding assistant message, dropping the user's prompt. For the very first user message, `getLeafId()` returns null and fork silently misbehaves. ❌ Still broken.
+
+The client `event-reducer` compounds the issue: it reads `entryId` from `message_start` for user messages and from `message_end` for assistant messages — asymmetric and wrong for users.
 
 ## What Changes
 
-- **Fix `entryId` enrichment timing in the bridge extension** so that the `entryId` attached to `message_end` events reflects the **assistant's own session entry**, not the prior leaf.
-- The fix must work within the constraint that pi core persists entries **after** emitting `message_end` to extensions — the bridge cannot rely on `getLeafId()` at `message_end` time for assistant messages.
-- One approach: defer `getLeafId()` capture for `message_end` events (e.g., use `queueMicrotask` or `setTimeout(0)`) so it runs after `appendMessage` completes synchronously in the same event loop tick.
-- Alternative approach: capture `entryId` from `turn_end` instead, and retroactively associate it with the last assistant message. This avoids timing hacks but changes the data flow.
+- **Symmetrize bridge entryId capture**: `message_end` attaches `entryId` (via `queueMicrotask` deferral) for **both** user and assistant roles. `message_start` no longer attaches `entryId` at all.
+- **Update client event-reducer**: consume `entryId` from `message_end` for both roles. For user messages, retroactively attach `entryId` to the already-appended user `ChatMessage` (appended at `message_start`), so the UI bubble keeps its current responsiveness.
+- **Update specs** to reflect that user-message entryId correctness is a first-class requirement, not "unchanged existing behavior".
 
 ## Capabilities
 
 ### New Capabilities
-- `fork-entryid-accuracy`: Ensure the `entryId` attached to assistant messages in the dashboard correctly identifies the assistant's own session tree entry, so that "fork from message" includes the clicked message in the new session.
+- `fork-entryid-accuracy`: Ensure the `entryId` attached to **any** message (user or assistant) in the dashboard correctly identifies that message's own session tree entry, so "Fork from here" always includes the clicked message in the new session.
 
 ### Modified Capabilities
+(none)
 
 ## Impact
 
-- `packages/extension/src/bridge.ts` — the `entryId` enrichment logic for `message_end` events
-- Possibly `packages/server/src/session-file-reader.ts` if the pruning logic needs adjustment (unlikely — the bug is in the entryId, not the pruning)
-- No API or protocol changes needed — `entryId` field already exists in the protocol, it just carries the wrong value
+- `packages/extension/src/bridge.ts` — `message_start` enrichment branch removed; `message_end` branch runs for all roles.
+- `packages/client/src/lib/event-reducer.ts` — user-message `entryId` now sourced from `message_end` (retroactive attach on the most recent user `ChatMessage`).
+- `packages/shared/src/state-replay.ts` — unchanged (replay already uses `entry.id` correctly for both roles).
+- `packages/server/src/session-file-reader.ts` — unchanged (bug is in the entryId value, not the pruning).
+- No protocol changes. `entryId` field already exists; we're fixing which value gets written to it.
