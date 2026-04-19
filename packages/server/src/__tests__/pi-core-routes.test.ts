@@ -19,6 +19,7 @@ describe("pi-core-routes", () => {
 	let app: FastifyInstance;
 	let checker: any;
 	let updater: any;
+	let onUpdateComplete: any;
 
 	beforeEach(async () => {
 		checker = {
@@ -28,8 +29,13 @@ describe("pi-core-routes", () => {
 		updater = {
 			update: vi.fn(),
 		};
+		onUpdateComplete = vi.fn();
 		app = Fastify({ logger: false });
-		registerPiCoreRoutes(app, { piCoreChecker: checker, piCoreUpdater: updater });
+		registerPiCoreRoutes(app, {
+			piCoreChecker: checker,
+			piCoreUpdater: updater,
+			onUpdateComplete,
+		});
 		await app.ready();
 	});
 
@@ -90,6 +96,26 @@ describe("pi-core-routes", () => {
 
 		// Cache invalidated so next status reflects new versions
 		expect(checker.invalidate).toHaveBeenCalled();
+
+		// onUpdateComplete called so server can broadcast to browsers (badge refetch)
+		expect(onUpdateComplete).toHaveBeenCalledTimes(1);
+		expect(onUpdateComplete).toHaveBeenCalledWith({
+			results: [{ name: "pi-web-access", success: true }],
+			sessionsReloaded: 2,
+		});
+	});
+
+	it("POST /api/pi-core/update does not call onUpdateComplete on busy-error", async () => {
+		checker.getStatus.mockResolvedValue({
+			packages: [makePkg("pi-web-access", true)],
+			updatesAvailable: 1,
+			lastChecked: new Date().toISOString(),
+		});
+		updater.update.mockRejectedValue(new PackageOperationBusyError());
+
+		const res = await app.inject({ method: "POST", url: "/api/pi-core/update", payload: {} });
+		expect(res.statusCode).toBe(409);
+		expect(onUpdateComplete).not.toHaveBeenCalled();
 	});
 
 	it("POST /api/pi-core/update with specific packages filters to those", async () => {

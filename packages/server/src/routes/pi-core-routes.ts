@@ -22,6 +22,16 @@ import { PackageOperationBusyError } from "../package-manager-wrapper.js";
 export interface PiCoreRouteDeps {
 	piCoreChecker: PiCoreChecker;
 	piCoreUpdater: PiCoreUpdater;
+	/**
+	 * Called after the updater finishes a batch (success or per-package failure).
+	 * The server wires this to broadcast a `pi_core_update_complete` WS message
+	 * so listeners (PiUpdateBadge, PiCoreVersionsSection, usePiCoreVersions
+	 * hook instances in other open tabs) refetch their state.
+	 */
+	onUpdateComplete?: (payload: {
+		results: Array<{ name: string; success: boolean; error?: string }>;
+		sessionsReloaded: number;
+	}) => void;
 }
 
 export function registerPiCoreRoutes(
@@ -91,6 +101,9 @@ export function registerPiCoreRoutes(
 				const out = await piCoreUpdater.update(resolved);
 				// Invalidate cache so next version check reflects new versions.
 				piCoreChecker.invalidate();
+				// Notify other browser tabs / the header badge hook instance so
+				// their independent usePiCoreVersions state refetches.
+				deps.onUpdateComplete?.(out);
 				return { success: true, data: out } satisfies ApiResponse<PiCoreUpdateResponse>;
 			} catch (err: any) {
 				if (err instanceof PackageOperationBusyError) {
