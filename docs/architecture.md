@@ -598,6 +598,10 @@ This is separate from the main JSON dashboard WebSocket (`/ws`).
 3. Browser opens binary WS to `/ws/terminal/:id`, attaches `xterm.js`
 4. Shell exit → PTY `onExit` → server broadcasts `terminal_removed` → card removed
 
+**Native binary permissions.** `node-pty`'s prebuilt `spawn-helper` (and `pty.node`) must be executable for `pty.spawn` to succeed on macOS/Linux. The workspace-root `postinstall` runs `packages/server/scripts/fix-pty-permissions.cjs`, which uses `require.resolve("node-pty/package.json")` to find the dependency wherever npm placed it (hoisted root or workspace-local) and sets mode `0o755` on every `prebuilds/*/spawn-helper` and `prebuilds/*/pty.node`. A regression test (`packages/server/src/__tests__/fix-pty-permissions.test.ts`) asserts the current platform's helper is executable after install.
+
+**Browser-gateway error visibility.** `browser-gateway.ts` distinguishes two failure modes when receiving a WebSocket frame: a `JSON.parse` error (silently dropped — garbage frames are normal on the open internet) and an exception thrown by an individual message handler (logged to stderr as `[browser-gw] handler error type=<msg.type>: <err>`). The connection stays open after handler errors so subsequent messages still flow. This stops failures like a broken `node-pty` `spawn` from manifesting as a silently dead UI button.
+
 ### Output Buffering
 
 Each terminal maintains a 256KB ring buffer of raw PTY output. When a new WebSocket connects (reconnect, new tab), the buffer is replayed before live streaming. Combined with client-side 10,000-line scrollback.

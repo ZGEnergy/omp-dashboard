@@ -240,8 +240,16 @@ export function createBrowserGateway(
 
 
     ws.on("message", async (raw) => {
+      // Malformed (non-JSON) frames are silently dropped. Only frame-parse
+      // errors are swallowed here — handler exceptions are logged below so
+      // real bugs (e.g. node-pty spawn failures) are not silently hidden.
+      let msg: BrowserToServerMessage;
       try {
-        const msg = JSON.parse(raw.toString()) as BrowserToServerMessage;
+        msg = JSON.parse(raw.toString()) as BrowserToServerMessage;
+      } catch {
+        return;
+      }
+      try {
         const ctx: BrowserHandlerContext = {
           ws, sessionManager, eventStore, piGateway,
           pendingForkRegistry, sessionOrderManager, preferencesStore,
@@ -432,8 +440,13 @@ export function createBrowserGateway(
             handlePiGatewayForward(msg, ctx);
             break;
         }
-      } catch {
-        // Ignore malformed messages
+      } catch (err) {
+        const type = (msg as { type?: string } | undefined)?.type ?? "unknown";
+        console.error(
+          `[browser-gw] handler error type=${type}:`,
+          err,
+        );
+        // Connection intentionally remains open so subsequent messages are still processed.
       }
     });
 

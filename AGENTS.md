@@ -102,7 +102,7 @@ make clean              # Destroy all cloned VMs
 | `src/server/idle-timer.ts` | Auto-shutdown idle timer with sleep-wake resilience |
 | `src/server/session-bootstrap.ts` | Startup session discovery and OpenSpec polling init |
 | `src/server/pi-gateway.ts` | Extension WebSocket gateway (port 9999) |
-| `src/server/browser-gateway.ts` | Browser WebSocket gateway (dispatches to handler modules) |
+| `src/server/browser-gateway.ts` | Browser WebSocket gateway (dispatches to handler modules; logs handler exceptions as `[browser-gw] handler error type=<msg.type>: <err>` instead of silently swallowing them — only malformed JSON frames are dropped silently) |
 | `src/server/browser-handlers/handler-context.ts` | Shared context type for browser message handlers |
 | `src/server/browser-handlers/subscription-handler.ts` | Subscribe/unsubscribe with async batched replay, backpressure, lazy loading |
 | `src/server/browser-handlers/session-action-handler.ts` | Send prompt, abort, resume, spawn, shutdown, force kill, flow control |
@@ -164,7 +164,7 @@ make clean              # Destroy all cloned VMs
 | `src/server/routes/known-servers-routes.ts` | REST routes: known servers CRUD, on-demand mDNS discovery scan |
 | `src/server/terminal-manager.ts` | PTY lifecycle, ring buffer, spawn/attach/kill terminals |
 | `src/server/terminal-gateway.ts` | Binary WebSocket upgrade handler for `/ws/terminal/:id` |
-| `scripts/fix-pty-permissions.cjs` | Postinstall: fix node-pty spawn-helper execute permissions |
+| `scripts/fix-pty-permissions.cjs` | Postinstall: locates `node-pty` via `require.resolve("node-pty/package.json")` (hoist-aware) and chmods every `prebuilds/*/spawn-helper` and `prebuilds/*/pty.node` to `0o755`. Wired up at the workspace-root `postinstall` so it applies regardless of which workspace triggered `npm install`. |
 | `src/server/tunnel.ts` | Zrok tunnel with reserved shares for persistent URLs, binary detection, PID tracking, stale cleanup |
 | `src/client/components/TunnelButton.tsx` | Unified tunnel/QR button — tunnel icon when not set up, QR icon when inactive, green QR icon when connected; opens QR dialog with disconnect/setup |
 | `src/client/components/QrCodeDialog.tsx` | QR code dialog showing tunnel URL as scannable QR code with copy, disconnect, and setup buttons |
