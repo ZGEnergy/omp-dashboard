@@ -187,7 +187,8 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
           setSelectedIndex((i) => {
             const next = Math.min(i + 1, dropdownLength - 1);
             requestAnimationFrame(() => {
-              document.querySelector(`[data-dropdown-index="${next}"]`)?.scrollIntoView({ block: "nearest" });
+              // scrollIntoView is not implemented in jsdom — optional-call.
+              (document.querySelector(`[data-dropdown-index="${next}"]`) as HTMLElement | null)?.scrollIntoView?.({ block: "nearest" });
             });
             return next;
           });
@@ -198,7 +199,7 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
           setSelectedIndex((i) => {
             const next = Math.max(i - 1, 0);
             requestAnimationFrame(() => {
-              document.querySelector(`[data-dropdown-index="${next}"]`)?.scrollIntoView({ block: "nearest" });
+              (document.querySelector(`[data-dropdown-index="${next}"]`) as HTMLElement | null)?.scrollIntoView?.({ block: "nearest" });
             });
             return next;
           });
