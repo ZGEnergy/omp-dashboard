@@ -42,6 +42,7 @@ export function findPortHolders(
 import { isDashboardRunning } from "@blackbelt-technology/pi-dashboard-shared/server-identity.js";
 import { discoverDashboard } from "@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js";
 import { resolveJitiImport } from "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js";
+import { assertNodeVersionSupported } from "./node-guard.js";
 
 const SUBCOMMANDS = ["start", "stop", "restart", "status"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
@@ -112,6 +113,7 @@ export function buildConfig(flags: Partial<ServerConfig>): ServerConfig {
  * Run the server in the foreground (original behavior).
  */
 async function runForeground(config: ServerConfig): Promise<void> {
+  assertNodeVersionSupported();
   const server = await createServer(config);
 
   let shuttingDown = false;
@@ -136,6 +138,7 @@ async function runForeground(config: ServerConfig): Promise<void> {
  * Start the server as a detached background daemon.
  */
 async function cmdStart(config: ServerConfig): Promise<void> {
+  assertNodeVersionSupported();
   const running = await isServerRunning(config.port);
   if (running) {
     console.log(`Dashboard server is already running (pid ${running})`);
