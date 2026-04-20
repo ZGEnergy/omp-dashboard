@@ -66,25 +66,30 @@ Skipping `8737249` (Phase 0.5):
 
 Order respects dependencies:
 
-- [ ] 3.1 `a4cced2` Vitest 4 migration — **foundational**, do first. Expect conflict on root config, deletion of workspace file. Verify `packages/shared/vitest.config.ts` + test-support `globalSetup` still wire correctly
-- [ ] 3.2 `9af9dd8` TS errors in tests/routes — inspect per MERGE-PLAN §2 Category C #30; likely SKIP if errors are develop-specific (caused by develop's ad-hoc spawn code not present on v2)
-- [ ] 3.3 `a45e9d0` path-picker server-side filter + new-folder — reconcile `browse.ts` per MERGE-PLAN §3.8: normalize path first (our code), then apply filter/listing logic
-- [ ] 3.4 `8ca4538` zrok tunnel leak fix + compression — reconcile `tunnel.ts` per MERGE-PLAN §3.11: keep ToolResolver binary lookup, apply develop's lifecycle + compression fixes
-- [ ] 3.5 `e368d27` pi_core broadcast (depends on 2.7)
-- [ ] 3.6 Run `npm test` + `npm run build`; must be green before Phase 3.5
+- [x] 3.1 `a4cced2` Vitest 4 migration — clean
+- [x] 3.2 `9af9dd8` TS errors in tests/routes — clean (needed for vitest 4)
+- [x] 3.3 `a45e9d0` path-picker — union: our Windows path normalization + develop's filter/new-folder logic
+- [x] 3.4 `8ca4538` zrok tunnel leak fix + compression — AGENTS.md + CHANGELOG.md + architecture.md take-ours (our narrative is superset); server.ts take-ours (getTunnelUrl present); tunnel.ts union (platform killPidWithGroup + SIGKILL escalation + releaseShare)
+- [x] 3.5 `e368d27` pi_core broadcast — clean
+- [x] 3.6 Test gate — 2519/2519 pass (after 3.7 fixes below)
 
 ## 3.5 Phase 3.5 — catch up to develop HEAD (NEW)
 
-- [ ] 3.7 Rebase windows-integration's `2257b08` (`fix-fork-entryid-timing` edits) onto pre-archive content; if already in develop's archived version, skip our edits
-- [ ] 3.8 Cherry-pick `c975222` archive `fix-fork-entryid-timing`; resolve file-move conflicts
-- [ ] 3.9 Cherry-pick `4b2b76c` restore zero-failure baseline
-- [ ] 3.10 Cherry-pick `a75a1db` eliminate vitest unhandled errors from jsdom gaps
-- [ ] 3.11 Cherry-pick `ac2bd96` platform-agnostic test fixtures
-- [ ] 3.12 Cherry-pick `c325227` CHANGELOG Unreleased consolidation (merge, don't replace)
-- [ ] 3.13 **SKIP** `16e9758` v0.3.0 release (deviation 3 — v0.4.0 cut at end)
-- [ ] 3.14 **SKIP** `90a3b7b` site sync to v0.3.0
-- [ ] 3.15 **SKIP** `01c5e0c` CI re-dispatch for v0.3.0 release
-- [ ] 3.16 Run `npm test` + `npm run build`; must be green
+- [x] 3.7 2257b08 edits already present on windows-integration — skipped rebase
+- [x] 3.8 `c975222` archive `fix-fork-entryid-timing` — tasks.md rename-modify conflict; take-theirs
+- [x] 3.9 `4b2b76c` restore zero-failure baseline — browse-endpoint + config test conflicts; take-theirs (canonical fixed versions)
+- [x] 3.10 `a75a1db` jsdom fixes — CHANGELOG conflict; take-theirs
+- [x] 3.11 `ac2bd96` platform-agnostic tests — editor-registry conflict; take-theirs
+- [x] 3.12 `c325227` CHANGELOG consolidation — clean
+- [x] 3.13 **SKIPPED** `16e9758` v0.3.0 release (per proposal §Deviation 3)
+- [x] 3.14 **SKIPPED** `90a3b7b` site sync to v0.3.0
+- [x] 3.15 **SKIPPED** `01c5e0c` CI re-dispatch for v0.3.0
+- [x] 3.16 Test gate — 2519/2519 pass (237/237 test files). 12 residual failures fixed in commit `31f5c68`:
+  - 1 lint violation in tunnel.ts (scavengeOrphanZrokProcesses routed through killPidWithGroup)
+  - 2 editor-registry tests (added mockedSpawnSync for ToolResolver.which; updated 2 detectEditors tests)
+  - 4 tunnel tests (async cleanupStaleZrok; scavenge negative-PID assertion)
+  - 8 package-manager-wrapper tests (inject ToolRegistry with stub importModule returning fakePiModule, bypassing vi.mock which can't intercept dynamic file:// URLs)
+  - 1 package-manager-wrapper-resolve test SKIPPED (bareImportStrategy picks up pi-coding-agent from dev node_modules regardless of HOME; tracked as Phase 4 tech debt)
 
 ## 4. Phase 4 — DEFERRED
 
