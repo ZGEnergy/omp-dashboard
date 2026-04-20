@@ -94,7 +94,7 @@ describe("SessionHeader back button", () => {
 });
 
 describe("Pi branding in SessionList", () => {
-  it("shows π symbol and not Sessions text", async () => {
+  it("shows the app icon image (not π text) and no 'Sessions' label", async () => {
     // Dynamic import to avoid issues — SessionList uses useLocation
     const { SessionList } = await import("../SessionList.js");
     const { hook, navigate } = memoryLocation({ path: "/", static: true });
@@ -110,10 +110,13 @@ describe("Pi branding in SessionList", () => {
       </Router>
     );
 
-    // π symbol should be present as the home button
+    // Home button should contain the inline PiLogo SVG, not a π text glyph or raster image
     const piButton = screen.getByTitle("Home");
     expect(piButton).toBeTruthy();
-    expect(piButton.textContent).toBe("π");
+    expect(piButton.textContent?.trim()).toBe("");
+    const svg = piButton.querySelector("svg[aria-label='Pi Dashboard']");
+    expect(svg).toBeTruthy();
+    expect(piButton.querySelector("img")).toBeNull();
 
     // "Sessions" text should not appear
     expect(screen.queryByText("Sessions")).toBeNull();

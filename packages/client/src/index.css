@@ -140,13 +140,55 @@ body {
 .markdown-content strong { font-weight: 700; }
 .markdown-content em { font-style: italic; }
 
-/* Card working pulse — subtle amber background tint for streaming/resuming sessions */
-@keyframes card-working-pulse {
-  0%, 100% { background-color: transparent; }
-  50% { background-color: rgba(234, 179, 8, 0.06); }
+/* Card working pulse — drifting 45° amber stripes layered with a breathing tint
+   for streaming/resuming sessions. Two background layers, two animations on
+   coprime-ish periods (2s stripes, 3s pulse) so the card never visually locks.
+
+   IMPORTANT: do NOT set background-size on the stripe layer. A diagonal
+   repeating-linear-gradient at 45° with 20px stops has a natural repeat
+   period of 20/√2 ≈ 14.142px along each axis. Any fixed background-size
+   that isn't an integer multiple of that period creates visible seams at
+   tile boundaries (especially obvious when the card has internal divider
+   lines). Letting the gradient fill the element naturally keeps the pattern
+   continuous across the whole card. The animation distance must also be a
+   pattern-period multiple for a seamless loop. */
+/* NOTE: stripes at `linear-gradient(45deg, …)` run along the (+1,+1) diagonal.
+   Translating background-position by (+x, +x) shifts the pattern ALONG the stripe
+   direction — visually invariant, zero perceived motion. To see motion we must
+   shift ACROSS the stripes. Scrolling purely horizontally (Δx, 0) gives the
+   classic barber-pole appearance. Period along x for a 20px diagonal gradient
+   is 20√2 ≈ 28.2843 px; we animate by 4 periods for a clearly visible drift. */
+@keyframes card-working-stripes-scroll {
+  0%   { background-position:         0px 0,  0 0; }
+  100% { background-position: 56.5685px 0,  0 0; } /* 2 × (20√2) px across stripes */
+}
+@keyframes card-working-opacity-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1;   }
 }
 .card-working-pulse {
-  animation: card-working-pulse 3s ease-in-out infinite;
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      transparent 0 10px,
+      rgba(234, 179, 8, 0.10) 10px 20px
+    ),
+    linear-gradient(rgba(234, 179, 8, 0.06), rgba(234, 179, 8, 0.06));
+  /* Tile size = 1 diagonal period (20√2 ≈ 28.2843 px) so the pattern
+     repeats seamlessly; background-position animates across multiple
+     full periods for a clean loop. Size the flat tint layer the same as
+     the stripes so the single shorthand background-size applies cleanly. */
+  background-size: 28.2843px 28.2843px, auto;
+  background-repeat: repeat, no-repeat;
+  /* Coprime-ish periods (2s stripes, 3s pulse) so the two effects never
+     visually lock into a single rhythm — keeps the card feeling ambient
+     rather than mechanically pumping. */
+  animation:
+    card-working-stripes-scroll 2s linear infinite,
+    card-working-opacity-pulse 3s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-working-pulse { animation: none; }
 }
 
 /* Card input pulse — purple tint for sessions waiting for user input (ask_user) */
