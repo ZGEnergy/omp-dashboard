@@ -14,7 +14,7 @@ import { createRequire } from "node:module";
 let fixed = false;
 
 export function fixPtyPermissions(): void {
-  if (fixed || process.platform === "win32") return;
+  if (fixed || process.platform === "win32") return; // platform-branch-ok POSIX-only chmod; no Windows equivalent
   fixed = true;
 
   try {

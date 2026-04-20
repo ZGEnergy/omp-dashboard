@@ -18,6 +18,7 @@
  */
 
 import { execSync } from "./spawn.js";
+import { existsSync, readFileSync } from "node:fs";
 
 // ── Unified ExecFn signature ────────────────────────────────────────────────
 
@@ -383,4 +384,47 @@ function shellQuote(s: string): string {
   // fall into the allow-list in practice, so this is almost always a no-op.
   if (/^[A-Za-z0-9._-]+$/.test(s)) return `"${s}"`;
   return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ══  getProcessCmdline — cross-platform command-line lookup by PID         ══
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Returns the full command line of a running process, or null when the pid
+// doesn't exist, the lookup fails, or the platform has no cheap mechanism.
+//
+// Separated from isProcessLikePi / isPiCommandLine because callers
+// (e.g. editor-pid-registry's cmdline-ownership verification) want the raw
+// cmdline string, not a predicate.
+
+export function getProcessCmdline(pid: number, opts: ProcessIdentifyOpts = {}): string | null {
+  const platform = opts.platform ?? process.platform;
+  const exec = opts.exec ?? defaultExec;
+
+  try {
+    if (platform === "linux") {
+      const file = `/proc/${pid}/cmdline`;
+      if (!existsSync(file)) return null;
+      const raw = readFileSync(file, "utf-8");
+      return raw.replace(/\0/g, " ").trim() || null;
+    }
+    if (platform === "darwin") {
+      const out = exec(`ps -p ${pid} -o command=`, {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return String(out).trim() || null;
+    }
+    if (platform === "win32") {
+      const out = exec(`wmic process where ProcessId=${pid} get CommandLine /value`, {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const m = String(out).match(/CommandLine=(.*)/);
+      return m ? m[1].trim() || null : null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }

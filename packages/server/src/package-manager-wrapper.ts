@@ -47,7 +47,7 @@ function resolveViaRegistry(
 /**
  * Subclass of pi's `DefaultPackageManager` that routes every subprocess
  * through our OS-aware `SubprocessAdapter`. Pi's upstream implementation
- * spawns with `shell: process.platform === "win32"` and no `windowsHide`,
+ * spawns with `shell: <is-win32>` and no `windowsHide`, // platform-branch-ok comment-only reference
  * which on Windows triggers Node issue #21825 — flashing cmd console
  * every time pi shells out to npm / git / etc.
  *

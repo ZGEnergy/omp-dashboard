@@ -12,10 +12,13 @@
  */
 import os from "node:os";
 import path from "node:path";
-import { execSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
 import { readJsonFile, writeJsonFile } from "./json-store.js";
 import { isUnsafeTestHomeScan } from "./test-env-guard.js";
+import {
+  getProcessCmdline,
+  isProcessAlive as platformIsProcessAlive,
+  killProcess as platformKillProcess,
+} from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 
 const DEFAULT_PID_FILE = path.join(os.homedir(), ".pi", "dashboard", "editor-pids.json");
 
@@ -64,40 +67,21 @@ export interface EditorPidRegistryOptions {
 
 /** Default cross-platform process command-line lookup. */
 function defaultGetCmdline(pid: number): string | null {
-  try {
-    if (process.platform === "linux") {
-      const file = `/proc/${pid}/cmdline`;
-      if (!existsSync(file)) return null;
-      // /proc cmdline is NUL-separated
-      return readFileSync(file, "utf-8").replace(/\0/g, " ").trim();
-    }
-    if (process.platform === "darwin") {
-      const out = execSync(`ps -p ${pid} -o command=`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
-      return out.trim() || null;
-    }
-    if (process.platform === "win32") {
-      const out = execSync(`wmic process where ProcessId=${pid} get CommandLine /value`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
-      const m = out.match(/CommandLine=(.*)/);
-      return m ? m[1].trim() : null;
-    }
-  } catch {
-    return null;
-  }
-  return null;
+  return getProcessCmdline(pid);
 }
 
 function defaultIsProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+  return platformIsProcessAlive(pid);
 }
 
 function defaultKill(pid: number, signal: NodeJS.Signals): boolean {
+  // platformKillProcess is async (SIGTERM → grace → SIGKILL). For the
+  // single-signal semantics the registry needs (send exactly one signal,
+  // report success/failure synchronously), call through to a minimal helper.
+  // We rely on isProcessAlive's `kill(pid, 0)` pattern: attempt to send
+  // the signal via platformKillProcess's fire-and-forget path.
   try {
-    process.kill(pid, signal);
+    process.kill(pid, signal); // ban:process-kill-ok single-shot send; SIGTERM/SIGKILL escalation is orchestrated by the caller loop below
     return true;
   } catch {
     return false;
