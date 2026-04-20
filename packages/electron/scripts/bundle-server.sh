@@ -88,5 +88,18 @@ find "$SERVER_BUNDLE/node_modules" \( -name "*.md" -o -name "*.map" -o -name "CH
 find "$SERVER_BUNDLE/node_modules" -name "__tests__" -type d -exec rm -rf {} + 2>/dev/null || true
 find "$SERVER_BUNDLE/node_modules" -name "test" -type d -exec rm -rf {} + 2>/dev/null || true
 
+# Fix node-pty spawn-helper permissions (npm hoisting may skip the postinstall fix)
+if [ "$(uname)" != "Windows_NT" ]; then
+  find "$SERVER_BUNDLE" -name spawn-helper -type f -exec chmod +x {} \;
+  echo "  Fixed spawn-helper execute permissions"
+fi
+
+# Remove macOS quarantine flags from native binaries
+if [ "$(uname)" = "Darwin" ]; then
+  find "$SERVER_BUNDLE/node_modules/node-pty" \( -name spawn-helper -o -name "*.node" \) -type f \
+    -exec xattr -d com.apple.quarantine {} 2>/dev/null \;
+  echo "  Removed quarantine flags from node-pty binaries"
+fi
+
 SIZE=$(du -sh "$SERVER_BUNDLE" | cut -f1)
 echo "✓ Server bundled ($SIZE) at $SERVER_BUNDLE"

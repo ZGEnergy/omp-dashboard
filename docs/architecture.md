@@ -700,7 +700,13 @@ This is separate from the main JSON dashboard WebSocket (`/ws`).
 3. Browser opens binary WS to `/ws/terminal/:id`, attaches `xterm.js`
 4. Shell exit → PTY `onExit` → server broadcasts `terminal_removed` → card removed
 
-**Native binary permissions.** `node-pty`'s prebuilt `spawn-helper` (and `pty.node`) must be executable for `pty.spawn` to succeed on macOS/Linux. The workspace-root `postinstall` runs `packages/server/scripts/fix-pty-permissions.cjs`, which uses `require.resolve("node-pty/package.json")` to find the dependency wherever npm placed it (hoisted root or workspace-local) and sets mode `0o755` on every `prebuilds/*/spawn-helper` and `prebuilds/*/pty.node`. A regression test (`packages/server/src/__tests__/fix-pty-permissions.test.ts`) asserts the current platform's helper is executable after install.
+**Native binary permissions.** `node-pty`'s prebuilt `spawn-helper` (and `pty.node`) must be executable for `pty.spawn` to succeed on macOS/Linux. Three layers of defense ensure this:
+
+1. **Postinstall** — `packages/server/scripts/fix-pty-permissions.cjs` (wired at workspace-root `postinstall`) uses `require.resolve("node-pty/package.json")` to locate the dependency wherever npm placed it and sets mode `0o755` on every `prebuilds/*/spawn-helper` and `prebuilds/*/pty.node`.
+2. **Electron bundle** — `packages/electron/scripts/bundle-server.sh` runs `find … -name spawn-helper -exec chmod +x` after `npm install` and removes macOS quarantine flags (`xattr -d com.apple.quarantine`) from native binaries.
+3. **Runtime** — `packages/server/src/fix-pty-permissions.ts` runs once when `createTerminalManager()` is called. Uses `createRequire().resolve("node-pty")` to find the actual install location and fixes any non-executable `spawn-helper`.
+
+A regression test (`packages/server/src/__tests__/fix-pty-permissions.test.ts`) asserts the current platform's helper is executable after install.
 
 **Browser-gateway error visibility.** `browser-gateway.ts` distinguishes two failure modes when receiving a WebSocket frame: a `JSON.parse` error (silently dropped — garbage frames are normal on the open internet) and an exception thrown by an individual message handler (logged to stderr as `[browser-gw] handler error type=<msg.type>: <err>`). The connection stays open after handler errors so subsequent messages still flow. This stops failures like a broken `node-pty` `spawn` from manifesting as a silently dead UI button.
 

@@ -4,6 +4,7 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import { randomBytes } from "node:crypto";
+import { fixPtyPermissions } from "./fix-pty-permissions.js";
 import type { TerminalSession, TerminalControlMessage } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { WebSocket } from "ws";
 
@@ -104,6 +105,9 @@ function generateId(): string {
 }
 
 export function createTerminalManager(options?: TerminalManagerOptions): TerminalManager {
+  // Fix node-pty spawn-helper permissions at runtime (defense in depth)
+  fixPtyPermissions();
+
   const entries = new Map<string, TerminalEntry>();
   const bufferSize = options?.bufferSize ?? DEFAULT_BUFFER_SIZE;
 
