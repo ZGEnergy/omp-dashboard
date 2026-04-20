@@ -35,8 +35,6 @@ import { ThemePicker } from "./ThemePicker.js";
 import { useEditors } from "../lib/use-editors.js";
 import { openEditor } from "../lib/editor-api.js";
 import { Toast, useToast } from "./Toast.js";
-import { PinDirectoryDialog } from "./PinDirectoryDialog.js";
-import { DialogPortal } from "./DialogPortal.js";
 import { BranchSwitchDialog } from "./BranchSwitchDialog.js";
 import { truncatePathMiddle } from "../lib/truncate-path.js";
 import { TunnelButton } from "./TunnelButton.js";
@@ -76,6 +74,8 @@ interface Props {
   onSpawnResultSeen?: () => void;
   pinnedDirectories?: string[];
   onPinDirectory?: (dirPath: string) => void;
+  /** Called when the "Add folder" button is clicked. Opens the app-level PinDirectoryDialog. */
+  onOpenPinDialog?: () => void;
   onUnpinDirectory?: (dirPath: string) => void;
   onReorderPinnedDirs?: (paths: string[]) => void;
   terminals?: TerminalSession[];
@@ -132,7 +132,7 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onFlowAction, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onUnpinDirectory, onReorderPinnedDirs, terminals, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, flowsMap, onKillProcess, onOpenSpecs, onOpenArchive, onViewReadme, onOpenTerminals, onOpenEditor, editorStatuses, editorAvailable, headerExtra, errorSessionIds, spawnErrors, onDismissSpawnError, resumeErrors, onDismissResumeError }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onFlowAction, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onOpenPinDialog, onUnpinDirectory, onReorderPinnedDirs, terminals, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, flowsMap, onKillProcess, onOpenSpecs, onOpenArchive, onViewReadme, onOpenTerminals, onOpenEditor, editorStatuses, editorAvailable, headerExtra, errorSessionIds, spawnErrors, onDismissSpawnError, resumeErrors, onDismissResumeError }: Props) {
   const now = Date.now();
   const [, navigate] = useLocation();
   const { messages, showToast, dismissToast } = useToast();
@@ -184,8 +184,6 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     }
   }, [spawnResult, showToast, onSpawnResultSeen]);
 
-  // Pin directory dialog state
-  const [showPinDialog, setShowPinDialog] = useState(false);
   const [branchDialogCwd, setBranchDialogCwd] = useState<string | null>(null);
 
   // Filter state - active-only defaults to ON
@@ -498,7 +496,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
           </div>
           {onPinDirectory && (
             <button
-              onClick={() => setShowPinDialog(true)}
+              onClick={() => onOpenPinDialog?.()}
               className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-tertiary)] hover:text-yellow-400 hover:border-yellow-500/50 inline-flex items-center gap-1"
               title="Pin a folder to the sidebar"
               data-testid="pin-dir-dialog-btn"
@@ -535,15 +533,6 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
         <div className="p-2 text-center text-[11px] text-[var(--text-muted)]">
           {hiddenCount} hidden
         </div>
-      )}
-      {showPinDialog && onPinDirectory && (
-        <DialogPortal><PinDirectoryDialog
-          onPin={(dirPath) => {
-            onPinDirectory(dirPath);
-            setShowPinDialog(false);
-          }}
-          onCancel={() => setShowPinDialog(false)}
-        /></DialogPortal>
       )}
       {branchDialogCwd && (
         <BranchSwitchDialog
