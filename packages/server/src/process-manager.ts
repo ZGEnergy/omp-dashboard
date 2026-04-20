@@ -18,22 +18,22 @@
 import { existsSync, mkdirSync, openSync, closeSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import type { ChildProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import type { ChildProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/spawn.js";
 import type { SpawnStrategy } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { MANAGED_BIN } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
-import { execSync, spawnSync, buildSafeArgv } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { execSync, spawnSync, buildSafeArgv } from "@blackbelt-technology/pi-dashboard-shared/platform/spawn.js";
 import {
   spawnDetached,
   waitForNoCrash,
-} from "@blackbelt-technology/pi-dashboard-shared/platform/detached-spawn.js";
+} from "@blackbelt-technology/pi-dashboard-shared/platform/spawn.js";
 import {
   selectMechanism,
   buildWtArgs,
   sessionFlagsToArgv,
   type SpawnMechanism,
   type UserSpawnStrategy,
-} from "@blackbelt-technology/pi-dashboard-shared/platform/spawn-mechanism.js";
+} from "@blackbelt-technology/pi-dashboard-shared/platform/spawn.js";
 
 // ── Resolver seam (injectable for tests) ────────────────────────────────────
 

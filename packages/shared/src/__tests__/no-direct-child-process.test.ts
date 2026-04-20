@@ -17,8 +17,10 @@ import url from "node:url";
 
 /** Files allowed to import from node:child_process directly. */
 const ALLOWLIST: readonly string[] = [
-  "packages/shared/src/platform/exec.ts",
-  // When runner.ts is added in Phase 2, include it here.
+  // spawn.ts is the merged process-creation primitives module (exec +
+  // subprocess-adapter + detached-spawn + spawn-mechanism).
+  "packages/shared/src/platform/spawn.ts",
+  // runner.ts is the Recipe engine that also needs child_process.
   "packages/shared/src/platform/runner.ts",
 ];
 

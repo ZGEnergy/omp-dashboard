@@ -12,8 +12,8 @@
  * This handles the reparenting problem: children get reparented to PID 1
  * when the bash wrapper exits, but we captured their PGIDs while alive.
  */
-import { spawnSync as defaultSpawnSync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
-import type { SpawnSyncReturns } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { spawnSync as defaultSpawnSync } from "@blackbelt-technology/pi-dashboard-shared/platform/spawn.js";
+import type { SpawnSyncReturns } from "@blackbelt-technology/pi-dashboard-shared/platform/spawn.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
 import { killPidWithGroup } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 

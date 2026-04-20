@@ -7,7 +7,7 @@
  * consolidate-platform-handlers.
  */
 
-import { execSync } from "./exec.js";
+import { execSync } from "./spawn.js";
 
 export type ExecFn = (cmd: string, opts: { encoding: "utf-8" }) => string;
 export type KillFn = (pid: number, signal: NodeJS.Signals | number) => void;

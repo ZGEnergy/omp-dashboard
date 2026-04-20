@@ -1,7 +1,7 @@
 /**
  * Server-side git operations — branch listing, checkout, init, stash.
  */
-import { execSync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { execSync } from "@blackbelt-technology/pi-dashboard-shared/platform/spawn.js";
 
 const GIT_TIMEOUT = 15_000;
 

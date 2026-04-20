@@ -3,7 +3,7 @@
  * Replaces scattered whichSync/resolvePiCommand/resolveTsxCommand implementations
  * with a single configurable resolver.
  */
-import { execSync, spawnSync, buildSafeArgv } from "./exec.js";
+import { execSync, spawnSync, buildSafeArgv } from "./spawn.js";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";

@@ -15,7 +15,7 @@
  */
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { spawnSync, spawn, buildSafeArgv } from "./exec.js";
+import { spawnSync, spawn, buildSafeArgv } from "./spawn.js";
 import { ToolResolver } from "./binary-lookup.js";
 // The tool registry publishes itself on a well-known `globalThis` symbol
 // when `getDefaultRegistry()` is first called from any consumer. The

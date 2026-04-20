@@ -11,7 +11,7 @@
  *
  * See change: fix-windows-server-parity.
  */
-import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/spawn.js";
 import os from "node:os";
 import path from "node:path";
 

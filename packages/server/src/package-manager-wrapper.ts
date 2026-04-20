@@ -19,7 +19,7 @@ import {
 import {
   getDefaultSubprocessAdapter,
   type SubprocessAdapter,
-} from "@blackbelt-technology/pi-dashboard-shared/platform/subprocess-adapter.js";
+} from "@blackbelt-technology/pi-dashboard-shared/platform/spawn.js";
 
 /**
  * Resolve a command name through the tool registry's executor API.

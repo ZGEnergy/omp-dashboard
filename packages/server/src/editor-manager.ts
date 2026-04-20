@@ -2,7 +2,7 @@
  * Server-side lifecycle manager for code-server child processes.
  * Spawns per-folder instances, tracks heartbeats, enforces idle timeout and max instances.
  */
-import { spawn, type ChildProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { spawn, type ChildProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/spawn.js";
 import { killPidWithGroup, killProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 import { createServer as createNetServer, Socket as NetSocket } from "node:net";
 import { createHash, randomBytes } from "node:crypto";
