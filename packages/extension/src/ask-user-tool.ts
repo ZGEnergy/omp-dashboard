@@ -186,15 +186,24 @@ export function registerAskUserTool(pi: ExtensionAPI): void {
         obj.questions.length > 0
       ) {
         obj.method = "batch";
-        if (obj.title === undefined) {
-          const first = obj.questions[0] as Record<string, unknown> | undefined;
-          const candidate =
-            (first && (first.title ?? first.question ?? first.header)) || "Questions";
-          obj.title = typeof candidate === "string" ? candidate : "Questions";
-        }
       }
 
-      // 6. For batch calls, normalize each sub-question (input_type, question/header, {label,value}).
+      // 6. For any batch call (synthesized or explicit), backfill a missing outer `title`
+      //    from the first sub-question so the schema validates. Opus frequently sends
+      //    `{method:"batch", questions:[...]}` without an outer `title`.
+      if (
+        obj.method === "batch" &&
+        Array.isArray(obj.questions) &&
+        obj.questions.length > 0 &&
+        obj.title === undefined
+      ) {
+        const first = obj.questions[0] as Record<string, unknown> | undefined;
+        const candidate =
+          (first && (first.title ?? first.question ?? first.header)) || "Questions";
+        obj.title = typeof candidate === "string" ? candidate : "Questions";
+      }
+
+      // 7. For batch calls, normalize each sub-question (input_type, question/header, {label,value}).
       const warnings: NormalizationWarning[] = [];
       if (obj.method === "batch" && Array.isArray(obj.questions)) {
         obj.questions = obj.questions.map((sq) => normalizeSubQuestion(sq, warnings));

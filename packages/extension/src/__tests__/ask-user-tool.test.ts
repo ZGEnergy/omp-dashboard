@@ -222,6 +222,20 @@ describe("registerAskUserTool", () => {
       expect(result.title).toBe("Pick");
     });
 
+    it("backfills missing outer title on explicit method=batch call", () => {
+      const tool = getTool();
+      const result = tool.prepareArguments({
+        method: "batch",
+        questions: [
+          { method: "confirm", question: "Proceed?" },
+          { method: "select", question: "Scope?", options: ["A", "B"] },
+        ],
+      });
+      expect(result.title).toBe("Proceed?");
+      expect(result.questions[0].title).toBe("Proceed?"); // sub-question rename also fired
+      expect(result.questions[1].title).toBe("Scope?");
+    });
+
     it("bare questions array with no method synthesizes method=batch and pulls title", () => {
       const tool = getTool();
       const result = tool.prepareArguments({
