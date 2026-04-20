@@ -16,13 +16,35 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: write # required so redispatch-on-release can run `gh workflow run`
 
 concurrency:
   group: pages-deploy
   cancel-in-progress: true
 
 jobs:
+  # When triggered by `release: published`, the workflow runs on the tag ref
+  # (e.g. v0.3.0). The `github-pages` environment's branch/tag protection
+  # rules reject deploys from non-default refs, so instead of trying to
+  # deploy inline we re-dispatch this same workflow on `develop` (the
+  # allowed ref) and let that run do the deploy. All other triggers
+  # (push to develop, workflow_dispatch) skip this job and proceed normally.
+  redispatch-on-release:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Deploy Site on develop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run deploy-site.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref develop
+
   build:
+    # Skip when this run was triggered by a release — redispatch-on-release
+    # will kick off a fresh run on develop that handles build + deploy.
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -66,6 +88,7 @@ jobs:
           path: site/dist
 
   deploy:
+    if: github.event_name != 'release'
     needs: build
     runs-on: ubuntu-latest
     environment:
