@@ -232,6 +232,7 @@ describe("SessionList header layout", () => {
             sessions={[makeSession()]}
             onSelect={() => {}}
             onPinDirectory={() => {}}
+            onOpenPinDialog={() => {}}
           />
         </ThemeProvider>
       </TestRouter>,
@@ -239,6 +240,27 @@ describe("SessionList header layout", () => {
     const filterBar = screen.getByTestId("header-filter-bar");
     const pinBtn = screen.getByTestId("pin-dir-dialog-btn");
     expect(filterBar.contains(pinBtn)).toBe(true);
+  });
+
+  it("Add folder button calls onOpenPinDialog and does not mount PinDirectoryDialog internally", () => {
+    const onOpenPinDialog = vi.fn();
+    render(
+      <TestRouter>
+        <ThemeProvider>
+          <SessionList
+            sessions={[makeSession()]}
+            onSelect={() => {}}
+            onPinDirectory={() => {}}
+            onOpenPinDialog={onOpenPinDialog}
+          />
+        </ThemeProvider>
+      </TestRouter>,
+    );
+    const pinBtn = screen.getByTestId("pin-dir-dialog-btn");
+    fireEvent.click(pinBtn);
+    expect(onOpenPinDialog).toHaveBeenCalledTimes(1);
+    // PinDirectoryDialog heading "Pin Directory" should NOT be rendered by SessionList
+    expect(screen.queryByText("Pin Directory")).toBeNull();
   });
 });
 
