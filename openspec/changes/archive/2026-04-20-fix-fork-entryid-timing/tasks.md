@@ -5,5 +5,5 @@
 
 ## 2. Verify end-to-end fork behavior
 
-- [ ] 2.1 Manual test: open dashboard, have a multi-turn conversation, click "Fork from here" on an assistant message, verify the new session includes the clicked assistant message
-- [ ] 2.2 Manual test: click "Fork from here" on a user message, verify existing behavior is preserved (fork includes that user message)
+- [x] 2.1 Manual test: open dashboard, have a multi-turn conversation, click "Fork from here" on an assistant message, verify the new session includes the clicked assistant message
+- [x] 2.2 Manual test: click "Fork from here" on a user message, verify existing behavior is preserved (fork includes that user message)
