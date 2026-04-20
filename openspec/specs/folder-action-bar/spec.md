@@ -1,12 +1,13 @@
 ## ADDED Requirements
 
 ### Requirement: Folder action bar layout
-Each folder group in the sidebar SHALL render a horizontal action bar below the group header containing buttons in this order: `+Session`, `+Terminal`, `Terminals(N)`, `Editor`, `Zed`, and Pi Resources (right-aligned). The action bar SHALL replace the current scattered button layout.
+Each folder group in the sidebar SHALL render a horizontal action bar below the group header containing buttons in this order: `+Session`, `Terminals(N)`, `Editor`, `Zed`, and Pi Resources (right-aligned). The action bar SHALL replace the current scattered button layout.
 
 #### Scenario: All buttons visible with detected editors
 - **WHEN** a folder group is rendered and Zed is detected as a running native editor
-- **THEN** the action bar SHALL display: +Session, +Terminal, Terminals(0), Editor, Zed, and Pi Resources icon
+- **THEN** the action bar SHALL display: +Session, Terminals(0), Editor, Zed, and Pi Resources icon
 - **THEN** buttons SHALL be arranged horizontally with consistent spacing
+- **THEN** the action bar SHALL NOT contain a `+Terminal` button
 
 #### Scenario: Zed not detected
 - **WHEN** a folder group is rendered and Zed is not detected
@@ -20,15 +21,6 @@ The +Session button SHALL spawn a new pi session in the folder's cwd. It SHALL b
 - **WHEN** user clicks +Session
 - **THEN** a new pi session SHALL be spawned in the folder's cwd
 - **THEN** the button SHALL be disabled until the session appears
-
-### Requirement: +Terminal button with auto-navigation
-The +Terminal button SHALL create a new terminal in the folder's cwd AND navigate to the TerminalsView for that folder.
-
-#### Scenario: Create terminal and navigate
-- **WHEN** user clicks +Terminal
-- **THEN** a new terminal session SHALL be created with cwd matching the folder
-- **THEN** the content area SHALL navigate to `/folder/:encodedCwd/terminals`
-- **THEN** the newly created terminal SHALL be the active tab
 
 ### Requirement: Terminals button with count badge
 The Terminals button SHALL display the count of open terminals for the folder as a badge (e.g., `Terminals(3)`). Clicking it SHALL navigate to the TerminalsView. When no terminals exist, the badge SHALL show 0.
