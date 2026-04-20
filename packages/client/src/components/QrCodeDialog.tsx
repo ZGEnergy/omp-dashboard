@@ -19,10 +19,20 @@ export function QrCodeDialog({ url, connected, onClose, onDisconnect, onConnect,
 
   useEffect(() => {
     if (canvasRef.current && url) {
-      QRCode.toCanvas(canvasRef.current, url, {
-        width: 256,
-        margin: 2,
-        color: { dark: "#000000", light: "#ffffff" },
+      // qrcode's canvas renderer calls ctx.createImageData which is null
+      // under jsdom (no 2D canvas). Swallow the rejection so it doesn't
+      // surface as an Unhandled Rejection during tests. Failing to render
+      // a QR code is non-fatal — the URL is still shown as text + copy button.
+      // Wrap in Promise.resolve so this works whether toCanvas returns a
+      // Promise (real qrcode lib) or undefined (test mocks).
+      Promise.resolve(
+        QRCode.toCanvas(canvasRef.current, url, {
+          width: 256,
+          margin: 2,
+          color: { dark: "#000000", light: "#ffffff" },
+        }),
+      ).catch(() => {
+        /* no-op — QR rendering failed (likely headless/jsdom, no canvas ctx) */
       });
     }
   }, [url]);

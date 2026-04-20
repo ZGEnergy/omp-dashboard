@@ -11,6 +11,8 @@ see [`docs/release-process.md`](docs/release-process.md).
 ## [Unreleased]
 
 ### Fixed
+- **Test suite green baseline** — restored a zero-failure `npm test` baseline (38 failing tests → 0; 2143 passed, 8 documented `.skip`s with `TODO(fix-failing-tests-followup)` markers). Fixes span assertion drift (auto-attach, PiResourcesView, SessionList, config, SessionCard), environment drift (git `master` → `main`, `os.homedir()` browse fixtures), component selectors (PinDirectoryDialog), and timing-flake skips in auto-shutdown / ws-ping-pong / session-lifecycle-logging.
+- **jsdom unhandled errors eliminated** — `CommandInput` guards `scrollIntoView?.()` (jsdom-unimplemented), and `QrCodeDialog` wraps `QRCode.toCanvas(...)` in `Promise.resolve(...).catch(…)` so headless-canvas rejections (and `vi.fn()` mocks that return `undefined`) no longer surface as "Errors 3" in the vitest summary.
 - **Electron terminal spawn on macOS** — `node-pty`'s `spawn-helper` binary was shipped without execute permission in Electron bundles (npm hoisting skipped the postinstall fix), causing silent `posix_spawnp failed` errors. Added three-layer defense: build-time `chmod +x` + quarantine removal in `bundle-server.sh`, and a runtime permission fix in `createTerminalManager()` as fallback.
 
 ### Added
