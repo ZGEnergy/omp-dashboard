@@ -18,8 +18,8 @@ See [docs/architecture.md](docs/architecture.md) for full details.
 
 ```bash
 npm install          # Install dependencies
-npm test             # Run all tests (vitest)
-npm run test:watch   # Watch mode
+npm test             # Run all tests (vitest) — ISOLATED HOME, safe for live sessions
+npm run test:watch   # Watch mode — also isolated
 npm run build        # Build web client (Vite)
 npm run dev          # Start Vite dev server
 npm run reload       # Reload all connected pi sessions
@@ -27,6 +27,69 @@ npm run reload:check # Type-check + reload all pi sessions
 pi-dashboard         # Start dashboard server
 pi-dashboard --dev   # Start with Vite proxy
 ```
+
+## Test Isolation (READ BEFORE RUNNING VITEST)
+
+**Always run tests via `npm test` or `npm run test:watch`.** Never run `npx vitest` / `vitest` directly without also setting `HOME` to an ephemeral directory first.
+
+### Why this matters
+
+Integration tests call `createServer()`, which on startup runs destructive sweeps against `$HOME/.pi/dashboard/`:
+- `headlessPidRegistry.cleanupOrphans()` — reads `headless-pids.json` and may SIGTERM PIDs it considers orphans (including the **live pi process running the bridge**).
+- `headlessPidRegistry.killAll()` — SIGTERMs every tracked PID on server shutdown.
+- `editorPidRegistry.cleanupOrphans()` — SIGTERMs orphan code-server processes.
+
+If tests run against your real `$HOME`, these sweeps can **kill the pi session that launched the tests**. They also write `.meta.json` sidecars into `~/.pi/agent/sessions/`, racing live bridges and corrupting real session state.
+
+### How isolation works
+
+Three independent layers (defense-in-depth):
+
+1. **Process-level HOME override** (`package.json` `test` / `test:watch` scripts): `HOME=$(mktemp -d -t pi-test-XXXXXX) vitest ...` — vitest starts with a fresh HOME under `os.tmpdir()`.
+2. **globalSetup tripwire** (`packages/shared/src/test-support/setup-home.ts`, wired via `globalSetup` in every `vitest.config.ts`): runs ONCE at vitest boot, throws if `process.env.HOME === os.userInfo().homedir` — aborts the run before any test file loads. Pre-creates `.pi/agent/sessions/` and `.pi/dashboard/` subdirs.
+3. **Production-code guards** (`packages/server/src/test-env-guard.ts`): `headlessPidRegistry.cleanupOrphans`/`killAll` and `editorPidRegistry.cleanupOrphans` no-op with `console.warn` when `process.env.VITEST === "true"` AND HOME matches the real user home.
+
+### Running tests safely
+
+```bash
+npm test                         # Preferred — all isolation layers active
+npm run test:watch               # Also safe
+```
+
+If you must invoke vitest directly (e.g. for a single file):
+
+```bash
+HOME=$(mktemp -d -t pi-test-XXXXXX) npx vitest run path/to/test.ts
+```
+
+Without the `HOME=$(mktemp -d)` prefix, the globalSetup tripwire will abort the run with an instructive error — but **don't rely on that alone**: if you stash or delete the tripwire code, the prefix is your only remaining safety net.
+
+### Writing integration tests
+
+Tests that boot a real `DashboardServer` SHOULD use the `createTestServer()` helper:
+
+```ts
+import { createTestServer } from "@blackbelt-technology/pi-dashboard-server/test-support/test-server.js";
+
+const { server, httpPort, piPort, stop } = await createTestServer();
+// httpPort and piPort are OS-assigned (port: 0) — no hard-coded port ranges,
+// no risk of colliding with the live dashboard on :8000 / :9999.
+// ...
+await stop();
+```
+
+Avoid hard-coding ports like `19070`, `19080`, `19090`, etc. in new tests — the helper handles port allocation and safe defaults (`autoShutdown: false`, `tunnel: false`).
+
+### Verifying isolation after test changes
+
+```bash
+find ~/.pi/agent/sessions -name "*.meta.json" -exec md5 -q {} \; | sort > /tmp/before.txt
+npm test
+find ~/.pi/agent/sessions -name "*.meta.json" -exec md5 -q {} \; | sort > /tmp/after.txt
+diff /tmp/before.txt /tmp/after.txt | grep -v "pi-agent-dashboard"  # should be empty
+```
+
+Files under the **current** session's directory (`~/.pi/agent/sessions/--Users-...-pi-agent-dashboard--/`) will legitimately change during the test run because the live bridge keeps writing heartbeats. Only files in **other** session directories indicate a leak.
 
 ## Cross-Platform QA Testing
 
@@ -192,6 +255,9 @@ make clean              # Destroy all cloned VMs
 | `src/shared/rest-api.ts` | REST API type definitions |
 | `scripts/reload-all.sh` | Build bridge + reload all pi sessions |
 | `CHANGELOG.md` | Human-authored release notes per version (Keep a Changelog 1.1.0); source of GitHub Release bodies. Contributors append bullets to `## [Unreleased]`; release author promotes at tag time. |
+| `packages/shared/src/test-support/setup-home.ts` | Vitest `globalSetup` module. Runs ONCE at vitest boot. Tripwire: throws if `process.env.HOME === os.userInfo().homedir` (i.e. tests would run against real user home), aborting the entire run before any test file loads. Warns if HOME is outside `os.tmpdir()`. Pre-creates `<HOME>/.pi/agent/sessions/` and `<HOME>/.pi/dashboard/`. Wired via `test.globalSetup` in every package's `vitest.config.ts`. |
+| `packages/server/src/test-env-guard.ts` | `isUnsafeTestHomeScan()` — returns true when `VITEST=true` AND HOME matches `os.userInfo().homedir`. Gates destructive sweeps in `headlessPidRegistry.cleanupOrphans/killAll` and `editorPidRegistry.cleanupOrphans` so tests never SIGTERM live pi processes even if higher isolation layers are bypassed. |
+| `packages/server/src/test-support/test-server.ts` | `createTestServer(overrides)` helper — boots a real `DashboardServer` on OS-assigned ports (`port: 0`, `piPort: 0`) with safe defaults (no auto-shutdown, no tunnel). Returns `{ server, httpPort, piPort, stop }`. Prefer over hard-coded `19xxx` port constants in new integration tests. |
 | `docs/release-process.md` | Canonical how-to for cutting a release: commit conventions, Unreleased promotion, version bump, tag + push, CI behavior, manual fallback. |
 | `src/client/components/PiResourcesView.tsx` | Content area view for browsing pi extensions, skills, and prompts (with Installed/Packages tabs) |
 | `src/client/components/PackageBrowser.tsx` | Reusable inline package browser: npm search, type filters, install/uninstall, manual URL input |

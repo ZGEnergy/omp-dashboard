@@ -2,28 +2,26 @@
  * Tests for GET /api/health endpoint.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { createServer, type DashboardServer } from "../server.js";
+import { createTestServer, type TestServerHandle } from "../test-support/test-server.js";
+import type { DashboardServer } from "../server.js";
 
-const httpPort = 19090;
-const piPort = 19091;
-let server: DashboardServer;
+let handle: TestServerHandle | undefined;
+let server: DashboardServer | undefined;
 
 describe("GET /api/health", () => {
   afterEach(async () => {
-    if (server) {
-      try { await server.stop(); } catch { /* already stopped */ }
+    if (handle) {
+      try { await handle.stop(); } catch { /* already stopped */ }
+      handle = undefined;
+      server = undefined;
     }
   });
 
   it("should return ok, pid, and uptime", async () => {
-    server = await createServer({
-      port: httpPort, piPort, dev: true,
-      autoShutdown: false, shutdownIdleSeconds: 999, tunnel: false,
-    editor: { idleTimeoutMinutes: 10, maxInstances: 3 },
-    });
-    await server.start();
+    handle = await createTestServer();
+    server = handle.server;
 
-    const res = await fetch(`http://localhost:${httpPort}/api/health`);
+    const res = await fetch(`http://localhost:${handle.httpPort}/api/health`);
     expect(res.status).toBe(200);
 
     const body = await res.json();

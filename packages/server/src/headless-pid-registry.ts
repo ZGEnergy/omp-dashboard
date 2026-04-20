@@ -8,6 +8,7 @@ import { EventEmitter } from "node:events";
 import { readJsonFile, writeJsonFile } from "./json-store.js";
 import path from "node:path";
 import os from "node:os";
+import { isUnsafeTestHomeScan } from "./test-env-guard.js";
 
 /** Default PID file path */
 const DEFAULT_PID_FILE = path.join(os.homedir(), ".pi", "dashboard", "headless-pids.json");
@@ -148,6 +149,10 @@ export function createHeadlessPidRegistry(options?: HeadlessPidRegistryOptions):
     },
 
     killAll() {
+      if (isUnsafeTestHomeScan()) {
+        console.warn("[headless-pid-registry] killAll() blocked: running under vitest with real HOME");
+        return;
+      }
       const useGroup = process.platform !== "win32";
       for (const [pid] of entries) {
         try {
@@ -166,6 +171,10 @@ export function createHeadlessPidRegistry(options?: HeadlessPidRegistryOptions):
     },
 
     cleanupOrphans() {
+      if (isUnsafeTestHomeScan()) {
+        console.warn("[headless-pid-registry] cleanupOrphans() blocked: running under vitest with real HOME");
+        return;
+      }
       const persisted = loadFromDisk();
       const now = Date.now();
 

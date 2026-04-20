@@ -4,7 +4,8 @@
  * This prevents resuming a stale session from loading the wrong conversation.
  */
 import { describe, it, expect, afterAll } from "vitest";
-import { createServer, type DashboardServer } from "../server.js";
+import { createTestServer, type TestServerHandle } from "../test-support/test-server.js";
+import type { DashboardServer } from "../server.js";
 import { WebSocket } from "ws";
 
 function waitForOpen(ws: WebSocket): Promise<void> {
@@ -26,22 +27,21 @@ function collectMsgs(ws: WebSocket, ms: number): Promise<any[]> {
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const httpPort = 19090;
-const piPort = 19091;
+let handle: TestServerHandle;
 let server: DashboardServer;
+let piPort: number;
+
 
 describe("session file deduplication", () => {
   afterAll(async () => {
-    if (server) await server.stop();
+    if (handle) await handle.stop();
   });
 
   it("clears sessionFile from old session when new session registers with same file", async () => {
-    server = await createServer({
-      port: httpPort, piPort, dev: true,
-      autoShutdown: false, shutdownIdleSeconds: 999, tunnel: false,
-    editor: { idleTimeoutMinutes: 10, maxInstances: 3 },
-    });
-    await server.start();
+    handle = await createTestServer();
+    server = handle.server;
+    piPort = handle.piPort;
+    const httpPort = handle.httpPort;
 
     const sharedFile = "/tmp/sessions/test.jsonl";
 

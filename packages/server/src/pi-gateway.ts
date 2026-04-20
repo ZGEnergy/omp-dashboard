@@ -17,6 +17,8 @@ export interface PiGatewayOptions {
 export interface PiGateway {
   start(port: number): void;
   stop(): void;
+  /** Resolved listening port after start() (useful when start(0) is used). Returns null if not started or closed. */
+  address(): number | null;
   sendToSession(sessionId: string, msg: ServerToExtensionMessage): boolean;
   broadcast(msg: ServerToExtensionMessage): void;
   connectionCount(): number;
@@ -172,6 +174,11 @@ export function createPiGateway(
       onSessionCreated = handler;
     },
 
+    address() {
+      const addr = wss?.address();
+      if (addr && typeof addr === "object") return addr.port;
+      return null;
+    },
     start(port: number) {
       wss = new WebSocketServer({ port });
 

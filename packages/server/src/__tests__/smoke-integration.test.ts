@@ -2,7 +2,8 @@
  * Smoke integration tests — validates end-to-end flows without SQLite.
  */
 import { describe, it, expect, afterAll } from "vitest";
-import { createServer, type DashboardServer, type ServerConfig } from "../server.js";
+import { createTestServer, type TestServerHandle } from "../test-support/test-server.js";
+import type { DashboardServer } from "../server.js";
 import { WebSocket } from "ws";
 
 function waitForOpen(ws: WebSocket): Promise<void> {
@@ -24,22 +25,21 @@ function collectMsgs(ws: WebSocket, ms: number): Promise<any[]> {
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const httpPort = 19070;
-const piPort = 19071;
+let handle: TestServerHandle;
 let server: DashboardServer;
+let httpPort: number;
+let piPort: number;
 
 describe("Smoke integration", () => {
   afterAll(async () => {
-    if (server) await server.stop();
+    if (handle) await handle.stop();
   });
 
   it("9.2 — events flow and replay from memory on reconnect", async () => {
-    server = await createServer({
-      port: httpPort, piPort, dev: true,
-      autoShutdown: false, shutdownIdleSeconds: 999, tunnel: false,
-    editor: { idleTimeoutMinutes: 10, maxInstances: 3 },
-    });
-    await server.start();
+    handle = await createTestServer();
+    server = handle.server;
+    httpPort = handle.httpPort;
+    piPort = handle.piPort;
 
     // Bridge connects and registers
     const bridge = new WebSocket(`ws://localhost:${piPort}`);

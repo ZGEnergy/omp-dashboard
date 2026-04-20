@@ -15,6 +15,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { readJsonFile, writeJsonFile } from "./json-store.js";
+import { isUnsafeTestHomeScan } from "./test-env-guard.js";
 
 const DEFAULT_PID_FILE = path.join(os.homedir(), ".pi", "dashboard", "editor-pids.json");
 
@@ -155,6 +156,10 @@ export function createEditorPidRegistry(options: EditorPidRegistryOptions = {}):
     },
 
     async cleanupOrphans() {
+      if (isUnsafeTestHomeScan()) {
+        console.warn("[editor-pid-registry] cleanupOrphans() blocked: running under vitest with real HOME");
+        return;
+      }
       const data = readJsonFile<EditorPidFileData>(pidFilePath, { entries: [] });
       const persisted = Array.isArray(data?.entries) ? data.entries : [];
 

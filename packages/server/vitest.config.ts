@@ -6,5 +6,6 @@ export default defineConfig({
     environment: "node",
     pool: "forks",
     maxWorkers: 1,
+    globalSetup: ["@blackbelt-technology/pi-dashboard-shared/test-support/setup-home.ts"],
   },
 });

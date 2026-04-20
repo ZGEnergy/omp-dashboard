@@ -85,6 +85,10 @@ export interface DashboardServer {
   sessionManager: SessionManager;
   eventStore: EventStore;
   browserGateway: BrowserGateway;
+  /** Resolved HTTP port after start() (useful for port:0 in tests). Returns null if not listening. */
+  httpPort(): number | null;
+  /** Resolved pi gateway port after start(). Returns null if not listening. */
+  piPort(): number | null;
 }
 
 export async function createServer(config: ServerConfig): Promise<DashboardServer> {
@@ -544,6 +548,15 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     sessionManager,
     eventStore,
     browserGateway,
+
+    httpPort() {
+      const addr = fastify.server.address();
+      if (addr && typeof addr === "object") return addr.port;
+      return null;
+    },
+    piPort() {
+      return piGateway.address();
+    },
 
     async start() {
       // Clean up orphan headless processes from a previous server instance
