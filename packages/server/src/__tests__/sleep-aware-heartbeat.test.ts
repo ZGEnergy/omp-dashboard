@@ -73,7 +73,9 @@ describe("Sleep-aware heartbeat", () => {
     await delay(100);
 
     ws.close();
-    await delay(SHORT_HB + 200);
+    // Heartbeat timeout now has a reconnect grace-period retry (same duration),
+    // so the terminal onEmpty fires after ~2× SHORT_HB + slack.
+    await delay(SHORT_HB * 2 + 400);
 
     expect(emptyCalled).toBe(true);
   }, 10000);

@@ -7,24 +7,18 @@ import os from "node:os";
 describe("loadConfig", () => {
   let testDir: string;
   let configFile: string;
-  let origHome: string | undefined;
-  let origUserProfile: string | undefined;
+  let origHome: string;
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-config-${Date.now()}`);
     fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
     configFile = path.join(testDir, ".pi", "dashboard", "config.json");
-    // Override both HOME (Unix) and USERPROFILE (Windows) — os.homedir()
-    // uses USERPROFILE on Windows, HOME elsewhere.
-    origHome = process.env.HOME;
-    origUserProfile = process.env.USERPROFILE;
+    origHome = process.env.HOME!;
     process.env.HOME = testDir;
-    process.env.USERPROFILE = testDir;
   });
 
   afterEach(() => {
-    if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome;
-    if (origUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = origUserProfile;
+    process.env.HOME = origHome;
     if (fs.existsSync(testDir)) fs.rmSync(testDir, { recursive: true });
   });
 
@@ -33,7 +27,6 @@ describe("loadConfig", () => {
     expect(config.port).toBe(8000);
     expect(config.piPort).toBe(9999);
     expect(config.autoStart).toBe(true);
-    // Default is false (opt-in) — see DEFAULTS in packages/shared/src/config.ts
     expect(config.autoShutdown).toBe(false);
     expect(config.lastServer).toBeUndefined();
     expect(config.shutdownIdleSeconds).toBe(300);
@@ -317,22 +310,18 @@ describe("ensureConfig", () => {
   let testDir: string;
   let configDir: string;
   let configFile: string;
-  let origHome: string | undefined;
-  let origUserProfile: string | undefined;
+  let origHome: string;
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-ensure-${Date.now()}`);
     configDir = path.join(testDir, ".pi", "dashboard");
     configFile = path.join(configDir, "config.json");
-    origHome = process.env.HOME;
-    origUserProfile = process.env.USERPROFILE;
+    origHome = process.env.HOME!;
     process.env.HOME = testDir;
-    process.env.USERPROFILE = testDir;
   });
 
   afterEach(() => {
-    if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome;
-    if (origUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = origUserProfile;
+    process.env.HOME = origHome;
     if (fs.existsSync(testDir)) fs.rmSync(testDir, { recursive: true });
   });
 

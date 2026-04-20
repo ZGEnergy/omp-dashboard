@@ -15,6 +15,13 @@ async function connectSession(piPort: number, sessionId: string): Promise<WebSoc
         cwd: "/tmp",
         source: "cli",
       }));
+      // Without replay_complete, event-wiring treats incoming events as replay
+      // and suppresses auto-attach. Send it immediately so subsequent events run
+      // through the normal live path.
+      ws.send(JSON.stringify({
+        type: "replay_complete",
+        sessionId,
+      }));
       setTimeout(resolve, 50);
     });
   });
@@ -53,6 +60,8 @@ function sendToolEvent(ws: WebSocket, sessionId: string, opts: { phase?: string;
     }));
   }
   if (opts.changeName) {
+    // Use Write (active) so auto-attach fires — Read is passive and only sets openspecChange,
+    // not attachedProposal (see event-wiring.ts: attach requires detected.isActive).
     ws.send(JSON.stringify({
       type: "event_forward",
       sessionId,
@@ -60,7 +69,7 @@ function sendToolEvent(ws: WebSocket, sessionId: string, opts: { phase?: string;
         eventType: "tool_execution_start",
         timestamp: Date.now(),
         data: {
-          toolName: "Read",
+          toolName: "Write",
           args: { path: `openspec/changes/${opts.changeName}/proposal.md` },
         },
       },

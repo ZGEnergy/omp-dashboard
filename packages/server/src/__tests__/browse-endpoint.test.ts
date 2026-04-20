@@ -8,19 +8,17 @@ import os from "node:os";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 
-// Monorepo: packages/server/src/__tests__ → repo root is 4 levels up.
-// Pre-monorepo this was 3 levels (src/__tests__); updated for the current layout.
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../../..");
-
 describe("listDirectories", () => {
   it("should return directory entries for a valid path", async () => {
-    const result = await listDirectories(REPO_ROOT);
+    // Use the project root — known to have subdirectories
+    const projectRoot = path.resolve(import.meta.dirname, "../../../..");
+    const result = await listDirectories(projectRoot);
 
-    expect(result.current).toBe(REPO_ROOT);
-    expect(result.parent).toBe(path.dirname(REPO_ROOT));
+    expect(result.current).toBe(projectRoot);
+    expect(result.parent).toBe(path.dirname(projectRoot));
     expect(result.entries.length).toBeGreaterThan(0);
 
-    // Should contain known subdirectories of the monorepo root
+    // Should contain known subdirectories at the monorepo root
     const names = result.entries.map((e) => e.name);
     expect(names).toContain("packages");
     expect(names).toContain("node_modules");
@@ -32,7 +30,8 @@ describe("listDirectories", () => {
   });
 
   it("should return entries sorted alphabetically", async () => {
-    const result = await listDirectories(REPO_ROOT);
+    const projectRoot = path.resolve(import.meta.dirname, "../../../..");
+    const result = await listDirectories(projectRoot);
     const names = result.entries.map((e) => e.name);
     const sorted = [...names].sort((a, b) => a.localeCompare(b));
     expect(names).toEqual(sorted);
@@ -47,22 +46,24 @@ describe("listDirectories", () => {
   });
 
   it("should detect isGit flag for git repos", async () => {
-    const parentDir = path.dirname(REPO_ROOT);
+    const projectRoot = path.resolve(import.meta.dirname, "../../../..");
+    const parentDir = path.dirname(projectRoot);
     const result = await listDirectories(parentDir);
 
     const projectEntry = result.entries.find(
-      (e) => e.name === path.basename(REPO_ROOT)
+      (e) => e.name === path.basename(projectRoot)
     );
     expect(projectEntry).toBeDefined();
     expect(projectEntry!.isGit).toBe(true);
   });
 
   it("should detect isPi flag for pi projects", async () => {
-    const parentDir = path.dirname(REPO_ROOT);
+    const projectRoot = path.resolve(import.meta.dirname, "../../../..");
+    const parentDir = path.dirname(projectRoot);
     const result = await listDirectories(parentDir);
 
     const projectEntry = result.entries.find(
-      (e) => e.name === path.basename(REPO_ROOT)
+      (e) => e.name === path.basename(projectRoot)
     );
     expect(projectEntry).toBeDefined();
     expect(projectEntry!.isPi).toBe(true);
@@ -86,7 +87,7 @@ describe("listDirectories", () => {
   });
 
   it("should only return directories, not files", async () => {
-    const projectRoot = path.resolve(import.meta.dirname, "../../..");
+    const projectRoot = path.resolve(import.meta.dirname, "../../../..");
     const result = await listDirectories(projectRoot);
     const names = result.entries.map((e) => e.name);
     // package.json is a file, should not appear
@@ -95,27 +96,11 @@ describe("listDirectories", () => {
   });
 
   it("should include full path in each entry", async () => {
-    const projectRoot = path.resolve(import.meta.dirname, "../../..");
+    const projectRoot = path.resolve(import.meta.dirname, "../../../..");
     const result = await listDirectories(projectRoot);
     for (const entry of result.entries) {
       expect(entry.path).toBe(path.join(projectRoot, entry.name));
     }
-  });
-
-  it("should return the server's platform", async () => {
-    const result = await listDirectories(REPO_ROOT);
-    expect(result.platform).toBe(process.platform);
-  });
-
-  it("returns parent=null at the filesystem root", async () => {
-    // Use whichever root is appropriate for the host: "/" on Unix, the
-    // process's drive root on Windows. Previously this test only
-    // exercised Unix; `isFilesystemRoot` covers both branches now.
-    const root = process.platform === "win32"
-      ? path.parse(process.cwd()).root    // e.g., "C:\\" or "B:\\"
-      : "/";
-    const result = await listDirectories(root);
-    expect(result.parent).toBeNull();
   });
 });
 

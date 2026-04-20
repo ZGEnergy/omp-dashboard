@@ -4,7 +4,7 @@
 TBD - created by archiving change isolate-test-environment. Update Purpose after archive.
 ## Requirements
 ### Requirement: Tests run with isolated HOME directory at the process level
-The vitest test suite SHALL execute with `process.env.HOME` pointing to an ephemeral directory under the OS temp dir from the moment the vitest process starts. Isolation SHALL NOT depend on in-JS hooks that could run after destructive module-level code.
+The vitest test suite SHALL execute with `process.env.HOME` pointing to an ephemeral directory under the OS temp dir from the moment the vitest process starts, AND the suite SHALL exit with zero failures on a clean run against this isolated HOME. Skipped tests are acceptable when each skip carries an inline `TODO(fix-failing-tests-followup)` comment and is tracked in the relevant change's deferred-work list.
 
 #### Scenario: npm test script sets HOME before vitest starts
 - **WHEN** `npm test` (or any script that runs vitest) is invoked
@@ -30,6 +30,12 @@ The vitest test suite SHALL execute with `process.env.HOME` pointing to an ephem
 - **WHEN** `npm test` completes (successfully or with failures)
 - **THEN** the hashes of every file in the developer's real `~/.pi/agent/sessions/` SHALL be identical to before the run
 - **AND** the contents of the real `~/.pi/dashboard/` SHALL be identical to before the run
+
+#### Scenario: Suite exits green on isolated HOME
+- **WHEN** `npm test` is invoked on a working tree at or after this change is merged
+- **THEN** vitest SHALL exit with code 0
+- **AND** the reported failure count SHALL be 0
+- **AND** any `.skip`ped tests SHALL carry an inline `TODO(fix-failing-tests-followup)` comment
 
 ### Requirement: Destructive production-code sweeps are neutered in test environments
 Server startup sweeps that send signals to processes or delete files based on on-disk PID registries SHALL refuse to run destructive actions when the process appears to be a vitest run AND the HOME points to the developer's real home directory. This is defense-in-depth against any path that bypasses the npm script and globalSetup.

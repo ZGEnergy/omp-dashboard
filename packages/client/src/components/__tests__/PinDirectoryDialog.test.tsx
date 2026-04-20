@@ -57,10 +57,11 @@ describe("PinDirectoryDialog", () => {
     await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
 
     const input = screen.getByRole("textbox") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "/Users/robson/Project/" } });
+    // No trailing slash: partial="Project", which matches the mocked entry
+    // name and satisfies PathPicker.tryConfirm Rule 1 (exact match).
+    fireEvent.change(input, { target: { value: "/Users/robson/Project" } });
     fireEvent.keyDown(input, { key: "Enter" });
-
-    expect(onPin).toHaveBeenCalledWith("/Users/robson/Project");
+    await waitFor(() => expect(onPin).toHaveBeenCalledWith("/Users/robson/Project"));
   });
 
   it("should call onPin when Select button clicked", async () => {
@@ -68,9 +69,8 @@ describe("PinDirectoryDialog", () => {
     await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
 
     const input = screen.getByRole("textbox") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "/Users/robson/Project/" } });
+    fireEvent.change(input, { target: { value: "/Users/robson/Project" } });
     fireEvent.click(screen.getByText("Select"));
-
-    expect(onPin).toHaveBeenCalledWith("/Users/robson/Project");
+    await waitFor(() => expect(onPin).toHaveBeenCalledWith("/Users/robson/Project"));
   });
 });

@@ -57,6 +57,7 @@ export function FolderActionBar({
       <button
         onClick={(e) => { e.stopPropagation(); onSpawnSession(); }}
         disabled={spawningDisabled}
+        data-testid="spawn-session-btn"
         className={`text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] ${
           spawningDisabled ? "opacity-50 cursor-not-allowed" : "hover:text-green-400 hover:border-green-500/50"
         }`}

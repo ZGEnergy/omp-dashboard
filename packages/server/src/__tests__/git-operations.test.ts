@@ -18,7 +18,9 @@ function git(cmd: string, cwd: string) {
 
 function makeRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "git-ops-test-"));
-  git("init", dir);
+  // Force `main` as the default branch so tests are deterministic regardless
+  // of the host user's `init.defaultBranch` config.
+  git("-c init.defaultBranch=main init", dir);
   git("config user.email test@test.com", dir);
   git("config user.name Test", dir);
   // Initial commit so we have a branch
@@ -122,7 +124,7 @@ describe("git-operations", () => {
         writeFileSync(join(repo, "remote.txt"), "data");
         git("add .", repo);
         git("commit -m remote-only", repo);
-        git("checkout master", repo);
+        git("checkout main", repo);
 
         // Fetch in clone
         git("fetch origin", clone);
@@ -151,7 +153,7 @@ describe("git-operations", () => {
   describe("checkoutBranch", () => {
     it("checks out a local branch on clean repo", () => {
       git("checkout -b feature-x", repo);
-      git("checkout master", repo);
+      git("checkout main", repo);
       const result = checkoutBranch(repo, "feature-x", false);
       expect(result.success).toBe(true);
       const head = execSync("git rev-parse --abbrev-ref HEAD", { cwd: repo, encoding: "utf-8" }).trim();
@@ -160,7 +162,7 @@ describe("git-operations", () => {
 
     it("returns dirty when working tree is dirty and stash=false", () => {
       git("checkout -b feature-y", repo);
-      git("checkout master", repo);
+      git("checkout main", repo);
       writeFileSync(join(repo, "README.md"), "dirty");
       const result = checkoutBranch(repo, "feature-y", false);
       expect(result.success).toBe(false);
@@ -172,7 +174,7 @@ describe("git-operations", () => {
 
     it("stashes and checks out when stash=true", () => {
       git("checkout -b feature-z", repo);
-      git("checkout master", repo);
+      git("checkout main", repo);
       writeFileSync(join(repo, "README.md"), "dirty");
       const result = checkoutBranch(repo, "feature-z", true);
       expect(result.success).toBe(true);
@@ -184,7 +186,7 @@ describe("git-operations", () => {
     });
 
     it("returns success when already on target branch", () => {
-      const result = checkoutBranch(repo, "master", false);
+      const result = checkoutBranch(repo, "main", false);
       expect(result.success).toBe(true);
     });
 
@@ -194,7 +196,7 @@ describe("git-operations", () => {
       writeFileSync(join(repo, "r.txt"), "data");
       git("add .", repo);
       git("commit -m r", repo);
-      git("checkout master", repo);
+      git("checkout main", repo);
 
       const clone = mkdtempSync(join(tmpdir(), "git-ops-clone-"));
       try {

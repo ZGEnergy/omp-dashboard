@@ -1,8 +1,37 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import React from "react";
 import { PiResourcesView } from "../PiResourcesView.js";
 import type { PiResourcesResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+
+/**
+ * The "Local" and "Global" scope sections render collapsed by default.
+ * Expand the Local section so loose resources (skills/prompts) and packages
+ * are visible to the test. The clickable button is the first descendant
+ * button of the scope-local container.
+ */
+async function expandLocal() {
+  const section = await screen.findByTestId("scope-local");
+  const toggle = section.querySelector("button");
+  if (toggle) fireEvent.click(toggle);
+  // Expand every ResourceGroup (Skills / Extensions / Prompts) — they also
+  // start collapsed. Each group has a single button that toggles visibility.
+  const groupButtons = Array.from(section.querySelectorAll("button")).filter((b) => {
+    const txt = b.textContent ?? "";
+    return /^(Skills|Extensions|Prompts)/i.test(txt.trim());
+  });
+  for (const btn of groupButtons) fireEvent.click(btn);
+}
+
+async function expandLocalPackage() {
+  await expandLocal();
+  // Expand the first package inside the Local section
+  const section = screen.getByTestId("scope-local");
+  const pkgButton = Array.from(section.querySelectorAll("button")).find((b) =>
+    b.textContent?.includes("pi-web-access"),
+  );
+  if (pkgButton) fireEvent.click(pkgButton);
+}
 
 afterEach(() => cleanup());
 
@@ -54,6 +83,7 @@ describe("PiResourcesView", () => {
 
   it("shows local skills and prompts", async () => {
     render(<PiResourcesView cwd="/path/to/project" onBack={vi.fn()} onViewFile={vi.fn()} />);
+    await expandLocal();
     expect(await screen.findByText("code-review")).toBeTruthy();
     expect(screen.getByText("Review code quality.")).toBeTruthy();
     expect(screen.getByText("opsx-apply")).toBeTruthy();
@@ -61,22 +91,25 @@ describe("PiResourcesView", () => {
 
   it("shows global section as empty", async () => {
     render(<PiResourcesView cwd="/path/to/project" onBack={vi.fn()} onViewFile={vi.fn()} />);
-    await screen.findByText("code-review");
-    const globalSection = screen.getByTestId("scope-global");
+    const globalSection = await screen.findByTestId("scope-global");
+    // Expand Global section (collapsed by default) and confirm empty state
+    const toggle = globalSection.querySelector("button");
+    if (toggle) fireEvent.click(toggle);
     expect(globalSection.textContent).toContain("(none)");
   });
 
   it("shows packages", async () => {
     render(<PiResourcesView cwd="/path/to/project" onBack={vi.fn()} onViewFile={vi.fn()} />);
-    // Package name and source both rendered
-    const pkgSection = await screen.findByTestId("scope-packages");
-    expect(pkgSection.textContent).toContain("pi-web-access");
-    expect(pkgSection.textContent).toContain("npm:pi-web-access");
+    // Packages with no scope (or scope='local') are merged into the Local section
+    await expandLocal();
+    const localSection = await screen.findByTestId("scope-local");
+    expect(localSection.textContent).toContain("pi-web-access");
   });
 
   it("calls onViewFile when resource item is clicked", async () => {
     const onViewFile = vi.fn();
     render(<PiResourcesView cwd="/path/to/project" onBack={vi.fn()} onViewFile={onViewFile} />);
+    await expandLocal();
     await screen.findByText("code-review");
     const items = screen.getAllByTestId("resource-item");
     items[0].click();
@@ -86,7 +119,7 @@ describe("PiResourcesView", () => {
   it("calls onBack when back button is clicked", async () => {
     const onBack = vi.fn();
     render(<PiResourcesView cwd="/path/to/project" onBack={onBack} onViewFile={vi.fn()} />);
-    await screen.findByText("code-review");
+    await screen.findByTestId("pi-resources-back");
     screen.getByTestId("pi-resources-back").click();
     expect(onBack).toHaveBeenCalled();
   });

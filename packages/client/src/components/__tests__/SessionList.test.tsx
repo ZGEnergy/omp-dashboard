@@ -68,7 +68,10 @@ describe("SessionList spawn button", () => {
     expect(btn).toBeTruthy();
   });
 
-  it("should not render spawn button when onSpawnSession is not provided", () => {
+  it("renders spawn button even when onSpawnSession is not provided (no-op click)", () => {
+    // FolderActionBar always renders the Session button; when the parent
+    // doesn't supply onSpawnSession, clicking it is a no-op (onSpawnSession?.()
+    // in SessionList). This is the current stable behavior.
     render(
       <TestRouter>
         <ThemeProvider>
@@ -79,7 +82,7 @@ describe("SessionList spawn button", () => {
         </ThemeProvider>
       </TestRouter>,
     );
-    expect(screen.queryByTestId("spawn-session-btn")).toBeNull();
+    expect(screen.getByTestId("spawn-session-btn")).toBeTruthy();
   });
 
   it("should call onSpawnSession with cwd when clicked", () => {

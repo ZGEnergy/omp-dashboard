@@ -55,7 +55,9 @@ describe("SessionCard", () => {
       <SessionCard session={session} {...defaultProps} selectedId="test-session" />
     );
     const card = container.firstChild as HTMLElement;
-    expect(card.className).toContain("border-l-blue-500");
+    // Current selected-state styling uses a full blue border + blue tint
+    // + ring, not the older `border-l-blue-500` left-accent.
+    expect(card.className).toContain("border-blue-500/60");
   });
 
   it("should call onSelect when clicked", () => {
