@@ -63,8 +63,8 @@ export interface ChildProcessInfo {
  * this module stable while centralizing the pure helper.
  * See change: consolidate-platform-handlers.
  */
-export { parseEtime } from "@blackbelt-technology/pi-dashboard-shared/platform/process-scan.js";
-import { parseEtime } from "@blackbelt-technology/pi-dashboard-shared/platform/process-scan.js";
+export { parseEtime } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
+import { parseEtime } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 
 const DEFAULT_MIN_ELAPSED_MS = 30_000;
 

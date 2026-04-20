@@ -12,7 +12,7 @@ import {
 } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 import {
   findPidByMarker,
-} from "@blackbelt-technology/pi-dashboard-shared/platform/process-identify.js";
+} from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 
 /**
  * Find headless pi PIDs associated with a session-id marker and kill them.
@@ -201,7 +201,7 @@ export function handleKillProcess(
  * Re-exported from `platform/process-identify.ts` for backwards compat with
  * any external consumer of this handler.
  */
-export { isPiCommandLine } from "@blackbelt-technology/pi-dashboard-shared/platform/process-identify.js";
+export { isPiCommandLine } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 
 export async function handleForceKill(
   msg: Extract<BrowserToServerMessage, { type: "force_kill" }>,

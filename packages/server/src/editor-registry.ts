@@ -4,7 +4,7 @@
  * Uses shared platform primitives so the win32 / unix split is owned in one
  * place. See change: consolidate-platform-handlers.
  */
-import { isProcessRunning as platformIsProcessRunning } from "@blackbelt-technology/pi-dashboard-shared/platform/process-scan.js";
+import { isProcessRunning as platformIsProcessRunning } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 
 export interface EditorEntry {
