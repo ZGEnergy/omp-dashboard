@@ -23,7 +23,7 @@ describe("pi-core-routes", () => {
 
 	beforeEach(async () => {
 		checker = {
-			getStatus: vi.fn<[boolean?], Promise<PiCoreStatus>>(),
+			getStatus: vi.fn<(refresh?: boolean) => Promise<PiCoreStatus>>(),
 			invalidate: vi.fn(),
 		};
 		updater = {

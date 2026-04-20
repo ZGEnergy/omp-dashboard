@@ -6,6 +6,8 @@ import type {
   DashboardEvent,
   ApiResponse,
 } from "./types.js";
+
+export type { ApiResponse } from "./types.js";
 import type { EnrichedRecommendedExtension } from "./recommended-extensions.js";
 
 export type { EnrichedRecommendedExtension } from "./recommended-extensions.js";

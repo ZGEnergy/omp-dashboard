@@ -77,7 +77,7 @@ describe("browser-gateway handler error reporting", () => {
 
     const gateway = createBrowserGateway(
       createMemorySessionManager(),
-      createMemoryEventStore(),
+      createMemoryEventStore(() => false),
       makeStubPiGateway(),
       undefined,
       undefined,
@@ -98,7 +98,7 @@ describe("browser-gateway handler error reporting", () => {
     await new Promise((r) => setImmediate(r));
 
     const handlerErrorCall = errorSpy.mock.calls.find(
-      (args) =>
+      (args: unknown[]) =>
         typeof args[0] === "string" &&
         args[0].includes("[browser-gw] handler error") &&
         args[0].includes("type=create_terminal"),
@@ -110,7 +110,7 @@ describe("browser-gateway handler error reporting", () => {
   it("silently drops malformed JSON frames (no handler-error log)", async () => {
     const gateway = createBrowserGateway(
       createMemorySessionManager(),
-      createMemoryEventStore(),
+      createMemoryEventStore(() => false),
       makeStubPiGateway(),
     );
 
@@ -121,7 +121,7 @@ describe("browser-gateway handler error reporting", () => {
     await new Promise((r) => setImmediate(r));
 
     const handlerErrorCall = errorSpy.mock.calls.find(
-      (args) =>
+      (args: unknown[]) =>
         typeof args[0] === "string" && args[0].includes("[browser-gw] handler error"),
     );
     expect(handlerErrorCall).toBeUndefined();
