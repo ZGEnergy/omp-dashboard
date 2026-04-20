@@ -8,8 +8,8 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "prepare": "vite build"
+    "build": "vite build && node scripts/precompress.mjs",
+    "prepare": "vite build && node scripts/precompress.mjs"
   },
   "dependencies": {
     "@blackbelt-technology/pi-dashboard-shared": "*",
