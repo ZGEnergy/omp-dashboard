@@ -3,6 +3,7 @@ import { getApiBase } from "../lib/api-context.js";
 import { useLocation } from "wouter";
 import { Icon } from "@mdi/react";
 import { mdiChevronRight, mdiChevronDown, mdiPlus, mdiPin, mdiFolder, mdiFolderOpen, mdiConsoleLine, mdiCog, mdiPuzzleOutline, mdiFileDocumentOutline } from "@mdi/js";
+import { PiLogo } from "./PiLogo.js";
 import { FolderActionBar } from "./FolderActionBar.js";
 import { encodeFolderPath } from "../lib/folder-encoding.js";
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
@@ -466,7 +467,9 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
       <div className="border-b border-[var(--border-primary)]">
         <div className="flex items-center justify-between px-3 py-1.5" data-testid="header-app-bar">
           <div className="flex gap-1.5 items-center">
-            <button onClick={() => navigate("/")} className="text-lg font-bold text-blue-500 hover:text-blue-400 transition-colors leading-none" title="Home">π</button>
+            <button onClick={() => navigate("/")} className="flex items-center leading-none text-blue-500 hover:text-blue-400 transition-colors" title="Home">
+              <PiLogo size={24} />
+            </button>
             <ThemePicker />
             <ThemeToggle />
           </div>
@@ -496,11 +499,12 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
           {onPinDirectory && (
             <button
               onClick={() => setShowPinDialog(true)}
-              className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-tertiary)] hover:text-yellow-400 hover:border-yellow-500/50"
-              title="Pin a directory"
+              className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-tertiary)] hover:text-yellow-400 hover:border-yellow-500/50 inline-flex items-center gap-1"
+              title="Pin a folder to the sidebar"
               data-testid="pin-dir-dialog-btn"
             >
-              <Icon path={mdiPin} size={0.45} className="inline" /><Icon path={mdiPlus} size={0.35} className="inline" />
+              <Icon path={mdiPin} size={0.45} />
+              <span>Add folder</span>
             </button>
           )}
         </div>

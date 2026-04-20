@@ -77,4 +77,24 @@ describe("SessionSidebar error indicator", () => {
     expect(dot).toBeTruthy();
     expect(container.querySelector(".bg-red-500")).toBeNull();
   });
+
+  it("renders the inline PiLogo SVG in the header brand button", () => {
+    const { container } = render(
+      <ThemeProvider>
+        <SessionSidebar
+          sessions={[]}
+          onSelect={() => {}}
+        />
+      </ThemeProvider>,
+    );
+
+    const headerBtn = container.querySelector("button[title='Home']");
+    expect(headerBtn).toBeTruthy();
+    // No literal π text node
+    expect(headerBtn?.textContent?.trim()).toBe("");
+    // Inline SVG with the brand aria-label, transparent (no <img> with raster src)
+    const svg = headerBtn?.querySelector("svg[aria-label='Pi Dashboard']");
+    expect(svg).toBeTruthy();
+    expect(headerBtn?.querySelector("img")).toBeNull();
+  });
 });

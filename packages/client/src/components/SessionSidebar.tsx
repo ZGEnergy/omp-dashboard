@@ -5,6 +5,7 @@ import { mdiMonitor, mdiFlash, mdiTelevision, mdiWeb, mdiHelpCircle, mdiCog } fr
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
 import { InlineRenameInput } from "./InlineRenameInput.js";
+import { PiLogo } from "./PiLogo.js";
 
 interface Props {
   sessions: DashboardSession[];
@@ -56,7 +57,9 @@ export function SessionSidebar({ sessions, selectedId, onSelect, onRename, error
   return (
     <div className="w-72 border-r border-[var(--border-primary)] overflow-y-auto flex flex-col">
       <div className="p-3 border-b border-[var(--border-primary)]">
-        <button onClick={() => navigate("/")} className="text-lg font-bold text-blue-500 hover:text-blue-400 transition-colors leading-none" title="Home">π</button>
+        <button onClick={() => navigate("/")} className="flex items-center leading-none text-blue-500 hover:text-blue-400 transition-colors" title="Home">
+          <PiLogo size={24} />
+        </button>
       </div>
 
       {/* Active sessions */}
