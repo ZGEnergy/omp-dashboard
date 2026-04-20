@@ -31,7 +31,7 @@ When a user clicks "Sign In" for an auth-code provider, the UI SHALL call `POST 
 - **THEN** the UI SHALL display the error message and a "Try Again" button
 
 ### Requirement: Device code login flow
-When a user clicks "Sign In" for GitHub Copilot, the UI SHALL call `POST /api/provider-auth/device-code`, display the verification URL and user code in a modal, open the verification URL in a new tab, and poll `GET /api/provider-auth/device-status/:flowId` until authorization completes or the code expires.
+When a user clicks "Sign In" for GitHub Copilot, the UI SHALL call `POST /api/provider-auth/device-code`, display the verification URL and user code in a modal, and poll `GET /api/provider-auth/device-status/:flowId` until authorization completes or the code expires. The UI SHALL NOT automatically open the verification URL — see "Device code flow requires explicit user action to open browser".
 
 #### Scenario: Successful device code login
 - **WHEN** the user enters the code on GitHub and authorizes
@@ -44,6 +44,19 @@ When a user clicks "Sign In" for GitHub Copilot, the UI SHALL call `POST /api/pr
 #### Scenario: GitHub Enterprise domain prompt
 - **WHEN** the user clicks "Sign In" for GitHub Copilot
 - **THEN** the UI SHALL first prompt for a GitHub Enterprise domain (with a placeholder "blank for github.com") before starting the device code flow
+
+### Requirement: Device code flow requires explicit user action to open browser
+When the device code flow is initiated, the system SHALL NOT automatically open the verification URL in a new browser tab. Instead, the system SHALL display the verification URL as a clickable link and a dedicated "Open Registration Page" button. The user MUST manually click the button to open the URL.
+
+#### Scenario: Device code flow shows button instead of auto-opening
+- **WHEN** the user initiates a device code login (e.g., GitHub Copilot)
+- **THEN** the device code modal displays the user code and verification URL
+- **AND** a "Open Registration Page" button is shown
+- **AND** no browser tab is opened automatically
+
+#### Scenario: User clicks button to open registration
+- **WHEN** the user clicks the "Open Registration Page" button in the device code modal
+- **THEN** the verification URL opens in a new browser tab
 
 ### Requirement: API key entry
 The UI SHALL provide text inputs for API key providers. When the user enters a key and confirms, the UI SHALL call `PUT /api/provider-auth/api-key` with the provider name and key. The input SHALL mask the key value after saving.
