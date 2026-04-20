@@ -21,8 +21,13 @@ const { code, lang = "bash", filename } = Astro.props;
       Copy
     </button>
   </div>
-  <div class="overflow-x-auto text-sm leading-relaxed">
-    <Code code={code} lang={lang as any} theme="github-dark-dimmed" wrap={false} />
+  <div class="overflow-x-auto text-sm leading-relaxed pi-shiki-dual">
+    <Code
+      code={code}
+      lang={lang as any}
+      themes={{ light: "github-light", dark: "github-dark-dimmed" }}
+      wrap={false}
+    />
   </div>
 </div>
 

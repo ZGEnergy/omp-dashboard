@@ -15,7 +15,22 @@ export interface FeatureEntry {
 const SHOTS_DESKTOP = "/pi-agent-dashboard/screenshots/desktop";
 const SHOTS_MOBILE = "/pi-agent-dashboard/screenshots/mobile";
 
+/**
+ * Feature cards laid out as a 12-column bento grid.
+ *
+ * Layout is tuned so every row adds up to exactly 12 columns with no gaps:
+ *
+ *   Row 1-2  sessions (8×2)  | chat (4)   / promptbus (4)   stacked
+ *   Row 3-4  terminal (4)   / editor (4)   stacked | flows (8×2) banner
+ *   Row 5    diff (6)        | mobile (6)
+ *   Row 6    openspec (4)    | packages (4) | providers (4)
+ *   Row 7    discovery (6)   | tunnel (6)
+ *
+ * The order here is the DOM order; visual placement is driven by the span
+ * classes in each entry's `span` field.
+ */
 export const FEATURES: FeatureEntry[] = [
+  // Row 1-2 — banner + stacked pair
   {
     id: "multi-session",
     title: "Every session, at a glance",
@@ -45,6 +60,8 @@ export const FEATURES: FeatureEntry[] = [
     badgeTone: "accent",
     span: "md:col-span-4",
   },
+
+  // Row 3-4 — terminal above editor (both col-4) next to the flows banner
   {
     id: "terminal",
     title: "A terminal that just… works",
@@ -66,6 +83,19 @@ export const FEATURES: FeatureEntry[] = [
     span: "md:col-span-8 md:row-span-2",
   },
   {
+    id: "editor",
+    title: "VS Code in the browser",
+    blurb:
+      "An embedded code-server per workspace — explorer, tabs, extensions, git. Lazy-started, proxied through the dashboard. No separate window to babysit.",
+    image: `${SHOTS_DESKTOP}/editor.png`,
+    imageAlt: "Embedded VS Code / code-server editor inside the dashboard",
+    badge: "New",
+    badgeTone: "accent",
+    span: "md:col-span-4",
+  },
+
+  // Row 5 — matched pair
+  {
     id: "diff",
     title: "Review every change",
     blurb:
@@ -85,6 +115,8 @@ export const FEATURES: FeatureEntry[] = [
     badgeTone: "accent",
     span: "md:col-span-6",
   },
+
+  // Row 6 — triple
   {
     id: "openspec",
     title: "OpenSpec baked in",
@@ -112,6 +144,8 @@ export const FEATURES: FeatureEntry[] = [
     imageAlt: "Provider authentication panel in settings",
     span: "md:col-span-4",
   },
+
+  // Row 7 — matched pair (remote delivery)
   {
     id: "discovery",
     title: "Network discovery",

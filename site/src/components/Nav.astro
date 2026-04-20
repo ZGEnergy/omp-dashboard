@@ -1,7 +1,10 @@
 ---
+import ThemeToggle from "./ThemeToggle.tsx";
+
 const links = [
   { href: "#features", label: "Features" },
   { href: "#why", label: "Why" },
+  { href: "#download", label: "Download" },
   { href: "#install", label: "Install" },
 ];
 ---
@@ -40,6 +43,7 @@ const links = [
     </ul>
 
     <div class="flex items-center gap-2">
+      <ThemeToggle client:load />
       <a
         href="https://github.com/BlackBeltTechnology/pi-agent-dashboard"
         target="_blank"

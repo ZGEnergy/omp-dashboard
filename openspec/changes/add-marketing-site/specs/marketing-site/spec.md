@@ -13,11 +13,53 @@ The repository SHALL contain a self-contained marketing site at `/site/` built w
 - **THEN** the build succeeds without depending on the root workspace, the `packages/*` workspaces, or any main-app build artifacts
 - **AND** output is written to `site/dist/` as static HTML/CSS/JS assets
 
-#### Scenario: Site declares "Pi blue" design tokens
+#### Scenario: Site declares "Pi blue" design tokens as CSS variables
 
-- **GIVEN** the site's Tailwind configuration
-- **WHEN** the config is loaded
-- **THEN** it defines slate-950 as the default background, indigo-400 and violet-500 as accent colors, and CSS variables for glow gradients and dot-grid background
+- **GIVEN** the site's Tailwind configuration and `global.css`
+- **WHEN** the stylesheet loads
+- **THEN** every `pi-*` Tailwind color resolves through a CSS variable of
+  the form `rgb(var(--pi-xxx) / <alpha-value>)` so opacity utilities still
+  work, and both `:root` (light) and `:root.dark` declare a complete set of
+  these variables covering bg, surface, surface-alt, border, fg, muted,
+  accent, accent2, success, and warn
+
+### Requirement: Theme selector with System / Light / Dark and no FOUC
+
+The site SHALL support a System / Light / Dark theme selector with
+pre-paint resolution of the initial theme.
+
+#### Scenario: First paint matches the resolved theme
+
+- **GIVEN** a visitor with `localStorage.pi-theme` unset and an OS set to
+  dark mode
+- **WHEN** they load the site for the first time
+- **THEN** an inlined script in `<head>` resolves the theme to "dark" and
+  sets `class="dark"` on `<html>` before any stylesheet parses, so no
+  flash of light content appears
+
+#### Scenario: Explicit choice is persisted across reloads
+
+- **GIVEN** a visitor who clicks the Light option in the theme toggle
+- **WHEN** they reload the page
+- **THEN** `<html>` does not carry the `dark` class and
+  `localStorage.pi-theme` is `"light"`
+
+#### Scenario: System mode tracks OS changes live
+
+- **GIVEN** a visitor in System mode
+- **WHEN** they toggle their OS color-scheme preference while the page is
+  open
+- **THEN** the site's theme updates to match without a reload
+
+#### Scenario: Hero and feature mockups swap per theme
+
+- **GIVEN** a visitor switches between light and dark modes
+- **WHEN** the hero animation and feature bento grid re-render
+- **THEN** each dashboard mockup image flips between a dark-themed PNG
+  (under `site/public/screenshots/desktop/`) and a light-themed PNG
+  (under `site/public/screenshots/desktop-light/`) via CSS-driven
+  visibility (`dark:block` / `dark:hidden`) so the mockups always match
+  the active theme
 
 ### Requirement: Storytelling hero animation
 
@@ -59,7 +101,8 @@ The site SHALL include a "Why" section with two dedicated cards, one for each of
 
 ### Requirement: Features bento grid
 
-The site SHALL present the product's features as a bento-style grid of at least 12 cards with asymmetric sizing.
+The site SHALL present the product's features as a bento-style grid with
+asymmetric sizing that covers all of the dashboard's headline features.
 
 #### Scenario: Features rendered from data
 
@@ -67,11 +110,95 @@ The site SHALL present the product's features as a bento-style grid of at least 
 - **WHEN** the Features section renders
 - **THEN** the `BentoGrid` component reads that list and renders a responsive 12-column grid where each card's column/row span is driven by the data entry
 
+#### Scenario: Grid rows have no gaps
+
+- **GIVEN** the bento grid's feature entries
+- **WHEN** the sum of `col-span` values per grid row is computed
+- **THEN** every row's declared spans total exactly 12 so that CSS grid
+  auto-placement leaves no empty cells
+
+#### Scenario: Embedded code-server / VS Code feature is included
+
+- **GIVEN** the features list
+- **WHEN** it is rendered
+- **THEN** there is a dedicated card for the embedded editor / code-server
+  integration, with its own screenshot and copy describing lazy-start and
+  per-workspace behavior
+
 #### Scenario: Every feature card has accessible imagery
 
 - **GIVEN** any feature card that embeds a screenshot
 - **WHEN** the card is rendered
 - **THEN** the `<img>` has a descriptive `alt` attribute that names the feature
+
+### Requirement: Newcomer-friendly "What is pi?" introduction
+
+The site SHALL include an introductory section between the hero and the
+big-idea section that explains what pi is for visitors unfamiliar with it.
+
+#### Scenario: Hero subhead links to the explainer
+
+- **GIVEN** the rendered hero
+- **WHEN** a visitor reads the subhead
+- **THEN** the word "pi" is an in-page link that jumps to the explainer
+  section
+
+#### Scenario: Explainer covers CLI, session, and non-replacement of TUI
+
+- **GIVEN** the "What is pi?" section
+- **WHEN** it renders
+- **THEN** it describes pi as an open-source coding-agent CLI, introduces
+  the term "session", and explicitly states that the dashboard does not
+  replace the TUI but runs alongside it
+
+### Requirement: Ambient mission-graph background
+
+The site SHALL render an ambient, non-figurative animated background that
+visually encodes the project's mission (many agents → bridged events → any
+device).
+
+#### Scenario: Graph is pure SVG and respects reduced motion
+
+- **GIVEN** the rendered site
+- **WHEN** the MissionGraph component is inspected
+- **THEN** it is a single inline SVG styled by CSS (no additional JS
+  shipped) and, under `prefers-reduced-motion: reduce`, all of its
+  animations (edge flow, node twinkle, ping rings) are disabled
+
+#### Scenario: Graph retints with the theme
+
+- **GIVEN** a visitor switches between light and dark mode
+- **WHEN** the MissionGraph re-renders
+- **THEN** its node, edge, and ping colors follow the `--pi-accent` /
+  `--pi-accent2` CSS variables so the graph reads correctly on both
+  backgrounds
+
+### Requirement: Scroll-triggered reveal animations
+
+Cards, section headings, and key content blocks SHALL animate into view
+when they enter the viewport, with staggered timing and reduced-motion
+support.
+
+#### Scenario: Elements reveal on first intersection
+
+- **GIVEN** any element tagged with `data-reveal`
+- **WHEN** the user scrolls and the element crosses into the viewport
+- **THEN** the `.is-visible` class is added and a 700 ms CSS transition
+  runs (opacity, translate, scale, blur) to bring it in
+
+#### Scenario: Reveals do not re-fire on scroll-back
+
+- **GIVEN** an element that has already been revealed
+- **WHEN** the user scrolls it out of and back into the viewport
+- **THEN** the observer does not re-observe the element and the element
+  remains statically visible
+
+#### Scenario: Reduced-motion users see no animation
+
+- **GIVEN** a visitor with `prefers-reduced-motion: reduce`
+- **WHEN** the page loads
+- **THEN** every `[data-reveal]` element is visible immediately with no
+  transform, blur, or transition
 
 ### Requirement: Playwright screenshot pipeline
 
@@ -94,6 +221,56 @@ The repository SHALL provide a scripted, re-runnable screenshot pipeline that ca
 - **GIVEN** the routes listed in `design.md`'s screenshot table
 - **WHEN** the pipeline finishes
 - **THEN** every listed route has a PNG at the expected path under `site/public/screenshots/`, at the declared viewport dimensions
+
+### Requirement: Latest-release surface with auto-sync
+
+The site SHALL prominently surface the latest published GitHub release
+(version tag, publish date, per-platform downloads) and keep that
+surface in sync without manual editing.
+
+#### Scenario: Download section renders per-platform cards
+
+- **GIVEN** a successful build with at least a cached release in
+  `site/src/data/latest-release.json`
+- **WHEN** the rendered page is inspected
+- **THEN** there is a `#download` section that shows the release tag,
+  publish date, links to release notes and the releases index, and three
+  platform cards (macOS / Linux / Windows), each with a primary download
+  button sized by the classifier (DMG for macOS, AppImage for Linux,
+  Installer .exe for Windows) and any additional assets tucked into a
+  collapsible “Other downloads” accordion
+
+#### Scenario: Hero CTA reflects the current version
+
+- **GIVEN** a successful build with a resolved release
+- **WHEN** the hero renders
+- **THEN** its primary CTA label is “Download <tag> →” and its href is
+  the in-page anchor `#download`
+
+#### Scenario: Build survives API outage via committed cache
+
+- **GIVEN** the GitHub API is unreachable (timeout, 403, or 5xx)
+- **WHEN** the site builds
+- **THEN** `github-release.ts` falls back to
+  `site/src/data/latest-release.json` and the Download section still
+  renders the last known release with no HTML difference to the visitor
+
+#### Scenario: Release publish updates the committed cache
+
+- **GIVEN** a maintainer publishes a new GitHub release
+- **WHEN** the `sync-release-version` workflow runs
+- **THEN** it writes the latest release metadata to
+  `site/src/data/latest-release.json` and, if the content changed,
+  commits the file back to `main` with a message of the form
+  `chore(site): sync latest-release.json to <tag>`
+
+#### Scenario: Release event rebuilds and redeploys the site
+
+- **GIVEN** the deploy-site workflow
+- **WHEN** a GitHub release is published
+- **THEN** the workflow runs via its `release: { types: [published] }`
+  trigger, builds the site with fresh release data, and publishes via
+  `actions/deploy-pages@v4`
 
 ### Requirement: GitHub Pages deployment via GitHub Actions
 

@@ -73,12 +73,23 @@ const toneColor =
     image && (
       <div class="relative mt-auto">
         <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-pi-accent/30 to-transparent" />
+        {/* Dark variant — visible only when html.dark is set. */}
         <img
           src={image}
           alt={imageAlt ?? title}
           loading="lazy"
           decoding="async"
-          class="w-full object-cover object-top max-h-72 group-hover:scale-[1.01] transition-transform duration-500"
+          class="w-full object-cover object-top max-h-72 group-hover:scale-[1.01] transition-transform duration-500 hidden dark:block"
+        />
+        {/* Light variant — auto-derived from the dark path (desktop/→desktop-light/, mobile/→mobile-light/). Astro renders <Fragment> during SSR. */}
+        <img
+          src={image
+            .replace("/screenshots/desktop/", "/screenshots/desktop-light/")
+            .replace("/screenshots/mobile/", "/screenshots/mobile-light/")}
+          alt={imageAlt ?? title}
+          loading="lazy"
+          decoding="async"
+          class="w-full object-cover object-top max-h-72 group-hover:scale-[1.01] transition-transform duration-500 block dark:hidden"
         />
       </div>
     )

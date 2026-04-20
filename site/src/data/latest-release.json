@@ -1,0 +1,18 @@
+{
+  "$comment": "Auto-updated by .github/workflows/sync-release-version.yml on every release. Do not edit manually.",
+  "tagName": "v0.2.9",
+  "name": "v0.2.9",
+  "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases/tag/v0.2.9",
+  "publishedAt": "2026-04-16T01:14:51Z",
+  "assets": [
+    { "name": "PI.Dashboard.dmg", "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases/download/v0.2.9/PI.Dashboard.dmg", "size": 153020504, "downloadCount": 0 },
+    { "name": "PI-Dashboard-0.2.9.AppImage", "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases/download/v0.2.9/PI-Dashboard-0.2.9.AppImage", "size": 172758208, "downloadCount": 0 },
+    { "name": "pi-dashboard_0.2.9_amd64.deb", "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases/download/v0.2.9/pi-dashboard_0.2.9_amd64.deb", "size": 126284224, "downloadCount": 0 },
+    { "name": "pi-dashboard_0.2.9_arm64.deb", "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases/download/v0.2.9/pi-dashboard_0.2.9_arm64.deb", "size": 125247780, "downloadCount": 0 },
+    { "name": "pi-dashboard-electron.Setup.0.2.9.exe", "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases/download/v0.2.9/pi-dashboard-electron.Setup.0.2.9.exe", "size": 119668507, "downloadCount": 0 },
+    { "name": "PI-Dashboard-x64-portable.exe", "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases/download/v0.2.9/PI-Dashboard-x64-portable.exe", "size": 103180681, "downloadCount": 0 },
+    { "name": "PI-Dashboard-arm64-portable.exe", "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases/download/v0.2.9/PI-Dashboard-arm64-portable.exe", "size": 106658133, "downloadCount": 0 },
+    { "name": "PI-Dashboard-win32-x64.zip", "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases/download/v0.2.9/PI-Dashboard-win32-x64.zip", "size": 171696684, "downloadCount": 0 },
+    { "name": "PI-Dashboard-win32-arm64.zip", "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases/download/v0.2.9/PI-Dashboard-win32-arm64.zip", "size": 173144016, "downloadCount": 0 }
+  ]
+}

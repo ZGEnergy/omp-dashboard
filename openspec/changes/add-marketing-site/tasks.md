@@ -90,3 +90,100 @@
 - [x] 9.6 AGENTS.md update — added site and deploy-workflow entries to Key Files.
 - [x] 9.7 docs/architecture.md — added note pointing at `/site` as product-adjacent.
 - [x] 9.8 CNAME placeholder documented in `/site/README.md` under "Custom domain (future: pi-dashboard.dev)".
+
+## Phase 10 — Post-implementation refinements
+
+Iteration passes driven by direct visual review in the browser after the
+initial implementation landed. Each was captured as a matching spec update
+in `specs/marketing-site/spec.md`.
+
+- [x] 10.1 **Dual-theme palette**: refactored `pi-*` Tailwind tokens to
+  resolve through CSS variables; defined light-theme and dark-theme
+  variable sets in `global.css`.
+- [x] 10.2 **Theme selector**: added `ThemeToggle.tsx` Preact island
+  (System / Light / Dark radiogroup) in the nav, and the no-FOUC
+  `ThemeScript.astro` inlined into `<head>` that resolves the initial
+  theme before paint and listens for OS theme flips in System mode.
+- [x] 10.3 **Theme-aware SVGs**: migrated hardcoded hex colors in
+  `ArchitectureDiagram.astro`, `MissionGraph.astro`, and a handful of
+  components to `rgb(var(--pi-xxx))` so every element retints with the
+  theme.
+- [x] 10.4 **Shiki dual-theme**: `CodeBlock.astro` uses
+  `themes={{ light: "github-light", dark: "github-dark-dimmed" }}` plus a
+  small `html.dark .astro-code` rule in `global.css` to swap themes.
+- [x] 10.5 **MissionGraph**: added non-figurative ambient background —
+  left cluster + right spray of twinkling nodes connected by S-curve
+  dashed flow arcs, with sonar-style ping rings emitted from select
+  nodes. Anchored at top of page, mask-faded out before content. Zero JS.
+- [x] 10.6 **Scroll-triggered reveals**: `RevealInit.astro` inlined
+  IntersectionObserver + `[data-reveal]` CSS rules; applied to every
+  FeatureCard (per-column stagger), WhyCard, BigIdea columns,
+  HowItWorks cells, GetStarted, and section headings.
+- [x] 10.7 **"What is pi?" section**: new `WhatIsPiSection.astro` between
+  Hero and BigIdea; hero subhead gained an in-page anchor link on the
+  word "pi" pointing at it.
+- [x] 10.8 **Embedded code-server feature card**: added a 13th bento
+  entry for the VS Code / code-server integration with its own generated
+  screenshot.
+- [x] 10.9 **Bento grid gap audit**: re-tuned span widths so every row
+  sums to exactly 12 columns (sessions-banner + stacked pair; terminal /
+  editor stacked next to flows-banner; diff+mobile pair; openspec /
+  packages / providers triple; discovery+tunnel pair).
+- [x] 10.10 **Header / footer logomark**: swapped the gradient `π` box
+  for the real `app-icon.png` from the main app's `public/icon-192.png`.
+- [x] 10.11 **Spec + design updates**: captured everything above in
+  `proposal.md`, `design.md`, and `specs/marketing-site/spec.md`
+  (added requirements for theme selector, mission graph, reveal
+  animations, "What is pi?" section, code-server card, and zero-gap
+  bento grid).
+
+## Phase 11 — Download surface + release auto-sync
+
+- [x] 11.1 **`src/lib/github-release.ts`**: build-time fetcher that reads
+  `api.github.com/.../releases/latest`, classifies assets by platform +
+  arch (DMG / AppImage / .deb / Installer .exe / portable / ZIP),
+  exports a `LatestRelease` shape keyed by platform with a primary
+  asset per platform and sorted alternates.
+- [x] 11.2 **Resolution order + resilience**: live API → committed
+  `site/src/data/latest-release.json` cache → `null`. Includes an
+  8-second fetch timeout, `GITHUB_TOKEN` support, and a
+  `PI_SKIP_RELEASE_FETCH=1` escape hatch for local builds.
+- [x] 11.3 **`src/data/latest-release.json`**: persisted, git-tracked
+  snapshot of the current release (tag, URL, publish date, assets).
+- [x] 11.4 **`DownloadSection.astro`**: prominent `#download` section
+  between How-It-Works and Get-Started with three platform cards,
+  primary CTA + size per card, collapsible “Other downloads” accordion,
+  release-notes + releases-index links, zero JavaScript.
+- [x] 11.5 **Dynamic Hero CTA**: “Download vX.Y.Z →” when a release is
+  resolved, generic “Get the app →” when both fetch and cache fail.
+- [x] 11.6 **Nav link**: added “Download” between Why and Install.
+- [x] 11.7 **`sync-release-version.yml`**: new workflow triggered on
+  `release: [published, edited]` + `workflow_dispatch`. Uses `gh api`
+  + `jq` to rewrite `latest-release.json`, commits back to main only
+  when the file changed, requires `permissions: contents: write`.
+- [x] 11.8 **`deploy-site.yml`**: added `release: [published]` trigger
+  and `GITHUB_TOKEN` env on the build step for API rate-limit relief.
+- [x] 11.9 **tsconfig**: enabled `resolveJsonModule: true` for the JSON
+  import.
+- [x] 11.10 **Spec updates**: new `Latest-release surface with auto-sync`
+  requirement in `specs/marketing-site/spec.md` with 5 scenarios
+  (download section renders, hero reflects version, API-outage fallback,
+  sync workflow commits cache, release event rebuilds site).
+
+## Phase 12 — Light-theme mockups for theme-aware screenshots
+
+- [x] 12.1 Generated 10 light-theme desktop mockups via
+  `nano-banana-imagegen` (sessions, chat, flows, terminal, editor, diff,
+  openspec, packages, settings-providers, tunnel-qr), matching the
+  site's light palette (off-white bg, slate borders, indigo-500 accents).
+- [x] 12.2 Committed them to `site/public/screenshots/desktop-light/`
+  with stable filenames matching `desktop/`.
+- [x] 12.3 **FeatureCard.astro**: render both dark and light variants
+  with `dark:block` / `dark:hidden` CSS toggles. Light path
+  auto-derived from the dark path with a string replace.
+- [x] 12.4 **HeroAnimation.tsx**: each state renders both a dark and a
+  light `<img>` stacked at `absolute inset-0`, CSS-toggled via the
+  same `dark:` variants. Crossfade animations continue to work because
+  they animate opacity on the container, not the images.
+- [x] 12.5 **Spec update**: added “Hero and feature mockups swap per
+  theme” scenario under the theme-selector requirement.

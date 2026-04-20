@@ -2,6 +2,11 @@
 import BrowserFrame from "./BrowserFrame.astro";
 import GlowBackdrop from "./GlowBackdrop.astro";
 import HeroAnimation from "./HeroAnimation.tsx";
+import { fetchLatestRelease } from "~/lib/github-release";
+
+const release = await fetchLatestRelease();
+const downloadHref = release ? "#download" : "https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases";
+const downloadLabel = release ? `Download ${release.tagName}` : "Get the app";
 ---
 
 <section class="relative isolate overflow-hidden">
@@ -25,18 +30,19 @@ import HeroAnimation from "./HeroAnimation.tsx";
         <span class="pi-accent-word"> in the browser.</span>
       </h1>
       <p class="text-base sm:text-lg text-pi-muted max-w-2xl text-balance leading-relaxed">
-        A real-time, visual, mobile-friendly dashboard for every pi session you
-        run. Because not everyone thinks in monospace — and your agents
-        shouldn't be stuck in a terminal.
+        A real-time, visual, mobile-friendly dashboard for
+        <a
+          href="#what-is-pi"
+          class="text-pi-fg underline decoration-pi-accent/40 underline-offset-4 hover:decoration-pi-accent">pi</a>
+        — the open-source coding-agent CLI. See every session at a glance,
+        steer from your phone, review diffs from the couch.
       </p>
       <div class="flex flex-col sm:flex-row gap-3 mt-2">
         <a
-          href="https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases"
-          target="_blank"
-          rel="noopener"
+          href={downloadHref}
           class="inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-pi-accent to-pi-accent2 px-5 py-2.5 text-sm font-semibold text-pi-bg shadow-pi-glow hover:brightness-110 transition-all"
         >
-          Get the app
+          {downloadLabel}
           <span aria-hidden="true">→</span>
         </a>
         <a

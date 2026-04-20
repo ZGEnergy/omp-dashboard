@@ -110,7 +110,7 @@ export default function InstallTabs() {
           >
             {copied ? "Copied!" : "Copy"}
           </button>
-          <pre className="p-4 overflow-x-auto text-sm leading-relaxed font-mono text-slate-200 whitespace-pre">
+          <pre className="p-4 overflow-x-auto text-sm leading-relaxed font-mono text-pi-fg/90 whitespace-pre">
             {current.code}
           </pre>
         </div>

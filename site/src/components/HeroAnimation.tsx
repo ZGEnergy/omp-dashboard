@@ -15,7 +15,8 @@ const STATES = [
   { src: "diff.png", label: "Diff review" },
 ];
 
-const BASE = "/pi-agent-dashboard/screenshots/desktop";
+const BASE_DARK = "/pi-agent-dashboard/screenshots/desktop";
+const BASE_LIGHT = "/pi-agent-dashboard/screenshots/desktop-light";
 const INTERVAL = 6000;
 
 function prefersReducedMotion(): boolean {
@@ -85,10 +86,19 @@ export default function HeroAnimation() {
           }}
           aria-hidden={i !== active}
         >
+          {/* Dark variant — visible when html.dark is set */}
           <img
-            src={`${BASE}/${s.src}`}
+            src={`${BASE_DARK}/${s.src}`}
             alt={s.label}
-            className="h-full w-full object-cover object-top"
+            className="absolute inset-0 h-full w-full object-cover object-top hidden dark:block"
+            loading={i === 0 ? "eager" : "lazy"}
+            decoding="async"
+          />
+          {/* Light variant */}
+          <img
+            src={`${BASE_LIGHT}/${s.src}`}
+            alt={s.label}
+            className="absolute inset-0 h-full w-full object-cover object-top block dark:hidden"
             loading={i === 0 ? "eager" : "lazy"}
             decoding="async"
           />
@@ -104,7 +114,7 @@ export default function HeroAnimation() {
           <span
             key={i}
             className={`h-1.5 w-1.5 rounded-full transition-all duration-500 ${
-              i === active ? "bg-indigo-400 w-4" : "bg-slate-500"
+              i === active ? "bg-pi-accent w-4" : "bg-pi-muted/50"
             }`}
           />
         ))}

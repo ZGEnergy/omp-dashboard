@@ -4,22 +4,26 @@ module.exports = {
     "./src/**/*.{astro,html,md,mdx,js,jsx,ts,tsx}",
     "./src/content/**/*.ts",
   ],
+  // `class` strategy — `<html>` carries `.dark` or no class for light mode.
+  // The inline script in Base.astro chooses the initial class before paint.
   darkMode: "class",
   theme: {
     extend: {
       colors: {
-        // Pi-blue palette — canonical tokens re-exposed as named colors
-        // so components can read `bg-pi-bg`, `text-pi-accent`, etc.
+        // Pi palette, fully driven by CSS variables defined in global.css.
+        // Each token accepts Tailwind's <alpha-value> placeholder so opacity
+        // utilities (e.g. bg-pi-surface/60) still work.
         pi: {
-          bg: "#020617",       // slate-950
-          surface: "#0f172a",  // slate-900
-          border: "#1e293b",   // slate-800
-          fg: "#f8fafc",       // slate-50
-          muted: "#94a3b8",    // slate-400
-          accent: "#818cf8",   // indigo-400
-          accent2: "#8b5cf6",  // violet-500
-          success: "#34d399",  // emerald-400
-          warn: "#fbbf24",     // amber-400
+          bg: "rgb(var(--pi-bg) / <alpha-value>)",
+          surface: "rgb(var(--pi-surface) / <alpha-value>)",
+          "surface-alt": "rgb(var(--pi-surface-alt) / <alpha-value>)",
+          border: "rgb(var(--pi-border) / <alpha-value>)",
+          fg: "rgb(var(--pi-fg) / <alpha-value>)",
+          muted: "rgb(var(--pi-muted) / <alpha-value>)",
+          accent: "rgb(var(--pi-accent) / <alpha-value>)",
+          accent2: "rgb(var(--pi-accent2) / <alpha-value>)",
+          success: "rgb(var(--pi-success) / <alpha-value>)",
+          warn: "rgb(var(--pi-warn) / <alpha-value>)",
         },
       },
       fontFamily: {
@@ -40,22 +44,12 @@ module.exports = {
           "monospace",
         ],
       },
-      backgroundImage: {
-        "pi-radial":
-          "radial-gradient(ellipse 80% 60% at 50% -10%, rgb(99 102 241 / 0.25), transparent 70%)",
-        "pi-dot-grid":
-          "radial-gradient(circle at 1px 1px, rgb(30 41 59 / 0.5) 1px, transparent 0)",
-        "pi-card-border":
-          "linear-gradient(135deg, rgba(129,140,248,0.6), rgba(139,92,246,0.3) 50%, transparent 100%)",
-      },
       backgroundSize: {
         "dot-grid": "32px 32px",
       },
       boxShadow: {
         "pi-glow":
-          "0 0 0 1px rgba(129,140,248,0.15), 0 20px 80px -20px rgba(129,140,248,0.35)",
-        "pi-card":
-          "0 1px 0 0 rgba(255,255,255,0.03) inset, 0 20px 40px -20px rgba(2,6,23,0.8)",
+          "0 0 0 1px rgb(var(--pi-accent) / 0.15), 0 20px 80px -20px rgb(var(--pi-accent) / 0.35)",
       },
       animation: {
         "pi-hue": "pi-hue 30s linear infinite",

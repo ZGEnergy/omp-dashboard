@@ -6,6 +6,10 @@ on:
     paths:
       - "site/**"
       - ".github/workflows/deploy-site.yml"
+  # Rebuild and redeploy whenever a new release is published so the
+  # Download section surfaces the latest version automatically.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -41,6 +45,10 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          # Higher rate limit when fetching the latest release at build
+          # time from src/lib/github-release.ts.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enforce JS bundle budget
         run: npm run size
