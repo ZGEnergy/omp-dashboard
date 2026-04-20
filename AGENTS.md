@@ -120,7 +120,9 @@ make clean              # Destroy all cloned VMs
 | `src/server/openspec-archive.ts` | Scans `openspec/changes/archive/` and returns structured ArchiveEntry list |
 | `src/client/components/SessionOpenSpecActions.tsx` | Session-level OpenSpec: searchable attach dialog, action buttons, detach |
 | `src/client/components/DialogPortal.tsx` | Portal wrapper rendering dialogs at document.body with scroll lock |
-| `src/client/components/PinDirectoryDialog.tsx` | Dialog to pin a directory (wraps PathPicker) |
+| `src/client/components/PinDirectoryDialog.tsx` | Dialog to pin a directory (wraps PathPicker). Mounted once at the app root in `App.tsx` via `DialogPortal`; opened by both the sidebar "Add folder" button and the LandingPage Step ② CTA through a shared `onOpenPinDialog` callback. |
+| `packages/client/src/components/LandingPage.tsx` | Empty-state onboarding view. Renders three cards (Setup credentials → Add folder → Start session) that collapse to ✔ rows once each step is satisfied. Accepts `{ providersReady, pinnedCount, sessionsCount, firstPinnedCwd, onOpenPinDialog, onSpawnSession, navigate }`. Falls back to the legacy `π + "Select a session to get started"` placeholder when no onboarding props are supplied (preserves existing test surface). |
+| `packages/client/src/hooks/useProvidersReady.ts` | Hook observing `GET /api/providers`: returns `{ loading, ready, count }` where `ready=true` iff at least one provider has a non-empty `apiKey`. Refetches on window `focus` and on `provider-auth-event` custom events. Used by `LandingPage` via `App.tsx` to drive Step ① state. |
 | `src/client/components/PathPicker.tsx` | Reusable keyboard-first path picker with typeahead directory list |
 | `src/client/lib/browse-api.ts` | Client-side browse API helper for PathPicker |
 | `src/server/browse.ts` | Directory listing logic for browse API endpoint |
@@ -172,7 +174,9 @@ make clean              # Destroy all cloned VMs
 | `src/server/terminal-manager.ts` | PTY lifecycle, ring buffer, spawn/attach/kill terminals |
 | `src/server/terminal-gateway.ts` | Binary WebSocket upgrade handler for `/ws/terminal/:id` |
 | `scripts/fix-pty-permissions.cjs` | Postinstall: locates `node-pty` via `require.resolve("node-pty/package.json")` (hoist-aware) and chmods every `prebuilds/*/spawn-helper` and `prebuilds/*/pty.node` to `0o755`. Wired up at the workspace-root `postinstall` so it applies regardless of which workspace triggered `npm install`. |
-| `src/server/tunnel.ts` | Zrok tunnel with reserved shares for persistent URLs, binary detection, PID tracking, stale cleanup |
+| `src/server/tunnel.ts` | Zrok tunnel with reserved shares for persistent URLs. Serialized creation via in-flight promise (`pendingCreate`) prevents parallel reservations from UI double-clicks. `releaseShare(token)` + `scavengeOrphanZrokProcesses(port)` clean up leaked reservations and processes on startup (unconditional when zrok binary is present, even in `--no-tunnel`), on `/api/restart`, `/api/shutdown`, and `/api/tunnel-disconnect`. Retry cap of 1 prevents cascade leaks; timeout path SIGTERM→SIGKILL escalation + release just-in-time tokens. |
+| `packages/client/vite.config.ts` | Client build. `rollupOptions.output.manualChunks` splits bundle into vendor chunks (`react-vendor`, `markdown`, `syntax`, `diff`, `xterm`, `dnd`, `util`) so the initial chunk is ~570 KB (~150 KB gzipped) instead of a 3 MB monolith — avoids tunnel abort thresholds on large assets. |
+| `packages/server/src/server.ts` | Fastify server. Registers `@fastify/compress` globally with gzip+deflate (brotli intentionally disabled — zrok free proxy stream-resets `content-encoding: br`). |
 | `src/client/components/TunnelButton.tsx` | Unified tunnel/QR button — tunnel icon when not set up, QR icon when inactive, green QR icon when connected; opens QR dialog with disconnect/setup |
 | `src/client/components/QrCodeDialog.tsx` | QR code dialog showing tunnel URL as scannable QR code with copy, disconnect, and setup buttons |
 | `public/manifest.json` | PWA web app manifest for installability |
@@ -205,7 +209,9 @@ make clean              # Destroy all cloned VMs
 | `src/client/components/TerminalsView.tsx` | Tabbed terminal container per folder (tab bar, keep-alive, rename) |
 | `src/client/components/EditorView.tsx` | code-server iframe embedding with lazy start and heartbeat |
 | `src/client/components/EditorInstallGuide.tsx` | Platform-specific code-server installation guide |
-| `src/client/components/FolderActionBar.tsx` | Unified action bar per folder: +Session, +Terminal, Terminals(N), Editor, Zed, Pi Resources |
+| `src/client/components/FolderActionBar.tsx` | Unified action bar per folder: +Session, Terminals(N), Editor, Zed, Pi Resources |
+| `packages/client/src/hooks/useImagePaste.ts` | Shared clipboard-image-paste hook (pendingImages, imageError, handlePaste, removeImage, clearImages). Used by `CommandInput` and `ExploreDialog` so behavior is identical across both prompt surfaces. Exports `MAX_IMAGE_SIZE` and `SUPPORTED_IMAGE_TYPES`. |
+| `packages/client/src/components/ImagePreviewStrip.tsx` | Shared image preview strip: error banner + horizontal thumbnail row with remove buttons; thumbnails open `ImageLightbox`. Used by `CommandInput` and `ExploreDialog`. |
 | `src/client/lib/folder-encoding.ts` | Base64url encode/decode for folder paths in URL routes |
 | `src/shared/editor-types.ts` | Editor instance types shared across components |
 | `src/client/components/TerminalCard.tsx` | Sidebar card for terminal sessions (cyan accent) |
@@ -214,6 +220,8 @@ make clean              # Destroy all cloned VMs
 | `src/client/components/MobileActionMenu.tsx` | Kebab menu for session actions on mobile (includes OpenSpec commands) |
 | `src/client/components/MobileOverlay.tsx` | Hamburger button and sidebar overlay for mobile |
 | `src/client/components/SessionHeader.tsx` | Session header with OpenSpec attach/detach, flow launcher, MobileAttachButton |
+| `packages/client/src/components/SessionSidebar.tsx` | Left sidebar; header brand button renders the app icon (`/icon-192.png`) as an `<img>` instead of a literal `π` glyph |
+| `packages/client/src/index.css` | Global styles. `.card-working-pulse` layers drifting 45° amber stripes (2s linear) over a breathing tint (3s ease-in-out, opacity-based) for streaming/resuming cards. `prefers-reduced-motion: reduce` disables both animations but keeps the static stripe pattern as a state cue. `.card-input-pulse` (ask_user) intentionally stays pulse-only — stripes = working, pulse-only = waiting on you. |
 | `src/client/hooks/useSwipeBack.ts` | iOS-style left-edge swipe-back gesture (40px edge zone, document-level listeners) |
 | `src/client/components/ChatView.tsx` | Chat message view with scroll-lock: pauses auto-scroll when user scrolls up, floating scroll-to-bottom button, per-session scroll position persistence |
 | `src/client/lib/mobile-depth.ts` | Pure function computing MobileShell depth from route state |
@@ -281,6 +289,12 @@ make clean              # Destroy all cloned VMs
 | `packages/electron/scripts/test-electron-install-inner.sh` | Inner test script run inside Docker container |
 | `packages/electron/resources/icon.png` | Master 1024×1024 app icon (π on dark navy) |
 | `.github/workflows/publish.yml` | CI: builds DMG (macOS), DEB+AppImage (Linux), NSIS+ZIP+portable (Windows) on native runners; publishes npm + GitHub Release |
+| `.github/workflows/deploy-site.yml` | CI: builds marketing site in `/site` with Astro, enforces 50 KB gzipped JS budget, deploys to GitHub Pages via `actions/deploy-pages@v4` on push to main when `site/**` changes |
+| `site/` | Public marketing site (Astro + Tailwind + MDX + Preact). Self-contained, published at `BlackBeltTechnology.github.io/pi-agent-dashboard` (later `pi-dashboard.dev`). Uses Pi-blue palette, Supabase-style playful bento grid, 4-state storytelling hero animation. |
+| `site/src/components/HeroAnimation.tsx` | Preact island — the only hydrated hero component. Cycles through dashboard state screenshots every 6s with motion-one crossfade; pauses on hover/touch; respects `prefers-reduced-motion`. |
+| `site/src/content/features.ts` | Data-driven feature list rendered by `BentoGrid.astro` into the 12-card bento layout. |
+| `site/scripts/screenshots/capture.ts` | Playwright screenshot pipeline. Two modes: `SCREENSHOT_TARGET_URL=<url> npm run screenshots` captures against an existing dashboard (recommended); plain `npm run screenshots` spawns a temp `pi-dashboard` with fixture sessions, captures desktop (1440) + mobile (390), and cleans up. Outputs to `site/public/screenshots/{desktop,mobile}/`. |
+| `site/scripts/check-js-size.mjs` | Enforces the 50 KB gzipped JavaScript budget on `site/dist/**/*.js` (wired to `npm run size` and to the deploy workflow). |
 
 ## Build & Restart Workflow
 

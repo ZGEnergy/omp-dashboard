@@ -11,10 +11,21 @@ see [`docs/release-process.md`](docs/release-process.md).
 ## [Unreleased]
 
 ### Added
+- **Bundle splitting** for the web client: `vite.config.ts` now manually chunks React, markdown, syntax-highlighter, git-diff-view, xterm, dnd-kit, and utility libs into separate vendor chunks. Initial main chunk drops from 3.1 MB to 570 KB (~150 KB gzipped), avoiding tunnel abort thresholds on large assets.
+- **HTTP response compression** on the Fastify server via `@fastify/compress` (gzip + deflate, threshold 1 KB). Brotli is intentionally disabled because the zrok free proxy stream-resets `content-encoding: br` responses under parallel browser load.
+- **Orphan zrok process scavenger** (`scavengeOrphanZrokProcesses(port)`): scans `ps -ax` for `zrok share … --override-endpoint http://localhost:<port>` processes that escaped pid-file tracking and SIGTERMs them. Runs unconditionally on startup when the zrok binary is present (even in `--no-tunnel` mode) and from `deleteTunnel(port)`.
+- **Reserved share release** (`releaseShare(token)`): best-effort `zrok release <token>` wrapper invoked when the retry path, timeout path, or cleanup path would otherwise leak a dead reservation on the zrok edge.
 
 ### Changed
+- `createTunnel()` is now serialized: concurrent calls return the same in-flight promise (`pendingCreate`) instead of spawning parallel `zrok share` processes. A UI double-click or a race between startup auto-connect and `/api/tunnel-connect` no longer creates duplicate reservations.
+- `deleteTunnel(port?)` now also scavenges orphan processes when a port is supplied. Called from graceful shutdown, `/api/shutdown`, `/api/restart`, and `/api/tunnel-disconnect`.
+- Reserved-share retry in `createTunnel()` is capped at 1 attempt and explicitly releases the old token before reserving a new one. Previously a single restart could leak 3+ reservations (and 3+ processes) as the retry chain compounded.
+- Tunnel-creation timeout path escalates SIGTERM→SIGKILL after a 2 s grace period and releases any just-in-time-reserved token before resolving `null`.
 
 ### Fixed
+- Stale zrok URLs (e.g. `https://<token>.share.zrok.io` returning 404 or `bad gateway!`) caused by the server leaking reservations across restarts without killing the old agent or releasing the token on the zrok edge.
+- `POST /api/restart` and `POST /api/shutdown` now call `deleteTunnel(config.port)` before exit; previously they bypassed the graceful-shutdown path and left zrok processes behind.
+- Browser `ERR_ABORTED 500` errors on large assets over zrok tunnels, caused by the 3.1 MB monolithic JS bundle exceeding the free proxy’s streaming threshold.
 
 ## [0.3.0] - 2026-04-19
 

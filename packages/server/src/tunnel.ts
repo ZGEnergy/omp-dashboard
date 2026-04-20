@@ -27,6 +27,12 @@ const SPAWN_TIMEOUT_MS = 30_000;
 let activeProcess: ChildProcess | null = null;
 let activeTunnelUrl: string | null = null;
 let zrokAvailable: boolean | null = null;
+// Serialization: any concurrent createTunnel() call while one is already in
+// flight returns the same promise instead of spawning a second zrok process.
+// Without this, a UI double-click or a race between startup auto-connect and
+// an explicit `/api/tunnel-connect` created two parallel reservations and
+// two running `zrok share` processes for the same port.
+let pendingCreate: Promise<string | null> | null = null;
 
 // ── Binary Detection ────────────────────────────────────────────────
 
@@ -161,6 +167,72 @@ function saveReservedToken(token: string): void {
 }
 
 /**
+ * Release a reserved share via `zrok release <token>`. Best-effort, non-throwing.
+ * Returns true if the release command exited cleanly, false otherwise. Callers
+ * should invoke this whenever abandoning a reserved token so the zrok edge
+ * doesn't keep an orphaned reservation record (which is what causes stale
+ * URLs like `tgbdzzvlar6b.share.zrok.io` to persist after the agent dies).
+ */
+export function releaseShare(token: string): boolean {
+  if (!token) return false;
+  try {
+    execSync(`zrok release ${token}`, {
+      timeout: 10_000,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Scan `ps` for orphan `zrok share` processes that point at the given port
+ * via `--override-endpoint http://localhost:<port>` and SIGTERM them.
+ *
+ * This complements `cleanupStaleZrok` (which only knows about the single PID
+ * in our pid-file): when the retry logic in `createTunnel` leaks processes
+ * across failures, or when a previous server instance crashed, the pid-file
+ * loses track of them. On startup we scavenge them directly from the process
+ * table so a fresh tunnel doesn't compete with orphans.
+ *
+ * Returns the list of PIDs we killed.
+ */
+export function scavengeOrphanZrokProcesses(port: number): number[] {
+  const killed: number[] = [];
+  let output = "";
+  try {
+    output = execSync("ps -ax -o pid=,args=", {
+      encoding: "utf-8",
+      timeout: 5_000,
+    }).toString();
+  } catch {
+    return killed;
+  }
+
+  const endpointMarker = `--override-endpoint http://localhost:${port}`;
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (!trimmed.includes("zrok share")) continue;
+    if (!trimmed.includes(endpointMarker)) continue;
+    const m = trimmed.match(/^(\d+)\s+/);
+    if (!m) continue;
+    const pid = parseInt(m[1], 10);
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+    if (pid === process.pid) continue; // never kill ourselves
+    try {
+      process.kill(pid, "SIGTERM");
+      killed.push(pid);
+      console.log(`Scavenged orphan zrok process (PID ${pid})`);
+    } catch {
+      // Process may have exited between ps and kill — ignore
+    }
+  }
+  return killed;
+}
+
+/**
  * Create a reserved share via `zrok reserve public`.
  * Returns the share token or null on failure.
  */
@@ -195,7 +267,29 @@ function reserveShare(port: number): Promise<string | null> {
  * On subsequent runs, reuses the reserved token.
  * Returns URL or null on failure.
  */
-export function createTunnel(port: number, reservedToken?: string): Promise<string | null> {
+export function createTunnel(
+  port: number,
+  reservedToken?: string,
+  retriesLeft: number = 1,
+): Promise<string | null> {
+  // Fast path: another caller is already creating a tunnel — join that promise.
+  if (pendingCreate) return pendingCreate;
+  // Fast path: tunnel already up — return its URL without spawning.
+  if (activeTunnelUrl) return Promise.resolve(activeTunnelUrl);
+
+  const promise = _createTunnelInner(port, reservedToken, retriesLeft);
+  pendingCreate = promise;
+  promise.finally(() => {
+    if (pendingCreate === promise) pendingCreate = null;
+  });
+  return promise;
+}
+
+function _createTunnelInner(
+  port: number,
+  reservedToken?: string,
+  retriesLeft: number = 1,
+): Promise<string | null> {
   return new Promise(async (resolve) => {
     if (!detectZrokBinary()) {
       resolve(null);
@@ -209,7 +303,11 @@ export function createTunnel(port: number, reservedToken?: string): Promise<stri
       return;
     }
 
-    // Try to get or create a reserved token
+    // Track whether this call reserved the token itself (so we know to
+    // release it if we subsequently time out or fail — the caller-provided
+    // `reservedToken` is owned by the caller / config and must not be released
+    // on transient timeouts).
+    const callerProvidedToken = !!reservedToken;
     let token = reservedToken;
     if (!token) {
       token = await reserveShare(port) ?? undefined;
@@ -228,12 +326,19 @@ export function createTunnel(port: number, reservedToken?: string): Promise<stri
       detached: false,
     });
 
-    // Timeout: kill process if URL not parsed in time
+    // Timeout: kill process if URL not parsed in time. Escalate SIGTERM
+    // → SIGKILL after a grace period so a wedged zrok doesn't keep a stale
+    // reservation attached after we've moved on. If we reserved the token
+    // just-in-time within this call, release it on the zrok edge too so we
+    // don't leak a dead reservation (root cause of stale URLs like
+    // `tgbdzzvlar6b.share.zrok.io`).
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
         console.warn("zrok tunnel creation timed out (30s)");
         try { child.kill("SIGTERM"); } catch {}
+        setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 2_000);
+        if (token && !callerProvidedToken) releaseShare(token);
         removeZrokPid();
         resolve(null);
       }
@@ -270,10 +375,20 @@ export function createTunnel(port: number, reservedToken?: string): Promise<stri
       if (!resolved) {
         resolved = true;
         clearTimeout(timeout);
-        // If reserved share failed, token may be expired — retry with fresh reservation
-        if (token) {
-          console.warn(`Reserved share failed (code ${code}), creating new reservation...`);
-          resolve(createTunnel(port)); // retry without token
+        // If reserved share failed, token may be expired or already attached
+        // to an orphan process. Release it on the zrok edge before retrying so
+        // we don't leak dead reservations (which is what produced stale URLs
+        // like `tgbdzzvlar6b.share.zrok.io` pointing at nothing).
+        if (token && retriesLeft > 0) {
+          console.warn(`Reserved share failed (code ${code}), releasing token ${token} and creating new reservation...`);
+          releaseShare(token);
+          // Bypass the mutex wrapper so we don't self-deadlock: call the inner
+          // implementation directly for the retry attempt.
+          resolve(_createTunnelInner(port, undefined, retriesLeft - 1));
+        } else if (token) {
+          console.warn(`Reserved share failed (code ${code}) and retry budget exhausted; releasing token ${token}`);
+          releaseShare(token);
+          resolve(null);
         } else {
           console.warn(`zrok process exited before producing URL (code ${code})`);
           resolve(null);
@@ -291,8 +406,11 @@ export function createTunnel(port: number, reservedToken?: string): Promise<stri
 
 /**
  * Stop the active tunnel. Kills the subprocess and removes PID file.
+ * Also sweeps any orphan zrok processes bound to the given port so restart
+ * paths (which call `deleteTunnel` then spawn a new server) don't leave
+ * dead reservations attached to the zrok edge.
  */
-export async function deleteTunnel(): Promise<void> {
+export async function deleteTunnel(port?: number): Promise<void> {
   const child = activeProcess;
   activeProcess = null;
   activeTunnelUrl = null;
@@ -305,6 +423,12 @@ export async function deleteTunnel(): Promise<void> {
     }
   }
   removeZrokPid();
+
+  // Belt-and-braces: sweep any orphan zrok processes that escaped pid-file
+  // tracking (e.g. from a previous crash or a failed retry chain).
+  if (typeof port === "number") {
+    try { scavengeOrphanZrokProcesses(port); } catch { /* best-effort */ }
+  }
 }
 
 /**

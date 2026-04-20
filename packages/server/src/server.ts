@@ -4,6 +4,7 @@
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import cors from "@fastify/cors";
+import compress from "@fastify/compress";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -29,7 +30,7 @@ import { createIdleTimer } from "./idle-timer.js";
 import { discoverAndBroadcastSessions } from "./session-bootstrap.js";
 import { scanAllSessions } from "./session-scanner.js";
 import { needsMigration, runMigration } from "./migrate-persistence.js";
-import { detectZrokBinary, cleanupStaleZrok, createTunnel, deleteTunnel } from "./tunnel.js";
+import { detectZrokBinary, cleanupStaleZrok, createTunnel, deleteTunnel, scavengeOrphanZrokProcesses } from "./tunnel.js";
 import { registerAuthPlugin, validateWsUpgrade } from "./auth-plugin.js";
 import { findBundledExtension, registerBridgeExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
 import { createNetworkGuard, isLoopback, isBypassedHost } from "./localhost-guard.js";
@@ -248,6 +249,19 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     logger: false,
     keepAliveTimeout: 30_000,
     connectionTimeout: 10_000,
+  });
+
+  // Compression: gzip/deflate for HTTP responses. Critical for large client
+  // bundles (~3 MB JS) served over tunnels like zrok which abort big transfers.
+  // Brotli is intentionally disabled — zrok's free public proxy has been
+  // observed to truncate/stream-reset `content-encoding: br` responses under
+  // parallel browser load (curl succeeds, Chrome reports ERR_ABORTED 500).
+  // gzip is universally supported and round-trips cleanly through zrok.
+  // threshold=1024 skips tiny responses; global=true compresses all routes.
+  await fastify.register(compress, {
+    global: true,
+    threshold: 1024,
+    encodings: ["gzip", "deflate"],
   });
 
   // CORS: allow localhost by default + configured origins
@@ -559,10 +573,19 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         console.warn(`mDNS browser failed (peer discovery disabled):`, err);
       }
 
+      // Always sweep leftover zrok processes on startup, even when tunnel is
+      // disabled (--no-tunnel). Orphans from a previous run hold reservations
+      // on the zrok edge and keep old URLs "alive but broken" until their
+      // agents are killed. Scavenge runs unconditionally when the binary is
+      // present; the tunnel-creation branch below is gated separately.
+      const hasZrok = detectZrokBinary();
+      if (hasZrok) {
+        cleanupStaleZrok();
+        scavengeOrphanZrokProcesses(config.port);
+      }
+
       if (config.tunnel) {
-        const hasZrok = detectZrokBinary();
         if (hasZrok) {
-          cleanupStaleZrok();
           const tunnelUrl = await createTunnel(config.port, config.tunnelReservedToken);
           if (tunnelUrl) {
             console.log(`🌐 Tunnel: ${tunnelUrl}`);
@@ -592,7 +615,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       preferencesStore.flush();
       preferencesStore.dispose();
 
-      await deleteTunnel();
+      await deleteTunnel(config.port);
       piGateway.stop();
       for (const client of browserGateway.wss.clients) {
         client.terminate();

@@ -1,5 +1,12 @@
 # PI Dashboard Architecture
 
+> **Adjacent artifact:** the public marketing site lives at `/site` and is
+> product-adjacent, not part of the dashboard runtime. It has its own Astro
+> build, its own Playwright screenshot pipeline, and its own GitHub Pages
+> deploy workflow (`.github/workflows/deploy-site.yml`). See
+> `/site/README.md` for details.
+
+
 ## Overview
 
 The PI Dashboard is a web-based dashboard for monitoring and interacting with pi agent sessions. It consists of three components:
@@ -75,6 +82,7 @@ A React-based responsive web UI that:
 - Provides command autocomplete with `/` prefix
 - Supports bidirectional interaction (send prompts, run commands)
 - Works on mobile with responsive layout and swipe gestures
+- Shows an onboarding `LandingPage` whenever the main pane is empty, narrating the three steps needed to go from install → first running session (Setup credentials → Add folder → Start session). Each step is a card in **pending**, **done**, or **locked** state, derived purely from client state: `useProvidersReady()` (from `GET /api/providers`), `pinnedDirectories.length`, and `sessions.size`. Satisfied steps collapse to single-line ✔ rows, so returning users see a compact status strip rather than a full onboarding wall. The `PinDirectoryDialog` used by Step ② is mounted once at the app root in `App.tsx` and shared with the sidebar "Add folder" button via a single `onOpenPinDialog` callback.
 
 ### 4. Shared Types (`src/shared/`)
 TypeScript type definitions shared across all components:
@@ -229,6 +237,26 @@ When a user sends a prompt to an ended session, the server automatically resumes
 
 ### File Read API
 The server exposes `GET /api/file?cwd=...&path=...` for reading files or listing directories from session working directories. Guards: localhost-only, cwd must match a known session, resolved path must stay inside cwd. Returns `{ type: "file", content }` or `{ type: "directory", entries }`.
+
+### Filesystem Browser (PathPicker)
+
+The dashboard's reusable directory chooser (`PathPicker`) is backed by two localhost-only endpoints:
+
+- `GET /api/browse?path=<dir>&q=<query>` — lists subdirectories of `<dir>` (or `$HOME` when omitted), with `.git` / `.pi` detection. When `q` is non-empty, entries are case-insensitive substring-filtered and ranked:
+  - **Tier 0** exact match → **Tier 1** prefix → **Tier 2** word-boundary substring (after `-`, `_`, `.`, space, `/`) → **Tier 3** plain substring.
+  - Alphabetical within each tier. The 200-entry cap is applied **after** filter+rank so best matches always survive truncation.
+- `POST /api/browse/mkdir` body `{ parent, name }` — creates a new directory non-recursively (`fs.mkdir` without `recursive: true`). Name validation rejects `/`, `\`, `\0`, `.`, `..`, empty, and leading/trailing whitespace. Errors map to 400 (`invalid name`, `parent is not a directory`), 404 (`parent not found`), 409 (`already exists`).
+
+Client-side, `PathPicker` debounces the `q` request at 150ms and cancels in-flight requests via `AbortController`. Enter/Select follow a strict state machine instead of confirming arbitrary input:
+
+1. Exact case-insensitive match against a visible entry → `onSelect(<entry.path>)` + close.
+2. Input ends with `/` and its parsed parent equals the fetched directory → `onSelect(inputValue)` + close.
+3. Exactly one filtered candidate → complete to `<path>/` (do not close).
+4. Otherwise → no-op with a 300ms red-border flash.
+
+If a debounced query is still pending when Enter fires, the client flushes it synchronously before evaluating the rules so the freshest server result is considered.
+
+New folders can be created from two entry points — a footer **＋ New folder** button (inline name entry), or an inline **＋ Create "<name>" here** row shown when the typed partial has no exact match. The create-here row is suppressed if the parsed parent differs from the last-successfully-fetched directory (prevents creating inside a stale parent after a mid-path typo). On success the picker refetches and descends into the new directory.
 
 ### Pi Resources Browser
 
@@ -439,17 +467,25 @@ The tunnel is **enabled by default** (`tunnel.enabled: true`). When the server s
 
 1. **Binary detection** — `detectZrokBinary()` checks if `zrok` is on PATH via `which`/`where`
 2. **Environment check** — `loadZrokEnv()` reads zrok's own config (`~/.zrok2/environment.json` or `~/.zrok/environment.json`) to verify enrollment. The dashboard never stores zrok API keys — they live entirely in zrok's config directory, created by `zrok enable <token>`.
-3. **Stale cleanup** — `cleanupStaleZrok()` reads `~/.pi/dashboard/zrok.pid`, kills orphaned zrok processes from previous crashes
-4. **Reserved share** — If `tunnel.reservedToken` is not set, `zrok reserve public` is called to create a persistent share token. The token is saved to config so the URL stays the same across restarts. If a saved token fails (e.g., expired), a new reservation is created automatically.
-5. **Subprocess spawn** — `createTunnel(port, reservedToken?)` spawns `zrok share reserved <token> --headless` (or `zrok share public --headless` as fallback) as a child process
-6. **URL parsing** — The public URL is parsed from stdout/stderr (30s timeout)
+3. **Stale cleanup** — Runs **unconditionally on startup** whenever the zrok binary is present (even in `--no-tunnel` mode) so leftovers from a previous run are always swept:
+   - `cleanupStaleZrok()` reads `~/.pi/dashboard/zrok.pid` and SIGTERMs the tracked process
+   - `scavengeOrphanZrokProcesses(port)` scans `ps -ax` for any `zrok share … --override-endpoint http://localhost:<port>` processes that escaped pid-file tracking (previous crashes, failed retries) and SIGTERMs them. Never kills the current process.
+4. **Reserved share** — If `tunnel.reservedToken` is not set, `zrok reserve public` is called to create a persistent share token. The token is saved to config so the URL stays the same across restarts. If a saved token fails (e.g., expired or orphaned on the zrok edge), `releaseShare(token)` explicitly releases it and a new reservation is created automatically (capped at 1 retry to prevent cascades).
+5. **Subprocess spawn** — `createTunnel(port, reservedToken?)` spawns `zrok share reserved <token> --headless` (or `zrok share public --headless` as fallback) as a child process. Concurrent calls are serialized via an in-flight promise (`pendingCreate`) so a UI double-click or a race between startup auto-connect and `/api/tunnel-connect` can’t create two parallel reservations.
+6. **URL parsing** — The public URL is parsed from stdout/stderr (30s timeout). On timeout: SIGTERM → SIGKILL after 2s grace, plus `releaseShare(token)` if the token was reserved just-in-time within the call (prevents leaking a dead reservation that would leave a "live but broken" URL on the zrok edge).
 7. **PID tracking** — The subprocess PID is written to `~/.pi/dashboard/zrok.pid`
-8. **Shutdown** — `deleteTunnel()` kills the subprocess and removes the PID file. The reserved token is preserved for next restart.
+8. **Shutdown** — `deleteTunnel(port?)` SIGTERMs the active subprocess, removes the PID file, and (when `port` is supplied) re-runs `scavengeOrphanZrokProcesses(port)` as belt-and-braces cleanup. The reserved token is preserved for next restart. Called from graceful shutdown, `/api/shutdown`, `/api/restart`, and `/api/tunnel-disconnect`.
 
-To disable: set `tunnel.enabled` to `false` in `~/.pi/dashboard/config.json` or pass `--no-tunnel` on the CLI.
+To disable: set `tunnel.enabled` to `false` in `~/.pi/dashboard/config.json` or pass `--no-tunnel` on the CLI. When disabled, step 3 still runs so orphan processes are cleaned up even if the tunnel is turned off.
 
 The client can query `GET /api/tunnel-status` which returns `{ status: "active"|"inactive"|"unavailable", url?, serverOs }`.
 The client can connect/disconnect the tunnel via `POST /api/tunnel-connect` and `POST /api/tunnel-disconnect`.
+
+### HTTP Compression
+
+The Fastify server registers `@fastify/compress` globally with `gzip` + `deflate` encodings (threshold 1 KB). Brotli is intentionally **not** enabled — zrok’s free public proxy has been observed to truncate/stream-reset `content-encoding: br` responses under parallel browser load (curl succeeds, Chrome reports `ERR_ABORTED 500`). gzip round-trips cleanly through zrok and is universally supported.
+
+Combined with client bundle splitting (see `packages/client/vite.config.ts` → `rollupOptions.output.manualChunks`), the main initial chunk ships at ~150 KB gzipped (down from 3.1 MB uncompressed), well under tunnel abort thresholds.
 
 ### PWA Support
 
@@ -622,7 +658,7 @@ Terminal xterm.js instances stay mounted in the DOM (CSS hidden/shown) for insta
 
 ### Folder-Scoped View
 
-Terminals are displayed in a tabbed `TerminalsView` per folder, accessed via the folder action bar's `Terminals(N)` button or `+Terminal` button. Terminal cards no longer appear in the sidebar — the sidebar shows only pi session cards. The tab bar supports switching, closing, renaming, and creating new terminals.
+Terminals are displayed in a tabbed `TerminalsView` per folder, accessed via the folder action bar's `Terminals(N)` button. Terminal cards no longer appear in the sidebar — the sidebar shows only pi session cards. The tab bar supports switching, closing, renaming, and creating new terminals.
 
 ## Embedded Editor (code-server)
 
