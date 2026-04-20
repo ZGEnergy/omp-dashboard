@@ -17,11 +17,11 @@
 
 ## 0.5 Safety commits (NEW, not in MERGE-PLAN)
 
-- [ ] 0.9 Cherry-pick `8737249` (node-pty hoist-aware permissions + handler error surfacing); resolve any conflicts with platform/ imports; run `npm test`
-- [ ] 0.10 Cherry-pick `3cad40b` (node-pty spawn-helper bundle execute permission); verify `packages/server/src/fix-pty-permissions.ts` path still matches platform/ layout; run `npm test`
-- [ ] 0.11 Cherry-pick `6a1b1d8` (test isolation tripwire — `packages/shared/src/test-support/setup-home.ts` + `packages/server/src/test-env-guard.ts` + root `vitest.config.ts` hookup); run `npm test` and verify tripwire fires when invoked outside ephemeral HOME
-- [ ] 0.12 Verify `HOME=$(mktemp -d -t pi-test-XXXXXX) npx vitest run packages/server` passes and that the tripwire throws without the `HOME=` prefix
-- [ ] 0.13 Run `find ~/.pi/agent/sessions -name "*.meta.json" -exec md5 -q {} \; | sort > /tmp/before.txt`; run `npm test`; verify only the current-session directory changed (per AGENTS.md isolation verification recipe)
+- [x] 0.9 Cherry-pick `8737249` (node-pty hoist-aware permissions + handler error surfacing) — commit `aa56431`, 3/3 tests pass
+- [x] 0.10 Cherry-pick `3cad40b` (node-pty spawn-helper bundle execute permission) — commit `7a86b30`, CHANGELOG.md + AGENTS.md conflicts resolved (take develop's richer narrative), `packages/server/src/fix-pty-permissions.ts` added for runtime chmod
+- [x] 0.11 Cherry-pick `6a1b1d8` (test-isolation tripwire) — conflicts in AGENTS.md + `headless-pid-registry.ts` (guard `killAll` + `cleanupOrphans` with `isUnsafeTestHomeScan()`; drop develop's redundant `useGroup` branch since `killPidWithGroup` already handles platform split) + `editor-pid-registry.ts` added from develop (will land cleanly when `97dd4bd` lands in Phase 1). Tripwire module + `test-env-guard.ts` + `test-support/test-server.ts` + canary test now on branch.
+- [x] 0.12 Tripwire verified: `cd packages/server && npx vitest run src/__tests__/node-guard.test.ts` (without `HOME=` prefix) correctly aborts with `[test-isolation] process.env.HOME (/Users/robson) equals the real user home`. With ephemeral HOME via `HOME=$(mktemp -d)`, tests proceed normally. Note: `npx vitest run <path>` from repo root bypasses workspace config (Vitest 3 quirk) — documented concern, `npm test` and manual HOME prefix both work correctly.
+- [x] 0.13 No cross-session contamination: 25 meta files hashed before tests, 25 identical meta files after running 22 tests across `test-server-canary`, `headless-pid-registry`, `editor-pid-registry`, and `smoke-integration` suites. Clean diff confirms the tripwire + `test-env-guard` layers prevented any write to real `~/.pi/agent/sessions/`.
 
 ## 1. Phase 1 — Category A (clean picks, 19 commits)
 
