@@ -140,6 +140,13 @@ export interface OpenSpecChange {
   completedTasks: number;
   totalTasks: number;
   artifacts: OpenSpecArtifact[];
+  /**
+   * Artifact-authoring completeness reported by `openspec status --change <name> --json`.
+   * `true` when all required artifacts for the change's workflow are present/done.
+   * Orthogonal to task-tally completeness; used by the dashboard to surface an
+   * "Archive anyway" escape hatch when artifacts are authored but tasks remain unchecked.
+   */
+  isComplete?: boolean;
 }
 
 /** Lifecycle state of an OpenSpec change, derived from artifacts + task status */

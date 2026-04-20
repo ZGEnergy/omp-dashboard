@@ -8,8 +8,18 @@ import type { DirectoryService } from "../directory-service.js";
 import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { NetworkGuard } from "./route-deps.js";
 import { scanOpenSpecArchive } from "../openspec-archive.js";
+import {
+  readTasks,
+  toggleTask,
+  NotFoundError,
+  LineMismatchError,
+  NotACheckboxError,
+} from "../openspec-tasks.js";
 import path from "node:path";
 import fs from "node:fs/promises";
+
+/** Callback to broadcast an openspec_update after a successful toggle. */
+export type OpenSpecBroadcaster = (cwd: string) => void;
 
 export function registerOpenSpecRoutes(
   fastify: FastifyInstance,
@@ -18,9 +28,11 @@ export function registerOpenSpecRoutes(
     preferencesStore: PreferencesStore;
     directoryService: DirectoryService;
     networkGuard: NetworkGuard;
+    /** Optional — called after a successful toggle to trigger openspec_update. */
+    onOpenSpecChanged?: OpenSpecBroadcaster;
   },
 ) {
-  const { sessionManager, preferencesStore, directoryService, networkGuard } = deps;
+  const { sessionManager, preferencesStore, directoryService, networkGuard, onOpenSpecChanged } = deps;
 
   // OpenSpec archive listing endpoint
   fastify.get<{ Querystring: { cwd?: string } }>(
@@ -93,6 +105,76 @@ export function registerOpenSpecRoutes(
       } catch {
         reply.code(404);
         return { success: false, error: "not found" } satisfies ApiResponse;
+      }
+    },
+  );
+
+  // --- Tasks.md list + toggle ---
+
+  fastify.get<{ Querystring: { cwd?: string; change?: string } }>(
+    "/api/openspec/tasks",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const { cwd, change } = request.query;
+      if (!cwd || !change) {
+        reply.code(400);
+        return { success: false, error: "cwd and change query params required" } satisfies ApiResponse;
+      }
+      try {
+        const tasks = await readTasks(cwd, change);
+        const groups = Array.from(new Set(tasks.map((t) => t.group).filter((g) => g.length > 0)));
+        return { success: true, data: { tasks, groups } } satisfies ApiResponse;
+      } catch (err: any) {
+        if (err instanceof NotFoundError) {
+          reply.code(404);
+          return { success: false, error: "tasks.md not found" } satisfies ApiResponse;
+        }
+        reply.code(500);
+        return { success: false, error: err?.message ?? "read error" } satisfies ApiResponse;
+      }
+    },
+  );
+
+  fastify.post<{
+    Body: { cwd?: string; change?: string; id?: string; done?: boolean; line?: number };
+  }>(
+    "/api/openspec/tasks/toggle",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const { cwd, change, id, done, line } = body;
+      if (
+        typeof cwd !== "string" ||
+        typeof change !== "string" ||
+        typeof id !== "string" ||
+        typeof done !== "boolean" ||
+        typeof line !== "number"
+      ) {
+        reply.code(400);
+        return { success: false, error: "invalid body" } satisfies ApiResponse;
+      }
+      try {
+        const task = await toggleTask(cwd, change, id, done, line);
+        // Fire-and-forget: refresh cache + broadcast openspec_update.
+        directoryService.refreshOpenSpec(cwd).then(() => {
+          onOpenSpecChanged?.(cwd);
+        }).catch(() => {});
+        return { success: true, data: { task } } satisfies ApiResponse;
+      } catch (err: any) {
+        if (err instanceof NotFoundError) {
+          reply.code(404);
+          return { success: false, error: "tasks.md not found" } satisfies ApiResponse;
+        }
+        if (err instanceof LineMismatchError) {
+          reply.code(409);
+          return { success: false, error: "line mismatch" } satisfies ApiResponse;
+        }
+        if (err instanceof NotACheckboxError) {
+          reply.code(400);
+          return { success: false, error: "target line is not a checkbox" } satisfies ApiResponse;
+        }
+        reply.code(500);
+        return { success: false, error: err?.message ?? "toggle error" } satisfies ApiResponse;
       }
     },
   );

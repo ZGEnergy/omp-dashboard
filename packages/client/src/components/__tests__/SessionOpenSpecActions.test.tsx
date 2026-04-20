@@ -513,7 +513,7 @@ describe("SessionOpenSpecActions", () => {
       expect(btn.hasAttribute("disabled")).toBe(true);
     });
 
-    it("shows Bulk Archive on attached session with completed changes", () => {
+    it("hides Bulk Archive on attached session with completed changes", () => {
       render(
         <SessionOpenSpecActions
           session={makeSession({ attachedProposal: "add-auth" })}
@@ -524,7 +524,182 @@ describe("SessionOpenSpecActions", () => {
           onBulkArchive={vi.fn()}
         />,
       );
+      expect(screen.queryByTestId("bulk-archive-btn")).toBeNull();
+    });
+
+    it("shows Bulk Archive on unattached session with same sibling completed change", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession()}
+          changes={[planningChange, completedChange]}
+          onAttach={vi.fn()}
+          onDetach={vi.fn()}
+          onSendPrompt={vi.fn()}
+          onBulkArchive={vi.fn()}
+        />,
+      );
       expect(screen.getByTestId("bulk-archive-btn")).toBeTruthy();
+    });
+  });
+
+  // --- State pill ---
+
+  describe("state pill", () => {
+    it("renders IMPLEMENTING pill for attached implementing change", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "impl-change" })}
+          changes={[implementingChange]}
+          {...defaultProps}
+        />,
+      );
+      const pill = screen.getByTestId("state-pill");
+      expect(pill.getAttribute("data-state")).toBe("IMPLEMENTING");
+      expect(pill.textContent).toBe("IMPLEMENTING");
+    });
+
+    it("renders COMPLETE pill for attached complete change", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "fix-bug" })}
+          changes={[completeChange]}
+          {...defaultProps}
+        />,
+      );
+      expect(screen.getByTestId("state-pill").getAttribute("data-state")).toBe("COMPLETE");
+    });
+
+    it("hides pill when attached change is missing from data", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "archived-change" })}
+          changes={[planningChange]}
+          {...defaultProps}
+        />,
+      );
+      expect(screen.queryByTestId("state-pill")).toBeNull();
+    });
+  });
+
+  // --- Archive-anyway overflow ---
+
+  describe("archive-anyway overflow", () => {
+    const implementingCompleteChange: OpenSpecChange = {
+      ...implementingChange,
+      isComplete: true,
+    };
+
+    it("shows overflow with Archive anyway when IMPLEMENTING + isComplete + all artifacts done", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "impl-change", status: "active" })}
+          changes={[implementingCompleteChange]}
+          {...defaultProps}
+        />,
+      );
+      expect(screen.getByTestId("overflow-btn")).toBeTruthy();
+      fireEvent.click(screen.getByTestId("overflow-btn"));
+      expect(screen.getByTestId("archive-anyway-btn")).toBeTruthy();
+    });
+
+    it("hides overflow when isComplete is false", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "impl-change", status: "active" })}
+          changes={[{ ...implementingChange, isComplete: false }]}
+          {...defaultProps}
+        />,
+      );
+      expect(screen.queryByTestId("overflow-btn")).toBeNull();
+    });
+
+    it("hides overflow when isComplete is undefined", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "impl-change", status: "active" })}
+          changes={[implementingChange]}
+          {...defaultProps}
+        />,
+      );
+      expect(screen.queryByTestId("overflow-btn")).toBeNull();
+    });
+
+    it("hides overflow in COMPLETE state", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "fix-bug", status: "active" })}
+          changes={[{ ...completeChange, isComplete: true }]}
+          {...defaultProps}
+        />,
+      );
+      expect(screen.queryByTestId("overflow-btn")).toBeNull();
+    });
+
+    it("hides overflow when not all artifacts are done", () => {
+      const planningIsComplete: OpenSpecChange = {
+        name: "planning-ic",
+        status: "in-progress",
+        completedTasks: 2,
+        totalTasks: 5,
+        artifacts: [
+          { id: "proposal", status: "done" },
+          { id: "design", status: "ready" },
+        ],
+        isComplete: true,
+      };
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "planning-ic", status: "active" })}
+          changes={[planningIsComplete]}
+          {...defaultProps}
+        />,
+      );
+      expect(screen.queryByTestId("overflow-btn")).toBeNull();
+    });
+
+    it("confirm dialog shows unchecked count and dispatches archive prompt", () => {
+      const onSendPrompt = vi.fn();
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "impl-change", status: "active" })}
+          changes={[implementingCompleteChange]}
+          {...defaultProps}
+          onSendPrompt={onSendPrompt}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("overflow-btn"));
+      fireEvent.click(screen.getByTestId("archive-anyway-btn"));
+      // 2/5 complete → 3 unchecked of 5
+      expect(screen.getByText(/3 of 5 tasks are unchecked/)).toBeTruthy();
+      fireEvent.click(screen.getByTestId("confirm-ok"));
+      expect(onSendPrompt).toHaveBeenCalledWith("/opsx:archive impl-change");
+    });
+  });
+
+  // --- Tasks button ---
+
+  describe("tasks button", () => {
+    it("shows Tasks N/M button when attached change has artifacts and totalTasks > 0", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "impl-change", status: "active" })}
+          changes={[implementingChange]}
+          {...defaultProps}
+        />,
+      );
+      const btn = screen.getByTestId("tasks-btn");
+      expect(btn.textContent).toContain("Tasks 2/5");
+    });
+
+    it("hides Tasks button when totalTasks is 0", () => {
+      render(
+        <SessionOpenSpecActions
+          session={makeSession({ attachedProposal: "ready-change", status: "active" })}
+          changes={[readyChange]}
+          {...defaultProps}
+        />,
+      );
+      expect(screen.queryByTestId("tasks-btn")).toBeNull();
     });
   });
 });
