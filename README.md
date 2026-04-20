@@ -6,6 +6,8 @@
 
 A web-based dashboard for monitoring and interacting with [pi](https://github.com/badlogic/pi-mono) agent sessions from any browser, including mobile.
 
+**Website:** [blackbelttechnology.github.io/pi-agent-dashboard](https://blackbelttechnology.github.io/pi-agent-dashboard) — animated tour, screenshots, and install guide.
+
 **Changelog:** see [`CHANGELOG.md`](CHANGELOG.md) for release notes.
 
 **Releasing:** see [`docs/release-process.md`](docs/release-process.md) for the cut-a-release workflow.
