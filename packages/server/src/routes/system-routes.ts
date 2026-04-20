@@ -148,7 +148,9 @@ export function registerSystemRoutes(
   });
 
   fastify.post("/api/tunnel-disconnect", async () => {
-    await deleteTunnel();
+    // Pass port so orphan zrok processes bound to this endpoint are also
+    // swept (not just the one we tracked via pid-file).
+    await deleteTunnel(config.port);
     return { ok: true };
   });
 
@@ -187,6 +189,9 @@ export function registerSystemRoutes(
     async () => {
       metaPersistence.flushAll();
       preferencesStore.flush();
+      // Tear down the zrok tunnel (and sweep orphans on our port) so restarts
+      // don't leak reservations that leave stale URLs backed by nothing.
+      try { await deleteTunnel(config.port); } catch { /* best-effort */ }
       setTimeout(() => process.exit(0), 100);
       return { ok: true };
     },
@@ -199,6 +204,10 @@ export function registerSystemRoutes(
     async (request) => {
       metaPersistence.flushAll();
       preferencesStore.flush();
+
+      // Tear down tunnel before spawning the replacement process so the new
+      // server doesn't race an orphan zrok agent on the same port.
+      try { await deleteTunnel(config.port); } catch { /* best-effort */ }
 
       const cliPath = process.argv[1];
       if (!cliPath) return { ok: false, error: "Cannot determine CLI path" };
