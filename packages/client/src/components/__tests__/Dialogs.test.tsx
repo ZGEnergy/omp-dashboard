@@ -46,7 +46,7 @@ describe("ExploreDialog", () => {
     const textarea = screen.getByTestId("explore-textarea");
     fireEvent.change(textarea, { target: { value: "my question" } });
     fireEvent.click(screen.getByTestId("explore-send"));
-    expect(onSend).toHaveBeenCalledWith("my question");
+    expect(onSend).toHaveBeenCalledWith("my question", undefined);
   });
 
   it("does not send when text is empty", () => {

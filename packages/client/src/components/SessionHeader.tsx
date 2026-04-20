@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Icon } from "@mdi/react";
 import { mdiPencilOutline, mdiArrowLeft, mdiPaperclip, mdiRefresh, mdiLinkOff, mdiPlay, mdiFileCompare, mdiHeadLightbulb } from "@mdi/js";
-import type { DashboardSession, OpenSpecChange, CommandInfo, FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { DashboardSession, OpenSpecChange, CommandInfo, FlowInfo, ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { SessionState } from "../lib/event-reducer.js";
 import type { DetectedEditor } from "../lib/editor-api.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
@@ -19,7 +19,7 @@ interface Props {
   onBack?: () => void;
   commands?: CommandInfo[];
   flows?: FlowInfo[];
-  onSendPrompt?: (text: string) => void;
+  onSendPrompt?: (text: string, images?: ImageContent[]) => void;
   openspecChanges?: OpenSpecChange[];
   onAttachProposal?: (changeName: string) => void;
   onDetachProposal?: () => void;
@@ -37,7 +37,7 @@ interface Props {
     onOpenEditor?: (editorId: string) => void;
     onAttachProposal?: (changeName: string) => void;
     onDetachProposal?: () => void;
-    onSendPrompt?: (text: string) => void;
+    onSendPrompt?: (text: string, images?: ImageContent[]) => void;
     onReadArtifact?: (changeName: string, artifactId: string) => void;
     onRefresh?: () => void;
   };

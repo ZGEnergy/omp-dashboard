@@ -105,7 +105,7 @@ describe("MobileActionMenu unattached OpenSpec section", () => {
     // Type and send
     fireEvent.change(screen.getByTestId("explore-textarea"), { target: { value: "investigate auth" } });
     fireEvent.click(screen.getByTestId("explore-send"));
-    expect(onSendPrompt).toHaveBeenCalledWith("/skill:openspec-explore\ninvestigate auth");
+    expect(onSendPrompt).toHaveBeenCalledWith("/skill:openspec-explore\ninvestigate auth", undefined);
     // Dialog should close
     expect(screen.queryByTestId("explore-dialog")).toBeNull();
   });
