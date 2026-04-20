@@ -57,7 +57,11 @@
     "electron:dev": "npm run start:dev --workspace=@blackbelt-technology/pi-dashboard-electron",
     "electron:start": "npm run start --workspace=@blackbelt-technology/pi-dashboard-electron",
     "electron:make": "npm run make --workspace=@blackbelt-technology/pi-dashboard-electron",
-    "electron:build": "bash packages/electron/scripts/build-installer.sh"
+    "electron:build": "bash packages/electron/scripts/build-installer.sh",
+    "site:dev": "npm --prefix site run dev",
+    "site:build": "npm --prefix site run build",
+    "site:preview": "npm --prefix site run preview",
+    "screenshots": "npm --prefix site run screenshots"
   },
   "dependencies": {
     "@blackbelt-technology/pi-dashboard-extension": "*",

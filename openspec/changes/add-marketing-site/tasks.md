@@ -76,15 +76,15 @@
 - [x] 8.1 `.github/workflows/deploy-site.yml` — build + deploy-pages job, triggered on push to main for `site/**` + workflow file itself + `workflow_dispatch`.
 - [x] 8.2 Concurrency group `pages-deploy` with `cancel-in-progress: true`.
 - [x] 8.3 Enable Pages in repo settings (Source: GitHub Actions) — documented in `/site/README.md` first-time-setup section.
-- [ ] 8.4 First successful deploy; verify live URL renders correctly on desktop + mobile (runs automatically once the PR merges; validated post-merge by maintainer).
+- [ ] 8.4 First successful deploy; verify live URL renders correctly on desktop + mobile. **Deferred** — requires a maintainer to merge this change, flip *Settings → Pages → Source = GitHub Actions*, and confirm the deploy lands.
 - [x] 8.5 CI check: Astro build must succeed (covered by the deploy workflow's `build` job, which runs on every push matching the path filter).
 - [x] 8.6 JS-size budget check in `scripts/check-js-size.mjs`, wired to `npm run size` and enforced by the deploy workflow.
 
 ## Phase 9 — Polish & verification
 
-- [ ] 9.1 Lighthouse mobile targets — requires post-deploy verification against the live URL.
+- [ ] 9.1 Lighthouse mobile targets (Perf / A11y / Best Practices / SEO ≥ 95). **Deferred** — requires the deployed URL.
 - [x] 9.2 A11y primitives wired up: skip-to-content link, visible focus ring, semantic landmarks, ARIA labels on tabs and live region on hero.
-- [ ] 9.3 Cross-browser smoke test — deferred to post-deploy.
+- [ ] 9.3 Cross-browser smoke test (Safari, Firefox, Chrome; desktop + mobile). **Deferred** — requires the deployed URL.
 - [x] 9.4 `prefers-reduced-motion` respected: hero freezes on state 0, body hue-shift disabled, global animation duration overridden in `global.css`.
 - [x] 9.5 README.md update — added "Website" link under the hero paragraph.
 - [x] 9.6 AGENTS.md update — added site and deploy-workflow entries to Key Files.
