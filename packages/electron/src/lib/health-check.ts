@@ -10,6 +10,8 @@ export interface DashboardStatus {
   running: boolean;
   pid?: number;
   version?: string;
+  /** Server mode ("dev" / "production") when the health endpoint reports it. */
+  mode?: string;
   portConflict?: boolean;
 }
 
@@ -31,7 +33,8 @@ export async function isDashboardRunning(port: number): Promise<DashboardStatus>
     const data = await res.json() as Record<string, unknown>;
     if (data && data.ok === true && typeof data.pid === "number") {
       const version = typeof data.version === "string" ? data.version : undefined;
-      return { running: true, pid: data.pid, version };
+      const mode = typeof data.mode === "string" ? data.mode : undefined;
+      return { running: true, pid: data.pid, version, mode };
     }
     // HTTP 200 but not our format — another service on this port
     return { running: false, portConflict: true };

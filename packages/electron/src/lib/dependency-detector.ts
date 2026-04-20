@@ -154,9 +154,10 @@ export function detectPiDashboardCli(): DetectionResult {
   const managed = path.join(MANAGED_BIN, process.platform === "win32" ? "pi-dashboard.cmd" : "pi-dashboard");
   if (existsSync(managed)) return { found: true, path: managed, source: "managed" };
 
+  // Delegate the `where`/`which` split + PATHEXT + login-shell fallback to
+  // the shared ToolResolver. See change: route-kill-paths-through-platform.
   try {
-    const cmd = process.platform === "win32" ? `where pi-dashboard` : `which pi-dashboard`;
-    const out = execSync(cmd, { encoding: "utf-8" }).trim().split(/\r?\n/)[0];
+    const out = resolver.which("pi-dashboard");
     if (!out) return { found: false };
     if (out.includes(".npm/_npx") || out.includes(".npm\\_npx")) return { found: false };
     return { found: true, path: out, source: "system" };

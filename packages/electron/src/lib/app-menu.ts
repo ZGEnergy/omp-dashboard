@@ -16,8 +16,8 @@ function showAboutDialog(): void {
   });
 }
 
-function showDoctorDialog(): void {
-  const report = runDoctor();
+async function showDoctorDialog(): Promise<void> {
+  const report = await runDoctor();
   const text = formatDoctorReport(report);
 
   const buttons = ["Copy to Clipboard"];

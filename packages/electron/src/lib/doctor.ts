@@ -12,7 +12,9 @@ import { detectPi, detectOpenSpec, detectSystemNode, detectDashboardPackage } fr
 import { getBundledNodePath, getBundledNpmPath } from "./bundled-node.js";
 import { isApiKeyConfigured, readModeFile } from "./wizard-state.js";
 import { MANAGED_DIR } from "./managed-paths.js";
+import { isDashboardRunning } from "./health-check.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
+import { isKnownBadNode } from "@blackbelt-technology/pi-dashboard-shared/platform/node-version-check.js";
 
 // Shared binary-lookup primitive (where/which + managed-bin + login-shell).
 // See change: consolidate-platform-handlers (Section 10).
@@ -55,7 +57,7 @@ function getPkgVersion(pkgJsonPath: string): string | null {
 }
 
 /** Run all doctor checks. */
-export function runDoctor(): DoctorReport {
+export async function runDoctor(): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
 
   // ── Electron app ─────────────────────────────────────────────
@@ -96,6 +98,23 @@ export function runDoctor(): DoctorReport {
       ? `${bundledNodeVersion} at ${bundledNode}`
       : "Not found in app resources",
     fixable: !bundledNode && !systemNode.found,
+  });
+
+  // Node runtime compatibility (nodejs/node#58515)
+  // Check the Node version that will actually run the server: prefer system
+  // Node (used when detected), else the bundled Node, else this Electron's
+  // embedded Node (process.versions.node).
+  const runtimeVersion = systemNodeVersion ?? bundledNodeVersion ?? `v${process.versions.node}`;
+  const runtimeCheck = isKnownBadNode(runtimeVersion);
+  checks.push({
+    name: "Node runtime compatibility",
+    status: runtimeCheck.bad ? "warning" : "ok",
+    message: runtimeCheck.bad
+      ? `${runtimeVersion} is affected by nodejs/node#58515 (Fastify ajv-compiler crash)`
+      : `${runtimeVersion} is compatible`,
+    detail: runtimeCheck.bad
+      ? "Upgrade to Node >=22.18.0 or >=24.3.0 to avoid server-launch crashes on Windows."
+      : undefined,
   });
 
   // Bundled npm
@@ -213,16 +232,13 @@ export function runDoctor(): DoctorReport {
   let serverMode: string | null = null;
   let serverVersion: string | null = null;
   try {
-    const res = execSync("curl -sf http://localhost:8000/api/health 2>/dev/null", {
-      encoding: "utf-8", timeout: 3000,
-    });
-    if (res) {
+    // Native fetch-based health check (no `curl` dependency). See change:
+    // route-kill-paths-through-platform.
+    const status = await isDashboardRunning(8000);
+    if (status.running) {
       serverRunning = true;
-      try {
-        const health = JSON.parse(res);
-        serverMode = health.mode || null;
-        serverVersion = health.version || null;
-      } catch { /* not JSON */ }
+      serverVersion = status.version ?? null;
+      serverMode = status.mode ?? null;
     }
   } catch { /* not running */ }
 
