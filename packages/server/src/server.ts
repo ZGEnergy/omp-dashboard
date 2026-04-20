@@ -522,7 +522,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       if (config.tunnel) {
         const hasZrok = detectZrokBinary();
         if (hasZrok) {
-          cleanupStaleZrok();
+          await cleanupStaleZrok();
           const tunnelUrl = await createTunnel(config.port, config.tunnelReservedToken);
           if (tunnelUrl) {
             console.log(`🌐 Tunnel: ${tunnelUrl}`);
