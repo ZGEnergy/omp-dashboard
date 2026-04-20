@@ -1,5 +1,8 @@
-## ADDED Requirements
+# vm-image-building Specification
 
+## Purpose
+TBD - created by archiving change cross-platform-qa-vms. Update Purpose after archive.
+## Requirements
 ### Requirement: Packer builds Ubuntu x86 base image
 The system SHALL provide a Packer HCL template that builds an Ubuntu 24.04 x86_64 VMware image from an ISO, with cloud-init autoinstall, and provisions Node.js (LTS via nvm), Git, and build-essential.
 
@@ -56,3 +59,4 @@ The system SHALL provide a common provisioning script for nvm + Node.js LTS inst
 #### Scenario: Common script installs Node
 - **WHEN** the common provision script runs on a Linux or macOS VM
 - **THEN** nvm is installed, Node.js LTS is activated, and `node` and `npm` are on the PATH for the test user
+

@@ -1,5 +1,8 @@
-## ADDED Requirements
+# test-execution Specification
 
+## Purpose
+TBD - created by archiving change cross-platform-qa-vms. Update Purpose after archive.
+## Requirements
 ### Requirement: Install test
 The system SHALL verify that `npm install -g @blackbelt-technology/pi-dashboard` succeeds on a clean VM, including native module compilation (node-pty).
 
@@ -68,3 +71,4 @@ The system SHALL use bash scripts for Linux/macOS tests and PowerShell scripts f
 #### Scenario: Unix tests use bash
 - **WHEN** tests execute on a Linux or macOS VM
 - **THEN** the test runner invokes `.sh` scripts via bash over SSH
+

@@ -1,5 +1,8 @@
-## ADDED Requirements
+# vm-lifecycle Specification
 
+## Purpose
+TBD - created by archiving change cross-platform-qa-vms. Update Purpose after archive.
+## Requirements
 ### Requirement: Clone base image for test run
 The system SHALL clone a base image into a disposable VM before each test run using VMware linked clones for speed and space efficiency.
 
@@ -39,3 +42,4 @@ The system SHALL provide a `make clean` target that stops and deletes all cloned
 #### Scenario: Clean all
 - **WHEN** the user runs `make clean`
 - **THEN** all running clone VMs are stopped and their disk images deleted
+
