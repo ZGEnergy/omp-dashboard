@@ -1,4 +1,6 @@
-## MODIFIED Requirements
+# Package Management
+
+
 
 ### Requirement: Pi module resolution
 `loadPiPackageManager()` SHALL resolve pi's `DefaultPackageManager` and `SettingsManager` using the following ordered resolution chain:

@@ -11,11 +11,11 @@ On portable Windows (Electron standalone mode), the package manager UI shows "pi
 
 ### New Capabilities
 
-_(none — this is a bug fix to existing capability)_
+- `package-management`: Pi module resolution chain (direct import → managed install → global npm) used by all package operations (install, remove, update, list, check-updates). Previously undocumented; this change adds the managed-install path and formalizes the resolution order in the spec.
 
 ### Modified Capabilities
 
-- `package-management`: Add managed-install resolution so `loadPiPackageManager()` finds pi in `~/.pi-dashboard/node_modules/` on portable/standalone Electron installs.
+_(none — no existing `package-management` spec to modify)_
 
 ## Impact
 

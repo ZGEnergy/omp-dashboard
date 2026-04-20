@@ -131,7 +131,7 @@ make clean              # Destroy all cloned VMs
 | `src/client/lib/browse-api.ts` | Client-side browse API helper for PathPicker |
 | `src/server/browse.ts` | Directory listing logic for browse API endpoint |
 | `src/server/pi-resource-scanner.ts` | Discovers pi extensions, skills, prompts from local, global, and package sources |
-| `src/server/package-manager-wrapper.ts` | Thin adapter around pi's `DefaultPackageManager` with operation serialization, progress forwarding, and session reload |
+| `src/server/package-manager-wrapper.ts` | Thin adapter around pi's `DefaultPackageManager` with operation serialization, progress forwarding, and session reload. `loadPiPackageManager()` resolution order: (1) direct import of `@mariozechner/pi-coding-agent`, (2) managed install at `~/.pi-dashboard/node_modules/` (used by Electron portable/standalone on Windows where pi isn't globally installed), (3) `npm root -g`. Without step (2) portable Windows users see a red "pi-coding-agent is not installed" banner in the Packages tab. |
 | `src/server/npm-search-proxy.ts` | Cached proxy for npm registry search (`keywords:pi-package`) and README fetch |
 | `src/server/routes/package-routes.ts` | REST routes: search, readme, installed, install, remove, update, check-updates |
 | `packages/server/src/pi-core-checker.ts` | Discovers pi ecosystem CORE CLI packages (pi itself, pi-dashboard, pi-model-proxy, etc.) from global npm + `~/.pi-dashboard/node_modules/` and compares against the npm registry. Complements PackageManagerWrapper which only manages extensions in `settings.json packages[]`. 5-min cache. |
