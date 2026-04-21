@@ -5,6 +5,7 @@
  * forwards all pi events, and relays commands back.
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Loader } from "@mariozechner/pi-tui";
 import { ConnectionManager } from "./connection.js";
 import { detectSessionSource } from "./source-detector.js";
 import { mapEventToProtocol } from "./event-forwarder.js";
@@ -951,17 +952,72 @@ function initBridge(pi: ExtensionAPI) {
     }
 
     // Discover or auto-start server (non-blocking — connection will reconnect)
+    //
+    // When a real launchServer() is about to run (not on mDNS/health-check
+    // paths), mount an animated TUI widget above the editor using pi-tui's
+    // Loader (a real Component, self-animating at 80ms, like pi-flows'
+    // architect-widget). The previous implementation used
+    // ctx.ui.setStatus(...) which only writes a footer string and relies on
+    // the TUI render loop being ticked elsewhere — on the cold-start path
+    // nothing else requests renders, so the spinner never animated and often
+    // never appeared. setWidget(key, factory, {placement:"aboveEditor"}) gives
+    // us a managed component that owns its own render loop and is always
+    // visible while the launch is in flight.
+    let spinnerTimer: NodeJS.Timeout | null = null;
+    let spinnerStart = 0;
+    let activeLoader: Loader | null = null;
+    const stopSpinner = () => {
+      if (spinnerTimer) {
+        clearInterval(spinnerTimer);
+        spinnerTimer = null;
+      }
+      activeLoader = null;
+      ctx.ui.setWidget("pi-dashboard-launch", undefined);
+    };
     autoStartServer(config, {
       discoverDashboard,
       isDashboardRunning,
       launchServer,
       notify: (msg, level) => ctx.ui.notify(msg, level),
+      onLaunchStart: () => {
+        spinnerStart = Date.now();
+        const buildMessage = () => {
+          const elapsed = Math.floor((Date.now() - spinnerStart) / 1000);
+          return `starting dashboard server … (${elapsed}s)`;
+        };
+        ctx.ui.setWidget(
+          "pi-dashboard-launch",
+          (tui: unknown, theme: { fg: (role: string, s: string) => string }) => {
+            const loader = new Loader(
+              tui as ConstructorParameters<typeof Loader>[0],
+              (s: string) => theme.fg("accent", s),
+              (s: string) => theme.fg("muted", s),
+              buildMessage(),
+            );
+            activeLoader = loader;
+            // Loader has stop() but no dispose(); wire dispose so that
+            // setExtensionWidget's teardown stops the 80ms animation interval.
+            (loader as Loader & { dispose?: () => void }).dispose = () => loader.stop();
+            return loader;
+          },
+          { placement: "aboveEditor" },
+        );
+        // Refresh the elapsed-seconds label every second. Frame animation is
+        // driven by the Loader's own 80ms interval.
+        spinnerTimer = setInterval(() => {
+          activeLoader?.setMessage(buildMessage());
+        }, 1000);
+      },
+      onLaunchEnd: () => {
+        stopSpinner();
+      },
     }).then((result) => {
+      stopSpinner(); // safety net — covers onLaunchEnd not firing
       if (result.server && result.server.piPort !== config.piPort) {
         // Server found on a different piPort than configured — update connection URL
         connection.updateUrl(`ws://${result.server.host === 'localhost' ? 'localhost' : result.server.host}:${result.server.piPort}`);
       }
-    }).catch(() => {});
+    }).catch(() => { stopSpinner(); });
 
     // Send initial git info
     sendGitInfoIfChanged(ctx.cwd);

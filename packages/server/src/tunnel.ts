@@ -7,7 +7,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execSync, spawn, type ChildProcess } from "node:child_process";
+import { execSync, spawn, type ChildProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
+import {
+  isProcessAlive,
+  killProcess,
+  killPidWithGroup,
+} from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
+
+const zrokResolver = new ToolResolver({ processExecPath: process.execPath });
 import type { TunnelStatus } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 import { CONFIG_FILE } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 
@@ -37,13 +45,10 @@ let pendingCreate: Promise<string | null> | null = null;
 // ── Binary Detection ────────────────────────────────────────────────
 
 function checkZrokOnPath(): boolean {
-  const cmd = process.platform === "win32" ? "where zrok" : "which zrok";
-  try {
-    execSync(cmd, { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
+  // Delegate binary lookup to the shared platform primitive (handles the
+  // where/which split on Windows vs Unix, managed-bin search, and login
+  // shell fallback). See change: consolidate-platform-handlers.
+  return zrokResolver.which("zrok") !== null;
 }
 
 /**
@@ -94,29 +99,21 @@ export function removeZrokPid(): void {
 // ── Stale Process Cleanup ───────────────────────────────────────────
 
 /**
- * Check if a process is alive by sending signal 0.
- */
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Clean up stale zrok processes from previous server runs.
- * Reads PID file, kills process if running, removes PID file.
+ * Reads PID file, kills process if running (via the platform helper so
+ * Windows uses `taskkill /F /T /PID`), removes PID file.
+ * See change: route-kill-paths-through-platform.
  */
-export function cleanupStaleZrok(): void {
+export async function cleanupStaleZrok(): Promise<void> {
   const pid = readZrokPid();
   if (pid === null) return;
 
   if (isProcessAlive(pid)) {
     try {
-      process.kill(pid, "SIGTERM");
-      console.log(`Killed stale zrok process (PID ${pid})`);
+      const result = await killProcess(pid, { timeoutMs: 2000 });
+      if (result.ok) {
+        console.log(`Killed stale zrok process (PID ${pid})`);
+      }
     } catch (err: any) {
       console.warn(`Failed to kill stale zrok process (PID ${pid}): ${err.message}`);
     }
@@ -222,7 +219,10 @@ export function scavengeOrphanZrokProcesses(port: number): number[] {
     if (!Number.isFinite(pid) || pid <= 0) continue;
     if (pid === process.pid) continue; // never kill ourselves
     try {
-      process.kill(pid, "SIGTERM");
+      // Group-kill on Unix so zrok's child workers die with it; taskkill /T
+      // already handles the tree on Windows (killPidWithGroup routes the
+      // platform-correct path).
+      killPidWithGroup(pid, "SIGTERM");
       killed.push(pid);
       console.log(`Scavenged orphan zrok process (PID ${pid})`);
     } catch {
@@ -336,8 +336,16 @@ function _createTunnelInner(
       if (!resolved) {
         resolved = true;
         console.warn("zrok tunnel creation timed out (30s)");
-        try { child.kill("SIGTERM"); } catch {}
-        setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 2_000);
+        try {
+          if (child.pid != null) killPidWithGroup(child.pid, "SIGTERM");
+          else child.kill("SIGTERM");
+        } catch { /* already dead */ }
+        setTimeout(() => {
+          try {
+            if (child.pid != null) killPidWithGroup(child.pid, "SIGKILL");
+            else child.kill("SIGKILL");
+          } catch { /* already dead */ }
+        }, 2_000);
         if (token && !callerProvidedToken) releaseShare(token);
         removeZrokPid();
         resolve(null);
@@ -417,7 +425,13 @@ export async function deleteTunnel(port?: number): Promise<void> {
 
   if (child) {
     try {
-      child.kill("SIGTERM");
+      if (child.pid != null) {
+        // Route through the platform helper so Windows gets taskkill
+        // semantics (tree-kill). See change: route-kill-paths-through-platform.
+        await killProcess(child.pid, { timeoutMs: 2000 });
+      } else {
+        child.kill("SIGTERM");
+      }
     } catch (err: any) {
       console.warn(`zrok tunnel cleanup failed: ${err.message}`);
     }

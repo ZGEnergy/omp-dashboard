@@ -47,6 +47,8 @@ import { registerRecommendedRoutes, invalidateRecommendedCache } from "./routes/
 import { registerPiCoreRoutes } from "./routes/pi-core-routes.js";
 import { PiCoreChecker } from "./pi-core-checker.js";
 import { PiCoreUpdater } from "./pi-core-updater.js";
+import { registerToolRoutes } from "./routes/tool-routes.js";
+import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
 import { PackageManagerWrapper } from "./package-manager-wrapper.js";
 import { createEditorManager, type EditorManager } from "./editor-manager.js";
@@ -94,9 +96,20 @@ export interface DashboardServer {
 export async function createServer(config: ServerConfig): Promise<DashboardServer> {
   // Ensure bridge extension is registered in pi's global settings
   // (needed for bundled installs where pi can't discover it from package.json)
+  //
+  // __serverDir = <repo>/packages/server/src
+  // baseDir MUST be <repo>/ so findBundledExtension resolves
+  // <repo>/packages/extension. Three levels up, not two.
   const __serverDir = path.dirname(fileURLToPath(import.meta.url));
-  const extPath = findBundledExtension(path.resolve(__serverDir, "..", ".."));
-  if (extPath) registerBridgeExtension(extPath);
+  const extPath = findBundledExtension(path.resolve(__serverDir, "..", "..", ".."));
+  if (extPath) {
+    registerBridgeExtension(extPath);
+    console.log(`[dashboard] Bridge extension registered: ${extPath}`);
+  } else {
+    console.warn(`[dashboard] Bridge extension NOT found (searched from ${__serverDir}). ` +
+      `Sessions will spawn but never connect to the gateway. ` +
+      `Manually add the extension path to ~/.pi/agent/settings.json packages[] as a workaround.`);
+  }
 
   // Run migration from sessions.json + state.json if needed
   if (needsMigration()) {
@@ -356,6 +369,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     },
   });
   registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion });
+  registerToolRoutes(fastify, { registry: getDefaultRegistry(), networkGuard });
   // Package management
   const packageManagerWrapper = new PackageManagerWrapper();
 
@@ -374,6 +388,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       scope: result.scope,
       success: result.success,
       error: result.error,
+      diagnostics: result.diagnostics,
       sessionsReloaded: (result as any).sessionsReloaded,
     } as any);
     if (result.success) invalidateRecommendedCache();
@@ -441,6 +456,17 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     },
   });
 
+  // Warm pi-coding-agent module import + DefaultPackageManager instances
+  // on startup so the first user request to /api/packages/* doesn't pay
+  // the 3-5s cold-load cost. Runs in background; errors are swallowed
+  // (user-visible flow surfaces any real problem with the full diagnostic
+  // trail via the OperationResult.diagnostics field).
+  // See change: consolidate-tool-resolution.
+  void Promise.allSettled([
+    packageManagerWrapper.listInstalled("global"),
+    packageManagerWrapper.listInstalled("local"),
+  ]);
+
   // Editor (code-server) routes and proxy.
   // NOTE: routes are *registered* here but cannot dispatch until fastify.listen runs
   // inside server.start(). The orphan sweep in editorPidRegistry.cleanupOrphans()
@@ -453,17 +479,38 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   registerKnownServersRoutes(fastify, { networkGuard, getPeerServers: () => peerServers });
   registerProviderRoutes(fastify, { networkGuard, piGateway, browserGateway });
 
-  // Serve static files / SPA fallback
-  // Search order: npm package → workspace sibling → legacy dist/client
+  // Serve static files / SPA fallback.
+  //
+  // Resolution strategies, in order:
+  //  1. Node module resolver — works in ANY install layout
+  //     (flat `node_modules/`, scoped, nested, pnpm, whatever).
+  //  2. Sibling-to-server in the installed @scope layout.
+  //  3. Monorepo workspace sibling.
+  //  4. Legacy dist/client.
+  //
+  // Same class of bug as commits 40a1319 (bridge auto-registration)
+  // and e11f5eb (server-launcher.ts resolve): sibling-path arithmetic
+  // that works in the dev repo silently returns wrong paths in the
+  // installed node_modules layout. require.resolve identifies packages
+  // by name, which is the only canonical identity across layouts.
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const clientSearchPaths = [
-    // Installed as npm dependency
-    path.join(__dirname, "../../node_modules/@blackbelt-technology/pi-dashboard-web/dist"),
+  const clientSearchPaths: string[] = [];
+  try {
+    const webPkgJson = createRequire(import.meta.url).resolve("@blackbelt-technology/pi-dashboard-web/package.json");
+    clientSearchPaths.push(path.join(path.dirname(webPkgJson), "dist"));
+  } catch {
+    // Web package not resolvable — fall through to path-based search.
+  }
+  clientSearchPaths.push(
+    // Installed as scoped sibling of server
+    path.join(__dirname, "..", "..", "pi-dashboard-web", "dist"),
+    // Installed in a parent node_modules (hoisted)
+    path.join(__dirname, "..", "..", "..", "@blackbelt-technology", "pi-dashboard-web", "dist"),
     // Monorepo workspace sibling
     path.join(__dirname, "../../client/dist"),
     // Legacy path
     path.join(__dirname, "../../dist/client"),
-  ];
+  );
   const clientDir = clientSearchPaths.find(p => existsSync(path.join(p, "index.html"))) ?? "";
   const hasProductionBuild = !!clientDir;
   if (!hasProductionBuild) {

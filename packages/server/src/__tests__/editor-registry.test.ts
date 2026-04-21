@@ -1,12 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockedExecSync } = vi.hoisted(() => ({
+const { mockedExecSync, mockedSpawnSync } = vi.hoisted(() => ({
   mockedExecSync: vi.fn(),
+  mockedSpawnSync: vi.fn(),
 }));
 
+// platform/process.ts and platform/tools.ts now use spawnSync via whereAllLines
+// and isProcessRunning; both must be mocked to exercise the detection path in
+// isolation. Default return is status:1 (not found) so each test explicitly
+// overrides what it needs.
 vi.mock("node:child_process", () => ({
-  default: { execSync: mockedExecSync },
+  default: { execSync: mockedExecSync, spawnSync: mockedSpawnSync },
   execSync: mockedExecSync,
+  spawnSync: mockedSpawnSync,
 }));
 
 import { detectEditors, isProcessRunning, isProcessRunningWin32, EDITORS, type DetectedEditor } from "../editor-registry.js";
@@ -14,6 +20,9 @@ import { detectEditors, isProcessRunning, isProcessRunningWin32, EDITORS, type D
 describe("editor-registry", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // Default: spawnSync reports not-found so any un-overridden test still
+    // sees clean state rather than stale returns from previous tests.
+    mockedSpawnSync.mockReturnValue({ status: 1, stdout: "", stderr: "" });
   });
 
   describe("EDITORS", () => {
@@ -74,19 +83,21 @@ describe("editor-registry", () => {
 
   describe("detectEditors", () => {
     it("should return editor when process is running AND CLI is available", () => {
+      // platform/process.ts isProcessRunning uses execSync (pgrep) internally.
       mockedExecSync.mockImplementation((cmd) => {
         const s = String(cmd);
         if (s.includes("pgrep")) {
-          // Only Zed is running — match on both the macOS pattern
-          // ("/Applications/Zed.app") and the Linux pattern ("zed").
           if (s.includes("Zed") || s.includes("zed")) return Buffer.from("12345\n");
           throw new Error("not found");
         }
-        if (s.includes("which")) {
-          if (s.includes("zed")) return Buffer.from("/usr/local/bin/zed\n");
-          throw new Error("not found");
-        }
         throw new Error("unexpected command");
+      });
+      // ToolResolver.which uses spawnSync for `which`/`where` lookup.
+      mockedSpawnSync.mockImplementation((cmd, args) => {
+        if ((cmd === "which" || cmd === "where") && args?.[0] === "zed") {
+          return { status: 0, stdout: "/usr/local/bin/zed\n", stderr: "" };
+        }
+        return { status: 1, stdout: "", stderr: "" };
       });
 
       const result = detectEditors("/some/project");
@@ -97,9 +108,9 @@ describe("editor-registry", () => {
       mockedExecSync.mockImplementation((cmd) => {
         const s = String(cmd);
         if (s.includes("pgrep")) throw new Error("not found");
-        if (s.includes("which")) return Buffer.from("/usr/local/bin/zed\n");
         throw new Error("unexpected command");
       });
+      mockedSpawnSync.mockImplementation(() => ({ status: 0, stdout: "/usr/local/bin/zed\n", stderr: "" }));
 
       const result = detectEditors("/some/project");
       expect(result).toEqual([]);
@@ -109,9 +120,9 @@ describe("editor-registry", () => {
       mockedExecSync.mockImplementation((cmd) => {
         const s = String(cmd);
         if (s.includes("pgrep")) return Buffer.from("12345\n");
-        if (s.includes("which")) throw new Error("not found");
         throw new Error("unexpected command");
       });
+      mockedSpawnSync.mockReturnValue({ status: 1, stdout: "", stderr: "" });
 
       const result = detectEditors("/some/project");
       expect(result).toEqual([]);
@@ -125,12 +136,14 @@ describe("editor-registry", () => {
           if (s.includes("Visual Studio Code") || s.includes("code")) return Buffer.from("67890\n");
           throw new Error("not found");
         }
-        if (s.includes("which")) {
-          if (s.includes("zed")) return Buffer.from("/usr/local/bin/zed\n");
-          if (s.includes("code")) return Buffer.from("/usr/local/bin/code\n");
-          throw new Error("not found");
-        }
         throw new Error("unexpected command");
+      });
+      mockedSpawnSync.mockImplementation((cmd, args) => {
+        if (cmd === "which" || cmd === "where") {
+          if (args?.[0] === "zed") return { status: 0, stdout: "/usr/local/bin/zed\n", stderr: "" };
+          if (args?.[0] === "code") return { status: 0, stdout: "/usr/local/bin/code\n", stderr: "" };
+        }
+        return { status: 1, stdout: "", stderr: "" };
       });
 
       const result = detectEditors("/some/project");

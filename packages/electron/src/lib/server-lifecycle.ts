@@ -7,11 +7,12 @@
  * Electron app, those packages are inside resources/server/node_modules/ which is NOT
  * on the ESM module resolution path. All config reading and health checking is inlined.
  */
-import { spawn } from "node:child_process";
+import { spawnDetached, waitForReady } from "@blackbelt-technology/pi-dashboard-shared/platform/detached-spawn.js";
 import { existsSync, mkdirSync, openSync, writeFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { resolveJitiFromAnchor } from "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { createRequire } from "node:module";
@@ -22,6 +23,32 @@ import { getBundledNodePath } from "./bundled-node.js";
 import { isDashboardRunning } from "./health-check.js";
 import type { DashboardStatus } from "./health-check.js";
 import { MANAGED_DIR } from "./managed-paths.js";
+
+/**
+ * Pure helper: build the options object passed to spawnDetached for the
+ * dashboard-server launch. Extracted for unit testing — keeps the `detach:
+ * false` invariant asserted in a pure test without booting Electron.
+ *
+ * detach: false on Windows keeps the child inside Electron's Job Object, so
+ * no new console is allocated (no flash) and the server dies when Electron
+ * exits.
+ */
+export function buildServerSpawnOptions(params: {
+  cmd: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  cwd: string;
+  logFd: number | undefined;
+}): Parameters<typeof spawnDetached>[0] {
+  return {
+    cmd: params.cmd,
+    args: params.args,
+    env: params.env,
+    cwd: params.cwd,
+    logFd: params.logFd,
+    detach: false,
+  };
+}
 
 let serverStartedByUs = false;
 
@@ -142,15 +169,15 @@ export async function ensureServer(): Promise<string> {
   return `http://localhost:${config.port}`;
 }
 
-const JITI_PACKAGES = [
-  "@mariozechner/jiti",
-  "@oh-my-pi/jiti",
-];
-
 /**
  * Attempt to resolve jiti's register hook from a pi installation.
  * Tries managed pi first, then system pi detected via PATH.
- * Returns the absolute path to jiti-register.mjs, or null.
+ * Returns a file:// URL to jiti-register.mjs, or null.
+ *
+ * Anchor-resolution logic is delegated to the shared primitive. This was
+ * previously a duplicate of `packages/shared/src/resolve-jiti.ts` — the
+ * very drift vector that `fix-windows-server-parity` had to patch in two
+ * places. The duplicate is now removed; see change: consolidate-platform-handlers.
  */
 export function resolveJitiFromPi(): string | null {
   // 1. Try managed pi install
@@ -169,22 +196,6 @@ export function resolveJitiFromPi(): string | null {
     } catch { /* ignore */ }
   }
 
-  return null;
-}
-
-/** Resolve jiti register hook from an anchor file path (package.json or binary). */
-function resolveJitiFromAnchor(anchorPath: string): string | null {
-  if (!existsSync(anchorPath)) return null;
-  try {
-    const req = createRequire(anchorPath);
-    for (const jiti of JITI_PACKAGES) {
-      try {
-        const pkgJson = req.resolve(`${jiti}/package.json`);
-        const registerPath = path.join(path.dirname(pkgJson), "lib", "jiti-register.mjs");
-        if (existsSync(registerPath)) return registerPath;
-      } catch { /* next */ }
-    }
-  } catch { /* ignore */ }
   return null;
 }
 
@@ -209,7 +220,7 @@ function resolveTsxCommand(): string[] | null {
 
   // System PATH
   try {
-    const { execSync } = require("node:child_process");
+    const { execSync } = require("node:child_process"); // ban:child_process-ok electron bundle prefers require() for cold-start cost; dev-only tsx probe
     const whichCmd = process.platform === "win32" ? "where" : "which";
     const result = execSync(`${whichCmd} tsx`, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
     if (result) return [result.split("\n")[0]];
@@ -250,10 +261,9 @@ async function launchViaCli(cliPath: string, port: number, piPort: number): Prom
   const launchInfo = `[${new Date().toISOString()}] Launching via CLI: ${cliPath} start --port ${port} --pi-port ${piPort}\n`;
   try { writeFileSync(logPath, launchInfo); } catch { /* ignore */ }
 
-  let stdio: any = "ignore";
+  let logFd: number | undefined;
   try {
-    const logFd = openSync(logPath, "a");
-    stdio = ["ignore", logFd, logFd];
+    logFd = openSync(logPath, "a");
   } catch { /* can't write log, use ignore */ }
 
   // Build env with the CLI's bin directory on PATH so node/tsx are available
@@ -262,35 +272,32 @@ async function launchViaCli(cliPath: string, port: number, piPort: number): Prom
   const env = { ...process.env };
   env.PATH = `${cliBinDir}${path.delimiter}${env.PATH || ""}`;
 
-  const isWin = process.platform === "win32";
-  const child = spawn(cliPath, ["start", "--port", String(port), "--pi-port", String(piPort)], {
-    detached: !isWin,
-    stdio,
+  // Route through buildServerSpawnOptions so detach:false invariant is
+  // enforced here too (Electron's Windows Job Object hosts the CLI child).
+  const r = await spawnDetached(buildServerSpawnOptions({
+    cmd: cliPath,
+    args: ["start", "--port", String(port), "--pi-port", String(piPort)],
     env,
-    windowsHide: true,
-  });
-
-  let spawnError: string | null = null;
-  child.on("error", (err) => { spawnError = err.message; });
-  child.unref();
-
-  // Wait for server to become available
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 500));
-    if (spawnError) {
-      throw new Error(`pi-dashboard CLI failed to spawn: ${spawnError}`);
-    }
-    const check = await isDashboardRunning(port);
-    if (check.running) return;
+    cwd: process.cwd(),
+    logFd,
+  }));
+  if (!r.ok) {
+    throw new Error(`pi-dashboard CLI failed to spawn: ${r.error}`);
   }
+
+  const ready = await waitForReady({
+    probe: async () => (await isDashboardRunning(port)).running,
+    deadlineMs: 15_000,
+    child: r.process,
+  });
+  if (ready.ok) return;
 
   let logContent = "";
   try { logContent = readFileSync(logPath, "utf-8"); } catch { /* ignore */ }
   const lastLines = logContent.split("\n").slice(-20).join("\n");
 
   throw new Error(
-    `pi-dashboard CLI failed to start server within 15 seconds.\n` +
+    `pi-dashboard CLI failed to start server within 15 seconds (${ready.error}).\n` +
     `Command: ${cliPath} start --port ${port} --pi-port ${piPort}\n` +
     (lastLines ? `\nServer log:\n${lastLines}` : "\nNo server log available.")
   );
@@ -379,46 +386,36 @@ async function launchServer(port: number, piPort: number): Promise<void> {
   ].join("\n");
   try { writeFileSync(logPath, launchInfo); } catch { /* ignore */ }
 
-  let stdio: any = "ignore";
+  let logFd: number | undefined;
   try {
-    const logFd = openSync(logPath, "a");
-    stdio = ["ignore", logFd, logFd];
+    logFd = openSync(logPath, "a");
   } catch { /* can't write log, use ignore */ }
 
-  // Launch: tsx <cli.ts> (tsx handles all TypeScript loading + __dirname shimming)
-  // On Windows: detached:true creates a visible console window for console apps (node.exe).
-  // Use detached:false + unref() instead — Electron manages server lifecycle via stopServerIfNeeded().
-  const isWin = process.platform === "win32";
-  const child = spawn(spawnBin, spawnArgs, {
-    detached: !isWin,
-    stdio,
-    env,
-    cwd,
-    windowsHide: true,
-  });
-
-  let spawnError: string | null = null;
-  child.on("error", (err) => { spawnError = err.message; });
-  child.unref();
-
-  // Wait for server to become available
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 500));
-    if (spawnError) {
-      throw new Error(`Server process failed to spawn: ${spawnError}`);
-    }
-    const check = await isDashboardRunning(port);
-    if (check.running) return;
+  // Launch via spawnDetached primitive — uniform detached/windowsHide/
+  // shell:false/stdio:ignore+fd defaults on every platform.
+  // Electron manages lifecycle via stopServerIfNeeded().
+  //
+  // detach: false — keep the child inside Electron's Windows Job Object
+  // (no cmd.exe flash on spawn; server dies with Electron). Mirrors the
+  // pi-session spawn decision in process-manager.ts::spawnHeadlessDetached.
+  const r = await spawnDetached(buildServerSpawnOptions({ cmd: spawnBin, args: spawnArgs, env, cwd, logFd }));
+  if (!r.ok) {
+    throw new Error(`Server process failed to spawn: ${r.error}`);
   }
 
-  // Read log for error details
+  const ready = await waitForReady({
+    probe: async () => (await isDashboardRunning(port)).running,
+    deadlineMs: 15_000,
+    child: r.process,
+  });
+  if (ready.ok) return;
+
   let logContent = "";
   try { logContent = readFileSync(logPath, "utf-8"); } catch { /* ignore */ }
   const lastLines = logContent.split("\n").slice(-20).join("\n");
 
   throw new Error(
-    `Server failed to start within 15 seconds.\n` +
+    `Server failed to start within 15 seconds (${ready.error}).\n` +
     `Command: ${spawnBin} ${spawnArgs.join(" ")}\n` +
     `CWD: ${cwd}\n` +
     (lastLines ? `\nServer log:\n${lastLines}` : "\nNo server log available.")

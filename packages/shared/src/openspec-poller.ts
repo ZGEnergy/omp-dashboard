@@ -1,44 +1,30 @@
 /**
  * Polls the openspec CLI to gather change data for the session's project.
- * Uses async child processes to avoid blocking the event loop.
+ *
+ * This module is a thin aggregator over `platform/openspec.ts`: it
+ * calls the Recipe-based primitives and combines `list` + per-change
+ * `status` into the dashboard's `OpenSpecData` shape.
+ *
+ * Two public flavors:
+ *
+ *   - `pollOpenSpec` (sync) — for the bridge extension where async
+ *     isn't practical. Uses `run()` under the hood; each call blocks
+ *     the event loop for ~200-2000ms per openspec invocation.
+ *
+ *   - `pollOpenSpecAsync` (async) — for the server's directory service.
+ *     Routes through the runner's `runAsync()` so every spawn goes
+ *     through the same binary resolution, `.cmd` shell handling, and
+ *     `windowsHide: true` default as everything else. Status queries
+ *     run in parallel via `Promise.all`, keeping the event loop free
+ *     on Windows where openspec.cmd startup is slow (~2s per call).
+ *
+ * See change: consolidate-tool-resolution.
  */
-import { spawnSync, execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { listOr, statusOr, OPENSPEC_LIST, OPENSPEC_STATUS } from "./platform/openspec.js";
+import { runAsync, unwrap } from "./platform/runner.js";
 import type { OpenSpecData, OpenSpecChange, OpenSpecArtifact } from "./types.js";
 
-const execFileAsync = promisify(execFile);
 const EMPTY_DATA: OpenSpecData = { initialized: false, changes: [] };
-
-/** Synchronous version — only used by bridge extension where async isn't practical */
-function runOpenSpecSync(args: string[], cwd: string): unknown | null {
-  try {
-    const result = spawnSync("openspec", args, {
-      cwd,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 10_000,
-    });
-    if (result.status !== 0 || !result.stdout) return null;
-    return JSON.parse(result.stdout);
-  } catch {
-    return null;
-  }
-}
-
-/** Async version — non-blocking, used by server */
-async function runOpenSpecAsync(args: string[], cwd: string): Promise<unknown | null> {
-  try {
-    const { stdout } = await execFileAsync("openspec", args, {
-      cwd,
-      encoding: "utf-8",
-      timeout: 10_000,
-    });
-    if (!stdout) return null;
-    return JSON.parse(stdout);
-  } catch {
-    return null;
-  }
-}
 
 export function buildOpenSpecData(
   listResult: { changes?: Array<{ name: string; status: string; completedTasks: number; totalTasks: number }> } | null,
@@ -72,30 +58,38 @@ export function buildOpenSpecData(
   return { initialized: true, changes };
 }
 
-/** Synchronous poll — blocks event loop. Used by bridge extension. */
+/**
+ * Synchronous poll — blocks the event loop. Used by the bridge extension
+ * where async isn't practical (some pi extension hooks are sync).
+ */
 export function pollOpenSpec(cwd: string): OpenSpecData {
-  const listResult = runOpenSpecSync(["list", "--json"], cwd) as any;
+  const listResult = listOr({ cwd }) as any;
   if (!listResult || !Array.isArray(listResult.changes)) return EMPTY_DATA;
 
   const statusResults = new Map<string, any>();
   for (const c of listResult.changes) {
-    statusResults.set(c.name, runOpenSpecSync(["status", "--change", c.name, "--json"], cwd));
+    statusResults.set(c.name, statusOr({ cwd, change: c.name }));
   }
   return buildOpenSpecData(listResult, statusResults);
 }
 
-/** Async poll — non-blocking. Used by server directory service. */
+/**
+ * Async poll — genuinely async. Runs per-change status queries in
+ * parallel via the shared `runAsync()`, so each spawn goes through the
+ * central binary resolution + `windowsHide: true` default.
+ */
 export async function pollOpenSpecAsync(cwd: string): Promise<OpenSpecData> {
-  const listResult = await runOpenSpecAsync(["list", "--json"], cwd) as any;
+  const listResult = unwrap(await runAsync(OPENSPEC_LIST, { cwd }, { cwd }), null) as
+    | { changes?: Array<{ name: string; status: string; completedTasks: number; totalTasks: number }> }
+    | null;
   if (!listResult || !Array.isArray(listResult.changes)) return EMPTY_DATA;
 
-  // Run all status queries in parallel
-  const entries = await Promise.all(
-    listResult.changes.map(async (c: any): Promise<[string, any]> => {
-      const status = await runOpenSpecAsync(["status", "--change", c.name, "--json"], cwd);
-      return [c.name, status];
+  const statusEntries = await Promise.all(
+    listResult.changes.map(async (c) => {
+      const result = await runAsync(OPENSPEC_STATUS, { cwd, change: c.name }, { cwd });
+      return [c.name, unwrap(result, null)] as const;
     }),
   );
-  const statusResults = new Map<string, any>(entries);
+  const statusResults = new Map<string, any>(statusEntries);
   return buildOpenSpecData(listResult, statusResults);
 }

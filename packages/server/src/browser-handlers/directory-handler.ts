@@ -4,10 +4,19 @@
 import type { BrowserToServerMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import type { BrowserHandlerContext } from "./handler-context.js";
 import { safeRealpathSync } from "../resolve-path.js";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { archiveCompleted as openspecArchiveCompleted } from "@blackbelt-technology/pi-dashboard-shared/platform/openspec.js";
+import { normalizePath } from "@blackbelt-technology/pi-dashboard-shared/platform/paths.js";
 
-const execFileAsync = promisify(execFile);
+/**
+ * Canonicalize a user-supplied path before storage: normalize separator /
+ * trailing-sep / case variants first, then resolve symlinks. Order matters
+ * — `realpath` can fail for not-yet-existing paths, so we keep its
+ * best-effort fallback but ensure we first have a sane string.
+ * See change: platform-path-normalization.
+ */
+function canonicalizePath(input: string): string {
+  return safeRealpathSync(normalizePath(input));
+}
 
 export function handlePinDirectory(
   msg: Extract<BrowserToServerMessage, { type: "pin_directory" }>,
@@ -15,7 +24,7 @@ export function handlePinDirectory(
 ): void {
   const { preferencesStore, directoryService, sessionManager, broadcast } = ctx;
   if (!preferencesStore) return;
-  const resolved = safeRealpathSync(msg.path);
+  const resolved = canonicalizePath(msg.path);
   preferencesStore.pinDirectory(resolved);
   broadcast({ type: "pinned_dirs_updated", paths: preferencesStore.getPinnedDirectories() });
   if (directoryService) {
@@ -48,7 +57,7 @@ export function handleUnpinDirectory(
   ctx: BrowserHandlerContext,
 ): void {
   if (ctx.preferencesStore) {
-    ctx.preferencesStore.unpinDirectory(safeRealpathSync(msg.path));
+    ctx.preferencesStore.unpinDirectory(canonicalizePath(msg.path));
     ctx.broadcast({ type: "pinned_dirs_updated", paths: ctx.preferencesStore.getPinnedDirectories() });
   }
 }
@@ -58,7 +67,10 @@ export function handleReorderPinnedDirs(
   ctx: BrowserHandlerContext,
 ): void {
   if (ctx.preferencesStore) {
-    ctx.preferencesStore.reorderPinnedDirs(msg.paths.map(safeRealpathSync));
+    // Wrap in arrow fn: map's (elem, index, array) callback would pass
+    // the array index as canonicalizePath's 2nd arg, silently breaking
+    // platform detection. See platform-path-normalization.
+    ctx.preferencesStore.reorderPinnedDirs(msg.paths.map((p) => canonicalizePath(p)));
     ctx.broadcast({ type: "pinned_dirs_updated", paths: ctx.preferencesStore.getPinnedDirectories() });
   }
 }
@@ -89,8 +101,11 @@ export function handleOpenSpecBulkArchive(
   ctx: BrowserHandlerContext,
 ): void {
   if (ctx.directoryService) {
-    execFileAsync("openspec", ["archive", "--completed"], { cwd: msg.cwd, timeout: 30000 })
-      .catch(() => {})
+    // Delegate to the shared openspec tool module. The runner handles
+    // windowsHide, timeout, and argv-array escaping.
+    // See change: platform-command-executor.
+    openspecArchiveCompleted({ cwd: msg.cwd });
+    Promise.resolve()
       .then(() => ctx.directoryService!.refreshOpenSpec(msg.cwd))
       .then((data) => {
         if (data) ctx.broadcast({ type: "openspec_update", cwd: msg.cwd, data });

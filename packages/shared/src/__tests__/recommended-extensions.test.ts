@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+	BUNDLED_EXTENSION_IDS,
 	RECOMMENDED_EXTENSIONS,
 	getRecommendedExtension,
 	getRecommendedByStatus,
@@ -35,18 +36,18 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 		}
 	});
 
-	it("pi-anthropic-messages is marked required and uses SSH git URL", () => {
+	it("pi-anthropic-messages is marked required and uses HTTPS git URL", () => {
 		const entry = getRecommendedExtension("pi-anthropic-messages");
 		expect(entry).toBeDefined();
 		expect(entry?.status).toBe("required");
-		expect(entry?.source).toContain("git@github.com:BlackBeltTechnology/pi-anthropic-messages.git");
+		expect(entry?.source).toContain("https://github.com/BlackBeltTechnology/pi-anthropic-messages.git");
 		expect(entry?.autowired).toBe(true);
 	});
 
-	it("pi-flows uses SSH git URL and registers flow-engine tools", () => {
+	it("pi-flows uses HTTPS git URL and registers flow-engine tools", () => {
 		const entry = getRecommendedExtension("pi-flows");
 		expect(entry).toBeDefined();
-		expect(entry?.source).toBe("git@github.com:BlackBeltTechnology/pi-flows.git");
+		expect(entry?.source).toBe("https://github.com/BlackBeltTechnology/pi-flows.git");
 		expect(entry?.toolsRegistered).toContain("subagent");
 		expect(entry?.toolsRegistered).toContain("flow_write");
 	});
@@ -65,12 +66,12 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 		);
 	});
 
-	it("git-sourced entries use the git@github.com:/.git SSH form", () => {
+	it("git-sourced entries use the https://github.com/.../.git HTTPS form", () => {
 		const gitEntries = RECOMMENDED_EXTENSIONS.filter((e) =>
-			e.source.startsWith("git@github.com:"),
+			e.source.startsWith("https://github.com/"),
 		);
 		for (const entry of gitEntries) {
-			expect(entry.source).toMatch(/^git@github\.com:[^/]+\/[^/]+\.git$/);
+			expect(entry.source).toMatch(/^https:\/\/github\.com\/[^/]+\/[^/]+\.git$/);
 		}
 		expect(gitEntries.map((e) => e.id).sort()).toEqual(
 			["pi-anthropic-messages", "pi-flows"].sort(),
@@ -119,5 +120,37 @@ describe("RecommendedExtension type", () => {
 			unlocks: ["something"],
 		};
 		expect(entry.id).toBe("x");
+	});
+});
+
+// ── BUNDLED_EXTENSION_IDS manifest (task 2 of bundle-first-party-extensions) ──
+
+describe("BUNDLED_EXTENSION_IDS manifest", () => {
+	it("contains exactly the v0.x initial bundled set", () => {
+		expect([...BUNDLED_EXTENSION_IDS].sort()).toEqual(
+			["pi-anthropic-messages", "pi-flows"].sort(),
+		);
+	});
+
+	it("every bundled id appears in RECOMMENDED_EXTENSIONS", () => {
+		const recommendedIds = new Set(RECOMMENDED_EXTENSIONS.map((e) => e.id));
+		for (const id of BUNDLED_EXTENSION_IDS) {
+			expect(recommendedIds.has(id)).toBe(true);
+		}
+	});
+
+	it("every bundled id has a git-based source (no npm:, no local paths)", () => {
+		for (const id of BUNDLED_EXTENSION_IDS) {
+			const entry = RECOMMENDED_EXTENSIONS.find((e) => e.id === id);
+			expect(entry, `RECOMMENDED_EXTENSIONS missing entry for ${id}`).toBeDefined();
+			const source = entry!.source;
+			const isGit =
+				source.endsWith(".git") ||
+				source.startsWith("git@") ||
+				source.startsWith("git:") ||
+				/^https?:\/\/.+\/.+/.test(source);
+			expect(isGit, `${id} source is not git-based: ${source}`).toBe(true);
+			expect(source.startsWith("npm:"), `${id} must not be an npm source`).toBe(false);
+		}
 	});
 });
