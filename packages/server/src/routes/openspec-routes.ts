@@ -30,9 +30,16 @@ export function registerOpenSpecRoutes(
     networkGuard: NetworkGuard;
     /** Optional — called after a successful toggle to trigger openspec_update. */
     onOpenSpecChanged?: OpenSpecBroadcaster;
+    /**
+     * Optional bootstrap state. When provided AND status !== "ready", the
+     * `/api/pi-resources` endpoint returns an empty result set with a
+     * `bootstrap` passthrough so the UI can render "pi not yet installed".
+     * See change: unified-bootstrap-install §5.4.
+     */
+    bootstrapState?: import("../bootstrap-state.js").BootstrapStateStore;
   },
 ) {
-  const { sessionManager, preferencesStore, directoryService, networkGuard, onOpenSpecChanged } = deps;
+  const { sessionManager, preferencesStore, directoryService, networkGuard, onOpenSpecChanged, bootstrapState } = deps;
 
   // OpenSpec archive listing endpoint
   fastify.get<{ Querystring: { cwd?: string } }>(
@@ -58,6 +65,23 @@ export function registerOpenSpecRoutes(
       if (!cwd) {
         reply.code(400);
         return { success: false, error: "cwd parameter required" } satisfies ApiResponse;
+      }
+      // Bootstrap gate: during degraded-mode install, return empty result
+      // with a `bootstrap` field so the UI can render the "pi not yet
+      // installed" state. See change: unified-bootstrap-install §5.4.
+      if (bootstrapState) {
+        const bs = bootstrapState.get();
+        if (bs.status !== "ready") {
+          return {
+            success: true,
+            data: {
+              local: { extensions: [], skills: [], prompts: [] },
+              global: { extensions: [], skills: [], prompts: [] },
+              packages: [],
+              bootstrap: bs,
+            },
+          } satisfies ApiResponse;
+        }
       }
       const forceRefresh = request.query.refresh === "true" || request.query.refresh === "1";
       let data = forceRefresh ? undefined : directoryService.getPiResources(cwd);

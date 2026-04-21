@@ -107,8 +107,10 @@ export function resolveNpmArgv(
     if (res.ok && res.path) return [res.path];
   }
 
-  // Last resort: rely on PATH. On Windows the .cmd shim is required.
-  return [process.platform === "win32" ? "npm.cmd" : "npm"];
+  // Last resort: rely on PATH. On Windows the .cmd shim is required
+  // because spawn doesn't auto-append extensions.
+  const npmBin = process.platform === "win32" ? "npm.cmd" : "npm"; // platform-branch-ok
+  return [npmBin];
 }
 
 /** Internal: spawn npm with a given argv + packages; stream progress. */

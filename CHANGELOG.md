@@ -11,6 +11,26 @@ see [`docs/release-process.md`](docs/release-process.md).
 ## [Unreleased]
 
 ### Added
+- **Auto-install pi on first `pi-dashboard` run** (degraded-mode first-run).
+  When the server starts and `ToolRegistry.resolve("pi")` fails, it now flips
+  `bootstrapState` to `installing`, runs a background `bootstrapInstall` into
+  `~/.pi-dashboard/` (extracted from the Electron installer into the shared
+  `@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js` module),
+  auto-registers the bridge extension on completion, and flips state back to
+  `ready`. The UI renders a new `BootstrapBanner` above the main layout
+  (`Installing pi…` while in progress, `pi install failed — [Retry]` on error,
+  upgrade hints when the resolved pi version is below the compatibility
+  range declared in `packages/server/package.json` `piCompatibility`). New
+  `pi-dashboard upgrade-pi` subcommand upgrades `@mariozechner/pi-coding-agent`
+  via the same shared installer, delegating to a running dashboard when
+  present. Session spawn is queued during installs via the new
+  `bootstrap-queue` (runs once status flips to `ready`); `/api/pi-core/*`,
+  `/api/pi-resources`, and `POST /api/bootstrap/upgrade-pi` all 503/202 as
+  appropriate. Extension is shipped as a runtime dep of
+  `pi-dashboard-server` so `findBundledExtension` resolves it via
+  `require.resolve` when installed via `npm i -g pi-dashboard`. See change:
+  `unified-bootstrap-install`.
+
 - **Bootstrap resolution harness** — in-memory (memfs-backed) test harness
   for the dashboard's bootstrap resolution: `ToolRegistry` strategy chains
   + bridge-extension registration across install mechanics, platforms, and

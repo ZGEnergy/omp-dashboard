@@ -27,15 +27,18 @@ The dashboard server SHALL start in degraded mode when pi is not yet resolvable,
 - **THEN** the request returns 202 Accepted with `{ status: "queued", ticketId: "..." }`
 - **AND** the request is processed once status transitions to "ready"
 
-#### Scenario: Terminal-with-pi-shell rejected during install
+#### Scenario: Terminals spawn normally during install (current protocol)
 - **WHEN** bootstrap status is "installing"
-- **AND** a client requests a terminal whose shell command resolves to `pi`
-- **THEN** the request returns 503 with `{ error: "pi not yet installed", retryAfter: "<estimated>" }`
+- **AND** a client requests a terminal (the `create_terminal` browser message carries only `cwd` — no shell command)
+- **THEN** the terminal spawns with the OS default shell via `detectShell()` (`bash`, `zsh`, `cmd.exe`, or `powershell.exe` — never `pi`)
+- **AND** the spawn succeeds regardless of bootstrap status (terminals are not pi-dependent under the current protocol)
 
-#### Scenario: Non-pi terminals unaffected
-- **WHEN** bootstrap status is "installing"
-- **AND** a client requests a terminal with command `bash` or `zsh`
-- **THEN** the terminal spawns normally with no bootstrap-related delay
+#### Scenario: Future-proof — pi-shell terminal would be rejected
+- **WHEN** the protocol is extended (future change) to allow custom shell commands on `create_terminal`
+- **AND** bootstrap status is "installing"
+- **AND** a client requests a terminal whose shell command resolves to `pi`
+- **THEN** the request MUST return 503 with `{ error: "pi not yet installed" }`
+- **AND** the gate infrastructure (`bootstrapState` + `bootstrapQueue` in `packages/server/src/`) is ready to wire when this protocol extension lands
 
 ### Requirement: Bootstrap status API
 The server SHALL expose `GET /api/bootstrap/status` returning the current state and broadcast `bootstrap_status_update` over the browser WebSocket gateway on every transition.
@@ -111,13 +114,16 @@ If `single-dashboard-per-home` has landed, bootstrap install SHALL run inside th
 - **THEN** the second detects the live instance via lock metadata + `isDashboardRunning()`
 - **AND** attaches (opens browser), does NOT run its own `bootstrapInstall`
 
-## MODIFIED Requirements
-
 ### Requirement: Electron wizard delegates to shared installer
-The Electron first-run wizard SHALL invoke `bootstrapInstall` from `@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js` rather than a local Electron-only implementation. The wizard's UX is unchanged — only the underlying call is refactored.
+The Electron first-run wizard SHALL NOT contain a parallel registry-install implementation. Its registry-install loop (resolve npm, `npm install <pkg>`, stream progress) SHALL be delegated to `bootstrapInstall` from `@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js`, either directly from the IPC handler OR via a thin Electron wrapper that adds only Electron-specific concerns (bundled Node + `npm-cli.js`, offline-cacache bundle, bundled-extension activation). The wizard's UX is unchanged — only the underlying call site is refactored.
 
 #### Scenario: Existing wizard tests still pass
 - **WHEN** the wizard's "Setup everything" IPC handler runs
 - **THEN** the same progress events fire
 - **AND** the same final state is reached
 - **AND** no test needs updating beyond the import path
+
+#### Scenario: No duplicate registry-install logic in Electron
+- **WHEN** a new `npm install <pkg>` call needs to be added to the bootstrap flow
+- **THEN** it SHALL be added to the shared `bootstrapInstall` function in `packages/shared/src/bootstrap-install.ts`
+- **AND** any Electron-specific behavior (bundled Node, offline cacache, postinstall PATH) is added as injectable options on `BootstrapInstallOptions` (`npmArgv`, `env`, `registry`) — NOT as a parallel install loop in Electron

@@ -79,6 +79,23 @@ function skipReasonFor(cell: ScenarioCell): string {
   // state) not modelled in this cube. The current cells remain
   // skipped until that proposal extends the enumeration.
 
+  // TODO(unified-bootstrap-install): add three scenarios once this
+  // change's task 13 wires the bootstrap through the home-lock:
+  //   - B1-post:   "npm-g-dash-only + bootstrap install ran→ pi resolves
+  //                 via managed + bridge auto-registered". Requires
+  //                 extending the cube with a `bootstrap?: "pre"|"post"`
+  //                 axis or a new pi state `managed-installed-fresh`.
+  //   - B4:        "pi-dashboard installed via npm-g, extension resolves
+  //                 via node_modules lookup (findBundledExtension
+  //                 Strategy 2)". Requires a new `pi-ext-resolution`
+  //                 axis.
+  //   - L2:        "two simultaneous bootstraps" (requires lock from
+  //                 single-dashboard-per-home to be wired).
+  // Reason skipped today: requires lock from single-dashboard-per-home
+  // to be wired AND the cube to grow new axes. Track in harness
+  // follow-up. See change: unified-bootstrap-install tasks 2.3, 10.2,
+  // 11.2, 13.2.
+
   // pi=malformed means partial install; resolution failure reason
   // is identical across settings/env axes once pi state is fixed.
   // E2 covers linux + win32; other combinations add no signal.

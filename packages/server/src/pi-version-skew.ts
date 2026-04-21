@@ -1,0 +1,196 @@
+/**
+ * Version-skew detection for pi-coding-agent.
+ *
+ * Reads `piCompatibility` from `packages/server/package.json` and the
+ * currently-resolved pi version from its `package.json`, then populates
+ * `bootstrapState.compatibility` with hints the UI banner uses to show
+ * upgrade suggestions.
+ *
+ * See change: unified-bootstrap-install \u00a79.
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
+import type { BootstrapCompatibility, BootstrapStateStore } from "./bootstrap-state.js";
+import { getDefaultRegistry, type ToolRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
+
+/**
+ * Parse a semver-ish string into its three numeric segments. Returns
+ * null when the string doesn't match `<n>.<n>.<n>` (with optional
+ * pre-release / build suffix which we ignore for comparison). This is
+ * deliberately minimal \u2014 pi versions have always been `0.x.y` and we
+ * don't want to pull in the `semver` dep.
+ */
+export function parseVersion(v: string): [number, number, number] | null {
+  const m = v.trim().replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+}
+
+/**
+ * Compare two version strings. Returns -1 if `a < b`, 0 if equal, 1 if
+ * `a > b`. Unparseable strings sort as equal (conservative \u2014 don't flag
+ * weird versions as outdated).
+ */
+export function compareVersions(a: string, b: string): -1 | 0 | 1 {
+  const A = parseVersion(a);
+  const B = parseVersion(b);
+  if (!A || !B) return 0;
+  for (let i = 0; i < 3; i++) {
+    if (A[i] < B[i]) return -1;
+    if (A[i] > B[i]) return 1;
+  }
+  return 0;
+}
+
+/**
+ * Return true if `version` is less than `threshold`. Delegates to
+ * `compareVersions` so unparseable strings never flag as "too old".
+ */
+export function isBelow(version: string, threshold: string): boolean {
+  return compareVersions(version, threshold) < 0;
+}
+
+/**
+ * Return true if `version` is strictly above `threshold`. `threshold`
+ * may include a `.x` wildcard in the patch slot (e.g. `"0.9.x"`); in
+ * that case the wildcard matches any patch, so `"0.9.5"` is NOT above
+ * `"0.9.x"` but `"0.10.0"` is.
+ */
+export function isAbove(version: string, threshold: string): boolean {
+  const thresholdClean = threshold.replace(/\.x$/i, ".99999");
+  return compareVersions(version, thresholdClean) > 0;
+}
+
+/**
+ * Read the server's declared compatibility range from its own package.json.
+ * Falls back to the hard-coded defaults when the field is missing or
+ * malformed (shouldn't happen in practice).
+ */
+export function readPiCompatibility(serverPkgJsonPath: string): Pick<
+  BootstrapCompatibility,
+  "minimum" | "recommended" | "maximum"
+> {
+  try {
+    const raw = fs.readFileSync(serverPkgJsonPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      piCompatibility?: { minimum?: string; recommended?: string; maximum?: string | null };
+    };
+    const c = parsed.piCompatibility;
+    if (c && typeof c.minimum === "string" && typeof c.recommended === "string") {
+      return {
+        minimum: c.minimum,
+        recommended: c.recommended,
+        maximum: c.maximum ?? null,
+      };
+    }
+  } catch {
+    /* fall through */
+  }
+  return { minimum: "0.6.7", recommended: "0.6.7", maximum: null };
+}
+
+/**
+ * Read the currently-resolved pi version from `<pi-module>/../package.json`.
+ * Returns undefined when pi isn't resolvable or the package.json can't
+ * be parsed.
+ */
+export function readCurrentPiVersion(registry: ToolRegistry = getDefaultRegistry()): string | undefined {
+  try {
+    const req = createRequire(import.meta.url);
+    const pkgJson = req.resolve("@mariozechner/pi-coding-agent/package.json");
+    const raw = fs.readFileSync(pkgJson, "utf8");
+    const parsed = JSON.parse(raw) as { version?: string };
+    if (typeof parsed.version === "string") return parsed.version;
+  } catch {
+    /* not resolvable yet */
+  }
+  // Fall back to the registry's resolved path + ../package.json.
+  try {
+    const res = registry.resolve("pi");
+    if (res.ok && res.path) {
+      const candidate = path.join(path.dirname(path.dirname(res.path)), "package.json");
+      if (fs.existsSync(candidate)) {
+        const raw = fs.readFileSync(candidate, "utf8");
+        const parsed = JSON.parse(raw) as { version?: string };
+        if (typeof parsed.version === "string") return parsed.version;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
+/**
+ * Compute the `compatibility` snapshot from a compatibility range and
+ * the current pi version (or undefined when not yet installed). Pure
+ * function \u2014 all I/O is done by callers.
+ */
+export function computeCompatibility(
+  range: Pick<BootstrapCompatibility, "minimum" | "recommended" | "maximum">,
+  current: string | undefined,
+): BootstrapCompatibility {
+  const out: BootstrapCompatibility = { ...range, current };
+  if (!current) return out;
+  if (isBelow(current, range.minimum)) {
+    // Minimum-violated is signalled by leaving `upgradeRecommended` true
+    // AND letting callers populate `bootstrapState.error` with the
+    // block-ops message.
+    out.upgradeRecommended = true;
+    return out;
+  }
+  if (isBelow(current, range.recommended)) {
+    out.upgradeRecommended = true;
+  }
+  if (range.maximum && isAbove(current, range.maximum)) {
+    out.upgradeDashboard = true;
+  }
+  return out;
+}
+
+interface CacheEntry {
+  value: BootstrapCompatibility;
+  /** Milliseconds epoch when this entry should be discarded. */
+  expiresAt: number;
+}
+
+let cached: CacheEntry | undefined;
+const CACHE_TTL_MS = 60_000;
+
+/**
+ * Convenience wrapper: read range + current version, compute result,
+ * cache for 60 s. `store` is called with a structured compatibility
+ * update and (when minimum is violated) a blocking `error` message.
+ */
+export function updateBootstrapCompatibility(
+  store: BootstrapStateStore,
+  serverPkgJsonPath: string,
+  registry: ToolRegistry = getDefaultRegistry(),
+  now: () => number = Date.now,
+): BootstrapCompatibility {
+  const t = now();
+  if (cached && t < cached.expiresAt) {
+    store.set({ compatibility: cached.value });
+    return cached.value;
+  }
+  const range = readPiCompatibility(serverPkgJsonPath);
+  const current = readCurrentPiVersion(registry);
+  const computed = computeCompatibility(range, current);
+  cached = { value: computed, expiresAt: t + CACHE_TTL_MS };
+  store.set({ compatibility: computed });
+  // Minimum-violated → block pi-dependent ops by setting `error`.
+  if (current && isBelow(current, range.minimum)) {
+    store.set({
+      error: {
+        message: `pi version ${current} is below minimum ${range.minimum}. Please run \`pi-dashboard upgrade-pi\`.`,
+      },
+    });
+  }
+  return computed;
+}
+
+/** Test helper: clear the 60-second cache between runs. */
+export function _resetVersionSkewCache(): void {
+  cached = undefined;
+}

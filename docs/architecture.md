@@ -158,6 +158,50 @@ pi-flows runs multi-agent workflows in-process. Subagent sessions use `SessionMa
 - Abort: browser sends `flow_control { action: "abort" }` → server → bridge → `pi.events.emit("flow:abort")` → `flowManager.abort()`
 - Autonomous toggle: browser sends `flow_control { action: "toggle_autonomous" }` → same path → `setAutonomousMode()`
 
+### Bootstrap & First Run
+
+The dashboard has three install paths that all converge on the shared
+`bootstrapInstall` in `packages/shared/src/bootstrap-install.ts`:
+
+1. **Electron wizard** (first-run in the desktop app) —
+   `packages/electron/src/lib/dependency-installer.ts installStandalone`
+   wraps the shared installer with Electron-specific concerns
+   (bundled Node + `npm-cli.js`, offline npm cacache bundle extracted
+   from `resourcesPath/offline-packages/`, bundled-extension activation
+   into pi's git cache). The registry-install loop itself is the shared
+   function.
+
+2. **`pi-dashboard` CLI first-run** (degraded-mode) — when
+   `pi-dashboard` (or `pi-dashboard start`) launches and
+   `ToolRegistry.resolve("pi")` fails, `cli.ts runDegradedModeBootstrap`
+   flips `bootstrapState.status` to `"installing"`, kicks off
+   `bootstrapInstall({ packages: ["@mariozechner/pi-coding-agent", "@fission-ai/openspec", "tsx"] })`
+   asynchronously, and returns immediately so the server's
+   `fastify.listen` remains responsive. The UI renders `BootstrapBanner`
+   above the main layout. `session-api.ts gateOrEnqueue` queues
+   `POST /api/session/spawn` requests while installing; the
+   `server.ts` subscribe hook flushes the queue on transition to
+   `"ready"`. On success, `registerBridgeExtension(findBundledExtension())`
+   auto-wires the bridge so no manual step is required.
+
+3. **`pi-dashboard upgrade-pi` CLI subcommand** — runs
+   `bootstrapInstall({ packages: ["@mariozechner/pi-coding-agent"] })`
+   either directly (when no dashboard is listening) or via
+   `POST /api/bootstrap/upgrade-pi` (when one is). The REST path flips
+   state through the existing broadcast hook so open dashboard tabs
+   see the progress; on completion, `/reload` is broadcast to all
+   connected bridges, matching the pi-core-update session-reload
+   pattern.
+
+Compatibility skew is checked on every ready transition via
+`updateBootstrapCompatibility` which reads `piCompatibility` from
+`packages/server/package.json` and populates `bootstrapState.compatibility`
+with `upgradeRecommended` / `upgradeDashboard` flags consumed by
+`BootstrapBanner`. Versions below `minimum` set a blocking `error`
+message that `session-api gateOrEnqueue` translates to 503 responses.
+
+See change: `unified-bootstrap-install`.
+
 ### Force Kill Escalation
 The Stop button supports two-click escalation for stuck sessions:
 1. **Click 1 (Abort)**: Sends `abort` → bridge → `ctx.abort()`. Button transitions to orange pulsing "Force Stop".

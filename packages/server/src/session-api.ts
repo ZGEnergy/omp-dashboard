@@ -11,6 +11,8 @@ import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/type
 import { spawnPiSession } from "./process-manager.js";
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
+import type { BootstrapStateStore } from "./bootstrap-state.js";
+import type { BootstrapQueue } from "./bootstrap-queue.js";
 
 export interface SessionApiDeps {
   sessionManager: SessionManager;
@@ -18,6 +20,13 @@ export interface SessionApiDeps {
   browserGateway: BrowserGateway;
   pendingForkRegistry?: PendingForkRegistry;
   pendingDashboardSpawns?: Map<string, number>;
+  /**
+   * Bootstrap state + queue for degraded-mode gating. When omitted,
+   * session operations run normally (legacy behavior for tests that
+   * don't exercise the bootstrap flow). See change: unified-bootstrap-install.
+   */
+  bootstrapState?: BootstrapStateStore;
+  bootstrapQueue?: BootstrapQueue;
 }
 
 type IdParams = { Params: { id: string } };
@@ -30,7 +39,54 @@ function getSessionOrFail(sessionManager: SessionManager, id: string): { session
 }
 
 export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDeps) {
-  const { sessionManager, piGateway, browserGateway, pendingForkRegistry, pendingDashboardSpawns } = deps;
+  const { sessionManager, piGateway, browserGateway, pendingForkRegistry, pendingDashboardSpawns, bootstrapState, bootstrapQueue } = deps;
+
+  /**
+   * Gate pi-dependent operations on bootstrap status. Returns:
+   *   - null when ready (proceed).
+   *   - `{ code: 202, body: { status: "queued", ticketId } }` when installing;
+   *     the operation is enqueued and will run once status flips to "ready".
+   *   - `{ code: 503, body: { error } }` when failed.
+   * See change: unified-bootstrap-install §5.
+   */
+  function gateOrEnqueue<T>(handler: () => Promise<T>):
+    | null
+    | { code: 202; body: { status: "queued"; ticketId: string } }
+    | { code: 503; body: { error: string; bootstrap: "failed" | "version-too-old" } } {
+    if (!bootstrapState) return null;
+    const snap = bootstrapState.get();
+    // Block when pi version is below the configured minimum —
+    // even when status is "ready", a too-old pi must not run sessions.
+    // See change: unified-bootstrap-install §9.3.
+    if (
+      snap.status === "ready"
+      && snap.error?.message?.startsWith("pi version ")
+    ) {
+      return {
+        code: 503,
+        body: { error: snap.error.message, bootstrap: "version-too-old" },
+      };
+    }
+    if (snap.status === "ready") return null;
+    if (snap.status === "installing") {
+      if (!bootstrapQueue) {
+        return {
+          code: 202,
+          body: { status: "queued", ticketId: "" },
+        };
+      }
+      const ticket = bootstrapQueue.enqueue(handler);
+      return {
+        code: 202,
+        body: { status: "queued", ticketId: ticket.ticketId },
+      };
+    }
+    // status === "failed"
+    return {
+      code: 503,
+      body: { error: "pi not installed (bootstrap failed)", bootstrap: "failed" },
+    };
+  }
 
   // POST /api/session/:id/prompt
   fastify.post<IdParams & { Body: { text?: string; images?: any[] } }>(
@@ -160,14 +216,27 @@ export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDep
         reply.code(400);
         return { success: false, error: "cwd is required" } satisfies ApiResponse;
       }
-      const config = loadConfig();
-      const spawnResult = await spawnPiSession(cwd, { strategy: config.spawnStrategy });
-      if (spawnResult.process && spawnResult.pid) {
-        browserGateway.headlessPidRegistry.register(spawnResult.pid, cwd, spawnResult.process);
+
+      const doSpawn = async () => {
+        const config = loadConfig();
+        const spawnResult = await spawnPiSession(cwd, { strategy: config.spawnStrategy });
+        if (spawnResult.process && spawnResult.pid) {
+          browserGateway.headlessPidRegistry.register(spawnResult.pid, cwd, spawnResult.process);
+        }
+        if (spawnResult.dashboardSpawned && spawnResult.success) {
+          pendingDashboardSpawns?.set(cwd, (pendingDashboardSpawns?.get(cwd) ?? 0) + 1);
+        }
+        return spawnResult;
+      };
+
+      // Bootstrap gate: if pi isn't ready, queue the spawn and return 202.
+      const gate = gateOrEnqueue(doSpawn);
+      if (gate) {
+        reply.code(gate.code);
+        return gate.body;
       }
-      if (spawnResult.dashboardSpawned && spawnResult.success) {
-        pendingDashboardSpawns?.set(cwd, (pendingDashboardSpawns?.get(cwd) ?? 0) + 1);
-      }
+
+      const spawnResult = await doSpawn();
       if (!spawnResult.success) {
         reply.code(500);
         return { success: false, error: spawnResult.message } satisfies ApiResponse;

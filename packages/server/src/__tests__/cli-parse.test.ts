@@ -31,6 +31,17 @@ describe("parseArgs", () => {
     expect(result.subcommand).toBe("status");
   });
 
+  it("parses upgrade-pi subcommand (unified-bootstrap-install §8)", () => {
+    const result = parseArgs(["upgrade-pi"]);
+    expect(result.subcommand).toBe("upgrade-pi");
+  });
+
+  it("parses upgrade-pi with --port flag", () => {
+    const result = parseArgs(["upgrade-pi", "--port", "9090"]);
+    expect(result.subcommand).toBe("upgrade-pi");
+    expect(result.flags.port).toBe(9090);
+  });
+
   it("parses subcommand with flags", () => {
     const result = parseArgs(["start", "--port", "3000", "--pi-port", "4000"]);
     expect(result.subcommand).toBe("start");

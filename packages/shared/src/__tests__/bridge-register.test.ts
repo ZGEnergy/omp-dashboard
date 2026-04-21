@@ -46,22 +46,45 @@ describe("shared bridge-register", () => {
     });
 
     it("returns null when extension dir does not exist", () => {
-      expect(findBundledExtension(tmpDir)).toBeNull();
+      // Disable Strategy 2 (node-resolver fallback) so we test Strategy 1 in isolation.
+      expect(findBundledExtension(tmpDir, { resolvePackage: () => null })).toBeNull();
     });
 
     it("returns null when no package.json in extension dir", () => {
       const extDir = path.join(tmpDir, "packages", "extension");
       fs.mkdirSync(extDir, { recursive: true });
       // No package.json
-      expect(findBundledExtension(tmpDir)).toBeNull();
+      expect(findBundledExtension(tmpDir, { resolvePackage: () => null })).toBeNull();
     });
 
     it("returns null for AppImage temp mount paths", () => {
-      // We can't easily create a /tmp/.mount_ path, but we can verify
-      // the function handles it via the string check
       const mockBase = "/tmp/.mount_PI1234/resources/server";
-      // findBundledExtension will check existsSync which returns false for this
-      expect(findBundledExtension(mockBase)).toBeNull();
+      // Even with a resolvable node-modules extension, if that resolved path is
+      // itself under /tmp/.mount_* it must be rejected (tested separately below).
+      expect(findBundledExtension(mockBase, { resolvePackage: () => null })).toBeNull();
+    });
+
+    it("Strategy 2 — falls back to require.resolve when baseDir has no packages/extension", () => {
+      // Simulate `npm i -g pi-dashboard` layout: baseDir is the server
+      // package root and contains no `packages/extension/`, but the
+      // extension is resolvable as a runtime dep via node_modules.
+      const fakeExtDir = path.join(tmpDir, "fake-node_modules", "pi-dashboard-extension");
+      fs.mkdirSync(fakeExtDir, { recursive: true });
+      fs.writeFileSync(path.join(fakeExtDir, "package.json"), '{"name":"fake"}');
+      const resolved = findBundledExtension(tmpDir, {
+        resolvePackage: () => path.join(fakeExtDir, "package.json"),
+      });
+      expect(resolved).toBe(fakeExtDir);
+    });
+
+    it("Strategy 2 — rejects AppImage-mount paths even when resolvable", () => {
+      // A /tmp/.mount_* path must be rejected regardless of which strategy
+      // surfaced it.
+      const appImageExtDir = "/tmp/.mount_PI1234/node_modules/@blackbelt-technology/pi-dashboard-extension";
+      const resolved = findBundledExtension(tmpDir, {
+        resolvePackage: () => path.join(appImageExtDir, "package.json"),
+      });
+      expect(resolved).toBeNull();
     });
   });
 

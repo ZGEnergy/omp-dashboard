@@ -30,7 +30,11 @@ describe("findBundledExtension - AppImage guard", () => {
   });
 
   it("returns null when extension does not exist", () => {
-    expect(findBundledExtension(tmpDir)).toBeNull();
+    // Disable Strategy 2 (node-resolver fallback) so this test exercises
+    // the AppImage guard path in isolation.
+    expect(
+      findBundledExtension(tmpDir, { resolvePackage: () => null }),
+    ).toBeNull();
   });
 
   // Note: We can't easily test the /tmp/.mount_ guard with real paths

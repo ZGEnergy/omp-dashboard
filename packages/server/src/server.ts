@@ -48,6 +48,10 @@ import { registerPiCoreRoutes } from "./routes/pi-core-routes.js";
 import { PiCoreChecker } from "./pi-core-checker.js";
 import { PiCoreUpdater } from "./pi-core-updater.js";
 import { registerToolRoutes } from "./routes/tool-routes.js";
+import { registerBootstrapRoutes } from "./routes/bootstrap-routes.js";
+import { createBootstrapState, type BootstrapStateStore } from "./bootstrap-state.js";
+import { createBootstrapQueue } from "./bootstrap-queue.js";
+import { bootstrapInstall } from "@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
 import { PackageManagerWrapper } from "./package-manager-wrapper.js";
@@ -87,6 +91,14 @@ export interface DashboardServer {
   sessionManager: SessionManager;
   eventStore: EventStore;
   browserGateway: BrowserGateway;
+  /**
+   * Bootstrap state store. Exposed so the CLI can flip status during
+   * degraded-mode first-run (`pi-dashboard` without pi installed) and
+   * so the REST handler for `/api/bootstrap/upgrade-pi` can orchestrate
+   * async installs without reaching back through closures.
+   * See change: unified-bootstrap-install.
+   */
+  bootstrapState: BootstrapStateStore;
   /** Resolved HTTP port after start() (useful for port:0 in tests). Returns null if not listening. */
   httpPort(): number | null;
   /** Resolved pi gateway port after start(). Returns null if not listening. */
@@ -342,6 +354,33 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     fastify.get("/auth/status", async () => ({ authenticated: true, authEnabled: false }));
   }
 
+  // ── Bootstrap state + queue ──────────────────────────────────────
+  // Declared here (before session-api registration) so the session
+  // routes can gate spawn operations on bootstrap status.
+  // See change: unified-bootstrap-install.
+  const bootstrapState = createBootstrapState();
+  const bootstrapQueue = createBootstrapQueue();
+  let lastBootstrapStatus: "ready" | "installing" | "failed" = "ready";
+  const unsubscribeBootstrap = bootstrapState.subscribe((snapshot) => {
+    browserGateway.broadcastToAll({
+      type: "bootstrap_status_update",
+      state: snapshot,
+    });
+    // Flush queued pi-dependent operations on ready transition.
+    if (lastBootstrapStatus !== "ready" && snapshot.status === "ready") {
+      void bootstrapQueue.flushAll();
+    }
+    lastBootstrapStatus = snapshot.status;
+  });
+  const unsubscribeQueueComplete = bootstrapQueue.onTicketComplete((evt) => {
+    browserGateway.broadcastToAll({
+      type: "bootstrap_ticket_complete",
+      ticketId: evt.ticketId,
+      success: evt.success,
+      error: evt.error,
+    });
+  });
+
   // Session control REST API (wraps WebSocket-only operations)
   registerSessionApi(fastify, {
     sessionManager,
@@ -349,6 +388,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     browserGateway,
     pendingForkRegistry,
     pendingDashboardSpawns,
+    bootstrapState,
+    bootstrapQueue,
   });
 
   // Register route modules
@@ -363,6 +404,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     preferencesStore,
     directoryService,
     networkGuard,
+    bootstrapState,
     onOpenSpecChanged: (cwd) => {
       const data = directoryService.getOpenSpecData(cwd);
       if (data) browserGateway.broadcastToAll({ type: "openspec_update", cwd, data });
@@ -370,6 +412,110 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   });
   registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion });
   registerToolRoutes(fastify, { registry: getDefaultRegistry(), networkGuard });
+
+  // ── Bootstrap REST routes ────────────────────────────────────────
+  // The routes module is registered here; state + queue are declared
+  // above (before session-api) so session routes can see them.
+  registerBootstrapRoutes(fastify, {
+    bootstrapState,
+    networkGuard,
+    triggerUpgradePi: async () => {
+      const packages = ["@mariozechner/pi-coding-agent"];
+      bootstrapState.setLastInstallPackages(packages);
+      bootstrapState.set({
+        status: "installing",
+        progress: { step: "@mariozechner/pi-coding-agent", output: "starting upgrade…" },
+        error: undefined,
+      });
+      try {
+        const res = await bootstrapInstall({
+          packages,
+          progress: (p) => {
+            bootstrapState.set({
+              progress: { step: p.step, output: p.output },
+            });
+          },
+        });
+        if (res.ok) {
+          bootstrapState.set({
+            status: "ready",
+            progress: undefined,
+            error: undefined,
+          });
+          // Broadcast /reload to connected sessions so they pick up the
+          // new pi version. Mirrors the pi-core update pattern above.
+          const connectedIds = piGateway.getConnectedSessionIds();
+          for (const sid of connectedIds) {
+            const session = sessionManager.get(sid);
+            if (session && session.status !== "ended") {
+              piGateway.sendToSession(sid, {
+                type: "send_prompt",
+                sessionId: sid,
+                text: "/reload",
+              });
+            }
+          }
+        } else {
+          bootstrapState.set({
+            status: "failed",
+            error: { message: res.error },
+            progress: undefined,
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        bootstrapState.set({
+          status: "failed",
+          error: { message },
+          progress: undefined,
+        });
+      }
+    },
+    triggerRetry: async () => {
+      // Retry re-runs the EXACT package set from the last failed install.
+      // Falls back to the default first-run set if no prior install was
+      // recorded (edge case: manual retry before any install attempt).
+      const prev = bootstrapState.getLastInstallPackages();
+      const packages = prev.length > 0
+        ? prev
+        : ["@mariozechner/pi-coding-agent", "@fission-ai/openspec", "tsx"];
+      bootstrapState.set({
+        status: "installing",
+        progress: { step: "retry", output: `restarting install (${packages.length} pkg${packages.length === 1 ? "" : "s"})…` },
+        error: undefined,
+      });
+      try {
+        const res = await bootstrapInstall({
+          packages,
+          progress: (p) => {
+            bootstrapState.set({
+              progress: { step: p.step, output: p.output },
+            });
+          },
+        });
+        if (res.ok) {
+          bootstrapState.set({
+            status: "ready",
+            progress: undefined,
+            error: undefined,
+          });
+        } else {
+          bootstrapState.set({
+            status: "failed",
+            error: { message: res.error },
+            progress: undefined,
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        bootstrapState.set({
+          status: "failed",
+          error: { message },
+          progress: undefined,
+        });
+      }
+    },
+  });
   // Package management
   const packageManagerWrapper = new PackageManagerWrapper();
 
@@ -447,6 +593,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   registerPiCoreRoutes(fastify, {
     piCoreChecker,
     piCoreUpdater,
+    bootstrapState,
     onUpdateComplete: (payload) => {
       browserGateway.broadcastToAll({
         type: "pi_core_update_complete",
@@ -595,6 +742,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     sessionManager,
     eventStore,
     browserGateway,
+    bootstrapState,
 
     httpPort() {
       const addr = fastify.server.address();
@@ -717,6 +865,10 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       preferencesStore.flush();
       preferencesStore.dispose();
 
+      unsubscribeBootstrap();
+      unsubscribeQueueComplete();
+      bootstrapState.dispose();
+      bootstrapQueue.clear("server shutting down");
       await deleteTunnel(config.port);
       piGateway.stop();
       for (const client of browserGateway.wss.clients) {

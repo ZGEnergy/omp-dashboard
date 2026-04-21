@@ -26,7 +26,9 @@ describe("bridge extension registration (server context)", () => {
   });
 
   it("findBundledExtension returns null when extension dir does not exist", () => {
-    const result = findBundledExtension(tmpDir);
+    // Strategy 2 (require.resolve) would find the monorepo extension;
+    // disable it for this test so we exercise Strategy 1 in isolation.
+    const result = findBundledExtension(tmpDir, { resolvePackage: () => null });
     expect(result).toBeNull();
   });
 

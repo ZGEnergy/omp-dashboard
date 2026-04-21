@@ -30,6 +30,8 @@ import { LandingPage } from "./components/LandingPage.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
 import { InstallBanner } from "./components/InstallBanner.js";
+import { BootstrapBanner } from "./components/BootstrapBanner.js";
+import { useBootstrapStatus } from "./hooks/useBootstrapStatus.js";
 import { MissingRequiredBanner } from "./components/MissingRequiredBanner.js";
 import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { TerminalView } from "./components/TerminalView.js";
@@ -131,6 +133,7 @@ export default function App() {
   const chatViewRef = useRef<ChatViewHandle>(null);
   const isMobile = useMobile();
   const installPrompt = useInstallPrompt();
+  const bootstrapStatus = useBootstrapStatus();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sessions, setSessions] = useState<Map<string, DashboardSession>>(new Map());
   const [sessionStates, setSessionStates] = useState<Map<string, SessionState>>(new Map());
@@ -1095,6 +1098,7 @@ export default function App() {
     });
     return apiProvider(
       <div className="bg-[var(--bg-primary)] text-[var(--text-primary)]">
+        <BootstrapBanner state={bootstrapStatus.state} onRetry={bootstrapStatus.retry} />
         <MobileShell
           depth={mobileDepth}
           onBack={() => {

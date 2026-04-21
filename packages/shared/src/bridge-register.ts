@@ -31,6 +31,28 @@ function isValidExtensionPath(candidate: string): boolean {
 }
 
 /**
+ * Optional dependency injection for `findBundledExtension`. Tests pass
+ * `{ resolvePackage: () => null }` to disable the node-resolver fallback.
+ */
+export interface FindExtensionDeps {
+  /**
+   * Resolve `@blackbelt-technology/pi-dashboard-extension/package.json`
+   * via Node's module resolver. Return the absolute package.json path
+   * or null. Defaults to `createRequire(import.meta.url).resolve(...)`.
+   */
+  resolvePackage?: () => string | null;
+}
+
+function defaultResolvePackage(): string | null {
+  try {
+    const req = createRequire(import.meta.url);
+    return req.resolve("@blackbelt-technology/pi-dashboard-extension/package.json");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Find the bundled extension directory.
  *
  * Resolution order:
@@ -46,7 +68,10 @@ function isValidExtensionPath(candidate: string): boolean {
  *
  * See change: unified-bootstrap-install.
  */
-export function findBundledExtension(baseDir: string): string | null {
+export function findBundledExtension(
+  baseDir: string,
+  deps: FindExtensionDeps = {},
+): string | null {
   // Strategy 1: monorepo sibling layout.
   const monorepoCandidate = path.resolve(baseDir, "packages", "extension");
   if (isValidExtensionPath(monorepoCandidate)) return monorepoCandidate;
@@ -54,15 +79,11 @@ export function findBundledExtension(baseDir: string): string | null {
   // Strategy 2: Node module resolver. This works for the `npm i -g
   // pi-dashboard` layout where the extension is shipped as a runtime dep
   // of pi-dashboard-server.
-  try {
-    const req = createRequire(import.meta.url);
-    const extPkgJson = req.resolve(
-      "@blackbelt-technology/pi-dashboard-extension/package.json",
-    );
+  const resolver = deps.resolvePackage ?? defaultResolvePackage;
+  const extPkgJson = resolver();
+  if (extPkgJson) {
     const extDir = path.dirname(extPkgJson);
     if (isValidExtensionPath(extDir)) return extDir;
-  } catch {
-    // Not resolvable — fall through.
   }
 
   return null;
