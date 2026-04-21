@@ -35,6 +35,15 @@ export function findBundledExtension(baseDir: string): string | null {
   return candidate;
 }
 
+/** Optional overrides for testing / multi-HOME scenarios. */
+export interface BridgeRegisterOptions {
+  /**
+   * Override the HOME used to locate settings.json. When omitted,
+   * falls back to `$HOME || $USERPROFILE || os.homedir()` (existing behavior).
+   */
+  homedir?: string;
+}
+
 /**
  * Register an extension path in pi's settings.json packages array.
  *
@@ -44,12 +53,16 @@ export function findBundledExtension(baseDir: string): string | null {
  *
  * No-op if the path is already registered.
  */
-export function registerBridgeExtension(extensionPath: string): void {
+export function registerBridgeExtension(
+  extensionPath: string,
+  opts: BridgeRegisterOptions = {},
+): void {
   // Compute at call time so tests can override HOME
-  const settingsPath = path.join(
-    process.env.HOME || process.env.USERPROFILE || os.homedir(),
-    ".pi", "agent", "settings.json",
-  );
+  const home = opts.homedir
+    ?? process.env.HOME
+    ?? process.env.USERPROFILE
+    ?? os.homedir();
+  const settingsPath = path.join(home, ".pi", "agent", "settings.json");
   const settingsDir = path.dirname(settingsPath);
   fs.mkdirSync(settingsDir, { recursive: true });
 

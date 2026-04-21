@@ -12,15 +12,33 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { ToolResolver } from "../platform/binary-lookup.js";
-import { MANAGED_BIN, MANAGED_DIR } from "../managed-paths.js";
+import { getManagedBin, getManagedDir } from "../managed-paths.js";
 import * as npm from "../platform/npm.js";
-import type { Strategy, StrategyResult } from "./types.js";
+import type { Strategy, StrategyCtx, StrategyResult } from "./types.js";
 
-/** Injectable filesystem + PATH lookup surface (tests pass fakes). */
+/**
+ * Injectable surfaces used by strategies.
+ *
+ * - `exists` — fs existence probe (memfs in tests).
+ * - `which` — PATH search.
+ * - `npmRootGlobal` — result of `npm root -g` (tests inject to avoid spawn).
+ * - `resolveModule` — node-module resolution (id, from) → absolute path.
+ *   Production uses `createRequire(from).resolve(id)`; tests walk fake
+ *   node_modules trees.
+ */
 export interface StrategyDeps {
   exists?(p: string): boolean;
   which?(name: string): string | null;
   npmRootGlobal?(): string;
+  resolveModule?(id: string, from: string): string | null;
+}
+
+function defaultResolveModule(id: string, from: string): string | null {
+  try {
+    return createRequire(from).resolve(id);
+  } catch {
+    return null;
+  }
 }
 
 function defaults(): Required<StrategyDeps> {
@@ -32,6 +50,7 @@ function defaults(): Required<StrategyDeps> {
     exists: existsSync,
     which: (name) => resolver.which(name),
     npmRootGlobal: () => npm.rootGlobalOr(""),
+    resolveModule: defaultResolveModule,
   };
 }
 
@@ -43,6 +62,7 @@ function d(deps?: StrategyDeps): Required<StrategyDeps> {
     exists: deps.exists ?? base.exists,
     which: deps.which ?? base.which,
     npmRootGlobal: deps.npmRootGlobal ?? base.npmRootGlobal,
+    resolveModule: deps.resolveModule ?? base.resolveModule,
   };
 }
 
@@ -80,7 +100,7 @@ export function managedBinStrategy(
     name: "managed",
     run(ctx): StrategyResult {
       const ext = ctx.platform === "win32" ? ".cmd" : "";
-      const candidate = path.join(MANAGED_BIN, binaryName + ext);
+      const candidate = path.join(getManagedBin(ctx.env), binaryName + ext);
       if (exists(candidate)) return { ok: true, path: candidate };
       return { ok: false, reason: `missing: ${candidate}` };
     },
@@ -99,8 +119,8 @@ export function managedModuleStrategy(
   const { exists } = d(deps);
   return {
     name: "managed",
-    run(): StrategyResult {
-      const candidate = path.join(MANAGED_DIR, "node_modules", pkgName, entryRelative);
+    run(ctx: StrategyCtx): StrategyResult {
+      const candidate = path.join(getManagedDir(ctx.env), "node_modules", pkgName, entryRelative);
       if (exists(candidate)) return { ok: true, path: candidate };
       return { ok: false, reason: `missing: ${candidate}` };
     },
@@ -164,25 +184,15 @@ export function whereStrategy(binaryName: string, deps?: StrategyDeps): Strategy
 export function bareImportStrategy(
   pkgName: string,
   anchor: string = import.meta.url,
+  deps?: StrategyDeps,
 ): Strategy {
-  // `createRequire` can throw for malformed anchors; guard defensively.
-  let resolver: ((id: string) => string) | null = null;
-  try {
-    resolver = createRequire(anchor).resolve;
-  } catch {
-    resolver = null;
-  }
+  const { resolveModule } = d(deps);
   return {
     name: "bare-import",
     run(): StrategyResult {
-      if (!resolver) return { ok: false, reason: "no module resolver available" };
-      try {
-        const resolved = resolver(pkgName);
-        return { ok: true, path: resolved };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message.split("\n")[0] : String(err);
-        return { ok: false, reason: msg };
-      }
+      const resolved = resolveModule(pkgName, anchor);
+      if (!resolved) return { ok: false, reason: `cannot resolve ${pkgName} from ${anchor}` };
+      return { ok: true, path: resolved };
     },
   };
 }

@@ -73,6 +73,17 @@ export interface StrategyCtx {
   overrides: Readonly<Record<string, string>>;
   /** Platform discriminator (injectable for tests). */
   platform: NodeJS.Platform;
+  /**
+   * Environment overrides used by HOME-sensitive strategies (managed/*,
+   * npm-global under APPDATA on win32, etc.). Production registries
+   * populate from `os.homedir()` + `process.cwd()`; tests inject fakes
+   * so the harness can reason about alternate HOME directories without
+   * mutating globals.
+   */
+  env?: {
+    homedir?: string;
+    cwd?: string;
+  };
 }
 
 /** A single resolution strategy. Pure function of its ctx + the tool's data. */

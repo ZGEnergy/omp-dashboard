@@ -23,6 +23,17 @@ import {
 } from "./types.js";
 import { OverridesStore } from "./overrides.js";
 
+/**
+ * Minimal platform-environment snapshot injected into strategies.
+ * Production leaves this undefined and strategies fall back to
+ * `os.homedir()` / `process.cwd()`. Tests inject fakes so the bootstrap
+ * harness can reason about alternate HOME directories.
+ */
+export interface PlatformEnv {
+  homedir?: string;
+  cwd?: string;
+}
+
 export interface ToolRegistryDeps {
   overrides?: OverridesStore;
   platform?: NodeJS.Platform;
@@ -30,6 +41,8 @@ export interface ToolRegistryDeps {
   importModule?: (url: string) => Promise<unknown>;
   /** Clock injector (used by tests for deterministic `resolvedAt`). */
   now?: () => number;
+  /** Environment overrides threaded into `StrategyCtx.env` (see types.ts). */
+  env?: PlatformEnv;
 }
 
 /** Default strategy → source mapping when a definition doesn't override it. */
@@ -56,12 +69,14 @@ export class ToolRegistry {
   private readonly platform: NodeJS.Platform;
   private readonly importModule: (url: string) => Promise<unknown>;
   private readonly now: () => number;
+  private readonly env: PlatformEnv | undefined;
 
   constructor(deps: ToolRegistryDeps = {}) {
     this.overrides = deps.overrides ?? new OverridesStore();
     this.platform = deps.platform ?? process.platform;
     this.importModule = deps.importModule ?? ((url) => import(/* @vite-ignore */ url));
     this.now = deps.now ?? (() => Date.now());
+    this.env = deps.env;
   }
 
   /**
@@ -102,6 +117,7 @@ export class ToolRegistry {
     const ctx: StrategyCtx = {
       overrides: this.overrides.list(),
       platform: this.platform,
+      env: this.env,
     };
 
     const tried: TriedEntry[] = [];

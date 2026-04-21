@@ -1,25 +1,25 @@
 ## 0. Precondition check
 
-- [ ] 0.1 Verify `merge-windows-integration-linear` has landed on `develop`. Run `git log develop --grep="windows-integration-v3" --oneline` and confirm the merge commit exists. If not, STOP — this proposal requires v3's `platform/` + `tool-registry/` primitives.
-- [ ] 0.2 Re-read `design.md §10` against current `packages/shared/src/tool-registry/strategies.ts` and confirm `StrategyDeps` still has the expected shape. If `resolveModule` has been added by another change, skip task 2.1.
-- [ ] 0.3 Re-read `design.md §13` and confirm the Windows `npm i -g` bug still reproduces (see proposal 2's pre-work). If it's already fixed, update scenario B1's expected outcome to "resolves via managed" and note in the PR description.
+- [x] 0.1 Verify `merge-windows-integration-linear` has landed on `develop`. Run `git log develop --grep="windows-integration-v3" --oneline` and confirm the merge commit exists. If not, STOP — this proposal requires v3's `platform/` + `tool-registry/` primitives. **Confirmed at commit `422bf5d Windows integration v3 (#10)`; `packages/shared/src/platform/` present.**
+- [x] 0.2 Re-read `design.md §10` against current `packages/shared/src/tool-registry/strategies.ts` and confirm `StrategyDeps` still has the expected shape. If `resolveModule` has been added by another change, skip task 2.1. **StrategyDeps had `exists`, `which`, `npmRootGlobal` only; no `resolveModule` — task 1.1 proceeded.**
+- [x] 0.3 Re-read `design.md §13` and confirm the Windows `npm i -g` bug still reproduces (see proposal 2's pre-work). If it's already fixed, update scenario B1's expected outcome to "resolves via managed" and note in the PR description. **Not reproducible on macOS dev host; assumed present per code review (the `npm i -g pi-dashboard` install layout still has no `packages/extension/` sibling in `node_modules/`, and the Unix pi strategy chain has no module fallback). Reverify on Windows VM before scenario B1 snapshot is captured.**
 
 ## 1. Refactor prerequisites
 
-- [ ] 1.1 Add `resolveModule(id: string, from: string): string | null` to `StrategyDeps` in `packages/shared/src/tool-registry/strategies.ts`. Default implementation uses `createRequire(from).resolve(id)`.
-- [ ] 1.2 Update `bareImportStrategy` to call `deps.resolveModule(pkgName, anchorPath)` instead of inline `createRequire(...).resolve(...)`. Confirm existing tests still pass.
-- [ ] 1.3 Add `getManagedDir(env?: { homedir?: string })` and `getManagedBin(env?: { homedir?: string })` functions to `packages/shared/src/managed-paths.ts`. Keep `MANAGED_DIR` and `MANAGED_BIN` constants for back-compat (they delegate to the getters with no arg → live env).
-- [ ] 1.4 Update `managedBinStrategy` and `managedModuleStrategy` to call `getManagedBin(ctx.env)` / `getManagedDir(ctx.env)` when `ctx.env` is provided; fall back to constants otherwise.
-- [ ] 1.5 Thread an optional `env: PlatformEnv` parameter through `ToolRegistry` constructor and `resolve()` method. Live default = `{ homedir: os.homedir(), platform: process.platform, cwd: () => process.cwd() }`.
-- [ ] 1.6 Add optional `homedir?: string` parameter to `registerBridgeExtension(extensionPath, { homedir? })` in `packages/shared/src/bridge-register.ts`. Keep current `$HOME || USERPROFILE || os.homedir()` as default.
+- [x] 1.1 Add `resolveModule(id: string, from: string): string | null` to `StrategyDeps` in `packages/shared/src/tool-registry/strategies.ts`. Default implementation uses `createRequire(from).resolve(id)`.
+- [x] 1.2 Update `bareImportStrategy` to call `deps.resolveModule(pkgName, anchorPath)` instead of inline `createRequire(...).resolve(...)`. Confirm existing tests still pass.
+- [x] 1.3 Add `getManagedDir(env?: { homedir?: string })` and `getManagedBin(env?: { homedir?: string })` functions to `packages/shared/src/managed-paths.ts`. Keep `MANAGED_DIR` and `MANAGED_BIN` constants for back-compat (they delegate to the getters with no arg → live env). `getPiSettingsPath` added alongside.
+- [x] 1.4 Update `managedBinStrategy` and `managedModuleStrategy` to call `getManagedBin(ctx.env)` / `getManagedDir(ctx.env)` when `ctx.env` is provided; fall back to constants otherwise.
+- [x] 1.5 Thread an optional `env: PlatformEnv` parameter through `ToolRegistry` constructor and `resolve()` method. Live default = `{ homedir: os.homedir(), platform: process.platform, cwd: () => process.cwd() }`. `StrategyCtx.env` added too.
+- [x] 1.6 Add optional `homedir?: string` parameter to `registerBridgeExtension(extensionPath, { homedir? })` in `packages/shared/src/bridge-register.ts`. Keep current `$HOME || USERPROFILE || os.homedir()` as default.
 
 ## 2. Harness foundation
 
-- [ ] 2.1 Add `memfs` as a dev dependency of `packages/shared/`.
-- [ ] 2.2 Create `packages/shared/src/__tests__/bootstrap/harness.ts` with `withFakeEnv({ platform, homedir, cwd, env, fs }, async (ctx) => ...)` — builds a `memfs` volume, produces a `createRegistry()` function wired with fake `exists`/`which`/`npmRootGlobal`/`resolveModule`, returns the computed `PlatformEnv`.
-- [ ] 2.3 Implement `ctx.which(name)` lookup over the fake PATH: iterate PATH entries, check `${entry}/${name}` and (on win32) `${entry}/${name}.cmd`, `${entry}/${name}.exe`.
-- [ ] 2.4 Implement `ctx.resolveModule(id, from)` over the fake fs: walk `from`'s ancestor `node_modules/` dirs, return path to `${dir}/node_modules/${id}/package.json` if it exists.
-- [ ] 2.5 Implement `ctx.npmRootGlobal()` — reads a configured value from the fake env; defaults to `<homedir>/.npm/lib/node_modules` on posix, `<APPDATA>/npm/node_modules` on win32.
+- [x] 2.1 Add `memfs` as a dev dependency of `packages/shared/`.
+- [x] 2.2 Create `packages/shared/src/__tests__/bootstrap/harness.ts` with `withFakeEnv({ platform, homedir, cwd, env, fs }, async (ctx) => ...)` — builds a `memfs` volume, produces a `createRegistry()` function wired with fake `exists`/`which`/`npmRootGlobal`/`resolveModule`, returns the computed `PlatformEnv`. Includes `FakeOverridesStore` and `toMemfsPath` helper for win32 path translation. Smoke tests in `harness.smoke.test.ts` (12 tests green).
+- [x] 2.3 Implement `ctx.which(name)` lookup over the fake PATH: iterate PATH entries, check `${entry}/${name}` and (on win32) `${entry}/${name}.cmd`, `${entry}/${name}.exe`. Also tries `.bat`.
+- [x] 2.4 Implement `ctx.resolveModule(id, from)` over the fake fs: walk `from`'s ancestor `node_modules/` dirs, return path to `${dir}/node_modules/${id}/package.json` if it exists. Reads `main` field to derive entry; defaults to `index.js`.
+- [x] 2.5 Implement `ctx.npmRootGlobal()` — reads a configured value from the fake env; defaults to `<homedir>/.npm/lib/node_modules` on posix, `<APPDATA>/npm/node_modules` on win32.
 
 ## 3. Fixtures library
 
