@@ -33,4 +33,15 @@ describe("bootstrap scenario cube", () => {
     expect(report.total).toBe(1080);
     expect(report.registered + report.skipped).toBe(report.total);
   });
+
+  it("at least one family registered a cell (smoke)", () => {
+    const report = sweepCube();
+    expect(report.registered).toBeGreaterThan(0);
+    // Visible in test output so cube growth is trackable without
+    // digging into internals.
+    // eslint-disable-next-line no-console
+    console.log(
+      `[cube] registered=${report.registered} skipped=${report.skipped} total=${report.total}`,
+    );
+  });
 });

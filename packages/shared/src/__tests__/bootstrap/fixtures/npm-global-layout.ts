@@ -49,10 +49,15 @@ export function npmGlobalUnix(spec: PosixSpec = {}): FsRecord {
   }
 
   if (spec.openspec !== false) {
-    const v = spec.openspec ?? "0.4.1";
-    const dir = p.join(root, "openspec");
-    out[p.join(dir, "package.json")] = openspecPackageJson(v);
-    out[p.join(dir, "dist", "cli.js")] = "#!/usr/bin/env node";
+    // openspec tool definition uses package `@fission-ai/openspec`
+    // with entry `bin/openspec.js` (see definitions.ts).
+    const dir = p.join(root, "@fission-ai", "openspec");
+    out[p.join(dir, "package.json")] = JSON.stringify({
+      name: "@fission-ai/openspec",
+      version: spec.openspec ?? "0.4.1",
+      bin: { openspec: "bin/openspec.js" },
+    });
+    out[p.join(dir, "bin", "openspec.js")] = "#!/usr/bin/env node";
     out[p.join(binDir, "openspec")] = "#!/bin/sh\nexec node ...";
   }
 
@@ -81,11 +86,14 @@ export function npmGlobalWindowsAppData(
   }
 
   if (spec.openspec !== false) {
-    const v = spec.openspec ?? "0.4.1";
-    const dir = p.join(nodeModules, "openspec");
-    out[p.join(dir, "package.json")] = openspecPackageJson(v);
-    out[p.join(dir, "dist", "cli.js")] = "#!/usr/bin/env node";
-    out[p.join(npmDir, "openspec.cmd")] = "@node %~dp0\\node_modules\\openspec\\dist\\cli.js %*";
+    const dir = p.join(nodeModules, "@fission-ai", "openspec");
+    out[p.join(dir, "package.json")] = JSON.stringify({
+      name: "@fission-ai/openspec",
+      version: spec.openspec ?? "0.4.1",
+      bin: { openspec: "bin/openspec.js" },
+    });
+    out[p.join(dir, "bin", "openspec.js")] = "#!/usr/bin/env node";
+    out[p.join(npmDir, "openspec.cmd")] = "@node %~dp0\\node_modules\\@fission-ai\\openspec\\bin\\openspec.js %*";
   }
 
   if (spec.dashboard) {
