@@ -1105,3 +1105,54 @@ Every OS-dependent function takes an optional trailing `platform: NodeJS.Platfor
 `Array.prototype.map` passes `(element, index, array)`. When a function takes `platform` as an optional second argument, the index (a number) gets passed as `platform`, silently failing the `=== "win32"` check and taking the POSIX branch. Always wrap: `.map((p) => normalizePath(p))` instead of `.map(normalizePath)`.
 
 See change: `platform-path-normalization`.
+
+## Chat Input State (drafts & history recall)
+
+### Per-session draft persistence
+
+The chat input (`CommandInput.tsx`) is a **controlled** component — its text value is driven by the `draft` prop passed from `App.tsx`. App owns a `drafts: Map<sessionId, string>` state that is:
+
+1. **Hydrated** once at mount from `localStorage` via `readAllDrafts()` (scans for the `chat-draft:` key prefix).
+2. **Persisted** (debounced ~300 ms) on change: new / changed keys go through `writeDraft(sid, text)`, removed keys and empty values go through `deleteDraft(sid)`.
+3. **Cleared eagerly on send** (`wrappedHandleSend` → `clearDraftForSession(selectedId)`) so a reload immediately after sending does not resurrect the sent prompt.
+
+```
+localStorage
+├── chat-draft:<sessionId-A>  "half-typed foo"
+├── chat-draft:<sessionId-B>  "another draft"
+└── ...
+```
+
+This solves two bugs at once:
+- **Lost drafts on navigation**: `CommandInput` unmounts when the user opens Settings, file diff view, OpenSpec preview, etc. The lifted state in `App.tsx` survives the unmount, and the draft reappears when the user returns to the chat branch.
+- **Draft leakage between sessions**: keying by `sessionId` means each session has its own draft cell; switching flips the `draft` prop, never bleeding text across.
+
+Pasted images (`useImagePaste` → `pendingImages`) are **intentionally not persisted** — base64 blobs blow through `localStorage` quotas and the transient in-memory behavior is unchanged from pre-change.
+
+### History recall (ArrowUp / ArrowDown)
+
+History source is **derived**, not stored: `extractUserPromptHistory(state.messages)` filters the session's in-memory `ChatMessage[]` to `role === "user"`, drops empty/whitespace content, collapses consecutive duplicates, and returns newest-first. Since messages are replayed from the server on subscribe, history is available as soon as the session is subscribed — no new protocol, no new persistence.
+
+Inside `CommandInput`, history navigation uses a small state machine:
+
+```
+historyIndex: number | null    — null = not in history mode
+savedDraftRef: useRef<string>  — in-progress draft captured when history mode is first entered
+
+  ArrowUp  (caret on first line, no dropdown, no pending, history.length > 0)
+    null  ─────────────────────────────────────────▶  0         (save current text first)
+    k     ─────────────────────────────────────────▶  min(k+1, len-1)
+  ArrowDown (caret on last line, no dropdown, historyIndex != null)
+    k > 0 ─────────────────────────────────────────▶  k - 1
+    0     ─────────────────────────────────────────▶  null      (restore savedDraftRef)
+  Escape  (historyIndex != null)
+    k     ─────────────────────────────────────────▶  null      (restore savedDraftRef)
+  any text edit while historyIndex != null
+    k     ─────────────────────────────────────────▶  null      (user now editing; no restore)
+  sessionId change
+                                                      null, savedDraftRef = ""
+```
+
+**Bash-style caret gating** is critical: `ArrowUp` only triggers history when `selectionStart` is at or before the first `\n` (the textarea's native "ArrowUp" would have nowhere to go); `ArrowDown` only when `selectionStart` is at or after the last `\n`. Non-empty selections are excluded. This guarantees multiline editing (moving between rows with arrow keys) is never broken.
+
+See change: `chat-input-draft-and-history`.

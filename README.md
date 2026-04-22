@@ -403,6 +403,21 @@ pi-dashboard status          # Show daemon status
 
 Daemon stdout/stderr is logged to `~/.pi/dashboard/server.log` for crash diagnosis.
 
+### Keyboard shortcuts in chat input
+
+The chat input supports bash-style history recall and per-session draft persistence:
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send the prompt. |
+| `Shift+Enter` | Insert a newline. |
+| `ArrowUp` | Recall the previous user prompt (only when the caret is on the first line and no autocomplete dropdown is open). Repeat to walk further back. |
+| `ArrowDown` | Walk forward through history (only when the caret is on the last line). Past the newest entry, restores the in-progress draft. |
+| `Escape` | While navigating history, restore the in-progress draft and exit history mode. Also cancels a pending prompt or dismisses the autocomplete dropdown. |
+| `Tab` / `Enter` in dropdown | Accept the highlighted `/command` or `@file` suggestion. |
+
+Drafts (typed-but-unsent text) are persisted per session in `localStorage` under `chat-draft:<sessionId>` and survive navigation (Settings, OpenSpec preview, file diffs, ...) as well as full page reloads. Drafts never leak between sessions.
+
 ### Graceful restart via API
 
 Restart without CLI — useful from scripts, other sessions, or the dashboard skill:

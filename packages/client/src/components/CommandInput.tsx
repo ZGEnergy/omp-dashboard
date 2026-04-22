@@ -23,6 +23,38 @@ interface Props {
   onForceKill?: () => void;
   pendingPrompt?: boolean;
   onCancelPending?: () => void;
+  /** Current session id — used to reset history-navigation state on switch. */
+  sessionId?: string;
+  /** Controlled draft text. When provided, the textarea is controlled by the parent. */
+  draft?: string;
+  /** Parent callback for every text change (controlled mode). */
+  onDraftChange?: (text: string) => void;
+  /** Previously sent user prompts for this session, newest-first, pre-deduped. */
+  history?: string[];
+}
+
+/**
+ * Caret-on-first-line predicate: returns true iff `selectionStart` sits at or
+ * before the first `\n` (so `ArrowUp` would have nowhere to go natively).
+ * Always false when there is a non-empty selection.
+ */
+export function isCaretOnFirstLine(selectionStart: number, selectionEnd: number, value: string): boolean {
+  if (selectionStart !== selectionEnd) return false;
+  const firstNewline = value.indexOf("\n");
+  if (firstNewline === -1) return true;
+  return selectionStart <= firstNewline;
+}
+
+/**
+ * Caret-on-last-line predicate: returns true iff `selectionStart` sits at or
+ * after the position following the last `\n` (so `ArrowDown` would have
+ * nowhere to go natively). Always false when there is a non-empty selection.
+ */
+export function isCaretOnLastLine(selectionStart: number, selectionEnd: number, value: string): boolean {
+  if (selectionStart !== selectionEnd) return false;
+  const lastNewline = value.lastIndexOf("\n");
+  if (lastNewline === -1) return true;
+  return selectionStart >= lastNewline + 1;
 }
 
 const sourceIcons: Record<string, ReactNode> = {
@@ -58,21 +90,44 @@ function extractAtQuery(text: string): string | null {
 
 type StopState = "idle" | "aborting" | "killing";
 
-export function CommandInput({ commands: externalCommands, onSend, onListFiles, fileResults, disabled, sessionStatus, onAbort, onForceKill, pendingPrompt, onCancelPending }: Props) {
+export function CommandInput({ commands: externalCommands, onSend, onListFiles, fileResults, disabled, sessionStatus, onAbort, onForceKill, pendingPrompt, onCancelPending, sessionId, draft, onDraftChange, history }: Props) {
   // Merge server commands with built-in commands, avoiding duplicates
   const commands = useMemo(() => {
     const names = new Set(externalCommands.map((c) => c.name));
     const builtins = BUILTIN_COMMANDS.filter((c) => !names.has(c.name));
     return [...builtins, ...externalCommands];
   }, [externalCommands]);
-  const [text, setText] = useState("");
+  // Controlled when `draft` prop is provided, otherwise fall back to local state
+  // (preserves backward-compat for callers/tests that don't pass `draft`).
+  const isControlled = draft !== undefined;
+  const [localText, setLocalText] = useState("");
+  const text = isControlled ? (draft as string) : localText;
+  const setText = useCallback((v: string) => {
+    if (!isControlled) setLocalText(v);
+    onDraftChange?.(v);
+  }, [isControlled, onDraftChange]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [stopState, setStopState] = useState<StopState>("idle");
+
+  // --- History recall (bash-style) ---
+  const historyList = history ?? [];
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const savedDraftRef = useRef<string>("");
+  // Ref to the *current* historyIndex for use inside handlers that shouldn't
+  // trigger the state-reset effect when they themselves clear it.
+  const historyIndexRef = useRef<number | null>(null);
+  historyIndexRef.current = historyIndex;
 
   // Reset stop state when session stops streaming
   useEffect(() => {
     if (sessionStatus !== "streaming") setStopState("idle");
   }, [sessionStatus]);
+
+  // Reset history-navigation state whenever the session changes.
+  useEffect(() => {
+    setHistoryIndex(null);
+    savedDraftRef.current = "";
+  }, [sessionId]);
   const { pendingImages, imageError, handlePaste, removeImage, clearImages } = useImagePaste();
   const [dismissed, setDismissed] = useState<string | null>(null); // text value when Escape was pressed
   const prevDropdownKeyRef = useRef<string>(""); // tracks mode+filter to reset selectedIndex
@@ -230,12 +285,78 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
         return;
       }
 
+      // --- History recall (ArrowUp / ArrowDown / Escape in history mode) ---
+      // Only activates when no dropdown is open and no prompt is pending.
+      if (!pendingPrompt && (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Escape")) {
+        const ta = inputRef.current;
+        // Escape while in history mode: restore the in-progress draft and exit.
+        if (e.key === "Escape" && historyIndex !== null) {
+          e.preventDefault();
+          const restored = savedDraftRef.current;
+          setText(restored);
+          setHistoryIndex(null);
+          if (ta) {
+            requestAnimationFrame(() => {
+              ta.setSelectionRange(restored.length, restored.length);
+              // Re-run the auto-resize logic to match restored content.
+              ta.style.height = "38px";
+              ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+            });
+          }
+          return;
+        }
+        if (ta && historyList.length > 0 && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+          const selStart = ta.selectionStart ?? text.length;
+          const selEnd = ta.selectionEnd ?? selStart;
+          if (e.key === "ArrowUp" && isCaretOnFirstLine(selStart, selEnd, text)) {
+            e.preventDefault();
+            const nextIdx = historyIndex === null ? 0 : Math.min(historyIndex + 1, historyList.length - 1);
+            if (historyIndex === null) {
+              savedDraftRef.current = text;
+            }
+            const nextText = historyList[nextIdx] ?? "";
+            setHistoryIndex(nextIdx);
+            setText(nextText);
+            requestAnimationFrame(() => {
+              ta.setSelectionRange(nextText.length, nextText.length);
+              ta.style.height = "38px";
+              ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+            });
+            return;
+          }
+          if (e.key === "ArrowDown" && historyIndex !== null && isCaretOnLastLine(selStart, selEnd, text)) {
+            e.preventDefault();
+            if (historyIndex === 0) {
+              const restored = savedDraftRef.current;
+              setHistoryIndex(null);
+              setText(restored);
+              requestAnimationFrame(() => {
+                ta.setSelectionRange(restored.length, restored.length);
+                ta.style.height = "38px";
+                ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+              });
+            } else {
+              const nextIdx = historyIndex - 1;
+              const nextText = historyList[nextIdx] ?? "";
+              setHistoryIndex(nextIdx);
+              setText(nextText);
+              requestAnimationFrame(() => {
+                ta.setSelectionRange(nextText.length, nextText.length);
+                ta.style.height = "38px";
+                ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+              });
+            }
+            return;
+          }
+        }
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
-    [dropdownMode, dropdownLength, filteredCommands, fileItems, selectedIndex, selectCommand, selectFile, handleSend, text, pendingPrompt, onCancelPending]
+    [dropdownMode, dropdownLength, filteredCommands, fileItems, selectedIndex, selectCommand, selectFile, handleSend, setText, text, pendingPrompt, onCancelPending, historyIndex, historyList]
   );
 
   // Clipboard paste + preview-strip are delegated to the shared hook +
@@ -297,7 +418,15 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
         <textarea
           ref={inputRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            // Any user-driven text change while navigating history exits history mode
+            // (the user is now editing the recalled entry). We don't restore the saved
+            // draft here — the edited text becomes the live draft.
+            if (historyIndexRef.current !== null) {
+              setHistoryIndex(null);
+            }
+            setText(e.target.value);
+          }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder="Message, /command, !shell, or @file..."

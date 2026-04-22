@@ -25,6 +25,8 @@ import { PiUpdateBadge } from "./components/PiUpdateBadge.js";
 import { TokenStatsBar } from "./components/TokenStatsBar.js";
 
 import { CommandInput } from "./components/CommandInput.js";
+import { readAllDrafts, writeDraft, deleteDraft } from "./lib/draft-storage.js";
+import { extractUserPromptHistory } from "./lib/message-history.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { LandingPage } from "./components/LandingPage.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
@@ -137,6 +139,12 @@ export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sessions, setSessions] = useState<Map<string, DashboardSession>>(new Map());
   const [sessionStates, setSessionStates] = useState<Map<string, SessionState>>(new Map());
+  // Per-session chat-input drafts. Hydrated once from localStorage on mount,
+  // then persisted (debounced) whenever the map changes.
+  const [drafts, setDrafts] = useState<Map<string, string>>(() => readAllDrafts());
+  // Track the previous drafts snapshot so the persist effect can compute a
+  // precise write-set (added/changed keys) and delete-set (removed/emptied keys).
+  const prevDraftsRef = useRef<Map<string, string>>(drafts);
   const [sessionCommands, setSessionCommands] = useState<Map<string, CommandInfo[]>>(new Map());
   const [sessionFlows, setSessionFlows] = useState<Map<string, FlowInfo[]>>(new Map());
   const [fileResults, setFileResults] = useState<{ query: string; files: FileEntry[] } | null>(null);
@@ -327,6 +335,63 @@ export default function App() {
     ? sessionStates.get(selectedId) ?? createInitialState()
     : createInitialState();
 
+  // Per-session draft text + history recall for CommandInput.
+  const selectedDraft = selectedId ? (drafts.get(selectedId) ?? "") : "";
+  const selectedHistory = useMemo(
+    () => extractUserPromptHistory(selectedState.messages),
+    [selectedState.messages],
+  );
+
+  // Debounced persistence for drafts. When the map changes, diff against the
+  // previous snapshot and flush writes/deletes after a short idle window so we
+  // don't hammer localStorage on every keystroke.
+  useEffect(() => {
+    const prev = prevDraftsRef.current;
+    const timer = setTimeout(() => {
+      // Writes: new or changed entries.
+      for (const [sid, text] of drafts) {
+        if (text === "") {
+          // Empty string in the map = cleared draft, treat as delete.
+          if (prev.get(sid) !== undefined) deleteDraft(sid);
+          continue;
+        }
+        if (prev.get(sid) !== text) writeDraft(sid, text);
+      }
+      // Deletes: keys present before but gone now.
+      for (const sid of prev.keys()) {
+        if (!drafts.has(sid)) deleteDraft(sid);
+      }
+      prevDraftsRef.current = drafts;
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [drafts]);
+
+  const setDraftForSelected = useCallback(
+    (text: string) => {
+      if (!selectedId) return;
+      setDrafts((m) => {
+        const existing = m.get(selectedId) ?? "";
+        if (existing === text) return m;
+        const next = new Map(m);
+        next.set(selectedId, text);
+        return next;
+      });
+    },
+    [selectedId],
+  );
+
+  const clearDraftForSession = useCallback((sid: string) => {
+    setDrafts((m) => {
+      if (!m.has(sid)) return m;
+      const next = new Map(m);
+      next.delete(sid);
+      return next;
+    });
+    // Also clear from localStorage eagerly so a reload before the debounce
+    // window fires doesn't resurrect the cleared draft.
+    deleteDraft(sid);
+  }, []);
+
   // Safety timeout: clear stuck pendingPrompt after 30s and show error
   usePendingPromptTimeout(!!selectedState.pendingPrompt, useCallback(() => {
     if (selectedId) {
@@ -405,7 +470,7 @@ export default function App() {
   const [flowDeleteFlowName, setFlowDeleteFlowName] = useState<string | null>(null);
   const [flowLaunchTarget, setFlowLaunchTarget] = useState<FlowInfo | null>(null);
 
-  // Wrap handleSend to intercept /flows commands
+  // Wrap handleSend to intercept /flows commands and clear the per-session draft.
   const wrappedHandleSend = useCallback((text: string, images?: ImageContent[]) => {
     const trimmed = text.trim();
     if (trimmed === "/flows") {
@@ -417,7 +482,8 @@ export default function App() {
       return;
     }
     handleSend(text, images);
-  }, [handleSend]);
+    if (selectedId) clearDraftForSession(selectedId);
+  }, [handleSend, selectedId, clearDraftForSession]);
 
   const openspecActions = useOpenSpecActions({ send, openspecMap, setPreviewState, clearAllContentViews });
   const {
@@ -901,6 +967,10 @@ export default function App() {
             onForceKill={handleForceKill}
             pendingPrompt={!!selectedState.pendingPrompt}
             onCancelPending={handleCancelPending}
+            sessionId={selectedId}
+            draft={selectedDraft}
+            onDraftChange={setDraftForSelected}
+            history={selectedHistory}
           />
           {flowPickerOpen && (() => {
             const hasFlowsNew = selectedCommands.some(c => c.name === "flows:new");

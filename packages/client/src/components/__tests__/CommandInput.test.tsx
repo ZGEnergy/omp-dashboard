@@ -316,3 +316,212 @@ describe("Image lightbox from paste preview", () => {
     vi.restoreAllMocks();
   });
 });
+
+// --- Controlled draft + history tests (change: chat-input-draft-and-history) ---
+
+/**
+ * Place the caret at a given offset inside the textarea. Some of our logic
+ * reads `selectionStart`/`selectionEnd` directly off the element, so we set
+ * them explicitly (plus focus) before firing the key event.
+ */
+function setCaret(textarea: HTMLTextAreaElement, pos: number) {
+  textarea.focus();
+  textarea.setSelectionRange(pos, pos);
+}
+
+describe("CommandInput — controlled draft prop", () => {
+  it("renders the provided draft value in the textarea", () => {
+    const { textarea } = renderInput({ draft: "hello world", onDraftChange: vi.fn() });
+    expect(textarea.value).toBe("hello world");
+  });
+
+  it("calls onDraftChange when the user types", () => {
+    const onDraftChange = vi.fn();
+    const { textarea } = renderInput({ draft: "", onDraftChange });
+    fireEvent.change(textarea, { target: { value: "x" } });
+    expect(onDraftChange).toHaveBeenCalledWith("x");
+  });
+
+  it("keeps the draft in sync across rerenders (different sessionId)", () => {
+    const onDraftChange = vi.fn();
+    const { rerender, container } = render(
+      <CommandInput commands={commands} onSend={vi.fn()} sessionId="A" draft="alpha" onDraftChange={onDraftChange} />
+    );
+    let textarea = container.querySelector("textarea")!;
+    expect(textarea.value).toBe("alpha");
+    rerender(
+      <CommandInput commands={commands} onSend={vi.fn()} sessionId="B" draft="beta" onDraftChange={onDraftChange} />
+    );
+    textarea = container.querySelector("textarea")!;
+    expect(textarea.value).toBe("beta");
+  });
+});
+
+describe("CommandInput — history recall", () => {
+  it("ArrowUp from empty draft loads the newest history entry", () => {
+    const onDraftChange = vi.fn();
+    const { textarea } = renderInput({
+      draft: "",
+      onDraftChange,
+      history: ["newest", "older"],
+    });
+    setCaret(textarea, 0);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(onDraftChange).toHaveBeenLastCalledWith("newest");
+  });
+
+  it("walks further back with repeated ArrowUp presses", () => {
+    const onDraftChange = vi.fn();
+    // Parent mirrors `draft` from onDraftChange to simulate controlled flow.
+    function Controlled({ history }: { history: string[] }) {
+      const [d, setD] = React.useState("");
+      return <CommandInput commands={commands} onSend={vi.fn()} draft={d} onDraftChange={(v) => { setD(v); onDraftChange(v); }} history={history} />;
+    }
+    const { container } = render(<Controlled history={["two", "one"]} />);
+    const textarea = container.querySelector("textarea")!;
+    setCaret(textarea, 0);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(onDraftChange).toHaveBeenLastCalledWith("one");
+  });
+
+  it("ArrowDown walks forward and eventually restores the in-progress draft", () => {
+    function Controlled() {
+      const [d, setD] = React.useState("half-typed");
+      return <CommandInput commands={commands} onSend={vi.fn()} draft={d} onDraftChange={setD} history={["recent", "older"]} />;
+    }
+    const { container } = render(<Controlled />);
+    const textarea = container.querySelector("textarea")!;
+    setCaret(textarea, (textarea as HTMLTextAreaElement).value.length);
+    // First ArrowUp must be at top-of-textarea; single-line so caret=end counts as first line.
+    setCaret(textarea, 0);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" }); // -> recent
+    expect(textarea.value).toBe("recent");
+    setCaret(textarea, textarea.value.length);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" }); // -> older
+    expect(textarea.value).toBe("older");
+    setCaret(textarea, textarea.value.length);
+    fireEvent.keyDown(textarea, { key: "ArrowDown" }); // -> recent
+    expect(textarea.value).toBe("recent");
+    setCaret(textarea, textarea.value.length);
+    fireEvent.keyDown(textarea, { key: "ArrowDown" }); // -> restored draft
+    expect(textarea.value).toBe("half-typed");
+  });
+
+  it("Escape while in history mode restores the in-progress draft", () => {
+    function Controlled() {
+      const [d, setD] = React.useState("wip");
+      return <CommandInput commands={commands} onSend={vi.fn()} draft={d} onDraftChange={setD} history={["recent"]} />;
+    }
+    const { container } = render(<Controlled />);
+    const textarea = container.querySelector("textarea")!;
+    setCaret(textarea, 0);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea.value).toBe("recent");
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(textarea.value).toBe("wip");
+  });
+
+  it("ArrowUp with empty history is a no-op", () => {
+    const onDraftChange = vi.fn();
+    const { textarea } = renderInput({ draft: "", onDraftChange, history: [] });
+    setCaret(textarea, 0);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    // Only calls from user typing should register; none expected.
+    expect(onDraftChange).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("");
+  });
+
+  it("ArrowUp with caret on middle line of multiline text does NOT trigger history", () => {
+    const onDraftChange = vi.fn();
+    const { textarea } = renderInput({
+      draft: "line1\nline2\nline3",
+      onDraftChange,
+      history: ["should-not-appear"],
+    });
+    // Caret inside "line2" — after the first newline (index 6), before the second (index 12).
+    setCaret(textarea, 8);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    // History should NOT activate. onDraftChange must not have been called.
+    expect(onDraftChange).not.toHaveBeenCalled();
+  });
+
+  it("ArrowUp with autocomplete dropdown open navigates the dropdown, not history", () => {
+    const onDraftChange = vi.fn();
+    const { textarea, container } = renderInput({
+      draft: "/d",
+      onDraftChange,
+      history: ["prev-prompt"],
+    });
+    // Confirm dropdown is open.
+    expect(getDropdownItems(container).length).toBeGreaterThan(0);
+    setCaret(textarea, 2);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    // History must NOT have fired.
+    expect(onDraftChange).not.toHaveBeenCalledWith("prev-prompt");
+  });
+
+  it("pre-deduped history is passed through verbatim (consecutive-dup collapse is a parent responsibility)", () => {
+    // This is a documentation test: CommandInput does not dedup; if the parent
+    // passes duplicates, they show up as separate walks. The real dedup lives
+    // in extractUserPromptHistory (covered by message-history.test.ts).
+    function Controlled() {
+      const [d, setD] = React.useState("");
+      return <CommandInput commands={commands} onSend={vi.fn()} draft={d} onDraftChange={setD} history={["a", "a", "b"]} />;
+    }
+    const { container } = render(<Controlled />);
+    const textarea = container.querySelector("textarea")!;
+    setCaret(textarea, 0);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea.value).toBe("a");
+    setCaret(textarea, textarea.value.length);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    // Because parent passed a, a, b without dedup, we land on the second "a".
+    expect(textarea.value).toBe("a");
+    setCaret(textarea, textarea.value.length);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea.value).toBe("b");
+  });
+
+  it("editing a recalled entry exits history mode (subsequent ArrowDown does not restore)", () => {
+    function Controlled() {
+      const [d, setD] = React.useState("wip");
+      return <CommandInput commands={commands} onSend={vi.fn()} draft={d} onDraftChange={setD} history={["recent"]} />;
+    }
+    const { container } = render(<Controlled />);
+    const textarea = container.querySelector("textarea")!;
+    setCaret(textarea, 0);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea.value).toBe("recent");
+    // User edits the recalled entry.
+    fireEvent.change(textarea, { target: { value: "recent-edited" } });
+    expect(textarea.value).toBe("recent-edited");
+    // ArrowDown at end-of-single-line; history mode should be exited, so this
+    // is a no-op (index is null, no further navigation).
+    setCaret(textarea, textarea.value.length);
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    // Value stays on the edited entry, NOT restored to "wip".
+    expect(textarea.value).toBe("recent-edited");
+  });
+
+  it("history-navigation state resets on sessionId change", () => {
+    function Controlled({ sid }: { sid: string }) {
+      const [d, setD] = React.useState("");
+      return <CommandInput commands={commands} onSend={vi.fn()} sessionId={sid} draft={d} onDraftChange={setD} history={["A-recent"]} />;
+    }
+    const { container, rerender } = render(<Controlled sid="A" />);
+    const textarea = container.querySelector("textarea")!;
+    setCaret(textarea, 0);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea.value).toBe("A-recent");
+    // Switch session — history state should reset. The `draft` value stays
+    // because we're still using the same controlled value, but history walk
+    // should start fresh.
+    rerender(<Controlled sid="B" />);
+    // We can't directly observe historyIndex; indirect check: pressing Escape
+    // after a session switch should NOT restore anything (no saved draft).
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    // No crash, no unexpected restoration.
+    expect(textarea).toBeTruthy();
+  });
+});

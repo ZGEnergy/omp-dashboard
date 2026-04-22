@@ -240,6 +240,9 @@ make clean              # Destroy all cloned VMs
 | `src/client/components/SessionHeader.tsx` | Session header with OpenSpec attach/detach, flow launcher, MobileAttachButton |
 | `src/client/hooks/useSwipeBack.ts` | iOS-style left-edge swipe-back gesture (40px edge zone, document-level listeners) |
 | `src/client/components/ChatView.tsx` | Chat message view with scroll-lock: pauses auto-scroll when user scrolls up, floating scroll-to-bottom button, per-session scroll position persistence |
+| `src/client/components/CommandInput.tsx` | Chat textarea + autocomplete + controlled draft / history. Props: `sessionId`, `draft`, `onDraftChange` (lifted to App.tsx so the draft survives navigation), `history` (newest-first user prompts for this session). `ArrowUp`/`ArrowDown` walk history bash-style (only when no dropdown is open AND caret is on first/last line); `Escape` during history mode restores the in-progress draft. See change: chat-input-draft-and-history |
+| `src/client/lib/draft-storage.ts` | Per-session chat input draft persistence helpers: `readAllDrafts()`, `writeDraft(sid, text)`, `deleteDraft(sid)`, key prefix `chat-draft:`. Wraps `localStorage` in try/catch (private-mode / quota safe). |
+| `src/client/lib/message-history.ts` | `extractUserPromptHistory(messages)` — pure filter+dedup over `ChatMessage[]` returning newest-first user prompts with consecutive duplicates collapsed. Drives `ArrowUp`/`ArrowDown` history recall in `CommandInput`. |
 | `src/client/lib/mobile-depth.ts` | Pure function computing MobileShell depth from route state |
 | `src/client/hooks/useZoomPan.ts` | Reusable zoom/pan hook (wheel, drag, pinch, buttons) |
 | `src/client/hooks/useMessageHandler.ts` | WebSocket message dispatch hook (extracted from App.tsx) |
