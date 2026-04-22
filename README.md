@@ -200,9 +200,26 @@ Tool path overrides (optional, machine-local): **`~/.pi/dashboard/tool-overrides
   "shutdownIdleSeconds": 300,
   "spawnStrategy": "headless",
   "tunnel": { "enabled": true, "reservedToken": "auto-created-on-first-run" },
-  "devBuildOnReload": false
+  "devBuildOnReload": false,
+  "openspec": {
+    "pollIntervalSeconds": 30,
+    "maxConcurrentSpawns": 3,
+    "changeDetection": "mtime",
+    "jitterSeconds": 5
+  }
 }
 ```
+
+**OpenSpec background polling** (`openspec` block):
+
+| Key | Default | Range | Description |
+|-----|---------|-------|-------------|
+| `pollIntervalSeconds` | `30` | `5–3600` | How often each known directory is polled for OpenSpec updates |
+| `maxConcurrentSpawns` | `3` | `1–16` | Cap on concurrent `openspec` CLI invocations across all directories |
+| `changeDetection` | `"mtime"` | `"mtime" \| "always"` | `mtime` skips re-polling unchanged proposals (near-zero steady-state cost); `always` polls unconditionally |
+| `jitterSeconds` | `5` | `0–60` | Per-directory phase offset so polls don't all align on the same tick |
+
+Live-reconfigurable via Settings → Advanced → "Background polling (OpenSpec)" or `PUT /api/config` — no server restart needed. See [docs/architecture.md](docs/architecture.md) for the cost model.
 
 ### Tool resolution & overrides
 

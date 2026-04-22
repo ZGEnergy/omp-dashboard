@@ -290,12 +290,31 @@ When a user sends a prompt to an ended session, the server automatically resumes
 7. Session cards display processes with elapsed time and a kill button (sends SIGTERM to process group)
 
 ### OpenSpec Polling (Server-Side)
-1. Server's DirectoryService polls `openspec` CLI every 30s for each known directory (union of pinned dirs + session cwds)
-2. OpenSpec data is keyed by directory (cwd), not by session — one poll per directory regardless of session count
-3. Changes are broadcast to all connected browsers via `openspec_update { cwd, data }`
-4. Browsers can request immediate refresh via `openspec_refresh { cwd }`
-5. New directories (pinned or from new sessions) trigger immediate discovery + polling
+1. Server's DirectoryService polls `openspec` CLI for each known directory (union of pinned dirs + session cwds) at a **configurable interval** (`DashboardConfig.openspec.pollIntervalSeconds`, default 30 s, range 5–3600 s).
+2. OpenSpec data is keyed by directory (cwd), not by session — one poll per directory regardless of session count.
+3. Changes are broadcast to all connected browsers via `openspec_update { cwd, data }`.
+4. Browsers can request immediate refresh via `openspec_refresh { cwd }`. Force-refresh **bypasses the mtime gate** but still respects the concurrency cap.
+5. New directories (pinned or from new sessions) trigger immediate discovery + polling (eager; bypasses jitter + mtime gate).
 6. Each `OpenSpecChange` carries an optional `isComplete?: boolean` field forwarded straight through from `openspec status --change <name> --json`. It indicates artifact-authoring completeness only — orthogonal to the task tally — and never feeds `deriveChangeState`. The dashboard uses it solely to gate the **Archive anyway** escape hatch (see “OpenSpec session card”).
+
+#### OpenSpec polling cost model
+
+A naive `for each cwd: list + for each change: status` fan-out explodes quickly: 4 pinned dirs with 63 total active changes → **67 `openspec` CLI spawns per 30 s tick**, each costing ~0.5 s user CPU just for Node + module load. On an 8-core host that produces a rectangular ~10 s plateau at 100 % CPU every cycle.
+
+The scheduler in `packages/server/src/directory-service.ts` applies four layers of throttling (all configurable under `DashboardConfig.openspec`):
+
+1. **mtime gate** (`changeDetection: "mtime" | "always"`, default `mtime`) — skips `openspec list` when `fs.stat(openspec/changes).mtimeMs` is unchanged since the last successful poll, and skips `openspec status --change X` when the per-change directory mtime is unchanged. A `stat` is ~10 µs vs. ~500 ms per CLI spawn; in steady state this drops 67 spawns/tick to 0–2.
+2. **Concurrency cap** (`maxConcurrentSpawns`, default 3, range 1–16) — an in-repo semaphore (`packages/shared/src/semaphore.ts`) serializes CLI spawns across all directories. Burst-work spreads uniformly over the interval instead of pinning every core.
+3. **Per-cwd jitter** (`jitterSeconds`, default 5) — each known directory is assigned a deterministic phase offset `fnv1a32(cwd) % (jitterSeconds * 1000)` within the interval so polls don't all align on the same scheduling boundary.
+4. **Split pi-resources timer** — `scanPiResources(cwd)` no longer rides the openspec tick; it has its own interval at 5× the openspec cadence (pi extensions/skills change far less often than OpenSpec artifacts).
+
+Cache shape (per cwd): `{ listMtimeMs, listResult, changes: Map<name, { mtimeMs, change }>, data }`. Cache is updated atomically per directory — a partial failure leaves the previous snapshot intact and the next tick retries.
+
+Force-refresh paths (`refreshOpenSpec(cwd)`, `openspec_refresh` WS, `onDirectoryAdded(cwd)`) bypass the mtime gate but **still go through the semaphore**, so a refresh-button storm cannot overload the host.
+
+Live reconfiguration: `PUT /api/config` with an `openspec` block calls `directoryService.reconfigurePolling(cfg)` — the timer cadence and semaphore max are updated without a server restart; in-flight polls finish on their old config.
+
+Observability: `DEBUG=pi-dashboard:openspec-poll` (or any `DEBUG=...pi-dashboard...`) emits one line per tick with dir count, queue size, and wall time. Any tick over 5 s logs a WARN hinting at `pollIntervalSeconds` / `maxConcurrentSpawns` as knobs.
 
 ### OpenSpec session card UI
 

@@ -60,7 +60,8 @@ make clean              # Destroy all cloned VMs
 | `src/shared/protocol.ts` | Extension↔Server WebSocket messages |
 | `src/shared/browser-protocol.ts` | Server↔Browser WebSocket messages (all message types including PromptBus `prompt_request`/`prompt_dismiss`/`prompt_cancel` must be in the `ServerToBrowserMessage` union — `as any` switch cases are stripped by esbuild in production) |
 | `src/shared/types.ts` | Data models (Session, Workspace, Event) |
-| `src/shared/config.ts` | Shared config loader (`~/.pi/dashboard/config.json`) |
+| `src/shared/config.ts` | Shared config loader (`~/.pi/dashboard/config.json`). Includes `openspec: OpenSpecPollConfig` block (`pollIntervalSeconds` 5–3600, `maxConcurrentSpawns` 1–16, `changeDetection` `"mtime"\|"always"`, `jitterSeconds` 0–60) with clamping via `parseOpenSpecPollConfig`. See change: optimize-openspec-poll-burst |
+| `src/shared/semaphore.ts` | Tiny FIFO semaphore (`createSemaphore(max)` → `{run, setMax, size}`). Used by `directory-service.ts` to cap concurrent `openspec` CLI spawns. Supports live resize via `setMax(n)` for runtime reconfig. |
 | `src/extension/bridge.ts` | Main extension entry point (composes sync/tracker/flow modules, tracks `isAgentStreaming` in persistent BridgeState) |
 | `src/extension/bridge-context.ts` | Shared mutable state type + helpers for bridge modules |
 | `src/extension/session-sync.ts` | Session register, replay, and switch/fork handling |
@@ -152,7 +153,7 @@ make clean              # Destroy all cloned VMs
 | `src/server/session-scanner.ts` | Startup session discovery by scanning `~/.pi/agent/sessions/` |
 | `src/server/migrate-persistence.ts` | One-time migration from `sessions.json` + `state.json` to `.meta.json` |
 | `src/server/session-order-manager.ts` | Per-cwd session ordering with persistence |
-| `src/server/directory-service.ts` | Server-side session discovery, event loading, and OpenSpec polling |
+| `src/server/directory-service.ts` | Server-side session discovery, event loading, and OpenSpec polling. Uses mtime-gated per-directory cache (`DirCache`), shared FIFO semaphore, and deterministic per-cwd `phaseOffsetMs(cwd, jitterSeconds)` jitter (FNV-1a 32-bit hash). `refreshOpenSpec(cwd)` bypasses the mtime gate but still acquires the semaphore. `reconfigurePolling(cfg)` applies live config changes without a restart. Pi-resources scan lives on its own 5×-interval timer so it doesn't stack with the openspec burst. See change: optimize-openspec-poll-burst |
 | `src/server/pending-fork-registry.ts` | Tracks pending fork operations for session placement |
 | `src/server/pending-resume-registry.ts` | Queues prompts for auto-resume of ended sessions |
 | `src/server/json-store.ts` | Atomic JSON file read/write helpers |

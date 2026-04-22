@@ -1,10 +1,4 @@
-## Purpose
-
-Server-side OpenSpec CLI polling per directory. The server polls each known directory (pinned dirs + session cwds) at a configurable interval and broadcasts results keyed by cwd to connected browsers, replacing the previous per-session bridge-side polling.
-
-To avoid burst CPU usage when many active changes exist across multiple pinned directories, the scheduler layers four optimizations: a configurable interval (default 30 s), an mtime-based change-detection gate that skips re-polling unchanged proposals, a concurrency cap on CLI spawns, and a deterministic per-cwd jitter that staggers polls within each interval. All four are runtime-reconfigurable via `DashboardConfig.openspec`.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Server polls openspec CLI per directory
 The server SHALL run `openspec list --json` and `openspec status --change <name> --json` for each known directory at a **configurable interval** (default 30 seconds, range 5–3600 seconds, controlled by `DashboardConfig.openspec.pollIntervalSeconds`) and broadcast results keyed by cwd to connected browsers. Each directory's poll SHALL be offset within the interval by a deterministic per-cwd phase (range 0 to `DashboardConfig.openspec.jitterSeconds`, default 5 s) so that polls do not all align on the same tick.

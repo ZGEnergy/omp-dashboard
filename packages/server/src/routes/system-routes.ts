@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import type { SessionManager } from "../memory-session-manager.js";
 import type { PreferencesStore } from "../preferences-store.js";
 import type { MetaPersistence } from "../meta-persistence.js";
+import type { DirectoryService } from "../directory-service.js";
 import type { ServerConfig } from "../server.js";
 import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { NetworkGuard } from "./route-deps.js";
@@ -28,9 +29,10 @@ export function registerSystemRoutes(
     config: ServerConfig;
     networkGuard: NetworkGuard;
     version?: string;
+    directoryService?: DirectoryService;
   },
 ) {
-  const { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version } = deps;
+  const { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version, directoryService } = deps;
   const serverStartTime = Date.now();
 
   // Editor detection endpoint
@@ -127,6 +129,9 @@ export function registerSystemRoutes(
         if (reloaded.auth && (fastify as any)._reloadAuth) {
           await (fastify as any)._reloadAuth(reloaded.auth);
         }
+      }
+      if (partial.openspec !== undefined && directoryService) {
+        directoryService.reconfigurePolling(reloaded.openspec);
       }
 
       return { success: true, restartRequired: result.restartRequired };

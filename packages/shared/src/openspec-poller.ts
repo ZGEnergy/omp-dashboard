@@ -74,6 +74,29 @@ export function pollOpenSpec(cwd: string): OpenSpecData {
 }
 
 /**
+ * Run `openspec list --json` for a single cwd. Exposed so callers that
+ * want their own concurrency control or mtime-gate logic can compose
+ * the list + per-change status calls themselves.
+ */
+export async function runOpenSpecList(cwd: string): Promise<
+  | { changes?: Array<{ name: string; status: string; completedTasks: number; totalTasks: number }> }
+  | null
+> {
+  return unwrap(await runAsync(OPENSPEC_LIST, { cwd }, { cwd }), null) as any;
+}
+
+/**
+ * Run `openspec status --change <name> --json` for a single change.
+ * Exposed for the same reason as `runOpenSpecList`.
+ */
+export async function runOpenSpecStatus(
+  cwd: string,
+  changeName: string,
+): Promise<{ artifacts?: Array<{ id: string; status: string }>; isComplete?: boolean } | null> {
+  return unwrap(await runAsync(OPENSPEC_STATUS, { cwd, change: changeName }, { cwd }), null) as any;
+}
+
+/**
  * Async poll — genuinely async. Runs per-change status queries in
  * parallel via the shared `runAsync()`, so each spawn goes through the
  * central binary resolution + `windowsHide: true` default.

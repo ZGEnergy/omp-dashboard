@@ -71,7 +71,20 @@ interface Config {
     idleTimeoutMinutes?: number;
     maxInstances?: number;
   };
+  openspec?: {
+    pollIntervalSeconds?: number;
+    maxConcurrentSpawns?: number;
+    changeDetection?: "mtime" | "always";
+    jitterSeconds?: number;
+  };
 }
+
+const DEFAULT_OPENSPEC_UI = {
+  pollIntervalSeconds: 30,
+  maxConcurrentSpawns: 3,
+  changeDetection: "mtime" as const,
+  jitterSeconds: 5,
+};
 
 const PROVIDER_LABELS: Record<string, string> = {
   github: "GitHub",
@@ -152,6 +165,11 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
     // Memory limits diff
     if (JSON.stringify(config.memoryLimits) !== JSON.stringify(original.memoryLimits)) {
       partial.memoryLimits = config.memoryLimits;
+    }
+
+    // OpenSpec poll diff
+    if (JSON.stringify(config.openspec) !== JSON.stringify(original.openspec)) {
+      partial.openspec = config.openspec ?? DEFAULT_OPENSPEC_UI;
     }
 
     // Editor config diff
@@ -573,6 +591,47 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
                   onChange={(v) => update((c) => {
                     if (!c.memoryLimits) c.memoryLimits = { maxEventsPerSession: 200, maxStringFieldSize: 4000, maxWsBufferBytes: 4194304 };
                     c.memoryLimits.maxWsBufferBytes = v;
+                  })}
+                />
+              </Section>
+              <Section title="Background polling (OpenSpec)">
+                <p className="text-xs text-[var(--text-tertiary)] mb-2">
+                  Controls how aggressively the server polls <code>openspec list</code> and <code>openspec status</code> for each known directory. Longer interval → less CPU, slightly staler UI. Lower concurrency → smoother curve. Change detection <code>mtime</code> skips re-polling unchanged proposals (recommended).
+                </p>
+                <NumberField
+                  label="Poll Interval (seconds, 5–3600)"
+                  value={config.openspec?.pollIntervalSeconds ?? DEFAULT_OPENSPEC_UI.pollIntervalSeconds}
+                  onChange={(v) => update((c) => {
+                    if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
+                    c.openspec.pollIntervalSeconds = v;
+                  })}
+                />
+                <NumberField
+                  label="Max Concurrent Spawns (1–16)"
+                  value={config.openspec?.maxConcurrentSpawns ?? DEFAULT_OPENSPEC_UI.maxConcurrentSpawns}
+                  onChange={(v) => update((c) => {
+                    if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
+                    c.openspec.maxConcurrentSpawns = v;
+                  })}
+                />
+                <SelectField
+                  label="Change Detection"
+                  value={config.openspec?.changeDetection ?? DEFAULT_OPENSPEC_UI.changeDetection}
+                  options={[
+                    { value: "mtime", label: "mtime (skip unchanged proposals)" },
+                    { value: "always", label: "always (re-poll every tick)" },
+                  ]}
+                  onChange={(v) => update((c) => {
+                    if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
+                    c.openspec.changeDetection = v as "mtime" | "always";
+                  })}
+                />
+                <NumberField
+                  label="Jitter (seconds, 0–60)"
+                  value={config.openspec?.jitterSeconds ?? DEFAULT_OPENSPEC_UI.jitterSeconds}
+                  onChange={(v) => update((c) => {
+                    if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
+                    c.openspec.jitterSeconds = v;
                   })}
                 />
               </Section>

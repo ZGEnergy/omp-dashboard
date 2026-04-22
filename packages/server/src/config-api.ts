@@ -114,6 +114,11 @@ export function writeConfigPartial(partial: Record<string, any>): WriteConfigRes
       restartRequired = true;
     }
 
+    // Merge openspec sub-object (no restart required — live-reconfigured)
+    if (partial.openspec) {
+      partial.openspec = { ...existing.openspec, ...partial.openspec };
+    }
+
     const merged = { ...existing, ...partial };
 
     // Remove computed fields that shouldn't be persisted

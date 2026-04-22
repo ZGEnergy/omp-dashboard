@@ -7,9 +7,23 @@ import type { PreferencesStore } from "../preferences-store.js";
 import type { SessionManager } from "../memory-session-manager.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
-// Mock the shared openspec poller
-vi.mock("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js", () => ({
-  pollOpenSpecAsync: vi.fn(async () => ({ initialized: false, changes: [] })),
+// Mock the shared openspec poller. We expose three entry points now:
+//   - pollOpenSpecAsync: legacy monolithic (still used as fallback where no mtime gate applies)
+//   - runOpenSpecList:   new granular list call
+//   - runOpenSpecStatus: new granular status call
+vi.mock("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js")>();
+  return {
+    ...actual,
+    pollOpenSpecAsync: vi.fn(async () => ({ initialized: false, changes: [] })),
+    runOpenSpecList: vi.fn(async () => null),
+    runOpenSpecStatus: vi.fn(async () => null),
+  };
+});
+
+// Mock pi-resource-scanner so polling ticks don't hit the filesystem.
+vi.mock("../pi-resource-scanner.js", () => ({
+  scanPiResources: vi.fn(async () => ({ local: { extensions: [], skills: [], prompts: [] }, global: { extensions: [], skills: [], prompts: [] }, packages: [] })),
 }));
 
 // Mock the shared state replay
@@ -184,20 +198,33 @@ describe("DirectoryService", () => {
 
   describe("getOpenSpecData / refreshOpenSpec", () => {
     it("returns cached data after polling", async () => {
-      const { pollOpenSpecAsync } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
-      (pollOpenSpecAsync as any).mockResolvedValue({ initialized: true, changes: [{ name: "change-1" }] });
+      // Use the granular mocks; fs.stat on the bogus path will return undefined so
+      // the new gated poll short-circuits. To exercise the happy path we set up a
+      // real tmp dir with an openspec/changes folder.
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ds-cache-"));
+      fs.mkdirSync(path.join(tmp, "openspec", "changes", "change-1"), { recursive: true });
+
+      const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
+      (runOpenSpecList as any).mockResolvedValue({ changes: [
+        { name: "change-1", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+      ] });
+      (runOpenSpecStatus as any).mockResolvedValue({ artifacts: [], isComplete: false });
 
       const stateStore = createMockPreferencesStore();
       const sessionManager = createMockSessionManager();
       service = createDirectoryService(stateStore, sessionManager);
 
-      const data = await service.refreshOpenSpec("/project");
+      const data = await service.refreshOpenSpec(tmp);
       expect(data.initialized).toBe(true);
       expect(data.changes[0].name).toBe("change-1");
 
-      // getOpenSpecData returns cached value
-      const cached = service.getOpenSpecData("/project");
+      const cached = service.getOpenSpecData(tmp);
       expect(cached).toEqual(data);
+
+      fs.rmSync(tmp, { recursive: true, force: true });
     });
   });
 
@@ -235,6 +262,205 @@ describe("DirectoryService", () => {
 
       service.stopPolling();
       vi.useRealTimers();
+    });
+  });
+
+  describe("mtime gate", () => {
+    const fs = require("node:fs") as typeof import("node:fs");
+    const os = require("node:os") as typeof import("node:os");
+    const path = require("node:path") as typeof import("node:path");
+
+    let tmpDir: string;
+    let cwd: string;
+    let changesDir: string;
+
+    beforeEach(async () => {
+      vi.clearAllMocks();
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ds-mtime-"));
+      cwd = tmpDir;
+      changesDir = path.join(cwd, "openspec", "changes");
+      fs.mkdirSync(changesDir, { recursive: true });
+      fs.mkdirSync(path.join(changesDir, "change-a"));
+      fs.mkdirSync(path.join(changesDir, "change-b"));
+    });
+
+    afterEach(() => {
+      if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it("first poll invokes list and status for each change", async () => {
+      const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
+      (runOpenSpecList as any).mockResolvedValue({ changes: [
+        { name: "change-a", status: "in-progress", completedTasks: 1, totalTasks: 2 },
+        { name: "change-b", status: "in-progress", completedTasks: 0, totalTasks: 3 },
+      ] });
+      (runOpenSpecStatus as any).mockResolvedValue({ artifacts: [], isComplete: false });
+
+      const stateStore = createMockPreferencesStore();
+      const sessionManager = createMockSessionManager();
+      service = createDirectoryService(stateStore, sessionManager);
+
+      const data = await service.refreshOpenSpec(cwd);
+      expect(data.initialized).toBe(true);
+      expect(data.changes).toHaveLength(2);
+      expect(runOpenSpecList).toHaveBeenCalledTimes(1);
+      expect(runOpenSpecStatus).toHaveBeenCalledTimes(2);
+    });
+
+    it("second poll with unchanged mtimes makes zero CLI calls", async () => {
+      const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
+      (runOpenSpecList as any).mockResolvedValue({ changes: [
+        { name: "change-a", status: "in-progress", completedTasks: 1, totalTasks: 2 },
+      ] });
+      (runOpenSpecStatus as any).mockResolvedValue({ artifacts: [], isComplete: false });
+
+      const stateStore = createMockPreferencesStore();
+      const sessionManager = createMockSessionManager();
+      service = createDirectoryService(stateStore, sessionManager);
+
+      // First poll (force = true bypasses gate, populates cache).
+      await service.refreshOpenSpec(cwd);
+      (runOpenSpecList as any).mockClear();
+      (runOpenSpecStatus as any).mockClear();
+
+      // Second poll via the internal gated path.
+      await service.pollDirectoryGated(cwd);
+      expect(runOpenSpecList).not.toHaveBeenCalled();
+      expect(runOpenSpecStatus).not.toHaveBeenCalled();
+    });
+
+    it("mtime advance on one change runs status only for that change", async () => {
+      const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
+      (runOpenSpecList as any).mockResolvedValue({ changes: [
+        { name: "change-a", status: "in-progress", completedTasks: 1, totalTasks: 2 },
+        { name: "change-b", status: "in-progress", completedTasks: 0, totalTasks: 3 },
+      ] });
+      (runOpenSpecStatus as any).mockResolvedValue({ artifacts: [], isComplete: false });
+
+      const stateStore = createMockPreferencesStore();
+      const sessionManager = createMockSessionManager();
+      service = createDirectoryService(stateStore, sessionManager);
+      await service.refreshOpenSpec(cwd);
+      (runOpenSpecList as any).mockClear();
+      (runOpenSpecStatus as any).mockClear();
+
+      // Bump mtime of change-a only by touching a file inside it.
+      const future = new Date(Date.now() + 10_000);
+      fs.utimesSync(path.join(changesDir, "change-a"), future, future);
+
+      await service.pollDirectoryGated(cwd);
+      // List is gated by top-level mtime (unchanged) so it's skipped.
+      expect(runOpenSpecList).not.toHaveBeenCalled();
+      // Status re-run exactly once, for change-a.
+      expect(runOpenSpecStatus).toHaveBeenCalledTimes(1);
+      expect((runOpenSpecStatus as any).mock.calls[0][1]).toBe("change-a");
+    });
+
+    it("changeDetection: 'always' bypasses the gate", async () => {
+      const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
+      (runOpenSpecList as any).mockResolvedValue({ changes: [
+        { name: "change-a", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+      ] });
+      (runOpenSpecStatus as any).mockResolvedValue({ artifacts: [], isComplete: false });
+
+      const stateStore = createMockPreferencesStore();
+      const sessionManager = createMockSessionManager();
+      service = createDirectoryService(stateStore, sessionManager, { changeDetection: "always" });
+      await service.refreshOpenSpec(cwd);
+      (runOpenSpecList as any).mockClear();
+      (runOpenSpecStatus as any).mockClear();
+
+      await service.pollDirectoryGated(cwd);
+      expect(runOpenSpecList).toHaveBeenCalledTimes(1);
+      expect(runOpenSpecStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it("removed change is pruned from cache", async () => {
+      const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
+      (runOpenSpecList as any).mockResolvedValueOnce({ changes: [
+        { name: "change-a", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+        { name: "change-b", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+      ] });
+      (runOpenSpecStatus as any).mockResolvedValue({ artifacts: [], isComplete: false });
+
+      const stateStore = createMockPreferencesStore();
+      const sessionManager = createMockSessionManager();
+      service = createDirectoryService(stateStore, sessionManager);
+      await service.refreshOpenSpec(cwd);
+
+      // Remove change-b and bump top-level mtime.
+      fs.rmSync(path.join(changesDir, "change-b"), { recursive: true });
+      const future = new Date(Date.now() + 20_000);
+      fs.utimesSync(changesDir, future, future);
+      (runOpenSpecList as any).mockResolvedValueOnce({ changes: [
+        { name: "change-a", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+      ] });
+      (runOpenSpecStatus as any).mockClear();
+
+      await service.pollDirectoryGated(cwd);
+      const data = service.getOpenSpecData(cwd);
+      expect(data?.changes).toHaveLength(1);
+      expect(data?.changes[0].name).toBe("change-a");
+    });
+  });
+
+  describe("semaphore + refresh", () => {
+    it("caps concurrent CLI spawns during refresh storms", async () => {
+      const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
+      (runOpenSpecList as any).mockImplementation(async () => ({ changes: [
+        { name: "c1", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+      ] }));
+
+      let active = 0;
+      let peak = 0;
+      (runOpenSpecStatus as any).mockImplementation(async () => {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((r) => setTimeout(r, 10));
+        active--;
+        return { artifacts: [], isComplete: false };
+      });
+
+      const stateStore = createMockPreferencesStore();
+      const sessionManager = createMockSessionManager();
+      service = createDirectoryService(stateStore, sessionManager, { maxConcurrentSpawns: 2, changeDetection: "always" });
+
+      // 10 concurrent refreshes across 5 dirs with list returning 1 change each.
+      await Promise.all(Array.from({ length: 10 }, (_, i) => service.refreshOpenSpec(`/project-${i}`)));
+      expect(peak).toBeLessThanOrEqual(2);
+    });
+  });
+
+  describe("jitter", () => {
+    it("produces deterministic per-cwd offsets within jitterSeconds", async () => {
+      const { phaseOffsetMs } = await import("../directory-service.js");
+      const a1 = phaseOffsetMs("/project/a", 5);
+      const a2 = phaseOffsetMs("/project/a", 5);
+      const b = phaseOffsetMs("/project/b", 5);
+      expect(a1).toBe(a2);          // stable
+      expect(a1).toBeLessThan(5000);
+      expect(a1).toBeGreaterThanOrEqual(0);
+      expect(b).toBeLessThan(5000);
+    });
+
+    it("returns 0 when jitterSeconds is 0", async () => {
+      const { phaseOffsetMs } = await import("../directory-service.js");
+      expect(phaseOffsetMs("/any", 0)).toBe(0);
+    });
+  });
+
+  describe("reconfigurePolling", () => {
+    it("accepts a new interval without losing cached data", async () => {
+      const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
+      (runOpenSpecList as any).mockResolvedValue({ changes: [] });
+      (runOpenSpecStatus as any).mockResolvedValue(null);
+
+      const stateStore = createMockPreferencesStore();
+      const sessionManager = createMockSessionManager();
+      service = createDirectoryService(stateStore, sessionManager);
+      await service.refreshOpenSpec("/x");
+      service.reconfigurePolling({ pollIntervalSeconds: 60, maxConcurrentSpawns: 5, changeDetection: "mtime", jitterSeconds: 0 });
+      expect(service.getOpenSpecData("/x")).toBeDefined();
     });
   });
 });

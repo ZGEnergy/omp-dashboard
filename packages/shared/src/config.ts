@@ -41,6 +41,24 @@ export const DEFAULT_MEMORY_LIMITS: MemoryLimitsConfig = {
   maxWsBufferBytes: 4 * 1024 * 1024,
 };
 
+export interface OpenSpecPollConfig {
+  /** Poll interval in seconds. Default 30. Clamped to [5, 3600]. */
+  pollIntervalSeconds: number;
+  /** Max concurrent `openspec` CLI invocations across all dirs. Default 3. Clamped to [1, 16]. */
+  maxConcurrentSpawns: number;
+  /** `"mtime"` skips re-polling unchanged changes; `"always"` polls unconditionally. Default `"mtime"`. */
+  changeDetection: "mtime" | "always";
+  /** Max per-directory phase jitter in seconds. 0 disables jitter. Default 5. Clamped to [0, 60]. */
+  jitterSeconds: number;
+}
+
+export const DEFAULT_OPENSPEC_POLL: OpenSpecPollConfig = {
+  pollIntervalSeconds: 30,
+  maxConcurrentSpawns: 3,
+  changeDetection: "mtime",
+  jitterSeconds: 5,
+};
+
 export interface EditorConfig {
   /** Override path to code-server binary */
   binary?: string;
@@ -75,6 +93,8 @@ export interface DashboardConfig {
   defaultModel: string;
   memoryLimits: MemoryLimitsConfig;
   editor: EditorConfig;
+  /** OpenSpec background polling behavior (interval, concurrency, change detection, jitter) */
+  openspec: OpenSpecPollConfig;
   /** Networks trusted for full access without authentication (CIDR, wildcard, exact IP) */
   trustedNetworks: string[];
   /** Merged trustedNetworks + auth.bypassHosts (deduplicated). Computed at load time. */
@@ -108,6 +128,7 @@ const DEFAULTS: DashboardConfig = {
   defaultModel: "",
   memoryLimits: { ...DEFAULT_MEMORY_LIMITS },
   editor: { ...DEFAULT_EDITOR_CONFIG },
+  openspec: { ...DEFAULT_OPENSPEC_POLL },
   trustedNetworks: [],
   resolvedTrustedNetworks: [],
   cors: { allowedOrigins: [] },
@@ -154,6 +175,27 @@ function parseEditorConfig(raw: any): EditorConfig {
     ...(typeof raw.binary === "string" ? { binary: raw.binary } : {}),
     idleTimeoutMinutes: typeof raw.idleTimeoutMinutes === "number" ? raw.idleTimeoutMinutes : DEFAULT_EDITOR_CONFIG.idleTimeoutMinutes,
     maxInstances: typeof raw.maxInstances === "number" ? raw.maxInstances : DEFAULT_EDITOR_CONFIG.maxInstances,
+  };
+}
+
+function clampNumber(raw: any, fallback: number, min: number, max: number): number {
+  const n = typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
+}
+
+function parseOpenSpecPollConfig(raw: any): OpenSpecPollConfig {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_OPENSPEC_POLL };
+  const changeDetection =
+    raw.changeDetection === "always" || raw.changeDetection === "mtime"
+      ? raw.changeDetection
+      : DEFAULT_OPENSPEC_POLL.changeDetection;
+  return {
+    pollIntervalSeconds: clampNumber(raw.pollIntervalSeconds, DEFAULT_OPENSPEC_POLL.pollIntervalSeconds, 5, 3600),
+    maxConcurrentSpawns: clampNumber(raw.maxConcurrentSpawns, DEFAULT_OPENSPEC_POLL.maxConcurrentSpawns, 1, 16),
+    changeDetection,
+    jitterSeconds: clampNumber(raw.jitterSeconds, DEFAULT_OPENSPEC_POLL.jitterSeconds, 0, 60),
   };
 }
 
@@ -217,6 +259,7 @@ export function loadConfig(): DashboardConfig {
       auth: parseAuthConfig(parsed.auth),
       memoryLimits: parseMemoryLimits(parsed.memoryLimits),
       editor: parseEditorConfig(parsed.editor),
+      openspec: parseOpenSpecPollConfig(parsed.openspec),
       trustedNetworks: parseTrustedNetworks(parsed.trustedNetworks),
       resolvedTrustedNetworks: [],
       cors: {

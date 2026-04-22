@@ -79,6 +79,8 @@ export interface ServerConfig {
   maxWsBufferBytes?: number;
   /** Editor (code-server) config */
   editor: import("@blackbelt-technology/pi-dashboard-shared/config.js").EditorConfig;
+  /** OpenSpec polling config (interval, concurrency, change detection, jitter) */
+  openspec?: import("@blackbelt-technology/pi-dashboard-shared/config.js").OpenSpecPollConfig;
   /** Merged trusted networks from config */
   resolvedTrustedNetworks?: string[];
   /** CORS allowed origins from config */
@@ -186,7 +188,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     knownSessionIds.add(s.id);
   }
 
-  const directoryService = createDirectoryService(preferencesStore, sessionManager);
+  const directoryService = createDirectoryService(preferencesStore, sessionManager, config.openspec);
 
   // mDNS peer discovery state
   let mdnsBrowser: DashboardBrowser | null = null;
@@ -410,7 +412,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       if (data) browserGateway.broadcastToAll({ type: "openspec_update", cwd, data });
     },
   });
-  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion });
+  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService });
   registerToolRoutes(fastify, { registry: getDefaultRegistry(), networkGuard });
 
   // ── Bootstrap REST routes ────────────────────────────────────────

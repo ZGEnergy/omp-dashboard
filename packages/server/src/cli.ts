@@ -112,6 +112,7 @@ export function buildConfig(flags: Partial<ServerConfig>): ServerConfig {
     maxStringFieldSize: fileConfig.memoryLimits.maxStringFieldSize,
     maxWsBufferBytes: fileConfig.memoryLimits.maxWsBufferBytes,
     editor: fileConfig.editor,
+    openspec: fileConfig.openspec,
     resolvedTrustedNetworks: fileConfig.resolvedTrustedNetworks,
     corsAllowedOrigins: fileConfig.cors.allowedOrigins,
   };
