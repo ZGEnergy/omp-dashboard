@@ -24,16 +24,166 @@ interface ProviderEntry {
   api?: string;
 }
 
+type InputModality = "text" | "image";
+
+export interface ModelMetadata {
+  contextWindow: number;
+  maxTokens: number;
+  reasoning: boolean;
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  input: InputModality[];
+}
+
+/**
+ * A catalog probe: given (provider, id), return the catalog entry or null.
+ * In production this is `modelRegistry.find(provider, id)` from pi's
+ * ModelRegistry (which knows both built-in pi-ai models AND user-configured
+ * custom models). Exposed as a parameter so unit tests can supply a fake
+ * catalog without needing pi-ai installed.
+ */
+export type CatalogProbe = (provider: string, modelId: string) => {
+  contextWindow: number;
+  maxTokens: number;
+  reasoning: boolean;
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  input: readonly ("text" | "image")[];
+} | null | undefined;
+
+// -- Model metadata enrichment --------------------------------------------
+//
+// Custom-provider `/v1/models` endpoints return only { id, object, ... } —
+// they do not advertise context_window, max_tokens, cost, or reasoning
+// capability. Rather than hardcode 200k / 16k / $0 / no-reasoning for every
+// discovered model (the prior behavior, which was wrong for Opus 4.6+/Sonnet
+// 4.6+/GPT-5/Gemini 2.5), we consult pi's `modelRegistry.find(provider, id)`
+// — which surfaces pi-ai's bundled catalog plus any custom models — for
+// accurate metadata and fall back to api-appropriate defaults when the
+// catalog has no match.
+//
+// See change: enrich-custom-provider-model-metadata.
+
+// API type → ordered list of candidate providers in pi's catalog.
+// Provider keys match pi-ai's MODELS export as surfaced by modelRegistry.
+// Order matters: first match wins.
+const CANDIDATE_PROVIDERS: Record<string, readonly string[]> = {
+  "anthropic-messages": ["anthropic", "opencode"],
+  "google-generative-ai": ["google", "google-vertex"],
+  "openai-completions": ["openai", "openrouter", "groq", "xai", "mistral"],
+};
+
+// Api-typed fallback defaults when the catalog has no match. Modern floors:
+//   - anthropic-messages: 200k ctx (Claude 3/4 floor), 64k maxTok
+//   - google-generative-ai: 1M ctx (Gemini 1.5+/2.x floor), 65k maxTok
+//   - openai-completions (default): 128k ctx (GPT-4o floor), 16k maxTok
+const FALLBACK_DEFAULTS: Record<string, Omit<ModelMetadata, "input">> = {
+  "anthropic-messages": {
+    contextWindow: 200_000,
+    maxTokens: 64_000,
+    reasoning: false,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+  "google-generative-ai": {
+    contextWindow: 1_000_000,
+    maxTokens: 65_536,
+    reasoning: false,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+  "openai-completions": {
+    contextWindow: 128_000,
+    maxTokens: 16_384,
+    reasoning: false,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+};
+
+const DEFAULT_INPUT: InputModality[] = ["text", "image"];
+
+/**
+ * Resolve a discovered custom-provider model id to full metadata by consulting
+ * pi's model catalog via the supplied `probe` function. Falls back to
+ * api-appropriate defaults when no catalog entry matches OR when no probe is
+ * available (e.g., modelRegistry not yet captured from spawn-context).
+ *
+ * Strips common proxy-prefix path segments (`cc/`, `anthropic/`,
+ * `openrouter/anthropic/…`) before lookup so prefixed ids resolve to the same
+ * catalog entry as the bare id.
+ *
+ * Exported (with the `probe` parameter) for unit testing. Production callers
+ * use `registerEntry()` which injects `modelRegistry.find`.
+ */
+export function enrichModelMetadata(
+  discoveredId: string,
+  api?: string,
+  probe?: CatalogProbe | null,
+): ModelMetadata {
+  const resolvedApi = api && api in CANDIDATE_PROVIDERS ? api : "openai-completions";
+  const candidates = CANDIDATE_PROVIDERS[resolvedApi] ?? CANDIDATE_PROVIDERS["openai-completions"];
+
+  // Build dedup'd list of ids to try: full, then everything after the last `/`.
+  const lookupIds: string[] = [discoveredId];
+  const lastSlash = discoveredId.lastIndexOf("/");
+  if (lastSlash >= 0 && lastSlash < discoveredId.length - 1) {
+    const bare = discoveredId.slice(lastSlash + 1);
+    if (bare && bare !== discoveredId) lookupIds.push(bare);
+  }
+
+  if (probe) {
+    for (const id of lookupIds) {
+      for (const provider of candidates) {
+        let match: ReturnType<CatalogProbe> | undefined;
+        try {
+          match = probe(provider, id);
+        } catch {
+          match = undefined;
+        }
+        if (match) {
+          return {
+            contextWindow: match.contextWindow,
+            maxTokens: match.maxTokens,
+            reasoning: match.reasoning,
+            cost: match.cost,
+            input: [...match.input] as InputModality[],
+          };
+        }
+      }
+    }
+  }
+
+  // No probe, or no catalog match — use api-appropriate fallback with
+  // image-capable default (see change: enable-image-input-custom-providers).
+  const fallback = FALLBACK_DEFAULTS[resolvedApi] ?? FALLBACK_DEFAULTS["openai-completions"];
+  return {
+    ...fallback,
+    input: [...DEFAULT_INPUT],
+  };
+}
+
 // -- Config path ----------------------------------------------------------
 
-const CONFIG_PATH = join(homedir(), ".pi", "agent", "providers.json");
+// Resolved lazily so HOME can be changed in tests.
+function configPath(): string {
+  return join(homedir(), ".pi", "agent", "providers.json");
+}
+const CONFIG_PATH = configPath();
+
+// Snapshot of last-registered provider entries so reloadProviders can diff.
+const lastRegistered = new Map<string, ProviderEntry>();
+
+function entriesEqual(a: ProviderEntry, b: ProviderEntry): boolean {
+  return (
+    a.baseUrl === b.baseUrl &&
+    a.apiKey === b.apiKey &&
+    (a.api ?? "openai-completions") === (b.api ?? "openai-completions")
+  );
+}
 
 // -- Config I/O (read-only — providers section) ----------------------------
 
 function loadProviders(): Record<string, ProviderEntry> {
-  if (existsSync(CONFIG_PATH)) {
+  const path = configPath();
+  if (existsSync(path)) {
     try {
-      const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+      const raw = JSON.parse(readFileSync(path, "utf-8"));
       const providers: Record<string, ProviderEntry> = { ...raw.providers };
       for (const [, entry] of Object.entries(providers) as [string, any][]) {
         if (entry.apiKeyEnv && !entry.apiKey) {
@@ -43,8 +193,10 @@ function loadProviders(): Record<string, ProviderEntry> {
         delete (entry as any).modelIds;
       }
       return providers;
-    } catch {
-      // Fall through to empty
+    } catch (err: any) {
+      console.error(
+        `[dashboard] providers.json reload failed: ${err?.message ?? String(err)}`,
+      );
     }
   }
   return {};
@@ -124,6 +276,11 @@ let currentSessionModelId = "";
 
 let piRef: ExtensionAPI | null = null;
 
+// Captured from any pi event handler's ctx.modelRegistry (first available wins).
+// Used by getModelRegistry() to probe pi's catalog for model metadata enrichment.
+// See change: enrich-custom-provider-model-metadata.
+let modelRegistryRef: any = null;
+
 // Callback for notifying the bridge when providers change
 let onProvidersChanged: (() => void) | null = null;
 
@@ -148,13 +305,15 @@ export function onProviderChanged(callback: () => void): void {
   onProvidersChanged = callback;
 }
 
-// -- Helper: get modelRegistry via event ----------------------------------
-
+// -- Helper: get modelRegistry --------------------------------------------
+//
+// pi's ModelRegistry is passed as `ctx.modelRegistry` to every extension
+// event handler (see ExtensionContext in pi's types). We capture the first
+// reference we see in `session_start` and reuse it thereafter. This avoids
+// depending on pi-flows' `flow:get-spawn-context` event which is not
+// guaranteed to be present in every install.
 function getModelRegistry(): any {
-  if (!piRef) return null;
-  const spawnCtx: any = {};
-  piRef.events.emit("flow:get-spawn-context", spawnCtx);
-  return spawnCtx.modelRegistry ?? null;
+  return modelRegistryRef;
 }
 
 // -- Provider registration (with auto-discovery) --------------------------
@@ -162,14 +321,23 @@ function getModelRegistry(): any {
 async function registerEntry(pi: ExtensionAPI, name: string, entry: ProviderEntry): Promise<number> {
   const discovered = await discoverModels(entry.baseUrl, entry.apiKey);
 
+  // Metadata (contextWindow, maxTokens, reasoning, cost, input) is resolved
+  // via pi's `modelRegistry.find(provider, id)` when the registry is
+  // reachable, with api-appropriate fallbacks otherwise — the previous
+  // hardcoded 200k / 16k / $0 / no-reasoning was silently wrong for
+  // Opus 4.6+/Sonnet 4.6+/GPT-5/Gemini-2.x proxied via OpenAI-compatible
+  // endpoints. See enrichModelMetadata above, and change:
+  // enrich-custom-provider-model-metadata.
+  const registry = getModelRegistry();
+  const probe: CatalogProbe | null =
+    registry && typeof registry.find === "function"
+      ? (provider, modelId) => registry.find(provider, modelId) ?? null
+      : null;
+
   const models = discovered.map((m) => ({
     id: m.id,
     name: m.id,
-    reasoning: false,
-    input: ["text"] as ("text" | "image")[],
-    contextWindow: 200000,
-    maxTokens: 16384,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    ...enrichModelMetadata(m.id, entry.api, probe),
   }));
 
   pi.registerProvider(name, {
@@ -179,10 +347,81 @@ async function registerEntry(pi: ExtensionAPI, name: string, entry: ProviderEntr
     models,
   });
 
+  // Record snapshot so reloadProviders can detect subsequent changes.
+  lastRegistered.set(name, {
+    baseUrl: entry.baseUrl,
+    apiKey: entry.apiKey,
+    api: entry.api ?? "openai-completions",
+  });
+
   // Notify bridge directly (same package — no cross-package event needed)
   onProvidersChanged?.();
 
   return discovered.length;
+}
+
+/**
+ * Diff the current providers.json against the last-registered snapshot and
+ * apply add / remove / change operations via `pi.registerProvider` and
+ * `pi.unregisterProvider`. Called by the bridge's `credentials_updated`
+ * handler so adding/editing/removing providers in the dashboard UI takes
+ * effect without a session restart.
+ *
+ * Malformed providers.json or IO errors produce an empty diff and do not
+ * throw, so the caller can still run `modelRegistry.refresh()` for other
+ * credential updates.
+ */
+export async function reloadProviders(
+  pi: ExtensionAPI,
+): Promise<{ added: string[]; removed: string[]; changed: string[] }> {
+  piRef = pi;
+  const added: string[] = [];
+  const removed: string[] = [];
+  const changed: string[] = [];
+
+  let current: Record<string, ProviderEntry>;
+  try {
+    current = loadProviders();
+  } catch {
+    return { added, removed, changed };
+  }
+
+  // Detect removals and changes against previous snapshot.
+  for (const [name, prev] of lastRegistered) {
+    const next = current[name];
+    if (!next) {
+      try {
+        pi.unregisterProvider(name);
+      } catch (err: any) {
+        console.error(`[dashboard] unregisterProvider("${name}") failed: ${err?.message ?? String(err)}`);
+      }
+      lastRegistered.delete(name);
+      removed.push(name);
+    } else if (!entriesEqual(prev, next)) {
+      try {
+        pi.unregisterProvider(name);
+      } catch (err: any) {
+        console.error(`[dashboard] unregisterProvider("${name}") failed: ${err?.message ?? String(err)}`);
+      }
+      lastRegistered.delete(name);
+      changed.push(name);
+    }
+  }
+
+  // Register new entries and changed entries (order-dependent: unregister ran first above).
+  for (const [name, entry] of Object.entries(current)) {
+    if (lastRegistered.has(name)) continue;
+    try {
+      await registerEntry(pi, name, entry);
+      if (!added.includes(name) && !changed.includes(name)) {
+        added.push(name);
+      }
+    } catch (err: any) {
+      console.error(`[dashboard] registerProvider("${name}") failed: ${err?.message ?? String(err)}`);
+    }
+  }
+
+  return { added, removed, changed };
 }
 
 // -- Extension entry point ------------------------------------------------
@@ -248,6 +487,11 @@ export function activate(pi: ExtensionAPI) {
   // ── Session lifecycle ──────────────────────────────────────────────
 
   pi.on("model_select", async (_event, ctx) => {
+    // Also capture modelRegistry here as a belt-and-suspenders in case
+    // session_start ran before activate() finished in some edge case.
+    if (!modelRegistryRef && ctx.modelRegistry) {
+      modelRegistryRef = ctx.modelRegistry;
+    }
     if (ctx.model) {
       currentSessionProvider = ctx.model.provider ?? "";
       currentSessionModelId = ctx.model.id ?? "";
@@ -255,6 +499,50 @@ export function activate(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    // Capture the modelRegistry reference the first time we see it, then
+    // re-register already-registered providers so their model metadata gets
+    // enriched from pi's catalog (they were registered at activate() before
+    // any ctx was available, so they currently carry fallback defaults).
+    // See change: enrich-custom-provider-model-metadata.
+    if (!modelRegistryRef && ctx.modelRegistry) {
+      modelRegistryRef = ctx.modelRegistry;
+      if (lastRegistered.size > 0) {
+        // Force re-registration: clear snapshot so reloadProviders re-adds all
+        // entries (which will now probe the captured registry).
+        const names = Array.from(lastRegistered.keys());
+        lastRegistered.clear();
+        for (const name of names) {
+          const entry = providers[name];
+          if (entry) {
+            try {
+              await registerEntry(pi, name, entry);
+            } catch (err: any) {
+              console.error(`[dashboard] re-registerProvider("${name}") failed: ${err?.message ?? String(err)}`);
+            }
+          }
+        }
+
+        // If the session's currently-selected model belongs to one of the
+        // providers we just re-registered, re-apply it via pi.setModel() so
+        // the snapshot on agent.state.model picks up the enriched metadata
+        // (reasoning / contextWindow / cost). Without this, pi's session
+        // still holds the pre-enrichment descriptor with reasoning: false,
+        // causing setThinkingLevel to clamp to "off" even though the registry
+        // now has reasoning: true. See change: enrich-custom-provider-model-metadata.
+        const current = ctx.model as any;
+        if (current?.provider && current?.id && names.includes(current.provider)) {
+          try {
+            const refreshed = ctx.modelRegistry.find(current.provider, current.id);
+            if (refreshed && (pi as any).setModel) {
+              await (pi as any).setModel(refreshed);
+            }
+          } catch (err: any) {
+            console.error(`[dashboard] re-setModel after enrichment failed: ${err?.message ?? String(err)}`);
+          }
+        }
+      }
+    }
+
     if (ctx.model) {
       currentSessionProvider = ctx.model.provider ?? "";
       currentSessionModelId = ctx.model.id ?? "";

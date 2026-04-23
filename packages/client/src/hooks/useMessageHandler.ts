@@ -86,6 +86,26 @@ export function useMessageHandler(
           }
           return next;
         });
+        // Mirror model/thinkingLevel into sessionStates so the bottom StatusBar
+        // (which reads selectedState.thinkingLevel ?? selectedSession.thinkingLevel)
+        // stays in sync with the session card. model_update events from the bridge
+        // go through session_updated — there's no dedicated browser-side
+        // model_update handler, so we propagate here.
+        // See change: enrich-custom-provider-model-metadata.
+        {
+          const updates = msg.updates as Partial<DashboardSession>;
+          if (updates.thinkingLevel !== undefined || updates.model !== undefined) {
+            setSessionStates((prev) => {
+              const next = new Map(prev);
+              const existing = next.get(msg.sessionId) ?? createInitialState();
+              const patched: SessionState = { ...existing };
+              if (updates.thinkingLevel !== undefined) patched.thinkingLevel = updates.thinkingLevel;
+              if (updates.model !== undefined) patched.model = updates.model;
+              next.set(msg.sessionId, patched);
+              return next;
+            });
+          }
+        }
         break;
 
       case "session_removed":
