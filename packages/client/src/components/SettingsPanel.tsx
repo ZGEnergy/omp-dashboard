@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { getApiBase } from "../lib/api-context.js";
 import { useDebugToolsVisible } from "../hooks/useDebugToolsVisible.js";
 import { Icon } from "@mdi/react";
-import { mdiArrowLeft, mdiContentSave, mdiAlert, mdiPlus, mdiDelete, mdiRestart, mdiUpdate } from "@mdi/js";
+import { mdiArrowLeft, mdiContentSave, mdiAlert, mdiPlus, mdiDelete, mdiRestart, mdiUpdate, mdiCheckCircle, mdiCloseCircle, mdiPlay, mdiLoading } from "@mdi/js";
+import { testProvider, type TestProviderResult } from "../lib/providers-api.js";
 import { useLocation } from "wouter";
 import { ProviderAuthSection } from "./ProviderAuthSection.js";
 import { ModelSelector } from "./ModelSelector.js";
@@ -1059,14 +1060,56 @@ function GlobalPackagesSection() {
   );
 }
 
-function LlmProviderCard({ provider, onChange, onRemove }: {
+type TestState =
+  | { kind: "idle" }
+  | { kind: "testing" }
+  | { kind: "ok"; modelCount: number; sample: string[] }
+  | { kind: "err"; status?: number; message: string };
+
+export function LlmProviderCard({ provider, onChange, onRemove }: {
   provider: LlmProvider;
   onChange: (p: LlmProvider) => void;
   onRemove: () => void;
 }) {
+  const [testState, setTestState] = useState<TestState>({ kind: "idle" });
+
+  const handleChange = (update: LlmProvider) => {
+    // Any change to baseUrl / apiKey / api clears a stale test result.
+    if (
+      update.baseUrl !== provider.baseUrl ||
+      update.apiKey !== provider.apiKey ||
+      update.api !== provider.api
+    ) {
+      setTestState({ kind: "idle" });
+    }
+    onChange(update);
+  };
+
+  const canTest =
+    provider.baseUrl.trim().length > 0 &&
+    provider.apiKey.trim().length > 0 &&
+    testState.kind !== "testing";
+
+  const handleTest = async () => {
+    if (!canTest) return;
+    setTestState({ kind: "testing" });
+    const result: TestProviderResult = await testProvider({
+      name: provider.isNew ? undefined : provider.name,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      api: provider.api,
+    });
+    if (result.ok) {
+      setTestState({ kind: "ok", modelCount: result.modelCount, sample: result.sample ?? [] });
+    } else {
+      const firstLine = (result.error ?? "Test failed").split("\n")[0].trim();
+      setTestState({ kind: "err", status: result.status, message: firstLine || "Test failed" });
+    }
+  };
+
   return (
     <div className="border border-[var(--border-secondary)] rounded p-3 mb-2">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 gap-2">
         {provider.isNew ? (
           <input
             type="text"
@@ -1079,25 +1122,50 @@ function LlmProviderCard({ provider, onChange, onRemove }: {
         ) : (
           <span className="text-sm font-medium text-[var(--text-primary)]">{provider.name}</span>
         )}
-        <button
-          onClick={onRemove}
-          className="text-xs px-2 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 flex items-center gap-1"
-        >
-          <Icon path={mdiDelete} size={0.45} />
-          Remove
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleTest}
+            disabled={!canTest}
+            title={
+              !canTest && testState.kind !== "testing"
+                ? "Enter Base URL and API Key first"
+                : "Ping the provider's /models endpoint"
+            }
+            className="text-xs px-2 py-0.5 rounded bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            data-testid="test-provider-button"
+          >
+            {testState.kind === "testing" ? (
+              <>
+                <Icon path={mdiLoading} size={0.45} className="animate-spin" />
+                Testing…
+              </>
+            ) : (
+              <>
+                <Icon path={mdiPlay} size={0.45} />
+                Test
+              </>
+            )}
+          </button>
+          <button
+            onClick={onRemove}
+            className="text-xs px-2 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 flex items-center gap-1"
+          >
+            <Icon path={mdiDelete} size={0.45} />
+            Remove
+          </button>
+        </div>
       </div>
       <div className="space-y-2">
         <TextField
           label="Base URL"
           value={provider.baseUrl}
-          onChange={(v) => onChange({ ...provider, baseUrl: v })}
+          onChange={(v) => handleChange({ ...provider, baseUrl: v })}
           placeholder="https://api.example.com/v1"
         />
         <TextField
           label="API Key"
           value={provider.apiKey}
-          onChange={(v) => onChange({ ...provider, apiKey: v })}
+          onChange={(v) => handleChange({ ...provider, apiKey: v })}
           type="password"
           placeholder="sk-... or $ENV_VAR_NAME"
         />
@@ -1106,14 +1174,59 @@ function LlmProviderCard({ provider, onChange, onRemove }: {
           <select
             className="w-full bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-sm text-[var(--text-primary)]"
             value={provider.api}
-            onChange={(e) => onChange({ ...provider, api: e.target.value })}
+            onChange={(e) => handleChange({ ...provider, api: e.target.value })}
           >
             {API_TYPE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
         </div>
+        {testState.kind !== "idle" && <TestPill state={testState} />}
       </div>
     </div>
   );
+}
+
+function TestPill({ state }: { state: TestState }) {
+  if (state.kind === "testing") {
+    return (
+      <div
+        className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]"
+        data-testid="test-pill"
+        data-state="testing"
+      >
+        <Icon path={mdiLoading} size={0.45} className="animate-spin" />
+        Testing…
+      </div>
+    );
+  }
+  if (state.kind === "ok") {
+    const label = state.modelCount > 0 ? `Connected · ${state.modelCount} models` : "Connected";
+    return (
+      <div
+        className="flex items-center gap-1.5 text-xs text-green-400"
+        data-testid="test-pill"
+        data-state="ok"
+        title={state.sample.length > 0 ? `Sample: ${state.sample.join(", ")}` : undefined}
+      >
+        <Icon path={mdiCheckCircle} size={0.5} />
+        {label}
+      </div>
+    );
+  }
+  if (state.kind === "err") {
+    const prefix = state.status ? `${state.status} — ` : "";
+    return (
+      <div
+        className="flex items-center gap-1.5 text-xs text-red-400"
+        data-testid="test-pill"
+        data-state="err"
+      >
+        <Icon path={mdiCloseCircle} size={0.5} />
+        <span className="truncate" title={`${prefix}${state.message}`}>{prefix}{state.message}</span>
+      </div>
+    );
+  }
+  // idle — parent guards against rendering, but keep a safe default.
+  return null;
 }

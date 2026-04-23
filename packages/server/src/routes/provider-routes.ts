@@ -8,6 +8,7 @@ import { join, dirname } from "node:path";
 import type { NetworkGuard } from "./route-deps.js";
 import type { PiGateway } from "../pi-gateway.js";
 import type { BrowserGateway } from "../browser-gateway.js";
+import { probeProvider, resolveProbeApiKey, type ProbeApi } from "../provider-probe.js";
 
 const REDACTED = "***";
 const CONFIG_PATH = join(homedir(), ".pi", "agent", "providers.json");
@@ -106,6 +107,48 @@ export function registerProviderRoutes(fastify: FastifyInstance, deps: { network
       }
 
       return { success: true };
+    },
+  );
+
+  // Test a provider configuration without saving it. Accepts literal api keys,
+  // $ENV_VAR references, or the REDACTED sentinel (***) for already-saved entries.
+  fastify.post(
+    "/api/providers/test",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const body = request.body as Record<string, any> | null;
+      if (!body || typeof body !== "object") {
+        return reply.code(400).send({ ok: false, error: "Invalid body" });
+      }
+      const name = typeof body.name === "string" ? body.name : undefined;
+      const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+      const apiKey = typeof body.apiKey === "string" ? body.apiKey : "";
+      const api = typeof body.api === "string" ? (body.api as ProbeApi) : undefined;
+      if (!baseUrl) {
+        return reply.code(400).send({ ok: false, error: "baseUrl is required" });
+      }
+      if (!apiKey) {
+        return reply.code(400).send({ ok: false, error: "apiKey is required" });
+      }
+      if (!api) {
+        return reply.code(400).send({ ok: false, error: "api type is required" });
+      }
+
+      const resolved = resolveProbeApiKey({
+        apiKey,
+        name,
+        readProviders: readProvidersRaw,
+      });
+      if (!resolved.ok) {
+        return { ok: false, error: resolved.error };
+      }
+
+      const result = await probeProvider({
+        baseUrl,
+        apiKey: resolved.key,
+        api,
+      });
+      return result;
     },
   );
 }

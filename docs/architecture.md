@@ -732,7 +732,23 @@ The dashboard supports browser-based authentication with pi's LLM providers, ena
 3. **Device-code flow** (GitHub Copilot): server requests device code → UI shows user code + verification URL → server polls until authorized
 4. **API key flow**: user pastes key in Settings → saved directly
 5. All credentials written to `~/.pi/agent/auth.json` with lockfile + atomic write (`0600` permissions)
-6. Server broadcasts `credentials_updated` to all connected bridges → bridges call `authStorage.reload()` so running pi sessions pick up new tokens immediately
+6. Server broadcasts `credentials_updated` to all connected bridges → bridges call `reloadProviders(pi)` (to hot-register any newly-added custom providers from `~/.pi/agent/providers.json`) then `authStorage.reload()` and `modelRegistry.refresh()` so running pi sessions pick up new tokens and new providers immediately without a session restart
+
+### Model metadata enrichment for custom providers
+
+Custom-provider `/v1/models` endpoints only advertise `{id, owned_by}` — they do not expose `context_window`, `max_tokens`, `cost`, or `reasoning`. Rather than hardcode a flat 200k / 16k / $0 / no-reasoning on every discovered model (which was silently wrong for proxied frontier models like `proxy/cc/claude-opus-4-7` → Opus 4.7's 1M window), the bridge's `registerEntry()` runs each discovered id through a pure `enrichModelMetadata(id, api, probe)` helper. The helper (a) strips common proxy prefixes (`cc/`, `anthropic/`, `openrouter/openai/…`) so the bare id is tried, (b) probes pi's `modelRegistry.find(provider, id)` via an ordered api-appropriate candidate list (`anthropic-messages` → `["anthropic", "opencode"]`, `google-generative-ai` → `["google", "google-vertex"]`, `openai-completions` → `["openai", "openrouter", "groq", "xai", "mistral"]`), and (c) returns the registry's full metadata when a match is found. The registry reference is captured from `ctx.modelRegistry` the first time pi fires `session_start` on the extension (with `model_select` as a fallback capture point) — no direct `@mariozechner/pi-ai` import. Because `activate()` registers providers before any event handler fires, the first pass uses fallback defaults; the `session_start` handler then re-registers all providers with the enriched metadata, relying on `pi.registerProvider`'s idempotent "replace" semantics. When the registry never becomes available or has no match for an id, the fallback path keeps `input: ["text","image"]` so the image-capable-by-default contract is preserved. Built-in and OAuth providers bypass this path entirely — their metadata still comes from pi's bundled `models.generated.js`. See `packages/extension/src/provider-register.ts` and change `enrich-custom-provider-model-metadata`.
+
+### Testing a custom provider (Test button)
+
+The Settings → Providers → LLM Providers card exposes a **Test** button that posts the unsaved `{ baseUrl, apiKey, api }` combination to `POST /api/providers/test`. The server performs a per-API-type probe:
+
+| API type | Probe |
+|----------|-------|
+| `openai-completions` / `openai-responses` | `GET {baseUrl}/models` with `Authorization: Bearer <apiKey>` |
+| `anthropic-messages` | `GET {baseUrl}/v1/models` with `x-api-key` + `anthropic-version: 2023-06-01` |
+| `google-generative-ai` | `GET {baseUrl}/models?key=<apiKey>` |
+
+The endpoint resolves `$ENV_VAR` references and the `***` REDACTED sentinel (for already-saved entries, by `name`) server-side — the response never echoes the resolved api key. An 8 s timeout protects against hanging upstreams. The UI renders a green `✓ Connected · N models` pill on success or a red `✗ <status> — <error>` pill on failure; any edit to the card's fields clears the pill.
 
 ### Key Files
 

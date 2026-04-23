@@ -26,7 +26,7 @@ import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
 import { PromptBus } from "./prompt-bus.js";
 import { DashboardDefaultAdapter } from "./dashboard-default-adapter.js";
 import { registerAskUserTool } from "./ask-user-tool.js";
-import { activate as activateProviderRegister, onProviderChanged } from "./provider-register.js";
+import { activate as activateProviderRegister, onProviderChanged, reloadProviders } from "./provider-register.js";
 import type { FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { startMetricsMonitor, stopMetricsMonitor, collectMetrics } from "./process-metrics.js";
 import { scanChildProcesses } from "./process-scanner.js";
@@ -217,6 +217,17 @@ function initBridge(pi: ExtensionAPI) {
       // Reload auth credentials when dashboard notifies of changes
       if (msg.type === "credentials_updated") {
         try {
+          // Hot-reload providers.json diff BEFORE refreshing the registry,
+          // so any newly added providers are registered before getAvailable() runs.
+          const diff = await reloadProviders(pi).catch((err) => {
+            console.error("[dashboard] reloadProviders failed:", err);
+            return { added: [], removed: [], changed: [] };
+          });
+          if (diff.added.length || diff.removed.length || diff.changed.length) {
+            console.log(
+              `[dashboard] hot-reloaded providers: added=${JSON.stringify(diff.added)} removed=${JSON.stringify(diff.removed)} changed=${JSON.stringify(diff.changed)}`,
+            );
+          }
           cachedModelRegistry?.authStorage?.reload?.();
           cachedModelRegistry?.refresh?.();
         } catch (err) { console.error("[dashboard] credentials reload failed:", err); }

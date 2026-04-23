@@ -30,6 +30,7 @@ declare module "@oh-my-pi/pi-coding-agent" {
     registerCommand(name: string, options: { description?: string; handler: (args: string, ctx: any) => Promise<void> }): void;
     registerTool(tool: any): void;
     registerProvider(name: string, config: any): void;
+    unregisterProvider(name: string): void;
     exec(command: string, args: string[], options?: { timeout?: number }): Promise<{ stdout: string; stderr: string; exitCode: number }>;
     events: EventBus;
   }
