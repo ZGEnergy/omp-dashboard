@@ -1,23 +1,5 @@
 ## ADDED Requirements
 
-### Requirement: Credentials updated protocol message
-The shared protocol SHALL define a `credentials_updated` message type in the `ServerToExtensionMessage` union. The message SHALL contain `{ type: "credentials_updated" }` with no additional payload.
-
-#### Scenario: Message type definition
-- **WHEN** the protocol types are compiled
-- **THEN** `CredentialsUpdatedMessage` SHALL be a valid `ServerToExtensionMessage` variant with `type: "credentials_updated"`
-
-### Requirement: Bridge handles credentials_updated
-When the bridge extension receives a `credentials_updated` message from the server, it SHALL call `authStorage.reload()` on the cached `modelRegistry.authStorage` to force pi to re-read `auth.json` from disk.
-
-#### Scenario: Credential reload on notification
-- **WHEN** the bridge receives `{ type: "credentials_updated" }` and `modelRegistry.authStorage` is available
-- **THEN** the bridge SHALL call `authStorage.reload()` so the pi session picks up updated credentials
-
-#### Scenario: No modelRegistry available
-- **WHEN** the bridge receives `credentials_updated` but `modelRegistry` has not been captured yet (session not started)
-- **THEN** the bridge SHALL ignore the message without error
-
 ### Requirement: Custom-provider models default to image-capable
 
 When the bridge extension registers a custom provider via `pi.registerProvider(...)` in `registerEntry()` (packages/extension/src/provider-register.ts), every model synthesized from the upstream `/v1/models` discovery response SHALL be declared with `input: ["text", "image"]` as its default capability. This default SHALL apply uniformly regardless of the model id, the provider's `api` field, or any upstream metadata. The default SHALL NOT apply to built-in or OAuth providers whose capabilities come from pi-ai's bundled `models.generated.js`.
@@ -48,5 +30,3 @@ When the bridge extension registers a custom provider via `pi.registerProvider(.
 - **WHEN** pi loads a built-in or OAuth-authenticated provider (Anthropic, OpenAI Codex, GitHub Copilot, Gemini CLI, Antigravity)
 - **THEN** the provider's models SHALL retain their `input` capability from pi-ai's `models.generated.js`
 - **AND** this change SHALL NOT alter the capability of any built-in model
-
-
