@@ -12,7 +12,7 @@
  * See change: fix-windows-server-parity.
  */
 import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
-import { toFileUrl, isTsxLoader } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
+import { toFileUrl, shouldUrlWrapEntry } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
 import os from "node:os";
 import path from "node:path";
 
@@ -37,16 +37,17 @@ export function buildOrchestratorScript(params: RestartParams): string {
   const execPath = params.execPath ?? process.execPath;
   const logPath = path.join(os.homedir(), ".pi", "dashboard", "restart.log");
   // Loader is always URL-wrapped (required on Windows for non-C: drives).
-  // Entry is URL-wrapped EXCEPT when the loader is tsx — tsx's ESM hook
-  // rejects file:// URLs at the entry position. See change:
-  // fix-windows-entry-script-url.
-  const useRawEntry = isTsxLoader(params.loader);
+  // Entry is URL-wrapped only on Windows + non-tsx loader. POSIX + jiti MUST
+  // pass raw path because jiti's resolver treats file:// URL entries as
+  // relative specifiers (normalises to file:/... then prepends cwd).
+  // See openspec/changes/archive/2026-04-24-fix-windows-entry-script-url.
+  const wrapEntry = shouldUrlWrapEntry(params.loader);
   const spawnArgs: string[] = [];
   if (params.loader) {
     spawnArgs.push("--import", toFileUrl(params.loader));
   }
   spawnArgs.push(
-    useRawEntry ? params.cliPath : toFileUrl(params.cliPath),
+    wrapEntry ? toFileUrl(params.cliPath) : params.cliPath,
     "start",
     ...params.extraArgs,
   );

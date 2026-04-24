@@ -13,7 +13,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { resolveJitiFromAnchor } from "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js";
-import { toFileUrl } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
+import { toFileUrl, shouldUrlWrapEntry } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { createRequire } from "node:module";
@@ -353,15 +353,19 @@ async function launchServer(port: number, piPort: number): Promise<void> {
     env.PATH = `${extraPath}${path.delimiter}${env.PATH || ""}`;
   } else {
     // jiti path: spawn node --import <jiti-register.mjs> <cli.ts>
-    // Both jitiPath (already a file:// URL from resolveJitiFromAnchor) and
-    // cliPath (raw OS path) are passed through toFileUrl — idempotent on
-    // URLs, wraps raw paths. Required on Windows for non-C: drives.
-    // See change: fix-windows-entry-script-url.
+    // Loader is always URL-wrapped (Node needs file:// for --import on Windows
+    // drive letters). Entry is URL-wrapped only on Windows + non-tsx loader;
+    // on POSIX the entry MUST be raw because jiti's resolver misbehaves on
+    // file:// URL entries. See openspec/changes/archive/2026-04-24-fix-windows-entry-script-url.
     if (!nodePath) {
       throw new Error("Node.js not found. Install Node.js >= 20.6 or run the setup wizard.");
     }
     spawnBin = nodePath;
-    spawnArgs = ["--import", toFileUrl(jitiPath!), toFileUrl(cliPath), "--port", String(port), "--pi-port", String(piPort)];
+    const wrapEntry = shouldUrlWrapEntry(jitiPath);
+    // entry is gated by shouldUrlWrapEntry: true only on Windows + non-tsx.
+    // On POSIX the raw path is required — jiti misresolves file:// entries.
+    const entry = wrapEntry ? toFileUrl(cliPath) : cliPath;
+    spawnArgs = ["--import", toFileUrl(jitiPath!), entry, "--port", String(port), "--pi-port", String(piPort)]; // ban:raw-node-import-ok: entry gated by shouldUrlWrapEntry
     const extraPath = [piBinDir, nodeBinDir].filter(Boolean).join(path.delimiter);
     env.PATH = `${extraPath}${path.delimiter}${env.PATH || ""}`;
   }

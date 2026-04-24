@@ -5,7 +5,7 @@
  * See change: fix-windows-entry-script-url.
  */
 import { describe, it, expect, vi } from "vitest";
-import { toFileUrl, spawnNodeScript, isTsxLoader } from "../platform/node-spawn.js";
+import { toFileUrl, spawnNodeScript, isTsxLoader, shouldUrlWrapEntry } from "../platform/node-spawn.js";
 import * as execModule from "../platform/exec.js";
 
 describe("toFileUrl", () => {
@@ -77,10 +77,13 @@ describe("spawnNodeScript", () => {
     expect(spawnSpy).toHaveBeenCalledTimes(1);
     const [bin, argv] = spawnSpy.mock.calls[0]!;
     expect(bin).toBe("C:\\Program Files\\nodejs\\node.exe");
+    // On Linux host: entry stays raw even with a Windows-styled path
+    // (shouldUrlWrapEntry consults process.platform, which is Linux).
+    // The Windows-wrapped branch is exercised separately via shouldUrlWrapEntry.
     expect(argv).toEqual([
       "--import",
       "file:///B:/jiti/register.mjs",
-      "file:///B:/Dev/cli.ts",
+      "B:\\Dev\\cli.ts",
       "start",
       "--dev",
     ]);
@@ -135,7 +138,8 @@ describe("spawnNodeScript", () => {
     });
 
     const [, argv] = spawnSpy.mock.calls[0]!;
-    expect(argv).toEqual(["file:///B:/Dev/cli.ts", "help"]);
+    // No loader → shouldUrlWrapEntry returns false on Linux host → raw entry.
+    expect(argv).toEqual(["B:\\Dev\\cli.ts", "help"]);
     spawnSpy.mockRestore();
   });
 
@@ -166,11 +170,41 @@ describe("spawnNodeScript", () => {
     });
 
     const [, argv] = spawnSpy.mock.calls[0]!;
+    // On Linux host with non-tsx loader: entry stays raw.
     expect(argv).toEqual([
       "--import",
       "file:///C:/jiti/register.mjs",
-      "file:///B:/Dev/cli.ts",
+      "B:\\Dev\\cli.ts",
     ]);
     spawnSpy.mockRestore();
+  });
+});
+
+describe("shouldUrlWrapEntry", () => {
+  it("returns false for tsx loader on any platform", () => {
+    const tsxLoader = "file:///home/u/node_modules/tsx/dist/esm/index.mjs";
+    expect(shouldUrlWrapEntry(tsxLoader, "linux")).toBe(false);
+    expect(shouldUrlWrapEntry(tsxLoader, "darwin")).toBe(false);
+    expect(shouldUrlWrapEntry(tsxLoader, "win32")).toBe(false);
+  });
+
+  it("returns false for non-tsx loader on POSIX (jiti MUST get raw entry)", () => {
+    const jiti = "file:///home/u/node_modules/@mariozechner/jiti/lib/jiti-register.mjs";
+    expect(shouldUrlWrapEntry(jiti, "linux")).toBe(false);
+    expect(shouldUrlWrapEntry(jiti, "darwin")).toBe(false);
+  });
+
+  it("returns true for non-tsx loader on Windows (drive letters need file://)", () => {
+    const jiti = "file:///C:/node_modules/@mariozechner/jiti/lib/jiti-register.mjs";
+    expect(shouldUrlWrapEntry(jiti, "win32")).toBe(true);
+  });
+
+  it("returns false when no loader is provided, regardless of platform", () => {
+    // Without a loader, Node's default resolver handles the entry; the URL
+    // wrap was historically used for Windows drive-letter collision, but
+    // if we were to spawn without a loader we'd still default to raw on POSIX.
+    // On Windows without a loader, callers should wrap themselves.
+    expect(shouldUrlWrapEntry(undefined, "linux")).toBe(false);
+    expect(shouldUrlWrapEntry(undefined, "darwin")).toBe(false);
   });
 });

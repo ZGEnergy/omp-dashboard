@@ -11,7 +11,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type { DashboardConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { resolveJitiImport } from "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js";
-import { toFileUrl } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
+import { toFileUrl, shouldUrlWrapEntry } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
 import { isDashboardRunning } from "@blackbelt-technology/pi-dashboard-shared/server-identity.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -78,13 +78,22 @@ export async function launchServer(config: DashboardConfig): Promise<LaunchResul
       );
     } catch { /* if we can't open the log, spawn still works */ }
 
-    // Spawn server via the detached-spawn primitive. resolveJitiImport()
-    // returns a file:// URL; cliPath is wrapped with toFileUrl so both
-    // positions are file:// URLs (required on Windows for node --import on
-    // non-C: drives). See change: fix-windows-entry-script-url.
+    // Spawn server via the detached-spawn primitive. The loader is always
+    // URL-wrapped (Node needs file:// for --import on Windows drive letters).
+    // The entry is URL-wrapped only on Windows + non-tsx loader (Node parses
+    // drive letters as URL schemes in argv); on POSIX the entry MUST be raw
+    // because jiti's resolver misbehaves on file:// URL entries. See
+    // openspec/changes/archive/2026-04-24-fix-windows-entry-script-url.
+    const loader = resolveJitiImport();
+    const wrapEntry = shouldUrlWrapEntry(loader);
+    // entry is gated by shouldUrlWrapEntry(loader): returns true only on
+    // Windows + non-tsx (where URL wrap is required); false on POSIX
+    // where jiti needs the raw path (file:// URL entries trigger jiti's
+    // `<cwd>/file:/...` misresolution bug).
+    const entry = wrapEntry ? toFileUrl(cliPath) : cliPath;
     const r = await spawnDetached({
       cmd: process.execPath,
-      args: ["--import", resolveJitiImport(), toFileUrl(cliPath), ...args],
+      args: ["--import", loader, entry, ...args], // ban:raw-node-import-ok: entry gated by shouldUrlWrapEntry
       env: { ...process.env },
       logFd,
     });

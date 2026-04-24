@@ -100,13 +100,39 @@ export function toFileUrl(pathOrUrl: string): string {
 }
 
 /**
+ * Decide whether the entry-script position needs `file://` URL wrapping.
+ *
+ * Rule:
+ *   - tsx loader: always raw path (tsx rejects file:// entries on every OS)
+ *   - non-tsx (jiti / Node default) on POSIX: raw path
+ *     (POSIX has no drive-letter / URL-scheme collision; jiti's resolver
+ *      actively MISBEHAVES when handed `file://` URL entries — it
+ *      normalises away the triple-slash and then treats `file:/...` as
+ *      a relative specifier, producing `<cwd>/file:/...` ENOENT errors.)
+ *   - non-tsx on Windows: file:// URL
+ *     (Node parses drive letters like `B:` / `A:` as URL schemes in argv
+ *      before loaders run, throwing ERR_UNSUPPORTED_ESM_URL_SCHEME.
+ *      Wrapping with `file://` sidesteps the parse.)
+ *
+ * Keeps a `platform` parameter for testability so unit tests on a POSIX
+ * host can exercise the Windows branch without mutating `process.platform`.
+ */
+export function shouldUrlWrapEntry(
+  loader: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (isTsxLoader(loader)) return false;
+  return platform === "win32";
+}
+
+/**
  * Spawn `node` with an optional `--import` loader and a script entry.
  *
  * The loader position is always URL-wrapped (Node's ESM loader
  * requires `file://` on Windows drive letters outside the heuristic).
  *
- * The entry position is URL-wrapped UNLESS the loader is tsx — tsx
- * rejects file:// URL entries. See `isTsxLoader` for detection.
+ * The entry position follows `shouldUrlWrapEntry(loader, platform)` —
+ * URL on Windows + non-tsx, raw everywhere else.
  *
  * Delegates actual spawning to `platform/exec.ts::spawn` so the
  * `windowsHide: true` default and other safe-spawn invariants are
@@ -115,13 +141,13 @@ export function toFileUrl(pathOrUrl: string): string {
  */
 export function spawnNodeScript(opts: SpawnNodeScriptOptions): ChildProcess {
   const nodeBin = opts.nodeBin ?? process.execPath;
-  const useRawEntry = isTsxLoader(opts.loader);
+  const wrapEntry = shouldUrlWrapEntry(opts.loader);
 
   const argv: string[] = [];
   if (opts.loader) {
     argv.push("--import", toFileUrl(opts.loader));
   }
-  argv.push(useRawEntry ? opts.entry : toFileUrl(opts.entry));
+  argv.push(wrapEntry ? toFileUrl(opts.entry) : opts.entry);
   if (opts.args) argv.push(...opts.args);
 
   return execSpawn(nodeBin, argv, opts.spawnOptions ?? {});
