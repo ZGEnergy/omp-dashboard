@@ -6,36 +6,416 @@
 
 A web-based dashboard for monitoring and interacting with [pi](https://github.com/badlogic/pi-mono) agent sessions from any browser, including mobile.
 
-**Website:** [blackbelttechnology.github.io/pi-agent-dashboard](https://blackbelttechnology.github.io/pi-agent-dashboard) — animated tour, screenshots, and install guide.
+🌐 **Website & demo:** [blackbelttechnology.github.io/pi-agent-dashboard](https://blackbelttechnology.github.io/pi-agent-dashboard) — animated tour, screenshots, and install guide.
+📝 **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
 
-**Changelog:** see [`CHANGELOG.md`](CHANGELOG.md) for release notes.
+> **Note:** This dashboard only works with [pi](https://github.com/badlogic/pi-mono). Oh My Pi is **not** supported.
 
-**Releasing:** see [`docs/release-process.md`](docs/release-process.md) for the cut-a-release workflow.
+---
+
+## Table of contents
+
+- [Quickstart](#quickstart)
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Recommended extensions](#recommended-extensions)
+- [Troubleshooting](#troubleshooting)
+- [Architecture](#architecture)
+- [Monitoring](#monitoring)
+- [Development](#development)
+- [Building the Electron app](#building-the-electron-app)
+- [CI/CD & releasing](#cicd--releasing)
+- [License](#license)
+
+---
+
+## Quickstart
+
+Three install paths, pick one:
+
+### A — Electron desktop app (no prerequisites)
+
+Download a pre-built installer from [GitHub Releases](https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases):
+
+| Platform | Download |
+|----------|----------|
+| **macOS** (Apple Silicon / Intel) | `.dmg` (arm64 / x64) |
+| **Linux** (x64 / ARM64) | `.deb` or `.AppImage` |
+| **Windows** (x64 / ARM64) | `.exe` (NSIS), `.zip`, or portable `.exe` |
+
+On first launch a setup wizard walks you through mode selection (standalone vs. power-user), API key / OAuth sign-in, and [recommended extensions](#recommended-extensions). The standalone mode bundles Node.js and auto-installs pi + dashboard + openspec into `~/.pi-dashboard/` — **no terminal, npm, or Node.js required**.
+
+### B — pi package (recommended for CLI users)
+
+```bash
+pi install npm:@blackbelt-technology/pi-agent-dashboard
+pi
+```
+
+The bridge extension auto-starts the dashboard server on first launch:
+
+```
+🌐 Dashboard started at http://localhost:8000
+```
+
+Open **http://localhost:8000** in any browser. All active pi sessions appear automatically. See [Prerequisites](#prerequisites) for Node.js / build-tool requirements.
+
+### C — From source (contributors)
+
+```bash
+git clone https://github.com/BlackBeltTechnology/pi-agent-dashboard.git
+cd pi-agent-dashboard
+npm install
+pi install /path/to/pi-agent-dashboard     # global
+# or: pi install -l /path/to/pi-agent-dashboard   # project-local only
+```
+
+To try the extension in a single pi session without registering it:
+
+```bash
+pi -e /path/to/pi-agent-dashboard/packages/extension/src/bridge.ts
+```
+
+Remove with `pi remove /path/to/pi-agent-dashboard`. Alternatively, add the package path directly to `~/.pi/agent/settings.json` (global) or `.pi/settings.json` (project) under `"packages": [...]`.
+
+---
 
 ## Features
 
-- **Real-time session mirroring** — See all active pi sessions with live streaming messages
-- **Bidirectional interaction** — Send prompts and commands from the browser
-- **Workspace management** — Organize sessions by project folder with pinned directories and drag-to-reorder
-- **Command autocomplete** — `/` prefix triggers command dropdown with filtering
-- **Session statistics** — Token counts, costs, model info, thinking level, context usage bar
-- **Elapsed time tracking** — Live ticking counters on running operations, final duration on completed tool calls and reasoning blocks
-- **Mobile-friendly** — Responsive layout with swipe drawer, touch targets, and mobile action menus
-- **Session spawning** — Launch new pi sessions from the dashboard (headless by default, or via tmux)
-- **PromptBus architecture** — Unified prompt routing with adapters (TUI, dashboard, custom). Interactive dialogs (confirm/select/input/editor/multiselect) survive page refresh and server restart. First-response-wins semantics with cross-adapter dismissal.
-- **On-demand session loading** — Browse historical sessions with lazy-loaded content from pi session files
-- **Integrated terminal** — Full browser-based terminal emulator (xterm.js + node-pty) with ANSI color support, scrollback, and keep-alive
-- **pi-flows integration** — Live flow execution dashboard with agent cards, detail views, flow graph visualization, summary, abort/auto controls. Launch flows and design new ones with the Flow Architect — all from the browser. Fork decisions and subagent dialogs forwarded via PromptBus.
-- **Force kill escalation** — Two-click Stop button (in command bar and on running tool cards): first click sends soft abort, second click force-kills the process (SIGTERM → SIGKILL). Session preserved as "ended" for resume/fork. Repeated tool calls (e.g. health check loops) are auto-collapsed with a count badge.
-- **Searchable select dialogs** — Keyboard-navigable picker with real-time filtering for OpenSpec changes and flow commands
-- **Browser-based provider auth** — Sign in to Anthropic, OpenAI Codex, GitHub Copilot, Gemini CLI, and Antigravity directly from Settings. Enter API keys for other providers. Credentials saved to `~/.pi/agent/auth.json` and live-synced to running sessions.
-- **Custom LLM providers** — Add OpenAI-compatible, Anthropic-compatible, or Google Generative AI endpoints (Settings → Providers → LLM Providers). Each card has a **Test** button that pings the provider's `/models` endpoint to verify your base URL + API key combination before saving. Adding, editing, or removing a provider takes effect live in every running pi session — no restart required.
-- **Package management** — Browse, install, update, and remove pi packages from the dashboard. Search the npm registry for pi-package extensions/skills/themes, install from npm or git URL, manage global packages in Settings and local packages per workspace. All active sessions auto-reload after changes.
-- **OpenSpec integration** — Browse specs, view archive history, manage changes, and create new changes from the session sidebar
-- **Diff viewer** — Side-by-side and unified diff views with file tree navigation for reviewing agent changes
-- **Editor integration** — Open files in your preferred editor (VS Code, Cursor, etc.) directly from tool call cards
-- **Markdown preview** — Rendered markdown views with search, mermaid diagrams, and syntax highlighting
-- **Network discovery** — mDNS-based auto-discovery of other dashboard servers on the local network; connect to known remote servers
+**Sessions & chat**
+- **Real-time session mirroring** — all active pi sessions with live streaming messages
+- **Bidirectional interaction** — send prompts and commands from the browser
+- **Session statistics** — token counts, costs, model info, thinking level, context usage bar
+- **Elapsed time tracking** — live ticking counters on running operations, final duration on completed tool calls and reasoning blocks
+- **Session spawning** — launch new pi sessions from the dashboard (headless by default, or via tmux)
+- **On-demand session loading** — browse historical sessions with lazy-loaded content from pi session files
+- **Force kill escalation** — two-click Stop button; first click sends soft abort, second force-kills (SIGTERM → SIGKILL). Session preserved as "ended" for resume/fork.
+
+**Workspace & UI**
+- **Workspace management** — organize sessions by project folder with pinned directories and drag-to-reorder
+- **Command autocomplete** — `/` prefix triggers a filtering dropdown
+- **Mobile-friendly** — responsive layout with swipe drawer, touch targets, and mobile action menus
+- **Markdown preview** — rendered markdown views with search, mermaid diagrams, and syntax highlighting
+- **Searchable select dialogs** — keyboard-navigable picker with real-time filtering (OpenSpec changes, flow commands)
+
+**Integrations**
+- **PromptBus architecture** — unified prompt routing with adapters (TUI, dashboard, custom). Interactive dialogs (confirm/select/input/editor/multiselect) survive page refresh and server restart. First-response-wins semantics with cross-adapter dismissal.
+- **pi-flows integration** — live flow execution dashboard with agent cards, detail views, flow graph, summary, abort/auto controls. Launch flows and design new ones with Flow Architect, all from the browser. Fork decisions and subagent dialogs forwarded via PromptBus.
+- **OpenSpec integration** — browse specs, view archive history, manage changes, create new changes from the sidebar
+- **Browser-based provider auth** — sign in to Anthropic, OpenAI Codex, GitHub Copilot, Gemini CLI, and Antigravity from Settings. Enter API keys for other providers. Credentials saved to `~/.pi/agent/auth.json` and live-synced to running sessions.
+- **Custom LLM providers** — add OpenAI-compatible, Anthropic-compatible, or Google Generative AI endpoints (Settings → Providers → LLM Providers). **Test** button verifies the base URL + API key before saving. Adding / editing / removing takes effect live in every running session — no restart.
+- **Package management** — browse, install, update, and remove pi packages. Search the npm registry for pi-package extensions/skills/themes; install from npm or git URL. Active sessions auto-reload after changes.
+
+**Dev tools**
+- **Integrated terminal** — full browser-based terminal emulator (xterm.js + node-pty) with ANSI colors, scrollback, and keep-alive
+- **Diff viewer** — side-by-side and unified diff views with file tree navigation
+- **Editor integration** — open files in VS Code, Cursor, etc. directly from tool call cards
+
+**Networking & distribution**
+- **Network discovery** — mDNS-based auto-discovery of other dashboard servers on the local network
+- **Zrok tunnel** — optional persistent public URL via reserved shares (see [Configuration → Tunnel](#tunnel-zrok))
+
+---
+
+## Prerequisites
+
+**Only needed for Quickstart paths B and C.** The Electron app (path A) bundles everything in standalone mode.
+
+| Requirement | Why | Install |
+|-------------|-----|---------|
+| **[pi](https://github.com/badlogic/pi-mono)** | The AI coding agent the dashboard monitors | `npm i -g @mariozechner/pi-coding-agent` |
+| **Node.js ≥ 22.18.0** | Server runtime. Older 22.x / 24.x < 24.3.0 are affected by [nodejs/node#58515](https://github.com/nodejs/node/issues/58515) which crashes Fastify at startup. | [nodejs.org](https://nodejs.org/) |
+| **C++ build tools** | Required by `node-pty` native addon for the integrated terminal | Xcode CLI Tools (macOS) / `build-essential` (Linux) |
+
+Optional:
+
+| Tool | Purpose | When needed |
+|------|---------|-------------|
+| **tmux** | Spawn new pi sessions in a tmux window | When `spawnStrategy` is `"tmux"` |
+| **[zrok](https://zrok.io/)** | Public tunnel with persistent URLs | When `tunnel.enabled` is `true` (default) |
+
+---
+
+## Configuration
+
+- **Config file:** `~/.pi/dashboard/config.json` (auto-created with defaults on first run)
+- **Tool overrides (machine-local):** `~/.pi/dashboard/tool-overrides.json` — see [Tool overrides](#tool-overrides)
+- **Settings UI:** click the ⚙ gear icon in the sidebar header to edit all fields from the browser
+
+### Precedence & keys
+
+CLI flags → environment variables → config file → built-in defaults.
+
+| CLI flag | Env var | Config key | Default | Description |
+|----------|---------|------------|---------|-------------|
+| `--port` | `PI_DASHBOARD_PORT` | `port` | `8000` | HTTP + browser WebSocket port |
+| `--pi-port` | `PI_DASHBOARD_PI_PORT` | `piPort` | `9999` | Pi extension WebSocket port |
+| `--dev` | — | — | `false` | Development mode (proxy to Vite) |
+| `--no-tunnel` | — | `tunnel.enabled` | `true` | Disable zrok tunnel |
+| — | — | `autoStart` | `true` | Bridge auto-starts server if not running |
+| — | — | `autoShutdown` | `false` | Server shuts down when idle |
+| — | — | `shutdownIdleSeconds` | `300` | Seconds idle before auto-shutdown |
+| — | — | `spawnStrategy` | `"headless"` | Session spawn mode: `"headless"` or `"tmux"` |
+| — | — | `devBuildOnReload` | `false` | Rebuild client + restart server on `/reload` |
+
+The bridge also honours `PI_DASHBOARD_URL=ws://host:port` to point at a remote server instead of localhost.
+
+### Minimal `config.json`
+
+```json
+{
+  "port": 8000,
+  "piPort": 9999,
+  "autoStart": true,
+  "autoShutdown": false,
+  "shutdownIdleSeconds": 300,
+  "spawnStrategy": "headless",
+  "tunnel": { "enabled": true, "reservedToken": "auto-created-on-first-run" },
+  "devBuildOnReload": false,
+  "openspec": {
+    "pollIntervalSeconds": 30,
+    "maxConcurrentSpawns": 3,
+    "changeDetection": "mtime",
+    "jitterSeconds": 5
+  }
+}
+```
+
+### Authentication (optional)
+
+OAuth2 authentication guards external (tunnel) access. Localhost is always unguarded.
+
+```json
+{
+  "auth": {
+    "secret": "auto-generated-if-omitted",
+    "providers": {
+      "github":   { "clientId": "...", "clientSecret": "..." },
+      "google":   { "clientId": "...", "clientSecret": "..." },
+      "keycloak": { "clientId": "...", "clientSecret": "...", "issuerUrl": "https://keycloak.example.com/realms/myrealm" }
+    },
+    "allowedUsers": ["octocat", "user@example.com", "*@company.com"]
+  }
+}
+```
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `auth.secret` | No | JWT signing secret (auto-generated if omitted) |
+| `auth.providers` | Yes | Map of provider → `{ clientId, clientSecret, issuerUrl? }` |
+| `auth.allowedUsers` | No | Allowlist: usernames, emails, or `*@domain` wildcards. Empty = allow all |
+
+**Supported providers:** `github`, `google`, `keycloak`, `oidc` (generic OIDC with `issuerUrl`).
+
+**Callback URL:** register `https://<tunnel-url>/auth/callback/<provider>` in your OAuth provider settings. The tunnel URL is stable across restarts (reserved shares are auto-created).
+
+### Tunnel (zrok)
+
+The dashboard auto-connects a [zrok](https://zrok.io/) tunnel on start when `tunnel.enabled` is `true`. Install with `brew install zrok` (macOS) and run `zrok enable <token>` to enrol — the dashboard reads zrok's own config (`~/.zrok2/environment.json`), no keys are stored in the dashboard. Reserved shares provide persistent URLs across restarts.
+
+### OpenSpec background polling
+
+Tune how often the server polls known directories for OpenSpec updates (`openspec` block):
+
+| Key | Default | Range | Description |
+|-----|---------|-------|-------------|
+| `pollIntervalSeconds` | `30` | `5–3600` | How often each known directory is polled |
+| `maxConcurrentSpawns` | `3` | `1–16` | Cap on concurrent `openspec` CLI invocations |
+| `changeDetection` | `"mtime"` | `"mtime" \| "always"` | `mtime` skips unchanged proposals; `always` polls unconditionally |
+| `jitterSeconds` | `5` | `0–60` | Per-directory phase offset so polls don't align on the same tick |
+
+Live-reconfigurable via Settings → Advanced → "Background polling (OpenSpec)" or `PUT /api/config` — no server restart needed. See [docs/architecture.md](docs/architecture.md) for the cost model.
+
+### Tool overrides
+
+The dashboard resolves every external tool it calls (`pi`, `pi-coding-agent`, `openspec`, `npm`, `node`, `tsx`, `git`, `zrok`, `pi-dashboard`) through a single `ToolRegistry`. Each tool has an ordered strategy chain (override → managed install → bare-import / npm-global → PATH search), and every resolution records a diagnostic trail.
+
+**Inspecting and overriding** — Settings → General → **Tools** shows every resolved tool, its source, and the trail. You can set a per-tool override path, rescan individually or all at once, and export the full diagnostic report.
+
+**Overrides file** — `~/.pi/dashboard/tool-overrides.json`:
+
+```json
+{
+  "version": 1,
+  "overrides": {
+    "pi":              { "path": "C:\\custom\\pi.cmd" },
+    "pi-coding-agent": { "path": "D:\\dev\\pi-coding-agent\\dist\\index.js" }
+  }
+}
+```
+
+The file is deliberately separate from `config.json` so machine-specific paths don't follow a dotfiles sync. Invalid overrides (path doesn't exist) are recorded in the trail and the registry falls through to the next strategy automatically.
+
+---
+
+## Usage
+
+### Auto-start (default)
+
+The bridge extension **automatically starts the dashboard server** when pi launches if it's not already running. Disable with `"autoStart": false` in `~/.pi/dashboard/config.json`.
+
+### Daemon mode
+
+```bash
+pi-dashboard start           # background daemon (production)
+pi-dashboard start --dev     # dev mode (proxy to Vite, fallback to production build)
+pi-dashboard stop            # stop daemon (also kills stale port holders)
+pi-dashboard restart         # restart (production)
+pi-dashboard restart --dev   # restart in dev mode
+pi-dashboard status          # daemon status
+```
+
+Daemon stdout/stderr is logged to `~/.pi/dashboard/server.log` (append mode with timestamped headers per start).
+
+### Manual server start
+
+```bash
+npx tsx packages/server/src/cli.ts
+npx tsx packages/server/src/cli.ts --port 8000 --pi-port 9999
+npx tsx packages/server/src/cli.ts --dev   # proxy to Vite dev server
+```
+
+### Graceful restart via API
+
+```bash
+# Restart in the same mode
+curl -X POST http://localhost:8000/api/restart
+
+# Switch to dev / production
+curl -X POST http://localhost:8000/api/restart -H 'Content-Type: application/json' -d '{"dev":true}'
+curl -X POST http://localhost:8000/api/restart -H 'Content-Type: application/json' -d '{"dev":false}'
+
+# Check current mode
+curl -s http://localhost:8000/api/health | jq .mode
+```
+
+The restart endpoint waits for the old server to exit, starts the new one, and verifies health. It works identically on Windows, macOS, and Linux (no `sh` / `lsof` / `curl` dependency).
+
+### Dev mode with production fallback
+
+When started with `--dev`, the server proxies client requests to the Vite dev server for HMR. If Vite is **not running**, it automatically falls back to serving the production build from `dist/client/`:
+
+- `pi-dashboard start --dev` **always works** — no 502 errors
+- Start/stop Vite independently without restarting the dashboard
+- Start Vite later and refresh the browser to get HMR
+
+### Dev build on reload
+
+Set `"devBuildOnReload": true` in `config.json` for a one-command full-stack refresh:
+
+```
+/reload → build client → stop server → reload extension → auto-start fresh server
+```
+
+> Blocks pi for ~2–5s during the build. The server shutdown affects all connected sessions — they auto-reconnect when one restarts the server.
+
+### Session spawning
+
+**Headless** (default) — runs pi as a background process with no terminal attached. Interaction through the web UI.
+
+**tmux** — runs pi inside a tmux session named `pi-dashboard`, each spawned session as a new window:
+
+```bash
+tmux attach -t pi-dashboard                # attach
+tmux list-windows -t pi-dashboard          # list windows
+# inside tmux: Ctrl-b n / p / w           # next / prev / picker
+```
+
+Switch with `"spawnStrategy": "tmux"` in `~/.pi/dashboard/config.json`.
+
+### Keyboard shortcuts in chat input
+
+Bash-style history recall and per-session draft persistence:
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send the prompt |
+| `Shift+Enter` | Insert a newline |
+| `ArrowUp` | Recall previous user prompt (caret on first line, no dropdown open). Repeat to walk back |
+| `ArrowDown` | Walk forward through history (caret on last line). Past the newest entry, restores the in-progress draft |
+| `Escape` | Restore in-progress draft and exit history mode; also cancels pending prompt / dismisses dropdown |
+| `Tab` / `Enter` in dropdown | Accept the highlighted `/command` or `@file` suggestion |
+
+Drafts (typed-but-unsent text) are persisted per session in `localStorage` under `chat-draft:<sessionId>` and survive navigation (Settings, OpenSpec preview, diffs, …) and full page reloads. Drafts never leak between sessions.
+
+---
+
+## Recommended extensions
+
+The dashboard integrates tightly with a small, curated set of pi extensions — for custom tool rendering, the Flow dashboard, and anthropic-messages protocol compatibility. The Electron wizard installs them in one go; the **Packages** tab and a top-of-page banner keep them discoverable afterwards.
+
+| Extension | Source | Status | Unlocks |
+|---|---|---|---|
+| `pi-anthropic-messages` | `git@github.com:BlackBeltTechnology/pi-anthropic-messages.git` | **required** | Tool calls on Claude-model Anthropic OAuth / 9Router `cc/*` / pi-model-proxy providers. Without it, tool calls fall back to Claude Code's built-in `bash_ide` sandbox and fail. |
+| `@tintinweb/pi-subagents` | `npm:@tintinweb/pi-subagents` | strongly suggested | `Agent` tool card UI, subagent activity badge, `get_subagent_result` / `steer_subagent` renderers |
+| `pi-flows` | `git@github.com:BlackBeltTechnology/pi-flows.git` | strongly suggested | Flow dashboard, role aliases (`@planning`, `@coding`, …), subagent / flow_write / flow_results / agent_write / ask_user / skill_read / finish tools |
+| `pi-web-access` | `npm:pi-web-access` | strongly suggested | `web_search`, `code_search`, `fetch_content`, `get_search_content` |
+| `pi-agent-browser` | `npm:pi-agent-browser` | optional | `browser` tool (open, snapshot, click, screenshot) |
+
+Authoritative source: `packages/shared/src/recommended-extensions.ts`. Descriptions, versions, and installed-state are enriched live via `GET /api/packages/recommended` (offline fallback).
+
+---
+
+## Troubleshooting
+
+### Dashboard server doesn't start
+
+If `pi` launches but the dashboard never becomes reachable, inspect the launch log:
+
+```bash
+cat ~/.pi/dashboard/server.log                          # Linux / macOS
+type %USERPROFILE%\.pi\dashboard\server.log             # Windows
+```
+
+The log is append-mode with timestamped headers per start attempt, so previous crashes are preserved. Common issues:
+
+- **`ERR_UNSUPPORTED_ESM_URL_SCHEME` on Windows** — fully fixed in 0.4.0+. The 0.2.10 release wrapped the `--import` loader position as a `file://` URL, but the entry-script position stayed a raw Windows path — which crashed Node on non-`C:` drives (`A:\`, `B:\`, …) because the drive-letter heuristic has gaps there. 0.4.0 routes all four server-spawn call sites through a single `spawnNodeScript` / `toFileUrl` helper that wraps both positions unconditionally, and a repo-level lint test prevents regression. Upgrade the package.
+- **`Cannot find pi's TypeScript loader`** — pi is not installed globally. Run `npm install -g @mariozechner/pi-coding-agent`.
+- **Fastify crash at startup** — you're on Node 22.0.0–22.17.x or 24.1.0–24.2.x which are affected by [nodejs/node#58515](https://github.com/nodejs/node/issues/58515). Upgrade to 22.18+ or 24.3+.
+
+### Port already in use
+
+- **Windows:** `netstat -ano | findstr :8000` then `taskkill /F /PID <pid>`
+- **Unix:** `lsof -t -i :8000 | xargs kill`
+- Or change `port` in `~/.pi/dashboard/config.json`.
+
+### UI is empty or stuck after switching servers
+
+Since the `safe-server-switch` release, switching servers via the header dropdown is **transactional**: the UI verifies the target through a short-lived staging WebSocket (5 s timeout) **before** clearing state or writing `localStorage`. If the target is unreachable, nothing changes — a toast appears and you stay on the previous server.
+
+If the currently-active server drops for more than 3 s, a yellow **“Disconnected from \<host\>. Retrying…”** banner appears at the top with a **Switch server** button — use it to pick a reachable server.
+
+You should no longer need to manually `localStorage.removeItem("pi-dashboard-last-server")` to recover from a bad switch. If you still get stuck, please file an issue.
+
+### Windows: sessions die when the dashboard restarts
+
+Since the `consolidate-windows-spawn-and-platform-handlers` release, pi sessions on Windows **survive dashboard restart**, matching macOS/Linux behaviour. Previously, killing the dashboard process (Task Manager, Ctrl+C, `/api/restart`, crash) terminated every running pi session because the children were in the server's libuv kill-on-close Job Object. The fix uses `detached: true` so children are excluded from the parent's job.
+
+If you previously relied on "closing the dashboard cleans everything up," use the per-session **Force Kill** action instead (or `POST /api/session/:id/force-kill`).
+
+### Windows Terminal tab doesn't appear
+
+Install Windows Terminal (`wt.exe`) for tabbed interactive sessions — the dashboard prefers it over WSL tmux / headless when available. Windows 11 ships with it; on Windows 10 install from the Microsoft Store.
+
+If `wt.exe` is on PATH but launching does nothing, check **Settings → Apps → Advanced app settings → App execution aliases**. If the "wt" alias is disabled, `wt.exe` is found but can't be executed. Enable the alias or uninstall/reinstall Windows Terminal.
+
+### Sessions don't group under my pinned folder
+
+Since v0.3+, session grouping uses OS-aware path equality (`platform/paths.ts`). Sessions group correctly under a pinned folder even across trailing-separator, separator-style, or case differences (on Windows and macOS).
+
+If you still see two entries for what should be one folder, the paths are likely on different Windows drives (`A:\Foo` and `B:\Foo` are different filesystems and never merge) — that's correct behaviour. If the paths really are the same filesystem, file an issue with both the pinned path (Settings → Tools → Export diagnostics) and the session `cwd` from `/api/sessions`.
+
+### Tool not found (pi / openspec / npm / …)
+
+Open **Settings → General → Tools**, click the chevron next to the failing tool to see the full `tried[]` trail, then either (a) install the missing tool on PATH / in the managed location shown in the trail, or (b) set an explicit override via the row's path input. Hit **Rescan** to pick up the change without a server restart.
+
+### Recommended extensions: "Permission denied (publickey)"
+
+`pi-flows` and `pi-anthropic-messages` install via SSH (`git@github.com:…`). If your system has no GitHub SSH key, set one up following [GitHub's SSH docs](https://docs.github.com/en/authentication/connecting-to-github-with-ssh), or substitute the equivalent HTTPS URL in the manifest if your fork is public.
+
+---
 
 ## Architecture
 
@@ -65,8 +445,6 @@ graph LR
     BG --- MEM
 ```
 
-The system has three components:
-
 | Component | Location | Role |
 |-----------|----------|------|
 | **Bridge Extension** | `packages/extension/` | Runs in every pi session. Forwards events, relays commands, auto-starts server, hosts PromptBus. |
@@ -75,406 +453,6 @@ The system has three components:
 | **Shared** | `packages/shared/` | TypeScript types, protocols, and utilities shared across all packages. |
 
 See [docs/architecture.md](docs/architecture.md) for detailed data flows, reconnection logic, and persistence model.
-
-## Getting Started
-
-There are three ways to use the dashboard, from simplest to most flexible:
-
-### Option A: Electron Desktop App (standalone — no prerequisites)
-
-Download a pre-built installer from [GitHub Releases](https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases) for your platform:
-
-| Platform | Download |
-|----------|----------|
-| **macOS** (Apple Silicon) | `.dmg` (arm64) |
-| **macOS** (Intel) | `.dmg` (x64) |
-| **Linux** (x64) | `.deb` or `.AppImage` |
-| **Linux** (ARM64) | `.deb` |
-| **Windows** (x64) | `.exe` (NSIS installer), `.zip`, or portable `.exe` |
-| **Windows** (ARM64) | `.zip` or portable `.exe` |
-
-On first launch, a setup wizard guides you through:
-
-1. **Choose a mode:**
-   - **Standalone** — Bundles Node.js and auto-installs pi + dashboard + openspec into `~/.pi-dashboard/`. No Node.js, npm, or build tools needed.
-   - **Power User** — Uses your existing system-installed pi and dashboard.
-2. **Configure an API key** — Enter your Anthropic/OpenAI key or sign in via browser-based OAuth.
-3. **Recommended extensions** — Install the curated set of pi extensions the dashboard is built to work with (see [Recommended extensions](#recommended-extensions) below). You can skip and manage them later from the Packages tab.
-4. **Done** — The app discovers or spawns a dashboard server automatically.
-
-> **No terminal, no npm, no Node.js required.** The Electron app is fully self-contained in standalone mode. It bundles a Node.js runtime, spawns the dashboard server internally, and manages all dependencies. System tray integration keeps it running in the background.
-
-### Option B: pi Package (recommended for CLI users)
-
-Requires [pi](https://github.com/badlogic/pi-mono) and Node.js **≥ 22.18.0** (or ≥ 24.3.0). Older Node 22.x / 24.x builds are affected by [nodejs/node#58515](https://github.com/nodejs/node/issues/58515) which crashes Fastify at startup.
-
-> **Note:** This dashboard only works with [pi](https://github.com/badlogic/pi-mono). Oh My Pi is **not** supported.
-
-```bash
-pi install npm:@blackbelt-technology/pi-agent-dashboard
-pi
-```
-
-The bridge extension auto-starts the dashboard server on first launch. You'll see:
-
-```
-🌐 Dashboard started at http://localhost:8000
-```
-
-Open **http://localhost:8000** in any browser. All active pi sessions appear automatically.
-
-### Option C: Local development install
-
-```bash
-git clone https://github.com/BlackBeltTechnology/pi-agent-dashboard.git
-cd pi-agent-dashboard
-npm install
-pi install /path/to/pi-agent-dashboard
-```
-
-## Recommended extensions
-
-The dashboard integrates tightly with a small, curated set of pi extensions
-— for custom tool rendering, the Flow dashboard, and anthropic-messages
-protocol compatibility. The wizard's Recommended-extensions step installs
-them in one go; the **Packages** tab and a top-of-page **banner** keep
-them discoverable afterwards.
-
-| Extension | Source | Status | Unlocks |
-|---|---|---|---|
-| `pi-anthropic-messages` | `git@github.com:BlackBeltTechnology/pi-anthropic-messages.git` | **required** | Tool calls on Claude-model Anthropic OAuth / 9Router `cc/*` / pi-model-proxy providers. Without it, tool calls fall back to Claude Code's built-in `bash_ide` sandbox and fail. |
-| `@tintinweb/pi-subagents` | `npm:@tintinweb/pi-subagents` | strongly suggested | `Agent` tool card UI, subagent activity badge, `get_subagent_result` / `steer_subagent` renderers. |
-| `pi-flows` | `git@github.com:BlackBeltTechnology/pi-flows.git` | strongly suggested | Flow dashboard, role aliases (`@planning`, `@coding`, …), subagent / flow_write / flow_results / agent_write / ask_user / skill_read / finish tools. |
-| `pi-web-access` | `npm:pi-web-access` | strongly suggested | `web_search`, `code_search`, `fetch_content`, `get_search_content`. |
-| `pi-agent-browser` | `npm:pi-agent-browser` | optional | `browser` tool (open, snapshot, click, screenshot). |
-
-Authoritative source of truth: `packages/shared/src/recommended-extensions.ts`.
-Descriptions, versions, and installed-state are enriched live at runtime via
-`GET /api/packages/recommended` (falling back to offline descriptions on
-network failure).
-
-### GitHub SSH notes
-
-The `pi-flows` and `pi-anthropic-messages` entries install via `pi install
-git@github.com:…` (SSH). If your system doesn't have a GitHub SSH key
-configured the clone will fail with a "Permission denied (publickey)"
-error. Set up a key by following
-[GitHub's SSH docs](https://docs.github.com/en/authentication/connecting-to-github-with-ssh),
-or substitute the equivalent HTTPS URL in the manifest if your fork is
-public.
-
-### Quick test (without installing)
-
-To try the extension in a single pi session without registering it:
-
-```bash
-pi -e /path/to/pi-agent-dashboard/packages/extension/src/bridge.ts
-```
-
-## Prerequisites
-
-Only needed for Option B/C (the Electron app handles everything automatically).
-
-| Requirement | Why | Install |
-|-------------|-----|---------|
-| **[pi](https://github.com/badlogic/pi-mono)** ≥ **0.70.0** | The AI coding agent that the dashboard monitors (Oh My Pi is **not** supported). The dashboard does NOT support pi versions older than 0.70.0 (see `piCompatibility` in `packages/server/package.json`); below-minimum versions trigger a 503-blocking banner with an in-app upgrade affordance. | `npm i -g @mariozechner/pi-coding-agent@0.70.0` |
-| **Node.js ≥ 22.18.0** | Runtime for the dashboard server (older 22.x / 24.x affected by [nodejs/node#58515](https://github.com/nodejs/node/issues/58515)) | [nodejs.org](https://nodejs.org/) |
-| **C++ build tools** | Required by `node-pty` native addon for terminal emulation | Xcode CLI Tools (macOS) / `build-essential` (Linux) |
-
-### Optional tools
-
-| Tool | Purpose | When needed |
-|------|---------|-------------|
-| **tmux** | Spawn new pi sessions from the browser in a tmux window | When `spawnStrategy` is `"tmux"` |
-| **[zrok](https://zrok.io/)** | Expose dashboard over the internet via tunnel (auto-connects on server start). Install with `brew install zrok` (macOS) and run `zrok enable <token>` to enroll — the dashboard reads zrok's own config (`~/.zrok2/environment.json`), no keys are stored in the dashboard. Uses reserved shares for persistent URLs across restarts. | When `tunnel.enabled` is `true` (default) |
-
-## Configuration
-
-Config file: **`~/.pi/dashboard/config.json`** (auto-created with defaults on first run)
-
-Tool path overrides (optional, machine-local): **`~/.pi/dashboard/tool-overrides.json`** — see [Tool resolution & overrides](#tool-resolution--overrides) below.
-
-```json
-{
-  "port": 8000,
-  "piPort": 9999,
-  "autoStart": true,
-  "autoShutdown": false,
-  "shutdownIdleSeconds": 300,
-  "spawnStrategy": "headless",
-  "tunnel": { "enabled": true, "reservedToken": "auto-created-on-first-run" },
-  "devBuildOnReload": false,
-  "openspec": {
-    "pollIntervalSeconds": 30,
-    "maxConcurrentSpawns": 3,
-    "changeDetection": "mtime",
-    "jitterSeconds": 5
-  }
-}
-```
-
-**OpenSpec background polling** (`openspec` block):
-
-| Key | Default | Range | Description |
-|-----|---------|-------|-------------|
-| `pollIntervalSeconds` | `30` | `5–3600` | How often each known directory is polled for OpenSpec updates |
-| `maxConcurrentSpawns` | `3` | `1–16` | Cap on concurrent `openspec` CLI invocations across all directories |
-| `changeDetection` | `"mtime"` | `"mtime" \| "always"` | `mtime` skips re-polling unchanged proposals (near-zero steady-state cost); `always` polls unconditionally |
-| `jitterSeconds` | `5` | `0–60` | Per-directory phase offset so polls don't all align on the same tick |
-
-Live-reconfigurable via Settings → Advanced → "Background polling (OpenSpec)" or `PUT /api/config` — no server restart needed. See [docs/architecture.md](docs/architecture.md) for the cost model.
-
-### Tool resolution & overrides
-
-The dashboard resolves every external tool it calls (`pi`, `pi-coding-agent`, `openspec`, `npm`, `node`, `tsx`, `git`, `zrok`, `pi-dashboard`) through a single `ToolRegistry`. Each tool has an ordered strategy chain (override → managed install → bare-import / npm-global → PATH search), and every resolution records a diagnostic trail of which strategies were tried and why each succeeded or failed.
-
-**Inspecting and overriding** — Settings → General → **Tools** shows every resolved tool, its source, and the trail. You can set a per-tool override path, rescan a single tool or all of them, and export the full diagnostic report for bug reports.
-
-**Overrides file** — `~/.pi/dashboard/tool-overrides.json`:
-
-```json
-{
-  "version": 1,
-  "overrides": {
-    "pi":              { "path": "C:\\custom\\pi.cmd" },
-    "pi-coding-agent": { "path": "D:\\dev\\pi-coding-agent\\dist\\index.js" }
-  }
-}
-```
-
-The file is deliberately separate from `config.json` so machine-specific paths don't follow a dotfiles sync to another host. Invalid overrides (path doesn't exist) are recorded in the diagnostic trail and the registry falls through to the next strategy automatically.
-
-**Troubleshooting** — if the dashboard says it can't find `pi`, `openspec`, `npm`, or any other tool, open Settings → General → Tools, click the chevron next to the failing tool to see the full `tried[]` trail, then either (a) install the missing tool on PATH / in the managed location shown in the trail, or (b) set an explicit override via the row's path input. Hit **Rescan** to pick up the change without a server restart.
-
-**Troubleshooting: sessions don't group under my pinned folder** — since v0.3+, session grouping uses OS-aware path equality (`platform/paths.ts`). Sessions group correctly under a pinned folder even when the path stored on pin and the path reported by the session differ in trailing separator, separator style, or case (on Windows and macOS). If you still see two entries for what should be one folder, the paths are likely on different Windows drives (`A:\Foo` and `B:\Foo` are different filesystems and never merge) — that's correct behavior, not a bug. If the paths really are the same filesystem, file an issue with both the pinned path (visible in Settings → Tools → Export diagnostics) and the session `cwd` as reported in `/api/sessions`.
-
-### Windows session durability
-
-**Behavior change**: Since the `consolidate-windows-spawn-and-platform-handlers` release, pi sessions on Windows now **survive dashboard server restart**, matching macOS/Linux behavior. Previously, killing or restarting the dashboard process (Task Manager, Ctrl+C, `/api/restart`, crash) would terminate every running pi session because the children were in the server's libuv kill-on-close Job Object. The fix uses `detached: true` so children are excluded from the parent's job — the Windows equivalent of Unix PGID detachment.
-
-If you previously relied on "closing the dashboard cleans everything up," use the per-session **Force Kill** action instead (or `POST /api/session/:id/force-kill` via the REST API).
-
-**Recommended: install Windows Terminal** (`wt.exe`) for tabbed interactive sessions on Windows 10/11. The dashboard prefers `wt` when available (new tab in an existing WT window, respects your default profile — cmd / PowerShell / WSL / whatever), and falls back to WSL tmux and then headless mode when absent. Windows Terminal is bundled with Windows 11; on Windows 10 install it from the Microsoft Store (search for "Windows Terminal").
-
-**Troubleshooting: UI is empty / dashboard can't reconnect after switching servers** — since the `safe-server-switch` release, switching servers in the header dropdown is transactional: the UI verifies the new server is reachable via a short-lived staging WebSocket (5s timeout) BEFORE clearing any state or writing `localStorage`. If the target is down, nothing changes — you see a toast and stay connected to the previous server. If you lose connection to the currently-active server for more than 3 seconds, a yellow "Disconnected from &lt;host&gt;. Retrying…" banner appears at the top of the page with a **Switch server** button — use it to pick a reachable server. You should no longer need to manually `localStorage.removeItem("pi-dashboard-last-server")` to recover from a bad switch; if you still find yourself stuck, please file an issue.
-
-**Troubleshooting: Windows Terminal tab doesn't appear** — if `wt.exe` is on PATH but launching does nothing, check Settings → Apps → Advanced app settings → App execution aliases. If the "wt" alias is disabled, `wt.exe` is found but can't be executed. Enable the alias or uninstall/reinstall Windows Terminal.
-
-### Authentication (Optional)
-
-Add an `auth` section to enable OAuth2 authentication for external (tunnel) access. Localhost is always unguarded.
-
-```json
-{
-  "auth": {
-    "secret": "auto-generated-if-omitted",
-    "providers": {
-      "github": {
-        "clientId": "your-github-client-id",
-        "clientSecret": "your-github-client-secret"
-      },
-      "google": {
-        "clientId": "your-google-client-id",
-        "clientSecret": "your-google-client-secret"
-      },
-      "keycloak": {
-        "clientId": "your-keycloak-client-id",
-        "clientSecret": "your-keycloak-client-secret",
-        "issuerUrl": "https://keycloak.example.com/realms/myrealm"
-      }
-    },
-    "allowedUsers": ["octocat", "user@example.com", "*@company.com"]
-  }
-}
-```
-
-| Key | Required | Description |
-|-----|----------|-------------|
-| `auth.secret` | No | JWT signing secret (auto-generated if omitted) |
-| `auth.providers` | Yes | Map of provider name → `{ clientId, clientSecret, issuerUrl? }` |
-| `auth.allowedUsers` | No | User allowlist: usernames, emails, or `*@domain` wildcards. Empty = allow all |
-
-**Supported providers:** `github`, `google`, `keycloak`, `oidc` (generic OIDC with `issuerUrl`).
-
-**Callback URL:** Register `https://<tunnel-url>/auth/callback/<provider>` in your OAuth provider settings. The tunnel URL is stable across restarts (reserved shares are auto-created).
-
-**Settings UI:** Click the ⚙ gear icon in the sidebar header to open the Settings panel, where all config fields (including auth) can be edited from the browser.
-
-**Precedence:** CLI flags → environment variables → config file → built-in defaults.
-
-| CLI Flag | Env Var | Config Key | Default | Description |
-|----------|---------|------------|---------|-------------|
-| `--port` | `PI_DASHBOARD_PORT` | `port` | `8000` | HTTP + Browser WebSocket port |
-| `--pi-port` | `PI_DASHBOARD_PI_PORT` | `piPort` | `9999` | Pi extension WebSocket port |
-| `--dev` | — | — | `false` | Development mode (proxy to Vite) |
-| `--no-tunnel` | — | `tunnel.enabled` | `true` | Disable zrok tunnel |
-| — | — | `autoStart` | `true` | Bridge auto-starts server if not running |
-| — | — | `autoShutdown` | `false` | Server shuts down when idle |
-| — | — | `shutdownIdleSeconds` | `300` | Seconds idle before auto-shutdown |
-| — | — | `spawnStrategy` | `"headless"` | Session spawn mode: `"headless"` or `"tmux"` |
-| — | — | `devBuildOnReload` | `false` | Rebuild client + restart server on `/reload` |
-
-### Override the server URL
-
-By default the bridge connects to `ws://localhost:{piPort}`. To point at a remote server:
-
-```bash
-PI_DASHBOARD_URL=ws://192.168.1.100:9999 pi
-```
-
-## Installation Methods
-
-### Electron Desktop App (standalone)
-
-See [Getting Started — Option A](#option-a-electron-desktop-app-standalone--no-prerequisites) above. Download from [GitHub Releases](https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases).
-
-### From npm (recommended for CLI users)
-
-```bash
-pi install npm:@blackbelt-technology/pi-agent-dashboard
-```
-
-> **Note:** Only [pi](https://github.com/badlogic/pi-mono) is supported. Oh My Pi is **not** compatible.
-
-### Local development install
-
-```bash
-cd /path/to/pi-agent-dashboard
-npm install
-
-# Global install
-pi install /path/to/pi-agent-dashboard
-
-# Or project-local only
-pi install -l /path/to/pi-agent-dashboard
-```
-
-Pi reads the `pi.extensions` field from `package.json` and loads the bridge extension automatically.
-
-### Manual settings entry
-
-Add the package path directly to your settings file:
-
-**Global** (`~/.pi/agent/settings.json`):
-```json
-{
-  "packages": ["/path/to/pi-agent-dashboard"]
-}
-```
-
-**Project-local** (`.pi/settings.json`):
-```json
-{
-  "packages": ["/path/to/pi-agent-dashboard"]
-}
-```
-
-### Removing
-
-```bash
-pi remove /path/to/pi-agent-dashboard
-```
-
-## Usage
-
-### Auto-start (default)
-
-The bridge extension **automatically starts the dashboard server** when pi launches if it's not already running. No separate terminal needed.
-
-To disable: set `"autoStart": false` in `~/.pi/dashboard/config.json`.
-
-### Manual server start
-
-```bash
-npx tsx packages/server/src/cli.ts
-npx tsx packages/server/src/cli.ts --port 8000 --pi-port 9999
-npx tsx packages/server/src/cli.ts --dev   # proxy to Vite dev server
-```
-
-### Daemon mode
-
-```bash
-pi-dashboard start           # Start as background daemon (production)
-pi-dashboard start --dev     # Start in dev mode (proxy to Vite, fallback to production build)
-pi-dashboard stop            # Stop running daemon (also kills stale port holders)
-pi-dashboard restart         # Restart daemon (production)
-pi-dashboard restart --dev   # Restart in dev mode
-pi-dashboard status          # Show daemon status
-```
-
-Daemon stdout/stderr is logged to `~/.pi/dashboard/server.log` for crash diagnosis.
-
-### Keyboard shortcuts in chat input
-
-The chat input supports bash-style history recall and per-session draft persistence:
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Send the prompt. |
-| `Shift+Enter` | Insert a newline. |
-| `ArrowUp` | Recall the previous user prompt (only when the caret is on the first line and no autocomplete dropdown is open). Repeat to walk further back. |
-| `ArrowDown` | Walk forward through history (only when the caret is on the last line). Past the newest entry, restores the in-progress draft. |
-| `Escape` | While navigating history, restore the in-progress draft and exit history mode. Also cancels a pending prompt or dismisses the autocomplete dropdown. |
-| `Tab` / `Enter` in dropdown | Accept the highlighted `/command` or `@file` suggestion. |
-
-Drafts (typed-but-unsent text) are persisted per session in `localStorage` under `chat-draft:<sessionId>` and survive navigation (Settings, OpenSpec preview, file diffs, ...) as well as full page reloads. Drafts never leak between sessions.
-
-### Graceful restart via API
-
-Restart without CLI — useful from scripts, other sessions, or the dashboard skill:
-
-```bash
-# Restart in same mode (preserves current dev/prod)
-curl -X POST http://localhost:8000/api/restart
-
-# Switch to dev mode
-curl -X POST http://localhost:8000/api/restart -H 'Content-Type: application/json' -d '{"dev":true}'
-
-# Switch to production mode
-curl -X POST http://localhost:8000/api/restart -H 'Content-Type: application/json' -d '{"dev":false}'
-
-# Check current mode
-curl -s http://localhost:8000/api/health | jq .mode
-```
-
-The restart endpoint waits for the old server to exit, starts the new one, and verifies health. If the new server fails to start, the error is logged to `server.log`.
-
-### Dev mode with production fallback
-
-When started with `--dev`, the server proxies client requests to the Vite dev server for HMR. If Vite is **not running**, the server automatically falls back to serving the production build from `dist/client/`. This means:
-
-- `pi-dashboard start --dev` **always works** — no 502 errors
-- Start/stop Vite independently without restarting the dashboard
-- Seamless transition: start Vite later and refresh the browser to get HMR
-
-### Session spawning
-
-The dashboard can spawn new pi sessions from the browser. Two strategies are available:
-
-**Headless** (default) — Runs pi as a background process with no terminal attached. Interaction happens entirely through the dashboard web UI.
-
-**tmux** — Runs pi inside a tmux session named `pi-dashboard`. Each spawned session opens as a new tmux window. This lets you attach to the terminal when needed:
-
-```bash
-# Attach to the pi-dashboard tmux session
-tmux attach -t pi-dashboard
-
-# List all windows (each is a spawned pi session)
-tmux list-windows -t pi-dashboard
-
-# Switch between windows inside tmux
-Ctrl-b n    # next window
-Ctrl-b p    # previous window
-Ctrl-b w    # interactive window picker
-```
-
-To switch strategy, set `spawnStrategy` in `~/.pi/dashboard/config.json`:
-
-```json
-{
-  "spawnStrategy": "tmux"
-}
-```
 
 ### Auto-start flow
 
@@ -493,15 +471,25 @@ flowchart TD
 
 The server is spawned detached (`child_process.spawn` with `detached: true`, `unref()`), so it outlives the pi session. Duplicate spawn attempts from concurrent pi sessions fail harmlessly with `EADDRINUSE`.
 
-### Dev build on reload
+---
 
-Set `"devBuildOnReload": true` in `config.json` for a one-command full-stack refresh:
+## Monitoring
 
+The health endpoint provides server and agent process metrics:
+
+```bash
+curl -s http://localhost:8000/api/health | jq
 ```
-/reload → build client → stop server → reload extension → auto-start fresh server
-```
 
-> **Note:** Blocks pi for ~2–5s during the build. The server shutdown affects all connected sessions — they auto-reconnect when one restarts the server.
+Returns:
+- `mode` — `"dev"` or `"production"`
+- `server.rss`, `server.heapUsed`, `server.heapTotal` — server memory
+- `server.activeSessions`, `server.totalSessions` — session counts
+- `agents[]` — per-agent metrics (CPU%, RSS, heap, event loop max delay, system load)
+
+Agent metrics are collected every 15s via heartbeats and include `eventLoopMaxMs` — useful for diagnosing connection drops during long-running operations.
+
+---
 
 ## Development
 
@@ -536,8 +524,6 @@ pi -e packages/extension/src/bridge.ts   # or just `pi` if installed
 
 ### Deploy after changes
 
-The `pi-dashboard` command is available globally when the package is installed. After making changes, restart the appropriate components:
-
 ```bash
 # After client changes (production mode)
 npm run build
@@ -547,142 +533,15 @@ curl -X POST http://localhost:8000/api/restart
 curl -X POST http://localhost:8000/api/restart
 
 # After bridge extension changes
-npm run reload          # Reload all connected pi sessions
+npm run reload
 
 # Full rebuild (e.g., after pulling updates)
 npm run build
 curl -X POST http://localhost:8000/api/restart
 npm run reload
-
-# Switch between dev and production mode
-curl -X POST http://localhost:8000/api/restart -H 'Content-Type: application/json' -d '{"dev":true}'
-curl -X POST http://localhost:8000/api/restart -H 'Content-Type: application/json' -d '{"dev":false}'
 ```
 
-### Project Structure
-
-The project is a monorepo with npm workspaces:
-
-```
-packages/
-├── shared/           # Shared TypeScript types & utilities
-│   └── src/
-│       ├── protocol.ts        # Extension ↔ Server messages
-│       ├── browser-protocol.ts # Server ↔ Browser messages (incl. PromptBus types)
-│       ├── types.ts           # Data models
-│       ├── config.ts          # Shared config loader
-│       ├── rest-api.ts        # REST API types
-│       ├── session-meta.ts    # Session metadata sidecar (.meta.json) read/write
-│       ├── state-replay.ts    # Event synthesis on reconnect
-│       ├── stats-extractor.ts # Token/cost stats extraction
-│       ├── server-identity.ts # Server detection & identity
-│       ├── mdns-discovery.ts  # mDNS network auto-discovery
-│       └── openspec-poller.ts # OpenSpec change data polling
-├── extension/        # Bridge extension (runs in pi)
-│   └── src/
-│       ├── bridge.ts          # Main extension entry
-│       ├── connection.ts      # WebSocket with reconnection
-│       ├── event-forwarder.ts # Event mapping
-│       ├── flow-event-wiring.ts # pi-flows event forwarding
-│       ├── prompt-bus.ts      # PromptBus — unified prompt routing with adapters
-│       ├── dashboard-default-adapter.ts # Default PromptBus adapter for dashboard UI
-│       ├── prompt-expander.ts # Prompt template expansion from disk
-│       ├── provider-register.ts # Provider auth registration & sync
-│       ├── model-tracker.ts   # Model selection tracking
-│       ├── source-detector.ts # Session source detection (via .meta.json sidecar)
-│       ├── command-handler.ts # Command relay
-│       ├── server-probe.ts    # TCP probe for server detection
-│       ├── server-auto-start.ts # Auto-start logic on session launch
-│       ├── server-launcher.ts # Spawn server as detached process
-│       ├── session-sync.ts    # Session history sync
-│       ├── process-metrics.ts # Agent process CPU/memory metrics
-│       ├── process-scanner.ts # Running process detection
-│       ├── git-info.ts        # Git branch/remote/PR detection
-│       ├── git-link-builder.ts # GitHub/GitLab permalink generation
-│       └── dev-build.ts       # Dev build-on-reload helper
-├── server/           # Dashboard server
-│   └── src/
-│       ├── cli.ts             # CLI entry (start/stop/restart/status)
-│       ├── server.ts          # HTTP + WebSocket server
-│       ├── pi-gateway.ts      # Extension WebSocket gateway
-│       ├── browser-gateway.ts # Browser WebSocket gateway
-│       ├── memory-event-store.ts # In-memory event buffer (LRU, per-session cap, truncation)
-│       ├── memory-session-manager.ts # In-memory session registry
-│       ├── preferences-store.ts # User prefs: hidden sessions, pinned dirs
-│       ├── meta-persistence.ts # Session metadata persistence
-│       ├── session-order-manager.ts # Per-cwd session ordering
-│       ├── session-discovery.ts # Session file scanning & loading
-│       ├── process-manager.ts # tmux/headless session spawning
-│       ├── headless-pid-registry.ts # Track headless process PIDs
-│       ├── editor-registry.ts # Available editor detection
-│       ├── editor-manager.ts  # Editor launch & file opening
-│       ├── provider-auth-storage.ts # Provider credential persistence
-│       ├── provider-auth-handlers.ts # OAuth flow handlers
-│       ├── npm-search-proxy.ts # npm registry search proxy
-│       ├── package-manager-wrapper.ts # pi package install/remove
-│       ├── pending-fork-registry.ts # Flow fork decision persistence
-│       ├── tunnel.ts          # Zrok tunnel with reserved shares
-│       ├── terminal-manager.ts # Browser terminal sessions (xterm.js + node-pty)
-│       ├── server-pid.ts      # PID file for daemon management
-│       ├── auth.ts            # OAuth2 authentication
-│       └── json-store.ts      # Atomic JSON file helpers
-├── client/           # React web client
-│   └── src/
-│       ├── App.tsx
-│       ├── hooks/             # WebSocket hooks, mobile detection
-│       ├── lib/               # Event reducer, command filter
-│       └── components/        # UI components
-│           ├── FlowDashboard.tsx    # Live flow execution view
-│           ├── FlowAgentCard.tsx    # Per-agent status cards
-│           ├── FlowGraph.tsx        # DAG visualization
-│           ├── FlowArchitect.tsx    # Flow designer UI
-│           ├── FlowSummary.tsx      # Post-flow result summary
-│           ├── DiffView.tsx         # Side-by-side diff viewer
-│           ├── TerminalView.tsx     # Browser terminal emulator
-│           ├── PackageBrowser.tsx   # Package search & install
-│           ├── ProviderAuthSection.tsx # Provider sign-in UI
-│           ├── SettingsPanel.tsx    # Config editor
-│           └── ...                  # 80+ components
-└── electron/         # Electron desktop app wrapper
-    ├── src/main.ts
-    ├── scripts/
-    └── resources/
-```
-
-## Monitoring
-
-The health endpoint provides server and agent process metrics:
-
-```bash
-curl -s http://localhost:8000/api/health | jq
-```
-
-Returns:
-- `mode` — `"dev"` or `"production"`
-- `server.rss`, `server.heapUsed`, `server.heapTotal` — server memory
-- `server.activeSessions`, `server.totalSessions` — session counts
-- `agents[]` — per-agent metrics (CPU%, RSS, heap, event loop max delay, system load)
-
-Agent metrics are collected every 15s via heartbeats and include `eventLoopMaxMs` — useful for diagnosing connection drops during long-running operations.
-
-### Troubleshooting: dashboard server doesn't start
-
-If `pi` launches but the dashboard never becomes reachable (no `http://localhost:8000`, no `🌐 Dashboard started` notification), inspect the launch log:
-
-```bash
-cat ~/.pi/dashboard/server.log          # Linux / macOS
-type %USERPROFILE%\.pi\dashboard\server.log   # Windows
-```
-
-The log is opened in append mode and prefixed with a timestamped header on every start attempt, so previous crashes are preserved. Common issues:
-
-- **`ERR_UNSUPPORTED_ESM_URL_SCHEME` on Windows** — fixed in pi-agent-dashboard 0.2.10+; upgrade the package.
-- **`Port 8000 is occupied by another service`** — another process is bound to the port. On Windows: `netstat -ano | findstr :8000` then `taskkill /F /PID <pid>`. On Unix: `lsof -t -i :8000 | xargs kill`. Or change `port` in `~/.pi/dashboard/config.json`.
-- **`Cannot find pi's TypeScript loader`** — pi is not installed globally. Run `npm install -g @mariozechner/pi-coding-agent`.
-
-The `POST /api/restart` endpoint and `pi-dashboard restart` command work identically on Windows, macOS, and Linux (no `sh`/`lsof`/`curl` dependency).
-
-## Extension UI Events
+### Extension UI events
 
 Your own extensions can broadcast UI events to the dashboard:
 
@@ -696,40 +555,40 @@ pi.events.emit("dashboard:ui", {
 
 Supported methods: `confirm`, `select`, `input`, `notify`.
 
-## Electron Desktop App
+### Project structure
 
-The project includes an Electron wrapper at `packages/electron/` that bundles the dashboard as a **fully standalone native desktop app**. Pre-built installers for all platforms are available on [GitHub Releases](https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases) — see [Getting Started](#getting-started) above.
+Monorepo with npm workspaces — top-level layout only. See [AGENTS.md](AGENTS.md) for the full file-by-file index.
 
-The Electron app supports two modes:
+```
+packages/
+├── shared/      # Shared TypeScript types, protocols, config, session-meta helpers
+├── extension/   # Bridge extension (runs inside pi) — WS client, PromptBus, event forwarding, auto-start
+├── server/      # Dashboard server — HTTP + dual WebSocket gateways, in-memory store, terminals, auth, tunnel
+├── client/      # React + Tailwind web client — 80+ components, hooks, event reducer
+└── electron/    # Electron desktop wrapper — wizard, system tray, auto-update, bundled Node.js
+```
 
-| Mode | Description |
-|------|-------------|
-| **Standalone** | Bundles Node.js, auto-installs pi + dashboard into `~/.pi-dashboard/`. Zero prerequisites. |
-| **Power User** | Detects and uses your existing system pi + dashboard install. |
+---
 
-Features: first-run setup wizard, auto-update checker, system tray, splash screen, VM detection (disables GPU acceleration), mDNS server discovery, and version compatibility checks.
+## Building the Electron app
 
-### Building from Source
+> **Prerequisites:** Node.js 22.12+; platform-specific tools handled by Electron Forge automatically.
 
-> **Prerequisites for building:** Node.js 22.12+, platform-specific tools handled by Electron Forge automatically.
-
-### Building for Your Platform
-
-The easiest way — one command that handles everything (client build, Node.js bundling, installer creation):
+### Native build (current platform)
 
 ```bash
-npm run electron:build              # Build for current platform & arch
-npm run electron:build -- --arch x64 # Override architecture
-npm run electron:build -- --skip-client # Skip client rebuild
+npm run electron:build                    # Build for current platform & arch
+npm run electron:build -- --arch x64      # Override architecture
+npm run electron:build -- --skip-client   # Skip client rebuild
 ```
 
 Or step by step:
 
 ```bash
-npm run build                        # Build web client
+npm run build                         # Build web client
 cd packages/electron
-bash scripts/download-node.sh        # Download Node.js for bundling
-npm run make                         # Build installer
+bash scripts/download-node.sh         # Download Node.js for bundling
+npm run make                          # Build installer
 ```
 
 Output by platform:
@@ -738,25 +597,22 @@ Output by platform:
 |----------|--------|----------|
 | macOS | `.dmg` | `packages/electron/out/make/` |
 | Linux | `.deb` + `.AppImage` | `packages/electron/out/make/` |
-| Windows | `.exe` (NSIS installer) + `.zip` + portable `.exe` | `packages/electron/out/make/` |
+| Windows | `.exe` (NSIS) + `.zip` + portable `.exe` | `packages/electron/out/make/` |
 
-### Cross-Platform Builds (via Docker)
+### Cross-platform builds (Docker)
 
-From macOS or Linux, you can build installers for **all platforms** using Docker:
+From macOS or Linux, build installers for all platforms:
 
 ```bash
-npm run electron:build -- --all        # macOS (native) + Linux + Windows (Docker)
-npm run electron:build -- --linux       # Linux .deb + .AppImage only
-npm run electron:build -- --windows     # Windows .exe (NSIS) only
+npm run electron:build -- --all              # macOS (native) + Linux + Windows (Docker)
+npm run electron:build -- --linux            # Linux .deb + .AppImage only
+npm run electron:build -- --windows          # Windows .exe (NSIS) only
 npm run electron:build -- --linux --windows  # Both, skip native
 ```
 
-Docker builds use a Node 22 Debian container with NSIS installed for Windows cross-compilation.
-All output goes to `packages/electron/out/make/`.
+Docker builds use a Node 22 Debian container with NSIS installed for Windows cross-compilation. Output goes to `packages/electron/out/make/`.
 
-> **Note:** Native builds (no flags) build for the current platform only. Docker is required for `--linux`, `--windows`, and `--all`.
-
-### Development Mode
+### Electron dev mode
 
 ```bash
 # Start the dashboard server and Vite dev server first
@@ -768,7 +624,7 @@ cd packages/electron
 npm run start:dev
 ```
 
-### Regenerating Icons
+### Regenerating icons
 
 All platform icon variants are generated from the master icon at `packages/electron/resources/icon.png`:
 
@@ -777,9 +633,31 @@ cd packages/electron
 npm run icons    # Generates .icns (macOS), .ico (Windows), and resized PNGs
 ```
 
-### CI Builds & GitHub Releases
+---
 
-The release workflow (`.github/workflows/publish.yml`) builds Electron installers for **all platforms** on every version tag (`v*`):
+## CI/CD & releasing
+
+See [`docs/release-process.md`](docs/release-process.md) for the full cut-a-release workflow.
+
+### Continuous integration
+
+Every push to `develop` and every pull request against `develop` triggers [`ci.yml`](.github/workflows/ci.yml):
+
+1. `npm ci` — install dependencies
+2. `npm run lint` — type check
+3. `npm test` — run tests
+4. `npm run build` — build web client
+
+### Releasing
+
+The publish workflow ([`publish.yml`](.github/workflows/publish.yml)) triggers on `v*` tags:
+
+```bash
+npm version patch   # or minor / major
+git push --follow-tags
+```
+
+This runs CI, publishes to npm with `--provenance` for supply-chain transparency, and builds Electron installers for all platforms on native runners:
 
 | Runner | Platform | Outputs |
 |--------|----------|---------|
@@ -789,37 +667,51 @@ The release workflow (`.github/workflows/publish.yml`) builds Electron installer
 | `windows-latest` | Windows x64 | `.exe` (NSIS) + `.zip` + portable |
 | `windows-latest` | Windows arm64 | `.zip` + portable (x64 Node.js via WoW64) |
 
-All artifacts are uploaded to a **draft GitHub Release** for review and publishing. The same workflow also publishes the npm package. Release notes for the draft are extracted automatically from the matching `## [<version>]` section of [`CHANGELOG.md`](CHANGELOG.md) — see [`docs/release-process.md`](docs/release-process.md) for the full cut-a-release workflow.
+All artifacts are uploaded to a **draft GitHub Release**. Release notes are extracted automatically from the matching `## [<version>]` section of [`CHANGELOG.md`](CHANGELOG.md).
 
-## CI/CD
+### Trusted Publisher (OIDC) setup
 
-### Continuous Integration
+The publish workflow uses **[npm Trusted Publishers](https://docs.npmjs.com/trusted-publishers)** over OIDC — **no `NPM_TOKEN` secret required**. Short-lived, workflow-scoped credentials are exchanged between GitHub and npm at publish time, and every release carries automatic [npm provenance](https://docs.npmjs.com/generating-provenance-statements) tying the published artifact to the exact workflow run.
 
-Every push to `develop` and every pull request against `develop` triggers the CI workflow (`.github/workflows/ci.yml`):
+**Requirements** (already configured in [`publish.yml`](.github/workflows/publish.yml)):
 
-1. `npm ci` — install dependencies
-2. `npm run lint` — type check
-3. `npm test` — run tests
-4. `npm run build` — build web client
-
-### Releasing to npm
-
-The publish workflow (`.github/workflows/publish.yml`) triggers on `v*` tags:
-
-```bash
-npm version patch   # or minor / major
-git push --follow-tags
+```yaml
+permissions:
+  contents: write   # draft GitHub Release + tag push
+  id-token: write   # OIDC token exchange with the npm registry
+environment: npm-publish
 ```
 
-This runs CI checks, then publishes to npm with `--provenance` for supply chain transparency.
+Trusted Publishing requires **npm CLI ≥ 11.5.1**. The workflow upgrades npm automatically (`npm install -g npm@latest`) before publishing.
 
-### npm Token Setup
+**One-time npm-side setup** — repeat once per published package (five scoped workspaces; `@blackbelt-technology/pi-dashboard-electron` is private and skipped):
 
-The publish workflow requires an `NPM_TOKEN` secret in the GitHub repository:
+| Package |
+|---|
+| `@blackbelt-technology/pi-agent-dashboard` (root) |
+| `@blackbelt-technology/pi-dashboard-shared` |
+| `@blackbelt-technology/pi-dashboard-extension` |
+| `@blackbelt-technology/pi-dashboard-server` |
+| `@blackbelt-technology/pi-dashboard-web` |
 
-1. Generate a token at [npmjs.com](https://www.npmjs.com/) → Access Tokens → Generate New Token (Granular Access Token)
-2. Grant publish access to `@blackbelt-technology` packages
-3. Add it as a repository secret: GitHub repo → Settings → Secrets and variables → Actions → New repository secret → Name: `NPM_TOKEN`
+For each:
+
+1. Go to [npmjs.com](https://www.npmjs.com/) → the package → **Settings** → **Trusted Publisher** → **GitHub Actions**
+2. Fill in:
+   - **Organization or user:** `BlackBeltTechnology`
+   - **Repository:** `pi-agent-dashboard`
+   - **Workflow filename:** `publish.yml` *(filename only, not the full path)*
+   - **Environment name:** `npm-publish` *(must match the `environment:` field in the workflow)*
+3. Save
+
+**GitHub Environment (recommended)** — configures an optional human-approval gate on every release:
+
+1. GitHub repo → **Settings** → **Environments** → **New environment** → name `npm-publish`
+2. Optionally add **required reviewers** and/or **deployment branch/tag protection rules** (e.g. restrict to `v*` tags)
+
+No secrets to rotate, no tokens to leak.
+
+---
 
 ## License
 
