@@ -24,7 +24,8 @@
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*"
+    "@mariozechner/pi-tui": "*",
+    "typebox": "*"
   },
   "peerDependenciesMeta": {
     "@mariozechner/pi-coding-agent": {
@@ -36,6 +37,7 @@
   },
   "devDependencies": {
     "@mariozechner/pi-tui": "*",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "typebox": "^1.1.33"
   }
 }

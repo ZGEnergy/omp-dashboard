@@ -64,7 +64,7 @@ export interface SpawnNodeScriptOptions {
  * check is tolerant of `file://` URLs, raw POSIX paths, and raw
  * Windows paths with either slash direction.
  */
-export function isTsxLoader(loader: string | undefined): boolean {
+export function isTsxLoader(loader: string | null | undefined): boolean {
   if (!loader) return false;
   // Normalize backslashes so the `/tsx/` probe works on Windows paths.
   const normalized = loader.replace(/\\/g, "/");
@@ -118,7 +118,7 @@ export function toFileUrl(pathOrUrl: string): string {
  * host can exercise the Windows branch without mutating `process.platform`.
  */
 export function shouldUrlWrapEntry(
-  loader: string | undefined,
+  loader: string | null | undefined,
   platform: NodeJS.Platform = process.platform,
 ): boolean {
   if (isTsxLoader(loader)) return false;

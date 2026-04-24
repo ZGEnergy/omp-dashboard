@@ -175,10 +175,11 @@ describe("pi-version-skew", () => {
 
     function stubRegistry(resolvedPath: string): ToolRegistry {
       return {
-        resolve: (_name: string): Resolution => ({
+        resolve: (name: string): Resolution => ({
           ok: true,
+          name,
           path: resolvedPath,
-          source: "where",
+          source: "system",
           tried: [],
           resolvedAt: Date.now(),
         }),
