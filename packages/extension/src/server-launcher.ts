@@ -11,6 +11,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type { DashboardConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { resolveJitiImport } from "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js";
+import { toFileUrl } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
 import { isDashboardRunning } from "@blackbelt-technology/pi-dashboard-shared/server-identity.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -78,10 +79,12 @@ export async function launchServer(config: DashboardConfig): Promise<LaunchResul
     } catch { /* if we can't open the log, spawn still works */ }
 
     // Spawn server via the detached-spawn primitive. resolveJitiImport()
-    // returns a file:// URL (required on Windows for node --import).
+    // returns a file:// URL; cliPath is wrapped with toFileUrl so both
+    // positions are file:// URLs (required on Windows for node --import on
+    // non-C: drives). See change: fix-windows-entry-script-url.
     const r = await spawnDetached({
       cmd: process.execPath,
-      args: ["--import", resolveJitiImport(), cliPath, ...args],
+      args: ["--import", resolveJitiImport(), toFileUrl(cliPath), ...args],
       env: { ...process.env },
       logFd,
     });

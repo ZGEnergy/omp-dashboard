@@ -34,14 +34,15 @@ describe("buildOrchestratorScript", () => {
     const script = buildOrchestratorScript(baseParams);
     // ARGS should be a JSON array containing --import and the loader
     expect(script).toMatch(/const ARGS = \[.*"--import".*"file:\/\/\/tmp\/jiti-register\.mjs"/);
-    expect(script).toMatch(/"\/tmp\/cli\.ts"/);
+    // cliPath is now wrapped as file:// URL (see change: fix-windows-entry-script-url)
+    expect(script).toMatch(/"file:\/\/\/tmp\/cli\.ts"/);
     expect(script).toMatch(/"start"/);
   });
 
   it("omits --import when loader is empty", () => {
     const script = buildOrchestratorScript({ ...baseParams, loader: "" });
     expect(script).not.toMatch(/"--import"/);
-    expect(script).toMatch(/"\/tmp\/cli\.ts"/);
+    expect(script).toMatch(/"file:\/\/\/tmp\/cli\.ts"/);
     expect(script).toMatch(/"start"/);
   });
 
@@ -51,7 +52,10 @@ describe("buildOrchestratorScript", () => {
     expect(script).toMatch(/"start","--dev"/);
   });
 
-  it("safely embeds Windows paths with backslashes and drive letters", () => {
+  it("wraps Windows cliPath as file:// URL so non-C: drives don't crash Node's ESM loader", () => {
+    // Regression: before fix-windows-entry-script-url, cliPath was embedded
+    // as a raw path "B:\\Dev\\..." which Node's ESM loader rejects with
+    // ERR_UNSUPPORTED_ESM_URL_SCHEME because "b:" parses as a URL scheme.
     const winParams = {
       ...baseParams,
       cliPath: "B:\\Dev\\BB\\pi-agent-dashboard\\packages\\server\\src\\cli.ts",
@@ -59,13 +63,15 @@ describe("buildOrchestratorScript", () => {
       execPath: "C:\\Program Files\\nodejs\\node.exe",
     };
     const script = buildOrchestratorScript(winParams);
-    // Must be embedded via JSON.stringify (backslashes escaped, quotes preserved)
+    // execPath is still a raw path (it's the binary, not URL-parsed)
     expect(script).toContain(JSON.stringify(winParams.execPath));
-    expect(script).toContain(JSON.stringify(winParams.cliPath));
+    // loader was already a file:// URL — idempotent, unchanged
     expect(script).toContain(JSON.stringify(winParams.loader));
-    // Should not contain raw unescaped backslashes that would break the JS
-    // (we embed via JSON.stringify which escapes them to \\)
-    expect(script).toMatch(/B:\\\\Dev\\\\BB/);
+    // cliPath MUST now be embedded as a file:// URL, not a raw Windows path
+    const expectedCliUrl = "file:///B:/Dev/BB/pi-agent-dashboard/packages/server/src/cli.ts";
+    expect(script).toContain(JSON.stringify(expectedCliUrl));
+    // Negative: the raw backslash form must NOT appear in the ARGS array
+    expect(script).not.toContain(JSON.stringify(winParams.cliPath));
   });
 
   it("references ~/.pi/dashboard/restart.log for failure logging", () => {

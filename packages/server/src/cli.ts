@@ -18,6 +18,7 @@
 import { createServer, type ServerConfig } from "./server.js";
 import { loadConfig, ensureConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { spawnNodeScript } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import fs from "node:fs";
@@ -339,12 +340,17 @@ async function cmdStart(config: ServerConfig): Promise<void> {
     `\n[${new Date().toISOString()}] pi-dashboard start (parent pid ${process.pid}, port ${config.port})\n`,
   );
 
-  // tsLoader is a file:// URL (required on Windows for node --import).
-  // See change: fix-windows-server-parity.
-  const child = spawn(process.execPath, ["--import", tsLoader, cliPath, ...args], {
-    detached: true,
-    stdio: ["ignore", logFd, logFd],
-    env: { ...process.env },
+  // Both tsLoader and cliPath are wrapped as file:// URLs by spawnNodeScript.
+  // Required on Windows for node --import (see change: fix-windows-entry-script-url).
+  const child = spawnNodeScript({
+    loader: tsLoader,
+    entry: cliPath,
+    args,
+    spawnOptions: {
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      env: { ...process.env },
+    },
   });
   child.unref();
   // Close the parent's copy of the fd — child has its own via stdio inheritance.

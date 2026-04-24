@@ -13,6 +13,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { resolveJitiFromAnchor } from "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js";
+import { toFileUrl } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { createRequire } from "node:module";
@@ -352,11 +353,15 @@ async function launchServer(port: number, piPort: number): Promise<void> {
     env.PATH = `${extraPath}${path.delimiter}${env.PATH || ""}`;
   } else {
     // jiti path: spawn node --import <jiti-register.mjs> <cli.ts>
+    // Both jitiPath (already a file:// URL from resolveJitiFromAnchor) and
+    // cliPath (raw OS path) are passed through toFileUrl — idempotent on
+    // URLs, wraps raw paths. Required on Windows for non-C: drives.
+    // See change: fix-windows-entry-script-url.
     if (!nodePath) {
       throw new Error("Node.js not found. Install Node.js >= 20.6 or run the setup wizard.");
     }
     spawnBin = nodePath;
-    spawnArgs = ["--import", jitiPath!, cliPath, "--port", String(port), "--pi-port", String(piPort)];
+    spawnArgs = ["--import", toFileUrl(jitiPath!), toFileUrl(cliPath), "--port", String(port), "--pi-port", String(piPort)];
     const extraPath = [piBinDir, nodeBinDir].filter(Boolean).join(path.delimiter);
     env.PATH = `${extraPath}${path.delimiter}${env.PATH || ""}`;
   }

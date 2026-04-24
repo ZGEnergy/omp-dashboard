@@ -9,6 +9,7 @@ export * from "./detached-spawn.js";
 export * from "./spawn-mechanism.js";
 export * from "./process-identify.js";
 export * from "./subprocess-adapter.js";
+export * from "./node-spawn.js";
 export * as git from "./git.js";
 export * as openspec from "./openspec.js";
 export * as npm from "./npm.js";

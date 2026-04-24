@@ -658,13 +658,16 @@ The restart endpoint accepts `{ dev: boolean }` to switch between dev/production
 
 ### Cross-Platform Server Launch
 
-The dashboard server is spawned via `node --import <loader> <cli.ts>` from three call sites (`packages/server/src/cli.ts` `cmdStart`, `packages/extension/src/server-launcher.ts` `launchServer`, `packages/electron/src/lib/server-lifecycle.ts` `launchServer`). On Node ≥ 20, Windows rejects raw absolute paths passed to `--import` because it parses the drive-letter prefix (e.g. `B:`) as a URL scheme (`ERR_UNSUPPORTED_ESM_URL_SCHEME`). Every resolver therefore returns a `file://` URL, not a raw path:
+The dashboard server is spawned via `node --import <loader> <cli.ts>` from four call sites (`packages/server/src/cli.ts` `cmdStart`, `packages/extension/src/server-launcher.ts` `launchServer`, `packages/electron/src/lib/server-lifecycle.ts` `launchServer`, `packages/server/src/restart-helper.ts` `buildOrchestratorScript`). On Node ≥ 20, Windows's ESM loader parses **both** the `--import` loader position AND the entry-script position as URLs. A raw Windows path like `B:\Dev\cli.ts` parses with scheme `b:` (not in the ESM loader's `file`/`data`/`node` allowlist) and crashes with `ERR_UNSUPPORTED_ESM_URL_SCHEME`. Node has a drive-letter heuristic that auto-wraps common Windows paths with `file://` before the URL parse in the entry-script position, but the heuristic has known gaps for less-common drives (`A:`, `B:`, ...), so reliance on it is unsafe.
 
-- `packages/shared/src/resolve-jiti.ts` — `resolveJitiImport()` (anchor = `process.argv[1]`) and `resolveJitiFromAnchor(anchorPath)` (anchor supplied explicitly) both return `pathToFileURL(registerPath).href`
-- `packages/electron/src/lib/server-lifecycle.ts` — `resolveJitiFromPi()` now imports `resolveJitiFromAnchor` from shared (previously duplicated; consolidated in the `consolidate-platform-handlers` change)
-- `packages/server/src/cli.ts` — the tsx fallback wraps `esm/index.mjs` the same way
+Both positions are wrapped as `file://` URLs universally:
 
-The URL form is cross-platform safe (Linux/macOS accept both raw paths and `file://` URLs) so no platform gating is needed in the resolvers.
+- `packages/shared/src/platform/node-spawn.ts` — `toFileUrl(pathOrUrl)` (idempotent path → file:// URL, handles Windows drive letters on POSIX hosts) and `spawnNodeScript(opts)` (wraps both loader and entry before delegating to `platform/exec.ts::spawn`). This is the canonical chokepoint.
+- `packages/shared/src/resolve-jiti.ts` — `resolveJitiImport()` and `resolveJitiFromAnchor(anchorPath)` return `pathToFileURL(registerPath).href` for the loader position.
+- `packages/server/src/cli.ts` — routes through `spawnNodeScript`.
+- `packages/extension/src/server-launcher.ts`, `packages/electron/src/lib/server-lifecycle.ts`, `packages/server/src/restart-helper.ts` — wrap the entry `cliPath` with `toFileUrl(cliPath)` before argv construction.
+
+The URL form is cross-platform safe (Linux/macOS accept `file://` URLs identically to raw paths), so no platform gating is needed. A repo-level lint test (`packages/shared/src/__tests__/no-raw-node-import.test.ts`) refuses any new call site that passes a raw identifier as argv after `--import` / `--loader`, preventing regression. Mirrors the `platform/exec.ts` + `no-direct-child-process.test.ts` pattern. See changes: `fix-windows-server-parity` (loader position), `fix-windows-entry-script-url` (entry-script position).
 
 #### stdout + stderr capture parity
 
@@ -798,9 +801,21 @@ The dashboard uses mDNS (via `bonjour-service`) for zero-config server discovery
 ### Server Selector UI
 - The header dropdown shows persisted known servers (from config) plus localhost, not raw mDNS results
 - Each entry shows label (or hostname), host:port, Local/Remote badge, and availability status
-- Non-current servers are probed via health check when the dropdown opens
-- Switching closes the current WebSocket and connects to the selected server
-- Last-used server persisted in `localStorage` (`pi-dashboard-last-server`)
+- **Eager probing**: every entry (including localhost) is probed via `/api/health` on selector mount, on dropdown open, on known-servers change, and on server switch — NOT on a continuous background timer. Current-server status is derived from the live WebSocket state, not a separate probe.
+- **Unreachable entries** render with `opacity-50` and an "Unreachable" badge but remain clickable — a probe is point-in-time and the user may be about to start the server; the transactional switch (below) makes the click safe.
+- Last-used server persisted in `localStorage` (`pi-dashboard-last-server`) — **only after** a successful switch (see transactional switching below).
+
+### Transactional Server Switching
+Switching servers is a two-phase transaction that never destructs state before verifying the target is reachable. Implemented by `performServerSwitch` (`packages/client/src/lib/server-switch.ts`) + `openStagingSocket` (`packages/client/src/lib/staging-socket.ts`):
+
+1. **Stage**: open a second ("staging") WebSocket to the target URL with a 5-second timeout. The live WebSocket stays connected.
+2. **Commit (on staging `OPEN`)**: close the staging socket, clear in-memory session/command/flow/openspec/terminal state, call `setWsUrl(newUrl)` so `useWebSocket` reconnects, and **only then** write `localStorage["pi-dashboard-last-server"]`.
+3. **Abort (on staging error/timeout)**: close the staging socket, show a toast "Couldn't reach &lt;host&gt;", leave the live connection and state untouched. localStorage is not written — so a subsequent refresh still recovers the last-known-good server.
+
+An `inFlightSwitchKey` ref guards against duplicate clicks; the clicked dropdown entry renders a spinner while staging is in progress. The `POST /api/config { lastServer }` fire-and-forget call was removed as dead weight (no consumer read the field).
+
+### Connection Status Banner
+`ConnectionStatusBanner` (`packages/client/src/components/ConnectionStatusBanner.tsx`) mounts above `<MobileShell>`. It shows "Disconnected from &lt;host&gt;. Retrying…" when the active WebSocket has been non-`OPEN` for more than 3 seconds continuously. The threshold is implemented via `setTimeout` cleared on any return-to-`OPEN` or unmount, so brief reconnects (laptop sleep, wifi hiccup) never flash the banner. During an in-flight staging switch the banner is suppressed — the live socket is still open, so no disconnection has actually occurred.
 
 ### Server Management (Settings Panel)
 - **Known Servers section**: lists persisted servers with remove buttons and an inline add form (host, port, label)
