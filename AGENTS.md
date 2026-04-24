@@ -30,6 +30,18 @@ pi-dashboard         # Start dashboard server
 pi-dashboard --dev   # Start with Vite proxy
 ```
 
+## Running Tests
+
+Pipe test output to a tmp file, then grep — avoids re-running to inspect errors:
+
+```bash
+npm test 2>&1 | tee /tmp/pi-test.log        # run once, capture all output
+grep -nE 'FAIL|Error|✗|✘' /tmp/pi-test.log   # find failures
+grep -n -A 20 'FAIL ' /tmp/pi-test.log        # failure + context
+```
+
+Always grep the file — never rerun `npm test` just to see errors.
+
 ## Cross-Platform QA Testing
 
 VM-based QA testing for verifying clean-state installation and runtime across platforms.
