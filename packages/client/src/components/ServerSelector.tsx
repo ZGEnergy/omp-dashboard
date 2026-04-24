@@ -31,9 +31,11 @@ interface Props {
   onSwitch: (host: string, port: number) => void;
   /** Navigate to server settings */
   onManageServers?: () => void;
+  /** "host:port" of an in-flight staging switch; shows a spinner on that entry. */
+  inFlightSwitchKey?: string | null;
 }
 
-export function ServerSelector({ currentHost, currentPort, connected, onSwitch, onManageServers }: Props) {
+export function ServerSelector({ currentHost, currentPort, connected, onSwitch, onManageServers, inFlightSwitchKey }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const [availability, setAvailability] = useState<Map<string, boolean>>(new Map());
@@ -68,13 +70,16 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
     entries.push({ host: currentHost, port: currentPort, isLocal });
   }
 
-  // Probe non-current servers for availability when dropdown opens
+  // Probe availability only when the dropdown opens — once per open.
+  // No background probing, no periodic timer, no mount probe.
+  // See openspec/changes/safe-server-switch.
   useEffect(() => {
-    if (!open || entries.length <= 1) return;
+    if (!open) return;
     let cancelled = false;
-    const others = entries.filter((s) => `${s.host}:${s.port}` !== currentKey);
-    for (const s of others) {
+    for (const s of entries) {
       const key = `${s.host}:${s.port}`;
+      // Current server's status is derived from `connected` — skip the probe.
+      if (key === currentKey) continue;
       fetch(`http://${s.host}:${s.port}/api/health`, { signal: AbortSignal.timeout(2000) })
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
@@ -84,8 +89,11 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
           if (!cancelled) setAvailability((prev) => new Map(prev).set(key, false));
         });
     }
-    return () => { cancelled = true; };
-  }, [open, knownServers, currentHost, currentPort]);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Close on outside click
   useEffect(() => {
@@ -128,16 +136,23 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
           {entries.map((entry) => {
             const key = `${entry.host}:${entry.port}`;
             const isCurrent = key === currentKey;
+            const probe = availability.get(key);
+            const unreachable = !isCurrent && probe === false;
+            const isSwitching = inFlightSwitchKey === key;
             return (
               <button
                 key={key}
+                disabled={unreachable}
+                title={unreachable ? `${entry.host}:${entry.port} is unreachable` : undefined}
                 onClick={() => {
+                  if (unreachable) return;
                   if (!isCurrent) onSwitch(entry.host, entry.port);
                   setOpen(false);
                 }}
-                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer ${
+                data-unreachable={unreachable || undefined}
+                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors ${
                   isCurrent ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"
-                }`}
+                } ${unreachable ? "opacity-50 cursor-not-allowed" : "hover:bg-[var(--bg-tertiary)] cursor-pointer"}`}
               >
                 <div className="flex-1 min-w-0">
                   <div className="truncate font-medium">{entry.label ?? entry.host}</div>
@@ -154,15 +169,18 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
                 >
                   {entry.isLocal ? "Local" : "Remote"}
                 </span>
-                {isCurrent ? (
+                {isSwitching ? (
+                  <span
+                    aria-label="Switching\u2026"
+                    className="shrink-0 w-3 h-3 rounded-full border-2 border-[var(--text-tertiary)] border-t-transparent animate-spin"
+                  />
+                ) : isCurrent ? (
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${connected ? "bg-green-500" : "bg-red-500"}`} />
-                ) : (
-                  availability.has(key) && (
-                    <span className={`shrink-0 text-[10px] ${availability.get(key) ? "text-green-500" : "text-red-400"}`}>
-                      {availability.get(key) ? "Available" : "Unreachable"}
-                    </span>
-                  )
-                )}
+                ) : unreachable ? (
+                  <span className="shrink-0 text-[10px] text-red-400">Unreachable</span>
+                ) : probe === true ? (
+                  <span className="shrink-0 text-[10px] text-green-500">Available</span>
+                ) : null}
               </button>
             );
           })}

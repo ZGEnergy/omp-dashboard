@@ -21,6 +21,10 @@ import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
 import type { OpenSpecArtifact } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { SessionHeader } from "./components/SessionHeader.js";
 import { ServerSelector } from "./components/ServerSelector.js";
+import { Toast, useToast } from "./components/Toast.js";
+import { ConnectionStatusBanner } from "./components/ConnectionStatusBanner.js";
+import { performServerSwitch } from "./lib/server-switch.js";
+import { openStagingSocket } from "./lib/staging-socket.js";
 import { PiUpdateBadge } from "./components/PiUpdateBadge.js";
 import { TokenStatsBar } from "./components/TokenStatsBar.js";
 
@@ -113,6 +117,7 @@ function OpenSpecPreview({
 export default function App() {
   const [wsUrl, setWsUrl] = useState(getInitialWsUrl);
   const { send, onMessage, status } = useWebSocket(wsUrl);
+  const { messages: toastMessages, showToast, dismissToast } = useToast();
   const apiBase = useMemo(() => {
     const base = deriveApiBase(wsUrl) || VITE_API_URL;
     setGlobalApiBase(base);
@@ -212,24 +217,40 @@ export default function App() {
     clearContentViews();
   }, [clearAppContentViews, clearContentViews]);
 
+  // Transactional server switching — see openspec/changes/safe-server-switch.
+  // Opens a staging WebSocket first; only commits state/localStorage after
+  // it reaches OPEN. On failure, live connection is preserved intact.
+  const inFlightSwitchKeyRef = useRef<string | null>(null);
+  const [inFlightSwitchKey, setInFlightSwitchKey] = useState<string | null>(null);
   const handleServerSwitch = useCallback((host: string, port: number) => {
-    const newUrl = `${wsProtocol}//${host}:${port}/ws`;
-    localStorage.setItem(LAST_SERVER_KEY, `${host}:${port}`);
-    // Persist to config.json for bridge/Electron reconnection
-    fetch(`${apiBase}/api/config`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lastServer: `${host}:${port}` }),
-    }).catch(() => {}); // Best-effort, don't block switching
-    // Clear all state for clean reconnect
-    setSessions(new Map());
-    setSessionStates(new Map());
-    setSessionCommands(new Map());
-    setSessionFlows(new Map());
-    setOpenspecMap(new Map());
-    setTerminals(new Map());
-    subscribedRef.current.clear();
-    setWsUrl(newUrl);
+    const key = `${host}:${port}`;
+    if (inFlightSwitchKeyRef.current) return; // ignore duplicate clicks
+    inFlightSwitchKeyRef.current = key;
+    setInFlightSwitchKey(key);
+    const wsProto = wsProtocol === "wss:" ? "wss:" : "ws:";
+    performServerSwitch(
+      { host, port, wsProtocol: wsProto },
+      {
+        openStagingSocket,
+        clearInMemoryState: () => {
+          setSessions(new Map());
+          setSessionStates(new Map());
+          setSessionCommands(new Map());
+          setSessionFlows(new Map());
+          setOpenspecMap(new Map());
+          setTerminals(new Map());
+          subscribedRef.current.clear();
+        },
+        setWsUrl,
+        persistLastServer: (h, p) => {
+          localStorage.setItem(LAST_SERVER_KEY, `${h}:${p}`);
+        },
+        notifyError: (msg) => showToast(msg),
+      },
+    ).finally(() => {
+      inFlightSwitchKeyRef.current = null;
+      setInFlightSwitchKey(null);
+    });
   }, []);
 
   // Parse current server host/port from wsUrl
@@ -626,6 +647,7 @@ export default function App() {
             currentPort={currentServerPort}
             connected={status === "connected"}
             onSwitch={handleServerSwitch}
+            inFlightSwitchKey={inFlightSwitchKey}
             onManageServers={() => navigate("/settings?tab=servers")}
           />
         </div>
@@ -1169,6 +1191,12 @@ export default function App() {
     return apiProvider(
       <div className="bg-[var(--bg-primary)] text-[var(--text-primary)]">
         <BootstrapBanner state={bootstrapStatus.state} onRetry={bootstrapStatus.retry} />
+        <ConnectionStatusBanner
+          status={status}
+          currentServerHost={currentServerHost}
+          inFlightSwitch={inFlightSwitchKey !== null}
+        />
+        <Toast messages={toastMessages} onDismiss={dismissToast} />
         <MobileShell
           depth={mobileDepth}
           onBack={() => {

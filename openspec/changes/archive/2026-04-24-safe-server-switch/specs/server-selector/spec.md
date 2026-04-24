@@ -1,47 +1,4 @@
-### Requirement: Server selector in dashboard header
-The dashboard header SHALL include a server selector dropdown showing known servers (persisted) plus localhost. Availability probing SHALL run once per dropdown open — not on mount, not on a timer, not while the dropdown is closed. Entries whose probes report unreachable SHALL be rendered with reduced opacity, a `disabled` attribute, and a `cursor-not-allowed` affordance; the selector SHALL NOT call `onSwitch` for unreachable entries. Clicking a reachable entry delegates to the transactional switch.
-
-#### Scenario: Single localhost server (default)
-- **WHEN** no known servers are configured
-- **THEN** the selector SHALL show localhost with an indicator reflecting its most recent probe result (or no indicator before the first open)
-
-#### Scenario: Known servers displayed
-- **WHEN** the config contains known servers
-- **THEN** the dropdown SHALL list localhost first, then known servers with their label, host:port, and a "Local" or "Remote" badge
-
-#### Scenario: Manage servers shortcut
-- **WHEN** the dropdown is open
-- **THEN** a "Manage servers…" button SHALL appear at the top
-- **AND** clicking it SHALL navigate to the Servers tab in Settings (`/settings?tab=servers`)
-
-#### Scenario: No probe on mount
-- **WHEN** the selector mounts and the dropdown is closed
-- **THEN** no health-check request SHALL be issued
-
-#### Scenario: Probe once per dropdown open
-- **WHEN** the dropdown transitions from closed to open
-- **THEN** each non-current entry SHALL be probed exactly once via `GET /api/health` with a 2-second timeout
-- **AND** no further probes SHALL be issued until the dropdown is closed and reopened
-
-#### Scenario: No probe while dropdown is closed
-- **WHEN** the dropdown is closed
-- **THEN** no periodic probe timer SHALL be running
-- **AND** no background health-check requests SHALL be issued
-
-#### Scenario: Unreachable entry is disabled
-- **WHEN** an entry's probe reports unreachable
-- **THEN** the entry SHALL render with reduced opacity and a `cursor-not-allowed` style
-- **AND** the entry SHALL have the `disabled` attribute set
-- **AND** clicking the entry SHALL NOT invoke `onSwitch`
-
-#### Scenario: Reachable entry is clickable
-- **WHEN** an entry's probe reports reachable (or no probe has run yet for this open-cycle)
-- **THEN** the entry SHALL render with normal hover affordance
-- **AND** clicking the entry SHALL invoke `onSwitch(host, port)`
-
-#### Scenario: Current server probe shortcut
-- **WHEN** an entry matches the currently connected server
-- **THEN** its reachability SHALL be derived from the live connection state, not from a separate probe
+## MODIFIED Requirements
 
 ### Requirement: Server switching
 Selecting a different server in the dropdown SHALL perform a transactional switch: a staging WebSocket connection is opened to the target while the current ("live") connection remains active, and the switch is committed only after the staging connection reaches the `OPEN` state. If the staging connection fails or times out, the switch is aborted and the live connection is preserved with no state loss.
@@ -93,13 +50,47 @@ The last-used server address SHALL be persisted in `localStorage` so the dashboa
 - **THEN** the dashboard SHALL attempt to connect to the saved server first
 - **AND** fall back to localhost discovery if the saved server is unreachable
 
-### Requirement: Server discovery via WebSocket message
-The server SHALL broadcast discovered peer servers to connected browsers for the network discovery UI in Settings, not for the header dropdown.
+### Requirement: Server selector in dashboard header
+The dashboard header SHALL include a server selector dropdown showing known servers (persisted) plus localhost. Availability probing SHALL run once per dropdown open — not on mount, not on a timer, not while the dropdown is closed. Entries whose probes report unreachable SHALL be rendered with reduced opacity, a `disabled` attribute, and a `cursor-not-allowed` affordance; the selector SHALL NOT call `onSwitch` for unreachable entries. Clicking a reachable entry delegates to the transactional switch.
 
-#### Scenario: Server sends peer list
-- **WHEN** a browser connects to the dashboard server
-- **THEN** the server SHALL send a `servers_discovered` message with mDNS-discovered peers
+#### Scenario: Single localhost server (default)
+- **WHEN** no known servers are configured
+- **THEN** the selector SHALL show localhost with an indicator reflecting its most recent probe result (or no indicator before the first open)
 
-#### Scenario: Server sends peer update
-- **WHEN** a new peer server appears or disappears on the network
-- **THEN** the server SHALL broadcast a `servers_updated` message to all connected browsers
+#### Scenario: Known servers displayed
+- **WHEN** the config contains known servers
+- **THEN** the dropdown SHALL list localhost first, then known servers with their label, host:port, and a "Local" or "Remote" badge
+
+#### Scenario: Manage servers shortcut
+- **WHEN** the dropdown is open
+- **THEN** a "Manage servers…" button SHALL appear at the top
+- **AND** clicking it SHALL navigate to the Servers tab in Settings (`/settings?tab=servers`)
+
+#### Scenario: No probe on mount
+- **WHEN** the selector mounts and the dropdown is closed
+- **THEN** no health-check request SHALL be issued
+
+#### Scenario: Probe once per dropdown open
+- **WHEN** the dropdown transitions from closed to open
+- **THEN** each non-current entry SHALL be probed exactly once via `GET /api/health` with a 2-second timeout
+- **AND** no further probes SHALL be issued until the dropdown is closed and reopened
+
+#### Scenario: No probe while dropdown is closed
+- **WHEN** the dropdown is closed
+- **THEN** no periodic probe timer SHALL be running
+- **AND** no background health-check requests SHALL be issued
+
+#### Scenario: Unreachable entry is disabled
+- **WHEN** an entry's probe reports unreachable
+- **THEN** the entry SHALL render with reduced opacity and a `cursor-not-allowed` style
+- **AND** the entry SHALL have the `disabled` attribute set
+- **AND** clicking the entry SHALL NOT invoke `onSwitch`
+
+#### Scenario: Reachable entry is clickable
+- **WHEN** an entry's probe reports reachable (or no probe has run yet for this open-cycle)
+- **THEN** the entry SHALL render with normal hover affordance
+- **AND** clicking the entry SHALL invoke `onSwitch(host, port)`
+
+#### Scenario: Current server probe shortcut
+- **WHEN** an entry matches the currently connected server
+- **THEN** its reachability SHALL be derived from the live connection state, not from a separate probe

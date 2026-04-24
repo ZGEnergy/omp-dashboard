@@ -254,6 +254,8 @@ If you previously relied on "closing the dashboard cleans everything up," use th
 
 **Recommended: install Windows Terminal** (`wt.exe`) for tabbed interactive sessions on Windows 10/11. The dashboard prefers `wt` when available (new tab in an existing WT window, respects your default profile — cmd / PowerShell / WSL / whatever), and falls back to WSL tmux and then headless mode when absent. Windows Terminal is bundled with Windows 11; on Windows 10 install it from the Microsoft Store (search for "Windows Terminal").
 
+**Troubleshooting: UI is empty / dashboard can't reconnect after switching servers** — since the `safe-server-switch` release, switching servers in the header dropdown is transactional: the UI verifies the new server is reachable via a short-lived staging WebSocket (5s timeout) BEFORE clearing any state or writing `localStorage`. If the target is down, nothing changes — you see a toast and stay connected to the previous server. If you lose connection to the currently-active server for more than 3 seconds, a yellow "Disconnected from &lt;host&gt;. Retrying…" banner appears at the top of the page with a **Switch server** button — use it to pick a reachable server. You should no longer need to manually `localStorage.removeItem("pi-dashboard-last-server")` to recover from a bad switch; if you still find yourself stuck, please file an issue.
+
 **Troubleshooting: Windows Terminal tab doesn't appear** — if `wt.exe` is on PATH but launching does nothing, check Settings → Apps → Advanced app settings → App execution aliases. If the "wt" alias is disabled, `wt.exe` is found but can't be executed. Enable the alias or uninstall/reinstall Windows Terminal.
 
 ### Authentication (Optional)

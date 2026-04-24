@@ -801,8 +801,8 @@ The dashboard uses mDNS (via `bonjour-service`) for zero-config server discovery
 ### Server Selector UI
 - The header dropdown shows persisted known servers (from config) plus localhost, not raw mDNS results
 - Each entry shows label (or hostname), host:port, Local/Remote badge, and availability status
-- **Eager probing**: every entry (including localhost) is probed via `/api/health` on selector mount, on dropdown open, on known-servers change, and on server switch — NOT on a continuous background timer. Current-server status is derived from the live WebSocket state, not a separate probe.
-- **Unreachable entries** render with `opacity-50` and an "Unreachable" badge but remain clickable — a probe is point-in-time and the user may be about to start the server; the transactional switch (below) makes the click safe.
+- **Probe lifecycle**: availability is probed via `/api/health` **only when the dropdown opens** — once per open. No mount probe, no timer, no probing while the dropdown is closed. Current-server status is derived from the live WebSocket state, not a separate probe.
+- **Unreachable entries** are rendered with `opacity-50`, `cursor-not-allowed`, and the `disabled` attribute set; clicks are no-ops. To re-probe, close and reopen the dropdown. The transactional switch (below) still protects against races between the last probe and a click on a reachable entry.
 - Last-used server persisted in `localStorage` (`pi-dashboard-last-server`) — **only after** a successful switch (see transactional switching below).
 
 ### Transactional Server Switching
