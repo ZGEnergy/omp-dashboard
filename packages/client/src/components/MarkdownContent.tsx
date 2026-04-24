@@ -37,6 +37,27 @@ function visitHast(node: HastNode, visitor: (node: HastNode) => void) {
   }
 }
 
+/**
+ * Returns true when `href` resolves to an origin different from the current
+ * page (i.e. the link is external and clicking it would strand the user if it
+ * replaced the dashboard view). Fragment-only refs (`#foo`), relative paths,
+ * and absolute URLs matching `window.location.origin` are all considered
+ * internal. Unparseable hrefs are treated as external so the anchor gets
+ * `target="_blank"` — safer than silently navigating away.
+ * See issue #13.
+ */
+export function isExternalHref(href: string | undefined): boolean {
+  if (!href) return false; // bare <a> without href → leave alone
+  if (href.startsWith("#")) return false; // fragment-only, same-document
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const resolved = new URL(href, base);
+    return resolved.origin !== new URL(base).origin;
+  } catch {
+    return true;
+  }
+}
+
 /** Convert a <table> DOM element to markdown */
 export function tableToMarkdown(table: HTMLTableElement): string {
   const rows: string[][] = [];
@@ -247,6 +268,23 @@ export const MarkdownContent = React.memo(function MarkdownContent({ content }: 
               <TableWrapper>
                 <table>{children}</table>
               </TableWrapper>
+            );
+          },
+          // External links open in a new tab/window with reverse-tabnabbing
+          // protection so clicking a URL in chat content never strands the
+          // dashboard view. Same-origin and fragment links stay in-document.
+          // See issue #13.
+          a({ href, children, ...props }) {
+            const external = isExternalHref(href);
+            return (
+              <a
+                href={href}
+                className="text-blue-400 hover:underline"
+                {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                {...props}
+              >
+                {children}
+              </a>
             );
           },
         }}
