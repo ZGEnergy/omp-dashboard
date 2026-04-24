@@ -389,10 +389,15 @@ async function cmdStart(config: ServerConfig): Promise<void> {
   // Close the parent's copy of the fd — child has its own via stdio inheritance.
   try { fs.closeSync(logFd); } catch { /* ignore */ }
 
-  // Wait for dashboard to become available (up to 5 seconds)
-  const deadline = Date.now() + 5000;
+  // Wait for dashboard to become available. Windows + jiti cold-start can
+  // take 10s+ (TS compile on first boot, native module loads). 30s is the
+  // outer bound — if the server isn't up by then, something's genuinely wrong.
+  const READINESS_TIMEOUT_MS = 30_000;
+  const deadline = Date.now() + READINESS_TIMEOUT_MS;
   let started = false;
   while (Date.now() < deadline) {
+    // Also bail if the child has already exited (fast-path crash detection).
+    if (child.exitCode !== null) break;
     await new Promise((r) => setTimeout(r, 300));
     const status = await isDashboardRunning(config.port);
     if (status.running) {
@@ -405,7 +410,10 @@ async function cmdStart(config: ServerConfig): Promise<void> {
     const pid = readPid();
     console.log(`Dashboard server started (pid ${pid ?? child.pid}) at http://localhost:${config.port}`);
   } else {
-    console.error("Failed to start dashboard server (timed out after 5s)");
+    const reason = child.exitCode !== null
+      ? `child process exited with code ${child.exitCode}`
+      : `timed out after ${READINESS_TIMEOUT_MS / 1000}s`;
+    console.error(`Failed to start dashboard server (${reason})`);
     console.error(`Check logs at ${path.join(logDir, "server.log")}`);
     process.exit(1);
   }
