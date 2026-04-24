@@ -106,7 +106,9 @@ On first launch, a setup wizard guides you through:
 
 ### Option B: pi Package (recommended for CLI users)
 
-Requires [pi](https://github.com/badlogic/pi-mono) (or [Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent)) and Node.js **≥ 22.18.0** (or ≥ 24.3.0). Older Node 22.x / 24.x builds are affected by [nodejs/node#58515](https://github.com/nodejs/node/issues/58515) which crashes Fastify at startup.
+Requires [pi](https://github.com/badlogic/pi-mono) and Node.js **≥ 22.18.0** (or ≥ 24.3.0). Older Node 22.x / 24.x builds are affected by [nodejs/node#58515](https://github.com/nodejs/node/issues/58515) which crashes Fastify at startup.
+
+> **Note:** This dashboard only works with [pi](https://github.com/badlogic/pi-mono). Oh My Pi is **not** supported.
 
 ```bash
 pi install npm:@blackbelt-technology/pi-agent-dashboard
@@ -175,7 +177,7 @@ Only needed for Option B/C (the Electron app handles everything automatically).
 
 | Requirement | Why | Install |
 |-------------|-----|---------|
-| **[pi](https://github.com/badlogic/pi-mono)** or **[Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent)** | The AI coding agent that the dashboard monitors | `npm i -g @mariozechner/pi-coding-agent` |
+| **[pi](https://github.com/badlogic/pi-mono)** | The AI coding agent that the dashboard monitors (Oh My Pi is **not** supported) | `npm i -g @mariozechner/pi-coding-agent` |
 | **Node.js ≥ 22.18.0** | Runtime for the dashboard server (older 22.x / 24.x affected by [nodejs/node#58515](https://github.com/nodejs/node/issues/58515)) | [nodejs.org](https://nodejs.org/) |
 | **C++ build tools** | Required by `node-pty` native addon for terminal emulation | Xcode CLI Tools (macOS) / `build-essential` (Linux) |
 
@@ -327,14 +329,10 @@ See [Getting Started — Option A](#option-a-electron-desktop-app-standalone--no
 ### From npm (recommended for CLI users)
 
 ```bash
-# pi
 pi install npm:@blackbelt-technology/pi-agent-dashboard
-
-# Oh My Pi
-omp install npm:@blackbelt-technology/pi-agent-dashboard
 ```
 
-> The package is compatible with both [pi](https://github.com/badlogic/pi-mono) and [Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent) — no configuration needed.
+> **Note:** Only [pi](https://github.com/badlogic/pi-mono) is supported. Oh My Pi is **not** compatible.
 
 ### Local development install
 
