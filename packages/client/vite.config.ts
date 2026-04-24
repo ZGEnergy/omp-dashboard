@@ -23,28 +23,35 @@ export default defineConfig({
     // (only changed chunks invalidate).
     rollupOptions: {
       output: {
-        manualChunks: {
-          "react-vendor": ["react", "react-dom", "react-dom/client"],
-          "markdown": ["react-markdown", "remark-gfm", "rehype-raw", "dompurify"],
-          "syntax": ["react-syntax-highlighter"],
-          "diff": [
-            "@git-diff-view/core",
-            "@git-diff-view/file",
-            "@git-diff-view/lowlight",
-            "@git-diff-view/react",
-            "diff",
-          ],
-          "xterm": [
-            "@xterm/xterm",
-            "@xterm/addon-attach",
-            "@xterm/addon-fit",
-          ],
-          "dnd": [
-            "@dnd-kit/core",
-            "@dnd-kit/sortable",
-            "@dnd-kit/utilities",
-          ],
-          "util": ["fuse.js", "qrcode", "wouter", "ansi-to-react"],
+        manualChunks(id: string) {
+          const chunks: Record<string, string[]> = {
+            "react-vendor": ["react", "react-dom"],
+            "markdown": ["react-markdown", "remark-gfm", "rehype-raw", "dompurify"],
+            "syntax": ["react-syntax-highlighter"],
+            "diff": [
+              "@git-diff-view/core",
+              "@git-diff-view/file",
+              "@git-diff-view/lowlight",
+              "@git-diff-view/react",
+              "diff",
+            ],
+            "xterm": [
+              "@xterm/xterm",
+              "@xterm/addon-attach",
+              "@xterm/addon-fit",
+            ],
+            "dnd": [
+              "@dnd-kit/core",
+              "@dnd-kit/sortable",
+              "@dnd-kit/utilities",
+            ],
+            "util": ["fuse.js", "qrcode", "wouter", "ansi-to-react"],
+          };
+          for (const [chunk, deps] of Object.entries(chunks)) {
+            if (deps.some((dep) => id.includes(`/node_modules/${dep}/`))) {
+              return chunk;
+            }
+          }
         },
       },
     },
