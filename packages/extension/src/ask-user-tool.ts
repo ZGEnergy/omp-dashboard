@@ -10,58 +10,72 @@ import { Type } from "typebox";
 import { polyfillMultiselect } from "./multiselect-polyfill.js";
 
 // ──────────────────────────────────────────────────────────────────────────
-// Single-question schema arms (reused inside the batch arm's questions array)
+// Schema definition
+//
+// IMPORTANT: We use a single flat `Type.Object` at the root (rather than a
+// `Type.Union` of per-method object arms) so the generated JSON Schema has
+// `"type": "object"` at the root.
+//
+// Rationale: OpenAI's function-calling validator (and especially the strict
+// mode used by GPT-4.1+/GPT-5.x/Codex/Responses API) REQUIRES the parameters
+// schema to be an object at the root. A `Type.Union` produces `anyOf` at the
+// root with no `type` field, which Anthropic accepts but OpenAI rejects with:
+//   "Invalid schema for function 'ask_user': schema must be a JSON Schema
+//    of 'type: \"object\"', got 'type: \"None\"'."
+//
+// Per-method validation (which fields are required for which `method`) is
+// enforced at runtime by `prepareArguments` (rescue/normalization) and the
+// `execute` switch below — the JSON Schema only needs to describe the union
+// of allowed fields.
 // ──────────────────────────────────────────────────────────────────────────
 
-const ConfirmSchema = Type.Object({
-  method: Type.Literal("confirm", { description: "Yes/no question" }),
-  title: Type.String({ description: "The question to confirm" }),
-  message: Type.Optional(Type.String({ description: "Additional context or detailed question body" })),
-});
+const MethodEnum = Type.Union(
+  [
+    Type.Literal("confirm"),
+    Type.Literal("select"),
+    Type.Literal("multiselect"),
+    Type.Literal("input"),
+    Type.Literal("batch"),
+  ],
+  {
+    description:
+      "Question kind. 'confirm' = yes/no, 'select' = pick one of options[], 'multiselect' = pick many of options[], 'input' = free text, 'batch' = ask several questions in one call (provide questions[]).",
+  },
+);
 
-const SelectSchema = Type.Object({
-  method: Type.Literal("select", { description: "Pick one option from a list" }),
-  title: Type.String({ description: "Short title for the question" }),
-  options: Type.Array(Type.String(), {
-    minItems: 2,
-    description: "Options the user chooses between (at least 2; use 'confirm' for yes/no)",
-  }),
-  message: Type.Optional(Type.String({ description: "Additional context" })),
-});
-
-const MultiselectSchema = Type.Object({
-  method: Type.Literal("multiselect", { description: "Pick multiple options from a list" }),
-  title: Type.String({ description: "Short title for the question" }),
-  options: Type.Array(Type.String(), {
-    minItems: 1,
-    description: "Options the user can multi-select",
-  }),
-  message: Type.Optional(Type.String({ description: "Additional context" })),
-});
-
-const InputSchema = Type.Object({
-  method: Type.Literal("input", { description: "Free-text input" }),
-  title: Type.String({ description: "Short title for the question" }),
-  placeholder: Type.Optional(Type.String({ description: "Placeholder text for the input field" })),
-  message: Type.Optional(Type.String({ description: "Additional context" })),
-});
-
-// Sub-question union deliberately omits the batch arm (no nesting).
-const SubQuestionSchema = Type.Union([ConfirmSchema, SelectSchema, MultiselectSchema, InputSchema], {
-  description: "A single question inside a batch. Must not itself be a batch.",
-});
-
-const BatchSchema = Type.Object({
-  method: Type.Literal("batch", {
-    description: "Ask multiple related questions in one call; answers are returned as an ordered array.",
-  }),
-  title: Type.String({ description: "Header shown above the sequence of dialogs" }),
-  questions: Type.Array(SubQuestionSchema, {
-    minItems: 1,
-    description: "One or more sub-questions (confirm/select/multiselect/input). Cannot nest batch.",
-  }),
-  message: Type.Optional(Type.String({ description: "Additional context for the whole batch" })),
-});
+// Sub-question schema for batch.method — flat object (no nested union) so the
+// emitted JSON Schema stays OpenAI-compatible at every level. Sub-questions
+// cannot themselves be a batch (no nesting); enforced at runtime.
+const SubQuestionSchema = Type.Object(
+  {
+    method: Type.Union(
+      [
+        Type.Literal("confirm"),
+        Type.Literal("select"),
+        Type.Literal("multiselect"),
+        Type.Literal("input"),
+      ],
+      { description: "Sub-question kind. Cannot be 'batch' (no nesting)." },
+    ),
+    title: Type.String({ description: "Short title / question text for this sub-question" }),
+    options: Type.Optional(
+      Type.Array(Type.String(), {
+        description:
+          "Required for 'select' (>=2) and 'multiselect' (>=1). Plain string[] — not [{label,value}].",
+      }),
+    ),
+    placeholder: Type.Optional(
+      Type.String({ description: "Placeholder for 'input' method" }),
+    ),
+    message: Type.Optional(
+      Type.String({ description: "Additional context for this sub-question" }),
+    ),
+  },
+  {
+    description:
+      "A single question inside a batch. Must not itself be a batch.",
+  },
+);
 
 // ──────────────────────────────────────────────────────────────────────────
 // Argument rescue helpers
@@ -132,9 +146,42 @@ export function registerAskUserTool(pi: ExtensionAPI): void {
       "Do not nest batches. Send `options` as a plain string[] — not [{label, value}].",
       "This applies to all workflows including OpenSpec, planning, and any situation where you need user input before proceeding.",
     ],
-    parameters: Type.Union(
-      [ConfirmSchema, SelectSchema, MultiselectSchema, InputSchema, BatchSchema],
-      { description: "Parameters for ask_user, discriminated by method." },
+    // Flat object schema (root: type=object) for OpenAI/Anthropic compatibility.
+    // Field requirements per method are enforced at runtime, not via JSON Schema.
+    parameters: Type.Object(
+      {
+        method: MethodEnum,
+        title: Type.Optional(
+          Type.String({
+            description:
+              "Short title / question text. Required for all methods except when 'questions' carry it (batch may omit and inherit from first sub-question).",
+          }),
+        ),
+        message: Type.Optional(
+          Type.String({ description: "Additional context shown alongside the question(s)." }),
+        ),
+        options: Type.Optional(
+          Type.Array(Type.String(), {
+            description:
+              "Required for method 'select' (>=2 items) and 'multiselect' (>=1 item). Plain string[] — not [{label,value}]. Ignored for other methods.",
+          }),
+        ),
+        placeholder: Type.Optional(
+          Type.String({
+            description: "Placeholder for method 'input'. Ignored for other methods.",
+          }),
+        ),
+        questions: Type.Optional(
+          Type.Array(SubQuestionSchema, {
+            description:
+              "Required for method 'batch' (>=1 sub-question). Each sub-question is its own confirm/select/multiselect/input — cannot nest 'batch'.",
+          }),
+        ),
+      },
+      {
+        description:
+          "Parameters for ask_user. The required fields depend on `method`: confirm→title; select→title+options(>=2); multiselect→title+options(>=1); input→title (placeholder optional); batch→questions[] (title auto-derived from first question if omitted). Validation is enforced at runtime.",
+      },
     ),
     prepareArguments(args: unknown) {
       let obj = (args && typeof args === "object" ? { ...(args as Record<string, unknown>) } : {}) as Record<string, unknown>;
