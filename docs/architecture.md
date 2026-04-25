@@ -158,6 +158,30 @@ pi-flows runs multi-agent workflows in-process. Subagent sessions use `SessionMa
 - Abort: browser sends `flow_control { action: "abort" }` → server → bridge → `pi.events.emit("flow:abort")` → `flowManager.abort()`
 - Autonomous toggle: browser sends `flow_control { action: "toggle_autonomous" }` → same path → `setAutonomousMode()`
 
+### Extension UI System (planned, design-only)
+
+A planned generalized mechanism for extensions to declare dashboard UIs as data without authoring React or importing a runtime SDK. Tracked under OpenSpec change `extension-ui-system` (design-only); implementation lands in follow-up changes (`add-extension-ui-modal` for Phase 1, `add-extension-ui-decorations` for Phase 2).
+
+**Mechanism (pull-based discovery):**
+1. Bridge emits `pi.events.emit("ui:list-modules", probe)` on `session_start`, after every reconnect, and on extension-emitted `ui:invalidate { id }`.
+2. Extensions listen and synchronously push schema descriptors into `probe.modules` (no SDK import; just `pi.events`).
+3. Bridge forwards as `ui_modules_list` to the server, which caches on the `Session` record (`session.uiModules`) and forwards to subscribed browsers.
+4. Browsers render each module in a fixed slot keyed by descriptor `kind`.
+
+**Slot taxonomy (frozen for v0.x):**
+- **Phase 1:** `management-modal` (`table` / `grid` / `form` views, triggered by slash command).
+- **Phase 2:** `footer-segment`, `agent-metric`, `breadcrumb`, `gate`, `toast` (live in-page decorations forwarded via single-union `ext_ui_decorator` message).
+- **Phase 4 (optional):** `rjsf-form` (JSON Schema escape hatch for rich forms).
+
+**Replay on reconnect:** Server caches state on `Session` records (`uiModules`, `uiDataMap`, `uiDecorators`) so cleanup is automatic when the session is deleted. The replay site is `handleSubscribe` in `subscription-handler.ts`, alongside the existing `replayPendingUiRequests` hook used by PromptBus.
+
+**Relationship to existing capabilities:**
+- `interactive-ui-dialogs` / `ui-proxy` / PromptBus — handle one-shot `ctx.ui.*` dialogs (request/response, awaited). The extension-ui-system handles persistent push-based descriptors (no awaiting). Orthogonal mechanisms; both ship.
+- `extension-ui-forwarding` (catch-all `pi.events.emit` forwarding) — kept for arbitrary extension events; the new system is the *declarative* path for UI specifically.
+- pi-flows: in Phase 3 pi-flows itself adopts the system to surface registered workflows (breadcrumb), gates, and cards (agent-metric) for any flow-using extension automatically.
+
+**No-dashboard fallback:** When no bridge is connected, `ui:list-modules` is never emitted; extension listeners are dormant; slash commands fall back to text. Extensions remain pi-runnable in pure-pi mode without code changes.
+
 ### Bootstrap & First Run
 
 The dashboard has three install paths that all converge on the shared
