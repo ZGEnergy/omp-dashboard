@@ -1,7 +1,7 @@
 /**
  * Extension ↔ Server WebSocket protocol messages.
  */
-import type { DashboardEvent, CommandInfo, FlowInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, PiSessionInfo, OpenSpecPhase, RoleInfo } from "./types.js";
+import type { DashboardEvent, CommandInfo, FlowInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, PiSessionInfo, OpenSpecPhase, RoleInfo, ExtensionUiModule, DecoratorDescriptor } from "./types.js";
 
 // ── Extension → Server ──────────────────────────────────────────────
 
@@ -228,6 +228,39 @@ export interface ProcessListMessage {
 
 // LoadSessionEventsResultMessage and LoadSessionEventsErrorMessage removed — server loads directly
 
+// ── Extension UI System (Phase 1) ──
+// Pull-discovered, schema-driven UI modules. See change: add-extension-ui-modal.
+
+export interface UiModulesListMessage {
+  type: "ui_modules_list";
+  sessionId: string;
+  modules: ExtensionUiModule[];
+}
+
+export interface UiDataListMessage {
+  type: "ui_data_list";
+  sessionId: string;
+  /** Matches some `module.view.dataEvent`. */
+  event: string;
+  items: unknown[];
+}
+
+// ── Extension UI System (Phase 2: live in-page decorations) ──
+// See change: add-extension-ui-decorations.
+
+/**
+ * Extension → server: a single live decorator descriptor. Cache key
+ * `${kind}:${namespace}:${id}` MUST be unique within a session; `removed: true`
+ * deletes the cache entry instead of upserting.
+ */
+export interface ExtUiDecoratorMessage {
+  type: "ext_ui_decorator";
+  sessionId: string;
+  descriptor: DecoratorDescriptor;
+  /** When true, server deletes the cached descriptor under the matching key. */
+  removed?: boolean;
+}
+
 export type ExtensionToServerMessage =
   | SessionRegisterMessage
   | SessionUnregisterMessage
@@ -250,7 +283,10 @@ export type ExtensionToServerMessage =
   | FirstMessageUpdateMessage
   | RolesListMessage
   | SpawnNewSessionMessage
-  | ProcessListMessage;
+  | ProcessListMessage
+  | UiModulesListMessage
+  | UiDataListMessage
+  | ExtUiDecoratorMessage;
 
 // ── Server → Extension ──────────────────────────────────────────────
 
@@ -401,6 +437,23 @@ export interface ExtensionUiResponseMessage {
   cancelled?: boolean;
 }
 
+/**
+ * Server → extension: a browser invoked an action / requested data on a
+ * Phase-1 management-modal module. The bridge re-emits this on `pi.events`
+ * as `pi.events.emit(msg.event, { ...msg.params, action: msg.action, _reply })`.
+ * Extensions either populate `data.items` synchronously (for `action: "list"`
+ * data fetches) or perform side-effects and emit `ui:invalidate` to refresh.
+ */
+export interface UiManagementMessage {
+  type: "ui_management";
+  sessionId: string;
+  /** Action id (matches some `UiAction.id`) or `"list"` for data fetch. */
+  action: string;
+  /** Event name to emit (matches `view.dataEvent` or `UiAction.event`). */
+  event: string;
+  params?: Record<string, unknown>;
+}
+
 export interface PromptResponseServerMessage {
   type: "prompt_response";
   sessionId: string;
@@ -435,4 +488,5 @@ export type ServerToExtensionMessage =
   | RolePresetSaveExtensionMessage
   | RolePresetDeleteExtensionMessage
   | RequestRolesMessage
+  | UiManagementMessage
   | KillProcessMessage;

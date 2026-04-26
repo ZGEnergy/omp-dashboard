@@ -30,6 +30,7 @@ import {
 import { SessionCard, GroupGitInfo, EditorButtons, branchCache } from "./SessionCard.js";
 import { PlaceholderSessionCard } from "./PlaceholderSessionCard.js";
 import { FolderOpenSpecSection } from "./FolderOpenSpecSection.js";
+import { SidebarFolderSectionSlot } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { ThemeToggle } from "./ThemeToggle.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useEditors } from "../lib/use-editors.js";
@@ -363,6 +364,8 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               onOpenPiResources={() => onOpenPiResources?.(group.cwd)}
             />
           </div>
+          {/* Plugin slot: sidebar-folder-section (additive, coexists with FolderOpenSpecSection) */}
+          <SidebarFolderSectionSlot folder={{ cwd: group.cwd }} />
           {openspecMap?.get(group.cwd)?.initialized && (
             <FolderOpenSpecSection
               data={openspecMap.get(group.cwd)!}

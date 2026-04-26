@@ -55,6 +55,47 @@ async function sendEventBatches(
   return stored.length > 0 ? stored[stored.length - 1].seq : 0;
 }
 
+/**
+ * Replay extension-declared UI state to a single browser. Sends:
+ *
+ *   1. one `ui_modules_list` (when modules exist)                  — Phase 1
+ *   2. one `ui_data_list` per cached `(event, items)` entry         — Phase 1
+ *   3. one `ext_ui_decorator` per cached `Session.uiDecorators` entry — Phase 2
+ *
+ * Replay decorator messages NEVER carry `removed: true` — only live entries
+ * are replayed; deleted entries are already absent from the cache.
+ *
+ * Called immediately after every `replayPendingUiRequests` site so the full
+ * replay ordering is:
+ *
+ *   events → pending UI requests → ui_modules_list → ui_data_list → ext_ui_decorator
+ *
+ * Exported so unit tests can drive it without standing up a full subscribe
+ * pipeline. See changes: add-extension-ui-modal, add-extension-ui-decorations.
+ */
+export function replayUiState(
+  ws: WebSocket,
+  sessionId: string,
+  ctx: Pick<BrowserHandlerContext, "sessionManager" | "sendTo">,
+): void {
+  const { sessionManager, sendTo } = ctx;
+  const session = sessionManager.get(sessionId);
+  if (!session) return;
+  if (session.uiModules && session.uiModules.length > 0) {
+    sendTo(ws, { type: "ui_modules_list", sessionId, modules: session.uiModules } as any);
+  }
+  if (session.uiDataMap) {
+    for (const [event, items] of Object.entries(session.uiDataMap)) {
+      sendTo(ws, { type: "ui_data_list", sessionId, event, items } as any);
+    }
+  }
+  if (session.uiDecorators) {
+    for (const descriptor of Object.values(session.uiDecorators)) {
+      sendTo(ws, { type: "ext_ui_decorator", sessionId, descriptor } as any);
+    }
+  }
+}
+
 export function handleSubscribe(
   msg: Extract<BrowserToServerMessage, { type: "subscribe" }>,
   subs: Set<string>,
@@ -85,6 +126,7 @@ export function handleSubscribe(
       sendEventBatches(ws, msg.sessionId, events, sendTo).then((lastSent) => {
         clearReplaying(ws, msg.sessionId, lastSent);
         replayPendingUiRequests(ws, msg.sessionId);
+        replayUiState(ws, msg.sessionId, ctx);
       });
     } else {
       let events = eventStore.getEvents(msg.sessionId, lastSeq + 1);
@@ -97,10 +139,12 @@ export function handleSubscribe(
         sendEventBatches(ws, msg.sessionId, events, sendTo).then((lastSent) => {
           clearReplaying(ws, msg.sessionId, lastSent);
           replayPendingUiRequests(ws, msg.sessionId);
+          replayUiState(ws, msg.sessionId, ctx);
         });
       } else {
         sendEventBatches(ws, msg.sessionId, events, sendTo).then(() => {
           replayPendingUiRequests(ws, msg.sessionId);
+          replayUiState(ws, msg.sessionId, ctx);
         });
       }
     }
@@ -130,6 +174,7 @@ export function handleSubscribe(
           for (const sub of subscribers) {
             await sendEventBatches(sub, msg.sessionId, stored, sendTo);
             replayPendingUiRequests(sub, msg.sessionId);
+            replayUiState(sub, msg.sessionId, ctx);
           }
         } else {
           sendTo(ws, { type: "event_replay", sessionId: msg.sessionId, events: [], isLast: true });

@@ -8,7 +8,9 @@
   },
   "exports": {
     "./*.js": "./src/*.ts",
-    "./*": "./src/*"
+    "./*": "./src/*",
+    "./dashboard-plugin/*.js": "./src/dashboard-plugin/*.ts",
+    "./dashboard-plugin/*": "./src/dashboard-plugin/*"
   },
   "files": [
     "src/"

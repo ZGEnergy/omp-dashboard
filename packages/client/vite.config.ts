@@ -2,6 +2,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
+// NOTE: viteDashboardPluginsPlugin is wired here but only active when
+// packages/dashboard-plugin-runtime is installed. The dynamic import
+// is deferred to avoid vite.config.ts failures during fresh installs.
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

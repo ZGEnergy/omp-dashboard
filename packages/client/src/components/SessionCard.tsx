@@ -17,6 +17,7 @@ import { SessionFlowActions } from "./SessionFlowActions.js";
 import { ProcessList, type ProcessEntry } from "./ProcessList.js";
 import type { CommandInfo, FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { useMobile } from "../hooks/useMobile.js";
+import { SessionCardBadgeSlot, SessionCardActionBarSlot } from "@blackbelt-technology/dashboard-plugin-runtime";
 
 export const statusColors: Record<string, string> = {
   active: "bg-green-500",
@@ -597,6 +598,11 @@ export function SessionCard({
           onBulkArchive={onBulkArchive}
         />
       )}
+      {/* Plugin slot: session-card-badge (additive, coexists with OpenSpec/Flow badges) */}
+      <SessionCardBadgeSlot session={session} />
+      {/* Plugin slot: session-card-action-bar (additive, coexists with OpenSpec/Flow actions) */}
+      <SessionCardActionBarSlot session={session} />
+
       {/* Flow launcher */}
       {flows && onFlowAction && (
         <SessionFlowActions

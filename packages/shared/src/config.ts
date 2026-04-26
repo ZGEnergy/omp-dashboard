@@ -80,6 +80,12 @@ export interface KnownServer {
   addedAt: string; // ISO timestamp
 }
 
+/**
+ * Plugin-specific config namespace.
+ * Lives at ~/.pi/dashboard/config.json#plugins.<id>.*
+ */
+export type PluginsConfig = Record<string, Record<string, unknown>>;
+
 export interface DashboardConfig {
   port: number;
   piPort: number;
@@ -107,6 +113,13 @@ export interface DashboardConfig {
   electronMode: boolean;
   /** Persisted list of known remote servers */
   knownServers: KnownServer[];
+  /**
+   * Per-plugin config namespaces. Reserved top-level key.
+   * Each plugin's config lives at plugins.<id>.*
+   * Plugin-shaped legacy top-level keys (e.g. openspec.*) stay at top-level
+   * until each extract-*-as-plugin change migrates them.
+   */
+  plugins: PluginsConfig;
 }
 
 export interface CorsConfig {
@@ -117,6 +130,7 @@ export interface CorsConfig {
 const VALID_SPAWN_STRATEGIES: SpawnStrategy[] = ["tmux", "headless"];
 
 const DEFAULTS: DashboardConfig = {
+  plugins: {},
   port: 8000,
   piPort: 9999,
   autoStart: true,
@@ -237,6 +251,36 @@ function parseMemoryLimits(raw: any): MemoryLimitsConfig {
   };
 }
 
+function parsePluginsConfig(raw: unknown): PluginsConfig {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const result: PluginsConfig = {};
+  for (const [id, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (val && typeof val === "object" && !Array.isArray(val)) {
+      result[id] = val as Record<string, unknown>;
+    }
+  }
+  return result;
+}
+
+/**
+ * Get the plugins config block from a loaded DashboardConfig.
+ * Provides typed access to plugins.<id>.* namespaces.
+ */
+export function getPluginsConfig(config: DashboardConfig): PluginsConfig {
+  return config.plugins ?? {};
+}
+
+/**
+ * Get a single plugin's config from a loaded DashboardConfig.
+ * Returns {} if the plugin has no stored config.
+ */
+export function getPluginConfig(
+  config: DashboardConfig,
+  pluginId: string,
+): Record<string, unknown> {
+  return config.plugins?.[pluginId] ?? {};
+}
+
 function parseKnownServers(raw: any): KnownServer[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -299,6 +343,7 @@ export function loadConfig(): DashboardConfig {
       ...(typeof parsed.lastServer === "string" ? { lastServer: parsed.lastServer } : {}),
       electronMode: parsed.electronMode === true,
       knownServers: parseKnownServers(parsed.knownServers),
+      plugins: parsePluginsConfig(parsed.plugins),
     };
 
     // Compute resolvedTrustedNetworks: merge trustedNetworks + auth.bypassHosts

@@ -426,6 +426,21 @@ export function createBrowserGateway(
             });
             break;
           }
+          case "ui_management": {
+            // Extension UI System (Phase 1): forward browser action / data
+            // request to the bridge unchanged. The bridge re-emits on
+            // pi.events; the extension replies via ui_data_list (round-trip
+            // handled in event-wiring).
+            // See change: add-extension-ui-modal.
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "ui_management",
+              sessionId: msg.sessionId,
+              action: msg.action,
+              event: msg.event,
+              params: msg.params,
+            });
+            break;
+          }
           case "create_terminal":
             handleCreateTerminal(msg, ctx);
             break;

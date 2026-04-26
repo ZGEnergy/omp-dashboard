@@ -55,6 +55,8 @@ import { useOpenSpecActions } from "./hooks/useOpenSpecActions.js";
 import type { DashboardSession, CommandInfo, FlowInfo, FileEntry, OpenSpecData, ModelInfo, RoleInfo, ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { SearchableSelectDialog, type SelectOption } from "./components/SearchableSelectDialog.js";
 import { FlowLaunchDialog } from "./components/FlowLaunchDialog.js";
+import { GenericExtensionDialog } from "./components/extension-ui/GenericExtensionDialog.js";
+import { ToastSlot } from "./components/extension-ui/ToastSlot.js";
 import { PinDirectoryDialog } from "./components/PinDirectoryDialog.js";
 import { DialogPortal } from "./components/DialogPortal.js";
 import { useProvidersReady } from "./hooks/useProvidersReady.js";
@@ -65,6 +67,16 @@ import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-
 import type { ToolContext } from "./components/tool-renderers/index.js";
 import type { ContextUsageInfo } from "./components/SessionList.js";
 import { ApiContext, deriveApiBase, VITE_API_URL, setGlobalApiBase } from "./lib/api-context.js";
+import { PluginContextProvider, applyPluginConfigUpdate } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import {
+  ContentViewSlot,
+  ContentHeaderStickySlot,
+  ContentInlineFooterSlot,
+} from "@blackbelt-technology/dashboard-plugin-runtime";
+import { createSlotRegistry } from "@blackbelt-technology/dashboard-plugin-runtime";
+
+// Empty registry until real plugins register claims at build time
+const _pluginRegistry = createSlotRegistry();
 
 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const wsPort = window.location.port ? `:${window.location.port}` : "";
@@ -536,7 +548,22 @@ export default function App() {
   const [flowDeleteFlowName, setFlowDeleteFlowName] = useState<string | null>(null);
   const [flowLaunchTarget, setFlowLaunchTarget] = useState<FlowInfo | null>(null);
 
-  // Wrap handleSend to intercept /flows commands and clear the per-session draft.
+  // Extension UI System (Phase 1): currently-open module modal, and the
+  // searchable picker shown via the Modules entry point.
+  // See change: add-extension-ui-modal.
+  const [extensionModuleOpen, setExtensionModuleOpen] = useState<{ sessionId: string; moduleId: string } | null>(null);
+  const [extensionModulePickerOpen, setExtensionModulePickerOpen] = useState(false);
+
+  // Built-in slash commands the dashboard handles natively. If an extension
+  // pushes a module whose `command` matches one of these, we drop the module
+  // (the built-in wins) and warn the developer.
+  const BUILTIN_SLASH_COMMANDS = useMemo(() => new Set([
+    "/flows", "/flows:new", "/flows:edit", "/flows:delete",
+    "/compact", "/reload", "/new", "/model", "/roles",
+  ]), []);
+
+  // Wrap handleSend to intercept /flows commands, extension UI module commands,
+  // and clear the per-session draft.
   const wrappedHandleSend = useCallback((text: string, images?: ImageContent[]) => {
     const trimmed = text.trim();
     if (trimmed === "/flows") {
@@ -547,12 +574,33 @@ export default function App() {
       setFlowNewOpen(true);
       return;
     }
+    // Extension UI System (Phase 1): exact-match slash command opens the
+    // matching module modal and suppresses the prompt send.
+    // See change: add-extension-ui-modal.
+    if (selectedId && trimmed.startsWith("/")) {
+      const session = sessions.get(selectedId);
+      const modules = session?.uiModules ?? [];
+      const match = modules.find((m) => m.command === trimmed && !BUILTIN_SLASH_COMMANDS.has(m.command));
+      if (match) {
+        setExtensionModuleOpen({ sessionId: selectedId, moduleId: match.id });
+        if (selectedId) {
+          clearDraftForSession(selectedId);
+          clearImagesForSession(selectedId);
+        }
+        return;
+      }
+      // Drop modules colliding with built-ins; warn once per id per session-tick.
+      const colliding = modules.find((m) => m.command === trimmed && BUILTIN_SLASH_COMMANDS.has(m.command));
+      if (colliding) {
+        console.warn(`[extension-ui] Dropping module "${colliding.id}" — command ${colliding.command} collides with a built-in.`);
+      }
+    }
     handleSend(text, images);
     if (selectedId) {
       clearDraftForSession(selectedId);
       clearImagesForSession(selectedId);
     }
-  }, [handleSend, selectedId, clearDraftForSession, clearImagesForSession]);
+  }, [handleSend, selectedId, clearDraftForSession, clearImagesForSession, sessions, BUILTIN_SLASH_COMMANDS]);
 
   const openspecActions = useOpenSpecActions({ send, openspecMap, setPreviewState, clearAllContentViews });
   const {
@@ -769,6 +817,7 @@ export default function App() {
         onDetachProposal={() => handleDetachProposal(selectedId)}
         hasFileChanges={selectedState.hasFileChanges}
         onOpenDiffView={() => { clearAllContentViews(); setDiffViewSessionId(selectedId); }}
+        onOpenExtensionModulePicker={() => setExtensionModulePickerOpen(true)}
         onRefresh={() => {
           setSessionStates((prev) => {
             const next = new Map(prev);
@@ -921,6 +970,7 @@ export default function App() {
               <FlowDashboard
                 flowState={selectedState.flowState}
                 flowStates={selectedState.flowStates}
+                session={selectedSession}
                 onAgentClick={setFlowDetailAgent}
                 selectedAgent={flowDetailAgent}
                 onAbort={() => selectedId && send({ type: "flow_control" as any, sessionId: selectedId, action: "abort" })}
@@ -961,6 +1011,7 @@ export default function App() {
               <FlowDashboard
                 flowState={selectedState.flowState}
                 flowStates={selectedState.flowStates}
+                session={selectedSession}
                 onAgentClick={setFlowDetailAgent}
                 selectedAgent={flowDetailAgent}
                 onAbort={() => selectedId && send({ type: "flow_control" as any, sessionId: selectedId, action: "abort" })}
@@ -975,6 +1026,8 @@ export default function App() {
               />
             </div>
           )}
+          {/* Plugin slot: content-header-sticky (additive, coexists with FlowDashboard until extract-flows-as-plugin) */}
+          <ContentHeaderStickySlot session={sessions.get(selectedId)!} />
           <ErrorBoundary fallback={
             <div className="flex-1 flex items-center justify-center p-8">
               <div className="text-center space-y-2">
@@ -1044,6 +1097,8 @@ export default function App() {
             images={selectedImages}
             onImagesChange={setImagesForSelected}
           />
+          {/* Plugin slot: content-inline-footer (additive, coexists with FlowSummary until extract-flows-as-plugin) */}
+          <ContentInlineFooterSlot session={sessions.get(selectedId)!} />
           {flowPickerOpen && (() => {
             const hasFlowsNew = selectedCommands.some(c => c.name === "flows:new");
             const hasFlowsEdit = selectedCommands.some(c => c.name === "flows:edit");
@@ -1150,6 +1205,7 @@ export default function App() {
             <FlowLaunchDialog
               flowName={flowLaunchTarget.name}
               description={flowLaunchTarget.description}
+              session={selectedSession}
               onSubmit={(task) => {
                 if (selectedId) handleFlowAction(selectedId, "run", { flowName: flowLaunchTarget.name, task: task || undefined });
                 setFlowLaunchTarget(null);
@@ -1157,6 +1213,57 @@ export default function App() {
               onCancel={() => setFlowLaunchTarget(null)}
             />
           )}
+          {/* Extension UI System (Phase 1): module picker + generic modal. */}
+          {/* See change: add-extension-ui-modal. */}
+          {extensionModulePickerOpen && selectedId && (() => {
+            const session = sessions.get(selectedId);
+            const modules = session?.uiModules ?? [];
+            const options: SelectOption[] = modules.map((m) => ({
+              value: m.id,
+              label: m.title,
+              description: m.description ?? m.command,
+              badge: m.category,
+            }));
+            return (
+              <SearchableSelectDialog
+                title="Extension Modules"
+                options={options}
+                placeholder="Search modules..."
+                emptyMessage="No modules available"
+                onSelect={(moduleId) => {
+                  setExtensionModuleOpen({ sessionId: selectedId, moduleId });
+                  setExtensionModulePickerOpen(false);
+                }}
+                onCancel={() => setExtensionModulePickerOpen(false)}
+              />
+            );
+          })()}
+          {/* Extension UI System (Phase 2): toast slot — top-right tray. */}
+          {/* See change: add-extension-ui-decorations. */}
+          <ToastSlot sessions={sessions} />
+          {extensionModuleOpen && (() => {
+            const session = sessions.get(extensionModuleOpen.sessionId);
+            const module = session?.uiModules?.find((m) => m.id === extensionModuleOpen.moduleId);
+            if (!module) return null;
+            const dataEvent = module.view.dataEvent;
+            const rows = dataEvent ? (session?.uiDataMap?.[dataEvent] ?? []) : [];
+            return (
+              <GenericExtensionDialog
+                module={module}
+                rows={rows}
+                onDispatch={({ action, event, params }) => {
+                  send({
+                    type: "ui_management",
+                    sessionId: extensionModuleOpen.sessionId,
+                    action,
+                    event,
+                    params,
+                  });
+                }}
+                onClose={() => setExtensionModuleOpen(null)}
+              />
+            );
+          })()}
         </>
       )}
     </div>
@@ -1223,8 +1330,18 @@ export default function App() {
     }
   }, [selectedTerminalId, terminalsLoaded, terminals, navigate]);
 
+  const allSessionsList = useMemo(() => Array.from(sessions.values()), [sessions]);
+
   const apiProvider = (children: React.ReactNode) => (
-    <ApiContext.Provider value={apiBase}>{children}</ApiContext.Provider>
+    <ApiContext.Provider value={apiBase}>
+      <PluginContextProvider
+        registry={_pluginRegistry}
+        sessions={allSessionsList}
+        send={(msg) => send(msg as Parameters<typeof send>[0])}
+      >
+        {children}
+      </PluginContextProvider>
+    </ApiContext.Provider>
   );
 
   // Mobile: two-step full-screen navigation
@@ -1444,7 +1561,11 @@ export default function App() {
               onBack={() => setPreviewState(null)}
             />
           ) : (
-            sessionDetail ?? (
+            /* Plugin slot: content-view (additive; rendered after existing routes, before sessionDetail fallback). Gate on registry claims so empty slot does NOT mask sessionDetail/LandingPage via `??`. */
+            (selectedId && selectedSession && _pluginRegistry.getClaims("content-view").length > 0
+              ? <ContentViewSlot session={selectedSession} routeParams={{}} onClose={() => navigate("/")} />
+              : null
+            ) ?? sessionDetail ?? (
               <LandingPage
                 providersReady={providersReady.ready}
                 pinnedCount={pinnedDirectories.length}

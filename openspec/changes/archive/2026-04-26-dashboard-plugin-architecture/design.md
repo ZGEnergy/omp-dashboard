@@ -101,8 +101,8 @@ Each slot has a fixed payload contract. Slots accept either React components (`R
 |---|---|---|---|---|
 | `sidebar-folder-section` | R | many per folder | persistent | Collapsible block above session list per workspace |
 | `session-card-badge` | R+D | many per session | persistent | Compact info chip; descriptor variant uses `kind: "agent-metric"` shape |
-| `session-card-action-bar` | R+D | many per session | persistent | Action buttons; descriptor variant uses `kind: "session-card-action-bar"` |
-| `content-view` | R+D | one active per session | persistent | Full-screen content; descriptor variant uses `kind: "management-modal"` opened as content view, or new `kind: "content-view-data"` |
+| `session-card-action-bar` | R | many per session | persistent | Action buttons. **Descriptor variant deferred** — would require a new descriptor kind in `extension-ui-system`; not introduced in v0.x. Adding it later is forward-compatible (slot is already in the taxonomy; `R` → `R+D` is a minor bump). |
+| `content-view` | R+D | one active per session | persistent | Full-screen content; descriptor variant **reuses the existing `kind: "management-modal"`** opened as a content view (escape hatch for table/grid/form payloads). A richer descriptor variant (`kind: "content-view-data"`) is *not* introduced here — extension-ui-system can add it in a later phase if needed. |
 | `content-header-sticky` | R+D | many per session | persistent | Sticks above content-view; descriptor variant uses `kind: "breadcrumb"` |
 | `content-inline-footer` | R | many per session | persistent | React-only (rich; pi-flows summary case) |
 | `anchored-popover` | R | one at a time | one-shot | Popover anchored to a triggering UI element |
@@ -116,6 +116,10 @@ Each slot has a fixed payload contract. Slots accept either React components (`R
 | `gate` | D | many per flow | persistent | (existing — `extension-ui-system`) |
 | `toast` | D | many globally | one-shot | (existing — `extension-ui-system`) |
 | `rjsf-form` | D | many globally | one-shot | (existing — `extension-ui-system` Phase 4) |
+
+**Cross-reference with `extension-ui-system`:**
+
+The descriptor-renderable rows (`management-modal`, `footer-segment`, `agent-metric`, `breadcrumb`, `gate`, `toast`, `rjsf-form`, `settings-section`) match the slot kinds defined in `openspec/changes/extension-ui-system/design.md` §"Slot taxonomy" by **identical name and payload contract**. The R+D slots that reuse an existing extension-ui-system descriptor kind (`session-card-badge` reuses `agent-metric`; `content-header-sticky` reuses `breadcrumb`; `content-view` reuses `management-modal`) consume that exact payload shape — no new descriptor kind is introduced by this proposal. Slots that *could* one day accept descriptors but don't yet (`session-card-action-bar`, `content-inline-footer`) are documented as React-only for v0.x; a future minor version of `extension-ui-system` may add new descriptor kinds and bump those rows from `R` to `R+D` non-breakingly.
 
 **Conflict rules:**
 - Multiplicity "one active per session" (e.g. `content-view`): the active route picks the winner. Multiple registrations claim distinct route patterns; collisions on the same pattern are a load-time error.

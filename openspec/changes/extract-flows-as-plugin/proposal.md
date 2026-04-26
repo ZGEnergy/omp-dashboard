@@ -62,3 +62,7 @@ None. This change is a refactor that uses `dashboard-shell-slots` and `dashboard
 - Sibling extraction: `openspec/changes/extract-openspec-as-plugin/`
 - pi-flows source repo: external (referenced by name only).
 - Layout scan results: `openspec/changes/dashboard-plugin-architecture/design.md` §"Current dashboard layout"
+
+## Slot wiring guardrail
+
+When this change wires new slot consumers into `App.tsx` (or any other shell file) inside a `??` fallback chain, the JSX element MUST be gated on a `getClaims(...).length > 0` check **before** construction. See `fix-slot-fallback-masks-content` for the rationale, the lint test that enforces the convention, and the exact production-bug shape that motivated it. Add the shell file path to `SCAN_FILES` in `packages/client/src/__tests__/no-jsx-slot-nullish-fallback.test.ts` if this change touches a file outside `App.tsx`.

@@ -35,6 +35,7 @@ import { filterHiddenCommands, extractFirstMessage, getCurrentModelString } from
 import { sendStateSync as _sendStateSync, replaySessionEntries as _replaySessionEntries, handleSessionChange as _handleSessionChange } from "./session-sync.js";
 import { sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged } from "./model-tracker.js";
 import { registerFlowEventListeners, FLOW_EVENT_MAP, SUBAGENT_EVENT_MAP } from "./flow-event-wiring.js";
+import { refreshUiModules, subscribeUiInvalidate, handleUiManagement, type UiModulesBridgeCtx } from "./ui-modules.js";
 
 const HEARTBEAT_INTERVAL = 15_000;
 const GIT_POLL_INTERVAL = 30_000;
@@ -263,11 +264,29 @@ function initBridge(pi: ExtensionAPI) {
   const config = loadConfig();
   const dashboardUrl = process.env.PI_DASHBOARD_URL ?? `ws://localhost:${config.piPort}`;
 
+  // Long-lived ctx wrapper for the Extension UI System (Phase 1) — see
+  // change: add-extension-ui-modal. `getSessionId` reads the closed-over
+  // `sessionId` so the helper always uses the current value (which is
+  // mutated when `event.reason ∈ {"new","fork","resume"}` fires).
+  const uiModulesBridgeCtx: UiModulesBridgeCtx = {
+    pi: pi as any,
+    connection: { send: (msg: unknown) => connection.send(msg) },
+    getSessionId: () => sessionId,
+  };
+
   const connection = new ConnectionManager({
     url: dashboardUrl,
     onMessage: safe(async (data: unknown) => {
       if (!isActive()) return; // Stale listener guard
       const msg = data as ServerToExtensionMessage;
+      // Extension UI System (Phase 1): browser-originated action / data
+      // request. Re-emit on pi.events; the listener either populates
+      // data.items synchronously or calls _reply asynchronously.
+      // See change: add-extension-ui-modal.
+      if ((msg as any).type === "ui_management") {
+        handleUiManagement(uiModulesBridgeCtx, msg as any);
+        return;
+      }
       // Legacy extension_ui_response removed — now handled by prompt_response → promptBus.respond()
       // Reload auth credentials when dashboard notifies of changes
       if (msg.type === "credentials_updated") {
@@ -463,6 +482,11 @@ function initBridge(pi: ExtensionAPI) {
       if (getBridgeState().isAgentStreaming) {
         connection.send(mapEventToProtocol(sessionId, { type: "agent_start" }));
       }
+      // Extension UI System (Phase 1): re-probe modules after every
+      // reconnect so the server-side cache stays accurate. The probe is
+      // synchronous and re-runs the listener stack each call.
+      // See change: add-extension-ui-modal.
+      refreshUiModules(uiModulesBridgeCtx);
     }),
   });
 
@@ -1160,6 +1184,13 @@ function initBridge(pi: ExtensionAPI) {
 
     // Register flow event listeners (pi-flows emits these via pi.events)
     registerFlowEventListeners(syncBc(), () => sessionReady, getFlowsList);
+
+    // Extension UI System (Phase 1): subscribe to invalidate once per
+    // session, then run the discovery probe. The probe is synchronous
+    // and re-runs on every reconnect (see `onReconnect` callback above).
+    // See change: add-extension-ui-modal.
+    subscribeUiInvalidate(uiModulesBridgeCtx);
+    refreshUiModules(uiModulesBridgeCtx);
   }));
 
   // Shared handler for session changes (new/fork/resume)

@@ -11,6 +11,8 @@ import type {
   OpenSpecData,
   ModelInfo,
   PiSessionInfo,
+  ExtensionUiModule,
+  DecoratorDescriptor,
 } from "./types.js";
 import type { TerminalSession } from "./terminal-types.js";
 import type { EditorInstanceStatus } from "./editor-types.js";
@@ -306,7 +308,53 @@ export interface PackageOperationCompleteMessage {
   sessionsReloaded?: number;
 }
 
+// ── Extension UI System (Phase 1: management-modal slot) ───────────
+// See change: add-extension-ui-modal.
+
+/** Server → browser: cached extension-declared UI modules for a session. */
+export interface BrowserUiModulesListMessage {
+  type: "ui_modules_list";
+  sessionId: string;
+  modules: ExtensionUiModule[];
+}
+
+/** Server → browser: row data for a `view.dataEvent`. */
+export interface BrowserUiDataListMessage {
+  type: "ui_data_list";
+  sessionId: string;
+  event: string;
+  items: unknown[];
+}
+
+// ── Extension UI System (Phase 2: live in-page decorations) ──
+// See change: add-extension-ui-decorations.
+
+/**
+ * Server → browser: a live decorator descriptor (forwarded verbatim from the
+ * extension). `removed: true` instructs the client to unmount the matching
+ * descriptor.
+ */
+export interface BrowserExtUiDecoratorMessage {
+  type: "ext_ui_decorator";
+  sessionId: string;
+  descriptor: DecoratorDescriptor;
+  removed?: boolean;
+}
+
+/** Sent when a plugin's config changes; carries only that plugin's namespace. */
+export interface PluginConfigUpdateMessage {
+  type: "plugin_config_update";
+  /** Plugin id that was updated. */
+  id: string;
+  /**
+   * Only this plugin's namespace config (plugins.<id>.*).
+   * Never contains other plugins' configs.
+   */
+  config: unknown;
+}
+
 export type ServerToBrowserMessage =
+  | PluginConfigUpdateMessage
   | SessionAddedMessage
   | SessionUpdatedMessage
   | SessionRemovedMessage
@@ -344,7 +392,10 @@ export type ServerToBrowserMessage =
   | BrowserPromptCancelMessage
   | ModelsRefreshedMessage
   | BootstrapStatusUpdateMessage
-  | BootstrapTicketCompleteMessage;
+  | BootstrapTicketCompleteMessage
+  | BrowserUiModulesListMessage
+  | BrowserUiDataListMessage
+  | BrowserExtUiDecoratorMessage;
 
 // ── Browser → Server ────────────────────────────────────────────────
 
@@ -629,6 +680,20 @@ export interface RequestRolesBrowserMessage {
   sessionId: string;
 }
 
+/**
+ * Browser → server: the user invoked a Phase-1 module action / requested
+ * row data. Server forwards via `piGateway.sendToSession` to the bridge,
+ * which re-emits as `pi.events.emit(event, { ...params, action, _reply })`.
+ * See change: add-extension-ui-modal.
+ */
+export interface UiManagementBrowserMessage {
+  type: "ui_management";
+  sessionId: string;
+  action: string;
+  event: string;
+  params?: Record<string, unknown>;
+}
+
 export type BrowserToServerMessage =
   | SubscribeMessage
   | UnsubscribeMessage
@@ -669,4 +734,5 @@ export type BrowserToServerMessage =
   | RolePresetSaveBrowserMessage
   | RolePresetDeleteBrowserMessage
   | RequestRolesBrowserMessage
+  | UiManagementBrowserMessage
   | KillProcessBrowserMessage;

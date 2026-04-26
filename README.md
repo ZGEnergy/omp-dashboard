@@ -102,6 +102,7 @@ Remove with `pi remove /path/to/pi-agent-dashboard`. Alternatively, add the pack
 
 **Integrations**
 - **PromptBus architecture** — unified prompt routing with adapters (TUI, dashboard, custom). Interactive dialogs (confirm/select/input/editor/multiselect) survive page refresh and server restart. First-response-wins semantics with cross-adapter dismissal.
+- **Extension UI System (Phase 1)** — extensions can declare slash-command-triggered modal UIs as data, without authoring React or importing an SDK. Listen on `pi.events.on("ui:list-modules", probe)` and push descriptors into `probe.modules`; the dashboard renders `table` / `grid` / `form` views with row actions, optional confirm-dialog gates, and MDI icons. Modules survive reconnect via the server-side cache; in pure-pi mode descriptors stay dormant. See `openspec/specs/extension-ui-system/spec.md` for the protocol contract.
 - **pi-flows integration** — live flow execution dashboard with agent cards, detail views, flow graph, summary, abort/auto controls. Launch flows and design new ones with Flow Architect, all from the browser. Fork decisions and subagent dialogs forwarded via PromptBus.
 - **OpenSpec integration** — browse specs, view archive history, manage changes, create new changes from the sidebar
 - **Browser-based provider auth** — sign in to Anthropic, OpenAI Codex, GitHub Copilot, Gemini CLI, and Antigravity from Settings. Enter API keys for other providers. Credentials saved to `~/.pi/agent/auth.json` and live-synced to running sessions.
@@ -451,6 +452,9 @@ graph LR
 | **Dashboard Server** | `packages/server/` | Aggregates events in-memory, persists metadata to JSON, serves the web client, manages terminals. |
 | **Web Client** | `packages/client/` | React + Tailwind UI with real-time WebSocket updates. |
 | **Shared** | `packages/shared/` | TypeScript types, protocols, and utilities shared across all packages. |
+| **Plugin Runtime** | `packages/dashboard-plugin-runtime/` | Plugin loader, slot registry, slot consumers, plugin context API, and Vite plugin. |
+
+First-party features can live as separate monorepo packages by declaring a `pi-dashboard-plugin` field in their `package.json`. The Vite plugin auto-discovers these manifests at build time and generates a static registry (`packages/client/src/generated/plugin-registry.tsx`) using named imports for tree-shaking. During server startup, `loadServerEntries()` dynamic-imports each plugin's server entry and invokes `registerPlugin(ctx: ServerPluginContext)`. See [docs/architecture.md](docs/architecture.md#plugin-architecture) for the full plugin data flow.
 
 See [docs/architecture.md](docs/architecture.md) for detailed data flows, reconnection logic, and persistence model.
 

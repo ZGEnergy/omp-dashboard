@@ -11,13 +11,21 @@ import type {
   BrowserPromptRequestMessage,
   BrowserPromptDismissMessage,
   BrowserPromptCancelMessage,
+  BrowserExtUiDecoratorMessage,
 } from "../browser-protocol.js";
+import type { ExtensionToServerMessage, ExtUiDecoratorMessage } from "../protocol.js";
+import type { DecoratorDescriptor } from "../types.js";
 
 // Type-level assertion: if these types are NOT in the union, this will fail to compile.
 type AssertExtends<T, U> = T extends U ? true : never;
 type _PromptRequestInUnion = AssertExtends<BrowserPromptRequestMessage, ServerToBrowserMessage>;
 type _PromptDismissInUnion = AssertExtends<BrowserPromptDismissMessage, ServerToBrowserMessage>;
 type _PromptCancelInUnion = AssertExtends<BrowserPromptCancelMessage, ServerToBrowserMessage>;
+// Phase-2 (add-extension-ui-decorations): ext_ui_decorator must be a member of
+// BOTH the extension→server union and the server→browser union, otherwise
+// esbuild strips the switch arms in production builds.
+type _ExtUiDecoratorInExtensionUnion = AssertExtends<ExtUiDecoratorMessage, ExtensionToServerMessage>;
+type _ExtUiDecoratorInBrowserUnion   = AssertExtends<BrowserExtUiDecoratorMessage, ServerToBrowserMessage>;
 
 // Runtime verification that the type discriminants are reachable in a switch
 function extractPromptType(msg: ServerToBrowserMessage): string | null {
@@ -58,5 +66,56 @@ describe("ServerToBrowserMessage includes PromptBus messages", () => {
       promptId: "p1",
     };
     expect(extractPromptType(msg)).toBe("p1");
+  });
+});
+
+// Phase-2: ext_ui_decorator switch-arm reachability.
+function extractDecoratorKey(msg: ServerToBrowserMessage): string | null {
+  switch (msg.type) {
+    case "ext_ui_decorator":
+      return `${msg.descriptor.kind}:${msg.descriptor.namespace}:${msg.descriptor.id}`;
+    default:
+      return null;
+  }
+}
+
+describe("ext_ui_decorator is a member of both protocol unions", () => {
+  const sample: DecoratorDescriptor = {
+    kind: "footer-segment",
+    namespace: "judo",
+    id: "model-state",
+    payload: { text: "3 mut" },
+  };
+
+  it("server→browser ext_ui_decorator is a valid discriminant", () => {
+    const msg: BrowserExtUiDecoratorMessage = {
+      type: "ext_ui_decorator",
+      sessionId: "s1",
+      descriptor: sample,
+    };
+    expect(extractDecoratorKey(msg)).toBe("footer-segment:judo:model-state");
+  });
+
+  it("removed flag round-trips through the union", () => {
+    const msg: BrowserExtUiDecoratorMessage = {
+      type: "ext_ui_decorator",
+      sessionId: "s1",
+      descriptor: sample,
+      removed: true,
+    };
+    expect(extractDecoratorKey(msg)).toBe("footer-segment:judo:model-state");
+    // Round-trip via JSON to confirm `removed` survives serialization.
+    const parsed = JSON.parse(JSON.stringify(msg)) as BrowserExtUiDecoratorMessage;
+    expect(parsed.removed).toBe(true);
+  });
+
+  it("extension→server ext_ui_decorator carries the same shape", () => {
+    const msg: ExtUiDecoratorMessage = {
+      type: "ext_ui_decorator",
+      sessionId: "s1",
+      descriptor: sample,
+    };
+    expect(msg.type).toBe("ext_ui_decorator");
+    expect(msg.descriptor.kind).toBe("footer-segment");
   });
 });

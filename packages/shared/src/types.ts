@@ -61,7 +61,167 @@ export interface DashboardSession {
     /** Timestamp when metrics were last received */
     updatedAt: number;
   };
+  /** Extension-declared UI modules (Phase 1: management-modal slot). */
+  uiModules?: ExtensionUiModule[];
+  /** Cached row data per `view.dataEvent` for table/grid views. Per-event item cap is enforced server-side. */
+  uiDataMap?: Record<string, unknown[]>;
+  /**
+   * Phase-2 live in-page decorations (footer-segment, agent-metric, breadcrumb,
+   * gate, toast). Keyed by `${kind}:${namespace}:${id}`. Last-write-wins on
+   * upsert; explicit removal via `ext_ui_decorator { removed: true }` deletes
+   * the entry. See change: add-extension-ui-decorations.
+   */
+  uiDecorators?: Record<string, DecoratorDescriptor>;
 }
+
+// ── Extension UI System (Phase 1: management-modal slot) ───────────
+// Per `extension-ui-system` design + `add-extension-ui-modal` change.
+// Field/type names match PR #15 verbatim so any later archival diff stays small.
+
+export type UiViewKind = "table" | "grid" | "form";
+
+export type UiFieldKind =
+  | "text"
+  | "number"
+  | "boolean"
+  | "select"
+  | "code"
+  | "datetime"
+  | "textarea";
+
+export interface UiField {
+  /** Dot-path into row / form-state. */
+  key: string;
+  label: string;
+  kind: UiFieldKind;
+  /** For kind: "select". */
+  options?: string[];
+  placeholder?: string;
+  required?: boolean;
+  readOnly?: boolean;
+  /** Legacy alias for kind: "textarea". Prefer `kind: "textarea"`. */
+  multiline?: boolean;
+  /** Display-only: table column width. */
+  width?: string | number;
+  /** For kind: "code". Hint to syntax highlighter. */
+  language?: string;
+}
+
+export interface UiAction {
+  /** Action id, echoed back as the `action` field on the `ui_management` message. */
+  id: string;
+  label: string;
+  /** MDI icon key from `@mdi/js` (e.g. `"mdiCheckCircle"`). Unknown keys render no icon. */
+  icon?: string;
+  variant?: "primary" | "secondary" | "danger";
+  /** Event name re-emitted on the extension's `pi.events` bus when the action fires. */
+  event: string;
+  params?: Record<string, unknown>;
+  /** If present, dashboard mounts ConfirmDialog with this message before dispatching. */
+  confirm?: string;
+}
+
+export interface UiSection {
+  id: string;
+  title?: string;
+  description?: string;
+  fields: UiField[];
+}
+
+export interface UiView {
+  kind: UiViewKind;
+  /** Table/grid columns; form fields when no `sections` provided. */
+  fields?: UiField[];
+  /** For form view: grouped fields. Mutually exclusive with top-level `fields`. */
+  sections?: UiSection[];
+  /** Event name to request rows; required for `table`/`grid`. */
+  dataEvent?: string;
+  /** Unique-row field for `table`/`grid` (default: `"id"`). */
+  rowKey?: string;
+  /** Per-row actions for `table`/`grid`. */
+  rowActions?: UiAction[];
+  /** Shown when `items.length === 0`. */
+  emptyState?: string;
+  /** Top-of-modal toolbar actions. */
+  actions?: UiAction[];
+}
+
+export interface ExtensionUiModule {
+  /** Phase 1: only `"management-modal"`. */
+  kind: "management-modal";
+  /** Unique within the session. Last-write-wins on collision. */
+  id: string;
+  /** Exact slash command (case-sensitive). */
+  command: string;
+  title: string;
+  description?: string;
+  /** MDI icon key from `@mdi/js`. */
+  icon?: string;
+  /** Free-form group label (sidebar grouping in future). */
+  category?: string;
+  view: UiView;
+}
+
+// ── Extension UI System (Phase 2: live in-page decorations) ──────
+// Per `extension-ui-system` design + `add-extension-ui-decorations` change.
+// Single discriminated union forwarded as one `ext_ui_decorator` message per
+// descriptor. Cache key: `${kind}:${namespace}:${id}`. `namespace` MUST match
+// `/^[a-z0-9-]+$/`; the bridge drops malformed namespaces with a warning.
+
+export type DecoratorKind =
+  | "footer-segment"
+  | "agent-metric"
+  | "breadcrumb"
+  | "gate"
+  | "toast";
+
+export interface FooterSegmentPayload {
+  text: string;
+  tooltip?: string;
+  /** MDI icon key from `@mdi/js`. Unknown keys render no icon. */
+  icon?: string;
+}
+
+export interface AgentMetricPayload {
+  /** Matches the agent id rendered by `FlowAgentCard`. */
+  agentId: string;
+  text: string;
+  tooltip?: string;
+}
+
+export interface BreadcrumbStep {
+  id: string;
+  label: string;
+  status: "pending" | "active" | "done" | "error";
+}
+
+export interface BreadcrumbPayload {
+  steps: BreadcrumbStep[];
+  /** Step id of the currently-active step (overrides `status: "active"` selection). */
+  current?: string;
+}
+
+export interface GatePayload {
+  /** Matches the flow id rendered in `FlowLaunchDialog`. */
+  flowId: string;
+  available: boolean;
+  /** Reason rendered as a tooltip when `available: false`. */
+  reason?: string;
+}
+
+export interface ToastPayload {
+  level: "info" | "success" | "warn" | "error";
+  message: string;
+  /** Auto-dismiss after this many ms. Default 5000; `0` = sticky. */
+  durationMs?: number;
+}
+
+export type DecoratorDescriptor =
+  | { kind: "footer-segment"; namespace: string; id: string; payload: FooterSegmentPayload }
+  | { kind: "agent-metric";   namespace: string; id: string; payload: AgentMetricPayload }
+  | { kind: "breadcrumb";     namespace: string; id: string; payload: BreadcrumbPayload }
+  | { kind: "gate";           namespace: string; id: string; payload: GatePayload }
+  | { kind: "toast";          namespace: string; id: string; payload: ToastPayload };
 
 /** An event forwarded from a pi session */
 export interface DashboardEvent {

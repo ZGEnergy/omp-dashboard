@@ -85,3 +85,7 @@ If, in the future, a third party ships a competing pi-extension implementing alt
   - `openspec/changes/extract-subagents-as-plugin/`
 - Layout scan: `openspec/changes/dashboard-plugin-architecture/design.md` §"Current dashboard layout"
 - Git's role in the dashboard: see `docs/architecture.md` §"Git Polling".
+
+## Slot wiring guardrail
+
+When this change wires new slot consumers into `App.tsx` (or any other shell file) inside a `??` fallback chain, the JSX element MUST be gated on a `getClaims(...).length > 0` check **before** construction. See `fix-slot-fallback-masks-content` for the rationale, the lint test that enforces the convention, and the exact production-bug shape that motivated it. Add the shell file path to `SCAN_FILES` in `packages/client/src/__tests__/no-jsx-slot-nullish-fallback.test.ts` if this change touches a file outside `App.tsx`.

@@ -35,6 +35,7 @@ import { registerAuthPlugin, validateWsUpgrade } from "./auth-plugin.js";
 import { findBundledExtension, registerBridgeExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
 import { createNetworkGuard, isLoopback, isBypassedHost } from "./localhost-guard.js";
 import type { AuthConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { loadConfig, CONFIG_FILE } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { registerSessionApi } from "./session-api.js";
 import { registerSessionRoutes } from "./routes/session-routes.js";
 import { registerGitRoutes } from "./routes/git-routes.js";
@@ -59,6 +60,11 @@ import { createEditorManager, type EditorManager } from "./editor-manager.js";
 import { createEditorPidRegistry } from "./editor-pid-registry.js";
 import { registerEditorRoutes } from "./routes/editor-routes.js";
 import { registerKnownServersRoutes } from "./routes/known-servers-routes.js";
+import { registerPluginConfigRoutes } from "./routes/plugin-config-routes.js";
+import { loadServerEntries, discoverPlugins, getPluginStatusStore } from "@blackbelt-technology/dashboard-plugin-runtime/server";
+import { createServerPluginContext } from "@blackbelt-technology/dashboard-plugin-runtime/server";
+import { getPluginConfig as getPluginConfigFromFile } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { registerAllPluginBridges } from "@blackbelt-technology/pi-dashboard-shared/plugin-bridge-register.js";
 import { registerEditorProxy, handleEditorUpgrade } from "./editor-proxy.js";
 import { detectCodeServerBinary } from "./editor-detection.js";
 
@@ -626,6 +632,10 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   registerProviderAuthRoutes(fastify, { piGateway, browserGateway });
   registerKnownServersRoutes(fastify, { networkGuard, getPeerServers: () => peerServers });
+  registerPluginConfigRoutes(fastify, {
+    networkGuard,
+    broadcast: (msg) => browserGateway.broadcast(msg),
+  });
   registerProviderRoutes(fastify, { networkGuard, piGateway, browserGateway });
 
   // Serve static files / SPA fallback.
@@ -847,6 +857,82 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
       // Discover sessions and start OpenSpec polling (async, non-blocking)
       discoverAndBroadcastSessions({ sessionManager, browserGateway, directoryService });
+
+      // Load plugin server entries (non-blocking; failures isolated per plugin)
+      loadServerEntries({
+        isEnabled: (pluginId) => {
+          const cfg = loadConfig();
+          const pluginCfg = getPluginConfigFromFile(cfg, pluginId) as Record<string, unknown>;
+          return pluginCfg.enabled !== false; // default: enabled
+        },
+        createContext: (plugin) => createServerPluginContext(
+          {
+            fastify,
+            sessionManager: {
+              listActive: () => sessionManager.listActive(),
+              listAll: () => sessionManager.listAll(),
+              getSession: (id) => sessionManager.getSession(id),
+            },
+            eventStore: {
+              getEvents: (sessionId) => eventStore.getEvents(sessionId, 0),
+              getLatestEvent: (sessionId) => {
+                const events = eventStore.getEvents(sessionId, 0);
+                return events.length > 0 ? events[events.length - 1] : undefined;
+              },
+            },
+            broadcastToSubscribers: (msg) => browserGateway.broadcast(msg as any),
+            // Plugin pi/browser handler registration — stub for now;
+            // full dynamic handler registration requires a registry refactor
+            // tracked in extract-*-as-plugin changes.
+            registerPiHandler: (_type, _handler) => {},
+            registerBrowserHandler: (_type, _handler) => {},
+            getPluginConfig: (id) => {
+              const cfg = loadConfig();
+              return getPluginConfigFromFile(cfg, id);
+            },
+            updatePluginConfig: async (id, partial) => {
+              // Inline partial write (reuses CONFIG_FILE path from shared config)
+              const cfg = loadConfig();
+              const current = getPluginConfigFromFile(cfg, id);
+              const merged = { ...current, ...partial };
+              let rawConfig: Record<string, unknown> = {};
+              try {
+                const raw = (await import('node:fs')).default.readFileSync(CONFIG_FILE, 'utf-8');
+                rawConfig = JSON.parse(raw);
+              } catch { /* start fresh */ }
+              rawConfig.plugins = { ...(rawConfig.plugins as Record<string, unknown> ?? {}), [id]: merged };
+              const fs = (await import('node:fs')).default;
+              const tmpFile = CONFIG_FILE + '.tmp.' + process.pid;
+              fs.writeFileSync(tmpFile, JSON.stringify(rawConfig, null, 2) + '\n');
+              fs.renameSync(tmpFile, CONFIG_FILE);
+              browserGateway.broadcast({ type: 'plugin_config_update', id, config: merged } as any);
+            },
+          },
+          plugin.manifest.id,
+        ),
+      }).catch((err) => console.error('[plugin-loader] Unexpected error:', err));
+
+      // Auto-register plugin bridge entries
+      const discoveredPlugins = discoverPlugins();
+      const pluginsWithBridges = discoveredPlugins
+        .filter(p => p.bridgeEntryPath)
+        .map(p => ({ pluginId: p.manifest.id, bridgePath: p.bridgeEntryPath! }));
+      if (pluginsWithBridges.length) {
+        const results = registerAllPluginBridges(pluginsWithBridges);
+        for (const [id, result] of Object.entries(results)) {
+          if (result.type === 'conflict') {
+            const store = getPluginStatusStore();
+            const existing = store.getStatus(id);
+            store.setStatus({
+              id,
+              enabled: existing?.enabled ?? true,
+              loaded: existing?.loaded ?? false,
+              error: `Bridge path conflict: existing=${result.existingPath}, new=${result.newPath}`,
+              claims: existing?.claims ?? 0,
+            });
+          }
+        }
+      }
 
       idleTimer.start();
     },

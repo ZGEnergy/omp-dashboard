@@ -2,18 +2,27 @@ import React, { useState, useRef, useEffect } from "react";
 import { Icon } from "@mdi/react";
 import { mdiPlay } from "@mdi/js";
 import { DialogPortal } from "./DialogPortal.js";
+import { GateSlot, aggregateGateState } from "./extension-ui/GateSlot.js";
+import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
 export function FlowLaunchDialog({
   flowName,
   description,
   onSubmit,
   onCancel,
+  session,
 }: {
   flowName: string;
   description?: string;
   onSubmit: (task: string) => void;
   onCancel: () => void;
+  /** Phase-2 decorator host — used to gate the Run button when an extension declares the flow unavailable. */
+  session?: Pick<DashboardSession, "uiDecorators">;
 }) {
+  // Phase-2 (`add-extension-ui-decorations`): aggregate any `gate` decorators
+  // targeting this flowId. Most-restrictive-wins: any `available: false`
+  // disables the Run button and renders the reason inline.
+  const gateState = aggregateGateState(session?.uiDecorators, flowName);
   const [task, setTask] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -37,6 +46,8 @@ export function FlowLaunchDialog({
         {description && (
           <p className="text-[11px] text-[var(--text-tertiary)] mb-3">{description}</p>
         )}
+        {/* Phase-2 gate decorator slot. See change: add-extension-ui-decorations. */}
+        <GateSlot session={session} flowId={flowName} />
         <form onSubmit={handleSubmit}>
           <input
             ref={inputRef}
@@ -56,7 +67,14 @@ export function FlowLaunchDialog({
             </button>
             <button
               type="submit"
-              className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-500"
+              disabled={!gateState.available}
+              title={gateState.available ? undefined : gateState.reason}
+              className={`text-xs px-3 py-1.5 rounded-lg ${
+                gateState.available
+                  ? "bg-blue-600 text-white hover:bg-blue-500"
+                  : "bg-[var(--bg-tertiary)] text-[var(--text-muted)] cursor-not-allowed"
+              }`}
+              data-testid="flow-launch-run"
             >
               <Icon path={mdiPlay} size={0.45} className="inline mr-0.5" />Run
             </button>

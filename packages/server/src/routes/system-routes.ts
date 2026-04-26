@@ -18,6 +18,7 @@ import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.j
 import path from "node:path";
 import os from "node:os";
 import { localhostGuard, netmaskToCidrBits, networkAddress } from "../localhost-guard.js";
+import { getPluginStatusStore } from "@blackbelt-technology/dashboard-plugin-runtime/server";
 import type { NetworkInterface } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 
 export function registerSystemRoutes(
@@ -184,6 +185,7 @@ export function registerSystemRoutes(
         totalSessions: sessionManager.listAll().length,
       },
       agents: agentMetrics,
+      plugins: getPluginStatusStore().listAll(),
     };
   });
 

@@ -64,7 +64,7 @@ None. This change is a refactor that uses `dashboard-shell-slots` and `dashboard
   1. Plugin's `configSchema` declares all four fields (`pollIntervalSeconds`, `maxConcurrentSpawns`, `changeDetection`, `jitterSeconds`) with their existing defaults and clamps from `parseOpenSpecPollConfig`.
   2. On first server start with the plugin enabled, the plugin's server entry checks for top-level `openspec.*` keys; if found, copies them under `plugins.openspec.*`, writes `plugins.openspec._migrated_from = "top-level"`, leaves the legacy keys in place for one release cycle (warning logged).
   3. The follow-up release deletes the legacy keys.
-- **Settings UI migration**: existing core SettingsPanel has no dedicated openspec section today (config is loaded but not surfaced in UI). After extraction, OpenSpec's settings appear as a plugin section in the Settings page — a UI gain, not just parity.
+- **Settings UI migration**: today's `SettingsPanel.tsx` (Advanced tab) hosts a `Background polling (OpenSpec)` `<Section>` with four fields (`pollIntervalSeconds`, `maxConcurrentSpawns`, `changeDetection`, `jitterSeconds`) writing to `config.openspec.*`. After extraction, the same fields move into `OpenSpecSettings.tsx` claiming the `settings-section` slot, persisting under `plugins.openspec.*`. The legacy `<Section>` is removed from `SettingsPanel.tsx` in the same change. Net: visual parity for the user; the section just lives in plugin code instead of shell code.
 
 ## References
 
@@ -72,3 +72,7 @@ None. This change is a refactor that uses `dashboard-shell-slots` and `dashboard
 - Sibling extraction: `openspec/changes/extract-flows-as-plugin/`
 - Layout scan results: `openspec/changes/dashboard-plugin-architecture/design.md` §"Current dashboard layout"
 - Existing OpenSpec capabilities currently in `openspec/specs/`: `openspec-polling`, `openspec-archive`, `openspec-attach-detach`, `openspec-tasks-popover`, etc. (final list confirmed during implementation).
+
+## Slot wiring guardrail
+
+When this change wires new slot consumers into `App.tsx` (or any other shell file) inside a `??` fallback chain, the JSX element MUST be gated on a `getClaims(...).length > 0` check **before** construction. See `fix-slot-fallback-masks-content` for the rationale, the lint test that enforces the convention, and the exact production-bug shape that motivated it. Add the shell file path to `SCAN_FILES` in `packages/client/src/__tests__/no-jsx-slot-nullish-fallback.test.ts` if this change touches a file outside `App.tsx`.

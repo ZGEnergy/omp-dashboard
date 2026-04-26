@@ -158,29 +158,208 @@ pi-flows runs multi-agent workflows in-process. Subagent sessions use `SessionMa
 - Abort: browser sends `flow_control { action: "abort" }` → server → bridge → `pi.events.emit("flow:abort")` → `flowManager.abort()`
 - Autonomous toggle: browser sends `flow_control { action: "toggle_autonomous" }` → same path → `setAutonomousMode()`
 
-### Extension UI System (planned, design-only)
+### Extension UI System (Phases 1 + 2 shipped)
 
-A planned generalized mechanism for extensions to declare dashboard UIs as data without authoring React or importing a runtime SDK. Tracked under OpenSpec change `extension-ui-system` (design-only); implementation lands in follow-up changes (`add-extension-ui-modal` for Phase 1, `add-extension-ui-decorations` for Phase 2).
+A generalized mechanism for extensions to declare dashboard UIs as data without authoring React or importing a runtime SDK. Phase 1 (`management-modal` slot) shipped in change `add-extension-ui-modal`. Phase 2 (live in-page decorations) shipped in change `add-extension-ui-decorations`. Phase 4 RJSF is tracked in `add-extension-ui-rjsf-form`.
 
-**Mechanism (pull-based discovery):**
-1. Bridge emits `pi.events.emit("ui:list-modules", probe)` on `session_start`, after every reconnect, and on extension-emitted `ui:invalidate { id }`.
-2. Extensions listen and synchronously push schema descriptors into `probe.modules` (no SDK import; just `pi.events`).
-3. Bridge forwards as `ui_modules_list` to the server, which caches on the `Session` record (`session.uiModules`) and forwards to subscribed browsers.
-4. Browsers render each module in a fixed slot keyed by descriptor `kind`.
+**Mechanism (pull-based discovery, synchronous probe):**
 
-**Slot taxonomy (frozen for v0.x):**
-- **Phase 1:** `management-modal` (`table` / `grid` / `form` views, triggered by slash command).
-- **Phase 2:** `footer-segment`, `agent-metric`, `breadcrumb`, `gate`, `toast` (live in-page decorations forwarded via single-union `ext_ui_decorator` message).
-- **Phase 4 (optional):** `rjsf-form` (JSON Schema escape hatch for rich forms).
+```mermaid
+sequenceDiagram
+    participant Ext as Extension (e.g. pi-judo)
+    participant Bridge as Bridge (pi process)
+    participant Server as Dashboard Server
+    participant Browser as Dashboard Browser
 
-**Replay on reconnect:** Server caches state on `Session` records (`uiModules`, `uiDataMap`, `uiDecorators`) so cleanup is automatic when the session is deleted. The replay site is `handleSubscribe` in `subscription-handler.ts`, alongside the existing `replayPendingUiRequests` hook used by PromptBus.
+    Note over Bridge: session_start (reason ∈ {new,fork,resume})
+    Bridge->>Ext: pi.events.emit("ui:list-modules", probe)
+    Ext-->>Bridge: probe.modules.push({ kind, id, command, view, … })
+    Bridge->>Server: ui_modules_list { sessionId, modules }
+    Server->>Browser: ui_modules_list (cache + forward)
+
+    Note over Browser: user types /judo:status
+    Browser->>Server: ui_management { action: "list", event: "judo:status-rows" }
+    Server->>Bridge: ui_management
+    Bridge->>Ext: pi.events.emit("judo:status-rows", { action, _reply })
+    Ext-->>Bridge: data.items = […]
+    Bridge->>Server: ui_data_list { sessionId, event, items }
+    Server->>Browser: ui_data_list (cache + forward)
+
+    Note over Ext: state changes
+    Ext->>Bridge: pi.events.emit("ui:invalidate", { id })
+    Bridge->>Ext: pi.events.emit("ui:list-modules", probe)
+    Bridge->>Server: ui_modules_list (refreshed)
+    Server->>Browser: ui_modules_list
+```
+
+Key properties:
+1. The probe is **synchronous** — listeners push into `probe.modules` while `pi.events.emit` is running. The bridge never polls and never caches across probes; idempotent re-registration just produces a fresh probe on the next trigger.
+2. **No SDK package** — extensions only need `pi.events` (already provided by the host). Schema types live in `@blackbelt-technology/pi-dashboard-shared`.
+3. **Last-write-wins on duplicate `id`** within a single probe; bridge logs one warning per collision.
+
+**Phase-1 surface (shipped):**
+
+- `kind: "management-modal"` — slash-command-triggered modal.
+- `view.kind` ∈ `"table" | "grid" | "form"`.
+- `UiField.kind` ∈ `"text" | "number" | "boolean" | "select" | "code" | "datetime" | "textarea"`.
+- `UiAction.confirm` polish via the existing Tailwind `ConfirmDialog` (no `window.confirm()`).
+- Icons resolved against `@mdi/js` keys; unknown keys render no icon (no error).
+- Slash-command interception in `App.tsx`'s `wrappedHandleSend`; built-in collisions (`/model`, `/compact`, `/flows`, etc.) drop the module with a `console.warn`.
+- "Modules" entry point in `SessionHeader` shows when `session.uiModules?.length > 0`.
+
+**Phase-1 wire protocol:**
+
+| Direction | Type | Purpose |
+|---|---|---|
+| extension → server → browser | `ui_modules_list { sessionId, modules }` | Cached schemas. |
+| extension → server → browser | `ui_data_list { sessionId, event, items }` | Row data for `table`/`grid` views. |
+| browser → server → extension | `ui_management { sessionId, action, event, params }` | Data fetch (`action: "list"`) or user action. |
+
+**Replay on reconnect:** Server caches `Session.uiModules` and `Session.uiDataMap` (per-event item cap = 1000, last-write-wins on overflow). The replay site is `replayUiState(ws, sessionId, ctx)` in `packages/server/src/browser-handlers/subscription-handler.ts`, called immediately after every existing `replayPendingUiRequests(ws, sessionId)` site (4 sites: stale-lastSeq full replay, delta replay, no-events path, lazy load from disk). Replay ordering: events → pending UI requests → UI module state.
+
+**Phase-2 surface (shipped):**
+
+Five live in-page decoration kinds reuse the same `ui:list-modules` probe primitive. Decorators carry an explicit `namespace: string` (must match `/^[a-z0-9-]+$/`) plus `id`, partitioned at the bridge and forwarded as one `ext_ui_decorator` message per descriptor. Server caches under `Session.uiDecorators[`${kind}:${namespace}:${id}`]` and replays after the Phase-1 batches.
+
+| Kind | Mount site | Filter | Closure? |
+|---|---|---|---|
+| `footer-segment` | `SessionHeader.tsx`, right of git/model info | `kind === "footer-segment"` | Yes — extension supplies fresh `payload.text` per probe |
+| `agent-metric` | Inside `FlowAgentCard.tsx` (one per card) | `kind === "agent-metric" && payload.agentId === card.agentName` | Yes |
+| `breadcrumb` | Top of `FlowDashboard.tsx` | `kind === "breadcrumb"` (most recent wins) | No (snapshot) |
+| `gate` | Inline in each `FlowLaunchDialog` | `kind === "gate" && payload.flowId === item.flowId` (most-restrictive aggregate) | No |
+| `toast` | `App.tsx` (top-right fixed tray) | `kind === "toast"` (stacks; auto-dismiss; FIFO display cap = 5) | No |
+
+Decorator removal is **explicit**: extensions push a descriptor with `removed: true` and the bridge forwards it verbatim; the server deletes the cache entry under the matching key (no-op if absent) and broadcasts the removal so client slots can unmount the matching descriptor without affecting siblings.
+
+**Phase-2 wire protocol:**
+
+| Direction | Type | Purpose |
+|---|---|---|
+| extension → server → browser | `ext_ui_decorator { sessionId, descriptor, removed? }` | Live decoration upsert (or removal when `removed: true`). |
+
+The message is a discriminated union over `descriptor.kind`. `ExtUiDecoratorMessage` is a member of both `ExtensionToServerMessage` and `ServerToBrowserMessage` (verified by a type-level test in `packages/shared/src/__tests__/browser-protocol-types.test.ts` — esbuild silently strips switch arms whose message types are not in the production union).
+
+**Phase-2 sequence (invalidate → probe → ext_ui_decorator → slot re-render):**
+
+```mermaid
+sequenceDiagram
+    participant Ext as Extension (e.g. pi-judo)
+    participant Bridge as Bridge (pi process)
+    participant Server as Dashboard Server
+    participant Browser as Dashboard Browser
+
+    Note over Ext: state changes (e.g. judo workspace mutation count incremented)
+    Ext->>Bridge: pi.events.emit("ui:invalidate", { id })
+    Bridge->>Ext: pi.events.emit("ui:list-modules", probe)
+    Ext-->>Bridge: probe.modules.push({ kind: "footer-segment", namespace, id, payload })
+    Note over Bridge: partition by kind — modal kinds → ui_modules_list,<br/>decorator kinds → one ext_ui_decorator each
+    Bridge->>Server: ext_ui_decorator { sessionId, descriptor }
+    Server->>Server: cache under `${kind}:${namespace}:${id}` on Session.uiDecorators
+    Server->>Browser: ext_ui_decorator (broadcast verbatim)
+    Browser->>Browser: per-kind slot component re-renders
+
+    Note over Ext: state cleared
+    Ext->>Bridge: probe.modules.push({ kind, namespace, id, payload, removed: true })
+    Bridge->>Server: ext_ui_decorator { ..., removed: true }
+    Server->>Server: delete cache entry; broadcast removal
+    Server->>Browser: ext_ui_decorator { ..., removed: true }
+    Browser->>Browser: slot unmounts the matching descriptor only
+```
+
+**Rate cap:** to prevent runaway extensions, the bridge throttles `ui:invalidate` re-probes per session to one probe every 50 ms (= 20/sec). Excess events coalesce into a single trailing-edge probe; a single warning is emitted per offending burst, latched until a quiet window passes.
+
+**Replay ordering** (extended from Phase 1): events → pending UI requests → `ui_modules_list` → `ui_data_list` (per event) → `ext_ui_decorator` (per cache key). Replay decorator messages never carry `removed: true` — only live entries are replayed.
+
+**Phase 4 (optional):** `rjsf-form` JSON-Schema escape hatch for rich forms; see `add-extension-ui-rjsf-form`.
 
 **Relationship to existing capabilities:**
 - `interactive-ui-dialogs` / `ui-proxy` / PromptBus — handle one-shot `ctx.ui.*` dialogs (request/response, awaited). The extension-ui-system handles persistent push-based descriptors (no awaiting). Orthogonal mechanisms; both ship.
 - `extension-ui-forwarding` (catch-all `pi.events.emit` forwarding) — kept for arbitrary extension events; the new system is the *declarative* path for UI specifically.
 - pi-flows: in Phase 3 pi-flows itself adopts the system to surface registered workflows (breadcrumb), gates, and cards (agent-metric) for any flow-using extension automatically.
 
-**No-dashboard fallback:** When no bridge is connected, `ui:list-modules` is never emitted; extension listeners are dormant; slash commands fall back to text. Extensions remain pi-runnable in pure-pi mode without code changes.
+**No-dashboard fallback:** When no bridge is connected, `ui:list-modules` is never emitted; extension listeners are dormant; slash commands fall back to existing text-output behavior. Extensions remain pi-runnable in pure-pi mode without code changes.
+
+### Plugin Architecture (runtime implemented in `add-dashboard-shell-slots-runtime`)
+
+A planned **two-tier rendering model** that lets first-party features (OpenSpec, pi-flows, pi-subagents tool renderers, git integration) live as standalone plugin packages instead of being baked into the dashboard core. Tracked under OpenSpec change `dashboard-plugin-architecture` (design-only umbrella); the runtime lands in `add-dashboard-shell-slots-runtime`; concrete migrations land in `extract-openspec-as-plugin`, `extract-flows-as-plugin`, `extract-subagents-as-plugin`, and `extract-git-as-plugin`.
+
+**The two tiers, one slot contract:**
+- **Tier 1 — first-party plugins** (this proposal): React + server contributions co-located in `packages/<name>-plugin/`. Bundled and tree-shaken into the dashboard's web build. Trusted because they live in the same repo and pass the same review.
+- **Tier 2 — third-party extensions** (`extension-ui-system`): descriptor-only protocol over the existing pi event bus. Sandboxed, declarative, no React.
+
+Both tiers fill the **same** named regions — the **slot taxonomy**. The shell knows about slots; only plugins/extensions know about specific features.
+
+**Slot taxonomy (frozen for v0.x):**
+
+First-party slots (React, possibly also descriptor):
+- `sidebar-folder-section` — collapsible block above the per-workspace session list (replaces `FolderOpenSpecSection`).
+- `session-card-badge` — compact info chips in the session card (replaces `OpenSpecActivityBadge`, `FlowActivityBadge`). Descriptor variant reuses `agent-metric`.
+- `session-card-action-bar` — action buttons in the session card (replaces `SessionOpenSpecActions`, `SessionFlowActions`). React-only in v0.x.
+- `content-view` — full-screen content area (replaces every conditional branch in `App.tsx` for `ArchiveBrowserView`, `SpecsBrowserView`, `OpenSpecPreview`, `FlowAgentDetail`, `FlowArchitectDetail`, `MarkdownPreviewView`, `FileDiffView`, `FlowYamlPreview`). Descriptor variant reuses `management-modal`.
+- `content-header-sticky` — sticky element above content-view (replaces sticky `FlowArchitect`/`FlowDashboard`). Descriptor variant reuses `breadcrumb`.
+- `content-inline-footer` — inline element below content-view (replaces `FlowSummary`). React-only.
+- `anchored-popover` — popover anchored to a triggering UI element (replaces `TasksPopover`).
+- `command-route` — maps a slash command or URL route to a `content-view` (replaces today's hand-wired routing in `App.tsx`).
+- `settings-section` — a section in the Settings page (replaces today's hardcoded `Background polling (OpenSpec)` section). React for first-party plugins; descriptor (RJSF/UiField) for third-party extensions.
+- `tool-renderer` — React component for a specific `tool_call` by `toolName` (replaces today's hardcoded `tool-renderers/registry.ts`).
+
+Descriptor-only slots (existing in `extension-ui-system`): `management-modal`, `footer-segment`, `agent-metric`, `breadcrumb`, `gate`, `toast`, `rjsf-form`.
+
+**Plugin loader (runtime):**
+
+`packages/dashboard-plugin-runtime/` is a new workspace package containing all runtime pieces:
+
+- **`src/slot-registry.ts`** — `createSlotRegistry()` returns a typed `Map<SlotId, ClaimEntry[]>` sorted by `(priority, pluginId)`. Filter helpers: `forSession`, `forFolder`, `forTab`, `forCommand`, `forToolName`.
+- **`src/manifest-validator.ts`** — hand-rolled manifest validator; throws `ManifestValidationError` with `pluginId` and `reason`.
+- **`src/plugin-context.tsx`** — `PluginContextProvider` wraps the entire app. A nested `CurrentPluginLayer` is pushed per contribution so `usePluginConfig<T>()` and `logger` resolve to the contributing plugin's id. `applyPluginConfigUpdate` updates the in-memory config store and re-renders subscribers.
+- **`src/slot-consumers.tsx`** — one component per slot id. Each wraps contributions in a `SlotErrorBoundary` (per-claim scope). Reads registry from the provider.
+- **`src/slot-error-boundary.tsx`** — React error boundary scoped to one claim. Logs with plugin id and slot id; renders nothing for the failing claim without suppressing siblings.
+- **`src/vite-plugin/index.ts`** — `viteDashboardPluginsPlugin` generates `packages/client/src/generated/plugin-registry.tsx` with named imports (tree-shaking). Watches manifests during dev and triggers HMR.
+- **`src/server/loader.ts`** — `discoverPlugins(repoRoot?)` (single module-level cache), `loadServerEntries(deps)` (per-plugin dynamic-import, failure isolated), `getPluginStatusStore()`.
+- **`src/server/server-context.ts`** — `createServerPluginContext(deps, pluginId)` — namespaced logger, typed config accessors.
+- **`src/server/config-validator.ts`** — Ajv JSON-Schema 7 validate + defaults.
+
+1. **Discovery** — server globs `packages/*/package.json` on startup, parses the `pi-dashboard-plugin` field, validates against schema, sorts by `priority` (lower first; first-party = 100; default 1000).
+2. **Server load** — dynamic-imports each plugin's `server` entry, invokes `registerPlugin(ctx)` with a typed `ServerPluginContext` (Fastify, session manager, event store, broadcast helper, scoped logger).
+3. **Client bundle** — a Vite plugin (`vite-plugin-dashboard-plugins`) generates `packages/client/src/generated/plugin-registry.tsx` with static imports per plugin manifest; Vite tree-shakes unused exports and code-splits per plugin.
+4. **Runtime registration** — client boot calls `getSlotRegistry()` once; slot consumer components (`<SessionCardBadgeSlot/>`, `<ContentViewSlot/>`, etc.) iterate the registry and render contributions in priority order with per-slot error boundaries.
+5. **Bridge auto-register** — plugins declaring a `bridge` entry are auto-registered into `~/.pi/agent/settings.json` under managed `dashboard-<plugin-id>` keys; user-owned entries are never touched.
+
+**Plugin settings persistence:**
+- All plugin settings live under `plugins.<id>.*` in `~/.pi/dashboard/config.json`. The dashboard core never reads or writes another plugin's namespace.
+- Each manifest may declare a `configSchema` (JSON Schema 7); the loader validates on read (with defaults applied) and on write (rejects invalid).
+- `POST /api/config/plugins/:id` accepts a partial config for a single plugin and broadcasts `plugin_config_update { id, config }` to all subscribed browsers.
+- The client-side `pluginContext.usePluginConfig<T>()` hook is reactive — consumers re-render within one frame of a write.
+- Legacy top-level keys (e.g. `openspec.*`) auto-migrate to `plugins.<id>.*` on the plugin's first server boot.
+
+**Failure isolation:**
+- A plugin failing to load (server throw, client import error, missing entry) does NOT crash the shell.
+- Failures are logged with full context and surfaced via `/api/health.plugins[]` (`{ id, enabled, loaded, error?, claims }`).
+- Slot consumers wrap each contribution in a React error boundary so a runtime crash in one plugin's component doesn't take down the page.
+
+**Bundled-by-default plugins:** The plugin loader treats all plugins identically (same manifest, same discovery, same `enabled` flag, same failure isolation). What distinguishes "bundled-by-default" plugins (initial set: `git-plugin`) is purely operational — the build pipeline always includes them in `packages/`. Their absence is a deliberate user opt-out, not a normal state. OpenSpec, Flows, and Subagents plugins are bundled in standard builds but their absence is a normal use case (e.g. a workspace without OpenSpec).
+
+**Future Work — external plugin discovery:** Phase 1 scans `packages/*/package.json` only. The manifest format (`pi-dashboard-plugin` field in any `package.json`) is intentionally **format-compatible with arbitrary npm packages**, which unblocks an eventual progression where stable plugins can be PR'd into upstream packages (e.g. `@tintinweb/pi-subagents/dashboard/`) and discovered from `node_modules`. The deferred work (trust model, SemVer pinning of the plugin context API, build integration with `node_modules` paths) is documented in `dashboard-plugin-architecture/design.md` §"Future Work: external plugin discovery".
+
+#### JSX slot wrappers and `??` fallback chains — anti-pattern
+
+Slot consumer components (`<ContentViewSlot/>`, `<SessionCardBadgeSlot/>`, etc.) return `null` when no plugin claims the slot. **They MUST NOT be placed directly as the left operand of a `??` operator** in JSX route fallback chains. The `??` operator evaluates the JSX *element* (always truthy), not its rendered output, so a fallback like
+
+```tsx
+// BROKEN — sessionDetail and LandingPage are unreachable
+<ContentViewSlot session={s} routeParams={p} onClose={c} /> ?? sessionDetail ?? <LandingPage />
+```
+
+renders nothing visible whenever zero plugins claim `content-view` (the slot's `null` return is masked by `??`'s value-based semantics). The bug is silent and ships fine in CI when fixture plugins are bundled — but breaks every user the moment fixtures are excluded from production.
+
+The fix gates the JSX element on a registry claim count *before* construction:
+
+```tsx
+// CORRECT — ?? falls through to sessionDetail when claimCount === 0
+(claimCount > 0 ? <ContentViewSlot …/> : null) ?? sessionDetail ?? <LandingPage />
+```
+
+A repository-level lint (`packages/client/src/__tests__/no-jsx-slot-nullish-fallback.test.ts`) scans the dashboard shell entry points for the anti-pattern and fails CI with the offending file:line. The lint is enforced for `packages/client/src/App.tsx` today; downstream changes that wire new slot consumers (`extract-flows-as-plugin`, `extract-openspec-as-plugin`, `extract-subagents-as-plugin`, `extract-git-as-plugin`) MUST add their shell file to the lint's `SCAN_FILES` allowlist. See change `fix-slot-fallback-masks-content` for the rationale, regression test, and the exact production bug shape (encountered during deployment of `add-extension-ui-decorations`).
 
 ### Bootstrap & First Run
 

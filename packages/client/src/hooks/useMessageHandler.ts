@@ -10,6 +10,7 @@ import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/
 import type { EditorInstanceStatus } from "@blackbelt-technology/pi-dashboard-shared/editor-types.js";
 import type { DiscoveredServerInfo } from "../components/ServerSelector.js";
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import { applyPluginConfigUpdate } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 
 export interface MessageHandlerSetters {
   setSessions: React.Dispatch<React.SetStateAction<Map<string, DashboardSession>>>;
@@ -407,6 +408,11 @@ export function useMessageHandler(
         window.dispatchEvent(new CustomEvent("pi-core-event", { detail: msg }));
         break;
 
+      case "plugin_config_update":
+        // Update the plugin config store and re-render any usePluginConfig consumers.
+        applyPluginConfigUpdate(msg);
+        break;
+
       case "bootstrap_status_update":
         // Dispatch to BootstrapBanner + useBootstrapStatus via custom DOM event.
         // See change: unified-bootstrap-install §6.
@@ -443,6 +449,54 @@ export function useMessageHandler(
           send({ type: "request_models", sessionId: selectedSessionIdRef.current });
         }
         break;
+
+      // ── Extension UI System (Phase 1) ──
+      // Cache the module list directly on the DashboardSession record so the
+      // existing `sessions.get(id)?.uiModules` access pattern works. See
+      // change: add-extension-ui-modal.
+      case "ui_modules_list":
+        setSessions((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(msg.sessionId);
+          if (existing) {
+            next.set(msg.sessionId, { ...existing, uiModules: msg.modules });
+          }
+          return next;
+        });
+        break;
+
+      case "ui_data_list":
+        setSessions((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(msg.sessionId);
+          if (existing) {
+            const dataMap = { ...(existing.uiDataMap ?? {}), [msg.event]: msg.items };
+            next.set(msg.sessionId, { ...existing, uiDataMap: dataMap });
+          }
+          return next;
+        });
+        break;
+
+      // ── Extension UI System (Phase 2): live decorator updates ──
+      // Cache descriptors on the DashboardSession record under composite key
+      // `${kind}:${namespace}:${id}`. `removed: true` deletes the entry without
+      // affecting siblings. See change: add-extension-ui-decorations.
+      case "ext_ui_decorator": {
+        const descriptor = msg.descriptor;
+        if (!descriptor || typeof descriptor.kind !== "string") break;
+        const key = `${descriptor.kind}:${descriptor.namespace}:${descriptor.id}`;
+        setSessions((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(msg.sessionId);
+          if (!existing) return prev;
+          const decorators = { ...(existing.uiDecorators ?? {}) };
+          if (msg.removed === true) delete decorators[key];
+          else decorators[key] = descriptor;
+          next.set(msg.sessionId, { ...existing, uiDecorators: decorators });
+          return next;
+        });
+        break;
+      }
     }
   }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses, setDiscoveredServers, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef, selectedSessionIdRef]);
 }

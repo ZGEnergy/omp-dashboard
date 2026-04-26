@@ -1,0 +1,159 @@
+/**
+ * Phase-2 slot: toast.
+ *
+ * Mounts a fixed top-right tray that renders the currently-active toast
+ * descriptors across all sessions. Behavior:
+ *
+ *   - No deduplication. Each `toast` descriptor is shown until either its
+ *     `payload.durationMs` timer expires or the user dismisses it.
+ *   - Auto-dismiss timer: `payload.durationMs` ms (default 5000; `0` = sticky).
+ *   - Display cap: 5 toasts visible simultaneously. Excess is FIFO-evicted
+ *     (oldest visible toast is dismissed first). Cache is unaffected; the
+ *     cap is purely a render-time concern.
+ *
+ * See change: add-extension-ui-decorations, design.md §6.
+ */
+import React, { useEffect, useState, useMemo } from "react";
+import { Icon } from "@mdi/react";
+import { mdiCloseCircle, mdiCheckCircle, mdiAlertCircle, mdiInformation } from "@mdi/js";
+import type { DashboardSession, DecoratorDescriptor } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+
+const DISPLAY_CAP = 5;
+const DEFAULT_DURATION_MS = 5000;
+
+interface ToastEntry {
+  /** Stable key: `${sessionId}|${kind}:${namespace}:${id}`. */
+  key: string;
+  sessionId: string;
+  descriptorKey: string;
+  /** First-seen timestamp (drives FIFO eviction). */
+  seenAt: number;
+  level: "info" | "success" | "warn" | "error";
+  message: string;
+  durationMs: number;
+}
+
+function levelIcon(level: ToastEntry["level"]): string {
+  switch (level) {
+    case "success": return mdiCheckCircle;
+    case "warn":    return mdiAlertCircle;
+    case "error":   return mdiCloseCircle;
+    default:        return mdiInformation;
+  }
+}
+
+function levelClass(level: ToastEntry["level"]): string {
+  switch (level) {
+    case "success": return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+    case "warn":    return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+    case "error":   return "border-red-500/40 bg-red-500/10 text-red-300";
+    default:        return "border-blue-500/40 bg-blue-500/10 text-blue-300";
+  }
+}
+
+/**
+ * ToastSlot — mount once at the App root; reads decorators across all
+ * subscribed sessions.
+ */
+export function ToastSlot({ sessions }: { sessions: Map<string, DashboardSession> | DashboardSession[] }) {
+  // Flatten incoming toast descriptors across all sessions.
+  const incoming = useMemo<ToastEntry[]>(() => {
+    const list: ToastEntry[] = [];
+    const sessionList: DashboardSession[] = sessions instanceof Map ? Array.from(sessions.values()) : sessions;
+    const now = Date.now();
+    for (const s of sessionList) {
+      if (!s.uiDecorators) continue;
+      for (const [k, d] of Object.entries(s.uiDecorators)) {
+        if (d.kind !== "toast") continue;
+        const td = d as Extract<DecoratorDescriptor, { kind: "toast" }>;
+        list.push({
+          key: `${s.id}|${k}`,
+          sessionId: s.id,
+          descriptorKey: k,
+          seenAt: now,
+          level: td.payload.level,
+          message: td.payload.message,
+          durationMs: typeof td.payload.durationMs === "number" ? td.payload.durationMs : DEFAULT_DURATION_MS,
+        });
+      }
+    }
+    return list;
+  }, [sessions]);
+
+  // Active set merges seen-time across renders so FIFO eviction is stable.
+  const [active, setActive] = useState<ToastEntry[]>([]);
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setActive((prev) => {
+      const prevByKey = new Map(prev.map((t) => [t.key, t]));
+      const merged: ToastEntry[] = [];
+      for (const t of incoming) {
+        if (dismissed.has(t.key)) continue;
+        const existing = prevByKey.get(t.key);
+        merged.push(existing ? { ...t, seenAt: existing.seenAt } : t);
+      }
+      return merged;
+    });
+  }, [incoming, dismissed]);
+
+  // Sort by seenAt ascending (oldest first); apply display cap by FIFO.
+  const visible = [...active].sort((a, b) => a.seenAt - b.seenAt).slice(0, DISPLAY_CAP);
+
+  // Schedule auto-dismiss timers.
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (const t of visible) {
+      if (t.durationMs <= 0) continue; // sticky
+      const remaining = Math.max(0, t.durationMs - (Date.now() - t.seenAt));
+      timers.push(setTimeout(() => {
+        setDismissed((prev) => {
+          if (prev.has(t.key)) return prev;
+          const next = new Set(prev);
+          next.add(t.key);
+          return next;
+        });
+      }, remaining));
+    }
+    return () => {
+      for (const id of timers) clearTimeout(id);
+    };
+  }, [visible.map((t) => t.key).join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (visible.length === 0) return null;
+
+  const handleDismiss = (key: string) => {
+    setDismissed((prev) => {
+      if (prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+  };
+
+  return (
+    <div
+      className="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"
+      data-testid="toast-slot"
+    >
+      {visible.map((t) => (
+        <div
+          key={t.key}
+          className={`pointer-events-auto flex items-start gap-2 px-3 py-2 rounded-lg border shadow-lg max-w-sm ${levelClass(t.level)}`}
+          data-testid={`toast:${t.descriptorKey}`}
+        >
+          <Icon path={levelIcon(t.level)} size={0.6} className="flex-shrink-0 mt-0.5" />
+          <span className="text-[12px] flex-1 whitespace-pre-line">{t.message}</span>
+          <button
+            onClick={() => handleDismiss(t.key)}
+            className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] flex-shrink-0"
+            title="Dismiss"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -66,3 +66,18 @@ Implementation phases are tracked as follow-up changes:
 5. pi-judo-adopt-extension-ui        ← Phase 3 consumer (in pi-judo repo)
 6. add-extension-ui-rjsf-form        ← Phase 4 (optional, JSON Schema)
 ```
+
+## Relationship to `dashboard-plugin-architecture`
+
+This proposal defines the **third-party tier** of dashboard UI contribution: extensions describe UIs as serializable descriptors, the dashboard renders them in a bounded set of named slots. It is sandboxed by design (no extension-authored React, no runtime SDK).
+
+A sibling design-only umbrella, `dashboard-plugin-architecture`, defines the **first-party tier**: monorepo plugin packages that ship real React (tree-shaken into the web build) and register concrete components into the **same** slot taxonomy. The two tiers share one slot contract — the shell doesn't care whether a contribution comes from a first-party plugin's React component or a third-party extension's descriptor.
+
+Mechanical alignment between the two proposals:
+
+- **Slot id reuse**: `dashboard-plugin-architecture` reuses every descriptor kind defined here (`management-modal`, `footer-segment`, `agent-metric`, `breadcrumb`, `gate`, `toast`, `rjsf-form`, `settings-section`) by identical name and payload contract. New first-party-only slots (`sidebar-folder-section`, `session-card-action-bar`, `content-inline-footer`, `anchored-popover`, `command-route`, `tool-renderer`, plus React variants of the shared slots) are documented in the umbrella's design.
+- **`settings-section` shared model**: both proposals agree on the `plugins.<namespace>.*` persistence namespace, JSON-Schema validation, and reactive `plugin_config_update` broadcast. A first-party plugin's React settings section and a third-party extension's descriptor settings section persist through the same mechanism.
+- **Forward-compatible additions**: a slot that is React-only here can become `R+D` in a future minor version by adding a descriptor kind to this proposal — no breaking change to plugins. The umbrella documents which slots are explicit candidates (`session-card-action-bar`, `content-inline-footer`).
+- **Independent timelines**: this proposal can ship Phase 1 and Phase 2 without waiting for `dashboard-plugin-architecture` runtime to land. Conversely, the runtime in `add-dashboard-shell-slots-runtime` can ship before Phase 2 of this proposal — first-party React plugins flow through it; third-party descriptor wiring flows through this proposal's protocol.
+
+See `openspec/changes/dashboard-plugin-architecture/design.md` §"Cross-reference with `extension-ui-system`" for the slot-by-slot mapping, and §"Settings persistence and contribution" for the shared `settings-section` model.

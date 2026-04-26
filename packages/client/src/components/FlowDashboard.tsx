@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Icon } from "@mdi/react";
 import { mdiRobotOutline, mdiStop, mdiChevronUp, mdiChevronRight, mdiChevronDown, mdiFileDocumentOutline, mdiLoading } from "@mdi/js";
-import type { FlowState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { DashboardSession, FlowState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { FlowAgentCard } from "./FlowAgentCard.js";
 import { FlowGraph, flowStateToGraphSteps } from "./FlowGraph.js";
 import { FlowSummary } from "./FlowSummary.js";
 import { FlowTabBar, type FlowTab } from "./FlowTabBar.js";
 import { useMobile } from "../hooks/useMobile.js";
+import { BreadcrumbSlot } from "./extension-ui/BreadcrumbSlot.js";
 
 export function FlowDashboard({
   flowState,
@@ -20,6 +21,7 @@ export function FlowDashboard({
   onViewYaml,
   onViewAgentSource,
   sourceOpenAgent,
+  session,
 }: {
   flowState: FlowState;
   /** All flow states (main + subflows) for tab navigation */
@@ -33,6 +35,8 @@ export function FlowDashboard({
   onViewYaml?: () => void;
   onViewAgentSource?: (sourcePath: string, agentName: string) => void;
   sourceOpenAgent?: string | null;
+  /** Phase-2 decorator host — carries breadcrumb + agent-metric descriptors. */
+  session?: Pick<DashboardSession, "uiDecorators">;
 }) {
   const isMobile = useMobile();
   const [collapsed, setCollapsed] = useState(false);
@@ -180,6 +184,9 @@ export function FlowDashboard({
             onToggleFollow={handleToggleFollow}
           />
 
+          {/* Phase-2 breadcrumb decorator slot. See change: add-extension-ui-decorations. */}
+          <BreadcrumbSlot session={session} />
+
           <FlowGraph
             steps={flowStateToGraphSteps(displayState)}
           />
@@ -204,6 +211,7 @@ export function FlowDashboard({
               <FlowAgentCard
                 key={agent.stepId || agent.agentName}
                 agent={agent}
+                session={session}
                 onClick={() => {
                   const key = agent.stepId || agent.agentName;
                   onAgentClick(selectedAgent === key ? null : key);

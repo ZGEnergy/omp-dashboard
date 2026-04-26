@@ -1,9 +1,10 @@
 import React from "react";
 import { Icon } from "@mdi/react";
 import { mdiRefresh, mdiEyeOutline, mdiEyeOffOutline, mdiFileDocumentOutline } from "@mdi/js";
-import type { FlowAgentState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { DashboardSession, FlowAgentState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { AgentCardShell } from "./AgentCardShell.js";
 import { formatTokens, formatDuration } from "./agent-card-utils.js";
+import { AgentMetricSlot } from "./extension-ui/AgentMetricSlot.js";
 
 export function FlowAgentCard({
   agent,
@@ -12,6 +13,7 @@ export function FlowAgentCard({
   selected,
   isDetailOpen,
   isSourceOpen,
+  session,
 }: {
   agent: FlowAgentState;
   onClick?: () => void;
@@ -19,6 +21,8 @@ export function FlowAgentCard({
   selected?: boolean;
   isDetailOpen?: boolean;
   isSourceOpen?: boolean;
+  /** Phase-2 decorator host — used for `agent-metric` filtering by agentId. */
+  session?: Pick<DashboardSession, "uiDecorators">;
 }) {
   const displayName = agent.label || agent.stepId || agent.agentName;
   const displayRole = agent.cardRole || agent.model || "";
@@ -75,6 +79,9 @@ export function FlowAgentCard({
             <span>waiting: {agent.blockedBy.join(", ")}</span>
           ) : null}
         </div>
+
+        {/* Phase-2 agent-metric decorator slot. See change: add-extension-ui-decorations. */}
+        <AgentMetricSlot session={session} agentId={agent.agentName} />
 
         {/* Recent tools */}
         <div className="mt-1 space-y-0">

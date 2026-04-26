@@ -66,6 +66,11 @@ export function wireEvents(deps: EventWiringDeps): void {
     }
   };
 
+  // Per-event cap for `Session.uiDataMap[event]`. Phase-1 spec contract:
+  // last-write-wins on overflow; oldest items are discarded.
+  // See change: add-extension-ui-modal, design.md §5.
+  const UI_DATA_PER_EVENT_CAP = 1000;
+
   // Track sessions replaying history — suppress status broadcasts to avoid card flicker
   const replayingSessions = new Set<string>();
   // Sessions whose replay should be discarded (canSkipWipe was true — events already in store)
@@ -521,6 +526,59 @@ export function wireEvents(deps: EventWiringDeps): void {
     if (msg.type === "prompt_cancel") {
       browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
       browserGateway.sendToSubscribers(sessionId, msg as any);
+    }
+
+    // ── Extension UI System (Phase 1): cache + broadcast ──
+    // See change: add-extension-ui-modal.
+    if (msg.type === "ui_modules_list") {
+      sessionManager.update(sessionId, { uiModules: msg.modules });
+      browserGateway.sendToSubscribers(sessionId, {
+        type: "ui_modules_list",
+        sessionId,
+        modules: msg.modules,
+      } as any);
+    }
+
+    if (msg.type === "ui_data_list") {
+      const session = sessionManager.get(sessionId);
+      const dataMap = { ...(session?.uiDataMap ?? {}) };
+      // Per-event item cap (default N = 1000). Last-write-wins on overflow.
+      const items = Array.isArray(msg.items) ? msg.items : [];
+      const capped = items.length > UI_DATA_PER_EVENT_CAP
+        ? items.slice(items.length - UI_DATA_PER_EVENT_CAP)
+        : items;
+      dataMap[msg.event] = capped;
+      sessionManager.update(sessionId, { uiDataMap: dataMap });
+      browserGateway.sendToSubscribers(sessionId, {
+        type: "ui_data_list",
+        sessionId,
+        event: msg.event,
+        items: capped,
+      } as any);
+    }
+
+    // ── Extension UI System (Phase 2): live decorator cache + broadcast ──
+    // See change: add-extension-ui-decorations.
+    if (msg.type === "ext_ui_decorator") {
+      const session = sessionManager.get(sessionId);
+      if (session) {
+        const descriptor = msg.descriptor;
+        if (descriptor && typeof descriptor.kind === "string" && typeof descriptor.namespace === "string" && typeof descriptor.id === "string") {
+          const key = `${descriptor.kind}:${descriptor.namespace}:${descriptor.id}`;
+          const next = { ...(session.uiDecorators ?? {}) };
+          if (msg.removed === true) delete next[key];
+          else next[key] = descriptor;
+          sessionManager.update(sessionId, { uiDecorators: next });
+        }
+      }
+      // Broadcast verbatim regardless of whether the session is known — mirrors
+      // the Phase-1 contract for `ui_modules_list` / `ui_data_list`.
+      browserGateway.sendToSubscribers(sessionId, {
+        type: "ext_ui_decorator",
+        sessionId,
+        descriptor: msg.descriptor,
+        ...(msg.removed === true ? { removed: true } : {}),
+      } as any);
     }
 
     if (msg.type === "session_name_update") {

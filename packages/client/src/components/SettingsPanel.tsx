@@ -17,6 +17,7 @@ import { useInstalledPackages } from "../hooks/useInstalledPackages.js";
 import { usePackageOperations } from "../hooks/usePackageOperations.js";
 import { UnifiedPackagesSection } from "./UnifiedPackagesSection.js";
 import type { NpmPackageResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+import { SettingsSectionSlot } from "@blackbelt-technology/dashboard-plugin-runtime";
 
 interface ProviderConfig {
   clientId: string;
@@ -420,12 +421,18 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
               </Section>
 
               <ToolsSection />
+              {/* Plugin slot: settings-section (general tab) */}
+              <SettingsSectionSlot tab="general" />
             </>
           )}
 
           {/* Servers Tab */}
           {activeTab === "servers" && (
-            <ServersTab />
+            <>
+              <ServersTab />
+              {/* Plugin slot: settings-section (servers tab) */}
+              <SettingsSectionSlot tab="servers" />
+            </>
           )}
 
           {/* Providers Tab */}
@@ -459,6 +466,8 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
                   Add Provider
                 </button>
               </Section>
+              {/* Plugin slot: settings-section (providers tab) */}
+              <SettingsSectionSlot tab="providers" />
             </>
           )}
 
@@ -531,6 +540,8 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
                   c.auth.bypassHosts = nets;
                 })}
               />
+              {/* Plugin slot: settings-section (security tab) */}
+              <SettingsSectionSlot tab="security" />
             </>
           )}
 
