@@ -1,6 +1,6 @@
 import React, { useState, type ReactNode } from "react";
 import { Icon } from "@mdi/react";
-import { mdiLoading, mdiCheck, mdiAlertCircle, mdiChevronRight, mdiChevronDown, mdiStop, mdiAlert } from "@mdi/js";
+import { mdiLoading, mdiCheck, mdiAlertCircle, mdiChevronRight, mdiChevronDown, mdiStop, mdiAlert, mdiHelpCircleOutline } from "@mdi/js";
 import { getToolRenderer, type ToolContext } from "./tool-renderers/index.js";
 import type { ChatImage } from "../lib/event-reducer.js";
 import { useMobile } from "../hooks/useMobile.js";
@@ -71,8 +71,18 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
         onClick={() => setExpanded(!expanded)}
         className={`flex items-center gap-1.5 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] w-full text-left ${isMobile ? "min-h-[44px] py-2" : ""}`}
       >
-        <span className={`inline-flex ${status === "error" ? "text-red-400" : status === "complete" ? "text-green-400" : "text-yellow-400"}`}>
-          {statusIcons[status]}
+        <span className={`inline-flex ${
+          status === "error"
+            ? "text-red-400"
+            : isAskUser
+              ? "text-sky-400"
+              : status === "complete"
+                ? "text-green-400"
+                : "text-yellow-400"
+        }`}>
+          {isAskUser && status !== "error" && status !== "running"
+            ? <Icon path={mdiHelpCircleOutline} size={0.55} />
+            : statusIcons[status]}
         </span>
         <span className="truncate">{getSummary(toolName, args)}</span>
         <ElapsedBadge startedAt={startedAt} duration={duration} />
