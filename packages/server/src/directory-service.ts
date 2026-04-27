@@ -86,6 +86,36 @@ function statMtimeOr(p: string): number | undefined {
   }
 }
 
+/**
+ * Maximum mtime across a fixed list of paths. Missing paths (ENOENT) are
+ * skipped — they don't poison the result. Returns `undefined` only when
+ * every input is missing.
+ *
+ * Used by the change-detection gate to catch in-place file edits that
+ * don't bump any parent directory's mtime on POSIX. See change:
+ * fix-openspec-mtime-gate-blind-spots.
+ */
+export function effectiveMtimeOr(paths: string[]): number | undefined {
+  let max: number | undefined;
+  for (const p of paths) {
+    const m = statMtimeOr(p);
+    if (m === undefined) continue;
+    if (max === undefined || m > max) max = m;
+  }
+  return max;
+}
+
+/** File set tracked by the per-change effective-mtime computation. */
+function perChangeArtifactPaths(changesRoot: string, name: string): string[] {
+  const dir = path.join(changesRoot, name);
+  return [
+    dir,
+    path.join(dir, "tasks.md"),
+    path.join(dir, "proposal.md"),
+    path.join(dir, "design.md"),
+  ];
+}
+
 // ── Per-directory cache ────────────────────────────────────────────
 type PerChangeEntry = {
   mtimeMs: number | undefined;
@@ -181,8 +211,21 @@ export function createDirectoryService(
     }
 
     // ── Step 1: list (gated) ──
+    //
+    // The list-step gate signal must catch in-place edits to <change>/tasks.md
+    // because `completedTasks` / `totalTasks` are derived from those files. POSIX
+    // dir-mtime alone misses these edits (it only advances on entry create/
+    // delete/rename), so we union the parent-dir mtime with each known
+    // tasks.md file's mtime. See change: fix-openspec-mtime-gate-blind-spots.
     let listResult: typeof cache.listResult = cache.listResult;
-    const listCacheValid = gateEnabled && cache.listMtimeMs === rootMtime && cache.listResult !== undefined;
+    let listSignal: number | undefined = rootMtime;
+    if (cache.listResult !== undefined) {
+      const taskFiles = cache.listResult.map((c) =>
+        path.join(changesRoot, c.name, "tasks.md"),
+      );
+      listSignal = effectiveMtimeOr([changesRoot, ...taskFiles]) ?? rootMtime;
+    }
+    const listCacheValid = gateEnabled && cache.listMtimeMs === listSignal && cache.listResult !== undefined;
     if (!listCacheValid) {
       const raw = await semaphore.run(() => runOpenSpecList(cwd));
       if (!raw || !Array.isArray(raw.changes)) {
@@ -195,7 +238,12 @@ export function createDirectoryService(
         return empty;
       }
       listResult = raw.changes;
-      cache.listMtimeMs = rootMtime;
+      // Recompute the signal against the freshly returned change set so the
+      // cache stamps the same shape we'll compare against on the next tick.
+      const taskFiles = (listResult ?? []).map((c) =>
+        path.join(changesRoot, c.name, "tasks.md"),
+      );
+      cache.listMtimeMs = effectiveMtimeOr([changesRoot, ...taskFiles]) ?? rootMtime;
       cache.listResult = listResult;
     }
 
@@ -209,8 +257,10 @@ export function createDirectoryService(
     const statusResults = new Map<string, { artifacts?: Array<{ id: string; status: string }>; isComplete?: boolean } | null>();
 
     await Promise.all((listResult ?? []).map(async (c) => {
-      const changeDir = path.join(changesRoot, c.name);
-      const changeMtime = statMtimeOr(changeDir);
+      // File-aware effective mtime: catches in-place edits to tasks.md /
+      // proposal.md / design.md that POSIX dir-mtime misses. See change:
+      // fix-openspec-mtime-gate-blind-spots.
+      const changeMtime = effectiveMtimeOr(perChangeArtifactPaths(changesRoot, c.name));
       const cached = cache.changes.get(c.name);
 
       if (gateEnabled && cached && cached.mtimeMs !== undefined && cached.mtimeMs === changeMtime) {
@@ -229,10 +279,9 @@ export function createDirectoryService(
     // ── Step 3: build + cache + return ──
     const data = buildOpenSpecData({ changes: listResult ?? [] }, statusResults);
 
-    // Update per-change cache with the mtimes we just observed.
+    // Update per-change cache with the file-aware effective mtimes we just observed.
     for (const change of data.changes) {
-      const changeDir = path.join(changesRoot, change.name);
-      const changeMtime = statMtimeOr(changeDir);
+      const changeMtime = effectiveMtimeOr(perChangeArtifactPaths(changesRoot, change.name));
       cache.changes.set(change.name, { mtimeMs: changeMtime, change });
     }
     cache.data = data;
@@ -242,7 +291,11 @@ export function createDirectoryService(
 
   async function refreshOpenSpec(cwd: string): Promise<OpenSpecData> {
     try {
-      return await pollOne(cwd, true);
+      // The mtime gate is now file-aware (catches in-place tasks.md edits),
+      // so force-mode is no longer required for correctness — and dropping it
+      // makes post-archive refresh O(1) status spawns instead of O(N). See
+      // change: fix-openspec-mtime-gate-blind-spots.
+      return await pollOne(cwd, false);
     } catch {
       // Fall back to the legacy monolithic path so "refresh" never silently fails.
       const data = await pollOpenSpecAsync(cwd);

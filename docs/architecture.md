@@ -541,14 +541,14 @@ A naive `for each cwd: list + for each change: status` fan-out explodes quickly:
 
 The scheduler in `packages/server/src/directory-service.ts` applies four layers of throttling (all configurable under `DashboardConfig.openspec`):
 
-1. **mtime gate** (`changeDetection: "mtime" | "always"`, default `mtime`) — skips `openspec list` when `fs.stat(openspec/changes).mtimeMs` is unchanged since the last successful poll, and skips `openspec status --change X` when the per-change directory mtime is unchanged. A `stat` is ~10 µs vs. ~500 ms per CLI spawn; in steady state this drops 67 spawns/tick to 0–2.
+1. **mtime gate** (`changeDetection: "mtime" | "always"`, default `mtime`) — skips `openspec list` and `openspec status --change X` when no tracked artifact has changed since the last successful poll. The gate uses **file-aware effective mtime** (the max over a fixed file set) rather than directory mtime alone, because POSIX directory mtime advances only on entry create/delete/rename and misses in-place file edits. The list-step signal unions `<changes>/` with each known `<change>/tasks.md`; the per-change signal unions `<change>/` with `tasks.md`, `proposal.md`, `design.md`. Missing files (e.g. a change with no `design.md`) are skipped, not zero. A `stat` is ~10 µs vs. ~500 ms per CLI spawn; in steady state this drops 67 spawns/tick to 0–2. See change: `fix-openspec-mtime-gate-blind-spots`.
 2. **Concurrency cap** (`maxConcurrentSpawns`, default 3, range 1–16) — an in-repo semaphore (`packages/shared/src/semaphore.ts`) serializes CLI spawns across all directories. Burst-work spreads uniformly over the interval instead of pinning every core.
 3. **Per-cwd jitter** (`jitterSeconds`, default 5) — each known directory is assigned a deterministic phase offset `fnv1a32(cwd) % (jitterSeconds * 1000)` within the interval so polls don't all align on the same scheduling boundary.
 4. **Split pi-resources timer** — `scanPiResources(cwd)` no longer rides the openspec tick; it has its own interval at 5× the openspec cadence (pi extensions/skills change far less often than OpenSpec artifacts).
 
 Cache shape (per cwd): `{ listMtimeMs, listResult, changes: Map<name, { mtimeMs, change }>, data }`. Cache is updated atomically per directory — a partial failure leaves the previous snapshot intact and the next tick retries.
 
-Force-refresh paths (`refreshOpenSpec(cwd)`, `openspec_refresh` WS, `onDirectoryAdded(cwd)`) bypass the mtime gate but **still go through the semaphore**, so a refresh-button storm cannot overload the host.
+Refresh paths (`refreshOpenSpec(cwd)`, `openspec_refresh` WS, `onDirectoryAdded(cwd)`) **also use the gate** — they don't bypass it. With the file-aware effective-mtime signal the gate now correctly reflects in-place edits, so force-mode is no longer needed for correctness and would just be wasted spawns. Post-archive refresh on a folder with N active changes used to cost `1 + N` spawns (forced); it now costs `1` (list) plus only the few status spawns whose artifact files actually moved. All paths still go through the semaphore, so a refresh-button storm cannot overload the host.
 
 Live reconfiguration: `PUT /api/config` with an `openspec` block calls `directoryService.reconfigurePolling(cfg)` — the timer cadence and semaphore max are updated without a server restart; in-flight polls finish on their old config.
 

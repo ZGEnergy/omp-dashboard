@@ -375,6 +375,107 @@ describe("DirectoryService", () => {
       expect(runOpenSpecStatus).toHaveBeenCalledTimes(1);
     });
 
+    it("re-spawns list+status when tasks.md is edited in place (POSIX dir-mtime blind spot)", async () => {
+      // This test covers the bug fix in change `fix-openspec-mtime-gate-blind-spots`:
+      // POSIX directory mtime advances only on entry create/delete/rename, not on
+      // in-place file content edits. The previous gate used dir mtime alone and
+      // missed these edits, leaving `completedTasks` stuck at the cached value.
+      const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
+      (runOpenSpecList as any).mockResolvedValue({ changes: [
+        { name: "change-a", status: "in-progress", completedTasks: 0, totalTasks: 3 },
+        { name: "change-b", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+      ] });
+      (runOpenSpecStatus as any).mockResolvedValue({ artifacts: [], isComplete: false });
+
+      // Seed tasks.md inside change-a so the file is part of the gate signal.
+      const tasksMd = path.join(changesDir, "change-a", "tasks.md");
+      fs.writeFileSync(tasksMd, "- [ ] 1.1 a\n- [ ] 1.2 b\n- [ ] 1.3 c\n", "utf-8");
+
+      const stateStore = createMockPreferencesStore();
+      const sessionManager = createMockSessionManager();
+      service = createDirectoryService(stateStore, sessionManager);
+      await service.refreshOpenSpec(cwd);
+      (runOpenSpecList as any).mockClear();
+      (runOpenSpecStatus as any).mockClear();
+
+      // Simulate an in-place edit: rewrite tasks.md AND bump its file mtime.
+      // Crucially, do NOT touch the parent directory's mtime — that's the
+      // blind spot the fix is supposed to cover.
+      fs.writeFileSync(tasksMd, "- [x] 1.1 a\n- [x] 1.2 b\n- [ ] 1.3 c\n", "utf-8");
+      const future = new Date(Date.now() + 60_000);
+      fs.utimesSync(tasksMd, future, future);
+
+      (runOpenSpecList as any).mockResolvedValue({ changes: [
+        { name: "change-a", status: "in-progress", completedTasks: 2, totalTasks: 3 },
+        { name: "change-b", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+      ] });
+
+      await service.pollDirectoryGated(cwd);
+
+      // List re-runs because the tasks.md file mtime is part of the list-step signal.
+      expect(runOpenSpecList).toHaveBeenCalledTimes(1);
+      // Status re-runs only for change-a (its effective mtime advanced via tasks.md).
+      expect(runOpenSpecStatus).toHaveBeenCalledTimes(1);
+      expect((runOpenSpecStatus as any).mock.calls[0][1]).toBe("change-a");
+      // Cache reflects the new counter.
+      const data = service.getOpenSpecData(cwd);
+      const ca = data?.changes.find((c) => c.name === "change-a");
+      expect(ca?.completedTasks).toBe(2);
+    });
+
+    it("refreshOpenSpec uses the gate after archive (no force — zero status spawns for unchanged changes)", async () => {
+      // Covers the second half of `fix-openspec-mtime-gate-blind-spots`: with the
+      // gate corrected, refreshOpenSpec no longer needs to bypass it. Bulk archive
+      // bumps `<changes>/` mtime once (entry removal), so list re-runs once — but
+      // unchanged active changes' per-change effective mtimes don't move, so we
+      // skip every status spawn. Pre-fix this test would see 4 status spawns
+      // (one per remaining change) because `force=true` disabled the gate.
+      const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
+
+      // Set up 5 changes in the directory (replacing the beforeEach default).
+      fs.rmSync(path.join(changesDir, "change-a"), { recursive: true });
+      fs.rmSync(path.join(changesDir, "change-b"), { recursive: true });
+      for (const n of ["c1", "c2", "c3", "c4", "c5"]) {
+        fs.mkdirSync(path.join(changesDir, n));
+      }
+
+      (runOpenSpecList as any).mockResolvedValueOnce({ changes: [
+        { name: "c1", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+        { name: "c2", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+        { name: "c3", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+        { name: "c4", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+        { name: "c5", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+      ] });
+      (runOpenSpecStatus as any).mockResolvedValue({ artifacts: [], isComplete: false });
+
+      const stateStore = createMockPreferencesStore();
+      const sessionManager = createMockSessionManager();
+      service = createDirectoryService(stateStore, sessionManager);
+
+      // First refresh seeds the cache (5 list+status spawns; not what's under test).
+      await service.refreshOpenSpec(cwd);
+      (runOpenSpecList as any).mockClear();
+      (runOpenSpecStatus as any).mockClear();
+
+      // Simulate archive: remove one change directory and bump <changes>/ mtime.
+      fs.rmSync(path.join(changesDir, "c5"), { recursive: true });
+      const future = new Date(Date.now() + 60_000);
+      fs.utimesSync(changesDir, future, future);
+      (runOpenSpecList as any).mockResolvedValueOnce({ changes: [
+        { name: "c1", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+        { name: "c2", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+        { name: "c3", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+        { name: "c4", status: "in-progress", completedTasks: 0, totalTasks: 1 },
+      ] });
+
+      await service.refreshOpenSpec(cwd);
+
+      expect(runOpenSpecList).toHaveBeenCalledTimes(1);
+      // Pre-fix this would be 4. Post-fix the gate skips every status because
+      // none of the surviving changes' artifact files moved.
+      expect(runOpenSpecStatus).toHaveBeenCalledTimes(0);
+    });
+
     it("removed change is pruned from cache", async () => {
       const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
       (runOpenSpecList as any).mockResolvedValueOnce({ changes: [
