@@ -127,6 +127,23 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottom = useRef(true);
   const programmaticScroll = useRef(false);
+  // Race-safe across multi-batch event_replay: when ChatView itself initiates a
+  // scroll, the resulting onScroll can fire after another replay batch has grown
+  // scrollHeight, making handleScroll misread the geometry as "user scrolled up".
+  // markProgrammatic() raises programmaticScroll for ~150ms so handleScroll
+  // ignores any onScroll attributable to our own scrollTo call.
+  const programmaticTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const markProgrammatic = useCallback(() => {
+    programmaticScroll.current = true;
+    if (programmaticTimeout.current) clearTimeout(programmaticTimeout.current);
+    programmaticTimeout.current = setTimeout(() => {
+      programmaticScroll.current = false;
+      programmaticTimeout.current = null;
+    }, 150);
+  }, []);
+  useEffect(() => () => {
+    if (programmaticTimeout.current) clearTimeout(programmaticTimeout.current);
+  }, []);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showDebugTools] = useState(() => {
     try { return localStorage.getItem("show-debug-tools") === "true"; } catch { return false; }
@@ -138,6 +155,11 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   const bubbleWide = isMobile ? "w-[95%]" : "w-[95%]";
 
   const handleScroll = useCallback(() => {
+    // Suppress scroll measurements caused by our own programmatic scrollTo. The
+    // onScroll event lags scrollTo and can fire after the next replay batch has
+    // grown scrollHeight; measuring then would falsely conclude the user scrolled
+    // away from the bottom. Only real user gestures should reach this code path.
+    if (programmaticScroll.current) return;
     const el = scrollRef.current;
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
@@ -180,6 +202,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
         isNearBottom.current = false;
         setShowScrollButton(true);
         requestAnimationFrame(() => {
+          markProgrammatic();
           scrollRef.current?.scrollTo(0, saved.scrollTop);
         });
       } else {
@@ -187,20 +210,26 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
         isNearBottom.current = true;
         setShowScrollButton(false);
         requestAnimationFrame(() => {
+          markProgrammatic();
           scrollRef.current?.scrollTo(0, scrollRef.current!.scrollHeight);
         });
       }
     }
   }, [sessionId]);
 
-  // Auto-scroll on new content when near bottom (skip during programmatic scroll)
+  // Auto-scroll on new content when near bottom. We deliberately do NOT gate on
+  // programmaticScroll here — repeated replay batches must keep chasing the tail.
+  // The flag is only consulted inside handleScroll to ignore the spurious onScroll
+  // events that follow each scrollTo. scrollToTurn opts out by setting
+  // isNearBottom.current = false, which still gates this effect.
   useEffect(() => {
-    if (isNearBottom.current && !programmaticScroll.current) {
+    if (isNearBottom.current) {
       requestAnimationFrame(() => {
+        markProgrammatic();
         scrollRef.current?.scrollTo(0, scrollRef.current!.scrollHeight);
       });
     }
-  }, [state.messages.length, state.streamingText, state.pendingPrompt]);
+  }, [state.messages.length, state.streamingText, state.pendingPrompt, markProgrammatic]);
 
   // Group consecutive repeated tool calls for cleaner display
   const filteredMessages = useMemo(() => {

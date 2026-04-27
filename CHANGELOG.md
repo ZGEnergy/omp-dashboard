@@ -15,6 +15,7 @@ see [`docs/release-process.md`](docs/release-process.md).
 ### Changed
 
 ### Fixed
+- ChatView: fixed a race during multi-batch `event_replay` that caused uncached session switches to land mid-conversation with the floating scroll-to-bottom button visible. `handleScroll` now ignores onScroll measurements that follow our own programmatic `scrollTo` for a ~150 ms window, so growing `scrollHeight` between batches no longer flips `isNearBottom` to false. (fix-chat-scroll-race-during-replay)
 
 ## [0.4.1] - 2026-04-27
 ### Added
