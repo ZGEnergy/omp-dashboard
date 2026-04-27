@@ -17,6 +17,8 @@ import { isDebugTool } from "../hooks/useDebugToolsVisible.js";
 import { getInteractiveRenderer } from "./interactive-renderers/registry.js";
 import { groupConsecutiveToolCalls, type ChatItem, type ToolCallGroup } from "../lib/group-tool-calls.js";
 import { CollapsedToolGroup } from "./CollapsedToolGroup.js";
+import { findRetriedErrorIds, findActiveInteractiveToolResultIds } from "../lib/collapse-retried-errors.js";
+import { RetriedErrorBadge } from "./RetriedErrorBadge.js";
 import { ImageLightbox } from "./ImageLightbox.js";
 
 interface Props {
@@ -206,6 +208,8 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     return state.messages.filter((m) => m.role !== "toolResult" || !isDebugTool(m.toolName ?? ""));
   }, [state.messages, showDebugTools]);
   const groupedMessages = useMemo(() => groupConsecutiveToolCalls(filteredMessages), [filteredMessages]);
+  const retriedErrorIds = useMemo(() => findRetriedErrorIds(filteredMessages), [filteredMessages]);
+  const hiddenToolResultIds = useMemo(() => findActiveInteractiveToolResultIds(filteredMessages), [filteredMessages]);
 
   useImperativeHandle(ref, () => ({
     scrollToTurn(turnIndex: number) {
@@ -277,6 +281,22 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
 
         if (msg.role === "toolResult") {
           if (!showDebugTools && isDebugTool(msg.toolName ?? "")) return null;
+          if (hiddenToolResultIds.has(msg.id)) return null;
+          if (retriedErrorIds.has(msg.id)) {
+            return (
+              <RetriedErrorBadge
+                key={msg.id}
+                toolName={msg.toolName ?? "unknown"}
+                toolCallId={msg.toolCallId ?? msg.id}
+                args={msg.args}
+                result={msg.result}
+                context={toolContext}
+                startedAt={msg.startedAt}
+                duration={msg.duration}
+                toolDetails={msg.toolDetails}
+              />
+            );
+          }
           return (
             <ToolCallStep
               key={msg.id}

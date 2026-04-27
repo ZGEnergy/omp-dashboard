@@ -160,6 +160,19 @@ describe("registerAskUserTool", () => {
       return pi.registerTool.mock.calls[0][0];
     }
 
+    it("leaves empty {} args untouched (no synthetic method) so schema rejection still fires", () => {
+      // Regression test for the Opus-emits-empty-args bug seen in session 019dd05c.
+      // Our rescue layer must NOT silently fabricate a method/title when there is
+      // nothing to rescue — the framework's schema validator must still reject {}
+      // so the model is forced to retry with valid args.
+      const tool = getTool();
+      const result = tool.prepareArguments({});
+      expect(result.method).toBeUndefined();
+      expect(result.title).toBeUndefined();
+      expect(result.questions).toBeUndefined();
+      expect(Object.keys(result).filter((k) => k !== "__normalizations")).toHaveLength(0);
+    });
+
     it("parses stringified options array", () => {
       const tool = getTool();
       const result = tool.prepareArguments({ method: "select", title: "Pick", options: '["A", "B"]' });

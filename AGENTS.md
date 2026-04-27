@@ -154,6 +154,8 @@ make clean              # Destroy all cloned VMs
 | `src/client/components/ImageLightbox.tsx` | Full-size image lightbox with zoom/pan (useZoomPan), Esc/backdrop close |
 | `src/client/components/CollapsedToolGroup.tsx` | Collapsed group of repeated tool calls with expand toggle |
 | `src/client/lib/group-tool-calls.ts` | Groups consecutive identical tool calls for chat display |
+| `src/client/lib/collapse-retried-errors.ts` | Two pure helpers used by `ChatView` to remove duplicate tool cards: `findRetriedErrorIds(messages)` returns ids of error `toolResult`s immediately superseded by a successful retry of the same tool (skipping `assistant`/`thinking`/`turnSeparator`/`rawEvent`/`commandFeedback`); `findActiveInteractiveToolResultIds(messages)` returns ids of `running` `toolResult`s paired with a *pending* `interactiveUi` message that follows them, so the running tool card can be hidden while the `InteractiveUiCard` is the sole interactive surface. See change: collapse-duplicate-tool-cards |
+| `src/client/components/RetriedErrorBadge.tsx` | One-line `⚠ <toolName> failed — retried ›` pill rendered by `ChatView` in place of full `ToolCallStep` for ids returned by `findRetriedErrorIds`. Click toggles an expanded view that re-uses `<ToolCallStep status="error">` with a "Hide failed attempt" toggle so the original validation message + `Received arguments:` JSON is still recoverable. See change: collapse-duplicate-tool-cards |
 | `src/server/browser-handlers/session-meta-handler.ts` | Rename, hide, unhide, attach/detach proposal, fetch, list |
 | `src/server/browser-handlers/terminal-handler.ts` | Create, kill, rename terminals |
 | `src/server/browser-handlers/directory-handler.ts` | Pin/unpin dirs, reorder, openspec refresh, pi-gateway forwards |
