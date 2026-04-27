@@ -229,4 +229,41 @@ describe("detectOpenSpecActivity", () => {
       expect(result).toBeNull();
     });
   });
+
+  describe("flag-shaped change names", () => {
+    it("returns null for `openspec archive --help`", () => {
+      const result = detectOpenSpecActivity("bash", {
+        command: "openspec archive --help",
+      });
+      expect(result).toBeNull();
+    });
+
+    it("returns null for `openspec new change --help`", () => {
+      const result = detectOpenSpecActivity("bash", {
+        command: "openspec new change --help",
+      });
+      expect(result).toBeNull();
+    });
+
+    it("returns null when --change is followed by another flag", () => {
+      const result = detectOpenSpecActivity("bash", {
+        command: "openspec foo --change --help",
+      });
+      expect(result).toBeNull();
+    });
+
+    it("still extracts a real change name from `openspec archive add-auth`", () => {
+      const result = detectOpenSpecActivity("bash", {
+        command: "openspec archive add-auth",
+      });
+      expect(result).toEqual({ changeName: "add-auth", isActive: true });
+    });
+
+    it("still extracts a quoted change name from `openspec archive \"add-auth\"`", () => {
+      const result = detectOpenSpecActivity("bash", {
+        command: 'openspec archive "add-auth"',
+      });
+      expect(result).toEqual({ changeName: "add-auth", isActive: true });
+    });
+  });
 });

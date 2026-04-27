@@ -83,29 +83,25 @@ export function detectOpenSpecActivity(
   }
 
   if (tool === "bash") {
-    const command = args.command as string | undefined;
-    if (!command || !command.includes("openspec")) return null;
+      const command = args.command as string | undefined;
+      if (!command || !command.includes("openspec")) return null;
 
-    // Check for --change flag
-    const flagMatch = command.match(CLI_CHANGE_FLAG_RE);
-    if (flagMatch) {
-      return { changeName: flagMatch[1], isActive: true };
+      // Try each CLI regex in order; first match wins.
+      const match =
+        command.match(CLI_CHANGE_FLAG_RE) ??
+        command.match(CLI_ARCHIVE_RE) ??
+        command.match(CLI_NEW_CHANGE_RE);
+      if (!match) return null;
+
+      const name = match[1];
+      // Reject flag-shaped tokens (e.g. `--help`, `-h`). The CLI regex capture
+      // groups use `[^\s"']+` which would otherwise treat `--help` as a change
+      // name and trigger downstream auto-attach + auto-rename.
+      // See change: fix-openspec-flag-rename-bug.
+      if (name.startsWith("-")) return null;
+
+      return { changeName: name, isActive: true };
     }
-
-    // Check for openspec archive <name>
-    const archiveMatch = command.match(CLI_ARCHIVE_RE);
-    if (archiveMatch) {
-      return { changeName: archiveMatch[1], isActive: true };
-    }
-
-    // Check for openspec new change "name"
-    const newChangeMatch = command.match(CLI_NEW_CHANGE_RE);
-    if (newChangeMatch) {
-      return { changeName: newChangeMatch[1], isActive: true };
-    }
-
-    return null;
-  }
 
   return null;
 }
