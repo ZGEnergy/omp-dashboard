@@ -1,13 +1,246 @@
 name: Release
 
+# Two ways to fire this workflow:
+#
+#   1. Push a tag matching `v*`. The `prepare` job extracts the version
+#      from the tag, then publish + electron + github-release run.
+#
+#   2. Click "Run workflow" in the GitHub Actions UI (workflow_dispatch).
+#      The `prepare` job validates / auto-bumps the version, mutates
+#      CHANGELOG.md (promotes [Unreleased] to [vX.Y.Z]), commits + tags +
+#      pushes the branch, then the publish + electron + github-release
+#      jobs run against the freshly-pushed tag.
+#
+#      With dry_run=true the prepare job computes everything, prints the
+#      diff, and STOPS — publish and downstream jobs are skipped.
+
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: |
+          Version to release (e.g. "0.4.1"). Use "Auto" to bump the patch
+          from the current root package.json version. Ignored on tag-push.
+        type: string
+        required: false
+        default: "Auto"
+      prerelease:
+        description: |
+          Mark the GitHub Release as prerelease. Tagged prereleases SHOULD
+          additionally use a -rc.N / -beta.N suffix on the version.
+        type: boolean
+        required: false
+        default: false
+      dry_run:
+        description: |
+          Compute the version + show the diff but do NOT commit, tag, or
+          push. Publish and downstream jobs are skipped.
+        type: boolean
+        required: false
+        default: false
 
 jobs:
+  # ── prepare: resolve version + (on dispatch) bump + tag + push ────────────
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write  # Used on workflow_dispatch (commit + tag + push).
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag:     ${{ steps.resolve.outputs.tag }}
+      should_publish: ${{ steps.resolve.outputs.should_publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # On tag-push we land on the tag's commit; on workflow_dispatch
+          # we land on the branch the operator selected. Full history so
+          # `git tag` can verify uniqueness.
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve version
+        id: resolve
+        shell: bash
+        env:
+          REQUESTED: ${{ github.event.inputs.version }}
+          DRY_RUN:   ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+            echo "Tag-push: tag=$tag version=$version"
+            echo "version=$version"        >> "$GITHUB_OUTPUT"
+            echo "tag=$tag"                 >> "$GITHUB_OUTPUT"
+            echo "should_publish=true"      >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          requested="${REQUESTED:-Auto}"
+          current=$(node -p "require('./package.json').version")
+          echo "Current root version: $current"
+          echo "Requested input:      $requested"
+          if [[ -z "$requested" || "$requested" == "Auto" ]]; then
+            next=$(node -e "
+              const v=require('./package.json').version.replace(/-.*\$/,'');
+              const [M,N,P]=v.split('.').map(n=>parseInt(n,10));
+              if (Number.isNaN(M)||Number.isNaN(N)||Number.isNaN(P)) {
+                process.stderr.write('Cannot parse current version: '+v+'\n');
+                process.exit(1);
+              }
+              process.stdout.write(\`\${M}.\${N}.\${P+1}\`);
+            ")
+            echo "Auto-bumped to:       $next"
+          else
+            next="$requested"
+            echo "Using requested:      $next"
+          fi
+          if ! [[ "$next" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::'$next' is not a valid semver string"
+            exit 1
+          fi
+          if git rev-parse "v$next" >/dev/null 2>&1; then
+            echo "::error::tag v$next already exists locally"
+            exit 1
+          fi
+          if git ls-remote --tags origin "v$next" | grep -q "v$next$"; then
+            echo "::error::tag v$next already exists on origin"
+            exit 1
+          fi
+          echo "version=$next"   >> "$GITHUB_OUTPUT"
+          echo "tag=v$next"       >> "$GITHUB_OUTPUT"
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_publish=true"  >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pre-flight gate (lint + tests + build)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Bump workspace package.json versions
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          npm version "${{ steps.resolve.outputs.version }}" \
+            --no-git-tag-version \
+            --allow-same-version \
+            --workspaces \
+            --include-workspace-root
+
+      - name: Sync inter-package dep specifiers
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: node scripts/sync-versions.js
+
+      - name: Promote CHANGELOG [Unreleased] section
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          today=$(date -u +%Y-%m-%d)
+          if grep -qE "^## \[${VERSION}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md already contains a section for ${VERSION}"
+            exit 1
+          fi
+          TODAY="$today" python3 - <<'PY'
+          import os, re, pathlib
+          version = os.environ["VERSION"]
+          today = os.environ["TODAY"]
+          p = pathlib.Path("CHANGELOG.md")
+          src = p.read_text()
+          replacement = (
+              "## [Unreleased]\n\n"
+              "### Added\n\n"
+              "### Changed\n\n"
+              "### Fixed\n\n"
+              f"## [{version}] - {today}\n"
+          )
+          new = re.sub(r"^## \[Unreleased\]\s*\n", replacement, src, count=1, flags=re.MULTILINE)
+          if new == src:
+              raise SystemExit("Could not find '## [Unreleased]' heading in CHANGELOG.md")
+          p.write_text(new)
+          PY
+
+      - name: Show planned diff (dry-run preview)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
+        shell: bash
+        run: |
+          {
+            echo "### Dry run preview"
+            echo ""
+            echo "Resolved version: \`${{ steps.resolve.outputs.version }}\`"
+            echo "Resolved tag:     \`${{ steps.resolve.outputs.tag }}\`"
+            echo ""
+            echo "Files staged for the release commit:"
+            echo '```'
+            git status --short
+            echo '```'
+            echo ""
+            echo "Diff summary:"
+            echo '```'
+            git diff --stat
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning::dry_run=true — NOT committing, NOT tagging, NOT pushing. Publish jobs will be skipped."
+
+      - name: Commit, tag, and push
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' }}
+        shell: bash
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(release): v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin HEAD:${{ github.ref_name }}
+          git push origin "v${VERSION}"
+
+      - name: Summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          VERSION:    ${{ steps.resolve.outputs.version }}
+          TAG:        ${{ steps.resolve.outputs.tag }}
+          PRERELEASE: ${{ github.event.inputs.prerelease }}
+          DRY_RUN:    ${{ github.event.inputs.dry_run }}
+        run: |
+          {
+            echo "### Prepare job result"
+            echo ""
+            echo "- **Event:**          ${{ github.event_name }}"
+            echo "- **Version:**        \`${VERSION}\`"
+            echo "- **Tag:**            \`${TAG}\`"
+            echo "- **Prerelease:**     ${PRERELEASE:-false}"
+            echo "- **Dry run:**        ${DRY_RUN:-false}"
+            echo "- **should_publish:** ${{ steps.resolve.outputs.should_publish }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ── npm publish (OIDC / Trusted Publisher — no NPM_TOKEN secret) ──────────
   publish:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.should_publish == 'true' }}
     runs-on: ubuntu-latest
     environment: npm-publish  # Matches npm Trusted Publisher config;
                               # acts as a required-reviewer gate if configured.
@@ -16,6 +249,11 @@ jobs:
       id-token: write  # Required for OIDC token exchange with npm registry.
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Always check out the resolved tag so dispatch-cut releases
+          # publish the freshly-bumped tree, not the branch tip we may
+          # have moved past.
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -29,8 +267,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Set version from tag
-        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version --workspaces --include-workspace-root
+      - name: Set version from resolved tag
+        run: npm version "${{ needs.prepare.outputs.version }}" --no-git-tag-version --allow-same-version --workspaces --include-workspace-root
 
       - name: Sync inter-package dep specifiers to bumped version
         run: node scripts/sync-versions.js
@@ -42,6 +280,8 @@ jobs:
 
   # ── Electron builds (parallel) ────────────────────────────────
   electron:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.should_publish == 'true' }}
     strategy:
       matrix:
         include:
@@ -70,6 +310,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -95,9 +337,9 @@ jobs:
           echo "Electron dir: $ELECTRON_DIR"
           cd "$ELECTRON_DIR" && node install.js 2>&1 | tail -5
 
-      - name: Set version from tag
+      - name: Set version from resolved tag
         shell: bash
-        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version --workspaces --include-workspace-root
+        run: npm version "${{ needs.prepare.outputs.version }}" --no-git-tag-version --allow-same-version --workspaces --include-workspace-root
 
       - name: Install Linux build dependencies
         if: matrix.platform == 'linux'
@@ -259,13 +501,15 @@ jobs:
 
   # ── GitHub Release (waits for all builds) ─────────────────────
   github-release:
-    if: always() && needs.electron.result == 'success'
-    needs: [publish, electron]
+    if: ${{ always() && needs.prepare.outputs.should_publish == 'true' && needs.electron.result == 'success' }}
+    needs: [prepare, publish, electron]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - uses: actions/download-artifact@v4
 
@@ -274,7 +518,7 @@ jobs:
         shell: bash
         run: |
           set -u
-          version="${GITHUB_REF_NAME#v}"
+          version="${{ needs.prepare.outputs.version }}"
           echo "Extracting notes for version: ${version}"
           if [ ! -f CHANGELOG.md ]; then
             echo "::warning::CHANGELOG.md not found — using fallback body"
@@ -305,7 +549,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
           files: electron-*/**/*
           body_path: release-notes.md
           generate_release_notes: ${{ steps.notes.outputs.fallback == 'true' }}
           draft: true
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
