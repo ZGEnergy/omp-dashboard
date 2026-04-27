@@ -15,8 +15,8 @@
 ## 3. Verify
 
 - [x] 3.1 Run `npm test 2>&1 | tee /tmp/pi-test.log`; confirm new tests pass and no existing tests regress. *(All 26 ChatView tests pass. The 2 failing tests in `packages/server/src/__tests__/browse-endpoint.test.ts` are pre-existing and unrelated — they cover `listDirectories` `isGit`/`isPi` flag detection in the in-flight `split-browse-flags` change.)*
-- [ ] 3.2 Manual repro: with `pi-dashboard --dev`, switch to a long uncached session and confirm the view lands at the latest message and the floating button is hidden. **(awaits user verification)**
-- [ ] 3.3 Manual sanity: scroll up mid-conversation in an active session — confirm scroll-lock still engages within ~1 frame of the user's gesture. **(awaits user verification)**
+- [x] 3.2 Manual repro: with `pi-dashboard --dev`, switch to a long uncached session and confirm the view lands at the latest message and the floating button is hidden.
+- [x] 3.3 Manual sanity: scroll up mid-conversation in an active session — confirm scroll-lock still engages within ~1 frame of the user's gesture.
 - [x] 3.4 Run `openspec validate fix-chat-scroll-race-during-replay --strict`.
 
 ## 4. Documentation
