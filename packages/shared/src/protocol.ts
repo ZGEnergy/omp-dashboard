@@ -57,6 +57,29 @@ export interface EventForwardMessage {
   event: DashboardEvent;
 }
 
+/**
+ * Conventions on `event_forward` payloads relevant to per-message fork:
+ *
+ * - `message_start` and `message_end` events MAY carry an optional
+ *   `data.nonce: string` stamped by the bridge. The reducer carries it
+ *   onto the resulting ChatMessage so a later `entry_persisted` event
+ *   can back-fill the entry id.
+ * - `entry_persisted` events have shape:
+ *     {
+ *       eventType: "entry_persisted",
+ *       timestamp,
+ *       data: { type: "entry_persisted", entryId: string, nonce: string }
+ *     }
+ *   They are emitted by the bridge after pi calls
+ *   `sessionManager.appendMessage` and the entry id has been generated.
+ *   See change: fix-per-message-fork.
+ */
+export interface EntryPersistedEventData {
+  type: "entry_persisted";
+  entryId: string;
+  nonce: string;
+}
+
 export interface CommandsListMessage {
   type: "commands_list";
   sessionId: string;

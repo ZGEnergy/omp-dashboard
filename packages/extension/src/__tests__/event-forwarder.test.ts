@@ -74,6 +74,36 @@ describe("mapEventToProtocol", () => {
     expect(result.event.data).toEqual(piEvent);
   });
 
+  it("should map an entry_persisted event (per fix-per-message-fork)", () => {
+    const piEvent = {
+      type: "entry_persisted",
+      entryId: "abc-123",
+      nonce: "n-7",
+    };
+    const result = mapEventToProtocol(sessionId, piEvent);
+    expect(result.type).toBe("event_forward");
+    expect(result.sessionId).toBe(sessionId);
+    expect(result.event.eventType).toBe("entry_persisted");
+    expect(result.event.data).toMatchObject({
+      type: "entry_persisted",
+      entryId: "abc-123",
+      nonce: "n-7",
+    });
+  });
+
+  it("should map a message_end event with nonce (per fix-per-message-fork)", () => {
+    const piEvent = {
+      type: "message_end",
+      message: { role: "assistant", content: "hi", id: "asst-9" },
+      entryId: "asst-9",
+      nonce: "n-7",
+    };
+    const result = mapEventToProtocol(sessionId, piEvent);
+    expect(result.event.eventType).toBe("message_end");
+    expect((result.event.data as any).nonce).toBe("n-7");
+    expect((result.event.data as any).entryId).toBe("asst-9");
+  });
+
   it("should strip non-serializable fields", () => {
     const piEvent = {
       type: "test_event",

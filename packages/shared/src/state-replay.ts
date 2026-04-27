@@ -13,6 +13,15 @@ import type { EventForwardMessage } from "./protocol.js";
  * - message_update + message_end for assistant messages
  * - tool_execution_start / tool_execution_end for tool calls
  * - model_select for model changes
+ *
+ * NOTE on entryId (per change: fix-per-message-fork):
+ * Replay reads from the persisted JSONL, so each entry already has a
+ * stable `id`. We attach it directly as `entryId` on both `message_start`
+ * (user) and `message_end` (assistant) events. Replay therefore does NOT
+ * need to emit an `entry_persisted` follow-up — the back-fill protocol
+ * exists to bridge a timing gap that only happens for LIVE pi events on
+ * pi 0.69+, where the bridge sees `message_start` before pi has assigned
+ * the entry id. Replay has no such gap.
  */
 export function replayEntriesAsEvents(
   sessionId: string,

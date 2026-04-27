@@ -562,6 +562,18 @@ When a session sends `flows_list`, the server notifies other sessions in the sam
 ### Event Broadcast During Replay
 During bridge session replay (while `replayingSessions` set contains the session), `event_forward` messages are stored but NOT broadcast individually to browser subscribers. Instead, when `replay_complete` arrives (or the 5s safety timeout fires), the server sends all accumulated events as a single `event_replay` batch to subscribers. This prevents per-event serialization overhead during replay while still delivering the full history to browsers.
 
+### Per-message entry id stamping (live vs replay)
+
+The per-message ⤘ Fork button needs each chat bubble to carry the entry id of the entry it represents in the persisted JSONL. Two paths populate this:
+
+- **Replay path** (`packages/shared/src/state-replay.ts`): reads from the persisted JSONL directly, so each `message_start` / `message_end` event carries the stable `entryId` from the source entry. No back-fill needed.
+- **Live path** (`packages/extension/src/bridge.ts`): pi 0.69+ awaits extension handlers BEFORE calling `sessionManager.appendMessage`, which means an entry id does NOT exist at the bridge's emit time. The bridge instead:
+  1. Stamps a per-event `nonce` on `message_start` / `message_end` events so the client can correlate later.
+  2. Defers the `message_end` SEND via `setTimeout(0)` (a macrotask) so pi's awaited dispatcher unwinds and `appendMessage` runs in between — by the time the timeout fires, pi has mutated `event.message.id` in place.
+  3. Wraps `ctx.sessionManager.appendMessage` once per session at `session_start`. After a successful append, the wrapper emits an `entry_persisted { entryId, nonce }` event so the client reducer back-fills the matching ChatMessage's `entryId` (covers user messages, whose `message_start` fires before persistence).
+
+`queueMicrotask` was used previously but no longer works: on pi 0.69+ the microtask resolves *inside* the awaited `_emitExtensionEvent`, before persistence. See change `fix-per-message-fork`.
+
 ## Persistence
 
 | Data | Storage | Details |
@@ -1048,6 +1060,22 @@ Every external binary, module, and directory the dashboard depends on is resolve
 | `pi-coding-agent` | module | override → bare-import → managed (`MANAGED_DIR/node_modules/.../dist/index.js`) → npm-global; probes both `@mariozechner/*` and `@oh-my-pi/*` aliases |
 | `openspec`, `npm`, `node`, `tsx`, `git`, `zrok` | binary | override → managed → where |
 | `pi-dashboard` | module | override → managed → npm-global (presence of `package.json` is enough) |
+| `electron` | module | override → bare-import (`paths: ["packages/electron"]`) → managed; resolves the package directory containing `install.js`, hoist-aware. See change: register-build-time-tools |
+| `node-pty` | module | override → bare-import; resolves the package directory containing `prebuilds/`. See change: register-build-time-tools |
+
+### Build-time consumers (shell-callable wrapper)
+
+CI workflows, Dockerfiles, and root-level postinstall scripts cannot import the shared package's TypeScript directly — those run before any TS build has fired (or, for postinstall, before the shared package is even unpacked). For these consumers, `packages/shared/bin/pi-dashboard-resolve-tool.cjs` provides a CommonJS, dependency-free shell wrapper that mirrors the registry's `override` + `bare-import` strategies for the build-time tool subset (`electron`, `node-pty`):
+
+```bash
+# Resolve a build-time tool from any shell context
+ELECTRON_DIR=$(node packages/shared/bin/pi-dashboard-resolve-tool.cjs electron)
+cd "$ELECTRON_DIR" && node install.js
+```
+
+The wrapper is used by `.github/workflows/publish.yml` (linux/arm64 native rebuild) and `packages/electron/scripts/Dockerfile.build` (Docker cross-platform native rebuild). The root postinstall `scripts/fix-pty-permissions.cjs` reimplements the same `bare-import` semantics inline (it cannot shell out because it runs DURING `npm install`).
+
+Reintroduction of hardcoded `node_modules/<dep>` paths in any of these sites is blocked by the lint test at `packages/shared/src/__tests__/no-hardcoded-node-modules-paths.test.ts`.
 
 ### Resolution record
 

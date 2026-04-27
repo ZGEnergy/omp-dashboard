@@ -33,6 +33,13 @@ export interface ChatMessage {
   toolDetails?: Record<string, unknown>;
   /** Session entry ID (for fork-from-message) */
   entryId?: string;
+  /**
+   * Bridge-stamped nonce that ties this ChatMessage to a later
+   * entry_persisted event. Set on user message_start (where entryId is
+   * not yet known) and on message_end. The reducer uses it to back-fill
+   * `entryId` once persistence completes. See change: fix-per-message-fork.
+   */
+  nonce?: string;
 }
 
 export interface ToolCallState {
@@ -352,7 +359,14 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
             content: text,
             images,
             timestamp: event.timestamp,
+            // entryId from data.entryId is correct ONLY for replayed events
+            // (state-replay attaches the persisted id). For LIVE user
+            // message_start the bridge no longer stamps entryId because
+            // the user entry has not been persisted yet — it will arrive
+            // via a later entry_persisted event keyed on `nonce`.
+            // See change: fix-per-message-fork.
             entryId: data.entryId as string | undefined,
+            nonce: data.nonce as string | undefined,
           },
         ];
       }
@@ -420,6 +434,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
               content: next.streamingText,
               timestamp: event.timestamp,
               entryId: data.entryId as string | undefined,
+              nonce: data.nonce as string | undefined,
             },
           ];
           next.streamingText = "";
@@ -439,6 +454,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
                 content: replayText,
                 timestamp: event.timestamp,
                 entryId: data.entryId as string | undefined,
+                nonce: data.nonce as string | undefined,
               },
             ];
           } else {
@@ -721,6 +737,28 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
         tokens: data.tokens as SubagentState["tokens"],
         toolUses: data.toolUses as number | undefined,
       });
+      break;
+    }
+
+    case "entry_persisted": {
+      // Bridge-emitted back-fill: when pi persists a user/assistant entry
+      // and assigns its id, the bridge sends entry_persisted { entryId, nonce }.
+      // We find the ChatMessage created from the matching message_start /
+      // message_end (by nonce) and stamp its entryId. This unlocks the
+      // per-message Fork button. See change: fix-per-message-fork.
+      const targetNonce = data.nonce as string | undefined;
+      const persistedEntryId = data.entryId as string | undefined;
+      if (targetNonce && persistedEntryId) {
+        let mutated = false;
+        const updated = next.messages.map((m) => {
+          if (!m.entryId && m.nonce === targetNonce) {
+            mutated = true;
+            return { ...m, entryId: persistedEntryId };
+          }
+          return m;
+        });
+        if (mutated) next.messages = updated;
+      }
       break;
     }
 

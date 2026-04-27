@@ -186,6 +186,61 @@ function initBridge(pi: ExtensionAPI) {
   let lastThinkingLevel: string | undefined;
   let promptBus: PromptBus | undefined;
 
+  // ── Per-message entry id tracking (for fix-per-message-fork) ──
+  // Pi 0.69+ awaits extension handlers BEFORE sessionManager.appendMessage runs,
+  // which means getLeafId() at emit time returns the previous leaf, not the
+  // entry id of the message currently being emitted. We solve this by:
+  //  1. Wrapping ctx.sessionManager.appendMessage at session_start to stamp
+  //     the just-generated entry id onto the message object reference.
+  //  2. Deferring the message_end enrichment-and-send via setTimeout(0) so
+  //     the awaited dispatcher unwinds and appendMessage runs in between.
+  //  3. Stamping a nonce on message_start/message_end events; emitting an
+  //     entry_persisted event after appendMessage so the client reducer can
+  //     back-fill user-message ChatMessage.entryId.
+  // See change: fix-per-message-fork.
+  const idByMessage = new WeakMap<object, string>();
+  const pendingNonces = new WeakMap<object, string>();
+  let nonceCounter = 0;
+  const nextNonce = (): string => `n-${++nonceCounter}-${Date.now()}`;
+  let appendMessageWrapped = false;
+  let lastWrappedSm: any = null;
+
+  /**
+   * Wrap ctx.sessionManager.appendMessage once per session so that when pi
+   * generates an entry id we capture it in the WeakMap and emit
+   * entry_persisted to the server.
+   */
+  function wrapAppendMessageForCtx(ctx: any): void {
+    const sm = ctx?.sessionManager;
+    if (!sm || typeof sm.appendMessage !== "function") return;
+    // Re-wrap when sessionManager identity changes (session replacement).
+    if (sm === lastWrappedSm && appendMessageWrapped) return;
+    const original = sm.appendMessage.bind(sm);
+    sm.appendMessage = (msg: any, ...rest: any[]) => {
+      const result = original(msg, ...rest);
+      try {
+        if (msg && typeof msg === "object" && typeof msg.id === "string") {
+          idByMessage.set(msg as object, msg.id);
+          const nonce = pendingNonces.get(msg as object);
+          if (nonce && sessionReady && isActive()) {
+            const ev = {
+              type: "entry_persisted",
+              entryId: msg.id,
+              nonce,
+            };
+            connection.send(mapEventToProtocol(sessionId, ev));
+            pendingNonces.delete(msg as object);
+          }
+        }
+      } catch (err) {
+        console.error("[dashboard] entry_persisted emit failed:", err);
+      }
+      return result;
+    };
+    lastWrappedSm = sm;
+    appendMessageWrapped = true;
+  }
+
   /** Wrap a callback so errors log instead of crashing the host pi agent. */
   function safe<T extends (...args: any[]) => any>(fn: T): T {
     return ((...args: any[]) => {
@@ -612,30 +667,53 @@ function initBridge(pi: ExtensionAPI) {
         }
       }
 
-      // For message_start, enrich with entryId immediately (current leaf)
+      // For message_start: stamp a nonce on the event so the client reducer
+      // can correlate a later entry_persisted back-fill with this bubble.
+      // We do NOT attach entryId here — the message has no id yet on pi
+      // 0.69+ (persistence is deferred to message_end). See change:
+      // fix-per-message-fork.
       if (eventType === "message_start") {
-        const entryId = ctx.sessionManager?.getLeafId?.();
-        if (entryId) {
-          const enriched = { ...event, entryId };
+        wrapAppendMessageForCtx(ctx);
+        const messageRef = (event as any).message;
+        if (messageRef && typeof messageRef === "object") {
+          const nonce = nextNonce();
+          pendingNonces.set(messageRef as object, nonce);
+          const enriched = { ...event, nonce };
           const msg = mapEventToProtocol(sessionId, enriched);
           connection.send(msg);
           return;
         }
       }
 
-      // For message_end, defer getLeafId() so it runs after pi core persists the entry.
-      // Pi core calls _emit (which invokes this handler) BEFORE appendMessage (which updates leafId).
-      // Since _emit doesn't await async handlers, yielding via queueMicrotask lets appendMessage
-      // run first, so getLeafId() returns the correct entry ID for the just-persisted message.
+      // For message_end: defer the SEND via setTimeout(0). Pi 0.69+ runs
+      // sessionManager.appendMessage AFTER the awaited extension dispatcher
+      // returns, so a queueMicrotask deferral is no longer enough. By the
+      // time the macrotask fires, appendMessage has run, pi has mutated
+      // event.message.id in place, and the wrapped appendMessage above has
+      // populated idByMessage. We also stamp a nonce so a downstream
+      // entry_persisted can correlate (covers user message_end where the
+      // earlier message_start nonce is what the reducer is waiting on).
+      // See change: fix-per-message-fork.
       if (eventType === "message_end") {
-        await new Promise<void>(resolve => queueMicrotask(resolve));
-        const entryId = ctx.sessionManager?.getLeafId?.();
-        if (entryId) {
-          const enriched = { ...event, entryId };
-          const msg = mapEventToProtocol(sessionId, enriched);
-          connection.send(msg);
-          return;
+        wrapAppendMessageForCtx(ctx);
+        const messageRef = (event as any).message;
+        const nonce = messageRef && typeof messageRef === "object"
+          ? (pendingNonces.get(messageRef as object) ?? nextNonce())
+          : nextNonce();
+        if (messageRef && typeof messageRef === "object" && !pendingNonces.has(messageRef as object)) {
+          pendingNonces.set(messageRef as object, nonce);
         }
+        setTimeout(() => {
+          if (!isActive() || !sessionReady) return;
+          const entryId =
+            (messageRef && typeof messageRef === "object" && typeof messageRef.id === "string" ? messageRef.id : undefined)
+            ?? (messageRef ? idByMessage.get(messageRef as object) : undefined)
+            ?? ctx.sessionManager?.getLeafId?.();
+          const enriched = { ...event, entryId, nonce };
+          const protoMsg = mapEventToProtocol(sessionId, enriched);
+          connection.send(protoMsg);
+        }, 0);
+        return;
       }
 
       const msg = mapEventToProtocol(sessionId, event);
@@ -693,6 +771,15 @@ function initBridge(pi: ExtensionAPI) {
     cachedHasUI = ctx.hasUI;
     cachedCtx = ctx;
     sessionId = newSessionId;
+
+    // Wrap sessionManager.appendMessage so that future message_end events can
+    // recover the just-generated entry id, even when their setTimeout(0)
+    // fires before pi has finished mutating event.message in place. The
+    // helper is idempotent and re-wraps on session replacement.
+    // See change: fix-per-message-fork.
+    appendMessageWrapped = false;
+    lastWrappedSm = null;
+    wrapAppendMessageForCtx(ctx);
 
     // Register ask_user at runtime (not at load time) to avoid static
     // tool-name conflicts with other extensions like pi-flows.
