@@ -64,17 +64,35 @@ export type FileReadResponse = ApiResponse<FileReadResult>;
 export interface BrowseEntry {
   name: string;
   path: string;
-  isGit: boolean;
-  isPi: boolean;
+  /**
+   * Set only when the request used `detect=1`. When the response was
+   * produced without `detect=1`, this field is absent (undefined) —
+   * meaning "not classified", NOT "classified as not-git". Consumers
+   * that need badges SHOULD call `GET /api/browse/flags` to fill in
+   * the flags lazily.
+   *
+   * See change: split-browse-flags.
+   */
+  isGit?: boolean;
+  /** See `isGit` — same opt-in / detect-gated semantics. */
+  isPi?: boolean;
 }
 
 /**
- * Response shape for `GET /api/browse?path=<dir>&q=<query>`.
+ * Response shape for `GET /api/browse?path=<dir>&q=<query>&detect=<0|1>`.
  *
  * The optional `q` query parameter, when present and non-empty, causes the
  * server to filter entries by case-insensitive substring on `name` and rank
  * them (exact → prefix → word-boundary → substring) before the 200-entry cap.
  * When omitted or whitespace-only, entries are sorted alphabetically.
+ *
+ * The optional `detect` query parameter (only the literal string `"1"` is
+ * truthy) opts into eager `.git` / `.pi` classification on every entry. When
+ * absent (the default), per-entry `isGit` / `isPi` are omitted and no
+ * filesystem probes run — use the bulk `GET /api/browse/flags` endpoint to
+ * classify entries lazily.
+ *
+ * See change: split-browse-flags.
  */
 export interface BrowseResult {
   entries: BrowseEntry[];
@@ -93,6 +111,43 @@ export interface BrowseResult {
 }
 
 export type BrowseResponse = ApiResponse<BrowseResult>;
+
+// ── Browse flags (bulk classifier) ──────────────────────────────────
+
+/**
+ * Per-path classification record returned by `GET /api/browse/flags`.
+ * Booleans only — any probe failure (ENOENT, EACCES, ELOOP, race-on-
+ * deletion, …) maps to `false` for that flag, never an error.
+ *
+ * See change: split-browse-flags.
+ */
+export interface BrowseFlagEntry {
+  isGit: boolean;
+  isPi: boolean;
+}
+
+/**
+ * Wire shape passed via the `paths` query parameter on
+ * `GET /api/browse/flags?paths=<json-array>`. The value MUST be a
+ * URL-encoded JSON array of absolute path strings (length ≤ 100).
+ * Provided here for type-only documentation — the request itself is a
+ * GET, so this interface is not serialized as a body.
+ */
+export interface BrowseFlagsRequest {
+  paths: string[];
+}
+
+/** Successful response payload for `GET /api/browse/flags`. */
+export interface BrowseFlagsResult {
+  /**
+   * Map keyed by the absolute paths that were requested. The key set
+   * SHALL equal the input `paths` set — one classification per input
+   * path, no extras, no omissions.
+   */
+  flags: Record<string, BrowseFlagEntry>;
+}
+
+export type BrowseFlagsResponse = ApiResponse<BrowseFlagsResult>;
 
 /** Request body for `POST /api/browse/mkdir`. */
 export interface MkdirRequest {

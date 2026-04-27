@@ -1,13 +1,46 @@
 /**
  * Directory browsing logic for the browse API endpoint.
+ *
+ * Two responsibilities, kept deliberately separate:
+ *   1. `listDirectories` — enumerate directory entries (cheap; one
+ *      readdir call). Only probes `.git` / `.pi` when the caller
+ *      explicitly opts in via `{ detect: true }`.
+ *   2. `classifyPaths` — bulk-classify a list of absolute paths,
+ *      returning `{ [path]: { isGit, isPi } }`. Used by the bulk
+ *      `GET /api/browse/flags` endpoint and by the path picker's
+ *      lazy second-phase fetch.
+ *
+ * See change: split-browse-flags.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import type { BrowseEntry, BrowseResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+import type { BrowseEntry, BrowseFlagEntry, BrowseResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 import { isFilesystemRoot } from "@blackbelt-technology/pi-dashboard-shared/platform/paths.js";
+import { createSemaphore } from "@blackbelt-technology/pi-dashboard-shared/semaphore.js";
 
 const MAX_ENTRIES = 200;
+
+/** Hard cap on how many paths a single `/api/browse/flags` request may classify. */
+export const MAX_FLAG_PATHS = 100;
+
+/** Bound on in-flight `fs.access` calls inside a single `classifyPaths` invocation. */
+const FLAG_PROBE_CONCURRENCY = 32;
+
+/**
+ * Probe a single absolute path for `.git` and `.pi` siblings using
+ * `fs.access`. Any error — ENOENT, EACCES, ELOOP, race-on-deletion,
+ * target removed mid-probe, anything — maps to `false` for that flag.
+ * Worktree-safe: `.git` is a regular file in worktrees, and `fs.access`
+ * accepts that just fine (no `readdir` shortcut, ever).
+ */
+async function probeFlags(absolutePath: string): Promise<BrowseFlagEntry> {
+  const [isGit, isPi] = await Promise.all([
+    fs.access(path.join(absolutePath, ".git")).then(() => true, () => false),
+    fs.access(path.join(absolutePath, ".pi")).then(() => true, () => false),
+  ]);
+  return { isGit, isPi };
+}
 const WORD_BOUNDARY_CHARS = new Set(["-", "_", ".", " ", "/"]);
 
 /**
@@ -38,7 +71,12 @@ function rankTier(name: string, qLower: string): number {
  * (exact → prefix → word-boundary → substring), alphabetical within tier.
  * Caps at 200 entries AFTER filtering/ranking.
  */
-export async function listDirectories(dirPath?: string, q?: string): Promise<BrowseResult> {
+export async function listDirectories(
+  dirPath?: string,
+  q?: string,
+  opts?: { detect?: boolean },
+): Promise<BrowseResult> {
+  const detect = opts?.detect === true;
   const resolved = dirPath ?? os.homedir();
 
   // Verify the directory exists and is a directory
@@ -74,17 +112,18 @@ export async function listDirectories(dirPath?: string, q?: string): Promise<Bro
   // Cap at MAX_ENTRIES (AFTER filtering/ranking)
   const capped = dirs.slice(0, MAX_ENTRIES);
 
-  // Build entries with isGit/isPi detection
-  const entries: BrowseEntry[] = await Promise.all(
-    capped.map(async (d) => {
-      const fullPath = path.join(resolved, d.name);
-      const [isGit, isPi] = await Promise.all([
-        fs.access(path.join(fullPath, ".git")).then(() => true, () => false),
-        fs.access(path.join(fullPath, ".pi")).then(() => true, () => false),
-      ]);
-      return { name: d.name, path: fullPath, isGit, isPi };
-    })
-  );
+  // Build entries. When `detect` is opt-in, probe `.git` / `.pi` for each
+  // surviving entry; otherwise omit the flag fields entirely so the
+  // single-syscall fast path stays a single syscall.
+  const entries: BrowseEntry[] = detect
+    ? await Promise.all(
+        capped.map(async (d) => {
+          const fullPath = path.join(resolved, d.name);
+          const flags = await probeFlags(fullPath);
+          return { name: d.name, path: fullPath, isGit: flags.isGit, isPi: flags.isPi };
+        }),
+      )
+    : capped.map((d) => ({ name: d.name, path: path.join(resolved, d.name) }));
 
   // Parent: null for any filesystem root (`/`, `C:\`, `\\server\share\`).
   // Previously this was `resolved === "/"`, which only recognized the Unix
@@ -94,6 +133,72 @@ export async function listDirectories(dirPath?: string, q?: string): Promise<Bro
   const parent = isFilesystemRoot(resolved) ? null : path.dirname(resolved);
 
   return { entries, parent, current: resolved, platform: process.platform };
+}
+
+/**
+ * Bulk-classify a batch of absolute paths. Returns a map keyed by the
+ * input paths whose values are `{ isGit, isPi }`. Probe failures (any
+ * error) become `{ isGit: false, isPi: false }` for that key — the
+ * function never throws on per-path failures. Caller is responsible for
+ * bounding `paths.length` (the route does this via `parseFlagsQuery`).
+ *
+ * Internal `fs.access` fan-out is bounded via a tiny FIFO semaphore so
+ * a single 100-path call cannot exhaust file descriptors.
+ */
+export async function classifyPaths(
+  paths: string[],
+): Promise<Record<string, BrowseFlagEntry>> {
+  if (paths.length === 0) return {};
+  const sem = createSemaphore(FLAG_PROBE_CONCURRENCY);
+  const result: Record<string, BrowseFlagEntry> = {};
+  await Promise.all(
+    paths.map((p) =>
+      sem.run(async () => {
+        result[p] = await probeFlags(p);
+      }),
+    ),
+  );
+  return result;
+}
+
+/**
+ * Result of parsing the `paths` query parameter for
+ * `GET /api/browse/flags`. Pure / synchronous so route handlers can
+ * map directly to HTTP 400 with the documented error string.
+ */
+export type ParseFlagsQueryResult =
+  | { ok: true; paths: string[] }
+  | { ok: false; error: "invalid paths" | "too many paths" };
+
+/**
+ * Parse the URL-encoded JSON-array `paths` query parameter. Validates:
+ *   - present and non-empty string
+ *   - parses as JSON
+ *   - is an array
+ *   - every element is a string
+ *   - length ≤ MAX_FLAG_PATHS
+ *
+ * Note: an empty array (`paths=[]`) is valid and returns `{ ok: true,
+ * paths: [] }` so the caller can short-circuit to `{ flags: {} }`.
+ */
+export function parseFlagsQuery(rawPaths: string | undefined): ParseFlagsQueryResult {
+  if (typeof rawPaths !== "string" || rawPaths.length === 0) {
+    return { ok: false, error: "invalid paths" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawPaths);
+  } catch {
+    return { ok: false, error: "invalid paths" };
+  }
+  if (!Array.isArray(parsed)) return { ok: false, error: "invalid paths" };
+  if (!parsed.every((p) => typeof p === "string")) {
+    return { ok: false, error: "invalid paths" };
+  }
+  if (parsed.length > MAX_FLAG_PATHS) {
+    return { ok: false, error: "too many paths" };
+  }
+  return { ok: true, paths: parsed as string[] };
 }
 
 /**

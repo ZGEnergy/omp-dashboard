@@ -2,6 +2,7 @@
  * Client-side browse API helper for the PathPicker component.
  */
 import type {
+  BrowseFlagEntry,
   BrowseResult,
   MkdirResult,
 } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
@@ -31,6 +32,33 @@ export async function browseDirectory(
     throw new Error(json.error ?? "browse failed");
   }
   return json.data;
+}
+
+/**
+ * Bulk-classify a list of absolute paths via `GET /api/browse/flags`.
+ * Returns a `Record<path, { isGit, isPi }>`. Paths that fail to probe
+ * server-side surface as `{ isGit: false, isPi: false }` — the call
+ * itself never throws on per-path failures.
+ *
+ * The PathPicker uses this as its lazy second-phase fetch after the
+ * fast `browseDirectory` enumeration completes.
+ *
+ * See change: split-browse-flags.
+ */
+export async function classifyPaths(
+  paths: string[],
+  options?: { signal?: AbortSignal },
+): Promise<Record<string, BrowseFlagEntry>> {
+  if (paths.length === 0) return {};
+  const params = new URLSearchParams();
+  params.set("paths", JSON.stringify(paths));
+  const url = `${getApiBase()}/api/browse/flags?${params.toString()}`;
+  const res = await fetch(url, { signal: options?.signal });
+  const json = await res.json();
+  if (!json.success) {
+    throw new Error(json.error ?? "classify failed");
+  }
+  return json.data.flags;
 }
 
 /**

@@ -328,10 +328,26 @@ Read a file or list a directory (localhost-only).
 { "success": true, "data": { "type": "directory", "entries": ["file1.ts", "dir/"] } }
 ```
 
-### `GET /api/browse?path=PATH`
+### `GET /api/browse?path=PATH&q=QUERY&detect=0|1`
 Browse directories (localhost-only).
 
-**Response:**
+By default this is a single-`readdir` enumeration with no per-entry filesystem probes — `isGit` and `isPi` are **absent** from each entry. Pass `detect=1` (only the literal string `"1"` is truthy) to opt into eager `.git` / `.pi` classification on every entry. For batch classification of an arbitrary set of paths, prefer `GET /api/browse/flags`. (See change: split-browse-flags.)
+
+**Response (default, `detect` absent):**
+```json
+{
+  "success": true,
+  "data": {
+    "current": "/Users/me/projects",
+    "parent": "/Users/me",
+    "entries": [
+      { "name": "my-app", "path": "/Users/me/projects/my-app" }
+    ]
+  }
+}
+```
+
+**Response (with `detect=1`):**
 ```json
 {
   "success": true,
@@ -344,6 +360,34 @@ Browse directories (localhost-only).
   }
 }
 ```
+
+### `GET /api/browse/flags?paths=JSON_ARRAY`
+Bulk-classify a list of absolute paths as git repositories and/or pi projects (localhost-only). The `paths` query is a URL-encoded JSON array of absolute path strings (length ≤ 100).
+
+Per-path probe failures (ENOENT, EACCES, ELOOP, race-on-deletion, target removed mid-probe) map to `{ isGit: false, isPi: false }` for that key — the call itself never throws on per-path failures. Only malformed input or over-cap arrays produce a top-level error (HTTP 400).
+
+**Example request:**
+```bash
+curl --get "$BASE/api/browse/flags" --data-urlencode \
+  'paths=["/Users/me/projects/my-app","/Users/me/projects/scratch"]'
+```
+
+**Response (success):**
+```json
+{
+  "success": true,
+  "data": {
+    "flags": {
+      "/Users/me/projects/my-app": { "isGit": true, "isPi": true },
+      "/Users/me/projects/scratch": { "isGit": false, "isPi": false }
+    }
+  }
+}
+```
+
+**Errors (HTTP 400):**
+- `{ "success": false, "error": "invalid paths" }` — missing, empty, not JSON, not an array, or array contains non-strings.
+- `{ "success": false, "error": "too many paths" }` — array length > 100.
 
 ### `GET /api/readme?cwd=CWD`
 Read README.md from a directory (localhost-only).

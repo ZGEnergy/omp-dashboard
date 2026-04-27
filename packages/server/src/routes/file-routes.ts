@@ -6,7 +6,7 @@ import type { SessionManager } from "../memory-session-manager.js";
 import type { PreferencesStore } from "../preferences-store.js";
 import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { NetworkGuard } from "./route-deps.js";
-import { listDirectories, createDirectory } from "../browse.js";
+import { listDirectories, createDirectory, classifyPaths, parseFlagsQuery } from "../browse.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -20,8 +20,13 @@ export function registerFileRoutes(
 ) {
   const { sessionManager, preferencesStore, networkGuard } = deps;
 
-  // Directory browse endpoint
-  fastify.get<{ Querystring: { path?: string; q?: string } }>(
+  // Directory browse endpoint.
+  // `detect=1` opts into eager `.git` / `.pi` classification on every entry
+  // (anything other than the literal string `"1"` is treated as falsy).
+  // Without `detect`, this is a single-readdir enumeration with no filesystem
+  // probes — use `GET /api/browse/flags` to classify lazily.
+  // See change: split-browse-flags.
+  fastify.get<{ Querystring: { path?: string; q?: string; detect?: string } }>(
     "/api/browse",
     { preHandler: networkGuard },
     async (request) => {
@@ -29,11 +34,32 @@ export function registerFileRoutes(
         const result = await listDirectories(
           request.query.path || undefined,
           request.query.q || undefined,
+          { detect: request.query.detect === "1" },
         );
         return { success: true, data: result } satisfies ApiResponse;
       } catch {
         return { success: false, error: "directory not found" } satisfies ApiResponse;
       }
+    },
+  );
+
+  // Bulk directory flag classifier. Accepts `paths=<json-array>` (URL-encoded
+  // JSON array of absolute path strings, length ≤ 100). Returns
+  // `{ flags: { [path]: { isGit, isPi } } }`. Per-path probe failures map to
+  // `{ isGit: false, isPi: false }` — only malformed input or over-cap
+  // requests produce a top-level error (HTTP 400).
+  // See change: split-browse-flags.
+  fastify.get<{ Querystring: { paths?: string } }>(
+    "/api/browse/flags",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const parsed = parseFlagsQuery(request.query.paths);
+      if (!parsed.ok) {
+        reply.code(400);
+        return { success: false, error: parsed.error } satisfies ApiResponse;
+      }
+      const flags = await classifyPaths(parsed.paths);
+      return { success: true, data: { flags } } satisfies ApiResponse;
     },
   );
 

@@ -6,15 +6,24 @@ import { PathPicker } from "../PathPicker.js";
 // Mock browse-api
 const mockBrowse = vi.fn();
 const mockMkdir = vi.fn();
+const mockClassify = vi.fn();
 vi.mock("../../lib/browse-api.js", () => ({
   browseDirectory: (...args: unknown[]) => mockBrowse(...args),
+  classifyPaths: (...args: unknown[]) => mockClassify(...args),
   createDirectory: (...args: unknown[]) => mockMkdir(...args),
 }));
 
+/**
+ * Build a `BrowseResult` mock. Per change `split-browse-flags`, the
+ * server omits `isGit`/`isPi` from the initial response; the picker
+ * fills them in via the lazy `classifyPaths` phase. Tests that want
+ * the legacy eager-flags shape can pass `eagerFlags: true`.
+ */
 function makeBrowseResult(
   current: string,
   entries: Array<{ name: string; isGit?: boolean; isPi?: boolean }>,
   parent: string | null = "/parent",
+  opts: { eagerFlags?: boolean } = {},
 ) {
   return {
     current,
@@ -22,10 +31,23 @@ function makeBrowseResult(
     entries: entries.map((e) => ({
       name: e.name,
       path: `${current}/${e.name}`,
-      isGit: e.isGit ?? false,
-      isPi: e.isPi ?? false,
+      ...(opts.eagerFlags
+        ? { isGit: e.isGit ?? false, isPi: e.isPi ?? false }
+        : {}),
     })),
   };
+}
+
+/** Build a `classifyPaths` response for the given entries (keyed by full path). */
+function makeFlagMap(
+  current: string,
+  entries: Array<{ name: string; isGit?: boolean; isPi?: boolean }>,
+): Record<string, { isGit: boolean; isPi: boolean }> {
+  const map: Record<string, { isGit: boolean; isPi: boolean }> = {};
+  for (const e of entries) {
+    map[`${current}/${e.name}`] = { isGit: e.isGit ?? false, isPi: e.isPi ?? false };
+  }
+  return map;
 }
 
 const homeEntries = makeBrowseResult("/Users/robson", [
@@ -54,6 +76,9 @@ describe("PathPicker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockBrowse.mockResolvedValue(homeEntries);
+    // Default: classify resolves to an empty map (no badges). Individual tests
+    // override with a populated map when they care about the lazy fill-in.
+    mockClassify.mockResolvedValue({});
     mockMkdir.mockResolvedValue({ path: "/Users/robson/new-thing" });
   });
 
@@ -364,17 +389,27 @@ describe("PathPicker", () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
-  it("should show git and pi indicators", async () => {
+  it("should show git and pi indicators after lazy classify resolves", async () => {
     mockBrowse.mockResolvedValue(projectEntries);
+    // change: split-browse-flags — badges arrive via the lazy second phase.
+    mockClassify.mockResolvedValue(
+      makeFlagMap("/Users/robson/Project", [
+        { name: "pi-agent-dashboard", isGit: true, isPi: true },
+        { name: "pi-coding-agent", isGit: true, isPi: true },
+        { name: "pi-tools", isGit: true, isPi: false },
+      ]),
+    );
     renderPicker({ initialPath: "/Users/robson/Project/" });
 
     await waitFor(() => {
       expect(screen.getByText("pi-agent-dashboard")).toBeTruthy();
     });
 
-    const dashboardRow = screen.getByText("pi-agent-dashboard").closest("[role='option']");
-    expect(dashboardRow?.textContent).toMatch(/git/i);
-    expect(dashboardRow?.textContent).toMatch(/pi/i);
+    await waitFor(() => {
+      const dashboardRow = screen.getByText("pi-agent-dashboard").closest("[role='option']");
+      expect(dashboardRow?.textContent).toMatch(/git/i);
+      expect(dashboardRow?.textContent).toMatch(/pi/i);
+    });
   });
 
   it("should show 'No subdirectories' for empty directory", async () => {
@@ -551,5 +586,103 @@ describe("PathPicker", () => {
 
     await waitFor(() => expect(screen.getByText(/already exists/)).toBeTruthy());
     expect(getInput().value).toBe("/Users/robson/");
+  });
+
+  // ── change: split-browse-flags ──────────────────────────────────────────
+
+  it("renders git/pi badges after the lazy classifyPaths phase resolves", async () => {
+    const projectFlagless = makeBrowseResult(
+      "/Users/robson/Project",
+      [
+        { name: "pi-agent-dashboard" },
+        { name: "pi-coding-agent" },
+        { name: "plain-dir" },
+      ],
+      "/Users/robson",
+    );
+    mockBrowse.mockResolvedValue(projectFlagless);
+    mockClassify.mockResolvedValue(
+      makeFlagMap("/Users/robson/Project", [
+        { name: "pi-agent-dashboard", isGit: true, isPi: true },
+        { name: "pi-coding-agent", isGit: true, isPi: false },
+        { name: "plain-dir", isGit: false, isPi: false },
+      ]),
+    );
+
+    renderPicker({ initialPath: "/Users/robson/Project/" });
+
+    // Phase 1: rows render without badges.
+    await waitFor(() => expect(screen.getByText("pi-agent-dashboard")).toBeTruthy());
+
+    // Phase 2: classifyPaths was called with all rendered paths.
+    await waitFor(() => {
+      expect(mockClassify).toHaveBeenCalled();
+      const [paths] = mockClassify.mock.calls[mockClassify.mock.calls.length - 1];
+      expect(paths).toEqual([
+        "/Users/robson/Project/pi-agent-dashboard",
+        "/Users/robson/Project/pi-coding-agent",
+        "/Users/robson/Project/plain-dir",
+      ]);
+    });
+
+    // Phase 2 fill-in: badges appear for entries with truthy flags.
+    await waitFor(() => {
+      const gitBadges = screen.getAllByTitle("git repo");
+      const piBadges = screen.getAllByTitle("pi project");
+      expect(gitBadges.length).toBe(2);
+      expect(piBadges.length).toBe(1);
+    });
+  });
+
+  it("swallows classifyPaths failures silently (no error surfaced, no badges)", async () => {
+    const projectFlagless = makeBrowseResult(
+      "/Users/robson/Project",
+      [{ name: "pi-agent-dashboard" }],
+      "/Users/robson",
+    );
+    mockBrowse.mockResolvedValue(projectFlagless);
+    mockClassify.mockRejectedValue(new Error("boom"));
+
+    renderPicker({ initialPath: "/Users/robson/Project/" });
+
+    await waitFor(() => expect(screen.getByText("pi-agent-dashboard")).toBeTruthy());
+    await waitFor(() => expect(mockClassify).toHaveBeenCalled());
+    // No error rendered, no badges rendered — picker is still usable.
+    expect(screen.queryByText(/boom/)).toBeNull();
+    expect(screen.queryAllByTitle("git repo").length).toBe(0);
+    expect(screen.queryAllByTitle("pi project").length).toBe(0);
+  });
+
+  it("aborts phase-2 classifyPaths when fetchDir is re-invoked", async () => {
+    const result = makeBrowseResult(
+      "/Users/robson/Project",
+      [{ name: "first-row" }],
+      "/Users/robson",
+    );
+    mockBrowse.mockResolvedValue(result);
+
+    let firstSignal: AbortSignal | undefined;
+    let firstResolved = false;
+    // Hold the first classifyPaths call open so the second invocation arrives
+    // before it resolves — lets us observe abort.
+    mockClassify.mockImplementationOnce((_paths: string[], opts?: { signal?: AbortSignal }) => {
+      firstSignal = opts?.signal;
+      return new Promise((resolve) => {
+        opts?.signal?.addEventListener("abort", () => {
+          firstResolved = true;
+          resolve({});
+        });
+      });
+    });
+    mockClassify.mockResolvedValueOnce({});
+
+    renderPicker({ initialPath: "/Users/robson/Project/" });
+    await waitFor(() => expect(mockClassify).toHaveBeenCalledTimes(1));
+
+    // Re-invoke fetchDir: typing a query change forces a fresh fetch and
+    // the prior AbortController is canceled.
+    fireEvent.change(getInput(), { target: { value: "/Users/robson/Project/f" } });
+    await waitFor(() => expect(firstSignal?.aborted).toBe(true));
+    expect(firstResolved).toBe(true);
   });
 });

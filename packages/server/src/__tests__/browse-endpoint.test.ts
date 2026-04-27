@@ -45,28 +45,76 @@ describe("listDirectories", () => {
     expect(hidden).toEqual([]);
   });
 
-  it("should detect isGit flag for git repos", async () => {
-    const projectRoot = path.resolve(import.meta.dirname, "../../../..");
-    const parentDir = path.dirname(projectRoot);
-    const result = await listDirectories(parentDir);
+  // Hermetic, no host-coupling: build a tmpdir with three siblings (one
+  // with `.git`, one with `.pi`, one plain) and assert the flag fields
+  // on each. Detection is opt-in via `{ detect: true }` per
+  // change: split-browse-flags.
+  it("should detect isGit flag for git repos when detect=true", async () => {
+    const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), "browse-flags-"));
+    try {
+      await fsp.mkdir(path.join(tmp, "git-repo"));
+      await fsp.mkdir(path.join(tmp, "git-repo", ".git"));
+      await fsp.mkdir(path.join(tmp, "plain-dir"));
 
-    const projectEntry = result.entries.find(
-      (e) => e.name === path.basename(projectRoot)
-    );
-    expect(projectEntry).toBeDefined();
-    expect(projectEntry!.isGit).toBe(true);
+      const result = await listDirectories(tmp, undefined, { detect: true });
+
+      const gitEntry = result.entries.find((e) => e.name === "git-repo");
+      const plainEntry = result.entries.find((e) => e.name === "plain-dir");
+      expect(gitEntry).toBeDefined();
+      expect(plainEntry).toBeDefined();
+      expect(gitEntry!.isGit).toBe(true);
+      expect(gitEntry!.isPi).toBe(false);
+      expect(plainEntry!.isGit).toBe(false);
+      expect(plainEntry!.isPi).toBe(false);
+    } finally {
+      await fsp.rm(tmp, { recursive: true, force: true });
+    }
   });
 
-  it("should detect isPi flag for pi projects", async () => {
-    const projectRoot = path.resolve(import.meta.dirname, "../../../..");
-    const parentDir = path.dirname(projectRoot);
-    const result = await listDirectories(parentDir);
+  it("should detect isPi flag for pi projects when detect=true", async () => {
+    const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), "browse-flags-"));
+    try {
+      await fsp.mkdir(path.join(tmp, "pi-project"));
+      await fsp.mkdir(path.join(tmp, "pi-project", ".pi"));
+      await fsp.mkdir(path.join(tmp, "plain-dir"));
 
-    const projectEntry = result.entries.find(
-      (e) => e.name === path.basename(projectRoot)
-    );
-    expect(projectEntry).toBeDefined();
-    expect(projectEntry!.isPi).toBe(true);
+      const result = await listDirectories(tmp, undefined, { detect: true });
+
+      const piEntry = result.entries.find((e) => e.name === "pi-project");
+      const plainEntry = result.entries.find((e) => e.name === "plain-dir");
+      expect(piEntry).toBeDefined();
+      expect(plainEntry).toBeDefined();
+      expect(piEntry!.isPi).toBe(true);
+      expect(piEntry!.isGit).toBe(false);
+      expect(plainEntry!.isGit).toBe(false);
+      expect(plainEntry!.isPi).toBe(false);
+    } finally {
+      await fsp.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("should omit isGit/isPi when detect is not set (default)", async () => {
+    const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), "browse-no-detect-"));
+    try {
+      await fsp.mkdir(path.join(tmp, "git-repo"));
+      await fsp.mkdir(path.join(tmp, "git-repo", ".git"));
+      await fsp.mkdir(path.join(tmp, "pi-project"));
+      await fsp.mkdir(path.join(tmp, "pi-project", ".pi"));
+
+      const result = await listDirectories(tmp);
+
+      // Both entries surface, but flags are absent from the response shape.
+      const gitEntry = result.entries.find((e) => e.name === "git-repo");
+      const piEntry = result.entries.find((e) => e.name === "pi-project");
+      expect(gitEntry).toBeDefined();
+      expect(piEntry).toBeDefined();
+      expect(gitEntry!.isGit).toBeUndefined();
+      expect(gitEntry!.isPi).toBeUndefined();
+      expect(piEntry!.isGit).toBeUndefined();
+      expect(piEntry!.isPi).toBeUndefined();
+    } finally {
+      await fsp.rm(tmp, { recursive: true, force: true });
+    }
   });
 
   it("should return null parent for root directory", async () => {
@@ -336,5 +384,233 @@ describe("listDirectories word-boundary ranking", () => {
     // 'foo-bar' is prefix (tier 1), 'xx-foo' is word-boundary (tier 2).
     const names = r.entries.map((e) => e.name);
     expect(names).toEqual(["foo-bar", "xx-foo"]);
+  });
+});
+
+// ─── classifyPaths + parseFlagsQuery (change: split-browse-flags) ────────────
+
+import { classifyPaths, parseFlagsQuery, MAX_FLAG_PATHS } from "../browse.js";
+
+describe("classifyPaths", () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fsp.mkdtemp(path.join(os.tmpdir(), "classify-"));
+  });
+
+  afterEach(async () => {
+    await fsp.rm(tmp, { recursive: true, force: true });
+  });
+
+  it("returns isGit/isPi for a mix of paths", async () => {
+    const gitDir = path.join(tmp, "git-repo");
+    const piDir = path.join(tmp, "pi-project");
+    const plain = path.join(tmp, "plain");
+    await fsp.mkdir(gitDir);
+    await fsp.mkdir(path.join(gitDir, ".git"));
+    await fsp.mkdir(piDir);
+    await fsp.mkdir(path.join(piDir, ".pi"));
+    await fsp.mkdir(plain);
+
+    const flags = await classifyPaths([gitDir, piDir, plain]);
+    expect(flags[gitDir]).toEqual({ isGit: true, isPi: false });
+    expect(flags[piDir]).toEqual({ isGit: false, isPi: true });
+    expect(flags[plain]).toEqual({ isGit: false, isPi: false });
+  });
+
+  it("handles non-existent paths as { isGit: false, isPi: false }", async () => {
+    const missing = path.join(tmp, "does-not-exist");
+    const flags = await classifyPaths([missing]);
+    expect(flags[missing]).toEqual({ isGit: false, isPi: false });
+  });
+
+  it("returns {} for an empty input", async () => {
+    const flags = await classifyPaths([]);
+    expect(flags).toEqual({});
+  });
+
+  it("preserves the input key set exactly", async () => {
+    await fsp.mkdir(path.join(tmp, "a"));
+    await fsp.mkdir(path.join(tmp, "b"));
+    const inputs = [path.join(tmp, "a"), path.join(tmp, "b"), path.join(tmp, "missing")];
+    const flags = await classifyPaths(inputs);
+    expect(Object.keys(flags).sort()).toEqual([...inputs].sort());
+  });
+});
+
+describe("parseFlagsQuery", () => {
+  it("rejects undefined", () => {
+    expect(parseFlagsQuery(undefined)).toEqual({ ok: false, error: "invalid paths" });
+  });
+
+  it("rejects empty string", () => {
+    expect(parseFlagsQuery("")).toEqual({ ok: false, error: "invalid paths" });
+  });
+
+  it("rejects non-JSON", () => {
+    expect(parseFlagsQuery("not-json")).toEqual({ ok: false, error: "invalid paths" });
+  });
+
+  it("rejects non-array JSON", () => {
+    expect(parseFlagsQuery('{"foo": 1}')).toEqual({ ok: false, error: "invalid paths" });
+  });
+
+  it("rejects array with non-string elements", () => {
+    expect(parseFlagsQuery('["/a", 42]')).toEqual({ ok: false, error: "invalid paths" });
+  });
+
+  it("rejects over-cap arrays", () => {
+    const big = Array.from({ length: MAX_FLAG_PATHS + 1 }, (_, i) => `/p${i}`);
+    expect(parseFlagsQuery(JSON.stringify(big))).toEqual({ ok: false, error: "too many paths" });
+  });
+
+  it("accepts a valid array", () => {
+    const r = parseFlagsQuery('["/a", "/b/c"]');
+    expect(r).toEqual({ ok: true, paths: ["/a", "/b/c"] });
+  });
+
+  it("accepts an empty array (the route short-circuits to empty flags)", () => {
+    expect(parseFlagsQuery("[]")).toEqual({ ok: true, paths: [] });
+  });
+
+  it("accepts exactly MAX_FLAG_PATHS entries", () => {
+    const cap = Array.from({ length: MAX_FLAG_PATHS }, (_, i) => `/p${i}`);
+    const r = parseFlagsQuery(JSON.stringify(cap));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.paths.length).toBe(MAX_FLAG_PATHS);
+  });
+});
+
+// ─── Route integration: GET /api/browse/flags ────────────────────────────────
+
+import Fastify from "fastify";
+import type { FastifyInstance } from "fastify";
+import { registerFileRoutes } from "../routes/file-routes.js";
+
+describe("GET /api/browse/flags route", () => {
+  let app: FastifyInstance;
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fsp.mkdtemp(path.join(os.tmpdir(), "browse-flags-route-"));
+    app = Fastify({ logger: false });
+    registerFileRoutes(app, {
+      sessionManager: { listAll: () => [] } as any,
+      preferencesStore: { getPinnedDirectories: () => [] } as any,
+      // Permit-all guard so we exercise the route logic, not the auth gate.
+      networkGuard: async () => undefined,
+    });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await fsp.rm(tmp, { recursive: true, force: true });
+  });
+
+  it("returns the flag map for valid input", async () => {
+    const gitDir = path.join(tmp, "git-repo");
+    const piDir = path.join(tmp, "pi-project");
+    await fsp.mkdir(gitDir);
+    await fsp.mkdir(path.join(gitDir, ".git"));
+    await fsp.mkdir(piDir);
+    await fsp.mkdir(path.join(piDir, ".pi"));
+
+    const paths = encodeURIComponent(JSON.stringify([gitDir, piDir]));
+    const res = await app.inject({ method: "GET", url: `/api/browse/flags?paths=${paths}` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.flags[gitDir]).toEqual({ isGit: true, isPi: false });
+    expect(body.data.flags[piDir]).toEqual({ isGit: false, isPi: true });
+  });
+
+  it("returns 400 with 'invalid paths' on malformed JSON", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/browse/flags?paths=not-json" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ success: false, error: "invalid paths" });
+  });
+
+  it("returns 400 with 'too many paths' when over cap", async () => {
+    const big = Array.from({ length: 101 }, (_, i) => `/p${i}`);
+    const paths = encodeURIComponent(JSON.stringify(big));
+    const res = await app.inject({ method: "GET", url: `/api/browse/flags?paths=${paths}` });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ success: false, error: "too many paths" });
+  });
+
+  it("returns 200 with empty flags for an empty array", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/browse/flags?paths=%5B%5D" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ success: true, data: { flags: {} } });
+  });
+
+  it("returns 400 when the paths param is missing entirely", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/browse/flags" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ success: false, error: "invalid paths" });
+  });
+});
+
+describe("GET /api/browse with detect param", () => {
+  let app: FastifyInstance;
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fsp.mkdtemp(path.join(os.tmpdir(), "browse-detect-route-"));
+    app = Fastify({ logger: false });
+    registerFileRoutes(app, {
+      sessionManager: { listAll: () => [] } as any,
+      preferencesStore: { getPinnedDirectories: () => [] } as any,
+      networkGuard: async () => undefined,
+    });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await fsp.rm(tmp, { recursive: true, force: true });
+  });
+
+  it("populates isGit/isPi when detect=1", async () => {
+    await fsp.mkdir(path.join(tmp, "git-repo"));
+    await fsp.mkdir(path.join(tmp, "git-repo", ".git"));
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/browse?path=${encodeURIComponent(tmp)}&detect=1`,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const e = body.data.entries.find((x: any) => x.name === "git-repo");
+    expect(e).toBeDefined();
+    expect(e.isGit).toBe(true);
+    expect(e.isPi).toBe(false);
+  });
+
+  it("omits isGit/isPi when detect is absent", async () => {
+    await fsp.mkdir(path.join(tmp, "git-repo"));
+    await fsp.mkdir(path.join(tmp, "git-repo", ".git"));
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/browse?path=${encodeURIComponent(tmp)}`,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const e = body.data.entries.find((x: any) => x.name === "git-repo");
+    expect(e).toBeDefined();
+    expect(e.isGit).toBeUndefined();
+    expect(e.isPi).toBeUndefined();
+  });
+
+  it("treats detect=true (non-1) as falsy", async () => {
+    await fsp.mkdir(path.join(tmp, "git-repo"));
+    await fsp.mkdir(path.join(tmp, "git-repo", ".git"));
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/browse?path=${encodeURIComponent(tmp)}&detect=true`,
+    });
+    const body = res.json();
+    const e = body.data.entries.find((x: any) => x.name === "git-repo");
+    expect(e.isGit).toBeUndefined();
   });
 });

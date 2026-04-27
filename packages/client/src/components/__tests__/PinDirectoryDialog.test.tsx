@@ -5,8 +5,10 @@ import { PinDirectoryDialog } from "../PinDirectoryDialog.js";
 
 // Mock browse-api
 const mockBrowse = vi.fn();
+const mockClassify = vi.fn();
 vi.mock("../../lib/browse-api.js", () => ({
   browseDirectory: (...args: unknown[]) => mockBrowse(...args),
+  classifyPaths: (...args: unknown[]) => mockClassify(...args),
 }));
 
 afterEach(() => cleanup());
@@ -17,13 +19,16 @@ describe("PinDirectoryDialog", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // change: split-browse-flags — server omits isGit/isPi from the
+    // initial response; the picker fills them via classifyPaths.
     mockBrowse.mockResolvedValue({
       current: "/Users/robson",
       parent: "/Users",
       entries: [
-        { name: "Project", path: "/Users/robson/Project", isGit: false, isPi: false },
+        { name: "Project", path: "/Users/robson/Project" },
       ],
     });
+    mockClassify.mockResolvedValue({});
   });
 
   function renderDialog() {

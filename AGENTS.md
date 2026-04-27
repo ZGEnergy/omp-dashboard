@@ -139,7 +139,7 @@ make clean              # Destroy all cloned VMs
 | `src/server/server.ts` | HTTP + WebSocket server (composes route modules + wiring) |
 | `src/server/routes/session-routes.ts` | REST routes: sessions, events, session-diff |
 | `src/server/routes/git-routes.ts` | REST routes: git branches, checkout, init, stash-pop |
-| `src/server/routes/file-routes.ts` | REST routes: file read, browse, readme, pinned-dirs |
+| `src/server/routes/file-routes.ts` | REST routes: file read, browse (with `detect=0\|1` opt-in classifier), browse-flags (bulk classifier), browse-mkdir, readme, pinned-dirs. See change: split-browse-flags |
 | `src/server/routes/openspec-routes.ts` | REST routes: openspec-archive, pi-resources, pi-resource-file |
 | `src/server/routes/system-routes.ts` | REST routes: config, health, shutdown, tunnel, editors |
 | `src/server/event-wiring.ts` | Pi gateway → browser gateway event forwarding (replay suppression with `skipReplayInsert` dedup, flows refresh dedup, context usage extraction). Phase-1 Extension UI System: caches `ui_modules_list` on `Session.uiModules` and broadcasts; caches `ui_data_list` on `Session.uiDataMap[event]` with a per-event item cap (default 1000, last-write-wins on overflow) and broadcasts. Phase-2: `ext_ui_decorator` switch arm caches descriptors under `Session.uiDecorators[`${kind}:${namespace}:${id}`]` (upsert, or delete when `removed: true`) and broadcasts the message verbatim to subscribers; deleting an absent key is a no-op but still broadcasts. See changes: add-extension-ui-modal, add-extension-ui-decorations. |
@@ -170,7 +170,7 @@ make clean              # Destroy all cloned VMs
 | `src/client/components/PinDirectoryDialog.tsx` | Dialog to pin a directory (wraps PathPicker) |
 | `src/client/components/PathPicker.tsx` | Reusable keyboard-first path picker with typeahead directory list |
 | `src/client/lib/browse-api.ts` | Client-side browse API helper for PathPicker |
-| `src/server/browse.ts` | Directory listing logic for browse API endpoint |
+| `src/server/browse.ts` | Directory listing + classification for the browse API. Two responsibilities kept deliberately separate: `listDirectories(dir, q, { detect })` does enumeration (cheap, single `readdir`; per-entry `.git`/`.pi` probes only when `detect: true`), and `classifyPaths(paths)` does bulk classification (≤ `MAX_FLAG_PATHS = 100`, `fs.access` fan-out bounded by `createSemaphore(32)`, any error → `{ isGit: false, isPi: false }`). `parseFlagsQuery(rawPaths)` validates the `paths=<json-array>` query for `GET /api/browse/flags`. Worktree-safe: detection uses `fs.access` (never `readdir`) so `.git` regular-files in worktrees still classify correctly. See change: split-browse-flags |
 | `src/server/pi-resource-scanner.ts` | Discovers pi extensions, skills, prompts from local, global, and package sources |
 | `src/server/package-manager-wrapper.ts` | Thin adapter around pi's `DefaultPackageManager` with operation serialization, progress forwarding, and session reload; delegates module resolution to `ToolRegistry.resolveModule("pi-coding-agent")` |
 | `src/shared/tool-registry/registry.ts` | `ToolRegistry` service — single-source resolver for every external binary/module (pi, pi-coding-agent, openspec, npm, node, tsx, git, zrok, pi-dashboard). Ordered strategy chain per tool, per-resolution diagnostic trail, in-memory cache, override-aware |

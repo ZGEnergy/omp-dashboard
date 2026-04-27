@@ -573,11 +573,12 @@ The server exposes `GET /api/file?cwd=...&path=...` for reading files or listing
 
 ### Filesystem Browser (PathPicker)
 
-The dashboard's reusable directory chooser (`PathPicker`) is backed by two localhost-only endpoints:
+The dashboard's reusable directory chooser (`PathPicker`) is backed by three localhost-only endpoints:
 
-- `GET /api/browse?path=<dir>&q=<query>` — lists subdirectories of `<dir>` (or `$HOME` when omitted), with `.git` / `.pi` detection. When `q` is non-empty, entries are case-insensitive substring-filtered and ranked:
+- `GET /api/browse?path=<dir>&q=<query>&detect=<0|1>` — lists subdirectories of `<dir>` (or `$HOME` when omitted). By default this is a single-`readdir` enumeration with no per-entry filesystem probes; `isGit` / `isPi` are absent from each `BrowseEntry`. Pass `detect=1` (only the literal string `"1"` is truthy) to opt into eager `.git` / `.pi` classification on every entry — useful for skill recipes that consumed the legacy shape. When `q` is non-empty, entries are case-insensitive substring-filtered and ranked:
   - **Tier 0** exact match → **Tier 1** prefix → **Tier 2** word-boundary substring (after `-`, `_`, `.`, space, `/`) → **Tier 3** plain substring.
-  - Alphabetical within each tier. The 200-entry cap is applied **after** filter+rank so best matches always survive truncation.
+  - Alphabetical within each tier. The 200-entry cap is applied **after** filter+rank so best matches always survive truncation. See change: split-browse-flags.
+- `GET /api/browse/flags?paths=<json-array>` — bulk classifier for paths produced by `/api/browse`. The `paths` query is a URL-encoded JSON array of absolute path strings (length ≤ 100). Returns `{ flags: { [path]: { isGit, isPi } } }`. Per-path probe failures (ENOENT, EACCES, ELOOP, race-on-deletion, anything) map to `{ isGit: false, isPi: false }` for that key — only malformed input or over-cap arrays produce a top-level error (`invalid paths` / `too many paths`, both HTTP 400). Internal `fs.access` fan-out is bounded at 32 in-flight calls. The `PathPicker` calls this lazily after each `/api/browse` enumeration and merges the flag map into the rendered rows so badges fade in without blocking the initial paint. See change: split-browse-flags.
 - `POST /api/browse/mkdir` body `{ parent, name }` — creates a new directory non-recursively (`fs.mkdir` without `recursive: true`). Name validation rejects `/`, `\`, `\0`, `.`, `..`, empty, and leading/trailing whitespace. Errors map to 400 (`invalid name`, `parent is not a directory`), 404 (`parent not found`), 409 (`already exists`).
 
 Client-side, `PathPicker` debounces the `q` request at 150ms and cancels in-flight requests via `AbortController`. Enter/Select follow a strict state machine instead of confirming arbitrary input:

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { browseDirectory, createDirectory } from "../lib/browse-api.js";
+import { browseDirectory, classifyPaths, createDirectory } from "../lib/browse-api.js";
 import type { BrowseResult, BrowseEntry } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 import { parsePathInput, withTrailingSep } from "@blackbelt-technology/pi-dashboard-shared/platform/paths.js";
 import { inferPlatform } from "../lib/session-grouping.js";
@@ -77,6 +77,29 @@ export function PathPicker({ initialPath, onSelect, onCancel, rows = 8 }: Props)
         setEntries(result.entries);
         setParentPath(result.parent);
         setHighlightIndex(-1);
+
+        // Phase 2: lazily classify the rendered entries via the bulk
+        // `/api/browse/flags` endpoint, then merge the flags into the
+        // entries already on screen. Fire-and-forget; aborts share the
+        // phase-1 controller so a rapid re-invocation cancels both. Phase-2
+        // errors are swallowed silently — the picker keeps the flag-less
+        // entries and just doesn't render badges.
+        // See change: split-browse-flags.
+        if (result.entries.length > 0) {
+          const paths = result.entries.map((e) => e.path);
+          classifyPaths(paths, { signal: ctrl.signal })
+            .then((flagMap) => {
+              if (abortRef.current !== ctrl) return;
+              setEntries((prev) =>
+                prev.map((e) => {
+                  const flags = flagMap[e.path];
+                  return flags ? { ...e, isGit: flags.isGit, isPi: flags.isPi } : e;
+                }),
+              );
+            })
+            .catch(() => { /* swallow — badges stay absent */ });
+        }
+
         return result;
       } catch (err: unknown) {
         const e = err as { name?: string; message?: string };
