@@ -88,28 +88,77 @@ The chat view SHALL collapse a `toolResult` message with `toolStatus: "error"` i
 - **WHEN** the user clicks the "Hide failed attempt" toggle
 - **THEN** the chat view SHALL collapse the error back to the one-line pill
 
-### Requirement: Running toolResult hidden during paired pending interactiveUi
-The chat view SHALL hide (return `null` from the message renderer) any `toolResult` message whose `toolStatus` is `"running"` AND whose very next non-skip message is an `interactiveUi` message with `args.status === "pending"`. Skip roles are the same as for the retry-pill helper. This prevents duplicate rendering of the same question during the active state. Once the `interactiveUi` resolves (`status` becomes `"resolved"`, `"cancelled"`, or `"dismissed"`), the running toolResult SHALL still be hidden only as long as `toolStatus` remains `"running"`; once the `tool_execution_end` event flips it to `"complete"`, the toolResult is no longer matched by the helper and SHALL render normally as a full tool-call card in history.
+### Requirement: toolResult hidden during paired pending interactiveUi
+The chat view SHALL hide (return `null` from the message renderer) any `toolResult` message whose very next non-skip message is an `interactiveUi` message with `args.status === "pending"`, regardless of the `toolResult`'s own `toolStatus`. Skip roles are the same as for the retry-pill helper (`assistant`, `thinking`, `turnSeparator`, `rawEvent`, `commandFeedback`).
 
-#### Scenario: Pending ask_user shows only the interactive card
+The `toolStatus` is intentionally ignored because, after a server restart, `state-replay.ts` synthesizes a `tool_execution_end` for every orphan tool call — including a legitimately-pending `ask_user`. The `toolResult` thus arrives as `"complete"` while the prompt replayed from the in-memory pending-prompt cache is still `"pending"`. Both must collapse to a single Confirm card. Once the user answers, the `interactiveUi` flips to `"resolved"` / `"cancelled"` / `"dismissed"`, the helper stops hiding, and the chat shows the full tool card in history.
+
+#### Scenario: Pending ask_user (live) shows only the interactive card
 - **WHEN** an `ask_user` tool is mid-execution, a `toolResult` exists with `toolStatus: "running"`, and the next non-skip message is an `interactiveUi` with `status: "pending"`
 - **THEN** the chat view SHALL render only the `InteractiveUiCard` (with Allow/Deny/Cancel buttons) and SHALL hide the running `toolResult`
+
+#### Scenario: Pending ask_user (post-restart replay) shows only the interactive card
+- **WHEN** the dashboard server has restarted while an `ask_user` was unanswered, `state-replay.ts` synthesized a `tool_execution_end` for the orphan call so the `toolResult.toolStatus` is `"complete"`, AND the next non-skip message is an `interactiveUi` with `status: "pending"` (replayed from the in-memory pending-prompt cache)
+- **THEN** the chat view SHALL hide the `complete` `toolResult` and render only the `InteractiveUiCard`, so the user sees exactly one Confirm card per unanswered prompt
+
+#### Scenario: Errored toolResult paired with pending interactiveUi is hidden
+- **WHEN** a `toolResult` with `toolStatus: "error"` is followed (across skip roles) by an `interactiveUi` with `status: "pending"`
+- **THEN** the chat view SHALL hide the errored `toolResult` (the pending UI takes precedence)
 
 #### Scenario: Resolved tool history shows the full tool card
 - **WHEN** the user has answered the `ask_user` prompt, the `interactiveUi.args.status` is `"resolved"`, and the corresponding `toolResult.toolStatus` is `"complete"`
 - **THEN** the chat view SHALL render the full `ToolCallStep` (showing the question + `User responded:` result), and the `InteractiveUiCard` SHALL render its compact one-line resolved-state pill (e.g. `mdi-shield-alert ▸ Allowed`)
 
+#### Scenario: Cancelled tool history shows the full tool card
+- **WHEN** the `interactiveUi.args.status` is `"cancelled"` and the corresponding `toolResult.toolStatus` is `"complete"`
+- **THEN** the chat view SHALL render the full `ToolCallStep` (no hide)
+
 #### Scenario: Skip-roles do not break pairing
-- **WHEN** a running `toolResult` is followed by `thinking` and `assistant` messages and THEN a pending `interactiveUi`
-- **THEN** the chat view SHALL still hide the running `toolResult`
+- **WHEN** a `toolResult` is followed by `thinking` and `assistant` messages and THEN a pending `interactiveUi`
+- **THEN** the chat view SHALL still hide the `toolResult`
 
 #### Scenario: Different intervening tool breaks pairing
-- **WHEN** a running `toolResult` for tool A is followed by a `toolResult` for tool B BEFORE any `interactiveUi`
-- **THEN** the chat view SHALL render the tool-A running card normally (no hide)
+- **WHEN** a `toolResult` for tool A is followed by a `toolResult` for tool B BEFORE any `interactiveUi`
+- **THEN** the chat view SHALL render the tool-A card normally (no hide); the tool-B card may itself be hidden if it is followed by a pending `interactiveUi`
 
-#### Scenario: Standalone running tool with no interactive UI
-- **WHEN** a `toolResult` is `running` and no subsequent `interactiveUi` exists
-- **THEN** the chat view SHALL render the running card normally
+#### Scenario: Standalone tool with no interactive UI
+- **WHEN** a `toolResult` has no subsequent `interactiveUi`
+- **THEN** the chat view SHALL render the card normally regardless of `toolStatus`
+
+### Requirement: Polling-loop tool calls collapse across transparent intermediate rows
+The `groupConsecutiveToolCalls` helper SHALL collapse 3 or more consecutive `toolResult` messages that share the same `toolName` AND have `argsSimilar` arguments (deep-equal JSON) into a single `ToolCallGroup` pill, even when the messages are separated by *transparent* intermediate rows: `assistant`, `thinking`, `turnSeparator`, `rawEvent`, and `commandFeedback`. "Hard" rows — `user`, a different-tool `toolResult`, `interactiveUi`, `bashOutput` — SHALL still terminate the run.
+
+This is required because the event reducer inserts a `turnSeparator` after every tool-only assistant turn (no prose, just a tool call), so a polling loop that issues the same bash command N times produces a sequence `toolResult, turnSeparator, toolResult, turnSeparator, …` in which no two `toolResult`s are immediately adjacent. Without skipping transparents the grouper would never fire and N identical cards would render.
+
+The collapsed group's expanded view SHALL render only the `ToolCallStep` rows (the absorbed transparents are not rendered standalone). When fewer than 3 matching `toolResult`s accumulate, the helper SHALL emit every walked row verbatim — including the intermediate transparents — so layout for sub-threshold runs is identical to the pre-grouping output. A `toolStatus: "running"` `toolResult` SHALL never be absorbed into a collapsed group (it is always rendered as a live card).
+
+#### Scenario: Polling loop with turnSeparators collapses
+- **WHEN** the LLM issues 40 identical `bash` `toolResult` rows interleaved with `turnSeparator` rows (e.g. `curl -s http://localhost:8000/ | grep -oE 'src=...'` repeatedly waiting for a server restart)
+- **THEN** the chat view SHALL render exactly one `×40` `CollapsedToolGroup` pill, expandable to reveal all 40 individual `ToolCallStep` rows
+
+#### Scenario: Identical calls separated by thinking blocks collapse
+- **WHEN** 3 identical `bash` `toolResult` rows are separated by `thinking` rows
+- **THEN** the chat view SHALL render exactly one `×3` `CollapsedToolGroup`
+
+#### Scenario: Mixed transparent rows do not break the run
+- **WHEN** identical `toolResult` rows are interleaved with a mix of `assistant`, `thinking`, and `turnSeparator` rows (no "hard" rows between them)
+- **THEN** the chat view SHALL collapse them into a single group
+
+#### Scenario: User message terminates the run
+- **WHEN** 3 identical `bash` rows are followed by a `user` message and then 3 more identical `bash` rows
+- **THEN** the chat view SHALL render two separate `×3` groups with the `user` message between them
+
+#### Scenario: Different tool terminates the run
+- **WHEN** the sequence is `bash, turnSeparator, bash, read, bash, bash` (only 2 bashes before the `read`, then 2 more after)
+- **THEN** the chat view SHALL render no group (each side has fewer than 3 matching calls); every `toolResult` and intermediate transparent SHALL render verbatim
+
+#### Scenario: Sub-threshold run renders verbatim with intermediates
+- **WHEN** only 2 identical `bash` rows are separated by a `turnSeparator`
+- **THEN** the chat view SHALL render 3 rows in order — `toolResult`, `turnSeparator`, `toolResult` — with no group pill (matches pre-grouping behavior exactly)
+
+#### Scenario: Trailing running tool not absorbed
+- **WHEN** 3 identical `complete` `bash` rows are followed (across transparents) by a 4th identical `bash` row whose `toolStatus` is `"running"`
+- **THEN** the first 3 SHALL collapse into a `×3` group and the running 4th SHALL render as a separate live card
 
 
 ### Requirement: ask_user resolved icon uses help-circle in sky-blue

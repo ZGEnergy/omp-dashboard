@@ -1,8 +1,24 @@
 /**
  * Groups consecutive tool call messages with the same tool name and similar args.
  * Used to collapse repetitive retry loops (e.g. health check polling) in the chat view.
+ *
+ * Identical tool-only assistant turns are interleaved by `turnSeparator`,
+ * `assistant` (empty), `thinking`, `rawEvent`, and `commandFeedback` rows
+ * inserted by the reducer. These are *transparent* for grouping purposes:
+ * a polling loop that issues the same bash command 40 times still collapses
+ * into a single ×N pill as long as no "hard" row (user / different
+ * toolResult / interactiveUi / bashOutput) appears between the calls.
  */
 import type { ChatMessage } from "./event-reducer.js";
+
+/** Roles that are skipped when looking for the next groupable toolResult. */
+const TRANSPARENT_ROLES: ReadonlySet<ChatMessage["role"]> = new Set([
+  "assistant",
+  "thinking",
+  "turnSeparator",
+  "rawEvent",
+  "commandFeedback",
+]);
 
 export interface ToolCallGroup {
   type: "group";
@@ -28,6 +44,12 @@ function argsSimilar(a?: Record<string, unknown>, b?: Record<string, unknown>): 
  * Group consecutive toolResult messages with the same toolName and similar args.
  * Returns a mixed array of ChatMessage and ToolCallGroup items.
  * Single items are never grouped. Running (last) items are never grouped.
+ *
+ * Transparent rows (see TRANSPARENT_ROLES) between two matching toolResults
+ * are absorbed into the group: they are rendered only inside the expanded
+ * view (alongside their owning toolResult), never as standalone rows in the
+ * collapsed timeline. If no group forms, every consumed row — toolResults
+ * and intermediate transparents — is emitted verbatim.
  */
 export function groupConsecutiveToolCalls(messages: ChatMessage[]): ChatItem[] {
   const result: ChatItem[] = [];
@@ -43,11 +65,18 @@ export function groupConsecutiveToolCalls(messages: ChatMessage[]): ChatItem[] {
       continue;
     }
 
-    // Collect consecutive toolResults with same name and similar args
+    // Collect consecutive toolResults with same name and similar args.
+    // Transparent intermediate rows (separator/thinking/empty assistant
+    // prose) don't break the run; everything else does.
     const group: ChatMessage[] = [msg];
     let j = i + 1;
+    let lastToolEnd = j; // exclusive index of last consumed toolResult
     while (j < messages.length) {
       const next = messages[j];
+      if (TRANSPARENT_ROLES.has(next.role)) {
+        j++;
+        continue;
+      }
       if (next.role !== "toolResult") break;
       if (next.toolName !== msg.toolName) break;
       if (!argsSimilar(next.args, msg.args)) break;
@@ -55,6 +84,7 @@ export function groupConsecutiveToolCalls(messages: ChatMessage[]): ChatItem[] {
       if (next.toolStatus === "running") break;
       group.push(next);
       j++;
+      lastToolEnd = j;
     }
 
     if (group.length >= 3) {
@@ -64,11 +94,15 @@ export function groupConsecutiveToolCalls(messages: ChatMessage[]): ChatItem[] {
         messages: group,
         summary: msg.toolName ?? "unknown",
       });
+      // Skip past the last grouped toolResult only — trailing transparent
+      // rows that followed the final toolResult belong to the next iteration.
+      i = lastToolEnd;
     } else {
-      // Not enough to group — push individually
-      for (const m of group) result.push(m);
+      // Not enough to group — emit every row we walked verbatim, including
+      // intermediate transparents, so the chat looks identical to before.
+      for (let k = i; k < lastToolEnd; k++) result.push(messages[k]);
+      i = lastToolEnd;
     }
-    i = j;
   }
 
   return result;
