@@ -19,6 +19,8 @@ import {
   mdiPlusCircle,
   mdiDelete,
   mdiFlashAuto,
+  mdiClockOutline,
+  mdiDownloadMultiple,
 } from "@mdi/js";
 import { useRecommendedExtensions } from "../hooks/useRecommendedExtensions.js";
 import { usePackageOperations } from "../hooks/usePackageOperations.js";
@@ -65,6 +67,26 @@ function scopePillLabel(scope: "global" | "local" | null): string | null {
 export function RecommendedExtensions({ scope, cwd }: Props) {
   const { recommended, isLoading, error, refresh } = useRecommendedExtensions();
   const ops = usePackageOperations(scope, cwd, refresh);
+
+  // Entries that need installing in the user's eyes ("missing").
+  const missingEntries = recommended.filter((e) => !e.activeInPi);
+  // "All missing already enqueued/running?" — disables the bulk button.
+  const allMissingScheduled =
+    missingEntries.length > 0 &&
+    missingEntries.every((e) => {
+      const s = ops.statusFor(e.source);
+      return s === "queued" || s === "running";
+    });
+
+  const onInstallAllMissing = useCallback(() => {
+    for (const entry of recommended.filter((e) => !e.activeInPi)) {
+      const target =
+        entry.installed.scope === "global" || entry.installed.scope === "local"
+          ? entry.installed.scope
+          : undefined;
+      ops.install(entry.source, target);
+    }
+  }, [recommended, ops]);
 
   const onInstall = useCallback(
     (entry: EnrichedRecommendedExtension) => {
@@ -129,32 +151,56 @@ export function RecommendedExtensions({ scope, cwd }: Props) {
 
   return (
     <section className="mb-6">
-      <header className="flex items-baseline justify-between mb-3">
+      <header className="flex items-center justify-between mb-3 gap-3">
         <h2 className="text-lg font-semibold">Recommended for this dashboard</h2>
-        <span className="text-xs text-muted">
-          {missingRequired > 0 && (
-            <span className="text-danger mr-3">
-              ● {missingRequired} required missing
-            </span>
-          )}
-          {missingSuggested > 0 && (
-            <span className="text-warning">
-              ★ {missingSuggested} suggested missing
-            </span>
-          )}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted">
+            {missingRequired > 0 && (
+              <span className="text-danger mr-3">
+                ● {missingRequired} required missing
+              </span>
+            )}
+            {missingSuggested > 0 && (
+              <span className="text-warning">
+                ★ {missingSuggested} suggested missing
+              </span>
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={onInstallAllMissing}
+            disabled={missingEntries.length === 0 || allMissingScheduled}
+            title={
+              missingEntries.length === 0
+                ? "Nothing to install — every recommended extension is active."
+                : allMissingScheduled
+                  ? "All missing extensions are queued or running."
+                  : `Install ${missingEntries.length} missing extension${missingEntries.length === 1 ? "" : "s"}`
+            }
+            className="text-xs px-2 py-1 rounded border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+            data-testid="rec-install-all-missing"
+          >
+            <Icon path={mdiDownloadMultiple} size={0.6} />
+            Install all missing
+            {missingEntries.length > 0 && !allMissingScheduled && (
+              <span className="ml-1 text-[10px] opacity-80">({missingEntries.length})</span>
+            )}
+          </button>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {recommended.map((entry) => {
-          const isBusy =
-            ops.operation.status === "running" &&
-            ops.operation.source === entry.source;
+          const sourceStatus = ops.statusFor(entry.source);
+          const isRunning = sourceStatus === "running";
+          const isQueued = sourceStatus === "queued";
+          const isBusy = isRunning || isQueued;
           const isActive = entry.activeInPi;
           const onDisk = entry.installed.scope !== null;
           const scopeLabel = scopePillLabel(entry.installed.scope);
           // "Activate" state: package is on disk but not registered in pi.
           const showActivate = !isActive && onDisk;
+          const sourceMessage = ops.messageFor(entry.source);
 
           return (
             <div
@@ -171,6 +217,15 @@ export function RecommendedExtensions({ scope, cwd }: Props) {
                   )}
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
+                  {isQueued && (
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded border border-blue-400/40 bg-blue-400/10 text-blue-400 whitespace-nowrap flex items-center gap-1"
+                      title="Waiting for an earlier package operation to finish"
+                    >
+                      <Icon path={mdiClockOutline} size={0.5} />
+                      Queued
+                    </span>
+                  )}
                   {scopeLabel && (
                     <span
                       className="text-[10px] px-1.5 py-0.5 rounded border border-green-500/40 bg-green-500/10 text-green-400 whitespace-nowrap"
@@ -212,8 +267,10 @@ export function RecommendedExtensions({ scope, cwd }: Props) {
                       className="text-xs px-2 py-1 rounded border border-border hover:bg-danger/10 hover:text-danger flex items-center gap-1 disabled:opacity-50"
                       data-testid={`rec-remove-${entry.id}`}
                     >
-                      {isBusy ? (
+                      {isRunning ? (
                         <Icon path={mdiLoading} size={0.6} spin />
+                      ) : isQueued ? (
+                        <Icon path={mdiClockOutline} size={0.6} />
                       ) : (
                         <Icon path={mdiDelete} size={0.6} />
                       )}
@@ -231,8 +288,10 @@ export function RecommendedExtensions({ scope, cwd }: Props) {
                           : "Register already-installed package with pi."
                       }
                     >
-                      {isBusy ? (
+                      {isRunning ? (
                         <Icon path={mdiLoading} size={0.6} spin />
+                      ) : isQueued ? (
+                        <Icon path={mdiClockOutline} size={0.6} />
                       ) : (
                         <Icon path={mdiFlashAuto} size={0.6} />
                       )}
@@ -245,8 +304,10 @@ export function RecommendedExtensions({ scope, cwd }: Props) {
                       className="text-xs px-2 py-1 rounded border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1 disabled:opacity-50"
                       data-testid={`rec-install-${entry.id}`}
                     >
-                      {isBusy ? (
+                      {isRunning ? (
                         <Icon path={mdiLoading} size={0.6} spin />
+                      ) : isQueued ? (
+                        <Icon path={mdiClockOutline} size={0.6} />
                       ) : (
                         <Icon path={mdiPlusCircle} size={0.6} />
                       )}
@@ -256,15 +317,14 @@ export function RecommendedExtensions({ scope, cwd }: Props) {
                 </div>
               </div>
 
-              {isBusy && ops.operation.message && (
-                <div className="text-[11px] text-muted">{ops.operation.message}</div>
+              {isRunning && sourceMessage && (
+                <div className="text-[11px] text-muted">{sourceMessage}</div>
               )}
-              {ops.operation.status === "error" &&
-                ops.operation.source === entry.source && (
-                  <div className="text-[11px] text-danger">
-                    {ops.operation.message}
-                  </div>
-                )}
+              {sourceStatus === "error" && (
+                <div className="text-[11px] text-danger">
+                  {sourceMessage}
+                </div>
+              )}
             </div>
           );
         })}

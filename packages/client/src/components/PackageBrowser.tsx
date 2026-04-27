@@ -167,7 +167,7 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
         </div>
         <button
           onClick={handleUrlInstall}
-          disabled={!urlInput.trim() || operations.operation.status === "running"}
+          disabled={!urlInput.trim()}
           className="px-3 py-1.5 text-xs bg-[var(--accent-primary)] text-white rounded hover:bg-[var(--accent-primary)]/80 disabled:opacity-50 font-medium"
         >
           Install
@@ -219,7 +219,7 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
         ))}
       </div>
 
-      {/* Operation status */}
+      {/* Operation status — reflects queue (running + N queued). */}
       {operations.operation.status !== "idle" && (
         <div
           className={`text-xs px-2 py-1.5 rounded ${
@@ -229,11 +229,17 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
                 ? "bg-green-500/10 text-green-400"
                 : "bg-red-500/10 text-red-400"
           }`}
+          data-testid="package-op-banner"
         >
           {operations.operation.status === "running" && (
             <Icon path={mdiLoading} size={0.4} className="inline animate-spin mr-1" />
           )}
-          {operations.operation.message}
+          {operations.operation.status === "running"
+            ? `Installing ${operations.operation.source}…`
+            : operations.operation.message}
+          {operations.queueDepth > 0 && operations.operation.status === "running" && (
+            <span className="ml-2 opacity-80">({operations.queueDepth} queued)</span>
+          )}
         </div>
       )}
 
@@ -272,12 +278,18 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
                   installedScope={getInstalledScope(pkg.name)}
                   updateAvailable={updatesAvailable.has(pkg.name)}
                   checkingUpdate={checkingUpdateFor.has(pkg.name)}
-                  operationStatus={
-                    operations.operation.source === `npm:${pkg.name}` ? operations.operation.status : undefined
-                  }
-                  operationMessage={
-                    operations.operation.source === `npm:${pkg.name}` ? operations.operation.message : undefined
-                  }
+                  operationStatus={(() => {
+                    const s = operations.statusFor(`npm:${pkg.name}`);
+                    if (s === "queued") return "running"; // visually busy but use the dedicated message
+                    if (s === "idle") return undefined;
+                    return s;
+                  })()}
+                  operationMessage={(() => {
+                    const s = operations.statusFor(`npm:${pkg.name}`);
+                    if (s === "queued") return "Queued…";
+                    if (s === "idle") return undefined;
+                    return operations.messageFor(`npm:${pkg.name}`);
+                  })()}
                   onInstall={() => handleInstall(pkg)}
                   onUninstall={() => operations.remove(`npm:${pkg.name}`)}
                   onUpdate={() => operations.update(`npm:${pkg.name}`)}
