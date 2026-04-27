@@ -11,6 +11,13 @@ see [`docs/release-process.md`](docs/release-process.md).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.4.1] - 2026-04-27
+### Added
 - **Build-time tool registry coverage for `electron` and `node-pty`.** Both packages are now registered in the dashboard's `ToolRegistry` (`override` → `bare-import` → optional `managed` strategy chain), and a new shell-callable resolver wrapper at `packages/shared/bin/pi-dashboard-resolve-tool.cjs` exposes registry resolution to CI workflows and Dockerfiles without requiring the shared package's TS build. CI's linux/arm64 electron rebuild step (`publish.yml`) and the cross-platform Docker electron rebuild step (`Dockerfile.build`) both now go through the wrapper, so npm workspace hoisting changes can no longer break releases (this was the root cause of the v0.4.0 release crisis). See change: `register-build-time-tools`.
 
 ### Changed
