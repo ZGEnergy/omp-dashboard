@@ -118,9 +118,11 @@ Each installed package card SHALL show a check-for-update button. Clicking it ch
 - **WHEN** the check returns an available update for that package
 - **THEN** the card shows an "Update" button that triggers `POST /api/packages/update` for that package
 
-### Requirement: PackageBrowser SHALL render an Installed Packages section
+### Requirement: PackageBrowser SHALL render an Installed Packages section by default
 
-The `PackageBrowser` component SHALL render a dedicated "Installed Packages" section above the search results. The section SHALL list every row returned by `useInstalledPackages(scope, cwd)` whose `isRecommended === false` (recommended ones already render in the existing `RecommendedExtensions` panel). Each row SHALL be a `PackageRow` and SHALL display source-type badges via `classifySource(pkg.source)`. The section SHALL render the same way regardless of source shape — `npm:`, absolute path, relative path, `file://`, `git://`, `https://...git`, and bare git URLs all SHALL produce a row with `Update` and `Uninstall` actions.
+The `PackageBrowser` component SHALL render a dedicated "Installed Packages" section above the search results when its `showInstalledSection` prop is `true` (the default). The section SHALL list every row returned by `useInstalledPackages(scope, cwd)` whose `isRecommended === false` (recommended ones already render in the existing `RecommendedExtensions` panel). Each row SHALL be a `PackageRow` and SHALL display source-type badges via `classifySource(pkg.source)`. The section SHALL render the same way regardless of source shape — `npm:`, absolute path, relative path, `file://`, `git://`, `https://...git`, and bare git URLs all SHALL produce a row with `Update` and `Uninstall` actions.
+
+When `showInstalledSection` is `false`, the component SHALL NOT render the Installed Packages section. This case applies in Settings → Packages, where `UnifiedPackagesSection` (Pi Ecosystem) is the canonical global-scope manage surface and rendering both would duplicate every installed row.
 
 #### Scenario: npm-source row in workspace scope
 
@@ -146,6 +148,13 @@ The `PackageBrowser` component SHALL render a dedicated "Installed Packages" sec
 - **AND** there are no recommended extensions installed
 - **THEN** `PackageBrowser` does not render the "Installed Packages" section header (no empty heading)
 - **AND** the search-results area renders normally
+
+#### Scenario: showInstalledSection={false} suppresses the section even when packages exist
+
+- **WHEN** `PackageBrowser` is mounted with `showInstalledSection={false}` and the scope has installed packages
+- **THEN** the Installed Packages section header is NOT rendered
+- **AND** no `PackageRow` for any installed package is rendered
+- **AND** Settings → Packages relies on `UnifiedPackagesSection` (Pi Ecosystem) above to manage these rows
 
 ### Requirement: Uninstall and update calls SHALL pass `pkg.source` verbatim
 

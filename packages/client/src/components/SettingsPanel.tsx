@@ -1043,6 +1043,9 @@ function GlobalPackagesBrowseAndDialogs() {
           scope="global"
           onViewReadme={setReadmePkg}
           onConfirmInstall={handleConfirmInstall}
+          // UnifiedPackagesSection above already shows global installed packages.
+          // See change: unify-workspace-package-management.
+          showInstalledSection={false}
         />
       </Section>
 

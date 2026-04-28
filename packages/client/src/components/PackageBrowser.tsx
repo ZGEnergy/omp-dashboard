@@ -18,9 +18,27 @@ interface PackageBrowserProps {
   cwd?: string;
   onViewReadme?: (pkg: NpmPackageResult) => void;
   onConfirmInstall?: (source: string, pkg?: NpmPackageResult) => void;
+  /**
+   * Render the "Installed Packages" section above search.
+   *
+   * Defaults to `true` for the workspace surface (Pi Resources → Packages
+   * tab), where this is the only manage UI. Settings → Packages should
+   * pass `false` because `UnifiedPackagesSection` (Pi Ecosystem) is already
+   * the global-scope manage surface, and rendering both would duplicate
+   * every installed row.
+   *
+   * See change: unify-workspace-package-management.
+   */
+  showInstalledSection?: boolean;
 }
 
-export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: PackageBrowserProps) {
+export function PackageBrowser({
+  scope,
+  cwd,
+  onViewReadme,
+  onConfirmInstall,
+  showInstalledSection = true,
+}: PackageBrowserProps) {
   const search = usePackageSearch();
   const installedOwn = useInstalledPackages(scope, cwd);
   // Also fetch the other scope to show cross-scope badges
@@ -143,8 +161,11 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
       <RecommendedExtensions scope={scope} cwd={cwd} />
 
       {/* Installed Packages — every source shape, uniform PackageRow.
-          See change: unify-workspace-package-management. */}
-      {installedNonRecommended.length > 0 && (
+          Hidden in Settings → Packages where UnifiedPackagesSection already
+          renders these rows; shown in the workspace Pi Resources → Packages
+          tab where this is the only manage surface. See change:
+          unify-workspace-package-management. */}
+      {showInstalledSection && installedNonRecommended.length > 0 && (
         <div data-testid="installed-packages-section">
           <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-1.5">
             Installed Packages

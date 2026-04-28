@@ -132,6 +132,19 @@ describe("PackageBrowser — Installed Packages section (unify-workspace-package
   // Cross-scope badges are visible on search-result PackageCard rows. We don't have
   // search results here, so we exercise the new source-keyed installedInfo via a
   // smoke check: the section above renders without throwing for non-npm cross-scope.
+  it("hides the Installed Packages section when showInstalledSection={false}", () => {
+    // Mirrors the Settings → Packages mount, where UnifiedPackagesSection is the
+    // canonical manage surface and PackageBrowser must NOT duplicate the rows.
+    installedOwnPkgs = [
+      makePkg("npm:foo", "global"),
+      makePkg("/abs/path/bar", "global"),
+    ];
+    render(<PackageBrowser scope="global" showInstalledSection={false} />);
+    expect(screen.queryByTestId("installed-packages-section")).toBeNull();
+    expect(screen.queryByTestId("installed-row-npm-foo")).toBeNull();
+    expect(screen.queryByTestId("installed-row--abs-path-bar")).toBeNull();
+  });
+
   it("supports cross-scope detection for non-npm sources without throwing", () => {
     installedOwnPkgs = [makePkg("/abs/path/foo", "local")];
     installedOtherPkgs = [makePkg("/abs/path/foo", "global")];
