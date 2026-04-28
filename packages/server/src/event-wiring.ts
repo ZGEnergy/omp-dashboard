@@ -16,6 +16,7 @@ import { writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/sess
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { detectOpenSpecActivity } from "@blackbelt-technology/pi-dashboard-shared/openspec-activity-detector.js";
 import { extractTurnStats } from "@blackbelt-technology/pi-dashboard-shared/stats-extractor.js";
+import { attachRenameTarget, isNameAutoSetFromAttachment } from "./proposal-attach-naming.js";
 
 export interface EventWiringDeps {
   sessionManager: SessionManager;
@@ -144,17 +145,30 @@ export function wireEvents(deps: EventWiringDeps): void {
             // (write/CLI). Reads are passive (browsing/analysis) and don't trigger attach.
             // Phase is optional — skills loaded via prompt templates don't emit a SKILL.md read event.
             const attachUpdates: Partial<DashboardSession> = {};
-            if (updatedSession?.openspecChange && !updatedSession.attachedProposal && detected.isActive) {
-              attachUpdates.attachedProposal = updatedSession.openspecChange;
-              if (!updatedSession.name?.trim()) {
-                attachUpdates.name = updatedSession.openspecChange;
-                piGateway.sendToSession(sessionId, {
-                  type: "rename_session",
-                  sessionId,
-                  name: updatedSession.openspecChange,
-                });
+            // Auto-detect parallel path — see change: fix-mobile-attach-proposal-display
+            // (design.md §"Auto-detect parallel path"). Mirrors the witness rule in
+            // session-meta-handler.ts: re-attach when the previous attachment was
+            // auto-tracked (name === attachedProposal) AND a different changeName
+            // is now detected. Inner rename guard reuses attachRenameTarget.
+            if (updatedSession?.openspecChange && detected.isActive) {
+              const attachmentWasAutoTracked =
+                !updatedSession.attachedProposal ||
+                isNameAutoSetFromAttachment(updatedSession);
+              const differentChangeDetected =
+                updatedSession.attachedProposal !== updatedSession.openspecChange;
+              if (attachmentWasAutoTracked && differentChangeDetected) {
+                attachUpdates.attachedProposal = updatedSession.openspecChange;
+                const newName = attachRenameTarget(updatedSession, updatedSession.openspecChange);
+                if (newName !== undefined) {
+                  attachUpdates.name = newName;
+                  piGateway.sendToSession(sessionId, {
+                    type: "rename_session",
+                    sessionId,
+                    name: newName,
+                  });
+                }
+                sessionManager.update(sessionId, attachUpdates);
               }
-              sessionManager.update(sessionId, attachUpdates);
             }
             if (!replayingSessions.has(sessionId)) {
               browserGateway.broadcastSessionUpdated(sessionId, {

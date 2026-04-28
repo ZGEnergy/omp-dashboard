@@ -3,6 +3,7 @@
  */
 import type { BrowserToServerMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import type { BrowserHandlerContext } from "./handler-context.js";
+import { attachRenameTarget, detachShouldClearName } from "../proposal-attach-naming.js";
 
 export function handleRenameSession(
   msg: Extract<BrowserToServerMessage, { type: "rename_session" }>,
@@ -38,11 +39,15 @@ export function handleAttachProposal(
   ctx: BrowserHandlerContext,
 ): void {
   const { sessionManager, piGateway, broadcast } = ctx;
-  const updates: Record<string, unknown> = { attachedProposal: msg.changeName };
   const session = sessionManager.get(msg.sessionId);
-  if (session && !session.name?.trim()) {
-    updates.name = msg.changeName;
-    piGateway.sendToSession(msg.sessionId, { type: "rename_session", sessionId: msg.sessionId, name: msg.changeName });
+  const updates: Record<string, unknown> = { attachedProposal: msg.changeName };
+
+  // Idempotent auto-rename (see change: fix-mobile-attach-proposal-display).
+  // See design.md decision matrix and ./proposal-attach-naming.ts.
+  const newName = attachRenameTarget(session, msg.changeName);
+  if (newName !== undefined) {
+    updates.name = newName;
+    piGateway.sendToSession(msg.sessionId, { type: "rename_session", sessionId: msg.sessionId, name: newName });
   }
   sessionManager.update(msg.sessionId, updates);
   broadcast({ type: "session_updated", sessionId: msg.sessionId, updates });
@@ -52,9 +57,22 @@ export function handleDetachProposal(
   msg: Extract<BrowserToServerMessage, { type: "detach_proposal" }>,
   ctx: BrowserHandlerContext,
 ): void {
-  const updates = { attachedProposal: null, openspecPhase: null, openspecChange: null };
-  ctx.sessionManager.update(msg.sessionId, updates);
-  ctx.broadcast({ type: "session_updated", sessionId: msg.sessionId, updates });
+  const { sessionManager, piGateway, broadcast } = ctx;
+  const session = sessionManager.get(msg.sessionId);
+
+  // Idempotent auto-revert (see change: fix-mobile-attach-proposal-display).
+  // See design.md decision matrix and ./proposal-attach-naming.ts.
+  const updates: Record<string, unknown> = {
+    attachedProposal: null,
+    openspecPhase: null,
+    openspecChange: null,
+  };
+  if (detachShouldClearName(session)) {
+    updates.name = undefined;
+    piGateway.sendToSession(msg.sessionId, { type: "rename_session", sessionId: msg.sessionId, name: "" });
+  }
+  sessionManager.update(msg.sessionId, updates);
+  broadcast({ type: "session_updated", sessionId: msg.sessionId, updates });
 }
 
 export function handleFetchContent(

@@ -13,6 +13,7 @@ import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js"
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { BootstrapStateStore } from "./bootstrap-state.js";
 import type { BootstrapQueue } from "./bootstrap-queue.js";
+import { attachRenameTarget, detachShouldClearName } from "./proposal-attach-naming.js";
 
 export interface SessionApiDeps {
   sessionManager: SessionManager;
@@ -370,9 +371,11 @@ export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDep
       }
       const updates: Record<string, unknown> = { attachedProposal: changeName };
       const session = result.session;
-      if (!session.name?.trim()) {
-        updates.name = changeName;
-        piGateway.sendToSession(id, { type: "rename_session", sessionId: id, name: changeName });
+      // Idempotent auto-rename (see change: fix-mobile-attach-proposal-display).
+      const newName = attachRenameTarget(session, changeName);
+      if (newName !== undefined) {
+        updates.name = newName;
+        piGateway.sendToSession(id, { type: "rename_session", sessionId: id, name: newName });
       }
       sessionManager.update(id, updates);
       browserGateway.broadcastSessionUpdated(id, updates);
@@ -390,7 +393,15 @@ export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDep
         reply.code(404);
         return result.error;
       }
-      const updates = { attachedProposal: null, openspecPhase: null, openspecChange: null };
+      const session = result.session;
+      const updates: Record<string, unknown> = {
+        attachedProposal: null, openspecPhase: null, openspecChange: null,
+      };
+      // Idempotent auto-revert (see change: fix-mobile-attach-proposal-display).
+      if (detachShouldClearName(session)) {
+        updates.name = undefined;
+        piGateway.sendToSession(id, { type: "rename_session", sessionId: id, name: "" });
+      }
       sessionManager.update(id, updates);
       browserGateway.broadcastSessionUpdated(id, updates);
       return { success: true } satisfies ApiResponse;

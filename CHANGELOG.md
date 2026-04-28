@@ -16,6 +16,7 @@ see [`docs/release-process.md`](docs/release-process.md).
 
 ### Fixed
 - ChatView: fixed a race during multi-batch `event_replay` that caused uncached session switches to land mid-conversation with the floating scroll-to-bottom button visible. `handleScroll` now ignores onScroll measurements that follow our own programmatic `scrollTo` for a ~150 ms window, so growing `scrollHeight` between batches no longer flips `isNearBottom` to false. (fix-chat-scroll-race-during-replay)
+- Mobile session header and session card now show a read-only `📎 <change>` chip when an OpenSpec proposal is attached — previously the attached state was hidden behind the paperclip popover. The auto-rename rule on attach/detach is now idempotent across all three code paths (browser WS handler, REST endpoint, and the auto-detect activity branch in `event-wiring.ts`): detach reverts the name only when it was auto-set, and re-attach to a different change re-tracks the new name without overwriting user customisations. **Release-test reminder**: run the 6-step manual mobile QA matrix from `openspec/changes/fix-mobile-attach-proposal-display/tasks.md §6` before next release. (fix-mobile-attach-proposal-display)
 
 ## [0.4.1] - 2026-04-27
 ### Added

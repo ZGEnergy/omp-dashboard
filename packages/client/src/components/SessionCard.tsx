@@ -1,7 +1,7 @@
 import React, { useState, useEffect, type ReactNode } from "react";
 import { getApiBase } from "../lib/api-context.js";
 import { Icon } from "@mdi/react";
-import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiConsoleLine, mdiRobotOutline, mdiCodeTags, mdiApplicationOutline, mdiCommentQuestion, mdiPlayCircleOutline, mdiSourceFork } from "@mdi/js";
+import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiConsoleLine, mdiRobotOutline, mdiCodeTags, mdiApplicationOutline, mdiCommentQuestion, mdiPlayCircleOutline, mdiSourceFork, mdiPaperclip } from "@mdi/js";
 import type { DashboardSession, ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
 import { formatRelativeTime, formatTokens } from "../lib/format.js";
@@ -378,6 +378,20 @@ export function SessionCard({
           )}
         </div>
 
+        {/* Mobile attached-proposal chip (read-only) — see change: */}
+        {/* fix-mobile-attach-proposal-display. Coexists with OpenSpecActivityBadge */}
+        {/* below (which reads openspecPhase/openspecChange, not attachedProposal). */}
+        {/* Mirror in SessionHeader.tsx → MobileHeader (mobile-header-attached-chip). */}
+        {session.attachedProposal && (
+          <div
+            className="mt-1 flex items-center gap-1 text-[11px] text-blue-400"
+            data-testid="mobile-card-attached-chip"
+            title={`Attached: ${session.attachedProposal}`}
+          >
+            <Icon path={mdiPaperclip} size={0.4} />
+            <span className="truncate">{session.attachedProposal}</span>
+          </div>
+        )}
         {/* OpenSpec activity badge */}
         {(session.openspecPhase || session.openspecChange) ? (
           <OpenSpecActivityBadge

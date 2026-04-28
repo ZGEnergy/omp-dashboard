@@ -11,6 +11,7 @@ import { useMobile } from "../hooks/useMobile.js";
 import { FlowLaunchDialog } from "./FlowLaunchDialog.js";
 import { SearchableSelectDialog, type SelectOption } from "./SearchableSelectDialog.js";
 import { FooterSegmentSlot } from "./extension-ui/FooterSegmentSlot.js";
+import { ArtifactLettersButton } from "./openspec-helpers.js";
 
 interface Props {
   session?: DashboardSession;
@@ -27,6 +28,10 @@ interface Props {
   hasFileChanges?: boolean;
   onOpenDiffView?: () => void;
   onRefresh?: () => void;
+  /** Open the artifact reader for an attached change. Wired into the
+   *  ArtifactLettersButton rendered in both desktop and mobile headers.
+   *  See change: add-attached-proposal-header-summary. */
+  onReadArtifact?: (changeName: string, artifactId: string) => void;
   /** Extension UI System (Phase 1): callback to open the modules picker. */
   onOpenExtensionModulePicker?: () => void;
   /** Mobile action menu props (only used on mobile) */
@@ -126,7 +131,7 @@ function MobileAttachButton({ session, openspecChanges, onAttach, onDetach }: {
 }
 
 /** Mobile header: back + name + attach icon + kebab */
-function MobileHeader({ session, showBack, onBack, isRenaming, onConfirmRename, onCancelRename, canRename, onStartRename, mobileActions }: {
+function MobileHeader({ session, showBack, onBack, isRenaming, onConfirmRename, onCancelRename, canRename, onStartRename, mobileActions, onReadArtifact }: {
   session: DashboardSession;
   showBack?: boolean;
   onBack?: () => void;
@@ -136,7 +141,16 @@ function MobileHeader({ session, showBack, onBack, isRenaming, onConfirmRename, 
   canRename: boolean;
   onStartRename: () => void;
   mobileActions?: SessionHeaderMobileActions;
+  onReadArtifact?: (changeName: string, artifactId: string) => void;
 }) {
+  // Look up the attached change in the polled openspecChanges list. When
+  // present, render the artifact-letters pill + task counter inside the
+  // existing mobile-header-attached-chip span.
+  // See change: add-attached-proposal-header-summary.
+  const attachedChange = session.attachedProposal
+    ? mobileActions?.openspecChanges?.find((c) => c.name === session.attachedProposal)
+    : undefined;
+  const readArtifact = onReadArtifact ?? mobileActions?.onReadArtifact;
   return (
     <div className="px-2 py-1 border-b border-[var(--border-primary)] flex items-center gap-1 text-sm min-h-[44px]">
       {showBack && onBack && (
@@ -158,6 +172,36 @@ function MobileHeader({ session, showBack, onBack, isRenaming, onConfirmRename, 
         />
       ) : (
         <span className="font-medium truncate flex-1">{getSessionDisplayName(session)}</span>
+      )}
+      {/* Mobile attached-proposal chip (read-only) — see change: */}
+      {/* fix-mobile-attach-proposal-display. Placed between the title and the */}
+      {/* MobileAttachButton, which keeps action affordances (attach/detach). */}
+      {session.attachedProposal && (
+        <span
+          className="text-[10px] text-blue-400 max-w-[55%] flex items-center gap-0.5 flex-shrink-0"
+          title={`Attached: ${session.attachedProposal}`}
+          data-testid="mobile-header-attached-chip"
+        >
+          <Icon path={mdiPaperclip} size={0.4} />
+          <span className="truncate min-w-0">{session.attachedProposal}</span>
+          {attachedChange && attachedChange.artifacts.length > 0 && (
+            <span className="flex-shrink-0">
+              <ArtifactLettersButton
+                artifacts={attachedChange.artifacts}
+                changeName={attachedChange.name}
+                onReadArtifact={readArtifact}
+              />
+            </span>
+          )}
+          {attachedChange && attachedChange.totalTasks > 0 && (
+            <span
+              className="text-[10px] text-[var(--text-muted)] flex-shrink-0"
+              data-testid="attached-proposal-task-counter"
+            >
+              ({attachedChange.completedTasks}/{attachedChange.totalTasks})
+            </span>
+          )}
+        </span>
       )}
       {mobileActions && (
         <MobileAttachButton
@@ -202,7 +246,7 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
-export function SessionHeader({ session, state, onRename, showBack, onBack, mobileActions, commands, flows, onSendPrompt, openspecChanges, onAttachProposal, onDetachProposal, hasFileChanges, onOpenDiffView, onRefresh, onOpenExtensionModulePicker }: Props) {
+export function SessionHeader({ session, state, onRename, showBack, onBack, mobileActions, commands, flows, onSendPrompt, openspecChanges, onAttachProposal, onDetachProposal, hasFileChanges, onOpenDiffView, onRefresh, onReadArtifact, onOpenExtensionModulePicker }: Props) {
   const [now, setNow] = useState(Date.now());
   const [isRenaming, setIsRenaming] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -266,9 +310,16 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
         canRename={!!canRename}
         onStartRename={() => setIsRenaming(true)}
         mobileActions={mobileActions}
+        onReadArtifact={onReadArtifact}
       />
     );
   }
+
+  // Desktop attached-change lookup for the artifact-letters pill + task counter.
+  // See change: add-attached-proposal-header-summary.
+  const desktopAttachedChange = attached
+    ? openspecChanges?.find((c) => c.name === attached)
+    : undefined;
 
   // Desktop: full header
   return (
@@ -322,6 +373,21 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
         attached ? (
           <span className="text-[10px] flex items-center gap-1 mr-2">
             <span className="text-blue-400"><Icon path={mdiPaperclip} size={0.4} className="inline mr-0.5" />{attached}</span>
+            {desktopAttachedChange && desktopAttachedChange.artifacts.length > 0 && (
+              <ArtifactLettersButton
+                artifacts={desktopAttachedChange.artifacts}
+                changeName={desktopAttachedChange.name}
+                onReadArtifact={onReadArtifact}
+              />
+            )}
+            {desktopAttachedChange && desktopAttachedChange.totalTasks > 0 && (
+              <span
+                className="text-[10px] text-[var(--text-muted)]"
+                data-testid="attached-proposal-task-counter"
+              >
+                ({desktopAttachedChange.completedTasks}/{desktopAttachedChange.totalTasks})
+              </span>
+            )}
             {onDetachProposal && (
               <button
                 onClick={onDetachProposal}

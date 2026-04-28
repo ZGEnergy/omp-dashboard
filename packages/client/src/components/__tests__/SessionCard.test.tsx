@@ -252,6 +252,56 @@ describe("SessionCard", () => {
     // Restore
     (useMobile as ReturnType<typeof vi.fn>).mockReturnValue(false);
   });
+
+  // ── mobile attached-proposal chip ───────────────────────────────
+  // See change: fix-mobile-attach-proposal-display.
+
+  it("renders mobile-card-attached-chip on mobile when attachedProposal is set", async () => {
+    const { useMobile } = await import("../../hooks/useMobile.js");
+    (useMobile as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    const session = makeSession({ attachedProposal: "add-auth" });
+    render(<SessionCard session={session} {...defaultProps} />);
+
+    const chip = screen.getByTestId("mobile-card-attached-chip");
+    expect(chip.textContent).toContain("add-auth");
+
+    (useMobile as ReturnType<typeof vi.fn>).mockReturnValue(false);
+  });
+
+  it("does NOT render mobile-card-attached-chip when attachedProposal is null/undefined", async () => {
+    const { useMobile } = await import("../../hooks/useMobile.js");
+    (useMobile as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    const sessionA = makeSession({ attachedProposal: null });
+    const { unmount } = render(<SessionCard session={sessionA} {...defaultProps} />);
+    expect(screen.queryByTestId("mobile-card-attached-chip")).toBeNull();
+    unmount();
+
+    const sessionB = makeSession({ attachedProposal: undefined });
+    render(<SessionCard session={sessionB} {...defaultProps} />);
+    expect(screen.queryByTestId("mobile-card-attached-chip")).toBeNull();
+
+    (useMobile as ReturnType<typeof vi.fn>).mockReturnValue(false);
+  });
+
+  it("renders mobile attached chip and OpenSpecActivityBadge simultaneously (different facts)", async () => {
+    const { useMobile } = await import("../../hooks/useMobile.js");
+    (useMobile as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    const session = makeSession({
+      attachedProposal: "add-auth",
+      openspecPhase: "applying",
+      openspecChange: "fix-bug",
+    } as Partial<DashboardSession>);
+    render(<SessionCard session={session} {...defaultProps} />);
+
+    expect(screen.getByTestId("mobile-card-attached-chip").textContent).toContain("add-auth");
+    // OpenSpecActivityBadge renders its phase + change name; assert it's distinct.
+    expect(screen.getByText(/fix-bug/)).toBeDefined();
+
+    (useMobile as ReturnType<typeof vi.fn>).mockReturnValue(false);
+  });
 });
 
 // Mock fetch for GroupGitInfo server-side branch lookup

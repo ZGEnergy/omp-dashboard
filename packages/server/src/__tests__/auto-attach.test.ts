@@ -170,18 +170,71 @@ describe("Auto-attach from openspec activity", () => {
     expect(session?.name).toBe("cool-feature");
   });
 
-  it("does not auto-attach when proposal is already attached", async () => {
-    // First, attach
-    sendToolEvent(ws, "s1", { phase: "apply" });
-    sendToolEvent(ws, "s1", { changeName: "add-auth" });
-    await new Promise((r) => setTimeout(r, 80));
+  // Auto-detect re-attach (witness rule). See change: fix-mobile-attach-proposal-display
+  // (design.md §"Auto-detect parallel path"). The previous behavior
+  // (`!updatedSession.attachedProposal` guard) had the one-shot pathology this
+  // change fixes: an auto-tracked attachment could not be replaced even when a
+  // different changeName was detected.
 
-    // Try to attach a different change
-    sendToolEvent(ws, "s1", { changeName: "other-change" });
+  it("§2A.2[1] fresh session — auto-attaches and auto-names", async () => {
+    sendToolEvent(ws, "s1", { changeName: "bar" });
     await new Promise((r) => setTimeout(r, 80));
+    const s = server.sessionManager.get("s1");
+    expect(s?.attachedProposal).toBe("bar");
+    expect(s?.name).toBe("bar");
+  });
 
-    const session = server.sessionManager.get("s1");
-    expect(session?.attachedProposal).toBe("add-auth");
+  it("§2A.2[2] auto-tracked session re-attaches when a different changeName is detected", async () => {
+    sendToolEvent(ws, "s1", { changeName: "foo" });
+    await new Promise((r) => setTimeout(r, 80));
+    let s = server.sessionManager.get("s1");
+    expect(s?.attachedProposal).toBe("foo");
+    expect(s?.name).toBe("foo");
+
+    // Different changeName via active tool — witness arm should re-attach.
+    sendToolEvent(ws, "s1", { changeName: "bar" });
+    await new Promise((r) => setTimeout(r, 80));
+    s = server.sessionManager.get("s1");
+    expect(s?.attachedProposal).toBe("bar");
+    expect(s?.name).toBe("bar");
+    expect(s?.openspecChange).toBe("bar");
+  });
+
+  it("§2A.2[3] custom-named session — openspecChange tracks reality, attached/name preserved", async () => {
+    // Set custom name + auto-attach foo via earlier activity
+    server.sessionManager.update("s1", { name: "my custom" } as any);
+    sendToolEvent(ws, "s1", { changeName: "foo" });
+    await new Promise((r) => setTimeout(r, 80));
+    let s = server.sessionManager.get("s1");
+    // attach happens (attachmentWasAutoTracked: attached=null counts as auto)
+    // BUT name stays "my custom" because attachRenameTarget returns undefined
+    // when name is custom and attached is null.
+    expect(s?.attachedProposal).toBe("foo");
+    expect(s?.name).toBe("my custom");
+
+    // Different changeName detected. attachmentWasAutoTracked = false because
+    // name ("my custom") !== attachedProposal ("foo"). So attached + name MUST
+    // NOT change. openspecChange SHOULD update via the activity-detector branch.
+    sendToolEvent(ws, "s1", { changeName: "bar" });
+    await new Promise((r) => setTimeout(r, 80));
+    s = server.sessionManager.get("s1");
+    expect(s?.attachedProposal).toBe("foo");
+    expect(s?.name).toBe("my custom");
+    expect(s?.openspecChange).toBe("bar");
+  });
+
+  it("§2A.2[4] already-converged state — no rename, no re-broadcast of redundant name", async () => {
+    sendToolEvent(ws, "s1", { changeName: "bar" });
+    await new Promise((r) => setTimeout(r, 80));
+    const before = server.sessionManager.get("s1");
+    expect(before?.attachedProposal).toBe("bar");
+
+    // Same changeName again — differentChangeDetected is false; no rename fires.
+    sendToolEvent(ws, "s1", { changeName: "bar" });
+    await new Promise((r) => setTimeout(r, 80));
+    const after = server.sessionManager.get("s1");
+    expect(after?.attachedProposal).toBe("bar");
+    expect(after?.name).toBe("bar");
   });
 });
 
