@@ -157,7 +157,7 @@ export function handleSubscribe(
         events: [],
         isLast: false,
       });
-      directoryService.loadSessionEvents(msg.sessionId, session.sessionFile).then(async (result) => {
+      directoryService.loadSessionEvents(msg.sessionId, session.sessionFile, session.contextWindow).then(async (result) => {
         if (result.success) {
           for (const evt of result.events) {
             eventStore.insertEvent(msg.sessionId, evt);

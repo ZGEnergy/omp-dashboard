@@ -145,6 +145,53 @@ describe("replayEntriesAsEvents", () => {
     });
   });
 
+  it("should use knownContextWindow over inferred value when provided", () => {
+    // Regression: pi's JSONL has no contextUsage events, so replay falls
+    // back to inferContextWindow(modelId) which pins Claude to 200k. When
+    // the caller knows the real value (e.g. server has it persisted in
+    // .meta.json from a live turn_end), it must override the heuristic.
+    const entries = [
+      { type: "model_change", modelId: "claude-sonnet-4-20250514", timestamp: "2025-01-01T00:00:00Z" },
+      {
+        type: "message",
+        id: "e1",
+        timestamp: "2025-01-01T00:00:00Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "hi" }],
+          usage: { input: 1, output: 1, totalTokens: 500_000 },
+        },
+      },
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries, 1_000_000);
+    const stats = events.find((e) => e.event.eventType === "stats_update");
+    expect(stats).toBeDefined();
+    const data = stats!.event.data as any;
+    expect(data.contextUsage.contextWindow).toBe(1_000_000);
+  });
+
+  it("should fall back to inferred contextWindow when knownContextWindow is undefined", () => {
+    const entries = [
+      { type: "model_change", modelId: "claude-sonnet-4-20250514", timestamp: "2025-01-01T00:00:00Z" },
+      {
+        type: "message",
+        id: "e1",
+        timestamp: "2025-01-01T00:00:00Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "hi" }],
+          usage: { input: 1, output: 1, totalTokens: 100 },
+        },
+      },
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries);
+    const stats = events.find((e) => e.event.eventType === "stats_update");
+    const data = stats!.event.data as any;
+    expect(data.contextUsage.contextWindow).toBe(200_000); // legacy heuristic
+  });
+
   it("should not generate stats_update when assistant message has no usage", () => {
     const entries = [
       {

@@ -138,6 +138,15 @@ export function scanAllSessions(sessionsDir?: string): ScanResult {
         // Stale cache — re-extract stats and merge
         const stats = extractSessionStats(sessionFile);
         if (stats) {
+          // Pi's JSONL has no turn_end/contextUsage events, so stats.contextWindow
+          // is always inferContextWindow(model) — a hardcoded heuristic that pins
+          // any Claude model to 200k and ignores 1M Sonnet variants. The persisted
+          // meta.contextWindow came from a real live `turn_end` event, so it's
+          // authoritative; only fall back to the inferred value when the model
+          // changed (persisted value no longer applies) or none was persisted.
+          const effectiveModel = stats.model ?? meta.model;
+          const preserveContextWindow =
+            meta.contextWindow !== undefined && effectiveModel === meta.model;
           const updated: SessionMeta = {
             ...meta,
             model: stats.model ?? meta.model,
@@ -148,7 +157,7 @@ export function scanAllSessions(sessionsDir?: string): ScanResult {
             cacheWrite: stats.cacheWrite,
             cost: stats.cost,
             contextTokens: stats.lastTotalTokens,
-            contextWindow: stats.contextWindow,
+            contextWindow: preserveContextWindow ? meta.contextWindow : stats.contextWindow,
             cachedAt: Date.now(),
           };
           writeSessionMeta(sessionFile, updated);

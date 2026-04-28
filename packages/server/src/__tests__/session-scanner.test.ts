@@ -184,6 +184,50 @@ describe("session-scanner", () => {
     expect(meta.cwd).toBe("/test");
   });
 
+  it("should preserve persisted contextWindow over inferred stats value when model unchanged", () => {
+    // Regression: pi's JSONL has no turn_end/contextUsage events, so
+    // extractSessionStats falls back to inferContextWindow(model) which
+    // hardcodes Claude → 200_000. The persisted .meta.json value (written
+    // from a live turn_end carrying e.g. 1_000_000 for Sonnet 1M) must win.
+    const dir = createSessionDir("--test-cwd--");
+    const sf = createJsonl(dir, "2026-03-30T21-39-43-034Z_ctx-id.jsonl", { id: "ctx-id", cwd: "/ctx" });
+
+    writeSessionMeta(sf, {
+      cwd: "/ctx",
+      model: "anthropic/claude-sonnet-4-20250514",
+      contextWindow: 1_000_000, // truth from a live turn_end
+      cachedAt: 1000, // stale — forces re-extract
+    });
+    fs.utimesSync(sf, new Date(), new Date());
+
+    const result = scanAllSessions(tmpDir);
+    expect(result.sessions[0].contextWindow).toBe(1_000_000);
+
+    // Should also persist the preserved value, not the inferred 200k.
+    const meta = JSON.parse(fs.readFileSync(metaPath(sf), "utf-8"));
+    expect(meta.contextWindow).toBe(1_000_000);
+  });
+
+  it("should adopt inferred contextWindow when model changes", () => {
+    // If the user switched models, the persisted contextWindow no longer
+    // applies — fall back to whatever stats reports for the new model.
+    const dir = createSessionDir("--test-cwd--");
+    const sf = createJsonl(dir, "2026-03-30T21-39-43-034Z_chg-id.jsonl", { id: "chg-id", cwd: "/chg" });
+
+    writeSessionMeta(sf, {
+      cwd: "/chg",
+      model: "openai/gpt-4o", // different model from the mock's anthropic/claude-...
+      contextWindow: 128_000,
+      cachedAt: 1000,
+    });
+    fs.utimesSync(sf, new Date(), new Date());
+
+    const result = scanAllSessions(tmpDir);
+    // Mock returns model=anthropic/claude-..., contextWindow=200000 → adopt it
+    expect(result.sessions[0].model).toBe("anthropic/claude-sonnet-4-20250514");
+    expect(result.sessions[0].contextWindow).toBe(200_000);
+  });
+
   it("should set hidden from meta", () => {
     const dir = createSessionDir("--test-cwd--");
     const sf = createJsonl(dir, "2026-03-30T21-39-43-034Z_hidden-id.jsonl", { id: "hidden-id", cwd: "/test" });

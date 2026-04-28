@@ -48,7 +48,7 @@ export interface DirectoryAddedResult {
 export interface DirectoryService {
   knownDirectories(): string[];
   discoverSessions(cwd: string): DiscoveredSession[];
-  loadSessionEvents(sessionId: string, sessionFile: string): Promise<LoadResult>;
+  loadSessionEvents(sessionId: string, sessionFile: string, knownContextWindow?: number): Promise<LoadResult>;
   getOpenSpecData(cwd: string): OpenSpecData | undefined;
   /** Force refresh: bypasses the mtime gate. Still honors the semaphore. */
   refreshOpenSpec(cwd: string): Promise<OpenSpecData>;
@@ -199,7 +199,7 @@ export function createDirectoryService(
     return discoverSessionsForCwd(cwd);
   }
 
-  async function loadSessionEvents(sessionId: string, sessionFile: string): Promise<LoadResult> {
+  async function loadSessionEvents(sessionId: string, sessionFile: string, knownContextWindow?: number): Promise<LoadResult> {
     if (loadingSet.has(sessionId)) {
       return { success: false, events: [], error: "already_loading" };
     }
@@ -207,7 +207,9 @@ export function createDirectoryService(
     try {
       const { loadSessionEntries } = await import("./session-file-reader.js");
       const entries = loadSessionEntries(sessionFile);
-      const eventMessages = replayEntriesAsEvents(sessionId, entries);
+      // Pass persisted contextWindow so replay's stats_update events use the
+      // real value instead of inferContextWindow(modelId)'s 200k Claude default.
+      const eventMessages = replayEntriesAsEvents(sessionId, entries, knownContextWindow);
       const events = eventMessages.map((m) => m.event);
       return { success: true, events };
     } catch (err: any) {

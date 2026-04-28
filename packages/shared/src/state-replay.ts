@@ -23,9 +23,19 @@ import type { EventForwardMessage } from "./protocol.js";
  * pi 0.69+, where the bridge sees `message_start` before pi has assigned
  * the entry id. Replay has no such gap.
  */
+/**
+ * @param knownContextWindow Optional override for the context window size,
+ *   typically `session.contextWindow` from `.meta.json` (which was persisted
+ *   from a live `turn_end` event). When provided, it is used in place of the
+ *   `inferContextWindow(modelId)` heuristic for every synthesized
+ *   `stats_update` event. The heuristic ignores Sonnet's 1M variant and
+ *   pins Claude to 200k, so passing the persisted value avoids a brief
+ *   200k flicker on reload before the next live `turn_end` arrives.
+ */
 export function replayEntriesAsEvents(
   sessionId: string,
   entries: any[],
+  knownContextWindow?: number,
 ): EventForwardMessage[] {
   const messages: EventForwardMessage[] = [];
   const openToolCalls = new Set<string>(); // track tool calls without results
@@ -86,7 +96,7 @@ export function replayEntriesAsEvents(
           if (totalTokens && totalTokens > 0) {
             statsData.contextUsage = {
               tokens: totalTokens,
-              contextWindow: inferContextWindow(currentModel),
+              contextWindow: knownContextWindow ?? inferContextWindow(currentModel),
             };
           }
           messages.push(makeEvent(sessionId, "stats_update", ts, statsData));

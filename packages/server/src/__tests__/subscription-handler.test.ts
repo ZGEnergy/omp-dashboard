@@ -135,6 +135,46 @@ describe("handleSubscribe — stale lastSeq detection", () => {
     expect(clearReplaying).toHaveBeenCalledWith(ctx.ws, "s1", 3);
   });
 
+  it("forwards session.contextWindow into directoryService.loadSessionEvents on lazy load", async () => {
+    // Regression: ended sessions opened from disk must replay with the
+    // persisted contextWindow (e.g. 1M Sonnet beta) instead of the legacy
+    // 200k Claude inference. The wiring lives in subscription-handler:160 —
+    // this test pins that loadSessionEvents is invoked with session.contextWindow
+    // as its 3rd argument so future refactors cannot silently drop it.
+    // See change: fix-context-window-reload.
+    const loadSessionEvents = vi.fn(async () => ({ success: true, events: [] }));
+    const directoryService = { loadSessionEvents } as any;
+    const ctx = createMockContext({ directoryService });
+
+    // Restore an ENDED session with sessionFile + persisted contextWindow.
+    // No events in the store → falls into the lazy-load branch.
+    // (`restore()` takes the full DashboardSession; `register()` does not
+    // accept contextWindow as a registration param.)
+    ctx.sessionManager.restore({
+      id: "s-ctx",
+      cwd: "/test",
+      source: "tui",
+      status: "ended",
+      startedAt: 1000,
+      endedAt: 2000,
+      tokensIn: 0,
+      tokensOut: 0,
+      cost: 0,
+      contextWindow: 1_000_000,
+      sessionFile: "/sessions/s-ctx.jsonl",
+      sessionDir: "/sessions",
+      hidden: false,
+    } as any);
+
+    const subs = new Set<string>();
+    handleSubscribe({ type: "subscribe", sessionId: "s-ctx" }, subs, ctx);
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(loadSessionEvents).toHaveBeenCalledTimes(1);
+    expect(loadSessionEvents).toHaveBeenCalledWith("s-ctx", "/sessions/s-ctx.jsonl", 1_000_000);
+  });
+
   it("does full replay when lastSeq is 0", async () => {
     const ctx = createMockContext();
     for (let i = 0; i < 3; i++) ctx.eventStore.insertEvent("s1", makeEvent());
