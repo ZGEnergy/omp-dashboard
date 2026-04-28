@@ -19,6 +19,31 @@ function dispatchComplete(opId: string, success: boolean, source: string, action
   );
 }
 
+function dispatchProgress(opId: string, source: string, eventType: "start" | "progress" | "complete" | "error" = "progress", message?: string) {
+  window.dispatchEvent(
+    new CustomEvent("pi-package-event", {
+      detail: {
+        type: "package_progress",
+        operationId: opId,
+        event: { type: eventType, action: "install", source, message },
+      },
+    }),
+  );
+}
+
+/** Build a fetch mock whose response resolution can be deferred from the test body. */
+function makeDeferredFetchMock(payload: any, status = 200) {
+  let resolveBody!: (r: Response) => void;
+  const bodyPromise = new Promise<Response>((res) => {
+    resolveBody = res;
+  });
+  const fetchMock = vi.fn(async () => bodyPromise);
+  return {
+    fetchMock,
+    settle: () => resolveBody(jsonResponse(payload, status)),
+  };
+}
+
 function makeFetchMock(responder: (req: { url: string; body: any }, callIndex: number) => Promise<Response> | Response) {
   let calls = 0;
   return vi.fn(async (url: string, init?: RequestInit) => {
@@ -228,6 +253,66 @@ describe("package-queue", () => {
     await flush();
 
     expect(packageQueue.getStateForSource("npm:a")).toBe("running");
+  });
+
+  // ── Race-window matching (change: fix-local-path-install-spinner) ───
+
+  it("completion arrives BEFORE HTTP response resolves (race window) — matched by source", async () => {
+    const { fetchMock, settle } = makeDeferredFetchMock({ success: true, data: { operationId: "op-race" } });
+    vi.stubGlobal("fetch", fetchMock);
+
+    packageQueue.enqueue({ source: "/local/path/x", action: "install", scope: "global" });
+    await flush();
+
+    // POST is in flight, HTTP response NOT yet resolved → operationId is still null.
+    expect(packageQueue.getRunning()?.operationId).toBeNull();
+    expect(packageQueue.getStateForSource("/local/path/x")).toBe("running");
+
+    // Server broadcasts completion BEFORE fetch resolves.
+    dispatchComplete("op-race", true, "/local/path/x");
+    await flush();
+
+    // With the fix, source-match wins during the null-opId window.
+    expect(packageQueue.getStateForSource("/local/path/x")).toBe("success");
+    expect(packageQueue.getRunning()).toBeNull();
+
+    // Now the HTTP response finally arrives — must be a no-op since the op already
+    // completed (the postOperation stale guard short-circuits).
+    settle();
+    await flush();
+    expect(packageQueue.getStateForSource("/local/path/x")).toBe("success");
+  });
+
+  it("progress arrives BEFORE HTTP response resolves — message updated via source-match", async () => {
+    const { fetchMock } = makeDeferredFetchMock({ success: true, data: { operationId: "op-race" } });
+    vi.stubGlobal("fetch", fetchMock);
+
+    packageQueue.enqueue({ source: "/local/path/y", action: "install", scope: "global" });
+    await flush();
+
+    expect(packageQueue.getRunning()?.operationId).toBeNull();
+    expect(packageQueue.getRunning()?.message).toBe("Starting…");
+
+    dispatchProgress("op-race", "/local/path/y", "progress", "Cloning…");
+    await flush();
+
+    // With the fix, source-match wins during the null-opId window.
+    expect(packageQueue.getRunning()?.message).toBe("Cloning…");
+  });
+
+  it("completion with mismatching source AND opId during race window is ignored", async () => {
+    const { fetchMock } = makeDeferredFetchMock({ success: true, data: { operationId: "op-race" } });
+    vi.stubGlobal("fetch", fetchMock);
+
+    packageQueue.enqueue({ source: "/local/path/z", action: "install", scope: "global" });
+    await flush();
+
+    // operationId still null AND source doesn't match → no match.
+    dispatchComplete("some-other-op", true, "npm:unrelated");
+    await flush();
+
+    expect(packageQueue.getStateForSource("/local/path/z")).toBe("running");
+    expect(packageQueue.getRunning()?.source).toBe("/local/path/z");
   });
 
   it("__resetForTests clears all state", async () => {

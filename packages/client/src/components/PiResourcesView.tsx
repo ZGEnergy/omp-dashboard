@@ -84,11 +84,17 @@ function MergedScopeSection({ title, scope, packages, onView }: {
 }) {
   const [collapsed, setCollapsed] = useState(true);
   const looseCount = scope.extensions.length + scope.skills.length + scope.prompts.length;
-  const pkgResourceCount = packages.reduce((sum, p) =>
+  // Browse-only: skip packages that contribute zero resources. They're not
+  // useful here — manage them in the Packages tab. See change:
+  // unify-workspace-package-management.
+  const contributingPackages = packages.filter(
+    (p) => p.resources.extensions.length + p.resources.skills.length + p.resources.prompts.length > 0,
+  );
+  const pkgResourceCount = contributingPackages.reduce((sum, p) =>
     sum + p.resources.extensions.length + p.resources.skills.length + p.resources.prompts.length, 0);
   const totalCount = looseCount + pkgResourceCount;
   const hasLoose = looseCount > 0;
-  const hasPkgs = packages.length > 0;
+  const hasPkgs = contributingPackages.length > 0;
   const isEmpty = !hasLoose && !hasPkgs;
 
   return (
@@ -102,7 +108,7 @@ function MergedScopeSection({ title, scope, packages, onView }: {
           {title}
         </h3>
         <span className="text-[10px] text-[var(--text-muted)] ml-1">
-          ({totalCount}{hasPkgs ? ` · ${packages.length} pkg${packages.length !== 1 ? "s" : ""}` : ""})
+          ({totalCount})
         </span>
       </button>
       {!collapsed && (
@@ -117,7 +123,7 @@ function MergedScopeSection({ title, scope, packages, onView }: {
                 <ResourceGroup label="Prompts" resources={scope.prompts} onView={onView} depth={1} />
               </>
             )}
-            {packages.map((pkg) => (
+            {contributingPackages.map((pkg) => (
               <PackageItem key={pkg.source} pkg={pkg} onView={onView} />
             ))}
           </>
@@ -228,7 +234,7 @@ export function PiResourcesView({ cwd, onBack, onViewFile }: Props) {
                 : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             }`}
           >
-            {tab === "installed" ? "Installed" : "Packages"}
+            {tab === "installed" ? "Resources" : "Packages"}
             {activeTab === tab && (
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--accent-primary)]" />
             )}

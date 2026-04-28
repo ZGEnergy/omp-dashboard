@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { getApiBase } from "../lib/api-context.js";
 import { Icon } from "@mdi/react";
-import { mdiMagnify, mdiLoading, mdiPackageVariantClosed, mdiLink, mdiFilterOutline } from "@mdi/js";
+import { mdiMagnify, mdiLoading, mdiPackageVariantClosed, mdiLink } from "@mdi/js";
 import { usePackageSearch } from "../hooks/usePackageSearch.js";
 import { useInstalledPackages } from "../hooks/useInstalledPackages.js";
 import { usePackageOperations } from "../hooks/usePackageOperations.js";
 import { PackageCard } from "./PackageCard.js";
+import { PackageRow } from "./PackageRow.js";
+import { classifySource } from "../lib/package-classifier.js";
 import { RecommendedExtensions } from "./RecommendedExtensions.js";
 import type { NpmPackageResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 
@@ -26,40 +28,42 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
   const installedOther = useInstalledPackages(otherScope, scope === "local" ? cwd : undefined);
   const operations = usePackageOperations(scope, cwd, installedOwn.refresh);
   const [urlInput, setUrlInput] = useState("");
-  const [showInstalled, setShowInstalled] = useState(false);
   const [updatesAvailable, setUpdatesAvailable] = useState<Set<string>>(new Set());
   const [checkingUpdateFor, setCheckingUpdateFor] = useState<Set<string>>(new Set());
 
-  /** Map npm package name → which scope(s) it's installed in */
+  /**
+   * Map `pkg.source` (canonical id from server) → which scope(s) it's installed in.
+   *
+   * Source-keyed instead of npm-name-keyed so cross-scope detection works for
+   * every source shape (`npm:`, absolute path, git URL). Search-result lookups
+   * for `NpmPackageResult` rows synthesize `npm:${pkg.name}` at lookup time
+   * (see `isInstalled` / `getInstalledScope` below). See change:
+   * unify-workspace-package-management.
+   */
   const installedInfo = useMemo(() => {
     const map = new Map<string, { own: boolean; other: boolean }>();
-    const addEntries = (packages: typeof installedOwn.packages, key: "own" | "other") => {
-      for (const p of packages) {
-        const npmMatch = p.source.match(/^npm:(.+?)(?:@.*)?$/);
-        const name = npmMatch ? npmMatch[1] : p.source;
-        const existing = map.get(name) ?? { own: false, other: false };
-        existing[key] = true;
-        map.set(name, existing);
-        // Also store by source
-        if (npmMatch) {
-          const ex2 = map.get(p.source) ?? { own: false, other: false };
-          ex2[key] = true;
-          map.set(p.source, ex2);
-        }
-      }
-    };
-    addEntries(installedOwn.packages, "own");
-    addEntries(installedOther.packages, "other");
+    for (const p of installedOwn.packages) {
+      map.set(p.source, { own: true, other: false });
+    }
+    for (const p of installedOther.packages) {
+      const e = map.get(p.source) ?? { own: false, other: false };
+      e.other = true;
+      map.set(p.source, e);
+    }
     return map;
   }, [installedOwn.packages, installedOther.packages]);
 
+  // Search-results rows (NpmPackageResult) have only `pkg.name`; reconstruct
+  // their canonical source as `npm:${name}` for the source-keyed lookup.
+  const lookupBySearchName = (name: string) => installedInfo.get(`npm:${name}`);
+
   const isInstalled = (name: string) => {
-    const info = installedInfo.get(name) ?? installedInfo.get(`npm:${name}`);
+    const info = lookupBySearchName(name);
     return !!(info && (info.own || info.other));
   };
 
   const getInstalledScope = (name: string): "global" | "local" | "both" | undefined => {
-    const info = installedInfo.get(name) ?? installedInfo.get(`npm:${name}`);
+    const info = lookupBySearchName(name);
     if (!info) return undefined;
     const ownScope = scope;
     const otherScopeLabel = otherScope;
@@ -70,6 +74,20 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
     if (inOther) return otherScopeLabel;
     return undefined;
   };
+
+  /**
+   * Non-recommended installed packages — shown as `PackageRow` entries above
+   * search. Recommended ones live in the dedicated `RecommendedExtensions`
+   * panel and are intentionally excluded here to avoid double-listing.
+   */
+  const installedNonRecommended = useMemo(
+    () => installedOwn.packages.filter((p) => !p.isRecommended),
+    [installedOwn.packages],
+  );
+
+  /** Sanitize a source string for use in a stable `data-testid`. */
+  const sourceTestId = (source: string) =>
+    source.replace(/[^a-z0-9]/gi, "-");
 
   const handleCheckUpdate = useCallback(async (pkgName: string) => {
     setCheckingUpdateFor((prev) => new Set(prev).add(pkgName));
@@ -93,34 +111,11 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
     setCheckingUpdateFor((prev) => { const next = new Set(prev); next.delete(pkgName); return next; });
   }, [cwd]);
 
-  // When "installed" filter is active, merge installed packages that aren't in search results
-  const displayPackages = useMemo(() => {
-    if (!showInstalled) return search.packages;
-
-    // Start with search results that are installed
-    const fromSearch = search.packages.filter((pkg) => isInstalled(pkg.name));
-    const seen = new Set(fromSearch.map((p) => p.name));
-
-    // Add installed packages not in search results as synthetic entries
-    const allInstalled = [...installedOwn.packages, ...installedOther.packages];
-    for (const pkg of allInstalled) {
-      const npmMatch = pkg.source.match(/^npm:(.+?)(?:@.*)?$/);
-      const name = npmMatch ? npmMatch[1] : null;
-      if (!name || seen.has(name)) continue;
-      seen.add(name);
-      fromSearch.push({
-        name,
-        description: undefined,
-        version: "",
-        keywords: [],
-        date: "",
-        types: [],
-        downloads: undefined,
-      });
-    }
-
-    return fromSearch;
-  }, [search.packages, showInstalled, installedInfo, installedOwn.packages, installedOther.packages]);
+  // Display packages = search results, full stop. Installed packages live in
+  // their own dedicated section (see InstalledPackagesSection JSX below) so
+  // the synthetic-card-from-installed code path is gone. See change:
+  // unify-workspace-package-management.
+  const displayPackages = search.packages;
 
   const handleInstall = (pkg: NpmPackageResult) => {
     const source = `npm:${pkg.name}`;
@@ -146,6 +141,44 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
     <div className="flex flex-col gap-3" data-testid="package-browser">
       {/* Recommended extensions (curated by the dashboard) — shown above search */}
       <RecommendedExtensions scope={scope} cwd={cwd} />
+
+      {/* Installed Packages — every source shape, uniform PackageRow.
+          See change: unify-workspace-package-management. */}
+      {installedNonRecommended.length > 0 && (
+        <div data-testid="installed-packages-section">
+          <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-1.5">
+            Installed Packages
+          </h3>
+          <div className="space-y-1">
+            {installedNonRecommended.map((pkg) => {
+              const tid = `installed-row-${sourceTestId(pkg.source)}`;
+              const opSource = pkg.source;
+              const busy = operations.runningSource === opSource;
+              const opStatus = operations.statusFor(opSource);
+              const opMessage = operations.messageFor(opSource);
+              return (
+                <PackageRow
+                  key={pkg.source}
+                  displayName={pkg.displayName ?? pkg.source}
+                  source={pkg.source}
+                  sourceType={classifySource(pkg.source)}
+                  isBundled={!!pkg.isBundled}
+                  currentVersion={pkg.version}
+                  updateAvailable={updatesAvailable.has(pkg.source)}
+                  busy={busy}
+                  progress={busy ? opMessage : undefined}
+                  error={opStatus === "error" ? opMessage : undefined}
+                  canUpdate={true}
+                  canUninstall={true}
+                  onUpdate={() => operations.update(pkg.source)}
+                  onUninstall={() => operations.remove(pkg.source)}
+                  testId={tid}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* URL input for manual install */}
       <div className="flex gap-2">
@@ -191,19 +224,8 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
         />
       </div>
 
-      {/* Type filter pills + installed filter */}
+      {/* Type filter pills */}
       <div className="flex gap-1.5 flex-wrap">
-        <button
-          onClick={() => setShowInstalled(!showInstalled)}
-          className={`px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors flex items-center gap-0.5 ${
-            showInstalled
-              ? "border-green-400 bg-green-400/20 text-green-400"
-              : "border-[var(--border-secondary)] text-[var(--text-muted)] hover:border-[var(--text-tertiary)]"
-          }`}
-        >
-          <Icon path={mdiFilterOutline} size={0.35} />
-          installed
-        </button>
         {TYPE_PILLS.map((type) => (
           <button
             key={type}
@@ -257,7 +279,7 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
       {!search.isLoading && displayPackages.length === 0 && !search.error && (
         <div className="text-center py-6 text-[var(--text-muted)]">
           <Icon path={mdiPackageVariantClosed} size={1.2} className="mx-auto mb-2 opacity-30" />
-          <p className="text-xs">{showInstalled ? "No installed packages found" : "No packages found"}</p>
+          <p className="text-xs">No packages found</p>
         </div>
       )}
 
@@ -265,7 +287,6 @@ export function PackageBrowser({ scope, cwd, onViewReadme, onConfirmInstall }: P
         <>
           <div className="text-[10px] text-[var(--text-muted)]">
             {displayPackages.length} package{displayPackages.length !== 1 ? "s" : ""}
-            {showInstalled ? " (installed)" : ""}
           </div>
           <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
             {displayPackages.map((pkg) => {

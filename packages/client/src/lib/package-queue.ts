@@ -237,18 +237,48 @@ class PackageQueue {
     this.notify();
   }
 
+  /**
+   * Match an incoming WS message to the running op.
+   *
+   * Race window: when the queue POSTs an operation, the server may finish
+   * faster than the HTTP response round-trip (notably for local-path
+   * installs that have no network step). The `package_operation_complete`
+   * WS frame can therefore arrive while `running.operationId` is still
+   * `null` (we haven't parsed `body.data.operationId` yet). Strict
+   * `operationId === operationId` matching during that window silently
+   * drops legitimate completions — the spinner sticks and the queue
+   * jams. See change: fix-local-path-install-spinner.
+   *
+   * Source-fallback during the null-opId window is unambiguous because
+   * `PackageManagerWrapper.busy` enforces at-most-one-in-flight per
+   * server, so we cannot have a second op for the same source running
+   * concurrently. Once `operationId` is known, prefer it: it survives
+   * any future server-side source canonicalization.
+   */
+  private matchesRunning(opId: string | undefined, source: string | undefined): boolean {
+    if (!this.running) return false;
+    if (this.running.operationId !== null) {
+      return this.running.operationId === opId;
+    }
+    return this.running.source === source;
+  }
+
   private onWindowEvent = (e: Event) => {
     const msg = (e as CustomEvent).detail;
     if (!msg || typeof msg !== "object") return;
     if (msg.type === "package_progress") {
-      if (this.running && this.running.operationId === msg.operationId) {
-        this.running.message = msg.event?.message ?? `${msg.event?.action}: ${msg.event?.type}`;
+      // PackageProgressMessage shape: { type, operationId, event: { source, action, type, message } }
+      // Source lives on the nested `event` object, not the top-level message.
+      if (this.matchesRunning(msg.operationId, msg.event?.source)) {
+        this.running!.message = msg.event?.message ?? `${msg.event?.action}: ${msg.event?.type}`;
         this.notify();
       }
       return;
     }
     if (msg.type === "package_operation_complete") {
-      if (!this.running || this.running.operationId !== msg.operationId) return;
+      // PackageOperationCompleteMessage shape: { type, operationId, source, action, ... }
+      // Source is top-level here.
+      if (!this.matchesRunning(msg.operationId, msg.source)) return;
       const errorMsg = msg.success ? undefined : (msg.error ?? "Operation failed");
       const successMsg = msg.success
         ? `${msg.action} complete${msg.sessionsReloaded ? ` (${msg.sessionsReloaded} sessions reloaded)` : ""}`
