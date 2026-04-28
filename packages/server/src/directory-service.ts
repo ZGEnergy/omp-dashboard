@@ -255,16 +255,27 @@ export function createDirectoryService(
     }
 
     // ── Step 2: per-change status (gated) ──
+    //
+    // TOCTOU note: we capture the file-aware effective mtime BEFORE invoking
+    // `openspec status` and stamp THAT value into the cache. If a tracked
+    // artifact file is written during the CLI invocation, the post-call mtime
+    // will differ from `preCallMtime` and we discard this tick's status for
+    // that change — leaving the prior cache entry (if any) untouched so the
+    // next gated tick re-polls naturally. See change:
+    // fix-openspec-mtime-gate-toctou.
     const statusResults = new Map<string, { artifacts?: Array<{ id: string; status: string }>; isComplete?: boolean } | null>();
+    const preCallMtimes = new Map<string, number | undefined>();
+    const racyNames = new Set<string>();
 
     await Promise.all((listResult ?? []).map(async (c) => {
       // File-aware effective mtime: catches in-place edits to tasks.md /
       // proposal.md / design.md that POSIX dir-mtime misses. See change:
       // fix-openspec-mtime-gate-blind-spots.
-      const changeMtime = effectiveMtimeOr(perChangeArtifactPaths(changesRoot, c.name));
+      const preCallMtime = effectiveMtimeOr(perChangeArtifactPaths(changesRoot, c.name));
+      preCallMtimes.set(c.name, preCallMtime);
       const cached = cache.changes.get(c.name);
 
-      if (gateEnabled && cached && cached.mtimeMs !== undefined && cached.mtimeMs === changeMtime) {
+      if (gateEnabled && cached && cached.mtimeMs !== undefined && cached.mtimeMs === preCallMtime) {
         // Cache hit. Reuse the artifacts/isComplete from the cached OpenSpecChange.
         statusResults.set(c.name, {
           artifacts: cached.change.artifacts.map((a) => ({ id: a.id, status: a.status })),
@@ -274,6 +285,30 @@ export function createDirectoryService(
       }
 
       const status = await semaphore.run(() => runOpenSpecStatus(cwd, c.name));
+
+      // TOCTOU check. If any tracked artifact path was written between the
+      // pre-call stat and now, the CLI's view of disk is stale relative to
+      // the mtime we'd stamp — discard. See change: fix-openspec-mtime-gate-toctou.
+      const postCallMtime = effectiveMtimeOr(perChangeArtifactPaths(changesRoot, c.name));
+      if (preCallMtime !== postCallMtime) {
+        if (typeof process !== "undefined" && /pi-dashboard|openspec-poll/.test(process.env?.DEBUG ?? "")) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[fix-openspec-mtime-gate-toctou] discarded racy status for ${c.name} (pre=${preCallMtime} post=${postCallMtime})`,
+          );
+        }
+        racyNames.add(c.name);
+        if (cached) {
+          // Reuse the prior cached status so buildOpenSpecData doesn't render
+          // an empty artifact list for this tick. Cache entry is preserved
+          // unchanged below by skipping the stamping loop for racy names.
+          statusResults.set(c.name, {
+            artifacts: cached.change.artifacts.map((a) => ({ id: a.id, status: a.status })),
+            ...(cached.change.isComplete !== undefined ? { isComplete: cached.change.isComplete } : {}),
+          });
+        }
+        return;
+      }
       statusResults.set(c.name, status);
     }));
 
@@ -284,10 +319,16 @@ export function createDirectoryService(
       createFsProbeFactory(cwd),
     );
 
-    // Update per-change cache with the file-aware effective mtimes we just observed.
+    // Stamp the cache with the pre-call mtime — i.e. the mtime that
+    // demonstrably reflects the file state observed by the CLI. Skip racy
+    // names so the next gated tick re-polls. See change:
+    // fix-openspec-mtime-gate-toctou.
     for (const change of data.changes) {
-      const changeMtime = effectiveMtimeOr(perChangeArtifactPaths(changesRoot, change.name));
-      cache.changes.set(change.name, { mtimeMs: changeMtime, change });
+      if (racyNames.has(change.name)) continue;
+      const stampMtime = preCallMtimes.has(change.name)
+        ? preCallMtimes.get(change.name)
+        : effectiveMtimeOr(perChangeArtifactPaths(changesRoot, change.name));
+      cache.changes.set(change.name, { mtimeMs: stampMtime, change });
     }
     cache.data = data;
     caches.set(cwd, cache);
@@ -296,11 +337,15 @@ export function createDirectoryService(
 
   async function refreshOpenSpec(cwd: string): Promise<OpenSpecData> {
     try {
-      // The mtime gate is now file-aware (catches in-place tasks.md edits),
-      // so force-mode is no longer required for correctness — and dropping it
-      // makes post-archive refresh O(1) status spawns instead of O(N). See
-      // change: fix-openspec-mtime-gate-blind-spots.
-      return await pollOne(cwd, false);
+      // User-initiated refresh bypasses the gate. The gate is heuristic; the
+      // CLI is authoritative. When the user clicks the OpenSpec refresh icon
+      // they expect fresh data, never silently-cached data — force-mode is
+      // the user's escape hatch when the gate's heuristic is wrong, while
+      // periodic paths (`pollDirectoryGated`, `onDirectoryAdded`,
+      // `handleOpenSpecBulkArchive` post-archive refresh) stay gated.
+      // See changes: fix-openspec-mtime-gate-toctou (re-introduced force=true),
+      // fix-openspec-mtime-gate-blind-spots (initial removal of force=true).
+      return await pollOne(cwd, true);
     } catch {
       // Fall back to the legacy monolithic path so "refresh" never silently fails.
       const data = await pollOpenSpecAsync(cwd);
@@ -441,9 +486,13 @@ export function createDirectoryService(
     },
 
     async onDirectoryAdded(cwd: string): Promise<DirectoryAddedResult> {
+      // Internal path — use the gated poll, not the user-facing
+      // `refreshOpenSpec` (which now bypasses the gate). For a freshly-added
+      // directory the cache is empty, so the gate lets the CLI run anyway.
+      // See change: fix-openspec-mtime-gate-toctou.
       const [sessions, openspecData] = await Promise.all([
         discoverSessions(cwd),
-        refreshOpenSpec(cwd),
+        pollDirectoryGated(cwd),
       ]);
       return { sessions, openspecData };
     },

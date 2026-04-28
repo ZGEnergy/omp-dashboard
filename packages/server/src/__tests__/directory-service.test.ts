@@ -492,13 +492,16 @@ describe("DirectoryService", () => {
       expect(ca?.completedTasks).toBe(2);
     });
 
-    it("refreshOpenSpec uses the gate after archive (no force — zero status spawns for unchanged changes)", async () => {
-      // Covers the second half of `fix-openspec-mtime-gate-blind-spots`: with the
-      // gate corrected, refreshOpenSpec no longer needs to bypass it. Bulk archive
-      // bumps `<changes>/` mtime once (entry removal), so list re-runs once — but
-      // unchanged active changes' per-change effective mtimes don't move, so we
-      // skip every status spawn. Pre-fix this test would see 4 status spawns
-      // (one per remaining change) because `force=true` disabled the gate.
+    it("post-archive path uses pollDirectoryGated (zero status spawns for unchanged changes)", async () => {
+      // Covers the post-archive contract: `fix-openspec-mtime-gate-blind-spots`
+      // made the gate file-aware so the bulk-archive path could safely skip
+      // status spawns for unchanged changes. `fix-openspec-mtime-gate-toctou`
+      // re-introduced `force=true` on the user-facing `refreshOpenSpec` (so a
+      // user clicking the refresh icon always sees authoritative data), and
+      // routed the bulk-archive handler through `pollDirectoryGated` instead
+      // — preserving the O(1) status-spawn property after archives.
+      // Pre-fix (pre-blind-spots) this test would see 4 status spawns because
+      // `force=true` disabled the gate.
       const { runOpenSpecList, runOpenSpecStatus } = await import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js");
 
       // Set up 5 changes in the directory (replacing the beforeEach default).
@@ -521,8 +524,8 @@ describe("DirectoryService", () => {
       const sessionManager = createMockSessionManager();
       service = createDirectoryService(stateStore, sessionManager);
 
-      // First refresh seeds the cache (5 list+status spawns; not what's under test).
-      await service.refreshOpenSpec(cwd);
+      // First poll seeds the cache (5 list+status spawns; not what's under test).
+      await service.pollDirectoryGated(cwd);
       (runOpenSpecList as any).mockClear();
       (runOpenSpecStatus as any).mockClear();
 
@@ -537,11 +540,12 @@ describe("DirectoryService", () => {
         { name: "c4", status: "in-progress", completedTasks: 0, totalTasks: 1 },
       ] });
 
-      await service.refreshOpenSpec(cwd);
+      await service.pollDirectoryGated(cwd);
 
       expect(runOpenSpecList).toHaveBeenCalledTimes(1);
-      // Pre-fix this would be 4. Post-fix the gate skips every status because
-      // none of the surviving changes' artifact files moved.
+      // The gate skips every status because none of the surviving changes'
+      // artifact files moved. This is the path `handleOpenSpecBulkArchive`
+      // now takes (was `refreshOpenSpec` before fix-openspec-mtime-gate-toctou).
       expect(runOpenSpecStatus).toHaveBeenCalledTimes(0);
     });
 

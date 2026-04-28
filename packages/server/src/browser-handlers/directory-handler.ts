@@ -105,8 +105,14 @@ export function handleOpenSpecBulkArchive(
     // windowsHide, timeout, and argv-array escaping.
     // See change: platform-command-executor.
     openspecArchiveCompleted({ cwd: msg.cwd });
+    // Post-archive refresh stays gated: bulk-archive bumps `<changes>/`
+    // mtime once (entry removal), so the gate naturally re-runs `list` and
+    // any per-change CLI calls whose effective mtime advanced. Skipping
+    // the user-facing `refreshOpenSpec` (which now force-bypasses the gate)
+    // avoids O(N) status spawns after every bulk archive.
+    // See change: fix-openspec-mtime-gate-toctou.
     Promise.resolve()
-      .then(() => ctx.directoryService!.refreshOpenSpec(msg.cwd))
+      .then(() => ctx.directoryService!.pollDirectoryGated(msg.cwd))
       .then((data) => {
         if (data) ctx.broadcast({ type: "openspec_update", cwd: msg.cwd, data });
       });

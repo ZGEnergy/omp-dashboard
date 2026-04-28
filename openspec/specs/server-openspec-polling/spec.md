@@ -92,13 +92,47 @@ The gate SHALL use **file-aware effective mtime** rather than directory mtime al
 - **WHEN** `changeDetection` is `"always"`
 - **THEN** the server SHALL run `openspec list` and all `openspec status` invocations on every poll tick (matching pre-change behavior)
 
-#### Scenario: Force refresh uses the gate (not bypass)
-- **WHEN** `openspec_refresh { cwd }` is received, or `refreshOpenSpec(cwd)` is called by server code, or `onDirectoryAdded(cwd)` runs
-- **THEN** the change-detection gate SHALL be evaluated with the file-aware effective mtime
-- **AND** the CLI SHALL be invoked only for the list step and per-change steps whose effective mtime has advanced
-- **AND** the gate SHALL still be honored — force-mode is no longer required for correctness, because the gate now correctly reflects in-place file edits
+#### Scenario: User-initiated refresh bypasses the gate
+- **WHEN** the browser sends `openspec_refresh { cwd }` (i.e. the user clicked the OpenSpec refresh icon)
+- **THEN** `refreshOpenSpec(cwd)` SHALL invoke `pollOne(cwd, /*force=*/true)` and bypass the change-detection gate
+- **AND** the server SHALL spawn `openspec list` and `openspec status --change <name>` for every change in the directory, subject to the concurrency cap
+- **AND** the resulting `openspec_update` broadcast SHALL reflect the freshly-fetched CLI output
 
-NOTE: This scenario reverses the previous "Force refresh bypasses the gate" contract from the original `optimize-openspec-poll-burst` change. The previous contract was a workaround for the directory-mtime blind spot; with the fixed signal, force-mode bypass would just be wasted spawns.
+NOTE: This scenario reverses the contract introduced by `fix-openspec-mtime-gate-blind-spots`. The file-aware mtime gate handles the common case correctly, but a user clicking the refresh icon expects authoritative data and should never be silently served from a possibly-poisoned cache. Periodic polls (`pollDirectoryGated`), `onDirectoryAdded`, and post-archive bulk-archive refresh continue to honor the gate.
+
+#### Scenario: Periodic and onDirectoryAdded paths still honor the gate
+- **WHEN** a periodic poll tick fires, or `onDirectoryAdded(cwd)` is called for a freshly-pinned directory, or `handleOpenSpecBulkArchive` triggers a post-archive refresh
+- **THEN** the server SHALL invoke the gate-respecting `pollOne(cwd, /*force=*/false)` path
+- **AND** the gate SHALL skip CLI spawns when the file-aware effective mtime is unchanged
+
+### Requirement: TOCTOU-safe mtime stamping in the gated poll
+The server SHALL stamp into the per-change cache an mtime value that demonstrably reflects the file state observed by the `openspec status --change <name>` CLI invocation. The gated-poll implementation SHALL NOT update the per-change cache entry for `<name>` when the file-aware effective mtime of the tracked artifact paths changed during the CLI invocation.
+
+This requirement closes a latent race in which a write to `openspec/changes/<name>/{tasks,proposal,design}.md` (or to `openspec/changes/<name>/` itself, e.g. file creation) lands between the moment `openspec status` scans the directory and the moment the post-call `stat()` is taken. Without this requirement, the cache could record `{ mtimeMs: post-write, status: pre-write }`, after which the gate would correctly find `current mtime == cached mtime` on every subsequent tick and reuse the stale status indefinitely.
+
+#### Scenario: No write during the CLI invocation
+- **WHEN** `openspec status --change <name>` is invoked during a gated poll
+- **AND** no write to the tracked artifact paths occurs between the pre-call `stat()` and the post-call `stat()`
+- **THEN** the server SHALL stamp the cache entry as `{ mtimeMs: <pre-call mtime>, change: <CLI result> }`
+
+#### Scenario: Write during the CLI invocation is detected and discarded
+- **WHEN** `openspec status --change <name>` is invoked during a gated poll
+- **AND** any tracked artifact path is written between the pre-call `stat()` and the post-call `stat()` (causing pre-call mtime ≠ post-call mtime)
+- **THEN** the server SHALL NOT update the per-change cache entry for `<name>` on this tick
+- **AND** the existing cache entry (if any) SHALL be preserved unchanged
+- **AND** the next gated poll tick SHALL re-spawn `openspec status --change <name>` because the post-write effective mtime differs from the (preserved) cached `mtimeMs`
+
+#### Scenario: Bulk fast-forward authoring does not poison the cache
+- **WHEN** an external authoring flow (`/opsx:ff`, agent `Edit` tool, the user's IDE) writes `proposal.md`, `design.md`, `specs/**/*.md`, and `tasks.md` for a single change in rapid succession
+- **AND** a periodic gated poll tick lands during this authoring window
+- **THEN** within at most one additional gated poll tick after authoring completes, the cache SHALL reflect the post-authoring artifact statuses
+- **AND** the dashboard's `openspec_update` broadcast SHALL carry the post-authoring statuses
+
+#### Scenario: Discard path emits a debug-only diagnostic
+- **WHEN** the discard branch fires (pre-call mtime ≠ post-call mtime)
+- **AND** the `DEBUG` environment variable matches `pi-dashboard|openspec-poll`
+- **THEN** the server SHALL emit a single `console.warn` line citing the change name, pre-call mtime, post-call mtime, and `[fix-openspec-mtime-gate-toctou]`
+- **AND** when `DEBUG` is unset, the discard SHALL be silent
 
 ### Requirement: Concurrency cap on openspec CLI spawns
 The server SHALL cap the number of concurrent `openspec` CLI invocations across all directories and all changes at `DashboardConfig.openspec.maxConcurrentSpawns` (default 3, range 1–16). Invocations exceeding the cap SHALL queue FIFO and run as slots free up. Force-refresh paths SHALL also honor the cap.
