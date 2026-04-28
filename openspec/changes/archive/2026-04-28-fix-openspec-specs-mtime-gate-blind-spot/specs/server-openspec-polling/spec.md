@@ -1,41 +1,4 @@
-## Purpose
-
-Server-side OpenSpec CLI polling per directory. The server polls each known directory (pinned dirs + session cwds) at a configurable interval and broadcasts results keyed by cwd to connected browsers, replacing the previous per-session bridge-side polling.
-
-To avoid burst CPU usage when many active changes exist across multiple pinned directories, the scheduler layers four optimizations: a configurable interval (default 30 s), an mtime-based change-detection gate that skips re-polling unchanged proposals, a concurrency cap on CLI spawns, and a deterministic per-cwd jitter that staggers polls within each interval. All four are runtime-reconfigurable via `DashboardConfig.openspec`.
-## Requirements
-### Requirement: Server polls openspec CLI per directory
-The server SHALL run `openspec list --json` and `openspec status --change <name> --json` for each known directory at a **configurable interval** (default 30 seconds, range 5–3600 seconds, controlled by `DashboardConfig.openspec.pollIntervalSeconds`) and broadcast results keyed by cwd to connected browsers. Each directory's poll SHALL be offset within the interval by a deterministic per-cwd phase (range 0 to `DashboardConfig.openspec.jitterSeconds`, default 5 s) so that polls do not all align on the same tick.
-
-#### Scenario: Periodic poll for a known directory
-- **WHEN** one poll interval has elapsed since the last poll for a directory
-- **THEN** the server SHALL evaluate the directory for re-polling (subject to change detection, see below) and broadcast an `openspec_update` message with `cwd` and `data` fields if the data has changed
-
-#### Scenario: Configurable interval
-- **WHEN** `DashboardConfig.openspec.pollIntervalSeconds` is set to 60
-- **THEN** the server SHALL poll every 60 seconds instead of 30
-- **AND** changing this value via `PUT /api/config` SHALL take effect without a server restart
-
-#### Scenario: Deterministic per-cwd phase offset
-- **WHEN** three known directories exist and `jitterSeconds` is 5
-- **THEN** each directory's poll SHALL fire at a stable offset in `[0, 5000) ms` derived from a hash of its cwd
-- **AND** the same cwd SHALL receive the same offset on every tick
-
-#### Scenario: Initial poll on server startup
-- **WHEN** the server starts with known directories
-- **THEN** the server SHALL poll openspec for each known directory and broadcast initial results to any connected browsers
-
-#### Scenario: New directory becomes known
-- **WHEN** a new pinned directory is added or a session registers with a new cwd
-- **THEN** the server SHALL immediately poll openspec for that directory (bypassing both jitter and change detection for this first poll)
-
-#### Scenario: openspec CLI not available
-- **WHEN** `openspec` is not installed or the directory is not an openspec project
-- **THEN** the server SHALL cache `{ initialized: false, changes: [] }` for that directory
-
-#### Scenario: Browser requests immediate refresh
-- **WHEN** a browser sends `openspec_refresh` with a `cwd` field
-- **THEN** the server SHALL immediately re-poll the openspec CLI for that directory, **bypassing change detection** but still respecting the concurrency cap, and broadcast the result
+## MODIFIED Requirements
 
 ### Requirement: Change-detection gate to avoid redundant CLI invocations
 
@@ -153,6 +116,8 @@ The gate SHALL use **file-aware effective mtime** rather than directory mtime al
 
 NOTE: This is a third delta on the same `Change-detection gate to avoid redundant CLI invocations` requirement. Prior deltas: `fix-openspec-mtime-gate-blind-spots` (added `tasks.md`/`proposal.md`/`design.md` to the watch set), `fix-openspec-mtime-gate-toctou` (added the post-call effective-mtime re-check). This delta extends the watch set to `specs/**` and is otherwise additive — every prior scenario remains in force.
 
+## ADDED Requirements
+
 ### Requirement: Local specs evidence promotes the specs artifact status
 
 The dashboard SHALL post-process the per-change `artifacts` array returned by `openspec status --change <name> --json` so that the `specs` artifact's `status` is promoted from `"ready"` to `"done"` when local file-system evidence indicates spec authoring is satisfied. The override MUST NOT alter any other artifact id, MUST NOT demote `"done"` to any other value, and MUST NOT promote `"blocked"` directly to `"done"`.
@@ -210,68 +175,3 @@ After the specs-artifact override is applied, the dashboard SHALL re-derive the 
 
 - **WHEN** the specs override promotes `specs: ready → done` but at least one other artifact is `ready` or `blocked`
 - **THEN** `isComplete` SHALL be the value reported by the CLI (no promotion to true based on a partial promotion).
-
-### Requirement: TOCTOU-safe mtime stamping in the gated poll
-The server SHALL stamp into the per-change cache an mtime value that demonstrably reflects the file state observed by the `openspec status --change <name>` CLI invocation. The gated-poll implementation SHALL NOT update the per-change cache entry for `<name>` when the file-aware effective mtime of the tracked artifact paths changed during the CLI invocation.
-
-This requirement closes a latent race in which a write to `openspec/changes/<name>/{tasks,proposal,design}.md` (or to `openspec/changes/<name>/` itself, e.g. file creation) lands between the moment `openspec status` scans the directory and the moment the post-call `stat()` is taken. Without this requirement, the cache could record `{ mtimeMs: post-write, status: pre-write }`, after which the gate would correctly find `current mtime == cached mtime` on every subsequent tick and reuse the stale status indefinitely.
-
-#### Scenario: No write during the CLI invocation
-- **WHEN** `openspec status --change <name>` is invoked during a gated poll
-- **AND** no write to the tracked artifact paths occurs between the pre-call `stat()` and the post-call `stat()`
-- **THEN** the server SHALL stamp the cache entry as `{ mtimeMs: <pre-call mtime>, change: <CLI result> }`
-
-#### Scenario: Write during the CLI invocation is detected and discarded
-- **WHEN** `openspec status --change <name>` is invoked during a gated poll
-- **AND** any tracked artifact path is written between the pre-call `stat()` and the post-call `stat()` (causing pre-call mtime ≠ post-call mtime)
-- **THEN** the server SHALL NOT update the per-change cache entry for `<name>` on this tick
-- **AND** the existing cache entry (if any) SHALL be preserved unchanged
-- **AND** the next gated poll tick SHALL re-spawn `openspec status --change <name>` because the post-write effective mtime differs from the (preserved) cached `mtimeMs`
-
-#### Scenario: Bulk fast-forward authoring does not poison the cache
-- **WHEN** an external authoring flow (`/opsx:ff`, agent `Edit` tool, the user's IDE) writes `proposal.md`, `design.md`, `specs/**/*.md`, and `tasks.md` for a single change in rapid succession
-- **AND** a periodic gated poll tick lands during this authoring window
-- **THEN** within at most one additional gated poll tick after authoring completes, the cache SHALL reflect the post-authoring artifact statuses
-- **AND** the dashboard's `openspec_update` broadcast SHALL carry the post-authoring statuses
-
-#### Scenario: Discard path emits a debug-only diagnostic
-- **WHEN** the discard branch fires (pre-call mtime ≠ post-call mtime)
-- **AND** the `DEBUG` environment variable matches `pi-dashboard|openspec-poll`
-- **THEN** the server SHALL emit a single `console.warn` line citing the change name, pre-call mtime, post-call mtime, and `[fix-openspec-mtime-gate-toctou]`
-- **AND** when `DEBUG` is unset, the discard SHALL be silent
-
-### Requirement: Concurrency cap on openspec CLI spawns
-The server SHALL cap the number of concurrent `openspec` CLI invocations across all directories and all changes at `DashboardConfig.openspec.maxConcurrentSpawns` (default 3, range 1–16). Invocations exceeding the cap SHALL queue FIFO and run as slots free up. Force-refresh paths SHALL also honor the cap.
-
-#### Scenario: Burst is serialized
-- **WHEN** 20 directories each need 5 `openspec status` invocations at once and `maxConcurrentSpawns` is 3
-- **THEN** at most 3 `openspec` child processes SHALL be running simultaneously
-- **AND** all 100 invocations SHALL complete in sequence without errors
-
-#### Scenario: Resize takes effect without restart
-- **WHEN** `maxConcurrentSpawns` is changed from 3 to 8 via `PUT /api/config`
-- **THEN** the semaphore SHALL immediately allow up to 8 concurrent spawns for new work
-- **AND** in-flight spawns under the old cap SHALL be unaffected
-
-#### Scenario: Refresh storm is throttled
-- **WHEN** a browser sends 20 `openspec_refresh` messages concurrently for the same cwd
-- **THEN** at most `maxConcurrentSpawns` openspec CLI invocations SHALL be in flight at any time
-
-### Requirement: OpenSpec data keyed by directory in browser protocol
-The server SHALL send `openspec_update` messages to browsers keyed by `cwd` instead of `sessionId`.
-
-#### Scenario: Browser receives openspec_update
-- **WHEN** the server broadcasts an openspec_update
-- **THEN** the message SHALL contain `{ type: "openspec_update", cwd: string, data: OpenSpecData }` with no sessionId field
-
-#### Scenario: Browser connects and receives initial state
-- **WHEN** a browser WebSocket connects
-- **THEN** the server SHALL send cached `openspec_update` messages for all known directories that have initialized OpenSpec data
-
-### Requirement: Deduplicated polling across sessions
-The server SHALL poll each directory at most once per polling interval, regardless of how many sessions are registered for that directory.
-
-#### Scenario: Multiple sessions in same directory
-- **WHEN** three sessions are registered for `/project/foo`
-- **THEN** the server SHALL run the openspec CLI at most once per interval for `/project/foo`, not three times
-

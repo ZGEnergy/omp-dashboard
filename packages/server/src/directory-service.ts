@@ -19,6 +19,7 @@ import {
   runOpenSpecList,
   runOpenSpecStatus,
   createFsProbeFactory,
+  createFsSpecsProbeFactory,
 } from "@blackbelt-technology/pi-dashboard-shared/openspec-poller.js";
 import { DEFAULT_OPENSPEC_POLL, type OpenSpecPollConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { createSemaphore, type Semaphore } from "@blackbelt-technology/pi-dashboard-shared/semaphore.js";
@@ -106,15 +107,45 @@ export function effectiveMtimeOr(paths: string[]): number | undefined {
   return max;
 }
 
-/** File set tracked by the per-change effective-mtime computation. */
+/**
+ * File set tracked by the per-change effective-mtime computation.
+ *
+ * The base set covers the change directory itself plus the three top-level
+ * artifact files. The `specs/` fan-out catches multi-spec authoring:
+ *
+ *   - `<change>/specs/`               — advances on capability dir create/remove
+ *   - `<change>/specs/<cap>/`         — advances when `spec.md` is created inside
+ *   - `<change>/specs/<cap>/spec.md`  — advances on in-place edits
+ *
+ * `readdirSync` is wrapped in try/catch so missing `specs/` (or any fs error)
+ * yields an empty fan-out rather than throwing.
+ *
+ * See change: fix-openspec-specs-mtime-gate-blind-spot.
+ */
 function perChangeArtifactPaths(changesRoot: string, name: string): string[] {
   const dir = path.join(changesRoot, name);
-  return [
+  const base = [
     dir,
     path.join(dir, "tasks.md"),
     path.join(dir, "proposal.md"),
     path.join(dir, "design.md"),
   ];
+  const specsDir = path.join(dir, "specs");
+  const specsExtras: string[] = [specsDir];
+  try {
+    const entries = fs.readdirSync(specsDir, { withFileTypes: true });
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        const capDir = path.join(specsDir, e.name);
+        specsExtras.push(capDir);
+        specsExtras.push(path.join(capDir, "spec.md"));
+      }
+    }
+  } catch {
+    // ENOENT, permission denied, etc. — leave specsExtras with just specsDir
+    // (its own statMtimeOr will return undefined and be excluded from max).
+  }
+  return [...base, ...specsExtras];
 }
 
 // ── Per-directory cache ────────────────────────────────────────────
@@ -317,6 +348,7 @@ export function createDirectoryService(
       { changes: listResult ?? [] },
       statusResults,
       createFsProbeFactory(cwd),
+      createFsSpecsProbeFactory(cwd),
     );
 
     // Stamp the cache with the pre-call mtime — i.e. the mtime that

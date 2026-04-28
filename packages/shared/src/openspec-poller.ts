@@ -28,6 +28,11 @@ import {
   createFsDesignEvidenceProbe,
   type DesignEvidenceProbe,
 } from "./openspec-design-evidence.js";
+import {
+  evaluateLocalSpecsSatisfaction,
+  createFsSpecsEvidenceProbe,
+  type SpecsEvidenceProbe,
+} from "./openspec-specs-evidence.js";
 import path from "node:path";
 
 const EMPTY_DATA: OpenSpecData = { initialized: false, changes: [] };
@@ -42,10 +47,23 @@ const EMPTY_DATA: OpenSpecData = { initialized: false, changes: [] };
  */
 export type DesignProbeFactory = (changeName: string) => DesignEvidenceProbe;
 
+/**
+ * Factory that returns a specs-evidence probe for a given change name.
+ * Parallel to `DesignProbeFactory` — production callers pass a closure
+ * rooted at `<cwd>/openspec/changes/<name>`; tests pass an in-memory
+ * factory. When omitted, the specs override does NOT fire and
+ * `buildOpenSpecData` matches today's behavior verbatim for the specs
+ * artifact.
+ *
+ * See change: fix-openspec-specs-mtime-gate-blind-spot.
+ */
+export type SpecsProbeFactory = (changeName: string) => SpecsEvidenceProbe;
+
 export function buildOpenSpecData(
   listResult: { changes?: Array<{ name: string; status: string; completedTasks: number; totalTasks: number }> } | null,
   statusResults: Map<string, { artifacts?: Array<{ id: string; status: string }>; isComplete?: boolean } | null>,
   probeFactory?: DesignProbeFactory,
+  specsProbeFactory?: SpecsProbeFactory,
 ): OpenSpecData {
   if (!listResult || !Array.isArray(listResult.changes)) {
     return EMPTY_DATA;
@@ -66,6 +84,18 @@ export function buildOpenSpecData(
         const probe = probeFactory(c.name);
         if (evaluateLocalDesignSatisfaction("", probe)) {
           artifacts[designIdx] = { ...artifacts[designIdx], status: "done" };
+        }
+      }
+    }
+
+    // Specs-artifact override: promote-only, specs-only. See change:
+    // fix-openspec-specs-mtime-gate-blind-spot.
+    if (specsProbeFactory) {
+      const specsIdx = artifacts.findIndex((a) => a.id === "specs");
+      if (specsIdx !== -1 && artifacts[specsIdx].status === "ready") {
+        const probe = specsProbeFactory(c.name);
+        if (evaluateLocalSpecsSatisfaction("", probe)) {
+          artifacts[specsIdx] = { ...artifacts[specsIdx], status: "done" };
         }
       }
     }
@@ -114,6 +144,25 @@ export function createFsProbeFactory(cwd: string): DesignProbeFactory {
 }
 
 /**
+ * Build a real-fs specs-probe factory rooted at `<cwd>/openspec/changes/<name>`.
+ * Parallel to `createFsProbeFactory` — production callers (`pollOpenSpec`,
+ * `pollOpenSpecAsync`, `directory-service.ts`) use this to wire the specs
+ * override. Tests inject their own factory.
+ *
+ * See change: fix-openspec-specs-mtime-gate-blind-spot.
+ */
+export function createFsSpecsProbeFactory(cwd: string): SpecsProbeFactory {
+  const probe = createFsSpecsEvidenceProbe();
+  const changesRoot = path.join(cwd, "openspec", "changes");
+  return (changeName) => {
+    const changeDir = path.join(changesRoot, changeName);
+    return {
+      hasAnySpecFile: () => probe.hasAnySpecFile(changeDir),
+    };
+  };
+}
+
+/**
  * Synchronous poll — blocks the event loop. Used by the bridge extension
  * where async isn't practical (some pi extension hooks are sync).
  */
@@ -125,7 +174,12 @@ export function pollOpenSpec(cwd: string): OpenSpecData {
   for (const c of listResult.changes) {
     statusResults.set(c.name, statusOr({ cwd, change: c.name }));
   }
-  return buildOpenSpecData(listResult, statusResults, createFsProbeFactory(cwd));
+  return buildOpenSpecData(
+    listResult,
+    statusResults,
+    createFsProbeFactory(cwd),
+    createFsSpecsProbeFactory(cwd),
+  );
 }
 
 /**
@@ -169,5 +223,10 @@ export async function pollOpenSpecAsync(cwd: string): Promise<OpenSpecData> {
     }),
   );
   const statusResults = new Map<string, any>(statusEntries);
-  return buildOpenSpecData(listResult, statusResults, createFsProbeFactory(cwd));
+  return buildOpenSpecData(
+    listResult,
+    statusResults,
+    createFsProbeFactory(cwd),
+    createFsSpecsProbeFactory(cwd),
+  );
 }
