@@ -182,7 +182,78 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       firstMessage: session.firstMessage,
       cachedAt: Date.now(),
     });
+    // When a session ends, drop its id from the persisted drag-reorder list
+    // for that cwd. Drag-reorder is meaningful for live sessions only; ended
+    // ones must fall to the bottom in their natural startedAt order rather
+    // than retaining a position that interleaves them with active sessions.
+    // See change: pin-and-search-sessions.
+    // Status-transition tracking: prune+broadcast runs ONCE per
+    // transition to ended. Subsequent `update()` calls on an already-
+    // ended session (e.g. heartbeat tail, click-induced state sync,
+    // late events from the bridge) do NOT re-trigger the prune —
+    // otherwise the card visibly jumps to the tail of the ended group
+    // every time the user interacts with it.
+    // See change: pin-and-search-sessions.
+    const wasEnded = endedSessionIds.has(sessionId);
+    const isEnded = session.status === "ended";
+    if (isEnded && !wasEnded) {
+      // Just transitioned alive→ended.
+      endedSessionIds.add(sessionId);
+      const orderBefore = sessionOrderManager.getOrder(session.cwd) ?? [];
+      sessionOrderManager.remove(session.cwd, sessionId);
+      const orderAfter = sessionOrderManager.getOrder(session.cwd) ?? [];
+      if (orderBefore.length !== orderAfter.length) {
+        browserGateway.broadcastToAll({
+          type: "sessions_reordered",
+          cwd: session.cwd,
+          sessionIds: orderAfter,
+        });
+      }
+    } else if (!isEnded && wasEnded) {
+      // Resume: ended→alive. The session is becoming visible in the
+      // alive tier. If a drag-to-resume put it back in `sessionOrder`
+      // already, leave it where the user dropped it; otherwise (e.g.
+      // a plain Resume click), prepend so the resumed session lands at
+      // the top of the alive tier rather than the tail. Either way,
+      // broadcast `sessions_reordered` so connected browsers refresh
+      // their local order map.
+      endedSessionIds.delete(sessionId);
+      const order = sessionOrderManager.getOrder(session.cwd) ?? [];
+      if (!order.includes(sessionId)) {
+        sessionOrderManager.insert(session.cwd, sessionId);
+      }
+      const next = sessionOrderManager.getOrder(session.cwd) ?? [];
+      browserGateway.broadcastToAll({
+        type: "sessions_reordered",
+        cwd: session.cwd,
+        sessionIds: next,
+      });
+    }
   };
+  // Track which session ids we've seen as ended at least once, so the
+  // onChange hook can detect actual alive→ended transitions vs. mere
+  // re-emits of the ended state.
+  const endedSessionIds = new Set<string>(
+    sessionManager.listAll().filter((s) => s.status === "ended").map((s) => s.id),
+  );
+
+  // Startup reconciliation: persisted `sessionOrder` may contain ended
+  // session ids from before the alive→ended prune was implemented. Strip
+  // them now so the next render sees a consistent state where ended ids
+  // never appear in the order pass.
+  // See change: pin-and-search-sessions.
+  for (const [cwd, ids] of Object.entries(sessionOrderManager.getAllOrders())) {
+    const aliveIds = ids.filter((id) => {
+      const s = sessionManager.get(id);
+      // Keep ids we don't know about — they may belong to other cwds or
+      // be live but not yet registered. Strip only the ones explicitly
+      // marked ended.
+      return !s || s.status !== "ended";
+    });
+    if (aliveIds.length !== ids.length) {
+      sessionOrderManager.reorder(cwd, aliveIds);
+    }
+  }
 
   // Track cwds with pending dashboard-spawned sessions (for writing .meta.json).
   // Uses a counter per cwd to handle multiple spawns and avoid reconnects consuming entries.

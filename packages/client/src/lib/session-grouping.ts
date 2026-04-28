@@ -168,3 +168,58 @@ export function filterSessions(
     return true;
   });
 }
+
+/**
+ * Case-insensitive substring search over a folder's session list.
+ * Matches against the same string the user actually sees on the card:
+ *   1. `name` (if non-empty)
+ *   2. `firstMessage` (if no name)
+ *   3. last segment of `cwd` (if neither, e.g. fresh sessions where
+ *      the display falls back to the folder basename — this is what
+ *      `getSessionDisplayName` does, so search must mirror it)
+ * Empty/whitespace queries return the input unchanged.
+ *
+ * Mirrors `getSessionDisplayName` to keep "what you see is what you
+ * search" — a session showing as "pi-shodh" must match a `pi-sho` query
+ * even when its underlying `name` and `firstMessage` are empty.
+ *
+ * The caller is responsible for applying `showHidden` filtering before
+ * search (typically via the standard `filterSessions` pipeline).
+ *
+ * See change: pin-and-search-sessions §8.
+ */
+export function filterByQuery<
+  T extends { name?: string; firstMessage?: string; cwd?: string },
+>(sessions: T[], query: string): T[] {
+  const q = query.trim().toLowerCase();
+  if (q.length === 0) return [...sessions];
+  return sessions.filter((s) => {
+    const name = s.name?.trim();
+    if (name) return name.toLowerCase().includes(q);
+    const fm = s.firstMessage?.trim();
+    if (fm) return fm.toLowerCase().includes(q);
+    const basename = s.cwd?.split("/").pop() ?? "";
+    return basename.toLowerCase().includes(q);
+  });
+}
+
+/**
+ * Stable rank: alive sessions (status ≠ "ended") above ended sessions,
+ * preserving relative order within each tier. Used to order session
+ * cards inside a folder so the user always sees their currently-active
+ * work at the top, regardless of when ended sessions were last updated.
+ *
+ * The previous "Active only" toggle is replaced by this universal sort
+ * (see design D1 revised): rather
+ * than hiding ended sessions outright, we keep them visible but ranked
+ * below active ones, so search and exploration both see the same set.
+ *
+ * See change: pin-and-search-sessions (design D1 revised).
+ */
+export function rankActiveFirst<T extends { status?: string }>(sessions: T[]): T[] {
+  return [...sessions].sort((a, b) => {
+    const aEnded = a.status === "ended" ? 1 : 0;
+    const bEnded = b.status === "ended" ? 1 : 0;
+    return aEnded - bEnded;
+  });
+}

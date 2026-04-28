@@ -15,13 +15,12 @@ import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/
 import {
   groupSessionsByDirectory,
   filterSessions,
+  filterByQuery,
   sortSessionsByOrder,
   type DirectoryGroup,
 } from "../lib/session-grouping.js";
 // TerminalCard removed — terminals now in TerminalsView
 import {
-  getActiveOnly,
-  setActiveOnly as persistActiveOnly,
   getCollapsedGroups,
   setCollapsedGroups,
   pruneStaleCollapsedGroups,
@@ -188,8 +187,36 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
   const [branchDialogCwd, setBranchDialogCwd] = useState<string | null>(null);
 
   // Filter state - active-only defaults to ON
-  const [activeOnly, setActiveOnly] = useState(() => getActiveOnly());
+  // Single visibility toggle: `Show hidden`. The previous `Active only`
+  // toggle was removed in favour of universal active-first ranking and
+  // per-folder search. Ended sessions
+  // are always visible but ranked below active ones; hidden sessions
+  // are off by default and surfaced via this single toggle.
+  // See change: pin-and-search-sessions (design D1 revised).
   const [showHidden, setShowHidden] = useState(false);
+  // Sidebar-level search/filter.
+  //   - workspaceFilter: substring match against the folder path.
+  //     Narrows the folder list. Matching folders auto-expand.
+  //   - sessionSearch: case-insensitive match against session.name /
+  //     firstMessage. Sessions outside the matching set are hidden;
+  //     the folder containing them auto-expands to reveal the match.
+  // Both filters compose with `Show hidden`. AND-composition when both
+  // are filled. See change: pin-and-search-sessions (design D1 revised).
+  const [workspaceFilter, setWorkspaceFilter] = useState("");
+  const [sessionSearch, setSessionSearch] = useState("");
+  // Per-folder "show ended" expansion state. Ended sessions are collapsed
+  // by default inside each folder; a minimal `Show N ended` row at the
+  // bottom toggles. State is keyed by cwd; absent = collapsed (default).
+  // The session-search query auto-expands ended in matching folders.
+  const [endedExpanded, setEndedExpanded] = useState<Set<string>>(new Set());
+  const toggleEndedExpanded = useCallback((cwd: string) => {
+    setEndedExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(cwd)) next.delete(cwd);
+      else next.add(cwd);
+      return next;
+    });
+  }, []);
 
   // Collapsed groups state
   const [collapsedGroups, setCollapsedGroupsState] = useState(() => getCollapsedGroups());
@@ -202,13 +229,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     setCollapsedGroupsState(prunedGroups);
   }, [sessions.length]);
 
-  const handleActiveOnlyToggle = useCallback(() => {
-    setActiveOnly((prev) => {
-      const next = !prev;
-      persistActiveOnly(next);
-      return next;
-    });
-  }, []);
+
 
   const handleHide = useCallback((id: string) => {
     onHideSession?.(id);
@@ -231,17 +252,18 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     onUnhideSession?.(id);
   }, [onUnhideSession]);
 
+  // `filterSessions` is called with `activeOnly: false` permanently —
+  // active-first ranking now happens per-folder via `rankActiveFirst`,
+  // so the global "hide ended" pre-filter is unnecessary.
   const filteredSessions = useMemo(
-    () => filterSessions(sessions, activeOnly, showHidden),
-    [sessions, activeOnly, showHidden],
+    () => filterSessions(sessions, false, showHidden),
+    [sessions, showHidden],
   );
 
-  const hiddenCount = useMemo(() => {
-    const afterActiveFilter = activeOnly
-      ? sessions.filter((s) => s.status !== "ended")
-      : sessions;
-    return afterActiveFilter.filter((s) => s.hidden).length;
-  }, [sessions, activeOnly]);
+  const hiddenCount = useMemo(
+    () => sessions.filter((s) => s.hidden).length,
+    [sessions],
+  );
 
   // Build a map of terminals by cwd for quick lookup
   const terminalsByCwd = useMemo(() => {
@@ -284,6 +306,22 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
         if (oldIndex !== -1 && newIndex !== -1) {
           const newOrder = arrayMove(sessionIds, oldIndex, newIndex);
           onReorderSessions?.(group.cwd, newOrder);
+          // Drag-to-resume: if the user dragged an ENDED session onto
+          // an ALIVE one (i.e., placed it inside the alive tier), treat
+          // that as intent to bring the session back. Auto-resume in
+          // continue mode. The persisted order (with the ended id now
+          // in the alive zone) means the client filter will pick it up
+          // at the dropped position once status flips to alive.
+          // See change: pin-and-search-sessions.
+          const draggedSession = group.sessions.find((s) => s.id === active.id);
+          const overSession = group.sessions.find((s) => s.id === over.id);
+          if (
+            draggedSession?.status === "ended" &&
+            draggedSession.sessionFile &&
+            overSession && overSession.status !== "ended"
+          ) {
+            onResume?.(draggedSession.id, "continue");
+          }
           break;
         }
       }
@@ -296,11 +334,35 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
         onReorderPinnedDirs?.(newOrder);
       }
     }
-  }, [allGroups, pinnedGroups, onReorderSessions, onReorderPinnedDirs]);
+  }, [allGroups, pinnedGroups, onReorderSessions, onReorderPinnedDirs, onResume]);
+
+  /**
+   * Decide whether a folder should be visible given the active filters.
+   * Workspace filter matches against folder path; session filter matches
+   * against any session title within the folder. Both are AND'd when set.
+   */
+  function folderMatchesFilters(group: DirectoryGroup): boolean {
+    const wf = workspaceFilter.trim().toLowerCase();
+    const sf = sessionSearch.trim().toLowerCase();
+    const folderHit = wf.length === 0 || group.cwd.toLowerCase().includes(wf);
+    if (!folderHit) return false;
+    if (sf.length === 0) return true;
+    return filterByQuery(group.sessions, sf).length > 0;
+  }
+
+  /**
+   * Force-expand folders when a filter is active so users can immediately
+   * see what matched without an extra click. The user-toggled
+   * `collapsedGroups` set still controls behavior at rest.
+   */
+  function isFolderCollapsed(cwd: string): boolean {
+    if (workspaceFilter.length > 0 || sessionSearch.length > 0) return false;
+    return collapsedGroups.has(cwd);
+  }
 
   function renderGroup(group: DirectoryGroup, isPinned: boolean) {
     const dirName = truncatePathMiddle(group.cwd, 45);
-    const isCollapsed = collapsedGroups.has(group.cwd);
+    const isCollapsed = isFolderCollapsed(group.cwd);
 
     return (
       <div key={group.cwd} className="bg-[var(--bg-secondary)] rounded-lg p-2">
@@ -398,19 +460,107 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
           )}
           {spawningCwds?.has(group.cwd) && <PlaceholderSessionCard />}
           {(() => {
-            // Only session cards in the sidebar — terminals moved to TerminalsView
-            const sessionIds = group.sessions.map((s) => s.id);
-            const orderedIds = sessionOrderMap?.get(group.cwd)?.filter((id) => sessionIds.includes(id)) ?? sessionIds;
-            // Add any sessions not in the order
+            // Render pipeline:
+            //   1. Start from `group.sessions` (already filtered by `showHidden`).
+            //   2. Narrow by global `sessionSearch` if one is typed.
+            //   3. Split into active vs ended buckets.
+            //   4. Ended bucket is collapsed by default per folder; the
+            //      bottom "Show N ended" row toggles. A non-empty
+            //      `sessionSearch` AUTO-EXPANDS ended (because the user's
+            //      query may match an ended session). The user's explicit
+            //      `endedExpanded` set also wins.
+            //   5. Pin partition (§7) is applied to whichever buckets are
+            //      currently rendered.
+            // See change: pin-and-search-sessions §8.
+            const matched = sessionSearch.length > 0
+              ? filterByQuery(group.sessions, sessionSearch)
+              : group.sessions;
+            // Flat-merge mode: when session-search is active AND no
+            // folder filter is typed, don't apply the active-first sort —
+            // ended results stay inline with active so the user sees
+            // results in their natural order. The user opted into
+            // searching across pinned folders by typing a session query;
+            // they don't also want a status-based reshuffling.
+            // See change: pin-and-search-sessions.
+            const flatMergeMode = sessionSearch.length > 0 && workspaceFilter.length === 0;
+            const activeSessions = matched.filter((s) => s.status !== "ended");
+            const endedSessions = matched.filter((s) => s.status === "ended");
+            const showEnded =
+              endedSessions.length > 0 &&
+              (endedExpanded.has(group.cwd) || sessionSearch.length > 0);
+            const visibleSessions = flatMergeMode
+              ? matched // ended interleaved naturally; sessionOrder still applies below
+              : (showEnded
+                  ? [...activeSessions, ...endedSessions]
+                  : activeSessions);
+            // Empty-state: search query active but nothing matched in
+            // this folder. Still rendered inline so the user can clear
+            // and recover.
+            if (sessionSearch.length > 0 && matched.length === 0) {
+              return (
+                <div
+                  className="text-xs text-[var(--text-muted)] italic px-2 py-2 select-none"
+                  data-testid="folder-search-empty"
+                >
+                  No sessions match your search
+                </div>
+              );
+            }
+            const sessionIds = visibleSessions.map((s) => s.id);
+            const sessionMap = new Map(visibleSessions.map((s) => [s.id, s]));
+            // Honor `sessionOrder` for every id it contains — ended OR
+            // alive. The server-side `onChange` hook prunes ended ids
+            // from `sessionOrder` when a session naturally transitions
+            // to ended, so any ended id that's STILL in the order list
+            // got there because the user explicitly dragged it into the
+            // alive zone (drag-to-resume). Honoring its position keeps
+            // the dropped placement stable through the resume round-trip.
+            // See change: pin-and-search-sessions.
+            const orderedIds = (sessionOrderMap?.get(group.cwd) ?? sessionIds).filter(
+              (id) => sessionIds.includes(id),
+            );
+            // Tail: ids not in the persisted order. Preserves
+            // visibleSessions order, which already has ended at the end.
             const orderedSet = new Set(orderedIds);
             const allIds = [...orderedIds, ...sessionIds.filter((id) => !orderedSet.has(id))];
-            const sessionMap = new Map(group.sessions.map((s) => [s.id, s]));
+            // Index of the first ended card in the rendered order — used
+            // to inject a top "Hide ended" button when ended sessions are
+            // currently expanded. Only meaningful in the non-flat layout
+            // where active and ended are separated; in flat-merge mode
+            // (search across pinned, mixed-status), no inline button.
+            const firstEndedIdx = !flatMergeMode && showEnded
+              ? allIds.findIndex((id) => sessionMap.get(id)?.status === "ended")
+              : -1;
+            // The top "Hide ended" button should appear:
+            //   - only when ended sessions are expanded
+            //   - only when the user manually expanded (not auto-expanded
+            //     by a search query — in that mode the user expects
+            //     results to stay visible until query is cleared)
+            //   - only when at least one ended session exists in render
+            const showInlineHideEnded =
+              firstEndedIdx >= 0 &&
+              endedExpanded.has(group.cwd) &&
+              sessionSearch.length === 0 &&
+              workspaceFilter.length === 0;
             return (
               <SortableContext items={allIds} strategy={verticalListSortingStrategy}>
-                {allIds.map((id) => {
+                {allIds.map((id, idx) => {
                   const session = sessionMap.get(id);
                   if (!session) return null;
+                  const renderTopHideEnded = showInlineHideEnded && idx === firstEndedIdx;
                   return (
+                    <React.Fragment key={`f-${id}`}>
+                      {renderTopHideEnded && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleEndedExpanded(group.cwd); }}
+                          className="w-full text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] py-1 px-2 select-none flex items-center justify-center gap-1 border-t border-[var(--border-subtle)]"
+                          data-testid={`folder-ended-toggle-top-${group.cwd}`}
+                          aria-label={`Hide ${endedSessions.length} ended sessions`}
+                        >
+                          <Icon path={mdiChevronDown} size={0.4} />
+                          <span>Hide ended</span>
+                        </button>
+                      )}
                     <SortableSessionCard key={id} id={id}>
                       <SessionCard
                         session={session}
@@ -452,9 +602,34 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                         </div>
                       )}
                     </SortableSessionCard>
+                    </React.Fragment>
                   );
                 })}
               </SortableContext>
+            );
+          })()}
+          {/* Minimal `Show N ended` expand row at the bottom of the folder.
+              Hidden when there are no ended sessions, when the user has
+              already expanded them, or when a search query is active
+              (search auto-expands ended). Click toggles. */}
+          {(() => {
+            const matched = sessionSearch.length > 0
+              ? filterByQuery(group.sessions, sessionSearch)
+              : group.sessions;
+            const endedCount = matched.filter((s) => s.status === "ended").length;
+            if (endedCount === 0) return null;
+            if (sessionSearch.length > 0) return null; // auto-expanded
+            const expanded = endedExpanded.has(group.cwd);
+            return (
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleEndedExpanded(group.cwd); }}
+                className="w-full text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] py-1 px-2 select-none flex items-center justify-center gap-1"
+                data-testid={`folder-ended-toggle-${group.cwd}`}
+                aria-label={expanded ? `Hide ${endedCount} ended sessions` : `Show ${endedCount} ended sessions`}
+              >
+                <Icon path={expanded ? mdiChevronDown : mdiChevronRight} size={0.4} />
+                <span>{expanded ? `Hide ended` : `${endedCount} ended`}</span>
+              </button>
             );
           })()}
         </div>
@@ -488,24 +663,37 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             </button>
           </div>
         </div>
-        <div className="flex items-center justify-between px-3 py-1.5" data-testid="header-filter-bar">
-          <div className="flex gap-1 items-center">
-            <ToggleButton active={activeOnly} onClick={handleActiveOnlyToggle}>
-              Active only
-            </ToggleButton>
-            <ToggleButton active={showHidden} onClick={() => setShowHidden((p) => !p)}>
-              Show hidden
-            </ToggleButton>
-          </div>
+        <div className="flex items-center justify-between px-3 py-1.5 gap-2" data-testid="header-filter-bar">
+          <input
+            type="search"
+            value={workspaceFilter}
+            onChange={(e) => setWorkspaceFilter(e.target.value)}
+            placeholder="Folder…"
+            className="min-w-0 flex-1 px-2 py-1 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-blue)]"
+            data-testid="workspace-filter-input"
+            aria-label="Filter folders by path"
+          />
+          <input
+            type="search"
+            value={sessionSearch}
+            onChange={(e) => setSessionSearch(e.target.value)}
+            placeholder="Session…"
+            className="min-w-0 flex-1 px-2 py-1 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-blue)]"
+            data-testid="session-search-input"
+            aria-label="Search sessions across folders"
+          />
+          <ToggleButton active={showHidden} onClick={() => setShowHidden((p) => !p)}>
+            Hidden
+          </ToggleButton>
           {onPinDirectory && (
             <button
               onClick={() => onOpenPinDialog?.()}
-              className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-tertiary)] hover:text-yellow-400 hover:border-yellow-500/50 inline-flex items-center gap-1"
+              className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-tertiary)] hover:text-yellow-400 hover:border-yellow-500/50 inline-flex items-center gap-1 shrink-0"
               title="Pin a folder to the sidebar"
               data-testid="pin-dir-dialog-btn"
             >
               <Icon path={mdiPin} size={0.45} />
-              <span>Add folder</span>
+              <span>Folder</span>
             </button>
           )}
         </div>
@@ -516,10 +704,10 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <ul className="flex flex-col gap-2 p-2">
-          {/* Pinned directory groups */}
+          {/* Pinned directory groups (filtered if workspace/session filter active) */}
           {pinnedGroups.length > 0 && (
-            <SortableContext items={pinnedGroups.map((g) => g.cwd)} strategy={verticalListSortingStrategy}>
-              {pinnedGroups.map((group) => (
+            <SortableContext items={pinnedGroups.filter(folderMatchesFilters).map((g) => g.cwd)} strategy={verticalListSortingStrategy}>
+              {pinnedGroups.filter(folderMatchesFilters).map((group) => (
                 <SortablePinnedGroup key={group.cwd} id={group.cwd}>
                   {renderGroup(group, true)}
                 </SortablePinnedGroup>
@@ -527,8 +715,20 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             </SortableContext>
           )}
           {/* Gap between pinned and unpinned is handled by flex gap */}
-          {/* Unpinned directory groups */}
-          {unpinnedGroups.map((group) => renderGroup(group, false))}
+          {/* Unpinned directory groups: rendered when the user is
+              actively filtering folders, OR when the folder contains
+              at least one alive session (active / idle / streaming).
+              Folders with only ended sessions stay hidden by default to
+              keep the sidebar focused on workspaces the user is
+              currently working in.
+              See change: pin-and-search-sessions. */}
+          {unpinnedGroups
+            .filter((g) =>
+              workspaceFilter.length > 0
+                ? folderMatchesFilters(g)
+                : g.sessions.some((s) => s.status !== "ended")
+            )
+            .map((group) => renderGroup(group, false))}
         </ul>
         </DndContext>
       )}
@@ -552,3 +752,4 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     </div>
   );
 }
+
