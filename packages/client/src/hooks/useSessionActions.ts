@@ -142,7 +142,7 @@ export function useSessionActions(deps: SessionActionDeps) {
     send({ type: "resume_session", sessionId, mode, ...(entryId ? { entryId } : {}) });
   }, [send, setSessions]);
 
-  const handleSpawnSession = useCallback((cwd: string) => {
+  const handleSpawnSession = useCallback((cwd: string, attachProposal?: string) => {
     setSpawningCwds((prev) => {
       const next = new Set(prev);
       next.add(cwd);
@@ -153,7 +153,10 @@ export function useSessionActions(deps: SessionActionDeps) {
       clearSpawningCwd(cwd);
     }, 30_000);
     spawnTimeoutsRef.current.set(cwd, timer);
-    send({ type: "spawn_session", cwd });
+    // The optional `attachProposal` field is consumed server-side and applied
+    // when the bridge issues `session_register`. See change:
+    // add-folder-task-checker-and-spawn-attach.
+    send({ type: "spawn_session", cwd, ...(attachProposal ? { attachProposal } : {}) });
   }, [send, clearSpawningCwd, setSpawningCwds, spawnTimeoutsRef]);
 
   const handleHideSession = useCallback((sessionId: string) => {

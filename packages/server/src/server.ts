@@ -18,6 +18,7 @@ import { createPreferencesStore, type PreferencesStore } from "./preferences-sto
 import { createMetaPersistence, type MetaPersistence } from "./meta-persistence.js";
 import { createSessionOrderManager, type SessionOrderManager } from "./session-order-manager.js";
 import { createPendingForkRegistry, type PendingForkRegistry } from "./pending-fork-registry.js";
+import { createPendingAttachRegistry } from "./pending-attach-registry.js";
 
 // pending-load-manager removed — server loads sessions directly via DirectoryService
 import { createDirectoryService, type DirectoryService } from "./directory-service.js";
@@ -258,6 +259,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // Track cwds with pending dashboard-spawned sessions (for writing .meta.json).
   // Uses a counter per cwd to handle multiple spawns and avoid reconnects consuming entries.
   const pendingDashboardSpawns = new Map<string, number>();
+
+  // Pending spawn-with-attach intents (cwd → FIFO queue of changeNames).
+  // Consumed in event-wiring.ts on session_register. See change:
+  // add-folder-task-checker-and-spawn-attach.
+  const pendingAttachRegistry = createPendingAttachRegistry();
   // Track known session IDs so we can distinguish new sessions from reconnections.
   const knownSessionIds = new Set<string>();
   // Populate from persisted sessions
@@ -314,7 +320,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     },
   });
 
-  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes);
+  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry);
 
   // Resolve package version once at startup
   const __require = createRequire(import.meta.url);
@@ -348,6 +354,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     directoryService,
     knownSessionIds,
     pendingDashboardSpawns,
+    pendingAttachRegistry,
   });
 
   // Auto-shutdown idle timer

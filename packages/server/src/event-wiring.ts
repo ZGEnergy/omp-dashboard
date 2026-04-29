@@ -28,6 +28,12 @@ export interface EventWiringDeps {
   directoryService: DirectoryService;
   knownSessionIds: Set<string>;
   pendingDashboardSpawns: Map<string, number>;
+  /**
+   * Optional pending-attach registry. When provided, the wiring consumes a
+   * pending intent on each `session_register` and applies the attach +
+   * auto-rename. See change: add-folder-task-checker-and-spawn-attach.
+   */
+  pendingAttachRegistry?: import("./pending-attach-registry.js").PendingAttachRegistry;
 }
 
 /**
@@ -45,6 +51,7 @@ export function wireEvents(deps: EventWiringDeps): void {
     directoryService,
     knownSessionIds,
     pendingDashboardSpawns,
+    pendingAttachRegistry,
   } = deps;
 
   // Broadcast placeholder session to browsers when auto-created from early events
@@ -53,6 +60,28 @@ export function wireEvents(deps: EventWiringDeps): void {
     if (session) {
       browserGateway.broadcastSessionAdded(session);
     }
+  };
+
+  // Consume any pending spawn-with-attach intent for the registering session.
+  // See change: add-folder-task-checker-and-spawn-attach.
+  piGateway.onSessionRegistered = (sessionId, cwd) => {
+    if (!pendingAttachRegistry) return;
+    const changeName = pendingAttachRegistry.consume(cwd);
+    if (!changeName) return;
+    // Lazy import to avoid a circular type dep at module load.
+    void import("./browser-handlers/session-meta-handler.js").then(({ applyAttachProposal }) => {
+      applyAttachProposal(sessionId, changeName, {
+        sessionManager,
+        piGateway,
+        broadcast: (msg) => {
+          // applyAttachProposal only emits `session_updated`; route via the
+          // browser gateway's typed helper to match the rest of this file.
+          if (msg.type === "session_updated") {
+            browserGateway.broadcastSessionUpdated(msg.sessionId, msg.updates);
+          }
+        },
+      });
+    });
   };
 
   // Broadcast session ended to browsers when sessions are unregistered

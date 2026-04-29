@@ -68,7 +68,7 @@ interface Props {
   onResume?: (sessionId: string, mode: "continue" | "fork") => void;
   onHideSession?: (sessionId: string) => void;
   onUnhideSession?: (sessionId: string) => void;
-  onSpawnSession?: (cwd: string) => void;
+  onSpawnSession?: (cwd: string, attachProposal?: string) => void;
   spawningCwds?: Set<string>;
   spawnResult?: { success: boolean; message: string } | null;
   onSpawnResultSeen?: () => void;
@@ -438,6 +438,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               onNavigateToSession={onSelect}
               onOpenSpecs={onOpenSpecs ? () => onOpenSpecs(group.cwd) : undefined}
               onOpenArchive={onOpenArchive ? () => onOpenArchive(group.cwd) : undefined}
+              onSpawnAttached={onSpawnSession ? (cwd, changeName) => onSpawnSession(cwd, changeName) : undefined}
             />
           )}
 

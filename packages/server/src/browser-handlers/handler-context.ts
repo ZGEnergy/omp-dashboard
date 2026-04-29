@@ -14,6 +14,7 @@ import type { DirectoryService } from "../directory-service.js";
 import type { TerminalManager } from "../terminal-manager.js";
 import type { HeadlessPidRegistry } from "../headless-pid-registry.js";
 import type { PendingResumeRegistry } from "../pending-resume-registry.js";
+import type { PendingAttachRegistry } from "../pending-attach-registry.js";
 
 export interface BrowserHandlerContext {
   ws: WebSocket;
@@ -28,6 +29,11 @@ export interface BrowserHandlerContext {
   headlessPidRegistry: HeadlessPidRegistry;
   pendingResumeRegistry: PendingResumeRegistry;
   pendingDashboardSpawns?: Map<string, number>;
+  /**
+   * Optional pending-attach registry for spawn-with-attach flow.
+   * See change: add-folder-task-checker-and-spawn-attach.
+   */
+  pendingAttachRegistry?: PendingAttachRegistry;
   /** Send message to a specific WebSocket */
   sendTo(ws: WebSocket, msg: ServerToBrowserMessage): void;
   /** Broadcast to all connected browsers */

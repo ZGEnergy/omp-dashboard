@@ -283,9 +283,16 @@ export async function handleSpawnSession(
   msg: Extract<BrowserToServerMessage, { type: "spawn_session" }>,
   ctx: BrowserHandlerContext,
 ): Promise<void> {
-  const { ws, headlessPidRegistry, pendingDashboardSpawns, sendTo } = ctx;
+  const { ws, headlessPidRegistry, pendingDashboardSpawns, pendingAttachRegistry, sendTo } = ctx;
   const config = loadConfig();
   const strategy = config.spawnStrategy ?? "tmux";
+
+  // Queue the optional attach intent BEFORE awaiting the spawn so a fast
+  // bridge `session_register` cannot lose the intent. See change:
+  // add-folder-task-checker-and-spawn-attach.
+  if (typeof msg.attachProposal === "string" && msg.attachProposal.length > 0) {
+    pendingAttachRegistry?.enqueue(msg.cwd, msg.attachProposal);
+  }
 
   // Catch both thrown exceptions and { success: false } results; surface as
   // spawn_error so the UI can render a retryable banner instead of failing
