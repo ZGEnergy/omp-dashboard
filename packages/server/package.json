@@ -3,6 +3,11 @@
   "version": "0.4.1",
   "description": "Dashboard server for monitoring and interacting with pi agent sessions",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard",
+    "directory": "packages/server"
+  },
   "publishConfig": {
     "access": "public"
   },
