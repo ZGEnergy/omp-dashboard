@@ -285,11 +285,12 @@ export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDep
       if (mode === "fork" && pendingForkRegistry) {
         pendingForkRegistry.recordFork(session.cwd, id);
       }
-      // Tag the user-resume intent BEFORE spawning so the bridge's
-      // subsequent session_register can be distinguished from a
-      // bridge-auto-reattach on dashboard reboot.
-      // See change: preserve-session-order-on-reboot.
-      pendingResumeIntents?.record(id);
+      // Tag the user-resume intent BEFORE spawning. REST resume always
+      // uses "front" placement — the only "keep" path is drag-to-resume
+      // which goes through the WebSocket handler, not this REST endpoint.
+      // See changes: preserve-session-order-on-reboot,
+      //              differentiate-resume-intent-by-trigger.
+      pendingResumeIntents?.record(id, "front");
       const config = loadConfig();
       const spawnResult = await spawnPiSession(session.cwd, {
         sessionFile: session.sessionFile,

@@ -182,4 +182,74 @@ For developers: extension authors using the PromptBus public adapter API who emi
 
 ## Open Questions
 
-(none — exploration verified the bug shape, the reducer trace, and the symmetric replay behavior; the fix is unambiguous and the boundary set is small enough to enumerate)
+(none at design time — exploration verified the bug shape, the reducer trace, and the symmetric replay behavior; the fix is unambiguous and the boundary set is small enough to enumerate)
+
+---
+
+## Post-Apply Findings (2026-04-30)
+
+This change shipped in commit `222ef45`. Subsequent manual testing surfaced an asymmetry the original design did NOT anticipate:
+
+### The asymmetry
+
+```
+BUILT-IN ANTHROPIC PROVIDER         CUSTOM api:"anthropic-messages" PROVIDER
+────────────────────────────    (e.g. 9Router proxy/cc/claude-opus-4-7)
+  thinking_start            ─┐   ───────────────────────────────────
+  thinking_delta            │   (NO thinking_start)
+  thinking_end              ─┘   (NO thinking_delta)
+  → pushes role:"thinking" row     (NO thinking_end)
+  message_update (text)           message_update (text)
+  tool_execution_start            tool_execution_start
+  message_end                     message_end
+    msg.content =                   msg.content =
+      [{thinking:"..."},              [{thinking:""},  ← EMPTY placeholder!
+       {text:"..."},                   {text:"..."},
+       {toolCall}]                     {toolCall}]
+```
+
+Proxy implementations strip reasoning *content* while the upstream payload still emits a thinking content block. Pi's anthropic-messages adapter (we believe) skips live `thinking_*` events when the content is empty — so the row is never pushed. But the placeholder block STILL appears in `msg.content[]` at `message_end`.
+
+### Why this change's reorder helper doesn't fix the proxy bug
+
+Dry-tracing the post-222ef45 helper against `[empty-thinking, text, toolCall]`:
+
+```
+Turn-boundary window walks back to user-msg, stops.
+Window = [tool-X (running), assistant-text]   (size 2)
+
+content = [thinking, text, toolCall]   (length 3)
+
+Pass 1 claims:
+  thinking → findLastUnclaimed(role:"thinking") → NOT FOUND → silent skip
+  text     → findLastUnclaimed(role:"assistant")  → idx 1 → claim
+  toolCall → findLastUnclaimed(role:"toolResult" w/ id) → idx 0 → claim
+  unclaimed: (none)
+
+newSuffix = [assistant-text, tool-X]    → LOOKS correct in dry trace
+```
+
+By this trace, the proxy bug **should not manifest**. Yet manual testing confirms it does. This means the actual mechanism is **upstream of the reducer** — either:
+
+1. Pi's anthropic-messages adapter emits `tool_execution_start` BEFORE the text content has streamed (so `streamingText` is empty when `message_end` lands, triggering the replay-fallback branch which pushes the assistant bubble at a different point in `messages[]`).
+2. Pi's adapter handles the `content_block_start` events differently for empty thinking blocks vs real ones, causing the text/tool event ordering to diverge.
+3. Some other adapter-level state that this change has no visibility into.
+
+### What this finding tells us about the design
+
+The original design's Decision 2 ("use content-array order, not 'always text first'") was correct for the cases it considered: it trusts the model's `msg.content[]` ordering as source of truth. But that contract assumes **every content block has a live row** to claim. When the upstream stream omits live events for placeholder content (empty thinking, possibly other shapes), the helper has no row to relocate — so it cannot fix a misorder that's already baked into `messages[]` by event arrival order.
+
+Decision 5 ("Replay path uses the same reducer; no `state-replay.ts` change") still holds for replay. The asymmetry is in **live emission**, not replay.
+
+### Follow-up work
+
+A separate proposal will investigate:
+
+- Diagnostic capture: transient log in `event-wiring.ts` to record the actual live `event_forward` sequence for one proxy/cc `[text, toolCall]` message; compare to the same prompt against built-in anthropic.
+- Audit pi's `anthropic-messages` adapter source (in `pi-coding-agent`) for its handling of empty thinking blocks and tool-block ordering when reasoning is absent from the SSE stream.
+- A candidate defense-in-depth filter at the reducer's `relevant` predicate to ignore empty content blocks (`thinking === ""`, `text === ""`). This wouldn't fix the root cause if the bug is upstream, but it removes one class of edge cases.
+- Whether the fix should live in pi (correct event emission), the bridge (re-emit reordering), or stay in the reducer.
+
+### Should this change be reverted?
+
+No. Even though it doesn't fix the proxy/cc bug, it (a) genuinely fixes `ask_user` ordering for built-in anthropic, (b) replaces the K-overcount-prone fixed-window with a structurally correct turn-boundary anchor, and (c) the bridge `ctx.ui.*` wrapper changes are additive and don't affect callers that don't opt into `opts.toolCallId`. Reverting would re-introduce the K-overcount class of bugs without addressing the proxy/cc bug, which is independent.

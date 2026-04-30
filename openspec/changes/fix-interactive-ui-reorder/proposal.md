@@ -1,3 +1,5 @@
+> **Status:** APPLIED in commit `222ef45` (2026-04-30). See "Post-Apply Findings" at the bottom of this file for what we learned after shipping — this change is necessary but not sufficient for the broader tool-ordering correctness story; a follow-up bug on **custom anthropic-messages providers (proxy/cc)** remains open.
+
 ## Why
 
 The previous fix `fix-text-tool-render-order` (archived 2026-04-29) added `reorderToolCardsForAssistantMessage` to `event-reducer.ts` so `[text, toolCall]` assistant messages render in content-array order. That fix is correct for plain tool calls, but it **misorders interactive-UI prompts** (e.g. `ask_user`).
@@ -77,3 +79,56 @@ Affects 100 % of `ask_user` invocations and any future PromptBus-routed tool who
   - Update `collapse-retried-errors.test.ts`: `findActiveInteractiveToolResultIds` continues to hide the running `tool-X` when `ui-X` is pending — invariant preserved post-reorder. Add explicit assertion that the *order* `[..., assistant, tool-X, ui-X]` produces the visible ChatView shape `[..., assistant, ui-X]` (tool-X hidden by the existing pairing rule).
 - **Compatibility**: pure client-side ordering change plus an opt-in `metadata.toolCallId` on `prompt_request`. Old bridges that don't set `toolCallId` continue to produce the buggy ordering for `ask_user`; new bridges set it. `interactiveUi` rows without `toolCallId` fall through to today's behavior (unclaimed trailing). Forward and backward compatible at the protocol level.
 - **Out of scope**: redesigning the PromptBus protocol, collapsing `tool-X` and `ui-X` into a single ChatMessage row, retroactively fixing already-recorded JSONLs (replay path inherits the fix automatically once the bridge is updated and the message is replayed).
+
+---
+
+## Post-Apply Findings (2026-04-30, after explore-mode investigation)
+
+After the fix shipped, manual testing surfaced an **adjacent ordering bug that this change does NOT fix**: tool cards on **custom providers using `api: "anthropic-messages"`** (e.g. 9Router proxy `proxy/cc/claude-opus-4-7`) still render above their own assistant text in some shapes — even though the same prompt against the **built-in pi anthropic provider** renders correctly.
+
+### What we verified
+
+1. **Built-in anthropic provider works correctly post-222ef45.** `[thinking, text, toolCall]` and `[text, toolCall:ask_user]` both render in content-array order. The PromptBus pairing rule and turn-boundary anchored window do their job.
+
+2. **Custom anthropic-messages providers (`proxy/cc/...`) misorder.** Same model (`claude-opus-4-7`), same prompt shape, same reducer path — but the rendered order is wrong only for the proxy.
+
+3. **The proxy emits the JSONL correctly.** Inspection of `~/.pi/agent/sessions/...` shows `msg.content[]` arrives in the right order (`[thinking, text, toolCall]`). The discrepancy is in **live event emission**, not persistence.
+
+4. **The proxy strips reasoning content** while leaving the placeholder block intact:
+   ```json
+   { "type": "thinking", "thinking": "" }
+   ```
+   This means pi's `anthropic-messages` adapter sees an empty thinking block, and (we believe) does not emit `thinking_start` / `thinking_delta` / `thinking_end` events live. So no `role:"thinking"` ChatMessage row is ever pushed.
+
+5. **9Router CHANGELOG audit (decolua/9router 0.3.96 → master 0.4.11)** found NO upstream stream-ordering fix for Anthropic. Closest hit (#791, v0.4.8) is request-side `reasoning_effort` translation, not stream-event sequencing. Adjacent ecosystems (charmbracelet/fantasy commit a3b8a69) document the same general pattern but in a different proxy.
+
+### Why this change can't reach the proxy bug
+
+The reorder helper trusts `msg.content[]` as the source-of-truth ordering and matches each block to a live-pushed row by role/id. For proxy/cc, the empty `thinking` block exists in `msg.content[]` but no thinking-row was ever pushed live → block silently skipped. By dry-trace the helper *should* still produce correct output for `[empty-thinking, text, toolCall]` because the missing thinking row collapses the count cleanly. **Yet the bug manifests anyway** — meaning the actual mechanism is upstream of the reducer (probably in pi's anthropic-messages adapter when handling proxy-style streams that don't carry reasoning deltas).
+
+### Should we revert this change?
+
+**No.** Decision matrix:
+
+| Case                                     | Reverted | Kept (current) |
+| ---------------------------------------- | -------- | -------------- |
+| `ask_user` with built-in anthropic       | broken   | **WORKS**      |
+| `ask_user` with proxy/cc                 | broken   | partially broken |
+| `[thinking, text, tool]` built-in        | buggy*   | better         |
+| `[text, toolCall]` plain (anthropic)     | works    | works          |
+| Bridge `ctx.ui.*` wrapper risk           | none     | small (additive) |
+
+\* The old K-window helper had its own correctness gaps; the unclaimed-row guard was a band-aid for K-overcount.
+
+The new turn-boundary anchored window is **structurally more correct** even where the new pairing rule isn't doing anything — and reverting would re-introduce the K-overcount class of bugs. The proxy/cc misorder is an **independent bug in the live event stream** that needs its own diagnosis and proposal.
+
+### Follow-up work tracked separately
+
+A new investigation/proposal will be opened to capture:
+
+- A diagnostic step that records the exact `event_forward` sequence the dashboard receives for one `proxy/cc` `[text, toolCall]` message (a transient `console.log` in `event-wiring.ts`, then revert).
+- Comparison with the same prompt against built-in anthropic.
+- Whether the fix needs to land in `pi-coding-agent`'s anthropic-messages adapter, our bridge's event forwarding, or the reducer's handling of empty content blocks.
+- A candidate defense-in-depth layer: filter out empty `text === ""` and `thinking === ""` content blocks from the `relevant` set in `reorderToolCardsForAssistantMessage` so future similar cases (any provider that ships placeholder-only blocks) degrade gracefully.
+
+The follow-up is intentionally NOT folded into this change because (a) we haven't reproduced the exact mechanism with a live event-stream capture yet, and (b) the fix may need to live in pi itself, not the dashboard.

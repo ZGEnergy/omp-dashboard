@@ -58,10 +58,12 @@ function endedToAlive(
   sessionOrderManager: ReturnType<typeof createSessionOrderManager>,
 ): BroadcastEvent | null {
   // Mirror server.ts:onChange ended\u2192alive branch verbatim.
+  // Post-`differentiate-resume-intent-by-trigger`: 3-way switch on the
+  // consumed intent ("front" | "keep" | null).
   endedSessionIds.delete(sessionId);
-  if (!pendingResumeIntents.consume(sessionId)) {
-    return null;
-  }
+  const intent = pendingResumeIntents.consume(sessionId);
+  if (intent === null) return null;
+  if (intent === "keep") return null; // dropped slot wins; no mutation, no broadcast
   sessionOrderManager.moveToFront(cwd, sessionId);
   const next = sessionOrderManager.getOrder(cwd) ?? [];
   return { type: "sessions_reordered", cwd, sessionIds: next };
@@ -87,7 +89,7 @@ describe("ended\u2192alive sessionOrder gate", () => {
     endedSessionIds.add("X");
 
     // User-initiated resume tags the intent before spawn.
-    pendingResumeIntents.record("X");
+    pendingResumeIntents.record("X", "front");
 
     const broadcast = endedToAlive("X", cwd, endedSessionIds, pendingResumeIntents, sessionOrderManager);
 
@@ -96,25 +98,42 @@ describe("ended\u2192alive sessionOrder gate", () => {
     expect(sessionOrderManager.getOrder(cwd)).toEqual(["X", "B", "A", "C"]);
   });
 
-  it("drag-to-resume moves id to front (top-of-tier semantic)", () => {
+  it("drag-to-resume preserves dropped slot (intent: \"keep\")", () => {
     // Pre-state: alive [A, C], ended id "B" was just dragged into slot 1
     // via reorder_sessions which writes the order BEFORE resume_session
     // fires.
     //
-    // Post change `top-of-tier-on-status-change`, user intent always
-    // wins: the dropped slot is overridden so the just-resumed card
-    // surfaces at the top of the alive tier. R1 in design.md.
+    // Post change `differentiate-resume-intent-by-trigger`, drag-to-resume
+    // tags `keep` so the dropped slot survives the resume round-trip.
     sessionOrderManager.reorder(cwd, ["A", "B", "C"]);
     endedSessionIds.add("B");
 
-    // resume_session handler tags the intent.
-    pendingResumeIntents.record("B");
+    // resume_session handler with placement: "keep" tags accordingly.
+    pendingResumeIntents.record("B", "keep");
 
     const broadcast = endedToAlive("B", cwd, endedSessionIds, pendingResumeIntents, sessionOrderManager);
 
+    // No broadcast — the earlier reorder_sessions already broadcast,
+    // and the order didn't change here.
+    expect(broadcast).toBeNull();
+    // B stays at the dropped slot.
+    expect(sessionOrderManager.getOrder(cwd)).toEqual(["A", "B", "C"]);
+  });
+
+  it("button resume after drag (last-write-wins) moves id to front", () => {
+    // User drags X into the middle (tags "keep"), then before the bridge
+    // re-registers, clicks Resume on X (tags "front"). Last-write-wins:
+    // X surfaces at the top.
+    sessionOrderManager.reorder(cwd, ["A", "X", "B"]);
+    endedSessionIds.add("X");
+
+    pendingResumeIntents.record("X", "keep");
+    pendingResumeIntents.record("X", "front");
+
+    const broadcast = endedToAlive("X", cwd, endedSessionIds, pendingResumeIntents, sessionOrderManager);
+
     expect(broadcast).not.toBeNull();
-    // B is at index 0 — user-intent resume always means move-to-front.
-    expect(sessionOrderManager.getOrder(cwd)).toEqual(["B", "A", "C"]);
+    expect(sessionOrderManager.getOrder(cwd)).toEqual(["X", "A", "B"]);
   });
 
   it("bridge auto-reattach on reboot leaves order untouched and emits no broadcast", () => {
@@ -156,7 +175,7 @@ describe("ended\u2192alive sessionOrder gate", () => {
     sessionOrderManager.reorder(cwd, ["A", "B", "C"]);
     endedSessionIds.add("X");
 
-    r.record("X"); // user clicked Resume but spawn failed
+    r.record("X", "front"); // user clicked Resume but spawn failed
     nowMs += 200; // 200 ms later, well past the 100 ms TTL
 
     // Now a legitimate bridge reattach happens for the same id.
@@ -173,7 +192,7 @@ describe("ended\u2192alive sessionOrder gate", () => {
     sessionOrderManager.insert(cwd, "A");
     endedSessionIds.add("X");
 
-    pendingResumeIntents.record("X");
+    pendingResumeIntents.record("X", "front");
 
     const first = endedToAlive("X", cwd, endedSessionIds, pendingResumeIntents, sessionOrderManager);
     expect(first).not.toBeNull();
@@ -198,7 +217,7 @@ describe("ended\u2192alive sessionOrder gate", () => {
     // Cycle 1: X ends, X resumes.
     sessionOrderManager.remove(cwd, "X");
     endedSessionIds.add("X");
-    pendingResumeIntents.record("X");
+    pendingResumeIntents.record("X", "front");
     const r1 = endedToAlive("X", cwd, endedSessionIds, pendingResumeIntents, sessionOrderManager);
     expect(r1).not.toBeNull();
     expect(sessionOrderManager.getOrder(cwd)[0]).toBe("X");
@@ -208,7 +227,7 @@ describe("ended\u2192alive sessionOrder gate", () => {
     // to the top regardless.
     sessionOrderManager.remove(cwd, "X");
     endedSessionIds.add("X");
-    pendingResumeIntents.record("X");
+    pendingResumeIntents.record("X", "front");
     const r2 = endedToAlive("X", cwd, endedSessionIds, pendingResumeIntents, sessionOrderManager);
     expect(r2).not.toBeNull();
     expect(sessionOrderManager.getOrder(cwd)[0]).toBe("X");
@@ -216,7 +235,7 @@ describe("ended\u2192alive sessionOrder gate", () => {
     // Cycle 3.
     sessionOrderManager.remove(cwd, "X");
     endedSessionIds.add("X");
-    pendingResumeIntents.record("X");
+    pendingResumeIntents.record("X", "front");
     endedToAlive("X", cwd, endedSessionIds, pendingResumeIntents, sessionOrderManager);
     expect(sessionOrderManager.getOrder(cwd)[0]).toBe("X");
   });

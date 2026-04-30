@@ -140,7 +140,26 @@ export function useSessionActions(deps: SessionActionDeps) {
       if (existing) next.set(sessionId, { ...existing, resuming: true });
       return next;
     });
-    send({ type: "resume_session", sessionId, mode, ...(entryId ? { entryId } : {}) });
+    // Explicit "front" placement: matches today's default but makes the
+    // intent visible at the wire level. See change:
+    // differentiate-resume-intent-by-trigger.
+    send({ type: "resume_session", sessionId, mode, placement: "front", ...(entryId ? { entryId } : {}) });
+  }, [send, setSessions]);
+
+  /**
+   * Drag-to-resume entry point. The drop position was just persisted via
+   * `reorder_sessions`, so the resume MUST NOT clobber it — send placement
+   * "keep" so the server's ended→alive branch leaves sessionOrder alone.
+   * See change: differentiate-resume-intent-by-trigger.
+   */
+  const handleResumeSessionKeepPosition = useCallback((sessionId: string) => {
+    setSessions((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(sessionId);
+      if (existing) next.set(sessionId, { ...existing, resuming: true });
+      return next;
+    });
+    send({ type: "resume_session", sessionId, mode: "continue", placement: "keep" });
   }, [send, setSessions]);
 
   const handleSpawnSession = useCallback((cwd: string, attachProposal?: string) => {
@@ -220,7 +239,7 @@ export function useSessionActions(deps: SessionActionDeps) {
   return {
     handleAbort, handleForceKill, handleCancelPending, handleRespondToUi, handleFlowAction, handleSend,
     handleSelect, handleRenameSession, handleShutdownSession, handleKillProcess,
-    handleSendPromptToSession, handleResumeSession, handleSpawnSession,
+    handleSendPromptToSession, handleResumeSession, handleResumeSessionKeepPosition, handleSpawnSession,
     handleHideSession, handleUnhideSession,
     handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleTerminalTitle,
     handleListFiles,

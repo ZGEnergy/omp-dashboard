@@ -66,6 +66,13 @@ interface Props {
   onRename?: (sessionId: string, name: string) => void;
   onShutdown?: (sessionId: string) => void;
   onResume?: (sessionId: string, mode: "continue" | "fork") => void;
+  /**
+   * Drag-to-resume entry point. Distinct from `onResume` so the WS
+   * message can carry `placement: "keep"`, preserving the dropped slot
+   * through the resume round-trip.
+   * See change: differentiate-resume-intent-by-trigger.
+   */
+  onResumeKeepPosition?: (sessionId: string) => void;
   onHideSession?: (sessionId: string) => void;
   onUnhideSession?: (sessionId: string) => void;
   onSpawnSession?: (cwd: string, attachProposal?: string) => void;
@@ -132,7 +139,7 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onFlowAction, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onOpenPinDialog, onUnpinDirectory, onReorderPinnedDirs, terminals, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, flowsMap, onKillProcess, onOpenSpecs, onOpenArchive, onViewReadme, onOpenTerminals, onOpenEditor, editorStatuses, editorAvailable, headerExtra, errorSessionIds, spawnErrors, onDismissSpawnError, resumeErrors, onDismissResumeError }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, sessionOrderMap, onReorderSessions, onSendPrompt, onFlowAction, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onResumeKeepPosition, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onOpenPinDialog, onUnpinDirectory, onReorderPinnedDirs, terminals, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, flowsMap, onKillProcess, onOpenSpecs, onOpenArchive, onViewReadme, onOpenTerminals, onOpenEditor, editorStatuses, editorAvailable, headerExtra, errorSessionIds, spawnErrors, onDismissSpawnError, resumeErrors, onDismissResumeError }: Props) {
   const now = Date.now();
   const [, navigate] = useLocation();
   const { messages, showToast, dismissToast } = useToast();
@@ -320,7 +327,18 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             draggedSession.sessionFile &&
             overSession && overSession.status !== "ended"
           ) {
-            onResume?.(draggedSession.id, "continue");
+            // Drag-to-resume — the dropped slot was just persisted by
+            // the `onReorderSessions` call above; route through the
+            // keep-position callback so the server's ended→alive
+            // branch does NOT move the id to the front and clobber it.
+            // Fallback to onResume for callers that haven't wired the
+            // new callback yet (preserves legacy behavior).
+            // See change: differentiate-resume-intent-by-trigger.
+            if (onResumeKeepPosition) {
+              onResumeKeepPosition(draggedSession.id);
+            } else {
+              onResume?.(draggedSession.id, "continue");
+            }
           }
           break;
         }
@@ -334,7 +352,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
         onReorderPinnedDirs?.(newOrder);
       }
     }
-  }, [allGroups, pinnedGroups, onReorderSessions, onReorderPinnedDirs, onResume]);
+  }, [allGroups, pinnedGroups, onReorderSessions, onReorderPinnedDirs, onResume, onResumeKeepPosition]);
 
   /**
    * Decide whether a folder should be visible given the active filters.

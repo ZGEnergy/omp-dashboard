@@ -2,38 +2,54 @@
  * In-memory tracker for user-initiated session-resume intents.
  *
  * Purpose: distinguish ended→alive transitions caused by a deliberate user
- * action (Resume click, drag-to-resume, REST resume) from those caused by a
- * bridge auto-reattach on dashboard reboot. The `sessionManager.onChange`
- * hook in `server.ts` consults this registry in its ended→alive branch:
+ * action (Resume click, drag-to-resume, REST resume, prompt-auto-resume)
+ * from those caused by a bridge auto-reattach on dashboard reboot, AND
+ * differentiate between "surface this card at the top" (front) and
+ * "respect the slot the user just chose" (keep) for user-driven resumes.
  *
- *   - if `consume(sessionId)` returns true  → user intent → reorder + broadcast
- *   - if `consume(sessionId)` returns false → bridge reattach → leave order alone
+ * The `sessionManager.onChange` hook in `server.ts` consults this registry
+ * in its ended→alive branch:
  *
- * Tagging happens in `handleResumeSession` (WS) and the `/api/session/:id/resume`
- * handler (REST), immediately before `spawnPiSession`. Both drag-to-resume and
- * a plain Resume click flow through `handleResumeSession`, so a single tag site
- * covers both.
+ *   - if `consume(sessionId) === "front"`  → moveToFront + broadcast
+ *   - if `consume(sessionId) === "keep"`   → no-op (drop position already
+ *                                             persisted via reorder_sessions)
+ *   - if `consume(sessionId) === null`     → bridge reattach → leave order alone
+ *
+ * Tagging happens in `handleResumeSession` (WS), the `/api/session/:id/resume`
+ * handler (REST), and `handleSendPrompt`'s ended-branch (prompt-auto-resume),
+ * immediately before `spawnPiSession`. The intent value is supplied by the
+ * caller — drag-to-resume tags `"keep"`; everyone else tags `"front"`.
  *
  * In-memory only. NOT persisted across server restarts. Stale entries (older
  * than `ttlMs`, default 60 s) are silently dropped on read so a failed spawn
  * cannot poison a later legitimate reattach.
  *
- * See change: preserve-session-order-on-reboot.
+ * See changes: preserve-session-order-on-reboot, top-of-tier-on-status-change,
+ *              differentiate-resume-intent-by-trigger.
  */
 
 export const PENDING_RESUME_INTENT_TTL_MS = 60_000;
 
+/** The two user-driven placement intents. */
+export type ResumeIntent = "front" | "keep";
+
+interface IntentEntry {
+  intent: ResumeIntent;
+  timestamp: number;
+}
+
 export interface PendingResumeIntentRegistry {
   /**
-   * Tag a session id as user-resume-initiated. Idempotent — re-recording the
-   * same id refreshes the timestamp without producing duplicate entries.
+   * Tag a session id with a placement intent. Idempotent — re-recording the
+   * same id refreshes both timestamp and intent (last-write-wins).
    */
-  record(sessionId: string): void;
+  record(sessionId: string, intent: ResumeIntent): void;
   /**
-   * Returns true and clears the entry iff the session was tagged within the
-   * TTL window. Stale entries are dropped silently and `false` is returned.
+   * Returns the recorded intent and clears the entry iff the session was
+   * tagged within the TTL window. Stale entries are dropped silently and
+   * `null` is returned. `null` is also returned for never-tagged ids.
    */
-  consume(sessionId: string): boolean;
+  consume(sessionId: string): ResumeIntent | null;
   /** Test helper — number of live (non-expired) entries. */
   size(): number;
 }
@@ -51,35 +67,36 @@ export function createPendingResumeIntentRegistry(
   const ttl = opts.ttlMs ?? PENDING_RESUME_INTENT_TTL_MS;
   const now = opts.now ?? (() => Date.now());
 
-  // sessionId -> timestamp of most recent record() call.
-  const store = new Map<string, number>();
+  // sessionId -> { intent, timestamp } of most recent record() call.
+  const store = new Map<string, IntentEntry>();
 
   function pruneStale(): void {
     const cutoff = now() - ttl;
-    for (const [id, ts] of store) {
-      if (ts < cutoff) store.delete(id);
+    for (const [id, entry] of store) {
+      if (entry.timestamp < cutoff) store.delete(id);
     }
   }
 
   return {
-    record(sessionId: string): void {
+    record(sessionId: string, intent: ResumeIntent): void {
       if (!sessionId) return;
-      // Refresh-on-rerecord is intentional: a second user click on Resume
-      // for the same session should not be silently classified as stale
-      // because the first click's timestamp aged out.
-      store.set(sessionId, now());
+      // Last-write-wins on re-record: a second user action for the same
+      // session (e.g. drag-then-button-click) should reflect the most
+      // recent intent. Also refreshes the timestamp so a slow bridge
+      // round-trip doesn't expire mid-resume.
+      store.set(sessionId, { intent, timestamp: now() });
     },
 
-    consume(sessionId: string): boolean {
-      if (!sessionId) return false;
-      const ts = store.get(sessionId);
-      if (ts === undefined) return false;
-      if (ts < now() - ttl) {
+    consume(sessionId: string): ResumeIntent | null {
+      if (!sessionId) return null;
+      const entry = store.get(sessionId);
+      if (entry === undefined) return null;
+      if (entry.timestamp < now() - ttl) {
         store.delete(sessionId);
-        return false;
+        return null;
       }
       store.delete(sessionId);
-      return true;
+      return entry.intent;
     },
 
     size(): number {

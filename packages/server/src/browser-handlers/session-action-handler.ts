@@ -168,7 +168,7 @@ export async function handleSendPrompt(
   msg: Extract<BrowserToServerMessage, { type: "send_prompt" }>,
   ctx: BrowserHandlerContext,
 ): Promise<void> {
-  const { sessionManager, piGateway, headlessPidRegistry, pendingResumeRegistry, pendingDashboardSpawns, broadcast } = ctx;
+  const { sessionManager, piGateway, headlessPidRegistry, pendingResumeRegistry, pendingResumeIntents, pendingDashboardSpawns, broadcast } = ctx;
 
   // Intercept `/reload` on active headless sessions — forward the request to
   // our kill-and-respawn handler instead of routing the prompt to the bridge
@@ -194,6 +194,11 @@ export async function handleSendPrompt(
       sessionFile: promptSession.sessionFile,
     });
     if (alreadyResuming) return;
+    // Tag the resume intent as "front" so the upcoming ended→alive
+    // transition surfaces this card at the top of the alive tier. The
+    // user is actively typing into this session; surfacing it matches
+    // their mental model. See change: differentiate-resume-intent-by-trigger.
+    pendingResumeIntents?.record(msg.sessionId, "front");
     sessionManager.update(msg.sessionId, { resuming: true });
     broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { resuming: true } });
     const autoResumeConfig = loadConfig();
@@ -237,6 +242,11 @@ export async function handleResumeSession(
     sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session not found" });
     return;
   }
+  // Resolve placement intent. Old browsers omit the field; default to
+  // "front" so they keep getting today's behavior. Drag-to-resume sends
+  // "keep" so the dropped slot is preserved through the resume round-trip.
+  // See change: differentiate-resume-intent-by-trigger.
+  const placement: "front" | "keep" = msg.placement ?? "front";
   if (!session.sessionFile) {
     sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session file is unknown (pre-migration session)" });
     return;
@@ -266,12 +276,13 @@ export async function handleResumeSession(
 
   // Tag the user-resume intent BEFORE spawning so the `onChange`
   // ended→alive branch in `server.ts` can distinguish a user-initiated
-  // resume (Resume click OR drag-to-resume — both flow through here)
-  // from a bridge auto-reattach on dashboard reboot. The fork path
-  // also tags but the tag is harmless: forks create new session ids
-  // that never appear in the ended→alive branch.
-  // See change: preserve-session-order-on-reboot.
-  pendingResumeIntents?.record(msg.sessionId);
+  // resume from a bridge auto-reattach on dashboard reboot, and choose
+  // placement (front vs. keep) appropriately. The fork path also tags
+  // but the tag is harmless: forks create new session ids that never
+  // appear in the ended→alive branch.
+  // See changes: preserve-session-order-on-reboot,
+  //              differentiate-resume-intent-by-trigger.
+  pendingResumeIntents?.record(msg.sessionId, placement);
   const resumeConfig = loadConfig();
   const result = await spawnPiSession(session.cwd, {
     sessionFile: forkSessionFile,

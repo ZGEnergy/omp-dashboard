@@ -555,6 +555,16 @@ export interface ResumeSessionBrowserMessage {
   mode: "continue" | "fork";
   /** When forking, optionally fork from a specific session entry instead of the latest */
   entryId?: string;
+  /**
+   * Placement intent for the resumed session in the cwd's sessionOrder:
+   *   - "front" (default): move to top of alive tier (Resume button, REST,
+   *     prompt-auto-resume).
+   *   - "keep": leave order alone (drag-to-resume — drop position was already
+   *     persisted by an earlier `reorder_sessions` message).
+   * Server defaults to "front" when omitted, preserving prior behavior.
+   * See change: differentiate-resume-intent-by-trigger.
+   */
+  placement?: "front" | "keep";
 }
 
 export interface HideSessionBrowserMessage {

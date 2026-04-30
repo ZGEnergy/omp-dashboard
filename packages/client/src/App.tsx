@@ -539,7 +539,7 @@ export default function App() {
   const {
     handleAbort, handleForceKill, handleCancelPending, handleRespondToUi, handleFlowAction, handleSend,
     handleSelect, handleRenameSession, handleShutdownSession, handleKillProcess,
-    handleSendPromptToSession, handleResumeSession, handleSpawnSession,
+    handleSendPromptToSession, handleResumeSession, handleResumeSessionKeepPosition, handleSpawnSession,
     handleHideSession, handleUnhideSession,
     handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleTerminalTitle,
     handleListFiles,
@@ -736,6 +736,7 @@ export default function App() {
       onRename={handleRenameSession}
       onShutdown={handleShutdownSession}
       onResume={handleResumeSession}
+      onResumeKeepPosition={handleResumeSessionKeepPosition}
       onHideSession={handleHideSession}
       onUnhideSession={handleUnhideSession}
       onSpawnSession={handleSpawnSession}

@@ -335,27 +335,34 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         });
       }
     } else if (!isEnded && wasEnded) {
-      // Resume: ended→alive. Two real triggers land here:
-      //   (a) user-initiated  — Resume click, drag-to-resume, REST
-      //                         resume; tagged via pendingResumeIntents
-      //   (b) bridge reattach — dashboard restarted, scan classified the
-      //                         session as ended, but the pi process was
-      //                         still alive and the bridge re-registered.
-      //                         NOT tagged.
+      // Resume: ended→alive. Three real outcomes land here, distinguished
+      // by the value `pendingResumeIntents.consume(...)` returns:
+      //   "front"  — Resume button, REST resume, prompt-auto-resume.
+      //              User wants the card surfaced at the top of alive.
+      //   "keep"   — Drag-to-resume. The dropped slot was already
+      //              persisted via `reorder_sessions`; do NOT clobber it.
+      //   null     — Bridge auto-reattach (dashboard restarted, pi
+      //              process still alive, no user intent tagged).
+      //              Preserve the user's existing layout.
       // We always clear the transition tracker so a future alive→ended
-      // for this session fires correctly. We only mutate the persisted
-      // sessionOrder + broadcast for case (a) — case (b) MUST preserve
-      // the user's existing layout.
-      // See change: preserve-session-order-on-reboot.
+      // for this session fires correctly.
+      // See changes: preserve-session-order-on-reboot,
+      //              top-of-tier-on-status-change,
+      //              differentiate-resume-intent-by-trigger.
       endedSessionIds.delete(sessionId);
-      if (!pendingResumeIntents.consume(sessionId)) {
+      const intent = pendingResumeIntents.consume(sessionId);
+      if (intent === null) {
         // Bridge auto-reattach — leave order alone.
         return;
       }
-      // User-intent resume: always move-to-front so the just-resumed
-      // card surfaces at the top of the alive tier, even on repeated
-      // end → resume cycles where the id might still be in the order.
-      // See change: top-of-tier-on-status-change.
+      if (intent === "keep") {
+        // Drag-to-resume — dropped slot wins; the earlier reorder_sessions
+        // already broadcast. Do NOT mutate sessionOrder, do NOT broadcast.
+        return;
+      }
+      // intent === "front": move-to-front so the just-resumed card
+      // surfaces at the top of the alive tier, even on repeated end →
+      // resume cycles where the id might still be in the order.
       sessionOrderManager.moveToFront(session.cwd, sessionId);
       const next = sessionOrderManager.getOrder(session.cwd) ?? [];
       browserGateway.broadcastToAll({
