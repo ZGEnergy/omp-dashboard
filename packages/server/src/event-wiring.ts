@@ -9,7 +9,7 @@ import type { BrowserGateway } from "./browser-gateway.js";
 import type { SessionOrderManager } from "./session-order-manager.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { DirectoryService } from "./directory-service.js";
-import { extractSessionUpdates } from "./event-status-extraction.js";
+import { extractSessionUpdates, isActivityEvent } from "./event-status-extraction.js";
 import { spawnPiSession } from "./process-manager.js";
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
@@ -107,6 +107,13 @@ export function wireEvents(deps: EventWiringDeps): void {
   const skipReplayInsert = new Set<string>();
   // Debounce flows refresh to prevent infinite loop between sessions in same cwd
   const recentFlowsRefresh = new Set<string>();
+  // Per-session timestamp of the most recent `lastActivityAt` broadcast.
+  // In-memory state updates on every activity event; the WebSocket broadcast
+  // is throttled to at most one per `LAST_ACTIVITY_BROADCAST_INTERVAL_MS` per
+  // session. The client's local `now` ticker handles label refreshes between
+  // broadcasts. See change: session-card-last-activity-badge.
+  const lastActivityBroadcastAt = new Map<string, number>();
+  const LAST_ACTIVITY_BROADCAST_INTERVAL_MS = 30_000;
 
   piGateway.onEvent = (sessionId, msg) => {
     if (msg.type === "event_forward") {
@@ -145,6 +152,20 @@ export function wireEvents(deps: EventWiringDeps): void {
         // to avoid rapid status flickers on the session card
         if (!replayingSessions.has(sessionId)) {
           browserGateway.broadcastSessionUpdated(sessionId, updates);
+        }
+      }
+
+      // Stamp `session.lastActivityAt` on every live activity event.
+      // Skipped during replay — historical events should not retroactively
+      // bump the badge. In-memory updates always; broadcasts throttled per
+      // session. See change: session-card-last-activity-badge.
+      if (!replayingSessions.has(sessionId) && isActivityEvent(msg.event.eventType)) {
+        const now = Date.now();
+        sessionManager.update(sessionId, { lastActivityAt: now });
+        const lastBroadcast = lastActivityBroadcastAt.get(sessionId) ?? 0;
+        if (now - lastBroadcast >= LAST_ACTIVITY_BROADCAST_INTERVAL_MS) {
+          lastActivityBroadcastAt.set(sessionId, now);
+          browserGateway.broadcastSessionUpdated(sessionId, { lastActivityAt: now });
         }
       }
 
@@ -466,6 +487,9 @@ export function wireEvents(deps: EventWiringDeps): void {
     }
 
     if (msg.type === "session_unregister") {
+      // Drop the per-session debounce entry so a future re-register with the
+      // same id does not silently suppress its first activity broadcast.
+      lastActivityBroadcastAt.delete(sessionId);
       browserGateway.broadcastSessionRemoved(sessionId);
     }
 
