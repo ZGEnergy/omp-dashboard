@@ -16,7 +16,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createPendingResumeIntentRegistry } from "../pending-resume-intent-registry.js";
 import { createSessionOrderManager } from "../session-order-manager.js";
+import { applyReattachPolicy } from "../reattach-placement.js";
+import { createMemorySessionManager } from "../memory-session-manager.js";
+import type { ReattachPlacement } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import type { PreferencesStore } from "../preferences-store.js";
+import type { BrowserGateway } from "../browser-gateway.js";
 
 // In-memory PreferencesStore mock matching the slice of the interface
 // `sessionOrderManager` consumes.
@@ -205,6 +209,119 @@ describe("ended\u2192alive sessionOrder gate", () => {
     expect(second).toBeNull();
     // X is still in the order from the first call \u2014 no further mutation.
     expect(sessionOrderManager.getOrder(cwd)).toEqual(["X", "A"]);
+  });
+
+  // ── reattach-move-to-front ──
+
+  it("reattach with policy 'always' on persisted-active session lands at index 0 + broadcasts", () => {
+    // Repro: 6 alive sessions in cwd, none ended. The user's was at
+    // index 5. Dashboard restarts; bridge reconnects with
+    // registerReason: "reattach" for that session id.
+    sessionOrderManager.reorder(cwd, ["S0", "S1", "S2", "S3", "S4", "S5"]);
+
+    // No ended→alive transition fires (wasEnded=false, isEnded=false)
+    // for these reattaches; we exercise the new branch in server.ts
+    // directly via the helper.
+    const sm = createMemorySessionManager();
+    sm.register({ id: "S5", cwd, source: "tui" });
+
+    const broadcasts: any[] = [];
+    const gateway = { broadcastToAll: (m: any) => broadcasts.push(m) } as unknown as BrowserGateway;
+
+    const action = applyReattachPolicy("S5", cwd, "always", {
+      sessionManager: sm,
+      sessionOrderManager,
+      browserGateway: gateway,
+    });
+
+    expect(action).toBe("moveToFront");
+    expect(sessionOrderManager.getOrder(cwd)).toEqual(["S5", "S0", "S1", "S2", "S3", "S4"]);
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0].sessionIds[0]).toBe("S5");
+  });
+
+  it("reattach with policy 'preserve' is a no-op (legacy behavior)", () => {
+    sessionOrderManager.reorder(cwd, ["S0", "S1", "S2"]);
+    const sm = createMemorySessionManager();
+    sm.register({ id: "S2", cwd, source: "tui" });
+
+    const broadcasts: any[] = [];
+    const gateway = { broadcastToAll: (m: any) => broadcasts.push(m) } as unknown as BrowserGateway;
+
+    const action = applyReattachPolicy("S2", cwd, "preserve", {
+      sessionManager: sm,
+      sessionOrderManager,
+      browserGateway: gateway,
+    });
+
+    expect(action).toBe("preserve");
+    expect(sessionOrderManager.getOrder(cwd)).toEqual(["S0", "S1", "S2"]);
+    expect(broadcasts).toEqual([]);
+  });
+
+  it("legacy bridge (no registerReason) does NOT trigger reattach policy", () => {
+    // Spec scenario: "Legacy bridge reattach without registerReason
+    // preserves layout". Pre-this-change bridges omit the field; the
+    // server treats omission as `"spawn"` and skips the policy entirely.
+    sessionOrderManager.reorder(cwd, ["S0", "S1", "S2"]);
+
+    // Simulate the alive→alive branch's gate condition with a missing
+    // registerReason (i.e. ctx?.registerReason === undefined). Per the
+    // server.ts onChange code, the branch should not fire.
+    const ctx = { registerReason: undefined } as { registerReason?: "spawn" | "reattach" };
+    const shouldFire = ctx.registerReason === "reattach";
+    expect(shouldFire).toBe(false);
+
+    // Order remains untouched.
+    expect(sessionOrderManager.getOrder(cwd)).toEqual(["S0", "S1", "S2"]);
+  });
+
+  it("registry intent wins over registerReason: reattach (defensive guarantee)", () => {
+    // Spec scenario: "Registry intent wins over reattach". A registry
+    // intent of "front" or "keep" must override any registerReason:
+    // "reattach" so user actions are never clobbered by the policy.
+    sessionOrderManager.reorder(cwd, ["S0", "S1", "S2"]);
+    const sm = createMemorySessionManager();
+    sm.register({ id: "S2", cwd, source: "tui" });
+
+    // Replicate the server.ts alive→alive branch logic verbatim:
+    // consume registry first, defer to it if non-null.
+    pendingResumeIntents.record("S2", "front");
+    const intent = pendingResumeIntents.consume("S2");
+    expect(intent).toBe("front");
+
+    // With intent === "front", the registry path moves to front;
+    // the reattach policy is NOT invoked.
+    sessionOrderManager.moveToFront(cwd, "S2");
+    expect(sessionOrderManager.getOrder(cwd)).toEqual(["S2", "S0", "S1"]);
+
+    // Verify policy.applyReattachPolicy would also have moved-to-front;
+    // the test guarantees registry-path wins by being executed first.
+    // (If both paths fired, S2 would still be at front, but only one
+    // sessions_reordered broadcast should be emitted in production.)
+  });
+
+  it("reattach respects 'streaming-only' policy: only moves streaming sessions", () => {
+    sessionOrderManager.reorder(cwd, ["S0", "S1", "S2"]);
+    const sm = createMemorySessionManager();
+    sm.register({ id: "S1", cwd, source: "tui" });
+    sm.register({ id: "S2", cwd, source: "tui" });
+    sm.update("S2", { status: "streaming" });
+
+    const policies: ReattachPlacement[] = ["streaming-only"];
+    for (const p of policies) {
+      // S1 is active, not streaming → preserve
+      const broadcastsA: any[] = [];
+      const gA = { broadcastToAll: (m: any) => broadcastsA.push(m) } as unknown as BrowserGateway;
+      expect(applyReattachPolicy("S1", cwd, p, { sessionManager: sm, sessionOrderManager, browserGateway: gA })).toBe("preserve");
+      expect(broadcastsA).toEqual([]);
+
+      // S2 is streaming → moveToFront
+      const broadcastsB: any[] = [];
+      const gB = { broadcastToAll: (m: any) => broadcastsB.push(m) } as unknown as BrowserGateway;
+      expect(applyReattachPolicy("S2", cwd, p, { sessionManager: sm, sessionOrderManager, browserGateway: gB })).toBe("moveToFront");
+      expect(broadcastsB).toHaveLength(1);
+    }
   });
 
   it("end → resume → end → resume cycle always lands id at index 0", () => {

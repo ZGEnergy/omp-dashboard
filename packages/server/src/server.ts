@@ -20,6 +20,7 @@ import { createSessionOrderManager, type SessionOrderManager } from "./session-o
 import { createPendingForkRegistry, type PendingForkRegistry } from "./pending-fork-registry.js";
 import { createPendingAttachRegistry } from "./pending-attach-registry.js";
 import { createPendingResumeIntentRegistry } from "./pending-resume-intent-registry.js";
+import { applyReattachPolicy } from "./reattach-placement.js";
 
 // pending-load-manager removed — server loads sessions directly via DirectoryService
 import { createDirectoryService, type DirectoryService } from "./directory-service.js";
@@ -282,7 +283,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   }
 
   // Save per-session .meta.json on any change
-  sessionManager.onChange = (sessionId: string) => {
+  sessionManager.onChange = (sessionId: string, ctx) => {
     const session = sessionManager.get(sessionId);
     if (!session?.sessionFile) return;
     metaPersistence.save(session.sessionFile, {
@@ -352,17 +353,33 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       endedSessionIds.delete(sessionId);
       const intent = pendingResumeIntents.consume(sessionId);
       if (intent === null) {
-        // Bridge auto-reattach — leave order alone.
+        // No user-driven resume intent. If this register carried
+        // `registerReason: "reattach"`, apply the configured
+        // `reattachPlacement` policy. Otherwise (legacy bridge or
+        // genuine null reattach with `"preserve"` semantics) leave
+        // order alone.
+        // See change: reattach-move-to-front.
+        if (ctx?.registerReason === "reattach") {
+          applyReattachPolicy(
+            sessionId,
+            session.cwd,
+            config.reattachPlacement,
+            { sessionManager, sessionOrderManager, browserGateway },
+            ctx.priorStatus,
+          );
+        }
         return;
       }
       if (intent === "keep") {
         // Drag-to-resume — dropped slot wins; the earlier reorder_sessions
         // already broadcast. Do NOT mutate sessionOrder, do NOT broadcast.
+        // Registry intent overrides any `registerReason: "reattach"`.
         return;
       }
       // intent === "front": move-to-front so the just-resumed card
       // surfaces at the top of the alive tier, even on repeated end →
       // resume cycles where the id might still be in the order.
+      // Registry intent overrides any `registerReason: "reattach"`.
       sessionOrderManager.moveToFront(session.cwd, sessionId);
       const next = sessionOrderManager.getOrder(session.cwd) ?? [];
       browserGateway.broadcastToAll({
@@ -370,6 +387,37 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         cwd: session.cwd,
         sessionIds: next,
       });
+    } else if (!isEnded && !wasEnded && ctx?.registerReason === "reattach") {
+      // Reattach of a session that was persisted as alive (the common
+      // case after `pi-dashboard restart` while pi processes stay
+      // alive). Neither alive→ended nor ended→alive transition fires;
+      // we apply the reattach policy directly here.
+      //
+      // Defensive: a registry intent for an alive session should not
+      // happen in practice (handleResumeSession only tags intents for
+      // ended sessions), but per spec scenario "Registry intent wins
+      // over reattach" we honor it if present and skip the policy.
+      // See change: reattach-move-to-front.
+      const intent = pendingResumeIntents.consume(sessionId);
+      if (intent === "front") {
+        sessionOrderManager.moveToFront(session.cwd, sessionId);
+        const next = sessionOrderManager.getOrder(session.cwd) ?? [];
+        browserGateway.broadcastToAll({
+          type: "sessions_reordered",
+          cwd: session.cwd,
+          sessionIds: next,
+        });
+      } else if (intent === "keep") {
+        // Honor dropped slot; do nothing.
+      } else {
+        applyReattachPolicy(
+          sessionId,
+          session.cwd,
+          config.reattachPlacement,
+          { sessionManager, sessionOrderManager, browserGateway },
+          ctx.priorStatus,
+        );
+      }
     }
   };
   // Track which session ids we've seen as ended at least once, so the

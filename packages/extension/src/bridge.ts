@@ -186,6 +186,7 @@ function initBridge(pi: ExtensionAPI) {
   let cachedCtx: any | undefined = prev.ctx;
   let lastModel: string | undefined;
   let lastThinkingLevel: string | undefined;
+  let hasRegisteredOnce = false; // see change: reattach-move-to-front
   let promptBus: PromptBus | undefined;
 
   // ── Per-message entry id tracking (for fix-per-message-fork) ──
@@ -596,6 +597,7 @@ function initBridge(pi: ExtensionAPI) {
       lastModel, lastThinkingLevel,
       lastSessionFile, lastSessionDir, lastFirstMessage,
       lastGitBranch, lastGitPrNumber, lastSessionName,
+      hasRegisteredOnce,
     };
   }
   /** Sync BridgeContext mutations back to local variables */
@@ -612,6 +614,7 @@ function initBridge(pi: ExtensionAPI) {
     lastGitBranch = bc.lastGitBranch;
     lastGitPrNumber = bc.lastGitPrNumber;
     lastSessionName = bc.lastSessionName;
+    hasRegisteredOnce = bc.hasRegisteredOnce;
   }
 
   // Local wrappers that sync bc around extracted module calls

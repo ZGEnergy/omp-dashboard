@@ -159,6 +159,7 @@ CLI flags → environment variables → config file → built-in defaults.
 | — | — | `autoShutdown` | `false` | Server shuts down when idle |
 | — | — | `shutdownIdleSeconds` | `300` | Seconds idle before auto-shutdown |
 | — | — | `spawnStrategy` | `"headless"` | Session spawn mode: `"headless"` or `"tmux"` |
+| — | — | `reattachPlacement` | `"always"` | After a dashboard restart, where re-registering bridges land in folder lists. `"always"` (top), `"streaming-only"` (only mid-completion), `"preserve"` (legacy: keep prior drag order) |
 | — | — | `devBuildOnReload` | `false` | Rebuild client + restart server on `/reload` |
 
 The bridge also honours `PI_DASHBOARD_URL=ws://host:port` to point at a remote server instead of localhost.

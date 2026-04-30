@@ -297,6 +297,10 @@ export function createPiGateway(
                 sessionDir: msg.sessionDir,
                 firstMessage: msg.firstMessage,
                 pid: msg.pid,
+                // Forward registerReason so server.ts onChange can apply
+                // the configured reattach placement policy.
+                // See change: reattach-move-to-front.
+                registerReason: msg.registerReason,
               });
               console.error(`[gateway] session registered: ${msg.sessionId} cwd=${msg.cwd}`);
 

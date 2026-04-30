@@ -11,8 +11,11 @@ see [`docs/release-process.md`](docs/release-process.md).
 ## [Unreleased]
 
 ### Added
+- New `reattachPlacement` config field (`"preserve" | "streaming-only" | "always"`) and a Settings → Sessions dropdown that controls how the dashboard places re-registering bridges in `sessionOrder` after a restart. (change: `reattach-move-to-front`)
+- New `registerReason: "spawn" | "reattach"` field on the `session_register` extension protocol message; bridges set it automatically. Legacy bridges that omit the field are treated as `"spawn"` for backwards compatibility.
 
 ### Changed
+- **BREAKING (default behavior)**: when the dashboard restarts, still-alive pi sessions now float to the **top** of their folder lists by default, instead of being preserved at their pre-restart drag-order positions. This eliminates the case where a session you were actively running before a restart ended up buried mid-list. To restore the old behavior, set `reattachPlacement: "preserve"` in `~/.pi/dashboard/config.json` and run `pi-dashboard restart`. (change: `reattach-move-to-front`)
 
 ### Fixed
 

@@ -22,6 +22,18 @@ export interface SessionRegisterMessage {
   eventCount?: number;
   /** OS process ID of the pi agent — used for force-kill escalation */
   pid?: number;
+  /**
+   * Why the bridge is registering this session. The bridge sets this to
+   * `"spawn"` for the very first `session_register` after process boot
+   * and for every register emitted by the new/fork/resume path
+   * (`handleSessionChange`), and `"reattach"` for any subsequent
+   * `sendStateSync` triggered by a WebSocket reconnect to the dashboard
+   * server (i.e. the dashboard restarted while the bridge stayed alive).
+   * When omitted (legacy bridges), the server treats the message as if
+   * `"spawn"` was specified.
+   * See change: reattach-move-to-front.
+   */
+  registerReason?: "spawn" | "reattach";
 }
 
 export interface SessionUnregisterMessage {
