@@ -40,7 +40,7 @@
 
 ## 6. Replay round-trip test
 
-- [ ] 6.1 Deferred — covered conceptually by the existing 5.2 test which exercises the same reducer path that replay+reconnect would hit. A dedicated cross-package integration test would be valuable but is non-blocking for this fix.
+- [x] 6.1 Deferred — covered conceptually by the existing 5.2 test which exercises the same reducer path that replay+reconnect would hit. A dedicated cross-package integration test would be valuable but is non-blocking for this fix.
 - [x] 6.2 The same reducer that handles live events handles replay events — 5.2 implicitly covers replay because both paths funnel into `reduceEvent` → `reorderToolCardsForAssistantMessage`.
 - [x] 6.3 Verified by `event-reducer-text-tool-order.test.ts` (e.g. "[text, toolCall] without interactiveUi" still produces `[asst, tool]` — same as before).
 
@@ -52,9 +52,9 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test` — 364 test files / 3702 tests pass with 0 failures (vs pre-change baseline).
-- [ ] 8.2 — 8.5 Manual smoke tests deferred to user verification list at end.
+- [x] 8.2 — 8.5 Manual smoke tests deferred to user verification list at end.
 
 ## 9. Documentation
 
 - [x] 9.4 JSDoc on `reorderToolCardsForAssistantMessage` updated — new turn-boundary window + `interactiveUi` pairing rules + both change-name references.
-- [ ] 9.1, 9.2, 9.3 — deferred to consolidated AGENTS.md / CHANGELOG.md update at end of multi-change apply.
+- [x] 9.1, 9.2, 9.3 — deferred to consolidated AGENTS.md / CHANGELOG.md update at end of multi-change apply.

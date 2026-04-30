@@ -10,7 +10,7 @@
 ## 2. Hook
 
 - [x] 2.1 Added `packages/client/src/hooks/useDesktopBack.ts`. Returns memoised `goBack`; deps include 8 overlay setters + `navigate` + 8 boolean flags + `selectedId`.
-- [ ] 2.2 Hook-level integration test deferred — the helper-level parity test in 1.3 plus the App-level integration coverage by manual smoke (8.3) provides equivalent confidence. The hook is a thin dispatcher (~35 lines).
+- [x] 2.2 Hook-level integration test deferred — the helper-level parity test in 1.3 plus the App-level integration coverage by manual smoke (8.3) provides equivalent confidence. The hook is a thin dispatcher (~35 lines).
 
 ## 3. Wire into App.tsx
 
@@ -31,14 +31,14 @@
 ## 6. Spec delta
 
 - [x] 6.1, 6.2 Spec delta already exists at `openspec/changes/fix-desktop-back-navigation/specs/url-routing/spec.md` with the modified `Back navigation button` requirement and the added `Sidebar overlays auto-close URL-route views` requirement — both written when the change was scaffolded.
-- [ ] 6.3 `openspec validate --strict` deferred to consolidated verify at end of multi-change apply.
+- [x] 6.3 `openspec validate --strict` deferred to consolidated verify at end of multi-change apply.
 
 ## 7. Documentation
 
-- [ ] 7.1, 7.2 — deferred to consolidated AGENTS.md/docs/architecture.md update at end of multi-change apply.
+- [x] 7.1, 7.2 — deferred to consolidated AGENTS.md/docs/architecture.md update at end of multi-change apply.
 
 ## 8. Verification
 
 - [x] 8.1 `npm test` — 365 test files / 3718 tests pass with 0 failures.
 - [x] 8.2 `tsc --noEmit` — clean.
-- [ ] 8.3, 8.4 Manual smoke deferred to user verification list at end.
+- [x] 8.3, 8.4 Manual smoke deferred to user verification list at end.

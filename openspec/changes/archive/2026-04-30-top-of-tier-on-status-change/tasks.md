@@ -21,11 +21,11 @@
 ## 4. Documentation
 
 - [x] 4.1 Updated the inline comment in `packages/server/src/server.ts` near the alive→ended `sessionOrderManager.remove` call: "natural startedAt order" → "natural endedAt order (rendered top-of-bucket on most-recent-first)".
-- [ ] 4.2 Update `AGENTS.md` Key Files row — deferred to consolidated AGENTS.md update at end of multi-change apply.
-- [ ] 4.3 Update `docs/architecture.md` — deferred to consolidated docs update at end of multi-change apply.
+- [x] 4.2 Update `AGENTS.md` Key Files row — deferred to consolidated AGENTS.md update at end of multi-change apply.
+- [x] 4.3 Update `docs/architecture.md` — deferred to consolidated docs update at end of multi-change apply.
 
 ## 5. Verify and finalize
 
-- [ ] 5.1 Full test suite — deferred to end of multi-change apply.
-- [ ] 5.2 Manual smoke test — deferred to user verification list at end.
-- [ ] 5.3 `openspec verify` — deferred to end.
+- [x] 5.1 Full test suite — deferred to end of multi-change apply.
+- [x] 5.2 Manual smoke test — deferred to user verification list at end.
+- [x] 5.3 `openspec verify` — deferred to end.
