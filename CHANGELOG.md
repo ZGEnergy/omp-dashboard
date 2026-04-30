@@ -16,6 +16,13 @@ see [`docs/release-process.md`](docs/release-process.md).
 
 ### Fixed
 
+## [0.4.4] - 2026-04-30
+### Added
+
+### Changed
+
+### Fixed
+
 ## [0.4.3] - 2026-04-30
 ### Added
 
