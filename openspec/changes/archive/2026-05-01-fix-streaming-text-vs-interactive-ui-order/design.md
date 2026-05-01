@@ -8,14 +8,17 @@ Two timing facts compose into a visible bug:
    `messages.map()`. Any row pushed into `messages[]` while `streamingText` is
    still set will visually appear ABOVE the streaming text bubble.
 
-2. `bridge.ts:721` defers `message_end` send via `setTimeout(0)`, so by the
-   time the dashboard receives `message_end`, the dashboard has already
-   received and processed `tool_execution_start` and (for tools that prompt)
-   `prompt_request`.
+2. Pi 0.69+ runs `sessionManager.appendMessage` AFTER the awaited extension
+   dispatcher returns, and `bridge.ts:739-757` defers the `message_end` SEND
+   via `setTimeout(0)` so it carries the just-persisted `entryId`. For
+   tool-bearing messages the dispatcher's await chain includes the running
+   tool, so `message_end` reaches the dashboard only AFTER the tool resolves.
 
-For `ask_user`, the parent tool BLOCKS — the gap between
-`tool_execution_start` and `message_end` is bounded only by the user's
-response time. The recent `fix-text-tool-render-order` corrects ordering at
+The gap between `tool_execution_start` and `message_end` therefore equals
+the parent tool's full runtime. For sub-millisecond tools the gap is
+invisible. For long bash commands, subagents, browser tools, and `ask_user`,
+the gap is plainly visible — minutes for `npm test`, unbounded for
+`ask_user`. The recent `fix-text-tool-render-order` corrects ordering at
 `message_end` but is silent during this gap.
 
 ## Solution: flush-at-tool-start
@@ -318,10 +321,12 @@ reorder pass continue to handle replay unchanged.
 | Scenario | Outcome |
 |---|---|
 | `streamingText` never populated (tool-only message) | Flush is no-op (guard). |
+| Long-running bash, no prompt (npm test, builds) | Flush at `tool_execution_start`, layout `[…, assistant_flushed, toolResult(running)]` is index-stable for the entire tool runtime. `tool_execution_update` events update toolResult in place; layout unchanged. |
 | `tool_execution_start` for second tool call in same message | `streamingTextFlushed === true`, flush is no-op (guard). Second `toolResult` lands after first; reorder at `message_end` keeps content-array order. |
 | Replay (no streaming) | Flush is no-op (no streamingText). |
 | `[text, toolCall, text]` | First text flushed, second text appears at `message_end` (no live streaming for second text — accepted tradeoff). |
 | `[toolCall, text]` (model leads with tool) | streamingText empty at `tool_execution_start`. Flush is no-op. Existing reorder at `message_end` produces correct `[toolResult, assistant]` order. |
+| `[thinking, text, toolCall]` (dominant ask_user shape) | `thinking` row pushed at `thinking_end` BEFORE the flush; suffix at message_end is `[thinking, assistant_flushed, toolResult, interactiveUi?]`; reorder claims thinking→thinking, text→assistant, toolCall→toolResult; interactiveUi (unclaimed) trails correctly. |
 | User aborts session before `message_end` fires | Flushed row remains in `messages[]` (correct — user did see that text). No reorder happens, but order is already correct. |
 | Bridge reconnect mid-message | `streamingTextFlushed` is per-session-state and survives because state is preserved. New `message_start` resets it. |
 
@@ -358,6 +363,60 @@ them in:
 - **Multiple text blocks per message**: does the reorder helper need a list-of-text-blocks → list-of-assistant-rows match (currently 1:1)? Investigation needed; the `[text, toolCall, text]` case may already work because each block ends up on its own row via separate flush + message_end paths. If not, the helper needs a one-line tweak.
 - **`entry_persisted` back-fill**: how exactly to identify the flushed row at `message_end`. Sketch above (Option 1) is the recommended path; verify by running the existing entry_persisted tests against a flushed bubble.
 - **Whether to expose `streamingTextFlushed` in the SessionState public type or keep it internal**: probably keep it on `SessionState` proper (mirror of how `thinkingStartedAt` is structured).
+
+## Risk register
+
+The risks below were surfaced during exploration of the widened scope. Each
+is tracked in `tasks.md` either as a regression test (R2, R3, R6, R7) or as
+a pre-merge audit/decision (R1, R4). R5 is an accepted tradeoff and needs
+no further work beyond the existing test in §5.5.
+
+| ID | Risk | Likelihood | Impact | Mitigation site |
+|----|------|-----------:|-------:|-----------------|
+| R1 | Flushed row exists without `entryId` for the entire tool runtime; downstream consumers may misbehave. | certain (by design) | low–medium | Task 11.1 (audit), 11.2 (UI decision) |
+| R2 | `message_end` never arrives (crash / disconnect / abort) — flushed row stays entryId-less even after replay. | low per session, certain at fleet scale | low | Task 3.4b (regression test) |
+| R3 | `findFlushedAssistantRowIndex` matches a prior message's orphan flushed row → cross-message entryId pollution. | low | **medium (data correctness)** | Task 3.1 (hard turn-boundary clamp), 3.4a (regression test) |
+| R4 | Loss of streaming pulse animation — flushed bubble looks finalized for the entire tool runtime. | certain (by design) | low | Task 11.2 (decision) |
+| R5 | `[text, toolCall, text]` — second text doesn't stream live; appears in one shot at `message_end`. | low (rare model shape) | low | Accepted tradeoff; pinned by Task 5.5 |
+| R6 | Suffix K-window math regresses when free-floating rows (bashOutput, unrelated interactiveUi) interleave with the current message's window. | medium | medium | Task 4.1c (interleaved-row regression) |
+| R7 | `streamingTextFlushed` flag stays true between message_end and the next message_start; a stray `tool_execution_start` would silently no-op the flush. | low | low | Task 3.4c (reset flag at message_end too) |
+
+### Risk surface NOT increased
+
+These were checked and confirmed unaffected:
+
+- **Bridge protocol** — untouched, no version-skew risk.
+- **Replay path** — flush is no-op (no streamingText), existing reorder still runs, identical outcome.
+- **Performance** — one extra spread copy of `messages` per tool start; trivial.
+- **Persistence** — `SessionState` isn't serialized; new field is in-memory only.
+- **React keys** — flushed row's `id: msg-${messages.length}` is stable through reorder.
+- **`tool_execution_update`** — different reducer arm; flush flag has no effect; toolResult updates in place.
+
+## Pre-merge audits
+
+### R1: entryId-consumer audit (task 11.1)
+
+Result of `grep -rn "\.entryId" packages/client/src/ --include='*.ts' --include='*.tsx'` (excluding `__tests__/` and `event-reducer.ts` itself):
+
+| Consumer | Site | Classification | Notes |
+|---|---|---|---|
+| `MessageBubble` fork button | `ChatView.tsx:80` (renders), `:291`, `:412` (passes prop) | **Tolerates undefined** | Already gated by `{entryId && onFork && (<button …>)}`. Fork button is silently absent until `message_end` stamps the flushed row — the user-visible regression is exactly what `fork-entryid-accuracy` already documented as acceptable. |
+| `useSessionActions.handleResumeSession` | `hooks/useSessionActions.ts:136,146` | **Tolerates undefined** | The `entryId` parameter is optional; `...(entryId ? { entryId } : {})` spread cleanly omits it from the WS payload when absent. Server treats absent `entryId` as "resume from leaf". |
+| App.tsx onFork passthrough | `App.tsx:1091` | **Pure passthrough** | Receives the typed `entryId: string` from `MessageBubble`'s gated callsite — already cannot be undefined here. |
+
+No consumers filter, key, or fail on undefined `entryId`. **No additional code changes required.**
+
+### R4: streaming-pulse animation decision (task 11.2)
+
+**Decision: (a) Accept.** The flushed assistant bubble is rendered as a finalized `assistant` ChatMessage with no pulsing cursor span. For long-running tools (`npm test`, `ask_user`) this means the bubble stays static-looking for the tool runtime instead of carrying a streaming-cursor pulse.
+
+Rationale:
+- For the dominant fast-tool case (`Read`, `Edit`, sub-second bash) the streaming pulse already vanishes at `message_end` within ms; users never see it pulse on a tool-bearing message anyway.
+- The `ask_user` shape spends 90%+ of its visible window with the question dialog as the user's focal point, not the assistant prose above it.
+- Adding a "persisting" CSS hint (option b) would require a second render path keyed on `entryId == null && streamingTextFlushed`-equivalent, plus tests for both paths. The marginal UX clarity isn't worth the surface.
+- The `MessageBubble` already shows the timestamp; users have a temporal anchor.
+
+If real-world feedback after merge surfaces the static-looking bubble as confusing, option (b) can be added later as a CSS-only tweak with no reducer changes.
 
 ## Why not the alternatives
 

@@ -3,8 +3,8 @@
  * (state, event) → new state
  */
 import type { DashboardEvent, FlowState, ArchitectState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { isFlowEvent, reduceFlowEvent } from "./flow-reducer.js";
-import { isArchitectEvent, reduceArchitectEvent } from "./architect-reducer.js";
+import { isFlowEvent, reduceFlowEvent } from "@blackbelt-technology/pi-dashboard-flows-plugin/reducer";
+import { isArchitectEvent, reduceArchitectEvent } from "@blackbelt-technology/pi-dashboard-flows-plugin/reducer";
 
 export interface ChatImage {
   data: string;
@@ -119,6 +119,16 @@ export interface SessionState {
   turnCount: number;
   /** Last LLM provider error (set from agent_end, cleared on agent_start or dismiss) */
   lastError?: { message: string; timestamp: number };
+  /**
+   * True iff the current assistant message has already had its streaming
+   * text flushed into messages[] via flushStreamingTextAsAssistantRow.
+   * Reset to false on every assistant message_start AND on every assistant
+   * message_end (R7 defense-in-depth: keeps the flag's lifecycle equal to
+   * "between message_start and message_end" so a stray tool_execution_start
+   * arriving outside that window cannot silently no-op the flush).
+   * See change: fix-streaming-text-vs-interactive-ui-order.
+   */
+  streamingTextFlushed?: boolean;
 }
 
 export function createInitialState(): SessionState {
@@ -164,6 +174,76 @@ const TURN_BOUNDARY_ROLES: ReadonlySet<ChatMessage["role"]> = new Set([
   "commandFeedback",
   "rawEvent",
 ]);
+
+/**
+ * Flush the current `streamingText` into a permanent assistant ChatMessage
+ * row. Called from `tool_execution_start` when streamingText is non-empty so
+ * that any subsequent toolResult / interactiveUi rows pushed during the same
+ * message land BELOW the assistant text in messages[], not above it.
+ *
+ * Idempotent guard: if `state.streamingTextFlushed` is already true OR
+ * `streamingText` is empty, returns state unchanged.
+ *
+ * Returns a new state with:
+ *   - messages: [...state.messages, new assistant row (entryId/nonce both
+ *     undefined; will be stamped at message_end)]
+ *   - streamingText: ""
+ *   - streamingTextFlushed: true
+ *
+ * Pure: input is not mutated.
+ *
+ * See change: fix-streaming-text-vs-interactive-ui-order.
+ */
+export function flushStreamingTextAsAssistantRow(
+  state: SessionState,
+  timestamp: number,
+): SessionState {
+  if (state.streamingTextFlushed) return state;
+  if (!state.streamingText) return state;
+  return {
+    ...state,
+    messages: [
+      ...state.messages,
+      {
+        id: `msg-${state.messages.length}`,
+        role: "assistant",
+        content: state.streamingText,
+        timestamp,
+        // entryId/nonce intentionally undefined — message_end stamps both
+        // via findFlushedAssistantRowIndex below.
+      },
+    ],
+    streamingText: "",
+    streamingTextFlushed: true,
+  };
+}
+
+/**
+ * Find the most recent assistant row in `messages[]` whose `entryId` AND
+ * `nonce` are both undefined — i.e. a row pushed by
+ * `flushStreamingTextAsAssistantRow` that has not yet been stamped by its
+ * `message_end`.
+ *
+ * Hard upper bound on the scan: stop at the first row whose role is in
+ * `TURN_BOUNDARY_ROLES`. This clamp prevents R3 cross-message pollution
+ * — a prior message's orphan flushed row (e.g. R2 disconnect dropped its
+ * `message_end`) cannot be matched by a later message's stamp because the
+ * `turnSeparator` / `user` row between them terminates the scan.
+ *
+ * Returns -1 if no unstamped flushed row is found in the current message's
+ * window.
+ *
+ * See change: fix-streaming-text-vs-interactive-ui-order.
+ */
+export function findFlushedAssistantRowIndex(messages: ChatMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (TURN_BOUNDARY_ROLES.has(m.role)) return -1;
+    if (m.role !== "assistant") continue;
+    if (m.entryId === undefined && m.nonce === undefined) return i;
+  }
+  return -1;
+}
 
 /**
  * Reorder the suffix of `messages` so that rows belonging to a single
@@ -561,6 +641,11 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
 
     case "message_start": {
       const msg = data.message as any;
+      if (msg?.role === "assistant") {
+        // Reset the per-message flush flag at the start of every assistant
+        // message. See change: fix-streaming-text-vs-interactive-ui-order.
+        next.streamingTextFlushed = false;
+      }
       if (msg?.role === "user") {
         next.pendingPrompt = undefined;
         let text = "";
@@ -642,13 +727,22 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       // Handle text streaming
       const msg = data.message as any;
       if (msg?.role === "assistant") {
-        const text = Array.isArray(msg.content)
-          ? msg.content
-              .filter((c: any) => c.type === "text")
-              .map((c: any) => c.text)
-              .join("")
-          : String(msg.content ?? "");
-        next.streamingText = text;
+        // If streamingText was already flushed for this message,
+        // re-populating it here would re-show the flushed prefix below the
+        // messages list (or, for [text, toolCall, text]-shaped messages,
+        // would resurrect text1 alongside text2). Skip the assignment;
+        // any post-flush text content is committed at message_end via the
+        // existing reorder pass. See change:
+        // fix-streaming-text-vs-interactive-ui-order.
+        if (!next.streamingTextFlushed) {
+          const text = Array.isArray(msg.content)
+            ? msg.content
+                .filter((c: any) => c.type === "text")
+                .map((c: any) => c.text)
+                .join("")
+            : String(msg.content ?? "");
+          next.streamingText = text;
+        }
       }
       break;
     }
@@ -656,7 +750,28 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
     case "message_end": {
       const msg = data.message as any;
       if (msg?.role === "assistant") {
-        if (next.streamingText) {
+        if (next.streamingTextFlushed) {
+          // Streaming text was already flushed at tool_execution_start.
+          // Locate the unstamped flushed row and stamp entryId / nonce in
+          // place — do NOT push a duplicate. The reorder pass below still
+          // runs against the existing row. See change:
+          // fix-streaming-text-vs-interactive-ui-order.
+          const flushedIdx = findFlushedAssistantRowIndex(next.messages);
+          if (flushedIdx >= 0) {
+            const stamped: ChatMessage = {
+              ...next.messages[flushedIdx],
+              entryId: data.entryId as string | undefined,
+              nonce: data.nonce as string | undefined,
+            };
+            next.messages = [
+              ...next.messages.slice(0, flushedIdx),
+              stamped,
+              ...next.messages.slice(flushedIdx + 1),
+            ];
+          }
+          // Note: streamingText is already "" because the flush cleared it.
+          // We deliberately leave next.streamingText untouched here.
+        } else if (next.streamingText) {
           next.messages = [
             ...next.messages,
             {
@@ -713,11 +828,30 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
         if (Array.isArray(msg?.content)) {
           next.messages = reorderToolCardsForAssistantMessage(next.messages, msg.content);
         }
+
+        // R7 defense-in-depth: reset the flag at message_end so the flag's
+        // lifecycle equals "between message_start and message_end". A stray
+        // tool_execution_start arriving before the next message_start would
+        // otherwise silently no-op the flush. See change:
+        // fix-streaming-text-vs-interactive-ui-order.
+        next.streamingTextFlushed = false;
       }
       break;
     }
 
     case "tool_execution_start": {
+      // Flush any pending streamingText into a permanent assistant row
+      // BEFORE pushing the new toolResult, so the message's content-array
+      // order is preserved in messages[] for the entire tool runtime —
+      // not just at message_end. See change:
+      // fix-streaming-text-vs-interactive-ui-order.
+      if (next.streamingText && !next.streamingTextFlushed) {
+        Object.assign(
+          next,
+          flushStreamingTextAsAssistantRow(next, event.timestamp),
+        );
+      }
+
       const toolCallId = data.toolCallId as string;
       const toolName = data.toolName as string;
       const args = data.args as Record<string, unknown> | undefined;
