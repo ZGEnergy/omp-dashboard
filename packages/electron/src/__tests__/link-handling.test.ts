@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isSameOriginUrl } from "../lib/link-handling.js";
+import { decideWillNavigate, isSameOriginUrl } from "../lib/link-handling.js";
 
 describe("isSameOriginUrl", () => {
 	const origin = "http://localhost:8000";
@@ -68,5 +68,79 @@ describe("isSameOriginUrl", () => {
 		// Defensive: if the caller passes a broken origin we should not crash
 		// and should not treat anything as same-origin.
 		expect(isSameOriginUrl("http://localhost:8000/", "not a url")).toBe(false);
+	});
+});
+
+describe("decideWillNavigate (current-origin-aware will-navigate decision)", () => {
+	const SERVER = "http://localhost:8000";
+
+	it("on dashboard → same-origin absolute target is allowed", () => {
+		expect(
+			decideWillNavigate(SERVER, "http://localhost:8000/sessions", "http://localhost:8000/x"),
+		).toBe("allow");
+	});
+
+	it("on dashboard → same-origin relative target is allowed", () => {
+		// Mirrors /auth/login?return=/ from useAuthStatus.redirectToLogin.
+		expect(decideWillNavigate(SERVER, "http://localhost:8000/", "/auth/login?return=/")).toBe(
+			"allow",
+		);
+	});
+
+	it("on dashboard → external http(s) target opens externally", () => {
+		expect(decideWillNavigate(SERVER, "http://localhost:8000/", "https://example.com/")).toBe(
+			"open-external",
+		);
+		expect(decideWillNavigate(SERVER, "http://localhost:8000/", "http://other-host:8000/")).toBe(
+			"open-external",
+		);
+	});
+
+	it("on OAuth provider → provider-internal navigation is allowed (OIDC fix)", () => {
+		// User is mid-login on accounts.google.com; Google's own multi-step
+		// navigation must NOT be intercepted by the dashboard guard. This is
+		// the regression in harden-external-link-handling that this change fixes.
+		expect(
+			decideWillNavigate(
+				SERVER,
+				"https://accounts.google.com/signin/oauth",
+				"https://accounts.google.com/signin/v2/challenge/pwd",
+			),
+		).toBe("allow");
+	});
+
+	it("on OAuth provider → navigation back to dashboard origin is allowed", () => {
+		expect(
+			decideWillNavigate(
+				SERVER,
+				"https://accounts.google.com/signin/oauth",
+				"http://localhost:8000/auth/callback/google?code=abc",
+			),
+		).toBe("allow");
+	});
+
+	it("on OAuth provider → navigation to a third-party identity broker is allowed", () => {
+		// Conservative: once we're already off-dashboard we don't second-guess
+		// where the flow goes next. The trap we care about is dashboard→external.
+		expect(
+			decideWillNavigate(
+				SERVER,
+				"https://accounts.google.com/",
+				"https://login.microsoftonline.com/oauth2/authorize",
+			),
+		).toBe("allow");
+	});
+
+	it("unparseable current URL → falls back to leaving-dashboard rules", () => {
+		// Defensive: if we cannot read the current URL we treat the call as if it
+		// were dashboard→target so the trap guard still fires.
+		expect(decideWillNavigate(SERVER, "", "https://example.com/")).toBe("open-external");
+		expect(decideWillNavigate(SERVER, "", "http://localhost:8000/")).toBe("allow");
+	});
+
+	it("unparseable server origin → cancels everything (fail closed)", () => {
+		expect(
+			decideWillNavigate("not a url", "http://localhost:8000/", "https://example.com/"),
+		).toBe("cancel");
 	});
 });
