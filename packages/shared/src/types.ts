@@ -25,6 +25,15 @@ export interface DashboardSession {
    * See change: session-card-last-activity-badge.
    */
   lastActivityAt?: number;
+  /**
+   * Server-managed per-session unread bit. `true` when an attention-worthy
+   * event (turn finished, ask_user appeared, agent_end with error) fired
+   * while no browser was viewing the session. Cleared when any browser
+   * sends `session_view`. Persisted to `.meta.json` so it survives reload.
+   * Bridges SHALL NOT send this field.
+   * See change: session-card-unread-stripes.
+   */
+  unread?: boolean;
   tokensIn?: number;
   tokensOut?: number;
   cacheRead?: number;
