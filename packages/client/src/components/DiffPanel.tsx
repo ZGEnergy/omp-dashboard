@@ -11,8 +11,9 @@ import { DiffView, DiffModeEnum } from "@git-diff-view/react";
 import { generateDiffFile } from "@git-diff-view/file";
 import { highlighter } from "@git-diff-view/lowlight";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import "@git-diff-view/react/styles/diff-view.css";
+import { getSyntaxTheme } from "../lib/syntax-theme.js";
+import { useThemeContext } from "./ThemeProvider.js";
 import type { FileChangeEvent, FileDiffEntry } from "@blackbelt-technology/pi-dashboard-shared/diff-types.js";
 import type { FileSelection } from "./DiffFileTree.js";
 
@@ -60,6 +61,8 @@ interface DiffPanelProps {
 type ViewMode = "diff" | "file";
 
 export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
+  const { resolved: theme, themeName } = useThemeContext();
+  const syntaxStyle = useMemo(() => getSyntaxTheme(theme, themeName), [theme, themeName]);
   const [diffMode, setDiffMode] = useState<DiffModeEnum>(DiffModeEnum.Split);
   const [viewMode, setViewMode] = useState<ViewMode>("diff");
   const [fileContent, setFileContent] = useState<string | null>(null);
@@ -190,7 +193,7 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
         {viewMode === "file" && fileContent != null && !fileLoading && (
           <SyntaxHighlighter
             language={getPrismLang(file.path)}
-            style={oneDark}
+            style={syntaxStyle}
             showLineNumbers
             customStyle={{ margin: 0, borderRadius: 0, fontSize: "13px", background: "transparent" }}
             lineNumberStyle={{ minWidth: "3em", paddingRight: "1em", color: "var(--text-muted, #555)" }}
