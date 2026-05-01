@@ -91,6 +91,17 @@ if (clientSrc) {
 // ── synthetic workspace package.json ─────────────────────────────────────
 // NOTE: intentionally NO "type": "module" here — node_modules contain CJS
 // packages (e.g. node-pty) that break if loaded as ESM.
+//
+// pi-coding-agent is intentionally NOT declared as a dependency here.
+// Architectural rationale: the dashboard ships pi/tsx/openspec via the
+// offline cacache (`offline-packages.json` + `offline-packages/`) which
+// `installStandalone()` extracts into `~/.pi-dashboard/` on first run.
+// At runtime, server-lifecycle.ts resolves tsx (preferred) and jiti
+// (fallback) from the managed dir first, then system pi. Bundling pi
+// inside this tree would duplicate it (~10MB) and create version-drift
+// risk against the offline cacache pin. The original D5 in the design
+// proposed this; pushed back during review — see change:
+// fix-electron-windows-installer-and-server-bootstrap (D5 reconsidered).
 const bundlePkg = {
   name: "pi-dashboard-bundled-server",
   private: true,

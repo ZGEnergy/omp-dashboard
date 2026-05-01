@@ -1636,6 +1636,77 @@ The two broken cells map to existing repo invariants:
 
 See change: `eliminate-bash-on-windows-runners`.
 
+## Electron Server Lifecycle
+
+### Power-user-mode managed install (Defect 1 fix)
+
+The Electron app's first-launch flow has three branches:
+
+```
+  firstRun?
+     yes
+      |
+      v
+  pi.found && bridge.found?
+   /                    \
+  yes                    no
+   |                      |
+   v                      v
+  auto-skip-wizard-      pi.found?
+  with-install            /     \
+  (D3, see below)        yes     no
+   |                      |       |
+   v                      v       v
+  Write mode.json    Wizard   Wizard
+  Run install        bridge-  full
+                     install
+```
+
+The `auto-skip-wizard-with-install` branch was the source of Defect 1 in change `fix-electron-windows-installer-and-server-bootstrap`. Pre-fix, this branch wrote `mode.json` as power-user but **skipped `installStandalone()`**, leaving `~/.pi-dashboard/node_modules/` empty. The bundled server's runtime then fell back to the user's system pi for the TS loader, which on machines with `pi-coding-agent@0.71.x` ships jiti 2.6.5 — a version that misnormalizes triple-slash file:// URLs on Windows and crashes the server child with `MODULE_NOT_FOUND`.
+
+The fix:
+
+```typescript
+// packages/electron/src/lib/power-user-install.ts (pure helpers)
+export function decideStartupAction(state: StartupState): StartupAction {
+  if (!state.firstRun) return { kind: "skip-everything", reason: "not-first-run" };
+  if (state.piFound && state.bridgeFound) {
+    return { kind: "auto-skip-wizard-with-install", reason: "power-user" };
+    //         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    //         skip the WIZARD UI — still RUN install
+  }
+  if (state.piFound) return { kind: "wizard", step: "bridge-install" };
+  return { kind: "wizard", step: "full" };
+}
+```
+
+The install is idempotent: `runPowerUserManagedInstall()` short-circuits when every required package's `package.json` is present and parses (`isManagedDirPopulated()`). On subsequent launches the install is a no-op.
+
+The install runs async with status forwarded to the splash window's `updateSplashStatus("Setting up dependencies…")`. After the install resolves, the server-launch step takes over and the splash transitions to `"Launching dashboard server…"`.
+
+### Server-startup deadline + cause-aware error wording (Defect 4 fix)
+
+Both `launchViaCli` and `launchServer` in `server-lifecycle.ts` use `SERVER_READY_DEADLINE_MS = 60_000` (was inline `15_000` pre-fix). The longer deadline gives the install + cold-start headroom on first launch.
+
+When `waitForReady` returns unsuccessful, the error message is built by the pure helper `buildServerStartupError(...)` which renders one of two cause-aware messages:
+
+| Condition | Header text | Hint |
+|---|---|---|
+| `readyError` contains "exit" | `Server child process exited prematurely (...)` | `This usually means a missing dependency or wrong TypeScript loader.` |
+| Otherwise (deadline elapsed) | `Server did not respond within 60 seconds (...)` | `The server is likely still starting; try the Retry button.` |
+
+Pre-fix, both cases shared the misleading wording "Server failed to start within 15 seconds (child exited with code 1)" — implying a timeout when the child died in <1s.
+
+### The runtime jiti version contract (Defect 2 defense)
+
+`shouldUrlWrapEntry()` in `packages/shared/src/platform/node-spawn.ts` decides whether the entry-script position in `node --import <loader> <entry>` argv needs `file://` URL wrapping. The Windows-non-tsx arm wraps with `file://` to sidestep Node's drive-letter URL-scheme parsing (`B:`, `A:` are otherwise treated as URL schemes). This rule **assumes** the jiti loader is from `pi-coding-agent@0.70.x` (jiti 2.x), which correctly handles `file:///` URL entries on Windows. Newer jiti versions (2.6.5 in pi 0.71.x) misnormalize triple-slash URLs.
+
+The contract holds because Defect 1's fix populates `~/.pi-dashboard/` with `pi-coding-agent` at the offline-cacache-pinned version. The runtime `resolveJitiFromPi()` chain is `managed → system`; once managed is populated with the pinned version, system pi (which may be a newer 0.71.x) is never reached.
+
+The contract is documented in the function's header comment (`!! JITI VERSION CONTRACT !!` block) and regression-pinned by `packages/shared/src/__tests__/node-spawn-jiti-contract.test.ts`, which asserts `offline-packages.json` keeps `pi-coding-agent` in the `0.70.x` range. Bumping the pin past 0.70.x fires the test and forces a re-validation.
+
+See change: `fix-electron-windows-installer-and-server-bootstrap`.
+
 ## Chat Input State (drafts & history recall)
 
 ### Per-session draft persistence

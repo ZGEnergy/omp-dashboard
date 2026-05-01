@@ -92,8 +92,23 @@ const config: ForgeConfig = {
       config: {
         oneClick: true,
         perMachine: false,
-        // Inject publish:never into electron-builder config via getAppBuilderConfig
-        getAppBuilderConfig: async () => ({ publish: null }),
+        // Pin every install-layer name explicitly. electron-builder's NSIS
+        // install-dir fallback chain reads npm `name` (slash-stripped) when
+        // nothing else overrides it, which produced the
+        // `@blackbelt-technologypi-dashboard-electron` install dir we hit
+        // on Windows. The override below makes the install layout
+        // version-independent of electron-builder defaults. See change:
+        // fix-electron-windows-installer-and-server-bootstrap (D2).
+        getAppBuilderConfig: async () => ({
+          publish: null,
+          productName: "pi-dashboard",
+          appId: "com.blackbelt-technology.pi-dashboard",
+          nsis: {
+            artifactName: "pi-dashboard-Setup-${version}.exe",
+            shortcutName: "pi-dashboard",
+            uninstallDisplayName: "pi-dashboard",
+          },
+        }),
       },
     },
   ],

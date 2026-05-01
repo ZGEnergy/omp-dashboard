@@ -1,6 +1,6 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-electron",
-  "productName": "pi-dashboard-electron",
+  "productName": "pi-dashboard",
   "version": "0.4.4",
   "private": true,
   "description": "Electron desktop app for pi-dashboard",
