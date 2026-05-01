@@ -209,8 +209,49 @@ This is a new plugin. No existing data to migrate.
 
 The bridge's git-info poll is **extended in place**. The first dashboard restart after this change ships will see jj-aware sessions begin populating `Session.jjState` automatically; pre-existing sessions without `.jj/` see no change.
 
+### Decision 10 — Forget refuses on unfolded work, force-flag escape hatch
+
+**What:** `POST /api/jj/workspace/forget` rejects with HTTP 409 (`UNFOLDED_WORK`) when the workspace has commits between its branch point and `@` that aren't present on trunk. The client surfaces the list of unfolded commits in a confirm dialog and re-issues the request with `force: true` only after explicit user confirmation. On force, the server runs both `jj workspace forget` AND `rm -rf` on the directory.
+
+**Why:** The default safety story — "forget means the work is gone" — is too dangerous given how easy it is to click the wrong button. The two-step (refuse, then force after confirmation) puts a hard pause on data loss. The unfolded commits are still in jj's op log after forget so `jj op restore` can recover them, but only for the op-log retention window.
+
+**Why include `rm -rf` of the directory:** A bare `jj workspace forget` leaves the directory on disk in a stale state — the working copy still has files but jj no longer knows about it, which is just confusing. Cleaning the directory on forget matches user intent. The two-step dialog is what makes this safe.
+
+### Decision 11 — Init-colocated affordance is opt-in, not always-shown
+
+**What:** The "Enable jj workspaces" button on plain-git sessions is gated behind `showInitColocatedSuggestion: false` (default). Users who want the affordance enable it once in plugin settings.
+
+**Why:** Always-showing the button is jj proselytization — some users actively don't want jj suggested. Hiding by default with an explicit opt-in respects the silent-when-not-installed principle (Decision 2) and keeps the plugin invisible until the user has decided they want it.
+
+**Trade-off:** This makes discovery harder for users who'd benefit from jj but don't know it exists. We accept the trade because (a) the dashboard's docs / changelogs can mention the setting, (b) once enabled it stays enabled, (c) users who already have `jj` installed get the full UI on `.jj/` repos with no opt-in needed — the setting only gates the conversion path.
+
+### Decision 12 — Fold-back conflicts auto-abandon to pre-rebase state
+
+**What:** If `jj rebase` during fold-back produces conflicts, the skill captures the op-id before the rebase, runs the rebase, detects conflicts via `jj resolve --list`, then invokes `jj op restore <pre-rebase-op>` to undo the rebase entirely. The skill reports failure with conflict details and stops.
+
+**Why:** The alternative — leaving the user in a half-finished rebase — produces a confusing state. Most users (and most agents) won't know how to drive `jj resolve` on partial rebases. Returning to known-good state is the path of least surprise. The user can then either:
+
+- Resolve conflicts manually in the workspace and re-invoke fold-back.
+- Rebase the workspace onto trunk first (`jj rebase -d trunk()`), resolve there, then fold back without conflicts.
+- Abandon the workspace via the forget flow.
+
+**Why not interactive resolution?** A future enhancement could prompt via `ask_user` mid-skill: "resolve conflicts in workspace, abandon, or rebase first?". For v1 we keep the skill atomic — either it succeeds cleanly or it doesn't run. Opening a mid-skill interaction surface adds testing complexity for a relatively rare path.
+
+### Decision 13 — Bookmark name = workspace name verbatim by default
+
+**What:** Fold-back's auto-derived bookmark name equals the workspace name (e.g. workspace `agent-1` produces bookmark `agent-1`). User can override with an explicit argument. Refuses if the bookmark already exists pointing at a different commit.
+
+**Why:** Simplest possible mapping. `feat/<name>` was considered but assumes "feat" semantics that don't always apply (could be a bugfix, refactor, experiment). Verbatim names are predictable, debuggable, and match the workspace directory the user already sees. Users with conventions like `feat/` can supply the override.
+
+### Decision 14 — Plugin config is global, no per-repo override
+
+**What:** `workspaceRoot`, `defaultPushTarget`, `allowDirectTrunkPush`, `showInitColocatedSuggestion` are plugin-global. We do not read `.pi/jj-plugin.json` or any per-repo override file.
+
+**Why:** Per-repo config doubles the surface area (two sources of truth, merge rules, persistence) for a use case we have no concrete user for yet. Users with genuinely-divergent needs across repos can either (a) call the REST endpoints directly with explicit args, or (b) we add per-repo override later as a separate change once the need is real. Premature flexibility is a real cost.
+
 ## Open Questions
 
 - **Should `jj-workspace-fold-back` be exposed as a slash command (e.g. `/jj-fold`) or only as a skill?** Slash commands are easier to discover; skills can be more reactive. Probably both — the slash command invokes the skill.
-- **Workspace names: enforce a regex or accept any string?** Recommend `/^[a-z0-9-]+$/` for filesystem and bookmark safety. Locked when we write the spec.
+- **Workspace names: enforce a regex or accept any string?** Locked: `/^[a-z0-9-]+$/`.
 - **Should the `+ Workspace` action be available on the folder action bar (`folder-action-bar` slot) or only on individual session cards?** Folder-level might be more discoverable. Defer to a follow-up if needed.
+- **`jj` minimum version** — the proposal pins `>= 0.18.0` provisionally; apply phase should verify against the actual command surface used (`workspace add -r`, `op restore`, `fork_point`).

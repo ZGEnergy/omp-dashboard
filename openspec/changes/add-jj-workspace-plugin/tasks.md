@@ -38,7 +38,9 @@
 - [ ] Create `packages/jj-plugin/package.json` with `pi-dashboard-plugin` manifest:
   - [ ] id: `jj`, displayName: `Jujutsu Workspaces`, priority: 100
   - [ ] claims: badge / action-bar / sidebar-folder-section / command-route / settings-section
-  - [ ] configSchema: `./src/configSchema.json`
+  - [ ] configSchema: `./src/configSchema.json` with fields:
+        `defaultPushTarget`, `workspaceRoot`, `allowDirectTrunkPush`,
+        `showInitColocatedSuggestion` (default `false` — plain-git affordance opt-in)
 - [ ] Create `packages/jj-plugin/src/client/index.tsx` barrel exporting:
   - [ ] `JjWorkspaceBadge`, `JjActionBar`, `JjWorkspaceList`, `JjWorkspaceView`, `JjFoldBackDialog`, `JjPluginSettings`
   - [ ] Predicates: `isInJjRepo`, `isInJjWorkspace`, `isInGitRepoButNotJj`
@@ -52,8 +54,8 @@
 - [ ] `JjActionBar` — row with buttons:
   - [ ] `+ Workspace` (when `isInJjRepo`) — opens a name-input dialog, calls `POST /api/jj/workspace/add`, then triggers `spawn` flow
   - [ ] `Fold back` (when `isInJjWorkspace`) — opens `JjFoldBackDialog`
-  - [ ] `Forget workspace` (when `isInJjWorkspace`) — calls `POST /api/jj/workspace/forget` after confirm
-  - [ ] `Enable jj workspaces` (when `isInGitRepoButNotJj`) — calls `POST /api/jj/init-colocated` after confirm
+  - [ ] `Forget workspace` (when `isInJjWorkspace`) — first attempt sends `force: false`; on HTTP 409 `UNFOLDED_WORK`, render a dialog listing the commits about to be lost and re-issue with `force: true` only after user confirms
+  - [ ] `Enable jj workspaces` (when `isInGitRepoButNotJj && showInitColocatedSuggestion`) — calls `POST /api/jj/init-colocated` after confirm; hidden by default per Decision 11
 - [ ] `JjWorkspaceList` — collapsed sidebar section listing workspaces under the folder
 - [ ] `JjWorkspaceView` — `/jj` route showing status + workspace list + op log (read-only, refresh button)
 - [ ] `JjFoldBackDialog` — explainer + radio buttons (`preserve | squash`), pre-fills the agent prompt with the fold-back skill invocation
@@ -85,7 +87,10 @@
 - [ ] `POST /api/jj/workspace/add` — `{ fromCwd, name, taskDescription? }` → runs `jj.workspaceAdd`, enqueues into `pendingAttachRegistry`, calls `spawnPiSession`
   - [ ] Validate `name` against `/^[a-z0-9-]+$/`
   - [ ] Reject if `<workspaceRoot>/<name>` already exists
-- [ ] `POST /api/jj/workspace/forget` — `{ cwd, name }` → runs `jj.workspaceForget`, optionally `rm -rf` the path (gated by config)
+- [ ] `POST /api/jj/workspace/forget` — `{ cwd, name, force?: boolean }`
+  - [ ] Inspect for unfolded commits via `jj log -r 'fork_point(<name>@, trunk()) .. <name>@'`
+  - [ ] Refuse with HTTP 409 (`code: "UNFOLDED_WORK"`) if non-empty AND `!force`
+  - [ ] On success/force: run `jj.workspaceForget` then `fs.rm({ recursive: true, force: true })` on the workspace dir
 - [ ] `POST /api/jj/init-colocated` — `{ cwd }` → checks `git status --porcelain` clean, then runs `jj.gitInitColocate`
 - [ ] `GET /api/jj/workspace/list?cwd=...` — returns workspace list (used by `JjWorkspaceList`)
 - [ ] All routes auth-gated (same pattern as `openspec-routes.ts`)
@@ -103,6 +108,10 @@
         `git reset` (safe), `jj new -m WIP` (jj-native), and explicitly call out
         `git stash` as forbidden with one-line reason.
   - [ ] Default flavor (preserve commits → rebase → push bookmark)
+  - [ ] Bookmark name auto-derived from workspace name verbatim (e.g. `agent-1`);
+        accept explicit override; refuse if bookmark already points elsewhere
+  - [ ] Conflict handling: capture pre-rebase op-id, on conflict run
+        `jj op restore <pre-op>` to revert, surface details, fail cleanly
   - [ ] Optional `mode: squash` flavor
   - [ ] Optional `mode: pr` flavor (requires `gh` CLI; document the dependency)
   - [ ] Loud disclaimer: "This skill never invokes `git commit` or `git merge`."

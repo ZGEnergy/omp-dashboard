@@ -94,6 +94,43 @@ Creating a workspace SHALL NOT alter the source workspace's working copy, index,
 - **THEN** the endpoint SHALL respond HTTP 400 with `{ code: "INVALID_NAME", message: "..." }`
 - **AND** no filesystem mutation SHALL occur
 
+### Requirement: Workspace forget refuses on unfolded commits
+
+The `POST /api/jj/workspace/forget` endpoint SHALL accept `{ cwd, name, force?: boolean }` and SHALL:
+
+1. Inspect the workspace's working-copy state via `jj log -r 'fork_point(<workspace-name>@, trunk()) .. <workspace-name>@'`.
+2. If the resulting revset contains any non-empty commits (i.e., the workspace has unfolded work), respond HTTP 409 (`code: "UNFOLDED_WORK"`) with a payload listing the change ids and descriptions of the unfolded commits, UNLESS `force === true`.
+3. When the call succeeds (no unfolded work, or `force === true`):
+   - Run `jj workspace forget <name>` to detach the workspace from the store.
+   - Recursively delete the on-disk workspace directory (`<workspaceRoot>/<name>/`) via `fs.rm({ recursive: true, force: true })`.
+   - Return HTTP 200.
+
+The client `JjActionBar`'s "Forget workspace" button SHALL NOT pass `force: true` on the first attempt. If the server returns 409, the client SHALL render a confirmation dialog enumerating the unfolded commits and SHALL re-issue the request with `force: true` only after explicit user confirmation.
+
+#### Scenario: Forget refused when workspace has unfolded commits
+
+- **GIVEN** workspace `agent-1` whose `@` and `@-` contain agent commits not present on trunk
+- **WHEN** the browser POSTs `{ cwd, name: "agent-1" }` (no `force`)
+- **THEN** the endpoint SHALL respond HTTP 409 with `code: "UNFOLDED_WORK"` and a list of the unfolded commits
+- **AND** `.shadow/agent-1/` SHALL still exist on disk
+- **AND** `jj workspace list` SHALL still include `agent-1`
+
+#### Scenario: Forget succeeds with force after confirmation
+
+- **GIVEN** the same workspace with unfolded commits
+- **WHEN** the browser re-issues the request with `force: true` after user confirmation
+- **THEN** the endpoint SHALL run `jj workspace forget agent-1`
+- **AND** SHALL `rm -rf .shadow/agent-1/`
+- **AND** SHALL respond HTTP 200
+- **AND** the unfolded commits SHALL remain in the jj op log (recoverable via `jj op restore`) but no longer reachable from any workspace tip
+
+#### Scenario: Forget on clean workspace
+
+- **GIVEN** workspace `agent-1` whose tip equals trunk (no unfolded work)
+- **WHEN** the browser POSTs `{ cwd, name: "agent-1" }` (no `force`)
+- **THEN** the endpoint SHALL succeed without requiring `force`
+- **AND** SHALL forget the workspace and remove the directory
+
 ### Requirement: Fold-back skill is jj-native and never invokes mutating git
 
 The skill `.pi/skills/jj-workspace-fold-back/SKILL.md` SHALL:
@@ -114,6 +151,27 @@ The skill `.pi/skills/jj-workspace-fold-back/SKILL.md` SHALL:
 - **AND** push via `jj git push --bookmark <bookmarkName>`
 - **AND** all 3 commits SHALL be preserved in the resulting git history (no squash)
 
+#### Scenario: Auto-abandon on rebase conflict
+
+- **GIVEN** the fold-back skill has bookmarked the workspace tip and begun `jj rebase -d <trunk> -s <bookmark>`
+- **WHEN** the rebase produces conflicts (`jj resolve --list` returns non-empty after the rebase)
+- **THEN** the skill SHALL invoke `jj op restore <op-id-before-rebase>` to undo the rebase entirely
+- **AND** SHALL surface the conflict details to the user (changed paths + conflicting hunks if available)
+- **AND** SHALL NOT push anything
+- **AND** SHALL leave the workspace in its pre-rebase state so the user can investigate or retry
+- **AND** the fold-back operation SHALL be reported as failed (the skill returns an error to the caller)
+
+The rationale: keeping the user in the workspace with conflicts mid-rebase produces a confusing state where the workspace's `@` is inside an in-progress rebase that they may not understand how to recover from. Restoring to pre-rebase state returns the user to known territory and lets them either resolve the conflicts manually in the workspace and re-invoke fold-back, or rebase the workspace onto trunk first themselves.
+
+#### Scenario: Bookmark name auto-derived from workspace name
+
+- **GIVEN** the user invokes fold-back from workspace `agent-1`
+- **WHEN** the skill runs without an explicit `--bookmark` argument
+- **THEN** the skill SHALL use `agent-1` as the bookmark name verbatim (matching the workspace name)
+- **AND** SHALL refuse with a clear error if a bookmark named `agent-1` already exists pointing at a different commit
+
+If the user supplies an explicit bookmark name, that overrides the auto-derived one.
+
 #### Scenario: Refusal on dirty git index
 
 - **GIVEN** the parent jj-colocated repo has staged changes (`git diff --cached` non-empty)
@@ -124,9 +182,11 @@ The skill `.pi/skills/jj-workspace-fold-back/SKILL.md` SHALL:
   - presents `jj new -m "WIP"` as the jj-native equivalent of stash (set current work aside as a real change),
   - explicitly lists `git stash` as forbidden (resets the working tree, triggers an unwanted jj snapshot)
 
-### Requirement: Plain-git repos receive a one-click colocated-init affordance
+### Requirement: Plain-git repos receive an opt-in colocated-init affordance
 
-When a session's cwd is inside a git repo that is NOT yet a jj repo, `JjActionBar` SHALL render a single "Enable jj workspaces" button (gated by the predicate `isInGitRepoButNotJj`).
+When a session's cwd is inside a git repo that is NOT yet a jj repo, AND `showInitColocatedSuggestion === true` in plugin config, `JjActionBar` SHALL render a single "Enable jj workspaces" button (gated by the predicate `isInGitRepoButNotJj && showInitColocatedSuggestion`).
+
+When `showInitColocatedSuggestion === false` (default), the plugin SHALL render nothing on plain-git sessions — no button, no banner, no nag. Users who want the affordance flip the setting once in `Settings → Jujutsu Workspaces`.
 
 The corresponding `POST /api/jj/init-colocated { cwd }` endpoint SHALL:
 
@@ -144,6 +204,20 @@ The corresponding `POST /api/jj/init-colocated { cwd }` endpoint SHALL:
 - **AND** `.jj/` SHALL be created
 - **AND** the user's edits to `README.md` SHALL be preserved on disk and snapshot into the new `@` commit
 
+#### Scenario: Init affordance hidden by default on plain-git
+
+- **GIVEN** a session whose cwd contains `.git/` but no `.jj/`
+- **AND** plugin config `showInitColocatedSuggestion` is `false` (default)
+- **WHEN** the session card renders
+- **THEN** no "Enable jj workspaces" button SHALL appear
+- **AND** no other JjPlugin UI SHALL appear (the badge and full action bar require `.jj/`)
+
+#### Scenario: Init affordance opt-in via plugin settings
+
+- **GIVEN** the user toggles `showInitColocatedSuggestion` to `true` in plugin settings
+- **WHEN** any plain-git session card re-renders
+- **THEN** the "Enable jj workspaces" button SHALL appear on every plain-git session card
+
 #### Scenario: Init refused on dirty index
 
 - **GIVEN** a git repo at `/repo` with `git add src/foo.ts` having staged a blob that differs from HEAD
@@ -159,6 +233,9 @@ The plugin SHALL declare a `configSchema.json` (JSON Schema 7) exposing:
 - `defaultPushTarget`: enum `["trunk", "bookmark"]`, default `"bookmark"`
 - `workspaceRoot`: string, default `".shadow"`
 - `allowDirectTrunkPush`: boolean, default `false`
+- `showInitColocatedSuggestion`: boolean, default `false` — when `false`, the "Enable jj workspaces" button on plain-git repos SHALL NOT render. The plugin is therefore opt-in for plain-git users; users who want the affordance enable it once in plugin settings.
+
+Configuration is plugin-global (one set of values applies across all repos). The plugin SHALL NOT read per-repo override files. Users who need divergent settings per repo invoke the REST endpoints directly.
 
 When `allowDirectTrunkPush` is `false`, the fold-back skill SHALL refuse any operation that would push to a bookmark named `main`, `master`, or `trunk`.
 
