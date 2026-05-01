@@ -1,6 +1,6 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-flows-plugin",
-  "version": "0.4.4",
+  "version": "0.4.5-rc.1",
   "private": true,
   "description": "Flow rendering plugin for pi-dashboard — pi-flows event reaction (FlowDashboard, FlowAgentCard, FlowArchitect, etc.)",
   "type": "module",
@@ -48,7 +48,7 @@
     "react-dom": ">=18.0.0"
   },
   "dependencies": {
-    "@blackbelt-technology/pi-dashboard-shared": "^0.4.4"
+    "@blackbelt-technology/pi-dashboard-shared": "^0.4.5-rc.1"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
