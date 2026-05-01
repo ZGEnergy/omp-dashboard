@@ -16,6 +16,13 @@ see [`docs/release-process.md`](docs/release-process.md).
 
 ### Fixed
 
+## [0.4.5] - 2026-05-01
+### Added
+
+### Changed
+
+### Fixed
+
 ## [0.4.5-rc.1] - 2026-05-01
 ### Added
 - Resume / Fork pills in the desktop session content header when the viewed session is `ended` and has a `sessionFile` — no more bouncing back to the sidebar after a server reload or pi crash. Mirrors the sidebar SessionCard's visual language and reuses the same `handleResumeSession` plumbing. (change: `resume-button-in-session-header`)
