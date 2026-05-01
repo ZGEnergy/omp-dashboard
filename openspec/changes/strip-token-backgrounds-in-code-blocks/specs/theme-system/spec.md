@@ -49,3 +49,18 @@ colors track theme switches like chat code blocks already do.
 - **WHEN** a file is rendered in `DiffPanel`'s "File" view under any
   active theme
 - **THEN** no token character displays a colored background pill
+
+### Requirement: Diff view tracks light and dark mode
+The `diffViewTheme` prop passed to `<DiffView>` SHALL be derived from the active app theme and SHALL NOT be hardcoded. When the resolved theme is `"light"` the prop SHALL be `"light"`; otherwise the prop SHALL be `"dark"`.
+
+#### Scenario: Switching to light mode re-themes the diff view
+- **WHEN** a `DiffPanel` is open in "Diff" view mode under a dark theme
+- **AND** the user switches the app theme to light
+- **THEN** the `<DiffView>` re-renders with `diffViewTheme="light"` and
+  the panel chrome (background, gutter, hunk headers) follows the
+  library's light palette
+
+#### Scenario: Switching to dark mode re-themes the diff view
+- **WHEN** a `DiffPanel` is open in "Diff" view mode under a light theme
+- **AND** the user switches the app theme to dark
+- **THEN** the `<DiffView>` re-renders with `diffViewTheme="dark"`

@@ -25,6 +25,9 @@ render colored on the panel cleanly without their own pills.
 - Strip applies to ALL token classes including semantic ones like
   `.token.deleted` / `.token.inserted` (red/green wash inside fenced ```diff
   blocks) — the panel-level diff hunk highlighting in `DiffView` is unaffected.
+- Bind `<DiffView>`'s `diffViewTheme` prop to the active app theme instead of
+  the hardcoded `"dark"` so the diff view re-themes when the user toggles
+  light / dark.
 - Add a unit test asserting no `.token*` selector retains a `background` /
   `backgroundColor` property after `getSyntaxTheme()` returns.
 
@@ -50,7 +53,9 @@ None.
   existing) — token-strip assertion.
 - No server-side changes. No protocol changes. No persistence changes.
 
-Out of scope: `<DiffView>` from `@git-diff-view/react` (used in DiffPanel's
-"Diff" view mode). Its tokens are highlighted by `@git-diff-view/lowlight`
-and styled via `@git-diff-view/react/styles/diff-view.css` — a separate
-mechanism that would need CSS overrides, not a prism-style transform.
+Out of scope: lowlight token-background pills inside `<DiffView>` (the
+"Diff" view mode of `DiffPanel`). Those tokens are highlighted by
+`@git-diff-view/lowlight` and styled via
+`@git-diff-view/react/styles/diff-view.css` — a separate mechanism that
+would need CSS overrides, not a prism-style transform. The `diffViewTheme`
+prop IS in scope (one-line fix); the per-token lowlight CSS is not.

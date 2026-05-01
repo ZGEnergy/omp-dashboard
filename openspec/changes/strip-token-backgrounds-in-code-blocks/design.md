@@ -40,11 +40,22 @@ The fix removes the second set without touching the first.
 ## Non-Goals
 
 - Replacing prebuilt prism styles with custom palettes.
-- Touching `<DiffView>` from `@git-diff-view/react` — different highlighter
-  (lowlight) and different styling system (CSS file). Deferred.
+- Overriding the lowlight token CSS inside `<DiffView>` from
+  `@git-diff-view/react` — that's a different highlighter (lowlight) and a
+  different styling system (CSS file from the library). Deferred.
 - Removing token-level **foreground** colors (e.g. red text for
   `.token.deleted` inside ```diff fences). Only backgrounds go.
 - Changing inline `<code>` styling (still uses `--bg-surface` pill).
+
+## In Scope (DiffPanel theme integrity)
+
+- DiffPanel's **File** view: migrate from raw `oneDark` to
+  `getSyntaxTheme(theme, themeName)` so it inherits the strip and tracks
+  the active theme.
+- DiffPanel's **Diff** view: bind `<DiffView>`'s `diffViewTheme` prop
+  (`"light" | "dark"`) to the resolved app theme instead of the hardcoded
+  `"dark"`. The library reacts to `diffViewTheme` changes (effect deps
+  include it) so the diff view re-renders on toggle without further work.
 
 ## Decisions
 
@@ -95,6 +106,29 @@ which (a) bypasses the new strip and (b) pins the diff file viewer to a
 single palette regardless of active theme. The migration kills two birds:
 the strip is applied AND the panel respects the active theme just like
 chat/Read/Write code blocks already do.
+
+### Decision 4: DiffPanel "Diff" view binds `diffViewTheme` to the app theme
+
+`<DiffView>` from `@git-diff-view/react` accepts
+`diffViewTheme?: "light" | "dark"` and reacts to changes (the library's
+effect deps include the prop, so it re-themes on toggle). The current
+`diffViewTheme="dark"` literal pins the diff view to dark even when the
+user is in light mode. The fix:
+
+```tsx
+const { resolved: theme } = useThemeContext();
+// ...
+<DiffView
+  ...
+  diffViewTheme={theme === "light" ? "light" : "dark"}
+  ...
+/>
+```
+
+`useThemeContext().resolved` is already typed `"light" | "dark"`, so the
+ternary is a defensive narrowing in case the type ever widens. The same
+`theme` value is reused for `getSyntaxTheme(theme, themeName)` in
+Decision 3, so we capture the hook once and feed both consumers.
 
 ### Decision 4: Diff color washes (`.token.deleted` / `.token.inserted`) go too
 
