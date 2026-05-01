@@ -305,6 +305,9 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       contextTokens: session.contextTokens ?? undefined,
       contextWindow: session.contextWindow,
       firstMessage: session.firstMessage,
+      // Persist unread bit so it survives server restart.
+      // See change: session-card-unread-stripes.
+      unread: session.unread,
       cachedAt: Date.now(),
     });
     // When a session ends, drop its id from the persisted drag-reorder list
@@ -551,6 +554,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     knownSessionIds,
     pendingDashboardSpawns,
     pendingAttachRegistry,
+    viewedSessionTracker: browserGateway.viewedSessionTracker,
   });
 
   // Auto-shutdown idle timer
@@ -700,7 +704,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       if (data) browserGateway.broadcastToAll({ type: "openspec_update", cwd, data });
     },
   });
-  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService });
+  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService, piGateway });
   registerToolRoutes(fastify, { registry: getDefaultRegistry(), networkGuard });
 
   // ── Bootstrap REST routes ────────────────────────────────────────

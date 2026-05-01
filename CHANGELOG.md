@@ -14,11 +14,13 @@ see [`docs/release-process.md`](docs/release-process.md).
 - Resume / Fork pills in the desktop session content header when the viewed session is `ended` and has a `sessionFile` — no more bouncing back to the sidebar after a server reload or pi crash. Mirrors the sidebar SessionCard's visual language and reuses the same `handleResumeSession` plumbing. (change: `resume-button-in-session-header`)
 - New `reattachPlacement` config field (`"preserve" | "streaming-only" | "always"`) and a Settings → Sessions dropdown that controls how the dashboard places re-registering bridges in `sessionOrder` after a restart. (change: `reattach-move-to-front`)
 - New `registerReason: "spawn" | "reattach"` field on the `session_register` extension protocol message; bridges set it automatically. Legacy bridges that omit the field are treated as `"spawn"` for backwards compatibility.
+- New `server_restarting { reason, quiesceMs }` extension protocol message broadcast by `/api/restart` and `/api/shutdown` before exit. Bridges that receive it suppress the auto-start spawn step in `server-auto-start.ts` for the quiesce window so they don't race the orchestrator. Discovery + reconnection still run during the window. (change: `fix-restart-bridge-auto-start-race`)
 
 ### Changed
 - **BREAKING (default behavior)**: when the dashboard restarts, still-alive pi sessions now float to the **top** of their folder lists by default, instead of being preserved at their pre-restart drag-order positions. This eliminates the case where a session you were actively running before a restart ended up buried mid-list. To restore the old behavior, set `reattachPlacement: "preserve"` in `~/.pi/dashboard/config.json` and run `pi-dashboard restart`. (change: `reattach-move-to-front`)
 
 ### Fixed
+- Dashboard restart no longer races bridge auto-start. `pi-dashboard restart` now delegates to `/api/restart` when the dashboard is up (mirroring the `cmdUpgradePi` pattern), and the `restart-helper.ts` orchestrator explicitly SIGTERM/SIGKILLs the previous PID before spawning the replacement. Symptoms fixed: agents running `pi-dashboard restart` from a chat would silently leave the server offline; clicking restart inside Electron could orphan the new server outside Electron's lifecycle supervision. (change: `fix-restart-bridge-auto-start-race`)
 
 ## [0.4.4] - 2026-04-30
 ### Added

@@ -475,6 +475,22 @@ export interface PromptResponseServerMessage {
   source: string;
 }
 
+/**
+ * Server → extension: the dashboard server is about to exit as part of a
+ * deliberate restart or shutdown. Bridges that receive this MUST suppress
+ * the spawn step in `server-auto-start.ts` for `quiesceMs` ms; mDNS
+ * discovery + health-check probes still run, so reconnection to the
+ * orchestrator-spawned replacement is unaffected.
+ *
+ * See change: fix-restart-bridge-auto-start-race.
+ */
+export interface ServerRestartingExtensionMessage {
+  type: "server_restarting";
+  reason: "restart" | "shutdown";
+  /** Suppression window in ms. Default 5000 for restart, 60000 for shutdown. */
+  quiesceMs: number;
+}
+
 export type ServerToExtensionMessage =
   | SendPromptToExtensionMessage
   | AbortToExtensionMessage
@@ -501,4 +517,5 @@ export type ServerToExtensionMessage =
   | RolePresetDeleteExtensionMessage
   | RequestRolesMessage
   | UiManagementMessage
-  | KillProcessMessage;
+  | KillProcessMessage
+  | ServerRestartingExtensionMessage;

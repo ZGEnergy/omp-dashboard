@@ -289,6 +289,20 @@ function initBridge(pi: ExtensionAPI) {
         handleUiManagement(uiModulesBridgeCtx, msg as any);
         return;
       }
+      // Server announced a deliberate restart/shutdown. Pause the auto-start
+      // spawn step in `server-auto-start.ts` for `quiesceMs` so we don't
+      // race the orchestrator that's about to bring up the replacement.
+      // Discovery + reconnection still run via the normal backoff path.
+      // See change: fix-restart-bridge-auto-start-race.
+      if ((msg as any).type === "server_restarting") {
+        const reason = (msg as any).reason;
+        const quiesceMs = (msg as any).quiesceMs;
+        if (typeof quiesceMs === "number" && quiesceMs > 0) {
+          connection.pauseAutoStart(quiesceMs);
+          console.log(`[dashboard] server announced restart (reason=${reason} quiesceMs=${quiesceMs})`);
+        }
+        return;
+      }
       // Legacy extension_ui_response removed — now handled by prompt_response → promptBus.respond()
       // Reload auth credentials when dashboard notifies of changes
       if (msg.type === "credentials_updated") {
@@ -1198,6 +1212,11 @@ function initBridge(pi: ExtensionAPI) {
       onLaunchEnd: () => {
         stopSpinner();
       },
+      // Honor the server's `server_restarting` quiesce window. While a
+      // deliberate restart/shutdown is in flight, skip the spawn step so we
+      // don't race the orchestrator. Discovery + reconnection still run.
+      // See change: fix-restart-bridge-auto-start-race.
+      shouldSuppressAutoStart: () => connection.shouldSuppressAutoStart(),
     }).then((result) => {
       stopSpinner(); // safety net — covers onLaunchEnd not firing
       if (result.server && result.server.piPort !== config.piPort) {
