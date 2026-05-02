@@ -121,13 +121,28 @@ if (SOURCE_ONLY) {
 }
 
 // ── npm install --omit=dev ───────────────────────────────────────────────
+// When TARGET_ARCH is set (cross-arch macOS local builds via --mac-both),
+// we forward it as `npm_config_target_arch` so native module prebuilds
+// (notably node-pty's prebuilds/darwin-<arch>/pty.node) are downloaded
+// for the target arch rather than the host arch. Defense-in-depth
+// alongside the `arch -x86_64` wrapper used by build-installer.sh on
+// Apple Silicon hosts requesting --arch x64.
+// See change: add-darwin-x64-build.
 const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+const targetArch = process.env.TARGET_ARCH;
+const npmEnv = targetArch
+  ? { ...process.env, npm_config_target_arch: targetArch }
+  : process.env;
+if (targetArch) {
+  console.log(`  TARGET_ARCH=${targetArch} — setting npm_config_target_arch`);
+}
 const npmInstall = spawnSync(
   npmCmd,
   ["install", "--omit=dev", "--no-audit", "--no-fund"],
   {
     cwd: SERVER_BUNDLE,
     encoding: "utf8",
+    env: npmEnv,
     // shell:true on Windows so npm.cmd is found via PATHEXT.
     shell: process.platform === "win32",
     stdio: ["ignore", "pipe", "pipe"],

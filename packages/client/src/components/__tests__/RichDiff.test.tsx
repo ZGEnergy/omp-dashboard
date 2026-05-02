@@ -37,7 +37,7 @@ const mockDiffFile = {
   buildSplitDiffLines: vi.fn(),
   buildUnifiedDiffLines: vi.fn(),
 };
-const generateDiffFileMock = vi.fn(() => mockDiffFile);
+const generateDiffFileMock = vi.fn((..._args: unknown[]) => mockDiffFile);
 vi.mock("@git-diff-view/file", () => ({
   generateDiffFile: (...args: unknown[]) => generateDiffFileMock(...args),
 }));

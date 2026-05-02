@@ -67,8 +67,10 @@ describe("isUnreadTrigger", () => {
         isUnreadTrigger(
           "agent_end",
           { status: "streaming", currentTool: null },
-          // @ts-expect-error simulating the broader status union
-          { status: "ended", currentTool: null },
+          // The status union is currently "streaming" | "idle" | "active";
+          // "ended" is not in the union but is a valid runtime value
+          // upstream, so we cast for the simulation.
+          { status: "ended" as unknown as "idle", currentTool: null },
         ),
       ).toBe(false);
     });

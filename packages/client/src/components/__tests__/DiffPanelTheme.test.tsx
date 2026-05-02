@@ -88,7 +88,7 @@ function renderWith(resolved: "light" | "dark") {
     <Provider value={{ resolved, themeName: "base" }}>
       <DiffPanel
         file={fileWithEdit}
-        selection={{ changeIndex: 0 }}
+        selection={{ filePath: "src/example.ts", changeIndex: 0 }}
         sessionId="sess-test"
       />
     </Provider>,

@@ -130,8 +130,8 @@ describe("flushStreamingTextAsAssistantRow (pure helper)", () => {
       ...createInitialState(),
       streamingText: "hello",
     };
-    const once = flushStreamingTextAsAssistantRow(initial, 100);
-    const twice = flushStreamingTextAsAssistantRow(once, 200);
+    const once = flushStreamingTextAsAssistantRow(initial, 100, "tool-1");
+    const twice = flushStreamingTextAsAssistantRow(once, 200, "tool-2");
     expect(once).not.toBe(initial);
     expect(twice).toBe(once); // strict-equal: returned identity
     expect(once.messages).toHaveLength(1);
@@ -143,7 +143,7 @@ describe("flushStreamingTextAsAssistantRow (pure helper)", () => {
 
   it("no-op when streamingText is empty", () => {
     const initial: SessionState = createInitialState();
-    const out = flushStreamingTextAsAssistantRow(initial, 100);
+    const out = flushStreamingTextAsAssistantRow(initial, 100, "tool-1");
     expect(out).toBe(initial);
   });
 
@@ -152,7 +152,7 @@ describe("flushStreamingTextAsAssistantRow (pure helper)", () => {
       ...createInitialState(),
       streamingText: "x",
     };
-    const out = flushStreamingTextAsAssistantRow(initial, 42);
+    const out = flushStreamingTextAsAssistantRow(initial, 42, "tool-1");
     expect(out.messages[0].entryId).toBeUndefined();
     expect(out.messages[0].nonce).toBeUndefined();
     expect(out.messages[0].timestamp).toBe(42);

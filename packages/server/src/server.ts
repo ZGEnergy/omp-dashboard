@@ -91,6 +91,10 @@ export interface ServerConfig {
   editor: import("@blackbelt-technology/pi-dashboard-shared/config.js").EditorConfig;
   /** OpenSpec polling config (interval, concurrency, change detection, jitter) */
   openspec?: import("@blackbelt-technology/pi-dashboard-shared/config.js").OpenSpecPollConfig;
+  /** Reattach-placement policy applied when a bridge re-registers after
+   *  a dashboard restart. Defaults to `"always"`.
+   *  See change: reattach-move-to-front. */
+  reattachPlacement?: import("@blackbelt-technology/pi-dashboard-shared/config.js").ReattachPlacement;
   /** Merged trusted networks from config */
   resolvedTrustedNetworks?: string[];
   /** CORS allowed origins from config */
@@ -367,7 +371,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
           applyReattachPolicy(
             sessionId,
             session.cwd,
-            config.reattachPlacement,
+            config.reattachPlacement ?? "always",
             { sessionManager, sessionOrderManager, browserGateway },
             ctx.priorStatus,
           );
@@ -417,7 +421,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         applyReattachPolicy(
           sessionId,
           session.cwd,
-          config.reattachPlacement,
+          config.reattachPlacement ?? "always",
           { sessionManager, sessionOrderManager, browserGateway },
           ctx.priorStatus,
         );
