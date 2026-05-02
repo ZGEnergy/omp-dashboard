@@ -102,12 +102,18 @@ const brainSrc = `${import.meta.env.BASE_URL}/kraken-brain.png`.replace(/\/{2,}/
   .kraken-backdrop > canvas {
     opacity: var(--kb-canvas-opacity, 0.32);
     transition: opacity 250ms ease;
+    /* Fade out the bottom edge so the canvas dissolves into the page bg
+       — prevents a visible horizontal cut where the wrapper ends. */
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, black 75%, transparent 100%);
+            mask-image: linear-gradient(to bottom, black 0%, black 75%, transparent 100%);
   }
   :root.dark .kraken-backdrop > canvas {
     opacity: var(--kb-canvas-opacity-dark, 0.22);
   }
 
-  /* Scrim: body bg + top glow, no dot grid. */
+  /* Scrim: body bg + top glow, no dot grid. The base colour fades to
+     transparent at the bottom so the seam where the wrapper ends blends
+     smoothly into the page's dot-grid + gradient. */
   .kraken-bg-scrim {
     background:
       radial-gradient(
@@ -115,7 +121,13 @@ const brainSrc = `${import.meta.env.BASE_URL}/kraken-brain.png`.replace(/\/{2,}/
         rgb(var(--pi-accent) / var(--pi-glow-strength)),
         transparent 70%
       ),
-      rgb(var(--pi-bg));
+      linear-gradient(
+        to bottom,
+        rgb(var(--pi-bg)) 0%,
+        rgb(var(--pi-bg)) 70%,
+        rgb(var(--pi-bg) / 0.6) 88%,
+        rgb(var(--pi-bg) / 0) 100%
+      );
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -483,25 +495,8 @@ const brainSrc = `${import.meta.env.BASE_URL}/kraken-brain.png`.replace(/\/{2,}/
           g.fillRect(0, 0, W, H);
         }
 
-        // ---- Decorative bubble rings (baked, static) ----
-        // 35 hollow circles scattered across the canvas. Brighter than before.
-        const bubbleAlpha = dark ? 0.28 : 0.22;
-        const BUBBLE_COUNT = 35;
-        g.lineWidth = 1 * scale;
-        for (let i = 0; i < BUBBLE_COUNT; i++) {
-          const x = Math.random() * W;
-          const y = Math.random() * H;
-          const r = 4 + Math.random() * 26;
-          const useAccent2 = Math.random() < 0.25;
-          g.strokeStyle = withAlpha(useAccent2 ? P.accent2 : P.accent1,
-            (bubbleAlpha * (0.6 + Math.random() * 0.5)).toFixed(3));
-          g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
-          // a fraction of bubbles also get a tiny filled centre dot
-          if (Math.random() < 0.35) {
-            g.fillStyle = withAlpha(useAccent2 ? P.accent2 : P.accent1, (bubbleAlpha * 0.5).toFixed(3));
-            g.beginPath(); g.arc(x, y, 1.2 * scale, 0, Math.PI * 2); g.fill();
-          }
-        }
+        // (Bubble rings removed — the body-level MissionGraph component on
+        //  Base.astro already provides the corner constellations.)
 
         // ---- Halo rings around the brain centre ----
         g.globalCompositeOperation = P.ringBlend;
@@ -712,17 +707,9 @@ const brainSrc = `${import.meta.env.BASE_URL}/kraken-brain.png`.replace(/\/{2,}/
         ctx.clearRect(0, 0, W, H);
         ctx.drawImage(bgLayer, 0, 0, W, H);
 
-        // Ripple rings (kept tight so they don't reach the corners)
-        ctx.globalCompositeOperation = P.ringBlend;
-        const ringMaxR = Math.min(W, H) * 0.26;
-        ctx.lineWidth = 1.2 * scale;
-        for (let k = 0; k < RING_COUNT; k++) {
-          const phase = ((time * 0.22) + k / RING_COUNT) % 1;
-          const r = phase * ringMaxR + 50 * scale;
-          const a = (1 - phase) * 0.28;
-          ctx.strokeStyle = (k % 2 === 0) ? P.rippleAccent(a) : P.rippleAccent2(a);
-          ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-        }
+        // (Pulsing ripple rings removed — the static halo rings + scattered
+        //  bubble rings + marching dashes carry the decoration without the
+        //  rhythmic "explosion" feel.)
 
         // ---- Smooth mouse position toward target ----
         // While mouse is over the canvas, ease toward it; otherwise fall back
