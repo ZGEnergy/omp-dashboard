@@ -16,9 +16,7 @@ import React, { useState } from "react";
 import { Icon } from "@mdi/react";
 import { mdiSourceMerge } from "@mdi/js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { usePluginConfig } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import { initColocated } from "./api.js";
-import type { JjPluginConfig } from "./JjPluginSettings.js";
 
 // Until the settings-section slot runtime lands, the user has no UI to flip
 // `showInitColocatedSuggestion`. The spec mandates opt-in (Decision 11) but
@@ -33,7 +31,13 @@ export function JjInitAffordance({
 }: {
   session: DashboardSession;
 }): React.ReactElement | null {
-  const config = usePluginConfig<JjPluginConfig>();
+  // Note: we intentionally do NOT call usePluginConfig here because this
+  // component is currently rendered inline from SessionCard.tsx (outside
+  // any plugin slot), where no PluginContextProvider/CurrentPluginLayer
+  // is in scope. Once SessionCard renders us through the
+  // session-card-action-bar slot, restore strict opt-in by reading
+  // showInitColocatedSuggestion via usePluginConfig<JjPluginConfig>().
+  const config: { showInitColocatedSuggestion?: boolean } = {};
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
