@@ -9,6 +9,14 @@ For the release workflow (including how `Unreleased` becomes a versioned section
 see [`docs/release-process.md`](docs/release-process.md).
 
 ## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+
+## [0.4.6] - 2026-05-02
 ### Added
 - **Electron Intel Mac DMG** (`darwin-x64`) is now published alongside the Apple Silicon DMG on every release. The CI matrix gained a `macos-13` row that produces `PI-Dashboard-darwin-x64-<ver>.dmg`. Fixes the long-standing "cannot be opened" error on Intel Macs trying to run an arm64-only artifact (Rosetta cannot translate arm64 → x86_64). The site's Download section now renders Apple Silicon and Intel as two equally prominent buttons. Local-builder helper `packages/electron/scripts/build-installer.sh` gained a `--mac-both` flag, sentinel-driven per-arch cache invalidation, and a Rosetta 2 preflight so maintainers can validate both DMGs on an Apple Silicon mac before cutting a release. (change: `add-darwin-x64-build`)
 
