@@ -83,9 +83,9 @@
         `"dark"`. Mock `<DiffView>` to capture the prop, mirroring the
         existing `MockedSyntaxHighlighter` pattern.
 
-- [ ] 8. Visual smoke (manual)
-  - [ ] 8.1 Open a session with file edits and trigger the diff/file view.
-  - [ ] 8.2 With the diff view rendering, toggle the app theme between
+- [x] 8. Visual smoke (manual)
+  - [x] 8.1 Open a session with file edits and trigger the diff/file view.
+  - [x] 8.2 With the diff view rendering, toggle the app theme between
         light and dark; confirm `<DiffView>`'s background, gutter, and
         hunk header chrome re-theme on every toggle.
 
