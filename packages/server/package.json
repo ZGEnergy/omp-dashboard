@@ -1,6 +1,6 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-server",
-  "version": "0.0.0-test-darwin-x64.2",
+  "version": "0.0.0-test-darwin-x64.3",
   "description": "Dashboard server for monitoring and interacting with pi agent sessions",
   "type": "module",
   "repository": {
@@ -31,9 +31,9 @@
     "postinstall": "node scripts/fix-pty-permissions.cjs"
   },
   "dependencies": {
-    "@blackbelt-technology/dashboard-plugin-runtime": "^0.0.0-test-darwin-x64.2",
-    "@blackbelt-technology/pi-dashboard-extension": "^0.0.0-test-darwin-x64.2",
-    "@blackbelt-technology/pi-dashboard-shared": "^0.0.0-test-darwin-x64.2",
+    "@blackbelt-technology/dashboard-plugin-runtime": "^0.0.0-test-darwin-x64.3",
+    "@blackbelt-technology/pi-dashboard-extension": "^0.0.0-test-darwin-x64.3",
+    "@blackbelt-technology/pi-dashboard-shared": "^0.0.0-test-darwin-x64.3",
     "@fastify/compress": "^8.3.1",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.0.0",

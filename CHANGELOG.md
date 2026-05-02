@@ -16,6 +16,13 @@ see [`docs/release-process.md`](docs/release-process.md).
 
 ### Fixed
 
+## [0.0.0-test-darwin-x64.3] - 2026-05-02
+### Added
+
+### Changed
+
+### Fixed
+
 ## [0.0.0-test-darwin-x64.2] - 2026-05-02
 ### Added
 

@@ -1,6 +1,6 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-flows-plugin",
-  "version": "0.0.0-test-darwin-x64.2",
+  "version": "0.0.0-test-darwin-x64.3",
   "description": "Flow rendering plugin for pi-dashboard — pi-flows event reaction (FlowDashboard, FlowAgentCard, FlowArchitect, etc.)",
   "license": "MIT",
   "publishConfig": {
@@ -51,7 +51,7 @@
     "react-dom": ">=18.0.0"
   },
   "dependencies": {
-    "@blackbelt-technology/pi-dashboard-shared": "^0.0.0-test-darwin-x64.2"
+    "@blackbelt-technology/pi-dashboard-shared": "^0.0.0-test-darwin-x64.3"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

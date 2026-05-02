@@ -1,6 +1,6 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-shared",
-  "version": "0.0.0-test-darwin-x64.2",
+  "version": "0.0.0-test-darwin-x64.3",
   "description": "Shared types and utilities for pi-dashboard",
   "type": "module",
   "repository": {
