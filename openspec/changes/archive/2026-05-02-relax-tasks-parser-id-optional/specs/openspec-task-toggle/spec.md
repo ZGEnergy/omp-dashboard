@@ -1,8 +1,4 @@
-## Purpose
-
-Provide a read/write API and UI affordance for the per-line checkboxes in an OpenSpec change's `tasks.md`, so dashboard users can monitor and toggle task completion without leaving the session card. The server is the single source of truth for the parsed task list; the session-card Tasks popover and its button label both derive their counts from the same parser to prevent silent disagreement between surfaces.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Server parses tasks.md into structured task list
 The dashboard server SHALL expose `GET /api/openspec/tasks?cwd=<abs>&change=<name>` returning a JSON array of parsed tasks read from `<cwd>/openspec/changes/<name>/tasks.md`. Each task SHALL include `id`, `text`, `done`, `line` (1-indexed line number in the source file), and `group` (the nearest preceding `## ` heading).

@@ -1,16 +1,23 @@
 /**
  * Parser + writer for an OpenSpec change's `tasks.md` file.
  *
- * `tasks.md` uses a rigid line-level format:
- *   ## 1. Group heading
- *   - [ ] 1.1 Task text
- *   - [x] 1.2 Done task
+ * Accepted shapes (top-level only — leading whitespace is rejected):
+ *   ## 1. Group heading            (group context)
+ *   - [ ] 1.1 Task text             (id-ed: numeric `1.1`-style id)
+ *   - [x] 1.2 Done task             (id-ed, ticked)
+ *   - [ ] Verify runner image       (id-less: parser synthesizes `L<line>`)
+ *   - [x] Add matrix row            (id-less, ticked)
  *
- * We parse top-level `- [ ]` / `- [x]` lines only; anything else is ignored
- * (indented sublists, free-form prose, etc.).
+ * Indented sublists and free-form prose are ignored.
  *
- * Writes rewrite exactly one line's checkbox marker and preserve everything
- * else byte-for-byte; atomic via write-then-rename.
+ * The synthesized `L<line>` id (e.g. `L17` for the 7th line of the file) is a
+ * stable opaque token — it round-trips through the toggle endpoint as the
+ * `id` param but is NEVER written to disk. The `line` field is the actual
+ * byte-level optimistic-concurrency token; the id is just a cross-check.
+ *
+ * Writes rewrite exactly one line's checkbox marker character and preserve
+ * everything else byte-for-byte (including the original spacing between `]`
+ * and the id/text); atomic via write-then-rename.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -46,10 +53,20 @@ export class NotACheckboxError extends Error {
   }
 }
 
-// Top-level checkbox: allow a single leading `- ` with optional `[ ]`/`[x]`/`[X]`,
-// followed by an id-like token (digits and dots) and remaining text.
-const CHECKBOX_RE = /^- \[([ xX])\] +([0-9]+(?:\.[0-9]+)*)\s+(.*)$/;
+// Top-level checkbox with positional groups so the writer can rebuild the line
+// byte-for-byte. Groups (1-indexed):
+//   1: "- ["          (literal prefix)
+//   2: " " | "x" | "X" (the marker char — the only thing the writer flips)
+//   3: "] " plus any extra spaces (literal separator, preserved verbatim)
+//   4: "1.1 " (numeric id + its trailing whitespace) OR "" (id-less)
+//   5: the remainder of the line (the task text)
+const CHECKBOX_RE = /^(- \[)([ xX])(\] +)((?:[0-9]+(?:\.[0-9]+)* +)?)(.*)$/;
 const HEADING_RE = /^##\s+(.*)$/;
+
+/** Synthesize the canonical id for an id-less line: `L<1-indexed-line>`. */
+function synthesizeId(line1Indexed: number): string {
+  return `L${line1Indexed}`;
+}
 
 export function parseTasksMarkdown(content: string): OpenSpecTask[] {
   // Split on \n only; trailing \r is trimmed so we handle CRLF inputs too.
@@ -66,12 +83,15 @@ export function parseTasksMarkdown(content: string): OpenSpecTask[] {
     }
     const m = CHECKBOX_RE.exec(line);
     if (!m) continue;
-    const done = m[1] === "x" || m[1] === "X";
+    const done = m[2] === "x" || m[2] === "X";
+    const lineNo = i + 1;
+    // m[4] is "" when no numeric id present, "1.1 " otherwise.
+    const id = m[4] ? m[4].trimEnd() : synthesizeId(lineNo);
     out.push({
-      id: m[2],
-      text: m[3].trim(),
+      id,
+      text: m[5].trim(),
       done,
-      line: i + 1,
+      line: lineNo,
       group: currentGroup,
     });
   }
@@ -121,16 +141,27 @@ export async function toggleTask(
 
   const m = CHECKBOX_RE.exec(bare);
   if (!m) throw new NotACheckboxError();
-  if (m[2] !== id) throw new LineMismatchError();
 
-  const currentDone = m[1] === "x" || m[1] === "X";
+  // Resolve the parsed id from the source line (numeric if present, else
+  // synthesized `L<line>`). The caller's `id` MUST match this exactly — a
+  // mismatch (numeric-vs-synthetic, wrong synthetic line number, or genuinely
+  // wrong id) is a line-mismatch.
+  const parsedId = m[4] ? m[4].trimEnd() : synthesizeId(line);
+  if (parsedId !== id) throw new LineMismatchError();
+
+  const currentDone = m[2] === "x" || m[2] === "X";
   // Optimistic concurrency: the caller's `done` is the *target* state; the line
   // must currently hold the opposite state. If it already matches, we treat
   // that as a line-mismatch — the file changed under us.
   if (currentDone === done) throw new LineMismatchError();
 
   const marker = done ? "x" : " ";
-  const rewritten = bare.replace(CHECKBOX_RE, `- [${marker}] ${m[2]} ${m[3]}`);
+  // Byte-for-byte rewrite: swap ONLY the marker char in group 2; preserve
+  // group 1 (prefix), group 3 (separator + any extra spaces), group 4 (id +
+  // trailing space, possibly empty for id-less lines), and group 5 (text).
+  // This guarantees id-less lines do not acquire a synthetic id in the file,
+  // and id-ed lines retain their exact spacing.
+  const rewritten = m[1] + marker + m[3] + m[4] + m[5];
   lines[idx] = hadCR ? rewritten + "\r" : rewritten;
 
   const newContent = lines.join("\n");
@@ -140,7 +171,7 @@ export async function toggleTask(
 
   return {
     id,
-    text: m[3].trim(),
+    text: m[5].trim(),
     done,
     line,
     group: findGroupForLine(lines, idx),

@@ -17,6 +17,7 @@ see [`docs/release-process.md`](docs/release-process.md).
 - **Breaking (direct download links)**: the macOS Apple Silicon DMG is renamed from `PI-Dashboard-<ver>.dmg` to `PI-Dashboard-darwin-arm64-<ver>.dmg` for symmetry with the new Intel build (`PI-Dashboard-darwin-x64-<ver>.dmg`). External deep links pointing at the old unsuffixed filename will 404 — update them to the new naming or link to the [Releases page](https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases) instead. (change: `add-darwin-x64-build`)
 
 ### Fixed
+- **Tasks popover** now renders rows for every change, not just those whose `tasks.md` uses `1.1`-style numeric ids. Previously, changes authored without numeric id prefixes (e.g. `- [ ] Verify runner image`) showed `Tasks 24/36` on the button but `No tasks.` in the popover — a silent disagreement between the openspec CLI's count and the dashboard's stricter parser. The parser now accepts top-level checkboxes with or without ids, synthesizing a stable `L<line>` identifier for id-less rows that round-trips through the toggle endpoint without ever leaking into the file. The button count and popover row count are now contractually identical, locked by a new spec scenario. (change: `relax-tasks-parser-id-optional`)
 
 ## [0.4.5] - 2026-05-01
 ### Added

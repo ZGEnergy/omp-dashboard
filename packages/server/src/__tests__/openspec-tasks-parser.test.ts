@@ -69,6 +69,53 @@ describe("parseTasksMarkdown", () => {
     const tasks = parseTasksMarkdown("- [ ] 1.1 Loose task");
     expect(tasks[0].group).toBe("");
   });
+
+  // ─── relax-tasks-parser-id-optional ───────────────────────────────────────
+  // The parser MUST accept top-level checkboxes with or without a `1.1`-style
+  // numeric id prefix. Id-less lines get a synthesized `L<line>` id.
+
+  it("parses id-less checkboxes with synthesized L<line> ids", () => {
+    const md = [
+      "## 1. Workflow matrix", // line 1
+      "",                       // line 2
+      "- [ ] Verify runner image",  // line 3
+      "- [x] Add matrix row",       // line 4
+    ].join("\n");
+    const tasks = parseTasksMarkdown(md);
+    expect(tasks).toEqual([
+      { id: "L3", text: "Verify runner image", done: false, line: 3, group: "1. Workflow matrix" },
+      { id: "L4", text: "Add matrix row", done: true, line: 4, group: "1. Workflow matrix" },
+    ]);
+  });
+
+  it("parses files mixing id-ed and id-less checkboxes", () => {
+    const md = [
+      "## 1. Mix",          // 1
+      "",                    // 2
+      "- [ ] 1.1 Has id",   // 3
+      "- [x] No id here",   // 4
+      "- [ ] 1.3 Skipped 1.2 on purpose", // 5
+    ].join("\n");
+    const tasks = parseTasksMarkdown(md);
+    expect(tasks).toEqual([
+      { id: "1.1", text: "Has id", done: false, line: 3, group: "1. Mix" },
+      { id: "L4", text: "No id here", done: true, line: 4, group: "1. Mix" },
+      { id: "1.3", text: "Skipped 1.2 on purpose", done: false, line: 5, group: "1. Mix" },
+    ]);
+  });
+
+  it("still ignores indented checkboxes (id-less or id-ed)", () => {
+    const md = [
+      "## G",
+      "  - [ ] indented id-less",
+      "  - [ ] 1.1 indented id-ed",
+      "- [ ] top-level id-less",
+    ].join("\n");
+    const tasks = parseTasksMarkdown(md);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].id).toBe("L4");
+    expect(tasks[0].text).toBe("top-level id-less");
+  });
 });
 
 describe("readTasks + toggleTask (writer)", () => {
@@ -174,5 +221,72 @@ describe("readTasks + toggleTask (writer)", () => {
     await toggleTask(tmpDir, CWD_CHANGE[1], "1.1", true, 4);
     const after = fs.readFileSync(tasksFile, "utf-8");
     expect(after).toBe(weirdMd.replace("- [ ] 1.1 Task one", "- [x] 1.1 Task one"));
+  });
+
+  // ─── relax-tasks-parser-id-optional ───────────────────────────────────────
+
+  describe("id-less round-trip", () => {
+    const idlessMd = [
+      "## 1. Workflow matrix",     // 1
+      "",                            // 2
+      "- [ ] Verify runner image",  // 3
+      "- [x] Add matrix row",       // 4
+      "",                            // 5
+      "## 2. Verify rename behavior", // 6
+      "- [ ] Inspect releases",      // 7
+    ].join("\n");
+
+    beforeEach(() => {
+      fs.writeFileSync(tasksFile, idlessMd, "utf-8");
+    });
+
+    it("toggle ticks an id-less task addressed by L<line>, no synthetic id leaks into the file", async () => {
+      const result = await toggleTask(tmpDir, CWD_CHANGE[1], "L3", true, 3);
+      expect(result).toEqual({
+        id: "L3",
+        text: "Verify runner image",
+        done: true,
+        line: 3,
+        group: "1. Workflow matrix",
+      });
+      const after = fs.readFileSync(tasksFile, "utf-8");
+      // CRITICAL: line shape preserved — no "L3" appears in the file body
+      expect(after).toBe(idlessMd.replace("- [ ] Verify runner image", "- [x] Verify runner image"));
+      expect(after).not.toContain("L3");
+    });
+
+    it("toggle unticks an id-less task addressed by L<line>", async () => {
+      const result = await toggleTask(tmpDir, CWD_CHANGE[1], "L4", false, 4);
+      expect(result.done).toBe(false);
+      const after = fs.readFileSync(tasksFile, "utf-8");
+      expect(after).toBe(idlessMd.replace("- [x] Add matrix row", "- [ ] Add matrix row"));
+      expect(after).not.toContain("L4");
+    });
+
+    it("toggle of id-less line with wrong synthesized id throws LineMismatchError", async () => {
+      // Line 3 is id-less; passing L99 (or any other L<n>) must reject
+      await expect(toggleTask(tmpDir, CWD_CHANGE[1], "L99", true, 3)).rejects.toBeInstanceOf(
+        LineMismatchError,
+      );
+      expect(fs.readFileSync(tasksFile, "utf-8")).toBe(idlessMd);
+    });
+
+    it("toggle of id-less line with a numeric-style id throws LineMismatchError", async () => {
+      // Line 3 has no numeric id; passing "1.1" must reject
+      await expect(toggleTask(tmpDir, CWD_CHANGE[1], "1.1", true, 3)).rejects.toBeInstanceOf(
+        LineMismatchError,
+      );
+      expect(fs.readFileSync(tasksFile, "utf-8")).toBe(idlessMd);
+    });
+
+    it("toggle of id-ed line addressed by L<n> throws LineMismatchError", async () => {
+      // Switch fixture to id-ed for this case
+      fs.writeFileSync(tasksFile, initialMd, "utf-8");
+      // Line 3 has id "1.1"; addressing it as "L3" must reject
+      await expect(toggleTask(tmpDir, CWD_CHANGE[1], "L3", true, 3)).rejects.toBeInstanceOf(
+        LineMismatchError,
+      );
+      expect(fs.readFileSync(tasksFile, "utf-8")).toBe(initialMd);
+    });
   });
 });
