@@ -445,7 +445,70 @@ jobs:
 
       - name: Make Electron distributables
         if: "!(matrix.platform == 'win32' && matrix.arch == 'arm64')"
+        # MACOSX_DEPLOYMENT_TARGET pins the Mach-O minos for every binary the
+        # build produces (Electron framework, custom binaries, any source-
+        # compiled native module). Set unconditionally — it's a no-op on
+        # linux/win32. Pairs with extendInfo.LSMinimumSystemVersion in
+        # forge.config.ts. See change: add-darwin-x64-build (6b).
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
         run: npm run electron:make -- --arch=${{ matrix.arch }}
+
+      - name: Verify macOS deployment target floor (10.15)
+        # Defensive check: extract LSMinimumSystemVersion from the produced
+        # Info.plist and otool the inner Mach-O minos. Fail the job on any
+        # drift so a future runner-image upgrade cannot silently raise the
+        # floor without anyone noticing. See change: add-darwin-x64-build (6b).
+        if: matrix.platform == 'darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG=$(find packages/electron/out/make -name '*.dmg' | head -1)
+          if [ -z "$DMG" ]; then
+            echo "::error::No DMG produced — cannot verify deployment target"
+            exit 1
+          fi
+          echo "Mounting $DMG ..."
+          MOUNT_OUT=$(hdiutil attach -nobrowse -readonly "$DMG")
+          MOUNT_POINT=$(echo "$MOUNT_OUT" | grep '/Volumes/' | awk '{$1=$2=""; sub(/^ +/,""); print}' | tail -1)
+          if [ -z "$MOUNT_POINT" ] || [ ! -d "$MOUNT_POINT" ]; then
+            echo "::error::Failed to mount DMG"
+            echo "$MOUNT_OUT"
+            exit 1
+          fi
+          APP=$(find "$MOUNT_POINT" -maxdepth 1 -name '*.app' -type d | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::No .app bundle inside DMG"
+            hdiutil detach "$MOUNT_POINT" -quiet || true
+            exit 1
+          fi
+          echo "Inspecting $APP"
+          # 1. LSMinimumSystemVersion in Info.plist
+          MIN_OS=$(plutil -extract LSMinimumSystemVersion raw "$APP/Contents/Info.plist" 2>/dev/null || echo "missing")
+          echo "  Info.plist LSMinimumSystemVersion = $MIN_OS"
+          if [ "$MIN_OS" != "10.15" ]; then
+            echo "::error::LSMinimumSystemVersion is '$MIN_OS', expected '10.15'. Pin via packagerConfig.extendInfo in packages/electron/forge.config.ts. See change: add-darwin-x64-build."
+            hdiutil detach "$MOUNT_POINT" -quiet || true
+            exit 1
+          fi
+          # 2. Mach-O LC_BUILD_VERSION minos for the main binary
+          BIN="$APP/Contents/MacOS/pi-dashboard"
+          if [ -f "$BIN" ]; then
+            MINOS=$(otool -l "$BIN" | awk '/LC_BUILD_VERSION/,/cmdsize/' | grep -E '^\s+minos' | awk '{print $2}' | head -1)
+            echo "  Mach-O minos = $MINOS"
+            # Accept exact 10.15 or any older floor (e.g. 10.13). Reject anything 11+
+            # which would mean the build host SDK leaked in.
+            MAJOR="${MINOS%%.*}"
+            if [ -n "$MAJOR" ] && [ "$MAJOR" -gt 10 ] 2>/dev/null; then
+              echo "::error::Mach-O minos is '$MINOS' (major=$MAJOR). The runner SDK leaked into the binary. Verify MACOSX_DEPLOYMENT_TARGET is set on the make step. See change: add-darwin-x64-build."
+              hdiutil detach "$MOUNT_POINT" -quiet || true
+              exit 1
+            fi
+          else
+            echo "::warning::Main binary not found at $BIN — skipping otool check"
+          fi
+          hdiutil detach "$MOUNT_POINT" -quiet || true
+          echo "✓ Deployment target floor verified: 10.15"
 
       - name: Package Electron (Windows arm64 — no NSIS cross-compile)
         if: matrix.platform == 'win32' && matrix.arch == 'arm64'

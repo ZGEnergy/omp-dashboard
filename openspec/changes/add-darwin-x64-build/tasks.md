@@ -84,14 +84,14 @@ section 3). This task verifies the rename happens automatically.
 - [x] Verify the local `npm run build` inside `site/` succeeds and the
       built `dist/index.html` shows both buttons when the cached
       `latest-release.json` has been updated post-release.
-- [ ] Push site changes — the `deploy-site` workflow auto-rebuilds on
+- [x] Push site changes — the `deploy-site` workflow auto-rebuilds on
       `release: { types: [published] }` AND on push to `develop`, so
       both the dual-button layout AND the new release data land
       together.
 
 ## 5. Verification
 
-- [ ] Push a feature branch with the workflow change to trigger a CI
+- [x] Push a feature branch with the workflow change to trigger a CI
       run on a tag (or use `workflow_dispatch` if available).
 - [ ] Confirm GitHub Actions:
       - `electron (darwin, x64)` job succeeds.
@@ -152,6 +152,24 @@ section 3). This task verifies the rename happens automatically.
           launches and the terminal works.
         - `./build-installer.sh --mac-both` produces both DMGs in
           one invocation, both verified runnable.
+
+## 6b. Defensive macOS deployment-target pin
+
+_Added 2026-05-02 after CI on `macos-15-intel` raised the question:
+will a build host on macOS 15 produce a DMG that launches on Sonoma/Ventura?
+Electron 32 already bakes in a 10.15 floor for its prebuilt binary, but the
+project doesn't enforce that floor at the bundle level. Pinning it
+defensively prevents a future native-module-from-source from silently
+raising the floor._
+
+- [x] In `packages/electron/forge.config.ts`, add `LSMinimumSystemVersion: "10.15"` under `packagerConfig.extendInfo`. If `extendInfo` is absent, create it.
+- [x] In `.github/workflows/publish.yml`, add `env: MACOSX_DEPLOYMENT_TARGET: "10.15"` to the `Make Electron distributables` step (gated to darwin only via `if: matrix.platform == 'darwin'`, OR set it unconditionally — it's a no-op on linux/win32). Document the choice inline.
+- [x] Add a verification step right after the make step (also darwin-gated) that mounts the produced DMG and asserts:
+      - `plutil -extract LSMinimumSystemVersion raw <App>/Contents/Info.plist` equals `10.15`
+      - `otool -l <App>/Contents/MacOS/pi-dashboard | grep -A 3 'LC_BUILD_VERSION'` shows `minos 10.15` (or older)
+      Fail the job (`exit 1`) on mismatch with a clear message citing this change.
+- [x] Update `packages/electron/forge.config.ts` comment near line 20 from `"support Catalina (10.15) and newer (requires Electron 32.x)"` to mention the pin is now enforced via `extendInfo` + workflow env, not just inferred from Electron's defaults.
+- [x] Update `AGENTS.md`'s `packages/electron/forge.config.ts` row to document the `extendInfo.LSMinimumSystemVersion` pin and link to this change.
 
 ## 7. Release skills (stale artifact-count fix)
 

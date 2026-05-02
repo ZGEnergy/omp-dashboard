@@ -17,8 +17,22 @@ const config: ForgeConfig = {
     executableName: "pi-dashboard",
     icon: path.resolve(__dirname, "resources/icon"),
     appBundleId: "com.blackbelt-technology.pi-dashboard",
-    // macOS: support Catalina (10.15) and newer (requires Electron 32.x)
+    // macOS: support Catalina (10.15) and newer.
+    //
+    // The 10.15 floor is enforced at THREE points so a future runner-image
+    // upgrade or source-built native module cannot silently raise it:
+    //   1. extendInfo.LSMinimumSystemVersion (below) — user-visible min in Info.plist;
+    //      Gatekeeper / launchd refuse to launch the app on older OSes.
+    //   2. .github/workflows/publish.yml step env MACOSX_DEPLOYMENT_TARGET=10.15 —
+    //      every Mach-O the build produces (Electron framework, custom binaries,
+    //      any source-compiled node-gyp module) declares 10.15 as its minos.
+    //   3. CI verification step that greps the produced Info.plist + otool -l
+    //      output and fails the job on any drift.
+    // See change: add-darwin-x64-build (Tasks group 6b, post-impl extension).
     darwinDarkModeSupport: true,
+    extendInfo: {
+      LSMinimumSystemVersion: "10.15",
+    },
     // macOS universal binary (arm64 + x64)
     ...(process.platform === "darwin" ? { arch: "universal" as any } : {}),
     extraResource: [
