@@ -237,6 +237,10 @@ jobs:
             platform: darwin
             arch: arm64
             node-arch: arm64
+          - os: macos-13
+            platform: darwin
+            arch: x64
+            node-arch: x64
           - os: ubuntu-latest
             platform: linux
             arch: x64
