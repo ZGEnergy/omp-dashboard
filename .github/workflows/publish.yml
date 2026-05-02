@@ -632,6 +632,14 @@ jobs:
           cat release-notes.md
           echo "--- end ---"
 
+      - name: Drop builder-debug logs (avoid asset basename collision)
+        # Each electron matrix leg emits a builder-debug.yml; multiple
+        # legs uploading the same basename cause softprops/action-gh-release
+        # to 404 on the asset-update API, failing the step even though all
+        # real artifacts uploaded successfully. The debug logs are not
+        # user-facing release artifacts.
+        run: find electron-* -name builder-debug.yml -delete || true
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
