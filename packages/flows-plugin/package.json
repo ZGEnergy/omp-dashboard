@@ -1,8 +1,11 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-flows-plugin",
   "version": "0.4.5",
-  "private": true,
   "description": "Flow rendering plugin for pi-dashboard — pi-flows event reaction (FlowDashboard, FlowAgentCard, FlowArchitect, etc.)",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "repository": {
     "type": "git",
