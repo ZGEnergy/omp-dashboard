@@ -166,6 +166,7 @@ CLI flags → environment variables → config file → built-in defaults.
 | — | — | `spawnStrategy` | `"headless"` | Session spawn mode: `"headless"` or `"tmux"` |
 | — | — | `reattachPlacement` | `"always"` | After a dashboard restart, where re-registering bridges land in folder lists. `"always"` (top), `"streaming-only"` (only mid-completion), `"preserve"` (legacy: keep prior drag order) |
 | — | — | `devBuildOnReload` | `false` | Rebuild client + restart server on `/reload` |
+| — | — | `askUserPromptTimeoutSeconds` | `300` | `ask_user` prompt timeout in seconds. `≤ 0` (e.g. `-1`) = wait indefinitely |
 
 The bridge also honours `PI_DASHBOARD_URL=ws://host:port` to point at a remote server instead of localhost.
 
@@ -181,6 +182,7 @@ The bridge also honours `PI_DASHBOARD_URL=ws://host:port` to point at a remote s
   "spawnStrategy": "headless",
   "tunnel": { "enabled": true, "reservedToken": "auto-created-on-first-run" },
   "devBuildOnReload": false,
+  "askUserPromptTimeoutSeconds": 300,
   "openspec": {
     "pollIntervalSeconds": 30,
     "maxConcurrentSpawns": 3,
