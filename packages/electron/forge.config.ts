@@ -10,6 +10,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const bundledNodePath = path.resolve(__dirname, "resources/node");
 const extraResource = fs.existsSync(bundledNodePath) ? [bundledNodePath] : [];
 
+// Read package version once at config-evaluation time. Used by the DMG
+// maker below to compose an arch-tagged artifact basename so each macOS
+// matrix leg lands a distinct release asset (see DMG maker comment).
+// See change: fix-darwin-dmg-arch-collision (D1).
+const pkgVersion: string = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, "package.json"), "utf8"),
+).version;
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
@@ -70,9 +78,29 @@ const config: ForgeConfig = {
   },
   makers: [
     {
+      // DMG `name` is composed at config-evaluation time as
+      // `PI-Dashboard-darwin-${process.arch}-${pkgVersion}` so each
+      // macOS matrix leg (`darwin/arm64` on `macos-14`, `darwin/x64` on
+      // `macos-15-intel`) produces a distinct artifact basename. Without
+      // this disambiguation, both legs emit `PI Dashboard.dmg` and
+      // `softprops/action-gh-release@v2` silently overwrites one with
+      // the other on upload (it dedups release assets by basename).
+      //
+      // The `process.arch`-vs-`matrix.arch` contract: forge invokes this
+      // file in the host Node process, so `process.arch` is the host
+      // arch. On every supported build path, host arch == target arch:
+      //   - macos-14 runner    → process.arch === "arm64"
+      //   - macos-15-intel     → process.arch === "x64"
+      //   - local --mac-both   → x64 leg wraps the sub-process in
+      //                          `arch -x86_64`, so the wrapped Node
+      //                          sees process.arch === "x64".
+      // `@electron-forge/maker-dmg` does not implement electron-builder's
+      // `${version}` placeholder substitution, so the version is
+      // composed in JS rather than declared as a template string.
+      // See change: fix-darwin-dmg-arch-collision (D1).
       name: "@electron-forge/maker-dmg",
       config: {
-        name: "PI Dashboard",
+        name: `PI-Dashboard-darwin-${process.arch}-${pkgVersion}`,
         title: "PI Dashboard",
         icon: path.resolve(__dirname, "resources/icon.icns"),
         format: "ULFO",

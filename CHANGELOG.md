@@ -9,28 +9,6 @@ For the release workflow (including how `Unreleased` becomes a versioned section
 see [`docs/release-process.md`](docs/release-process.md).
 
 ## [Unreleased]
-
-### Added
-
-### Changed
-
-### Fixed
-
-## [0.0.0-test-darwin-x64.3] - 2026-05-02
-### Added
-
-### Changed
-
-### Fixed
-
-## [0.0.0-test-darwin-x64.2] - 2026-05-02
-### Added
-
-### Changed
-
-### Fixed
-
-## [0.0.0-test-darwin-x64.1] - 2026-05-02
 ### Added
 - **Electron Intel Mac DMG** (`darwin-x64`) is now published alongside the Apple Silicon DMG on every release. The CI matrix gained a `macos-13` row that produces `PI-Dashboard-darwin-x64-<ver>.dmg`. Fixes the long-standing "cannot be opened" error on Intel Macs trying to run an arm64-only artifact (Rosetta cannot translate arm64 → x86_64). The site's Download section now renders Apple Silicon and Intel as two equally prominent buttons. Local-builder helper `packages/electron/scripts/build-installer.sh` gained a `--mac-both` flag, sentinel-driven per-arch cache invalidation, and a Rosetta 2 preflight so maintainers can validate both DMGs on an Apple Silicon mac before cutting a release. (change: `add-darwin-x64-build`)
 
@@ -38,16 +16,10 @@ see [`docs/release-process.md`](docs/release-process.md).
 - **Breaking (direct download links)**: the macOS Apple Silicon DMG is renamed from `PI-Dashboard-<ver>.dmg` to `PI-Dashboard-darwin-arm64-<ver>.dmg` for symmetry with the new Intel build (`PI-Dashboard-darwin-x64-<ver>.dmg`). External deep links pointing at the old unsuffixed filename will 404 — update them to the new naming or link to the [Releases page](https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases) instead. (change: `add-darwin-x64-build`)
 
 ### Fixed
+- **macOS DMG release-asset collision** — both macOS matrix legs (`darwin/arm64` on `macos-14`, `darwin/x64` on `macos-15-intel`) used to emit a static `PI Dashboard.dmg` basename, causing `softprops/action-gh-release@v2` to silently overwrite one arch with the other on release-asset upload (it dedups by basename). Even though the CI matrix correctly built two DMGs per release, only one ever survived in the published GitHub Release — whichever job finished last won. Intel users were hit hardest because their DMG was usually overwritten by the arm64 one and Rosetta cannot translate arm64 → x86_64. The DMG maker's `name` field is now composed at config-evaluation time as `` `PI-Dashboard-darwin-${process.arch}-${pkgVersion}` `` so each leg lands a distinct asset. **One-time release-asset URL change**: anyone scripting downloads against the unsuffixed legacy URL (`releases/download/<tag>/PI%20Dashboard.dmg`) will see a 404 starting from the next release — link to the [Releases page](https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases) or the new `PI-Dashboard-darwin-${arch}-${version}.dmg` pattern. Locked by `forge-config-dmg-naming.test.ts`. (change: `fix-darwin-dmg-arch-collision`)
 - **Tasks popover** now renders rows for every change, not just those whose `tasks.md` uses `1.1`-style numeric ids. Previously, changes authored without numeric id prefixes (e.g. `- [ ] Verify runner image`) showed `Tasks 24/36` on the button but `No tasks.` in the popover — a silent disagreement between the openspec CLI's count and the dashboard's stricter parser. The parser now accepts top-level checkboxes with or without ids, synthesizing a stable `L<line>` identifier for id-less rows that round-trips through the toggle endpoint without ever leaking into the file. The button count and popover row count are now contractually identical, locked by a new spec scenario. (change: `relax-tasks-parser-id-optional`)
 
 ## [0.4.5] - 2026-05-01
-### Added
-
-### Changed
-
-### Fixed
-
-## [0.4.5-rc.1] - 2026-05-01
 ### Added
 - Resume / Fork pills in the desktop session content header when the viewed session is `ended` and has a `sessionFile` — no more bouncing back to the sidebar after a server reload or pi crash. Mirrors the sidebar SessionCard's visual language and reuses the same `handleResumeSession` plumbing. (change: `resume-button-in-session-header`)
 - New `reattachPlacement` config field (`"preserve" | "streaming-only" | "always"`) and a Settings → Sessions dropdown that controls how the dashboard places re-registering bridges in `sessionOrder` after a restart. (change: `reattach-move-to-front`)

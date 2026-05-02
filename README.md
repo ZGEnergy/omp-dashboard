@@ -49,7 +49,7 @@ On first launch a setup wizard walks you through mode selection (standalone vs. 
 
 **Picking the right macOS DMG:** run `uname -m` in Terminal — `arm64` means Apple Silicon (M1/M2/M3/M4), `x86_64` means Intel. Or open   Apple menu → About This Mac and read the chip name. Download the matching DMG; if you grab the wrong one macOS will refuse to launch the app with a "cannot be opened" error.
 
-> **Note:** Starting with the v0.5.x release line, the Apple Silicon DMG ships as `PI-Dashboard-darwin-arm64-<ver>.dmg` (previously `PI-Dashboard-<ver>.dmg`). Any older direct download links pointing at the unsuffixed filename will 404; please link to the [Releases page](https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases) instead.
+> **Note:** A future release will rename the macOS DMGs to `PI-Dashboard-darwin-arm64-<ver>.dmg` and `PI-Dashboard-darwin-x64-<ver>.dmg` (previously a single `PI Dashboard.dmg` was produced and silently overwrote one arch on each release). Direct download links pointing at the unsuffixed filename will 404 from that release onward; please link to the [Releases page](https://github.com/BlackBeltTechnology/pi-agent-dashboard/releases) instead. See OpenSpec change `fix-darwin-dmg-arch-collision`.
 
 ### B — pi package (recommended for CLI users)
 
