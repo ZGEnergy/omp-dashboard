@@ -173,6 +173,91 @@ device).
   `--pi-accent2` CSS variables so the graph reads correctly on both
   backgrounds
 
+### Requirement: Kraken-brain animated backdrop on the hero
+
+The hero section SHALL render an animated canvas backdrop layer composed
+of a glowing brain core, eight undulating tentacles, marching dashed
+bezier curves, and binary data streams. The backdrop SHALL be tinted
+from the site's `--pi-accent` / `--pi-accent2` tokens so it reads
+correctly in both light and dark themes, SHALL be subtle enough that
+foreground copy stays readable, and SHALL NOT obscure the body-level
+MissionGraph or the page's atmospheric backdrop.
+
+#### Scenario: Backdrop adopts the site's indigo/violet palette
+
+- **GIVEN** the hero is rendered
+- **WHEN** the kraken backdrop's CSS custom properties are inspected
+- **THEN** every `--kb-*` token is derived from `--pi-accent`,
+  `--pi-accent2`, or `--pi-bg`, and switching `<html class="dark">`
+  on/off retints the canvas (brain colormap, tentacle hues, halo,
+  stream digits) without a page reload via a `MutationObserver`
+
+#### Scenario: Backdrop sits behind copy without blocking MissionGraph
+
+- **GIVEN** a visitor on the hero
+- **WHEN** the layer stack is inspected
+- **THEN** the kraken canvas mounts inside `<section class="isolate">`
+  at `-z-20`, has no opaque background scrim, has
+  `pointer-events: none`, and its bottom edge fades out via
+  `mask-image: linear-gradient(...)` so the body's MissionGraph SVG and
+  page bg show through smoothly with no visible horizontal cut
+
+#### Scenario: Brain heartbeat pulse with zoom and alpha
+
+- **GIVEN** the kraken canvas is animating
+- **WHEN** the brain layer is observed across one 1.5 s period
+- **THEN** it scales and fades following a lub-DUB Gaussian heartbeat
+  waveform (two pulses per period, the second roughly twice as strong)
+  layered over a slow ~3.7 s breath sine, producing organic "alive"
+  motion rather than a simple sine fade
+
+#### Scenario: Tentacle tips reach toward the cursor
+
+- **GIVEN** a visitor moves the cursor inside the hero
+- **WHEN** each tentacle is updated per frame
+- **THEN** the tip displaces toward the smoothed cursor position with
+  a `u³` falloff (anchor end immobile, tip flexes most), capped at
+  ~75 × scale px, with the effect easing in/out as the cursor
+  enters/leaves the canvas bounds
+
+#### Scenario: Tip-vs-dashed-line collisions emit electric sparks
+
+- **GIVEN** a tentacle tip is reaching for the cursor
+- **WHEN** the tip enters proximity (≤ 14 × scale px) of any sampled
+  point on a dashed bezier curve
+- **THEN** a spark particle is spawned at the contact midpoint (subject
+  to a 0.5 s per-(tentacle, path) cooldown), drawn additively with a
+  hot-white core, an indigo halo expanding from 4 to 20 px, and 4–5
+  deterministic crackle filaments, fading to nothing within 360–600 ms
+
+#### Scenario: Backdrop adapts to performance via dynamic DPR
+
+- **GIVEN** the kraken canvas is animating
+- **WHEN** the rolling 60-frame FPS average drops below 30
+- **THEN** the device-pixel-ratio is reduced by 0.25 (down to a 0.5
+  floor), the offscreen layers are rebuilt at the new resolution, and a
+  3-second cooldown prevents oscillation; window resize resets the DPR
+  to its initial value
+
+#### Scenario: Reduced-motion users see no canvas animation
+
+- **GIVEN** a visitor with `prefers-reduced-motion: reduce`
+- **WHEN** the kraken canvas is rendered
+- **THEN** the canvas opacity is forced to 0 via CSS (`@media
+  (prefers-reduced-motion: reduce) { .kraken-backdrop canvas {
+  opacity: 0 !important; } }`) and no `requestAnimationFrame` loop is
+  scheduled
+
+#### Scenario: Brain image is host-resolved and luminance-keyed
+
+- **GIVEN** the kraken backdrop initialises
+- **WHEN** the brain PNG (`<BASE_URL>/kraken-brain.png`) loads
+- **THEN** the renderer walks the pixel buffer once setting
+  `r=g=b=alpha=max(r,g,b)` so the brain is a pure greyscale silhouette,
+  and a radial colormap from `--kb-brain-1` → `--kb-brain-2` →
+  `--kb-brain-3` is composited via `source-in` so the brain colour is
+  100 % theme-token-driven
+
 ### Requirement: Scroll-triggered reveal animations
 
 Cards, section headings, and key content blocks SHALL animate into view
