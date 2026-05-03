@@ -22,6 +22,7 @@ import type { ChildProcess } from "@blackbelt-technology/pi-dashboard-shared/pla
 import type { SpawnStrategy } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { MANAGED_BIN } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
+import { prependManagedNodeToPath } from "@blackbelt-technology/pi-dashboard-shared/platform/managed-node-path.js";
 import { execSync, spawnSync, buildSafeArgv } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import {
   spawnDetached,
@@ -66,9 +67,21 @@ export interface SpawnResult {
   dashboardSpawned?: boolean;
 }
 
-/** Build env with managed install bin + current node binary dir prepended to PATH. */
+/**
+ * Build env for pi-session spawns.
+ *
+ * Order of PATH prepends (highest priority first):
+ *   1. Managed Node runtime (`<managedDir>/node/{bin,}`) when installed.
+ *      See change: embed-managed-node-runtime.
+ *   2. Managed bin (`<managedDir>/node_modules/.bin`).
+ *   3. Current Node binary dir, extra bin dirs, common user bin dirs.
+ *
+ * The managed-Node prepend happens AFTER the resolver's prepends so it
+ * lands at the very head of `PATH` — spawned children invoking plain
+ * `node` / `npm` resolve to the managed runtime first.
+ */
 export function buildSpawnEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return resolver.buildSpawnEnv(baseEnv);
+  return prependManagedNodeToPath(resolver.buildSpawnEnv(baseEnv));
 }
 
 /**

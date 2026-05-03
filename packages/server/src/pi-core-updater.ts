@@ -11,6 +11,8 @@ import path from "node:path";
 import os from "node:os";
 import { existsSync } from "node:fs";
 import type { PiCorePackage, PiCoreUpdateResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
+import { prependManagedNodeToPath } from "@blackbelt-technology/pi-dashboard-shared/platform/managed-node-path.js";
 import type { PackageManagerWrapper } from "./package-manager-wrapper.js";
 
 const UPDATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 min per package
@@ -33,10 +35,44 @@ export interface PiCoreUpdaterOptions {
 	onAllComplete?: () => Promise<number>;
 }
 
-/** Default npm-update runner. */
-function defaultRunNpmUpdate(
+/**
+ * Test seams for `defaultRunNpmUpdate`. Production callers omit
+ * `_seams`; tests inject fakes to avoid real spawns.
+ *
+ * `_resolveNpm` defaults to `getDefaultRegistry().resolveExecutor("npm")`.
+ * `_spawn` defaults to `node:child_process` `spawn`.
+ * `_envBuilder` defaults to `prependManagedNodeToPath(process.env)`.
+ */
+export interface DefaultRunNpmUpdateSeams {
+	_resolveNpm?: () =>
+		| { ok: true; argv: string[] }
+		| { ok: false; reason: string };
+	_spawn?: typeof spawn;
+	_envBuilder?: () => NodeJS.ProcessEnv;
+}
+
+/**
+ * Default npm-update runner.
+ *
+ * After change `embed-managed-node-runtime`:
+ *   - Resolves the `npm` binary via `ToolRegistry.resolve("npm")` so
+ *     the managed-Node runtime (when installed) is preferred over the
+ *     system PATH — the user-visible regression class this change
+ *     exists to prevent (`npm update exited with code 1` on a fresh
+ *     Windows install with no system Node).
+ *   - Refuses to spawn a bare `"npm"` if the registry can't resolve
+ *     it. Surfaces a clear `npm` unresolved error per the spec
+ *     scenario "ToolRegistry resolution failure surfaces a clear
+ *     error".
+ *   - Prepends the managed Node directory to the spawned child's
+ *     `PATH` via `prependManagedNodeToPath`, so any nested `node` /
+ *     `npm` invocation inside the npm subprocess also resolves to the
+ *     managed runtime.
+ */
+export function defaultRunNpmUpdate(
 	pkg: PiCorePackage,
 	onOutput: (line: string) => void,
+	seams: DefaultRunNpmUpdateSeams = {},
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const args =
@@ -50,15 +86,35 @@ function defaultRunNpmUpdate(
 			return;
 		}
 
-		// On Windows, system npm is npm.cmd (batch wrapper) — spawn("npm")
-		// without the .cmd extension fails with ENOENT. shell:true routes
-		// the invocation through cmd.exe which resolves via PATHEXT.
-		// See change: route-kill-paths-through-platform (same class of bug).
-		const child = spawn("npm", args, {
+		// Resolve npm via ToolRegistry: managed runtime > override > PATH.
+		// On unresolved, refuse — do not fall back to bare spawn("npm").
+		const resolveNpm =
+			seams._resolveNpm ??
+			(() => {
+				const r = getDefaultRegistry().resolveExecutor("npm");
+				return r.ok && r.path
+					? { ok: true as const, argv: r.argv }
+					: { ok: false as const, reason: "no override, no managed runtime, no npm on PATH" };
+			});
+		const npmRes = resolveNpm();
+		if (!npmRes.ok) {
+			reject(new Error(
+				`npm could not be resolved (${npmRes.reason}). ` +
+				"Install Node.js or run `pi-dashboard repair` to restore the managed Node runtime.",
+			));
+			return;
+		}
+
+		// `argv` is ready-to-spawn: on Windows + an npm-cli.js resolution
+		// it is `[node.exe, npm-cli.js]` (bypasses the .cmd shim and the
+		// cmd.exe console flash); elsewhere it is `[npm]`.
+		const [cmd, ...argvPrefix] = npmRes.argv;
+		const spawnFn = seams._spawn ?? spawn;
+		const envFn = seams._envBuilder ?? (() => prependManagedNodeToPath(process.env));
+		const child = spawnFn(cmd, [...argvPrefix, ...args], {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
-			env: process.env,
-			shell: process.platform === "win32", // platform-branch-ok: shell:true required on Windows so PATHEXT resolves npm.cmd (spawn('npm') without .cmd ENOENTs)
+			env: envFn(),
 			windowsHide: true,
 		});
 

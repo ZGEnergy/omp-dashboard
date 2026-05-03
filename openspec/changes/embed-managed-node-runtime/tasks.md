@@ -27,10 +27,10 @@
 
 ## 5. Spawn-site PATH injection
 
-- [ ] 5.1 Edit `src/server/process-manager.ts` to apply `prependManagedNodeToPath(env)` to every pi-session spawn's environment
-- [ ] 5.2 Edit `packages/server/src/pi-core-updater.ts::defaultRunNpmUpdate` to apply `prependManagedNodeToPath(env)` to the spawned `npm` child's environment
-- [ ] 5.3 Audit bridge-extension shell-command spawn paths (`!`/`!!`) in `src/extension/command-handler.ts`. If they spawn outside the inherited server env, apply `prependManagedNodeToPath` there too; document a one-line note if no change is needed
-- [ ] 5.4 Add tests in `src/server/__tests__/process-manager-managed-path.test.ts` and `packages/server/src/__tests__/pi-core-updater-managed-path.test.ts` asserting the spawned env has the managed dir prepended when present
+- [x] 5.1 Edit `src/server/process-manager.ts` to apply `prependManagedNodeToPath(env)` to every pi-session spawn's environment
+- [x] 5.2 Edit `packages/server/src/pi-core-updater.ts::defaultRunNpmUpdate` to apply `prependManagedNodeToPath(env)` to the spawned `npm` child's environment
+- [x] 5.3 Audit bridge-extension shell-command spawn paths (`!`/`!!`) in `src/extension/command-handler.ts`. If they spawn outside the inherited server env, apply `prependManagedNodeToPath` there too; document a one-line note if no change is needed _(NO CHANGE: bridge `pi.exec` inherits the bridge process env; the bridge runs inside a pi session spawned by `process-manager.ts::buildSpawnEnv` which already prepends managed Node — transitive inheritance covers it.)_
+- [x] 5.4 Add tests in `src/server/__tests__/process-manager-managed-path.test.ts` and `packages/server/src/__tests__/pi-core-updater-managed-path.test.ts` asserting the spawned env has the managed dir prepended when present
 
 ## 6. pi-core-updater registry refactor
 
