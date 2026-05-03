@@ -346,7 +346,9 @@ export default function App() {
   useEffect(() => {
     if (status === "connected" && prevStatusRef.current !== "connected") {
       subscribedRef.current.clear();
-      setSessionOrderMap(new Map());
+      // sessionOrderMap is replaced atomically by the on-connect
+      // `sessions_snapshot` message — no pre-reset needed.
+      // See change: fix-stale-sessions-on-reconnect.
       setTerminals(new Map());
       // Fetch current editor statuses
       fetch(`${apiBase}/api/editor/status`)

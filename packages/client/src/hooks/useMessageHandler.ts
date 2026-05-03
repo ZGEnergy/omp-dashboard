@@ -317,6 +317,15 @@ export function useMessageHandler(
         });
         break;
 
+      case "sessions_snapshot":
+        // Atomic REPLACE — not merge. Drops stale ids from previous server
+        // lifetime so an actually-running session never lingers below the
+        // “Show N ended” divider after a reconnect.
+        // See change: fix-stale-sessions-on-reconnect.
+        setSessions(new Map(msg.sessions.map((s) => [s.id, s])));
+        setSessionOrderMap(new Map(Object.entries(msg.orders)));
+        break;
+
       case "pinned_dirs_updated":
         setPinnedDirectories(msg.paths);
         break;

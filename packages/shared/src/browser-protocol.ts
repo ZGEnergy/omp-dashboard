@@ -148,6 +148,28 @@ export interface SessionsReorderedMessage {
   sessionIds: string[];
 }
 
+/**
+ * Atomic on-connect snapshot of the server's full session registry and
+ * per-cwd ordering. Replaces the legacy per-session `session_added` loop
+ * + per-cwd `sessions_reordered` loop that the gateway used to emit on
+ * each browser WS connect. Client SHALL replace its `sessions` Map and
+ * `sessionOrderMap` with this payload (no merging) so stale ids from a
+ * previous server lifetime are dropped atomically.
+ *
+ * Live updates after the snapshot continue using the incremental
+ * `session_added` / `session_updated` / `session_removed` /
+ * `sessions_reordered` messages.
+ *
+ * See change: fix-stale-sessions-on-reconnect.
+ */
+export interface SessionsSnapshotMessage {
+  type: "sessions_snapshot";
+  /** Every session known to the server at construction time, alive AND ended. */
+  sessions: DashboardSession[];
+  /** cwd → ordered session ids. Only non-empty arrays are included. */
+  orders: Record<string, string[]>;
+}
+
 export interface PinnedDirsUpdatedMessage {
   type: "pinned_dirs_updated";
   paths: string[];
@@ -410,6 +432,7 @@ export type ServerToBrowserMessage =
   | SpawnResultBrowserMessage
   | SpawnErrorMessage
   | SessionsReorderedMessage
+  | SessionsSnapshotMessage
   | PinnedDirsUpdatedMessage
   | TerminalAddedMessage
   | TerminalRemovedMessage

@@ -16,6 +16,7 @@ see [`docs/release-process.md`](docs/release-process.md).
 ### Changed
 
 ### Fixed
+- **Sidebar no longer leaves a running session below the “Show N ended” divider after the dashboard server restarts.** The browser used to merge incremental on-connect `session_added` + `sessions_reordered` messages into stale state from the previous server lifetime; depending on bridge-reattach timing, an actually-running session could end up rendered under the ended divider until a manual page refresh. The server now emits a single atomic `sessions_snapshot` message on every browser WebSocket connect, and the client REPLACES (does not merge) its `sessions` Map and `sessionOrderMap` from that payload, so stale ids are dropped atomically. **BREAKING** (browser protocol): older browser tabs from before this release that reconnect to a server with this change will see no sessions until refreshed; the legacy per-session bootstrap loop has been removed. Live updates after the snapshot continue to use the existing incremental messages. (change: `fix-stale-sessions-on-reconnect`)
 
 ## [0.4.6] - 2026-05-02
 ### Added

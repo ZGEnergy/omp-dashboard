@@ -208,25 +208,26 @@ export function createBrowserGateway(
     const subs = new Set<string>();
     subscriptions.set(ws, subs);
 
-    // Send all sessions on connect (client filters by hidden flag)
-    const allSessions = sessionManager.listAll();
-    for (const session of allSessions) {
-      sendTo(ws, { type: "session_added", session });
+    // Atomic snapshot of the full session registry + per-cwd orders.
+    // Replaces the legacy per-session `session_added` loop and per-cwd
+    // `sessions_reordered` loop. Client REPLACES (not merges) its
+    // `sessions` Map and `sessionOrderMap` on receipt so stale ids from a
+    // previous server lifetime are dropped atomically.
+    // See change: fix-stale-sessions-on-reconnect.
+    {
+      const sessionsSnapshot = sessionManager.listAll();
+      const orders: Record<string, string[]> = {};
+      if (sessionOrderManager) {
+        for (const [cwd, sessionIds] of Object.entries(sessionOrderManager.getAllOrders())) {
+          if (sessionIds.length > 0) orders[cwd] = sessionIds;
+        }
+      }
+      sendTo(ws, { type: "sessions_snapshot", sessions: sessionsSnapshot, orders });
     }
 
     // Send pinned directories on connect
     if (preferencesStore) {
       sendTo(ws, { type: "pinned_dirs_updated", paths: preferencesStore.getPinnedDirectories() });
-    }
-
-    // Send session orders for all cwds
-    if (sessionOrderManager) {
-      const allOrders = sessionOrderManager.getAllOrders();
-      for (const [cwd, sessionIds] of Object.entries(allOrders)) {
-        if (sessionIds.length > 0) {
-          sendTo(ws, { type: "sessions_reordered", cwd, sessionIds });
-        }
-      }
     }
 
     // Send cached OpenSpec data for all known directories
