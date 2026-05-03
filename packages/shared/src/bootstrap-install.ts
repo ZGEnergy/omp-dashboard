@@ -12,8 +12,15 @@
  *
  * See change: unified-bootstrap-install.
  */
-import { spawn as cpSpawn } from "./platform/exec.js";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { spawn as cpSpawn, spawnSync as cpSpawnSync } from "./platform/exec.js";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { getManagedDir } from "./managed-paths.js";
 import { getDefaultRegistry, type ToolRegistry } from "./tool-registry/index.js";
@@ -209,4 +216,191 @@ export async function bootstrapInstallDefaults(
     packages: ["@mariozechner/pi-coding-agent", "@fission-ai/openspec", "tsx"],
     progress,
   });
+}
+
+// ── Managed Node runtime install ───────────────────────────────────────
+//
+// See change: embed-managed-node-runtime (spec: managed-node-runtime).
+//
+// `installManagedNode` copies a bundled Node distribution into
+// `<managedDir>/node/` and writes a `<managedDir>/node/.version` marker.
+// Idempotent: skip when marker matches the bundled version, replace on
+// mismatch, no-op when the bundled source isn't available (standalone
+// CLI install with no Electron resources).
+
+export interface InstallManagedNodeOptions {
+  /**
+   * Source directory containing the bundled Node distribution.
+   * Layout matches the upstream Node zip/tar:
+   *   Windows: `<dir>/node.exe`, `<dir>/npm.cmd`, `<dir>/npx.cmd`
+   *   Unix:    `<dir>/bin/node`, `<dir>/bin/npm`, `<dir>/bin/npx`
+   *
+   * Caller resolves this (Electron uses `path.dirname(getBundledNodePath())`
+   * after stripping the platform-specific suffix). Pass `null` /
+   * `undefined` for the standalone CLI install case — the function
+   * no-ops without error.
+   */
+  bundledNodeDir?: string | null;
+  /** Root of the managed install. Defaults to `getManagedDir()`. */
+  managedDir?: string;
+  /** Called on every progress tick. Mirrors `bootstrapInstall` shape. */
+  progress?: ProgressCallback;
+  /**
+   * Test seam: override how the bundled Node version is read. Default
+   * spawns `<bundledNodeDir>/bin/node --version` (or `node.exe` on
+   * Windows) and trims stdout. Tests inject a fake to avoid real spawns.
+   */
+  _readVersion?: (sourceBinary: string) => string | null;
+}
+
+export interface InstallManagedNodeResult {
+  /** True iff the operation succeeded (including the no-op cases). */
+  ok: boolean;
+  /** Did we actually copy files? false when no-op or skipped. */
+  copied: boolean;
+  /** Resolved managed Node directory (`<managedDir>/node`). */
+  managedNodeDir: string;
+  /** Bundled Node version (e.g. `v22.12.0`) when known. */
+  version?: string;
+  /** Reason for skip / failure. Always set when `copied === false`. */
+  reason?: string;
+  /** Error message when `ok === false`. */
+  error?: string;
+}
+
+/** Path to the source `node` / `node.exe` binary inside `bundledNodeDir`. */
+function sourceNodeBinary(bundledNodeDir: string): string {
+  return process.platform === "win32" // platform-branch-ok: Node distribution layout differs Windows vs Unix
+    ? path.join(bundledNodeDir, "node.exe")
+    : path.join(bundledNodeDir, "bin", "node");
+}
+
+/**
+ * Spawn `<nodeBinary> --version` and return the trimmed stdout (e.g.
+ * `v22.12.0`). Returns null on failure or when the binary is missing.
+ * Synchronous because bootstrap is naturally serial.
+ */
+function readNodeVersion(nodeBinary: string): string | null {
+  if (!existsSync(nodeBinary)) return null;
+  try {
+    const r = cpSpawnSync(nodeBinary, ["--version"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+      encoding: "utf-8",
+    });
+    if (r.status !== 0) return null;
+    const out = (r.stdout ?? "").toString().trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the `<managedNodeDir>/.version` marker if present, else null. */
+function readManagedMarker(managedNodeDir: string): string | null {
+  const markerPath = path.join(managedNodeDir, ".version");
+  if (!existsSync(markerPath)) return null;
+  try {
+    return readFileSync(markerPath, "utf-8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Idempotently copy the bundled Node distribution into `<managedDir>/node/`.
+ *
+ * - First-run: full recursive copy + write `.version` marker.
+ * - Re-run with matching marker: no-op.
+ * - Mismatched marker (or missing marker with dir present): replace +
+ *   rewrite marker.
+ * - Bundled source absent or `bundledNodeDir == null`: no-op.
+ * - Failed copy mid-flight: marker NOT written, so next call retries.
+ */
+export async function installManagedNode(
+  opts: InstallManagedNodeOptions = {},
+): Promise<InstallManagedNodeResult> {
+  const managedDir = opts.managedDir ?? getManagedDir();
+  const managedNodeDir = path.join(managedDir, "node");
+  const step = "node-runtime";
+
+  const bundledDir = opts.bundledNodeDir ?? null;
+  if (!bundledDir) {
+    return {
+      ok: true,
+      copied: false,
+      managedNodeDir,
+      reason: "no bundled source",
+    };
+  }
+
+  const sourceBinary = sourceNodeBinary(bundledDir);
+  const sourceVersion = (opts._readVersion ?? readNodeVersion)(sourceBinary);
+  if (!sourceVersion) {
+    return {
+      ok: true,
+      copied: false,
+      managedNodeDir,
+      reason: `bundled node binary missing or unreadable: ${sourceBinary}`,
+    };
+  }
+
+  const existingMarker = readManagedMarker(managedNodeDir);
+  if (existingMarker === sourceVersion) {
+    return {
+      ok: true,
+      copied: false,
+      managedNodeDir,
+      version: sourceVersion,
+      reason: "version matches bundled — no copy needed",
+    };
+  }
+
+  opts.progress?.({
+    step,
+    status: "running",
+    output: `Installing Node ${sourceVersion} runtime`,
+  });
+
+  try {
+    // Replace any existing dir (handles the mismatch + missing-marker
+    // cases) so the copy is from a clean slate.
+    if (existsSync(managedNodeDir)) {
+      rmSync(managedNodeDir, { recursive: true, force: true });
+    }
+    mkdirSync(path.dirname(managedNodeDir), { recursive: true });
+
+    cpSync(bundledDir, managedNodeDir, {
+      recursive: true,
+      force: true,
+      // dereference: false keeps symlinks-as-symlinks (Unix npm shim).
+      // verbatimSymlinks would also work in newer Node; default is fine.
+    });
+
+    // Marker last — partial copy on failure leaves no marker, so the
+    // next invocation treats the dir as missing and retries.
+    writeFileSync(
+      path.join(managedNodeDir, ".version"),
+      sourceVersion + "\n",
+      "utf-8",
+    );
+
+    opts.progress?.({ step, status: "done", output: `Node ${sourceVersion}` });
+    return {
+      ok: true,
+      copied: true,
+      managedNodeDir,
+      version: sourceVersion,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    opts.progress?.({ step, status: "error", error: message });
+    return {
+      ok: false,
+      copied: false,
+      managedNodeDir,
+      version: sourceVersion,
+      error: message,
+    };
+  }
 }

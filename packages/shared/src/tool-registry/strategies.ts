@@ -13,6 +13,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { ToolResolver, isAppImageSelfHit } from "../platform/binary-lookup.js";
 import { getManagedBin, getManagedDir } from "../managed-paths.js";
+import { getManagedNodeBinDir } from "../platform/managed-node-path.js";
 import * as npm from "../platform/npm.js";
 import type { Strategy, StrategyCtx, StrategyResult } from "./types.js";
 
@@ -82,6 +83,47 @@ export function overrideStrategy(toolName: string, deps?: StrategyDeps): Strateg
       if (!p) return { ok: false, reason: "no override set" };
       if (!exists(p)) return { ok: false, reason: `invalid: path does not exist: ${p}` };
       return { ok: true, path: p };
+    },
+  };
+}
+
+/**
+ * Managed Node runtime: `<managedDir>/node/{node.exe,npm.cmd,npx.cmd}`
+ * on Windows or `<managedDir>/node/bin/{node,npm,npx}` on Unix.
+ *
+ * Lets `ToolRegistry.resolve("node")` and `resolve("npm")` prefer the
+ * persistent runtime under `~/.pi-dashboard/node/` (installed by
+ * `installManagedNode`) over the system PATH lookup, while still
+ * deferring to `tool-overrides.json`.
+ *
+ * Returns `null` when the managed Node runtime is not present, so the
+ * standalone-CLI / no-Electron-resources case falls through cleanly to
+ * the existing `where`/PATH strategy.
+ *
+ * See change: embed-managed-node-runtime (spec: managed-node-runtime,
+ * Requirement: ToolRegistry resolves managed runtime first).
+ */
+export function managedRuntimeStrategy(
+  toolName: "node" | "npm" | "npx",
+  deps?: StrategyDeps,
+): Strategy {
+  const { exists } = d(deps);
+  return {
+    name: "managed",
+    run(ctx): StrategyResult {
+      const dir = getManagedNodeBinDir(ctx.env, ctx.platform);
+      const isWin = ctx.platform === "win32";
+      const fileName =
+        toolName === "node"
+          ? isWin
+            ? "node.exe"
+            : "node"
+          : isWin
+            ? `${toolName}.cmd`
+            : toolName;
+      const candidate = path.join(dir, fileName);
+      if (exists(candidate)) return { ok: true, path: candidate };
+      return { ok: false, reason: `missing: ${candidate}` };
     },
   };
 }

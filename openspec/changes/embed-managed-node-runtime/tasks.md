@@ -6,12 +6,12 @@
 
 ## 2. Pure helpers (no production wire-up yet)
 
-- [ ] 2.1 Add `installManagedNode(managedDir)` to `packages/shared/src/bootstrap-install.ts`. Resolves source via `getBundledNodePath()` parent dir; copies recursively via `fs.cp`; writes `<managedDir>/node/.version` marker on success; idempotent skip when marker matches; replaces dir on mismatch; no-op when bundled source absent
-- [ ] 2.2 Add `prependManagedNodeToPath(env)` helper in `src/shared/platform/managed-node-path.ts`. Returns shallow-cloned env with `<managedDir>/node` (Windows) or `<managedDir>/node/bin` (Unix) prepended to `PATH`. No-op when managed runtime absent. Never mutates `process.env`
-- [ ] 2.3 Add `managedRuntime(toolName)` strategy to `src/shared/tool-registry/strategies.ts`. Returns the managed-runtime path for `node` or `npm` when present, else null
-- [ ] 2.4 Unit-test `installManagedNode` (memfs-backed): first-run copy writes marker; idempotent re-run is no-op; mismatch triggers re-copy; missing bundled source no-ops; partial-copy failure leaves no marker
-- [ ] 2.5 Unit-test `prependManagedNodeToPath`: prepends correct dir per OS; no-op when managed dir absent; returns distinct env object; does not mutate `process.env`
-- [ ] 2.6 Unit-test `managedRuntime` strategy in isolation: returns managed path when present; returns null when absent; OS-correct binary names
+- [x] 2.1 Add `installManagedNode(managedDir)` to `packages/shared/src/bootstrap-install.ts`. Resolves source via `getBundledNodePath()` parent dir; copies recursively via `fs.cp`; writes `<managedDir>/node/.version` marker on success; idempotent skip when marker matches; replaces dir on mismatch; no-op when bundled source absent
+- [x] 2.2 Add `prependManagedNodeToPath(env)` helper in `src/shared/platform/managed-node-path.ts`. Returns shallow-cloned env with `<managedDir>/node` (Windows) or `<managedDir>/node/bin` (Unix) prepended to `PATH`. No-op when managed runtime absent. Never mutates `process.env`
+- [x] 2.3 Add `managedRuntime(toolName)` strategy to `src/shared/tool-registry/strategies.ts`. Returns the managed-runtime path for `node` or `npm` when present, else null
+- [x] 2.4 Unit-test `installManagedNode` (memfs-backed): first-run copy writes marker; idempotent re-run is no-op; mismatch triggers re-copy; missing bundled source no-ops; partial-copy failure leaves no marker
+- [x] 2.5 Unit-test `prependManagedNodeToPath`: prepends correct dir per OS; no-op when managed dir absent; returns distinct env object; does not mutate `process.env`
+- [x] 2.6 Unit-test `managedRuntime` strategy in isolation: returns managed path when present; returns null when absent; OS-correct binary names
 
 ## 3. ToolRegistry wire-up
 
