@@ -123,7 +123,17 @@ export function useMessageHandler(
       case "session_state_reset":
         setSessionStates((prev) => {
           const next = new Map(prev);
-          next.set(msg.sessionId, createInitialState());
+          // Carry `pendingPrompt` across reset: it's optimistic UI state
+          // representing user intent that hasn't round-tripped yet. Reducer
+          // user `message_start` / `agent_start`, the 30s safety timeout, or
+          // explicit cancel are the right paths to clear it. Auto-resume's
+          // bridge re-register triggers this reset, and dropping the bubble
+          // makes the user feel their message vanished.
+          // See change: preserve-pending-prompt-across-replay.
+          const carry = next.get(msg.sessionId)?.pendingPrompt;
+          const fresh = createInitialState();
+          if (carry) fresh.pendingPrompt = carry;
+          next.set(msg.sessionId, fresh);
           return next;
         });
         maxSeqMapRef.current.set(msg.sessionId, 0);
@@ -227,7 +237,12 @@ export function useMessageHandler(
         const shouldReset = firstSeq != null && (firstSeq === 1 || firstSeq <= maxSeq);
         setSessionStates((prev) => {
           const next = new Map(prev);
+          // Same rationale as session_state_reset: preserve optimistic
+          // pendingPrompt across the full-replay reset branch.
+          // See change: preserve-pending-prompt-across-replay.
+          const carry = shouldReset ? next.get(msg.sessionId)?.pendingPrompt : undefined;
           let current = shouldReset ? createInitialState() : (next.get(msg.sessionId) ?? createInitialState());
+          if (carry) current.pendingPrompt = carry;
           for (const { event } of msg.events) {
             current = reduceEvent(current, event);
           }
