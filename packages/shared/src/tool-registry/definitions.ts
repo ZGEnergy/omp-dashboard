@@ -18,6 +18,7 @@ import {
   bareImportStrategy,
   managedBinStrategy,
   managedModuleStrategy,
+  managedRuntimeStrategy,
   npmGlobalStrategy,
   overrideStrategy,
   whereStrategy,
@@ -39,14 +40,20 @@ function classify(strategyName: string): Source {
 // ── Binary definitions ──────────────────────────────────────────────────────
 
 function binaryDef(binaryName: string, deps?: StrategyDeps): ToolDefinition {
+  // The `node` binary gets the managed-Node runtime strategy prepended
+  // (after override) so the persistent <managedDir>/node/ install wins
+  // over PATH lookup. See change: embed-managed-node-runtime.
+  const isNode = binaryName === "node";
+  const strategies = [
+    overrideStrategy(binaryName, deps),
+    ...(isNode ? [managedRuntimeStrategy("node", deps)] : []),
+    managedBinStrategy(binaryName, deps),
+    whereStrategy(binaryName, deps),
+  ];
   return {
     name: binaryName,
     kind: "binary",
-    strategies: [
-      overrideStrategy(binaryName, deps),
-      managedBinStrategy(binaryName, deps),
-      whereStrategy(binaryName, deps),
-    ],
+    strategies,
     classify,
   };
 }
@@ -283,14 +290,20 @@ function npmExecutorDef(deps?: StrategyDeps): ToolDefinition {
     },
   };
 
+  // Managed-Node runtime: prefer <managedDir>/node/{npm.cmd,bin/npm}
+  // when the runtime is installed. See change: embed-managed-node-runtime.
+  const managedNpm = managedRuntimeStrategy("npm", deps);
+
   const winStrategies = [
     overrideStrategy("npm", deps),
+    managedNpm,
     npmCliBesideNodeStrategy,
     whereStrategy("npm", deps),
   ];
 
   const unixStrategies = [
     overrideStrategy("npm", deps),
+    managedNpm,
     whereStrategy("npm", deps),
   ];
 

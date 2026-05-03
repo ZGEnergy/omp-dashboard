@@ -15,9 +15,9 @@
 
 ## 3. ToolRegistry wire-up
 
-- [ ] 3.1 Prepend `managedRuntime("node")` to the `node` strategy chain in `src/shared/tool-registry/definitions.ts` (before any `where`/PATH strategy, after the override strategy)
-- [ ] 3.2 Prepend `managedRuntime("npm")` to the `npm` strategy chain in the same file
-- [ ] 3.3 Add a chain-order test in `src/shared/tool-registry/__tests__/managed-runtime-strategy.test.ts`: managed-runtime present → returned; override file present → override wins; both absent → falls through to PATH lookup
+- [x] 3.1 Prepend `managedRuntime("node")` to the `node` strategy chain in `src/shared/tool-registry/definitions.ts` (before any `where`/PATH strategy, after the override strategy)
+- [x] 3.2 Prepend `managedRuntime("npm")` to the `npm` strategy chain in the same file
+- [x] 3.3 Add a chain-order test in `src/shared/tool-registry/__tests__/managed-runtime-strategy.test.ts`: managed-runtime present → returned; override file present → override wins; both absent → falls through to PATH lookup
 
 ## 4. Bootstrap chain wire-up
 
