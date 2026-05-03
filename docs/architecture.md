@@ -477,6 +477,10 @@ actually changed since boot.
 
 See changes: `unified-bootstrap-install`, `pi-zero-seventy-compat`, `warn-pi-version-skew-in-cli`, `fix-openspec-buttons-after-bootstrap-install`.
 
+#### Managed Node runtime
+
+Electron resources ship bundled Node under `resources/node/` (Windows: `node.exe` + `npm.cmd` + `npx.cmd` at root; Unix: `bin/node` + `bin/npm` + `bin/npx`). `installManagedNode` (`packages/shared/src/bootstrap-install.ts`) `fs.cp`-copies bundle into `<managedDir>/node/` (default `~/.pi-dashboard/node/`), writes `.version` marker for idempotency. `installStandalone` calls it BEFORE first `bootstrapInstall` so npm shims exist when registry install runs; Doctor calls it unconditionally on every launch as a self-repair step. ToolRegistry `node` + `npm` strategy chains prefer `<managedDir>/node/` ahead of system PATH; `prependManagedNodeToPath(env, managedDir)` (`packages/shared/src/platform/managed-node-path.ts`) injects same dir at HEAD of every spawned child's `PATH` (pi-session, pi-core-updater, headless RPC, server-launcher) so `npm.cmd`/`npx.cmd` resolve without `where npm` returning empty on Windows. Standalone CLI / dev / builds without `resources/node/`: bundled source absent, both helpers no-op, resolver falls through to system PATH. See change: embed-managed-node-runtime.
+
 ### Force Kill Escalation
 The Stop button supports two-click escalation for stuck sessions:
 1. **Click 1 (Abort)**: Sends `abort` → bridge → `ctx.abort()`. Button transitions to orange pulsing "Force Stop".

@@ -44,10 +44,10 @@
 
 ## 8. Docs and cross-references
 
-- [ ] 8.1 Delegate to a general-purpose subagent: add a row for `installManagedNode` to `docs/file-index-shared.md` (or appropriate per-area split) in caveman style, in path-alphabetical order
-- [ ] 8.2 Delegate to a general-purpose subagent: add a row for `prependManagedNodeToPath` to `docs/file-index-shared.md` in caveman style
-- [ ] 8.3 Delegate to a general-purpose subagent: update `docs/architecture.md` bootstrap section with a one-paragraph caveman-style note explaining the managed-Node copy step and `~/.pi-dashboard/node/` layout
-- [ ] 8.4 Delegate to a general-purpose subagent: append a `docs/faq.md` entry "Why does `where npm` return nothing on Windows after install?" pointing at the managed Node directory and the PATH-inheritance behavior
+- [x] 8.1 Delegate to a general-purpose subagent: add a row for `installManagedNode` to `docs/file-index-shared.md` (or appropriate per-area split) in caveman style, in path-alphabetical order
+- [x] 8.2 Delegate to a general-purpose subagent: add a row for `prependManagedNodeToPath` to `docs/file-index-shared.md` in caveman style
+- [x] 8.3 Delegate to a general-purpose subagent: update `docs/architecture.md` bootstrap section with a one-paragraph caveman-style note explaining the managed-Node copy step and `~/.pi-dashboard/node/` layout
+- [x] 8.4 Delegate to a general-purpose subagent: append a `docs/faq.md` entry "Why does `where npm` return nothing on Windows after install?" pointing at the managed Node directory and the PATH-inheritance behavior
 
 ## 9. Manual verification on Windows
 

@@ -1618,3 +1618,20 @@ npm packages already published cannot be `npm unpublish` after 72h or when depen
 Cross-refs:
 - docs/release-process.md:168
 - docs/release-process.md:187
+
+## Why does `where npm` return nothing on Windows after Electron install?
+
+Bundled Node lived at `<app>/resources/node/` only. Pre-`embed-managed-node-runtime`: `npm.cmd` / `npx.cmd` shims missing from bundle (`docker-make.sh` bug omitted them) AND bundled dir not on `PATH` for spawned children (pi-session, pi-core-updater) — `where npm` failed, `npm install` from agent failed.
+
+After change:
+- Bundle ships `node.exe` + `npm.cmd` + `npx.cmd` at `resources/node/` root (Windows) or `bin/` (Unix).
+- `installManagedNode` copies bundle into `~/.pi-dashboard/node/` on first run + on every Doctor launch (idempotent via `.version` marker). Persists across Electron upgrades.
+- `prependManagedNodeToPath(env, managedDir)` injects `~/.pi-dashboard/node/` at HEAD of every spawned-child `PATH`. Children resolve `npm` / `npx` without system Node.
+- Restore if missing: run `pi-dashboard repair` (Doctor menu) — re-runs `installManagedNode` unconditionally.
+
+See change: embed-managed-node-runtime.
+
+Cross-refs:
+- docs/architecture.md — Bootstrap & First Run → Managed Node runtime
+- packages/shared/src/bootstrap-install.ts (`installManagedNode`)
+- packages/shared/src/platform/managed-node-path.ts (`prependManagedNodeToPath`)
