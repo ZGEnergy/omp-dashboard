@@ -13,6 +13,7 @@ import { getBundledNodePath, getBundledNpmPath } from "./bundled-node.js";
 import { isApiKeyConfigured, readModeFile } from "./wizard-state.js";
 import { MANAGED_DIR } from "./managed-paths.js";
 import { resolveOfflinePackages } from "./offline-packages.js";
+import { installManagedNode } from "@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js";
 
 export interface DoctorCheck {
   name: string;
@@ -47,8 +48,81 @@ function getPkgVersion(pkgJsonPath: string): string | null {
   }
 }
 
-/** Run all doctor checks. */
-export function runDoctor(): DoctorReport {
+/**
+ * Repair-and-report for the managed Node runtime under
+ * `~/.pi-dashboard/node/`. Always invokes `installManagedNode` so a
+ * missing or version-mismatched copy is restored; idempotent when the
+ * marker matches.
+ *
+ * Exported for the unit test in `__tests__/doctor-managed-node.test.ts`.
+ */
+export async function checkManagedNodeRuntime(opts?: {
+  install?: typeof installManagedNode;
+  bundledNodeBinary?: string | null;
+  managedDir?: string;
+}): Promise<DoctorCheck> {
+  const install = opts?.install ?? installManagedNode;
+  const bundledNodeBinary = opts?.bundledNodeBinary ?? getBundledNodePath();
+  const managedDir = opts?.managedDir ?? MANAGED_DIR;
+  const bundledDir = bundledNodeBinary
+    ? (process.platform === "win32" // platform-branch-ok: Node distribution layout differs Windows vs Unix
+        ? path.dirname(bundledNodeBinary)
+        : path.dirname(path.dirname(bundledNodeBinary)))
+    : null;
+
+  let installError: string | undefined;
+  try {
+    const r = await install({ bundledNodeDir: bundledDir, managedDir });
+    if (!r.ok) installError = r.error;
+  } catch (err) {
+    installError = err instanceof Error ? err.message : String(err);
+  }
+
+  const managedNodeBinary = process.platform === "win32" // platform-branch-ok: Node distribution layout differs Windows vs Unix
+    ? path.join(managedDir, "node", "node.exe")
+    : path.join(managedDir, "node", "bin", "node");
+  const markerPath = path.join(managedDir, "node", ".version");
+  const present = existsSync(managedNodeBinary);
+  const markerVersion = existsSync(markerPath)
+    ? readFileSync(markerPath, "utf-8").trim() || null
+    : null;
+
+  if (installError) {
+    return {
+      name: "Managed Node runtime",
+      status: "warning",
+      message: `Failed to install: ${installError}`,
+      detail: `Target: ${path.join(managedDir, "node")}`,
+      fixable: true,
+    };
+  }
+  if (!present && !bundledDir) {
+    return {
+      name: "Managed Node runtime",
+      status: "warning",
+      message: "Not installed (no bundled source — standalone CLI install)",
+      detail: `System Node will be used. Target: ${path.join(managedDir, "node")}`,
+    };
+  }
+  if (!present) {
+    return {
+      name: "Managed Node runtime",
+      status: "error",
+      message: "Install attempted but binary not found",
+      detail: `Target: ${managedNodeBinary}`,
+      fixable: true,
+    };
+  }
+  return {
+    name: "Managed Node runtime",
+    status: "ok",
+    message: `${markerVersion || "installed"} at ${path.join(managedDir, "node")}`,
+  };
+}
+
+/** Run all doctor checks. Async because the managed-Node-runtime
+ * check awaits the idempotent `installManagedNode` repair step. */
+export async function runDoctor(): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
 
   // ── Electron app ─────────────────────────────────────────────
@@ -103,6 +177,15 @@ export function runDoctor(): DoctorReport {
       ? `${bundledNpmVersion || "installed"} at ${bundledNpm}`
       : "Not found in app resources",
   });
+
+  // ── Managed Node runtime (~/.pi-dashboard/node/) ─────────────
+  // Self-healing repair: invoke installManagedNode unconditionally.
+  // Idempotent — no-op when the marker matches the bundled version,
+  // re-copies on missing or mismatched marker. Fixes the user-visible
+  // bug class "where npm returns nothing on Windows".
+  // See change: embed-managed-node-runtime (task 7.1).
+  const managedNodeRow = await checkManagedNodeRuntime();
+  checks.push(managedNodeRow);
 
   // ── pi CLI ───────────────────────────────────────────────────
 

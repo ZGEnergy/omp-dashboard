@@ -34,13 +34,13 @@
 
 ## 6. pi-core-updater registry refactor
 
-- [ ] 6.1 Refactor `packages/server/src/pi-core-updater.ts::defaultRunNpmUpdate` to resolve the npm binary via `getDefaultRegistry().resolve("npm")` instead of `spawn("npm", ...)`. On unresolved, reject with a clear error naming `npm` (per spec scenario "ToolRegistry resolution failure surfaces a clear error"). Preserve the existing permission-error stderr-hint regex
-- [ ] 6.2 Update `packages/server/src/__tests__/pi-core-updater.test.ts` to assert the resolved absolute path is invoked (not bare `"npm"`), to assert the unresolved-npm rejection surface, and to assert the permission-hint preservation
+- [x] 6.1 Refactor `packages/server/src/pi-core-updater.ts::defaultRunNpmUpdate` to resolve the npm binary via `getDefaultRegistry().resolve("npm")` instead of `spawn("npm", ...)`. On unresolved, reject with a clear error naming `npm` (per spec scenario "ToolRegistry resolution failure surfaces a clear error"). Preserve the existing permission-error stderr-hint regex _(combined with task 5.2 commit)_
+- [x] 6.2 Update `packages/server/src/__tests__/pi-core-updater.test.ts` to assert the resolved absolute path is invoked (not bare `"npm"`), to assert the unresolved-npm rejection surface, and to assert the permission-hint preservation _(covered by sibling new file `pi-core-updater-managed-path.test.ts` which exercises `defaultRunNpmUpdate` directly via test seams; existing `pi-core-updater.test.ts` continues to test the orchestrator via the `runNpmUpdate` test seam.)_
 
 ## 7. Doctor / repair wire-up
 
-- [ ] 7.1 Edit `packages/electron/src/lib/doctor.ts` to invoke `installManagedNode(MANAGED_DIR)` as part of its checks; surface result in the existing Doctor UI rows (`Node runtime`)
-- [ ] 7.2 Add a Doctor test asserting it re-copies on missing managed Node and on version-marker mismatch, and that it no-ops when the marker matches
+- [x] 7.1 Edit `packages/electron/src/lib/doctor.ts` to invoke `installManagedNode(MANAGED_DIR)` as part of its checks; surface result in the existing Doctor UI rows (`Node runtime`)
+- [x] 7.2 Add a Doctor test asserting it re-copies on missing managed Node and on version-marker mismatch, and that it no-ops when the marker matches
 
 ## 8. Docs and cross-references
 
