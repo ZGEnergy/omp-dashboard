@@ -18,6 +18,12 @@ Per-area maps of every architecturally significant file in pi-agent-dashboard. L
 | Dashboard plugins | [`file-index-plugins.md`](./file-index-plugins.md) | `packages/dashboard-plugin-runtime/`, `packages/{jj,flows,demo}-plugin/` |
 | Skills, scripts, CI | [`file-index-skills-misc.md`](./file-index-skills-misc.md) | `.pi/skills/`, `scripts/`, `public/`, `.github/`, misc |
 
+## Standalone topic docs
+
+| File | Covers |
+|---|---|
+| [`faq.md`](./faq.md) | Recurring how-to questions. Answers point at README.md + docs/ sources. |
+
 ## Adding a new file
 
 1. Pick the split that matches its path prefix.

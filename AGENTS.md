@@ -5,6 +5,20 @@
 
 Web-based dashboard for monitoring and interacting with pi agent sessions remotely. Three-component architecture: bridge extension + Node.js server + React web client.
 
+## STOP — Docs-First Gate
+
+**Before any build / run / install / setup / release / "how do I X" question: `grep -i <keyword> docs/faq.md README.md docs/` FIRST. No source reads until that returns nothing.**
+
+If you read a script, config, or source file before grepping docs on a how-to, what-is question, you violated the protocol. Re-grep, then answer.
+
+- ❌ User: "how do I ..." → read `<src files>` → guess answer
+- ✅ User: "how do I ..." → `grep -ni '<words>' docs/faq.md` → quote the FAQ entry
+
+- ❌ User: "what is ..." → read `scripts/build-installer.sh`, `forge.config.ts` → guess answer
+- ✅ User: "what is ..." → `grep -ni '<words>' docs/index-*.md` → quote the entry
+
+Full protocol (index-first for code questions, file-index splits, etc.) is in [Investigation Protocol — Index First](#investigation-protocol--index-first) below.
+
 ## Code Instructions
 
 Behavioral guidelines to reduce common LLM coding mistakes. Bias toward caution over speed. For trivial tasks, use judgment.
@@ -174,6 +188,29 @@ make clean              # Destroy all cloned VMs
 | `qa/scripts/` | VM lifecycle (clone, wait-ssh, destroy, run-test) |
 | `qa/tests/` | Test suite (install, server, websocket, terminal, git) |
 | `qa/README.md` | Full setup and usage documentation |
+
+## Investigation Protocol — Index First
+
+**Before reading source, consult `docs/file-index.md` and the relevant `docs/file-index-<area>.md` split.** The index is the cheapest map of the codebase — every architecturally significant file has a one-line purpose plus change-history pointers. Reading source blind wastes tokens and risks hallucination.
+
+**For "how do I X" / build / run / setup questions: grep `README.md` + `docs/` first.** These already document every supported workflow (build, install, release, QA, troubleshooting). Reading source before checking docs wastes tokens and produces wrong answers (e.g. claiming a feature is missing when it ships). Check `docs/faq.md` for recurring questions.
+
+Workflow for any non-trivial "where is X" / "how does Y work" question:
+
+1. **Pick the split** from `docs/file-index.md` table (shared / extension / server / client / electron / plugins / skills-misc) by path prefix or topic.
+2. **Delegate harvesting to a subagent** (`Explore` preferred). Give it:
+   - the user's question,
+   - the split file(s) to read,
+   - explicit instruction: *"return only rows + file paths relevant to the question — no source reads, no speculation."*
+3. **Receive a short list** of candidate files (≤ ~10 rows). Only then open source for the ones that matter.
+4. If the split lacks coverage, fall back to `rg` / `Explore` over the source tree — and add the missing row per the Documentation Update Protocol.
+
+Why subagents: the splits are large (`file-index-server.md`, `file-index-client.md` each > 20 KB). Loading them into the main context on every question pollutes the budget. A subagent reads the split, returns the 5–10 relevant rows, and discards the rest.
+
+Do **not**:
+- Grep source before checking the index.
+- Read a whole split file into the main agent's context — delegate.
+- Trust the AGENTS.md "Key Files" backbone as exhaustive; it is a subset.
 
 ## Key Files
 
