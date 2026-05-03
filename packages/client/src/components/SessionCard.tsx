@@ -357,6 +357,7 @@ export function SessionCard({
   if (isMobile) {
     return (
       <li
+        data-session-id={session.id}
         onClick={() => onSelect(session.id)}
         className={`px-4 py-3 cursor-pointer rounded-xl shadow-md shadow-[var(--shadow-card)] border hover:shadow-lg transition-all duration-200 ${
           isSelected ? "border-blue-500/60 bg-blue-500/5 ring-1 ring-blue-500/30" : "border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"
@@ -447,6 +448,7 @@ export function SessionCard({
 
   return (
     <li
+      data-session-id={session.id}
       onClick={() => onSelect(session.id)}
       className={`px-3 py-2.5 cursor-pointer rounded-xl shadow-md shadow-[var(--shadow-card)] border hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ${
         isSelected ? "border-blue-500/60 bg-blue-500/5 ring-1 ring-blue-500/30" : "border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { getApiBase } from "../lib/api-context.js";
 import { useLocation } from "wouter";
 import { Icon } from "@mdi/react";
@@ -37,6 +37,7 @@ import { openEditor } from "../lib/editor-api.js";
 import { Toast, useToast } from "./Toast.js";
 import { BranchSwitchDialog } from "./BranchSwitchDialog.js";
 import { truncatePathMiddle } from "../lib/truncate-path.js";
+import { selectedCardScrollFingerprint } from "../lib/session-list-scroll.js";
 import { TunnelButton } from "./TunnelButton.js";
 import { InstallButton } from "./InstallButton.js";
 import { useInstallPrompt } from "../hooks/useInstallPrompt.js";
@@ -144,6 +145,44 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
   const [, navigate] = useLocation();
   const { messages, showToast, dismissToast } = useToast();
   const installPrompt = useInstallPrompt();
+
+  // Scroll-to-selected-card wiring.
+  // See change: auto-scroll-selected-session-card.
+  // - Scroll on background re-sort of unchanged selection (status/hidden/cwd/order index).
+  // - One-shot scroll on first mount when selectedId is set (deep-link arrival).
+  // - Do NOT scroll on subsequent selectedId changes (user click / programmatic switch).
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const prevSelectedRef = useRef<string | undefined>(selectedId);
+  const firstMountRef = useRef(true);
+  const scrollFingerprint = useMemo(
+    () => selectedCardScrollFingerprint(selectedId, sessions, sessionOrderMap),
+    [selectedId, sessions, sessionOrderMap],
+  );
+  useEffect(() => {
+    if (scrollFingerprint === null) {
+      // Even when noop'ing, keep prev-selected ref in sync so a subsequent
+      // background re-sort of a newly-clicked selection scrolls correctly.
+      prevSelectedRef.current = selectedId;
+      firstMountRef.current = false;
+      return;
+    }
+    const selectionChanged = prevSelectedRef.current !== selectedId;
+    prevSelectedRef.current = selectedId;
+    const isFirstMount = firstMountRef.current;
+    firstMountRef.current = false;
+    if (!isFirstMount && selectionChanged) {
+      // User clicked / programmatic switch — do not hijack scroll position.
+      return;
+    }
+    if (!selectedId) return;
+    const escaped = (window.CSS && typeof window.CSS.escape === "function")
+      ? window.CSS.escape(selectedId)
+      : selectedId.replace(/"/g, '\\"');
+    const el = listRef.current?.querySelector(`[data-session-id="${escaped}"]`);
+    if (el && typeof (el as HTMLElement).scrollIntoView === "function") {
+      (el as HTMLElement).scrollIntoView({ block: "nearest", behavior: "auto" });
+    }
+  }, [scrollFingerprint, selectedId]);
 
 
   // Detect editors for all unique cwds (sessions + pinned directories)
@@ -732,7 +771,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
           )}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div ref={listRef} className="flex-1 overflow-y-auto">
       {filteredSessions.length === 0 && pinnedGroups.length === 0 ? (
         <div className="p-4 text-sm text-[var(--text-tertiary)]">No active sessions</div>
       ) : (
