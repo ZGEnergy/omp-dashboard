@@ -33,7 +33,7 @@
 | `src/client/components/SessionOpenSpecActions.tsx` | Session-level OpenSpec: searchable attach dialog, action buttons, detach |
 | `src/client/components/DialogPortal.tsx` | Portal wrapper rendering dialogs at document.body with scroll lock |
 | `src/client/components/PinDirectoryDialog.tsx` | Dialog to pin directory (wraps PathPicker) |
-| `src/client/components/PathPicker.tsx` | Reusable keyboard-first path picker with typeahead directory list |
+| `src/client/components/PathPicker.tsx` | Reusable keyboard-first path picker with typeahead directory list. Change `fix-pathpicker-windows-trailing-sep`: `tryConfirm` Rule 2 accepts `\` trailing separator (Windows + UNC), not just `/`. |
 | `src/client/lib/browse-api.ts` | Client-side browse API helper for PathPicker |
 | `packages/client/src/hooks/useBootstrapStatus.ts` | Client hook for bootstrap state. Fetches `/api/bootstrap/status` on mount, subscribes to `bootstrap-status` `CustomEvent` dispatched by `useMessageHandler` on `bootstrap_status_update` WS broadcasts. Exposes `{ state, isLoading, error, refresh, retry, upgradePi }`. |
 | `packages/client/src/components/BootstrapBanner.tsx` | Banner mounted in `App.tsx` above `<MobileShell>`. Hidden at status="ready" with no compatibility hints; blue "Installing pi…" when installing; red "pi install failed — [Retry]" when failed; amber upgrade hints when `compatibility.upgradeRecommended` or `upgradeDashboard` is true. |

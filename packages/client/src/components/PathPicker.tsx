@@ -270,8 +270,17 @@ export function PathPicker({ initialPath, onSelect, onCancel, rows = 8 }: Props)
       }
     }
 
-    // Rule 2: input ends with "/" and parsed parent equals the fetched dir
-    if (inputValue.endsWith("/") && fetchedDirRef.current === p) {
+    // Rule 2: input ends with the OS-native separator (`/` on POSIX, `\`
+    // on Windows, plus UNC paths terminated by `\`) and parsed parent
+    // equals the fetched dir. The picker itself writes a trailing
+    // separator after every navigation step via `withTrailingSep` —
+    // accepting only `/` here made every Windows confirmation
+    // (Enter or Select button) fall through to `triggerInvalid`.
+    // See change: fix-pathpicker-windows-trailing-sep.
+    if (
+      (inputValue.endsWith("/") || inputValue.endsWith("\\")) &&
+      fetchedDirRef.current === p
+    ) {
       onSelect(inputValue);
       return true;
     }

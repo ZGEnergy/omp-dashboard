@@ -685,4 +685,99 @@ describe("PathPicker", () => {
     await waitFor(() => expect(firstSignal?.aborted).toBe(true));
     expect(firstResolved).toBe(true);
   });
+
+  describe("Windows trailing-backslash confirmation", () => {
+    // Build a Windows-shaped BrowseResult (entries joined with `\`, not `/`).
+    function makeWinBrowseResult(
+      current: string,
+      entries: Array<{ name: string }>,
+      parent: string | null,
+    ) {
+      return {
+        current,
+        parent,
+        entries: entries.map((e) => ({
+          name: e.name,
+          path: `${current}\\${e.name}`,
+        })),
+      };
+    }
+
+    it("Enter on C:\\Users\\me\\ calls onSelect with the input value and closes", async () => {
+      const winResult = makeWinBrowseResult(
+        "C:\\Users\\me",
+        [{ name: "Documents" }, { name: "Downloads" }],
+        "C:\\Users",
+      );
+      mockBrowse.mockResolvedValue(winResult);
+
+      render(
+        <PathPicker
+          initialPath={"C:\\Users\\me\\"}
+          onSelect={onSelect}
+          onCancel={onCancel}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("Documents")).toBeTruthy());
+      // Sanity: the picker preserved the Windows shape verbatim.
+      expect(getInput().value).toBe("C:\\Users\\me\\");
+
+      fireEvent.keyDown(getInput(), { key: "Enter" });
+      await waitFor(() =>
+        expect(onSelect).toHaveBeenCalledWith("C:\\Users\\me\\"),
+      );
+    });
+
+    it("Select button on C:\\Users\\me\\ calls onSelect", async () => {
+      const winResult = makeWinBrowseResult(
+        "C:\\Users\\me",
+        [{ name: "Documents" }],
+        "C:\\Users",
+      );
+      mockBrowse.mockResolvedValue(winResult);
+
+      render(
+        <PathPicker
+          initialPath={"C:\\Users\\me\\"}
+          onSelect={onSelect}
+          onCancel={onCancel}
+        />,
+      );
+      await waitFor(() => expect(screen.getByText("Documents")).toBeTruthy());
+
+      fireEvent.click(screen.getByText("Select"));
+      await waitFor(() =>
+        expect(onSelect).toHaveBeenCalledWith("C:\\Users\\me\\"),
+      );
+    });
+
+    it("Enter on UNC \\\\server\\share\\ calls onSelect", async () => {
+      // UNC root carries a trailing `\` after `normalizePath` (the picker's
+      // parent comparison runs against the normalized form), so align the
+      // mock's `current` with that shape — `\\server\share\`, not
+      // `\\server\share`. Otherwise `fetchedDirRef.current === p` is false
+      // and Rule 2 silently skips.
+      const uncResult = {
+        current: "\\\\server\\share\\",
+        parent: null,
+        entries: [{ name: "public", path: "\\\\server\\share\\public" }],
+      };
+      mockBrowse.mockResolvedValue(uncResult);
+
+      render(
+        <PathPicker
+          initialPath={"\\\\server\\share\\"}
+          onSelect={onSelect}
+          onCancel={onCancel}
+        />,
+      );
+      await waitFor(() => expect(screen.getByText("public")).toBeTruthy());
+
+      fireEvent.keyDown(getInput(), { key: "Enter" });
+      await waitFor(() =>
+        expect(onSelect).toHaveBeenCalledWith("\\\\server\\share\\"),
+      );
+    });
+  });
 });
