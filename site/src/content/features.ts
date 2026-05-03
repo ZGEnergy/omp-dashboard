@@ -10,6 +10,8 @@ export interface FeatureEntry {
   badgeTone?: BadgeTone;
   /** Grid span classes for desktop layout. */
   span?: string;
+  /** Substitute visual when no screenshot exists. */
+  visual?: "promptbus" | "discovery";
 }
 
 const SHOTS_DESKTOP = "/screenshots/desktop";
@@ -59,6 +61,7 @@ export const FEATURES: FeatureEntry[] = [
     badge: "New",
     badgeTone: "accent",
     span: "md:col-span-4",
+    visual: "promptbus",
   },
 
   // Row 3-4 — terminal above editor (both col-4) next to the flows banner
@@ -152,6 +155,7 @@ export const FEATURES: FeatureEntry[] = [
     blurb:
       "mDNS auto-finds every dashboard on your LAN. Pick a server, connect, done. Known servers persist across reloads.",
     span: "md:col-span-6",
+    visual: "discovery",
   },
   {
     id: "tunnel",
