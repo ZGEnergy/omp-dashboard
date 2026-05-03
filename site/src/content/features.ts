@@ -12,8 +12,8 @@ export interface FeatureEntry {
   span?: string;
 }
 
-const SHOTS_DESKTOP = "/pi-agent-dashboard/screenshots/desktop";
-const SHOTS_MOBILE = "/pi-agent-dashboard/screenshots/mobile";
+const SHOTS_DESKTOP = "/screenshots/desktop";
+const SHOTS_MOBILE = "/screenshots/mobile";
 
 /**
  * Feature cards laid out as a 12-column bento grid.

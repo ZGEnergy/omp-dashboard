@@ -5,8 +5,7 @@ import preact from "@astrojs/preact";
 
 // https://astro.build/config
 export default defineConfig({
-  site: "https://blackbelttechnology.github.io",
-  base: "/pi-agent-dashboard",
+  site: "https://pi-dashboard.dev",
   output: "static",
   integrations: [
     tailwind({ applyBaseStyles: false }),

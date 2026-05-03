@@ -15,7 +15,7 @@ export interface Props {
 const {
   title = "pi-dashboard — Your pi agents, in the browser",
   description = "A visual, real-time, mobile-friendly dashboard for pi agent sessions. Not everyone thinks in monospace.",
-  ogImage = `${import.meta.env.BASE_URL}/og-card.png`,
+  ogImage = `${import.meta.env.BASE_URL}og-card.png`,
 } = Astro.props;
 
 const canonical = new URL(Astro.url.pathname, Astro.site).toString();
@@ -33,7 +33,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site).toString();
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
 
-    <link rel="icon" type="image/png" href={`${import.meta.env.BASE_URL}/favicon.png`} />
+    <link rel="icon" type="image/png" href={`${import.meta.env.BASE_URL}favicon.png`} />
 
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />

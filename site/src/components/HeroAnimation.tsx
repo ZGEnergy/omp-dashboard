@@ -15,8 +15,8 @@ const STATES = [
   { src: "diff.png", label: "Diff review" },
 ];
 
-const BASE_DARK = "/pi-agent-dashboard/screenshots/desktop";
-const BASE_LIGHT = "/pi-agent-dashboard/screenshots/desktop-light";
+const BASE_DARK = "/screenshots/desktop";
+const BASE_LIGHT = "/screenshots/desktop-light";
 const INTERVAL = 6000;
 
 function prefersReducedMotion(): boolean {
