@@ -13,6 +13,7 @@ import { CopyButton } from "./CopyButton.js";
 import { wrapAsciiTables } from "../lib/wrap-ascii-tables.js";
 import { MermaidBlock } from "./MermaidBlock.js";
 import { useSessionAssets } from "../lib/SessionAssetsContext.js";
+import { ImageLightbox } from "./ImageLightbox.js";
 
 interface Props {
   content: string;
@@ -216,19 +217,46 @@ function fixWideCharsInCodeBlocks(container: HTMLElement) {
  */
 function PiAssetImg(props: React.ImgHTMLAttributes<HTMLImageElement>) {
   const assets = useSessionAssets();
-  const { src, alt, ...rest } = props;
+  const [lightboxSrc, setLightboxSrc] = React.useState<{ src: string; alt: string } | null>(null);
+  const { src, alt, className: incomingClass, onClick: _drop, ...rest } = props;
+  const altText = typeof alt === "string" ? alt : "";
+  const baseClass = `${incomingClass ?? ""} cursor-pointer`.trim();
+
+  const openLightbox = (e: React.MouseEvent, lbSrc: string) => {
+    // Stop propagation so a wrapping markdown link `[![](...)](href)` does
+    // not navigate when the user clicks to enlarge the image. See change:
+    // add-lightbox-to-markdown-images.
+    e.stopPropagation();
+    e.preventDefault();
+    setLightboxSrc({ src: lbSrc, alt: altText });
+  };
+
+  // pi-asset:<hash> path — resolve to data: URL or render placeholder.
   if (typeof src === "string" && src.startsWith("pi-asset:")) {
     const hash = src.slice("pi-asset:".length);
     const asset = assets[hash];
     if (asset) {
+      const dataUrl = `data:${asset.mimeType};base64,${asset.data}`;
       return (
-        <img
-          {...rest}
-          src={`data:${asset.mimeType};base64,${asset.data}`}
-          alt={alt}
-        />
+        <>
+          <img
+            {...rest}
+            src={dataUrl}
+            alt={alt}
+            className={baseClass}
+            onClick={(e) => openLightbox(e, dataUrl)}
+          />
+          {lightboxSrc && (
+            <ImageLightbox
+              src={lightboxSrc.src}
+              alt={lightboxSrc.alt}
+              onClose={() => setLightboxSrc(null)}
+            />
+          )}
+        </>
       );
     }
+    // Unresolved hash — placeholder span is intentionally non-interactive.
     return (
       <span
         className="inline-block px-2 py-1 my-1 text-xs italic text-[var(--text-muted)] bg-[var(--bg-surface)] rounded border border-dashed border-[var(--border-secondary)]"
@@ -238,7 +266,32 @@ function PiAssetImg(props: React.ImgHTMLAttributes<HTMLImageElement>) {
       </span>
     );
   }
-  return <img {...rest} src={src} alt={alt} />;
+
+  // Fall-through: external URL, blob, inline data:, fragment, etc. Render
+  // a default <img> with click-to-open lightbox affordance using the
+  // original src verbatim (the lightbox just renders <img src> — whatever
+  // the page-level <img> can load, the modal can load).
+  if (typeof src !== "string") {
+    return <img {...rest} src={src} alt={alt} />;
+  }
+  return (
+    <>
+      <img
+        {...rest}
+        src={src}
+        alt={alt}
+        className={baseClass}
+        onClick={(e) => openLightbox(e, src)}
+      />
+      {lightboxSrc && (
+        <ImageLightbox
+          src={lightboxSrc.src}
+          alt={lightboxSrc.alt}
+          onClose={() => setLightboxSrc(null)}
+        />
+      )}
+    </>
+  );
 }
 
 export const MarkdownContent = React.memo(function MarkdownContent({ content }: Props) {

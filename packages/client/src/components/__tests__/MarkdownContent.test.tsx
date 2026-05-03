@@ -1,9 +1,17 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
+import { render, screen, act, fireEvent, cleanup } from "@testing-library/react";
 import React, { useState } from "react";
 import { MarkdownContent, tableToMarkdown, tableToTsv } from "../MarkdownContent.js";
 import { ThemeProvider } from "../ThemeProvider.js";
 import { SessionAssetsProvider } from "../../lib/SessionAssetsContext.js";
+
+// Each test renders a MarkdownContent into the document; the lightbox
+// portals to document.body. Cleanup unmounts both, removing any open
+// modal so cross-test backdrop queries are unambiguous.
+// See change: add-lightbox-to-markdown-images.
+afterEach(() => {
+  cleanup();
+});
 
 beforeAll(() => {
   Object.defineProperty(window, "matchMedia", {
@@ -406,6 +414,104 @@ describe("MarkdownContent", () => {
       expect(img!.getAttribute("src")).toBe("data:image/jpeg;base64,BBBB");
     });
   });
+
+  // chat-markdown-local-images-and-math → add-lightbox-to-markdown-images:
+  // every successfully-rendered <img> should be clickable to open the
+  // shared <ImageLightbox> with the same src/alt.
+  describe("click-to-open lightbox on markdown images", () => {
+    function findLightboxBackdrop(): HTMLElement | null {
+      // ImageLightbox renders the backdrop with data-testid="lightbox-backdrop"
+      // via DialogPortal at document.body, NOT inside our render container.
+      return document.querySelector('[data-testid="lightbox-backdrop"]');
+    }
+
+    function expectNoLightbox() {
+      expect(findLightboxBackdrop()).toBeNull();
+    }
+
+    afterEachCleanupOpenLightboxes();
+
+    it("clicking a resolved pi-asset image opens the lightbox", () => {
+      const { container } = render(
+        <ThemeProvider>
+          <SessionAssetsProvider assets={{ abc: { data: "AAAA", mimeType: "image/png" } }}>
+            <MarkdownContent content="![pic](pi-asset:abc)" />
+          </SessionAssetsProvider>
+        </ThemeProvider>,
+      );
+      expectNoLightbox();
+      const img = container.querySelector("img")!;
+      expect(img.className).toMatch(/cursor-pointer/);
+      fireEvent.click(img);
+      const backdrop = findLightboxBackdrop();
+      expect(backdrop).not.toBeNull();
+      const modalImg = backdrop!.querySelector("img");
+      expect(modalImg).not.toBeNull();
+      expect(modalImg!.getAttribute("src")).toBe("data:image/png;base64,AAAA");
+      expect(modalImg!.getAttribute("alt")).toBe("pic");
+    });
+
+    it("clicking an external URL image opens the lightbox with the URL verbatim", () => {
+      const { container } = renderMd("![logo](https://example.com/logo.png)");
+      expectNoLightbox();
+      const img = container.querySelector("img")!;
+      expect(img.className).toMatch(/cursor-pointer/);
+      fireEvent.click(img);
+      const modalImg = findLightboxBackdrop()!.querySelector("img")!;
+      expect(modalImg.getAttribute("src")).toBe("https://example.com/logo.png");
+      expect(modalImg.getAttribute("alt")).toBe("logo");
+    });
+
+    it("clicking an inline data: image opens the lightbox with the data URL verbatim", () => {
+      const { container } = renderMd("![inline](data:image/png;base64,XXX)");
+      const img = container.querySelector("img")!;
+      fireEvent.click(img);
+      const modalImg = findLightboxBackdrop()!.querySelector("img")!;
+      expect(modalImg.getAttribute("src")).toBe("data:image/png;base64,XXX");
+    });
+
+    it("unresolved pi-asset placeholder is NOT clickable / does not open the lightbox", () => {
+      const { container } = render(
+        <ThemeProvider>
+          <SessionAssetsProvider assets={{}}>
+            <MarkdownContent content="![pic](pi-asset:zzz)" />
+          </SessionAssetsProvider>
+        </ThemeProvider>,
+      );
+      // No <img> at all on the unresolved branch (it renders a <span>).
+      expect(container.querySelector("img")).toBeNull();
+      const placeholder = container.querySelector("span");
+      expect(placeholder).not.toBeNull();
+      // Clicking the placeholder is a no-op for the lightbox machinery.
+      fireEvent.click(placeholder!);
+      expectNoLightbox();
+    });
+
+    it("click stops propagation so a wrapping link does not navigate", () => {
+      // [![alt](src)](href) — markdown image inside a link.
+      const parentClick = vi.fn();
+      const { container } = render(
+        <ThemeProvider>
+          <div onClick={parentClick}>
+            <MarkdownContent content="[![logo](https://example.com/x.png)](https://example.com/page)" />
+          </div>
+        </ThemeProvider>,
+      );
+      const img = container.querySelector("img")!;
+      fireEvent.click(img);
+      // The lightbox opened…
+      expect(findLightboxBackdrop()).not.toBeNull();
+      // …and the parent click handler was NOT invoked because of
+      // stopPropagation in PiAssetImg's onClick.
+      expect(parentClick).not.toHaveBeenCalled();
+    });
+  });
+
+  /** Close any open lightbox modals between tests so backdrop queries from
+   *  the previous test don't bleed into the next. */
+  function afterEachCleanupOpenLightboxes() {
+    return undefined; // afterEach is registered at module-load below
+  }
 
   // ASCII table fixer disabled pending refinement
   it.skip("renders mixed ASCII table and normal markdown correctly", () => {
