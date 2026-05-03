@@ -1,13 +1,13 @@
 # Installing pi-dashboard on Windows
 
-A comprehensive guide to installing and running **pi-agent-dashboard** on Windows 10/11.
+Guide to installing + running **pi-agent-dashboard** on Windows 10/11.
 
-Two install paths are documented:
+Two install paths:
 
 1. **Electron portable / installer** (recommended) — one-click download, bundled Node + npm, graphical setup wizard. Works for most users.
-2. **Tarball / npm install** (advanced) — for developers validating pre-release builds or running the headless server without Electron.
+2. **Tarball / npm install** (advanced) — for developers validating pre-release builds or running headless server without Electron.
 
-Both paths share the same runtime layout: the agent runtime (`pi-coding-agent`) lives in `%USERPROFILE%\.pi-dashboard\node_modules\`, and the dashboard's config / logs / sessions live in `%USERPROFILE%\.pi\dashboard\` and `%USERPROFILE%\.pi\agent\sessions\`.
+Both share same runtime layout: agent runtime (`pi-coding-agent`) lives in `%USERPROFILE%\.pi-dashboard\node_modules\`; dashboard's config / logs / sessions live in `%USERPROFILE%\.pi\dashboard\` + `%USERPROFILE%\.pi\agent\sessions\`.
 
 ---
 
@@ -15,18 +15,18 @@ Both paths share the same runtime layout: the agent runtime (`pi-coding-agent`) 
 
 ### Step 1 — Download
 
-Grab the latest Windows installer or portable zip from the GitHub releases page:
+Grab latest Windows installer or portable zip from GitHub releases page:
 
-- **`PI-Dashboard-<version>-Setup.exe`** — full installer, creates Start Menu entries and file associations.
-- **`PI-Dashboard-win32-x64.zip`** — portable zip, no install needed; unzip and run `pi-dashboard.exe` in place.
+- **`PI-Dashboard-<version>-Setup.exe`** — full installer, creates Start Menu entries + file associations.
+- **`PI-Dashboard-win32-x64.zip`** — portable zip; unzip + run `pi-dashboard.exe` in place.
 
-Both are built on a Linux CI runner via Docker + electron-forge → NSIS. Artifacts are identical in behaviour; installer vs portable is a packaging preference.
+Both built on Linux CI runner via Docker + electron-forge → NSIS. Artifacts identical in behaviour; installer vs portable = packaging preference.
 
 ### Step 2 — Launch
 
-Double-click `pi-dashboard.exe` (portable) or the Start Menu shortcut (installer).
+Double-click `pi-dashboard.exe` (portable) or Start Menu shortcut (installer).
 
-The splash window appears within 1 second and progresses through startup phases:
+Splash window appears within 1 second + progresses through startup phases:
 
 ```
 Starting…
@@ -38,75 +38,75 @@ Launching dashboard server…
 Opening dashboard…
 ```
 
-If any phase stalls, the same text appears in `%TEMP%\pi-dashboard-electron.log` — useful for bug reports.
+Any phase stalls → same text appears in `%TEMP%\pi-dashboard-electron.log` — useful for bug reports.
 
 ### Step 3 — First-run setup wizard
 
-On first launch, the wizard opens automatically. It installs the agent runtime (`@mariozechner/pi-coding-agent` + `tsx`) into `%USERPROFILE%\.pi-dashboard\node_modules\` using the bundled Node + npm (no system Node required).
+On first launch, wizard opens automatically. Installs agent runtime (`@mariozechner/pi-coding-agent` + `tsx`) into `%USERPROFILE%\.pi-dashboard\node_modules\` using bundled Node + npm (no system Node required).
 
 | Phase | What happens |
 |---|---|
-| Download Node | Skipped — Node is already bundled inside the Electron app |
+| Download Node | Skipped — Node bundled inside Electron app |
 | Install pi-coding-agent | Spawns bundled `node.exe + npm-cli.js install @mariozechner/pi-coding-agent` |
-| Install openspec | Skipped if already on system PATH; otherwise installed via the same bundled npm |
-| Install tsx | Skipped if already on system PATH; otherwise installed the same way |
+| Install openspec | Skipped if already on system PATH; otherwise installed via same bundled npm |
+| Install tsx | Skipped if already on system PATH; otherwise installed same way |
 
-The wizard uses bundled Node even when system Node is present. This sidesteps a Windows-specific bug where `spawn("npm", ...)` fails with `ENOENT` because Windows doesn't auto-append `.cmd` extensions.
+Wizard uses bundled Node even when system Node present. Sidesteps Windows-specific bug where `spawn("npm", ...)` fails with `ENOENT` because Windows doesn't auto-append `.cmd` extensions.
 
 #### First-run offline (air-gapped / corporate proxy)
 
-Release Electron builds ship a **per-platform npm cacache** containing `pi-coding-agent`, `openspec`, and `tsx` plus all transitive dependencies — inside `resources/offline-packages/` in the app bundle. The wizard uses this cache automatically: it extracts the tarball to `%USERPROFILE%\.pi-dashboard\.offline-cache\`, runs ONE `npm install --offline`, then deletes the cache to reclaim ~140 MB.
+Release Electron builds ship **per-platform npm cacache** containing `pi-coding-agent`, `openspec`, `tsx` plus all transitive dependencies — inside `resources/offline-packages/` in app bundle. Wizard uses cache automatically: extracts tarball to `%USERPROFILE%\.pi-dashboard\.offline-cache\`, runs ONE `npm install --offline`, then deletes cache to reclaim ~140 MB.
 
-- **Air-gapped install**: unzip/run the Windows installer on a machine with no network; the wizard completes without contacting `registry.npmjs.org`.
-- **Proxy-blocked install**: same — no registry traffic means no proxy failures.
-- **Doctor check**: the Doctor window shows an "Offline packages bundle" row with the target platform and the pinned versions. If it says "Not bundled (registry-install mode)", you have a dev/feature build; get a release artifact.
+- **Air-gapped install**: unzip/run Windows installer on machine with no network; wizard completes without contacting `registry.npmjs.org`.
+- **Proxy-blocked install**: same — no registry traffic = no proxy failures.
+- **Doctor check**: Doctor window shows "Offline packages bundle" row with target platform + pinned versions. "Not bundled (registry-install mode)" → dev/feature build; get release artifact.
 - **Pin versions** live in `packages/electron/offline-packages.json` (bumped per dashboard release).
-- If the bundle is missing or its SHA-256 doesn't match the manifest, the wizard aborts with a clear error — it does **not** silently fall back to the registry (deterministic offline contract). The tarball path manual install (Path 2 below) remains the power-user fallback.
+- Bundle missing or SHA-256 mismatch → wizard aborts with clear error; does **not** silently fall back to registry (deterministic offline contract). Tarball path manual install (Path 2 below) remains power-user fallback.
 
-If you see `Error: spawn npm ENOENT` in the wizard:
+If you see `Error: spawn npm ENOENT` in wizard:
 
-- You're running a build predating `29af651` — rebuild or upgrade to a newer release.
+- Running build predating `29af651` — rebuild or upgrade to newer release.
 - Workaround without rebuilding: install deps manually via cmd (see *Troubleshooting* below).
 
-### Step 4 — Configure a provider
+### Step 4 — Configure provider
 
-Close the wizard (or it closes automatically when deps install cleanly). The dashboard opens at <http://localhost:8000>.
+Close wizard (or it closes automatically when deps install cleanly). Dashboard opens at <http://localhost:8000>.
 
 - Click **Settings** (gear icon) → **Providers**.
-- Configure at least one LLM provider (Anthropic, OpenAI, Google, etc.) via API key or OAuth.
+- Configure ≥ 1 LLM provider (Anthropic, OpenAI, Google, etc.) via API key or OAuth.
 
-### Step 5 — Spawn your first session
+### Step 5 — Spawn first session
 
 - Click **Add folder** (top right sidebar).
-- Navigate to a project directory.
-- Click **+ Session** on the pinned folder.
+- Navigate to project directory.
+- Click **+ Session** on pinned folder.
 
-A pi agent spawns; chat view opens; start prompting.
+pi agent spawns; chat view opens; start prompting.
 
-### Using the built-in Doctor
+### Using built-in Doctor
 
-**Help → Doctor** (menu bar) runs diagnostics and shows what's installed / missing:
+**Help → Doctor** (menu bar) runs diagnostics + shows what's installed / missing:
 
 - ✓ Electron / System Node.js / Bundled Node.js / npm / openspec CLI / Dashboard server code
-- ✗ pi CLI, tsx — **[fixable]** — click **Run Setup** to re-run the wizard
+- ✗ pi CLI, tsx — **[fixable]** — click **Run Setup** to re-run wizard
 - ⚠ Dashboard server not running, API key not configured — benign; resolved by normal use
 
-The Doctor diagnostic output can be copied to clipboard or exported; attach it to any bug report.
+Doctor output copies to clipboard or exports; attach to any bug report.
 
 ---
 
 ## Path 2 — Tarball / npm install (advanced)
 
-For developers running pre-release builds from a feature branch, headless server-only installs, or CI environments without GUI. **If you're a normal user installing a release, use Path 1 instead.**
+For developers running pre-release builds from feature branch, headless server-only installs, or CI environments without GUI. **Normal user installing release → use Path 1 instead.**
 
 ### Prerequisites
 
-- **Node.js ≥ 22.18.0** — pi-dashboard refuses to start on versions affected by [nodejs/node#58515](https://github.com/nodejs/node/issues/58515). Install the MSI from [nodejs.org](https://nodejs.org/dist/v22.18.0/node-v22.18.0-x64.msi), or use [fnm](https://github.com/Schniz/fnm). **Avoid nvm-windows** if your username contains non-ASCII characters — it misreads paths and fails activation.
-- **Git for Windows** — [git-scm.com](https://git-scm.com/download/win). During setup, select "Use Git from the Windows Command Prompt" so git is on system PATH.
+- **Node.js ≥ 22.18.0** — pi-dashboard refuses to start on versions affected by [nodejs/node#58515](https://github.com/nodejs/node/issues/58515). Install MSI from [nodejs.org](https://nodejs.org/dist/v22.18.0/node-v22.18.0-x64.msi), or use [fnm](https://github.com/Schniz/fnm). **Avoid nvm-windows** if username contains non-ASCII characters — misreads paths + fails activation.
+- **Git for Windows** — [git-scm.com](https://git-scm.com/download/win). During setup, select "Use Git from the Windows Command Prompt" so git on system PATH.
 - **Long paths enabled** — run as Administrator: `reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f` then `git config --global core.longpaths true`. Reboot. Node's `node_modules` nesting can exceed Windows' default 260-char limit.
-- **Windows Build Tools** (only if native modules fail to compile): `npm install --global windows-build-tools` or install **Visual Studio Build Tools** with the "Desktop development with C++" workload.
+- **Windows Build Tools** (only if native modules fail to compile): `npm install --global windows-build-tools` or install **Visual Studio Build Tools** with "Desktop development with C++" workload.
 
-### Install the agent runtime
+### Install agent runtime
 
 ```cmd
 mkdir "%USERPROFILE%\.pi-dashboard"
@@ -127,7 +127,7 @@ dir node_modules\@mariozechner\pi-coding-agent\dist
 
 ### Install pi-dashboard
 
-**Option A — from an official npm release (once published):**
+**Option A — from official npm release (once published):**
 
 ```cmd
 cd /d "%USERPROFILE%\.pi-dashboard"
@@ -136,7 +136,7 @@ npm install @blackbelt-technology/pi-dashboard-server @blackbelt-technology/pi-d
 
 **Option B — from local tarballs (pre-release testing):**
 
-On a dev machine (macOS / Linux / Windows):
+On dev machine (macOS / Linux / Windows):
 
 ```bash
 git clone -b <branch> https://github.com/BlackBeltTechnology/pi-agent-dashboard.git
@@ -172,7 +172,7 @@ cd /d "%USERPROFILE%\.pi-dashboard"
 npx pi-dashboard start
 ```
 
-Or add the managed install's `.bin` directory to PATH:
+Or add managed install's `.bin` to PATH:
 
 ```cmd
 setx PATH "%PATH%;%USERPROFILE%\.pi-dashboard\node_modules\.bin"
@@ -186,15 +186,17 @@ Open <http://localhost:8000>.
 
 ## Troubleshooting
 
+> **Comprehensive symptom → root-cause → fix log:** [`docs/troubleshooting-windows-installer.md`](./troubleshooting-windows-installer.md). Includes full Windows bootstrap flow (which binaries called in what order, fallback chains, what happens when each missing), defensive infrastructure (`ensureWindowsSystemPath`, `pickNodeForServer`, `buildSafeArgv`), 14 documented symptoms with resolutions, quick-reference PowerShell diagnostic toolkit.
+
 ### Electron wizard: `Error: spawn npm ENOENT`
 
-**Symptom:** First-run wizard fails during "Installing pi-coding-agent" with the ENOENT error. pi-coding-agent shows ✗ in the Doctor output.
+**Symptom:** First-run wizard fails during "Installing pi-coding-agent" with ENOENT error. pi-coding-agent shows ✗ in Doctor output.
 
-**Cause:** Old build before commit `29af651`. Windows `npm` is actually `npm.cmd` (a batch wrapper); `child_process.spawn("npm", ...)` without the `.cmd` extension fails because Windows doesn't auto-append extensions during spawn.
+**Cause:** Old build before commit `29af651`. Windows `npm` actually `npm.cmd` (batch wrapper); `child_process.spawn("npm", ...)` without `.cmd` extension fails because Windows doesn't auto-append extensions during spawn.
 
-**Fix (preferred):** Download a newer installer or rebuild from a branch that includes `29af651`.
+**Fix (preferred):** Download newer installer or rebuild from branch including `29af651`.
 
-**Workaround (no rebuild):** Install the missing deps yourself via cmd, then relaunch the Dashboard:
+**Workaround (no rebuild):** Install missing deps yourself via cmd, then relaunch Dashboard:
 
 ```cmd
 cd /d "%USERPROFILE%\.pi-dashboard"
@@ -204,71 +206,71 @@ if not exist package.json echo {"name":"pi-dashboard-managed","version":"0.0.0",
 npm install @mariozechner/pi-coding-agent
 ```
 
-Reopen the Dashboard. Doctor now shows ✓ pi CLI. Dismiss the wizard (close the window — Dashboard opens the main UI automatically) or click **Doctor → Run Setup** to retry the wizard for any remaining fixable items.
+Reopen Dashboard. Doctor shows ✓ pi CLI. Dismiss wizard (close window — Dashboard opens main UI automatically) or click **Doctor → Run Setup** to retry wizard for any remaining fixable items.
 
 ### Doctor says tsx / openspec "not found" but wizard says "Already installed (system)"
 
-Detection inconsistency between the two surfaces. Both read from the same ToolRegistry, but some branches of the wizard inspect `detectSystemNode()` + global npm root directly, which misses managed installs.
+Detection inconsistency between two surfaces. Both read from same ToolRegistry, but some wizard branches inspect `detectSystemNode()` + global npm root directly, missing managed installs.
 
-Workaround: use Doctor's output as the source of truth. If Doctor says ✗, add an override via **Settings → Tools** inside the running dashboard (not the wizard):
+Workaround: use Doctor's output as source of truth. Doctor says ✗ → add override via **Settings → Tools** inside running dashboard (not wizard):
 
-1. Open the dashboard
+1. Open dashboard
 2. Settings → General → scroll to **Tools**
-3. Expand the offending row (tsx, openspec, git, etc.)
-4. Paste the full path you got from `where tsx` in cmd
+3. Expand offending row (tsx, openspec, git, etc.)
+4. Paste full path from `where tsx` in cmd
 5. Rescan
 
-Overrides persist to `%USERPROFILE%\.pi\dashboard\tool-overrides.json` and survive restarts / upgrades.
+Overrides persist to `%USERPROFILE%\.pi\dashboard\tool-overrides.json` + survive restarts / upgrades.
 
 ### Session spawn fails: `[headless] Windows pi spawn requires node.exe + cli.js (managed install). Found only pi.cmd on PATH.`
 
-**Cause:** Dashboard found the pi CLI wrapper (`pi.cmd` via `where`) but not the pi-coding-agent module's `dist/index.js`. Windows headless spawn can't use `.cmd` files — they require `shell: true`, which breaks detached spawn.
+**Cause:** Dashboard found pi CLI wrapper (`pi.cmd` via `where`) but not pi-coding-agent module's `dist/index.js`. Windows headless spawn can't use `.cmd` files — they require `shell: true`, which breaks detached spawn.
 
-**Fix 1 — rescan tools:** Settings → Tools → Rescan (top right). The `pi-coding-agent` row should flip to ✓ with source=`managed`.
+**Fix 1 — rescan tools:** Settings → Tools → Rescan (top right). `pi-coding-agent` row flips to ✓ with source=`managed`.
 
-**Fix 2 — manual override:** expand the `pi-coding-agent` row, paste `%USERPROFILE%\.pi-dashboard\node_modules\@mariozechner\pi-coding-agent\dist\index.js` into the override field.
+**Fix 2 — manual override:** expand `pi-coding-agent` row, paste `%USERPROFILE%\.pi-dashboard\node_modules\@mariozechner\pi-coding-agent\dist\index.js` into override field.
 
-**Fix 3 — restart server:** if pi-coding-agent was installed *after* pi-dashboard started, the server's cached environment is stale. `pi-dashboard stop && pi-dashboard start` (or close and relaunch the Electron app).
+**Fix 3 — restart server:** pi-coding-agent installed *after* pi-dashboard started → server's cached environment stale. `pi-dashboard stop && pi-dashboard start` (or close + relaunch Electron app).
 
 ### Session spawn fails: `[headless] Directory does not exist: <name>`
 
-A pinned folder points to a path that doesn't exist.
+Pinned folder points to non-existent path.
 
-- Unpin via the 📌 icon and re-add with a valid absolute path, or
-- Edit `%USERPROFILE%\.pi\dashboard\preferences.json` manually (stop the server first) and remove the stale entry from `pinnedDirectories`.
+- Unpin via 📌 icon + re-add with valid absolute path, or
+- Edit `%USERPROFILE%\.pi\dashboard\preferences.json` manually (stop server first) + remove stale entry from `pinnedDirectories`.
 
 ### `git` / other tools show "not found" even though `where <tool>` works in cmd
 
-The server inherited a stale PATH from a shell that didn't have the tool on it. Fix:
+Server inherited stale PATH from shell that didn't have tool. Fix:
 
 ```cmd
 taskkill /F /IM node.exe
 where git
 :: confirm path shown, e.g. C:\Program Files\Git\cmd\git.exe
 
-:: Start dashboard from a NEW cmd window so it inherits current PATH
+:: Start dashboard from NEW cmd window so it inherits current PATH
 pi-dashboard start
 ```
 
 Then Settings → Tools → Rescan.
 
-If it still fails: paste the `where git` output into the git row's override field.
+Still fails: paste `where git` output into git row's override field.
 
 ### `npm warn cleanup ... EPERM: operation not permitted, rmdir`
 
-Cosmetic warning during npm install. Windows has a file handle on a transitive dependency npm is trying to clean up. Safe to ignore if `npm ls --depth=0` reports no errors.
+Cosmetic warning during npm install. Windows has file handle on transitive dependency npm trying to clean up. Safe to ignore if `npm ls --depth=0` reports no errors.
 
-If it blocks the install: close VS Code / File Explorer windows in the path, disable antivirus temporarily, or `rmdir /S /Q node_modules && del package-lock.json && npm install`.
+Blocks install: close VS Code / File Explorer windows in path, disable antivirus temporarily, or `rmdir /S /Q node_modules && del package-lock.json && npm install`.
 
 ### `npm ERR! E404 ... @blackbelt-technology/pi-dashboard-shared is not in this registry`
 
-Path 2 only. You ran `npm install -g <one-tarball>.tgz` instead of installing all four tarballs together in one command. Global install treats each tarball as isolated and re-resolves sibling `*` deps from the registry (which doesn't have them).
+Path 2 only. Ran `npm install -g <one-tarball>.tgz` instead of installing all four tarballs together in one command. Global install treats each tarball as isolated + re-resolves sibling `*` deps from registry (which doesn't have them).
 
 Fix: run `npm install` with **all four tarball paths in one command** inside `%USERPROFILE%\.pi-dashboard` (see *Path 2 → Install pi-dashboard → Option B*).
 
 ### `Cannot find package 'tsx' imported from C:\...`
 
-Dashboard tarballs installed but `tsx` is missing. Run:
+Dashboard tarballs installed but `tsx` missing. Run:
 
 ```cmd
 cd /d "%USERPROFILE%\.pi-dashboard"
@@ -277,25 +279,25 @@ npm install tsx @mariozechner/pi-coding-agent
 
 ### Non-ASCII username path issues
 
-If your Windows username contains accented characters (e.g. `Róbert Csákány`), some legacy Node / npm / nvm-windows code paths misread PATH / HOME.
+Windows username contains accented characters (e.g. `Róbert Csákány`) → some legacy Node / npm / nvm-windows code paths misread PATH / HOME.
 
 **Workarounds:**
 
-- Move npm cache to an ASCII path: `npm config set cache C:\npm-cache`
-- Move the managed install to an ASCII path:
+- Move npm cache to ASCII path: `npm config set cache C:\npm-cache`
+- Move managed install to ASCII path:
   ```cmd
   mkdir C:\pi-dashboard
   :: Install into C:\pi-dashboard instead of %USERPROFILE%\.pi-dashboard
   ```
-  **Caveat:** using a non-default location means the dashboard's `managed` tool-resolution strategy won't find pi-coding-agent automatically — you'll need to set the override manually in Settings → Tools.
+  **Caveat:** non-default location → dashboard's `managed` tool-resolution strategy won't find pi-coding-agent automatically; set override manually in Settings → Tools.
 
-### Dashboard starts but terminals don't work in the packaged Electron build
+### Dashboard starts but terminals don't work in packaged Electron build
 
-The packaged build requires executable permissions on `node-pty`'s spawn helper. This is handled at install time for npm installs, but packaged Electron bundles need their own bundle-time fix. If terminals silently fail in a packaged .exe, file an issue with the build log attached.
+Packaged build requires executable permissions on `node-pty`'s spawn helper. Handled at install time for npm installs, but packaged Electron bundles need their own bundle-time fix. Terminals silently fail in packaged .exe → file issue with build log attached.
 
 ### Startup feels slow on cold launch (Windows portable)
 
-The splash window should appear within 1 second — if it doesn't, check `%TEMP%\pi-dashboard-electron.log` for the phase progression. Expected sequence:
+Splash window should appear within 1 second — if not, check `%TEMP%\pi-dashboard-electron.log` for phase progression. Expected sequence:
 
 ```
 [timestamp] === Electron starting ===
@@ -306,7 +308,7 @@ The splash window should appear within 1 second — if it doesn't, check `%TEMP%
 [timestamp] splash: Opening dashboard…
 ```
 
-If any phase stalls > 10 seconds, share that block in a bug report.
+Any phase stalls > 10 seconds, share that block in bug report.
 
 ---
 
@@ -314,8 +316,8 @@ If any phase stalls > 10 seconds, share that block in a bug report.
 
 ### Electron (Path 1)
 
-- **Installer:** download the new `PI-Dashboard-<version>-Setup.exe`, run it. It uninstalls the old version and installs the new one. Config / sessions preserved.
-- **Portable:** download the new `.zip`, unzip over (or next to) the old folder, launch the new `pi-dashboard.exe`.
+- **Installer:** download new `PI-Dashboard-<version>-Setup.exe`, run it. Uninstalls old version + installs new. Config / sessions preserved.
+- **Portable:** download new `.zip`, unzip over (or next to) old folder, launch new `pi-dashboard.exe`.
 
 ### Tarball / npm (Path 2)
 
@@ -333,7 +335,7 @@ npm install ^
 pi-dashboard start
 ```
 
-Your `%USERPROFILE%\.pi\dashboard\*` (config, preferences, tool overrides) and `%USERPROFILE%\.pi\agent\sessions\` (session history) are preserved across upgrades on both paths.
+`%USERPROFILE%\.pi\dashboard\*` (config, preferences, tool overrides) + `%USERPROFILE%\.pi\agent\sessions\` (session history) preserved across upgrades on both paths.
 
 ---
 
@@ -342,7 +344,7 @@ Your `%USERPROFILE%\.pi\dashboard\*` (config, preferences, tool overrides) and `
 ### Path 1 (Electron)
 
 - **Installer:** Windows Settings → Apps → PI Dashboard → Uninstall.
-- **Portable:** delete the folder you unzipped.
+- **Portable:** delete unzipped folder.
 
 ### Path 2 (tarball)
 
@@ -351,14 +353,14 @@ pi-dashboard stop
 rmdir /S /Q "%USERPROFILE%\.pi-dashboard"
 ```
 
-### Optional — remove config and sessions too
+### Optional — remove config + sessions too
 
 ```cmd
 rmdir /S /Q "%USERPROFILE%\.pi\dashboard"
 rmdir /S /Q "%USERPROFILE%\.pi\agent\sessions"
 ```
 
-If you added `~/.pi-dashboard/node_modules/.bin` to PATH via `setx`, remove that entry via **Settings → System → Advanced system settings → Environment Variables**.
+Added `~/.pi-dashboard/node_modules/.bin` to PATH via `setx` → remove that entry via **Settings → System → Advanced system settings → Environment Variables**.
 
 ---
 
@@ -381,7 +383,7 @@ If you added `~/.pi-dashboard/node_modules/.bin` to PATH via `setx`, remove that
 
 ## Build your own installer
 
-Useful if you're validating a feature branch before it ships:
+Useful when validating feature branch before ship:
 
 ```bash
 # On any machine with Docker (macOS / Linux / Windows)
@@ -400,7 +402,7 @@ npm run make
 
 Artifacts land in `packages/electron/out/make/`. Expect ~5-15 minutes first time (Docker pulls base image + Wine + build tools), ~2-5 min subsequent.
 
-The Docker build uses `--platform linux/amd64`. On Apple Silicon, Rosetta emulation makes this slow (~20-30 min); consider using CI or a native Windows box for faster turnaround.
+Docker build uses `--platform linux/amd64`. On Apple Silicon, Rosetta emulation slow (~20-30 min); use CI or native Windows box for faster turnaround.
 
 ---
 
@@ -408,6 +410,6 @@ The Docker build uses `--platform linux/amd64`. On Apple Silicon, Rosetta emulat
 
 - Check `%USERPROFILE%\.pi\dashboard\server.log` for server errors.
 - Check `%TEMP%\pi-dashboard-electron.log` for Electron startup traces.
-- Run **Help → Doctor → Copy to Clipboard** in the Electron app for a full diagnostic snapshot.
-- Run **Settings → Tools → Export** for a ToolRegistry resolution trail (every strategy's attempt per tool).
-- Open a GitHub issue with those three attached.
+- Run **Help → Doctor → Copy to Clipboard** in Electron app for full diagnostic snapshot.
+- Run **Settings → Tools → Export** for ToolRegistry resolution trail (every strategy's attempt per tool).
+- Open GitHub issue with those three attached.

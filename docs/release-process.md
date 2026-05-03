@@ -1,8 +1,8 @@
 # Release Process
 
-This doc is the canonical how-to for cutting a pi-agent-dashboard release.
-The goal is **low-friction, human-curated release notes** — no generator
-tooling, just discipline during development plus a curation pass at tag time.
+How-to for cutting pi-agent-dashboard release.
+Goal: **low-friction, human-curated release notes** — no generator
+tooling; discipline during dev + curation pass at tag time.
 
 ## Overview
 
@@ -16,14 +16,13 @@ tooling, just discipline during development plus a curation pass at tag time.
  └────────────────┘     └────────────────┘     └────────────────┘
 ```
 
-Single source of truth: [`CHANGELOG.md`](../CHANGELOG.md). The GitHub Release
-body is **extracted automatically** from the matching section at tag time.
+Single source of truth: [`CHANGELOG.md`](../CHANGELOG.md). GitHub Release
+body **extracted automatically** from matching section at tag time.
 
 ## Commit Conventions
 
-The project uses [Conventional Commits](https://www.conventionalcommits.org/)
-prefixes, lightly enforced **by code review only** (no commit lint, no husky
-hooks).
+[Conventional Commits](https://www.conventionalcommits.org/) prefixes,
+enforced **by code review only** (no commit lint, no husky hooks).
 
 | Prefix      | Meaning                                          |
 |-------------|--------------------------------------------------|
@@ -35,12 +34,12 @@ hooks).
 | `chore:`    | Dependency bumps, tooling, version bumps         |
 | `ci:`       | CI / release workflow changes                    |
 
-Optional scopes in parens are encouraged (`feat(error-banner): …`).
+Optional scopes in parens encouraged (`feat(error-banner): …`).
 
 ## During Development
 
-When your PR ships user-visible behaviour, **add a bullet** under the matching
-subsection of `## [Unreleased]` in `CHANGELOG.md`:
+PR ships user-visible behaviour → **add bullet** under matching subsection
+of `## [Unreleased]` in `CHANGELOG.md`:
 
 ```markdown
 ## [Unreleased]
@@ -54,28 +53,28 @@ subsection of `## [Unreleased]` in `CHANGELOG.md`:
 - Fork entryId timing: leaf registry now resolves the parent message correctly.
 ```
 
-Write bullets in **end-user language**, not commit-subject shorthand. Link to
-relevant docs when helpful. Absence of a bullet does **not** block the PR —
-the release author will back-fill during curation.
+Bullets in **end-user language**, not commit-subject shorthand. Link to
+relevant docs when helpful. Missing bullet does **not** block PR —
+release author back-fills during curation.
 
 ## Cutting a Release
 
 ### 1. Curate `Unreleased`
 
-- Review `git log <last-tag>..HEAD` and confirm every user-visible change
-  has a bullet under `## [Unreleased]`.
+- Review `git log <last-tag>..HEAD`; confirm every user-visible change has
+  bullet under `## [Unreleased]`.
 - Add anything contributors missed.
 - Tighten wording. Reorder for impact.
-- Decide the next version per SemVer: feature additions → minor bump, bug
-  fixes only → patch bump, breaking changes → major bump.
+- Pick next version per SemVer: feature additions → minor, bug fixes only
+  → patch, breaking changes → major.
 
 ### 2. Promote `Unreleased` → versioned section
 
 In `CHANGELOG.md`:
 
-1. Rename `## [Unreleased]` to `## [<version>] - <YYYY-MM-DD>` (today's date,
-   no leading `v`).
-2. Insert a fresh empty `## [Unreleased]` section **above** it:
+1. Rename `## [Unreleased]` → `## [<version>] - <YYYY-MM-DD>` (today, no
+   leading `v`).
+2. Insert fresh empty `## [Unreleased]` section **above** it:
 
    ```markdown
    ## [Unreleased]
@@ -97,22 +96,22 @@ npm version <version> --workspaces --include-workspace-root --no-git-tag-version
 node scripts/sync-versions.js
 ```
 
-The first command updates the `version` field in `package.json` and every
-workspace under `packages/*` in a single commit-worthy edit. The second
-command (`sync-versions.js`) rewrites every inter-package dependency
-specifier (e.g. `"@blackbelt-technology/pi-dashboard-shared": "^<old>"`) to
-the bumped version. Without it, the published root would declare
-`"pi-dashboard-server": "^<old>"` while the actual published server tarball
-is `^<new>` — inconsistent metadata on the registry.
+First command updates `version` in `package.json` + every workspace under
+`packages/*` in single edit. Second (`sync-versions.js`) rewrites every
+inter-package dependency specifier (e.g.
+`"@blackbelt-technology/pi-dashboard-shared": "^<old>"`) to bumped
+version. Without it, published root declares `"pi-dashboard-server":
+"^<old>"` while actual server tarball `^<new>` — inconsistent registry
+metadata.
 
-Verify with `git diff package.json packages/*/package.json` — expected:
-lockstep `version` bumps plus synchronised inter-package dep specifiers.
+Verify: `git diff package.json packages/*/package.json` — expected:
+lockstep `version` bumps + synchronised inter-package dep specifiers.
 
-> Why the separate script? The npm CLI does not implement the `workspace:`
-> protocol (pnpm/yarn-only feature). We use plain semver ranges
-> (`"^0.3.0"`) and sync them at bump time. CI also runs `sync-versions.js`
-> defensively in `publish.yml` after `npm version`, so a forgotten local
-> invocation does not corrupt the release.
+> Why separate script? npm CLI does not implement `workspace:` protocol
+> (pnpm/yarn-only). Use plain semver ranges (`"^0.3.0"`) + sync at bump
+> time. CI also runs `sync-versions.js` defensively in `publish.yml`
+> after `npm version`, so forgotten local invocation does not corrupt
+> release.
 
 ### 4. Commit
 
@@ -129,14 +128,14 @@ git push origin develop
 git push origin v<version>
 ```
 
-The tag push triggers `.github/workflows/publish.yml`.
+Tag push triggers `.github/workflows/publish.yml`.
 
 ## What CI Does
 
-On a `v*` tag push, `publish.yml`:
+On `v*` tag push, `publish.yml`:
 
-1. **`publish` job** — publishes **five npm packages** in one invocation of
-   `npm publish --workspaces --include-workspace-root --provenance
+1. **`publish` job** — publishes **five npm packages** in one invocation
+   of `npm publish --workspaces --include-workspace-root --provenance
    --access public`:
    - `@blackbelt-technology/pi-agent-dashboard` (root metapackage)
    - `@blackbelt-technology/pi-dashboard-shared`
@@ -144,38 +143,38 @@ On a `v*` tag push, `publish.yml`:
    - `@blackbelt-technology/pi-dashboard-server`
    - `@blackbelt-technology/pi-dashboard-web`
 
-   The job runs `node scripts/sync-versions.js` between `npm version` and
-   `npm run build` so inter-package dep specifiers match the bumped version
-   even if the release author forgot to run it locally.
+   Job runs `node scripts/sync-versions.js` between `npm version` +
+   `npm run build` so inter-package dep specifiers match bumped version
+   even if release author forgot local invocation.
 
-   `packages/electron` is marked `"private": true` and is automatically
-   skipped by `npm publish --workspaces`; it ships as native installers
-   through the Electron job instead.
+   `packages/electron` marked `"private": true`, auto-skipped by
+   `npm publish --workspaces`; ships as native installers via Electron
+   job.
 
 2. **`electron` job (matrix)** — builds DMG (macOS arm64), DEB + AppImage
    (Linux x64 + arm64), NSIS + ZIP + portable (Windows x64 + arm64).
 3. **`github-release` job** —
-   - Extracts the `## [<version>]` section from `CHANGELOG.md` into
+   - Extracts `## [<version>]` section from `CHANGELOG.md` →
      `release-notes.md`.
-   - If extraction fails or returns empty, writes a one-line fallback body
-     pointing at `CHANGELOG.md` and logs a warning.
-   - Calls `softprops/action-gh-release@v2` with `body_path: release-notes.md`,
-     `draft: true`, and all Electron artifacts attached.
+   - Extraction fails / returns empty → writes one-line fallback body
+     pointing at `CHANGELOG.md`, logs warning.
+   - Calls `softprops/action-gh-release@v2` with
+     `body_path: release-notes.md`, `draft: true`, all Electron artifacts
+     attached.
 
-The release lands as a **draft** — nothing is published until you click
-*Publish* on the GitHub Releases page.
+Release lands as **draft** — nothing published until *Publish* clicked on
+GitHub Releases page.
 
 ## Manual Fallback
 
-If the auto-extracted body rendered incorrectly (missing section, wrong
-version, truncated bullets), you can fix it before publishing:
+Auto-extracted body rendered incorrectly (missing section, wrong version,
+truncated bullets) → fix before publishing:
 
-1. Open the draft release on GitHub.
-2. Replace the body with the correct content from `CHANGELOG.md`.
+1. Open draft release on GitHub.
+2. Replace body with correct content from `CHANGELOG.md`.
 3. Click *Publish release*.
 
-If something worse happens (no release at all, wrong artifacts), the tag can
-be deleted, the issue fixed, and the tag re-pushed:
+Worst case (no release at all, wrong artifacts) → delete tag, fix, re-push:
 
 ```bash
 git push --delete origin v<version>
@@ -187,7 +186,7 @@ git push origin v<version>
 
 ## After Publishing
 
-- Announce in the project's channels (Discord, X, etc. — if/when they exist).
-- Monitor the GitHub Issues tracker for install/upgrade regressions.
-- Leave `## [Unreleased]` empty-but-present so the next contributor has an
+- Announce in project channels (Discord, X, etc. — if/when exist).
+- Monitor GitHub Issues for install/upgrade regressions.
+- Leave `## [Unreleased]` empty-but-present so next contributor has
   obvious target.

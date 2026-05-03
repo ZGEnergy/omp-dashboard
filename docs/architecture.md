@@ -9,7 +9,7 @@
 
 ## Overview
 
-The PI Dashboard is a web-based dashboard for monitoring and interacting with pi agent sessions. It consists of three components:
+PI Dashboard: web-based dashboard for monitoring + interacting with pi agent sessions. Three components:
 
 ```
 ┌─────────────┐     WebSocket      ┌──────────────┐     WebSocket     ┌─────────────┐
@@ -27,14 +27,14 @@ The PI Dashboard is a web-based dashboard for monitoring and interacting with pi
 ## Components
 
 ### 1. Bridge Extension (`src/extension/`)
-A global pi extension that runs in every pi session. It:
-- Detects session source (TUI, Zed, tmux, dashboard-spawned) via `.meta.json` sidecar files and environment variables
-- Forwards all pi events to the dashboard server via WebSocket
-- Relays commands from the dashboard back to pi
-- Handles reconnection with exponential backoff and event buffering
+Global pi extension running in every pi session. It:
+- Detects session source (TUI, Zed, tmux, dashboard-spawned) via `.meta.json` sidecar files + env vars
+- Forwards all pi events to dashboard server via WebSocket
+- Relays commands from dashboard back to pi
+- Handles reconnection with exponential backoff + event buffering
 - Sends heartbeats every 15s with process metrics (CPU%, RSS, heap, event loop max delay, load average); server responds with `heartbeat_ack`
 - Server liveness watchdog: forces reconnect if no message received for 60s
-- Server-side WS ping/pong (60s interval) detects dead TCP connections; requires 2 consecutive missed pongs before killing (tolerates long-running bash commands that block the event loop)
+- Server-side WS ping/pong (60s interval) detects dead TCP connections; requires 2 consecutive missed pongs before killing (tolerates long-running bash commands blocking event loop)
 - Detects OpenSpec activity (phase/change) from tool events; server auto-attaches the change when `changeName` is detected (phase is not required — skills loaded via prompt templates don't emit a SKILL.md read event). The session card's OpenSpec activity badge displays when either `openspecPhase` or `openspecChange` is detected (not just phase).
 - **Attached-proposal artifact summary** in the content-window header (`SessionHeader.tsx`, both desktop branch and `MobileHeader`): when `session.attachedProposal` matches an entry in the polled `openspecChanges` list, the header renders the `ArtifactLettersButton` (P/D/T/S letters colored by per-artifact status, single button → opens the proposal artifact) plus a `(completedTasks/totalTasks)` counter. Surface is gated on the explicit user attach only — auto-detected `openspecChange` does not trigger it. Wired via the new `onReadArtifact` prop, threaded from `App.tsx` (`handleReadArtifact` from `useContentViews`). See change: add-attached-proposal-header-summary.
 - **Duplicate bridge prevention**: Uses `process`-level shared state (not `globalThis`) with a monotonic generation counter. When the extension is loaded multiple times (e.g., local + global npm package), only the latest instance's event handlers are active — stale listeners bail out immediately. All previous connections and timers are tracked and cleaned up on re-init.
@@ -48,7 +48,7 @@ A global pi extension that runs in every pi session. It:
   - Protocol messages: `prompt_request`, `prompt_dismiss`, `prompt_cancel`, `prompt_response`
 
 ### 2. Dashboard Server (`src/server/`)
-A Node.js HTTP + WebSocket server that:
+Node.js HTTP + WebSocket server that:
 - Accepts connections from bridge extensions (Pi Gateway, port 9999)
 - Accepts connections from web browsers (Browser Gateway, port 8000)
 - Stores events in an in-memory buffer with LRU eviction (max 100 sessions, 5000 events per session)
@@ -59,7 +59,7 @@ A Node.js HTTP + WebSocket server that:
 - Discovers historical sessions directly from disk via `SessionManager.list()` (DirectoryService)
 - Loads session events on demand directly from disk via `SessionManager.open()` (DirectoryService)
 - Polls OpenSpec CLI per directory every 30s, broadcasting changes to browsers (DirectoryService).
-  - **Design-artifact override**: After receiving the CLI's per-change `status`, `buildOpenSpecData` post-processes the `design` artifact: when CLI says `design: ready`, the dashboard checks local file-system evidence (R1: `^design.*\.md$` present; R2: `design/*.md` present; R3: `tasks.md` contains a Markdown checkbox) and promotes `design.status` to `"done"` if any rule fires. The override is **promote-only and design-only** — never demotes, never touches other artifact ids, never promotes from `"blocked"`. Change-level `isComplete` is re-derived locally; CLI `isComplete: true` is never demoted. The same R1/R2/R3 rules are mirrored in `.pi/skills/openspec-shared/scripts/effective-status.sh` so OpenSpec workflow skills and dashboard session-card buttons cannot disagree about a change's next-ready artifact. See change: fix-openspec-design-detection.
+  - **Design-artifact override**: after CLI's per-change `status`, `buildOpenSpecData` post-processes `design` artifact: when CLI says `design: ready`, dashboard checks local fs evidence (R1: `^design.*\.md$` present; R2: `design/*.md` present; R3: `tasks.md` contains Markdown checkbox) + promotes `design.status` to `"done"` if any rule fires. **Promote-only + design-only** — never demotes, never touches other artifact ids, never promotes from `"blocked"`. Change-level `isComplete` re-derived locally; CLI `isComplete: true` never demoted. Same R1/R2/R3 mirrored in `.pi/skills/openspec-shared/scripts/effective-status.sh` so OpenSpec workflow skills + dashboard session-card buttons cannot disagree about next-ready artifact. See change: fix-openspec-design-detection.
 - Serves the built web client as static files (production) or proxies to Vite dev server (dev mode)
 - Writes per-session `.meta.json` sidecar files with dashboard state and cached stats
 - Exposes REST API for session management, event content fetch, pinned directories, and file reading
@@ -75,7 +75,7 @@ A Node.js HTTP + WebSocket server that:
 - `browser-handlers/` — Browser WebSocket message handlers by domain (subscription, session-actions, session-meta, terminal, directory)
 
 ### 3. Web Client (`src/client/`)
-A React-based responsive web UI that:
+React-based responsive web UI that:
 - Shows all active sessions organized by directory, with pinned directories always visible at the top
 - Renders chat messages with markdown, syntax highlighting, streaming, and a small raw-HTML pass that strips React-only `ref` attributes before render
 - Persists scroll position per session — switching sessions restores exact scroll position if locked, or scrolls to bottom if following
@@ -88,6 +88,7 @@ A React-based responsive web UI that:
 
 ### 4. Shared Types (`src/shared/`)
 TypeScript type definitions shared across all components:
+
 - `protocol.ts` - Extension↔Server WebSocket messages
 - `browser-protocol.ts` - Server↔Browser WebSocket messages (includes PromptBus messages: `prompt_request`, `prompt_dismiss`, `prompt_cancel`)
 - `types.ts` - Data models (Session, Workspace, Event, etc.)
@@ -101,7 +102,7 @@ TypeScript type definitions shared across all components:
 4. Server broadcasts to all subscribed browsers via `event` message
 5. Browser's event reducer processes event, React renders update
 
-**Last-activity stamping** (change: session-card-last-activity-badge): inside step 3, before any other event-derived updates, the server checks `isActivityEvent(eventType)` against a curated allowlist (`prompt_send`, `message_*`, `turn_end`, `tool_execution_*`, `agent_*`, `bash_output`, `flow_*`, `architect_*`). On a match — and only when the session is NOT in replay — it stamps `session.lastActivityAt = Date.now()`. The in-memory write is unconditional; the `session_updated` broadcast is throttled to **at most one per 30 s per session** via `lastActivityBroadcastAt: Map<sessionId, ms>`. The map entry is dropped on `session_unregister` so a fast re-register cannot lose its first broadcast. Heartbeat / metrics / UI-state events (`process_metrics`, `git_info_update`, `model_select`, `ui_data_list`, `ext_ui_decorator`, …) are excluded so an idle pi process emitting periodic metrics does not keep the badge artificially fresh. At server boot, `session-scanner.ts` cold-start-seeds `lastActivityAt` from the `events.jsonl` file mtime so existing idle sessions retain a meaningful relative-time label across restarts. The client's `selectBadgeTimestamp(session)` (in `packages/client/src/lib/session-card-time.ts`) renders `endedAt ?? lastActivityAt ?? startedAt` for ended sessions and `lastActivityAt ?? startedAt` for active ones.
+**Last-activity stamping** (change: session-card-last-activity-badge): in step 3, before other event-derived updates, server checks `isActivityEvent(eventType)` against curated allowlist (`prompt_send`, `message_*`, `turn_end`, `tool_execution_*`, `agent_*`, `bash_output`, `flow_*`, `architect_*`). On match — only when session NOT in replay — stamps `session.lastActivityAt = Date.now()`. In-memory write unconditional; `session_updated` broadcast throttled to **≤ 1×/30 s/session** via `lastActivityBroadcastAt: Map<sessionId, ms>`. Map entry dropped on `session_unregister` so fast re-register can't lose first broadcast. Heartbeat/metrics/UI-state events (`process_metrics`, `git_info_update`, `model_select`, `ui_data_list`, `ext_ui_decorator`, …) excluded so idle pi process emitting periodic metrics doesn't keep badge artificially fresh. At server boot, `session-scanner.ts` cold-start-seeds `lastActivityAt` from `events.jsonl` mtime so idle sessions retain meaningful relative-time label across restarts. Client `selectBadgeTimestamp(session)` (`packages/client/src/lib/session-card-time.ts`) renders `endedAt ?? lastActivityAt ?? startedAt` for ended sessions, `lastActivityAt ?? startedAt` for active.
 
 **Unread state machine** (change: session-card-unread-stripes): every session carries a `unread: boolean` field that flips to `true` when an attention-worthy event fires while no browser has the session displayed, and clears to `false` when any browser opens the session. The visual is cyan scrolling stripes (`card-unread-pulse`, Tailwind `cyan-400`) on the session card, lower priority than the yellow streaming and purple ask_user pulses.
 
@@ -128,7 +129,7 @@ TypeScript type definitions shared across all components:
 7. User responds in browser → `prompt_response` sent to server → routed to bridge
 8. Bus resolves the original dialog promise and calls `onResponse()` on all adapters for cleanup
 
-**Multiselect note:** pi's upstream `ExtensionUIContext` has no native `multiselect` method, so the bridge attaches `ctx.ui.multiselect` during `session_start`. `ask_user` dispatches multiselect through `polyfillMultiselect`, which delegates to that patched PromptBus method when present and falls back to `ctx.ui.custom` + `MultiSelectList` for legacy / non-bridge contexts (the fallback is a no-op in pi 0.70 RPC mode — dashboard headless — because pi-coding-agent defines `custom` as `async () => undefined` there). The bridge intentionally registers NO TUI adapter arm for multiselect; routing is bus-only. Browser responses encode `{ values: string[] }` as `JSON.stringify(values)` in `prompt_response.answer`, preserving `[]` as a real empty selection distinct from cancellation.
+**Multiselect note:** pi's upstream `ExtensionUIContext` has no native `multiselect`, so bridge attaches `ctx.ui.multiselect` during `session_start`. `ask_user` dispatches multiselect through `polyfillMultiselect`, which delegates to that patched PromptBus method when present + falls back to `ctx.ui.custom` + `MultiSelectList` for legacy / non-bridge contexts (fallback is no-op in pi 0.70 RPC mode — dashboard headless — because pi-coding-agent defines `custom` as `async () => undefined` there). Bridge intentionally registers NO TUI adapter arm for multiselect; routing bus-only. Browser responses encode `{ values: string[] }` as `JSON.stringify(values)` in `prompt_response.answer`, preserving `[]` as real empty selection distinct from cancellation.
 
 **First-response-wins (multi-adapter):**
 - Multiple adapters can claim the same prompt (e.g. TUI + dashboard)
@@ -588,7 +589,7 @@ flowchart TD
     H -->|No| J[Error logged to bridge stderr<br/>User must bootstrap via TUI]
 ```
 
-**Why two paths?** pi-coding-agent's `ExtensionContext` (delivered to `session_start` handlers) has no `reload()` method — only `ExtensionCommandContext` (given to command handlers) does. The bridge works around this by registering `__dashboard_reload` as a command and capturing `ctx.reload` into `globalThis[RELOAD_KEY]` when a user first invokes it in pi's TUI. Headless sessions have no TUI, so the capture never happens. The server-side interception is a transparent kill-and-respawn that achieves the same user-visible outcome (fresh settings, fresh extensions, fresh skills/prompts/themes) without needing an in-process reload. Since `memorySessionManager.register` carries accumulated state when the same `sessionId` re-registers, the user sees a brief reconnect flicker but keeps their tokens, cost, context usage, and attached proposal. See change: headless-reload-via-respawn.
+**Why two paths?** pi-coding-agent's `ExtensionContext` (delivered to `session_start` handlers) has no `reload()` method — only `ExtensionCommandContext` (given to command handlers) does. Bridge workaround: registers `__dashboard_reload` as command, captures `ctx.reload` into `globalThis[RELOAD_KEY]` when user first invokes in pi's TUI. Headless sessions have no TUI, so capture never happens. Server-side interception is transparent kill-and-respawn achieving same user-visible outcome (fresh settings, extensions, skills/prompts/themes) without in-process reload. `memorySessionManager.register` carries accumulated state when same `sessionId` re-registers, so user sees brief reconnect flicker but keeps tokens, cost, context usage, attached proposal. See change: headless-reload-via-respawn.
 
 ### Server Restart (single-orchestrator path)
 
@@ -621,7 +622,7 @@ When a user sends a prompt to an ended session, the server automatically resumes
 ### Sidebar session ordering: top-of-tier on status change
 The sidebar splits each folder's session cards into two tiers (alive on top, ended at the bottom). Cards within each tier sort independently:
 
-- **Alive tier** uses the persisted `sessionOrder` per cwd (drag-reorder, prepend on new spawn). On user-intent resume (Resume button, drag-to-resume, REST resume), the server calls `sessionOrderManager.moveToFront(cwd, sessionId)` so the just-resumed card surfaces at index 0 of the alive tier — even on repeated `end → resume → end → resume` cycles where the id might already be in the order list. **Bridge auto-reattach after a dashboard restart** is governed by the `reattachPlacement` config (`"always"` default / `"streaming-only"` / `"preserve"`): the bridge tags every `session_register` after its first call as `registerReason: "reattach"`, and `server.ts onChange` routes those into `reattach-placement.ts::applyReattachPolicy` to `moveToFront` according to policy. The `"preserve"` setting reproduces the legacy behavior of leaving order untouched. Registry intents (`pendingResumeIntents.consume()` returning `"front"` or `"keep"`) always override the reattach policy. See change: reattach-move-to-front.
+- **Alive tier** uses persisted `sessionOrder` per cwd (drag-reorder, prepend on new spawn). On user-intent resume (Resume button, drag-to-resume, REST resume), server calls `sessionOrderManager.moveToFront(cwd, sessionId)` so just-resumed card surfaces at index 0 of alive tier — even on repeated `end → resume → end → resume` where id may already be in order list. **Bridge auto-reattach after dashboard restart** governed by `reattachPlacement` config (`"always"` default / `"streaming-only"` / `"preserve"`): bridge tags every `session_register` after first call as `registerReason: "reattach"`, `server.ts onChange` routes into `reattach-placement.ts::applyReattachPolicy` to `moveToFront` per policy. `"preserve"` reproduces legacy behavior of leaving order untouched. Registry intents (`pendingResumeIntents.consume()` returning `"front"` / `"keep"`) always override reattach policy. See change: reattach-move-to-front.
 - **Ended tier** sorts by `(endedAt ?? startedAt)` descending, computed at render time inside `SessionList.renderGroup` (no persisted `endedSessionOrder` list — pure function of session timestamps). The most-recently-ended card surfaces at the top of the ended bucket regardless of cause (✕ shutdown, natural pi exit, force-kill). Legacy sessions without a recorded `endedAt` fall back to `startedAt` so pre-migration entries keep their previous ordering.
 
 Both halves share one mental model: "the session you just acted on appears at the top of its new tier." No protocol changes — the existing `sessions_reordered` broadcast carries the new order. See change `top-of-tier-on-status-change`.
@@ -703,7 +704,7 @@ A naive `for each cwd: list + for each change: status` fan-out explodes quickly:
 
 The scheduler in `packages/server/src/directory-service.ts` applies four layers of throttling (all configurable under `DashboardConfig.openspec`):
 
-1. **mtime gate** (`changeDetection: "mtime" | "always"`, default `mtime`) — skips `openspec list` and `openspec status --change X` when no tracked artifact has changed since the last successful poll. The gate uses **file-aware effective mtime** (the max over a fixed file set) rather than directory mtime alone, because POSIX directory mtime advances only on entry create/delete/rename and misses in-place file edits. The list-step signal unions `<changes>/` with each known `<change>/tasks.md`; the per-change signal unions `<change>/` with `tasks.md`, `proposal.md`, `design.md`, **plus the entire `specs/**` subtree** (the `specs/` directory itself, every immediate `specs/<cap>/` directory, and every `specs/<cap>/spec.md`). Missing files or directories (e.g. a change with no `design.md` or no `specs/` yet) are skipped, not zero — `readdirSync` on `specs/` is try/catch-wrapped so absence yields an empty fan-out. A `stat` is ~10 µs vs. ~500 ms per CLI spawn; in steady state this drops 67 spawns/tick to 0–2. The gate is **TOCTOU-safe**: each per-change iteration captures `preCallMtime` before awaiting `runOpenSpecStatus` and stamps THAT value into the cache; if the post-call effective mtime differs, the entry is racy and the cache is left untouched (the next gated tick re-polls because the post-write mtime no longer matches the preserved cached value). Without this guard, a write landing during the CLI call would stamp `{ mtimeMs: post-write, status: pre-write }` and latch the stale status indefinitely — trivially triggered by `/opsx:ff` mid-poll. **Defense in depth**: `buildOpenSpecData` also accepts a `SpecsProbeFactory` (parallel to the existing `DesignProbeFactory`) that promotes `specs: ready → done` whenever any `specs/**/*.md` file is found locally — promote-only, never demote, never `blocked → done`. So even if a future blind spot creeps into the gate, the dashboard cannot under-report `specs` as ready when at least one spec file exists. See changes: `fix-openspec-specs-mtime-gate-blind-spot`, `fix-openspec-mtime-gate-toctou`, `fix-openspec-mtime-gate-blind-spots`.
+1. **mtime gate** (`changeDetection: "mtime" | "always"`, default `mtime`) — skips `openspec list` and `openspec status --change X` when no tracked artifact changed since last successful poll. Uses **file-aware effective mtime** (max over fixed file set) rather than directory mtime alone, because POSIX directory mtime advances only on entry create/delete/rename + misses in-place file edits. List-step signal unions `<changes>/` with each known `<change>/tasks.md`; per-change signal unions `<change>/` with `tasks.md`, `proposal.md`, `design.md`, **plus entire `specs/**` subtree** (`specs/` itself, every immediate `specs/<cap>/`, every `specs/<cap>/spec.md`). Missing files/dirs (e.g. change with no `design.md` or no `specs/` yet) skipped, not zero — `readdirSync` on `specs/` try/catch-wrapped so absence yields empty fan-out. `stat` ~10 µs vs. ~500 ms per CLI spawn; steady state drops 67 spawns/tick to 0–2. **TOCTOU-safe**: each per-change iteration captures `preCallMtime` before awaiting `runOpenSpecStatus` + stamps THAT value into cache; if post-call effective mtime differs, entry racy + cache left untouched (next gated tick re-polls because post-write mtime no longer matches preserved cached value). Without guard, write landing during CLI call would stamp `{ mtimeMs: post-write, status: pre-write }` + latch stale status indefinitely — trivially triggered by `/opsx:ff` mid-poll. **Defense in depth**: `buildOpenSpecData` also accepts `SpecsProbeFactory` (parallel to existing `DesignProbeFactory`) that promotes `specs: ready → done` whenever any `specs/**/*.md` found locally — promote-only, never demote, never `blocked → done`. So even if future blind spot creeps in, dashboard cannot under-report `specs` as ready when ≥1 spec file exists. See changes: `fix-openspec-specs-mtime-gate-blind-spot`, `fix-openspec-mtime-gate-toctou`, `fix-openspec-mtime-gate-blind-spots`.
 2. **Concurrency cap** (`maxConcurrentSpawns`, default 3, range 1–16) — an in-repo semaphore (`packages/shared/src/semaphore.ts`) serializes CLI spawns across all directories. Burst-work spreads uniformly over the interval instead of pinning every core.
 3. **Per-cwd jitter** (`jitterSeconds`, default 5) — each known directory is assigned a deterministic phase offset `fnv1a32(cwd) % (jitterSeconds * 1000)` within the interval so polls don't all align on the same scheduling boundary.
 4. **Split pi-resources timer** — `scanPiResources(cwd)` no longer rides the openspec tick; it has its own interval at 5× the openspec cadence (pi extensions/skills change far less often than OpenSpec artifacts).
@@ -745,7 +746,7 @@ The dashboard's reusable directory chooser (`PathPicker`) is backed by three loc
 - `GET /api/browse?path=<dir>&q=<query>&detect=<0|1>` — lists subdirectories of `<dir>` (or `$HOME` when omitted). By default this is a single-`readdir` enumeration with no per-entry filesystem probes; `isGit` / `isPi` are absent from each `BrowseEntry`. Pass `detect=1` (only the literal string `"1"` is truthy) to opt into eager `.git` / `.pi` classification on every entry — useful for skill recipes that consumed the legacy shape. When `q` is non-empty, entries are case-insensitive substring-filtered and ranked:
   - **Tier 0** exact match → **Tier 1** prefix → **Tier 2** word-boundary substring (after `-`, `_`, `.`, space, `/`) → **Tier 3** plain substring.
   - Alphabetical within each tier. The 200-entry cap is applied **after** filter+rank so best matches always survive truncation. See change: split-browse-flags.
-- `GET /api/browse/flags?paths=<json-array>` — bulk classifier for paths produced by `/api/browse`. The `paths` query is a URL-encoded JSON array of absolute path strings (length ≤ 100). Returns `{ flags: { [path]: { isGit, isPi } } }`. Per-path probe failures (ENOENT, EACCES, ELOOP, race-on-deletion, anything) map to `{ isGit: false, isPi: false }` for that key — only malformed input or over-cap arrays produce a top-level error (`invalid paths` / `too many paths`, both HTTP 400). Internal `fs.access` fan-out is bounded at 32 in-flight calls. The `PathPicker` calls this lazily after each `/api/browse` enumeration and merges the flag map into the rendered rows so badges fade in without blocking the initial paint. See change: split-browse-flags.
+- `GET /api/browse/flags?paths=<json-array>` — bulk classifier for paths produced by `/api/browse`. `paths` query: URL-encoded JSON array of absolute path strings (length ≤ 100). Returns `{ flags: { [path]: { isGit, isPi } } }`. Per-path probe failures (ENOENT, EACCES, ELOOP, race-on-deletion, anything) map to `{ isGit: false, isPi: false }` for that key — only malformed input or over-cap arrays produce top-level error (`invalid paths` / `too many paths`, both HTTP 400). Internal `fs.access` fan-out bounded at 32 in-flight. `PathPicker` calls this lazily after each `/api/browse` enumeration + merges flag map into rendered rows so badges fade in without blocking initial paint. See change: split-browse-flags.
 - `POST /api/browse/mkdir` body `{ parent, name }` — creates a new directory non-recursively (`fs.mkdir` without `recursive: true`). Name validation rejects `/`, `\`, `\0`, `.`, `..`, empty, and leading/trailing whitespace. Errors map to 400 (`invalid name`, `parent is not a directory`), 404 (`parent not found`), 409 (`already exists`).
 
 Client-side, `PathPicker` debounces the `q` request at 150ms and cancels in-flight requests via `AbortController`. Enter/Select follow a strict state machine instead of confirming arbitrary input:
@@ -850,7 +851,7 @@ The server has a two-layer access model:
 
 **Layer 1: Network Guard (`createNetworkGuard`)** — Fastify `preHandler` on all sensitive routes. Allows requests via three paths:
 1. **Loopback** — `127.0.0.1`, `::1`, `::ffff:127.0.0.1` (always allowed)
-2. **Trusted networks** — IPs matching `resolvedTrustedNetworks` (CIDR, wildcard, exact). `resolvedTrustedNetworks` is computed at load time by merging two config sources: the Settings UI writes new entries to `auth.bypassHosts` (canonical path on the Security tab, surfaced as the "Trusted Networks" section), while the legacy top-level `trustedNetworks` field remains readable for backward compatibility with hand-edited `config.json` files. Both honor the same matching logic; the UI does not modify the legacy field. **Both fields work independently of whether `auth.providers` is configured** — a config with `auth: { providers: {}, bypassHosts: [...] }` is honored as-is; the auth plugin no-ops when the provider registry is empty and the network guard serves the bypass path directly. See `openspec/changes/archive/` for `fix-trusted-networks-no-oauth` which restored this behavior after it regressed in `consolidate-trusted-networks`.
+2. **Trusted networks** — IPs matching `resolvedTrustedNetworks` (CIDR, wildcard, exact). `resolvedTrustedNetworks` computed at load time by merging two config sources: Settings UI writes new entries to `auth.bypassHosts` (canonical path on Security tab, surfaced as "Trusted Networks" section); legacy top-level `trustedNetworks` field remains readable for back-compat with hand-edited `config.json`. Both honor same matching logic; UI does not modify legacy field. **Both fields work independently of whether `auth.providers` is configured** — config with `auth: { providers: {}, bypassHosts: [...] }` honored as-is; auth plugin no-ops when provider registry empty + network guard serves bypass path directly. See `openspec/changes/archive/` for `fix-trusted-networks-no-oauth` which restored this after regression in `consolidate-trusted-networks`.
 3. **Authenticated** — `request.isAuthenticated === true` (set by auth `onRequest` hook via `decorateRequest`)
 
 Otherwise → 403. The guard strips `::ffff:` IPv4-mapped prefixes before matching.
@@ -1068,7 +1069,7 @@ The restart endpoint accepts `{ dev: boolean }` to switch between dev/production
 
 ### Cross-Platform Server Launch
 
-The dashboard server is spawned via `node --import <loader> <cli.ts>` from four call sites (`packages/server/src/cli.ts` `cmdStart`, `packages/extension/src/server-launcher.ts` `launchServer`, `packages/electron/src/lib/server-lifecycle.ts` `launchServer`, `packages/server/src/restart-helper.ts` `buildOrchestratorScript`). On Node ≥ 20, Windows's ESM loader parses **both** the `--import` loader position AND the entry-script position as URLs. A raw Windows path like `B:\Dev\cli.ts` parses with scheme `b:` (not in the ESM loader's `file`/`data`/`node` allowlist) and crashes with `ERR_UNSUPPORTED_ESM_URL_SCHEME`. Node has a drive-letter heuristic that auto-wraps common Windows paths with `file://` before the URL parse in the entry-script position, but the heuristic has known gaps for less-common drives (`A:`, `B:`, ...), so reliance on it is unsafe.
+Dashboard server spawned via `node --import <loader> <cli.ts>` from 4 call sites (`packages/server/src/cli.ts` `cmdStart`, `packages/extension/src/server-launcher.ts` `launchServer`, `packages/electron/src/lib/server-lifecycle.ts` `launchServer`, `packages/server/src/restart-helper.ts` `buildOrchestratorScript`). On Node ≥ 20, Windows's ESM loader parses **both** `--import` loader position AND entry-script position as URLs. Raw Windows path like `B:\Dev\cli.ts` parses with scheme `b:` (not in ESM loader's `file`/`data`/`node` allowlist) + crashes with `ERR_UNSUPPORTED_ESM_URL_SCHEME`. Node has drive-letter heuristic that auto-wraps common Windows paths with `file://` before URL parse in entry-script position, but heuristic has known gaps for less-common drives (`A:`, `B:`, …), so reliance unsafe.
 
 Both positions are wrapped as `file://` URLs universally:
 
@@ -1103,7 +1104,7 @@ This is a **race-independent fix**: it doesn't try to close the timing window, i
 
 #### AppImage CLI self-recursion guard (Linux power-user mode)
 
-The Electron app's power-user launch path (`ensureServer()` → `detectPiDashboardCli()` → `launchViaCli()`) prefers an already-installed `pi-dashboard` CLI on PATH. On Linux **AppImage** builds, the AppImage runtime prepends its squashfs mount directory (e.g. `/tmp/.mount_PI-Das.../`) to `PATH` of the Electron child. That mount contains a binary literally named `pi-dashboard` because `forge.config.ts` declares `packagerConfig.executableName: "pi-dashboard"` for user-facing branding consistency. Without a guard, `which pi-dashboard` returns the AppImage's own launcher first; `launchViaCli()` then spawns the Electron app recursively as if it were the dashboard CLI, the recursive child silently ignores `start --port 8000`, never opens the dashboard port, and `waitForReady` polls until its 15-second deadline expires — user sees an indefinite loading screen.
+Electron's power-user launch path (`ensureServer()` → `detectPiDashboardCli()` → `launchViaCli()`) prefers already-installed `pi-dashboard` CLI on PATH. On Linux **AppImage** builds, AppImage runtime prepends its squashfs mount dir (e.g. `/tmp/.mount_PI-Das.../`) to `PATH` of Electron child. Mount contains binary literally named `pi-dashboard` because `forge.config.ts` declares `packagerConfig.executableName: "pi-dashboard"` for branding consistency. Without guard, `which pi-dashboard` returns AppImage's own launcher first; `launchViaCli()` spawns Electron app recursively as if it were dashboard CLI; recursive child silently ignores `start --port 8000`, never opens dashboard port, `waitForReady` polls until 15s deadline expires — user sees indefinite loading screen.
 
 The fix lives at two layers:
 
@@ -1269,7 +1270,7 @@ The dashboard supports browser-based authentication with pi's LLM providers, ena
 
 ### Model metadata enrichment for custom providers
 
-Custom-provider `/v1/models` endpoints only advertise `{id, owned_by}` — they do not expose `context_window`, `max_tokens`, `cost`, or `reasoning`. Rather than hardcode a flat 200k / 16k / $0 / no-reasoning on every discovered model (which was silently wrong for proxied frontier models like `proxy/cc/claude-opus-4-7` → Opus 4.7's 1M window), the bridge's `registerEntry()` runs each discovered id through a pure `enrichModelMetadata(id, api, probe)` helper. The helper (a) strips common proxy prefixes (`cc/`, `anthropic/`, `openrouter/openai/…`) so the bare id is tried, (b) probes pi's `modelRegistry.find(provider, id)` via an ordered api-appropriate candidate list (`anthropic-messages` → `["anthropic", "opencode"]`, `google-generative-ai` → `["google", "google-vertex"]`, `openai-completions` → `["openai", "openrouter", "groq", "xai", "mistral"]`), and (c) returns the registry's full metadata when a match is found. The registry reference is captured from `ctx.modelRegistry` the first time pi fires `session_start` on the extension (with `model_select` as a fallback capture point) — no direct `@mariozechner/pi-ai` import. Because `activate()` registers providers before any event handler fires, the first pass uses fallback defaults; the `session_start` handler then re-registers all providers with the enriched metadata, relying on `pi.registerProvider`'s idempotent "replace" semantics. When the registry never becomes available or has no match for an id, the fallback path keeps `input: ["text","image"]` so the image-capable-by-default contract is preserved. Built-in and OAuth providers bypass this path entirely — their metadata still comes from pi's bundled `models.generated.js`. See `packages/extension/src/provider-register.ts` and change `enrich-custom-provider-model-metadata`.
+Custom-provider `/v1/models` endpoints only advertise `{id, owned_by}` — do not expose `context_window`, `max_tokens`, `cost`, `reasoning`. Rather than hardcode flat 200k / 16k / $0 / no-reasoning on every discovered model (silently wrong for proxied frontier models like `proxy/cc/claude-opus-4-7` → Opus 4.7's 1M window), bridge's `registerEntry()` runs each discovered id through pure `enrichModelMetadata(id, api, probe)` helper. Helper: (a) strips common proxy prefixes (`cc/`, `anthropic/`, `openrouter/openai/…`) so bare id tried; (b) probes pi's `modelRegistry.find(provider, id)` via ordered api-appropriate candidate list (`anthropic-messages` → `["anthropic", "opencode"]`, `google-generative-ai` → `["google", "google-vertex"]`, `openai-completions` → `["openai", "openrouter", "groq", "xai", "mistral"]`); (c) returns registry's full metadata when matched. Registry reference captured from `ctx.modelRegistry` first time pi fires `session_start` on extension (`model_select` as fallback capture point) — no direct `@mariozechner/pi-ai` import. Since `activate()` registers providers before any event handler fires, first pass uses fallback defaults; `session_start` handler re-registers all providers with enriched metadata via `pi.registerProvider`'s idempotent "replace" semantics. When registry never available or no match, fallback keeps `input: ["text","image"]` so image-capable-by-default contract preserved. Built-in + OAuth providers bypass entirely — metadata comes from pi's bundled `models.generated.js`. See `packages/extension/src/provider-register.ts` + change `enrich-custom-provider-model-metadata`.
 
 ### Testing a custom provider (Test button)
 
@@ -1373,7 +1374,7 @@ The Electron installer can optionally ship a curated subset of recommended pi ex
 
 **Build time** (`packages/electron/scripts/bundle-recommended-extensions.sh`): gated on `BUNDLE_RECOMMENDED_EXTENSIONS=1` (set in `.github/workflows/publish.yml`, unset everywhere else). Clones each id shallow, records the commit SHA to `.bundled-sha`, validates the SPDX identifier against a fixed allowlist (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC), and fails the build if the combined bundle exceeds 15 MB. `forge.config.ts` conditionally appends `./resources/bundled-extensions` to `extraResource` when the directory exists.
 
-**First launch** (`installBundledExtensions()` in `dependency-installer.ts`): enumerates bundled subdirectories, and for each id whose `manager.getInstalledPath(source, "user")` is **not** already populated, copies the bundled tree into pi's git cache location (`~/.pi/agent/git/<host>/<path>/`), runs `npm install --omit=dev` if the package declares runtime dependencies, then calls `manager.addSourceToSettings(gitUrl)` + `settingsManager.flush()` so the original git URL is persisted in `~/.pi/agent/settings.json`. The function runs before `installRecommendedExtensions`, and its return value seeds that call's `skipPackages` set so already-bundled ids are reported with `output: "Already installed (bundled)"`. The wizard renders a distinct "Bundled ✓" badge for those rows and an "Installed" badge for entries that were already present from a prior CLI install (logic factored into the pure helper `wizard-badge.ts`).
+**First launch** (`installBundledExtensions()` in `dependency-installer.ts`): enumerates bundled subdirectories; for each id whose `manager.getInstalledPath(source, "user")` is **not** already populated, copies bundled tree into pi's git cache location (`~/.pi/agent/git/<host>/<path>/`), runs `npm install --omit=dev` if package declares runtime deps, then calls `manager.addSourceToSettings(gitUrl)` + `settingsManager.flush()` so original git URL persisted in `~/.pi/agent/settings.json`. Runs before `installRecommendedExtensions`; return value seeds that call's `skipPackages` set so already-bundled ids reported with `output: "Already installed (bundled)"`. Wizard renders distinct "Bundled ✓" badge for those rows + "Installed" badge for entries already present from prior CLI install (logic in pure helper `wizard-badge.ts`).
 
 **Why not simply `installAndPersist("local:")`?** Investigated in `packages/electron/scripts/spike-local-install.mjs`: pi has no `local:` scheme, and `installAndPersist(source)` always persists the exact source string it receives. Installing from a local path therefore persists the local path (breaking `manager.update()`) rather than the git URL. The copy-into-cache + `addSourceToSettings(gitUrl)` approach produces the same on-disk shape as a normal `installGit` run, so pi's later `update()` naturally replaces the bundled copy with upstream via `git fetch && reset --hard`. See design.md of change `bundle-first-party-extensions` for details.
 3. **Runtime** — `packages/server/src/fix-pty-permissions.ts` runs once when `createTerminalManager()` is called. Uses `createRequire().resolve("node-pty")` to find the actual install location and fixes any non-executable `spawn-helper`.
@@ -1825,3 +1826,110 @@ savedDraftRef: useRef<string>  — in-progress draft captured when history mode 
 **Bash-style caret gating** is critical: `ArrowUp` only triggers history when `selectionStart` is at or before the first `\n` (the textarea's native "ArrowUp" would have nowhere to go); `ArrowDown` only when `selectionStart` is at or after the last `\n`. Non-empty selections are excluded. This guarantees multiline editing (moving between rows with arrow keys) is never broken.
 
 See change: `chat-input-draft-and-history`.
+
+## Git is required
+
+The Electron app treats git as a hard runtime dependency. Several core code
+paths assume git is reachable (recommended-extension installs via pi's
+`DefaultPackageManager`, Settings → Packages git/HTTPS sources, BranchPicker /
+git status in session cards, attach-proposal workflow). Before the
+`require-git-on-boot` change, missing git silently degraded these features
+with cryptic errors. The change makes git a first-class detected, prompted,
+and installable dependency on every platform.
+
+### Boot-time gate
+
+```mermaid
+flowchart TD
+    A[app.whenReady] --> B{First run?}
+    B -- yes --> C[Wizard window]
+    C --> D{Wizard tools step\nelse fall-through}
+    D -- git missing --> C
+    D -- git ok --> E[mode.json written]
+    B -- no --> F{detectGit found?}
+    F -- yes --> H[createMainWindow]
+    F -- no --> G{escape-hatch set?\n--skip-git-gate or PI_DASHBOARD_SKIP_GIT_GATE=1}
+    G -- yes --> H
+    G -- no --> I[Open git-required.html window]
+    I -- user installs/locates --> F
+    I -- user closes window --> J[app.quit]
+    E --> H
+```
+
+The pure decision lives in `packages/electron/src/lib/git-gate.ts`
+(`evaluateGitGate(detection, { argv, env, wizardWillRun })`), which honors
+both escape hatches and defers to the wizard on the first-run path
+(D11 — wizard↔gate handoff). Side effects live in
+`git-gate-window.ts::openGitRequiredWindow()` and the gate orchestration
+block in `main.ts`.
+
+### Platform install dispatch
+
+`installTool(toolName, action, options)` in
+`packages/electron/src/lib/system-toolchain-installer.ts` dispatches to the
+OS-native package manager:
+
+| Platform | git: install | node: install / upgrade |
+|---|---|---|
+| `win32` | `winget install --id Git.Git -e --source winget --accept-…` | `winget install/upgrade --id OpenJS.NodeJS …` |
+| `darwin` (brew present) | `brew install git` | `brew install/upgrade node` |
+| `darwin` (no brew) | `xcode-select --install` (Apple's Command Line Tools GUI) | manual link to nodejs.org |
+| `linux` (pkexec + pm) | `pkexec apt-get/dnf/zypper install -y git` (or `pacman -S --noconfirm git`, `apk add git`) | `pkexec <pm> install nodejs npm` |
+| `linux` (no pkexec) | manual `sudo …` snippet | manual snippet |
+
+Pure command builders are exported and unit-tested without spawning anything
+(`buildWingetArgs`, `buildBrewArgs`, `buildXcodeSelectArgs`,
+`buildLinuxInstallArgs`, `buildSudoSnippet`); the Linux PM probe order is
+`apt-get → dnf → pacman → zypper → apk` (D10).
+
+### Single-flight + cancellation
+
+A module-level `inFlight: Map<"git" | "node", …>` enforces at most one
+in-flight install per tool. A second invocation kills the first spawn
+(`platform/process.ts::killProcess`, idempotent across OS) and settles the
+prior promise to `{ kind: "cancelled", reason: "replaced-by-new-attempt" }`.
+The renderer exposes `[Cancel] (running…)` while a spawn is alive
+(`cancelInstall(tool)` settles to `{ kind: "cancelled", reason: "user-requested" }`).
+
+### Error formatting and fault tolerance (D8a)
+
+Every installer surface returns a tagged `InstallResult` instead of throwing.
+The renderer never sees a raw stack trace — every non-`ok` result is rendered
+through `formatInstallError(result, platform)` which produces:
+- a plain-English headline (no error codes; e.g. "winget could not reach its
+  package source" rather than "exit code 1978335212")
+- the failing command verbatim in a copy-button code block
+- the last 20 lines of stdout/stderr with `… (N earlier lines)` prefix
+- 1–3 actionable next-step bullets
+
+The same formatter is used by:
+- the Electron wizard's "Last attempt" panel under the Git/Node rows
+- the boot-time `git-required.html` gate window
+- the dashboard CLI (`runInstallErrorPlainText` for non-markdown surfaces in
+  `pi-dashboard upgrade-pi` and `runDegradedModeBootstrap`)
+- bootstrap-install.ts failures (the rich `installResult` field is attached
+  to `BootstrapInstallFailure` so the CLI can render it)
+
+### Persistent log
+
+Every gate-related I/O event is appended as a single-line JSON record to
+`~/.pi-dashboard/git-gate.log` (1 MB rotation cap, one historical
+`.log.1`). Top-level `uncaughtException` and `unhandledRejection` handlers
+in `main.ts` append a `{ event: "uncaught", level: "fatal", error, stack }`
+record BEFORE Electron's default crash dialog fires, ensuring all fatal
+boot-time crashes leave a forensic trail. The dashboard server's
+`pi-core-checker` failures also append (`level: "warn"`) via the shared
+`packages/shared/src/git-gate-log.ts` mirror.
+
+See `docs/troubleshooting-windows-installer.md` §9 for the log format
+reference and grep recipes.
+
+### Escape hatches
+
+Headless / SSH-only Linux server scenarios bypass the gate via
+`--skip-git-gate` (CLI flag) or `PI_DASHBOARD_SKIP_GIT_GATE=1` (env var),
+both checked unconditionally by `evaluateGitGate(...)`. The wizard's git
+row also honors the flag — when set, the row shows an amber "skipped" pill
+instead of a red blocker and Continue is enabled.
+
+See change: require-git-on-boot.

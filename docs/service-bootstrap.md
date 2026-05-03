@@ -2,7 +2,7 @@
 
 ## Overview
 
-The PI Dashboard has two independent startup chains that lead to the same server process. Each chain must resolve tool paths (pi, openspec, node, tsx, bridge extension) to launch the server and spawn pi sessions. This document describes both chains, the tool resolution problem, and the target architecture.
+PI Dashboard has two independent startup chains leading to same server process. Each chain MUST resolve tool paths (pi, openspec, node, tsx, bridge extension) to launch server + spawn pi sessions. Doc describes both chains, tool resolution problem, target architecture.
 
 ## Startup Chains
 
@@ -67,14 +67,14 @@ The PI Dashboard has two independent startup chains that lead to the same server
 | `openspec` | Pi sessions (inherited PATH) | OpenSpec CLI inside sessions |
 | `node` | Server launch, tsx, spawn | Node.js runtime |
 | `tsx` | Server launch (standalone) | TypeScript loader for server CLI |
-| `bridge` | settings.json, pi loader | Extension directory with package.json + bridge.ts |
+| `bridge` | settings.json, pi loader | Extension dir with package.json + bridge.ts |
 | `serverCli` | Electron + bridge launcher | Server entry point (cli.ts) |
 
 ### Why it's hard
 
-**Chain 2 (TUI) works naturally** — the user's shell has the full PATH with nvm/volta/homebrew/fnm, so all tools are findable. The server inherits this environment.
+**Chain 2 (TUI) works naturally** — user's shell has full PATH with nvm/volta/homebrew/fnm, so all tools findable. Server inherits this environment.
 
-**Chain 1 (Electron) breaks** — macOS/Linux GUI apps get a minimal system PATH (`/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin`). Tools installed via nvm, volta, or homebrew are invisible.
+**Chain 1 (Electron) breaks** — macOS/Linux GUI apps get minimal system PATH (`/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin`). Tools installed via nvm, volta, homebrew invisible.
 
 ### Current mitigations (fragile)
 
@@ -86,7 +86,7 @@ The PI Dashboard has two independent startup chains that lead to the same server
 | Server extension-register | `extension-register.ts` | Relative path from `__dirname` |
 | Bridge server-launcher | `server-launcher.ts` | Uses `process.execPath` + relative `__dirname` |
 
-Each component resolves tools independently. No shared state. Login shell output includes macOS session restore noise (`Restored session:...`, `Saving session...completed.`) that must be parsed out.
+Each component resolves tools independently. No shared state. Login shell output includes macOS session restore noise (`Restored session:...`, `Saving session...completed.`) MUST be parsed out.
 
 ### Failure modes
 
@@ -96,7 +96,7 @@ Each component resolves tools independently. No shared state. Login shell output
 | Server spawned by Electron | Can't spawn pi sessions | Server PATH missing nvm bin dir |
 | nvm version change (v22.22→v22.23) | Persisted paths become stale | Hardcoded absolute paths |
 | AppImage on Linux | Bridge path in settings.json invalid after relaunch | Temp mount path changes |
-| tmux sessions | `pi` not found in tmux shell | tmux server has its own env, not the spawner's |
+| tmux sessions | `pi` not found in tmux shell | tmux server has its own env, not spawner's |
 
 ## Tool Source Hierarchy
 
@@ -104,7 +104,7 @@ Each tool can come from multiple sources. Priority depends on mode:
 
 ### Power-user mode
 
-Prefers the user's system installation:
+Prefers user's system install:
 
 ```
 pi, openspec:  System PATH (nvm/volta) → Managed (~/.pi-dashboard/) → Bundled
@@ -116,7 +116,7 @@ serverCli:     System (pi-dashboard CLI) → Bundled → Managed
 
 ### Standalone mode
 
-Prefers the app's own copies:
+Prefers app's copies:
 
 ```
 pi, openspec:  Managed (~/.pi-dashboard/) → Bundled → System PATH
@@ -149,7 +149,7 @@ Add `toolPaths` to `~/.pi/dashboard/config.json`:
 }
 ```
 
-All paths are absolute. `null` or missing means "detect at runtime."
+All paths absolute. `null` or missing → detect at runtime.
 
 ### Writers
 
@@ -234,7 +234,7 @@ for each tool in toolPaths:
 
 ### PATH derivation
 
-Instead of hardcoding which directories to add, derive PATH from the resolved tool paths:
+Instead of hardcoding directories, derive PATH from resolved tool paths:
 
 ```typescript
 function buildPathFromToolPaths(toolPaths: ToolPaths): string {
@@ -248,11 +248,11 @@ function buildPathFromToolPaths(toolPaths: ToolPaths): string {
 }
 ```
 
-This automatically handles nvm, volta, homebrew — wherever the tools live, their parent dirs end up on PATH.
+Auto-handles nvm, volta, homebrew — wherever tools live, parent dirs end up on PATH.
 
 ### tmux PATH injection
 
-tmux sessions start in a new shell that doesn't inherit the server's environment. Fix: prepend the resolved PATH to the tmux command:
+tmux sessions start in new shell not inheriting server's env. Fix: prepend resolved PATH to tmux command:
 
 ```typescript
 function buildTmuxCommand(cwd, sessionExists, options, resolvedPath) {
@@ -267,7 +267,7 @@ function buildTmuxCommand(cwd, sessionExists, options, resolvedPath) {
 ### macOS (.app bundle)
 
 - `process.resourcesPath` = `/Applications/PI Dashboard.app/Contents/Resources`
-- Bundled paths are stable across app launches
+- Bundled paths stable across app launches
 - Login shell fallback needed for nvm/volta detection (GUI apps don't source `.zshrc`)
 - Login shell outputs session restore noise — parse by finding first line starting with `/`
 
@@ -282,7 +282,7 @@ function buildTmuxCommand(cwd, sessionExists, options, resolvedPath) {
 
 - `process.resourcesPath` = `/tmp/.mount_PIxxxxxx/resources`
 - **Unstable** — mount path changes every launch
-- `toolPaths.bridge` and `toolPaths.serverCli` must not be persisted from AppImage paths
+- `toolPaths.bridge` + `toolPaths.serverCli` MUST NOT be persisted from AppImage paths
 - Detection: reject paths containing `/tmp/.mount_`
 - Workaround: use global npm install or re-detect on every start
 
@@ -290,7 +290,7 @@ function buildTmuxCommand(cwd, sessionExists, options, resolvedPath) {
 
 - `process.resourcesPath` = `C:\Program Files\PI Dashboard\resources`
 - Stable paths
-- No login shell fallback (not needed — PATH is global on Windows)
+- No login shell fallback (not needed — PATH global on Windows)
 - Spawn uses `windowsHide: true` to prevent console windows
 
 ## Key Files
@@ -316,18 +316,19 @@ function buildTmuxCommand(cwd, sessionExists, options, resolvedPath) {
 
 ## Migration Path
 
-The `toolPaths` config is additive — all fields are optional. Existing installations continue to work with runtime detection as fallback:
+`toolPaths` config additive — all fields optional. Existing installations continue to work with runtime detection as fallback:
 
-1. **Phase 1**: Add `toolPaths` to config schema. Server reads them if present, falls back to current detection. No breaking changes.
-2. **Phase 2**: Wizard writes `toolPaths` on setup. Server validates on start. Doctor displays them.
-3. **Phase 3**: Settings panel allows editing. `mode.json` simplified to just "wizard completed" flag.
+1. **Phase 1**: Add `toolPaths` to config schema. Server reads if present, falls back to current detection. No breaking changes.
+2. **Phase 2**: Wizard writes `toolPaths` on setup. Server validates on start. Doctor displays.
+3. **Phase 3**: Settings panel allows editing. `mode.json` simplified to "wizard completed" flag only.
 4. **Phase 4**: Remove scattered detection logic from `resolvePiCommand()`, `resolveTsxCommand()`, `findServerCli()`, etc. All read from config with detect-on-miss fallback.
 
 ## Appendix: Detection Methods
 
 ### Login shell fallback (macOS/Linux)
 
-Used when `which <cmd>` fails on the process PATH (Electron GUI apps):
+Used when `which <cmd>` fails on process PATH (Electron GUI apps):
+
 
 ```typescript
 const shell = process.env.SHELL || "/bin/zsh";
