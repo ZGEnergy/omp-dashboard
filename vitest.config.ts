@@ -17,6 +17,7 @@ export default defineConfig({
       "packages/client",
       "packages/dashboard-plugin-runtime",
       "packages/flows-plugin",
+      "packages/flows-anthropic-bridge-plugin",
       "packages/jj-plugin",
       // NOTE: packages/electron is intentionally NOT included here — it has
       // pre-existing orphaned tests that depend on ambient PATH/mocks never
