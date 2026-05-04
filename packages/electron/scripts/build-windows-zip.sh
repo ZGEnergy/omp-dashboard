@@ -52,9 +52,15 @@ NODE_DIR="$ELECTRON_DIR/resources/node"
 # node.exe present but the npm install path broken. If the canary is missing,
 # wipe the tree and re-extract with the lossless extractor below.
 MINIZLIB_CANARY="$NODE_DIR/node_modules/npm/node_modules/minizlib/dist/commonjs/package.json"
+NODE_FRESH=0
 if [ -f "$NODE_DIR/node.exe" ] && [ ! -f "$MINIZLIB_CANARY" ]; then
   echo "--- Step 1b: existing resources/node is incomplete (minizlib canary missing), wiping for re-extraction"
   rm -rf "$NODE_DIR"
+  # Force-regenerate the offline cache too: it should be built with the npm
+  # version paired with this re-extracted node, not whatever stale npm built
+  # the existing cache.
+  rm -rf "$ELECTRON_DIR/resources/offline-packages"
+  NODE_FRESH=1
 fi
 if [ ! -f "$NODE_DIR/node.exe" ]; then
   echo "--- Step 1b: downloading Windows Node.js $NODE_VERSION ($ARCH) for resources/node/"
@@ -104,14 +110,19 @@ if [ ! -f "$NODE_DIR/node.exe" ]; then
   fi
 
   rm -rf "$NODE_EXTRACT_DIR" "$NODE_ZIP"
+  NODE_FRESH=1
   echo "  ✓ Node.js bundled at $NODE_DIR"
 else
   echo "--- Step 1b: resources/node/node.exe already present, skipping download"
 fi
 
 # Step 1c — bundle offline npm cache (pi + openspec + tsx)
-if [ ! -f "$ELECTRON_DIR/resources/offline-packages/manifest.json" ]; then
-  echo "--- Step 1c: bundling offline npm cache for win32-$ARCH"
+# Re-bundle when the cache is missing OR when resources/node was just
+# (re)extracted in step 1b — the cache must be built against the bundled
+# npm that ships in this build, not against a previous build's npm.
+if [ ! -f "$ELECTRON_DIR/resources/offline-packages/manifest.json" ] || [ "$NODE_FRESH" = "1" ]; then
+  echo "--- Step 1c: bundling offline npm cache for win32-$ARCH (fresh=${NODE_FRESH})"
+  rm -rf "$ELECTRON_DIR/resources/offline-packages"
   cd "$ROOT_DIR"
   node packages/electron/scripts/bundle-offline-packages.mjs --platform="win32-$ARCH"
 else
