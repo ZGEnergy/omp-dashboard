@@ -22,12 +22,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ELECTRON_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$ELECTRON_DIR/../.." && pwd)"
 
-NODE_VERSION="v22.12.0"
+NODE_VERSION="v22.18.0"
 SKIP_CLIENT=false
 ARCH=""
 BUILD_NATIVE=false
 BUILD_LINUX=false
 BUILD_WINDOWS=false
+BUILD_WINDOWS_ZIP_ONLY=false
 BUILD_ALL=false
 BUILD_MAC_BOTH=false
 DOCKER_IMAGE="pi-dashboard-electron-builder"
@@ -52,6 +53,11 @@ while [[ $# -gt 0 ]]; do
       BUILD_WINDOWS=true
       shift
       ;;
+    --windows-zip)
+      BUILD_WINDOWS=true
+      BUILD_WINDOWS_ZIP_ONLY=true
+      shift
+      ;;
     --arch)
       ARCH="$2"
       shift 2
@@ -69,7 +75,8 @@ while [[ $# -gt 0 ]]; do
       echo "  (none)            Build for current platform only"
       echo "  --all             Build for all platforms (native + Docker)"
       echo "  --linux           Build Linux .deb + .AppImage via Docker"
-      echo "  --windows         Build Windows .exe (NSIS) via Docker"
+      echo "  --windows         Build Windows .exe (NSIS) + .zip + portable via Docker
+  --windows-zip     Build Windows .zip only via Docker (no NSIS, no portable)"
       echo "  --mac-both        Build BOTH macOS DMGs (arm64 + x64) on an"
       echo "                    Apple Silicon host. Requires Rosetta 2."
       echo ""
@@ -340,6 +347,7 @@ docker_build() {
   local TARGET_PLATFORM="$1"
   local TARGET_ARCH="${2:-x64}"
   local LABEL="$3"
+  local ZIP_ONLY_FLAG="${4:-0}"
 
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -361,6 +369,7 @@ docker_build() {
   docker run \
     --platform linux/amd64 \
     --name "$CONTAINER_NAME" \
+    -e "ZIP_ONLY=$ZIP_ONLY_FLAG" \
     "$DOCKER_IMAGE" \
     "$TARGET_PLATFORM" "$TARGET_ARCH"
 
@@ -381,7 +390,9 @@ fi
 # ── Windows build via Docker ────────────────────────────────────
 
 if [ "$BUILD_WINDOWS" = true ]; then
-  docker_build "win32" "x64" "Windows"
+  ZIP_ONLY_VAL="0"
+  [ "$BUILD_WINDOWS_ZIP_ONLY" = true ] && ZIP_ONLY_VAL="1"
+  docker_build "win32" "x64" "Windows" "$ZIP_ONLY_VAL"
 fi
 
 # ── Show results ────────────────────────────────────────────────

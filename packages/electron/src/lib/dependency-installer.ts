@@ -10,7 +10,7 @@
  *
  * See change: unified-bootstrap-install.
  */
-import { exec, spawn as cpSpawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { exec, spawn as cpSpawn, spawnSync as cpSpawnSync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -77,20 +77,48 @@ function ensureManagedDir(): void {
  * On Windows, both managed and bundled paths use
  * `"<node.exe>" "<npm-cli.js>"` to bypass the .cmd shim entirely.
  */
+/**
+ * Verify that an `<node> <npm-cli.js> --version` invocation actually works.
+ * Used to detect a partial / corrupted managed-npm copy on Windows (MAX_PATH,
+ * AV interference, non-ASCII home dir failures) before we commit to using it.
+ * Returns true on `--version` exit 0 with a `X.Y.Z`-shaped stdout.
+ * See change: spawn-failure-diagnostics.
+ */
+function verifyNpmWorks(nodeBin: string, npmCliJs: string): boolean {
+  try {
+    const r = cpSpawnSync(nodeBin, [npmCliJs, "--version"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+      encoding: "utf-8",
+    });
+    if (r.status !== 0) return false;
+    const out = (r.stdout ?? "").toString().trim();
+    return /^\d+\.\d+\.\d+/.test(out);
+  } catch {
+    return false;
+  }
+}
+
 function resolveNpm(): string {
-  // 1. Managed runtime first (when installed).
+  // 1. Managed runtime first (when installed and verified working).
+  // The dashboard server + bridge resolve node/npm via the same `MANAGED_DIR`
+  // path, so we want managed to be the canonical install. But cpSync can leave
+  // a partial copy on Windows (MAX_PATH, antivirus interference, non-ASCII
+  // home dirs) that loads `npm` enough to print --help but crashes on real
+  // commands. Verify with a fast `--version` probe before committing.
+  // See change: spawn-failure-diagnostics.
   if (isManagedNodePresent()) {
     const managedNode = getManagedNodeBinary();
-    // npm-cli.js layout: Windows root vs Unix lib/.
     const managedNpmCli = process.platform === "win32" // platform-branch-ok: npm-cli.js layout differs Windows vs Unix
       ? path.join(MANAGED_DIR, "node", "node_modules", "npm", "bin", "npm-cli.js")
       : path.join(MANAGED_DIR, "node", "lib", "node_modules", "npm", "bin", "npm-cli.js");
-    if (existsSync(managedNpmCli)) {
+    if (existsSync(managedNpmCli) && verifyNpmWorks(managedNode, managedNpmCli)) {
       return `"${managedNode}" "${managedNpmCli}"`;
     }
   }
 
-  // 2. Bundled Electron resources.
+  // 2. Bundled Electron resources — fallback when managed copy is broken or
+  // hasn't been installed yet. Sitting next to pi-dashboard.exe in resources/.
   const nodePath = getBundledNodePath();
   const npmPath = getBundledNpmPath();
   if (process.platform === "win32" && nodePath && npmPath) {
@@ -245,19 +273,40 @@ export async function installStandalone(onProgress?: ProgressCallback, skipPacka
   const strategy = selectInstallStrategy({ outstandingPackages: outstanding, resolution });
 
   if (strategy.kind === "offline" && resolution.present) {
-    await runOfflineInstall({
-      resolution,
-      outstanding,
-      pinMap: strategy.pinMap,
-      npmCmd,
-      onProgress,
-    });
-    // Mark skipped-already entries for wizard UI completeness
-    for (const pkg of packages.filter(p => skipSet.has(p))) {
-      const step = pkg.split("/").pop() || pkg;
-      onProgress?.({ step, status: "done", output: "Already installed (system)" });
+    try {
+      await runOfflineInstall({
+        resolution,
+        outstanding,
+        pinMap: strategy.pinMap,
+        npmCmd,
+        onProgress,
+      });
+      // Mark skipped-already entries for wizard UI completeness
+      for (const pkg of packages.filter(p => skipSet.has(p))) {
+        const step = pkg.split("/").pop() || pkg;
+        onProgress?.({ step, status: "done", output: "Already installed (system)" });
+      }
+      return;
+    } catch (err: any) {
+      // Offline path failed (cache key mismatch, npm internal crash on the
+      // user's npmrc, non-ASCII path issue, etc.). Don't block the user —
+      // fall through to the registry install path. The wizard's per-package
+      // rows are reset to "running" by the registry install. Log the offline
+      // failure for diagnostics.
+      // See change: spawn-failure-diagnostics.
+      console.error("[dependency-installer] Offline install failed, falling back to registry:", err?.message ?? err);
+      onProgress?.({
+        step: "offline-install",
+        status: "error",
+        error: `Offline cache failed (${err?.message ?? "unknown"}) — falling back to registry`,
+      });
+      // Mark each per-package row back to "running" so the user sees the
+      // registry install starting fresh.
+      for (const id of outstanding.map((n) => n.split("/").pop()!)) {
+        onProgress?.({ step: id, status: "running", output: "Falling back to registry…" });
+      }
+      // Continue past the offline branch into the registry install below.
     }
-    return;
   }
 
   if (strategy.kind === "offline-incomplete") {
@@ -338,7 +387,7 @@ async function runOfflineInstall(params: {
   }
   onProgress?.({ step: "offline-cache", status: "done", output: "Cache ready" });
 
-  // Step 2: one `npm install --offline <p@v>...`
+  // Step 2: one `npm install --prefer-offline <p@v>...`
   const pkgsWithVersions = outstanding.map(name => ({
     name,
     version: pinMap.get(name)!,
@@ -346,25 +395,44 @@ async function runOfflineInstall(params: {
   const humanLabel = pkgsWithVersions.map(p => p.name.split("/").pop()).join(", ");
   onProgress?.({ step: "offline-install", status: "running", output: `Installing ${humanLabel}` });
 
+  // Map full package name ("@mariozechner/pi-coding-agent") to the UI step id
+  // ("pi-coding-agent"). The wizard renders one row per UI step id.
+  const uiStepIds = pkgsWithVersions.map((p) => p.name.split("/").pop()!);
+  // Emit "running" for every UI row so the user sees activity for all three
+  // packages while the single npm install proceeds.
+  for (const id of uiStepIds) {
+    onProgress?.({ step: id, status: "running", output: "Installing…" });
+  }
+
   const args = buildOfflineInstallArgs({
     managedDir: MANAGED_DIR,
     cacheDir: path.dirname(cacacheDir), // parent of _cacache is what npm expects for --cache
     packages: pkgsWithVersions,
   });
   try {
-    // Drop the leading "install" from args because runNpmInstall prepends it.
     const [, ...restArgs] = args;
-    // runNpmInstall expects `packages` to append — but we pass full flag-laden args.
-    // Easiest: call npm directly via the same spawn primitive.
     await runNpmWithArgv(restArgs, npmCmd, (output) => {
       onProgress?.({ step: "offline-install", status: "running", output });
+      // Best-effort: route lines mentioning a known package name to its UI row
+      // so users see live npm output next to the right package.
+      for (const id of uiStepIds) {
+        if (output.includes(id)) {
+          onProgress?.({ step: id, status: "running", output });
+        }
+      }
     });
   } catch (err: any) {
     onProgress?.({ step: "offline-install", status: "error", error: err.message });
-    // PRESERVE .offline-cache/ on failure for debugging.
+    // Mark every UI row as errored so the user can see the failure.
+    for (const id of uiStepIds) {
+      onProgress?.({ step: id, status: "error", error: err.message });
+    }
     throw err;
   }
   onProgress?.({ step: "offline-install", status: "done", output: `Installed ${humanLabel}` });
+  for (const id of uiStepIds) {
+    onProgress?.({ step: id, status: "done", output: "Installed" });
+  }
 
   // Step 3: cleanup (reclaim ~140 MB)
   onProgress?.({ step: "offline-cache", status: "running", output: "Cleaning up" });
@@ -406,7 +474,18 @@ function runNpmWithArgv(
     child.on("error", (err) => reject(new Error(err.message)));
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(stderr.slice(-500) || `npm install exited with code ${code}`));
+        // Surface actual `npm error` / `npm ERR!` lines instead of the last 500 chars,
+        // which are usually just the "complete log of this run can be found in: ..." footer.
+        // See change: spawn-failure-diagnostics.
+        const errLines = stderr
+          .split(/\r?\n/)
+          .filter((l) => /^npm (error|ERR!)/i.test(l) && !/A complete log of this run/i.test(l))
+          .map((l) => l.replace(/^npm (error|ERR!)\s*/i, "").trim())
+          .filter((l) => l.length > 0);
+        const detail = errLines.length > 0
+          ? errLines.join("\n").slice(0, 1500)
+          : stderr.slice(-500) || `npm install exited with code ${code}`;
+        reject(new Error(detail));
       } else {
         resolve();
       }
@@ -478,7 +557,21 @@ export async function installRecommendedExtensions(
   const settingsManager = pm.SettingsManager.create(cwd, agentDir);
   const manager = new pm.DefaultPackageManager({ cwd, agentDir, settingsManager });
 
+  // Pi's DefaultPackageManager shells out `npm install -g <pkg>` and inherits
+  // the parent process's PATH — it doesn't accept an env override. In Electron,
+  // process.env.PATH doesn't include the bundled/managed node bin dir, so the
+  // spawned npm.cmd lookup fails on Windows. Temporarily prepend our augmented
+  // PATH for the duration of the install loop, then restore. Idempotent: if PATH
+  // already contains the dirs, no-op.
+  // See change: spawn-failure-diagnostics.
+  const originalPath = process.env.PATH;
+  const installEnv = buildInstallEnv();
+  if (installEnv.PATH && installEnv.PATH !== originalPath) {
+    process.env.PATH = installEnv.PATH;
+  }
+
   let installed = 0;
+  try {
   for (const id of ids) {
     const entry = RECOMMENDED_EXTENSIONS.find((e: any) => e.id === id);
     if (!entry) {
@@ -501,6 +594,13 @@ export async function installRecommendedExtensions(
 
     onProgress?.({ step, status: "running" });
     try {
+      // Workaround: pi's DefaultPackageManager shells out `git clone <url> <dest>`
+      // without quoting the destination, breaking on Windows usernames with spaces
+      // (e.g. "Róbert Csákány"). Pre-clone the repo ourselves with discrete argv
+      // so `installAndPersist` sees an existing directory and skips its broken clone.
+      // See change: spawn-failure-diagnostics (Windows-spaced-username workaround).
+      await preClonePiExtensionIfGit(entry.source, agentDir);
+
       manager.setProgressCallback?.((event: any) => {
         if (event?.message) {
           onProgress?.({ step, status: "running", output: String(event.message).slice(0, 120) });
@@ -515,8 +615,68 @@ export async function installRecommendedExtensions(
       throw err;
     }
   }
+  } finally {
+    // Restore the original PATH so we don't leak augmented env into the rest of
+    // the Electron main process lifetime.
+    if (originalPath !== undefined) {
+      process.env.PATH = originalPath;
+    } else {
+      delete process.env.PATH;
+    }
+  }
 
   return installed;
+}
+
+/**
+ * Pre-clone a recommended pi extension's git repo into pi's cache path so
+ * the subsequent `manager.installAndPersist()` call sees an existing dir
+ * and skips its own (improperly quoted) `git clone` command.
+ *
+ * Pi's package manager builds a shell command string `git clone <url> <dest>`
+ * and runs it via the shell, which breaks when `<dest>` contains spaces
+ * (e.g. `C:\Users\Róbert Csákány\.pi\agent\git\...`). Spawning git
+ * with discrete argv avoids the shell entirely and quoting becomes moot.
+ *
+ * No-op for non-git sources (`npm:...`, etc.) and when the dir already exists.
+ *
+ * See change: spawn-failure-diagnostics.
+ */
+async function preClonePiExtensionIfGit(source: string, agentDir: string): Promise<void> {
+  const parsed = parseBundledGitSource(source);
+  if (!parsed) return; // npm: or unrecognized — leave it to pi's manager
+
+  const destDir = path.join(agentDir, "git", parsed.host, parsed.path);
+  if (existsSync(destDir)) return; // already cloned (or stub)
+
+  // Strip any `@ref` suffix from the URL for the actual clone.
+  // The version selection is pi's responsibility post-clone.
+  let cloneUrl = source.trim().replace(/^git:/, "");
+  const atIdx = cloneUrl.lastIndexOf("@");
+  if (atIdx > cloneUrl.indexOf("://") + 3 && cloneUrl[atIdx - 1] !== ":") {
+    // Only strip if it's a ref (not part of git@host).
+    const candidate = cloneUrl.slice(0, atIdx);
+    if (/\.git$/.test(candidate) || /github|gitlab|bitbucket/.test(candidate)) {
+      cloneUrl = candidate;
+    }
+  }
+
+  mkdirSync(path.dirname(destDir), { recursive: true });
+
+  await new Promise<void>((resolve, reject) => {
+    const child = cpSpawn("git", ["clone", cloneUrl, destDir], {
+      stdio: ["ignore", "pipe", "pipe"],
+      // Critically NOT shell:true — spawn passes argv discretely so
+      // spaces in destDir don't get re-split by the shell.
+    });
+    let stderr = "";
+    child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+    child.on("error", (err: Error) => reject(new Error(`git spawn failed: ${err.message}`)));
+    child.on("close", (code: number | null) => {
+      if (code === 0) resolve();
+      else reject(new Error(`git clone exited ${code}: ${stderr.trim().slice(-500)}`));
+    });
+  });
 }
 
 // ── Bundled extensions installer ───────────────────────────────

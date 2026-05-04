@@ -8,7 +8,7 @@
 #
 set -euo pipefail
 
-NODE_VERSION="${1:-v22.12.0}"
+NODE_VERSION="${1:-v22.18.0}"
 PLATFORM="${2:-$(uname -s | tr '[:upper:]' '[:lower:]')}"
 ARCH="${3:-$(uname -m)}"
 

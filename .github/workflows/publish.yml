@@ -316,13 +316,13 @@ jobs:
         if: matrix.platform != 'win32'
         run: |
           cd packages/electron
-          bash scripts/download-node.sh v22.12.0 ${{ matrix.platform }} ${{ matrix.node-arch }}
+          bash scripts/download-node.sh v22.18.0 ${{ matrix.platform }} ${{ matrix.node-arch }}
 
       - name: Download Node.js binary (Windows)
         if: matrix.platform == 'win32'
         shell: pwsh
         run: |
-          $version = "v22.12.0"
+          $version = "v22.18.0"
           $arch = "${{ matrix.node-arch }}"
           $url = "https://nodejs.org/dist/$version/node-$version-win-$arch.zip"
           $outDir = "packages/electron/resources/node"
@@ -416,7 +416,7 @@ jobs:
         run: |
           # node-pty has no win32-arm64 prebuilds, so bundle x64 Node.js + native modules
           # Windows ARM64 runs x64 binaries via emulation (WoW64)
-          $version = "v22.12.0"
+          $version = "v22.18.0"
           $outDir = "packages/electron/resources/node"
           Remove-Item -Recurse -Force $outDir
           New-Item -ItemType Directory -Force -Path $outDir

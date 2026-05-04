@@ -181,7 +181,11 @@ export function buildOfflineInstallArgs(params: {
 		managedDir,
 		"--cache",
 		cacheDir,
-		"--offline",
+		// --prefer-offline: use cache when available, fall back to network on miss.
+		// We avoid --offline (strict) because cache entries built by a different
+		// npm major version (e.g. npm 11 on build machine vs npm 10 bundled with
+		// Node.js v22.12.0) use incompatible cache key formats.
+		"--prefer-offline",
 		"--no-audit",
 		"--no-fund",
 		...packages.map((p) => `${p.name}@${p.version}`),

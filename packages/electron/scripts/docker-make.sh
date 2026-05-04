@@ -81,7 +81,7 @@ cd /build
 
 if [ "$PLATFORM" = "linux" ]; then
   cd "$ELECTRON_DIR"
-  bash scripts/download-node.sh v22.12.0 linux "$ARCH"
+  bash scripts/download-node.sh v22.18.0 linux "$ARCH"
   cd /build
 
   cd "$ELECTRON_DIR"
@@ -107,7 +107,7 @@ if [ "$PLATFORM" = "win32" ]; then
   # Download Windows Node.js for bundling (matching target arch)
   NODE_DIR="resources/node"
   mkdir -p "$NODE_DIR"
-  VERSION="v22.12.0"
+  VERSION="v22.18.0"
   URL="https://nodejs.org/dist/$VERSION/node-$VERSION-win-$ARCH.zip"
   echo "→ Downloading Node.js $VERSION for Windows $ARCH..."
   curl -fsSL "$URL" -o /tmp/node-win.zip
@@ -147,7 +147,10 @@ if [ "$PLATFORM" = "win32" ]; then
   zip -r -q "../out/make/zip/$ARCH/$ZIP_NAME" "PI-Dashboard-win32-$ARCH/"
   cd /build/packages/electron
 
-  # 2. Portable exe (self-extracting)
+  # 2. Portable exe (self-extracting) — skipped when ZIP_ONLY=1
+  if [ "${ZIP_ONLY:-0}" = "1" ]; then
+    echo "→ Skipping portable exe (ZIP_ONLY=1)"
+  else
   echo "→ Building portable exe..."
   npx electron-builder --win portable --$ARCH \
     --prepackaged "$PACKAGED_DIR" \
@@ -165,6 +168,7 @@ if [ "$PLATFORM" = "win32" ]; then
 }
 EOF
 ) || echo "  ⚠ Portable build failed (non-fatal)"
+  fi
 
   echo ""
   echo "✓ Build complete for win32-$ARCH"

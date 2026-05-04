@@ -109,11 +109,44 @@ try {
   console.log(
     `  populating cacache (--os=${TARGET_OS} --cpu=${TARGET_CPU} --ignore-scripts)...`,
   );
-  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+  // Prefer the bundled npm (resources/node/) when available so the cache is built
+  // with the same npm version that runs the offline install at runtime, ensuring
+  // cache key compatibility. Pick the layout from the TARGET platform (so a macOS
+  // host cross-building for Windows still finds the Windows-layout node.exe).
+  // Cross-arch caveat: bundled node.exe is the same arch as the host, so on a
+  // non-matching host we can't actually execute it. We detect that and fall back
+  // to system npm. See change: spawn-failure-diagnostics.
+  const bundledNodeExe = path.join(ELECTRON_DIR, "resources", "node",
+    TARGET_OS === "win32" ? "node.exe" : path.join("bin", "node"),
+  );
+  const bundledNpmCli = path.join(ELECTRON_DIR, "resources", "node",
+    TARGET_OS === "win32"
+      ? path.join("node_modules", "npm", "bin", "npm-cli.js")
+      : path.join("lib", "node_modules", "npm", "bin", "npm-cli.js"),
+  );
+  const targetMatchesHost = TARGET_OS === process.platform;
+  const useBundledNpm = targetMatchesHost && existsSync(bundledNodeExe) && existsSync(bundledNpmCli);
+  if (useBundledNpm) {
+    console.log(`  using bundled npm: ${bundledNodeExe} ${bundledNpmCli}`);
+  } else if (existsSync(bundledNodeExe) && !targetMatchesHost) {
+    console.log(
+      `  bundled npm present but target=${TARGET_OS} ≠ host=${process.platform}; " +
+      "using system npm (cache integrity hashes are universal, but cache keys may " +
+      "differ from the runtime npm — build on a matching host or in Docker for parity).`,
+    );
+  } else {
+    console.log(`  bundled npm not found, using system npm`);
+  }
+  const [npmSpawnCmd, npmSpawnArgs] = useBundledNpm
+    ? [bundledNodeExe, [bundledNpmCli, "install"]]
+    : process.platform === "win32"
+      ? ["npm.cmd", ["install"]]
+      : ["npm", ["install"]];
+
   const npmInstall = spawnSync(
-    npmCmd,
+    npmSpawnCmd,
     [
-      "install",
+      ...npmSpawnArgs,
       "--prefix",
       scratch,
       "--cache",
@@ -126,8 +159,7 @@ try {
       ...pinSpecs,
     ],
     {
-      // shell:true on Windows so npm.cmd is found via PATHEXT.
-      shell: process.platform === "win32",
+      shell: !useBundledNpm && process.platform === "win32",
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     },

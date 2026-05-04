@@ -228,7 +228,10 @@
         'tsx': deps?.node, // tsx is needed when node exists but not as a skip signal itself
       };
       const items = ['pi-coding-agent', 'openspec', 'tsx'];
-      list.innerHTML = items.map(name => {
+      // node-runtime is prepended as a visible step so the user sees activity
+      // while installManagedNode copies Node.js to ~/.pi-dashboard/node/.
+      const nodeRuntimeRow = `<div class="progress-item" id="prog-node-runtime"><span class="icon status-pending">○</span><div class="progress-wrap"><span class="name">node runtime</span></div><span class="elapsed"></span></div>`;
+      list.innerHTML = nodeRuntimeRow + items.map(name => {
         const dep = itemDeps[name];
         const alreadyInstalled = dep?.found && dep?.source === 'system';
         const icon = alreadyInstalled ? 'status-done' : 'status-pending';
