@@ -14,9 +14,12 @@
 
 ## 2. Command-handler dispatch
 
+PRECONDITION: `fix-extension-slash-commands-in-dashboard` MUST be archived (or at minimum implemented through its tasks 3.1–3.2) before any task in §2 starts. The exec branch lands AFTER the fix's extension-dispatch branch in the same call sites.
+
 - [ ] 2.1 Add new variant to the `ParsedPrompt` union in `packages/extension/src/command-handler.ts`: `{ type: "slash-exec"; command: string; excludeFromContext: boolean; argsString: string }`.
-- [ ] 2.2 Modify `parseSendPrompt(text)` so the existing `// 6. Check / prefix (generic slash command)` arm peeks at the resolved template via `loadPromptTemplate`. When the template is `kind: "exec"`, return the new `slash-exec` variant; otherwise return `{ type: "slash" }` as before.
+- [ ] 2.2 Modify `parseSendPrompt(text)` so the existing `// 6. Check / prefix (generic slash command)` arm peeks at the resolved template via `loadPromptTemplate`. When the template is `kind: "exec"`, return the new `slash-exec` variant; otherwise return `{ type: "slash" }` as before. Place this check AFTER the fix's extension-command detection so extension dispatch wins when both could match (in practice they cannot — see design.md "Disjointness").
 - [ ] 2.3 In the `handle()` switch in `createCommandHandler`, add an arm for `parsed.type === "slash-exec"` that calls `handleBashCommand(pi, sessionId, parsed.command, parsed.excludeFromContext, options?.eventSink)` and returns. Reuse `handleBashCommand` verbatim — no duplicated execution code.
+- [ ] 2.3a Mirror the exec branch in `bridge.ts::sessionPrompt` immediately AFTER the fix's extension-dispatch branch and BEFORE the existing template-expansion fallback. If the fix extracted a shared `slash-dispatch.ts` helper (its task 3.2), add the exec branch there alongside the extension-dispatch branch instead of duplicating in two call sites.
 - [ ] 2.4 Modify `handleBashCommand` to accept an optional `source: "slash-exec"` parameter and include it in the `bash_output` event's `data` payload.
 - [ ] 2.5 The exec-mode dispatcher MUST construct the bash invocation as `sh -c "<body>" -- <argsString-tokens>` so positional `$1`, `$2`, ... work in the body. Implement by calling `pi.exec("sh", ["-c", body, "--", ...args])` where `args = argsString.trim().split(/\s+/).filter(Boolean)`.
 - [ ] 2.6 Inject env vars `PI_DASHBOARD_PORT` (from `~/.pi/dashboard/config.json`, default 8000) and `PI_DASHBOARD_BASE` (`http://localhost:$PORT`) into the exec environment so templates don't have to re-derive them.

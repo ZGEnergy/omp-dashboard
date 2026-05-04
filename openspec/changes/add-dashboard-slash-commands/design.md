@@ -22,6 +22,35 @@ The dashboard's REST API is fully wrapped by the existing `pi-dashboard` skill, 
 - Per-skill subdirectory scanning by the expander. Templates ship inside the existing skill's `commands/` dir and are surfaced via `pi.getCommands()` (which already enumerates skill-shipped commands).
 - Auto-discovery of dashboard endpoints. The command set is hand-curated.
 
+## Relationship to fix-extension-slash-commands-in-dashboard
+
+This change has a hard dependency on `fix-extension-slash-commands-in-dashboard` landing first. That change:
+
+- Adds detection of pi-extension-registered slash commands (e.g. `/ctx-stats`) before the fallback to `sendUserMessage`.
+- Establishes a numbered routing order in `command-routing/spec.md` (steps 1–11).
+- Modifies the same two call sites this change needs: `bridge.ts::sessionPrompt` and `command-handler.ts`'s slash else-arm.
+- Proposes (its task 3.2) extracting a shared helper to keep the two sites in lockstep.
+
+My change slots a new routing step into the order the fix establishes:
+
+```
+  fix lands:                            mine slots in:
+  ─────────────────                     ──────────────
+  ...                                   ...
+   8. user-defined flow run             8. user-defined flow run
+   9. extension command dispatch        9. extension command dispatch
+  10. fall through to template          10. NEW: template with executable: bash
+      expansion + sendUserMessage           → run as bash, no LLM
+  11. no-slash text → sendUserMessage   11. fall through to template expansion
+                                            + sendUserMessage (was step 10)
+                                        12. no-slash text → sendUserMessage
+                                            (was step 11)
+```
+
+**Disjointness**: extension commands are JS handlers (`pi.registerCommand`); exec-mode templates are `.md` files on disk with `executable: bash` frontmatter. A single name cannot be both, so the order between steps 9 and 10 is arbitrary on correctness grounds. We put extension-dispatch first because it's user-installed (higher precedence than template authoring).
+
+**Implementation sites**: the new exec branch lands in the same two places the fix already touches — either both call sites directly, or the shared helper the fix's task 3.2 extracts. Whichever shape the fix lands in, this change follows it.
+
 ## The Five Pipelines (after this change)
 
 ```mermaid

@@ -78,3 +78,21 @@ Existing slash command templates without `executable` frontmatter SHALL continue
 - **GIVEN** a slash template without `executable` frontmatter (e.g. `/opsx:continue`)
 - **WHEN** a user invokes it
 - **THEN** the bridge SHALL expand the template and call `pi.sendUserMessage` (LLM-bound), with no behavioural change from before this change.
+
+### Requirement: Routing precedence relative to extension dispatch
+
+The exec-mode dispatch (template with `executable: bash`) SHALL run AFTER pi-extension-command dispatch (`source: "extension"` in `pi.getCommands()`, dispatched via `pi.dispatchCommand` per `command-routing` spec) and BEFORE the fallback to `pi.sendUserMessage` for skills, prompt templates, and unrecognised slashes. Extension commands and exec-mode templates are disjoint by construction (extension commands are JS handlers; exec-mode templates are `.md` files with frontmatter), so this ordering is documentary; it pins the contract for future readers.
+
+#### Scenario: Extension command takes precedence over exec template with same name
+
+- **GIVEN** a pi extension registers a command `foo` via `pi.registerCommand` AND a file `dashboard-foo.md` exists with `executable: bash` frontmatter
+- **WHEN** a user types `/foo`
+- **THEN** the bridge SHALL dispatch via `pi.dispatchCommand("/foo", ...)` (extension dispatch wins)
+- **AND** SHALL NOT execute the template body as bash.
+
+#### Scenario: Exec template takes precedence over LLM fallback
+
+- **GIVEN** a file `dashboard-server-health.md` exists with `executable: bash` frontmatter AND no extension command named `dashboard-server-health` is registered
+- **WHEN** a user types `/dashboard:server-health`
+- **THEN** the bridge SHALL execute the template body as bash and emit `bash_output`
+- **AND** SHALL NOT call `pi.sendUserMessage` for this input.

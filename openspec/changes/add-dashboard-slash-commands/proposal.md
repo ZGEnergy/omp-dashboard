@@ -52,10 +52,19 @@ None. The existing slash-command pipeline (template → LLM as user message) con
 - **MODIFIED**: `docs/architecture.md` — adds a sub-section under the bridge-extension flow describing the four pipelines (now five with `slash-exec`).
 - **Backward compatibility**: Every existing `~/.pi/prompts/*.md` and every `.pi/skills/*/SKILL.md` continues to work unchanged. Templates without `executable` frontmatter route to the LLM exactly as before. The change is purely additive at the parse/dispatch layer.
 
+## Depends On
+
+This change DEPENDS ON `fix-extension-slash-commands-in-dashboard` landing first. That change establishes the numbered routing-order spec in `command-routing` (steps 1–11 covering bang commands, `/compact`, `/quit`, `/reload`, `/new`, `/model`, user-defined flow names, extension dispatch, fallback to `sendUserMessage`, etc.) and rewires `bridge.ts::sessionPrompt` plus `command-handler.ts`'s slash else-arm to consult `pi.getCommands()` before falling through to `sendUserMessage`.
+
+This change INSERTS one new routing step between the fix's step 9 (`extension command → pi.dispatchCommand`) and step 10 (`fall through to template expansion + sendUserMessage`): if the resolved template carries `executable: bash` frontmatter, run the body as bash and skip the LLM entirely. Implementation MUST land the new branch in the same two call sites the fix touches (`bridge.ts::sessionPrompt` and `command-handler.ts`'s slash else-arm). If the fix extracts a shared `slash-dispatch.ts` helper (its task 3.2 proposes this), this change adds the exec-mode branch alongside the fix's extension-dispatch branch in that helper.
+
+No behavioural conflict exists between the two proposals: extension commands (`source: "extension"` in `pi.getCommands()`) are JS handlers; executable-bash templates are `.md` files on disk with frontmatter. A name cannot be both. Step ordering between extension-dispatch and exec-mode is therefore arbitrary; this change defers to the fix's numbering and slots in immediately after.
+
 ## References
 
 - Existing helper script and skill: `.pi/skills/pi-dashboard/SKILL.md`, `.pi/skills/pi-dashboard/scripts/dashboard-api.sh`, `.pi/skills/pi-dashboard/references/api-reference.md`.
 - Slash command pipeline today: `packages/extension/src/prompt-expander.ts`, `packages/extension/src/command-handler.ts`.
+- Prerequisite proposal: `openspec/changes/fix-extension-slash-commands-in-dashboard/` — establishes routing-order spec and the two call sites this change extends.
 - The four existing pipelines:
   - `!cmd`  — `parseSendPrompt` → `{ type: "bash", excludeFromContext: false }` → `handleBashCommand` + send to LLM.
   - `!!cmd` — `parseSendPrompt` → `{ type: "bash", excludeFromContext: true }`  → `handleBashCommand` only.
