@@ -18,39 +18,39 @@ Each entry in the queue (running, queued, error, success) SHALL carry a `kind` f
 
 #### Scenario: Pi-core dispatch via explicit kind
 
-- **WHEN** a caller invokes `packageQueue.enqueue({source: "pi-core:pi", kind: "pi-core", action: "update", scope: "global"})`
-- **THEN** the queue POSTs to `/api/pi-core/update` with body `{packages: ["pi"]}`
+- **WHEN** a caller invokes `packageQueue.enqueue({source: "pi-core:@mariozechner/pi-coding-agent", kind: "pi-core", action: "update", scope: "global"})`
+- **THEN** the queue POSTs to `/api/pi-core/update` with body `{packages: ["@mariozechner/pi-coding-agent"]}`
 - **AND** the queue does NOT POST to `/api/packages/update`
 
 #### Scenario: Pi-core completion is signalled by the POST response
 
-- **WHEN** a pi-core op's POST resolves with HTTP 200 and `body.data.results = [{name: "pi", success: true}]`
+- **WHEN** a pi-core op's POST resolves with HTTP 200 and `body.data.results = [{name: "@mariozechner/pi-coding-agent", success: true}]`
 - **THEN** the queue immediately calls `completeRunning(true)` and advances to the next queued op
-- **AND** any subsequent `pi_core_update_complete` WebSocket event for the same op SHALL be a no-op for the queue
+- **AND** any `pi_core_update_complete` WebSocket event for the same op (which typically arrives BEFORE the POST response in practice — see scenario "Pi-core complete event is a no-op for the queue" below) SHALL be a no-op for the queue
 
 #### Scenario: Pi-core failure surfaces as queue error
 
-- **WHEN** a pi-core op's POST resolves with `body.data.results = [{name: "pi", success: false, error: "boom"}]`
-- **THEN** the queue records `errorBySource.set("pi-core:pi", { message: "boom" })` and advances to the next queued op
+- **WHEN** a pi-core op's POST resolves with `body.data.results = [{name: "@mariozechner/pi-coding-agent", success: false, error: "boom"}]`
+- **THEN** the queue records `errorBySource.set("pi-core:@mariozechner/pi-coding-agent", { message: "boom" })` and advances to the next queued op
 
 ### Requirement: Pi-core source key uses a `pi-core:` prefix convention
 
-Pi-core operations SHALL use a `source` string of the form `"pi-core:" + packageName` (e.g. `"pi-core:pi"`, `"pi-core:pi-dashboard"`). The prefix is a self-documenting convention; the dispatch decision is made by the `kind` field, not by source-string prefix matching.
+Pi-core operations SHALL use a `source` string of the form `"pi-core:" + packageName`, where `packageName` is the full scoped npm name from `CORE_PACKAGE_NAMES` in `packages/server/src/pi-core-checker.ts` — e.g. `"pi-core:@mariozechner/pi-coding-agent"`, `"pi-core:@blackbelt-technology/pi-agent-dashboard"`, `"pi-core:@blackbelt-technology/pi-model-proxy"`. The prefix is a self-documenting convention; the dispatch decision is made by the `kind` field, not by source-string prefix matching.
 
 The prefix SHALL appear in `running.source`, `queue[].source`, `errorBySource` keys, and `successBySource` keys for pi-core operations. Components rendering pi-core rows SHALL look up state using the prefixed source.
 
 #### Scenario: Per-row state lookup uses the prefixed source
 
-- **GIVEN** a pi-core update is running for `pi`
-- **WHEN** the Core sub-group of `UnifiedPackagesSection` calls `operations.statusFor("pi-core:pi")`
+- **GIVEN** a pi-core update is running for `@mariozechner/pi-coding-agent`
+- **WHEN** the Core sub-group of `UnifiedPackagesSection` calls `operations.statusFor("pi-core:@mariozechner/pi-coding-agent")`
 - **THEN** the result is `"running"`
 
 #### Scenario: Source prefix does not collide with extension dispatch
 
-- **GIVEN** an extension named `pi-core` exists in the npm registry (hypothetical)
-- **WHEN** a user installs it via the recommended-extensions panel using `enqueue({source: "npm:pi-core", action: "install", scope: "global"})`
+- **GIVEN** an extension whose source string starts with the literal characters `pi-core` exists in the npm registry (hypothetical — actual core package names are scoped, e.g. `@mariozechner/pi-coding-agent`)
+- **WHEN** a user installs it via the recommended-extensions panel using `enqueue({source: "npm:pi-core-helper", action: "install", scope: "global"})`
 - **THEN** the queue dispatches as `kind: "extension"` (default) and POSTs to `/api/packages/install`
-- **AND** the source string `"npm:pi-core"` does NOT match any pi-core op's source string `"pi-core:..."`, so per-source state lookups stay correct
+- **AND** the source string `"npm:pi-core-helper"` does NOT match any pi-core op's source string (which always begins with the literal `"pi-core:"`, including the colon), so per-source state lookups stay correct
 
 ### Requirement: Package queue subscribes to both `pi-package-event` and `pi-core-event`
 
@@ -63,21 +63,21 @@ The `PackageQueue` constructor SHALL attach `window.addEventListener` for both `
 
 #### Scenario: Pi-core progress event updates running message
 
-- **GIVEN** the queue's running op is `{kind: "pi-core", source: "pi-core:pi"}` with message `"Starting…"`
-- **WHEN** a `pi_core_update_progress` event arrives with `{name: "pi", phase: "output", message: "added 12 packages"}`
+- **GIVEN** the queue's running op is `{kind: "pi-core", source: "pi-core:@mariozechner/pi-coding-agent"}` with message `"Starting…"`
+- **WHEN** a `pi_core_update_progress` event arrives with `{name: "@mariozechner/pi-coding-agent", phase: "output", message: "added 12 packages"}`
 - **THEN** `running.message` becomes `"added 12 packages"` and subscribers are notified
 
 #### Scenario: Pi-core progress for a non-running name is ignored
 
-- **GIVEN** the queue's running op is `{kind: "pi-core", source: "pi-core:pi"}`
-- **WHEN** a `pi_core_update_progress` event arrives with `{name: "pi-dashboard", phase: "output", message: "..."}`
+- **GIVEN** the queue's running op is `{kind: "pi-core", source: "pi-core:@mariozechner/pi-coding-agent"}`
+- **WHEN** a `pi_core_update_progress` event arrives with `{name: "@blackbelt-technology/pi-agent-dashboard", phase: "output", message: "..."}`
 - **THEN** the queue ignores the event; `running.message` is unchanged
 
-#### Scenario: Pi-core complete event is a no-op for the queue
+#### Scenario: Pi-core complete event is a no-op for the queue (common-case timing)
 
-- **GIVEN** the queue's running op is `{kind: "pi-core", source: "pi-core:pi"}`
+- **GIVEN** the queue's running op is `{kind: "pi-core", source: "pi-core:@mariozechner/pi-coding-agent"}`
 - **AND** the corresponding POST has not yet resolved
-- **WHEN** a `pi_core_update_complete` event arrives via WebSocket
+- **WHEN** a `pi_core_update_complete` event arrives via WebSocket (the COMMON case — the server broadcasts the WS event before returning the HTTP response, so the WS event nearly always reaches the client first)
 - **THEN** the queue does NOT transition the running op based on the WS event
 - **AND** the running op transitions only when the POST response resolves
 
@@ -89,7 +89,7 @@ This requirement closes the "cross-domain 409" UX bug class: today, a click on a
 
 #### Scenario: Extension install while pi-core updates → queued
 
-- **GIVEN** the queue's running op is `{kind: "pi-core", source: "pi-core:pi"}`
+- **GIVEN** the queue's running op is `{kind: "pi-core", source: "pi-core:@mariozechner/pi-coding-agent"}`
 - **WHEN** a user invokes `operations.install("npm:pi-flows")` from the Recommended Extensions panel
 - **THEN** the extension install enters the `"queued"` state
 - **AND** no POST to `/api/packages/install` is made yet
@@ -99,7 +99,7 @@ This requirement closes the "cross-domain 409" UX bug class: today, a click on a
 #### Scenario: Pi-core update while extension installs → queued
 
 - **GIVEN** the queue's running op is `{kind: "extension", source: "npm:foo"}` waiting on its `package_operation_complete` event
-- **WHEN** the user clicks Update on a Core row, invoking `operations.coreUpdate("pi")`
+- **WHEN** the user clicks Update on a Core row, invoking `operations.coreUpdate("@mariozechner/pi-coding-agent")`
 - **THEN** the pi-core op enters the `"queued"` state
 - **AND** no POST to `/api/pi-core/update` is made yet
 - **WHEN** the extension op completes
@@ -128,20 +128,20 @@ The `packageQueue` SHALL expose a public method `isAnyRunning(): boolean` that r
 
 ### Requirement: `usePackageOperations` exposes a typed `coreUpdate` helper
 
-The `usePackageOperations` hook SHALL expose `coreUpdate(name: string): void` that internally calls `packageQueue.enqueue({ source: "pi-core:" + name, kind: "pi-core", action: "update", scope: "global" })`. This is the canonical way for components to enqueue a pi-core update.
+The `usePackageOperations` hook SHALL expose `coreUpdate(name: string): void` that internally calls `packageQueue.enqueue({ source: "pi-core:" + name, kind: "pi-core", action: "update", scope: "global" })`. The `name` argument SHALL be the full scoped npm name (matching `PiCorePackage.name` from `GET /api/pi-core/status`). The `scope: "global"` value is a non-meaningful placeholder for pi-core ops — the `/api/pi-core/update` endpoint does not consume `scope`; install location is determined server-side from `PiCorePackage.installSource`. This is the canonical way for components to enqueue a pi-core update.
 
 The hook's existing methods (`install`, `remove`, `update`, `move`, `statusFor`, `messageFor`, `runningSource`, `queueDepth`, `clearOperation`, etc.) SHALL be preserved unchanged.
 
 #### Scenario: coreUpdate enqueues a pi-core op
 
-- **WHEN** a component calls `operations.coreUpdate("pi")`
-- **THEN** the queue's `running` (or `queue[]`) contains an entry with `source: "pi-core:pi"`, `kind: "pi-core"`, `action: "update"`, `scope: "global"`
+- **WHEN** a component calls `operations.coreUpdate("@mariozechner/pi-coding-agent")`
+- **THEN** the queue's `running` (or `queue[]`) contains an entry with `source: "pi-core:@mariozechner/pi-coding-agent"`, `kind: "pi-core"`, `action: "update"`, `scope: "global"`
 
 #### Scenario: Update All splits into N enqueues
 
-- **WHEN** the user clicks "Update All" with 3 updatable Core packages
+- **WHEN** the user clicks "Update All" with 3 updatable Core packages (e.g. `@mariozechner/pi-coding-agent`, `@blackbelt-technology/pi-agent-dashboard`, `@blackbelt-technology/pi-model-proxy`)
 - **AND** the component invokes `operations.coreUpdate(name)` for each
 - **THEN** the queue contains exactly 3 pi-core ops, processed FIFO
-- **AND** each op POSTs `/api/pi-core/update` with `{packages: [oneName]}`
+- **AND** each op POSTs `/api/pi-core/update` with `{packages: [oneScopedName]}`
 - **AND** they are NOT batched into a single POST
 

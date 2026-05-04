@@ -24,27 +24,27 @@
 
 ## 2. Unit tests for the queue
 
-Add `packages/client/src/lib/__tests__/package-queue-pi-core.test.ts` covering:
+Add `packages/client/src/lib/__tests__/package-queue-pi-core.test.ts` covering. All test scenarios use the canonical core package name `@mariozechner/pi-coding-agent` (the actual `PiCorePackage.name` from `pi-core-checker.ts#CORE_PACKAGE_NAMES`):
 
-- [ ] 2.1 `enqueue({source: "pi-core:pi", kind: "pi-core", action: "update", scope: "global"})` POSTs to `/api/pi-core/update` with body `{packages: ["pi"]}`.
-- [ ] 2.2 On HTTP 200 with `body.data.results = [{name: "pi", success: true}]`, the queue transitions to success and clears `running`.
-- [ ] 2.3 On HTTP 200 with `body.data.results = [{name: "pi", success: false, error: "boom"}]`, the queue records `error` keyed under `"pi-core:pi"` with the message `"boom"`.
+- [ ] 2.1 `enqueue({source: "pi-core:@mariozechner/pi-coding-agent", kind: "pi-core", action: "update", scope: "global"})` POSTs to `/api/pi-core/update` with body `{packages: ["@mariozechner/pi-coding-agent"]}`.
+- [ ] 2.2 On HTTP 200 with `body.data.results = [{name: "@mariozechner/pi-coding-agent", success: true}]`, the queue transitions to success and clears `running`.
+- [ ] 2.3 On HTTP 200 with `body.data.results = [{name: "@mariozechner/pi-coding-agent", success: false, error: "boom"}]`, the queue records `error` keyed under `"pi-core:@mariozechner/pi-coding-agent"` with the message `"boom"`.
 - [ ] 2.4 On HTTP 409 once then 200 success, the queue retries once and succeeds.
 - [ ] 2.5 On HTTP 409 twice, the queue records `error` with the server's busy message.
 - [ ] 2.6 A `pi_core_update_progress` event for the running op updates `running.message`.
 - [ ] 2.7 A `pi_core_update_progress` event for a different name (not the running op) is a no-op.
-- [ ] 2.8 A `pi_core_update_complete` event for the running op is a no-op (the POST response handles completion). This test asserts that the queue does NOT prematurely transition based on the WS event.
+- [ ] 2.8 A `pi_core_update_complete` event for the running op is a no-op (the POST response handles completion). This test asserts that the queue does NOT prematurely transition based on the WS event — critical because the WS event arrives BEFORE the POST response in the common case (see design R4).
 - [ ] 2.9 An extension op (`{source: "npm:foo", kind: "extension"}`) and a pi-core op queued back-to-back are processed in order; the pi-core dispatch arm is selected based on `kind`, not source.
 - [ ] 2.10 `isAnyRunning()` returns `true` while either an extension or a pi-core op is the running op, `false` otherwise.
 
 ## 3. `usePackageOperations` hook
 
-- [ ] 3.1 In `packages/client/src/hooks/usePackageOperations.ts`, add `coreUpdate(name: string): void` that calls `packageQueue.enqueue({ source: "pi-core:" + name, kind: "pi-core", action: "update", scope: "global" })`.
+- [ ] 3.1 In `packages/client/src/hooks/usePackageOperations.ts`, add `coreUpdate(name: string): void` that calls `packageQueue.enqueue({ source: "pi-core:" + name, kind: "pi-core", action: "update", scope: "global" })`. Document inline that `name` is the full scoped npm name from `PiCorePackage.name` and that `scope: "global"` is a non-meaningful placeholder for pi-core ops.
 - [ ] 3.2 Add `coreUpdate` to the hook's return value alongside the existing methods.
 - [ ] 3.3 Add a unit test in `packages/client/src/hooks/__tests__/usePackageOperations-pi-core.test.tsx`:
-  - `coreUpdate("pi")` triggers the queue's pi-core POST.
-  - `runningSource` becomes `"pi-core:pi"` until completion.
-  - `statusFor("pi-core:pi")` cycles `"running"` → `"success"` (or `"error"` per response).
+  - `coreUpdate("@mariozechner/pi-coding-agent")` triggers the queue's pi-core POST.
+  - `runningSource` becomes `"pi-core:@mariozechner/pi-coding-agent"` until completion.
+  - `statusFor("pi-core:@mariozechner/pi-coding-agent")` cycles `"running"` → `"success"` (or `"error"` per response).
 
 ## 4. Refactor `UnifiedPackagesSection`
 
@@ -53,7 +53,7 @@ Add `packages/client/src/lib/__tests__/package-queue-pi-core.test.ts` covering:
   - Remove the `pi-core-event` `useEffect` listener block.
   - Remove the `doCoreUpdate` `useCallback`.
   - Remove the `ProgressMap` type import if no longer used.
-- [ ] 4.2 Wire each Core sub-group `<PackageRow>` through `usePackageOperations`:
+- [ ] 4.2 Wire each Core sub-group `<PackageRow>` through `usePackageOperations`. `pkg.name` here is `PiCorePackage.name` — the full scoped npm name like `@mariozechner/pi-coding-agent`:
   - `busy={operations.runningSource === "pi-core:" + pkg.name}`
   - `progress={operations.runningSource === "pi-core:" + pkg.name ? operations.operation.message : undefined}`
   - `error={operations.statusFor("pi-core:" + pkg.name) === "error" ? operations.messageFor("pi-core:" + pkg.name) : undefined}`
@@ -68,13 +68,14 @@ Add `packages/client/src/lib/__tests__/package-queue-pi-core.test.ts` covering:
 
 - [ ] 5.1 Add `packages/client/src/components/__tests__/unified-packages-section-core-survives-unmount.test.tsx`:
   - Render `UnifiedPackagesSection` inside a parent that toggles its mounted state.
-  - Click Update on `pi (core agent)`. Assert the row renders busy.
+  - Click Update on the `pi (core agent)` row (display name for `@mariozechner/pi-coding-agent`). Assert the row renders busy.
   - Unmount the parent.
   - Remount the parent. Without dispatching new events, assert the row STILL renders busy (the queue's running op survived).
+  - Optionally, dispatch a `pi_core_update_complete` WS event BEFORE resolving the mocked `fetch` and assert the row STILL shows busy (verifying that the WS event does not prematurely transition the queue — see design R4).
   - Resolve the mocked `fetch` with success. Assert the row clears its busy state.
 - [ ] 5.2 Add `packages/client/src/components/__tests__/unified-packages-section-core-cross-domain-queue.test.tsx`:
   - Mock `fetch` to leave the pi-core POST pending.
-  - Click Update on a Core row. Assert `runningSource === "pi-core:pi"`.
+  - Click Update on a Core row. Assert `runningSource === "pi-core:@mariozechner/pi-coding-agent"`.
   - In the same test, click Install on a Recommended-Extensions row.
   - Assert the extension install enters the `queued` state (not `running`, not `error`).
   - Resolve the pi-core POST. Assert the extension install transitions from `queued` to `running` (and POSTs to `/api/packages/install`).
@@ -83,10 +84,10 @@ Add `packages/client/src/lib/__tests__/package-queue-pi-core.test.ts` covering:
 
 - [ ] 6.1 Update `AGENTS.md`'s entry for `package-queue.ts`:
   - Note that the queue handles both extension and pi-core operations.
-  - Mention the `kind` discriminator and the `pi-core:` source-prefix convention.
+  - Mention the `kind` discriminator and the `pi-core:<scoped-name>` source-prefix convention.
   - Mention the dual `pi-package-event` + `pi-core-event` subscription.
 - [ ] 6.2 Update `AGENTS.md`'s entry for `usePackageOperations.ts` to mention the `coreUpdate(name)` helper.
-- [ ] 6.3 Update `AGENTS.md`'s entry for `UnifiedPackagesSection.tsx` to remove the references to local pi-core state and point at `packageQueue` instead.
+- [ ] 6.3 Update `AGENTS.md`'s entry for `UnifiedPackagesSection.tsx` to remove the references to local pi-core state and point at `packageQueue` instead. **Coordinate with the still-open task 7.1 of the in-flight `consolidate-packages-settings-ui` change**, which also touches this AGENTS.md row — whichever change ships second must rebase the row to merge both edits.
 - [ ] 6.4 Update `docs/architecture.md` if it has a "Package Operations" section that diagrams the state machine; otherwise no change.
 - [ ] 6.5 No README.md changes (UX bug fix, not a user-visible feature).
 

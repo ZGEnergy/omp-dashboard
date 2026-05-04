@@ -21,7 +21,7 @@ This change picks the architectural fix over the narrow one: **pi-core operation
 ### 1. `packageQueue` learns to handle pi-core operations
 
 - Extend `RunningOp` and `EnqueueRequest` in `packages/client/src/lib/package-queue.ts` with a `kind: "extension" | "pi-core"` discriminator (default `"extension"` for backwards compat with every existing call site).
-- Pi-core operations key as `pi-core:${packageName}` (e.g. `pi-core:pi`, `pi-core:pi-dashboard`). The prefix is canonical and self-documenting; the `kind` field is the actual dispatch key but the prefix lets human readers grep.
+- Pi-core operations key as `pi-core:${packageName}` where `packageName` is the full npm name from `CORE_PACKAGE_NAMES` in `packages/server/src/pi-core-checker.ts` (e.g. `pi-core:@mariozechner/pi-coding-agent`, `pi-core:@blackbelt-technology/pi-agent-dashboard`, `pi-core:@blackbelt-technology/pi-model-proxy`). The prefix is canonical and self-documenting; the `kind` field is the actual dispatch key but the prefix lets human readers grep.
 - `postOperation` dispatches by `kind`:
   - `"extension"` → existing flow: POST `/api/packages/{action}` → wait for `package_operation_complete` WS event.
   - `"pi-core"` → new flow: POST `/api/pi-core/update` with `{packages: [name]}` → completion is signalled by the POST response itself (the pi-core endpoint is synchronous from the client's perspective; it returns when the update has actually finished).
@@ -32,7 +32,8 @@ This change picks the architectural fix over the narrow one: **pi-core operation
 
 ### 2. `usePackageOperations` gains a typed pi-core helper
 
-- Add `coreUpdate(name: string): void` that calls `packageQueue.enqueue({ source: "pi-core:" + name, kind: "pi-core", action: "update", scope: "global" })`.
+- Add `coreUpdate(name: string): void` that calls `packageQueue.enqueue({ source: "pi-core:" + name, kind: "pi-core", action: "update", scope: "global" })`. The `name` argument is the full scoped npm name (e.g. `@mariozechner/pi-coding-agent`), matching `PiCorePackage.name` returned by `GET /api/pi-core/status`.
+- The `scope: "global"` value is a non-meaningful placeholder for pi-core ops — `/api/pi-core/update` does not consume the `scope` field; the server-side install location is determined per-package from `PiCorePackage.installSource` (`"global"` for npm-global vs `"managed"` for `~/.pi-dashboard/`). We pick `"global"` to satisfy the `EnqueueRequest.scope` type contract without introducing a third enum value.
 - All existing API on the hook is preserved.
 
 ### 3. `UnifiedPackagesSection` deletes its pi-core state
@@ -40,7 +41,7 @@ This change picks the architectural fix over the narrow one: **pi-core operation
 - Remove `useState` for `coreUpdating`, `coreProgress`, `coreErrors`.
 - Remove the `pi-core-event` `useEffect` listener (the queue owns it).
 - Remove the local `doCoreUpdate` `useCallback`.
-- Wire Core sub-group `<PackageRow>` props through `usePackageOperations`:
+- Wire Core sub-group `<PackageRow>` props through `usePackageOperations`. `pkg.name` here is the full scoped npm name (e.g. `@mariozechner/pi-coding-agent`):
   - `busy={operations.runningSource === "pi-core:" + pkg.name}`
   - `progress={operations.runningSource === "pi-core:" + pkg.name ? operations.operation.message : undefined}`
   - `error={operations.statusFor("pi-core:" + pkg.name) === "error" ? operations.messageFor("pi-core:" + pkg.name) : undefined}`
@@ -55,7 +56,7 @@ This falls out of (1) for free: the queue's existing single-flight contract now 
 
 - **`moveTracker` stays separate.** Moves use a different identity scheme (`moveId`-keyed, partial-success semantics) and a different REST endpoint with composite phases. Bringing moves into the queue would be a larger change with no bug-fix justification.
 - **No server-side changes.** The `/api/pi-core/update` endpoint accepts batch input today; we choose to call it with single-name batches from the client, but we don't break the batch shape for any other consumer. The endpoint and the `PiCoreUpdater` class are unchanged.
-- **Acceptable trade-off: N session reloads for "Update All".** Today, pi-core's "Update All" sends one POST with N packages, the server runs them serially under one `runExclusive` call, and triggers exactly one session reload at the end. With this change, the client splits "Update All" into N enqueues, each producing its own reload (~1-2 s each, N typically 2-3). Documented as a trade-off; if it becomes a UX issue, a server-side reload debouncer is a clean follow-up.
+- **Acceptable trade-off: N session reloads for "Update All".** Today, pi-core's "Update All" sends one POST with N packages, the server runs them serially under one `runExclusive` call, and triggers exactly one session reload at the end. With this change, the client splits "Update All" into N enqueues, each producing its own reload (~1-2 s each). Real N is typically 2-3 in practice (`@mariozechner/pi-coding-agent` + `@blackbelt-technology/pi-agent-dashboard` + `@blackbelt-technology/pi-model-proxy`; the `@oh-my-pi/pi-coding-agent` fork is mutually exclusive with the `@mariozechner` variant). Documented as a trade-off; if it becomes a UX issue, a server-side reload debouncer is a clean follow-up.
 - **Channel separation preserved at `useMessageHandler`.** `pi_core_update_progress` / `pi_core_update_complete` continue to dispatch to `pi-core-event`; `package_progress` / `package_operation_complete` continue to dispatch to `pi-package-event`. The queue subscribes to both. We do not unify the channels because the message shapes are different and the channel boundary acts as a useful type discriminator at the routing layer.
 - **No protocol changes.** `PackageOperationResponse`, `PackageProgressMessage`, `PackageOperationCompleteMessage`, `PiCoreUpdateProgressMessage`, `PiCoreUpdateCompleteMessage` are all unchanged.
 - **No `usePiCoreVersions` refactor.** It already consumes `pi_core_update_complete` for refetch and is unrelated to in-flight tracking.

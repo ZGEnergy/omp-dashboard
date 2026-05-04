@@ -8,7 +8,7 @@ This requirement closes a UX bug in which an update started on a core package wo
 
 #### Scenario: Update spinner survives unmount/remount
 
-- **GIVEN** the user clicked Update on `pi (core agent)` in `Settings → Pi Ecosystem`
+- **GIVEN** the user clicked Update on the `pi (core agent)` row (display name for `@mariozechner/pi-coding-agent`) in `Settings → Pi Ecosystem`
 - **AND** the row is rendering its busy state (spinner + progress message)
 - **WHEN** the user navigates to a different sidebar entry, causing `UnifiedPackagesSection` to unmount
 - **AND** later navigates back to Settings, causing `UnifiedPackagesSection` to remount
@@ -17,10 +17,10 @@ This requirement closes a UX bug in which an update started on a core package wo
 
 #### Scenario: Progress events received while component is unmounted are visible on remount
 
-- **GIVEN** the user has started a pi-core update and unmounted the component
+- **GIVEN** the user has started a pi-core update for `@mariozechner/pi-coding-agent` and unmounted the component
 - **WHEN** a `pi_core_update_progress` event arrives via WebSocket while the component is unmounted
 - **THEN** the queue SHALL update its running op's `message` field
-- **AND** when the component remounts, the row SHALL display the most-recent message via `operations.operation.message` (when `runningSource === "pi-core:" + pkg.name`)
+- **AND** when the component remounts, the row SHALL display the most-recent message via `operations.operation.message` (when `runningSource === "pi-core:" + pkg.name`, e.g. `"pi-core:@mariozechner/pi-coding-agent"`)
 
 #### Scenario: Completion finalizes state regardless of mount status
 
@@ -38,18 +38,18 @@ The version-list refresh after completion (currently the inline `refresh(true)` 
 
 #### Scenario: Core row Update button calls coreUpdate
 
-- **WHEN** the user clicks Update on the `pi (core agent)` Core row
-- **THEN** the component invokes `operations.coreUpdate("pi")`
-- **AND** the queue subsequently POSTs `/api/pi-core/update` with `{packages: ["pi"]}`
+- **WHEN** the user clicks Update on the `pi (core agent)` Core row (whose `pkg.name` is `@mariozechner/pi-coding-agent`)
+- **THEN** the component invokes `operations.coreUpdate("@mariozechner/pi-coding-agent")`
+- **AND** the queue subsequently POSTs `/api/pi-core/update` with `{packages: ["@mariozechner/pi-coding-agent"]}`
 
 #### Scenario: Core row reads busy from runningSource
 
-- **WHEN** the queue's `runningSource` is `"pi-core:pi"`
+- **WHEN** the queue's `runningSource` is `"pi-core:@mariozechner/pi-coding-agent"`
 - **THEN** the `pi (core agent)` row renders `busy = true` and shows the in-flight progress message
 
 #### Scenario: Core row reads error from queue's per-source map
 
-- **WHEN** a pi-core update for `pi` fails and the queue records `errorBySource.set("pi-core:pi", { message: "..." })`
+- **WHEN** a pi-core update for `@mariozechner/pi-coding-agent` fails and the queue records `errorBySource.set("pi-core:@mariozechner/pi-coding-agent", { message: "..." })`
 - **THEN** the `pi (core agent)` row renders the error text underneath
 - **AND** the row's Update button is enabled again (the error is sticky until the next enqueue, matching today's behavior)
 

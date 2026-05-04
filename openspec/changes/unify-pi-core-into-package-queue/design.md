@@ -60,6 +60,8 @@ interface RunningOp {
 
 **Why this is correct**: the pi-core endpoint is *synchronous* from the client's perspective — `await piCoreUpdater.update(...)` only resolves when every npm update finishes, and the HTTP response carries the full results. There is no async ack pattern. Waiting for a WS event would be redundant and would re-introduce a race (POST resolved → WS hasn't arrived yet → queue thinks op is done when it actually is).
 
+**Important ordering note**: server-side, the WS broadcast happens *before* the HTTP response returns (`packages/server/src/routes/pi-core-routes.ts:124-130` — `onUpdateComplete(out)` runs before `return { success: true, data: out }`). So in practice the WS event will *typically* arrive at the client before the POST `fetch()` resolves — it is the **common case**, not an edge case. The queue's "ignore the WS event" rule is what makes this work; without it, the queue would prematurely transition based on a WS event that arrived a few milliseconds before the HTTP response, then receive a contradictory completion when the response did arrive.
+
 The extension flow is genuinely async (`run()` returns `operationId` immediately, executes in the background, completion arrives via WS). The two flows have different completion semantics and the queue must handle them differently. The discriminator is `kind`.
 
 ```
@@ -96,7 +98,9 @@ Splitting into N single ops keeps the source-key contract simple (`statusFor(s)`
 
 ### D5. The hook surface gets a typed helper, not a polymorphic `enqueue`
 
-**Decision**: `usePackageOperations` adds `coreUpdate(name: string): void` that constructs the right `EnqueueRequest`. Existing methods (`install`, `remove`, `update`, `move`) are preserved unchanged.
+**Decision**: `usePackageOperations` adds `coreUpdate(name: string): void` that constructs the right `EnqueueRequest`. The `name` is the full scoped npm name (e.g. `@mariozechner/pi-coding-agent`), matching `PiCorePackage.name` from `GET /api/pi-core/status`. Existing methods (`install`, `remove`, `update`, `move`) are preserved unchanged.
+
+**Scope semantics for pi-core ops**: `EnqueueRequest.scope` is set to `"global"` as a non-meaningful placeholder. The `/api/pi-core/update` endpoint does not read `scope`; per-package install location is determined server-side from `PiCorePackage.installSource` (npm-global vs `~/.pi-dashboard/`). Picking `"global"` satisfies the `EnqueueRequest.scope: PackageScope` type without introducing a third enum value or making the field optional. The placeholder is invisible to all consumers — no UI or hook reads `running.scope` for pi-core ops.
 
 **Why not expose `enqueue` directly with a `kind` parameter**: the type-safety win from a dedicated helper is small but the discoverability win is substantial. `coreUpdate` clearly signals that pi-core is a different kind of operation. Future maintainers can grep for the helper and understand the dispatch surface; a polymorphic `enqueue({source, kind, action, ...})` blends pi-core into a sea of every other call.
 
@@ -126,9 +130,15 @@ The same pattern is already used by `move`, which has its own typed helper (`mov
 
 **Mitigation**: this is already true today — `doCoreUpdate` awaits the same fetch. The queue is a singleton that retains the in-flight Promise via the `postPiCoreUpdate` closure. Component unmount during the wait is harmless because the closure outlives the component.
 
-### R4. The `pi_core_update_complete` WS event is now ignored by the queue but still consumed by `usePiCoreVersions`
+### R4. The `pi_core_update_complete` WS event arrives at the client *before* the POST response in the common case
 
-**Mitigation**: this is by design. `usePiCoreVersions` listens to refetch the version list when an update completes; the queue listens to update its own state. Both listeners on the same `pi-core-event` channel see the same events. There's no contention.
+**Context**: server-side, `onUpdateComplete(out)` is invoked before `return { success: true, data: out }` (see `pi-core-routes.ts:124-130`). The WebSocket broadcast is dispatched synchronously to the gateway and travels on a different socket than the HTTP response. In practice, the WS event nearly always arrives at the client first — the HTTP response trails by milliseconds.
+
+**Mitigation**: this is the case D2 explicitly handles. The queue ignores `pi_core_update_complete` for its own state; only the POST response transitions the running op. Without this rule, the queue would transition based on the WS event, then have to reconcile with the POST response that arrives moments later. With the rule, the WS event is harmless background noise as far as queue tracking is concerned.
+
+The `usePiCoreVersions` hook independently consumes the same WS event for its own purpose (version-list refetch). Both listeners on the same `pi-core-event` channel see the same events. There's no contention because they read different state.
+
+**Test coverage**: tasks 2.8 and 5.1 explicitly assert that a `pi_core_update_complete` arriving while the POST is still pending does NOT prematurely complete the queue's running op.
 
 ### R5. The 409-retry-once policy might fire in pi-core scenarios where it's surprising
 
