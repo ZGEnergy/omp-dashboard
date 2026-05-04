@@ -52,9 +52,13 @@ NODE_DIR="$ELECTRON_DIR/resources/node"
 # node.exe present but the npm install path broken. If the canary is missing,
 # wipe the tree and re-extract with the lossless extractor below.
 MINIZLIB_CANARY="$NODE_DIR/node_modules/npm/node_modules/minizlib/dist/commonjs/package.json"
+# Real failure-mode canary: the nested minipass at minizlib/node_modules/minipass/
+# must have the dist/commonjs/ subtree (v7+). If it only has a root index.js,
+# it's the old v3 layout and minizlib will crash on `class extends Minipass`.
+NESTED_MINIPASS_V7_CANARY="$NODE_DIR/node_modules/npm/node_modules/minizlib/node_modules/minipass/dist/commonjs/index.js"
 NODE_FRESH=0
-if [ -f "$NODE_DIR/node.exe" ] && [ ! -f "$MINIZLIB_CANARY" ]; then
-  echo "--- Step 1b: existing resources/node is incomplete (minizlib canary missing), wiping for re-extraction"
+if [ -f "$NODE_DIR/node.exe" ] && { [ ! -f "$MINIZLIB_CANARY" ] || [ ! -f "$NESTED_MINIPASS_V7_CANARY" ]; }; then
+  echo "--- Step 1b: existing resources/node is incomplete (canary check failed), wiping for re-extraction"
   rm -rf "$NODE_DIR"
   # Force-regenerate the offline cache too: it should be built with the npm
   # version paired with this re-extracted node, not whatever stale npm built
@@ -101,12 +105,29 @@ if [ ! -f "$NODE_DIR/node.exe" ]; then
   # corepack shim is required by some npm-internal codepaths.
   [ -f "$EXTRACTED_ROOT/corepack.cmd" ] && cp "$EXTRACTED_ROOT/corepack.cmd" "$NODE_DIR/"
 
-  # Sanity check: minizlib dual-publish marker that the actual crash signaled.
+  # Sanity check: minizlib dual-publish marker.
   MINIZLIB_PKG="$NODE_DIR/node_modules/npm/node_modules/minizlib/dist/commonjs/package.json"
   if [ ! -f "$MINIZLIB_PKG" ]; then
     echo "  ✗ SANITY CHECK FAILED: $MINIZLIB_PKG missing after extraction." >&2
     echo "    The Windows Node.js zip extraction dropped files. Try installing 'ditto' (macOS) or '7z' (linux p7zip)." >&2
     exit 1
+  fi
+
+  # Workaround: the bundled npm tree contains a NESTED minipass at
+  # node_modules/npm/node_modules/minizlib/node_modules/minipass/ that ships
+  # as old v3 layout (module.exports = MinipassClass). minizlib's compiled
+  # CJS does `const { Minipass } = require('minipass')`, which gets undefined
+  # because the class has no `.Minipass` property — then `class X extends
+  # undefined` crashes any `npm install`. The npm-level minipass at
+  # node_modules/npm/node_modules/minipass/ is v7+ with the named export
+  # minizlib expects, so overwrite the nested copy with the npm-level one.
+  # See change: fix-windows-electron-zip-install.
+  NESTED_MINIPASS="$NODE_DIR/node_modules/npm/node_modules/minizlib/node_modules/minipass"
+  TOPLEVEL_MINIPASS="$NODE_DIR/node_modules/npm/node_modules/minipass"
+  if [ -d "$NESTED_MINIPASS" ] && [ -d "$TOPLEVEL_MINIPASS" ]; then
+    echo "  → replacing nested minipass with npm-level minipass (Minipass-named-export)"
+    rm -rf "$NESTED_MINIPASS"
+    cp -R "$TOPLEVEL_MINIPASS" "$NESTED_MINIPASS"
   fi
 
   rm -rf "$NODE_EXTRACT_DIR" "$NODE_ZIP"
