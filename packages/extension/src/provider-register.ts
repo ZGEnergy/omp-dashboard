@@ -300,34 +300,29 @@ export function getSessionInfo(): { provider: string; modelId: string } {
 type PiAiHelpers = {
   findEnvKeys?: (id: string) => string[] | undefined;
   getEnvApiKey?: (id: string) => string | undefined;
-  /**
-   * Pi-ai's built-in provider list (from its static MODELS table).
-   * Used to filter custom-registered providers (e.g. user's proxy entry
-   * from ~/.pi/agent/providers.json) out of the catalogue — those are
-   * already managed by the dashboard's dedicated LLM Providers section.
-   */
-  getProviders?: () => string[];
 };
 
 export function _buildProviderCatalogue(
   modelRegistry: any,
   piAi: PiAiHelpers,
+  excludeIds: ReadonlySet<string> = new Set(),
 ): ProviderInfo[] {
   if (!modelRegistry) return [];
   const oauthIds = new Set<string>(
     (modelRegistry.authStorage?.getOAuthProviders?.() ?? []).map((p: any) => p.id),
   );
-  // Built-in provider whitelist. Filters out user-registered custom
-  // providers (proxy/your-llmproxy/etc. from ~/.pi/agent/providers.json),
-  // which are already managed by the dashboard's LLM Providers section.
-  // When piAi.getProviders is unavailable, fall through to the legacy
-  // unfiltered behaviour (test-friendly + safe degradation).
+  // Custom providers registered by the dashboard itself (entries from
+  // ~/.pi/agent/providers.json driven through pi.registerProvider()) are
+  // managed by the dashboard's dedicated "LLM Providers" settings
+  // section — do NOT also surface them as "Add Key" rows. The bridge
+  // passes its `lastRegistered` snapshot as `excludeIds`. OAuth-handler
+  // ids are kept regardless (a custom provider that registers an OAuth
+  // flow is still surfaced via OAuth UI).
   // See change: replace-hardcoded-provider-lists (filter-custom follow-up).
-  const builtInIds = piAi.getProviders ? new Set<string>(piAi.getProviders()) : null;
   const allIds = new Set<string>(oauthIds);
   for (const m of (modelRegistry.getAll?.() ?? []) as Array<{ provider?: string }>) {
     if (!m.provider) continue;
-    if (builtInIds && !builtInIds.has(m.provider) && !oauthIds.has(m.provider)) continue;
+    if (excludeIds.has(m.provider) && !oauthIds.has(m.provider)) continue;
     allIds.add(m.provider);
   }
   return [...allIds].map((id) => {
@@ -380,32 +375,32 @@ async function loadPiAi(): Promise<PiAiHelpers> {
   _piAiLoadAttempted = true;
   try {
     const mod: any = await import("@mariozechner/pi-ai");
-    _piAiModule = {
-      findEnvKeys: mod.findEnvKeys,
-      getEnvApiKey: mod.getEnvApiKey,
-      getProviders: mod.getProviders,
-    };
+    _piAiModule = { findEnvKeys: mod.findEnvKeys, getEnvApiKey: mod.getEnvApiKey };
     return _piAiModule;
   } catch {
     return {};
   }
 }
 
+// Eagerly kick off pi-ai load at module import time so env-var hints
+// are populated by the time the first session_register fires. Failure
+// is silent; `buildProviderCatalogue` falls back to {} which still
+// produces a valid catalogue minus envVar/ambient hints.
+void loadPiAi();
+
 /**
  * Public wrapper: returns the current provider catalogue, or [] when
- * the model registry has not been captured yet. Synchronous after the
- * first pi-ai import resolves; before that, returns rows without env
- * hints (still useful — display names + OAuth + configured flags).
+ * the model registry has not been captured yet. Excludes providers the
+ * bridge registered itself (from `~/.pi/agent/providers.json` via
+ * `pi.registerProvider()`) — those are managed by the dashboard's
+ * "LLM Providers" settings section.
  */
 export function buildProviderCatalogue(): ProviderInfo[] {
   const mr = getModelRegistry();
   if (!mr) return [];
   const piAi = _piAiModule ?? {};
-  if (!_piAiLoadAttempted) {
-    // Kick off async load so subsequent calls have env hints.
-    void loadPiAi();
-  }
-  return _buildProviderCatalogue(mr, piAi);
+  const excludeIds = new Set<string>(lastRegistered.keys());
+  return _buildProviderCatalogue(mr, piAi, excludeIds);
 }
 
 export function getModelDisplayName(modelId: string): string {

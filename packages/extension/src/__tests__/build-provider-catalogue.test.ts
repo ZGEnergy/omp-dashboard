@@ -125,7 +125,7 @@ describe("_buildProviderCatalogue", () => {
     expect(cat[0].ambient).toBeUndefined();
   });
 
-  it("filters out custom providers not in piAi.getProviders()", () => {
+  it("excludes ids in excludeIds set (dashboard-registered custom providers)", () => {
     const reg = makeRegistry({
       models: [
         { provider: "deepseek", id: "deepseek-chat" },
@@ -133,28 +133,27 @@ describe("_buildProviderCatalogue", () => {
         { provider: "your-llmproxy", id: "foo" },    // custom
       ],
     });
-    const cat = _buildProviderCatalogue(reg, {
-      getProviders: () => ["anthropic", "deepseek", "openai", "groq"],
-    });
+    const exclude = new Set(["proxy", "your-llmproxy"]);
+    const cat = _buildProviderCatalogue(reg, {}, exclude);
     const ids = cat.map((c) => c.id).sort();
     expect(ids).toEqual(["deepseek"]);
     expect(ids).not.toContain("proxy");
     expect(ids).not.toContain("your-llmproxy");
   });
 
-  it("OAuth-handler ids survive the filter even if absent from piAi.getProviders()", () => {
+  it("OAuth-handler ids survive the exclusion (a custom OAuth provider keeps its OAuth row)", () => {
     const reg = makeRegistry({
-      oauthIds: ["google-antigravity"],   // dashboard-only OAuth, not in pi-ai's static list
-      models: [{ provider: "google-antigravity", id: "x" }, { provider: "deepseek", id: "y" }],
+      oauthIds: ["corporate-sso"],
+      models: [{ provider: "corporate-sso", id: "x" }, { provider: "deepseek", id: "y" }],
     });
-    const cat = _buildProviderCatalogue(reg, {
-      getProviders: () => ["deepseek"],
-    });
+    // Even if a custom provider is in excludeIds, the OAuth flow must
+    // still be surfaced — the OAuth row is what users log into.
+    const cat = _buildProviderCatalogue(reg, {}, new Set(["corporate-sso"]));
     const ids = cat.map((c) => c.id).sort();
-    expect(ids).toEqual(["deepseek", "google-antigravity"]);
+    expect(ids).toEqual(["corporate-sso", "deepseek"]);
   });
 
-  it("falls back to unfiltered behaviour when piAi.getProviders is missing", () => {
+  it("empty excludeIds = no filtering (default behaviour)", () => {
     const reg = makeRegistry({
       models: [{ provider: "deepseek", id: "x" }, { provider: "proxy", id: "y" }],
     });
