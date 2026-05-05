@@ -137,6 +137,8 @@ export function handleSubscribe(
   // while the browser is actually subscribed (responses use sendToSubscribers).
   piGateway.sendToSession(msg.sessionId, { type: "request_commands", sessionId: msg.sessionId });
   piGateway.sendToSession(msg.sessionId, { type: "request_models", sessionId: msg.sessionId });
+  // See change: replace-hardcoded-provider-lists.
+  piGateway.sendToSession(msg.sessionId, { type: "request_providers", sessionId: msg.sessionId });
   piGateway.sendToSession(msg.sessionId, { type: "request_roles", sessionId: msg.sessionId });
 
   if (eventStore.hasEvents(msg.sessionId)) {

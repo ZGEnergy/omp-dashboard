@@ -342,6 +342,32 @@ export interface ModelInfo {
   id: string;
 }
 
+/**
+ * Provider catalogue entry pushed by the bridge to the server.
+ * Derived from pi's live `ModelRegistry` (see provider-register.ts in
+ * the bridge). The server caches the most recently received catalogue
+ * and uses it as the source for `GET /api/provider-auth/status`.
+ * See change: replace-hardcoded-provider-lists.
+ */
+export interface ProviderInfo {
+  /** pi-ai provider id (e.g. "anthropic", "deepseek", "google-vertex"). */
+  id: string;
+  /** From `modelRegistry.getProviderDisplayName(id)`; falls back to id. */
+  displayName: string;
+  /** True iff `authStorage.getOAuthProviders()` includes this id. */
+  hasOAuth: boolean;
+  /** True iff a credential is stored in auth.json. */
+  configured: boolean;
+  /** Where the credential is sourced from, when configured. */
+  source?: "stored" | "environment" | "fallback" | "runtime";
+  /** First env var name pi-ai consults for this provider, when applicable. */
+  envVar?: string;
+  /** True when configured via ambient credential chain (AWS profile / GCP ADC). */
+  ambient?: boolean;
+  /** Expiry timestamp for OAuth credentials. */
+  expires?: number;
+}
+
 /** Role assignment info (from pi-flows role-manager) */
 export interface RoleInfo {
   roles: Record<string, string>;

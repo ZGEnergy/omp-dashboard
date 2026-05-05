@@ -27,7 +27,7 @@ import { PromptBus } from "./prompt-bus.js";
 import { DashboardDefaultAdapter } from "./dashboard-default-adapter.js";
 import { registerAskUserTool } from "./ask-user-tool.js";
 import { decodeMultiselectAnswer } from "./multiselect-decode.js";
-import { activate as activateProviderRegister, onProviderChanged, reloadProviders } from "./provider-register.js";
+import { activate as activateProviderRegister, onProviderChanged, reloadProviders, buildProviderCatalogue } from "./provider-register.js";
 import type { FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { startMetricsMonitor, stopMetricsMonitor, collectMetrics } from "./process-metrics.js";
 import { scanChildProcesses } from "./process-scanner.js";
@@ -421,6 +421,8 @@ function initBridge(pi: ExtensionAPI) {
               id: m.id,
             }));
             connection.send({ type: "models_list", sessionId, models });
+            // See change: replace-hardcoded-provider-lists.
+            connection.send({ type: "providers_list", sessionId, providers: buildProviderCatalogue() });
           } catch (err) { console.error("[dashboard] models_list push failed:", err); }
         }
         return;
@@ -1258,6 +1260,8 @@ function initBridge(pi: ExtensionAPI) {
           id: m.id,
         }));
         connection.send({ type: "models_list", sessionId, models });
+        // See change: replace-hardcoded-provider-lists.
+        connection.send({ type: "providers_list", sessionId, providers: buildProviderCatalogue() });
       } catch { /* modelRegistry not available */ }
     }
 
@@ -1477,6 +1481,8 @@ function initBridge(pi: ExtensionAPI) {
           id: m.id,
         }));
         connection.send({ type: "models_list", sessionId, models });
+        // See change: replace-hardcoded-provider-lists.
+        connection.send({ type: "providers_list", sessionId, providers: buildProviderCatalogue() });
       } catch { /* ignore */ }
 
       // Retry pending default model — custom provider may now have its models

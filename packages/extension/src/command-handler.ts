@@ -12,6 +12,7 @@ import { killProcessByPgid } from "./process-scanner.js";
 import type { FileEntry, PiSessionInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { filterHiddenCommands } from "./bridge-context.js";
 import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
+import { buildProviderCatalogue } from "./provider-register.js";
 
 const IGNORE_DIRS = new Set([".git", "node_modules", ".next", "dist", "build", ".cache", "__pycache__", ".venv"]);
 const MAX_RESULTS = 20;
@@ -342,6 +343,11 @@ export function createCommandHandler(
             } catch { /* ignore */ }
           }
           return { type: "models_list", sessionId, models: [] };
+        }
+
+        case "request_providers": {
+          // See change: replace-hardcoded-provider-lists.
+          return { type: "providers_list", sessionId, providers: buildProviderCatalogue() };
         }
 
         case "set_thinking_level":

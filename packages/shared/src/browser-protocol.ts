@@ -577,6 +577,15 @@ export interface RequestModelsBrowserMessage {
   sessionId: string;
 }
 
+/**
+ * Browser asks the server to forward `request_providers` to the bridge.
+ * See change: replace-hardcoded-provider-lists.
+ */
+export interface RequestProvidersBrowserMessage {
+  type: "request_providers";
+  sessionId: string;
+}
+
 export interface SetThinkingLevelBrowserMessage {
   type: "set_thinking_level";
   sessionId: string;
@@ -870,6 +879,7 @@ export type BrowserToServerMessage =
   | OpenSpecRefreshBrowserMessage
   | RenameSessionBrowserMessage
   | RequestModelsBrowserMessage
+  | RequestProvidersBrowserMessage
   | SetThinkingLevelBrowserMessage
   | SetModelBrowserMessage
   | ShutdownBrowserMessage

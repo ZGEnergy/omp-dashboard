@@ -11,6 +11,7 @@ import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { DirectoryService } from "./directory-service.js";
 import { extractSessionUpdates, isActivityEvent, isUnreadTrigger } from "./event-status-extraction.js";
 import type { ViewedSessionTracker } from "./viewed-session-tracker.js";
+import { setCatalogueForSession } from "./provider-catalogue-cache.js";
 import { spawnPiSession } from "./process-manager.js";
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
@@ -608,6 +609,14 @@ export function wireEvents(deps: EventWiringDeps): void {
         sessionId,
         models: msg.models,
       } as any);
+    }
+
+    if (msg.type === "providers_list") {
+      // Cache the bridge-pushed catalogue. Browsers don't subscribe to it
+      // directly; they read via GET /api/provider-auth/status.
+      // See change: replace-hardcoded-provider-lists.
+      setCatalogueForSession(sessionId, msg.providers);
+      browserGateway.broadcastToAll({ type: "models_refreshed" } as any);
     }
 
     if (msg.type === "roles_list") {

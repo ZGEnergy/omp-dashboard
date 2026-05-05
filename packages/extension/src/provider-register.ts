@@ -15,6 +15,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { ProviderInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
 // -- Types ----------------------------------------------------------------
 
@@ -286,6 +287,105 @@ let onProvidersChanged: (() => void) | null = null;
 
 export function getSessionInfo(): { provider: string; modelId: string } {
   return { provider: currentSessionProvider, modelId: currentSessionModelId };
+}
+
+// -- Provider catalogue (for dashboard /api/provider-auth/status) -------
+//
+// Pure derivation: given a captured `ModelRegistry` and the pi-ai
+// helpers (`findEnvKeys`, `getEnvApiKey`), build a flat ProviderInfo[]
+// covering every OAuth provider plus every distinct provider id from
+// `getAll()`. The bridge pushes this to the server alongside
+// `models_list`. See change: replace-hardcoded-provider-lists.
+
+type PiAiHelpers = {
+  findEnvKeys?: (id: string) => string[] | undefined;
+  getEnvApiKey?: (id: string) => string | undefined;
+};
+
+export function _buildProviderCatalogue(
+  modelRegistry: any,
+  piAi: PiAiHelpers,
+): ProviderInfo[] {
+  if (!modelRegistry) return [];
+  const oauthIds = new Set<string>(
+    (modelRegistry.authStorage?.getOAuthProviders?.() ?? []).map((p: any) => p.id),
+  );
+  const allIds = new Set<string>(oauthIds);
+  for (const m of (modelRegistry.getAll?.() ?? []) as Array<{ provider?: string }>) {
+    if (m.provider) allIds.add(m.provider);
+  }
+  return [...allIds].map((id) => {
+    let displayName = id;
+    try {
+      displayName = modelRegistry.getProviderDisplayName?.(id) ?? id;
+    } catch { /* fallback to id */ }
+    let configured = false;
+    let source: ProviderInfo["source"];
+    try {
+      const status = modelRegistry.authStorage?.getAuthStatus?.(id);
+      if (status) {
+        configured = !!status.configured;
+        source = status.source;
+      }
+    } catch { /* ignore */ }
+    let expires: number | undefined;
+    try {
+      const cred = modelRegistry.authStorage?.get?.(id);
+      if (cred?.type === "oauth" && typeof cred.expires === "number") {
+        expires = cred.expires;
+      }
+    } catch { /* ignore */ }
+    let envVar: string | undefined;
+    let ambient: boolean | undefined;
+    try {
+      const keys = piAi.findEnvKeys?.(id);
+      if (keys && keys.length > 0) envVar = keys[0];
+      if (piAi.getEnvApiKey?.(id) === "<authenticated>") ambient = true;
+    } catch { /* ignore */ }
+    return {
+      id,
+      displayName,
+      hasOAuth: oauthIds.has(id),
+      configured,
+      source,
+      envVar,
+      ambient,
+      expires,
+    };
+  });
+}
+
+// Lazy-cached pi-ai module (in scope inside pi's process).
+let _piAiModule: PiAiHelpers | null = null;
+let _piAiLoadAttempted = false;
+async function loadPiAi(): Promise<PiAiHelpers> {
+  if (_piAiModule) return _piAiModule;
+  if (_piAiLoadAttempted) return {};
+  _piAiLoadAttempted = true;
+  try {
+    const mod: any = await import("@mariozechner/pi-ai");
+    _piAiModule = { findEnvKeys: mod.findEnvKeys, getEnvApiKey: mod.getEnvApiKey };
+    return _piAiModule;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Public wrapper: returns the current provider catalogue, or [] when
+ * the model registry has not been captured yet. Synchronous after the
+ * first pi-ai import resolves; before that, returns rows without env
+ * hints (still useful — display names + OAuth + configured flags).
+ */
+export function buildProviderCatalogue(): ProviderInfo[] {
+  const mr = getModelRegistry();
+  if (!mr) return [];
+  const piAi = _piAiModule ?? {};
+  if (!_piAiLoadAttempted) {
+    // Kick off async load so subsequent calls have env hints.
+    void loadPiAi();
+  }
+  return _buildProviderCatalogue(mr, piAi);
 }
 
 export function getModelDisplayName(modelId: string): string {

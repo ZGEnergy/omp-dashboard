@@ -18,6 +18,7 @@ import {
   resolveAuthJsonKey,
   type ApiKeyCredential,
 } from "../provider-auth-storage.js";
+import { getLatestCatalogue } from "../provider-catalogue-cache.js";
 import { startCallbackServer } from "../oauth-callback-server.js";
 import type { PiGateway } from "../pi-gateway.js";
 import type { BrowserGateway } from "../browser-gateway.js";
@@ -98,6 +99,14 @@ export function registerProviderAuthRoutes(
 
   // Full status (OAuth + API key)
   fastify.get("/api/provider-auth/status", async () => {
+    // Cold-cache nudge: if no bridge has pushed a catalogue yet, ask
+    // every connected pi to send one. Best-effort, doesn't block this
+    // response. See change: replace-hardcoded-provider-lists.
+    if (getLatestCatalogue().length === 0) {
+      for (const sid of piGateway.getConnectedSessionIds()) {
+        piGateway.sendToSession(sid, { type: "request_providers", sessionId: sid });
+      }
+    }
     return getAuthStatus();
   });
 
