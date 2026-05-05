@@ -125,7 +125,7 @@ describe("_buildProviderCatalogue", () => {
     expect(cat[0].ambient).toBeUndefined();
   });
 
-  it("excludes ids in excludeIds set (dashboard-registered custom providers)", () => {
+  it("marks ids in customIds set with custom:true; catalogue stays complete", () => {
     const reg = makeRegistry({
       models: [
         { provider: "deepseek", id: "deepseek-chat" },
@@ -133,33 +133,35 @@ describe("_buildProviderCatalogue", () => {
         { provider: "your-llmproxy", id: "foo" },    // custom
       ],
     });
-    const exclude = new Set(["proxy", "your-llmproxy"]);
-    const cat = _buildProviderCatalogue(reg, {}, exclude);
+    const customIds = new Set(["proxy", "your-llmproxy"]);
+    const cat = _buildProviderCatalogue(reg, {}, customIds);
+    // ALL providers present — the catalogue does not filter; consumers do.
     const ids = cat.map((c) => c.id).sort();
-    expect(ids).toEqual(["deepseek"]);
-    expect(ids).not.toContain("proxy");
-    expect(ids).not.toContain("your-llmproxy");
+    expect(ids).toEqual(["deepseek", "proxy", "your-llmproxy"]);
+    // Custom flag is set only for custom providers.
+    expect(cat.find((c) => c.id === "deepseek")?.custom).toBeUndefined();
+    expect(cat.find((c) => c.id === "proxy")?.custom).toBe(true);
+    expect(cat.find((c) => c.id === "your-llmproxy")?.custom).toBe(true);
   });
 
-  it("OAuth-handler ids survive the exclusion (a custom OAuth provider keeps its OAuth row)", () => {
+  it("OAuth-handler ids carry custom:true when in customIds (custom OAuth provider)", () => {
     const reg = makeRegistry({
       oauthIds: ["corporate-sso"],
       models: [{ provider: "corporate-sso", id: "x" }, { provider: "deepseek", id: "y" }],
     });
-    // Even if a custom provider is in excludeIds, the OAuth flow must
-    // still be surfaced — the OAuth row is what users log into.
     const cat = _buildProviderCatalogue(reg, {}, new Set(["corporate-sso"]));
-    const ids = cat.map((c) => c.id).sort();
-    expect(ids).toEqual(["corporate-sso", "deepseek"]);
+    expect(cat.find((c) => c.id === "corporate-sso")?.hasOAuth).toBe(true);
+    expect(cat.find((c) => c.id === "corporate-sso")?.custom).toBe(true);
   });
 
-  it("empty excludeIds = no filtering (default behaviour)", () => {
+  it("empty customIds = no provider marked custom (default behaviour)", () => {
     const reg = makeRegistry({
       models: [{ provider: "deepseek", id: "x" }, { provider: "proxy", id: "y" }],
     });
     const cat = _buildProviderCatalogue(reg, {});
     const ids = cat.map((c) => c.id).sort();
     expect(ids).toEqual(["deepseek", "proxy"]);
+    expect(cat.every((c) => !c.custom)).toBe(true);
   });
 
   it("does not throw when getProviderDisplayName throws", () => {

@@ -305,25 +305,23 @@ type PiAiHelpers = {
 export function _buildProviderCatalogue(
   modelRegistry: any,
   piAi: PiAiHelpers,
-  excludeIds: ReadonlySet<string> = new Set(),
+  customIds: ReadonlySet<string> = new Set(),
 ): ProviderInfo[] {
   if (!modelRegistry) return [];
   const oauthIds = new Set<string>(
     (modelRegistry.authStorage?.getOAuthProviders?.() ?? []).map((p: any) => p.id),
   );
-  // Custom providers registered by the dashboard itself (entries from
-  // ~/.pi/agent/providers.json driven through pi.registerProvider()) are
-  // managed by the dashboard's dedicated "LLM Providers" settings
-  // section — do NOT also surface them as "Add Key" rows. The bridge
-  // passes its `lastRegistered` snapshot as `excludeIds`. OAuth-handler
-  // ids are kept regardless (a custom provider that registers an OAuth
-  // flow is still surfaced via OAuth UI).
-  // See change: replace-hardcoded-provider-lists (filter-custom follow-up).
+  // The catalogue is the complete picture of what pi knows about —
+  // built-in providers, OAuth providers, AND custom providers registered
+  // by the dashboard via pi.registerProvider() from ~/.pi/agent/providers.json.
+  // Custom providers carry `custom: true` so consumers can decide what
+  // to surface where (e.g. the auth UI suppresses their API-key rows
+  // because they're managed by the LLM Providers settings section).
+  // Filtering decisions belong to consumers, not to this function.
+  // See change: replace-hardcoded-provider-lists.
   const allIds = new Set<string>(oauthIds);
   for (const m of (modelRegistry.getAll?.() ?? []) as Array<{ provider?: string }>) {
-    if (!m.provider) continue;
-    if (excludeIds.has(m.provider) && !oauthIds.has(m.provider)) continue;
-    allIds.add(m.provider);
+    if (m.provider) allIds.add(m.provider);
   }
   return [...allIds].map((id) => {
     let displayName = id;
@@ -362,6 +360,7 @@ export function _buildProviderCatalogue(
       envVar,
       ambient,
       expires,
+      custom: customIds.has(id) || undefined,
     };
   });
 }
@@ -390,17 +389,20 @@ void loadPiAi();
 
 /**
  * Public wrapper: returns the current provider catalogue, or [] when
- * the model registry has not been captured yet. Excludes providers the
- * bridge registered itself (from `~/.pi/agent/providers.json` via
- * `pi.registerProvider()`) — those are managed by the dashboard's
- * "LLM Providers" settings section.
+ * the model registry has not been captured yet. Marks providers the
+ * bridge itself registered (from `~/.pi/agent/providers.json` via
+ * `pi.registerProvider()`) with `custom: true` so consumers can
+ * suppress their API-key auth rows (those are managed by the LLM
+ * Providers settings section). The catalogue itself is complete —
+ * including custom providers — so other consumers (e.g. diagnostics)
+ * see the full picture.
  */
 export function buildProviderCatalogue(): ProviderInfo[] {
   const mr = getModelRegistry();
   if (!mr) return [];
   const piAi = _piAiModule ?? {};
-  const excludeIds = new Set<string>(lastRegistered.keys());
-  return _buildProviderCatalogue(mr, piAi, excludeIds);
+  const customIds = new Set<string>(lastRegistered.keys());
+  return _buildProviderCatalogue(mr, piAi, customIds);
 }
 
 export function getModelDisplayName(modelId: string): string {

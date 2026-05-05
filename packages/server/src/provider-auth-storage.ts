@@ -162,7 +162,13 @@ export function _buildAuthStatus(
   }
 
   // API-key rows from bridge-pushed catalogue.
+  // Skip custom providers (registered via pi.registerProvider() from
+  // ~/.pi/agent/providers.json) — those are managed by the dedicated
+  // LLM Providers settings section. OAuth rows for custom providers
+  // were already emitted above when the OAuth handler registry has
+  // a matching id.
   for (const entry of catalogue) {
+    if (entry.custom) continue;
     const hasOAuthCollision = oauthIds.has(entry.id);
     const uiId = hasOAuthCollision ? `${entry.id}-api` : entry.id;
     const displayName = hasOAuthCollision

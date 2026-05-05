@@ -366,6 +366,15 @@ export interface ProviderInfo {
   ambient?: boolean;
   /** Expiry timestamp for OAuth credentials. */
   expires?: number;
+  /**
+   * True when this provider was registered by the dashboard itself via
+   * `pi.registerProvider()` from `~/.pi/agent/providers.json` (a "custom"
+   * provider managed by the LLM Providers settings section). Consumers
+   * use this to suppress API-key auth rows for custom providers — their
+   * keys are managed elsewhere. OAuth rows are still emitted because a
+   * custom OAuth provider needs its login button.
+   */
+  custom?: boolean;
 }
 
 /** Role assignment info (from pi-flows role-manager) */

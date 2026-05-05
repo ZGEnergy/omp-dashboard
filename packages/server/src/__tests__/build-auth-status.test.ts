@@ -150,6 +150,35 @@ describe("_buildAuthStatus", () => {
     expect(apiRow?.maskedKey).toBe("sk-an...234");
   });
 
+  it("skips API-key rows for catalogue entries marked custom:true", () => {
+    const catalogue: ProviderInfo[] = [
+      { id: "deepseek", displayName: "DeepSeek", hasOAuth: false, configured: false },
+      { id: "proxy", displayName: "proxy", hasOAuth: false, configured: false, custom: true },
+      { id: "your-llmproxy", displayName: "your-llmproxy", hasOAuth: false, configured: true, custom: true },
+    ];
+    const result = _buildAuthStatus(catalogue, {}, []);
+    const ids = result.map((r) => r.id);
+    expect(ids).toContain("deepseek");
+    expect(ids).not.toContain("proxy");
+    expect(ids).not.toContain("your-llmproxy");
+  });
+
+  it("OAuth row IS still emitted for a custom provider with an OAuth handler", () => {
+    // A custom provider whose id matches a registered OAuth handler
+    // should still surface its OAuth row — only the API-key row is
+    // suppressed for custom providers.
+    const corporateHandler = makeOAuthHandler("corporate-sso", "Corporate SSO");
+    const catalogue: ProviderInfo[] = [
+      { id: "corporate-sso", displayName: "Corporate SSO", hasOAuth: true, configured: false, custom: true },
+    ];
+    const result = _buildAuthStatus(catalogue, {}, [corporateHandler]);
+    const oauthRow = result.find((r) => r.id === "corporate-sso");
+    const apiKeyRow = result.find((r) => r.id === "corporate-sso-api");
+    expect(oauthRow).toBeDefined();
+    expect(oauthRow?.flowType).toBe("auth_code");
+    expect(apiKeyRow).toBeUndefined();
+  });
+
   it("preserves OAuth handler order then catalogue order", () => {
     const catalogue: ProviderInfo[] = [
       { id: "deepseek", displayName: "DeepSeek", hasOAuth: false, configured: false },
