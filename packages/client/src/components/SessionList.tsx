@@ -486,7 +486,9 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
           </div>
           {/* Plugin slot: sidebar-folder-section (additive, coexists with FolderOpenSpecSection) */}
           <SidebarFolderSectionSlot folder={{ cwd: group.cwd }} />
-          {openspecMap?.get(group.cwd)?.initialized && (
+          {/* Render for both initialized (full section) and pending (spinner).
+              See change: fix-cold-boot-openspec-protocol. */}
+          {(openspecMap?.get(group.cwd)?.initialized || openspecMap?.get(group.cwd)?.pending) && (
             <FolderOpenSpecSection
               data={openspecMap.get(group.cwd)!}
               cwd={group.cwd}

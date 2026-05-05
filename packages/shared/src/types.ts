@@ -392,6 +392,19 @@ export function deriveChangeState(change: OpenSpecChange): ChangeState {
 export interface OpenSpecData {
   initialized: boolean;
   changes: OpenSpecChange[];
+  /**
+   * Cold-boot signaling: server has detected `openspec/changes/` for this
+   * cwd but the slow poll has not yet produced authoritative data.
+   *
+   * Optional for backwards compatibility — absence means `false`. Composes
+   * with `initialized` to encode three states:
+   *   - { initialized: false, pending: false } → no openspec dir
+   *   - { initialized: false, pending: true  } → dir exists, polling
+   *   - { initialized: true,  pending: ?     } → poll complete
+   *
+   * See change: fix-cold-boot-openspec-protocol.
+   */
+  pending?: boolean;
 }
 
 /** OpenSpec workflow phase detected from tool calls */

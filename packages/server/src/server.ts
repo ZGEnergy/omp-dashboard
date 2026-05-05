@@ -23,7 +23,7 @@ import { createPendingResumeIntentRegistry } from "./pending-resume-intent-regis
 import { applyReattachPolicy } from "./reattach-placement.js";
 
 // pending-load-manager removed — server loads sessions directly via DirectoryService
-import { createDirectoryService, type DirectoryService } from "./directory-service.js";
+import { createDirectoryService, isOpenSpecDataEmpty, type DirectoryService } from "./directory-service.js";
 import { createTerminalManager, type TerminalManager } from "./terminal-manager.js";
 import { createTerminalGateway, type TerminalGateway } from "./terminal-gateway.js";
 import { writePid, removePid } from "./server-pid.js";
@@ -143,10 +143,6 @@ export interface PostInstallRepairDeps {
   browserGateway: { broadcastToAll(msg: ServerToBrowserMessage): void };
 }
 
-function isOpenSpecDataEmpty(d: OpenSpecData | undefined): boolean {
-  if (!d) return true;
-  return !d.initialized && (!d.changes || d.changes.length === 0);
-}
 
 /**
  * Centralized post-install repair work fired on every `installing → ready`
