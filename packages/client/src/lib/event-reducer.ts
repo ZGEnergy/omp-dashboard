@@ -5,6 +5,7 @@
 import type { DashboardEvent, FlowState, ArchitectState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { isFlowEvent, reduceFlowEvent } from "@blackbelt-technology/pi-dashboard-flows-plugin/reducer";
 import { isArchitectEvent, reduceArchitectEvent } from "@blackbelt-technology/pi-dashboard-flows-plugin/reducer";
+import { parseSkillBlock, type SkillBlock } from "@blackbelt-technology/pi-dashboard-shared/skill-block-parser.js";
 
 export interface ChatImage {
   data: string;
@@ -40,6 +41,15 @@ export interface ChatMessage {
    * `entryId` once persistence completes. See change: fix-per-message-fork.
    */
   nonce?: string;
+  /**
+   * Parsed skill-invocation metadata for user messages whose persisted
+   * content matches the `<skill name=...>...</skill>\n\nargs` envelope (pi's
+   * `_expandSkillCommand` output, also produced by the dashboard bridge).
+   * `content` is preserved as the raw expanded string for copy semantics;
+   * the renderer uses `skill` to produce a collapsible card.
+   * See change: render-skill-invocations-collapsibly.
+   */
+  skill?: SkillBlock;
 }
 
 export interface ToolCallState {
@@ -695,12 +705,17 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
         } else {
           text = String(msg.content ?? "");
         }
+        // Detect a wrapped <skill>...</skill> envelope so the renderer can show
+        // a collapsible card and ArrowUp recall can return the slash form.
+        // See change: render-skill-invocations-collapsibly.
+        const skill = parseSkillBlock(text) ?? undefined;
         next.messages = [
           ...next.messages,
           {
             id: `msg-${next.messages.length}`,
             role: "user",
             content: text,
+            ...(skill ? { skill } : {}),
             images,
             timestamp: event.timestamp,
             // entryId from data.entryId is correct ONLY for replayed events

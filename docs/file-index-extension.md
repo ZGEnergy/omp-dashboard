@@ -17,7 +17,7 @@
 | `src/extension/server-probe.ts` | TCP probe to detect running server |
 | `src/extension/server-launcher.ts` | Auto-start server as detached process; captures **both stdout AND stderr** to `~/.pi/dashboard/server.log` (append mode) by passing `stdoutFd: logFd` alongside `logFd` — parity with `pi-dashboard start`'s `stdio: ["ignore", logFd, logFd]`. Exports pure `buildSpawnDetachedOptions` + `buildReadyTimeoutMessage`; latter appends `nodejs/node#58515` upgrade hint when `isKnownBadNode(process.version)` true. |
 | `src/extension/command-handler.ts` | Command routing: `!`/`!!` bash, `/compact`, slash commands |
-| `src/extension/prompt-expander.ts` | Slash command → prompt template expansion (supports colon-to-hyphen aliasing: `/opsx:cmd` → `opsx-cmd.md`) |
+| `src/extension/prompt-expander.ts` | Slash command → prompt template expansion (supports colon-to-hyphen aliasing: `/opsx:cmd` → `opsx-cmd.md`). **Skill expansions wrap output in pi's `<skill name=...>...</skill>\n\nargs` envelope** via `buildSkillBlock` from `pi-dashboard-shared/skill-block-parser.js`; detection via `isSkillResolution(templateName, filePath, pi)` (templateName starts with `skill:` OR pi.getCommands fallback returned `source: "skill"`). Plain prompt templates continue to emit unwrapped `body\n\nargs`. See change: render-skill-invocations-collapsibly. |
 | `src/extension/dev-build.ts` | Dev build-on-reload helper (client build + server shutdown) |
 | `src/extension/server-auto-start.ts` | mDNS-first discovery → health check fallback → auto-start with concurrent launch detection |
 | `src/extension/process-metrics.ts` | Lightweight CPU/memory/event-loop metrics collector for heartbeats |

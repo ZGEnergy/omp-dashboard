@@ -383,4 +383,58 @@ describe("ChatView", () => {
       expect(onDismiss).toHaveBeenCalledOnce();
     });
   });
+
+  // See change: render-skill-invocations-collapsibly.
+  describe("skill-invocation routing", () => {
+    it("routes user messages with skill metadata to SkillInvocationCard", () => {
+      const state = createInitialState();
+      const wrapped = `<skill name="openspec-explore" location="/x/SKILL.md">\nbody\n</skill>\n\nfollow up`;
+      state.messages.push({
+        id: "u-skill",
+        role: "user",
+        content: wrapped,
+        timestamp: 1,
+        skill: {
+          name: "openspec-explore",
+          location: "/x/SKILL.md",
+          body: "body",
+          args: "follow up",
+          condensed: "/skill:openspec-explore follow up",
+        },
+      } as ChatMessage);
+      state.messages.push({
+        id: "u-plain",
+        role: "user",
+        content: "plain prompt",
+        timestamp: 2,
+      } as ChatMessage);
+      const { container } = render(
+        <ThemeProvider>
+          <ChatView state={state} toolContext={defaultToolContext} />
+        </ThemeProvider>,
+      );
+      // The skill card uses aria-expanded for its toggle button. The plain bubble does not.
+      const expandToggles = container.querySelectorAll("button[aria-expanded]");
+      expect(expandToggles.length).toBe(1);
+      // The condensed slash form appears in the document
+      expect(container.textContent).toContain("/skill:openspec-explore follow up");
+      // The plain prompt also renders
+      expect(container.textContent).toContain("plain prompt");
+    });
+
+    it("plain user messages without skill stamp render as the regular bubble", () => {
+      const state = stateWithMessages([
+        { id: "u", role: "user", content: "hello" },
+      ]);
+      const { container } = render(
+        <ThemeProvider>
+          <ChatView state={state} toolContext={defaultToolContext} />
+        </ThemeProvider>,
+      );
+      // No card-style toggle button
+      expect(container.querySelectorAll("button[aria-expanded]").length).toBe(0);
+      // Standard MessageBubble copy buttons present
+      expect(container.querySelector('button[title="Copy as Markdown"]')).not.toBeNull();
+    });
+  });
 });
