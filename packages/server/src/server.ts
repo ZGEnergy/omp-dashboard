@@ -45,6 +45,7 @@ import { registerGitRoutes } from "./routes/git-routes.js";
 import { registerFileRoutes } from "./routes/file-routes.js";
 import { registerOpenSpecRoutes } from "./routes/openspec-routes.js";
 import { registerSystemRoutes } from "./routes/system-routes.js";
+import { registerDoctorRoutes } from "./routes/doctor-routes.js";
 import { registerProviderAuthRoutes } from "./routes/provider-auth-routes.js";
 import { registerPackageRoutes } from "./routes/package-routes.js";
 import { registerRecommendedRoutes, invalidateRecommendedCache } from "./routes/recommended-routes.js";
@@ -707,7 +708,9 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       if (data) browserGateway.broadcastToAll({ type: "openspec_update", cwd, data });
     },
   });
-  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService, piGateway });
+  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService, piGateway, bootstrapState });
+  // GET /api/doctor — see change: doctor-rich-output (task 4.2). Auth-gated identically to /api/config.
+  registerDoctorRoutes(fastify);
   registerToolRoutes(fastify, { registry: getDefaultRegistry(), networkGuard });
   registerJjRoutes(fastify, { browserGateway, pendingAttachRegistry, networkGuard });
 
