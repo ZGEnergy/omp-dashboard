@@ -44,7 +44,7 @@ Download a pre-built installer from [GitHub Releases](https://github.com/BlackBe
 |----------|----------|
 | **macOS** (Apple Silicon / Intel) | `.dmg` (arm64 / x64) |
 | **Linux** (x64 / ARM64) | `.deb` or `.AppImage` |
-| **Windows** (x64 / ARM64) | `.exe` (NSIS), `.zip`, or portable `.exe` |
+| **Windows** (x64 / ARM64) | `.zip` |
 
 On first launch a setup wizard walks you through mode selection (standalone vs. power-user), API key / OAuth sign-in, and [recommended extensions](#recommended-extensions). The standalone mode bundles Node.js and auto-installs pi + dashboard + openspec into `~/.pi-dashboard/` — **no terminal, npm, or Node.js required**.
 
@@ -640,7 +640,7 @@ Output by platform:
 |----------|--------|----------|
 | macOS | `.dmg` | `packages/electron/out/make/` |
 | Linux | `.deb` + `.AppImage` | `packages/electron/out/make/` |
-| Windows | `.exe` (NSIS) + `.zip` + portable `.exe` | `packages/electron/out/make/` |
+| Windows | `.zip` | `packages/electron/out/make/` |
 
 ### Cross-platform builds (Docker)
 
@@ -649,7 +649,7 @@ From macOS or Linux, build installers for all platforms:
 ```bash
 npm run electron:build -- --all              # macOS (native) + Linux + Windows (Docker)
 npm run electron:build -- --linux            # Linux .deb + .AppImage only
-npm run electron:build -- --windows          # Windows .exe (NSIS) only
+npm run electron:build -- --windows          # Windows .zip only
 npm run electron:build -- --linux --windows  # Both, skip native
 ```
 
@@ -663,7 +663,7 @@ npm run electron:build -- --mac-both
 
 Requires Rosetta 2 (`softwareupdate --install-rosetta --agree-to-license`) so node-pty's x64 prebuilt binary can be unpacked during the cross-arch run. The script wipes per-arch caches between the two builds (`resources/.last-arch` sentinel) so back-to-back runs don't accidentally ship arm64 binaries inside an x64 DMG. Intel macs cannot cross-build arm64 locally (Rosetta is one-way) — use CI for arm64 validation.
 
-Docker builds use a Node 22 Debian container with NSIS installed for Windows cross-compilation. Output goes to `packages/electron/out/make/`.
+Docker builds use a Node 22 Debian container for Windows cross-compilation. Output goes to `packages/electron/out/make/`.
 
 ### Electron dev mode
 
@@ -718,8 +718,8 @@ This runs CI, publishes to npm with `--provenance` for supply-chain transparency
 | `macos-15-intel` | macOS x64 | `.dmg` (Intel; last GitHub-hosted x86_64 image, EOL 2027-08) |
 | `ubuntu-latest` | Linux x64 | `.deb` + `.AppImage` |
 | `ubuntu-24.04-arm` | Linux arm64 | `.deb` |
-| `windows-latest` | Windows x64 | `.exe` (NSIS) + `.zip` + portable |
-| `windows-latest` | Windows arm64 | `.zip` + portable (x64 Node.js via WoW64) |
+| `windows-latest` | Windows x64 | `.zip` |
+| `windows-latest` | Windows arm64 | `.zip` (x64 Node.js via WoW64) |
 
 All artifacts are uploaded to a **draft GitHub Release**. Release notes are extracted automatically from the matching `## [<version>]` section of [`CHANGELOG.md`](CHANGELOG.md).
 
