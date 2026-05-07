@@ -655,6 +655,35 @@ export function dismissInteractiveRequest(
   };
 }
 
+/**
+ * Find the most recent `user`-role ChatMessage and return its content + images
+ * mapped to the wire-format `ImageContent[]` shape (adds `type: "image"`).
+ *
+ * Used by the Retry-after-error button to re-send the failed turn via
+ * `send_prompt` (which routes to `pi.sendUserMessage` in the bridge). Skips
+ * non-user roles like `interactiveUi`, so an `ask_user` response cannot be
+ * mistaken for a prompt.
+ *
+ * Returns `null` when no user message exists in history.
+ *
+ * See change: fix-retry-resends-last-user-message.
+ */
+export function findLastUserPrompt(
+  messages: readonly ChatMessage[],
+): { text: string; images?: { type: "image"; data: string; mimeType: string }[] } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.role !== "user") continue;
+    const images = m.images?.map((img) => ({
+      type: "image" as const,
+      data: img.data,
+      mimeType: img.mimeType,
+    }));
+    return { text: m.content, ...(images && images.length > 0 ? { images } : {}) };
+  }
+  return null;
+}
+
 /** Extract error info from agent_end event's messages array. */
 export function extractAgentEndError(data: Record<string, unknown>): string | undefined {
   const messages = data.messages;
