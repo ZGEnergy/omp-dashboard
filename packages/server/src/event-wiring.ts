@@ -623,9 +623,19 @@ export function wireEvents(deps: EventWiringDeps): void {
     if (msg.type === "providers_list") {
       // Cache the bridge-pushed catalogue. Browsers don't subscribe to it
       // directly; they read via GET /api/provider-auth/status.
-      // See change: replace-hardcoded-provider-lists.
-      setCatalogueForSession(sessionId, msg.providers);
-      browserGateway.broadcastToAll({ type: "models_refreshed" } as any);
+      // Broadcast `models_refreshed` ONLY when the catalogue contents
+      // actually changed. Routine state-syncs (every fork/resume/reconnect/
+      // subscribe) re-send identical content; broadcasting unconditionally
+      // wipes every browser's modelsMap and — because App.tsx's
+      // auto-subscribe effect skips re-requesting models for any session
+      // that's already in `subscribedRef` — leaves previously-visited
+      // sessions with an empty model selector until reconnect. See changes:
+      // replace-hardcoded-provider-lists,
+      // fix-providers-list-spurious-models-refreshed.
+      const { changed } = setCatalogueForSession(sessionId, msg.providers);
+      if (changed) {
+        browserGateway.broadcastToAll({ type: "models_refreshed" } as any);
+      }
     }
 
     if (msg.type === "roles_list") {

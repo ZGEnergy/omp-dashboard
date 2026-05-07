@@ -1,7 +1,12 @@
 /**
  * End-to-end test: `providers_list` arriving from a (fake) bridge updates
  * the provider-catalogue cache, and `getAuthStatus()` reflects it.
- * See change: replace-hardcoded-provider-lists.
+ * Also pins the broadcast-gating contract: `models_refreshed` is emitted to
+ * browsers only when the catalogue contents actually changed (regression for
+ * the over-aggressive global wipe that left previously-visited sessions
+ * with empty model selectors).
+ * See changes: replace-hardcoded-provider-lists,
+ *              fix-providers-list-spurious-models-refreshed.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { WebSocket } from "ws";
@@ -83,5 +88,55 @@ describe("providers_list — server wiring", () => {
     expect(fireworksRow?.envVar).toBe("FIREWORKS_API_KEY");
 
     piWs.close();
+  });
+
+  // Regression — see change: fix-providers-list-spurious-models-refreshed.
+  it("broadcasts models_refreshed only when catalogue contents actually change", async () => {
+    const piWs = await connectSession(piPort, "p1");
+    const browserWs = new WebSocket(`ws://localhost:${browserPort}/ws`);
+    const browserMessages: any[] = [];
+    await new Promise<void>((resolve) => {
+      browserWs.on("open", () => resolve());
+    });
+    browserWs.on("message", (raw) => {
+      try {
+        const m = JSON.parse(raw.toString());
+        browserMessages.push(m);
+      } catch { /* ignore */ }
+    });
+    // Drain initial snapshot/handshake messages.
+    await wait(80);
+    browserMessages.length = 0;
+
+    const cat1 = [
+      { id: "deepseek", displayName: "DeepSeek", hasOAuth: false, configured: false },
+      { id: "fireworks", displayName: "Fireworks", hasOAuth: false, configured: false, envVar: "FIREWORKS_API_KEY" },
+    ];
+
+    // 1) First push — must broadcast.
+    piWs.send(JSON.stringify({ type: "providers_list", sessionId: "p1", providers: cat1 }));
+    await wait(80);
+    const refreshes1 = browserMessages.filter((m) => m.type === "models_refreshed");
+    expect(refreshes1.length).toBe(1);
+    browserMessages.length = 0;
+
+    // 2) Identical re-push (the routine state-sync case) — must NOT broadcast.
+    piWs.send(JSON.stringify({ type: "providers_list", sessionId: "p1", providers: cat1 }));
+    await wait(80);
+    const refreshes2 = browserMessages.filter((m) => m.type === "models_refreshed");
+    expect(refreshes2.length).toBe(0);
+
+    // 3) Push with a flipped `custom` flag — must broadcast (catalogue truly changed).
+    const cat2 = [
+      { id: "deepseek", displayName: "DeepSeek", hasOAuth: false, configured: false, custom: true },
+      { id: "fireworks", displayName: "Fireworks", hasOAuth: false, configured: false, envVar: "FIREWORKS_API_KEY" },
+    ];
+    piWs.send(JSON.stringify({ type: "providers_list", sessionId: "p1", providers: cat2 }));
+    await wait(80);
+    const refreshes3 = browserMessages.filter((m) => m.type === "models_refreshed");
+    expect(refreshes3.length).toBe(1);
+
+    piWs.close();
+    browserWs.close();
   });
 });
