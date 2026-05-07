@@ -212,6 +212,11 @@ export default function App() {
   const spawningCwdsRef = useRef<Set<string>>(spawningCwds);
   spawningCwdsRef.current = spawningCwds;
   const spawnTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // Maps client-minted requestId → cwd, used to correlate session_added
+  // back to the originating click for auto-select after spawn AND fork.
+  // Lives alongside `spawningCwds` (which keeps placeholder + disabled-button
+  // behavior cwd-keyed). See change: spawn-correlation-token.
+  const pendingSpawnsRef = useRef<Map<string, { cwd: string; kind: "spawn" | "resume" }>>(new Map());
   const [sessionOrderMap, setSessionOrderMap] = useState<Map<string, string[]>>(new Map());
   const [pinnedDirectories, setPinnedDirectories] = useState<string[]>([]);
   const [pinDialogOpen, setPinDialogOpen] = useState(false);
@@ -337,7 +342,7 @@ export default function App() {
 
   const handleMessage = useMessageHandler(
     { setSessions, setSessionStates, setSessionCommands, setSessionFlows, setFileResults, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setTerminals, setEditorStatuses, setDiscoveredServers, setSpawnErrors, setResumeErrors },
-    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef },
+    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef },
   );
 
   useEffect(() => {
@@ -562,6 +567,7 @@ export default function App() {
     selectedId, send, navigate, setMobileOpen,
     setSessions, setSessionStates, setSpawningCwds, setTerminals,
     clearSpawningCwd, spawnTimeoutsRef, pendingTerminalCwdRef, terminals,
+    pendingSpawnsRef,
   });
   const {
     handleAbort, handleForceKill, handleCancelPending, handleRespondToUi, handleFlowAction, handleSend,

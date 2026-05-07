@@ -43,6 +43,14 @@ export interface EventWiringDeps {
    * See change: session-card-unread-stripes.
    */
   viewedSessionTracker?: ViewedSessionTracker;
+  /**
+   * Optional client-correlation registry. When provided, the wiring
+   * consumes the requestId for the resolved spawnToken after a successful
+   * three-tier link and surfaces it on `session_added` as `spawnRequestId`,
+   * letting the client auto-select / dismiss its placeholder by exact
+   * correlation. See change: spawn-correlation-token.
+   */
+  pendingClientCorrelations?: import("./pending-client-correlations.js").PendingClientCorrelations;
 }
 
 /**
@@ -62,6 +70,7 @@ export function wireEvents(deps: EventWiringDeps): void {
     pendingDashboardSpawns,
     pendingAttachRegistry,
     viewedSessionTracker,
+    pendingClientCorrelations,
   } = deps;
 
   // Broadcast placeholder session to browsers when auto-created from early events
@@ -452,7 +461,34 @@ export function wireEvents(deps: EventWiringDeps): void {
         }
       }
 
-      browserGateway.headlessPidRegistry.linkSession(sessionId, msg.cwd);
+      // Three-tier link: token → pid → cwd-FIFO. Each tier is independently
+      // correct; `linkByToken` is the strong identity introduced by
+      // `spawn-correlation-token`. cwd-FIFO is the legacy fallback for old
+      // bridges that send neither token nor pid (and is logged so we can see
+      // when it actually triggers).
+      let linked = false;
+      if (msg.spawnToken) {
+        linked = browserGateway.headlessPidRegistry.linkByToken(msg.spawnToken, sessionId, msg.pid);
+      }
+      if (!linked && msg.pid !== undefined) {
+        linked = browserGateway.headlessPidRegistry.linkByPid(sessionId, msg.pid);
+      }
+      if (!linked) {
+        if (msg.spawnToken || msg.pid !== undefined) {
+          console.error(
+            `[event-wiring] cwd-FIFO fallback for session ${sessionId} — token=${msg.spawnToken ?? ""} pid=${msg.pid ?? ""} cwd=${msg.cwd}`,
+          );
+        }
+        browserGateway.headlessPidRegistry.linkSession(sessionId, msg.cwd);
+      }
+
+      // Resolve the originating browser `requestId` (when known) so the
+      // upcoming session_added broadcast can carry spawnRequestId and the
+      // client can auto-select / dismiss its placeholder.
+      // See change: spawn-correlation-token.
+      const spawnRequestId = (msg.spawnToken && pendingClientCorrelations)
+        ? pendingClientCorrelations.consume(msg.spawnToken)
+        : undefined;
 
       const isNewSession = !knownSessionIds.has(sessionId);
       knownSessionIds.add(sessionId);
@@ -469,7 +505,11 @@ export function wireEvents(deps: EventWiringDeps): void {
         }
       }
 
-      const forkParent = pendingForkRegistry.consumeFork(msg.cwd);
+      // Fork-parent lookup is keyed by spawn token (was: cwd, racy on
+      // multi-fork-in-same-cwd). See change: spawn-correlation-token.
+      const forkParent = msg.spawnToken
+        ? pendingForkRegistry.consumeFork(msg.spawnToken)
+        : undefined;
       sessionOrderManager.insert(msg.cwd, sessionId);
 
       if (forkParent) {
@@ -489,7 +529,7 @@ export function wireEvents(deps: EventWiringDeps): void {
 
       const updatedSession = sessionManager.get(sessionId);
       if (updatedSession) {
-        browserGateway.broadcastSessionAdded(updatedSession);
+        browserGateway.broadcastSessionAdded(updatedSession, spawnRequestId ? { spawnRequestId } : undefined);
       }
 
       const isNewCwd = !sessionManager.listAll().some(

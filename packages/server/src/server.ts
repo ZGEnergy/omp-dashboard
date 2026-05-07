@@ -18,6 +18,7 @@ import { createPreferencesStore, type PreferencesStore } from "./preferences-sto
 import { createMetaPersistence, type MetaPersistence } from "./meta-persistence.js";
 import { createSessionOrderManager, type SessionOrderManager } from "./session-order-manager.js";
 import { createPendingForkRegistry, type PendingForkRegistry } from "./pending-fork-registry.js";
+import { createPendingClientCorrelations } from "./pending-client-correlations.js";
 import { createPendingAttachRegistry } from "./pending-attach-registry.js";
 import { createPendingResumeIntentRegistry } from "./pending-resume-intent-registry.js";
 import { applyReattachPolicy } from "./reattach-placement.js";
@@ -269,6 +270,10 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   const metaPersistence = createMetaPersistence();
   const sessionOrderManager = createSessionOrderManager(preferencesStore);
   const pendingForkRegistry = createPendingForkRegistry();
+  // Maps spawnToken → originating browser requestId. Surfaced as
+  // session_added.spawnRequestId so the client can auto-select / dismiss
+  // its placeholder by exact correlation. See change: spawn-correlation-token.
+  const pendingClientCorrelations = createPendingClientCorrelations();
 
   // Restore sessions from per-session .meta.json files (scans ~/.pi/agent/sessions/)
   const scanResult = scanAllSessions();
@@ -521,7 +526,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     },
   });
 
-  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry, pendingResumeIntents);
+  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry, pendingResumeIntents, pendingClientCorrelations);
 
   // Resolve package version once at startup
   const __require = createRequire(import.meta.url);
@@ -557,6 +562,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     pendingDashboardSpawns,
     pendingAttachRegistry,
     viewedSessionTracker: browserGateway.viewedSessionTracker,
+    pendingClientCorrelations,
   });
 
   // Auto-shutdown idle timer
@@ -688,6 +694,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     bootstrapState,
     bootstrapQueue,
     pendingResumeIntents,
+    pendingAttachRegistry,
   });
 
   // Register route modules

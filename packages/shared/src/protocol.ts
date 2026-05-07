@@ -23,6 +23,14 @@ export interface SessionRegisterMessage {
   /** OS process ID of the pi agent — used for force-kill escalation */
   pid?: number;
   /**
+   * Server-minted spawn correlation token. Bridge populates this from
+   * `process.env.PI_DASHBOARD_SPAWN_TOKEN` IFF this is the first register
+   * for the bridge process (`bc.hasRegisteredOnce === false`). Subsequent
+   * registers (reattach, in-process new/fork/resume) omit it.
+   * See change: spawn-correlation-token.
+   */
+  spawnToken?: string;
+  /**
    * Why the bridge is registering this session. The bridge sets this to
    * `"spawn"` for the very first `session_register` after process boot
    * and for every register emitted by the new/fork/resume path

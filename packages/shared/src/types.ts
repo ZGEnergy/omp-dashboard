@@ -649,4 +649,11 @@ export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
+  /**
+   * Optional structured failure-classifier code paired with `error`.
+   * Lets clients render specific UI for known failure modes
+   * (e.g., `"FORK_EMPTY_SESSION"`).
+   * See change: fix-fork-empty-session-silent-timeout.
+   */
+  code?: string;
 }

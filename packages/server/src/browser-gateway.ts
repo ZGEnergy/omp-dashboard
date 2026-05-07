@@ -68,7 +68,7 @@ import { handlePinDirectory, handleUnpinDirectory, handleReorderPinnedDirs, hand
 export interface BrowserGateway {
   wss: WebSocketServer;
   broadcastEvent(sessionId: string, seq: number, event: any): void;
-  broadcastSessionAdded(session: any): void;
+  broadcastSessionAdded(session: any, opts?: { spawnRequestId?: string }): void;
   broadcastSessionUpdated(sessionId: string, updates: any): void;
   broadcastSessionRemoved(sessionId: string): void;
   sendToSubscribers(sessionId: string, msg: ServerToBrowserMessage): void;
@@ -119,6 +119,7 @@ export function createBrowserGateway(
   maxWsBufferBytes?: number,
   pendingAttachRegistry?: import("./pending-attach-registry.js").PendingAttachRegistry,
   pendingResumeIntents?: import("./pending-resume-intent-registry.js").PendingResumeIntentRegistry,
+  pendingClientCorrelations?: import("./pending-client-correlations.js").PendingClientCorrelations,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -307,6 +308,7 @@ export function createBrowserGateway(
           headlessPidRegistry, pendingResumeRegistry, pendingDashboardSpawns,
           pendingAttachRegistry,
           pendingResumeIntents,
+          pendingClientCorrelations,
           sendTo, broadcast, getSubscribers, replayPendingUiRequests,
           trackUiRequest: trackUiRequest,
           markReplaying(targetWs, sessionId) {
@@ -574,8 +576,15 @@ export function createBrowserGateway(
       }
     },
 
-    broadcastSessionAdded(session: any) {
-      broadcast({ type: "session_added", session });
+    broadcastSessionAdded(session: any, opts?: { spawnRequestId?: string }) {
+      // Carry the originating client `requestId` (when known) so the
+      // browser can auto-select / dismiss its placeholder by exact
+      // correlation. See change: spawn-correlation-token.
+      broadcast({
+        type: "session_added",
+        session,
+        ...(opts?.spawnRequestId ? { spawnRequestId: opts.spawnRequestId } : {}),
+      });
     },
 
     broadcastSessionUpdated(sessionId: string, updates: any) {
