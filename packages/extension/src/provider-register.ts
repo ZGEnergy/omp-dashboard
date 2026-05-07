@@ -436,6 +436,20 @@ function getModelRegistry(): any {
 // -- Provider registration (with auto-discovery) --------------------------
 
 async function registerEntry(pi: ExtensionAPI, name: string, entry: ProviderEntry): Promise<number> {
+  // Record snapshot SYNCHRONOUSLY before awaiting discovery so the very
+  // first providers_list push (typically fired from `session_start`
+  // shortly after `activate()` kicked off async registerEntry calls) carries
+  // the correct `custom: true` flags. Otherwise a slow / unreachable
+  // /v1/models endpoint causes custom providers from
+  // `~/.pi/agent/providers.json` to leak into Settings → Provider
+  // Authentication → API Keys until the discovery probe resolves.
+  // See change: fix-custom-provider-flag-race.
+  lastRegistered.set(name, {
+    baseUrl: entry.baseUrl,
+    apiKey: entry.apiKey,
+    api: entry.api ?? "openai-completions",
+  });
+
   const discovered = await discoverModels(entry.baseUrl, entry.apiKey);
 
   // Metadata (contextWindow, maxTokens, reasoning, cost, input) is resolved
@@ -462,13 +476,6 @@ async function registerEntry(pi: ExtensionAPI, name: string, entry: ProviderEntr
     apiKey: resolveApiKeyEnvName(name, entry.apiKey),
     api: (entry.api ?? "openai-completions") as any,
     models,
-  });
-
-  // Record snapshot so reloadProviders can detect subsequent changes.
-  lastRegistered.set(name, {
-    baseUrl: entry.baseUrl,
-    apiKey: entry.apiKey,
-    api: entry.api ?? "openai-completions",
   });
 
   // Notify bridge directly (same package — no cross-package event needed)

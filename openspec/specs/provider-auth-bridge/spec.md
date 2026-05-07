@@ -1,5 +1,8 @@
-## ADDED Requirements
+# provider-auth-bridge Specification
 
+## Purpose
+Bridge-side contract for surfacing pi's `ModelRegistry` credential state to the dashboard server: pushes `models_list` + `providers_list` over WebSocket, hot-reloads `~/.pi/agent/providers.json` on `credentials_updated`, captures `ctx.modelRegistry` from `session_start` to enrich custom-provider model metadata, and tracks bridge-registered custom providers via `lastRegistered` so the consumer-side filter (`provider-auth-storage._buildAuthStatus`) can suppress their API-key rows from the Settings UI.
+## Requirements
 ### Requirement: Credentials updated protocol message
 The shared protocol SHALL define a `credentials_updated` message type in the `ServerToExtensionMessage` union. The message SHALL contain `{ type: "credentials_updated" }` with no additional payload.
 
@@ -49,8 +52,6 @@ When the bridge extension registers a custom provider via `pi.registerProvider(.
 - **THEN** the provider's models SHALL retain their `input` capability from pi-ai's `models.generated.js`
 - **AND** this change SHALL NOT alter the capability of any built-in model
 
-
-
 ### Requirement: Bridge hot-reloads providers.json on credentials_updated
 When the bridge extension receives a `credentials_updated` message, it SHALL re-read `~/.pi/agent/providers.json`, diff it against the last-registered provider snapshot, and call `pi.registerProvider(...)` for new or changed entries and `pi.unregisterProvider(...)` for removed entries — BEFORE invoking `modelRegistry.refresh()`. This ensures the model registry's subsequent refresh observes the newly-registered providers.
 
@@ -88,8 +89,6 @@ When the bridge extension receives a `credentials_updated` message, it SHALL re-
 - **WHEN** reading `~/.pi/agent/providers.json` throws (missing file, parse error, IO error)
 - **THEN** the bridge SHALL log the error via `console.error` with a `[dashboard]` prefix
 - **AND** SHALL still invoke `modelRegistry.refresh()` so other credential updates are not blocked
-
-
 
 ### Requirement: Model metadata enriched via pi's model registry
 
@@ -254,7 +253,7 @@ The bridge SHALL emit a `providers_list` message to the server alongside `models
 - **THEN** the bridge SHALL skip the `providers_list` push and the server SHALL receive only `models_list` (which is also skipped today). No error.
 
 ### Requirement: Provider catalogue payload shape
-Each entry in the `providers` array of `providers_list` SHALL be an object with the following fields, derived from pi's live `ModelRegistry`:
+Each entry in the `providers` array of `providers_list` SHALL be an object with the following fields, derived from pi's live `ModelRegistry` and the bridge's own custom-provider tracking:
 
 - `id` (string, required): pi-ai provider id (e.g. `"anthropic"`, `"deepseek"`, `"google-vertex"`).
 - `displayName` (string, required): from `modelRegistry.getProviderDisplayName(id)`.
@@ -264,12 +263,15 @@ Each entry in the `providers` array of `providers_list` SHALL be an object with 
 - `envVar` (string, optional): the first env var name returned by pi-ai's `findEnvKeys(id)`.
 - `ambient` (boolean, optional): `true` when `pi-ai.getEnvApiKey(id) === "<authenticated>"` (Vertex ADC / Bedrock IAM).
 - `expires` (number, optional): for OAuth credentials, the `expires` timestamp from `auth.json`.
+- `custom` (boolean, optional): `true` iff the bridge itself registered this provider via `pi.registerProvider(...)` from `~/.pi/agent/providers.json`. Consumers (notably `provider-auth-storage.ts::_buildAuthStatus`) SHALL use this flag to suppress API-key auth rows for custom providers, which are managed by the dedicated **LLM Providers** settings section.
 
 The catalogue SHALL be the union of `authStorage.getOAuthProviders().map(p => p.id)` AND every distinct `provider` value from `modelRegistry.getAll()`. Duplicates are deduplicated by `id`.
 
+The `custom` flag SHALL be set synchronously when the bridge attempts to register a provider from `providers.json`, **independently** of asynchronous model-discovery completion. Specifically, the bridge SHALL track custom-provider ids the moment `registerEntry` is invoked — before any `await` — so that the very first `providers_list` push (typically fired from `session_start` shortly after `activate()` kicked off async `registerEntry` calls) carries the correct flags. This rules out a race where the first push leaks custom providers into Settings → API Keys until the async discovery probe resolves.
+
 #### Scenario: Built-in API-key provider
 - **WHEN** pi-ai's `MODELS` table contains a model with `provider: "deepseek"` and the user has not configured any auth
-- **THEN** the catalogue SHALL contain `{id: "deepseek", displayName: "DeepSeek", hasOAuth: false, configured: false, envVar: undefined, ambient: undefined}`
+- **THEN** the catalogue SHALL contain `{id: "deepseek", displayName: "DeepSeek", hasOAuth: false, configured: false, envVar: undefined, ambient: undefined}` with no `custom` field
 
 #### Scenario: Provider with env var set but no auth.json entry
 - **WHEN** `OPENAI_API_KEY` is exported to the bridge process
@@ -287,6 +289,20 @@ The catalogue SHALL be the union of `authStorage.getOAuthProviders().map(p => p.
 - **WHEN** another pi extension calls `pi.registerProvider("custom-llm", { models: [...], oauth: {...} })`
 - **THEN** the next `providers_list` push SHALL contain a `custom-llm` entry with `hasOAuth: true`
 
+#### Scenario: Custom provider from providers.json carries custom:true on first push (regression)
+- **WHEN** `~/.pi/agent/providers.json` contains a `proxy` entry with `baseUrl` pointing to an OpenAI-compatible endpoint
+- **AND** the bridge's `activate()` has begun async `registerEntry("proxy", ...)` but `discoverModels` for `proxy` has NOT yet resolved
+- **AND** the bridge calls `buildProviderCatalogue()` to build the first `providers_list` payload
+- **THEN** the catalogue SHALL include a `proxy` entry with `custom: true`
+- **AND** the server-side consumer `_buildAuthStatus` SHALL skip emitting an API-key row for `proxy`
+- **AND** Settings → Provider Authentication → API Keys SHALL NOT list `proxy`
+
+#### Scenario: discoverModels failure for a custom provider
+- **WHEN** the bridge's `discoverModels` for `proxy` resolves with HTTP failure or network timeout
+- **THEN** `proxy` SHALL still be present in `lastRegistered`
+- **AND** the next `providers_list` push SHALL still carry `custom: true` for `proxy`
+- **AND** `proxy` SHALL still be filtered from Settings → API Keys
+
 ### Requirement: Bridge handles request_providers
 When the bridge receives a `request_providers` message from the server, it SHALL respond with a `providers_list` for the message's `sessionId`, using the same catalogue-build logic as the periodic push.
 
@@ -297,3 +313,4 @@ When the bridge receives a `request_providers` message from the server, it SHALL
 #### Scenario: Request without modelRegistry
 - **WHEN** the bridge receives `request_providers` before `session_start` has captured `ctx.modelRegistry`
 - **THEN** the bridge SHALL respond with `{ type: "providers_list", sessionId, providers: [] }` and no error
+
