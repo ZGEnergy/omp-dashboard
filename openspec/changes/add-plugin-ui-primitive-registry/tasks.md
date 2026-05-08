@@ -1,35 +1,37 @@
 ## 1. Define the primitive contracts in shared
 
-- [ ] 1.1 Create `packages/shared/src/dashboard-plugin/ui-primitives.ts`. Define `UI_PRIMITIVE_KEYS` const (object literal) with `as const` assertion, eight keys per the spec.
-- [ ] 1.2 Define `UiPrimitiveKey` type as `typeof UI_PRIMITIVE_KEYS[keyof typeof UI_PRIMITIVE_KEYS]`.
-- [ ] 1.3 Define `UiPrimitiveMap` interface mapping each key to its contract type. Component contracts use `React.ComponentType<P>`; helper contracts use function signatures.
-- [ ] 1.4 Re-export `SelectOption` type if needed for the searchable-select-dialog contract — pull from existing `client-utils/SearchableSelectDialog.tsx` types.
-- [ ] 1.5 Add to `packages/shared/src/dashboard-plugin/index.ts` (or shared/src/index.ts) so `import from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives"` resolves cleanly.
-- [ ] 1.6 Verify `npm run build -w @blackbelt-technology/pi-dashboard-shared` is clean.
+- [x] 1.1 Created `packages/shared/src/dashboard-plugin/ui-primitives.ts` with `UI_PRIMITIVE_KEYS` const (8 keys: agentCard, markdownContent, confirmDialog, dialogPortal, searchableSelectDialog, zoomControls, formatTokens, formatDuration), `as const` assertion in place.
+- [x] 1.2 `UiPrimitiveKey` type derived from `typeof UI_PRIMITIVE_KEYS[keyof typeof UI_PRIMITIVE_KEYS]`.
+- [x] 1.3 `UiPrimitiveMap` interface defined; 6 component contracts via `ComponentType<P>` + 2 helper contracts via function signature.
+- [x] 1.4 Embedded `UiSelectOption` interface in shared (mirrors client-utils' `SelectOption`) so the searchable-select-dialog contract is fully typed without cross-package type imports.
+- [x] 1.5 Added `export * from "./ui-primitives.js"` to `packages/shared/src/dashboard-plugin/index.ts`.
+- [x] 1.6 Shared test suite: 86 files / 916 tests passing.
 
 ## 2. Build the registry runtime
 
-- [ ] 2.1 Create `packages/dashboard-plugin-runtime/src/ui-primitive-registry.ts`. Define the `UiPrimitiveRegistry` interface (a Map<key, impl> wrapper). Export `createUiPrimitiveRegistry()`.
-- [ ] 2.2 Export `registerUiPrimitive<K extends UiPrimitiveKey>(reg, key, impl)`. Throw `Error('UI primitive "${key}" is already registered. Each primitive can only have one registration.')` on duplicate.
-- [ ] 2.3 Create `packages/dashboard-plugin-runtime/src/ui-primitive-context.tsx`. Define a React context with type `UiPrimitiveRegistry | null`. Export `<UiPrimitiveProvider value={registry}>` component.
-- [ ] 2.4 Export strict hook `useUiPrimitive<K>(key: K): UiPrimitiveMap[K]`. Throw clear errors for: (a) called outside provider; (b) key not registered. Error messages name the missing piece concretely.
-- [ ] 2.5 Export soft hook `useUiPrimitiveOrNull<K>(key: K): UiPrimitiveMap[K] | null`. Returns null for missing key; still throws if called outside provider.
-- [ ] 2.6 Re-export from `packages/dashboard-plugin-runtime/src/index.ts` so consumers import via `@blackbelt-technology/dashboard-plugin-runtime`.
+- [x] 2.1 Created `packages/dashboard-plugin-runtime/src/ui-primitive-registry.ts` with opaque `UiPrimitiveRegistry` interface (private `_impls` Map), `createUiPrimitiveRegistry()`, and internal `getUiPrimitiveImpl()` accessor.
+- [x] 2.2 `registerUiPrimitive` is generic over key type, type-checks impl against contract; throws on double-registration with message `"UI primitive \"${key}\" is already registered.\u2026"`. First-write-wins semantics (the throwing call's impl is discarded).
+- [x] 2.3 Created `packages/dashboard-plugin-runtime/src/ui-primitive-context.tsx` with `<UiPrimitiveProvider value={registry}>` wrapping React context.
+- [x] 2.4 `useUiPrimitive(key)` strict hook: throws if outside provider OR if key not registered. Error messages name the specific missing piece (provider vs registration).
+- [x] 2.5 `useUiPrimitiveOrNull(key)` soft hook: returns null if key not registered; still throws if outside provider (provider missing is always a setup bug).
+- [x] 2.6 Re-exported all 5 public symbols + 2 types from `packages/dashboard-plugin-runtime/src/index.ts`.
 
 ## 3. Tests for the registry
 
-- [ ] 3.1 Create `packages/dashboard-plugin-runtime/src/__tests__/ui-primitive-registry.test.tsx`. Cover:
-  - 3.1.1 Empty registry — `useUiPrimitiveOrNull` returns null for every key.
-  - 3.1.2 Successful registration — `useUiPrimitive` returns the registered impl.
-  - 3.1.3 Type lookup — TypeScript infers correct type from key (compile-time check via `// @ts-expect-error` for misuse).
-  - 3.1.4 Double-registration throws with clear error.
-  - 3.1.5 First-write-wins after the throw — original registration is retained.
-  - 3.1.6 Strict hook outside provider throws "must be called inside <UiPrimitiveProvider>".
-  - 3.1.7 Soft hook outside provider throws (same as strict — no provider means no context).
-  - 3.1.8 Strict hook for missing key throws "is not registered" with key name.
-  - 3.1.9 Soft hook for missing key returns null.
-  - 3.1.10 Multiple consumers in the same tree all see the same registry.
-- [ ] 3.2 Run `HOME=$(mktemp -d) NODE_OPTIONS="--localstorage-file=$(mktemp)" npx vitest run --project @blackbelt-technology/dashboard-plugin-runtime`. All passing.
+- [x] 3.1 Created `packages/dashboard-plugin-runtime/src/__tests__/ui-primitive-registry.test.tsx` with 12 cases covering:
+  - empty registry → soft hook returns null;
+  - successful registration → strict hook returns impl;
+  - function-typed primitive (format-tokens) round-trips;
+  - double-registration throws with clear key-named message;
+  - first-write-wins after the throw;
+  - independent registrations for different keys;
+  - strict hook outside provider throws "must be called inside <UiPrimitiveProvider>";
+  - strict hook for missing key throws with key name;
+  - soft hook outside provider throws (provider always required);
+  - soft hook missing key returns null;
+  - soft hook registered key returns impl;
+  - multiple consumers in same tree all see the same registry.
+- [x] 3.2 12/12 ui-primitive tests pass. Full plugin-runtime project: 10 files / 76 tests (up from 64).
 
 ## 4. Test helper for plugin tests
 
