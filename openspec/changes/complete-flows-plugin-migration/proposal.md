@@ -1,3 +1,49 @@
+> ## ⚠️ SUPERSEDED — DO NOT IMPLEMENT FROM HERE
+>
+> This proposal was superseded mid-implementation by
+> `add-plugin-ui-primitive-registry`. The package-extraction approach
+> described below (creating `client-utils` and `markdown-content` workspace
+> packages with per-subpath imports) was deemed over-engineered after
+> deeper investigation revealed:
+>
+> 1. **Three other planned plugin extractions** (extract-openspec-as-plugin,
+>    extract-git-as-plugin, extract-subagents-as-plugin) face the IDENTICAL
+>    deep-import problem flows-plugin hit. Their proposals don't address it,
+>    making the deep-import problem repo-wide rather than flows-specific.
+>
+> 2. **A primitive registry** (Pandino-style — dashboard registers React
+>    primitives by key at startup, plugins look them up via
+>    `useUiPrimitive(key)`) solves the issue for ALL FOUR extractions with
+>    a single architectural investment, rather than per-extraction package
+>    extraction churn.
+>
+> 3. The package-extraction approach creates a **promotion ceremony per
+>    primitive** that grows linearly with plugin count. The registry
+>    approach has a one-time cost.
+>
+> What landed from this proposal:
+> - **Layer 1** (predicate emission + sync-versions hardening) shipped in
+>   commit `80c99ce`. It stands as a useful improvement independent of the
+>   approach chosen here.
+> - **Layer 0a** (creating `packages/client-utils/` workspace + moving 13
+>   files + flows-plugin import rewrites) shipped in commit `e28943a`.
+>   The `client-utils` package will be REPURPOSED by the registry change
+>   as the implementation host (the dashboard registers components from it
+>   under primitive keys at startup); the package itself is not reverted.
+>
+> What's NOT being implemented from this proposal:
+> - Layer 0b (creating a separate `packages/markdown-content/` package).
+>   Replaced by registering MarkdownContent as a primitive instead.
+> - Layer 2 (refactoring 7 flow components to `{session}` signatures) and
+>   Layer 3 (shell surgery) — both addressed by the new proposal under a
+>   different mechanism (registry consumption + slot claims).
+>
+> See: `openspec/changes/add-plugin-ui-primitive-registry/`.
+>
+> ---
+>
+> The original content below is preserved as a design-exploration record.
+
 ## Why
 
 `flows-plugin` was physically extracted into `packages/flows-plugin/` in April but its migration is **half-finished and currently broken in three independent ways**:
