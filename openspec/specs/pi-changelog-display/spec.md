@@ -104,7 +104,7 @@ The server SHALL derive a public `changelogUrl` for the GitHub-hosted CHANGELOG 
 - **THEN** the server SHALL include the subdir in the URL: `https://github.com/org/repo/blob/main/packages/foo/CHANGELOG.md`
 
 ### Requirement: WhatsNewDialog modal
-The client SHALL provide a `WhatsNewDialog` React component that renders parsed changelog entries between two versions of a package as a modal dialog.
+The client SHALL provide a `WhatsNewDialog` React component that renders parsed changelog entries between two versions of a package as a modal dialog. The dialog SHALL render whether or not the changelog contains breaking changes; only the auto-expansion behaviour of the Breaking section is conditional on `hasBreaking`.
 
 #### Scenario: Dialog mounts via DialogPortal
 - **WHEN** the dialog is opened
@@ -112,11 +112,14 @@ The client SHALL provide a `WhatsNewDialog` React component that renders parsed 
 - **AND** SHALL trap focus while open
 - **AND** SHALL close on Esc, click-outside, and the explicit `[×]` button
 
-#### Scenario: Breaking changes pinned at top
+#### Scenario: Breaking section auto-expanded only when hasBreaking is true
 - **WHEN** the dialog opens with `hasBreaking: true`
 - **THEN** the "Breaking Changes" section SHALL be the first content block beneath the title
 - **AND** SHALL be expanded by default
 - **AND** SHALL list every breaking-change bullet across every release in the response, grouped by version
+- **WHEN** the dialog opens with `hasBreaking: false`
+- **THEN** the "Breaking Changes" section SHALL NOT be rendered
+- **AND** the dialog content SHALL begin with the New features and Other changes sections
 
 #### Scenario: Other sections collapsed
 - **WHEN** the dialog renders the "New features" and "Other changes" sections (the latter aggregating `changed` + `fixed`)
