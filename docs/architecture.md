@@ -1998,3 +1998,53 @@ Diagnostics MUST never crash the app. `doctor-core.ts` enforces this with three 
 - **`assumedMandatory(label, fn, deps)`** — wraps "should-never-fail" ops (e.g. reading bundled-Node version, listing `~/.pi-dashboard/`). On throw it appends a structured entry to `<managedDir>/doctor.log` (1MB ring rotation) AND surfaces a row in the `Diagnostics` section so the user sees something went wrong instead of a silent gap. The log is opened from the toolbar (`Open doctor log`); the IPC handler returns `{exists:false}` when the file is absent so the renderer can show "no entries yet" instead of erroring.
 
 See change: `doctor-rich-output`.
+
+## Model Proxy
+
+Dashboard-resident LLM proxy: `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/messages`.
+
+```mermaid
+sequenceDiagram
+    participant C as External client<br/>(Honcho, LangChain, curl)
+    participant D as Dashboard :8000/v1/*
+    participant R as InternalRegistry
+    participant P as Upstream provider<br/>(Anthropic, OpenAI, Google…)
+
+    C->>D: Authorization: Bearer pi-proxy-*
+    D->>D: Auth gate: verify key, scope, backoff
+    D->>R: getAvailable() / find(provider, model)
+    R->>R: auth.json + providers.json + models.json
+    D->>R: getApiKeyAndHeaders(model)
+    R->>D: { apiKey, headers }
+    D->>P: streamSimple(model, context, opts)
+    P-->>D: SSE stream
+    D-->>C: SSE stream (OpenAI or Anthropic shape)
+```
+
+### API-key auth data flow
+
+1. Client sends `Authorization: Bearer pi-proxy-<48-char-base64url>`.
+2. Auth gate (`model-proxy/auth-gate.ts`) prefix-checks `pi-proxy-`, looks up `sha256(token)` in `config.json#modelProxy.apiKeys[]`.
+3. On hit: checks `revokedAt`, `expiresAt`, scope vs. route path.
+4. On success: attaches `request.proxyApiKeyId`, resets per-IP backoff, debounced `lastUsedAt` write.
+
+### Refresh trigger map
+
+| Trigger | Site |
+|---|---|
+| `PUT /api/providers` | `routes/provider-routes.ts` → `refreshModelRegistry()` |
+| OAuth callback completes | `routes/provider-auth-routes.ts` → `refreshModelRegistry()` |
+| Config save | `config-api.ts#writeConfigPartial` → `refreshModelRegistry()` |
+| Bridge `credentials_updated` | `event-wiring.ts` → `refreshModelRegistry()` |
+| `POST /api/model-proxy/refresh` | manual trigger (JWT-gated) |
+
+### auth.json write contract
+
+Two writer processes for `~/.pi/agent/auth.json`:
+
+- **Dashboard**: `provider-auth-storage.ts#writeCredential` (mkdir-based lock). Used by OAuth-flow completion routes AND `InternalAuthStorage` OAuth-refresh-on-expiry.
+- **Pi sessions**: `pi-coding-agent`'s `AuthStorage` (proper-lockfile). Runs in each connected pi session.
+
+Last-writer-wins on overlapping provider keys; non-overlapping providers preserved by merge. Acceptable — both writers re-read before writing; churn only occurs during concurrent OAuth refreshes (rare in practice).
+
+See change: `add-dashboard-model-proxy`.

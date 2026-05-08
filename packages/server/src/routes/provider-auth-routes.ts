@@ -22,6 +22,7 @@ import { getLatestCatalogue } from "../provider-catalogue-cache.js";
 import { startCallbackServer } from "../oauth-callback-server.js";
 import type { PiGateway } from "../pi-gateway.js";
 import type { BrowserGateway } from "../browser-gateway.js";
+import { refreshModelRegistry } from "../model-proxy/registry-singleton.js";
 
 // ── In-memory flow store (short-lived PKCE + device code state) ──────────────
 
@@ -94,6 +95,8 @@ export function registerProviderAuthRoutes(
     // broadcast and update modelsMap / catalogue cache without needing a
     // global wipe. See change: simplify-model-selection-channels.
     piGateway.broadcast({ type: "credentials_updated" });
+    // Eager-refresh model proxy registry so /v1/models reflects the change.
+    refreshModelRegistry().catch(() => {});
   }
 
   // List OAuth providers

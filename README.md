@@ -284,6 +284,27 @@ The file is deliberately separate from `config.json` so machine-specific paths d
 
 ---
 
+## Using the model proxy
+
+The dashboard exposes an OpenAI-compatible HTTP proxy on the same port as the dashboard UI (`/v1/...`). Any LLM client that accepts a custom `base_url` can use it.
+
+```bash
+# Example: point an OpenAI-compatible client at the dashboard
+export OPENAI_BASE_URL=http://localhost:8000/v1
+export OPENAI_API_KEY=pi-proxy-<your-proxy-key>
+```
+
+**Setup:** open Settings → API Proxy in the dashboard UI, enable the proxy, and create an API key.
+
+**Endpoints:**
+- `GET /v1/models` — list available models (requires `models:list` scope or `all`)
+- `POST /v1/chat/completions` — OpenAI chat completions, streaming + non-streaming
+- `POST /v1/messages` — Anthropic messages, streaming + non-streaming
+
+**Auth:** proxy API keys only (`pi-proxy-*` prefix). Dashboard JWT is never accepted on `/v1/*`.
+
+For migration from `@blackbelt-technology/pi-model-proxy`, see [`docs/migration/from-pi-model-proxy.md`](docs/migration/from-pi-model-proxy.md).
+
 ## Usage
 
 ### Auto-start (default)

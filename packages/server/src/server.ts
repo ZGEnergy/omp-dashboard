@@ -68,6 +68,11 @@ import { createEditorPidRegistry } from "./editor-pid-registry.js";
 import { registerEditorRoutes } from "./routes/editor-routes.js";
 import { registerKnownServersRoutes } from "./routes/known-servers-routes.js";
 import { registerPluginConfigRoutes } from "./routes/plugin-config-routes.js";
+import { createModelProxyAuthGate } from "./model-proxy/auth-gate.js";
+import { registerModelProxyRoutes } from "./routes/model-proxy-routes.js";
+import { registerModelProxyApiKeyRoutes } from "./routes/model-proxy-api-key-routes.js";
+import { registerModelProxyRefreshRoutes } from "./routes/model-proxy-refresh-routes.js";
+import { getModelRegistry, getStreamSimpleFn } from "./model-proxy/registry-singleton.js";
 import { writeConfigPartial } from "./config-api.js";
 import { loadServerEntries, discoverPlugins, getPluginStatusStore } from "@blackbelt-technology/dashboard-plugin-runtime/server";
 import { createServerPluginContext } from "@blackbelt-technology/dashboard-plugin-runtime/server";
@@ -487,6 +492,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   // mDNS peer discovery state
   let mdnsBrowser: DashboardBrowser | null = null;
+  // Optional second-port Fastify instance for model proxy (/v1/*)
+  let secondFastify: Awaited<ReturnType<typeof import("fastify").default>> | null = null;
   const peerServers = new Map<string, DiscoveredServer>();
 
   const piGateway = createPiGateway(sessionManager, {
@@ -953,7 +960,51 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     networkGuard,
     broadcast: (msg) => browserGateway.broadcast(msg),
   });
-  registerProviderRoutes(fastify, { networkGuard, piGateway, browserGateway });
+  registerProviderRoutes(fastify, { networkGuard, piGateway, browserGateway, port: config.port });
+
+  // ── Model Proxy ───────────────────────────────────────────────────
+  {
+    const fullCfg = loadConfig();
+    if (fullCfg.modelProxy.enabled) {
+      // Register proxy auth gate (runs BEFORE JWT hook for /v1/* routes)
+      const proxyAuthGate = createModelProxyAuthGate({
+        getConfig: () => loadConfig().modelProxy,
+        persistKeyUsage: (apiKeys) => {
+          writeConfigPartial({ modelProxy: { apiKeys } });
+        },
+      });
+      fastify.addHook("onRequest", proxyAuthGate);
+
+      // Register /v1/* routes
+      registerModelProxyRoutes(fastify, {
+        getConfig: () => loadConfig().modelProxy,
+        getRegistry: async () => {
+          try {
+            return await getModelRegistry();
+          } catch {
+            return null;
+          }
+        },
+        streamSimple: (opts: any) => {
+          const fn = getStreamSimpleFn();
+          if (!fn) throw new Error("streamSimple not available");
+          return fn(opts.model, { messages: opts.messages, system: opts.system, tools: opts.tools }, opts);
+        },
+      });
+
+      // Register API key management routes (JWT-gated)
+      registerModelProxyApiKeyRoutes(fastify, {
+        networkGuard,
+        getModelProxyConfig: () => loadConfig().modelProxy,
+        writeModelProxyApiKeys: async (apiKeys) => {
+          writeConfigPartial({ modelProxy: { apiKeys } });
+        },
+      });
+
+      // Register refresh route (JWT-gated)
+      registerModelProxyRefreshRoutes(fastify);
+    }
+  }
 
   // Serve static files / SPA fallback.
   //
@@ -1184,6 +1235,40 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       console.log(`Dashboard server running at http://localhost:${config.port}`);
       console.log(`Pi gateway listening on port ${config.piPort}`);
 
+      // ── Optional second port for model proxy (/v1/*) ──────────────
+      {
+        const proxyCfg = loadConfig().modelProxy;
+        if (proxyCfg.enabled && proxyCfg.secondPort) {
+          try {
+            const F = (await import("fastify")).default;
+            const sf = F({ logger: false });
+            const proxyAuthGate = createModelProxyAuthGate({
+              getConfig: () => loadConfig().modelProxy,
+              persistKeyUsage: (apiKeys) => {
+                writeConfigPartial({ modelProxy: { apiKeys } });
+              },
+            });
+            sf.addHook("onRequest", proxyAuthGate);
+            registerModelProxyRoutes(sf, {
+              getConfig: () => loadConfig().modelProxy,
+              getRegistry: async () => {
+                try { return await getModelRegistry(); } catch { return null; }
+              },
+              streamSimple: (opts: any) => {
+                const fn = getStreamSimpleFn();
+                if (!fn) throw new Error("streamSimple not available");
+                return fn(opts.model, { messages: opts.messages, system: opts.system, tools: opts.tools }, opts);
+              },
+            });
+            await sf.listen({ port: proxyCfg.secondPort, host: "127.0.0.1" });
+            secondFastify = sf as any;
+            console.log(`Model proxy second port listening at http://127.0.0.1:${proxyCfg.secondPort}`);
+          } catch (err) {
+            console.warn(`Model proxy second port bind failed (continuing without):`, err);
+          }
+        }
+      }
+
       // Advertise via mDNS
       try {
         advertiseDashboard(config.port, config.piPort);
@@ -1292,6 +1377,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       editorManager.stopAll();
       // Close any pending OAuth callback servers
       try { const { closeAllCallbackServers } = await import("./oauth-callback-server.js"); await closeAllCallbackServers(); } catch {}
+      // Close second port before main server
+      if (secondFastify) {
+        try { await secondFastify.close(); } catch { /* ignore */ }
+        secondFastify = null;
+      }
       await fastify.close();
     },
   };

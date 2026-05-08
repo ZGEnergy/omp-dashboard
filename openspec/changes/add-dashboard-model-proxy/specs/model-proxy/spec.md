@@ -436,4 +436,4 @@ When the dashboard's zrok tunnel is active, `/v1/*` SHALL be reachable via the t
 
 - **GIVEN** the tunnel is active
 - **WHEN** an external client GETs the tunnel URL with `Authorization: Bearer <jwt>`
-- **THEN** the response is `401` with `code: "TUNNEL_REQUIRES_API_KEY"`
+- **THEN** the response is `401` with `code: "PROXY_KEY_REQUIRED"` (uniform rejection per design.md Decision 2 — no source-specific error codes)

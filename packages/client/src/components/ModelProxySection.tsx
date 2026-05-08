@@ -1,0 +1,463 @@
+/**
+ * Model Proxy settings section (task 13.1).
+ *
+ * Renders:
+ *   - Master toggle (modelProxy.enabled)
+ *   - Default model dropdown
+ *   - Optional second port input
+ *   - API keys table with reveal-once banner + revoke/purge actions
+ *
+ * Mounted in SettingsPanel providers tab after "LLM Providers" section.
+ * See change: add-dashboard-model-proxy.
+ */
+import React, { useState, useEffect, useCallback } from "react";
+import { Icon } from "@mdi/react";
+import { mdiPlus, mdiTrashCan, mdiClipboardCheckOutline, mdiRefresh, mdiClose } from "@mdi/js";
+import {
+  listApiKeys,
+  createApiKey,
+  revokeApiKey,
+  deleteApiKey,
+  refreshRegistry,
+  type ProxyApiKeyEntry,
+  type CreateApiKeyResult,
+} from "../lib/model-proxy-api.js";
+
+// ── Types ────────────────────────────────────────────────────────────────
+
+export interface ModelProxyConfig {
+  enabled?: boolean;
+  defaultModel?: string;
+  secondPort?: number;
+  maxConcurrentStreams?: number;
+  perKeyConcurrentStreams?: number;
+  logRequests?: boolean;
+}
+
+interface Props {
+  config: ModelProxyConfig;
+  onChange: (patch: ModelProxyConfig) => void;
+  /** Set to true when bridge reports @blackbelt-technology/pi-model-proxy is installed in pi settings.json */
+  upstreamExtensionDetected?: boolean;
+}
+
+// ── Reveal-once banner (task 13.3) ────────────────────────────────────────
+
+interface RevealBannerProps {
+  keyInfo: CreateApiKeyResult;
+  onDismiss: () => void;
+}
+
+function RevealBanner({ keyInfo, onDismiss }: RevealBannerProps) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => {
+    navigator.clipboard.writeText(keyInfo.key).catch(() => {
+      // Fallback: create temp textarea
+      const ta = document.createElement("textarea");
+      ta.value = keyInfo.key;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    });
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div
+      className="border border-amber-500 bg-amber-950/40 rounded p-3 mb-3"
+      data-testid="reveal-banner"
+    >
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-semibold text-amber-400">
+          ⚠ Save this key now — you cannot view it again
+        </span>
+        <button
+          className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          data-testid="reveal-banner-dismiss"
+        >
+          <Icon path={mdiClose} size={0.6} />
+        </button>
+      </div>
+      <code className="block text-xs font-mono text-[var(--text-primary)] bg-[var(--bg-secondary)] rounded px-2 py-1 mb-2 break-all select-all">
+        {keyInfo.key}
+      </code>
+      <button
+        onClick={copy}
+        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white"
+        data-testid="copy-key-button"
+      >
+        <Icon path={mdiClipboardCheckOutline} size={0.55} />
+        {copied ? "Copied!" : "Copy key"}
+      </button>
+    </div>
+  );
+}
+
+// ── New Key Form ──────────────────────────────────────────────────────────
+
+interface NewKeyFormProps {
+  onCreated: (result: CreateApiKeyResult) => void;
+  onCancel: () => void;
+}
+
+function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps) {
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!label.trim()) { setError("Label is required"); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await createApiKey({ label: label.trim() });
+      onCreated(result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create key");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex gap-2 items-center mb-2" data-testid="new-key-form">
+      <input
+        type="text"
+        className="flex-1 bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-sm text-[var(--text-primary)]"
+        placeholder="Key label"
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") void submit(); if (e.key === "Escape") onCancel(); }}
+        autoFocus
+        data-testid="new-key-label-input"
+      />
+      <button
+        className="px-2 py-1 rounded text-xs bg-[var(--accent-blue)] hover:opacity-90 text-white disabled:opacity-50"
+        onClick={() => void submit()}
+        disabled={busy}
+        data-testid="new-key-submit"
+      >
+        {busy ? "Creating…" : "Create"}
+      </button>
+      <button
+        className="px-2 py-1 rounded text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+        onClick={onCancel}
+      >
+        Cancel
+      </button>
+      {error && <span className="text-xs text-red-400">{error}</span>}
+    </div>
+  );
+}
+
+// ── Key Row ───────────────────────────────────────────────────────────────
+
+interface KeyRowProps {
+  entry: ProxyApiKeyEntry;
+  onRevoke: () => void;
+  onDelete: () => void;
+}
+
+function KeyRow({ entry, onRevoke, onDelete }: KeyRowProps) {
+  const isRevoked = entry.revokedAt != null;
+
+  return (
+    <div className="flex items-center gap-2 py-1.5 border-b border-[var(--border-secondary)] last:border-0">
+      <div className="flex-1 min-w-0">
+        <span className={`text-sm ${isRevoked ? "line-through text-[var(--text-tertiary)]" : "text-[var(--text-primary)]"}`}>
+          {entry.label}
+        </span>
+        {entry.createdBy && (
+          <span className="ml-2 text-xs text-[var(--text-tertiary)]">{entry.createdBy}</span>
+        )}
+        {entry.lastUsedAt && (
+          <span className="ml-2 text-xs text-[var(--text-tertiary)]">
+            last used {new Date(entry.lastUsedAt).toLocaleDateString()}
+          </span>
+        )}
+      </div>
+      <span className="text-xs text-[var(--text-tertiary)]">
+        {entry.scopes?.join(", ") ?? "all"}
+      </span>
+      {!isRevoked ? (
+        <button
+          className="text-xs text-amber-400 hover:text-amber-300"
+          onClick={onRevoke}
+          title="Revoke key"
+          data-testid={`revoke-${entry.id}`}
+        >
+          Revoke
+        </button>
+      ) : (
+        <button
+          className="text-xs text-red-400 hover:text-red-300"
+          onClick={onDelete}
+          title="Purge key"
+          data-testid={`purge-${entry.id}`}
+        >
+          <Icon path={mdiTrashCan} size={0.55} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Main section component ────────────────────────────────────────────────
+
+export function ModelProxySection({ config, onChange, upstreamExtensionDetected }: Props) {
+  const [keys, setKeys] = useState<ProxyApiKeyEntry[]>([]);
+  const [revokedKeys, setRevokedKeys] = useState<ProxyApiKeyEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [newlyCreated, setNewlyCreated] = useState<CreateApiKeyResult | null>(null);
+  // Persist "key was created" trail even after banner dismiss (task 13.3)
+  const [lastCreatedLabel, setLastCreatedLabel] = useState<string | null>(null);
+  const [secondPortInput, setSecondPortInput] = useState(
+    config.secondPort != null ? String(config.secondPort) : "",
+  );
+  const [secondPortError, setSecondPortError] = useState<string | null>(null);
+
+  const loadKeys = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await listApiKeys();
+      setKeys(result.keys);
+      setRevokedKeys(result.revoked);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load keys");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (config.enabled) void loadKeys();
+  }, [config.enabled, loadKeys]);
+
+  const handleToggle = () => onChange({ ...config, enabled: !config.enabled });
+
+  const handleSecondPortBlur = () => {
+    const raw = secondPortInput.trim();
+    if (!raw) {
+      setSecondPortError(null);
+      onChange({ ...config, secondPort: undefined });
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1024 || n > 65535) {
+      setSecondPortError("Port must be 1024–65535");
+      return;
+    }
+    setSecondPortError(null);
+    onChange({ ...config, secondPort: n });
+  };
+
+  const handleKeyCreated = (result: CreateApiKeyResult) => {
+    setNewlyCreated(result);
+    setLastCreatedLabel(result.label);
+    setShowNewForm(false);
+    void loadKeys();
+  };
+
+  const handleRevoke = async (id: string) => {
+    try {
+      await revokeApiKey(id);
+      await loadKeys();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to revoke key");
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteApiKey(id);
+      await loadKeys();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete key");
+    }
+  };
+
+  const handleRefresh = async () => {
+    try {
+      await refreshRegistry();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Refresh failed");
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Master toggle */}
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="text-sm font-medium text-[var(--text-primary)]">API Proxy</span>
+          <p className="text-xs text-[var(--text-tertiary)]">
+            Expose OpenAI-compatible <code>/v1/chat/completions</code> and Anthropic-compatible <code>/v1/messages</code> endpoints backed by your configured providers.
+          </p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={config.enabled ?? false}
+          onClick={handleToggle}
+          className={`relative inline-flex h-5 w-9 rounded-full transition-colors ${config.enabled ? "bg-[var(--accent-blue)]" : "bg-[var(--border-secondary)]"}`}
+          data-testid="proxy-toggle"
+        >
+          <span
+            className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform mt-0.75 ${config.enabled ? "translate-x-4" : "translate-x-0.5"}`}
+          />
+        </button>
+      </div>
+
+      {/* Task 14.1: coexistence warning — non-blocking, user-initiated disable only */}
+      {config.enabled && upstreamExtensionDetected && (
+        <div className="rounded border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+          <strong>Note:</strong> The upstream <code>@blackbelt-technology/pi-model-proxy</code> extension is also active in one or more pi sessions.
+          Both will work; the dashboard proxy runs on <code>:8000/v1</code> while the upstream uses <code>:9876</code>.
+          Consider{" "}
+          <a
+            href="https://github.com/BlackBeltTechnology/pi-model-proxy#disable"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-amber-100"
+          >
+            disabling the upstream extension
+          </a>{" "}
+          to avoid duplicate listeners.
+        </div>
+      )}
+
+      {config.enabled && (
+        <>
+          {/* Default model */}
+          <div>
+            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+              Default Model <span className="text-[var(--text-tertiary)]">(optional — used when request omits model)</span>
+            </label>
+            <input
+              type="text"
+              className="w-full bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1.5 text-sm text-[var(--text-primary)] font-mono"
+              placeholder="e.g. anthropic/claude-3-5-sonnet"
+              value={config.defaultModel ?? ""}
+              onChange={(e) => onChange({ ...config, defaultModel: e.target.value || undefined })}
+              data-testid="default-model-input"
+            />
+          </div>
+
+          {/* Second port */}
+          <div>
+            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+              Second Port <span className="text-[var(--text-tertiary)]">(optional — for clients that hardcode /v1 path-prefix-less base URLs)</span>
+            </label>
+            <input
+              type="number"
+              min={1024}
+              max={65535}
+              className={`w-32 bg-[var(--bg-secondary)] border rounded px-2 py-1.5 text-sm text-[var(--text-primary)] ${secondPortError ? "border-red-400" : "border-[var(--border-secondary)]"}`}
+              placeholder="e.g. 9876"
+              value={secondPortInput}
+              onChange={(e) => { setSecondPortInput(e.target.value); setSecondPortError(null); }}
+              onBlur={handleSecondPortBlur}
+              data-testid="second-port-input"
+            />
+            {secondPortError && (
+              <p className="text-xs text-red-400 mt-1" data-testid="second-port-error">{secondPortError}</p>
+            )}
+          </div>
+
+          {/* API Keys */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wide">
+                API Keys
+              </span>
+              <button
+                onClick={handleRefresh}
+                title="Refresh model registry"
+                className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                data-testid="refresh-registry-button"
+              >
+                <Icon path={mdiRefresh} size={0.6} />
+              </button>
+            </div>
+
+            {/* Reveal-once banner for newly created key (task 13.3) */}
+            {newlyCreated && (
+              <RevealBanner
+                keyInfo={newlyCreated}
+                onDismiss={() => setNewlyCreated(null)}
+              />
+            )}
+
+            {/* Trail after dismissal */}
+            {!newlyCreated && lastCreatedLabel && (
+              <p className="text-xs text-[var(--text-tertiary)] mb-2">
+                Key <em>{lastCreatedLabel}</em> was created. See logs for usage.
+              </p>
+            )}
+
+            {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
+
+            {loading ? (
+              <p className="text-xs text-[var(--text-tertiary)]">Loading…</p>
+            ) : (
+              <div className="bg-[var(--bg-secondary)] rounded border border-[var(--border-secondary)]">
+                {keys.length === 0 && revokedKeys.length === 0 ? (
+                  <p className="text-xs text-[var(--text-tertiary)] px-3 py-2">No API keys yet.</p>
+                ) : (
+                  <div className="px-3">
+                    {keys.map((k) => (
+                      <KeyRow
+                        key={k.id}
+                        entry={k}
+                        onRevoke={() => void handleRevoke(k.id)}
+                        onDelete={() => void handleDelete(k.id)}
+                      />
+                    ))}
+                    {revokedKeys.length > 0 && (
+                      <>
+                        <p className="text-xs text-[var(--text-tertiary)] mt-2 mb-1">Revoked</p>
+                        {revokedKeys.map((k) => (
+                          <KeyRow
+                            key={k.id}
+                            entry={k}
+                            onRevoke={() => void handleRevoke(k.id)}
+                            onDelete={() => void handleDelete(k.id)}
+                          />
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {showNewForm ? (
+              <div className="mt-2">
+                <NewKeyForm
+                  onCreated={handleKeyCreated}
+                  onCancel={() => setShowNewForm(false)}
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowNewForm(true)}
+                className="flex items-center gap-1.5 text-sm text-[var(--accent-blue)] hover:text-blue-400 mt-2"
+                data-testid="new-key-button"
+              >
+                <Icon path={mdiPlus} size={0.6} />
+                New API key
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

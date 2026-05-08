@@ -4,20 +4,24 @@ The pi-agent-dashboard is a long-lived daemon that already aggregates pi session
 
 External services (Honcho, LangChain, CI runners, custom apps) routinely need an OpenAI-compatible HTTP endpoint that fronts whatever models the user has authenticated. The upstream extension `@blackbelt-technology/pi-model-proxy` does this but its lifecycle is bound to a single pi session: its HTTP server boots on `extension default()` and closes on `session_shutdown`. Multiple sessions race for `:9876`; zero sessions means zero proxy. That mismatch with "always available while the dashboard runs" is the motivating gap.
 
-**Pre-conditions verified during exploration (2026-05-01):**
+**Pre-conditions verified during exploration (2026-05-01), re-verified during runtime-resolve rewrite (2026-05-07a), then again during the in-house-registry rewrite (2026-05-07b):**
 
-- `@mariozechner/pi-coding-agent` exports `ModelRegistry.create(authStorage, modelsJsonPath?)` and `AuthStorage.create(authPath?)` as standalone factories — the dashboard can construct them outside any pi session. Confirmed via `dist/core/model-registry.d.ts` and `dist/core/auth-storage.d.ts`.
-- `ModelRegistry` provides `getAvailable()` (filtered to credentialed models), `getApiKeyAndHeaders(model)` (OAuth refresh handled), `find(provider, modelId)`, and `refresh()` (re-read disk).
-- `@mariozechner/pi-ai` exports `streamSimple` as the canonical stream entry point; abortable via `AbortSignal`.
+- `@mariozechner/pi-ai` exports the full surface the proxy needs: `streamSimple` (upstream HTTP/SSE call, abortable via `AbortSignal`), the `MODELS` table (auto-generated catalog with context window / max-tokens / cost / capability metadata), `register-builtins` (returns the built-in provider table), per-provider OAuth refresh helpers in `oauth.ts` (Anthropic, Codex, Gemini CLI, GitHub Copilot, Antigravity), `transform-messages.ts` for shape normalization, and the `Model<Api>` types. Confirmed at `pi-ai/dist/index.d.ts` v0.73.0.
+- pi-ai is ~5 MB on disk plus 11 SDK transitives. pi-coding-agent is ~181 MB — essentially all of it (agent runtime, tool calling, prompt building, ask_user, settings manager) is unrelated to the model-proxy use case.
+- The dashboard already reads `~/.pi/agent/{auth,providers,models}.json` directly via existing modules: `provider-auth-storage.ts` (auth.json read/write with locking), `routes/provider-routes.ts` (providers.json read/write), `provider-catalogue-cache.ts` (caches bridge-pushed catalogue). Composing them into a per-model resolver is well-scoped (~50 lines).
+- The dashboard already has a writer for `~/.pi/agent/auth.json` — `provider-auth-storage.ts` (`writeCredential`) — used by OAuth-flow completion routes. Reusing this writer for OAuth-refresh-on-expiry collapses the would-be "three writers, one file" problem to two (dashboard + bridge sessions, exactly as today).
+- The dashboard's `ToolRegistry` (`packages/shared/src/tool-registry/`) is the runtime-resolution mechanism for external pi packages. `pi-coding-agent` is already registered there for `package-manager-wrapper.ts`; the proxy adds a new `pi-ai` registration.
+- `pi-ai` is currently a transitive dep of `pi-coding-agent`. When `bootstrap-install-from-list.ts` installs `pi-coding-agent` into `~/.pi-dashboard/node_modules/`, npm typically hoists `pi-ai` to the same top-level. If hoisting fails on a particular machine, an explicit pi-ai entry in the install list is the documented fallback (tasks.md §2.7).
+- `packages/server/src/provider-catalogue-cache.ts` is **bridge-pushed** — each pi session pushes its `providers_list` over WS for `/api/provider-auth/status`. The proxy does NOT replace this; the cache continues to serve its existing consumers. The proxy maintains its OWN server-resident registry for `/v1/*` request handling.
 - The upstream `pi-model-proxy/src/convert/` code is MIT-licensed pure functions — eligible for lift with attribution.
-- The dashboard's auth plugin (`packages/server/src/auth-plugin.ts`) already gates routes; extending it to recognize proxy API keys is additive, not replacement.
+- The dashboard's auth plugin (`packages/server/src/auth-plugin.ts`) already gates routes via an `onRequest` hook; adding a `/v1/*`-scoped proxy-key check ahead of the JWT hook is additive.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
 - Mount OpenAI-compatible (`/v1/chat/completions`) and Anthropic-compatible (`/v1/messages`) endpoints on the dashboard server, plus `GET /v1/models`.
-- Reuse the dashboard's effective model catalog — the same set the `/model` dropdown shows, sourced from `ModelRegistry.getAvailable()`.
+- Reuse the dashboard's effective model catalog — the same set the `/model` dropdown shows. Both the proxy's in-house registry and pi sessions' `ModelRegistry` compose `auth.json` + `providers.json` + `models.json` over pi-ai's built-ins, so they agree by construction.
 - Authenticate external clients via dedicated **proxy API keys**, separate from the user-facing dashboard JWT.
 - Stream upstream provider responses back to the client with `AbortSignal` propagation on client disconnect.
 - Refresh model availability when the user logs into a new provider, edits `providers.json`, or imports `models.json` — no server restart required.
@@ -34,24 +38,46 @@ External services (Honcho, LangChain, CI runners, custom apps) routinely need an
 
 ## Decisions
 
-### 1. Server-resident, not bridge-delegated
+### 1. Server-resident registry built on pi-ai primitives (no pi-coding-agent dep)
 
-**Decision:** The dashboard server instantiates `ModelRegistry` directly and calls `pi-ai.streamSimple` itself. Requests do **not** round-trip through a connected pi session's bridge.
+**Decision:** The dashboard server instantiates a server-resident registry built **directly on pi-ai's primitives** — not on pi-coding-agent's `ModelRegistry`/`AuthStorage`. The proxy's only runtime-resolved external module is `pi-ai`. Requests do **not** round-trip through a connected pi session's bridge.
 
-**Why:**
+Concretely:
+
+- `internal-registry.ts` (~50 lines) reads `~/.pi/agent/{auth,providers,models}.json` via the dashboard's existing readers, composes them with `pi-ai.registerBuiltins()`, and exposes the methods the proxy needs (`getAvailable`, `find`, `getApiKeyAndHeaders`, `refresh`, `getAll`).
+- `internal-auth-storage.ts` (~70 lines) wraps the existing `provider-auth-storage.ts#writeCredential` writer with pi-ai's per-provider OAuth refresh helpers; on `getApiKeyAndHeaders()` for an OAuth model with an expired token, it refreshes and persists.
+- `pi-ai` is runtime-resolved via the existing `ToolRegistry.resolveModule("pi-ai")`, exactly like `package-manager-wrapper.ts` resolves `pi-coding-agent`. No direct deps in `packages/server/package.json`.
+
+**Why server-resident (vs bridge-delegated):**
 
 - The user's stated requirement is "always-on while the dashboard runs". Bridge-delegation needs ≥1 connected session — fails when sessions are all closed.
-- `ModelRegistry.create` + `AuthStorage.create` are designed for standalone use; we are not pulling on threads that weren't already exposed.
+- pi-ai's `streamSimple` is designed for standalone use; we are not pulling on threads that weren't already exposed.
 - Avoids a new bridge protocol message and the associated WS round-trip latency.
 - Makes test harnesses trivially predictable — a Fastify-only fixture.
 
+**Why in-house registry over pi-coding-agent's `ModelRegistry`/`AuthStorage`:**
+
+- **Surface area.** pi-coding-agent is ~181 MB on disk; ~99% of that is agent runtime, tool calling, prompt building, ask_user, settings manager — none of which the proxy uses. We need ~10 symbols from it. Building those ~10 symbols ourselves over pi-ai (~120 lines total) is cheaper than carrying the full agent runtime as a runtime dep.
+- **Single-writer contract on `auth.json`.** The dashboard already owns a writer (`provider-auth-storage.ts`) for OAuth-flow completion. Adopting pi-coding-agent's `AuthStorage` for OAuth-refresh-on-expiry would introduce a *third* writer with a *different* lock convention (`AuthStorage` uses `proper-lockfile`; `provider-auth-storage.ts` uses `mkdir`-based locking). The in-house path reuses the existing writer, so the dashboard remains a single-writer process — bridge sessions are the only other writers, exactly as today.
+- **Stability surface.** pi-ai is a low-level HTTP/SSE library; its public exports (`streamSimple`, `MODELS`, `oauth.ts` helpers, `transform-messages`) change less often than pi-coding-agent's higher-level `ModelRegistry`/`AuthStorage` API. Tracking ~10 stable symbols is easier than tracking ~30 mid-level ones.
+- **Composition rules are simple.** The registry composition is: built-in providers ∪ `providers.json` ∪ (models from `models.json` whose provider has auth) — filtered by `auth.json` keys. ~50 lines of straightforward logic.
+
+**Why runtime-resolved (vs `pi-ai` as a direct dep in `packages/server/package.json`):**
+
+- The dashboard's existing architecture treats pi packages as **external runtime dependencies** supplied by the user's pi install / Electron's bundled install / `~/.pi-dashboard/` managed install / npm-global. `package-manager-wrapper.ts` and `bootstrap-install-from-list.ts` already establish this contract.
+- Keeps the published `@blackbelt-technology/pi-dashboard-server` package small (~5 MB saved).
+- Decouples dashboard release cycle from pi-ai version: the existing `pi-version-skew.ts` machinery remains the single compatibility gate.
+
 **Alternatives considered:**
 
-- **C2: bridge-delegated.** Pick any connected session, forward the request via WS, stream back. Rejected because of the "no sessions = 503" failure mode and because it couples request latency to whichever pi session got picked.
-- **B: spawn a hidden pi as the proxy.** Daemon would `pi --headless` internally, capture its registry. Rejected because we'd be paying for a full pi runtime to do what `ModelRegistry.create` already does cheaply.
-- **A: singleton-host pattern (first session wins).** Rejected because the lifetime is still session-scoped; closing the host session breaks the proxy.
+- **C0: bridge-delegated.** Forward `/v1/*` requests via WS to any connected session. Rejected: "no sessions = 503".
+- **C1: spawn a hidden pi as the proxy.** Rejected: paying for a full pi runtime when pi-ai's `streamSimple` does the work in-process.
+- **C2: server-resident + pi-coding-agent runtime-resolved.** Rejected (this rewrite's predecessor): unnecessary 175 MB carry, three-writer smell on `auth.json`.
+- **C3: server-resident + pi-coding-agent + pi-ai as direct deps.** Rejected: forks the existing pi-resolution contract, ~180 MB published-package bloat.
+- **C4: drop pi-ai too, reimplement upstream HTTP/SSE per-provider.** Rejected: 11 SDK transitives + per-provider OAuth quirks + weekly MODELS-table churn. Owning that surface is a net loss.
+- **C5: ship a small subset extracted from pi-ai/pi-coding-agent into a private package.** Rejected: requires upstream cooperation we don't have. May revisit if upstream decides to publish `@mariozechner/pi-llm-client`.
 
-**Cost:** Promotes `@mariozechner/pi-coding-agent` and `@mariozechner/pi-ai` from transitive to direct server deps. Both are already on disk via the bridge extension — no install-size delta in practice. **Risk:** version-coupling tightens (see Risks §1).
+**Cost:** ~120 lines of new code (`internal-registry.ts` + `internal-auth-storage.ts`) plus one new `pi-ai` registration row in `tool-registry/definitions.ts`. **Risk:** when the user's pi-ai install is missing/broken, the proxy is unavailable — same failure semantics as `package-manager-wrapper.ts` has for pi-coding-agent. Surfaced via `/api/health` (`proxy.status: "degraded"`) and a clear 503 + `code: "MODEL_PROXY_RUNTIME_MISSING"` from `/v1/*`.
 
 ### 2. Authentication: uniform proxy API key, no JWT, no bypass inheritance
 
@@ -131,9 +157,9 @@ External services (Honcho, LangChain, CI runners, custom apps) routinely need an
 - **Depend on `@blackbelt-technology/pi-model-proxy` as a library.** Rejected: that package is structured as a pi extension (default-export expecting `ExtensionAPI`), not as a reusable converter library. Importing internal `convert/` modules is brittle and unsupported.
 - **Re-implement from scratch.** Rejected: slow and error-prone for no upside.
 
-### 5. ModelRegistry refresh policy
+### 5. Registry refresh policy
 
-**Decision:** Refresh the registry on the following events, all eager (no per-request refresh, no polling):
+**Decision:** Refresh the in-house registry on the following events, all eager (no per-request refresh, no polling):
 
 | Trigger | Implementation site |
 |---|---|
@@ -143,7 +169,7 @@ External services (Honcho, LangChain, CI runners, custom apps) routinely need an
 | Bridge `credentials_updated` event | `packages/server/src/event-wiring.ts` after broadcasting to browsers |
 | `/v1/models` request | NO — refresh is too expensive; rely on the eager triggers |
 
-**Why:** `ModelRegistry.refresh()` re-reads disk and re-validates models.json; it's not free. Eager refresh on the four mutation sites covers every realistic credential change. Pure-on-disk edits (e.g. user manually edits `models.json` outside the dashboard) are a 30-second-staleness corner case we accept; users can hit the refresh button (REST: `POST /api/model-proxy/refresh`) if they need immediate effect.
+**Why:** `InternalRegistry.refresh()` re-reads disk and re-parses `models.json`; it's not free. Eager refresh on the four mutation sites covers every realistic credential change. Pure-on-disk edits (e.g. user manually edits `models.json` outside the dashboard) are a 30-second-staleness corner case we accept; users can hit the refresh button (REST: `POST /api/model-proxy/refresh`) if they need immediate effect.
 
 ### 6. Recursion guard
 
@@ -186,19 +212,31 @@ Per-key tracking is in-memory; survives daemon lifetime, not across restarts. Ac
 
 ## Risks / Trade-offs
 
-### 1. Version-coupling with pi
+### 1. Version-coupling with pi-ai
 
-**Risk:** Promoting `@mariozechner/pi-coding-agent` and `@mariozechner/pi-ai` to direct deps means dashboard now imports their public types and classes. A pi major version bump that changes `ModelRegistry`'s API becomes a dashboard breaking change.
+**Risk:** The proxy depends on pi-ai's public surface (`streamSimple`, `MODELS`, `register-builtins`, `oauth.ts` per-provider helpers, `transform-messages`, `Model<Api>` types). A pi-ai breaking change in any of these breaks the proxy at runtime.
 
-**Mitigation:** The existing `pi-version-skew.ts` machinery already gates pi version compatibility via `piCompatibility` in `packages/server/package.json`. Tighten the *minimum* by one minor when this ships — add a precondition test in `packages/server/src/__tests__/model-registry-shape.test.ts` that asserts the symbols we use are present (defensive against typo / dist-shape drift).
+**Mitigation:**
 
-**Accepted because:** pi's `ModelRegistry` is a stable public API (used by the bridge extension since the dashboard's first version). The upstream maintainer treats it as such.
+- Runtime resolution via `ToolRegistry` (Decision 1) keeps the coupling out of `packages/server/package.json` — the existing `pi-version-skew.ts` machinery remains the single compatibility gate.
+- Precondition test `packages/server/src/__tests__/pi-ai-shape.test.ts` resolves pi-ai through the registry and asserts the symbols we use (`streamSimple`, `MODELS`, `registerBuiltins`, the OAuth helper exports for each supported provider). `it.skip`-able when pi-ai cannot be resolved (clean CI without `~/.pi-dashboard/` populated); full and required when it can. `MODEL_PROXY_REQUIRE_PI_AI=1` env var forces hard-fail for release-cut runs.
+- Failures at runtime degrade `/v1/*` to 503 + `code: "MODEL_PROXY_RUNTIME_MISSING"`; the dashboard does not crash.
+- The surface area we track is intentionally small (~10 symbols). pi-ai changes are easier to follow than pi-coding-agent changes.
 
-### 2. OAuth refresh contention
+**Accepted because:** pi-ai is a stable lower-level library with a less-volatile public API than pi-coding-agent's higher-level `ModelRegistry`/`AuthStorage`.
 
-**Risk:** A pi session AND the dashboard server both call `getApiKeyAndHeaders` at the same moment, both notice the OAuth token expired, both attempt refresh, both write to `auth.json` → lock contention or token churn.
+### 2. OAuth refresh contention (single-writer-on-dashboard contract)
 
-**Mitigation:** `AuthStorage` already uses `proper-lockfile` (verified in `dist/core/auth-storage.d.ts` — `acquireLockSyncWithRetry`). Concurrent refreshes serialize. The losing side picks up the winning side's freshly-written token. **Acceptance test required**: simulate concurrent refresh from two `AuthStorage` instances (one in-process for the dashboard, one in-process for a stub session) and assert no token corruption.
+**Risk:** A pi session AND the dashboard server both call into auth refresh at the same moment, both notice the OAuth token expired, both attempt refresh, both write to `~/.pi/agent/auth.json` → lock contention or token churn.
+
+**Mitigation:**
+
+- **The dashboard has exactly one writer for `auth.json`: `provider-auth-storage.ts`.** The proxy's `internal-auth-storage.ts` reuses this writer (calls `writeCredential`); it does NOT add a parallel write path. So the only cross-process contention is between dashboard ↔ pi session(s), exactly as today — no new pairing is introduced.
+- Pi sessions write `auth.json` via pi-coding-agent's `AuthStorage`, which uses `proper-lockfile`. The dashboard's `provider-auth-storage.ts` currently uses a `mkdir`-based lock. **Recommended (orthogonal but related):** upgrade `provider-auth-storage.ts` to `proper-lockfile` so dashboard and bridge sessions share one lock convention. This is a small, isolated patch — see tasks.md §2.5.
+- Acceptance tests:
+  1. Concurrent refresh from `internal-auth-storage` AND a stub pi-session AuthStorage — assert no `auth.json` corruption (parsed JSON valid before/after).
+  2. Last-writer-wins is acceptable: whichever side completes refresh first writes the new token; the other side reloads, sees it fresh, and skips redundant refresh.
+- Documented in `docs/architecture.md` under "auth.json write contract".
 
 ### 3. Streaming inside Fastify
 
@@ -206,11 +244,17 @@ Per-key tracking is in-memory; survives daemon lifetime, not across restarts. Ac
 
 **Mitigation:** Use the upstream pi-model-proxy's exact SSE pattern (`reply.raw.writeHead(200, sseHeaders); for await (const event of stream) reply.raw.write(formatEvent(event)); reply.raw.end()`). Disable compression on `/v1/*` routes via Fastify's per-route `compress: false`. Set `request.raw.setTimeout(0)` so streams aren't killed by the dashboard's default request timeout.
 
-### 4. Bundle weight on the server
+### 4. Runtime-resolution miss (pi-ai not installed)
 
-**Risk:** Pulling pi-coding-agent into the server bundle increases install size. Quick measurement in `node_modules/@mariozechner/pi-coding-agent/dist/`: ~10MB. pi-ai: ~5MB. Negligible compared to the existing `node_modules` footprint, but worth tracking.
+**Risk:** A user's machine has the dashboard installed but no pi-ai install reachable by `ToolRegistry` (no `~/.pi-dashboard/`, no npm-global pi-ai, no override). `getModelRegistry()` throws `ModuleResolutionError`.
 
-**Mitigation:** None needed. Documented in the impact section.
+**Mitigation:** Same failure mode `package-manager-wrapper.ts` already has for pi-coding-agent and surfaces via `/api/packages`. The proxy reuses that pattern:
+
+- Returns 503 + `code: "MODEL_PROXY_RUNTIME_MISSING"` from `/v1/*` with a `details` field carrying `ToolRegistry`'s diagnostic trail.
+- Shows a non-blocking warning in `ModelProxySection.tsx` ("pi-ai not installed in any known location") with a one-click "Install via bootstrap" button that triggers the existing `bootstrap-install` flow with `["@mariozechner/pi-ai"]` (or `["@mariozechner/pi-coding-agent"]` if hoisting is reliable on the user's npm).
+- Health endpoint reports `proxy.status: "degraded" | "ready"`.
+
+**Accepted because:** the failure mode is identical to existing pi-dependent features and the user has clear remediation paths. The likelihood is also low: pi-ai is a transitive of pi-coding-agent which the dashboard already installs by default.
 
 ### 5. Coexistence with upstream pi-model-proxy
 

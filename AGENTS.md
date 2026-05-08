@@ -390,6 +390,22 @@ This section lists only the **architectural backbone** — the files agents touc
 | `src/server/provider-auth-storage.ts` | Read/write `~/.pi/agent/auth.json` with lockfile for pi provider credentials |
 | `src/server/routes/provider-auth-routes.ts` | REST routes: provider OAuth authorize/exchange/callback, device-code, API key CRUD |
 | `src/server/routes/provider-routes.ts` | REST routes: custom LLM provider CRUD + connection probe |
+| `src/server/model-proxy/auth-gate.ts` | Fastify `onRequest` hook for `/v1/*`: uniform proxy-key auth, backoff, scope check |
+| `src/server/model-proxy/api-key-store.ts` | Pure helpers: `hashKey`, `verifyKey`, `generateKey`, `findApiKey`, `recordKeyUsage`, `keyHasScope` |
+| `src/server/model-proxy/concurrency.ts` | `ConcurrencyTracker`: server-wide + per-key + per-provider caps; throws `ConcurrencyError` |
+| `src/server/model-proxy/failed-auth-backoff.ts` | Per-IP exponential backoff (10ms→10s cap) for failed proxy-key auth |
+| `src/server/model-proxy/internal-registry.ts` | Server-resident model registry: reads auth/providers/models.json + pi-ai built-ins |
+| `src/server/model-proxy/internal-auth-storage.ts` | Wraps `provider-auth-storage.ts`; handles OAuth-refresh-on-expiry via pi-ai per-provider helpers |
+| `src/server/model-proxy/registry-singleton.ts` | Lazy singleton: `getModelRegistry()`, `refreshModelRegistry()`, `getModelProxyStatus()` |
+| `src/server/model-proxy/recursion-guard.ts` | `isSelfPointing(baseUrl, origins)`: detects dashboard-pointing custom provider baseUrls |
+| `src/server/model-proxy/request-log.ts` | Append-mode JSONL request log at `~/.pi/dashboard/model-proxy.jsonl`; 50MB rotation |
+| `src/server/model-proxy/streamer.ts` | `streamCompletion(opts, streamSimple, registry?)`: resolves creds then streams via pi-ai |
+| `src/server/model-proxy/convert/` | Lifted MIT converters: OpenAI↔pi-ai, Anthropic↔pi-ai (format conversions, SSE output) |
+| `src/server/routes/model-proxy-routes.ts` | Route handlers: `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/messages` |
+| `src/server/routes/model-proxy-api-key-routes.ts` | REST CRUD for proxy API keys: list, create, revoke, purge (JWT-gated) |
+| `src/server/routes/model-proxy-refresh-routes.ts` | `POST /api/model-proxy/refresh`: JWT-gated manual registry refresh |
+| `src/client/components/ModelProxySection.tsx` | Settings section: proxy toggle, second-port, API key table + reveal-once banner |
+| `src/client/lib/model-proxy-api.ts` | Client fetch helpers: `listApiKeys`, `createApiKey`, `revokeApiKey`, `deleteApiKey`, `refreshRegistry` |
 | `src/server/provider-probe.ts` | Pure per-API probe builders + I/O `probeProvider` (8s timeout, no apiKey echo) |
 | `src/extension/provider-register.ts` | Reads `providers.json`, calls `pi.registerProvider`, hot-reload on credentials change |
 | `src/client/lib/providers-api.ts` | Client fetch helper for `/api/providers/test` connection probe |

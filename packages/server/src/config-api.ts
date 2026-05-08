@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { loadConfig, type DashboardConfig, type AuthConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { refreshModelRegistry } from "./model-proxy/registry-singleton.js";
 
 const REDACTED = "***";
 
@@ -138,6 +139,9 @@ export function writeConfigPartial(partial: Record<string, any>): WriteConfigRes
     // Write
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify(merged, null, 2) + "\n");
+
+    // Eager-refresh model proxy registry (config may affect proxy settings).
+    refreshModelRegistry().catch(() => {});
 
     return { success: true, restartRequired };
   } catch (err: any) {

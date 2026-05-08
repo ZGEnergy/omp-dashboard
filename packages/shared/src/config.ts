@@ -57,6 +57,8 @@ export interface AuthConfig {
   allowedUsers?: string[];
   bypassUrls?: string[];
   bypassHosts?: string[];
+  /** Admin email override — can list/revoke every user's proxy API keys. */
+  admin?: string;
 }
 
 export interface MemoryLimitsConfig {
@@ -112,6 +114,47 @@ export interface KnownServer {
   label?: string;
   addedAt: string; // ISO timestamp
 }
+
+// ── Model Proxy ─────────────────────────────────────────────────────
+
+export interface ProxyApiKey {
+  id: string;
+  label: string;
+  createdBy?: string;
+  scopes?: string[];
+  createdAt: number;
+  lastUsedAt?: number;
+  expiresAt?: number;
+  revokedAt?: number;
+  hash: string;
+}
+
+export interface ModelProxyConfig {
+  /** Master toggle. Default true. */
+  enabled: boolean;
+  /** Default model for requests that omit it. */
+  defaultModel?: string;
+  /** Optional second port for /v1/* routes (for SDKs that hardcode path-prefix-less base URLs). */
+  secondPort?: number;
+  /** Server-wide max concurrent streams. Default 16. Clamped [1, 256]. */
+  maxConcurrentStreams: number;
+  /** Per-API-key max concurrent streams. Default 4. Clamped [1, 64]. */
+  perKeyConcurrentStreams: number;
+  /** Per-provider concurrency caps. Keys are provider names. */
+  perProviderCaps?: Record<string, number>;
+  /** Enable JSONL request logging. Default false. */
+  logRequests: boolean;
+  /** Proxy API keys (stored hashed). */
+  apiKeys: ProxyApiKey[];
+}
+
+export const DEFAULT_MODEL_PROXY: ModelProxyConfig = {
+  enabled: true,
+  maxConcurrentStreams: 16,
+  perKeyConcurrentStreams: 4,
+  logRequests: false,
+  apiKeys: [],
+};
 
 /**
  * Plugin-specific config namespace.
@@ -172,6 +215,8 @@ export interface DashboardConfig {
    * until each extract-*-as-plugin change migrates them.
    */
   plugins: PluginsConfig;
+  /** Model proxy configuration (OpenAI/Anthropic-compatible /v1/* endpoints). */
+  modelProxy: ModelProxyConfig;
 }
 
 export interface CorsConfig {
@@ -193,6 +238,7 @@ export function clampSpawnRegisterTimeoutMs(v: unknown): number {
 
 const DEFAULTS: DashboardConfig = {
   plugins: {},
+  modelProxy: { ...DEFAULT_MODEL_PROXY },
   port: 8000,
   piPort: 9999,
   autoStart: true,
@@ -274,6 +320,7 @@ function parseAuthConfig(raw: any): AuthConfig | undefined {
     ...(Array.isArray(raw.allowedUsers) ? { allowedUsers: raw.allowedUsers } : Array.isArray(raw.allowedEmails) ? { allowedUsers: raw.allowedEmails } : {}),
     bypassUrls: Array.isArray(raw.bypassUrls) ? raw.bypassUrls.filter((u: unknown) => typeof u === "string") : [],
     bypassHosts: Array.isArray(raw.bypassHosts) ? raw.bypassHosts.filter((u: unknown) => typeof u === "string") : [],
+    ...(typeof raw.admin === "string" && raw.admin ? { admin: raw.admin } : {}),
   };
 }
 
@@ -346,6 +393,70 @@ export function getPluginConfig(
   return config.plugins?.[pluginId] ?? {};
 }
 
+export function parseModelProxyConfig(raw: any): ModelProxyConfig {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_MODEL_PROXY };
+
+  const apiKeys: ProxyApiKey[] = [];
+  if (Array.isArray(raw.apiKeys)) {
+    for (const entry of raw.apiKeys) {
+      if (
+        entry &&
+        typeof entry === "object" &&
+        typeof entry.id === "string" &&
+        typeof entry.label === "string" &&
+        typeof entry.hash === "string" &&
+        typeof entry.createdAt === "number"
+      ) {
+        apiKeys.push({
+          id: entry.id,
+          label: entry.label,
+          hash: entry.hash,
+          createdAt: entry.createdAt,
+          ...(typeof entry.createdBy === "string" ? { createdBy: entry.createdBy } : {}),
+          ...(Array.isArray(entry.scopes) ? { scopes: entry.scopes.filter((s: unknown) => typeof s === "string") } : {}),
+          ...(typeof entry.lastUsedAt === "number" ? { lastUsedAt: entry.lastUsedAt } : {}),
+          ...(typeof entry.expiresAt === "number" ? { expiresAt: entry.expiresAt } : {}),
+          ...(typeof entry.revokedAt === "number" ? { revokedAt: entry.revokedAt } : {}),
+        });
+      }
+    }
+  }
+
+  let perProviderCaps: Record<string, number> | undefined;
+  if (raw.perProviderCaps && typeof raw.perProviderCaps === "object" && !Array.isArray(raw.perProviderCaps)) {
+    perProviderCaps = {};
+    for (const [key, val] of Object.entries(raw.perProviderCaps)) {
+      if (typeof val === "number" && Number.isFinite(val) && val >= 1) {
+        perProviderCaps[key] = Math.min(val, 256);
+      }
+    }
+  }
+
+  return {
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : DEFAULT_MODEL_PROXY.enabled,
+    ...(typeof raw.defaultModel === "string" ? { defaultModel: raw.defaultModel } : {}),
+    ...(typeof raw.secondPort === "number" && raw.secondPort >= 1024 && raw.secondPort <= 65535
+      ? { secondPort: raw.secondPort }
+      : {}),
+    maxConcurrentStreams: clampNumber(
+      raw.maxConcurrentStreams,
+      DEFAULT_MODEL_PROXY.maxConcurrentStreams,
+      1,
+      256,
+    ),
+    perKeyConcurrentStreams: clampNumber(
+      raw.perKeyConcurrentStreams,
+      DEFAULT_MODEL_PROXY.perKeyConcurrentStreams,
+      1,
+      64,
+    ),
+    ...(perProviderCaps ? { perProviderCaps } : {}),
+    logRequests:
+      typeof raw.logRequests === "boolean" ? raw.logRequests : DEFAULT_MODEL_PROXY.logRequests,
+    apiKeys,
+  };
+}
+
 function parseKnownServers(raw: any): KnownServer[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -414,6 +525,7 @@ export function loadConfig(): DashboardConfig {
         ? parsed.askUserPromptTimeoutSeconds
         : defaults.askUserPromptTimeoutSeconds,
       spawnRegisterTimeoutMs: clampSpawnRegisterTimeoutMs(parsed.spawnRegisterTimeoutMs),
+      modelProxy: parseModelProxyConfig(parsed.modelProxy),
     };
 
     // Compute resolvedTrustedNetworks: merge trustedNetworks + auth.bypassHosts

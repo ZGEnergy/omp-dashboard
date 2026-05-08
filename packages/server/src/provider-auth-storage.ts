@@ -10,6 +10,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createRequire } from "node:module";
+const _require = createRequire(import.meta.url);
+const _lockfile = _require("proper-lockfile") as typeof import("proper-lockfile");
 import type { ProviderAuthStatus } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 import type { ProviderInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { getAllHandlers, type ProviderHandler } from "./provider-auth-handlers.js";
@@ -19,10 +22,6 @@ import { getLatestCatalogue } from "./provider-catalogue-cache.js";
 
 const AUTH_DIR = path.join(os.homedir(), ".pi", "agent");
 const AUTH_PATH = path.join(AUTH_DIR, "auth.json");
-const LOCK_PATH = AUTH_PATH + ".lock";
-const LOCK_STALE_MS = 10_000;
-const LOCK_RETRY_MS = 50;
-const LOCK_MAX_RETRIES = 40; // 40 × 50ms = 2s max wait
 
 export type ApiKeyCredential = { type: "api_key"; key: string };
 export type OAuthCredential = { type: "oauth"; refresh: string; access: string; expires: number; [k: string]: unknown };
@@ -35,45 +34,34 @@ interface OAuthProviderMeta {
   flowType: "auth_code" | "device_code";
 }
 
-// ── Lock helpers ─────────────────────────────────────────────────────────────
+// ── Lock helpers (proper-lockfile) ───────────────────────────────────────────
+//
+// Upgraded from mkdir-based lock to proper-lockfile to match pi-coding-agent's
+// AuthStorage lock convention. See change: add-dashboard-model-proxy task 2.5.
 
-function acquireLock(): void {
-  // Ensure parent directory exists (fresh install may not have ~/.pi/agent/)
+/**
+ * Run `fn` while holding a proper-lockfile lock on auth.json.
+ * Ensures the file exists (lockfile requires the target to exist).
+ */
+function withLock<T>(fn: () => T): T {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
-  for (let i = 0; i < LOCK_MAX_RETRIES; i++) {
-    try {
-      fs.mkdirSync(LOCK_PATH, { recursive: false });
-      return;
-    } catch (err: any) {
-      if (err.code === "EEXIST") {
-        // Check for stale lock
-        try {
-          const stat = fs.statSync(LOCK_PATH);
-          if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-            fs.rmdirSync(LOCK_PATH);
-            continue;
-          }
-        } catch { /* stat failed, retry */ }
-        // Wait and retry
-        const waitMs = LOCK_RETRY_MS + Math.random() * LOCK_RETRY_MS;
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
-        continue;
-      }
-      throw err;
-    }
+  if (!fs.existsSync(AUTH_PATH)) {
+    // Create empty auth file so lockfile can lock it
+    try { fs.writeFileSync(AUTH_PATH, "{}\n", { flag: "wx" }); } catch { /* race-safe */ }
   }
-  throw new Error("Failed to acquire auth.json lock after retries");
-}
 
-function releaseLock(): void {
-  try { fs.rmdirSync(LOCK_PATH); } catch { /* ignore */ }
+  const release = _lockfile.lockSync(AUTH_PATH, {
+    stale: 10_000,
+    realpath: false,
+  });
+  try {
+    return fn();
+  } finally {
+    try { release(); } catch { /* ignore cleanup errors */ }
+  }
 }
 
 // ── File operations ──────────────────────────────────────────────────────────
-
-function ensureDir(): void {
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
-}
 
 export function readAuthJson(): AuthData {
   try {
@@ -86,7 +74,7 @@ export function readAuthJson(): AuthData {
 }
 
 function writeAuthJson(data: AuthData): void {
-  ensureDir();
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
   const tmp = AUTH_PATH + ".tmp";
   const content = JSON.stringify(data, null, 2) + "\n";
 
@@ -104,25 +92,19 @@ function writeAuthJson(data: AuthData): void {
 // ── Public API: write/remove ─────────────────────────────────────────────────
 
 export function writeCredential(provider: string, credential: AuthCredential): void {
-  acquireLock();
-  try {
+  withLock(() => {
     const data = readAuthJson();
     data[provider] = credential;
     writeAuthJson(data);
-  } finally {
-    releaseLock();
-  }
+  });
 }
 
 export function removeCredential(provider: string): void {
-  acquireLock();
-  try {
+  withLock(() => {
     const data = readAuthJson();
     delete data[provider];
     writeAuthJson(data);
-  } finally {
-    releaseLock();
-  }
+  });
 }
 
 // ── Pure status builder (testable) ───────────────────────────────────────────

@@ -9,6 +9,9 @@ import type { NetworkGuard } from "./route-deps.js";
 import type { PiGateway } from "../pi-gateway.js";
 import type { BrowserGateway } from "../browser-gateway.js";
 import { probeProvider, resolveProbeApiKey, type ProbeApi } from "../provider-probe.js";
+import { refreshModelRegistry } from "../model-proxy/registry-singleton.js";
+import { isSelfPointing, collectDashboardOrigins } from "../model-proxy/recursion-guard.js";
+import { getTunnelUrl } from "../tunnel.js";
 
 const REDACTED = "***";
 const CONFIG_PATH = join(homedir(), ".pi", "agent", "providers.json");
@@ -47,7 +50,7 @@ function redactProviders(
   return redacted;
 }
 
-export function registerProviderRoutes(fastify: FastifyInstance, deps: { networkGuard: NetworkGuard; piGateway?: PiGateway; browserGateway?: BrowserGateway }): void {
+export function registerProviderRoutes(fastify: FastifyInstance, deps: { networkGuard: NetworkGuard; piGateway?: PiGateway; browserGateway?: BrowserGateway; port?: number }): void {
   const { networkGuard, piGateway } = deps;
   fastify.get(
     "/api/providers",
@@ -68,6 +71,23 @@ export function registerProviderRoutes(fastify: FastifyInstance, deps: { network
       }
 
       const incoming = body.providers as Record<string, ProviderEntry>;
+
+      // Recursion guard: reject providers pointing back at the dashboard
+      const dashboardPort = deps.port ?? 8000;
+      const tunnelUrl = getTunnelUrl();
+      const tunnelHostname = tunnelUrl ? new URL(tunnelUrl).hostname : undefined;
+      const origins = collectDashboardOrigins(dashboardPort, { tunnelHostname });
+      for (const [name, entry] of Object.entries(incoming)) {
+        if (entry.baseUrl && isSelfPointing(entry.baseUrl, origins)) {
+          return reply.code(400).send({
+            success: false,
+            code: "RECURSIVE_PROXY",
+            message: `Provider "${name}" baseUrl points back at this dashboard`,
+            offendingBaseUrl: entry.baseUrl,
+          });
+        }
+      }
+
       const existing = readProvidersRaw();
 
       // Merge: preserve redacted apiKey values from existing file
@@ -105,6 +125,9 @@ export function registerProviderRoutes(fastify: FastifyInstance, deps: { network
       if (piGateway) {
         piGateway.broadcast({ type: "credentials_updated" });
       }
+
+      // Eager-refresh model proxy registry so /v1/models reflects the change.
+      refreshModelRegistry().catch(() => {});
 
       return { success: true };
     },

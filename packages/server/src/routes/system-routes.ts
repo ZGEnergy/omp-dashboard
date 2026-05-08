@@ -14,6 +14,7 @@ import { detectEditors, EDITORS } from "../editor-registry.js";
 import { detectCodeServerBinary, resetDetectionCache } from "../editor-detection.js";
 import { readConfigRedacted, writeConfigPartial } from "../config-api.js";
 import { createTunnel, deleteTunnel, getTunnelStatus } from "../tunnel.js";
+import { getModelProxyStatus } from "../model-proxy/registry-singleton.js";
 import { spawnRestart } from "../restart-helper.js";
 import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import path from "node:path";
@@ -206,6 +207,7 @@ export function registerSystemRoutes(
       },
       agents: agentMetrics,
       plugins: getPluginStatusStore().listAll(),
+      proxy: getModelProxyStatus(),
     };
   });
 

@@ -253,6 +253,9 @@ export async function registerAuthPlugin(
     // Skip health endpoint
     if (request.url === "/api/health") return;
 
+    // Skip /v1/* — proxy auth gate handles those
+    if (request.url.startsWith("/v1/")) return;
+
     // Skip configured bypass URL prefixes
     if (isBypassed(request.url, authState.bypassUrls)) return;
 

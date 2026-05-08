@@ -447,3 +447,177 @@ export interface RescanToolsRequest {
 export interface SetToolOverrideRequest {
   path: string;
 }
+
+// ── Model Proxy: wire-protocol types ────────────────────────────────
+
+/** OpenAI Chat Completions request shape (subset relevant to the proxy). */
+export interface OpenAIChatCompletionRequest {
+  model: string;
+  messages: OpenAIChatMessage[];
+  stream?: boolean;
+  max_tokens?: number;
+  temperature?: number;
+  top_p?: number;
+  tools?: OpenAITool[];
+  tool_choice?: string | { type: string; function?: { name: string } };
+  stop?: string | string[];
+}
+
+export interface OpenAIChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string | OpenAIContentPart[];
+  name?: string;
+  tool_calls?: OpenAIToolCall[];
+  tool_call_id?: string;
+}
+
+export interface OpenAIContentPart {
+  type: "text" | "image_url";
+  text?: string;
+  image_url?: { url: string; detail?: string };
+}
+
+export interface OpenAITool {
+  type: "function";
+  function: { name: string; description?: string; parameters?: Record<string, unknown> };
+}
+
+export interface OpenAIToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+export interface OpenAIChatCompletionResponse {
+  id: string;
+  object: "chat.completion";
+  created: number;
+  model: string;
+  choices: {
+    index: number;
+    message: { role: "assistant"; content?: string | null; tool_calls?: OpenAIToolCall[] };
+    finish_reason: string | null;
+  }[];
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+}
+
+export interface OpenAIChatCompletionStreamChunk {
+  id: string;
+  object: "chat.completion.chunk";
+  created: number;
+  model: string;
+  choices: {
+    index: number;
+    delta: {
+      role?: "assistant";
+      content?: string | null;
+      reasoning_content?: string | null;
+      tool_calls?: { index: number; id?: string; type?: "function"; function?: { name?: string; arguments?: string } }[];
+    };
+    finish_reason: string | null;
+  }[];
+}
+
+export interface OpenAIModelEntry {
+  id: string;
+  object: "model";
+  created: number;
+  owned_by: string;
+  "x-pi"?: {
+    contextWindow?: number;
+    maxTokens?: number;
+    reasoning?: boolean;
+    cost?: { input?: number; output?: number };
+    input?: string[];
+  };
+}
+
+export interface OpenAIModelsResponse {
+  object: "list";
+  data: OpenAIModelEntry[];
+}
+
+/** Anthropic Messages request shape (subset relevant to the proxy). */
+export interface AnthropicMessagesRequest {
+  model: string;
+  messages: AnthropicMessage[];
+  system?: string | AnthropicContentBlock[];
+  max_tokens: number;
+  stream?: boolean;
+  temperature?: number;
+  top_p?: number;
+  tools?: AnthropicTool[];
+  stop_sequences?: string[];
+}
+
+export interface AnthropicMessage {
+  role: "user" | "assistant";
+  content: string | AnthropicContentBlock[];
+}
+
+export interface AnthropicContentBlock {
+  type: string;
+  text?: string;
+  source?: { type: "base64"; media_type: string; data: string };
+  [key: string]: unknown;
+}
+
+export interface AnthropicTool {
+  name: string;
+  description?: string;
+  input_schema: Record<string, unknown>;
+}
+
+export interface AnthropicMessagesResponse {
+  id: string;
+  type: "message";
+  role: "assistant";
+  content: AnthropicContentBlock[];
+  model: string;
+  stop_reason: string | null;
+  usage: { input_tokens: number; output_tokens: number };
+}
+
+export interface AnthropicMessagesStreamEvent {
+  type: string;
+  message?: AnthropicMessagesResponse;
+  index?: number;
+  content_block?: AnthropicContentBlock;
+  delta?: { type: string; text?: string; partial_json?: string; thinking?: string; [key: string]: unknown };
+  usage?: { output_tokens: number };
+}
+
+// ── Model Proxy: API key management ─────────────────────────────────
+
+export interface ModelProxyApiKeysCreateRequest {
+  label: string;
+  scopes?: string[];
+  expiresAt?: number;
+}
+
+export interface ModelProxyApiKeyEntry {
+  id: string;
+  label: string;
+  createdBy?: string;
+  scopes: string[];
+  createdAt: number;
+  lastUsedAt?: number;
+  expiresAt?: number;
+  revokedAt?: number;
+  hash: string; // redacted to "***" in list responses
+}
+
+export type ModelProxyApiKeysListResponse = ApiResponse<{
+  keys: ModelProxyApiKeyEntry[];
+  revoked: ModelProxyApiKeyEntry[];
+}>;
+
+export type ModelProxyApiKeysCreateResponse = ApiResponse<{
+  id: string;
+  label: string;
+  createdBy?: string;
+  scopes: string[];
+  createdAt: number;
+  expiresAt?: number;
+  key: string; // cleartext, revealed ONCE
+}>;

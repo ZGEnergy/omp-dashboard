@@ -12,6 +12,7 @@ import { NetworkDiscoverySection } from "./NetworkDiscoverySection.js";
 import { PackageBrowser } from "./PackageBrowser.js";
 import { ToolsSection, SpawnFailuresSection } from "./ToolsSection.js";
 import { DiagnosticsSection } from "./DiagnosticsSection.js";
+import { ModelProxySection } from "./ModelProxySection.js";
 import { PackageInstallConfirmDialog } from "./PackageInstallConfirmDialog.js";
 import { PackageReadmeDialog } from "./PackageReadmeDialog.js";
 import { useInstalledPackages } from "../hooks/useInstalledPackages.js";
@@ -109,6 +110,12 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
   const [config, setConfig] = useState<Config | null>(null);
   const [original, setOriginal] = useState<Config | null>(null);
   const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([]);
+  // Detect upstream pi-model-proxy extension for ModelProxySection coexistence advisory.
+  // See change: add-dashboard-model-proxy task 14.1.
+  const installedTopLevel = useInstalledPackages("global");
+  const upstreamPiModelProxyInstalled = installedTopLevel.packages.some(
+    (p) => p.source === "npm:@blackbelt-technology/pi-model-proxy",
+  );
   const [originalLlmProviders, setOriginalLlmProviders] = useState<LlmProvider[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -535,6 +542,13 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
                   <Icon path={mdiPlus} size={0.6} />
                   Add Provider
                 </button>
+              </Section>
+              <Section title="API Proxy">
+                <ModelProxySection
+                  config={config.modelProxy ?? {}}
+                  onChange={(patch) => update((c) => { c.modelProxy = { ...c.modelProxy, ...patch }; })}
+                  upstreamExtensionDetected={upstreamPiModelProxyInstalled}
+                />
               </Section>
               {/* Plugin slot: settings-section (providers tab) */}
               <SettingsSectionSlot tab="providers" />
