@@ -1522,7 +1522,7 @@ Every external binary, module, and directory the dashboard depends on is resolve
 | Tool | Kind | Strategy chain |
 |---|---|---|
 | `pi` | binary | override → managed (`MANAGED_BIN/pi[.cmd]`) → where |
-| `pi-coding-agent` | module | override → bare-import → managed (`MANAGED_DIR/node_modules/.../dist/index.js`) → npm-global; probes both `@mariozechner/*` and `@oh-my-pi/*` aliases |
+| `pi-coding-agent` | module | override → bare-import → managed (`MANAGED_DIR/node_modules/.../dist/index.js`) → npm-global; probes `@earendil-works/*` (primary) and `@mariozechner/*` (legacy) aliases |
 | `openspec`, `npm`, `node`, `tsx`, `git`, `zrok` | binary | override → managed → where |
 | `pi-dashboard` | module | override → managed → npm-global (presence of `package.json` is enough) |
 | `electron` | module | override → bare-import (`paths: ["packages/electron"]`) → managed; resolves the package directory containing `install.js`, hoist-aware. See change: register-build-time-tools |

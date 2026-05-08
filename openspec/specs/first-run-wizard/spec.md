@@ -23,11 +23,11 @@ The wizard SHALL present two installation modes as the first step.
 - **THEN** the wizard SHALL verify pi and openspec are on PATH and the dashboard bridge extension is registered with pi
 
 ### Requirement: Standalone mode installation
-In standalone mode, the wizard SHALL install all required tools into the managed location.
+In standalone mode, the wizard SHALL install all required tools into the managed location. The pi package installed SHALL be `@earendil-works/pi-coding-agent` by default. The wizard SHALL NOT install `@oh-my-pi/pi-coding-agent`.
 
 #### Scenario: Full standalone install
 - **WHEN** standalone mode is active
-- **THEN** the wizard SHALL install `@mariozechner/pi-coding-agent`, `@blackbelt-technology/pi-dashboard`, `@fission-ai/openspec`, and `tsx` into `~/.pi-dashboard/node_modules/`
+- **THEN** the wizard SHALL install `@earendil-works/pi-coding-agent`, `@blackbelt-technology/pi-dashboard`, `@fission-ai/openspec`, and `tsx` into `~/.pi-dashboard/node_modules/`
 - **AND** show progress per dependency (checking → installing → installed / failed)
 
 #### Scenario: Standalone install uses bundled Node when no system Node
@@ -37,6 +37,10 @@ In standalone mode, the wizard SHALL install all required tools into the managed
 #### Scenario: Installation failure with retry
 - **WHEN** a dependency installation fails
 - **THEN** the wizard SHALL show the error message and a "Retry" button
+
+#### Scenario: Wizard hint message names earendil-works
+- **WHEN** the wizard's setup-everything error path renders the "Install pi" hint
+- **THEN** the suggested command SHALL be `npm install -g @earendil-works/pi-coding-agent` (not the legacy mariozechner or oh-my-pi names)
 
 ### Requirement: Power user mode verification
 In power user mode, the wizard SHALL verify the existing installation and guide the user to fix any gaps.

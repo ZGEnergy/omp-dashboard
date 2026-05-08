@@ -7,10 +7,13 @@ Server-side discovery and reporting of installed pi ecosystem core package versi
 The server SHALL discover all installed pi ecosystem core packages from both global npm and the managed install directory (`~/.pi-dashboard/node_modules/`) using a strict whitelist of package names. The `pi-*` name-prefix heuristic SHALL NOT be used.
 
 The whitelist consists of:
-- `@mariozechner/pi-coding-agent`
-- `@oh-my-pi/pi-coding-agent`
+
+- `@earendil-works/pi-coding-agent` (primary fork)
+- `@mariozechner/pi-coding-agent` (legacy fork retained for backward compatibility)
 - `@blackbelt-technology/pi-agent-dashboard`
 - `@blackbelt-technology/pi-model-proxy`
+
+The whitelist SHALL NOT include `@oh-my-pi/pi-coding-agent`.
 
 #### Scenario: Global npm packages discovered
 - **WHEN** the server runs `npm list -g --depth=0 --json`
@@ -21,6 +24,16 @@ The whitelist consists of:
 - **WHEN** `npm list -g` includes a package whose name starts with `pi-` (e.g., `pi-agent-browser`, `pi-web-access`) but is NOT in the whitelist
 - **THEN** the package SHALL NOT appear in the core discovery result
 - **AND** SHALL NOT appear in `GET /api/pi-core/status`
+
+#### Scenario: Legacy oh-my-pi install ignored
+- **WHEN** `@oh-my-pi/pi-coding-agent` is present in either global or managed install
+- **THEN** it SHALL NOT appear in the discovery result
+- **AND** the user SHALL receive no upgrade hint for it (the dashboard does not support that fork)
+
+#### Scenario: Both supported forks present uses earendil
+- **WHEN** both `@earendil-works/pi-coding-agent` and `@mariozechner/pi-coding-agent` are present in global npm
+- **THEN** both SHALL appear in the discovery result with their respective install sources
+- **AND** the dashboard SHALL prefer earendil for runtime resolution (per the package-management spec)
 
 #### Scenario: Managed install packages discovered
 - **WHEN** the directory `~/.pi-dashboard/node_modules/` exists
@@ -75,17 +88,21 @@ The server SHALL expose `GET /api/pi-core/versions` returning `PiCoreStatus` wit
 - **THEN** the response SHALL return an empty `packages` array with `updatesAvailable: 0`
 
 ### Requirement: Core package update execution
-The server SHALL expose `POST /api/pi-core/update` to update one or more core packages. Updates SHALL always target the npm `latest` dist-tag regardless of the consuming `package.json` dependency range.
+The server SHALL expose `POST /api/pi-core/update` to update one or more core packages. The endpoint SHALL accept either supported pi fork name in the `packages` array.
 
-#### Scenario: Update global package
-- **WHEN** a client calls `POST /api/pi-core/update` with `{ packages: ["@mariozechner/pi-coding-agent"] }` and the package has `installSource: "global"`
-- **THEN** the server SHALL run `npm install -g @mariozechner/pi-coding-agent@latest`
+#### Scenario: Update earendil global package
+- **WHEN** a client calls `POST /api/pi-core/update` with `{ packages: ["@earendil-works/pi-coding-agent"] }` and the package has `installSource: "global"`
+- **THEN** the server SHALL run `npm update -g @earendil-works/pi-coding-agent`
 - **AND** broadcast progress events via WebSocket
+
+#### Scenario: Update legacy mariozechner global package
+- **WHEN** a client calls `POST /api/pi-core/update` with `{ packages: ["@mariozechner/pi-coding-agent"] }` and the package has `installSource: "global"`
+- **THEN** the server SHALL run `npm update -g @mariozechner/pi-coding-agent`
+- **AND** the legacy fork SHALL be updated in place without being silently swapped to earendil
 
 #### Scenario: Update managed package
 - **WHEN** a package has `installSource: "managed"`
-- **THEN** the server SHALL run `npm install <pkg>@latest` in the `~/.pi-dashboard/` directory
-- **AND** the consuming `~/.pi-dashboard/package.json` dependency range SHALL be rewritten to reflect the freshly installed version (npm default behaviour)
+- **THEN** the server SHALL run `npm update <pkg>` in the `~/.pi-dashboard/` directory using the discovered package name (earendil or mariozechner)
 
 #### Scenario: Update crosses minor-version boundary
 - **WHEN** the installed version is in a different minor than the npm `latest` dist-tag (e.g. installed `0.70.6`, latest `0.73.1`)
@@ -116,11 +133,16 @@ The server SHALL auto-reload all connected pi sessions after a successful core p
 - **AND** the completion message SHALL include `sessionsReloaded` count
 
 ### Requirement: Display name mapping
-Known core packages SHALL have human-readable display names.
+Known core packages SHALL have human-readable display names that distinguish the primary fork from the legacy one.
 
-#### Scenario: Known package has display name
-- **WHEN** `@mariozechner/pi-coding-agent` is discovered
+#### Scenario: Earendil pi-coding-agent gets primary display name
+- **WHEN** `@earendil-works/pi-coding-agent` is discovered
 - **THEN** its `displayName` SHALL be `"pi (core agent)"`
+
+#### Scenario: Mariozechner pi-coding-agent gets legacy display name
+- **WHEN** `@mariozechner/pi-coding-agent` is discovered
+- **THEN** its `displayName` SHALL be `"pi (core agent — legacy fork)"`
+- **AND** the dashboard UI SHALL surface this label so users can see which fork is active
 
 #### Scenario: Unknown package uses npm name
 - **WHEN** a discovered package has no display name mapping
@@ -128,15 +150,19 @@ Known core packages SHALL have human-readable display names.
 
 ### Requirement: piCompatibility block tracks current upstream pi-coding-agent
 
-The `packages/server/package.json` `piCompatibility` block SHALL declare a `recommended` version that is no more than one minor release behind the latest published `@mariozechner/pi-coding-agent` and a `minimum` version that matches the version actually exercised in the dashboard's tests and bundled offline cache.
+The `packages/server/package.json` `piCompatibility` block SHALL declare a `recommended` version that is no more than one minor release behind the latest published `@earendil-works/pi-coding-agent` and a `minimum` version that matches the version actually exercised in the dashboard's tests and bundled offline cache.
 
-After this change, the values SHALL be:
+When the bundled offline cache still pins the legacy `@mariozechner/pi-coding-agent` build (transitional state), the `minimum` SHALL match that legacy version; the `recommended` SHALL still track the earendil release stream so the upgrade-hint UI surfaces forward-progress.
 
-- `minimum: "0.70.0"`
-- `recommended: "0.70.0"`
-- `maximum: null`
+#### Scenario: Recommended tracks earendil even when offline cache is legacy
+- **WHEN** the bundled offline cache pins `@mariozechner/pi-coding-agent@0.70.0`
+- **AND** the latest published `@earendil-works/pi-coding-agent` is `0.74.0`
+- **THEN** `piCompatibility.minimum` SHALL be `"0.70.0"` (matching the offline cache)
+- **AND** `piCompatibility.recommended` SHALL be no more than one minor behind `0.74.0` (e.g., `"0.73.0"` or `"0.74.0"`)
 
-Note: `minimum` is intentionally pinned in lockstep with `recommended`. The dashboard does NOT maintain backward compatibility for older pi versions — keeping `minimum` at the same value as `recommended` removes the need for any conditional code paths or dual-import shims.
+#### Scenario: Recommended tracks earendil when both forks publish in lockstep
+- **WHEN** both `@earendil-works/pi-coding-agent` and `@mariozechner/pi-coding-agent` publish `0.74.0`
+- **THEN** `piCompatibility.recommended` MAY be set to `"0.74.0"` and the dashboard SHALL accept either fork at that version
 
 #### Scenario: Recommended version drives the upgrade hint
 - **WHEN** the running pi-coding-agent version is below `piCompatibility.recommended`

@@ -8,7 +8,9 @@ Requirements governing how the PI Dashboard bootstraps its runtime dependencies 
 
 ### Requirement: Electron artifacts ship a per-platform offline npm cache
 
-Every published Electron artifact (DMG, DEB, AppImage, NSIS, ZIP / portable) SHALL include a `resources/offline-packages/` directory containing a `manifest.json` and a `npm-cache.tar.gz` gzip of a pre-populated npm `_cacache/` tree targeted at that artifact's platform. The cache SHALL contain every tarball required to install `@mariozechner/pi-coding-agent`, `@fission-ai/openspec`, and `tsx` at their pinned versions without any network access.
+Every published Electron artifact (DMG, DEB, AppImage, NSIS, ZIP / portable) SHALL include a `resources/offline-packages/` directory containing a `manifest.json` and a `npm-cache.tar.gz` gzip of a pre-populated npm `_cacache/` tree targeted at that artifact's platform. The cache SHALL contain every tarball required to install the dashboard's pinned pi build (`@earendil-works/pi-coding-agent` or, for legacy artefacts, `@mariozechner/pi-coding-agent`), `@fission-ai/openspec`, and `tsx` at their pinned versions without any network access.
+
+The pi-package name embedded in the manifest is the one the artefact's first-run installer will pass to `npm install --offline`. The dashboard SHALL accept either supported name as a primary install target; producing artefacts that pin one or the other is a build-time decision tracked by the offline-cache regeneration tooling. Artefacts SHALL NOT pin `@oh-my-pi/pi-coding-agent`.
 
 #### Scenario: Manifest and cache present in packaged ZIP
 
@@ -91,7 +93,9 @@ The Electron Doctor diagnostic SHALL include a row showing whether the offline b
 
 
 ### Requirement: Single shared installer module
-The system SHALL expose a single `bootstrapInstall` function in `packages/shared/src/bootstrap-install.ts` callable from all entry points (Electron wizard, `pi-dashboard` CLI first-run, `pi-dashboard upgrade-pi` CLI, `/api/bootstrap/upgrade-pi` REST).
+The system SHALL expose a single `bootstrapInstall` function in `packages/shared/src/bootstrap-install.ts` callable from all entry points (Electron wizard, `pi-dashboard` CLI first-run, `pi-dashboard upgrade-pi` CLI, `/api/bootstrap/upgrade-pi` REST). The function's default `packages` list SHALL install `@earendil-works/pi-coding-agent` as the primary pi package, with `@fission-ai/openspec` and `tsx` alongside.
+
+When the offline cache pins the legacy `@mariozechner/pi-coding-agent` name, callers MAY override the default list to match the cached name.
 
 #### Scenario: Electron wizard uses shared installer
 - **WHEN** the Electron wizard runs "Setup everything"
@@ -99,7 +103,11 @@ The system SHALL expose a single `bootstrapInstall` function in `packages/shared
 
 #### Scenario: CLI first-run uses shared installer
 - **WHEN** `pi-dashboard` starts and pi resolution fails
-- **THEN** the server calls `bootstrapInstall` with `packages: ["@mariozechner/pi-coding-agent", "openspec", "tsx"]` async, without blocking server startup
+- **THEN** the server calls `bootstrapInstall` with `packages: ["@earendil-works/pi-coding-agent", "@fission-ai/openspec", "tsx"]` async, without blocking server startup
+
+#### Scenario: CLI first-run accepts legacy override for offline-pinned artefact
+- **WHEN** the offline cache manifest pins `@mariozechner/pi-coding-agent` and the offline-install path is taken
+- **THEN** the caller MAY pass `packages: ["@mariozechner/pi-coding-agent", "@fission-ai/openspec", "tsx"]` and the installer SHALL succeed against the legacy name
 
 ### Requirement: Degraded-mode startup
 The dashboard server SHALL start in degraded mode when pi is not yet resolvable, remaining fully operational for non-pi-dependent operations while bootstrap install runs in the background.

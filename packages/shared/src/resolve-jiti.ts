@@ -7,16 +7,17 @@
  * can resolve it directly.
  *
  * Supported jiti providers, in lookup order:
- *   1. `@mariozechner/jiti` — legacy fork shipped with pi ≤ 0.73.0.
- *   2. `@oh-my-pi/jiti`     — fork shipped with `@oh-my-pi/pi-coding-agent`.
- *   3. `jiti`               — upstream package. Pi 0.73.1+ dropped the
- *                              fork in favour of upstream jiti 2.7,
- *                              which ships the same `lib/jiti-register.mjs`
- *                              layout the helpers below assume.
+ *   1. `jiti`               — upstream package shipped with
+ *                              `@earendil-works/pi-coding-agent@0.74+`
+ *                              and `@mariozechner/pi-coding-agent@0.73.1+`.
+ *                              Ships the `lib/jiti-register.mjs` layout the
+ *                              helpers below assume.
+ *   2. `@mariozechner/jiti` — legacy fork shipped with pi ≤ 0.73.0 via
+ *                              `@mariozechner/pi-coding-agent`.
  *
- * Forks are tried first to preserve behaviour for users on older pi
- * versions; upstream is the fallthrough for pi 0.73.1+. See change:
- * support-upstream-jiti-resolution.
+ * Upstream is tried first since it is the current shape; the legacy fork
+ * is the fallthrough for users still on pi ≤ 0.73.0. See changes:
+ * support-upstream-jiti-resolution, migrate-pi-fork-to-earendil.
  */
 
 import { createRequire } from "node:module";
