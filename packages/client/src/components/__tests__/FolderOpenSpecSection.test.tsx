@@ -194,6 +194,154 @@ describe("FolderOpenSpecSection", () => {
     expect(screen.queryAllByTestId("session-link")).toHaveLength(0);
   });
 
+  // --- Linked-session pill lifecycle icons ---
+
+  const liveAttached: DashboardSession = {
+    id: "s-live",
+    cwd: "/project/foo",
+    source: "tui",
+    status: "idle",
+    startedAt: Date.now(),
+    attachedProposal: "feat-in-progress",
+    sessionFile: "/sf/live.jsonl",
+  };
+
+  it("alive + not hidden → hide icon, fork icon, no unhide, no resume", () => {
+    render(
+      <FolderOpenSpecSection
+        {...defaultProps}
+        sessions={[liveAttached]}
+        onNavigateToSession={vi.fn()}
+        onHideSession={vi.fn()}
+        onUnhideSession={vi.fn()}
+        onResumeSession={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+    expect(screen.queryByTestId("linked-session-hide")).toBeTruthy();
+    expect(screen.queryByTestId("linked-session-unhide")).toBeNull();
+    expect(screen.queryByTestId("linked-session-resume")).toBeNull();
+    expect(screen.queryByTestId("linked-session-fork")).toBeTruthy();
+  });
+
+  it("hidden → unhide icon + resume icon", () => {
+    render(
+      <FolderOpenSpecSection
+        {...defaultProps}
+        sessions={[{ ...liveAttached, hidden: true }]}
+        onNavigateToSession={vi.fn()}
+        onHideSession={vi.fn()}
+        onUnhideSession={vi.fn()}
+        onResumeSession={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+    expect(screen.queryByTestId("linked-session-unhide")).toBeTruthy();
+    expect(screen.queryByTestId("linked-session-hide")).toBeNull();
+    expect(screen.queryByTestId("linked-session-resume")).toBeTruthy();
+  });
+
+  it("ended (not alive) → resume icon visible", () => {
+    render(
+      <FolderOpenSpecSection
+        {...defaultProps}
+        sessions={[{ ...liveAttached, status: "ended" }]}
+        onNavigateToSession={vi.fn()}
+        onHideSession={vi.fn()}
+        onResumeSession={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+    expect(screen.queryByTestId("linked-session-resume")).toBeTruthy();
+  });
+
+  it("no sessionFile → no resume, no fork", () => {
+    render(
+      <FolderOpenSpecSection
+        {...defaultProps}
+        sessions={[{ ...liveAttached, sessionFile: undefined, status: "ended" }]}
+        onNavigateToSession={vi.fn()}
+        onResumeSession={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+    expect(screen.queryByTestId("linked-session-resume")).toBeNull();
+    expect(screen.queryByTestId("linked-session-fork")).toBeNull();
+  });
+
+  it("clicking each lifecycle icon fires its callback and does NOT navigate", () => {
+    const onNavigate = vi.fn();
+    const onHide = vi.fn();
+    const onResume = vi.fn();
+    render(
+      <FolderOpenSpecSection
+        {...defaultProps}
+        sessions={[liveAttached]}
+        onNavigateToSession={onNavigate}
+        onHideSession={onHide}
+        onResumeSession={onResume}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+
+    fireEvent.click(screen.getByTestId("linked-session-hide"));
+    expect(onHide).toHaveBeenCalledWith("s-live");
+    expect(onNavigate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("linked-session-fork"));
+    expect(onResume).toHaveBeenCalledWith("s-live", "fork");
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("clicking unhide fires onUnhideSession with id", () => {
+    const onUnhide = vi.fn();
+    const onNavigate = vi.fn();
+    render(
+      <FolderOpenSpecSection
+        {...defaultProps}
+        sessions={[{ ...liveAttached, hidden: true }]}
+        onNavigateToSession={onNavigate}
+        onUnhideSession={onUnhide}
+        onResumeSession={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+    fireEvent.click(screen.getByTestId("linked-session-unhide"));
+    expect(onUnhide).toHaveBeenCalledWith("s-live");
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("clicking resume fires onResumeSession with continue mode", () => {
+    const onResume = vi.fn();
+    render(
+      <FolderOpenSpecSection
+        {...defaultProps}
+        sessions={[{ ...liveAttached, status: "ended" }]}
+        onNavigateToSession={vi.fn()}
+        onResumeSession={onResume}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+    fireEvent.click(screen.getByTestId("linked-session-resume"));
+    expect(onResume).toHaveBeenCalledWith("s-live", "continue");
+  });
+
+  it("clicking the name region still navigates", () => {
+    const onNavigate = vi.fn();
+    render(
+      <FolderOpenSpecSection
+        {...defaultProps}
+        sessions={[liveAttached]}
+        onNavigateToSession={onNavigate}
+        onHideSession={vi.fn()}
+        onResumeSession={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("folder-openspec-header"));
+    fireEvent.click(screen.getByTestId("session-link"));
+    expect(onNavigate).toHaveBeenCalledWith("s-live");
+  });
+
   it("does not render + Change button", () => {
     render(<FolderOpenSpecSection {...defaultProps} />);
     expect(screen.queryByTestId("folder-new-change-btn")).toBeNull();

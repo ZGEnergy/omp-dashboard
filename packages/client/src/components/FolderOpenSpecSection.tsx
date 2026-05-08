@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Icon } from "@mdi/react";
-import { mdiRefresh, mdiChevronDown, mdiChevronRight, mdiArchiveOutline, mdiFileDocumentOutline, mdiPlay, mdiPlus } from "@mdi/js";
+import { mdiRefresh, mdiChevronDown, mdiChevronRight, mdiArchiveOutline, mdiFileDocumentOutline, mdiPlay, mdiPlus, mdiEyeOffOutline, mdiEyeOutline, mdiPlayCircleOutline, mdiSourceFork } from "@mdi/js";
 import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import type { OpenSpecData, OpenSpecChange, OpenSpecGroup, DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { ArtifactLettersButton } from "./openspec-helpers.js";
@@ -24,13 +24,19 @@ interface Props {
   onOpenSpecs?: () => void;
   onOpenArchive?: () => void;
   onSpawnAttached?: (cwd: string, changeName: string) => void;
+  /** Hide a session (eye-off icon on linked-session pill). */
+  onHideSession?: (sessionId: string) => void;
+  /** Unhide a session (eye icon, shown when session.hidden). */
+  onUnhideSession?: (sessionId: string) => void;
+  /** Resume or fork a session (play-circle / source-fork icons). */
+  onResumeSession?: (sessionId: string, mode: "continue" | "fork") => void;
   /** Externally-pushed groups (from WS broadcast). */
   groups?: OpenSpecGroup[];
   /** Externally-pushed assignments (from WS broadcast). */
   assignments?: Record<string, string>;
 }
 
-export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, sessions, onNavigateToSession, onOpenSpecs, onOpenArchive, onSpawnAttached, groups: externalGroups, assignments: externalAssignments }: Props) {
+export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, sessions, onNavigateToSession, onOpenSpecs, onOpenArchive, onSpawnAttached, onHideSession, onUnhideSession, onResumeSession, groups: externalGroups, assignments: externalAssignments }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [tasksOpenForChange, setTasksOpenForChange] = useState<string | null>(null);
   const [activePill, setActivePill] = useState<string | null>(null);
@@ -245,20 +251,73 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, se
             </button>
           )}
         </div>
-        {/* Line 2+: linked sessions — always stack full-width for readable list of names */}
+        {/* Line 2+: linked sessions — always stack full-width for readable list of names.
+            Each row: name (jump) + trailing lifecycle icon group (hide/unhide/resume/fork). */}
         {linkedSessions.length > 0 && (
           <div className="mt-0.5 flex flex-col items-stretch gap-0.5">
-            {linkedSessions.map((s) => (
-              <button
-                key={s.id}
-                data-testid="session-link"
-                onClick={(e) => { e.stopPropagation(); onNavigateToSession?.(s.id); }}
-                className="text-[9px] px-1 py-0.5 rounded bg-[var(--bg-tertiary)] text-blue-400 hover:text-blue-300 truncate text-left w-full"
-                title={s.name || s.id}
-              >
-                {s.name || s.id.slice(0, 8)}
-              </button>
-            ))}
+            {linkedSessions.map((s) => {
+              const isHidden = !!s.hidden;
+              const isAlive = s.status !== "ended";
+              const hasSessionFile = !!s.sessionFile;
+              const showResume = !!onResumeSession && hasSessionFile && (!isAlive || isHidden);
+              const showFork = !!onResumeSession && hasSessionFile;
+              return (
+                <div
+                  key={s.id}
+                  className="flex items-center gap-1 rounded bg-[var(--bg-tertiary)] pr-0.5"
+                >
+                  <button
+                    data-testid="session-link"
+                    onClick={(e) => { e.stopPropagation(); onNavigateToSession?.(s.id); }}
+                    className="flex-1 min-w-0 text-[9px] px-1 py-0.5 text-blue-400 hover:text-blue-300 truncate text-left"
+                    title={s.name || s.id}
+                  >
+                    {s.name || s.id.slice(0, 8)}
+                  </button>
+                  <div className="flex items-center gap-0.5 flex-shrink-0">
+                    {isHidden && onUnhideSession ? (
+                      <button
+                        data-testid="linked-session-unhide"
+                        onClick={(e) => { e.stopPropagation(); onUnhideSession(s.id); }}
+                        className="p-0.5 text-[var(--text-tertiary)] hover:text-green-400"
+                        title="Show session"
+                      >
+                        <Icon path={mdiEyeOutline} size={0.4} />
+                      </button>
+                    ) : !isHidden && onHideSession ? (
+                      <button
+                        data-testid="linked-session-hide"
+                        onClick={(e) => { e.stopPropagation(); onHideSession(s.id); }}
+                        className="p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-muted)]"
+                        title="Hide session"
+                      >
+                        <Icon path={mdiEyeOffOutline} size={0.4} />
+                      </button>
+                    ) : null}
+                    {showResume && (
+                      <button
+                        data-testid="linked-session-resume"
+                        onClick={(e) => { e.stopPropagation(); onResumeSession!(s.id, "continue"); }}
+                        className="p-0.5 text-[var(--text-tertiary)] hover:text-green-400"
+                        title="Resume session"
+                      >
+                        <Icon path={mdiPlayCircleOutline} size={0.4} />
+                      </button>
+                    )}
+                    {showFork && (
+                      <button
+                        data-testid="linked-session-fork"
+                        onClick={(e) => { e.stopPropagation(); onResumeSession!(s.id, "fork"); }}
+                        className="p-0.5 text-[var(--text-tertiary)] hover:text-blue-400"
+                        title="Fork session"
+                      >
+                        <Icon path={mdiSourceFork} size={0.4} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

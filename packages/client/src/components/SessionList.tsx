@@ -502,6 +502,9 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               onOpenSpecs={onOpenSpecs ? () => onOpenSpecs(group.cwd) : undefined}
               onOpenArchive={onOpenArchive ? () => onOpenArchive(group.cwd) : undefined}
               onSpawnAttached={onSpawnSession ? (cwd, changeName) => onSpawnSession(cwd, changeName) : undefined}
+              onHideSession={onHideSession ? handleHide : undefined}
+              onUnhideSession={onUnhideSession ? handleUnhide : undefined}
+              onResumeSession={onResume}
               groups={openspecGroupsMap?.get(group.cwd)?.groups}
               assignments={openspecGroupsMap?.get(group.cwd)?.assignments}
             />
