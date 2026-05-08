@@ -95,10 +95,10 @@ describe("resolveJitiFromPi", () => {
     expect(resolveJitiFromPi()).toBeNull();
   });
 
-  it("tries @oh-my-pi/jiti as fallback", () => {
+  it("tries @mariozechner/jiti as fallback when bare jiti is not available", () => {
     const managedPiPkg = path.join(MANAGED_DIR, "node_modules", "@mariozechner", "pi-coding-agent", "package.json");
-    const jitiPkgJson = "/some/path/@oh-my-pi/jiti/package.json";
-    const jitiRegister = "/some/path/@oh-my-pi/jiti/lib/jiti-register.mjs";
+    const jitiPkgJson = "/some/path/@mariozechner/jiti/package.json";
+    const jitiRegister = "/some/path/@mariozechner/jiti/lib/jiti-register.mjs";
 
     mockExistsSync.mockImplementation((p: string) => {
       if (p === managedPiPkg) return true;
@@ -106,8 +106,8 @@ describe("resolveJitiFromPi", () => {
       return false;
     });
     mockResolve.mockImplementation((pkg: string) => {
-      if (pkg === "@mariozechner/jiti/package.json") throw new Error("not found");
-      if (pkg === "@oh-my-pi/jiti/package.json") return jitiPkgJson;
+      if (pkg === "jiti/package.json") throw new Error("not found");
+      if (pkg === "@mariozechner/jiti/package.json") return jitiPkgJson;
       throw new Error("not found");
     });
 
