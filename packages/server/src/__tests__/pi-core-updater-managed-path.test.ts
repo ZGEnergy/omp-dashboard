@@ -20,7 +20,7 @@ import type { PiCorePackage } from "@blackbelt-technology/pi-dashboard-shared/re
 
 function makePkg(overrides: Partial<PiCorePackage> = {}): PiCorePackage {
 	return {
-		name: "@mariozechner/pi-coding-agent",
+		name: "@earendil-works/pi-coding-agent",
 		displayName: "pi",
 		currentVersion: "0.1.0",
 		latestVersion: "0.2.0",

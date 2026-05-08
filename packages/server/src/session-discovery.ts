@@ -1,6 +1,6 @@
 /**
  * Standalone session discovery — lists pi sessions for a given cwd
- * without requiring @mariozechner/pi-coding-agent.
+ * without requiring @earendil-works/pi-coding-agent.
  * Reads session JSONL files from ~/.pi/agent/sessions/<encoded-cwd>/.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";

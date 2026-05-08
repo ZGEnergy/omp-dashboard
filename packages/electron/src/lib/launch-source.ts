@@ -489,7 +489,7 @@ async function buildExtractedSource(
       // Swap-aside pattern: protect bundle's node_modules from npm's
       // reconciliation. The synthetic package.json bundle-server.mjs
       // writes declares no dependencies, so `npm install --prefix
-      // <managedDir> @mariozechner/pi-coding-agent ...` treats every
+      // <managedDir> @earendil-works/pi-coding-agent ...` treats every
       // existing entry under node_modules/ as "extraneous" and prunes it.
       // That destroys not just @blackbelt-technology/* (cliPath) but
       // every server runtime dep (fastify, ws, lru-cache, etc.).
@@ -646,7 +646,7 @@ export async function spawnFromSource(
   // process-argv-anchored `resolveJitiImport()` always throws. cliPath sits
   // inside a real node_modules tree (managedDir for extracted, repo for
   // devMonorepo, pi's tree for piExtension/npmGlobal) so createRequire
-  // walks up correctly to find @mariozechner/jiti or @oh-my-pi/jiti.
+  // walks up correctly to find jiti or @mariozechner/jiti.
   // See change: simplify-electron-bootstrap-derived-state (Phase C bring-up).
   const loader =
     resolveJitiFromAnchor(source.cliPath) ?? resolveJitiImport();

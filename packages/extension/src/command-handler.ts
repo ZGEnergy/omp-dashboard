@@ -3,7 +3,7 @@
  */
 import { readdirSync } from "node:fs";
 import { join, relative } from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type {
   ServerToExtensionMessage,
   ExtensionToServerMessage,
@@ -451,7 +451,7 @@ export function createCommandHandler(
         case "list_sessions": {
           try {
             // Dynamic import to avoid hard dependency at module load
-            const { SessionManager } = await import("@mariozechner/pi-coding-agent") as any;
+            const { SessionManager } = await import("@earendil-works/pi-coding-agent") as any;
             const cwd = msg.cwd || options?.getCwd?.() || process.cwd();
             const sessionInfos = await SessionManager.list(cwd);
             const sessions: PiSessionInfo[] = (sessionInfos || []).map((s: any) => ({

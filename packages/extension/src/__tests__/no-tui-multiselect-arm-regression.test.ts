@@ -11,7 +11,7 @@
  * pi 0.70's RPC mode (the only mode dashboard headless sessions run
  * under) defines `ExtensionUIContext.custom` as an unconditional no-op
  * (`async custom() { return undefined; }`, see
- * `~/.nvm/.../@mariozechner/pi-coding-agent/dist/modes/rpc/rpc-mode.js`
+ * `~/.nvm/.../@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-mode.js`
  * lines 150-153). Awaiting that primitive resolves to `undefined`
  * synchronously, and the TUI arm's `bus.respond({ cancelled: true,
  * source: "tui" })` triggers the PromptBus's first-response-wins

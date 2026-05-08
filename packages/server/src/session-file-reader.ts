@@ -1,6 +1,6 @@
 /**
  * Standalone JSONL session file reader.
- * Reads pi session files without requiring @mariozechner/pi-coding-agent.
+ * Reads pi session files without requiring @earendil-works/pi-coding-agent.
  * Falls back to linear entry order (no tree branching support).
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";

@@ -21,7 +21,7 @@ const validManifest = {
 	tarballBytes: 1234567,
 	sha256: "a".repeat(64),
 	packages: [
-		{ name: "@mariozechner/pi-coding-agent", version: "0.68.0" },
+		{ name: "@earendil-works/pi-coding-agent", version: "0.68.0" },
 		{ name: "@fission-ai/openspec", version: "1.3.0" },
 		{ name: "tsx", version: "4.21.0" },
 	],

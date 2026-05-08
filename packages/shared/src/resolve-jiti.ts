@@ -24,16 +24,12 @@ import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-/**
- * Lookup order for jiti providers. Forks first (legacy pi ≤ 0.73.0),
- * upstream `jiti` last (pi 0.73.1+). Exported so tests can verify the
- * contract without mocking module resolution.
- */
-export const JITI_PACKAGES = [
-  "@mariozechner/jiti",
-  "@oh-my-pi/jiti",
+const JITI_PACKAGES = [
+  // @earendil-works/pi-coding-agent depends on plain `jiti`. Try the
+  // bare name first; fall back to the legacy namespaced fork.
   "jiti",
-] as const;
+  "@mariozechner/jiti",
+];
 
 /**
  * Pure helper: given a jiti package.json path, return the file:// URL of
@@ -106,7 +102,7 @@ export function resolveJitiImport(): string {
 
   throw new Error(
     "Cannot find pi's TypeScript loader (jiti). " +
-    "Is @mariozechner/pi-coding-agent or @oh-my-pi/pi-coding-agent installed?"
+    "Is @earendil-works/pi-coding-agent or @mariozechner/pi-coding-agent installed?"
   );
 }
 

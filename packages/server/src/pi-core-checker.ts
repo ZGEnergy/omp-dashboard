@@ -36,16 +36,16 @@ const MANAGED_NODE_MODULES = path.join(MANAGED_DIR, "node_modules");
 
 /** Known core packages (not extensions). Order matters for display. */
 export const CORE_PACKAGE_NAMES: readonly string[] = [
+	"@earendil-works/pi-coding-agent",
 	"@mariozechner/pi-coding-agent",
-	"@oh-my-pi/pi-coding-agent",
 	"@blackbelt-technology/pi-agent-dashboard",
 	"@blackbelt-technology/pi-model-proxy",
 ];
 
 /** Display name mapping for known packages. Falls back to package name. */
 const DISPLAY_NAMES: Readonly<Record<string, string>> = {
-	"@mariozechner/pi-coding-agent": "pi (core agent)",
-	"@oh-my-pi/pi-coding-agent": "pi (core agent — fork)",
+	"@earendil-works/pi-coding-agent": "pi (core agent)",
+	"@mariozechner/pi-coding-agent": "pi (core agent — legacy fork)",
 	"@blackbelt-technology/pi-agent-dashboard": "pi-dashboard",
 	"@blackbelt-technology/pi-model-proxy": "pi-model-proxy",
 };

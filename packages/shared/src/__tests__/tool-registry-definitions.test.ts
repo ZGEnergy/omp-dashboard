@@ -104,7 +104,7 @@ describe("pi binary definition", () => {
 });
 
 describe("pi-coding-agent module definition", () => {
-  it("probes both @mariozechner and @oh-my-pi alias names", () => {
+  it("probes both @earendil-works (preferred) and @mariozechner (legacy fallback) alias names", () => {
     const r = freshRegistry({ exists: () => false });
     const res = r.resolve("pi-coding-agent");
     const names = res.tried.map((t) => t.strategy);

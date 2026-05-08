@@ -119,7 +119,7 @@ export function toFileUrl(pathOrUrl: string): string {
  *
  * !! JITI VERSION CONTRACT !!
  * The Windows-non-tsx arm assumes the jiti loader is from
- * `@mariozechner/pi-coding-agent@0.70.x` (jiti 2.x with the `file:///`
+ * `@earendil-works/pi-coding-agent@0.70.x` (jiti 2.x with the `file:///`
  * triple-slash URL handling fix). jiti 2.x correctly handles `file:///`
  * URL entries on Windows — it was the version we carved this contract
  * around in change `fix-windows-entry-script-url`.

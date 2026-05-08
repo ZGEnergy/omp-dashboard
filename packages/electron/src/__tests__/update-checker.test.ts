@@ -40,9 +40,9 @@ describe("update-checker", () => {
 
   it("detects outdated package (standalone/managed mode)", () => {
     outdatedOr.mockImplementation(({ pkg }: { pkg?: string }) => {
-      if (pkg === "@mariozechner/pi-coding-agent") {
+      if (pkg === "@earendil-works/pi-coding-agent") {
         return {
-          "@mariozechner/pi-coding-agent": { current: "0.64.0", latest: "0.65.0" },
+          "@earendil-works/pi-coding-agent": { current: "0.64.0", latest: "0.65.0" },
         };
       }
       return null;
@@ -50,14 +50,14 @@ describe("update-checker", () => {
 
     const result = checkOutdated();
     expect(result).toHaveLength(1);
-    expect(result[0].name).toBe("@mariozechner/pi-coding-agent");
+    expect(result[0].name).toBe("@earendil-works/pi-coding-agent");
     expect(result[0].current).toBe("0.64.0");
     expect(result[0].latest).toBe("0.65.0");
   });
 
   it("skips entries where current === latest", () => {
     outdatedOr.mockReturnValue({
-      "@mariozechner/pi-coding-agent": { current: "0.65.0", latest: "0.65.0" },
+      "@earendil-works/pi-coding-agent": { current: "0.65.0", latest: "0.65.0" },
     });
     expect(checkOutdated()).toEqual([]);
   });

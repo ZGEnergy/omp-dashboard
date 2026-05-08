@@ -3,7 +3,7 @@
  *
  * <root>/
  *   node_modules/
- *     @mariozechner/pi-coding-agent/dist/cli.js
+ *     @earendil-works/pi-coding-agent/dist/cli.js
  *     openspec/dist/cli.js
  *     tsx/dist/cli.mjs
  *   packages/

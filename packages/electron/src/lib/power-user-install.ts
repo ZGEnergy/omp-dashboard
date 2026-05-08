@@ -31,7 +31,7 @@ import { MANAGED_DIR } from "./managed-paths.js";
 
 /** Packages `installStandalone()` writes into MANAGED_DIR. */
 export const REQUIRED_MANAGED_PACKAGES: readonly string[] = [
-  "@mariozechner/pi-coding-agent",
+  "@earendil-works/pi-coding-agent",
   "@fission-ai/openspec",
   "tsx",
 ];

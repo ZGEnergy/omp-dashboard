@@ -243,7 +243,7 @@ describe("parsePreferOverride", () => {
 // Phase C bring-up gap: the bundled `resources/server/` does NOT include
 // pi-coding-agent / jiti (by design — see bundle-server.mjs). The spawned
 // server cannot resolve jiti to load TS source unless `installStandalone()`
-// has populated `~/.pi-dashboard/node_modules/@mariozechner/pi-coding-agent`
+// has populated `~/.pi-dashboard/node_modules/@earendil-works/pi-coding-agent`
 // from the offline cacache before the spawn. Pin the call site here so a
 // future refactor cannot silently drop the install step.
 it("12. extracted: installStandalone is called after extractBundle when didExtract=true", async () => {

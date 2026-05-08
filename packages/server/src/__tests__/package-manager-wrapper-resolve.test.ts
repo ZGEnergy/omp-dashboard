@@ -2,7 +2,7 @@
  * Tests for loadPiPackageManager() resolution chain in package-manager-wrapper.ts.
  *
  * Separate from package-manager-wrapper.test.ts because that file mocks
- * "@mariozechner/pi-coding-agent" so direct-import succeeds and the
+ * "@earendil-works/pi-coding-agent" so direct-import succeeds and the
  * fallback paths never execute.
  *
  * These tests exercise the managed-install and global-npm fallbacks.
@@ -15,10 +15,10 @@ import * as path from "node:path";
 // Force the direct import to fail so resolution falls through to the
 // managed-install / global-npm paths. vi.mock is hoisted; the factory
 // throws at import time which mimics pi not being an installed dependency.
-vi.mock("@mariozechner/pi-coding-agent", () => {
+vi.mock("@earendil-works/pi-coding-agent", () => {
   throw new Error("not installed as direct dependency");
 });
-vi.mock("@oh-my-pi/pi-coding-agent", () => {
+vi.mock("@mariozechner/pi-coding-agent", () => {
   throw new Error("not installed as direct dependency");
 });
 
@@ -60,7 +60,7 @@ describe("loadPiPackageManager resolution chain", () => {
       tmpHome,
       ".pi-dashboard",
       "node_modules",
-      "@mariozechner",
+      "@earendil-works",
       "pi-coding-agent",
       "dist",
     );

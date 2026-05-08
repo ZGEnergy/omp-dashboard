@@ -1,7 +1,7 @@
 /**
  * Skill block parser & builder.
  *
- * Pi's `_expandSkillCommand` (in `@mariozechner/pi-coding-agent`) wraps skill
+ * Pi's `_expandSkillCommand` (in `@earendil-works/pi-coding-agent`) wraps skill
  * expansions in a `<skill name="..." location="...">…</skill>\n\nargs` envelope.
  * The dashboard's bridge expander (`packages/extension/src/prompt-expander.ts`)
  * aligns to the same byte format. This module is the single source of truth for

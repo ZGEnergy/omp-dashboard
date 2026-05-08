@@ -11,7 +11,7 @@
  *   flow:resolve-model / flow:get-available-models
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -373,7 +373,7 @@ async function loadPiAi(): Promise<PiAiHelpers> {
   if (_piAiLoadAttempted) return {};
   _piAiLoadAttempted = true;
   try {
-    const mod: any = await import("@mariozechner/pi-ai");
+    const mod: any = await import("@earendil-works/pi-ai");
     _piAiModule = { findEnvKeys: mod.findEnvKeys, getEnvApiKey: mod.getEnvApiKey };
     return _piAiModule;
   } catch {

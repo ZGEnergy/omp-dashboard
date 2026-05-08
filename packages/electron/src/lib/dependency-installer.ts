@@ -255,7 +255,7 @@ export async function installStandalone(onProgress?: ProgressCallback, skipPacka
   // Note: @blackbelt-technology/pi-dashboard is bundled with the Electron app
   // (server CLI in extraResources), so it's not installed via npm.
   const packages = [
-    "@mariozechner/pi-coding-agent",
+    "@earendil-works/pi-coding-agent",
     "@fission-ai/openspec",
     "tsx",
   ];
@@ -395,7 +395,7 @@ async function runOfflineInstall(params: {
   const humanLabel = pkgsWithVersions.map(p => p.name.split("/").pop()).join(", ");
   onProgress?.({ step: "offline-install", status: "running", output: `Installing ${humanLabel}` });
 
-  // Map full package name ("@mariozechner/pi-coding-agent") to the UI step id
+  // Map full package name ("@earendil-works/pi-coding-agent") to the UI step id
   // ("pi-coding-agent"). The wizard renders one row per UI step id.
   const uiStepIds = pkgsWithVersions.map((p) => p.name.split("/").pop()!);
   // Emit "running" for every UI row so the user sees activity for all three

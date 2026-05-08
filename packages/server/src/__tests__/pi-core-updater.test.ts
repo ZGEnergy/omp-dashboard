@@ -8,7 +8,7 @@ import type { PiCorePackage } from "@blackbelt-technology/pi-dashboard-shared/re
 
 // Pi PM is mocked in other tests via vi.mock; we don't need it here because
 // we never call the install/remove/update methods — only runExclusive().
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
 	DefaultPackageManager: function () {
 		return {};
 	},

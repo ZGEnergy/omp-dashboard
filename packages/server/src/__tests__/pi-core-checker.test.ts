@@ -63,14 +63,14 @@ describe("PiCoreChecker.getStatus", () => {
 			npmList: async () =>
 				JSON.stringify({
 					dependencies: {
-						"@mariozechner/pi-coding-agent": { version: "0.67.1" },
+						"@earendil-works/pi-coding-agent": { version: "0.67.1" },
 						"@blackbelt-technology/pi-agent-dashboard": { version: "0.4.0" },
 						"pi-web-access": { version: "0.10.6" }, // NOT in whitelist → ignored
 						react: { version: "19.0.0" }, // ignored
 					},
 				}),
 			fetchLatest: async (name) => {
-				if (name === "@mariozechner/pi-coding-agent") return "0.67.6";
+				if (name === "@earendil-works/pi-coding-agent") return "0.67.6";
 				if (name === "@blackbelt-technology/pi-agent-dashboard") return "0.4.1";
 				return null;
 			},
@@ -82,7 +82,7 @@ describe("PiCoreChecker.getStatus", () => {
 		expect(status.packages.length).toBe(2);
 		expect(status.packages.find((p) => p.name === "pi-web-access")).toBeUndefined();
 
-		const pi = status.packages.find((p) => p.name === "@mariozechner/pi-coding-agent")!;
+		const pi = status.packages.find((p) => p.name === "@earendil-works/pi-coding-agent")!;
 		expect(pi.displayName).toBe("pi (core agent)");
 		expect(pi.currentVersion).toBe("0.67.1");
 		expect(pi.latestVersion).toBe("0.67.6");
@@ -116,13 +116,13 @@ describe("PiCoreChecker.getStatus", () => {
 	});
 
 	it("discovers managed packages and prefers them over global duplicates", async () => {
-		writeManagedPackage(tmpManagedDir, "@mariozechner/pi-coding-agent", "0.67.5");
+		writeManagedPackage(tmpManagedDir, "@earendil-works/pi-coding-agent", "0.67.5");
 
 		const checker = new PiCoreChecker({
 			npmList: async () =>
 				JSON.stringify({
 					dependencies: {
-						"@mariozechner/pi-coding-agent": { version: "0.67.1" },
+						"@earendil-works/pi-coding-agent": { version: "0.67.1" },
 					},
 				}),
 			fetchLatest: async () => "0.67.6",
@@ -168,7 +168,7 @@ describe("PiCoreChecker.getStatus", () => {
 				const err = new Error("npm warn") as Error & { stdout: string };
 				err.stdout = JSON.stringify({
 					dependencies: {
-						"@mariozechner/pi-coding-agent": { version: "0.67.1" },
+						"@earendil-works/pi-coding-agent": { version: "0.67.1" },
 					},
 				});
 				throw err;
@@ -178,7 +178,7 @@ describe("PiCoreChecker.getStatus", () => {
 		});
 		const status = await checker.getStatus();
 		expect(status.packages.length).toBe(1);
-		expect(status.packages[0].name).toBe("@mariozechner/pi-coding-agent");
+		expect(status.packages[0].name).toBe("@earendil-works/pi-coding-agent");
 	});
 
 	it("caches results within 5 minutes", async () => {
@@ -187,7 +187,7 @@ describe("PiCoreChecker.getStatus", () => {
 			npmList: async () => {
 				calls++;
 				return JSON.stringify({
-					dependencies: { "@mariozechner/pi-coding-agent": { version: "0.67.1" } },
+					dependencies: { "@earendil-works/pi-coding-agent": { version: "0.67.1" } },
 				});
 			},
 			fetchLatest: async () => "0.67.6",
@@ -204,7 +204,7 @@ describe("PiCoreChecker.getStatus", () => {
 			npmList: async () => {
 				calls++;
 				return JSON.stringify({
-					dependencies: { "@mariozechner/pi-coding-agent": { version: "0.67.1" } },
+					dependencies: { "@earendil-works/pi-coding-agent": { version: "0.67.1" } },
 				});
 			},
 			fetchLatest: async () => "0.67.6",
@@ -219,7 +219,7 @@ describe("PiCoreChecker.getStatus", () => {
 		const checker = new PiCoreChecker({
 			npmList: async () =>
 				JSON.stringify({
-					dependencies: { "@mariozechner/pi-coding-agent": { version: "0.67.1" } },
+					dependencies: { "@earendil-works/pi-coding-agent": { version: "0.67.1" } },
 				}),
 			fetchLatest: async () => {
 				throw new Error("network down");
@@ -238,14 +238,14 @@ describe("PiCoreChecker.getStatus", () => {
 				JSON.stringify({
 					dependencies: {
 						"@blackbelt-technology/pi-agent-dashboard": { version: "0.4.0" },
-						"@mariozechner/pi-coding-agent": { version: "0.67.1" },
+						"@earendil-works/pi-coding-agent": { version: "0.67.1" },
 					},
 				}),
 			fetchLatest: async () => null,
 			managedDir: path.join(tmpManagedDir, "nope"),
 		});
 		const status = await checker.getStatus();
-		expect(status.packages[0].name).toBe("@mariozechner/pi-coding-agent");
+		expect(status.packages[0].name).toBe("@earendil-works/pi-coding-agent");
 		expect(status.packages[1].name).toBe("@blackbelt-technology/pi-agent-dashboard");
 	});
 });

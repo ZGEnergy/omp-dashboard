@@ -2,7 +2,7 @@
  * Shared mutable state for bridge modules.
  * Avoids passing 14+ closure variables to every extracted function.
  */
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ConnectionManager } from "./connection.js";
 
 export interface BridgeContext {

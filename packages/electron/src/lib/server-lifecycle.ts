@@ -346,11 +346,18 @@ async function launchViaCli(cliPath: string, port: number, piPort: number): Prom
 
   // Route through buildServerSpawnOptions so detach:false invariant is
   // enforced here too (Electron's Windows Job Object hosts the CLI child).
+  //
+  // cwd: MANAGED_DIR (~/.pi-dashboard) so the CLI's `#!/usr/bin/env node
+  // --import tsx` shebang resolves `tsx` from the managed install's
+  // node_modules. Using process.cwd() here breaks when the Electron app
+  // is launched from a directory that has no node_modules/tsx (the typical
+  // GUI launch case where cwd is `/` or the user's home).
+  // See change: fix-managed-cli-cwd-tsx-resolution.
   const r = await spawnDetached(buildServerSpawnOptions({
     cmd: cliPath,
     args: ["start", "--port", String(port), "--pi-port", String(piPort)],
     env,
-    cwd: process.cwd(),
+    cwd: MANAGED_DIR,
     logFd,
   }));
   if (!r.ok) {
@@ -403,7 +410,7 @@ async function launchServer(port: number, piPort: number): Promise<void> {
   if (!tsxCmd && !jitiPath) {
     throw new Error(
       "No TypeScript loader found (tsx or jiti). " +
-      "Install pi (`npm install -g @mariozechner/pi-coding-agent`) or " +
+      "Install pi (`npm install -g @earendil-works/pi-coding-agent`) or " +
       "run the setup wizard to install dependencies."
     );
   }

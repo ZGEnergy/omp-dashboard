@@ -60,7 +60,7 @@ function binaryDef(binaryName: string, deps?: StrategyDeps): ToolDefinition {
 
 // ── Module definitions ──────────────────────────────────────────────────────
 
-/** Sibling probe for an aliased package name (pi: `@mariozechner/*` + `@oh-my-pi/*`). */
+/** Sibling probe for an aliased package name (pi: `@earendil-works/*` + `@mariozechner/*`). */
 function moduleDefWithAliases(
   canonicalName: string,
   pkgNames: readonly string[],
@@ -188,7 +188,7 @@ const nodeScriptToArgv: ToolDefinition["toArgv"] = (resolvedPath, { platform, re
  * On Unix, the chain finds `pi` on PATH; argv = [pi].
  */
 function piExecutorDef(deps?: StrategyDeps): ToolDefinition {
-  const piPkgAliases = ["@mariozechner/pi-coding-agent", "@oh-my-pi/pi-coding-agent"];
+  const piPkgAliases = ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"];
   const cliEntry = path.join("dist", "cli.js");
 
   const winStrategies = [
@@ -413,7 +413,19 @@ export function registerDefaultTools(registry: ToolRegistry, deps?: StrategyDeps
   registry.register(
     moduleDefWithAliases(
       "pi-coding-agent",
-      ["@mariozechner/pi-coding-agent", "@oh-my-pi/pi-coding-agent"],
+      ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"],
+      path.join("dist", "index.js"),
+      deps,
+    ),
+  );
+
+  // pi-ai module — used by model-proxy to call upstream LLM providers.
+  // Aliases: @earendil-works/pi-ai (preferred) + @mariozechner/pi-ai (legacy fallback).
+  // See change: add-dashboard-model-proxy.
+  registry.register(
+    moduleDefWithAliases(
+      "pi-ai",
+      ["@earendil-works/pi-ai", "@mariozechner/pi-ai"],
       path.join("dist", "index.js"),
       deps,
     ),

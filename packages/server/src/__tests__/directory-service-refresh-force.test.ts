@@ -39,7 +39,7 @@ vi.mock("../session-file-reader.js", () => ({
   loadSessionEntries: vi.fn(() => []),
 }));
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
   SessionManager: {
     list: vi.fn(async () => []),
     open: vi.fn(() => ({ getBranch: vi.fn(() => []) })),

@@ -5,7 +5,7 @@
  *   POST /api/pi-core/update                 { packages?: string[] }
  *
  * Complements /api/packages/* (extension management): this endpoint covers
- * globally-installed pi CLI packages like @mariozechner/pi-coding-agent,
+ * globally-installed pi CLI packages like @earendil-works/pi-coding-agent,
  * pi-dashboard itself, pi-model-proxy, etc.
  */
 import type { FastifyInstance } from "fastify";

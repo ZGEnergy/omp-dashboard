@@ -4,8 +4,8 @@
  * Global extension that connects to the dashboard server,
  * forwards all pi events, and relays commands back.
  */
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Loader } from "@mariozechner/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Loader } from "@earendil-works/pi-tui";
 import { ConnectionManager } from "./connection.js";
 import { detectSessionSource } from "./source-detector.js";
 import { mapEventToProtocol } from "./event-forwarder.js";
