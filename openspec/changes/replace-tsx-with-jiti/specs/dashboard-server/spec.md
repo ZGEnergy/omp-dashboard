@@ -1,30 +1,19 @@
-## MODIFIED Requirements
-
-### Requirement: Shutdown REST endpoint
-The dashboard server SHALL expose a `POST /api/shutdown` endpoint that gracefully stops the server process. When called, it SHALL invoke the server's `stop()` method and then exit the process with code 0.
-
-#### Scenario: Shutdown request
-- **WHEN** a `POST /api/shutdown` request is received
-- **THEN** the server SHALL respond with `{ ok: true }`, call `server.stop()`, and exit with `process.exit(0)`
-
-#### Scenario: Shutdown during active sessions
-- **WHEN** `POST /api/shutdown` is received while pi sessions are connected
-- **THEN** the server SHALL still shut down gracefully — connected extensions will reconnect when a new server starts
-
-_Note: No behavioral change — this requirement is included because the CLI file changes its shebang and daemon spawn mechanism._
-
 ## ADDED Requirements
 
-### Requirement: Daemon spawn uses jiti loader
-When the CLI `start` subcommand spawns itself as a background daemon, it SHALL use `getJitiImportArgs()` from the jiti-loader module to construct the spawn arguments instead of hardcoding `--import tsx`.
+### Requirement: CLI bin entry resolves loader at runtime
+The `pi-dashboard` CLI entry point SHALL be a plain JavaScript file (`packages/server/bin/pi-dashboard.mjs`) that resolves a TypeScript loader at runtime (jiti via `resolveJitiImport()`, with tsx as a fallback) and re-execs Node.js with the appropriate `--import` flag pointing at `cli.ts`.
 
-#### Scenario: Daemon spawn with jiti
-- **WHEN** `pi-dashboard start` is executed
-- **THEN** the daemon process SHALL be spawned with `node --import <jiti-register-path> cli.ts` instead of `node --import tsx cli.ts`
+#### Scenario: Direct CLI invocation with pi available
+- **WHEN** a user runs `pi-dashboard status` from a shell with pi reachable on the module graph
+- **THEN** the JS wrapper SHALL resolve jiti, then exec `node --import <jiti-path> packages/server/src/cli.ts status` and forward the child's exit code
 
-### Requirement: CLI bin entry resolves jiti at runtime
-The `pi-dashboard` CLI entry point SHALL be a plain JavaScript file (`bin/pi-dashboard.mjs`) that resolves the jiti register path at runtime and re-execs Node.js with the appropriate `--import` flag.
+#### Scenario: Direct CLI invocation without pi
+- **WHEN** a user runs `pi-dashboard status` in an environment where `resolveJitiImport()` throws
+- **THEN** the JS wrapper SHALL fall back to resolving tsx's `esm/index.mjs` via `createRequire` and exec `node --import <tsx-path> packages/server/src/cli.ts status`
 
-#### Scenario: Direct CLI invocation
-- **WHEN** a user runs `pi-dashboard status` from a shell
-- **THEN** the JS wrapper SHALL resolve jiti, then exec `node --import <jiti-path> src/server/cli.ts status`
+### Requirement: CLI shebang is loader-agnostic
+The `packages/server/src/cli.ts` shebang SHALL be `#!/usr/bin/env node` (no `--import` flag). The file SHALL no longer be invoked directly as the bin entry — the loader is supplied by the `bin/pi-dashboard.mjs` wrapper.
+
+#### Scenario: Shebang inspection
+- **WHEN** inspecting line 1 of `packages/server/src/cli.ts`
+- **THEN** it SHALL read `#!/usr/bin/env node` with no loader flag

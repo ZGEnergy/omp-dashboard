@@ -1,57 +1,58 @@
 ## Context
 
-The dashboard spawns its server process using `node --import tsx` in three places:
-1. **Shebang** in `src/server/cli.ts` — `#!/usr/bin/env node --import tsx`
-2. **Daemon spawn** in `src/server/cli.ts` line 126 — `spawn(process.execPath, ["--import", "tsx", cliPath, ...args])`
-3. **Extension spawn** in `src/extension/server-launcher.ts` line 48 — same pattern
+The dashboard originally spawned its server process using `node --import tsx` in three places: the `cli.ts` shebang, the daemon spawn inside `cli.ts`, and the extension's auto-launcher. Pi ships a TypeScript loader (`jiti`, formerly `@mariozechner/jiti`) which provides an `--import`-compatible register hook, so the dashboard can prefer pi's loader and avoid an extra tsx dependency on the hot path.
 
-Pi ships `@mariozechner/jiti` which provides `jiti-register.mjs` — a Node.js `--import` hook that transpiles TypeScript on the fly, same as tsx.
+Two of the three call sites have already migrated:
+
+1. **Daemon spawn** — `packages/server/src/cli.ts:364` calls `resolveJitiImport()` and falls back to tsx at `cli.ts:366-377` when jiti is unavailable.
+2. **Extension spawn** — `packages/extension/src/server-launcher.ts:104` calls `resolveJitiImport()` and uses the same fallback semantics.
+3. **Shebang** — `packages/server/src/cli.ts:1` still reads `#!/usr/bin/env node --import tsx`.
+
+The shebang is the only remaining call site because shebangs cannot interpolate a dynamic path. This change scopes itself to that last site.
+
+A separate decision (recorded here) keeps tsx as a fallback rather than removing it: Electron's managed install (`packages/server/src/cli.ts:255`) and the standalone-without-pi path (`packages/electron/src/lib/server-lifecycle.ts:235-297`) both rely on tsx when no pi installation is reachable. Removing tsx outright would regress those flows.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Replace all `tsx` usage with pi's bundled `@mariozechner/jiti/register`
-- Remove `tsx` from `package.json` dependencies
-- Work in both contexts: inside pi process (extension) and standalone CLI (`pi-dashboard`)
+- Decouple the `pi-dashboard` bin entry from the tsx-in-shebang requirement
+- Reuse the existing `resolveJitiImport()` resolver — no new resolution logic
+- Preserve the tsx fallback behavior already present in the daemon spawn
 
 **Non-Goals:**
-- Building/bundling the server to plain JS (that's a separate concern)
-- Supporting environments where pi is not installed
+- Removing tsx from dependencies (out of scope; tsx is the fallback loader)
+- Bundling the server to plain JS
+- Touching the daemon spawn or extension spawn — both already migrated
 
 ## Decisions
 
-### 1. Jiti path resolution strategy
+### 1. JS bootstrap wrapper at `packages/server/bin/pi-dashboard.mjs`
 
-**Decision**: Create a shared `resolveJitiRegister()` helper that uses two strategies:
+**Decision**: Add a thin ESM wrapper that mirrors the runtime resolution already done inside `cli.ts:364-377`:
 
-1. **`import.meta.resolve`** — Works when running inside pi's process (extension context). Call `import.meta.resolve('@mariozechner/jiti/register')` which resolves through pi's module graph.
-2. **`which pi` fallback** — For standalone CLI invocation. Find the `pi` binary, follow symlinks to get `pi-coding-agent/dist/cli.js`, walk up to the package root, then resolve `node_modules/@mariozechner/jiti/lib/jiti-register.mjs`.
+```
+1. Try resolveJitiImport() from @blackbelt-technology/pi-dashboard-shared/resolve-jiti.js
+2. If that throws, fall back to resolving tsx's esm/index.mjs via createRequire
+3. spawn(process.execPath, ["--import", loader, cliTsPath, ...argv], { stdio: "inherit" })
+4. Forward exit code
+```
 
-*Why not just `import.meta.resolve`?* — The CLI bin entry may run outside pi's process where `@mariozechner/jiti` isn't in the resolution chain.
+The wrapper itself is plain ESM JS so it needs no loader to parse.
 
-*Why not just `which pi`?* — It spawns a child process and depends on PATH. The `import.meta.resolve` path is instant and more reliable when available.
+*Why mirror cli.ts logic instead of extracting to a shared helper?* — The fallback chain is ~10 lines and lives in one other place (`cli.ts:364-377`). Extracting it would create a new shared module for two callers; inlining keeps the surface small. If a third caller appears, extract then.
 
-### 2. CLI bin entry approach
+### 2. Bin entry repointing
 
-**Decision**: Replace the TypeScript shebang with a thin JS wrapper.
+**Decision**: Change `packages/server/package.json` `bin.pi-dashboard` from `src/cli.ts` to `bin/pi-dashboard.mjs`. Add `bin/` to the published `files` list if not already covered by the existing globs.
 
-Current: `"bin": { "pi-dashboard": "src/server/cli.ts" }` with shebang `#!/usr/bin/env node --import tsx`.
+*Why not keep both?* — npm's `bin` field maps a name to one file. The shebang change makes `cli.ts` no longer a directly executable entry, so the wrapper is now the canonical entry.
 
-New: `"bin": { "pi-dashboard": "bin/pi-dashboard.mjs" }` — a ~15-line ESM JS file that:
-1. Resolves jiti register path (via `which pi` + symlink traversal)
-2. Re-execs node with `--import <jiti-path> src/server/cli.ts`
+### 3. Shebang change
 
-This avoids the shebang limitation (can't use dynamic paths in shebangs).
-
-### 3. Where the helper lives
-
-**Decision**: `src/shared/jiti-loader.ts` — shared between extension and server code. Exports:
-- `resolveJitiRegisterPath(): string` — returns the absolute filesystem path to `jiti-register.mjs`
-- `getJitiImportArgs(scriptPath: string): string[]` — returns `["--import", jitiPath, scriptPath]` ready for `spawn()`
+**Decision**: Replace `#!/usr/bin/env node --import tsx` with `#!/usr/bin/env node` in `cli.ts:1`. The `cli.ts` file is no longer invoked directly — only via the `.mjs` wrapper which supplies the loader through `--import`. The plain shebang is kept so that `cli.ts` remains a syntactically valid Node entry if someone imports it directly under jiti/tsx.
 
 ## Risks / Trade-offs
 
-- **[Risk] Pi not installed globally** → Mitigation: The dashboard already requires pi as a prerequisite. The resolver throws a clear error message if jiti can't be found.
-- **[Risk] Pi's jiti version changes behavior** → Mitigation: Low risk — jiti's register hook is a stable API. Both tsx and jiti use esbuild transforms. Already verified with `cli.ts status`.
-- **[Risk] `which pi` fails on some systems** → Mitigation: `import.meta.resolve` is the primary path (covers extension + daemon spawn). `which pi` is only needed for direct `pi-dashboard` CLI invocation, where pi must be on PATH anyway.
-- **[Trade-off] Adds coupling to pi's internal package structure** → Acceptable since this is a pi extension/plugin. The path `node_modules/@mariozechner/jiti/lib/jiti-register.mjs` follows standard node_modules layout.
+- **[Risk] Wrapper drift from daemon spawn fallback** → Mitigation: both copies are short and live in adjacent files; a comment in the wrapper points back to `cli.ts:364-377` as the reference.
+- **[Risk] `bin/` excluded from npm package** → Mitigation: explicit verification in task 4.2; existing test pattern in `packages/shared/src/__tests__` could be extended if regressions appear.
+- **[Trade-off] Two fallback resolvers** (cli.ts daemon spawn + bin wrapper) → Acceptable; consolidating would require a new shared module for two callers.
