@@ -31,12 +31,17 @@ All dashboard-server spawns SHALL go through `launchDashboardServer(opts)` expor
 
 ### Requirement: Unified jiti resolution via `ToolResolver`
 
-`ToolResolver.resolveJiti({ anchor? })` SHALL be the single source of truth for resolving pi's `jiti-register.mjs`. Resolution order: managed pi (`~/.pi-dashboard/node_modules/@mariozechner/pi-coding-agent`) → system pi via `which("pi")` → caller-supplied `opts.anchor` walked up to nearest `node_modules` → `process.argv[1]` walked up. Returns the register hook as a `file://` URL string (preserving the Windows drive-letter URL-wrapping contract documented on the prior `buildJitiRegisterUrl` helper) or null.
+`ToolResolver.resolveJiti({ anchor?, resolver? })` SHALL be the single source of truth for resolving pi's `jiti-register.mjs`. Resolution order: managed pi install (`~/.pi-dashboard/node_modules/<pi-pkg>` for each entry of `["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"]`, primary then legacy) → system pi via `which("pi")` → caller-supplied `opts.anchor` walked up to nearest `node_modules` → `process.argv[1]` walked up. For every anchor, the inner walk SHALL try `JITI_PACKAGES = ["jiti", "@mariozechner/jiti"]` (upstream first, legacy fallback). Returns the register hook as a `file://` URL string (preserving the Windows drive-letter URL-wrapping contract documented on the prior `buildJitiRegisterUrl` helper) or null. The optional `resolver` parameter SHALL be the same `JitiResolver` test-injection seam currently exposed by `pickJitiRegisterUrl` / `pickJitiFromAnchor`, carried over so existing tests port without rewrite.
 
-#### Scenario: Managed pi present
+#### Scenario: Managed pi present (upstream)
 
-- **WHEN** `~/.pi-dashboard/node_modules/@mariozechner/jiti/lib/jiti-register.mjs` exists
-- **THEN** `resolveJiti()` returns a `file://` URL pointing at that path
+- **WHEN** `~/.pi-dashboard/node_modules/@earendil-works/pi-coding-agent` exists and resolves `jiti/package.json`
+- **THEN** `resolveJiti()` returns a `file://` URL pointing at the upstream `jiti/lib/jiti-register.mjs`
+
+#### Scenario: Managed pi present (legacy fork)
+
+- **WHEN** managed pi is the legacy `@mariozechner/pi-coding-agent` shipping `@mariozechner/jiti`
+- **THEN** `resolveJiti()` falls through to the legacy package and returns its register URL
 
 #### Scenario: System pi only
 
@@ -63,7 +68,7 @@ All dashboard-server spawns SHALL go through `launchDashboardServer(opts)` expor
 
 The following symbols SHALL be removed once all call sites are migrated:
 
-- `packages/shared/src/resolve-jiti.ts` (file deleted; `resolveJitiImport`, `resolveJitiFromAnchor`, `buildJitiRegisterUrl` exports gone — contract preserved in `ToolResolver.resolveJiti`).
+- `packages/shared/src/resolve-jiti.ts` (file deleted; `resolveJitiImport`, `resolveJitiFromAnchor`, `buildJitiRegisterUrl`, `pickJitiRegisterUrl`, `pickJitiFromAnchor`, and the `JitiResolver` type all subsumed into `ToolResolver.resolveJiti` — the resolver-injection seam is preserved verbatim).
 - `packages/electron/src/lib/ts-loader-resolver.ts` (file deleted).
 - `resolveJitiFromPi` export in `packages/electron/src/lib/server-lifecycle.ts`.
 - `deps.resolveJitiFromAnchor` injection seam in `packages/electron/src/lib/launch-source.ts`.
@@ -71,4 +76,4 @@ The following symbols SHALL be removed once all call sites are migrated:
 #### Scenario: Symbol-presence check
 
 - **WHEN** the migration is complete
-- **THEN** `git grep -nE 'resolveJitiImport|resolveJitiFromAnchor|resolveJitiFromPi|ts-loader-resolver|buildJitiRegisterUrl'` returns zero matches under `packages/` (excluding `out/`, `dist/`, `node_modules/`)
+- **THEN** `git grep -nE 'resolveJitiImport|resolveJitiFromAnchor|resolveJitiFromPi|ts-loader-resolver|buildJitiRegisterUrl|pickJitiRegisterUrl|pickJitiFromAnchor'` returns zero matches under `packages/` (excluding `out/`, `dist/`, `node_modules/`)
