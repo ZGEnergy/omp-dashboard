@@ -1,169 +1,238 @@
-## 1. Phase 0 — Vite plugin predicate emission (unblocker)
+## 0. Layer 1 — Vite plugin predicate emission ✅ SHIPPED (commit `80c99ce`)
 
-- [x] 1.1 Read `packages/dashboard-plugin-runtime/src/vite-plugin/index.ts::generateRegistryContent` and confirm current emission shape (component-only).
-- [x] 1.2 In `generateRegistryContent`, collect `claim.predicate` names alongside `claim.component` names; merge into the per-plugin named-import list with deduplication.
-- [x] 1.3 In the per-claim emitted literal, append `, predicate: <name>` whenever `claim.predicate` is set, alongside the existing `Component: <name>`.
-- [x] 1.4 Add build-time validation: read the plugin's resolved client entry source (text-based regex extraction — lighter than dynamic import); verify every named ref (component AND predicate) exists in its exports; fail loudly with plugin id, slot, missing name, entry path, and exported names list. Soft-skip when source unreadable.
-- [x] 1.5 Create `packages/dashboard-plugin-runtime/src/__tests__/vite-plugin-predicate-emission.test.ts` with cases: predicate emitted; predicate-typo build failure; component-typo build failure; no-predicate emission omits the field; soft-skip on unreadable entry; deduplication when same name used across claims.
-- [x] 1.6 Run tests via `HOME=$(mktemp -d) npx vitest run --project @blackbelt-technology/dashboard-plugin-runtime` — 9 files / 64 tests pass, including 6 new predicate-emission tests.
-- [x] 1.7 `npm run build` regenerated `packages/client/src/generated/plugin-registry.tsx`. Verified jj-plugin's three predicates (`isInJjWorkspace`, `isInJjRepo`, `isInGitRepoButNotJj`) appear as named imports AND as `predicate:` fields on the matching ClaimEntry literals; flows-anthropic-bridge claim correctly omits predicate.
+- [x] 0.1 Read `packages/dashboard-plugin-runtime/src/vite-plugin/index.ts::generateRegistryContent` and confirm current emission shape (component-only).
+- [x] 0.2 Collect `claim.predicate` names alongside `claim.component`; merge into per-plugin named-import list with deduplication.
+- [x] 0.3 Append `, predicate: <name>` to inline ClaimEntry literal whenever `claim.predicate` is set.
+- [x] 0.4 Build-time validation: read plugin's resolved client entry source via regex; verify every named ref exists in exports; fail loudly. Soft-skip when source unreadable.
+- [x] 0.5 Created `vite-plugin-predicate-emission.test.ts` with 6 cases: predicate emitted; typo fails build; component-typo fails build; no-predicate omits field; soft-skip on unreadable; deduplication.
+- [x] 0.6 Tests pass: 64/64 in plugin-runtime project.
+- [x] 0.7 Verified jj-plugin's three predicates appear correctly in regenerated `plugin-registry.tsx`.
 
-## 2. Phase 0 — sync-versions.js hardening
+## 1. Layer 1 — sync-versions.js hardening ✅ SHIPPED (commit `80c99ce`)
 
-- [x] 2.1 Read `scripts/sync-versions.js` and identify the rewrite loop (lines ~85–115 in the original).
-- [x] 2.2 Extracted classifier `isRewritableSemverSpec` into `scripts/sync-versions-spec.js` (importable without side effects); regex `/^[\^~]?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/` accepts plain/caret/tilde + prerelease/build forms.
-- [x] 2.3 In the rewrite loop, non-rewritable specifiers are preserved and `console.warn` emits a line naming the dependent `package.json`, the dep, and the preserved value. Final summary reports preserved count separately from rewritten count.
-- [x] 2.4 Updated header docblock with a "Specifier preservation" section explaining the rule and the rationale.
-- [x] 2.5 Created `packages/shared/src/__tests__/sync-versions-spec.test.ts` covering: rewritable forms (plain/caret/tilde/prerelease/build/multi-digit); preserved forms (`*`, `latest`, dist-tag, `workspace:*`, `workspace:^X`, github URL, github tarball, `git+ssh`, `file:`, `http:` tarball, `>=1.0.0`, `||` union, `1.x`, empty, whitespace-only, partial caret); non-string inputs (undefined/null/number/object). 30 cases all pass.
-- [x] 2.6 Smoke test: seeded `"@blackbelt-technology/pi-dashboard-flows-plugin": "*"` in `packages/client/package.json`, ran `node scripts/sync-versions.js`. The `*` pin was preserved with a warning; the script restored existing `^0.5.0` deps untouched (already in sync). Snapshot reverted clean.
+- [x] 1.1 Read `scripts/sync-versions.js` and identify the rewrite loop.
+- [x] 1.2 Extracted classifier `isRewritableSemverSpec` into `scripts/sync-versions-spec.js` (importable without side effects).
+- [x] 1.3 Non-rewritable specifiers preserved with stderr warning.
+- [x] 1.4 Updated header docblock with "Specifier preservation" section.
+- [x] 1.5 Created `packages/shared/src/__tests__/sync-versions-spec.test.ts` with 30 cases.
+- [x] 1.6 Smoke test: `"*"` pin survives a sync-versions run with warning.
 
-## 3. Layer 1 — Create client-utils workspace
+## 2. Layer 0a — Create `client-utils` workspace package
 
-- [ ] 3.1 `mkdir -p packages/client-utils/src`.
-- [ ] 3.2 Create `packages/client-utils/package.json` with: name `@blackbelt-technology/pi-dashboard-client-utils`, version matching root, `"type": "module"`, `publishConfig.access: "public"`, `peerDependencies` for react/react-dom (`>=18.0.0`), `dependencies` for the markdown stack + MDI + `pi-dashboard-shared`, `files: ["src/"]`.
-- [ ] 3.3 Create `packages/client-utils/tsconfig.json` extending `tsconfig.base.json` with `compilerOptions.jsx: "react-jsx"` and `outDir` matching workspace convention.
-- [ ] 3.4 Add `"packages/client-utils"` to root `package.json#workspaces`.
-- [ ] 3.5 Run `npm install` to wire the workspace symlink; verify `node_modules/@blackbelt-technology/pi-dashboard-client-utils` resolves to `packages/client-utils/`.
+- [ ] 2.1 `mkdir -p packages/client-utils/src/extension-ui packages/client-utils/src/__tests__`.
+- [ ] 2.2 Create `packages/client-utils/package.json` with: name `@blackbelt-technology/pi-dashboard-client-utils`, version matching root, `"type": "module"`, `publishConfig.access: "public"`, `peerDependencies` for react/react-dom (`>=18.0.0`), `dependencies` for `@mdi/js`/`@mdi/react`/`@blackbelt-technology/pi-dashboard-shared`, `files: ["src/"]`.
+- [ ] 2.3 Create `packages/client-utils/tsconfig.json` extending `tsconfig.base.json` with `compilerOptions.jsx: "react-jsx"`.
+- [ ] 2.4 No root `package.json#workspaces` change needed — existing `"packages/*"` glob auto-discovers the new package.
+- [ ] 2.5 Run `npm install` to wire the workspace symlink; verify `node_modules/@blackbelt-technology/pi-dashboard-client-utils` resolves to `packages/client-utils/`.
 
-## 4. Layer 1 — Move source files (preserve git history)
+## 3. Layer 0a — Move client-utils source files (preserve git history)
 
-- [ ] 4.1 `git mv packages/client/src/components/AgentCardShell.tsx packages/client-utils/src/AgentCardShell.tsx`
-- [ ] 4.2 `git mv packages/client/src/components/MarkdownContent.tsx packages/client-utils/src/MarkdownContent.tsx`
-- [ ] 4.3 `git mv packages/client/src/components/DialogPortal.tsx packages/client-utils/src/DialogPortal.tsx`
-- [ ] 4.4 `git mv packages/client/src/components/ConfirmDialog.tsx packages/client-utils/src/ConfirmDialog.tsx`
-- [ ] 4.5 `git mv packages/client/src/components/SearchableSelectDialog.tsx packages/client-utils/src/SearchableSelectDialog.tsx`
-- [ ] 4.6 `git mv packages/client/src/components/ZoomControls.tsx packages/client-utils/src/ZoomControls.tsx`
-- [ ] 4.7 `git mv packages/client/src/components/agent-card-utils.ts packages/client-utils/src/agent-card-utils.ts`
-- [ ] 4.8 `git mv packages/client/src/hooks/useZoomPan.ts packages/client-utils/src/useZoomPan.ts`
-- [ ] 4.9 `git mv packages/client/src/hooks/useMobile.tsx packages/client-utils/src/useMobile.tsx`
-- [ ] 4.10 `mkdir -p packages/client-utils/src/extension-ui` and `git mv` AgentMetricSlot/BreadcrumbSlot/GateSlot from `packages/client/src/components/extension-ui/`.
-- [ ] 4.11 Move co-located tests: `packages/client/src/components/__tests__/{MarkdownContent,DialogPortal}.test.tsx` → `packages/client-utils/src/__tests__/`. Move `packages/client/src/hooks/__tests__/{useZoomPan,useMobile}.test.tsx` likewise.
-- [ ] 4.12 Update intra-package imports inside the moved files (any `from "../hooks/..."` etc. that now points to a stale relative location must be rewritten to a same-package path within client-utils).
-- [ ] 4.13 Verify `git log --follow packages/client-utils/src/MarkdownContent.tsx` shows pre-move history.
+- [ ] 3.1 `git mv packages/client/src/components/AgentCardShell.tsx packages/client-utils/src/AgentCardShell.tsx`
+- [ ] 3.2 `git mv packages/client/src/components/agent-card-utils.ts packages/client-utils/src/agent-card-utils.ts`
+- [ ] 3.3 `git mv packages/client/src/components/DialogPortal.tsx packages/client-utils/src/DialogPortal.tsx`
+- [ ] 3.4 `git mv packages/client/src/components/ConfirmDialog.tsx packages/client-utils/src/ConfirmDialog.tsx`
+- [ ] 3.5 `git mv packages/client/src/components/SearchableSelectDialog.tsx packages/client-utils/src/SearchableSelectDialog.tsx`
+- [ ] 3.6 `git mv packages/client/src/components/ZoomControls.tsx packages/client-utils/src/ZoomControls.tsx`
+- [ ] 3.7 `git mv packages/client/src/hooks/useZoomPan.ts packages/client-utils/src/useZoomPan.ts`
+- [ ] 3.8 `git mv packages/client/src/hooks/useMobile.tsx packages/client-utils/src/useMobile.tsx`
+- [ ] 3.9 `git mv packages/client/src/hooks/useMediaQuery.ts packages/client-utils/src/useMediaQuery.ts` (required dep of useMobile).
+- [ ] 3.10 `git mv` AgentMetricSlot/BreadcrumbSlot/GateSlot from `packages/client/src/components/extension-ui/` to `packages/client-utils/src/extension-ui/`.
+- [ ] 3.11 `git mv packages/client/src/components/extension-ui/decorator-utils.ts packages/client-utils/src/extension-ui/decorator-utils.ts` (required dep of all three slots).
+- [ ] 3.12 Move co-located tests: `useZoomPan.test.ts`, `useMobile.test.tsx`, `DialogPortal.test.tsx` → `packages/client-utils/src/__tests__/`.
+- [ ] 3.13 Update intra-package imports inside the moved files (any `from "../hooks/..."` etc. that points to a stale relative location must be rewritten to a same-package path within client-utils).
+- [ ] 3.14 Verify `git log --follow packages/client-utils/src/AgentCardShell.tsx` shows pre-move history.
 
-## 5. Layer 1 — Per-subpath exports map
+## 4. Layer 0a — Per-subpath exports map for client-utils
 
-- [ ] 5.1 In `packages/client-utils/package.json`, add an `exports` map entry for each of the 12 moved files plus 4 test moves: paths under the keys listed in spec `client-utils-package` (one subpath per symbol; no barrel `.` entry).
-- [ ] 5.2 Run a quick smoke import in a temporary scratch file to verify each subpath resolves under both Node and Vite.
-- [ ] 5.3 Build the production bundle for `packages/client/` and verify (via grep) that the markdown stack appears only in chunks that consumed `MarkdownContent`.
+- [ ] 4.1 In `packages/client-utils/package.json#exports`, add an entry for each moved file: `./AgentCardShell`, `./agent-card-utils`, `./DialogPortal`, `./ConfirmDialog`, `./SearchableSelectDialog`, `./ZoomControls`, `./useZoomPan`, `./useMobile`, `./useMediaQuery`, `./extension-ui/AgentMetricSlot`, `./extension-ui/BreadcrumbSlot`, `./extension-ui/GateSlot`, `./extension-ui/decorator-utils`.
+- [ ] 4.2 No barrel `.` export — each consumer imports per-symbol.
+- [ ] 4.3 Smoke test: write a temporary scratch import for each subpath; verify each resolves under both Node and Vite.
 
-## 6. Layer 1 — Re-export shims at original locations
+## 5. Layer 0b — Create `markdown-content` workspace package
 
-- [ ] 6.1 Create `packages/client/src/components/AgentCardShell.tsx` as a single re-export line: `export * from "@blackbelt-technology/pi-dashboard-client-utils/AgentCardShell";` plus a one-line comment.
-- [ ] 6.2 Repeat 6.1 for each of the other 11 moved files at their original locations.
-- [ ] 6.3 Verify TypeScript still compiles by running `npm run build -w @blackbelt-technology/pi-dashboard-web`.
-- [ ] 6.4 Verify the existing client tests (e.g. `MarkdownContent.test.tsx` re-import path, if any test still lives in client) resolve through the shims.
+- [ ] 5.1 `mkdir -p packages/markdown-content/src packages/markdown-content/src/__tests__`.
+- [ ] 5.2 Create `packages/markdown-content/package.json` with: name `@blackbelt-technology/pi-dashboard-markdown-content`, version matching root, `"type": "module"`, `publishConfig.access: "public"`, `peerDependencies` for react/react-dom, `dependencies` for the markdown stack (`react-markdown`, `remark-gfm`, `remark-math`, `rehype-raw`, `rehype-katex`, `katex`, `react-syntax-highlighter`, `mermaid`, `@mdi/js`, `@mdi/react`) + workspace deps on `pi-dashboard-shared` and `pi-dashboard-client-utils`, `files: ["src/"]`.
+- [ ] 5.3 Create `packages/markdown-content/tsconfig.json`.
+- [ ] 5.4 Run `npm install`; verify symlink wired.
 
-## 7. Layer 1 — Update plugin imports + cross-package deep import lint
+## 6. Layer 0b — Move markdown-content source files
 
-- [ ] 7.1 Add `@blackbelt-technology/pi-dashboard-client-utils` as a dependency in `packages/flows-plugin/package.json` and `packages/jj-plugin/package.json` (caret-range matching root version).
-- [ ] 7.2 Rewrite the 13 deep relative imports in `packages/flows-plugin/src/client/` to use package-name paths.
-- [ ] 7.3 Rewrite all deep relative imports in `packages/jj-plugin/src/client/` (verify with grep first; some plugins may already be clean).
-- [ ] 7.4 Create `packages/shared/src/__tests__/no-cross-package-deep-imports.test.ts`: scan every `*.ts`/`*.tsx` under `packages/*/src/`; fail when an import specifier starts with `..` and resolves outside the importing package's directory.
-- [ ] 7.5 Run `npm test -w @blackbelt-technology/pi-dashboard-shared` and confirm the lint passes against the migrated repo.
-- [ ] 7.6 Manually verify by `pnpm pack --dry-run -F flows-plugin` (or `npm pack --workspaces=false -w flows-plugin`) and grepping the inspected tarball for `../../../`.
+- [ ] 6.1 `git mv packages/client/src/components/MarkdownContent.tsx packages/markdown-content/src/MarkdownContent.tsx`
+- [ ] 6.2 `git mv packages/client/src/components/ThemeProvider.tsx packages/markdown-content/src/ThemeProvider.tsx`
+- [ ] 6.3 `git mv packages/client/src/components/CopyButton.tsx packages/markdown-content/src/CopyButton.tsx`
+- [ ] 6.4 `git mv packages/client/src/components/MermaidBlock.tsx packages/markdown-content/src/MermaidBlock.tsx`
+- [ ] 6.5 `git mv packages/client/src/components/ImageLightbox.tsx packages/markdown-content/src/ImageLightbox.tsx`
+- [ ] 6.6 `git mv packages/client/src/lib/SessionAssetsContext.tsx packages/markdown-content/src/SessionAssetsContext.tsx`
+- [ ] 6.7 `git mv packages/client/src/lib/syntax-theme.ts packages/markdown-content/src/syntax-theme.ts`
+- [ ] 6.8 `git mv packages/client/src/hooks/useTheme.ts packages/markdown-content/src/useTheme.ts` (consumed by ThemeProvider).
+- [ ] 6.9 Move co-located test: `MarkdownContent.test.tsx` → `packages/markdown-content/src/__tests__/`.
+- [ ] 6.10 Update intra-package imports inside moved files. Where MermaidBlock or ImageLightbox import `DialogPortal`/`useZoomPan`/`ZoomControls`, rewrite to `@blackbelt-technology/pi-dashboard-client-utils/<symbol>`.
+- [ ] 6.11 Verify `git log --follow packages/markdown-content/src/MarkdownContent.tsx` shows pre-move history.
 
-## 8. Layer 1 — Publish workflow ordering
+## 7. Layer 0b — Per-subpath exports map for markdown-content
 
-- [ ] 8.1 Identify the package-publish ordering list in `.github/workflows/publish.yml` (the `PACKAGES` env var inside the electron→publish job).
-- [ ] 8.2 Add `@blackbelt-technology/pi-dashboard-client-utils` to that list, BEFORE `pi-dashboard-flows-plugin` and `pi-dashboard-jj-plugin`.
-- [ ] 8.3 Update `packages/shared/src/__tests__/publish-workflow-contract.test.ts` to assert the ordering: client-utils precedes flows-plugin and jj-plugin in the parsed list.
-- [ ] 8.4 Run the contract test and verify it passes.
+- [ ] 7.1 In `packages/markdown-content/package.json#exports`, add: `./MarkdownContent`, `./ThemeProvider`, `./SessionAssetsContext`, `./CopyButton`, `./MermaidBlock`, `./ImageLightbox`, `./syntax-theme`, `./useTheme`.
+- [ ] 7.2 Smoke test: import each subpath in a scratch file, verify resolution.
 
-## 9. Layer 2 — Extend DashboardSession type
+## 8. Layer 0c — Re-export shims at original locations
 
-- [ ] 9.1 In `packages/shared/src/types.ts`, add three optional fields to the `DashboardSession` interface: `flowState?: FlowState | null`, `flowStates?: ReadonlyMap<string, FlowState>`, `architectState?: ArchitectState | null`. Import `FlowState` and `ArchitectState` from `@blackbelt-technology/pi-dashboard-flows-plugin/reducer` (already a workspace dep transitively; verify the import works without circular).
-- [ ] 9.2 If the import in 9.1 introduces a circular dependency at the type level (likely fine, types-only), confirm by running `tsc --noEmit` on shared. If circular, define minimal local versions of `FlowState` / `ArchitectState` in shared OR re-export them from a dedicated `flow-types.ts` in flows-plugin.
-- [ ] 9.3 Run `npm run build` and confirm no TS errors.
+- [ ] 8.1 Create `packages/client/src/components/AgentCardShell.tsx` as a single re-export line: `export * from "@blackbelt-technology/pi-dashboard-client-utils/AgentCardShell";` plus a one-line comment indicating the move.
+- [ ] 8.2 Repeat 8.1 for each of the other client-utils-moved files at their original locations: `agent-card-utils`, `DialogPortal`, `ConfirmDialog`, `SearchableSelectDialog`, `ZoomControls`, `useZoomPan`, `useMobile`, `useMediaQuery`, three extension-ui slots, `decorator-utils`.
+- [ ] 8.3 Create shims for markdown-content-moved files: `MarkdownContent`, `ThemeProvider`, `SessionAssetsContext`, `CopyButton`, `MermaidBlock`, `ImageLightbox`, `syntax-theme`, `useTheme`.
+- [ ] 8.4 Verify TypeScript compiles by running `npm run build -w @blackbelt-technology/pi-dashboard-web`.
+- [ ] 8.5 Run client tests; existing imports must still resolve through shims.
 
-## 10. Layer 2 — Bridge populates flow state on session payloads
+## 9. Layer 0d — Update flows-plugin imports
 
-- [ ] 10.1 Read `packages/extension/src/flow-event-wiring.ts` and `packages/extension/src/session-sync.ts` to locate where `session_register` payloads are constructed.
-- [ ] 10.2 Maintain a per-session-id map of latest `FlowState` (and `flowStates` map, and `architectState`) inside the bridge; update it on every `flow:*` / `architect:*` event the bridge already listens for.
-- [ ] 10.3 At every `session_register` and at every model-tracker push (whatever the bridge currently uses to refresh the server's view of a session), include the latest known `flowState`, `flowStates`, `architectState` fields on the outgoing payload.
-- [ ] 10.4 Verify `MemorySessionManager` carries the augmented fields through to `sessions_snapshot`. (No code change should be needed there if the manager merges the full session object.)
-- [ ] 10.5 Add an integration test: spin up a fake bridge that emits `flow_started` then `session_register`; assert the server's session record contains the `flowState` payload.
-- [ ] 10.6 Add a reconnect test: with an active flow on session X, simulate browser disconnect + reconnect; assert the first `sessions_snapshot` after reconnect contains `session.flowState`.
+- [ ] 9.1 Add `@blackbelt-technology/pi-dashboard-client-utils` and `@blackbelt-technology/pi-dashboard-markdown-content` as dependencies in `packages/flows-plugin/package.json` (caret-range matching root version).
+- [ ] 9.2 Rewrite the deep relative imports in `packages/flows-plugin/src/client/` — for each file, change `from "../../../client/src/components/<Symbol>.js"` to `from "@blackbelt-technology/pi-dashboard-client-utils/<Symbol>"` or `@blackbelt-technology/pi-dashboard-markdown-content/<Symbol>` as appropriate.
+- [ ] 9.3 Specifically: `FlowAgentCard.tsx` → AgentCardShell, agent-card-utils, AgentMetricSlot (all client-utils). `FlowAgentDetail.tsx` → MarkdownContent (markdown-content). `FlowArchitect.tsx` → AgentCardShell + MarkdownContent. `FlowDashboard.tsx` → useMobile, BreadcrumbSlot. `FlowGraph.tsx` → useZoomPan, ZoomControls. `FlowLaunchDialog.tsx` → DialogPortal, GateSlot, aggregateGateState. `SessionFlowActions.tsx` → ConfirmDialog, SearchableSelectDialog.
+- [ ] 9.4 Run `npm test -w @blackbelt-technology/pi-dashboard-flows-plugin` to catch any missed import.
 
-## 11. Layer 2 — Deduplicate flow JSX in App.tsx
+## 10. Layer 0d — Update jj-plugin imports
 
-- [ ] 11.1 Read `packages/client/src/App.tsx` lines around 1000–1110 and document the three FlowArchitect call sites + two FlowDashboard call sites with their exact gating conditions and prop differences.
-- [ ] 11.2 Create `packages/client/src/__tests__/flow-rendering-parity.test.tsx`: render scenarios covering (a) architect detail open, (b) flow detail agent open, (c) neither open. Snapshot the rendered JSX for FlowArchitect and FlowDashboard in each scenario. Run the snapshot test against the current code and commit the baseline.
-- [ ] 11.3 Refactor App.tsx to render FlowArchitect at most once with combined gating (`selectedState.architectState && (architectDetailOpen || flowDetailAgent || true)`) — the gating reduces to `selectedState.architectState`. Confirm the unified `onDismiss` accepts the combined reset behavior (`setFlowDetailAgent(null)` + dismiss-summary send) safely; if not, preserve the differences via a single closure over `architectDetailOpen` / `flowDetailAgent`.
-- [ ] 11.4 Refactor App.tsx to render FlowDashboard at most once with combined gating. Same approach for `onDismiss`.
-- [ ] 11.5 Re-run the parity test; snapshots MUST match.
-- [ ] 11.6 Manual gate: open a flow, drill into an agent, dismiss the summary. Confirm the drill-down clears as expected.
+- [ ] 10.1 Add `@blackbelt-technology/pi-dashboard-client-utils` as a dependency in `packages/jj-plugin/package.json`. Do NOT add `pi-dashboard-markdown-content` — jj-plugin doesn't render markdown.
+- [ ] 10.2 Grep `packages/jj-plugin/src/` for any cross-package relative imports; rewrite to package-name imports.
+- [ ] 10.3 Run `npm test -w @blackbelt-technology/pi-dashboard-jj-plugin` to catch any missed import.
 
-## 12. Layer 2 — Create FlowsActionsContext and FlowActionsContext
+## 11. Layer 0e — Cross-package deep-import lint
 
-- [ ] 12.1 Create `packages/flows-plugin/src/client/FlowsActionsContext.tsx` exporting `FlowsActionsContext`, `FlowsActionsProvider`, and `useFlowsActions()` hook. Hook throws when called outside provider.
-- [ ] 12.2 Create `packages/flows-plugin/src/client/FlowActionsContext.tsx` exporting the per-active-session counterpart with the eight callbacks.
-- [ ] 12.3 Add unit tests for both contexts: hook returns provider value; hook throws outside provider; multiple providers nest correctly.
-- [ ] 12.4 Re-export both providers and hooks from `packages/flows-plugin/src/client/index.tsx`.
+- [ ] 11.1 Create `packages/shared/src/__tests__/no-cross-package-deep-imports.test.ts`. Scan every `*.ts`/`*.tsx` under `packages/*/src/`. For each, check every import specifier; fail when a specifier starts with `..` and resolves outside the importing package's directory.
+- [ ] 11.2 Allow re-export shims at `packages/client/src/{components,hooks,lib,components/extension-ui}/` to use package-name imports (which they do).
+- [ ] 11.3 Allow intra-package relative imports.
+- [ ] 11.4 Run `npm test -w @blackbelt-technology/pi-dashboard-shared`; lint passes against the migrated repo.
+- [ ] 11.5 Manual inverse test: temporarily add `import { Foo } from "../../../client/src/Foo.js"` to a flows-plugin file; run lint; confirm it fails with a clear message; revert.
 
-## 13. Layer 2 — Adapt flow components to {session} entry signatures
+## 12. Layer 0e — Vite alias updates
 
-- [ ] 13.1 `FlowActivityBadge`: change signature to `({ session }: { session: DashboardSession })`. Self-derive `flowName`/`agentsDone`/`agentsTotal`/`status` from `session.flowState`. Return `null` when `session.flowState` is falsy.
-- [ ] 13.2 `SessionFlowActions`: change signature to `({ session }: { session: DashboardSession })`. Pull `flows`/`commands`/`onFlowAction` from `useFlowsActions()`. Self-gate when no flows defined.
-- [ ] 13.3 `FlowDashboard`: change signature to `({ session }: { session: DashboardSession })`. Self-derive `flowState`/`flowStates` from session. Pull callbacks from `useFlowActions()`.
-- [ ] 13.4 `FlowArchitect`: change signature to `({ session }: { session: DashboardSession })`. Self-derive `architectState` from session. Pull callbacks from `useFlowActions()`.
-- [ ] 13.5 `FlowAgentDetail`: change signature to `({ session, routeParams, onClose }: SlotProps<"content-view">)`. Look up agent via `session.flowState?.agents.get(routeParams.agentId)`. Use `onClose` for back action.
-- [ ] 13.6 `FlowArchitectDetail`: same shape as 13.5; derive state from `session.architectState`.
-- [ ] 13.7 `FlowSummary`: change signature to `({ session }: { session: DashboardSession })`. Pull callbacks from `useFlowActions()`.
-- [ ] 13.8 In each adapted component, internal rendering logic stays unchanged below the entry boundary.
-- [ ] 13.9 Update existing component tests to render with the new signatures + provider wrappers.
+- [ ] 12.1 In `packages/client/vite.config.ts`, add path aliases mirroring the existing `pi-dashboard-shared` alias:
+  - `"@blackbelt-technology/pi-dashboard-client-utils"` → `path.resolve(__dirname, "../client-utils/src")`
+  - `"@blackbelt-technology/pi-dashboard-markdown-content"` → `path.resolve(__dirname, "../markdown-content/src")`
+- [ ] 12.2 Restart Vite dev server; verify HMR works for edits in both new packages.
 
-## 14. Layer 2 — Export predicates from flows-plugin
+## 13. Layer 0e — Electron bundle-server.mjs updates
 
-- [ ] 14.1 In `packages/flows-plugin/src/client/index.tsx`, export `hasActiveFlow(session: DashboardSession | null | undefined): boolean` returning `Boolean(session?.flowState)`.
-- [ ] 14.2 Export `hasActiveArchitect(session: DashboardSession | null | undefined): boolean` returning `Boolean(session?.architectState)`.
-- [ ] 14.3 Add unit tests covering true/false/null/undefined inputs for both predicates.
+- [ ] 13.1 Open `packages/electron/scripts/bundle-server.mjs`. Find four hardcoded lists of `["server", "shared", "extension"]` (lines ~52, 120, 232, 340).
+- [ ] 13.2 Add `"client-utils"` and `"markdown-content"` to all four lists.
+- [ ] 13.3 Add `"packages/client-utils"` and `"packages/markdown-content"` to the synthetic `bundlePkg.workspaces` array (line ~120).
+- [ ] 13.4 Run `npm run electron:bundle-server` (or equivalent) and verify both packages appear under `packages/electron/resources/server/packages/`.
 
-## 15. Layer 2 — Restore manifest claims
+## 14. Layer 0e — Publish workflow ordering
 
-- [ ] 15.1 In `packages/flows-plugin/package.json#pi-dashboard-plugin.claims`, populate the seven claims listed in spec `dashboard-shell-slots` (`session-card-badge`, `session-card-action-bar`, `content-header-sticky` × 2, `content-view` × 2, `content-inline-footer`).
-- [ ] 15.2 Remove the `"//pi-dashboard-plugin-deferred-claims"` comment block.
-- [ ] 15.3 Run `npm run build -w @blackbelt-technology/pi-dashboard-web` and verify the generated `plugin-registry.tsx` contains the new claim entries with their predicate and Component refs.
-- [ ] 15.4 Confirm the build-time validation from Phase 0 (task 1.4) catches if any claim references a missing export.
+- [ ] 14.1 Identify the `PACKAGES=(...)` array in `.github/workflows/publish.yml` (lines ~166-173).
+- [ ] 14.2 Add `@blackbelt-technology/pi-dashboard-client-utils` after `pi-dashboard-shared` and before any plugin.
+- [ ] 14.3 Add `@blackbelt-technology/pi-dashboard-markdown-content` after `client-utils` and before any plugin.
+- [ ] 14.4 Update `packages/shared/src/__tests__/publish-workflow-contract.test.ts` to assert both new packages precede `flows-plugin` and `jj-plugin`, and `client-utils` precedes `markdown-content`.
+- [ ] 14.5 Run the contract test; verify it passes.
 
-## 16. Layer 2 — Wire context providers in the shell
+## 15. Layer 0f — Test mock-path resilience
 
-- [ ] 16.1 In `packages/client/src/App.tsx`, import `FlowsActionsProvider` and `FlowActionsProvider` from `@blackbelt-technology/pi-dashboard-flows-plugin/client`.
-- [ ] 16.2 Wrap the session-list area with `<FlowsActionsProvider value={{ flows: sessionFlows.get(selectedId) || [], commands: sessionCommands.get(selectedId) || [], onFlowAction }}>`. Place above `SessionList` so all session cards are descendants.
-- [ ] 16.3 Wrap the per-session content area with `<FlowActionsProvider value={{ onAbort, onToggleAutonomous, onDismissSummary, onSendPrompt, onViewYaml, onViewAgentSource, onAgentClick, onPromptRespond }}>`. Each callback is the same closure used in the hard-coded JSX before this change.
-- [ ] 16.4 Verify React DevTools shows the providers wrapping their respective subtrees.
+- [ ] 15.1 Run the full test suite. The shim chain should keep `vi.mock("../../hooks/useMobile.js", ...)` style mocks working.
+- [ ] 15.2 If any test fails due to mock resolution, investigate whether the failure is from a dynamic `vi.doMock` in `SessionHeader.attached-proposal-summary.test.tsx` or `SessionHeader.resume.test.tsx`. Update those specific dynamic mock paths to point at the package name.
+- [ ] 15.3 Re-run; suite green.
 
-## 17. Layer 2 — Remove direct flow JSX from shell
+## 16. Layer 0 — Verification gate
 
-- [ ] 17.1 Delete the `import { FlowDashboard, FlowAgentDetail, FlowArchitect, FlowArchitectDetail } from "@blackbelt-technology/pi-dashboard-flows-plugin/client"` block from `packages/client/src/App.tsx`. Also delete the FlowLaunchDialog import if it's no longer needed (FlowLaunchDialog migration is preserved separately if still gated by interceptors; verify against `remove-flow-dialog-interceptors` proposal interaction).
-- [ ] 17.2 Delete the deduplicated FlowArchitect rendering block from App.tsx, replaced by `<ContentHeaderStickySlot session={selectedSession} />` (or whatever slot consumer the shell already invokes there).
-- [ ] 17.3 Delete the deduplicated FlowDashboard rendering block, replaced by the same slot consumer (the slot consumer renders both FlowArchitect and FlowDashboard claims when their predicates match).
-- [ ] 17.4 Delete the FlowAgentDetail and FlowArchitectDetail content-view JSX, replaced by `<ContentViewSlot session={…} routeParams={…} onClose={…} />` for the matching view ids.
-- [ ] 17.5 Delete the FlowSummary inline-footer JSX (if present), replaced by `<ContentInlineFooterSlot session={…} />`.
-- [ ] 17.6 Delete `import { FlowActivityBadge, SessionFlowActions } from "@blackbelt-technology/pi-dashboard-flows-plugin/client"` from `packages/client/src/components/SessionCard.tsx` and remove the inline JSX.
-- [ ] 17.7 Delete the FlowLaunchDialog import + JSX from `packages/client/src/components/SessionHeader.tsx` if it no longer renders directly (verify against the remove-flow-dialog-interceptors interaction; preserve if that proposal hasn't landed).
-- [ ] 17.8 Run `npm run build` and `npm test`. All tests must pass.
+- [ ] 16.1 `npm run build` — clean build, no TS errors, no Vite warnings about unresolved imports.
+- [ ] 16.2 `npm test` — full suite passes.
+- [ ] 16.3 Inspect `packages/client/src/generated/plugin-registry.tsx` — Layer 1's predicate emission still works; jj-plugin's three predicates appear.
+- [ ] 16.4 `pnpm pack -F flows-plugin --dry-run` (or `npm pack`); inspect file list and source for any `../../../client/` substring; must be zero hits.
+- [ ] 16.5 Same for `jj-plugin` tarball.
+- [ ] 16.6 Vite dev smoke: `npm run dev`, open dashboard, confirm browser console clean.
+- [ ] 16.7 **CHECKPOINT** — Layer 0 complete. Commit and consider whether to push before continuing into Layer 2.
 
-## 18. Layer 2 — Regression tests
+## 17. Layer 2 — Extend DashboardSession type
 
-- [ ] 18.1 Create `packages/client/src/__tests__/session-card-no-double-flow.test.tsx`: render a SessionCard for a session with active flow; assert exactly one FlowActivityBadge instance and one SessionFlowActions instance in the rendered DOM.
-- [ ] 18.2 Update `packages/client/src/__tests__/no-jsx-slot-nullish-fallback.test.ts::SCAN_FILES` to include `components/MobileShell.tsx`.
-- [ ] 18.3 Run all client tests; the new and updated tests must pass.
+- [ ] 17.1 In `packages/shared/src/types.ts`, add three optional fields to `DashboardSession`: `flowState?: FlowState | null`, `flowStates?: ReadonlyMap<string, FlowState>`, `architectState?: ArchitectState | null`. (`FlowState` and `ArchitectState` already exist in this file at lines 547+ and 620+.)
+- [ ] 17.2 Run `npm run build`; confirm no TS errors.
 
-## 19. Verification
+## 18. Layer 2 — Bridge populates flow state on session payloads
 
-- [ ] 19.1 Full test suite: `npm test 2>&1 | tee /tmp/pi-test.log` — all tests pass; no regressions.
-- [ ] 19.2 Build: `npm run build` — clean TypeScript, no warnings about missing types.
-- [ ] 19.3 Type check: `npm run typecheck` (or equivalent if defined) — zero errors.
-- [ ] 19.4 Pack inspection: `pnpm pack -F flows-plugin --dry-run` (or npm equivalent) and grep the inspected tarball file list and TypeScript output for any `../../../client/` substring; must be zero hits.
-- [ ] 19.5 Vite dev server smoke: `npm run dev`, open the dashboard, confirm the browser console has no errors; spawn a flow; verify the FlowDashboard renders and is fully interactive.
-- [ ] 19.6 Reconnect test (manual): spawn a flow, hard-refresh the browser, confirm the flow UI re-renders with the same state from the bridge's perspective.
-- [ ] 19.7 Plugin status: open `/api/health` and confirm `plugins.flows` reports `loaded: true` with `claims: 7` (or matches the populated count).
-- [ ] 19.8 Predicate filtering: spawn two sessions, run a flow on one only; the FlowActivityBadge appears on the active-flow session card and is absent from the other.
+- [ ] 18.1 Read `packages/extension/src/flow-event-wiring.ts` and `packages/extension/src/session-sync.ts` to locate where `session_register` payloads are constructed.
+- [ ] 18.2 Maintain a per-session-id map of latest `FlowState`, `flowStates` map, `architectState` inside the bridge; update on every `flow:*` / `architect:*` event the bridge already listens for.
+- [ ] 18.3 At every `session_register` and at every model-tracker push, include the latest known `flowState`, `flowStates`, `architectState` fields on the outgoing payload.
+- [ ] 18.4 Verify `MemorySessionManager` carries the augmented fields through to `sessions_snapshot`.
+- [ ] 18.5 Add an integration test: spin up a fake bridge that emits `flow_started` then `session_register`; assert the server's session record contains `flowState`.
+- [ ] 18.6 Add a reconnect test: with an active flow on session X, simulate browser disconnect + reconnect; assert the first `sessions_snapshot` after reconnect contains `session.flowState`.
 
-## 20. Documentation + housekeeping
+## 19. Layer 2 — Create FlowsActionsContext and FlowActionsContext
 
-- [ ] 20.1 Update `AGENTS.md` "Key Files" section: add row for `packages/client-utils/` (≤ 200 chars per the documentation update protocol); update `packages/flows-plugin/` row to reflect "fully wired claims".
-- [ ] 20.2 Update `docs/file-index.md` and the matching `docs/file-index-<area>.md` splits with detail rows for the new client-utils package, the new tests, and the bridge augmentation.
-- [ ] 20.3 Update `CHANGELOG.md` `## [Unreleased]` with a single Internal entry summarizing the migration. Mark the protocol field additions to `DashboardSession` as additive (not breaking).
-- [ ] 20.4 Mark obsolete proposals: in `openspec/changes/extract-client-utils-package/`, `openspec/changes/migrate-flows-jsx-to-slots/`, `openspec/changes/migrate-flows-content-slots/` — append a final note pointing readers at this change. (Do not delete; archive after this lands.)
+- [ ] 19.1 Create `packages/flows-plugin/src/client/FlowsActionsContext.tsx` exporting `FlowsActionsContext`, `FlowsActionsProvider`, `useFlowsActions()` hook (throws when called outside provider).
+- [ ] 19.2 Create `packages/flows-plugin/src/client/FlowActionsContext.tsx` exporting the per-active-session counterpart with the eight callbacks.
+- [ ] 19.3 Add unit tests for both contexts.
+- [ ] 19.4 Re-export both providers and hooks from `packages/flows-plugin/src/client/index.tsx`.
+
+## 20. Layer 2 — Adapt flow components to {session} entry signatures
+
+- [ ] 20.1 `FlowActivityBadge`: accept `{ session }`. Self-derive `flowName`/`agentsDone`/`agentsTotal`/`status` from `session.flowState`. Return `null` when falsy.
+- [ ] 20.2 `SessionFlowActions`: accept `{ session }`. Pull `flows`/`commands`/`onFlowAction` from `useFlowsActions()`. Self-gate.
+- [ ] 20.3 `FlowDashboard`: accept `{ session }`. Self-derive `flowState`/`flowStates`. Pull callbacks from `useFlowActions()`.
+- [ ] 20.4 `FlowArchitect`: accept `{ session }`. Self-derive `architectState`. Pull callbacks.
+- [ ] 20.5 `FlowAgentDetail`: accept `{ session, routeParams, onClose }`. Look up agent via `session.flowState?.agents.get(routeParams.agentId)`.
+- [ ] 20.6 `FlowArchitectDetail`: same shape; derive from `session.architectState`.
+- [ ] 20.7 `FlowSummary`: accept `{ session }`. Pull callbacks from `useFlowActions()`.
+- [ ] 20.8 Internal rendering logic stays unchanged below the entry boundary.
+- [ ] 20.9 Update existing component tests to render with new signatures + provider wrappers.
+
+## 21. Layer 2 — Export predicates from flows-plugin
+
+- [ ] 21.1 In `packages/flows-plugin/src/client/index.tsx`, export `hasActiveFlow(session): boolean` returning `Boolean(session?.flowState)`.
+- [ ] 21.2 Export `hasActiveArchitect(session): boolean` returning `Boolean(session?.architectState)`.
+- [ ] 21.3 Add unit tests covering true/false/null/undefined inputs for both.
+
+## 22. Layer 2 — Restore manifest claims
+
+- [ ] 22.1 In `packages/flows-plugin/package.json#pi-dashboard-plugin.claims`, populate the seven claims listed in spec `dashboard-shell-slots`.
+- [ ] 22.2 Remove the `"//pi-dashboard-plugin-deferred-claims"` comment block.
+- [ ] 22.3 Run `npm run build`; verify generated `plugin-registry.tsx` contains the new claim entries with predicate and Component refs.
+- [ ] 22.4 Layer 1's build-time validation catches any claim referencing a missing export.
+
+## 23. Layer 3 — Deduplicate flow JSX in App.tsx
+
+- [ ] 23.1 Document the three FlowArchitect call sites + two FlowDashboard call sites with their exact gating conditions and prop differences.
+- [ ] 23.2 Create `packages/client/src/__tests__/flow-rendering-parity.test.tsx`. Render scenarios covering (a) architect detail open, (b) flow detail agent open, (c) neither open. Snapshot the rendered JSX. Run against current code; commit baseline.
+- [ ] 23.3 Refactor App.tsx to render FlowArchitect at most once with combined gating.
+- [ ] 23.4 Refactor App.tsx to render FlowDashboard at most once with combined gating.
+- [ ] 23.5 Re-run parity test; snapshots MUST match.
+- [ ] 23.6 Manual gate: open a flow, drill into an agent, dismiss the summary. Confirm drill-down clears.
+
+## 24. Layer 3 — Wire context providers in shell
+
+- [ ] 24.1 In App.tsx, import `FlowsActionsProvider` and `FlowActionsProvider` from `@blackbelt-technology/pi-dashboard-flows-plugin/client`.
+- [ ] 24.2 Wrap the session-list area with `<FlowsActionsProvider value={{ flows, commands, onFlowAction }}>`. Place above SessionList.
+- [ ] 24.3 Wrap per-session content area with `<FlowActionsProvider value={{ onAbort, onToggleAutonomous, ... }}>`.
+- [ ] 24.4 Verify React DevTools shows the providers wrapping their respective subtrees.
+
+## 25. Layer 3 — Remove direct flow JSX from shell
+
+- [ ] 25.1 Delete `import { FlowDashboard, FlowAgentDetail, FlowArchitect, FlowArchitectDetail }` from `App.tsx`.
+- [ ] 25.2 Delete the deduplicated FlowArchitect block, replaced by `<ContentHeaderStickySlot session={selectedSession} />`.
+- [ ] 25.3 Delete the deduplicated FlowDashboard block (same slot consumer renders both via predicate filtering).
+- [ ] 25.4 Delete FlowAgentDetail and FlowArchitectDetail content-view JSX, replaced by `<ContentViewSlot session={...} routeParams={...} onClose={...} />`.
+- [ ] 25.5 Delete FlowSummary inline-footer JSX, replaced by `<ContentInlineFooterSlot session={...} />`.
+- [ ] 25.6 Delete `import { FlowActivityBadge, SessionFlowActions }` from `SessionCard.tsx` and remove inline JSX.
+- [ ] 25.7 Delete FlowLaunchDialog imports + JSX from `SessionHeader.tsx` if no longer rendered directly.
+- [ ] 25.8 `npm run build` + `npm test`. All pass.
+
+## 26. Layer 3 — Regression tests
+
+- [ ] 26.1 Create `packages/client/src/__tests__/session-card-no-double-flow.test.tsx`. Render a SessionCard with active flow; assert exactly one `FlowActivityBadge` and one `SessionFlowActions` instance.
+- [ ] 26.2 Update `no-jsx-slot-nullish-fallback.test.ts::SCAN_FILES` to include `MobileShell.tsx`.
+- [ ] 26.3 Run all client tests; pass.
+
+## 27. Layer 4 — Verification
+
+- [ ] 27.1 Full test suite: `npm test 2>&1 | tee /tmp/pi-test.log` — all tests pass.
+- [ ] 27.2 `npm run build` — clean TypeScript, no warnings.
+- [ ] 27.3 Pack inspection: `pnpm pack -F flows-plugin --dry-run`; grep tarball file list for `../../../`; zero hits.
+- [ ] 27.4 Vite dev smoke: `npm run dev`, spawn a flow, verify FlowDashboard renders and is fully interactive.
+- [ ] 27.5 Reconnect test (manual): spawn a flow, hard-refresh the browser, confirm flow UI re-renders.
+- [ ] 27.6 Plugin status: `/api/health` reports `plugins.flows` with `loaded: true` and 7 claims.
+- [ ] 27.7 Predicate filtering: spawn two sessions, run a flow on one only; FlowActivityBadge appears on the active-flow session card and is absent from the other.
+
+## 28. Layer 4 — Documentation + housekeeping
+
+- [ ] 28.1 Update AGENTS.md "Key Files" section: add rows for `packages/client-utils/` and `packages/markdown-content/` (≤ 200 chars each); update `packages/flows-plugin/` row to reflect "fully wired claims".
+- [ ] 28.2 Update `docs/file-index.md` and `docs/file-index-client.md`, `docs/file-index-plugins.md` (or whichever splits apply) with rows for the moved files in their new locations.
+- [ ] 28.3 Update `CHANGELOG.md` `## [Unreleased]` with a single Internal entry summarizing the migration. Mark `DashboardSession` field additions as additive (not breaking).
+- [ ] 28.4 Mark obsolete proposals: `extract-client-utils-package`, `migrate-flows-jsx-to-slots`, `migrate-flows-content-slots`. Append a final note pointing to this change. Archive after this lands.
