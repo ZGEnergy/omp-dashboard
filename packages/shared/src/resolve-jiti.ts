@@ -24,7 +24,7 @@ import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const JITI_PACKAGES = [
+export const JITI_PACKAGES = [
   // @earendil-works/pi-coding-agent depends on plain `jiti`. Try the
   // bare name first; fall back to the legacy namespaced fork.
   "jiti",

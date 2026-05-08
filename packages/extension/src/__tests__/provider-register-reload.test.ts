@@ -438,7 +438,7 @@ describe("reloadProviders", () => {
     expect(cat.find((c) => c.id === "deepseek")?.custom).toBeUndefined();
 
     // Cleanup: settle the dangling fetches so the test process doesn't leak.
-    if (resolveFetch) resolveFetch(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    if (resolveFetch) (resolveFetch as (value: Response) => void)(new Response(JSON.stringify({ data: [] }), { status: 200 }));
   });
 
   it("discovered unknown model falls back to api-appropriate defaults (openai-completions → 128k)", async () => {

@@ -21,9 +21,10 @@ function makeRefs() {
     lastCreatedTerminalIdRef: { current: null },
     maxSeqMapRef: { current: new Map<string, number>() },
     selectedSessionIdRef: { current: undefined },
+    pendingSpawnsRef: { current: new Map<string, { cwd: string; kind: "spawn" | "resume" }>() },
   } satisfies Pick<
     MessageHandlerDeps,
-    "spawningCwdsRef" | "subscribedRef" | "pendingTerminalCwdRef" | "lastCreatedTerminalIdRef" | "maxSeqMapRef" | "selectedSessionIdRef"
+    "spawningCwdsRef" | "subscribedRef" | "pendingTerminalCwdRef" | "lastCreatedTerminalIdRef" | "maxSeqMapRef" | "selectedSessionIdRef" | "pendingSpawnsRef"
   >;
 }
 
