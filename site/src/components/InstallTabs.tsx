@@ -60,12 +60,20 @@ function UnsignedBinaryNote() {
       <p>
         <span className="font-medium text-pi-fg/80">macOS:</span> the DMGs
         are not yet notarized. Either right-click (or Control-click){" "}
-        <em>PI Dashboard.app</em> → <em>Open</em> the first time, or clear
+        <em>PI-Dashboard.app</em> → <em>Open</em> the first time, or clear
         the quarantine attribute from the terminal:
       </p>
       <pre className="mt-2 overflow-x-auto rounded border border-pi-border/60 bg-pi-bg p-2 font-mono text-[11px] text-pi-fg/80">
-        xattr -d com.apple.quarantine &quot;/Applications/PI Dashboard.app&quot;
+        xattr -cr /Applications/PI-Dashboard.app
       </pre>
+      <p className="mt-2">
+        If you instead see{" "}
+        <code className="font-mono">No such xattr: com.apple.quarantine</code>{" "}
+        from an older{" "}
+        <code className="font-mono">xattr -d</code> command, that&rsquo;s
+        harmless — the attribute was never set or already cleared. Just
+        launch the app.
+      </p>
     </div>
   );
 }

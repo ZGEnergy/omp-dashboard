@@ -13,6 +13,7 @@ see [`docs/release-process.md`](docs/release-process.md).
 ### Added
 
 ### Changed
+- **First-run unblocking docs corrected for macOS.** Both `README.md` (Quickstart) and the marketing site's Install tab (`site/src/components/InstallTabs.tsx`) now recommend `xattr -cr /Applications/PI-Dashboard.app` instead of `xattr -d com.apple.quarantine "/Applications/PI Dashboard.app"`. The previous instructions had two issues: (1) the bundle is named `PI-Dashboard.app` (hyphen, matches `packagerConfig.name` in `packages/electron/forge.config.ts`), not `PI Dashboard.app` with a space; (2) `xattr -d com.apple.quarantine` errors with `No such xattr: com.apple.quarantine` when the attribute is absent (e.g. locally built apps, or a previously cleared install), confusing first-time users. `xattr -cr` is idempotent — clears all extended attributes recursively, no error when nothing is set. A note now explicitly calls out the `No such xattr` message as harmless for users following older instructions.
 
 ### Fixed
 
