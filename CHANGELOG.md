@@ -11,6 +11,14 @@ see [`docs/release-process.md`](docs/release-process.md).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.5.1] - 2026-05-08
+
+### Added
 - **Spawn correlation token: kill-fork-doesn't-kill-parent + auto-select after fork.** Server now mints a UUIDv4 `spawnToken` per `spawnPiSession()` invocation, injects it as `PI_DASHBOARD_SPAWN_TOKEN` into the spawned pi's environment, and the bridge echoes it back in the first `session_register`. The `headlessPidRegistry` exposes a three-tier link — `linkByToken` (strong identity) → `linkByPid` (works for any bridge that sends `pid`) → `linkSession` (legacy cwd-FIFO fallback) — used by `event-wiring.ts` to resolve `sessionId↔pid` mappings deterministically. The `pendingForkRegistry` is keyed by token, eliminating the race where two same-cwd forks would mis-attribute parents. `spawn-register-watchdog` adds a third `byToken` index alongside `byCwd` and `byPid`. The browser protocol gains optional `requestId` (`spawn_session`, `resume_session`) echoed in `spawn_result` / `resume_result`, plus optional `spawnRequestId` on `session_added` so the client auto-selects the new session for both spawn AND fork — closing the long-standing UX gap where forks did not auto-navigate. All new fields are optional; old bridges, old clients, and old servers continue to work via the lower-tier matching fallbacks. (change: `spawn-correlation-token`)
 
 ### Changed
