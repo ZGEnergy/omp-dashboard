@@ -3,8 +3,8 @@ import { Icon } from "@mdi/react";
 import { mdiPlay, mdiPlus } from "@mdi/js";
 import type { FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { FlowLaunchDialog } from "./FlowLaunchDialog.js";
-import { ConfirmDialog } from "../../../client/src/components/ConfirmDialog.js";
-import { SearchableSelectDialog, type SelectOption } from "../../../client/src/components/SearchableSelectDialog.js";
+import { ConfirmDialog } from "@blackbelt-technology/pi-dashboard-client-utils/ConfirmDialog";
+import { SearchableSelectDialog, type SelectOption } from "@blackbelt-technology/pi-dashboard-client-utils/SearchableSelectDialog";
 
 export function SessionFlowActions({
   flows,

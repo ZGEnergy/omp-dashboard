@@ -722,6 +722,23 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
     }
 
     case "auto_retry_start": {
+      // Defensive guard: drop the event when a fresh same-turn lastError is
+      // already set and the session is not streaming. This prevents the
+      // (yellow + red) banner-overlap state if any future bridge ordering
+      // bug ever delivers an `auto_retry_start` AFTER `agent_end` for the
+      // same terminal turn. Existing carry-over behavior (stale red from a
+      // prior turn + fresh yellow on a new turn) is preserved because by
+      // the time the new turn's `auto_retry_start` arrives, `agent_start`
+      // has already cleared `lastError` (so the guard's first precondition
+      // is false). See change: fix-retry-banner-stuck-on-limit-exceeded.
+      const FRESH_ERROR_WINDOW_MS = 1500;
+      if (
+        state.lastError &&
+        !state.isStreaming &&
+        event.timestamp - state.lastError.timestamp <= FRESH_ERROR_WINDOW_MS
+      ) {
+        break;
+      }
       const attempt = typeof data.attempt === "number" ? data.attempt : 1;
       const maxAttempts = typeof data.maxAttempts === "number" ? data.maxAttempts : 1;
       const delayMs = typeof data.delayMs === "number" ? data.delayMs : 0;

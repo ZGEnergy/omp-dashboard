@@ -2155,4 +2155,72 @@ describe("auto_retry events (provider-retry-state)", () => {
     expect(state.retryState).toBeUndefined();
     expect(state.lastError).toBeUndefined();
   });
+
+  // Defense-in-depth guard against (yellow + red) banner overlap.
+  // See change: fix-retry-banner-stuck-on-limit-exceeded.
+  describe("auto_retry_start defensive guard against banner overlap", () => {
+    it("drops auto_retry_start when lastError is fresh same-turn (≤1500ms, not streaming)", () => {
+      let state = createInitialState();
+      state.lastError = { message: "...quota exhausted...", timestamp: 1_000_000 };
+      state.isStreaming = false;
+      state = reduceEvent(state, {
+        eventType: "auto_retry_start",
+        timestamp: 1_000_500, // 500ms later
+        data: { attempt: 1, maxAttempts: -1, delayMs: -1, errorMessage: "429" },
+      });
+      expect(state.retryState).toBeUndefined();
+      expect(state.lastError).toEqual({ message: "...quota exhausted...", timestamp: 1_000_000 });
+    });
+
+    it("does NOT drop auto_retry_start when lastError is stale carry-over (>1500ms old)", () => {
+      let state = createInitialState();
+      state.lastError = { message: "earlier turn", timestamp: 1_000_000 };
+      state.isStreaming = false;
+      state = reduceEvent(state, {
+        eventType: "auto_retry_start",
+        timestamp: 1_010_000, // 10s later
+        data: { attempt: 1, maxAttempts: -1, delayMs: -1, errorMessage: "rate limit" },
+      });
+      expect(state.retryState).toBeDefined();
+      expect(state.retryState!.reason).toBe("rate limit");
+      expect(state.lastError).toEqual({ message: "earlier turn", timestamp: 1_000_000 });
+    });
+
+    it("does NOT drop auto_retry_start when streaming (isStreaming=true)", () => {
+      let state = createInitialState();
+      state.lastError = { message: "fresh but mid-stream", timestamp: 1_000_000 };
+      state.isStreaming = true;
+      state = reduceEvent(state, {
+        eventType: "auto_retry_start",
+        timestamp: 1_000_500,
+        data: { attempt: 1, maxAttempts: -1, delayMs: -1, errorMessage: "x" },
+      });
+      expect(state.retryState).toBeDefined();
+    });
+
+    it("does NOT drop auto_retry_start when lastError is undefined", () => {
+      let state = createInitialState();
+      state.lastError = undefined;
+      state.isStreaming = false;
+      state = reduceEvent(state, {
+        eventType: "auto_retry_start",
+        timestamp: 5000,
+        data: { attempt: 1, maxAttempts: -1, delayMs: -1, errorMessage: "x" },
+      });
+      expect(state.retryState).toBeDefined();
+    });
+
+    it("does NOT drop auto_retry_start when lastError is exactly at the boundary (1500ms old)", () => {
+      // Boundary case: with `<=` semantics, exactly 1500ms drops; 1501ms keeps.
+      let state = createInitialState();
+      state.lastError = { message: "boundary", timestamp: 1_000_000 };
+      state.isStreaming = false;
+      state = reduceEvent(state, {
+        eventType: "auto_retry_start",
+        timestamp: 1_001_501, // 1501ms later
+        data: { attempt: 1, maxAttempts: -1, delayMs: -1, errorMessage: "x" },
+      });
+      expect(state.retryState).toBeDefined();
+    });
+  });
 });

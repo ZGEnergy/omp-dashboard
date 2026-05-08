@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Icon } from "@mdi/react";
 import { mdiPlay } from "@mdi/js";
-import { DialogPortal } from "../../../client/src/components/DialogPortal.js";
-import { GateSlot, aggregateGateState } from "../../../client/src/components/extension-ui/GateSlot.js";
+import { DialogPortal } from "@blackbelt-technology/pi-dashboard-client-utils/DialogPortal";
+import { GateSlot, aggregateGateState } from "@blackbelt-technology/pi-dashboard-client-utils/extension-ui/GateSlot";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
 export function FlowLaunchDialog({

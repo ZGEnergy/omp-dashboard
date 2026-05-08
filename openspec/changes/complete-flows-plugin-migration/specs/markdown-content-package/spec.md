@@ -106,5 +106,5 @@ The `flows-plugin` source files that render markdown (`FlowAgentDetail.tsx`, `Fl
 #### Scenario: jj-plugin does NOT depend on markdown-content
 
 - **WHEN** reading `packages/jj-plugin/package.json#dependencies`
-- **THEN** the object SHALL NOT contain `@blackbelt-technology/pi-dashboard-markdown-content`
+- **THEN** the object SHALL NOT contain `@blackbelt-technology/pi-dashboard-markdown-content` (jj-plugin does not import any markdown-content symbol)
 - **AND** jj-plugin's installation footprint SHALL NOT include the markdown rendering stack

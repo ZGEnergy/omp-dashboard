@@ -24,6 +24,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@blackbelt-technology/pi-dashboard-shared": path.resolve(__dirname, "../shared/src"),
+      "@blackbelt-technology/pi-dashboard-client-utils": path.resolve(__dirname, "../client-utils/src"),
     },
   },
   build: {

@@ -15,6 +15,7 @@ export default defineConfig({
       "packages/server",
       "packages/extension",
       "packages/client",
+      "packages/client-utils",
       "packages/dashboard-plugin-runtime",
       "packages/flows-plugin",
       "packages/flows-anthropic-bridge-plugin",

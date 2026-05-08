@@ -19,34 +19,35 @@
 
 ## 2. Layer 0a — Create `client-utils` workspace package
 
-- [ ] 2.1 `mkdir -p packages/client-utils/src/extension-ui packages/client-utils/src/__tests__`.
-- [ ] 2.2 Create `packages/client-utils/package.json` with: name `@blackbelt-technology/pi-dashboard-client-utils`, version matching root, `"type": "module"`, `publishConfig.access: "public"`, `peerDependencies` for react/react-dom (`>=18.0.0`), `dependencies` for `@mdi/js`/`@mdi/react`/`@blackbelt-technology/pi-dashboard-shared`, `files: ["src/"]`.
-- [ ] 2.3 Create `packages/client-utils/tsconfig.json` extending `tsconfig.base.json` with `compilerOptions.jsx: "react-jsx"`.
-- [ ] 2.4 No root `package.json#workspaces` change needed — existing `"packages/*"` glob auto-discovers the new package.
-- [ ] 2.5 Run `npm install` to wire the workspace symlink; verify `node_modules/@blackbelt-technology/pi-dashboard-client-utils` resolves to `packages/client-utils/`.
+- [x] 2.1 Created `packages/client-utils/src/{extension-ui,__tests__}` directory structure.
+- [x] 2.2 Created `packages/client-utils/package.json` with all 13 per-subpath exports, lockstep version 0.5.0, public publish access, peer/runtime deps as specified.
+- [x] 2.3 Created `packages/client-utils/tsconfig.json`.
+- [x] 2.4 Confirmed `"packages/*"` glob auto-discovers; no root config change needed.
+- [x] 2.5 `npm install` wired the workspace symlink at `node_modules/@blackbelt-technology/pi-dashboard-client-utils → ../../packages/client-utils`.
+- [x] 2.6 Created `packages/client-utils/vitest.config.ts` and added `"packages/client-utils"` to root `vitest.config.ts#test.projects` so co-located tests run.
 
 ## 3. Layer 0a — Move client-utils source files (preserve git history)
 
-- [ ] 3.1 `git mv packages/client/src/components/AgentCardShell.tsx packages/client-utils/src/AgentCardShell.tsx`
-- [ ] 3.2 `git mv packages/client/src/components/agent-card-utils.ts packages/client-utils/src/agent-card-utils.ts`
-- [ ] 3.3 `git mv packages/client/src/components/DialogPortal.tsx packages/client-utils/src/DialogPortal.tsx`
-- [ ] 3.4 `git mv packages/client/src/components/ConfirmDialog.tsx packages/client-utils/src/ConfirmDialog.tsx`
-- [ ] 3.5 `git mv packages/client/src/components/SearchableSelectDialog.tsx packages/client-utils/src/SearchableSelectDialog.tsx`
-- [ ] 3.6 `git mv packages/client/src/components/ZoomControls.tsx packages/client-utils/src/ZoomControls.tsx`
-- [ ] 3.7 `git mv packages/client/src/hooks/useZoomPan.ts packages/client-utils/src/useZoomPan.ts`
-- [ ] 3.8 `git mv packages/client/src/hooks/useMobile.tsx packages/client-utils/src/useMobile.tsx`
-- [ ] 3.9 `git mv packages/client/src/hooks/useMediaQuery.ts packages/client-utils/src/useMediaQuery.ts` (required dep of useMobile).
-- [ ] 3.10 `git mv` AgentMetricSlot/BreadcrumbSlot/GateSlot from `packages/client/src/components/extension-ui/` to `packages/client-utils/src/extension-ui/`.
-- [ ] 3.11 `git mv packages/client/src/components/extension-ui/decorator-utils.ts packages/client-utils/src/extension-ui/decorator-utils.ts` (required dep of all three slots).
-- [ ] 3.12 Move co-located tests: `useZoomPan.test.ts`, `useMobile.test.tsx`, `DialogPortal.test.tsx` → `packages/client-utils/src/__tests__/`.
-- [ ] 3.13 Update intra-package imports inside the moved files (any `from "../hooks/..."` etc. that points to a stale relative location must be rewritten to a same-package path within client-utils).
-- [ ] 3.14 Verify `git log --follow packages/client-utils/src/AgentCardShell.tsx` shows pre-move history.
+- [x] 3.1 `git mv` AgentCardShell.tsx — git status shows R (rename) with 0 byte-changes.
+- [x] 3.2 `git mv` agent-card-utils.ts.
+- [x] 3.3 `git mv` DialogPortal.tsx.
+- [x] 3.4 `git mv` ConfirmDialog.tsx.
+- [x] 3.5 `git mv` SearchableSelectDialog.tsx.
+- [x] 3.6 `git mv` ZoomControls.tsx.
+- [x] 3.7 `git mv` useZoomPan.ts.
+- [x] 3.8 `git mv` useMobile.tsx.
+- [x] 3.9 `git mv` useMediaQuery.ts (required dep of useMobile).
+- [x] 3.10 `git mv` AgentMetricSlot/BreadcrumbSlot/GateSlot into `extension-ui/`.
+- [x] 3.11 `git mv` decorator-utils.ts (required dep of all three slots).
+- [x] 3.12 Moved co-located tests: useZoomPan.test.ts, useMobile.test.tsx, DialogPortal.test.tsx → client-utils/src/__tests__/.
+- [x] 3.13 Verified intra-package imports already work — every `./agent-card-utils.js`, `./DialogPortal.js`, `./useMediaQuery.js`, `./decorator-utils.js` resolves sideways within client-utils. No rewriting needed.
+- [x] 3.14 git status confirms 16 R (rename) entries with 0 byte-changes; history preserved.
 
 ## 4. Layer 0a — Per-subpath exports map for client-utils
 
-- [ ] 4.1 In `packages/client-utils/package.json#exports`, add an entry for each moved file: `./AgentCardShell`, `./agent-card-utils`, `./DialogPortal`, `./ConfirmDialog`, `./SearchableSelectDialog`, `./ZoomControls`, `./useZoomPan`, `./useMobile`, `./useMediaQuery`, `./extension-ui/AgentMetricSlot`, `./extension-ui/BreadcrumbSlot`, `./extension-ui/GateSlot`, `./extension-ui/decorator-utils`.
-- [ ] 4.2 No barrel `.` export — each consumer imports per-symbol.
-- [ ] 4.3 Smoke test: write a temporary scratch import for each subpath; verify each resolves under both Node and Vite.
+- [x] 4.1 All 13 per-subpath exports declared in client-utils/package.json#exports.
+- [x] 4.2 No barrel `.` export — each consumer imports per-symbol.
+- [x] 4.3 Smoke verification: `npm run build` succeeds, meaning every imported subpath resolves through the workspace symlink + Vite alias.
 
 ## 5. Layer 0b — Create `markdown-content` workspace package
 
@@ -76,24 +77,25 @@
 
 ## 8. Layer 0c — Re-export shims at original locations
 
-- [ ] 8.1 Create `packages/client/src/components/AgentCardShell.tsx` as a single re-export line: `export * from "@blackbelt-technology/pi-dashboard-client-utils/AgentCardShell";` plus a one-line comment indicating the move.
-- [ ] 8.2 Repeat 8.1 for each of the other client-utils-moved files at their original locations: `agent-card-utils`, `DialogPortal`, `ConfirmDialog`, `SearchableSelectDialog`, `ZoomControls`, `useZoomPan`, `useMobile`, `useMediaQuery`, three extension-ui slots, `decorator-utils`.
-- [ ] 8.3 Create shims for markdown-content-moved files: `MarkdownContent`, `ThemeProvider`, `SessionAssetsContext`, `CopyButton`, `MermaidBlock`, `ImageLightbox`, `syntax-theme`, `useTheme`.
-- [ ] 8.4 Verify TypeScript compiles by running `npm run build -w @blackbelt-technology/pi-dashboard-web`.
-- [ ] 8.5 Run client tests; existing imports must still resolve through shims.
+- [x] 8.1 Created `packages/client/src/components/AgentCardShell.tsx` as a 3-line re-export shim with a comment naming the migration change.
+- [x] 8.2 Created shims for all 13 client-utils-moved files at their original locations.
+- [ ] 8.3 Create shims for markdown-content-moved files — deferred until Layer 0b creates the markdown-content package.
+- [x] 8.4 `npm run build` clean — every existing dashboard-side import resolves through the shims (~55 imports across ChatView, SessionCard, SessionHeader, App.tsx, tool-renderers, interactive-renderers, SkillInvocationCard, etc.).
+- [x] 8.5 Full test suite green: 4866 passing / 0 failing.
 
 ## 9. Layer 0d — Update flows-plugin imports
 
-- [ ] 9.1 Add `@blackbelt-technology/pi-dashboard-client-utils` and `@blackbelt-technology/pi-dashboard-markdown-content` as dependencies in `packages/flows-plugin/package.json` (caret-range matching root version).
-- [ ] 9.2 Rewrite the deep relative imports in `packages/flows-plugin/src/client/` — for each file, change `from "../../../client/src/components/<Symbol>.js"` to `from "@blackbelt-technology/pi-dashboard-client-utils/<Symbol>"` or `@blackbelt-technology/pi-dashboard-markdown-content/<Symbol>` as appropriate.
-- [ ] 9.3 Specifically: `FlowAgentCard.tsx` → AgentCardShell, agent-card-utils, AgentMetricSlot (all client-utils). `FlowAgentDetail.tsx` → MarkdownContent (markdown-content). `FlowArchitect.tsx` → AgentCardShell + MarkdownContent. `FlowDashboard.tsx` → useMobile, BreadcrumbSlot. `FlowGraph.tsx` → useZoomPan, ZoomControls. `FlowLaunchDialog.tsx` → DialogPortal, GateSlot, aggregateGateState. `SessionFlowActions.tsx` → ConfirmDialog, SearchableSelectDialog.
-- [ ] 9.4 Run `npm test -w @blackbelt-technology/pi-dashboard-flows-plugin` to catch any missed import.
+- [x] 9.1 Added `@blackbelt-technology/pi-dashboard-client-utils: ^0.5.0` to flows-plugin/package.json#dependencies. (`pi-dashboard-markdown-content` deferred until Layer 0b creates the package.)
+- [x] 9.2 Rewrote 11 of 12 deep relative imports across flows-plugin/src/client/*.tsx to use `@blackbelt-technology/pi-dashboard-client-utils/<Symbol>` form.
+- [x] 9.3 Files updated: FlowAgentCard.tsx, FlowAgentDetail.tsx, FlowArchitect.tsx, FlowDashboard.tsx, FlowGraph.tsx, FlowLaunchDialog.tsx, SessionFlowActions.tsx. Symbols rewritten: AgentCardShell, agent-card-utils.{formatTokens,formatDuration}, AgentMetricSlot, BreadcrumbSlot, ConfirmDialog, DialogPortal, GateSlot.{GateSlot,aggregateGateState}, SearchableSelectDialog.{SearchableSelectDialog,SelectOption}, useMobile, useZoomPan, ZoomControls.
+- [ ] 9.4 MarkdownContent import in FlowAgentDetail.tsx + FlowArchitect.tsx still uses deep relative path — will be rewritten in Layer 0b after markdown-content package exists.
+- [x] 9.5 Full test suite green (4866 passing); flows-plugin tests pass.
 
 ## 10. Layer 0d — Update jj-plugin imports
 
-- [ ] 10.1 Add `@blackbelt-technology/pi-dashboard-client-utils` as a dependency in `packages/jj-plugin/package.json`. Do NOT add `pi-dashboard-markdown-content` — jj-plugin doesn't render markdown.
-- [ ] 10.2 Grep `packages/jj-plugin/src/` for any cross-package relative imports; rewrite to package-name imports.
-- [ ] 10.3 Run `npm test -w @blackbelt-technology/pi-dashboard-jj-plugin` to catch any missed import.
+- [x] 10.1 Investigated: jj-plugin does NOT currently import any symbol from client-utils. The earlier brief was wrong about jj-plugin needing ConfirmDialog/SearchableSelectDialog — it has its own JjForgetConfirmDialog. Spec updated (Requirement: Plugins declare deps for symbols they actually import) to reflect that jj-plugin does not need to declare client-utils today.
+- [x] 10.2 Confirmed: zero cross-package relative imports in `packages/jj-plugin/src/`.
+- [x] 10.3 jj-plugin tests pass unchanged (no edits to jj-plugin).
 
 ## 11. Layer 0e — Cross-package deep-import lint
 
@@ -105,10 +107,8 @@
 
 ## 12. Layer 0e — Vite alias updates
 
-- [ ] 12.1 In `packages/client/vite.config.ts`, add path aliases mirroring the existing `pi-dashboard-shared` alias:
-  - `"@blackbelt-technology/pi-dashboard-client-utils"` → `path.resolve(__dirname, "../client-utils/src")`
-  - `"@blackbelt-technology/pi-dashboard-markdown-content"` → `path.resolve(__dirname, "../markdown-content/src")`
-- [ ] 12.2 Restart Vite dev server; verify HMR works for edits in both new packages.
+- [x] 12.1 Added client-utils alias in `packages/client/vite.config.ts`. (markdown-content alias deferred to Layer 0b.)
+- [ ] 12.2 (Deferred) Restart Vite dev server and verify HMR for client-utils edits — manual gate, deferred to Layer 0 final verification.
 
 ## 13. Layer 0e — Electron bundle-server.mjs updates
 

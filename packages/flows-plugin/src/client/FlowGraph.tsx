@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import { useZoomPan } from "../../../client/src/hooks/useZoomPan.js";
-import { ZoomControls } from "../../../client/src/components/ZoomControls.js";
+import { useZoomPan } from "@blackbelt-technology/pi-dashboard-client-utils/useZoomPan";
+import { ZoomControls } from "@blackbelt-technology/pi-dashboard-client-utils/ZoomControls";
 import { graphlib } from "dagre-d3-es";
 import { layout as dagreLayout } from "dagre-d3-es/src/dagre/index.js";
 import type { FlowState, ArchitectDagStep } from "@blackbelt-technology/pi-dashboard-shared/types.js";

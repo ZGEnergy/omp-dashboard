@@ -72,11 +72,13 @@ A repository-level lint test SHALL enforce this rule by scanning every `*.ts` an
 - **WHEN** a file under `packages/flows-plugin/src/client/` imports `from "./helpers.js"` or `from "../reducer.js"`
 - **THEN** the lint test SHALL NOT flag these imports
 
-### Requirement: flows-plugin and jj-plugin depend on the new packages by name
+### Requirement: Plugins declare deps for symbols they actually import
 
-`packages/flows-plugin/package.json` SHALL declare both `@blackbelt-technology/pi-dashboard-client-utils` AND `@blackbelt-technology/pi-dashboard-markdown-content` as runtime `dependencies`.
+Each plugin's `package.json#dependencies` SHALL declare every workspace package whose symbols it imports. Plugins SHALL NOT declare dependencies on packages they do not import from.
 
-`packages/jj-plugin/package.json` SHALL declare `@blackbelt-technology/pi-dashboard-client-utils` only as a runtime `dependency` — it does NOT depend on `markdown-content`.
+`packages/flows-plugin/package.json` SHALL declare both `@blackbelt-technology/pi-dashboard-client-utils` AND `@blackbelt-technology/pi-dashboard-markdown-content` as runtime `dependencies` because flows-plugin imports symbols from both.
+
+`packages/jj-plugin/package.json` is NOT required to declare either new package today — jj-plugin does not currently import any symbol from `client-utils` or `markdown-content`. If a future change adds such an import, the corresponding dependency SHALL be added at that time.
 
 #### Scenario: flows-plugin declares both deps
 
@@ -85,8 +87,13 @@ A repository-level lint test SHALL enforce this rule by scanning every `*.ts` an
 - **AND** the object SHALL contain `"@blackbelt-technology/pi-dashboard-markdown-content": "^X.Y.Z"`
 - **AND** both versions SHALL match the root version
 
-#### Scenario: jj-plugin declares client-utils only
+#### Scenario: jj-plugin does not need either new package today
 
-- **WHEN** reading `packages/jj-plugin/package.json#dependencies`
-- **THEN** the object SHALL contain `"@blackbelt-technology/pi-dashboard-client-utils": "^X.Y.Z"`
-- **AND** the object SHALL NOT contain `"@blackbelt-technology/pi-dashboard-markdown-content"`
+- **WHEN** scanning `packages/jj-plugin/src/` for imports of `@blackbelt-technology/pi-dashboard-client-utils/*` or `@blackbelt-technology/pi-dashboard-markdown-content/*`
+- **THEN** zero such imports SHALL exist
+- **AND** therefore `packages/jj-plugin/package.json#dependencies` SHALL NOT be required to list either package
+
+#### Scenario: future plugin adding a client-utils import declares the dep
+
+- **WHEN** a plugin adds an `import { ConfirmDialog } from "@blackbelt-technology/pi-dashboard-client-utils/ConfirmDialog"`
+- **THEN** the same change SHALL also add `"@blackbelt-technology/pi-dashboard-client-utils": "^X.Y.Z"` to that plugin's `package.json#dependencies`

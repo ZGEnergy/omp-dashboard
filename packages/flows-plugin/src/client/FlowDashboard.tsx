@@ -6,8 +6,8 @@ import { FlowAgentCard } from "./FlowAgentCard.js";
 import { FlowGraph, flowStateToGraphSteps } from "./FlowGraph.js";
 import { FlowSummary } from "./FlowSummary.js";
 import { FlowTabBar, type FlowTab } from "./FlowTabBar.js";
-import { useMobile } from "../../../client/src/hooks/useMobile.js";
-import { BreadcrumbSlot } from "../../../client/src/components/extension-ui/BreadcrumbSlot.js";
+import { useMobile } from "@blackbelt-technology/pi-dashboard-client-utils/useMobile";
+import { BreadcrumbSlot } from "@blackbelt-technology/pi-dashboard-client-utils/extension-ui/BreadcrumbSlot";
 
 export function FlowDashboard({
   flowState,
