@@ -13,6 +13,9 @@ PLATFORM="${1:-linux}"
 ARCH="${2:-x64}"
 ELECTRON_DIR="packages/electron"
 
+# shellcheck disable=SC1091
+source "/build/$ELECTRON_DIR/scripts/_node-version.sh"
+
 echo "→ Building for $PLATFORM-$ARCH..."
 
 # Safety net: ensure all source files are readable by the container.
@@ -129,7 +132,7 @@ cd /build
 
 if [ "$PLATFORM" = "linux" ]; then
   cd "$ELECTRON_DIR"
-  bash scripts/download-node.sh v22.18.0 linux "$ARCH"
+  bash scripts/download-node.sh "$BUNDLED_NODE_VERSION" linux "$ARCH"
   cd /build
 
   cd "$ELECTRON_DIR"
@@ -155,7 +158,7 @@ if [ "$PLATFORM" = "win32" ]; then
   # Download Windows Node.js for bundling (matching target arch)
   NODE_DIR="resources/node"
   mkdir -p "$NODE_DIR"
-  VERSION="v22.18.0"
+  VERSION="$BUNDLED_NODE_VERSION"
   URL="https://nodejs.org/dist/$VERSION/node-$VERSION-win-$ARCH.zip"
   echo "→ Downloading Node.js $VERSION for Windows $ARCH..."
   curl -fsSL "$URL" -o /tmp/node-win.zip

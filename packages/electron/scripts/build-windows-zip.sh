@@ -33,7 +33,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ELECTRON_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$ELECTRON_DIR/../.." && pwd)"
 
-NODE_VERSION="v22.18.0"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/_node-version.sh"
+NODE_VERSION="$BUNDLED_NODE_VERSION"
 ARCH="x64"
 SKIP_CLIENT=false
 NO_PORTABLE=false
@@ -237,7 +239,9 @@ else
   if ! docker image inspect "$DOCKER_IMAGE" &>/dev/null 2>&1; then
     echo ""
     echo "▶ Building Docker image ($DOCKER_IMAGE)..."
-    docker build --platform linux/amd64 -t "$DOCKER_IMAGE" -f "$SCRIPT_DIR/Dockerfile.build" "$PROJECT_DIR"
+    docker build --platform linux/amd64 \
+      --build-arg "NODE_BUILD_IMAGE=node:${BUNDLED_NODE_MAJOR}-bookworm-slim" \
+      -t "$DOCKER_IMAGE" -f "$SCRIPT_DIR/Dockerfile.build" "$PROJECT_DIR"
     echo "✓ Docker image built"
   else
     echo "✓ Docker image already present"

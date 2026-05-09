@@ -25,7 +25,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ELECTRON_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$ELECTRON_DIR/../.." && pwd)"
 
-NODE_VERSION="v22.18.0"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/_node-version.sh"
+NODE_VERSION="$BUNDLED_NODE_VERSION"
 SKIP_CLIENT=false
 ARCH=""
 BUILD_NATIVE=false
@@ -367,6 +369,7 @@ docker_build() {
   docker build \
     --no-cache \
     --platform linux/amd64 \
+    --build-arg "NODE_BUILD_IMAGE=node:${BUNDLED_NODE_MAJOR}-bookworm-slim" \
     -f packages/electron/scripts/Dockerfile.build \
     -t "$DOCKER_IMAGE" \
     . 2>&1 | tail -20

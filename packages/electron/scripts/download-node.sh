@@ -8,7 +8,11 @@
 #
 set -euo pipefail
 
-NODE_VERSION="${1:-v22.18.0}"
+SCRIPT_DIR_FOR_VERSION="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR_FOR_VERSION/_node-version.sh"
+
+NODE_VERSION="${1:-$BUNDLED_NODE_VERSION}"
 PLATFORM="${2:-$(uname -s | tr '[:upper:]' '[:lower:]')}"
 ARCH="${3:-$(uname -m)}"
 

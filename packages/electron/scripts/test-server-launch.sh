@@ -23,7 +23,8 @@ fi
 # Build a minimal test image
 cd "$PROJECT_DIR"
 docker build -f - -t pi-dashboard-server-test "$ELECTRON_DIR" <<'DOCKERFILE'
-FROM node:22-bookworm-slim
+# Must match BUNDLED_NODE_MAJOR in scripts/_node-version.sh.
+FROM node:24-bookworm-slim
 
 # Simulate Electron's resource layout
 RUN mkdir -p /app/resources
