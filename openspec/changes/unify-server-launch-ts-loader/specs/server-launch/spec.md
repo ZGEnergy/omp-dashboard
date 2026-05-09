@@ -4,7 +4,15 @@
 
 ### Requirement: Single shared dashboard-server spawn primitive
 
-All dashboard-server spawns SHALL go through `launchDashboardServer(opts)` exported from `packages/shared/src/server-launcher.ts`. No call site outside this module MAY construct `node --import <loader> <cli>` argv directly. Internally, `launchDashboardServer` SHALL delegate argv construction to the existing `spawnNodeScript` helper in `packages/shared/src/platform/node-spawn.ts`.
+All runtime dashboard-server spawns SHALL go through `launchDashboardServer(opts)` exported from `packages/shared/src/server-launcher.ts`. No source file outside this module AND `node-spawn.ts` MAY construct `node --import <loader> <cli>` argv directly. Internally, `launchDashboardServer` SHALL delegate argv construction to `spawnNodeScript` in `packages/shared/src/platform/node-spawn.ts`, which itself uses the shared pure helper `buildNodeImportArgvParts({ loader, entry, args })`. The `restart-helper.ts` `node -e` orchestrator (which runs in a fresh process and cannot call `launchDashboardServer` directly) SHALL also call `buildNodeImportArgvParts` for argv construction.
+
+#### Scenario: Entry-script URL-wrapping rule preserved
+
+- **WHEN** the loader is jiti AND the host platform is POSIX
+- **THEN** the entry script is passed as a raw path (jiti's resolver mishandles `file://` URL entries on POSIX)
+- **AND WHEN** the host platform is Windows OR the loader is tsx
+- **THEN** the entry script is URL-wrapped via `toFileUrl()`
+- **AND** this rule is owned by `shouldUrlWrapEntry(loader)` in `node-spawn.ts` and pinned by tests in both `node-spawn.test.ts` and `server-launcher.test.ts`
 
 #### Scenario: Extension auto-spawn
 
@@ -28,6 +36,54 @@ All dashboard-server spawns SHALL go through `launchDashboardServer(opts)` expor
 - **WHEN** the repo-lint test `no-raw-node-import` runs
 - **THEN** the `ALLOWLIST` constant contains exactly `packages/shared/src/platform/node-spawn.ts` and `packages/shared/src/server-launcher.ts`
 - **AND** no source file in `packages/{extension,server,electron}/src/` contains the `ban:raw-node-import-ok` marker
+
+### Requirement: Readiness policy with four termination conditions
+
+`launchDashboardServer` SHALL poll `isDashboardRunning(port)` from `packages/shared/src/server-identity.ts` until exactly one of these terminates the wait:
+
+- `running === true` → resolve with `{ healthOk: true, reportedPid: status.pid ?? null, childPid: child.pid }`.
+- `portConflict === true` → throw `PortConflictError`.
+- `child.exitCode !== null` (child died mid-poll) → throw `EarlyExitError({ code: child.exitCode })`.
+- `healthTimeoutMs` elapsed → throw `Error("readiness timeout")`.
+
+#### Scenario: Identity verification rejects foreign service on port
+
+- **WHEN** another (non-dashboard) service occupies the target port
+- **THEN** `isDashboardRunning` returns `portConflict: true`
+- **AND** `launchDashboardServer` throws `PortConflictError` instead of treating the foreign service as success
+
+#### Scenario: Early-exit detection beats timeout
+
+- **WHEN** the spawned child exits during the readiness poll
+- **THEN** `launchDashboardServer` throws `EarlyExitError` carrying the child exit code on the next poll tick
+- **AND** does not wait for the full `healthTimeoutMs` window
+
+#### Scenario: Dual PID surfaced
+
+- **WHEN** the server reaches health-ok
+- **THEN** the resolved value carries both `childPid` (the spawned process pid) and `reportedPid` (from `/api/health`, matching `~/.pi/dashboard/dashboard.pid` once written)
+- **AND** callers MAY use `reportedPid ?? readPid() ?? childPid` for the user-visible PID (cli.ts pattern)
+
+### Requirement: Caller-owned log-file policy
+
+When `stdio: { logFile }` is supplied, `launchDashboardServer` SHALL:
+
+- Create the parent directory with `mkdirSync(..., { recursive: true })`.
+- Open the log file with `"a"` (append) mode.
+- Write a single header line `[<ISO timestamp>] <starter?> launch (parent pid <pid>, port <port>, cli <cliPath>)\n` before passing the fd to the child.
+- Pass the fd as both stdout and stderr in `spawnOptions.stdio`.
+- Close the parent's fd after `spawn` returns (child retains its inherited copy).
+
+The absolute log-file path is **caller-owned**. Conventions in the migrated tree:
+- Extension: `stdio: "ignore"` (no log).
+- CLI (`cmdStart`): `~/.pi/dashboard/server.log`.
+- Electron: existing electron log path (unchanged by this proposal).
+
+#### Scenario: Header line written before child sees fd
+
+- **WHEN** `launchDashboardServer({ stdio: { logFile } })` runs
+- **THEN** the log file contains the header line for this launch on the first byte after the previous run's content (append mode preserves history)
+- **AND** the parent process closes its copy of the fd after `spawn`
 
 ### Requirement: Unified jiti resolution via `ToolResolver`
 
