@@ -627,7 +627,25 @@ async function cmdStatus(port: number): Promise<void> {
   console.log(`Dashboard server is running (pid ${pid}) on port ${port}`);
 }
 
+/**
+ * Install process-level safety net so a single misbehaving plugin or
+ * library cannot kill the whole dashboard. Logs the offending error and
+ * keeps the event loop running. We do NOT exit; the surrounding daemon
+ * harness already restarts on real crashes (signal/exit-code), and
+ * silently swallowing recoverable async faults is the lesser evil here.
+ */
+function installCrashSafetyNet(): void {
+  process.on("unhandledRejection", (reason: unknown) => {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    console.error("[crash-safety] unhandledRejection (suppressed):", err.stack || err.message);
+  });
+  process.on("uncaughtException", (err: Error) => {
+    console.error("[crash-safety] uncaughtException (suppressed):", err.stack || err.message);
+  });
+}
+
 async function main() {
+  installCrashSafetyNet();
   ensureConfig();
 
   const { subcommand, flags } = parseArgs(process.argv.slice(2));
