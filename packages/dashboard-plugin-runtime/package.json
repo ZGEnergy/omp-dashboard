@@ -27,6 +27,10 @@
     "./vite-plugin": {
       "types": "./src/vite-plugin/index.ts",
       "default": "./src/vite-plugin/index.ts"
+    },
+    "./manifest-validator": {
+      "types": "./src/manifest-validator.ts",
+      "default": "./src/manifest-validator.ts"
     }
   },
   "files": [

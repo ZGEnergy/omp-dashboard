@@ -8,13 +8,14 @@ import {
 } from "../recommended-extensions.js";
 
 describe("RECOMMENDED_EXTENSIONS manifest", () => {
-	it("contains exactly the five expected entries", () => {
+	it("contains exactly the six expected entries", () => {
 		const ids = RECOMMENDED_EXTENSIONS.map((e) => e.id).sort();
 		expect(ids).toEqual(
 			[
 				"pi-anthropic-messages",
 				"pi-agent-browser",
 				"pi-flows",
+				"pi-memory-honcho",
 				"pi-web-access",
 				"tintinweb-pi-subagents",
 			].sort(),
@@ -62,7 +63,12 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 	it("npm-sourced entries use the npm: prefix", () => {
 		const npmEntries = RECOMMENDED_EXTENSIONS.filter((e) => e.source.startsWith("npm:"));
 		expect(npmEntries.map((e) => e.id).sort()).toEqual(
-			["pi-agent-browser", "pi-web-access", "tintinweb-pi-subagents"].sort(),
+			[
+				"pi-agent-browser",
+				"pi-memory-honcho",
+				"pi-web-access",
+				"tintinweb-pi-subagents",
+			].sort(),
 		);
 	});
 
@@ -105,7 +111,9 @@ describe("getRecommendedByStatus", () => {
 
 	it("filters by optional", () => {
 		const optional = getRecommendedByStatus("optional");
-		expect(optional.map((e) => e.id)).toEqual(["pi-agent-browser"]);
+		expect(optional.map((e) => e.id).sort()).toEqual(
+			["pi-agent-browser", "pi-memory-honcho"].sort(),
+		);
 	});
 });
 

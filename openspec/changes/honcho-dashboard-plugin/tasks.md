@@ -1,5 +1,6 @@
 <!-- 2026-05-08: tasks 1.1-5b.10 (1-55) implemented at packages/honcho-plugin/ (monorepo override; user picked monorepo over external repo). Task 1.6 (npm-publish.yml) skipped — falls under workspace publish flow. 46 unit tests pass; tsc clean. Docker integration tests deferred (no DOCKER_AVAILABLE env). -->
 <!-- 2026-05-08: tasks 6.1-6.14, 7.1-7.7 implemented. Client components: HonchoSettings (main panel), InstallGate, StatusHeader, ConnectionSection, RecallSection, ModeSection, ServerSection, LlmSection (model dropdown w/ search, route override, inline credential editors), DoctorSection, SyncInterviewSection, AdvancedSection (18 Phase-1 flags), DockerMissingCallout, PortOverrideNotice, HonchoBadge, HonchoCardActions (interview popover, sync, map-name), HonchoMapPopover. API helper at src/client/api.ts. Hooks at src/client/hooks.ts. tsc clean; 46 existing tests still pass. -->
+<!-- 2026-05-09: tasks 10.2, 10.3, 10.6 implemented. 10.2: pi-memory-honcho added to RECOMMENDED_EXTENSIONS (status: optional, autowired) + 3 test assertions updated. 10.3: file-index-plugins.md row added (caveman style, alphabetical placement, delegated to subagent per docs-write protocol). 10.6: manifest-discoverability.test.ts vendors package.json manifest, validates against dashboard's validateManifest. Required adding ./manifest-validator export to dashboard-plugin-runtime/package.json. 7 new tests in manifest-discoverability + recommended-extensions tests still pass. Total honcho-plugin: 74 passing. -->
 
 ## 1. External repo scaffold
 
@@ -138,8 +139,8 @@
 ## 10. Documentation and release
 
 - [x] 10.1 Write README for `pi-memory-honcho-dashboard` covering: install (`pi-dashboard plugin install pi-memory-honcho-dashboard`), cloud-mode quickstart, self-host quickstart, Docker prerequisite, troubleshooting (docker-missing, port-conflict, migrations failed)
-- [ ] 10.2 Add a one-line entry to `pi-agent-dashboard`'s recommended-plugins list pointing at the new package
-- [ ] 10.3 Add a row to `docs/file-index-plugins.md` for the new package (caveman style; one line per the file-index protocol)
+- [x] 10.2 Add a one-line entry to `pi-agent-dashboard`'s recommended-plugins list pointing at the new package
+- [x] 10.3 Add a row to `docs/file-index-plugins.md` for the new package (caveman style; one line per the file-index protocol)
 - [ ] 10.4 Tag and publish v0.1.0 (cloud-mode complete) of `pi-memory-honcho-dashboard`
 - [ ] 10.5 Tag and publish v0.2.0 once the docker-compose lifecycle is green on the integration tests
-- [ ] 10.6 Create a discoverability-test in this repo verifying the plugin's manifest validates against the dashboard's manifest schema (against a vendored snapshot of the package's manifest)
+- [x] 10.6 Create a discoverability-test in this repo verifying the plugin's manifest validates against the dashboard's manifest schema (against a vendored snapshot of the package's manifest)

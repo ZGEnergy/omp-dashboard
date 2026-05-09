@@ -165,6 +165,24 @@ export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
 		unlocks: ["browser tool (open, snapshot, click, screenshot)"],
 		toolsRegistered: ["browser"],
 	},
+	{
+		id: "pi-memory-honcho",
+		source: "npm:pi-memory-honcho",
+		displayName: "pi-memory-honcho",
+		fallbackDescription:
+			"Persistent cross-session memory backed by Honcho. Pairs with " +
+			"the @blackbelt-technology/pi-dashboard-honcho-plugin dashboard " +
+			"plugin which adds a settings panel, per-card actions, and " +
+			"optional self-hosted Honcho server lifecycle.",
+		status: "optional",
+		unlocks: [
+			"Honcho memory tools (honcho_search, honcho_context, honcho_profile)",
+			"Honcho settings panel (when honcho-plugin is loaded)",
+			"Per-card 🧠 status badge + interview/sync/map actions",
+		],
+		toolsRegistered: ["honcho_search", "honcho_context", "honcho_profile"],
+		autowired: true,
+	},
 ];
 
 /**
