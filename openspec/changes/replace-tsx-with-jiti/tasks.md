@@ -6,19 +6,15 @@
 
 ## 2. CLI shebang + bin wrapper
 
-- [ ] 2.1 Replace shebang at `packages/server/src/cli.ts:1` from `#!/usr/bin/env node --import tsx` to `#!/usr/bin/env node`.
-- [ ] 2.2 Create `packages/server/bin/pi-dashboard.mjs` — plain ESM wrapper that:
-  - Imports `resolveJitiImport()` from `@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js` (or `ToolResolver.resolveJiti()` once `unify-server-launch-ts-loader` lands — coordinate at merge time).
-  - On success, re-execs `node --import <jiti-url> <path-to-cli.ts> <args>`. Use `spawnNodeScript` from `node-spawn.ts` (or its `buildNodeImportArgvParts` helper) for argv construction so the wrapper participates in the `no-raw-node-import` lint allow-list.
-  - On `JitiNotFoundError` / null resolve: write a one-line stderr message — `pi-dashboard: cannot find jiti. Install pi: 'npm install -g @earendil-works/pi-coding-agent'` — and exit `1`. **No tsx fallback.**
-  - Inherits stdio; forwards exit code.
-- [ ] 2.3 Add unit test for the wrapper: jiti hit → spawn argv shape + exit code forwarding; jiti miss → stderr message + exit 1.
+- [x] 2.1 Replace shebang at `packages/server/src/cli.ts:1` from `#!/usr/bin/env node --import tsx` to `#!/usr/bin/env node`. **Done in earlier commit; verified `head -1 cli.ts` reads `#!/usr/bin/env node`.**
+- [x] 2.2 Create `packages/server/bin/pi-dashboard.mjs` — plain ESM wrapper, jiti-only. Wrapper file pre-existed with tsx fallback under the old proposal; amended to remove `resolveTsxUrl()` + the dual-resolver pattern and emit the spec-mandated stderr install-hint on null resolve. Inlines `JITI_PACKAGES`, `resolveJitiUrl()` (mirrors `resolve-jiti.ts` shape; cannot import .ts before loader). Argv uses raw `child_process.spawn` with the `shouldUrlWrapEntry`-equivalent rule (POSIX jiti raw, Windows URL-wrapped). Note: this wrapper is the lone runtime exception to the `no-raw-node-import` lint — cannot use `spawnNodeScript` because that lives in TS and needs a loader to parse. The lint allow-list will gain `bin/pi-dashboard.mjs` if it doesn't already match the `.ts/.tsx/.mts/.cts` walker (see verification §8.x).
+- [x] 2.3 Add unit test for the wrapper: `packages/server/src/__tests__/pi-dashboard-bin-wrapper.test.ts`. Two scenarios: (a) jiti miss — isolated tmp dir, no `node_modules` adjacency → stderr contains install-hint, exit 1, no tsx mention; (b) jiti hit — wrapper resolved against repo `node_modules/jiti`, re-execs `cli.ts status` which exits 0 with `Dashboard server` output. Both pass under vitest with `HOME=$(mktemp -d)`.
 
 ## 3. Package wiring
 
-- [ ] 3.1 Repoint `bin.pi-dashboard` in `packages/server/package.json` from `src/cli.ts` to `bin/pi-dashboard.mjs`.
-- [ ] 3.2 Add `bin/` to the `files` array in `packages/server/package.json` if not already covered.
-- [ ] 3.3 Verify `npm pack --dry-run -w packages/server` includes `bin/pi-dashboard.mjs`.
+- [x] 3.1 Repoint `bin.pi-dashboard` in `packages/server/package.json` from `src/cli.ts` to `bin/pi-dashboard.mjs`.
+- [x] 3.2 Add `bin/` to the `files` array in `packages/server/package.json`.
+- [x] 3.3 Verified: `npm pack --dry-run -w packages/server` lists `2.8kB bin/pi-dashboard.mjs` in tarball contents.
 
 ## 4. Install-list cleanup (5 sites)
 

@@ -21,9 +21,10 @@
   },
   "main": "src/cli.ts",
   "bin": {
-    "pi-dashboard": "src/cli.ts"
+    "pi-dashboard": "bin/pi-dashboard.mjs"
   },
   "files": [
+    "bin/",
     "src/",
     "scripts/"
   ],
