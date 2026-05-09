@@ -16,7 +16,7 @@ The session card has accreted many independent feature areas (OpenSpec, workspac
   - `session-card-memory` (multiplicity `many`, react-only) — reserved for memory-related plugin contributions; rendered inside the MEMORY subcard. No plugin claims it in this PR; honcho-plugin reroute is deferred to a separate change.
   - `workspace-action-bar` (multiplicity `many`, react-only) — contributions render inside the WORKSPACE subcard alongside `session-card-badge`.
 - **Reroute jj-plugin claims**: `JjActionBar` + `JjInitAffordance` migrate from `session-card-action-bar` → `workspace-action-bar`. The generic `session-card-action-bar` slot remains defined as a card-footer escape hatch (currently unclaimed).
-- **Out of scope (future honcho change)**: rerouting `honcho-plugin`'s `HonchoBadge` / `HonchoCardActions` claims from `session-card-badge` / `session-card-action-bar` → `session-card-memory`. Until that change lands, the Honcho badge continues to render via the generic `session-card-badge` slot inside the WORKSPACE subcard, and the MEMORY subcard remains hidden (no claimers).
+- **Out of scope here, tracked elsewhere**: the honcho-plugin manifest reroute (`HonchoBadge` / `HonchoCardActions` from `session-card-badge` / `session-card-action-bar` → `session-card-memory`) lives in `openspec/changes/honcho-dashboard-plugin/tasks.md §11`. Until that follow-up lands, the Honcho badge continues to render via the generic `session-card-badge` slot inside the WORKSPACE subcard, and the MEMORY subcard remains hidden (no claimers).
 - **Folder header parallel redesign** (sidebar pinned-folder rows): apply the same gutter + drag-context pattern. The folder chevron sits at the top of a left gutter column; the empty space below the chevron is the drag zone (`SortablePinnedGroup` exposes `FolderDragHandleCtx`; `FolderDragGutter` consumes). All folder-header content (branch line, action bar, OpenSpec section) shifts to the content column — the previous `ml-5` / `ml-3` indents are removed. The dedicated drag-icon overlay (`mdiDragHorizontalVariant`) is removed.
 - No behavioral change to any contained control — buttons, pills, dialogs, links, callbacks, and dnd-kit reorder semantics are preserved verbatim.
 
@@ -48,7 +48,7 @@ The session card has accreted many independent feature areas (OpenSpec, workspac
   - `packages/dashboard-plugin-runtime/src/slot-consumers.tsx` — add `SessionCardMemorySlot`, `WorkspaceActionBarSlot`, and `useSlotHasClaimsForSession` helper hook.
 - **Plugin manifests**:
   - `packages/jj-plugin/package.json` — reroute `JjActionBar` + `JjInitAffordance` to `workspace-action-bar`.
-  - `packages/honcho-plugin/package.json` — **NOT touched** in this PR. Reroute deferred to a separate honcho-scoped change.
+  - `packages/honcho-plugin/package.json` — **NOT touched** in this PR. Reroute tracked in `openspec/changes/honcho-dashboard-plugin/tasks.md §11`.
 - **Tests**: `SessionCard.test.tsx`, `SessionSubcard.test.tsx`, `session-drag-reorder.test.tsx`, `jj-plugin/src/__tests__/manifest.test.ts` — updated for new structure, new testids (`session-status-icon`), new slot ids, and new query selectors (`text-*` instead of `bg-*` for status).
 - **Visuals**: Cards visibly tighter horizontally (~14 px reclaimed) and vertically; subcard panels translucent; status now communicated via colored source icon; folder header padding tightened.
 - **Out of scope**: Server, bridge, protocol, persistence — none touched. No behavior change to any control.

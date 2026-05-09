@@ -5,7 +5,7 @@
 ## What Changes
 
 - **Monorepo package** at `packages/honcho-plugin/` published as `@blackbelt-technology/pi-dashboard-honcho-plugin`. Discovered by the dashboard plugin loader at boot via its `pi-dashboard-plugin` manifest field.
-- Plugin manifest claims four slots: `settings-section` (general tab), `session-card-action-bar`, `session-card-badge`, `anchored-popover` (for the per-card session-name editor).
+- Plugin manifest claims four slots: `settings-section` (general tab), `session-card-memory` (twice — for badge and actions), `anchored-popover` (for the per-card session-name editor). NOTE: original claims targeted `session-card-badge` + `session-card-action-bar`; reroute to the dedicated `session-card-memory` slot is tracked in tasks §11 (introduced by `redesign-session-card-subcards`).
 - **Extension install gate**: plugin probes `GET /api/packages/installed` for `pi-memory-honcho`. If absent, the settings panel renders an "Install pi-memory-honcho" call-to-action that POSTs to the existing `/api/packages/install` endpoint. Installation tracks progress in real time via the dashboard's WebSocket `package_progress` / `package_operation_complete` channel — the gate shows a spinner, streaming progress messages, an indeterminate progress bar during install, a success banner on completion, and a retry button on failure. Card-level slots stay hidden until the extension is installed.
 - **Settings panel** (Settings → General → Honcho Memory) ports these TUI commands to the dashboard:
   - `/honcho:setup` → connection form (api key + masked reveal, peer name, workspace, AI peer, endpoint, linked hosts, session strategy)
@@ -31,8 +31,8 @@
   - Inline credential editors per source: API key masked input for direct providers, base URL + optional key for OpenAI-compatible
   - Refresh button to bust model list cache
 - **Per-session-card surfaces**:
-  - `session-card-badge`: 🧠 status pill (connected / syncing / offline) gated on extension installation.
-  - `session-card-action-bar`: `[🧠 Interview]` `[🔄 Sync]` `[🏷️ Map name]` buttons.
+  - `session-card-memory` (HonchoBadge): 🧠 status pill (connected / syncing / offline) gated on extension installation. Renders inside the MEMORY subcard.
+  - `session-card-memory` (HonchoCardActions): `[🧠 Interview]` `[🔄 Sync]` `[🏷️ Map name]` buttons. Renders inside the MEMORY subcard alongside the badge.
   - `[🧠 Interview]` opens a small popover with text input directly on the card.
   - `[🏷️ Map name]` opens an `anchored-popover` with a single text field + Save/Clear/Cancel; saving merges `hosts.pi.sessions[cwd] = name` into `~/.honcho/config.json`. Replaces the global sessions-map editor.
 - **Plugin server entry** exposes REST endpoints (auth-gated, scoped under `/api/plugins/honcho/`):

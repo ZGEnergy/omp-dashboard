@@ -144,3 +144,15 @@
 - [ ] 10.4 Tag and publish v0.1.0 (cloud-mode complete) of `pi-memory-honcho-dashboard`
 - [ ] 10.5 Tag and publish v0.2.0 once the docker-compose lifecycle is green on the integration tests
 - [x] 10.6 Create a discoverability-test in this repo verifying the plugin's manifest validates against the dashboard's manifest schema (against a vendored snapshot of the package's manifest)
+
+## 11. Migrate honcho slot claims to `session-card-memory` (follow-up to redesign-session-card-subcards)
+
+Deferred from `redesign-session-card-subcards` to keep the base UI commit independent. The dashboard already defines the `session-card-memory` slot and renders contributions inside the `MemorySubcard`; this group migrates honcho's claims so the badge + actions land in the MEMORY subcard.
+
+- [ ] 11.1 Update `packages/honcho-plugin/package.json` manifest: change `HonchoBadge` claim from `session-card-badge` → `session-card-memory`; change `HonchoCardActions` claim from `session-card-action-bar` → `session-card-memory`. Keep `HonchoSettings` (`settings-section`) and `HonchoMapPopover` (`anchored-popover`) unchanged.
+- [ ] 11.2 Update top-of-file slot-routing comment in `packages/honcho-plugin/src/client/index.tsx` (currently documents `HonchoBadge → session-card-badge` etc.) to reflect the new routing.
+- [ ] 11.3 Update top-of-file JSDoc comments in `packages/honcho-plugin/src/client/HonchoBadge.tsx` and `HonchoCardActions.tsx` (currently `"— session-card-badge slot"` / `"— session-card-action-bar slot"`) to say `session-card-memory`.
+- [ ] 11.4 Update `packages/honcho-plugin/src/__tests__/manifest-discoverability.test.ts` (and any other manifest tests) to assert the new slot ids.
+- [ ] 11.5 Verify visually: in a session-card with honcho extension installed, the MEMORY subcard renders with the badge + action buttons inside; WORKSPACE subcard no longer carries the honcho brain icon.
+- [ ] 11.6 Run the dashboard repo lints (`packages/jj-plugin/src/__tests__/manifest.test.ts` pattern — may not apply to honcho but rerun full test suite to confirm no regression).
+- [ ] 11.7 Bump `pi-memory-honcho-dashboard` to v0.3.0 (or appropriate semver) since slot ids are part of the plugin's public contract; mention in CHANGELOG that the badge + actions now require a dashboard version that defines `session-card-memory` (i.e. shipped after `redesign-session-card-subcards` lands).

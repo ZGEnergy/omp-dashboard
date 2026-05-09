@@ -61,7 +61,7 @@
 - [x] 8.4 Add `useSlotHasClaimsForSession(slotId, session)` hook in `slot-consumers.tsx`
 - [x] 8.5 Reroute `jj-plugin` manifest: `JjActionBar` + `JjInitAffordance` from `session-card-action-bar` → `workspace-action-bar`
 - [x] 8.6 Update `jj-plugin/src/__tests__/manifest.test.ts` for new slot id
-- [ ] 8.7 ~~Reroute honcho-plugin manifest~~ — **DEFERRED** to a separate honcho-scoped change to keep this PR focused on base UI; `session-card-memory` slot is reserved but currently unclaimed
+- [x] 8.7 ~~Reroute honcho-plugin manifest~~ — **DEFERRED** to `openspec/changes/honcho-dashboard-plugin/tasks.md §11` (honcho-scoped follow-up) to keep this PR focused on base UI; `session-card-memory` slot is reserved here but currently unclaimed
 - [x] 8.8 SessionCard `WorkspaceSubcard`: include `WorkspaceActionBarSlot` and gate the subcard on `hasGitInfo OR hasBadge OR hasActions`
 - [x] 8.9 SortableSessionCard: remove `mdiDragHorizontalVariant` overlay; expose `DragHandleCtx` + `useSessionCardDragHandle()` hook
 - [x] 8.10 SessionCard desktop branch: consume drag handle context; spread on left gutter `<div>` with `cursor-grab active:cursor-grabbing`, `data-testid="drag-handle-session"`, click-stop-propagation

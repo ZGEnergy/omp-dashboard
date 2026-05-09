@@ -54,8 +54,8 @@ Alternatives considered:
 | Slot | Component | Multiplicity | Visibility gate |
 |---|---|---|---|
 | `settings-section` (`tab=general`) | `HonchoSettings` | many | always (renders gate when uninstalled) |
-| `session-card-badge` | `HonchoBadge` | many | extension installed |
-| `session-card-action-bar` | `HonchoCardActions` | many | extension installed |
+| `session-card-memory` | `HonchoBadge` | many | extension installed |
+| `session-card-memory` | `HonchoCardActions` | many | extension installed |
 | `anchored-popover` | `HonchoMapPopover` | one | opened from `HonchoCardActions` |
 
 Rationale: settings-section + per-card surfaces is exactly the dashboard's pattern for "extension that affects every session" (mirrors how the bridge-extension settings + per-card actions are split). The `anchored-popover` slot is `multiplicity: one`, which matches the UX (only one popover open at a time).

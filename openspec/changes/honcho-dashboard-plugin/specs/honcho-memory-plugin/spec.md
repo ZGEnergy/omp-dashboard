@@ -41,7 +41,9 @@ The plugin SHALL probe `GET /api/packages/installed` for a package id of `pi-mem
 
 ### Requirement: Per-session-card slot claims gated on extension
 
-The plugin SHALL contribute a `session-card-badge` slot and a `session-card-action-bar` slot. Both contributions SHALL render `null` when `pi-memory-honcho` is not installed.
+The plugin SHALL contribute two claims on the `session-card-memory` slot (introduced by `redesign-session-card-subcards`): `HonchoBadge` (status pill) and `HonchoCardActions` (Interview / Sync / Map-name buttons). Both contributions SHALL render `null` when `pi-memory-honcho` is not installed.
+
+When at least one Honcho contribution is rendered for a session, the dashboard's `MemorySubcard` (consumer of `session-card-memory`) SHALL render a `MEMORY` titled subcard around them. When the contributions return `null`, the subcard SHALL stay hidden.
 
 #### Scenario: Badge shows current status
 
