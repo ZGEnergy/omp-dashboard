@@ -60,8 +60,8 @@ describe("isManagedDirPopulated", () => {
   it("returns false when the dir exists but is missing one of the required packages", () => {
     const tmp = mkdtempSync(path.join(os.tmpdir(), "pmgd-"));
     try {
-      // Only put two of the three required packages in place.
-      const partial = REQUIRED_MANAGED_PACKAGES.slice(0, 2);
+      // Drop the last required package so isManagedDirPopulated sees a gap.
+      const partial = REQUIRED_MANAGED_PACKAGES.slice(0, REQUIRED_MANAGED_PACKAGES.length - 1);
       for (const pkg of partial) {
         const dir = path.join(tmp, "node_modules", ...pkg.split("/"));
         mkdirSync(dir, { recursive: true });

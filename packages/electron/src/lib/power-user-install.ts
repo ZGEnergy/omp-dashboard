@@ -39,7 +39,6 @@ import { MANAGED_DIR } from "./managed-paths.js";
 export const REQUIRED_MANAGED_PACKAGES: readonly string[] = [
   "@earendil-works/pi-coding-agent",
   "@fission-ai/openspec",
-  "tsx",
 ];
 
 /** Pure inputs for the startup-action decision. */

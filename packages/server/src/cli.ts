@@ -254,7 +254,7 @@ async function runDegradedModeBootstrap(server: DashboardServer): Promise<void> 
     return;
   }
 
-  const installPackages = ["@earendil-works/pi-coding-agent", "@fission-ai/openspec", "tsx"];
+  const installPackages = ["@earendil-works/pi-coding-agent", "@fission-ai/openspec"];
   server.bootstrapState.setLastInstallPackages(installPackages);
   console.log("[bootstrap] installing (pi unresolved, running background install)");
   server.bootstrapState.set({

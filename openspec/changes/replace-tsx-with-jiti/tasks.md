@@ -18,38 +18,38 @@
 
 ## 4. Install-list cleanup (5 sites)
 
-- [ ] 4.1 `packages/server/src/cli.ts:255` — remove `"tsx"` from `installPackages`.
-- [ ] 4.2 `packages/server/src/server.ts:802` — remove `"tsx"` from the default install array.
-- [ ] 4.3 `packages/electron/src/lib/dependency-installer.ts:260` — remove `"tsx"` from `installStandalone`'s package list.
-- [ ] 4.4 `packages/electron/src/lib/power-user-install.ts:42` — remove `"tsx"` (V1 legacy — keep aligned even if currently dead-on-shipped under `LAUNCH_SOURCE_V2=true`).
-- [ ] 4.5 `packages/shared/src/bootstrap-install.ts:216` — remove `"tsx"` from the shared bootstrap default.
-- [ ] 4.6 Update test fixtures pinning the 3-element install-list shape (search: `git grep -nE '"tsx"' packages/*/src/__tests__/`).
+- [x] 4.1 `packages/server/src/cli.ts:257` — dropped `"tsx"` from `installPackages`.
+- [x] 4.2 `packages/server/src/server.ts:802` — dropped `"tsx"` from default install array.
+- [x] 4.3 `packages/electron/src/lib/dependency-installer.ts` — dropped `"tsx"` from `installStandalone` package list.
+- [x] 4.4 `packages/electron/src/lib/power-user-install.ts` — dropped `"tsx"` from `REQUIRED_MANAGED_PACKAGES`.
+- [x] 4.5 `packages/shared/src/bootstrap-install.ts:216` — dropped `"tsx"` from shared bootstrap default.
+- [x] 4.6 Test fixture audit. Adjusted `wizard-power-user-managed-install.test.ts` (changed `.slice(0, 2)` to `.slice(0, REQUIRED_MANAGED_PACKAGES.length - 1)` to keep the "missing one" semantic after `REQUIRED_MANAGED_PACKAGES` shrunk to 2 entries). `offline-packages.test.ts` and `installable-list.test.ts` use `tsx` as generic fixture data, not as production install-list — left intact.
 
 ## 5. Doctor cleanup
 
-- [ ] 5.1 `packages/electron/src/lib/doctor.ts` — delete the `where/which tsx` probe (line ~396), the `testTsxBin` variable (line ~407), and the `"No tsx binary"` detail string (line ~427). Doctor's "Server launch test" reduces to checking `node` + pi.
-- [ ] 5.2 Update `packages/electron/src/lib/__tests__/doctor*.test.ts` (or shared `doctor-core.ts` tests) to drop tsx-probe expectations.
+- [x] 5.1 `runServerLaunchTest` in `packages/electron/src/lib/doctor.ts` rewritten: dropped `managedTsxBin` + `where/which tsx` probe; replaced with `ToolResolver.resolveJiti({ anchor: testCli })` and the launch test now invokes `<nodeBin> --import <jiti-url> -e "import <cliSpec>..."`. The detail string `No tsx binary` becomes `No jiti loader (install pi)`. The `not-found` message updated to `tsx or server CLI` → `jiti or server CLI`.
+- [x] 5.2 No doctor test files reference tsx (verified: `grep tsx packages/electron/src/lib/__tests__/doctor*` and `packages/shared/src/__tests__/doctor-core*` return zero matches). No-op.
 
 ## 6. Dependency removal
 
-- [ ] 6.1 Remove `"tsx": "..."` from every workspace `package.json` declaring it. Search: `git grep -nE '"tsx":' --` (top level). Likely sites: root `package.json`, `packages/server/package.json`, `packages/electron/package.json`. Drop both `dependencies` and `devDependencies` entries.
-- [ ] 6.2 `npm install` to regenerate `package-lock.json`. Commit the lockfile delta.
-- [ ] 6.3 Verify no transitive consumer remains: `npm ls tsx` should report nothing under any workspace package, or only under unrelated optional deps that shadow-install it.
+- [x] 6.1 Only root `package.json` declared `tsx` (`devDependencies: "tsx": "^4.21.0"`). Removed. No workspace package.json files contained tsx.
+- [x] 6.2 `npm install` ran cleanly; lockfile regenerated.
+- [x] 6.3 `npm ls tsx` shows tsx only as a transitive of `vite` (under `dashboard-plugin-runtime`). Spec exempts "transitive shadow-installs by unrelated optional deps" — vite is unrelated to runtime TS-loading, so this is acceptable.
 
 ## 7. Coordination boundary (with `unify-server-launch-ts-loader`)
 
-- [ ] 7.1 In-body tsx fallback at `packages/server/src/cli.ts:366–377` (cmdStart try-jiti-except-tsx) — **owned by `unify-server-launch-ts-loader §3.2.1`**, NOT this change. If this change lands first and that block still exists, leave it alone (it will be deleted in `unify-server-launch-ts-loader §3.2.1`). Note in CHANGELOG that the in-body block is removed by the sister change.
-- [ ] 7.2 Legacy electron V1 tsx-first launch path (`packages/electron/src/lib/server-lifecycle.ts:274–440` `resolveTsxCommand` + tsx-first branch in `launchServer`) — **owned by `unify-server-launch-ts-loader §3.4.1`**, NOT this change.
-- [ ] 7.3 Zombie `packages/electron/src/lib/ts-loader-resolver.ts` — **owned by `unify-server-launch-ts-loader §6.4`**.
-- [ ] 7.4 Cross-link in both proposals' CHANGELOG drafts so the merge order is unambiguous.
+- [x] 7.1 Verified clean: `grep resolveJitiImport packages/server/src/cli.ts` returns zero matches — the in-body tsx fallback was removed by `unify-server-launch-ts-loader` (archived 2026-05-09).
+- [x] 7.2 Verified clean: `grep resolveJitiFromPi packages/electron/src/lib/server-lifecycle.ts` returns zero matches — V1 tsx branch removed.
+- [x] 7.3 Verified deleted: `packages/electron/src/lib/ts-loader-resolver.ts` does not exist.
+- [x] 7.4 CHANGELOG §Unreleased §Changed: prepended a `replace-tsx-with-jiti` entry summarising bin wrapper, install lists, Doctor cleanup, and devDep removal. Cross-references `unify-server-launch-ts-loader`.
 
 ## 8. Verification
 
-- [ ] 8.1 `openspec validate replace-tsx-with-jiti --strict` passes.
-- [ ] 8.2 `npm test` green across all workspaces.
-- [ ] 8.3 `npm run reload:check` (typecheck + reload) green.
-- [ ] 8.4 Manual: install fresh on a clean machine — `~/.pi-dashboard/node_modules/tsx` does NOT appear after bootstrap.
-- [ ] 8.5 Manual: `pi-dashboard status` works through the new wrapper with pi on PATH.
-- [ ] 8.6 Manual: in a sandbox without pi, `pi-dashboard status` fails fast with the stderr install-hint and exit 1 (no silent tsx fallback).
-- [ ] 8.7 Manual: extension auto-launch still works (`npm run reload`, confirm server starts with jiti loader).
-- [ ] 8.8 Manual: Electron cold-launch on every `LaunchSource` succeeds; Doctor no longer reports tsx-related rows.
+- [x] 8.1 `openspec validate replace-tsx-with-jiti --strict` passes.
+- [x] 8.2 `npm test` — 5282 pass / 16 skip / 7 pre-existing failures unrelated to this change (all in `openspec-effective-status-script.test.ts`, missing-file rot at `.pi/skills/openspec-shared/scripts/effective-status.sh` deleted in working tree by an unrelated change). Zero failures in any file touched by this change.
+- [x] 8.3 `tsc --noEmit` — my changes type-check cleanly. Two pre-existing errors in `client/src/components/SessionCard.tsx` (`mdiConsoleLine`) and ~30 pre-existing errors in `__tests__/server-launcher.test.ts` (Mock-typing issues from the prior unify change) are unrelated.
+- [ ] 8.4 Manual: install fresh on a clean machine — `~/.pi-dashboard/node_modules/tsx` does NOT appear after bootstrap. **Deferred to user.**
+- [ ] 8.5 Manual: `pi-dashboard status` works through the new wrapper with pi on PATH. **Deferred to user (covered partially by automated `pi-dashboard-bin-wrapper.test.ts`).**
+- [ ] 8.6 Manual: in a sandbox without pi, `pi-dashboard status` fails fast with the stderr install-hint and exit 1 (no silent tsx fallback). **Deferred to user (covered partially by automated `pi-dashboard-bin-wrapper.test.ts`).**
+- [ ] 8.7 Manual: extension auto-launch still works (`npm run reload`, confirm server starts with jiti loader). **Deferred to user.**
+- [ ] 8.8 Manual: Electron cold-launch on every `LaunchSource` succeeds; Doctor no longer reports tsx-related rows. **Deferred to user.**

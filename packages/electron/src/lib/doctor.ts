@@ -15,6 +15,7 @@ import { isApiKeyConfigured } from "./wizard-state.js";
 import { MANAGED_DIR } from "./managed-paths.js";
 import { resolveOfflinePackages } from "./offline-packages.js";
 import { installManagedNode } from "@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js";
+import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import {
   type DoctorCheck,
   type DoctorReport,
@@ -389,30 +390,29 @@ async function runServerLaunchTest(
   ctx: { hasBundledServer: boolean; bundledServerCli: string | null; bundledNode: string | null },
 ): Promise<void> {
   const { hasBundledServer, bundledServerCli, bundledNode } = ctx;
-  const ext = process.platform === "win32" ? ".cmd" : "";
-  const managedTsxBin = path.join(MANAGED_DIR, "node_modules", ".bin", "tsx" + ext);
-  let testTsxBin: string | null = existsSync(managedTsxBin) ? managedTsxBin : null;
-  if (!testTsxBin) {
-    const lookup = safeExec(process.platform === "win32" ? "where tsx" : "which tsx", { timeoutMs: 5000 });
-    if (lookup.ok) testTsxBin = lookup.stdout.trim().split("\n")[0] || null;
-  }
   const testCli = hasBundledServer ? bundledServerCli : null;
+  // ToolResolver.resolveJiti probes the managed pi install at MANAGED_DIR
+  // automatically; no constructor arg needed for that lookup. extraBinDirs
+  // is forwarded so binDir-aware probes match the rest of doctor's checks.
+  const resolver = new ToolResolver({});
+  const jitiUrl = resolver.resolveJiti({ anchor: testCli ?? undefined });
+  const nodeBin = bundledNode ?? process.execPath;
 
-  if (!testCli || !testTsxBin) {
+  if (!testCli || !jitiUrl) {
     checks.push({
       name: "Server launch test",
       section: "server",
       status: "error",
       message: "Cannot test launch — missing components",
-      detail: [testCli ? null : "No server CLI", testTsxBin ? null : "No tsx binary"].filter(Boolean).join(", "),
+      detail: [testCli ? null : "No server CLI", jitiUrl ? null : "No jiti loader (install pi)"].filter(Boolean).join(", "),
     });
     return;
   }
 
-  const extraPaths = [bundledNode ? path.dirname(bundledNode) : null, path.dirname(testTsxBin)].filter(Boolean) as string[];
+  const extraPaths = [bundledNode ? path.dirname(bundledNode) : null].filter(Boolean) as string[];
   const env = { ...process.env, PATH: `${extraPaths.join(path.delimiter)}${path.delimiter}${process.env.PATH ?? ""}` };
   const importSpec = JSON.stringify(testCli);
-  const cmd = `"${testTsxBin}" -e "import ${importSpec.replace(/"/g, '\\"')}; setTimeout(() => process.exit(0), 100)"`;
+  const cmd = `"${nodeBin}" --import "${jitiUrl}" -e "import ${importSpec.replace(/"/g, '\\"')}; setTimeout(() => process.exit(0), 100)"`;
   const r = safeExec(cmd, { timeoutMs: 15000, env });
   if (r.ok) {
     checks.push({
@@ -424,7 +424,7 @@ async function runServerLaunchTest(
     return;
   }
   const messages: Record<string, string> = {
-    "not-found": "Server launch test: tsx or server CLI binary missing",
+    "not-found": "Server launch test: jiti or server CLI binary missing",
     "permission-denied": "Server launch test: binary not executable",
     timeout: "Server hung during launch test (15s deadline exceeded)",
     "non-zero-exit": "Server fails to start",

@@ -257,7 +257,6 @@ export async function installStandalone(onProgress?: ProgressCallback, skipPacka
   const packages = [
     "@earendil-works/pi-coding-agent",
     "@fission-ai/openspec",
-    "tsx",
   ];
 
   const skipSet = new Set(skipPackages || []);

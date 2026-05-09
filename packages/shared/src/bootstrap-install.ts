@@ -213,7 +213,7 @@ export async function bootstrapInstallDefaults(
   progress?: ProgressCallback,
 ): Promise<BootstrapInstallResult> {
   return bootstrapInstall({
-    packages: ["@earendil-works/pi-coding-agent", "@fission-ai/openspec", "tsx"],
+    packages: ["@earendil-works/pi-coding-agent", "@fission-ai/openspec"],
     progress,
   });
 }

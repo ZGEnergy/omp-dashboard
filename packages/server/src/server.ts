@@ -799,7 +799,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       const prev = bootstrapState.getLastInstallPackages();
       const packages = prev.length > 0
         ? prev
-        : ["@earendil-works/pi-coding-agent", "@fission-ai/openspec", "tsx"];
+        : ["@earendil-works/pi-coding-agent", "@fission-ai/openspec"];
       bootstrapState.set({
         status: "installing",
         progress: { step: "retry", output: `restarting install (${packages.length} pkg${packages.length === 1 ? "" : "s"})…` },
