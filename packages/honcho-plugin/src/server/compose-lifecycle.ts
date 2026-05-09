@@ -3,7 +3,7 @@
  *
  * See change: honcho-dashboard-plugin (spec honcho-server-lifecycle).
  */
-import { spawn } from "node:child_process";
+import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
