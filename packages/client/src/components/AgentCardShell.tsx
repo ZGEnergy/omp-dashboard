@@ -30,7 +30,7 @@ export function AgentCardShell({ name, status, headerRight, stats, onClick, sele
       onClick={onClick}
       className={`rounded-lg border p-2.5 transition-all duration-150 flex flex-col
         ${onClick ? "cursor-pointer hover:shadow-md" : ""}
-        ${selected ? "border-blue-500/60 bg-[var(--bg-surface)]" : "border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"}
+        ${selected ? "border-blue-500/60 bg-[var(--bg-surface)]" : "border-[var(--border-subtle)] bg-[color-mix(in_srgb,var(--bg-secondary),var(--bg-tertiary))]"}
         ${status === "running" ? "border-yellow-500/30" : ""}
         ${status === "error" ? "border-red-500/30" : ""}
       `}
