@@ -45,6 +45,8 @@ import { registerSessionRoutes } from "./routes/session-routes.js";
 import { registerGitRoutes } from "./routes/git-routes.js";
 import { registerFileRoutes } from "./routes/file-routes.js";
 import { registerOpenSpecRoutes } from "./routes/openspec-routes.js";
+import { registerOpenSpecGroupRoutes } from "./routes/openspec-group-routes.js";
+import { createOpenSpecGroupStore, joinGroupIdsToOpenSpecData } from "./openspec-group-store.js";
 import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerDoctorRoutes } from "./routes/doctor-routes.js";
 import { registerProviderAuthRoutes } from "./routes/provider-auth-routes.js";
@@ -484,10 +486,26 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     knownSessionIds.add(s.id);
   }
 
+  // Create the OpenSpec change-grouping store BEFORE the directory-service so
+  // the latter can join `groupId` into every `OpenSpecChange` it produces.
+  // See change: add-openspec-change-grouping (task 4.2).
+  const openspecGroupStore = createOpenSpecGroupStore();
+
   const directoryService = createDirectoryService(
     preferencesStore,
     sessionManager,
     config.openspec,
+    {
+      enrichOpenSpecData: async (cwd, data) => {
+        try {
+          const file = await openspecGroupStore.read(cwd);
+          return joinGroupIdsToOpenSpecData(data, file.assignments);
+        } catch {
+          // Bad file (e.g., unsupported schemaVersion) — fall back to unjoined.
+          return data;
+        }
+      },
+    },
   );
 
   // mDNS peer discovery state
@@ -727,6 +745,29 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       const data = directoryService.getOpenSpecData(cwd);
       if (data) browserGateway.broadcastToAll({ type: "openspec_update", cwd, data });
     },
+  });
+  // OpenSpec change-grouping routes (store created earlier next to
+  // directory-service so the join can run during polls).
+  // See change: add-openspec-change-grouping.
+  openspecGroupStore.subscribe((cwd, payload) => {
+    browserGateway.broadcastToAll({
+      type: "openspec_groups_update",
+      cwd,
+      groups: payload.groups,
+      assignments: payload.assignments,
+    });
+    // Refresh OpenSpecData so the joined `groupId` field reflects the new
+    // assignments on subscribers that don't consume `openspec_groups_update`
+    // directly. Fire-and-forget; failures are logged inside refreshOpenSpec.
+    directoryService.refreshOpenSpec(cwd).then((data) => {
+      browserGateway.broadcastToAll({ type: "openspec_update", cwd, data });
+    }).catch(() => {});
+  });
+  registerOpenSpecGroupRoutes(fastify, {
+    sessionManager,
+    preferencesStore,
+    networkGuard,
+    store: openspecGroupStore,
   });
   registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService, piGateway, bootstrapState });
   // GET /api/doctor — see change: doctor-rich-output (task 4.2). Auth-gated identically to /api/config.
