@@ -1,4 +1,4 @@
-#!/usr/bin/env node --import tsx
+#!/usr/bin/env node
 /**
  * PI Dashboard Server CLI
  *
@@ -17,11 +17,13 @@
  */
 import { createServer, type ServerConfig } from "./server.js";
 import { loadConfig, ensureConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
-import { spawnNodeScript } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
-import { createRequire } from "node:module";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import fs from "node:fs";
+import {
+  launchDashboardServer,
+  JitiNotFoundError,
+  PortConflictError,
+  EarlyExitError,
+} from "@blackbelt-technology/pi-dashboard-shared/server-launcher.js";
+import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
 import { readPid, removePid, isServerRunning } from "./server-pid.js";
@@ -42,7 +44,7 @@ export function findPortHolders(
 }
 import { isDashboardRunning } from "@blackbelt-technology/pi-dashboard-shared/server-identity.js";
 import { discoverDashboard } from "@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js";
-import { resolveJitiImport } from "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js";
+
 import { assertNodeVersionSupported } from "./node-guard.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
 import { bootstrapInstall } from "@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js";
@@ -351,7 +353,10 @@ async function cmdStart(config: ServerConfig): Promise<void> {
     process.exit(1);
   }
 
-  // Spawn ourselves in foreground mode (no subcommand) as a detached process
+  // Spawn ourselves in foreground mode (no subcommand) as a detached process.
+  // All concerns below — jiti loader resolution, --import argv URL-wrapping,
+  // env merge, log-file header, readiness polling, port-conflict / early-exit
+  // detection — are owned by the shared `launchDashboardServer` primitive.
   const cliPath = fileURLToPath(import.meta.url);
   const args: string[] = [];
   if (config.port !== 8000) args.push("--port", String(config.port));
@@ -359,83 +364,39 @@ async function cmdStart(config: ServerConfig): Promise<void> {
   if (config.dev) args.push("--dev");
   if (!config.tunnel) args.push("--no-tunnel");
 
-  let tsLoader: string;
+  const logDir = path.join(os.homedir(), ".pi", "dashboard");
+  const logPath = path.join(logDir, "server.log");
+
   try {
-    tsLoader = resolveJitiImport();
-  } catch {
-    // Fallback to tsx when jiti is not available (e.g. running outside pi).
-    // The loader is passed to `node --import`; on Windows, Node >= 20 rejects
-    // raw absolute paths with a drive letter (parsed as URL scheme), so we
-    // return a file:// URL. See change: fix-windows-server-parity.
-    try {
-      const tsxMain = createRequire(cliPath).resolve("tsx");
-      const tsxLoaderPath = path.join(path.dirname(tsxMain), "esm", "index.mjs");
-      tsLoader = pathToFileURL(tsxLoaderPath).href;
-    } catch {
-      console.error(
-        "[pi-dashboard] Cannot find TypeScript loader. " +
-        "Install tsx (`npm install`) or run inside a pi session."
-      );
+    const result = await launchDashboardServer({
+      cliPath,
+      extraArgs: args,
+      stdio: { logFile: logPath },
+      starter: "Standalone",
+      healthTimeoutMs: 30_000,
+      port: config.port,
+      env: { ...process.env },
+    });
+    const reportedPid = result.reportedPid ?? readPid() ?? result.childPid;
+    console.log(`Dashboard server started (pid ${reportedPid}) at http://localhost:${config.port}`);
+  } catch (err: unknown) {
+    if (err instanceof JitiNotFoundError) {
+      console.error(`[pi-dashboard] ${err.message}`);
       process.exit(1);
     }
-  }
-
-  // Redirect daemon stdout/stderr to a log file for crash diagnosis.
-  // Log is opened in append mode ("a") so output from prior start attempts
-  // is preserved across retries — critical for diagnosing intermittent or
-  // silent launch failures. A timestamped header line distinguishes runs.
-  // See change: fix-windows-server-parity.
-  const logDir = path.join(os.homedir(), ".pi", "dashboard");
-  fs.mkdirSync(logDir, { recursive: true });
-  const logPath = path.join(logDir, "server.log");
-  const logFd = fs.openSync(logPath, "a");
-  fs.writeSync(
-    logFd,
-    `\n[${new Date().toISOString()}] pi-dashboard start (parent pid ${process.pid}, port ${config.port})\n`,
-  );
-
-  // Both tsLoader and cliPath are wrapped as file:// URLs by spawnNodeScript.
-  // Required on Windows for node --import (see change: fix-windows-entry-script-url).
-  const child = spawnNodeScript({
-    loader: tsLoader,
-    entry: cliPath,
-    args,
-    spawnOptions: {
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-      env: { ...process.env },
-    },
-  });
-  child.unref();
-  // Close the parent's copy of the fd — child has its own via stdio inheritance.
-  try { fs.closeSync(logFd); } catch { /* ignore */ }
-
-  // Wait for dashboard to become available. Windows + jiti cold-start can
-  // take 10s+ (TS compile on first boot, native module loads). 30s is the
-  // outer bound — if the server isn't up by then, something's genuinely wrong.
-  const READINESS_TIMEOUT_MS = 30_000;
-  const deadline = Date.now() + READINESS_TIMEOUT_MS;
-  let started = false;
-  while (Date.now() < deadline) {
-    // Also bail if the child has already exited (fast-path crash detection).
-    if (child.exitCode !== null) break;
-    await new Promise((r) => setTimeout(r, 300));
-    const status = await isDashboardRunning(config.port);
-    if (status.running) {
-      started = true;
-      break;
+    if (err instanceof PortConflictError) {
+      console.error(`Port ${err.port} is occupied by another service (not the dashboard).`);
+      console.error(`Change the port in ~/.pi/dashboard/config.json or use --port <n>`);
+      process.exit(1);
     }
-  }
-
-  if (started) {
-    const pid = readPid();
-    console.log(`Dashboard server started (pid ${pid ?? child.pid}) at http://localhost:${config.port}`);
-  } else {
-    const reason = child.exitCode !== null
-      ? `child process exited with code ${child.exitCode}`
-      : `timed out after ${READINESS_TIMEOUT_MS / 1000}s`;
+    if (err instanceof EarlyExitError) {
+      console.error(`Failed to start dashboard server (child process exited with code ${err.code})`);
+      console.error(`Check logs at ${logPath}`);
+      process.exit(1);
+    }
+    const reason = err instanceof Error ? err.message : String(err);
     console.error(`Failed to start dashboard server (${reason})`);
-    console.error(`Check logs at ${path.join(logDir, "server.log")}`);
+    console.error(`Check logs at ${logPath}`);
     process.exit(1);
   }
 }

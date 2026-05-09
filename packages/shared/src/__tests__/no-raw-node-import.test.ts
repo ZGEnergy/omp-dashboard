@@ -20,10 +20,12 @@ import url from "node:url";
 /** Files allowed to reference --import / --loader with raw identifiers. */
 const ALLOWLIST: readonly string[] = [
   "packages/shared/src/platform/node-spawn.ts",
-  // resolve-jiti.ts returns a file:// URL to callers; it does not itself
-  // build a `["--import", X, Y]` argv. Allowlisted as the documented
-  // source of loader URLs referenced in server spawn call sites.
-  "packages/shared/src/resolve-jiti.ts",
+  // server-launcher.ts is the single shared spawn primitive for the
+  // dashboard server (Bridge / Standalone CLI / Electron). It mentions
+  // "--import" in commentary; argv construction itself is delegated to
+  // node-spawn.ts via `spawnNodeScript` / `buildNodeImportArgvParts`.
+  // See change: unify-server-launch-ts-loader.
+  "packages/shared/src/server-launcher.ts",
 ];
 
 /** Per-line opt-out for intentional usages (e.g. comment examples). */
@@ -49,7 +51,7 @@ const IMPORT_ARGV_RE =
   /["']--(?:import|loader)["']\s*,\s*([^,\]]+?)\s*,\s*([^,\]]+?)(?:\s*,|\s*\])/g;
 
 const URL_LOOKING_RE =
-  /^(?:["']file:|toFileUrl\s*\(|pathToFileURL\s*\([^)]*\)\s*\.href|resolveJitiImport\s*\(|resolveJitiFromAnchor\s*\()/;
+  /^(?:["']file:|toFileUrl\s*\(|pathToFileURL\s*\([^)]*\)\s*\.href)/;
 
 /** Recursively walk a directory, yielding .ts / .tsx files. */
 async function* walk(dir: string): AsyncGenerator<string> {

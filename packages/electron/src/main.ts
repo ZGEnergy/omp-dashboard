@@ -472,19 +472,16 @@ async function main(): Promise<void> {
 
       let spawnedPid: number | undefined;
       if (source.kind !== "attach") {
-        let logFd: number | undefined;
-        try {
-          const logDir = path.join(os.homedir(), ".pi", "dashboard");
-          fs.mkdirSync(logDir, { recursive: true });
-          logFd = fs.openSync(path.join(logDir, "server.log"), "a");
-        } catch { /* ignore — server still works without log fd */ }
-
+        // Log-file lifecycle (mkdir + open + write + close) is owned
+        // by `launchDashboardServer` inside `spawnFromSource`. We pass
+        // only the absolute path; the launcher writes a header line
+        // and routes child stdout/stderr to it.
+        const logFile = path.join(os.homedir(), ".pi", "dashboard", "server.log");
         const spawnResult = await spawnFromSource(
           source as Exclude<typeof source, { kind: "attach" }>,
           { port: config.port, piPort: config.piPort },
-          logFd,
+          { logFile },
         );
-        if (logFd !== undefined) try { fs.closeSync(logFd); } catch { /* ignore */ }
         spawnedPid = spawnResult.pid;
         log(`[launch-source-v2] spawned server pid=${spawnedPid}`);
         // Record spawned PID for lifecycle ownership check on quit.

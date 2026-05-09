@@ -180,6 +180,57 @@ describe("spawnNodeScript", () => {
   });
 });
 
+describe("buildNodeImportArgvParts", () => {
+  // Pure helper shared by spawnNodeScript and restart-helper.ts so the
+  // `--import` argv shape lives in exactly one place.
+  it("POSIX + jiti: entry passed RAW (jiti rejects file:// URL entries)", async () => {
+    const { buildNodeImportArgvParts } = await import("../platform/node-spawn.js");
+    const parts = buildNodeImportArgvParts({
+      loader: "/usr/lib/jiti/lib/jiti-register.mjs",
+      entry: "/srv/cli.ts",
+      args: ["start", "--port", "8000"],
+      platform: "linux",
+    });
+    expect(parts[0]).toBe("--import");
+    expect(parts[1]).toMatch(/^file:\/\//);
+    expect(parts[2]).toBe("/srv/cli.ts"); // RAW
+    expect(parts.slice(3)).toEqual(["start", "--port", "8000"]);
+  });
+
+  it("Windows + jiti: entry URL-wrapped", async () => {
+    const { buildNodeImportArgvParts } = await import("../platform/node-spawn.js");
+    const parts = buildNodeImportArgvParts({
+      loader: "B:\\Dev\\jiti\\lib\\jiti-register.mjs",
+      entry: "B:\\srv\\cli.ts",
+      args: ["start"],
+      platform: "win32",
+    });
+    expect(parts[1]).toBe("file:///B:/Dev/jiti/lib/jiti-register.mjs");
+    expect(parts[2]).toBe("file:///B:/srv/cli.ts");
+  });
+
+  it("tsx loader: entry RAW on any platform", async () => {
+    const { buildNodeImportArgvParts } = await import("../platform/node-spawn.js");
+    const parts = buildNodeImportArgvParts({
+      loader: "/x/tsx/dist/esm/index.mjs",
+      entry: "C:\\srv\\cli.ts",
+      args: [],
+      platform: "win32",
+    });
+    expect(parts[2]).toBe("C:\\srv\\cli.ts"); // RAW (tsx rejects file:// entries)
+  });
+
+  it("omits args when none supplied", async () => {
+    const { buildNodeImportArgvParts } = await import("../platform/node-spawn.js");
+    const parts = buildNodeImportArgvParts({
+      loader: "/x/jiti/lib/jiti-register.mjs",
+      entry: "/srv/cli.ts",
+      platform: "linux",
+    });
+    expect(parts).toEqual(["--import", `file://${"/x/jiti/lib/jiti-register.mjs"}`, "/srv/cli.ts"]);
+  });
+});
+
 describe("shouldUrlWrapEntry", () => {
   it("returns false for tsx loader on any platform", () => {
     const tsxLoader = "file:///home/u/node_modules/tsx/dist/esm/index.mjs";

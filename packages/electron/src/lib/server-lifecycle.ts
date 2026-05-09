@@ -12,12 +12,15 @@ import { existsSync, mkdirSync, openSync, writeFileSync, readFileSync } from "no
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { resolveJitiFromAnchor } from "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js";
-import { toFileUrl, shouldUrlWrapEntry } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
+import {
+  launchDashboardServer,
+  JitiNotFoundError,
+  PortConflictError,
+  EarlyExitError,
+} from "@blackbelt-technology/pi-dashboard-shared/server-launcher.js";
+import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { createRequire } from "node:module";
-import { realpathSync } from "node:fs";
 import { readModeFile } from "./wizard-state.js";
 import { detectSystemNode, detectPiDashboardCli, detectPi } from "./dependency-detector.js";
 import { getBundledNodePath } from "./bundled-node.js";
@@ -241,66 +244,6 @@ export async function ensureServer(): Promise<string> {
   return `http://localhost:${config.port}`;
 }
 
-/**
- * Attempt to resolve jiti's register hook from a pi installation.
- * Tries managed pi first, then system pi detected via PATH.
- * Returns a file:// URL to jiti-register.mjs, or null.
- *
- * Anchor-resolution logic is delegated to the shared primitive. This was
- * previously a duplicate of `packages/shared/src/resolve-jiti.ts` — the
- * very drift vector that `fix-windows-server-parity` had to patch in two
- * places. The duplicate is now removed; see change: consolidate-platform-handlers.
- */
-export function resolveJitiFromPi(): string | null {
-  // 1. Try managed pi install
-  const managedPiPkg = path.join(MANAGED_DIR, "node_modules", "@mariozechner", "pi-coding-agent", "package.json");
-  const jitiFromManaged = resolveJitiFromAnchor(managedPiPkg);
-  if (jitiFromManaged) return jitiFromManaged;
-
-  // 2. Try system pi via detectPi() path
-  const piResult = detectPi();
-  if (piResult.found && piResult.path) {
-    try {
-      const resolved = realpathSync(piResult.path);
-      // pi binary → dist/cli.js or similar — resolve jiti from its package tree
-      const jitiFromSystem = resolveJitiFromAnchor(resolved);
-      if (jitiFromSystem) return jitiFromSystem;
-    } catch { /* ignore */ }
-  }
-
-  return null;
-}
-
-/** Resolve tsx as [command, ...prefixArgs] to avoid .cmd and shell:true on Windows.
- *  On Unix: returns ["path/to/tsx"]
- *  On Windows: returns ["path/to/node.exe", "path/to/tsx/dist/cli.mjs"]
- *  This avoids spawning .cmd batch files which need shell:true and flash a console window.
- */
-function resolveTsxCommand(): string[] | null {
-  // Try managed install first
-  const managedTsxCli = path.join(MANAGED_DIR, "node_modules", "tsx", "dist", "cli.mjs");
-  if (process.platform === "win32" && existsSync(managedTsxCli)) {
-    // On Windows, find node.exe and run tsx's entry point directly
-    const nodePath = getBundledNodePath() || detectSystemNode().path;
-    if (nodePath) return [nodePath, managedTsxCli];
-  }
-
-  // Unix or fallback: use the tsx binary directly
-  const ext = process.platform === "win32" ? ".cmd" : "";
-  const managed = path.join(MANAGED_DIR, "node_modules", ".bin", "tsx" + ext);
-  if (existsSync(managed)) return [managed];
-
-  // System PATH
-  try {
-    const { execSync } = require("node:child_process"); // ban:child_process-ok electron bundle prefers require() for cold-start cost; dev-only tsx probe
-    const whichCmd = process.platform === "win32" ? "where" : "which";
-    const result = execSync(`${whichCmd} tsx`, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-    if (result) return [result.split("\n")[0]];
-  } catch { /* not found */ }
-
-  return null;
-}
-
 /** Find the server CLI path. */
 function findServerCli(): string | null {
   const candidates = [
@@ -393,132 +336,81 @@ async function launchViaCli(cliPath: string, port: number, piPort: number): Prom
   );
 }
 
-/** Launch the dashboard server as a detached background process. */
+/**
+ * Launch the dashboard server as a detached background process.
+ *
+ * Legacy V1 path — reachable only when `LAUNCH_SOURCE_V2=false`.
+ * Migrated in change `unify-server-launch-ts-loader` to delegate
+ * loader resolution, argv shape, env merge, log header, and
+ * readiness polling to the shared `launchDashboardServer` primitive.
+ * tsx fallback dropped per the proposal (jiti is the only loader).
+ */
 async function launchServer(port: number, piPort: number): Promise<void> {
-  // Find server CLI first (needed for both tsx and jiti paths)
   const cliPath = findServerCli();
   if (!cliPath) {
     throw new Error("Dashboard server CLI not found. Run the setup wizard or reinstall the app.");
   }
 
-  // Resolve tsx command (avoids .cmd on Windows — no shell needed, no cmd window)
-  const tsxCmd = resolveTsxCommand();
-
-  // If tsx not found, try jiti from pi as fallback TS loader
-  const jitiPath = !tsxCmd ? resolveJitiFromPi() : null;
-
-  if (!tsxCmd && !jitiPath) {
-    throw new Error(
-      "No TypeScript loader found (tsx or jiti). " +
-      "Install pi (`npm install -g @earendil-works/pi-coding-agent`) or " +
-      "run the setup wizard to install dependencies."
-    );
-  }
-
-  // Resolve Node.js for the PATH
+  const piResult = detectPi();
+  const piBinDir = piResult.found && piResult.path ? path.dirname(piResult.path) : null;
   const systemNode = detectSystemNode();
   const bundledNode = getBundledNodePath();
   const nodeBinDir = bundledNode ? path.dirname(bundledNode) : (systemNode.found ? path.dirname(systemNode.path!) : null);
-  const nodePath = bundledNode || (systemNode.found ? systemNode.path! : null);
 
-  // Build environment
-  const env = { ...process.env };
-
-  // Resolve pi's bin directory so the server can spawn pi sessions
-  // (GUI apps on macOS don't inherit nvm/volta/homebrew paths)
-  const piResult = detectPi();
-  const piBinDir = piResult.found && piResult.path ? path.dirname(piResult.path) : null;
-
-  // Build spawn command depending on loader
-  let spawnBin: string;
-  let spawnArgs: string[];
-
-  if (tsxCmd) {
-    // tsx path: tsxCmd is [node, tsx-cli.mjs] or [tsx]
-    spawnBin = tsxCmd[0];
-    spawnArgs = [...tsxCmd.slice(1), cliPath, "--port", String(port), "--pi-port", String(piPort)];
-    const tsxBinDir = path.dirname(tsxCmd[0]);
-    const extraPath = [piBinDir, nodeBinDir, tsxBinDir].filter(Boolean).join(path.delimiter);
-    env.PATH = `${extraPath}${path.delimiter}${env.PATH || ""}`;
-  } else {
-    // jiti path: spawn node --import <jiti-register.mjs> <cli.ts>
-    // Loader is always URL-wrapped (Node needs file:// for --import on Windows
-    // drive letters). Entry is URL-wrapped only on Windows + non-tsx loader;
-    // on POSIX the entry MUST be raw because jiti's resolver misbehaves on
-    // file:// URL entries. See openspec/changes/archive/2026-04-24-fix-windows-entry-script-url.
-    if (!nodePath) {
-      throw new Error("Node.js not found. Install Node.js >= 20.6 or run the setup wizard.");
-    }
-    spawnBin = nodePath;
-    const wrapEntry = shouldUrlWrapEntry(jitiPath);
-    // entry is gated by shouldUrlWrapEntry: true only on Windows + non-tsx.
-    // On POSIX the raw path is required — jiti misresolves file:// entries.
-    const entry = wrapEntry ? toFileUrl(cliPath) : cliPath;
-    spawnArgs = ["--import", toFileUrl(jitiPath!), entry, "--port", String(port), "--pi-port", String(piPort)]; // ban:raw-node-import-ok: entry gated by shouldUrlWrapEntry
-    const extraPath = [piBinDir, nodeBinDir].filter(Boolean).join(path.delimiter);
-    env.PATH = `${extraPath}${path.delimiter}${env.PATH || ""}`;
+  // PATH augmentation preserved from legacy V1: prepend pi bin + node bin
+  // so the server's session-spawn code can find them in the spawned env.
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (typeof v === "string") env[k] = v;
   }
+  const extraPath = [piBinDir, nodeBinDir].filter(Boolean).join(path.delimiter);
+  if (extraPath) env.PATH = `${extraPath}${path.delimiter}${env.PATH || ""}`;
 
-  // Ensure NODE_PATH includes bundled server's node_modules
-  // cli.ts is at <serverRoot>/packages/server/src/cli.ts — go up 3 levels to the workspace root
-  // where node_modules/ and package.json live (created by bundle-server.sh)
+  // NODE_PATH augmentation preserved: bundled server's node_modules
+  // and managed install's node_modules. The bundled server has its own
+  // dependency tree at <cliPath>/../../../node_modules.
   const serverRoot = path.resolve(path.dirname(cliPath), "..", "..", "..");
   const bundledModules = path.join(serverRoot, "node_modules");
   const managedModules = path.join(MANAGED_DIR, "node_modules");
   env.NODE_PATH = [bundledModules, managedModules, env.NODE_PATH || ""].filter(Boolean).join(path.delimiter);
 
-  const cwd = serverRoot;
+  const logFile = path.join(MANAGED_DIR, "server.log");
 
-  // Log server startup for debugging
-  const logDir = MANAGED_DIR;
-  const logPath = path.join(logDir, "server.log");
-  try { mkdirSync(logDir, { recursive: true }); } catch { /* ignore */ }
-
-  const launchInfo = [
-    `[${new Date().toISOString()}] Launching dashboard server`,
-    `  command: ${spawnBin} ${spawnArgs.join(" ")}`,
-    `  cwd: ${cwd}`,
-    `  PATH: ${env.PATH?.split(path.delimiter).slice(0, 3).join(path.delimiter)}...`,
-    `  NODE_PATH: ${env.NODE_PATH}`,
-    "",
-  ].join("\n");
-  try { writeFileSync(logPath, launchInfo); } catch { /* ignore */ }
-
-  let logFd: number | undefined;
   try {
-    logFd = openSync(logPath, "a");
-  } catch { /* can't write log, use ignore */ }
+    await launchDashboardServer({
+      cliPath,
+      anchor: cliPath,
+      extraArgs: ["--port", String(port), "--pi-port", String(piPort)],
+      env,
+      starter: "Electron",
+      stdio: { logFile },
+      healthTimeoutMs: SERVER_READY_DEADLINE_MS,
+      port,
+      detach: false,
+      cwd: serverRoot,
+    });
+  } catch (err: unknown) {
+    let logContent = "";
+    try { logContent = readFileSync(logFile, "utf-8"); } catch { /* ignore */ }
+    const lastLines = logContent.split("\n").slice(-20).join("\n");
+    let readyError = "unknown";
+    if (err instanceof JitiNotFoundError) readyError = err.message;
+    else if (err instanceof PortConflictError) readyError = err.message;
+    else if (err instanceof EarlyExitError) readyError = `child exited (code=${err.code})`;
+    else if (err instanceof Error) readyError = err.message;
 
-  // Launch via spawnDetached primitive — uniform detached/windowsHide/
-  // shell:false/stdio:ignore+fd defaults on every platform.
-  // Electron manages lifecycle via stopServerIfNeeded().
-  //
-  // detach: false — keep the child inside Electron's Windows Job Object
-  // (no cmd.exe flash on spawn; server dies with Electron). Mirrors the
-  // pi-session spawn decision in process-manager.ts::spawnHeadlessDetached.
-  const r = await spawnDetached(buildServerSpawnOptions({ cmd: spawnBin, args: spawnArgs, env, cwd, logFd }));
-  if (!r.ok) {
-    throw new Error(`Server process failed to spawn: ${r.error}`);
+    // Synthetic argv for the error message only — the real argv was
+    // built and spawned by `launchDashboardServer`. Avoid a literal
+    // node-import argv shape here so the lint does not match.
+    const errorArgv = ["node", "--ts-loader=jiti", cliPath, "--port", String(port), "--pi-port", String(piPort)];
+    throw buildServerStartupError({
+      spawnBin: process.execPath,
+      spawnArgs: errorArgv,
+      cwd: serverRoot,
+      logTail: lastLines,
+      readyError,
+    });
   }
-
-  const ready = await waitForReady({
-    probe: async () => (await isDashboardRunning(port)).running,
-    deadlineMs: SERVER_READY_DEADLINE_MS,
-    child: r.process,
-  });
-  if (ready.ok) return;
-
-  let logContent = "";
-  try { logContent = readFileSync(logPath, "utf-8"); } catch { /* ignore */ }
-  const lastLines = logContent.split("\n").slice(-20).join("\n");
-
-  throw buildServerStartupError({
-    spawnBin,
-    spawnArgs,
-    cwd,
-    logTail: lastLines,
-    readyError: ready.error ?? "unknown",
-  });
 }
 
 // ── User-initiated launch routine ──────────────────────────────────────────────

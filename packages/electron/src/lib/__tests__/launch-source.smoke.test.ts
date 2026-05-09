@@ -33,7 +33,15 @@ import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { extractBundle } from "../bundle-extract.js";
-import { resolveJitiFromAnchor } from "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js";
+import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
+
+// Anchor-only jiti probe — mirrors the legacy `resolveJitiFromAnchor`
+// helper this test was written against. Used to assert that a specific
+// extracted node_modules tree is healthy (not that jiti is findable
+// somewhere on the system).
+function resolveJitiAnchorOnly(anchor: string): string | null {
+  return new ToolResolver().resolveJiti({ anchor, anchorOnly: true });
+}
 
 // ── Paths into the host's built bundle ────────────────────────────────────────
 
@@ -119,7 +127,8 @@ async function waitForHealth(port: number, timeoutMs = 30_000): Promise<{ starte
  *
  * Prefer the test host's Node (`process.execPath`) over the bundle's Node.
  * Rationale: the bundled Node may be stale (e.g. a v22.12.0 left over from a
- * previous build run, while the production pin is v22.18.0+). The server's
+ * previous build run, while the production pin is v24.x — see
+ * scripts/_node-version.sh). The server's
  * pre-flight version check in `node-version-check.ts` refuses to boot on
  * known-bad versions, so a stale bundle aborts before /api/health responds.
  * The host's Node is whatever runs vitest — if it's bad enough that the
@@ -127,7 +136,8 @@ async function waitForHealth(port: number, timeoutMs = 30_000): Promise<{ starte
  * state.
  *
  * Production users get the canonical bundled Node from the build pipeline
- * (`packages/electron/scripts/download-node.sh v22.18.0 ...`); this test is
+ * (`packages/electron/scripts/download-node.sh` reads BUNDLED_NODE_VERSION
+ * from `scripts/_node-version.sh`); this test is
  * about the server boot path, not the bundled-runtime selection.
  */
 function nodeBinaryForSpawn(): string {
@@ -253,7 +263,7 @@ describe.skipIf(!HAS_BUNDLE)("Tier A — extractBundle real-fs", () => {
       managedDir, "node_modules", "@blackbelt-technology",
       "pi-dashboard-server", "src", "cli.ts",
     );
-    expect(resolveJitiFromAnchor(cliPath)).toBeNull();
+    expect(resolveJitiAnchorOnly(cliPath)).toBeNull();
   });
 });
 
@@ -284,7 +294,7 @@ describe.skipIf(!HAS_BUNDLE || !HAS_OFFLINE_CACHE || !HAS_BUNDLED_NODE)(
           ).toBe(true);
 
           // jiti now resolves from the cliPath anchor
-          const jitiUrl = resolveJitiFromAnchor(ctx.cliPath);
+          const jitiUrl = resolveJitiAnchorOnly(ctx.cliPath);
           expect(jitiUrl, "jiti must be resolvable post-install").toBeTruthy();
           expect(jitiUrl!.startsWith("file://")).toBe(true);
         } finally {
@@ -301,7 +311,7 @@ describe.skipIf(!HAS_BUNDLE || !HAS_OFFLINE_CACHE || !HAS_BUNDLED_NODE)(
         const ctx = await runExtractedPath();
         try {
           // Sanity: jiti reachable after first call.
-          expect(resolveJitiFromAnchor(ctx.cliPath)).toBeTruthy();
+          expect(resolveJitiAnchorOnly(ctx.cliPath)).toBeTruthy();
 
           // Simulate AV / partial corruption: nuke the @mariozechner subtree
           // (which contains jiti). Marker stays put — exactly the failure
@@ -314,7 +324,7 @@ describe.skipIf(!HAS_BUNDLE || !HAS_OFFLINE_CACHE || !HAS_BUNDLED_NODE)(
           expect(fs.existsSync(mzDir), "precondition: @mariozechner present").toBe(true);
           fs.rmSync(mzDir, { recursive: true, force: true });
           // Health check should now report unhealthy.
-          expect(resolveJitiFromAnchor(ctx.cliPath)).toBeNull();
+          expect(resolveJitiAnchorOnly(ctx.cliPath)).toBeNull();
 
           // Second call: same version marker, but health probe must force
           // re-extract + install. After the call jiti must resolve again.
@@ -333,7 +343,7 @@ describe.skipIf(!HAS_BUNDLE || !HAS_OFFLINE_CACHE || !HAS_BUNDLED_NODE)(
           const cliPath2 = (result2 as { cliPath: string }).cliPath;
           expect(fs.existsSync(cliPath2)).toBe(true);
           expect(
-            resolveJitiFromAnchor(cliPath2),
+            resolveJitiAnchorOnly(cliPath2),
             "jiti must be reachable after auto-recover re-extract",
           ).toBeTruthy();
         } finally {
@@ -364,7 +374,7 @@ describe.skipIf(
       async () => {
         const ctx = await runExtractedPath();
         try {
-          const jitiUrl = resolveJitiFromAnchor(ctx.cliPath);
+          const jitiUrl = resolveJitiAnchorOnly(ctx.cliPath);
           expect(jitiUrl).toBeTruthy();
 
           const child = spawn(

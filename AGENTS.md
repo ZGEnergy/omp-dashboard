@@ -436,7 +436,7 @@ This section lists only the **architectural backbone** — the files agents touc
 | `src/client/components/ZrokInstallGuide.tsx` | OS-aware zrok installation guide view |
 | `src/server/cli.ts` | CLI entry: start/stop/restart/status; `cmdRestart` delegates to `/api/restart` when up |
 | `src/server/restart-helper.ts` | Cross-platform `/api/restart` orchestrator (detached node-built-ins-only spawner) |
-| `src/shared/resolve-jiti.ts` | Resolves pi's jiti register hook as a `file://` URL |
+| `packages/shared/src/server-launcher.ts` | `launchDashboardServer` — single shared spawn primitive (jiti loader, argv, env, log header, readiness) used by Bridge / Standalone / Electron starters |
 | `src/shared/platform/paths.ts` | OS-aware path primitives (`normalizePath`, `samePath`, `parsePathInput`) |
 | `src/client/lib/session-grouping.ts` | Sessions grouped by directory; `resolveSessionGroupPath` (pin > jjState.workspaceRoot > cwd) |
 | `src/shared/platform/` | Unified cross-OS primitives barrel (exec/runner/git/openspec/npm/process/binary-lookup/...) |

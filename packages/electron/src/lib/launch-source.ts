@@ -17,10 +17,9 @@
 
 import path from "node:path";
 import os from "node:os";
-import { spawnDetached } from "@blackbelt-technology/pi-dashboard-shared/platform/detached-spawn.js";
-import { resolveJitiImport, resolveJitiFromAnchor } from "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js";
+import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
+import { launchDashboardServer } from "@blackbelt-technology/pi-dashboard-shared/server-launcher.js";
 import { installStandalone } from "./dependency-installer.js";
-import { toFileUrl, shouldUrlWrapEntry } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
 import type { LaunchSource, SourceKind } from "@blackbelt-technology/pi-dashboard-shared/launch-source-types.js";
 import type { DashboardStarter } from "@blackbelt-technology/pi-dashboard-shared/dashboard-starter.js";
 
@@ -334,11 +333,14 @@ export function extractedSourceIsHealthy(
   cliPath: string,
   deps?: {
     existsSync?: (p: string) => boolean;
-    resolveJitiFromAnchor?: (anchor: string) => string | null;
+    /** Anchor-only jiti probe; returns a `file://` URL or null. */
+    resolveJiti?: (anchor: string) => string | null;
   },
 ): boolean {
   const exists = deps?.existsSync ?? fsExistsSync;
-  const resolveJiti = deps?.resolveJitiFromAnchor ?? resolveJitiFromAnchor;
+  const resolveJiti =
+    deps?.resolveJiti ??
+    ((anchor: string) => new ToolResolver().resolveJiti({ anchor, anchorOnly: true }));
   try {
     if (!exists(cliPath)) return false;
     const url = resolveJiti(cliPath);
@@ -385,7 +387,7 @@ async function buildExtractedSource(
     ? false  // about to extract anyway
     : extractedSourceIsHealthy(cliPath, {
         existsSync: probes.existsSync,
-        resolveJitiFromAnchor,
+        resolveJiti: (anchor) => new ToolResolver().resolveJiti({ anchor, anchorOnly: true }),
       });
   if (!markerSaysExtract && !healthy) {
     console.warn(
@@ -634,47 +636,48 @@ export interface SpawnResult {
 
 /**
  * Spawn the dashboard server from the given `source`.
- * Stamps `DASHBOARD_STARTER=Electron` in the spawned process env.
+ * Delegates to the shared `launchDashboardServer` primitive. Owns:
+ *   - DASHBOARD_STARTER=Electron stamp
+ *   - jiti anchor = source.cliPath (packaged Electron has empty
+ *     process.argv[1]; cliPath sits in a real node_modules tree)
+ *   - log file at ~/.pi/dashboard/server.log (caller no longer pre-opens
+ *     a fd — launcher owns the open/write/close lifecycle)
+ *   - detach: false so the server dies with Electron unless
+ *     `decideShutdownOnQuit` keeps it alive
+ *   - 15 s readiness timeout (cold extraction + bootstrap can be slow)
  */
 export async function spawnFromSource(
   source: Exclude<LaunchSource, { kind: "attach" }>,
   config: { port: number; piPort: number },
-  logFd?: number,
+  opts?: { logFile?: string },
 ): Promise<SpawnResult> {
-  // Anchor jiti resolution on the cliPath we are about to spawn. Inside
-  // packaged Electron `process.argv[1]` is empty/a flag, so the
-  // process-argv-anchored `resolveJitiImport()` always throws. cliPath sits
-  // inside a real node_modules tree (managedDir for extracted, repo for
-  // devMonorepo, pi's tree for piExtension/npmGlobal) so createRequire
-  // walks up correctly to find jiti or @mariozechner/jiti.
-  // See change: simplify-electron-bootstrap-derived-state (Phase C bring-up).
-  const loader =
-    resolveJitiFromAnchor(source.cliPath) ?? resolveJitiImport();
-  const wrapEntry = shouldUrlWrapEntry(loader);
-  const entry = wrapEntry ? toFileUrl(source.cliPath) : source.cliPath;
-
-  const r = await spawnDetached({
-    cmd: process.execPath,
-    args: [
-      "--import",
-      loader,
-      entry,
-      "--port",
-      String(config.port),
-      "--pi-port",
-      String(config.piPort),
-    ], // ban:raw-node-import-ok: entry gated by shouldUrlWrapEntry
-    env: { ...process.env, DASHBOARD_STARTER: "Electron" },
-    cwd: source.cwd,
-    logFd,
-    detach: false,
-  });
-
-  if (!r.ok || !r.process?.pid) {
-    throw new Error(
-      `Failed to spawn server from source "${source.kind}": ${r.error ?? "unknown error"}`,
-    );
+  const logFile = opts?.logFile ?? path.join(os.homedir(), ".pi", "dashboard", "server.log");
+  const baseEnv = new ToolResolver({ processExecPath: process.execPath }).buildSpawnEnv(process.env);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(baseEnv)) {
+    if (typeof v === "string") env[k] = v;
   }
+  env["DASHBOARD_STARTER"] = "Electron";
 
-  return { pid: r.process.pid };
+  try {
+    const result = await launchDashboardServer({
+      cliPath: source.cliPath,
+      anchor: source.cliPath,
+      extraArgs: [
+        "--port", String(config.port),
+        "--pi-port", String(config.piPort),
+      ],
+      env,
+      starter: "Electron",
+      stdio: { logFile },
+      healthTimeoutMs: 15_000,
+      port: config.port,
+      detach: false,
+      cwd: source.cwd,
+    });
+    return { pid: result.reportedPid ?? result.childPid };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to spawn server from source "${source.kind}": ${message}`);
+  }
 }

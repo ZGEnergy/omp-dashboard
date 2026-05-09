@@ -76,27 +76,21 @@ describe("parseArgs", () => {
 });
 
 describe("daemon spawn jiti resolution", () => {
-  it("resolveJitiImport either returns a file:// URL or throws the documented error", async () => {
-    // After change `support-upstream-jiti-resolution`, the resolver
-    // also looks for upstream `jiti` (bare name). Vitest itself depends
-    // transitively on `jiti`, so when the test runner is the anchor,
-    // resolution may succeed. Either outcome is valid — we just assert
-    // the contract: success returns a `file://` URL, failure throws the
-    // documented error.
-    const { resolveJitiImport } = await import(
-      "@blackbelt-technology/pi-dashboard-shared/resolve-jiti.js"
+  it("ToolResolver.resolveJiti either returns a file:// URL or null", async () => {
+    // After change `unify-server-launch-ts-loader`, jiti resolution
+    // is owned by `ToolResolver.resolveJiti()` which walks managed pi
+    // → system pi → anchor → argv. Vitest's transitive `jiti` dep
+    // makes resolution likely succeed under the test runner; either
+    // outcome is valid — we just assert the contract: success returns
+    // a `file://` URL, miss returns null (no throw).
+    const { ToolResolver } = await import(
+      "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js"
     );
-    let url: string | undefined;
-    let err: Error | undefined;
-    try {
-      url = resolveJitiImport();
-    } catch (e) {
-      err = e as Error;
-    }
-    if (url !== undefined) {
+    const url = new ToolResolver().resolveJiti();
+    if (url !== null) {
       expect(url.startsWith("file://")).toBe(true);
     } else {
-      expect(err?.message).toContain("Cannot find pi's TypeScript loader");
+      expect(url).toBeNull();
     }
   });
 });

@@ -177,16 +177,53 @@ export function shouldUrlWrapEntry(
  * preserved. Does not import `node:child_process` directly (the type
  * imports above are annotated with the opt-out marker).
  */
+/**
+ * Pure helper: build the bare argv chunk for `node --import <loader>
+ * <entry> [...args]` with correct URL-wrapping at both positions.
+ *
+ * Single source of truth for the `--import` argv shape — used by
+ * `spawnNodeScript` (runtime spawn) and by
+ * `packages/server/src/restart-helper.ts buildOrchestratorScript`
+ * (which embeds the argv into a `node -e` orchestrator script that
+ * executes in a fresh process and therefore cannot call
+ * `spawnNodeScript` directly).
+ *
+ * No I/O. The `platform` parameter is passed through to
+ * `shouldUrlWrapEntry` for testability.
+ *
+ * Loader is always URL-wrapped. Entry is URL-wrapped per
+ * `shouldUrlWrapEntry(loader, platform)`.
+ */
+export function buildNodeImportArgvParts(opts: {
+  loader: string;
+  entry: string;
+  args?: readonly string[];
+  platform?: NodeJS.Platform;
+}): string[] {
+  const wrapEntry = shouldUrlWrapEntry(opts.loader, opts.platform);
+  const parts: string[] = [
+    "--import", toFileUrl(opts.loader),
+    wrapEntry ? toFileUrl(opts.entry) : opts.entry,
+  ];
+  if (opts.args && opts.args.length > 0) parts.push(...opts.args);
+  return parts;
+}
+
 export function spawnNodeScript(opts: SpawnNodeScriptOptions): ChildProcess {
   const nodeBin = opts.nodeBin ?? process.execPath;
-  const wrapEntry = shouldUrlWrapEntry(opts.loader);
 
-  const argv: string[] = [];
+  let argv: string[];
   if (opts.loader) {
-    argv.push("--import", toFileUrl(opts.loader));
+    argv = buildNodeImportArgvParts({
+      loader: opts.loader,
+      entry: opts.entry,
+      args: opts.args,
+    });
+  } else {
+    const wrapEntry = shouldUrlWrapEntry(opts.loader);
+    argv = [wrapEntry ? toFileUrl(opts.entry) : opts.entry];
+    if (opts.args) argv.push(...opts.args);
   }
-  argv.push(wrapEntry ? toFileUrl(opts.entry) : opts.entry);
-  if (opts.args) argv.push(...opts.args);
 
   return execSpawn(nodeBin, argv, opts.spawnOptions ?? {});
 }

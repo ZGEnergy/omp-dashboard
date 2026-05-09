@@ -129,10 +129,15 @@ describe("SERVER_READY_DEADLINE_MS", () => {
     // forbid raw literals so the constant is the single source of truth.
     expect(src).not.toContain("deadlineMs: 60_000");
     expect(src).not.toContain("deadlineMs: 15_000");
-    // At least two callsites use the constant (launchViaCli, launchServer).
-    const matches = src.match(/deadlineMs:\s*SERVER_READY_DEADLINE_MS/g);
-    expect(matches).not.toBeNull();
-    expect(matches!.length).toBeGreaterThanOrEqual(2);
+    // After change `unify-server-launch-ts-loader`, `launchServer`
+    // delegates readiness polling to `launchDashboardServer` and no
+    // longer references `deadlineMs:` directly — it passes
+    // `healthTimeoutMs: SERVER_READY_DEADLINE_MS` instead. The remaining
+    // direct callsite is `launchViaCli`. Pin both timeout-source uses.
+    const deadlineMatches = src.match(/deadlineMs:\s*SERVER_READY_DEADLINE_MS/g);
+    const healthTimeoutMatches = src.match(/healthTimeoutMs:\s*SERVER_READY_DEADLINE_MS/g);
+    const total = (deadlineMatches?.length ?? 0) + (healthTimeoutMatches?.length ?? 0);
+    expect(total).toBeGreaterThanOrEqual(2);
   });
 });
 

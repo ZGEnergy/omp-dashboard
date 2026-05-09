@@ -308,7 +308,7 @@ describe("extractedSourceIsHealthy", () => {
   it("returns false when cliPath does not exist", () => {
     const result = extractedSourceIsHealthy("/missing/cli.ts", {
       existsSync: () => false,
-      resolveJitiFromAnchor: () => "file:///should-not-be-called",
+      resolveJiti: () => "file:///should-not-be-called",
     });
     expect(result).toBe(false);
   });
@@ -316,7 +316,7 @@ describe("extractedSourceIsHealthy", () => {
   it("returns true when cliPath exists and jiti is reachable", () => {
     const result = extractedSourceIsHealthy("/managed/cli.ts", {
       existsSync: () => true,
-      resolveJitiFromAnchor: () => "file:///jiti/lib/jiti-register.mjs",
+      resolveJiti: () => "file:///jiti/lib/jiti-register.mjs",
     });
     expect(result).toBe(true);
   });
@@ -324,7 +324,7 @@ describe("extractedSourceIsHealthy", () => {
   it("returns false when cliPath exists but jiti cannot be resolved", () => {
     const result = extractedSourceIsHealthy("/managed/cli.ts", {
       existsSync: () => true,
-      resolveJitiFromAnchor: () => null,
+      resolveJiti: () => null,
     });
     expect(result).toBe(false);
   });
@@ -332,23 +332,23 @@ describe("extractedSourceIsHealthy", () => {
   it("returns false when existsSync throws", () => {
     const result = extractedSourceIsHealthy("/managed/cli.ts", {
       existsSync: () => { throw new Error("EACCES"); },
-      resolveJitiFromAnchor: () => "file:///jiti/lib/jiti-register.mjs",
+      resolveJiti: () => "file:///jiti/lib/jiti-register.mjs",
     });
     expect(result).toBe(false);
   });
 
-  it("returns false when resolveJitiFromAnchor throws", () => {
+  it("returns false when resolveJiti throws", () => {
     const result = extractedSourceIsHealthy("/managed/cli.ts", {
       existsSync: () => true,
-      resolveJitiFromAnchor: () => { throw new Error("createRequire failed"); },
+      resolveJiti: () => { throw new Error("createRequire failed"); },
     });
     expect(result).toBe(false);
   });
 
-  it("returns false when resolveJitiFromAnchor returns empty string", () => {
+  it("returns false when resolveJiti returns empty string", () => {
     const result = extractedSourceIsHealthy("/managed/cli.ts", {
       existsSync: () => true,
-      resolveJitiFromAnchor: () => "",
+      resolveJiti: () => "",
     });
     expect(result).toBe(false);
   });
