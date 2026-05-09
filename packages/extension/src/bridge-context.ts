@@ -40,9 +40,11 @@ export interface BridgeContext {
   hasRegisteredOnce: boolean;
 }
 
-// Commands that the dashboard handles natively with superior UX.
-// These are filtered from the command list sent to dashboard clients.
-const DASHBOARD_NATIVE_COMMANDS = new Set(["roles"]);
+// Commands that the dashboard handles natively with superior UX, filtered from
+// the command list sent to dashboard clients AND from extension-slash detection.
+// Current set: { "roles" }. Bridge-registered `__dashboard_reload` is filtered
+// separately by the `__`-prefix rule. See change: fix-extension-slash-commands-in-dashboard.
+export const DASHBOARD_NATIVE_COMMANDS = new Set(["roles"]);
 
 /** Filter out hidden commands (names starting with __) and dashboard-native commands from commands list */
 export function filterHiddenCommands(commands: any[]): any[] {
@@ -50,6 +52,41 @@ export function filterHiddenCommands(commands: any[]): any[] {
     !cmd.name.startsWith("__") &&
     !DASHBOARD_NATIVE_COMMANDS.has(cmd.name)
   );
+}
+
+/**
+ * Pure predicate: does `text` name an extension-registered slash command?
+ *
+ * Returns true iff:
+ *   - `text` starts with `/` and contains no embedded newline
+ *   - the token after `/` (up to first space or end) appears in `commandList`
+ *     with `source === "extension"`
+ *   - that token is NOT in `DASHBOARD_NATIVE_COMMANDS` (and not `__`-prefixed)
+ *
+ * Pure: no pi calls, no mutation. See change: fix-extension-slash-commands-in-dashboard.
+ */
+export function isExtensionSlashCommand(
+  text: string,
+  commandList: ReadonlyArray<{ name: string; source?: string }>,
+): boolean {
+  if (typeof text !== "string" || !text.startsWith("/")) return false;
+  if (text.includes("\n")) return false;
+  const rest = text.slice(1);
+  const spaceIdx = rest.indexOf(" ");
+  const cmdName = spaceIdx === -1 ? rest : rest.slice(0, spaceIdx);
+  if (!cmdName) return false;
+  if (cmdName.startsWith("__")) return false;
+  if (DASHBOARD_NATIVE_COMMANDS.has(cmdName)) return false;
+  return commandList.some((c) => c?.name === cmdName && c?.source === "extension");
+}
+
+/**
+ * Feature-detect upstream `pi.dispatchCommand(text, opts)` (pi 0.71+).
+ * Returns true iff the field is a function on the supplied object.
+ * See change: fix-extension-slash-commands-in-dashboard.
+ */
+export function hasDispatchCommand(pi: unknown): boolean {
+  return typeof (pi as any)?.dispatchCommand === "function";
 }
 
 /** Extract first user message text from session entries */

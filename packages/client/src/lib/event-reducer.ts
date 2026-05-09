@@ -1195,6 +1195,35 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       const status = data.status as string;
       const message = data.message as string | undefined;
       next.pendingPrompt = undefined;
+      // Upsert: a terminal status (completed/error) for the same command
+      // transitions the most recent matching started row in place, instead of
+      // appending a duplicate. Keeps chat clean for started → terminal pairs.
+      // See change: fix-extension-slash-commands-in-dashboard.
+      if (status === "completed" || status === "error") {
+        let replaced = false;
+        const updated = next.messages.slice();
+        for (let i = updated.length - 1; i >= 0; i--) {
+          const m = updated[i] as any;
+          if (
+            m?.role === "commandFeedback" &&
+            m?.args?.command === command &&
+            m?.args?.status === "started"
+          ) {
+            updated[i] = {
+              ...m,
+              content: message ?? "",
+              timestamp: event.timestamp,
+              args: { command, status },
+            };
+            replaced = true;
+            break;
+          }
+        }
+        if (replaced) {
+          next.messages = updated;
+          break;
+        }
+      }
       next.messages = [
         ...next.messages,
         {

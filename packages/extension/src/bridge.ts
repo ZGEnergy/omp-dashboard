@@ -35,6 +35,7 @@ import { startMetricsMonitor, stopMetricsMonitor, collectMetrics } from "./proce
 import { scanChildProcesses } from "./process-scanner.js";
 import type { BridgeContext } from "./bridge-context.js";
 import { filterHiddenCommands, extractFirstMessage, getCurrentModelString } from "./bridge-context.js";
+import { tryDispatchExtensionCommand } from "./slash-dispatch.js";
 import { sendStateSync as _sendStateSync, replaySessionEntries as _replaySessionEntries, handleSessionChange as _handleSessionChange } from "./session-sync.js";
 import { sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged, sendJjStateIfChanged as _sendJjStateIfChanged, resetReconnectCaches as _resetReconnectCaches } from "./model-tracker.js";
 import { registerFlowEventListeners, FLOW_EVENT_MAP, SUBAGENT_EVENT_MAP } from "./flow-event-wiring.js";
@@ -694,26 +695,33 @@ function initBridge(pi: ExtensionAPI) {
     spawnNew: () => {
       connection.send({ type: "spawn_new_session", sessionId, cwd: process.cwd() });
     },
-    sessionPrompt: (text) => {
-      // Route slash commands: management events, flow:run, then fallback
+    sessionPrompt: async (text) => {
+      // Route slash commands: management events, flow:run, extension dispatch, then fallback.
+      // See change: fix-extension-slash-commands-in-dashboard.
       if (text.startsWith("/") && pi.events) {
         const cmdText = text.slice(1);
         const spaceIdx = cmdText.indexOf(" ");
         const cmdName = spaceIdx === -1 ? cmdText : cmdText.slice(0, spaceIdx);
         const cmdArgs = spaceIdx === -1 ? "" : cmdText.slice(spaceIdx + 1);
 
-        // Flow management commands from buttons use flow_management message type.
-        // Typed /flows:new, /flows:edit, /flows:delete in chat input fall through
-        // to the slash command handler below, which invokes pi's command system
-        // via pi.sendUserMessage (with ui-proxy handling ctx.ui calls).
-
-        // Check if it's a user-defined flow via flow:list-flows
+        // Flow fast-path: typed /<user-defined-flow-name> wins over extension dispatch.
         const flowsList = getFlowsList();
         if (flowsList.some(f => f.name === cmdName)) {
           pi.events.emit("flow:run", { flowName: cmdName, task: cmdArgs.trim() || undefined });
           return;
         }
       }
+
+      // Extension-command dispatch (routing step 9). When matched, the helper
+      // emits its own command_feedback events and we MUST NOT fall through.
+      const handled = await tryDispatchExtensionCommand(
+        pi,
+        text,
+        sessionId,
+        (msg) => connection.send(msg),
+      );
+      if (handled) return;
+
       // Fallback: send as user message (template-expanded).
       // Uses deliverAs:followUp so it queues properly when agent is streaming.
       // expandPromptTemplateFromDisk handles skill commands (/skill:xxx) and

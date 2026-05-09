@@ -12,6 +12,7 @@ import { killProcessByPgid } from "./process-scanner.js";
 import type { FileEntry, PiSessionInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { filterHiddenCommands } from "./bridge-context.js";
 import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
+import { tryDispatchExtensionCommand } from "./slash-dispatch.js";
 import { buildProviderCatalogue } from "./provider-register.js";
 
 const IGNORE_DIRS = new Set([".git", "node_modules", ".next", "dist", "build", ".cache", "__pycache__", ".venv"]);
@@ -161,8 +162,14 @@ export function createCommandHandler(
     spawnNew?: () => void;
     /** Switch model via pi.setModel() */
     setModel?: (provider: string, modelId: string) => Promise<void>;
-    /** Route slash commands through session.prompt() */
-    sessionPrompt?: (text: string) => void;
+    /**
+     * Route slash commands through pi's command system. May be sync or async.
+     * In bridge wiring this also runs the extension-command dispatch branch
+     * (see slash-dispatch.ts). The handler awaits the result so command_feedback
+     * events emitted by the dispatch path arrive before this turn returns.
+     * See change: fix-extension-slash-commands-in-dashboard.
+     */
+    sessionPrompt?: (text: string) => void | Promise<void>;
   },
 ): CommandHandler {
   const getSessionId = typeof sessionIdOrGetter === "function" ? sessionIdOrGetter : () => sessionIdOrGetter;
@@ -292,19 +299,29 @@ export function createCommandHandler(
 
           if (parsed.type === "slash") {
             if (options?.sessionPrompt) {
-              options.sessionPrompt(parsed.text);
+              // sessionPrompt (bridge) owns slash-dispatch + flow fast-path +
+              // template expansion. It also owns command_feedback emission for
+              // extension-command dispatch. Do NOT emit completed here — would
+              // duplicate the dispatch path's terminal event.
+              // See change: fix-extension-slash-commands-in-dashboard.
+              await options.sessionPrompt(parsed.text);
             } else {
-              pi.sendUserMessage(parsed.text);
+              // Test / non-bridge callers: apply the extension-command dispatch
+              // branch inline before falling through to sendUserMessage. Keeps
+              // both call sites in lockstep per spec routing-step 9.
+              const handled = await tryDispatchExtensionCommand(
+                pi,
+                parsed.text,
+                sessionId,
+                options?.eventSink,
+              );
+              if (!handled) {
+                // sendUserMessage exempt from gating: only typed single-line
+                // slashes that are NOT extension commands reach this — i.e.
+                // skills, prompt templates, unrecognized slashes.
+                pi.sendUserMessage(parsed.text);
+              }
             }
-            options?.eventSink?.({
-              type: "event_forward",
-              sessionId,
-              event: {
-                eventType: "command_feedback",
-                timestamp: Date.now(),
-                data: { command: parsed.text, status: "completed" },
-              },
-            });
             return undefined;
           }
 
@@ -312,6 +329,12 @@ export function createCommandHandler(
           // Multi-line slash commands (e.g. "/skill:foo\nuser text") are classified as
           // passthrough by parseSendPrompt to preserve images (the slash route strips them),
           // so we expand prompt templates / skills here before sending.
+          //
+          // sendUserMessage exempt from extension-dispatch gating: this path handles
+          // multi-line slashes and image-bearing messages. Per spec, only typed
+          // single-line slash text gates through extension dispatch — multi-line and
+          // image-bearing messages go raw to the LLM as before.
+          // See change: fix-extension-slash-commands-in-dashboard.
           let outgoing = msg.text;
           if (outgoing.startsWith("/")) {
             outgoing = expandPromptTemplateFromDisk(outgoing, process.cwd(), pi);

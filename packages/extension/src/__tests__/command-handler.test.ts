@@ -502,20 +502,22 @@ describe("CommandHandler", () => {
       }));
     });
 
-    it("should emit command_feedback for slash commands even without sessionPrompt", async () => {
+    it("should NOT emit command_feedback for unrecognized slash commands (no sessionPrompt)", async () => {
+      // Per fix-extension-slash-commands-in-dashboard, unrecognized slashes
+      // (not extension commands, not bridge-handled) fall through to
+      // sendUserMessage with NO command_feedback events. Only registered
+      // extension commands emit started/{completed,error}.
       const pi = createMockPi();
       const eventSink = vi.fn();
       const handler = createCommandHandler(pi as any, "s1", { eventSink });
 
       await handler.handle({ type: "send_prompt", sessionId: "s1", text: "/some-command" });
 
-      expect(eventSink).toHaveBeenCalledWith(expect.objectContaining({
-        type: "event_forward",
-        event: expect.objectContaining({
-          eventType: "command_feedback",
-          data: expect.objectContaining({ command: "/some-command", status: "completed" }),
-        }),
-      }));
+      expect(pi.sendUserMessage).toHaveBeenCalledWith("/some-command");
+      const feedbackCalls = eventSink.mock.calls.filter(
+        (c) => (c[0] as any)?.event?.eventType === "command_feedback",
+      );
+      expect(feedbackCalls).toHaveLength(0);
     });
 
     it("should fallback to sendUserMessage when sessionPrompt is not available for slash commands", async () => {

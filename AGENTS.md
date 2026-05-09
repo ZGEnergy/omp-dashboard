@@ -227,8 +227,9 @@ This section lists only the **architectural backbone** — the files agents touc
 | `src/shared/types.ts` | Data models (Session, Workspace, Event) |
 | `src/shared/config.ts` | Shared config loader (`~/.pi/dashboard/config.json`) |
 | `src/shared/semaphore.ts` | Tiny FIFO semaphore (`createSemaphore(max)`) |
-| `src/extension/bridge.ts` | Main bridge extension entry; PromptBus patch site, sync/tracker/flow composition |
-| `src/extension/bridge-context.ts` | Shared mutable state type + helpers for bridge modules |
+| `src/extension/bridge.ts` | Main bridge extension entry; PromptBus patch site, sync/tracker/flow composition; sessionPrompt routes through slash-dispatch (extension-cmd dispatch + stopgap) before template fallback. See change: fix-extension-slash-commands-in-dashboard. |
+| `src/extension/bridge-context.ts` | Shared mutable state type + helpers for bridge modules; hosts `isExtensionSlashCommand`, `hasDispatchCommand`, `DASHBOARD_NATIVE_COMMANDS` (= {"roles"}). See change: fix-extension-slash-commands-in-dashboard. |
+| `src/extension/slash-dispatch.ts` | Shared `tryDispatchExtensionCommand` helper: routing-step 9 (extension-command dispatch via `pi.dispatchCommand` 0.71+ or `command_feedback{error}` stopgap on 0.70). See change: fix-extension-slash-commands-in-dashboard. |
 | `src/extension/session-sync.ts` | Session register, replay, and switch/fork handling |
 | `src/extension/model-tracker.ts` | Model/thinking-level/git/name change detection |
 | `src/extension/flow-event-wiring.ts` | Flow event listener registration (flow:* → event_forward) |
@@ -237,7 +238,7 @@ This section lists only the **architectural backbone** — the files agents touc
 | `src/shared/server-identity.ts` | Identity-verified health check (`isDashboardRunning`) |
 | `src/shared/mdns-discovery.ts` | mDNS advertise/discover/browse for `_pi-dashboard._tcp` |
 | `src/extension/server-launcher.ts` | Auto-start server as detached process; logs to `~/.pi/dashboard/server.log` |
-| `src/extension/command-handler.ts` | Command routing: `!`/`!!` bash, `/compact`, slash commands |
+| `src/extension/command-handler.ts` | Command routing: `!`/`!!` bash, `/compact`, slash commands; slash else-arm now gates through extension-dispatch helper before `sendUserMessage`. See change: fix-extension-slash-commands-in-dashboard. |
 | `src/extension/prompt-expander.ts` | Slash command → prompt template expansion |
 | `src/extension/dev-build.ts` | Dev build-on-reload helper (client build + server shutdown) |
 | `src/extension/server-auto-start.ts` | mDNS-first → health check → auto-start with concurrent launch detection |
