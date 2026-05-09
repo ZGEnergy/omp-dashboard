@@ -44,9 +44,9 @@ describe("SessionCard", () => {
   it("should show active status indicator", () => {
     const session = makeSession({ status: "active" });
     const { container } = render(<SessionCard session={session} {...defaultProps} />);
-    // Status dot is a span with bg-green-500 class
-    const statusDot = container.querySelector(".bg-green-500");
-    expect(statusDot).toBeTruthy();
+    // Status indicator is the source icon colored by status (text-* class).
+    const statusIcon = container.querySelector(".text-green-500");
+    expect(statusIcon).toBeTruthy();
   });
 
   it("should highlight when selected", () => {
@@ -76,10 +76,11 @@ describe("SessionCard", () => {
     expect(screen.getByText("$0.42")).toBeTruthy();
   });
 
-  it("should show source badge icon", () => {
+  it("should show source badge via gutter title (TUI prefix)", () => {
     const session = makeSession({ source: "tui" });
-    render(<SessionCard session={session} {...defaultProps} />);
-    expect(screen.getByTitle("TUI")).toBeTruthy();
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    const titled = container.querySelector('[title^="TUI"]');
+    expect(titled).toBeTruthy();
   });
 
   it("should show git branch when showGitInfo is true", () => {
@@ -103,34 +104,36 @@ describe("SessionCard", () => {
     const { container } = render(
       <SessionCard session={session} {...defaultProps} hasError={true} />,
     );
-    expect(container.querySelector(".bg-red-500")).toBeTruthy();
+    expect(container.querySelector(".text-red-500")).toBeTruthy();
   });
 
-  it("shows amber pulsing dot when isRetrying without lastError", () => {
+  it("shows amber pulsing icon when isRetrying without lastError", () => {
     const session = makeSession({ status: "active" });
     const { container } = render(
       <SessionCard session={session} {...defaultProps} isRetrying={true} />,
     );
-    const dot = container.querySelector(".bg-amber-500");
-    expect(dot).toBeTruthy();
-    expect(dot!.className).toContain("animate-pulse");
+    const icon = container.querySelector(".text-amber-500");
+    expect(icon).toBeTruthy();
+    expect(icon!.className).toContain("animate-pulse");
   });
 
-  it("red error dot wins over amber retry dot", () => {
+  it("red error icon wins over amber retry icon", () => {
     const session = makeSession({ status: "active" });
     const { container } = render(
       <SessionCard session={session} {...defaultProps} hasError={true} isRetrying={true} />,
     );
-    expect(container.querySelector(".bg-red-500")).toBeTruthy();
-    expect(container.querySelector(".bg-amber-500")).toBeNull();
+    expect(container.querySelector(".text-red-500")).toBeTruthy();
+    expect(container.querySelector(".text-amber-500")).toBeNull();
   });
 
   it("should show ended status for ended sessions", () => {
     const session = makeSession({ status: "ended" });
     const { container } = render(<SessionCard session={session} {...defaultProps} />);
-    // Ended sessions have bg-[var(--bg-surface)] status dot
-    const statusDot = container.querySelector(".bg-\\[var\\(--bg-surface\\)\\]");
-    expect(statusDot).toBeTruthy();
+    // Ended sessions render the source icon via the status-icon span using
+    // a muted text color (rather than the active green/yellow/red palette).
+    const statusIcon = container.querySelector('[data-testid="session-status-icon"]');
+    expect(statusIcon).toBeTruthy();
+    expect(statusIcon!.className).toContain("text-[var(--text-muted)]");
   });
 
   it("should show shutdown button when session is active and selected", () => {
@@ -416,5 +419,113 @@ describe("GroupGitInfo", () => {
     const btn = screen.getByTestId("git-init-btn");
     fireEvent.click(btn);
     expect(onClick).toHaveBeenCalled();
+  });
+});
+
+// ── Subcard structure (redesign-session-card-subcards) ────────────────────────
+
+describe("SessionCard subcard structure", () => {
+  it("renders OPENSPEC, WORKSPACE, PROCESS, FLOWS subcard titles in order when populated", () => {
+    const session = makeSession({ gitBranch: "feature/test" });
+    const changes = [{ name: "feat-a", status: "in-progress" as const, completedTasks: 1, totalTasks: 3, artifacts: [] }];
+    const { container } = render(
+      <SessionCard
+        session={session}
+        {...defaultProps}
+        showGitInfo={true}
+        openspecChanges={changes}
+        onSendPrompt={() => {}}
+        onAttachProposal={() => {}}
+        onDetachProposal={() => {}}
+        flows={[]}
+        commands={[{ name: "flows:new" } as any]}
+        onFlowAction={() => {}}
+        processes={[{ pid: 123, pgid: 123, command: "node", elapsedMs: 1000 } as any]}
+        onKillProcess={() => {}}
+      />,
+    );
+    // Subcard titles are rendered as capsule legends (uppercase, rounded-full).
+    const titles = Array.from(container.querySelectorAll(".uppercase.rounded-full")).map(
+      (el) => el.textContent,
+    );
+    // MEMORY is intentionally absent (no plugin contributes).
+    const filtered = titles.filter((t) => t && /^(OPENSPEC|WORKSPACE|PROCESS|MEMORY|FLOWS)$/.test(t));
+    expect(filtered).toEqual(["OPENSPEC", "WORKSPACE", "PROCESS", "FLOWS"]);
+  });
+
+  it("hides PROCESS subcard when processes array is empty", () => {
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...defaultProps}
+        processes={[]}
+        onKillProcess={() => {}}
+      />,
+    );
+    expect(screen.queryByText("PROCESS")).toBeNull();
+  });
+
+  it("hides MEMORY subcard when no plugin claims session-card-memory", () => {
+    const session = makeSession();
+    render(<SessionCard session={session} {...defaultProps} />);
+    expect(screen.queryByText("MEMORY")).toBeNull();
+  });
+
+  it("hides OPENSPEC subcard when handlers are absent", () => {
+    const session = makeSession();
+    render(<SessionCard session={session} {...defaultProps} />);
+    expect(screen.queryByText("OPENSPEC")).toBeNull();
+  });
+
+  it("hides WORKSPACE subcard when showGitInfo is false and no badge plugin", () => {
+    const session = makeSession();
+    render(<SessionCard session={session} {...defaultProps} showGitInfo={false} />);
+    expect(screen.queryByText("WORKSPACE")).toBeNull();
+  });
+
+  it("selected card retains blue accent ring after subcard refactor", () => {
+    const session = makeSession();
+    const { container } = render(
+      <SessionCard session={session} {...defaultProps} selectedId="test-session" />,
+    );
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).toContain("border-blue-500/60");
+    expect(card.className).toContain("ring-1");
+    expect(card.className).toContain("ring-blue-500/30");
+  });
+
+  it("streaming session retains card-working-pulse on outer li", () => {
+    const session = makeSession({ status: "streaming" });
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).toContain("card-working-pulse");
+  });
+});
+
+// ── Mobile parity ────────────────────────────────────────────────────────────
+
+describe("SessionCard mobile branch unchanged by subcard refactor", () => {
+  it("mobile card renders no subcard panels", async () => {
+    const useMobileMod = await import("../../hooks/useMobile.js");
+    (useMobileMod.useMobile as any).mockReturnValueOnce(true);
+    const session = makeSession({ gitBranch: "main" });
+    const changes = [{ name: "x", status: "in-progress" as const, completedTasks: 0, totalTasks: 1, artifacts: [] }];
+    const { container } = render(
+      <SessionCard
+        session={session}
+        {...defaultProps}
+        showGitInfo={true}
+        openspecChanges={changes}
+        onSendPrompt={() => {}}
+        onAttachProposal={() => {}}
+        onDetachProposal={() => {}}
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).toBeNull();
+    expect(screen.queryByText("WORKSPACE")).toBeNull();
+    expect(screen.queryByText("FLOWS")).toBeNull();
+    // No inset subcard panels rendered (subcards use color-mix bg + rounded-lg).
+    expect(container.querySelector("[class*='color-mix'].rounded-lg")).toBeNull();
   });
 });

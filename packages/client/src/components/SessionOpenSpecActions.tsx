@@ -165,7 +165,6 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
     return (
       <div className="mt-1" data-testid="session-openspec-actions">
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-[var(--text-muted)]">OpenSpec:</span>
           <button
             data-testid="attach-combo"
             disabled={changes.length === 0}
@@ -240,7 +239,6 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
     return (
       <div className="mt-1" data-testid="session-openspec-actions">
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-[var(--text-muted)]">OpenSpec:</span>
           <span className="text-[11px] text-[var(--text-tertiary)]"><Icon path={mdiPaperclip} size={0.4} className="inline mr-0.5" />{attached}</span>
           <span className="flex-1" />
           <ActionButton label="Detach" icon={mdiLinkOff} onClick={onDetach} testId="detach-btn" />
@@ -260,7 +258,6 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
     <div className="mt-1 space-y-1" data-testid="session-openspec-actions">
       {/* Line 1: badge + state pill + detach + artifact letters right-aligned */}
       <div className="flex items-center gap-1.5">
-        <span className="text-[10px] text-[var(--text-muted)]">OpenSpec:</span>
         <span className="text-[11px]" data-testid="attached-badge"><Icon path={mdiPaperclip} size={0.4} className="inline mr-0.5" /><span className="text-blue-400">{attached}</span></span>
         <StatePill state={state} />
         <ActionButton label="Detach" icon={mdiLinkOff} onClick={onDetach} testId="detach-btn" />

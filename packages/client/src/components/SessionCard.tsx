@@ -24,7 +24,9 @@ import {
 import { ProcessList, type ProcessEntry } from "./ProcessList.js";
 import type { CommandInfo, FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { useMobile } from "../hooks/useMobile.js";
-import { SessionCardBadgeSlot, SessionCardActionBarSlot } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { SessionCardBadgeSlot, SessionCardActionBarSlot, SessionCardMemorySlot, WorkspaceActionBarSlot, useSlotHasClaimsForSession } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { SessionSubcard } from "./SessionSubcard.js";
+import { useSessionCardDragHandle } from "./SortableSessionCard.js";
 
 export const statusColors: Record<string, string> = {
   active: "bg-green-500",
@@ -339,6 +341,10 @@ export function SessionCard({
   /** True iff a synthesized provider retry is in flight (retryState set, no error yet). */
   isRetrying?: boolean;
 }) {
+  // dnd-kit drag handle props (attributes + listeners) supplied by
+  // SortableSessionCard via context. When non-null, the desktop card's left
+  // gutter (status dot + source icon column) becomes the drag zone.
+  const dragHandleProps = useSessionCardDragHandle();
   const isSelected = selectedId === session.id;
   const [isRenaming, setIsRenaming] = useState(false);
   const canRename = session.status !== "ended" && !!onRename;
@@ -351,6 +357,14 @@ export function SessionCard({
       : isRetrying
         ? "bg-amber-500 animate-pulse"
         : (statusColors[session.status] ?? "bg-[var(--bg-surface)]");
+  // Source-icon text color mirrors the dot's status color so the icon
+  // doubles as a status indicator (replaces the round dot in the gutter).
+  // Map only leading `bg-<palette>` tokens (not arbitrary `bg-[var(...)]`,
+  // which would alias text color to a bg variable). Ended sessions get a
+  // muted token instead.
+  const iconStatusColor = session.status === "ended"
+    ? "text-[var(--text-muted)]"
+    : dotColor.replace(/\bbg-(?!\[)/g, "text-");
 
   function handleConfirmRename(name: string) {
     setIsRenaming(false);
@@ -367,11 +381,15 @@ export function SessionCard({
           isSelected ? "border-blue-500/60 bg-blue-500/5 ring-1 ring-blue-500/30" : "border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"
         } ${isHidden ? "opacity-40" : ""} ${getCardPulseClass(session)}`}
       >
-        {/* Line 1: status dot + name + age */}
+        {/* Line 1: source icon (colored by status) + name + age */}
         <div className="flex items-center gap-2">
           <span
-            className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`}
-          />
+            className={`flex-shrink-0 ${iconStatusColor}`}
+            title={`${sourceLabels[session.source] ?? session.source} — ${session.status}`}
+            data-testid="session-status-icon"
+          >
+            <Icon path={sourceIcons[session.source] ?? mdiConsoleLine} size={0.5} />
+          </span>
           <span className="text-sm truncate flex-1">
             {getSessionDisplayName(session)}
           </span>
@@ -454,24 +472,23 @@ export function SessionCard({
     <li
       data-session-id={session.id}
       onClick={() => onSelect(session.id)}
-      className={`px-3 py-2.5 cursor-pointer rounded-xl shadow-md shadow-[var(--shadow-card)] border hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ${
+      className={`px-2 py-2 cursor-pointer rounded-xl shadow-md shadow-[var(--shadow-card)] border hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ${
         isSelected ? "border-blue-500/60 bg-blue-500/5 ring-1 ring-blue-500/30" : "border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"
       } ${isHidden ? "opacity-40" : ""} ${getCardPulseClass(session)}`}
     >
-      <div className="flex gap-2">
-      {/* Left gutter: source icon vertically centered */}
-      <div className="flex flex-col items-center flex-shrink-0 w-4 pt-1">
-        <span
-          className={`w-2 h-2 rounded-full ${dotColor}`}
-        />
-        <span className="flex-1" />
-        <span
-          className={`${sourceBadgeColors[session.source] ?? "text-[var(--text-tertiary)]"}`}
-          title={sourceLabels[session.source] ?? session.source}
-        >
-          <Icon path={sourceIcons[session.source] ?? mdiConsoleLine} size={0.55} />
+      <div className="flex gap-1.5">
+      {/* Left gutter: source icon vertically centered. Doubles as drag handle
+          when dragHandleProps is provided (see SortableSessionCard). */}
+      <div
+        {...(dragHandleProps ?? {})}
+        className={`flex flex-col items-center flex-shrink-0 w-3.5 pt-1.5 ${dragHandleProps ? "cursor-grab active:cursor-grabbing" : ""}`}
+        onClick={(e) => { if (dragHandleProps) e.stopPropagation(); }}
+        title={`${sourceLabels[session.source] ?? session.source} — ${session.status}`}
+        data-testid={dragHandleProps ? "drag-handle-session" : undefined}
+      >
+        <span className={iconStatusColor} data-testid="session-status-icon">
+          <Icon path={sourceIcons[session.source] ?? mdiConsoleLine} size={0.5} />
         </span>
-        <span className="flex-1" />
       </div>
       {/* Card content */}
       <div className="flex-1 min-w-0">
@@ -624,45 +641,89 @@ export function SessionCard({
         />
       ) : null}
 
-      {/* Line 4: git info (only for single-session groups) */}
-      {showGitInfo && <GitInfo session={session} />}
+      {/* Subcard stack — see change: redesign-session-card-subcards */}
 
-      {/* Thin divider before action row */}
-      {/* OpenSpec attach/actions */}
+      {/* OPENSPEC subcard */}
       {openspecChanges && onSendPrompt && onAttachProposal && onDetachProposal && (
-        <SessionOpenSpecActions
-          session={session}
-          changes={openspecChanges}
-          onAttach={onAttachProposal}
-          onDetach={onDetachProposal}
-          onSendPrompt={onSendPrompt}
-          onReadArtifact={onReadArtifact}
-          onBulkArchive={onBulkArchive}
-          groups={openspecGroups}
-          assignments={openspecAssignments}
-        />
+        <SessionSubcard title="OPENSPEC">
+          <SessionOpenSpecActions
+            session={session}
+            changes={openspecChanges}
+            onAttach={onAttachProposal}
+            onDetach={onDetachProposal}
+            onSendPrompt={onSendPrompt}
+            onReadArtifact={onReadArtifact}
+            onBulkArchive={onBulkArchive}
+            groups={openspecGroups}
+            assignments={openspecAssignments}
+          />
+        </SessionSubcard>
       )}
-      {/* Plugin slot: session-card-badge (additive, coexists with OpenSpec/Flow badges) */}
-      <SessionCardBadgeSlot session={session} />
-      {/* Plugin slot: session-card-action-bar (additive, coexists with OpenSpec/Flow actions) */}
-      <SessionCardActionBarSlot session={session} />
 
-      {/* Flow launcher */}
-      {flows && onFlowAction && (
-        <SessionFlowActions
-          flows={flows}
-          hasFlowsNew={commands?.some(c => c.name === "flows:new") ?? false}
-          hasFlowsEdit={commands?.some(c => c.name === "flows:edit") ?? false}
-          hasFlowsDelete={commands?.some(c => c.name === "flows:delete") ?? false}
-          onFlowAction={onFlowAction}
-        />
-      )}
-      {/* Active child processes */}
+      {/* WORKSPACE subcard — git info + plugin badge contributions */}
+      <WorkspaceSubcard session={session} showGitInfo={showGitInfo} />
+
+      {/* PROCESS subcard */}
       {processes && processes.length > 0 && onKillProcess && (
-        <ProcessList processes={processes} onKill={onKillProcess} />
+        <SessionSubcard title="PROCESS">
+          <ProcessList processes={processes} onKill={onKillProcess} />
+        </SessionSubcard>
       )}
+
+      {/* MEMORY subcard — plugin slot only */}
+      <MemorySubcard session={session} />
+
+      {/* FLOWS subcard */}
+      {flows && onFlowAction && (
+        <SessionSubcard title="FLOWS">
+          <SessionFlowActions
+            flows={flows}
+            hasFlowsNew={commands?.some(c => c.name === "flows:new") ?? false}
+            hasFlowsEdit={commands?.some(c => c.name === "flows:edit") ?? false}
+            hasFlowsDelete={commands?.some(c => c.name === "flows:delete") ?? false}
+            onFlowAction={onFlowAction}
+          />
+        </SessionSubcard>
+      )}
+
+      {/* Plugin slot: session-card-action-bar — generic card footer.
+          Currently no claimers after jj/honcho rerouted to workspace-action-bar /
+          session-card-memory; kept rendered for future generic plugins. */}
+      <SessionCardActionBarSlot session={session} />
       </div>{/* end card content */}
       </div>{/* end flex row */}
     </li>
+  );
+}
+
+/**
+ * WORKSPACE subcard — git/jj info plus plugin badge contributions.
+ * Hidden when both showGitInfo is false AND no plugin claims session-card-badge.
+ * See change: redesign-session-card-subcards (D4).
+ */
+function WorkspaceSubcard({ session, showGitInfo }: { session: DashboardSession; showGitInfo: boolean }) {
+  const hasBadge = useSlotHasClaimsForSession("session-card-badge", session);
+  const hasActions = useSlotHasClaimsForSession("workspace-action-bar", session);
+  if (!showGitInfo && !hasBadge && !hasActions) return null;
+  return (
+    <SessionSubcard title="WORKSPACE">
+      {showGitInfo ? <GitInfo session={session} /> : null}
+      {hasBadge ? <SessionCardBadgeSlot session={session} /> : null}
+      {hasActions ? <WorkspaceActionBarSlot session={session} /> : null}
+    </SessionSubcard>
+  );
+}
+
+/**
+ * MEMORY subcard — renders only when a plugin claims session-card-memory.
+ * See change: redesign-session-card-subcards (D3).
+ */
+function MemorySubcard({ session }: { session: DashboardSession }) {
+  const hasMemory = useSlotHasClaimsForSession("session-card-memory", session);
+  if (!hasMemory) return null;
+  return (
+    <SessionSubcard title="MEMORY">
+      <SessionCardMemorySlot session={session} />
+    </SessionSubcard>
   );
 }

@@ -71,12 +71,12 @@ export const PLUGIN_REGISTRY: RegistryEntry[] = [
                 "predicate": "isInJjWorkspace"
             },
             {
-                "slot": "session-card-action-bar",
+                "slot": "workspace-action-bar",
                 "component": "JjActionBar",
                 "predicate": "isInJjRepo"
             },
             {
-                "slot": "session-card-action-bar",
+                "slot": "workspace-action-bar",
                 "component": "JjInitAffordance",
                 "predicate": "isInGitRepoButNotJj"
             },
@@ -101,8 +101,8 @@ export const PLUGIN_REGISTRY: RegistryEntry[] = [
     },
     claims: [
       { pluginId: "jj", priority: 100, slot: "session-card-badge", Component: JjWorkspaceBadge },
-      { pluginId: "jj", priority: 100, slot: "session-card-action-bar", Component: JjActionBar },
-      { pluginId: "jj", priority: 100, slot: "session-card-action-bar", Component: JjInitAffordance },
+      { pluginId: "jj", priority: 100, slot: "workspace-action-bar", Component: JjActionBar },
+      { pluginId: "jj", priority: 100, slot: "workspace-action-bar", Component: JjInitAffordance },
       { pluginId: "jj", priority: 100, slot: "sidebar-folder-section", Component: JjWorkspaceList },
       { pluginId: "jj", priority: 100, slot: "command-route", command: "/jj", Component: JjWorkspaceView },
       { pluginId: "jj", priority: 100, slot: "settings-section", tab: "general", Component: JjPluginSettings },

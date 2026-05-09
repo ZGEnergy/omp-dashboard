@@ -10,7 +10,7 @@ import { encodeFolderPath } from "../lib/folder-encoding.js";
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { SortableSessionCard } from "./SortableSessionCard.js";
-import { SortablePinnedGroup } from "./SortablePinnedGroup.js";
+import { SortablePinnedGroup, useFolderDragHandle } from "./SortablePinnedGroup.js";
 import type { DashboardSession, OpenSpecData, OpenSpecGroup, CommandInfo, FlowInfo, ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import {
@@ -426,15 +426,15 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     const isCollapsed = isFolderCollapsed(group.cwd);
 
     return (
-      <div key={group.cwd} className="bg-[var(--bg-secondary)] rounded-lg p-2">
-        <div
-          className="px-2 py-1.5 min-h-[44px] md:min-h-0 cursor-pointer rounded hover:bg-[var(--bg-hover)]"
-          onClick={() => handleToggleCollapse(group.cwd)}
-        >
+      <div key={group.cwd} className="bg-[var(--bg-secondary)] rounded-lg p-1.5">
+        <div className="flex gap-1.5 px-1 py-1 min-h-[44px] md:min-h-0 rounded">
+          {/* Left gutter — chevron at top, drag-handle column extending below */}
+          <FolderDragGutter
+            isCollapsed={isCollapsed}
+            onToggle={() => handleToggleCollapse(group.cwd)}
+          />
+          <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="inline-flex text-[var(--text-tertiary)]">
-              <Icon path={isCollapsed ? mdiChevronRight : mdiChevronDown} size={0.6} />
-            </span>
             <span className="text-xs font-medium text-[var(--text-secondary)] truncate flex items-center gap-1">
               <Icon path={isCollapsed ? mdiFolder : mdiFolderOpen} size={0.5} className="shrink-0" /> {dirName}
             </span>
@@ -472,7 +472,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               </button>
             )}
           </div>
-          <div className="mt-1 ml-5">
+          <div className="mt-1">
             <FolderActionBar
               cwd={group.cwd}
               terminalCount={terminalsByCwd.get(group.cwd)?.length ?? 0}
@@ -510,6 +510,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             />
           )}
 
+          </div>{/* end content column */}
         </div>
         {/* Session + terminal cards — animated collapse */}
         <div className={`group-collapse ${isCollapsed ? "collapsed" : "expanded"}`}>
@@ -830,6 +831,43 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
       <Toast messages={messages} onDismiss={dismissToast} />
 
       </div>
+    </div>
+  );
+}
+
+/**
+ * Folder header left gutter — chevron at top, drag-handle column extending
+ * the full height of the header content. The chevron itself remains a
+ * click-to-toggle button (pointer events stop propagation so the surrounding
+ * drag listener doesn't compete on click). The empty space below the chevron
+ * is the drag zone, mirroring the SessionCard gutter pattern.
+ */
+function FolderDragGutter({
+  isCollapsed,
+  onToggle,
+}: {
+  isCollapsed: boolean;
+  onToggle: () => void;
+}) {
+  const dragHandleProps = useFolderDragHandle();
+  return (
+    <div
+      {...(dragHandleProps ?? {})}
+      className={`flex flex-col items-center flex-shrink-0 w-3 pt-0.5 text-[var(--text-tertiary)] ${dragHandleProps ? "cursor-grab active:cursor-grabbing" : ""}`}
+      data-testid={dragHandleProps ? "drag-handle-pinned" : undefined}
+      title={dragHandleProps ? "Drag to reorder folder" : undefined}
+    >
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        onPointerDown={(e) => e.stopPropagation()}
+        className="inline-flex items-center justify-center cursor-pointer hover:text-[var(--text-secondary)]"
+        title={isCollapsed ? "Expand folder" : "Collapse folder"}
+        data-testid="folder-toggle-btn"
+      >
+        <Icon path={isCollapsed ? mdiChevronRight : mdiChevronDown} size={0.6} />
+      </button>
+      {/* Remainder of the column is the drag area (no children needed). */}
+      <span className="flex-1" />
     </div>
   );
 }

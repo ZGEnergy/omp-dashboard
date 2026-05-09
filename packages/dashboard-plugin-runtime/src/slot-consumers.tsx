@@ -13,7 +13,20 @@ import { useSlotRegistryOrNull, CurrentPluginLayer } from "./plugin-context.js";
 import { forSession, forFolder, forTab, forToolName } from "./slot-registry.js";
 import { SlotErrorBoundary } from "./slot-error-boundary.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { SlotId } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
 import type { FolderDescriptor } from "./slot-registry.js";
+
+/**
+ * Returns true when at least one plugin claim exists for `slotId` and matches
+ * the given `session` (per slot's session targeting rules). Lets call sites
+ * conditionally render parent containers (e.g. titled subcards) without
+ * triggering the slot's own render path twice.
+ */
+export function useSlotHasClaimsForSession(slotId: SlotId, session: DashboardSession): boolean {
+  const registry = useSlotRegistryOrNull();
+  if (!registry) return false;
+  return forSession(registry.getClaims(slotId), session).length > 0;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -72,6 +85,34 @@ export function SessionCardActionBarSlot({ session }: { session: DashboardSessio
     <>
       {claims.map(c =>
         renderClaim(c as Parameters<typeof renderClaim>[0], "session-card-action-bar", { session }),
+      )}
+    </>
+  );
+}
+
+export function SessionCardMemorySlot({ session }: { session: DashboardSession }) {
+  const registry = useSlotRegistryOrNull();
+  if (!registry) return null;
+  const claims = forSession(registry.getClaims("session-card-memory"), session);
+  if (!claims.length) return null;
+  return (
+    <>
+      {claims.map(c =>
+        renderClaim(c as Parameters<typeof renderClaim>[0], "session-card-memory", { session }),
+      )}
+    </>
+  );
+}
+
+export function WorkspaceActionBarSlot({ session }: { session: DashboardSession }) {
+  const registry = useSlotRegistryOrNull();
+  if (!registry) return null;
+  const claims = forSession(registry.getClaims("workspace-action-bar"), session);
+  if (!claims.length) return null;
+  return (
+    <>
+      {claims.map(c =>
+        renderClaim(c as Parameters<typeof renderClaim>[0], "workspace-action-bar", { session }),
       )}
     </>
   );

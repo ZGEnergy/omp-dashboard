@@ -137,7 +137,7 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, se
   if (!data.initialized && data.pending) {
     return (
       <div data-testid="folder-openspec-section-pending" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-1.5 mt-1 ml-5">
+        <div className="flex items-center gap-1.5 mt-1">
           <span
             className="inline-block h-2.5 w-2.5 rounded-full border border-[var(--text-tertiary)] border-t-transparent animate-spin"
             data-testid="folder-openspec-pending-spinner"
@@ -420,7 +420,7 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, se
   return (
     <div data-testid="folder-openspec-section" onClick={(e) => e.stopPropagation()}>
       {/* Header */}
-      <div className="flex items-center gap-1.5 mt-1 ml-5">
+      <div className="flex items-center gap-1.5 mt-1">
         <button
           data-testid="folder-openspec-header"
           onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
@@ -470,7 +470,7 @@ export function FolderOpenSpecSection({ data, cwd, onRefresh, onReadArtifact, se
 
       {/* Expanded content */}
       {expanded && (
-        <div className="ml-5 mt-1">
+        <div className="mt-1">
           {/* Pills + search */}
           {hasGroups && (
             <div className="space-y-1 mb-1">

@@ -37,9 +37,8 @@ export function SessionFlowActions({
 
   return (
     <>
-      <div className="mt-1.5 pt-1.5 border-t border-[var(--border-subtle)]">
+      <div>
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] text-[var(--text-muted)]">Flows:</span>
           {flows.length > 0 && (
             <button
               onClick={(e) => { e.stopPropagation(); setPickerOpen(true); }}

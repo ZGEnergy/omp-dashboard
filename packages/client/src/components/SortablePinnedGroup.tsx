@@ -1,12 +1,22 @@
 import React from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Icon } from "@mdi/react";
-import { mdiDragHorizontalVariant } from "@mdi/js";
 
 interface Props {
   id: string;
   children: React.ReactNode;
+}
+
+/**
+ * Context channel that hands the dnd-kit drag handle props (attributes +
+ * listeners) from `SortablePinnedGroup` down to the folder header. Using
+ * context (instead of cloneElement) lets the wrapper accept arbitrary
+ * children without traversal.
+ */
+const FolderDragHandleCtx = React.createContext<React.HTMLAttributes<HTMLDivElement> | null>(null);
+
+export function useFolderDragHandle() {
+  return React.useContext(FolderDragHandleCtx);
 }
 
 export function SortablePinnedGroup({ id, children }: Props) {
@@ -26,18 +36,14 @@ export function SortablePinnedGroup({ id, children }: Props) {
     position: "relative",
   };
 
+  const dragHandleProps = React.useMemo(
+    () => ({ ...attributes, ...listeners }) as React.HTMLAttributes<HTMLDivElement>,
+    [attributes, listeners],
+  );
+
   return (
-    <div ref={setNodeRef} style={style} className="group/pinned-sortable" data-testid="sortable-pinned-group">
-      <div
-        {...attributes}
-        {...listeners}
-        className="absolute left-1 top-0 h-8 w-4 flex items-center justify-center cursor-grab active:cursor-grabbing opacity-0 group-hover/pinned-sortable:opacity-60 transition-opacity z-10"
-        data-testid="drag-handle-pinned"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <Icon path={mdiDragHorizontalVariant} size={0.45} className="text-[var(--text-tertiary)]" />
-      </div>
-      {children}
+    <div ref={setNodeRef} style={style} data-testid="sortable-pinned-group">
+      <FolderDragHandleCtx.Provider value={dragHandleProps}>{children}</FolderDragHandleCtx.Provider>
     </div>
   );
 }

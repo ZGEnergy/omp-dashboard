@@ -38,6 +38,14 @@ export interface SlotPropsMap {
     session: DashboardSession;
     pluginContext: AnyPluginContext;
   };
+  "session-card-memory": {
+    session: DashboardSession;
+    pluginContext: AnyPluginContext;
+  };
+  "workspace-action-bar": {
+    session: DashboardSession;
+    pluginContext: AnyPluginContext;
+  };
   "content-view": {
     session: DashboardSession;
     routeParams: Record<string, string>;
