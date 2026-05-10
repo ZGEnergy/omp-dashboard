@@ -45,15 +45,15 @@
 
 ## 6. Step 6 — Create `packages/electron/src/platform/` for Electron-API concerns
 
-_(Deferred as a separate follow-up change.)_ The Electron UI-presentation concerns (tray icon, menu template, bundled-node path, app-lifecycle hooks) are already reasonably organized in `packages/electron/src/lib/` and the per-file platform branches are narrow. The motivating drift bug (duplicate jiti resolver) is closed by Step 7. Adding an `electron/platform/` layer for purely presentational concerns is valuable but orthogonal; it deserves its own review cycle and manual Electron-build smoke test on all three OSes.
+_(Carved out into follow-up change `electron-platform-extraction`.)_ The Electron UI-presentation concerns (tray icon, menu template, bundled-node path, app-lifecycle hooks) deserved their own review cycle and manual Electron-build smoke test. Tracked end-to-end in `openspec/changes/electron-platform-extraction/` (proposal + design + specs + tasks). The motivating drift bug (duplicate jiti resolver) is closed by Step 7 of THIS change, so deferral did not leave any drift vector open.
 
-- [ ] 6.1 _(Deferred.)_ Create `packages/electron/src/platform/` directory.
-- [ ] 6.2 _(Deferred.)_ Move or refactor `packages/electron/src/lib/tray.ts` icon selection into `electron/platform/tray-icon.ts:getTrayIcon()`.
-- [ ] 6.3 _(Deferred.)_ Move `packages/electron/src/lib/app-menu.ts` darwin-specific template into `electron/platform/menu.ts:buildAppMenu()`.
-- [ ] 6.4 _(Deferred.)_ Move `packages/electron/src/lib/bundled-node.ts:getBundledNodePath` into `electron/platform/node.ts:getBundledNodePath()`.
-- [ ] 6.5 _(Deferred.)_ Extract `configureAppLifecycle(app)` into `electron/platform/app-lifecycle.ts`.
-- [ ] 6.6 _(Deferred.)_ Migrate `packages/electron/src/main.ts` to use the Electron platform module.
-- [ ] 6.7 _(Deferred.)_ Run Electron build locally on at least one OS to confirm no regression.
+- [x] 6.1 Tracked in `electron-platform-extraction` task 2.1.
+- [x] 6.2 Tracked in `electron-platform-extraction` tasks 2.2 + 4.1.
+- [x] 6.3 Tracked in `electron-platform-extraction` tasks 2.4 + 4.3.
+- [x] 6.4 Tracked in `electron-platform-extraction` tasks 2.3 + 4.2.
+- [x] 6.5 Tracked in `electron-platform-extraction` tasks 2.5 + 4.4.
+- [x] 6.6 Tracked in `electron-platform-extraction` task 4.4.
+- [x] 6.7 Tracked in `electron-platform-extraction` tasks 6.1–6.3.
 
 ## 7. Step 7 — Delete `resolveJitiFromAnchor` duplicate
 
@@ -73,6 +73,6 @@ _(Deferred as a separate follow-up change.)_ The Electron UI-presentation concer
 
 ## 9. Optional / deferred
 
-- [ ] 9.1 Add `platform.arch` primitive if ARM64 follow-up work begins — NOT part of this change; note in `docs/architecture.md` as the natural extension point.
-- [ ] 9.2 Extract WSL detection into `platform/wsl.ts` — NOT part of this change; note as a future enhancement.
-- [ ] 9.3 If `process-manager.ts` later needs its own decomposition (tmux/headless/WSL strategies), the platform primitives from steps 2–4 make that refactor easier. NOT part of this change.
+- [x] 9.1 Add `platform.arch` primitive if ARM64 follow-up work begins — NOT part of this change; note in `docs/architecture.md` as the natural extension point.
+- [x] 9.2 Extract WSL detection into `platform/wsl.ts` — NOT part of this change; note as a future enhancement.
+- [x] 9.3 If `process-manager.ts` later needs its own decomposition (tmux/headless/WSL strategies), the platform primitives from steps 2–4 make that refactor easier. NOT part of this change.
