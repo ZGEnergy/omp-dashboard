@@ -20,6 +20,20 @@ export { FlowLaunchDialog } from "./FlowLaunchDialog.js";
 export { FlowTabBar } from "./FlowTabBar.js";
 export { SessionFlowActions } from "./SessionFlowActions.js";
 
+// Plugin-internal state hooks. Components consume these in place of
+// props that previously came from App.tsx. See change:
+// pluginize-flows-via-registry.
+export {
+  useFlowsSessionState,
+  reduceFlowsSessionState,
+} from "./FlowsSessionStateContext.js";
+export type { FlowsSessionState } from "./FlowsSessionStateContext.js";
+export {
+  useFlowsUiState,
+  useFlowsUiActions,
+} from "./FlowsUiStateContext.js";
+export type { FlowsUiState, FlowsUiActions } from "./FlowsUiStateContext.js";
+
 /**
  * Predicate for the `session-card-badge` slot claim.
  * The slot consumer skips claims whose predicate returns false.
