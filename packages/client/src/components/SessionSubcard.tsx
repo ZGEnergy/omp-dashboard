@@ -24,7 +24,7 @@ export function SessionSubcard({
   if (!hasMeaningfulChildren(children)) return null;
   return (
     <div className="relative mt-1.5 rounded-lg border border-[var(--border-subtle)] bg-[color-mix(in_srgb,var(--bg-surface)_50%,transparent)] px-2 py-1.5">
-      <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 px-1.5 py-px rounded-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] text-[9px] uppercase tracking-wider text-[var(--text-muted)] leading-none">
+      <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 px-1.5 py-px rounded-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] text-[9px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] leading-none">
         {title}
       </span>
       {children}

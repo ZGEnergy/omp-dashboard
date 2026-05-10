@@ -254,6 +254,32 @@ mark.markdown-search-highlight-active {
   outline: 2px solid rgba(250, 204, 21, 0.8);
 }
 
+/* Light-mode contrast tweaks for tinted pills.
+   Tailwind 400-shades on light backgrounds (amber/blue/green/zinc on #f0f0f0)
+   wash out — bump to 700-shades and a touch more background tint when
+   the dashboard is in light mode. Targets shared pill components by data-testid
+   so plugin-rendered pills aren't accidentally affected. */
+[data-theme="light"] [data-testid="state-pill"][data-state="PLANNING"] {
+  color: #3f3f46; /* zinc-700 */
+  background-color: rgba(113, 113, 122, 0.15);
+  border-color: rgba(113, 113, 122, 0.45);
+}
+[data-theme="light"] [data-testid="state-pill"][data-state="READY"] {
+  color: #1d4ed8; /* blue-700 */
+  background-color: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.45);
+}
+[data-theme="light"] [data-testid="state-pill"][data-state="IMPLEMENTING"] {
+  color: #b45309; /* amber-700 */
+  background-color: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.5);
+}
+[data-theme="light"] [data-testid="state-pill"][data-state="COMPLETE"] {
+  color: #15803d; /* green-700 */
+  background-color: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.45);
+}
+
 /* Flow DAG graph animations */
 @keyframes flow-node-pulse {
   0%, 100% { opacity: 1; }
