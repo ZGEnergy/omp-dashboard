@@ -503,6 +503,102 @@ describe("SessionCard subcard structure", () => {
   });
 });
 
+// ── Status-tinted mosaic rail (left gutter) ─────────────────────────────
+// See change: add-session-card-status-mosaic-rail.
+
+describe("SessionCard left-gutter mosaic rail", () => {
+  function railEl(container: HTMLElement): HTMLElement {
+    const el = container.querySelector("[data-rail-bg]") as HTMLElement | null;
+    if (!el) throw new Error("rail element not found");
+    return el;
+  }
+
+  it("renders green rail palette for idle/active sessions", () => {
+    const { container } = render(
+      <SessionCard session={makeSession({ status: "idle" })} {...defaultProps} />,
+    );
+    expect(railEl(container).getAttribute("data-rail-bg")).toBe("bg-green-500/40");
+  });
+
+  it("renders amber rail palette for streaming sessions", () => {
+    const { container } = render(
+      <SessionCard session={makeSession({ status: "streaming" })} {...defaultProps} />,
+    );
+    expect(railEl(container).getAttribute("data-rail-bg")).toBe("bg-amber-500/40");
+  });
+
+  it("renders muted rail palette for ended sessions", () => {
+    const { container } = render(
+      <SessionCard session={makeSession({ status: "ended" })} {...defaultProps} />,
+    );
+    expect(railEl(container).getAttribute("data-rail-bg")).toBe("bg-[var(--bg-surface)]");
+  });
+
+  it("renders red rail palette when hasError is true", () => {
+    const { container } = render(
+      <SessionCard
+        session={makeSession({ status: "idle" })}
+        {...defaultProps}
+        hasError={true}
+      />,
+    );
+    expect(railEl(container).getAttribute("data-rail-bg")).toBe("bg-red-500/40");
+  });
+
+  it("selected idle session uses brighter -400/65 palette", () => {
+    const { container } = render(
+      <SessionCard
+        session={makeSession({ status: "idle" })}
+        {...defaultProps}
+        selectedId="test-session"
+      />,
+    );
+    expect(railEl(container).getAttribute("data-rail-bg")).toBe("bg-green-400/65");
+  });
+
+  it("selected streaming session uses brighter -400/65 palette", () => {
+    const { container } = render(
+      <SessionCard
+        session={makeSession({ status: "streaming" })}
+        {...defaultProps}
+        selectedId="test-session"
+      />,
+    );
+    expect(railEl(container).getAttribute("data-rail-bg")).toBe("bg-amber-400/65");
+  });
+
+  it("rail bar is a centered capsule (rounded-full, 6px wide, top-2 bottom-2)", () => {
+    const { container } = render(
+      <SessionCard session={makeSession({ status: "idle" })} {...defaultProps} />,
+    );
+    const bar = railEl(container).querySelector("[aria-hidden=true]") as HTMLElement | null;
+    expect(bar).toBeTruthy();
+    expect(bar!.className).toMatch(/absolute/);
+    expect(bar!.className).toMatch(/left-1\/2/);
+    expect(bar!.className).toMatch(/-translate-x-1\/2/);
+    expect(bar!.className).toMatch(/w-1\.5/);
+    expect(bar!.className).toMatch(/rounded-full/);
+    expect(bar!.className).toMatch(/top-7/);
+    expect(bar!.className).toMatch(/bottom-2/);
+    // Status palette class is applied.
+    expect(bar!.className).toContain("bg-green-500/40");
+  });
+
+  it("source icon sits in a circular tertiary-surface chip above the rail bar", () => {
+    const { container } = render(
+      <SessionCard session={makeSession({ status: "idle" })} {...defaultProps} />,
+    );
+    const icon = container.querySelector("[data-testid='session-status-icon']") as HTMLElement | null;
+    expect(icon).toBeTruthy();
+    expect(icon!.className).toContain("bg-[var(--bg-tertiary)]");
+    expect(icon!.className).toContain("rounded-full");
+    expect(icon!.className).toMatch(/w-4/);
+    expect(icon!.className).toMatch(/h-4/);
+    // Chip sits above the rail bar via z-10.
+    expect(icon!.className).toMatch(/z-10/);
+  });
+});
+
 // ── Mobile parity ────────────────────────────────────────────────────────────
 
 describe("SessionCard mobile branch unchanged by subcard refactor", () => {

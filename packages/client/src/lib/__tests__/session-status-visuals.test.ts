@@ -7,6 +7,7 @@ import {
   deriveDotColorWithFlags,
   deriveIconStatusColor,
   pulseClassForStatus,
+  deriveRailBgColor,
 } from "../session-status-visuals.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
@@ -143,5 +144,64 @@ describe("pulseClassForStatus", () => {
 
   it("ended + ask_user currentTool → empty string (icon-only pulse, status wins)", () => {
     expect(pulseClassForStatus(makeSession({ status: "ended", currentTool: "ask_user" }))).toBe("");
+  });
+});
+
+describe("deriveRailBgColor", () => {
+  // Unselected: /25 alpha
+  it("idle → bg-green-500/40", () => {
+    expect(deriveRailBgColor(makeSession({ status: "idle" }), {}, false)).toBe("bg-green-500/40");
+  });
+  it("active → bg-green-500/40", () => {
+    expect(deriveRailBgColor(makeSession({ status: "active" }), {}, false)).toBe("bg-green-500/40");
+  });
+  it("streaming → bg-amber-500/40", () => {
+    expect(deriveRailBgColor(makeSession({ status: "streaming" }), {}, false)).toBe("bg-amber-500/40");
+  });
+  it("ended → muted surface token", () => {
+    expect(deriveRailBgColor(makeSession({ status: "ended" }), {}, false)).toBe("bg-[var(--bg-surface)]");
+  });
+  it("resuming overrides status → bg-amber-500/40", () => {
+    expect(deriveRailBgColor(makeSession({ status: "idle", resuming: true }), {}, false)).toBe("bg-amber-500/40");
+  });
+  it("hasError → bg-red-500/40", () => {
+    expect(deriveRailBgColor(makeSession({ status: "idle" }), { hasError: true }, false)).toBe("bg-red-500/40");
+  });
+  it("isRetrying → bg-amber-500/40", () => {
+    expect(deriveRailBgColor(makeSession({ status: "idle" }), { isRetrying: true }, false)).toBe("bg-amber-500/40");
+  });
+
+  // Selected: brighter -400 shade with /50 alpha
+  it("selected idle → bg-green-400/65", () => {
+    expect(deriveRailBgColor(makeSession({ status: "idle" }), {}, true)).toBe("bg-green-400/65");
+  });
+  it("selected streaming → bg-amber-400/65", () => {
+    expect(deriveRailBgColor(makeSession({ status: "streaming" }), {}, true)).toBe("bg-amber-400/65");
+  });
+  it("selected hasError → bg-red-400/65", () => {
+    expect(deriveRailBgColor(makeSession({ status: "idle" }), { hasError: true }, true)).toBe("bg-red-400/65");
+  });
+  it("selected ended → still muted (no shade swap)", () => {
+    expect(deriveRailBgColor(makeSession({ status: "ended" }), {}, true)).toBe("bg-[var(--bg-surface)]");
+  });
+
+  // Precedence: resuming > hasError > isRetrying > status (mirrors deriveDotColorWithFlags)
+  it("resuming + hasError + isRetrying → resuming wins (amber)", () => {
+    expect(
+      deriveRailBgColor(
+        makeSession({ status: "idle", resuming: true }),
+        { hasError: true, isRetrying: true },
+        false,
+      ),
+    ).toBe("bg-amber-500/40");
+  });
+  it("hasError + isRetrying → hasError wins (red)", () => {
+    expect(
+      deriveRailBgColor(
+        makeSession({ status: "idle" }),
+        { hasError: true, isRetrying: true },
+        false,
+      ),
+    ).toBe("bg-red-500/40");
   });
 });

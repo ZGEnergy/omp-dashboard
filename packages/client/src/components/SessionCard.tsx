@@ -9,6 +9,7 @@ import {
   sourceLabels,
   deriveDotColorWithFlags,
   deriveIconStatusColor,
+  deriveRailBgColor,
 } from "../lib/session-status-visuals.js";
 
 // Re-export for any downstream consumers that historically imported these
@@ -337,6 +338,11 @@ export function SessionCard({
   // arbitrary-bg-token defenses.
   // See change: add-session-status-to-folder-proposal-rows.
   const iconStatusColor = deriveIconStatusColor(dotColor, session.status);
+  // Status-tinted background color for the left-gutter mosaic rail. The
+  // mosaic shape is carved by an SVG mask asset; the gutter element's
+  // background-color supplies the colour. Selected cards use the brighter
+  // -400 shade. See change: add-session-card-status-mosaic-rail.
+  const railBgClass = deriveRailBgColor(session, { hasError, isRetrying }, isSelected);
 
   function handleConfirmRename(name: string) {
     setIsRenaming(false);
@@ -449,17 +455,34 @@ export function SessionCard({
       } ${isHidden ? "opacity-40" : ""} ${getCardPulseClass(session)}`}
     >
       <div className="flex gap-1.5">
-      {/* Left gutter: source icon vertically centered. Doubles as drag handle
-          when dragHandleProps is provided (see SortableSessionCard). */}
+      {/* Left gutter: a status-tinted capsule rail with a circular icon chip
+          at the top. The rail is a 6px-wide rounded vertical bar centered in
+          a 20px-wide gutter, capped above and below the chip. The icon sits
+          in its own circular chip with an opaque dark backing so it reads
+          clearly. Doubles as drag handle when dragHandleProps is provided.
+          See change: add-session-card-status-mosaic-rail. */}
       <div
         {...(dragHandleProps ?? {})}
-        className={`flex flex-col items-center flex-shrink-0 w-3.5 pt-1.5 ${dragHandleProps ? "cursor-grab active:cursor-grabbing" : ""}`}
+        className={`relative flex flex-col items-center flex-shrink-0 w-5 pt-2 pb-2 ${dragHandleProps ? "cursor-grab active:cursor-grabbing" : ""}`}
         onClick={(e) => { if (dragHandleProps) e.stopPropagation(); }}
         title={`${sourceLabels[session.source] ?? session.source} — ${session.status}`}
         data-testid={dragHandleProps ? "drag-handle-session" : undefined}
+        data-rail-bg={railBgClass}
       >
-        <span className={iconStatusColor} data-testid="session-status-icon">
-          <Icon path={sourceIcons[session.source] ?? mdiConsoleLine} size={0.5} />
+        {/* Capsule rail: 6 px wide, centered, rounded-full both ends. Starts
+            below the icon chip (top-7 = 28 px = pt-2 + chip h-4 + ~4 px
+            gap) so the chip and the bar do not visually run into each other. */}
+        <span
+          aria-hidden="true"
+          className={`pointer-events-none absolute left-1/2 top-7 bottom-2 -translate-x-1/2 w-1.5 rounded-full ${railBgClass}`}
+        />
+        {/* Icon chip: opaque tertiary surface so the icon stays clear of the
+            colored rail behind it. */}
+        <span
+          className={`relative z-10 inline-flex items-center justify-center w-4 h-4 rounded-full bg-[var(--bg-tertiary)] shadow-sm ${iconStatusColor}`}
+          data-testid="session-status-icon"
+        >
+          <Icon path={sourceIcons[session.source] ?? mdiConsoleLine} size={0.45} />
         </span>
       </div>
       {/* Card content */}

@@ -100,3 +100,37 @@ export function pulseClassForStatus(session: DashboardSession): string {
   if (session.status === "streaming") return "animate-pulse";
   return "";
 }
+
+/**
+ * Status-tinted background color for the session card's left-gutter mosaic
+ * rail. The rail is a decorative SVG mask carved over a flat coloured
+ * background — this helper supplies the colour. Precedence mirrors
+ * `deriveDotColorWithFlags` so dot, source-icon tint, and rail always agree.
+ *
+ * `isSelected === true` (and status !== ended) bumps the palette to the
+ * brighter `-400` shade. The `ended` palette is muted and does NOT swap on
+ * selection — selected ended cards already carry the blue card-level
+ * highlight, and a brighter rail would compete with it.
+ *
+ * See change: add-session-card-status-mosaic-rail.
+ */
+export function deriveRailBgColor(
+  session: DashboardSession,
+  flags: { hasError?: boolean; isRetrying?: boolean },
+  isSelected: boolean,
+): string {
+  // Slim, low-alpha vertical line. `/25` for unselected and `/50` for
+  // selected keeps the colour a tint, not a block. Class strings are
+  // written as literals so Tailwind's JIT picks them up.
+  // See change: add-session-card-status-mosaic-rail.
+  if (session.status === "ended") return "bg-[var(--bg-surface)]";
+  if (session.resuming) return isSelected ? "bg-amber-400/65" : "bg-amber-500/40";
+  if (flags.hasError) return isSelected ? "bg-red-400/65" : "bg-red-500/40";
+  if (flags.isRetrying) return isSelected ? "bg-amber-400/65" : "bg-amber-500/40";
+  if (session.status === "streaming") return isSelected ? "bg-amber-400/65" : "bg-amber-500/40";
+  if (session.status === "active" || session.status === "idle") {
+    return isSelected ? "bg-green-400/65" : "bg-green-500/40";
+  }
+  // Unknown status: fall back to muted.
+  return "bg-[var(--bg-surface)]";
+}
