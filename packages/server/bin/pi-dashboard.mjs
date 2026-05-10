@@ -4,14 +4,15 @@
  *
  * The actual CLI is `../src/cli.ts`. This wrapper exists because a
  * `#!/usr/bin/env` shebang cannot interpolate a dynamic `--import`
- * loader path. The wrapper resolves jiti at runtime from pi's tree
- * and re-execs Node with `--import <jiti-url> cli.ts`.
+ * loader path. The wrapper resolves jiti from pi's tree at runtime
+ * and re-execs Node with `--import <jiti-url> cli.ts <args>`.
  *
- * Jiti-only — no tsx fallback. When jiti cannot be resolved, exit 1
- * with a stderr install-hint. tsx is being fully extruded from
- * runtime + bootstrap (see proposal: replace-tsx-with-jiti).
+ * No tsx fallback: if jiti cannot be resolved, the wrapper exits 1
+ * with an install-hint pointing at pi. Mirrors the resolution shape
+ * in `packages/shared/src/resolve-jiti.ts` (cannot import the .ts
+ * module before a TS loader is registered, so the lookup is inlined).
  *
- * Kept as plain ESM JS so it needs no loader to parse itself.
+ * See change: replace-tsx-with-jiti.
  */
 import { createRequire } from "node:module";
 import { realpathSync } from "node:fs";
@@ -22,9 +23,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const cliPath = resolve(here, "..", "src", "cli.ts");
 
-// Mirrors packages/shared/src/resolve-jiti.ts JITI_PACKAGES list.
-// Inlined because we cannot import a .ts module before the loader
-// is registered.
+// Mirrors packages/shared/src/resolve-jiti.ts JITI_PACKAGES.
 const JITI_PACKAGES = ["jiti", "@mariozechner/jiti"];
 
 /** Resolve pi's jiti register hook as a file:// URL. Returns null on miss. */
@@ -52,18 +51,17 @@ function resolveJitiUrl() {
 
 const loader = resolveJitiUrl();
 if (!loader) {
-  console.error(
+  process.stderr.write(
     "pi-dashboard: cannot find jiti. " +
-      "Install pi: 'npm install -g @earendil-works/pi-coding-agent'",
+      "Install pi: 'npm install -g @earendil-works/pi-coding-agent'\n",
   );
   process.exit(1);
 }
 
 // Mirrors shouldUrlWrapEntry() in packages/shared/src/platform/node-spawn.ts:
 // jiti needs the entry URL-wrapped on Windows (Node rejects raw drive-letter
-// paths for --import). POSIX + jiti accepts raw paths.
-const wrapEntry = process.platform === "win32";
-const entry = wrapEntry ? pathToFileURL(cliPath).href : cliPath;
+// paths for --import). POSIX takes the raw path.
+const entry = process.platform === "win32" ? pathToFileURL(cliPath).href : cliPath;
 
 const child = spawn(
   process.execPath,
@@ -81,6 +79,6 @@ child.on("exit", (code, signal) => {
 });
 
 child.on("error", (err) => {
-  console.error("[pi-dashboard] Failed to spawn Node:", err.message);
+  process.stderr.write(`pi-dashboard: failed to spawn Node: ${err.message}\n`);
   process.exit(1);
 });
