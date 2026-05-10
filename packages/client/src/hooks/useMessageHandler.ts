@@ -33,6 +33,7 @@ export interface SpawnErrorDetail {
   timeoutMs?: number;
 }
 import { applyPluginConfigUpdate } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import { publishSessionEvent, clearSessionEvents } from "@blackbelt-technology/dashboard-plugin-runtime";
 
 export interface MessageHandlerSetters {
   setSessions: React.Dispatch<React.SetStateAction<Map<string, DashboardSession>>>;
@@ -178,6 +179,11 @@ export function useMessageHandler(
           return next;
         });
         maxSeqMapRef.current.set(msg.sessionId, 0);
+        // Mirror the reset into the plugin-runtime per-session event
+        // store so plugin reducers (e.g. flows-plugin) re-derive from
+        // a clean stream after a replay. See change:
+        // pluginize-flows-via-registry.
+        clearSessionEvents(msg.sessionId);
         break;
 
       case "event":
@@ -190,6 +196,12 @@ export function useMessageHandler(
         if (msg.seq > (maxSeqMapRef.current.get(msg.sessionId) ?? 0)) {
           maxSeqMapRef.current.set(msg.sessionId, msg.seq);
         }
+        // Publish to the plugin-runtime per-session event store so
+        // plugin slot consumers calling `useSessionEvents(sessionId)`
+        // re-render with the extended event list. The shell's reducer
+        // and the plugin store consume the same `msg.event`. See
+        // change: pluginize-flows-via-registry.
+        publishSessionEvent(msg.sessionId, msg.event);
         break;
 
       // chat-markdown-local-images-and-math: bridge-emitted local-image asset.

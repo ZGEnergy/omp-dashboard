@@ -11,12 +11,14 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { DashboardEvent, DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { SlotId } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
 import type { PluginConfigUpdateMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import { createSlotRegistry, type SlotRegistry, type ClaimEntry } from "./slot-registry.js";
+import { getSessionEvents, subscribeSessionEvents } from "./session-events-store.js";
 
 // ── Logger ───────────────────────────────────────────────────────────────────
 
@@ -50,6 +52,15 @@ export interface PluginContextValue {
   useSessionState(sessionId: string): DashboardSession | undefined;
   /** Access all sessions. */
   useAllSessions(): DashboardSession[];
+  /**
+   * Access the per-session event stream as a stable, reactive
+   * snapshot. Plugins use this to derive their own state via internal
+   * reducers + `useMemo`. The returned array reference is stable
+   * across renders that don't add a new event for this session.
+   *
+   * See change: pluginize-flows-via-registry.
+   */
+  useSessionEvents(sessionId: string): readonly DashboardEvent[];
   /** Get plugin config for a specific plugin id. */
   getPluginConfig(pluginId: string): Record<string, unknown>;
   /** Subscribe to plugin config updates. Returns an unsubscribe fn. */
@@ -112,6 +123,38 @@ export function useSessionState(sessionId: string): DashboardSession | undefined
   const ctx = useContext(PluginReactContext);
   if (!ctx) throw new Error("Slot consumer must be rendered inside <PluginContextProvider>");
   return ctx.useSessionState(sessionId);
+}
+
+/**
+ * Internal hook implementation — wired into `PluginContextValue.useSessionEvents`
+ * by `PluginContextProvider`. The implementation lives here as a
+ * top-level hook (not a closure inside the provider) so React's hook
+ * detection sees a real hook call.
+ */
+function useSessionEventsHookImpl(sessionId: string): readonly DashboardEvent[] {
+  return useSyncExternalStore(
+    (cb) => subscribeSessionEvents(sessionId, cb),
+    () => getSessionEvents(sessionId),
+    () => getSessionEvents(sessionId),
+  );
+}
+
+/**
+ * Public hook — read the per-session event stream for plugin-owned
+ * state derivation. Plugins SHALL call this from inside a slot
+ * contribution (i.e. a descendant of `<PluginContextProvider>`).
+ *
+ * The returned array is a frozen snapshot; the reference is stable
+ * until a new event arrives for the requested session, at which point
+ * `useSyncExternalStore` triggers a re-render and returns the
+ * extended snapshot.
+ *
+ * @public
+ */
+export function useSessionEvents(sessionId: string): readonly DashboardEvent[] {
+  const ctx = useContext(PluginReactContext);
+  if (!ctx) throw new Error("Slot consumer must be rendered inside <PluginContextProvider>");
+  return ctx.useSessionEvents(sessionId);
 }
 
 /** @public — namespaced logger for the current plugin contribution */
@@ -253,6 +296,7 @@ export function PluginContextProvider({
     registry: resolvedRegistry,
     useAllSessions: useAllSessionsFn,
     useSessionState: useSessionStateFn,
+    useSessionEvents: useSessionEventsHookImpl,
     getPluginConfig: getConfig,
     subscribePluginConfig: subscribeConfig,
     send,

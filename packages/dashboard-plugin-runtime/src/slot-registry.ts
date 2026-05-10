@@ -29,6 +29,12 @@ export interface ClaimEntry<S extends SlotId = SlotId> {
   slot: S;
   componentName?: string;
   command?: string;
+  /**
+   * Discriminator string for slots whose multiplicity selects one
+   * contribution at a time (notably `content-view`). See
+   * `forRoute` filter helper. See change: pluginize-flows-via-registry.
+   */
+  route?: string;
   trigger?: string;
   toolName?: string;
   tab?: string;
@@ -162,6 +168,17 @@ export function forFolder(claims: ClaimEntry[], folder: FolderDescriptor): Claim
 /** Filter command-route claims by command string. */
 export function forCommand(claims: ClaimEntry[], command: string): ClaimEntry[] {
   return claims.filter(c => c.command === command);
+}
+
+/**
+ * Filter content-view claims by route. A claim with no `route` field
+ * matches the empty route (`undefined` or `""`); a claim with a route
+ * matches only when the active route equals it. See change:
+ * pluginize-flows-via-registry.
+ */
+export function forRoute(claims: ClaimEntry[], activeRoute: string | undefined): ClaimEntry[] {
+  const target = activeRoute ?? "";
+  return claims.filter(c => (c.route ?? "") === target);
 }
 
 /** Filter settings-section claims by tab. */

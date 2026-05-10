@@ -10,6 +10,16 @@ export interface PluginClaim {
   component?: string;
   /** Route command for "command-route" slot (e.g. "/specs"). */
   command?: string;
+  /**
+   * Optional discriminator string for slots whose multiplicity selects
+   * one contribution at a time (notably `content-view`). When set, the
+   * slot consumer SHALL render only the claim whose `route` matches
+   * the active route at render time. Free-form string; the plugin and
+   * the slot consumer share the namespace.
+   *
+   * See change: pluginize-flows-via-registry.
+   */
+  route?: string;
   /** Trigger id for "anchored-popover" slot. */
   trigger?: string;
   /** toolName for "tool-renderer" slot. */

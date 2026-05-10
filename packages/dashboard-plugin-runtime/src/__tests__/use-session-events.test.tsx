@@ -1,0 +1,131 @@
+/**
+ * Tests for `useSessionEvents` plugin-runtime hook + the underlying
+ * module-level event store. See change: pluginize-flows-via-registry.
+ */
+import React from "react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, act, cleanup } from "@testing-library/react";
+import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { PluginContextProvider, useSessionEvents, publishSessionEvent } from "../index.js";
+import { __resetSessionEventsStoreForTests } from "../session-events-store.js";
+
+function makeEvent(seq: number, eventType = "tool_start"): DashboardEvent {
+  return {
+    seq,
+    timestamp: new Date(seq * 1000).toISOString(),
+    eventType,
+    data: { ts: seq },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+}
+
+function Probe({ sessionId, onSnapshot }: {
+  sessionId: string;
+  onSnapshot: (events: readonly DashboardEvent[]) => void;
+}) {
+  const events = useSessionEvents(sessionId);
+  onSnapshot(events);
+  return <div data-testid="count">{events.length}</div>;
+}
+
+function renderProbe(sessionId: string, onSnapshot: (e: readonly DashboardEvent[]) => void) {
+  return render(
+    <PluginContextProvider>
+      <Probe sessionId={sessionId} onSnapshot={onSnapshot} />
+    </PluginContextProvider>,
+  );
+}
+
+describe("useSessionEvents", () => {
+  beforeEach(() => __resetSessionEventsStoreForTests());
+  afterEach(() => {
+    cleanup();
+    __resetSessionEventsStoreForTests();
+  });
+
+  it("returns empty array for unknown session", () => {
+    const snaps: readonly DashboardEvent[][] = [];
+    renderProbe("S", (s) => snaps.push(s));
+    expect(snaps[0]).toEqual([]);
+  });
+
+  it("re-renders when a new event is published for the subscribed session", () => {
+    const snaps: readonly DashboardEvent[][] = [];
+    const { getByTestId } = renderProbe("S", (s) => snaps.push(s));
+    expect(getByTestId("count").textContent).toBe("0");
+
+    act(() => publishSessionEvent("S", makeEvent(1)));
+    expect(getByTestId("count").textContent).toBe("1");
+
+    act(() => publishSessionEvent("S", makeEvent(2)));
+    expect(getByTestId("count").textContent).toBe("2");
+
+    // Snapshot growth: 0 → 1 → 2
+    const lengths = snaps.map((s) => s.length);
+    expect(lengths).toContain(0);
+    expect(lengths).toContain(1);
+    expect(lengths).toContain(2);
+  });
+
+  it("preserves arrival order", () => {
+    const snaps: readonly DashboardEvent[][] = [];
+    renderProbe("S", (s) => snaps.push(s));
+
+    act(() => {
+      publishSessionEvent("S", makeEvent(1));
+      publishSessionEvent("S", makeEvent(2));
+      publishSessionEvent("S", makeEvent(3));
+    });
+
+    const last = snaps[snaps.length - 1];
+    expect(last.map((e) => e.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("scopes events per session", () => {
+    const snapsA: readonly DashboardEvent[][] = [];
+    const snapsB: readonly DashboardEvent[][] = [];
+    render(
+      <PluginContextProvider>
+        <Probe sessionId="A" onSnapshot={(s) => snapsA.push(s)} />
+        <Probe sessionId="B" onSnapshot={(s) => snapsB.push(s)} />
+      </PluginContextProvider>,
+    );
+
+    act(() => publishSessionEvent("A", makeEvent(1)));
+    act(() => publishSessionEvent("B", makeEvent(99)));
+    act(() => publishSessionEvent("A", makeEvent(2)));
+
+    const lastA = snapsA[snapsA.length - 1];
+    const lastB = snapsB[snapsB.length - 1];
+    expect(lastA.map((e) => e.seq)).toEqual([1, 2]);
+    expect(lastB.map((e) => e.seq)).toEqual([99]);
+  });
+
+  it("returns a stable reference between publishes", () => {
+    const snaps: readonly DashboardEvent[][] = [];
+    const { rerender } = renderProbe("S", (s) => snaps.push(s));
+
+    act(() => publishSessionEvent("S", makeEvent(1)));
+    const refAfterFirst = snaps[snaps.length - 1];
+
+    // Force a re-render without publishing.
+    rerender(
+      <PluginContextProvider>
+        <Probe sessionId="S" onSnapshot={(s) => snaps.push(s)} />
+      </PluginContextProvider>,
+    );
+    const refAfterRerender = snaps[snaps.length - 1];
+
+    expect(refAfterRerender).toBe(refAfterFirst);
+  });
+
+  it("throws when called outside PluginContextProvider", () => {
+    // Suppress React error logging for this assertion.
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(() =>
+      render(<Probe sessionId="S" onSnapshot={() => {}} />),
+    ).toThrow(/PluginContextProvider/);
+    errSpy.mockRestore();
+  });
+});
+

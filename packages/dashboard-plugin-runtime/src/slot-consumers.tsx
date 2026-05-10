@@ -10,7 +10,7 @@
  */
 import React from "react";
 import { useSlotRegistryOrNull, CurrentPluginLayer } from "./plugin-context.js";
-import { forSessionRendered, forFolder, forTab, forToolName } from "./slot-registry.js";
+import { forSessionRendered, forFolder, forTab, forToolName, forRoute } from "./slot-registry.js";
 import { SlotErrorBoundary } from "./slot-error-boundary.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { SlotId } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
@@ -136,9 +136,15 @@ export function ContentViewSlot({
 }) {
   const registry = useSlotRegistryOrNull();
   if (!registry) return null;
-  const claims = registry.getClaims("content-view");
+  // Multiple plugins may claim `content-view` with different `route`
+  // discriminators (e.g. flows-plugin's `flow-agent-detail` vs
+  // `flow-architect-detail`). Filter by `routeParams.route` so each
+  // route's claim is selectable independently. Claims without a route
+  // match the empty/default route. one-active: render the first
+  // matching claim after priority resolution. See change:
+  // pluginize-flows-via-registry.
+  const claims = forRoute(registry.getClaims("content-view"), routeParams.route);
   if (!claims.length) return null;
-  // one-active: render only the first matching claim
   const claim = claims[0];
   return renderClaim(claim as Parameters<typeof renderClaim>[0], "content-view", {
     session,

@@ -191,8 +191,9 @@ function generateRegistryContent(entries: PluginEntry[]): string {
       const tabStr = claim.tab ? `, tab: ${JSON.stringify(claim.tab)}` : "";
       const toolNameStr = claim.toolName ? `, toolName: ${JSON.stringify(claim.toolName)}` : "";
       const commandStr = claim.command ? `, command: ${JSON.stringify(claim.command)}` : "";
+      const routeStr = claim.route ? `, route: ${JSON.stringify(claim.route)}` : "";
       lines.push(
-        `      { pluginId: ${JSON.stringify(manifest.id)}, priority: ${manifest.priority ?? 1000}, slot: ${JSON.stringify(claim.slot)}${tabStr}${toolNameStr}${commandStr}${componentRef}${predicateRef}${shouldRenderRef} },`,
+        `      { pluginId: ${JSON.stringify(manifest.id)}, priority: ${manifest.priority ?? 1000}, slot: ${JSON.stringify(claim.slot)}${tabStr}${toolNameStr}${commandStr}${routeStr}${componentRef}${predicateRef}${shouldRenderRef} },`,
       );
     }
     lines.push("    ],");
