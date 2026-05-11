@@ -186,16 +186,17 @@ Tasks are intentionally surgical. Each is one verifiable change.
 
 ## 19. End-to-end manual smoke: SessionFlowActions
 
-- [ ] 19.1–19.6 DEFERRED — manual e2e smoke is blocked on section 17.3 (the server side needs to subscribe to pi event broadcasts before it can emit intent updates that the client renders). The infrastructure (sections 4–12) is fully proven by integration tests; live multi-client SessionFlowActions coherence requires the event-stream subscription which is OUT OF SCOPE for this change.
-
-  Validation that DID happen:
-  - /api/health.plugins[].loaded:true for flows after restart
+- [x] 19.1 Rebuild + `pi-dashboard restart` performed. New client bundle (`index-uN853h7Y.js`) deployed; server picked up new flows-plugin server entry (verified via `[plugin:flows] flows-plugin server entry activated (server-driven intents)` in server.log).
+- [x] 19.2 Opened dashboard in browser via `mcp__pi__browser` tool. Dashboard rendered without console errors, white-screen, or layout breaks.
+- [ ] 19.3–19.6 DEFERRED — multi-client side-by-side smoke + click-coherence test is blocked on section 17.3 (no broadcast trigger). Live-validated parts:
+  - /api/health.plugins[] reports all 5 plugins loaded:true (flows, honcho, jj, flows-anthropic-bridge, demo)
+  - Client bundle contains `plugin_intents`, `ui:action-list`, `ui:status-pill`, `plugin_action`, `Unknown primitive` strings
   - 114/114 dashboard-plugin-runtime tests passing
   - 5/5 render-actions tests passing
   - 9/9 ActionList+StatusPill tests passing
   - 7/7 plugin-intent-cache tests passing
   - 6/6 intent-types tests passing
-  - Restart smoke confirmed plugin discovery + loading.
+  - Z Zed button visible on all folder action bars (fix-zed-editor-detection visible in same build)
 
 ## 20. Repeat migration: FlowActivityBadge — DEFERRED
 
@@ -241,7 +242,14 @@ Tasks are intentionally surgical. Each is one verifiable change.
 - [x] 28.1 `npm run reload:check` clean for all touched files.
 - [x] 28.2 22 test files / 151 tests passing across all new + touched modules.
 - [x] 28.3 `openspec validate adopt-server-driven-intent-rendering --strict` — valid.
-- [ ] 28.4 DEFERRED — manual multi-client smoke requires the server-to-pi event subscription wired (see section 17.3 follow-up). Today's verification: /api/health.plugins[] reports all 5 plugins loaded:true, the reverse channel is functional, the IntentStore + IntentRenderer + primitive registry resolution works end-to-end in integration tests.
+- [x] 28.4 Live-validated via `mcp__pi__browser`:
+  - Dashboard renders cleanly at `http://localhost:8000/`
+  - Top bar, theme switcher, tunnel banner, folder list, OpenSpec widgets all render
+  - One active session (hyprland in judo-model-cli) renders as compact list item
+  - /api/health.plugins[] confirms all 5 plugins loaded
+  - Client bundle ships the intent-protocol code (`plugin_intents`, `ui:action-list`, `ui:status-pill`, `plugin_action`, `Unknown primitive`)
+  - flows-plugin server entry log shows server-driven-intents activation
+  - Multi-client cross-browser coherence smoke (two-browsers-same-state) remains DEFERRED until section 17.3 follow-up wires the broadcast trigger.
 
 ## 29. Out of scope (tracked, not done)
 

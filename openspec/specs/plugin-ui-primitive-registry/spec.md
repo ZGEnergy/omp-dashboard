@@ -156,33 +156,39 @@ Plugin tests SHALL use this helper to provide mock implementations of the primit
 - **THEN** the rendered `<ComponentUnderTest />` SHALL have access to `MockMarkdown` via `useUiPrimitive("ui:markdown-content")`
 - **AND** any primitive not in `partialImpls` SHALL throw if accessed via the strict hook (matches production behavior)
 
-### Requirement: Plugins consume primitives via the registry
+### Requirement: The primitive registry SHALL be consumed by the shell's IntentRenderer, not by plugin code
 
-Plugin source files under `packages/*-plugin/src/` SHALL access registered UI primitives ONLY through `useUiPrimitive(key)` or `useUiPrimitiveOrNull(key)`. Direct imports of registered primitive SYMBOLS from `@blackbelt-technology/pi-dashboard-client-utils/{AgentCardShell,MarkdownContent,ConfirmDialog,DialogPortal,SearchableSelectDialog,ZoomControls,agent-card-utils}` SHALL be forbidden in plugin source.
+The primitive registry's mechanism — `createUiPrimitiveRegistry`, `registerUiPrimitive`, `UiPrimitiveProvider`, `useUiPrimitive`, `useUiPrimitiveOrNull` — SHALL survive unchanged. The currently-registered primitives SHALL stay registered. Adding new primitives still requires three steps: extend `UI_PRIMITIVE_KEYS`, extend `UiPrimitiveMap`, register an impl in `main.tsx`.
 
-Direct imports of HOOKS (`useMobile`, `useZoomPan`) and SLOT CONSUMERS (`extension-ui/AgentMetricSlot`, `BreadcrumbSlot`, `GateSlot`) from `@blackbelt-technology/pi-dashboard-client-utils/*` ARE explicitly allowed — hooks cannot be registered (Rules of Hooks) and slot consumers are a different layer.
+What changes: the expected caller of `useUiPrimitive(...)` SHALL move from plugin React components to the shell's `IntentRenderer`. Plugins SHALL NOT directly call `useUiPrimitive` from their client-side code as a renderer of their own state. The shell, on each connected client, SHALL call `useUiPrimitive(intent.primitive)` inside `IntentRenderer` to resolve a primitive name from an incoming intent to a `ComponentType` for rendering.
 
-A repository-level lint test SHALL enforce this rule.
+This SUPERSEDES the usage pattern established by the archived change `add-plugin-ui-primitive-registry` (2026-05-11), where plugins like flows-plugin called `useUiPrimitive` from inside their React components. That pattern, while functional, runs plugin React code in every connected client independently — incompatible with multi-client state coherence. The new pattern keeps the registry's mechanism and moves the call site to the shell.
 
-#### Scenario: Lint passes on registry-using plugin
+#### Scenario: Plugin's intent uses a registered primitive name
 
-- **WHEN** flows-plugin imports `useUiPrimitive` from `@blackbelt-technology/dashboard-plugin-runtime` and looks up `"ui:markdown-content"` instead of importing `MarkdownContent` directly
-- **THEN** the lint test `no-primitive-direct-import.test.ts` SHALL pass
+- **GIVEN** the dashboard has registered `UI_PRIMITIVE_KEYS.agentCard` → `AgentCardShell` at startup
+- **WHEN** a plugin broadcasts an intent `{primitive:"ui:agent-card", props:{name:"Explore", status:"running"}}`
+- **THEN** the shell's IntentRenderer SHALL resolve "ui:agent-card" via `useUiPrimitive(UI_PRIMITIVE_KEYS.agentCard)`
+- **AND** render `<AgentCardShell name="Explore" status="running" />` in the target slot
 
-#### Scenario: Lint fails on direct primitive import
+#### Scenario: Plugin emits intent referencing an unregistered primitive name
 
-- **WHEN** a plugin source file contains `import { MarkdownContent } from "@blackbelt-technology/pi-dashboard-client-utils/MarkdownContent"`
-- **THEN** the lint test SHALL fail with a message identifying the file and recommending `useUiPrimitive("ui:markdown-content")`
+- **WHEN** a plugin broadcasts `{primitive:"my-custom-thing", props:{...}}` and the primitive is not registered
+- **THEN** the IntentRenderer SHALL use `useUiPrimitiveOrNull` and receive `null`
+- **AND** render an inline error placeholder identifying the missing primitive name and the broadcasting pluginId
+- **AND** sibling intent contributions continue to render normally
 
-#### Scenario: Lint allows hook imports
+### Requirement: Plugin client-side `useUiPrimitive` calls SHALL be marked DEPRECATED
 
-- **WHEN** a plugin source file contains `import { useMobile } from "@blackbelt-technology/pi-dashboard-client-utils/useMobile"`
-- **THEN** the lint test SHALL NOT flag this import
+Plugin code that still imports `useUiPrimitive` (today, flows-plugin's 9 client files) SHALL continue to work — the API is not removed. But the JSDoc on the exported `useUiPrimitive` hook SHALL include a deprecation notice directing plugin authors to the intent broadcast pattern. The deprecation is documentation-only; runtime behavior is unchanged for legacy callers.
 
-#### Scenario: Lint allows slot consumer imports
+The repo-lint `no-primitive-direct-import.test.ts` (introduced by `add-plugin-ui-primitive-registry`) SHALL be relaxed from "fail on direct import" to "warn on direct import" during the migration period. Once flows-plugin has fully migrated, the lint may be re-tightened to forbid direct imports AND `useUiPrimitive` calls from plugin code entirely.
 
-- **WHEN** a plugin source file contains `import { GateSlot } from "@blackbelt-technology/pi-dashboard-client-utils/extension-ui/GateSlot"`
-- **THEN** the lint test SHALL NOT flag this import
+#### Scenario: JSDoc marks plugin-callsite useUiPrimitive as deprecated
+
+- **GIVEN** plugin author reads the `useUiPrimitive` hook definition
+- **WHEN** they look at the IDE hover or JSDoc preview
+- **THEN** they SHALL see a deprecation notice stating: "Plugin code SHOULD emit intent broadcasts via ServerPluginContext.broadcastToSubscribers instead of calling useUiPrimitive directly. See plugin-intent-protocol."
 
 ### Requirement: Dashboard registers all declared primitives at startup
 
