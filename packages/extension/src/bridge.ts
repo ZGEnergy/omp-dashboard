@@ -919,6 +919,30 @@ function initBridge(pi: ExtensionAPI) {
         // messages immediately so they precede the deferred message_end
         // send below. See change: chat-markdown-local-images-and-math.
         maybeInlineAssistantImages(event);
+        // Run retry-tracker / usage-limit-orderer SYNCHRONOUSLY here, BEFORE
+        // the handler returns. Both the state update AND the synth event
+        // send must be sync so they land on the wire BEFORE the next
+        // `agent_end` (which pi fires synchronously back-to-back, see
+        // pi-coding-agent agent-session.js:298–331).
+        //
+        // Previously these ran inside the setTimeout(0) macrotask intended
+        // for entryId capture, so `agent_end` was processed (and shipped)
+        // BEFORE the synthesizers had marked the retry as in-flight —
+        // leaving the dashboard's `retryState` stuck (yellow + red banners
+        // both visible). The message_end body itself stays deferred for
+        // the entryId workaround (`fix-per-message-fork`); it doesn't
+        // affect retry-state ordering since the reducer's message_end arm
+        // does not touch retryState/lastError.
+        // See change: fix-retry-banner-stuck-on-limit-exceeded.
+        const synthetic = retryTracker.observeMessageEnd(sessionId, messageRef as any);
+        if (synthetic) {
+          if (synthetic.eventType === "auto_retry_start") {
+            usageLimitOrderer.noteRetryStart(sessionId);
+          } else {
+            usageLimitOrderer.noteRetryEnd(sessionId);
+          }
+          sendSyntheticRetryEvent(synthetic.eventType, synthetic.data);
+        }
         setTimeout(() => {
           if (!isActive() || !sessionReady) return;
           const entryId =
@@ -928,18 +952,6 @@ function initBridge(pi: ExtensionAPI) {
           const enriched = { ...event, entryId, nonce };
           const protoMsg = mapEventToProtocol(sessionId, enriched);
           connection.send(protoMsg);
-          // After forwarding the original message_end, ask the retry tracker
-          // whether to synthesize an auto_retry_* event. See change:
-          // fix-provider-retry-infinite-loop.
-          const synthetic = retryTracker.observeMessageEnd(sessionId, messageRef as any);
-          if (synthetic) {
-            sendSyntheticRetryEvent(synthetic.eventType, synthetic.data);
-            if (synthetic.eventType === "auto_retry_start") {
-              usageLimitOrderer.noteRetryStart(sessionId);
-            } else {
-              usageLimitOrderer.noteRetryEnd(sessionId);
-            }
-          }
         }, 0);
         return;
       }

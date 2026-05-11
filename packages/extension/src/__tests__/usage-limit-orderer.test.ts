@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { UsageLimitOrderer, USAGE_LIMIT_PATTERN } from "../usage-limit-orderer.js";
+import { USAGE_LIMIT_FIXTURES, NON_USAGE_LIMIT_FIXTURES } from "./fixtures/usage-limit-error-strings.js";
 
 describe("UsageLimitOrderer", () => {
   it("returns null when no retry was pending", () => {
@@ -58,6 +59,17 @@ describe("UsageLimitOrderer", () => {
     "",
   ])("does not match non-usage-limit variant: %s", (msg) => {
     expect(USAGE_LIMIT_PATTERN.test(msg)).toBe(false);
+  });
+
+  // Real production-log fixtures — see change: fix-retry-banner-stuck-on-limit-exceeded.
+  describe("USAGE_LIMIT_PATTERN broadened coverage (production fixtures)", () => {
+    it.each(USAGE_LIMIT_FIXTURES)("matches terminal: [$provider] $label", ({ error }) => {
+      expect(USAGE_LIMIT_PATTERN.test(error)).toBe(true);
+    });
+
+    it.each(NON_USAGE_LIMIT_FIXTURES)("does not match transient: [$provider] $label", ({ error }) => {
+      expect(USAGE_LIMIT_PATTERN.test(error)).toBe(false);
+    });
   });
 
   it("clears pending after agent_end (no double-synthesis on subsequent agent_end)", () => {
