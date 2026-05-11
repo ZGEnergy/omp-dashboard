@@ -5,6 +5,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type {
   ServerToBrowserMessage,
+  BrowserOpenSpecUpdateMessage,
   BrowserToServerMessage,
 } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import type { SessionManager } from "./memory-session-manager.js";
@@ -32,8 +33,8 @@ export function buildOpenSpecConnectSnapshot(
   directoryService: Pick<DirectoryService, "knownDirectories" | "getOpenSpecData">,
   hasDir: (cwd: string) => boolean,
   hasRoot: (cwd: string) => boolean = hasDir,
-): Array<ServerToBrowserMessage> {
-  const out: Array<ServerToBrowserMessage> = [];
+): Array<BrowserOpenSpecUpdateMessage> {
+  const out: Array<BrowserOpenSpecUpdateMessage> = [];
   for (const cwd of directoryService.knownDirectories()) {
     const cached = directoryService.getOpenSpecData(cwd);
     const root = hasRoot(cwd);
