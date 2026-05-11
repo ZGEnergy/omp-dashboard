@@ -10,22 +10,29 @@
  */
 import React from "react";
 import { useSlotRegistryOrNull, CurrentPluginLayer } from "./plugin-context.js";
-import { forSession, forFolder, forTab, forToolName } from "./slot-registry.js";
+import { forSessionRendered, forFolder, forTab, forToolName } from "./slot-registry.js";
 import { SlotErrorBoundary } from "./slot-error-boundary.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { SlotId } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
 import type { FolderDescriptor } from "./slot-registry.js";
 
 /**
- * Returns true when at least one plugin claim exists for `slotId` and matches
- * the given `session` (per slot's session targeting rules). Lets call sites
- * conditionally render parent containers (e.g. titled subcards) without
- * triggering the slot's own render path twice.
+ * Returns true when at least one plugin claim exists for `slotId` AND matches
+ * the given `session` per the slot's session targeting rules AND would
+ * actually render visible output (i.e. its `shouldRender(session)` returns
+ * `true`, or no `shouldRender` is declared). Lets call sites conditionally
+ * render parent containers (e.g. titled subcards) without triggering the
+ * slot's own render path twice.
+ *
+ * Note: this consults `shouldRender` (introduced by change
+ * `auto-hide-empty-session-subcards`). Claims whose component conditionally
+ * returns `null` should declare `shouldRender` so this hook reports `false`
+ * and parent wrappers hide cleanly.
  */
 export function useSlotHasClaimsForSession(slotId: SlotId, session: DashboardSession): boolean {
   const registry = useSlotRegistryOrNull();
   if (!registry) return false;
-  return forSession(registry.getClaims(slotId), session).length > 0;
+  return forSessionRendered(registry.getClaims(slotId), session).length > 0;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -65,7 +72,7 @@ export function SidebarFolderSectionSlot({ folder }: { folder: FolderDescriptor 
 export function SessionCardBadgeSlot({ session }: { session: DashboardSession }) {
   const registry = useSlotRegistryOrNull();
   if (!registry) return null;
-  const claims = forSession(registry.getClaims("session-card-badge"), session);
+  const claims = forSessionRendered(registry.getClaims("session-card-badge"), session);
   if (!claims.length) return null;
   return (
     <>
@@ -79,7 +86,7 @@ export function SessionCardBadgeSlot({ session }: { session: DashboardSession })
 export function SessionCardActionBarSlot({ session }: { session: DashboardSession }) {
   const registry = useSlotRegistryOrNull();
   if (!registry) return null;
-  const claims = forSession(registry.getClaims("session-card-action-bar"), session);
+  const claims = forSessionRendered(registry.getClaims("session-card-action-bar"), session);
   if (!claims.length) return null;
   return (
     <>
@@ -93,7 +100,7 @@ export function SessionCardActionBarSlot({ session }: { session: DashboardSessio
 export function SessionCardMemorySlot({ session }: { session: DashboardSession }) {
   const registry = useSlotRegistryOrNull();
   if (!registry) return null;
-  const claims = forSession(registry.getClaims("session-card-memory"), session);
+  const claims = forSessionRendered(registry.getClaims("session-card-memory"), session);
   if (!claims.length) return null;
   return (
     <>
@@ -107,7 +114,7 @@ export function SessionCardMemorySlot({ session }: { session: DashboardSession }
 export function WorkspaceActionBarSlot({ session }: { session: DashboardSession }) {
   const registry = useSlotRegistryOrNull();
   if (!registry) return null;
-  const claims = forSession(registry.getClaims("workspace-action-bar"), session);
+  const claims = forSessionRendered(registry.getClaims("workspace-action-bar"), session);
   if (!claims.length) return null;
   return (
     <>
@@ -143,7 +150,7 @@ export function ContentViewSlot({
 export function ContentHeaderStickySlot({ session }: { session: DashboardSession }) {
   const registry = useSlotRegistryOrNull();
   if (!registry) return null;
-  const claims = forSession(registry.getClaims("content-header-sticky"), session);
+  const claims = forSessionRendered(registry.getClaims("content-header-sticky"), session);
   if (!claims.length) return null;
   return (
     <>
@@ -157,7 +164,7 @@ export function ContentHeaderStickySlot({ session }: { session: DashboardSession
 export function ContentInlineFooterSlot({ session }: { session: DashboardSession }) {
   const registry = useSlotRegistryOrNull();
   if (!registry) return null;
-  const claims = forSession(registry.getClaims("content-inline-footer"), session);
+  const claims = forSessionRendered(registry.getClaims("content-inline-footer"), session);
   if (!claims.length) return null;
   return (
     <>

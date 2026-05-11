@@ -1,11 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, renderHook } from "@testing-library/react";
 import React from "react";
 import { PluginContextProvider } from "../plugin-context.js";
 import {
   SessionCardBadgeSlot,
+  SessionCardMemorySlot,
   SettingsSectionSlot,
   ToolRendererSlot,
+  useSlotHasClaimsForSession,
 } from "../slot-consumers.js";
 import { createSlotRegistry } from "../slot-registry.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -192,6 +194,128 @@ describe("slot consumer outside PluginContextProvider", () => {
     // Slot consumers gracefully render nothing when no provider is present
     // so existing component tests don't need wrapping.
     const { container } = render(<SessionCardBadgeSlot session={makeSession()} />);
+    expect(container.firstChild).toBeNull();
+  });
+});
+
+// ── shouldRender semantics (auto-hide-empty-session-subcards) ───────────────
+
+describe("useSlotHasClaimsForSession with shouldRender", () => {
+  const wrap =
+    (registry: ReturnType<typeof createSlotRegistry>) =>
+    ({ children }: { children: React.ReactNode }) => (
+      <PluginContextProvider registry={registry}>{children}</PluginContextProvider>
+    );
+
+  it("returns false when only claim's shouldRender returns false", () => {
+    const registry = createSlotRegistry();
+    registry.addClaim({
+      pluginId: "closed",
+      priority: 100,
+      slot: "session-card-memory",
+      shouldRender: () => false,
+      Component: () => <span>shouldnt-render</span>,
+    });
+    const { result } = renderHook(
+      () => useSlotHasClaimsForSession("session-card-memory", makeSession()),
+      { wrapper: wrap(registry) },
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("returns true when at least one claim's shouldRender returns true", () => {
+    const registry = createSlotRegistry();
+    registry.addClaim({
+      pluginId: "closed",
+      priority: 100,
+      slot: "session-card-memory",
+      shouldRender: () => false,
+      Component: () => <span>nope</span>,
+    });
+    registry.addClaim({
+      pluginId: "open",
+      priority: 200,
+      slot: "session-card-memory",
+      shouldRender: () => true,
+      Component: () => <span data-testid="open">open</span>,
+    });
+    const { result } = renderHook(
+      () => useSlotHasClaimsForSession("session-card-memory", makeSession()),
+      { wrapper: wrap(registry) },
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("treats absent shouldRender as pass-through (true)", () => {
+    const registry = createSlotRegistry();
+    registry.addClaim({
+      pluginId: "legacy",
+      priority: 100,
+      slot: "session-card-memory",
+      Component: () => <span>legacy</span>,
+    });
+    const { result } = renderHook(
+      () => useSlotHasClaimsForSession("session-card-memory", makeSession()),
+      { wrapper: wrap(registry) },
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("returns false outside PluginContextProvider", () => {
+    const { result } = renderHook(() =>
+      useSlotHasClaimsForSession("session-card-memory", makeSession()),
+    );
+    expect(result.current).toBe(false);
+  });
+});
+
+describe("SessionCardMemorySlot with shouldRender", () => {
+  it("mounts only claims whose shouldRender returns true", () => {
+    const registry = createSlotRegistry();
+    registry.addClaim({
+      pluginId: "closed",
+      priority: 100,
+      slot: "session-card-memory",
+      shouldRender: () => false,
+      Component: () => <span data-testid="closed-badge">closed</span>,
+    });
+    registry.addClaim({
+      pluginId: "open",
+      priority: 200,
+      slot: "session-card-memory",
+      shouldRender: () => true,
+      Component: () => <span data-testid="open-badge">open</span>,
+    });
+    render(
+      <PluginContextProvider registry={registry}>
+        <SessionCardMemorySlot session={makeSession()} />
+      </PluginContextProvider>,
+    );
+    expect(screen.queryByTestId("closed-badge")).toBeNull();
+    expect(screen.getByTestId("open-badge")).toBeDefined();
+  });
+
+  it("renders nothing when every claim is gated out", () => {
+    const registry = createSlotRegistry();
+    registry.addClaim({
+      pluginId: "a",
+      priority: 100,
+      slot: "session-card-memory",
+      shouldRender: () => false,
+      Component: () => <span>a</span>,
+    });
+    registry.addClaim({
+      pluginId: "b",
+      priority: 200,
+      slot: "session-card-memory",
+      shouldRender: () => false,
+      Component: () => <span>b</span>,
+    });
+    const { container } = render(
+      <PluginContextProvider registry={registry}>
+        <SessionCardMemorySlot session={makeSession()} />
+      </PluginContextProvider>,
+    );
     expect(container.firstChild).toBeNull();
   });
 });

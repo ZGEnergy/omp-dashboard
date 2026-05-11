@@ -124,3 +124,49 @@ describe("validateManifest — invalid cases", () => {
     ).toThrow(ManifestValidationError);
   });
 });
+
+describe("validateManifest — shouldRender + predicate (auto-hide-empty-session-subcards)", () => {
+  it("accepts shouldRender as a string", () => {
+    const m = validateManifest({
+      ...validManifest,
+      claims: [
+        {
+          slot: "session-card-memory",
+          component: "Mem",
+          shouldRender: "shouldRenderHonchoMemory",
+        },
+      ],
+    });
+    expect(m.claims[0].shouldRender).toBe("shouldRenderHonchoMemory");
+  });
+
+  it("accepts predicate as a string (existing behavior preserved)", () => {
+    const m = validateManifest({
+      ...validManifest,
+      claims: [
+        {
+          slot: "session-card-badge",
+          component: "Badge",
+          predicate: "isInJjRepo",
+        },
+      ],
+    });
+    expect(m.claims[0].predicate).toBe("isInJjRepo");
+  });
+
+  it("rejects non-string shouldRender", () => {
+    expect(() =>
+      validateManifest({
+        ...validManifest,
+        claims: [{ slot: "session-card-memory", component: "Mem", shouldRender: 42 }],
+      }),
+    ).toThrow(ManifestValidationError);
+  });
+
+  it("manifest without shouldRender field still valid (no field present in resolved claim)", () => {
+    const m = validateManifest(validManifest);
+    for (const c of m.claims) {
+      expect(c.shouldRender).toBeUndefined();
+    }
+  });
+});

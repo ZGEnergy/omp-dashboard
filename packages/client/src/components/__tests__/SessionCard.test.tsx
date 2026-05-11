@@ -625,3 +625,173 @@ describe("SessionCard mobile branch unchanged by subcard refactor", () => {
     expect(container.querySelector("[class*='color-mix'].rounded-lg")).toBeNull();
   });
 });
+
+describe("SessionCard — OPENSPEC subcard visibility (auto-hide-empty-session-subcards)", () => {
+  const baseProps = {
+    ...defaultProps,
+    onSendPrompt: () => {},
+    onAttachProposal: () => {},
+    onDetachProposal: () => {},
+  };
+
+  it("hides OPENSPEC subcard when openspecInitialized=false and pending=false (no openspec/ dir)", () => {
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...baseProps}
+        openspecChanges={[]}
+        openspecInitialized={false}
+        openspecPending={false}
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).toBeNull();
+  });
+
+  it("hides OPENSPEC subcard when openspecInitialized=false and pending=false (also covers globally disabled — same payload)", () => {
+    // Server broadcasts the same cleared shape for both "no openspec dir" and
+    // "openspec.enabled === false". This scenario covers the disabled case.
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...baseProps}
+        openspecChanges={[]}
+        openspecInitialized={false}
+        openspecPending={false}
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).toBeNull();
+  });
+
+  it("shows OPENSPEC subcard when pending=true (cold-boot)", () => {
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...baseProps}
+        openspecChanges={[]}
+        openspecInitialized={false}
+        openspecPending={true}
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).not.toBeNull();
+  });
+
+  it("shows OPENSPEC subcard when openspecInitialized=true even with empty changes (attach CTA)", () => {
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...baseProps}
+        openspecChanges={[]}
+        openspecInitialized={true}
+        openspecPending={false}
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).not.toBeNull();
+  });
+
+  it("shows OPENSPEC subcard for legacy callers (openspecInitialized undefined preserves visibility)", () => {
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...baseProps}
+        openspecChanges={[]}
+        // openspecInitialized + openspecPending omitted — legacy parent
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).not.toBeNull();
+  });
+});
+
+describe("SessionCard — openspecHasDir (auto-hide-empty-session-subcards)", () => {
+  const baseProps = {
+    ...defaultProps,
+    onSendPrompt: () => {},
+    onAttachProposal: () => {},
+    onDetachProposal: () => {},
+  };
+
+  it("shows OPENSPEC subcard when openspecHasDir=true even with initialized=false and no changes", () => {
+    // Fresh `openspec init` project: openspec/ exists, openspec/changes/ does
+    // not, openspec list errors out. The subcard must still render as an
+    // init/attach affordance.
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...baseProps}
+        openspecChanges={[]}
+        openspecInitialized={false}
+        openspecPending={false}
+        openspecHasDir={true}
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).not.toBeNull();
+  });
+
+  it("hides OPENSPEC subcard when openspecHasDir=false (truly not an OpenSpec project)", () => {
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...baseProps}
+        openspecChanges={[]}
+        openspecInitialized={false}
+        openspecPending={false}
+        openspecHasDir={false}
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).toBeNull();
+  });
+
+  it("shows OPENSPEC subcard when openspecHasDir=false but pending=true (cold-boot)", () => {
+    // Edge case: openspecHasDir was probed before changes/ existed, but the
+    // poll is still in flight. Keep the subcard visible so it doesn't blink.
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...baseProps}
+        openspecChanges={[]}
+        openspecHasDir={false}
+        openspecPending={true}
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).not.toBeNull();
+  });
+
+  it("openspecHasDir takes precedence over openspecInitialized when both present", () => {
+    // openspecHasDir=true wins even if openspecInitialized=false.
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...baseProps}
+        openspecChanges={[]}
+        openspecInitialized={false}
+        openspecPending={false}
+        openspecHasDir={true}
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).not.toBeNull();
+  });
+
+  it("falls back to legacy (initialized||pending) when openspecHasDir undefined", () => {
+    // Old broadcast or legacy parent — backwards-compat check.
+    const session = makeSession();
+    render(
+      <SessionCard
+        session={session}
+        {...baseProps}
+        openspecChanges={[]}
+        openspecInitialized={true}
+        openspecPending={false}
+        // openspecHasDir intentionally omitted
+      />,
+    );
+    expect(screen.queryByText("OPENSPEC")).not.toBeNull();
+  });
+});

@@ -21,8 +21,23 @@ export interface PluginClaim {
   tab?: SettingsTab;
   /** Slot-specific extra config. */
   config?: Record<string, unknown>;
-  /** Optional exported predicate function name for filtering contributions. */
+  /**
+   * Optional exported predicate function name for filtering contributions.
+   * Answers "does this claim apply to this target?" — a claim failing its
+   * predicate is removed from the slot's claim list entirely.
+   */
   predicate?: string;
+  /**
+   * Optional exported sync function name. Answers "will this claim's component
+   * produce visible output for this target?" — a claim whose shouldRender
+   * returns false is NOT mounted and counts as absent for the wrapper-gate
+   * helpers (e.g. `useSlotHasClaimsForSession`), so parent subcards hide
+   * cleanly. Use when the component conditionally returns `null` based on
+   * dynamic state (e.g. "extension not installed"). MUST be synchronous.
+   *
+   * See change: auto-hide-empty-session-subcards.
+   */
+  shouldRender?: string;
 }
 
 /**

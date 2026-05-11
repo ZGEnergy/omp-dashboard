@@ -647,6 +647,9 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
 
                         contextUsage={contextUsageMap?.get(session.id)}
                         openspecChanges={openspecMap?.get(session.cwd)?.changes}
+                        openspecInitialized={openspecMap?.get(session.cwd)?.initialized}
+                        openspecPending={openspecMap?.get(session.cwd)?.pending}
+                        openspecHasDir={openspecMap?.get(session.cwd)?.hasOpenspecDir}
                         openspecGroups={openspecGroupsMap?.get(session.cwd)?.groups}
                         openspecAssignments={openspecGroupsMap?.get(session.cwd)?.assignments}
                         onSendPrompt={onSendPrompt ? (text, images) => onSendPrompt(session.id, text, images) : undefined}

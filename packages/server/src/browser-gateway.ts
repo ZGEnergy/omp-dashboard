@@ -15,7 +15,7 @@ import { createHeadlessPidRegistry, type HeadlessPidRegistry } from "./headless-
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { SessionOrderManager } from "./session-order-manager.js";
 import type { PreferencesStore } from "./preferences-store.js";
-import { hasOpenSpecDir, type DirectoryService } from "./directory-service.js";
+import { hasOpenSpecDir, hasOpenSpecRoot, type DirectoryService } from "./directory-service.js";
 
 /**
  * Pure helper: build the per-cwd `openspec_update` messages a freshly
@@ -31,23 +31,30 @@ import { hasOpenSpecDir, type DirectoryService } from "./directory-service.js";
 export function buildOpenSpecConnectSnapshot(
   directoryService: Pick<DirectoryService, "knownDirectories" | "getOpenSpecData">,
   hasDir: (cwd: string) => boolean,
+  hasRoot: (cwd: string) => boolean = hasDir,
 ): Array<ServerToBrowserMessage> {
   const out: Array<ServerToBrowserMessage> = [];
   for (const cwd of directoryService.knownDirectories()) {
     const cached = directoryService.getOpenSpecData(cwd);
+    const root = hasRoot(cwd);
     if (cached && cached.initialized) {
-      out.push({ type: "openspec_update", cwd, data: cached });
+      // Cached payload already carries `hasOpenspecDir` set by `pollOne`; if
+      // an old cache entry predates that field, fill it from the live probe.
+      const data = cached.hasOpenspecDir === undefined
+        ? { ...cached, hasOpenspecDir: root }
+        : cached;
+      out.push({ type: "openspec_update", cwd, data });
     } else if (hasDir(cwd)) {
       out.push({
         type: "openspec_update",
         cwd,
-        data: { initialized: false, pending: true, changes: [] },
+        data: { initialized: false, pending: true, changes: [], hasOpenspecDir: root },
       });
     } else {
       out.push({
         type: "openspec_update",
         cwd,
-        data: { initialized: false, pending: false, changes: [] },
+        data: { initialized: false, pending: false, changes: [], hasOpenspecDir: root },
       });
     }
   }
@@ -272,7 +279,7 @@ export function createBrowserGateway(
     // `openspec_update` per cwd, never silently omit.
     // See change: fix-cold-boot-openspec-protocol.
     if (directoryService) {
-      for (const msg of buildOpenSpecConnectSnapshot(directoryService, hasOpenSpecDir)) {
+      for (const msg of buildOpenSpecConnectSnapshot(directoryService, hasOpenSpecDir, hasOpenSpecRoot)) {
         sendTo(ws, msg);
       }
     }

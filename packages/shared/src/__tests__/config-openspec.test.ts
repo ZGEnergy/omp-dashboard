@@ -104,3 +104,77 @@ describe("loadConfig — openspec poll block", () => {
     expect(second.openspec).toEqual(first.openspec);
   });
 });
+
+describe("loadConfig — openspec.enabled (auto-hide-empty-session-subcards)", () => {
+  let testDir: string;
+  let configFile: string;
+  let origHome: string;
+
+  beforeEach(() => {
+    testDir = path.join(
+      os.tmpdir(),
+      `test-config-openspec-enabled-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
+    configFile = path.join(testDir, ".pi", "dashboard", "config.json");
+    origHome = process.env.HOME!;
+    process.env.HOME = testDir;
+  });
+
+  afterEach(() => {
+    process.env.HOME = origHome;
+    if (fs.existsSync(testDir)) fs.rmSync(testDir, { recursive: true });
+  });
+
+  it("defaults to true when openspec block is absent", () => {
+    fs.writeFileSync(configFile, JSON.stringify({ port: 8000 }));
+    expect(loadConfig().openspec.enabled).toBe(true);
+  });
+
+  it("defaults to true when openspec block has other fields but no `enabled`", () => {
+    fs.writeFileSync(
+      configFile,
+      JSON.stringify({ openspec: { pollIntervalSeconds: 60 } }),
+    );
+    expect(loadConfig().openspec.enabled).toBe(true);
+  });
+
+  it("preserves explicit `false`", () => {
+    fs.writeFileSync(
+      configFile,
+      JSON.stringify({ openspec: { enabled: false } }),
+    );
+    const cfg = loadConfig();
+    expect(cfg.openspec.enabled).toBe(false);
+    // sibling fields keep their defaults
+    expect(cfg.openspec.pollIntervalSeconds).toBe(30);
+  });
+
+  it("preserves explicit `true`", () => {
+    fs.writeFileSync(
+      configFile,
+      JSON.stringify({ openspec: { enabled: true } }),
+    );
+    expect(loadConfig().openspec.enabled).toBe(true);
+  });
+
+  it("falls back to default true on non-boolean", () => {
+    fs.writeFileSync(
+      configFile,
+      JSON.stringify({ openspec: { enabled: "yes" } }),
+    );
+    expect(loadConfig().openspec.enabled).toBe(true);
+  });
+
+  it("round-trips through load → stringify → load", () => {
+    fs.writeFileSync(
+      configFile,
+      JSON.stringify({ openspec: { enabled: false, pollIntervalSeconds: 90 } }),
+    );
+    const first = loadConfig();
+    fs.writeFileSync(configFile, JSON.stringify(first));
+    const second = loadConfig();
+    expect(second.openspec.enabled).toBe(false);
+    expect(second.openspec.pollIntervalSeconds).toBe(90);
+  });
+});

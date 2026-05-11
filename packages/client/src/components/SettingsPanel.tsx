@@ -101,6 +101,7 @@ interface Config {
 }
 
 const DEFAULT_OPENSPEC_UI = {
+  enabled: true,
   pollIntervalSeconds: 30,
   maxConcurrentSpawns: 3,
   changeDetection: "mtime" as const,
@@ -753,42 +754,64 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
                 <p className="text-xs text-[var(--text-tertiary)] mb-2">
                   Controls how aggressively the server polls <code>openspec list</code> and <code>openspec status</code> for each known directory. Longer interval → less CPU, slightly staler UI. Lower concurrency → smoother curve. Change detection <code>mtime</code> skips re-polling unchanged proposals (recommended).
                 </p>
-                <NumberField
-                  label="Poll Interval (seconds, 5–3600)"
-                  value={config.openspec?.pollIntervalSeconds ?? DEFAULT_OPENSPEC_UI.pollIntervalSeconds}
+                <ToggleField
+                  label="Enable OpenSpec"
+                  value={config.openspec?.enabled ?? DEFAULT_OPENSPEC_UI.enabled}
                   onChange={(v) => update((c) => {
                     if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
-                    c.openspec.pollIntervalSeconds = v;
+                    c.openspec.enabled = v;
                   })}
                 />
-                <NumberField
-                  label="Max Concurrent Spawns (1–16)"
-                  value={config.openspec?.maxConcurrentSpawns ?? DEFAULT_OPENSPEC_UI.maxConcurrentSpawns}
-                  onChange={(v) => update((c) => {
-                    if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
-                    c.openspec.maxConcurrentSpawns = v;
-                  })}
-                />
-                <SelectField
-                  label="Change Detection"
-                  value={config.openspec?.changeDetection ?? DEFAULT_OPENSPEC_UI.changeDetection}
-                  options={[
-                    { value: "mtime", label: "mtime (skip unchanged proposals)" },
-                    { value: "always", label: "always (re-poll every tick)" },
-                  ]}
-                  onChange={(v) => update((c) => {
-                    if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
-                    c.openspec.changeDetection = v as "mtime" | "always";
-                  })}
-                />
-                <NumberField
-                  label="Jitter (seconds, 0–60)"
-                  value={config.openspec?.jitterSeconds ?? DEFAULT_OPENSPEC_UI.jitterSeconds}
-                  onChange={(v) => update((c) => {
-                    if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
-                    c.openspec.jitterSeconds = v;
-                  })}
-                />
+                <p className="text-xs text-[var(--text-tertiary)] mb-2">
+                  When off, OpenSpec is fully disabled: no polling, no OPENSPEC subcards on session cards. Tuning values below remain but are ignored.
+                </p>
+                {(() => {
+                  const openspecOff = (config.openspec?.enabled ?? DEFAULT_OPENSPEC_UI.enabled) === false;
+                  return (
+                    <>
+                      <NumberField
+                        label="Poll Interval (seconds, 5–3600)"
+                        disabled={openspecOff}
+                        value={config.openspec?.pollIntervalSeconds ?? DEFAULT_OPENSPEC_UI.pollIntervalSeconds}
+                        onChange={(v) => update((c) => {
+                          if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
+                          c.openspec.pollIntervalSeconds = v;
+                        })}
+                      />
+                      <NumberField
+                        label="Max Concurrent Spawns (1–16)"
+                        disabled={openspecOff}
+                        value={config.openspec?.maxConcurrentSpawns ?? DEFAULT_OPENSPEC_UI.maxConcurrentSpawns}
+                        onChange={(v) => update((c) => {
+                          if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
+                          c.openspec.maxConcurrentSpawns = v;
+                        })}
+                      />
+                      <SelectField
+                        label="Change Detection"
+                        disabled={openspecOff}
+                        value={config.openspec?.changeDetection ?? DEFAULT_OPENSPEC_UI.changeDetection}
+                        options={[
+                          { value: "mtime", label: "mtime (skip unchanged proposals)" },
+                          { value: "always", label: "always (re-poll every tick)" },
+                        ]}
+                        onChange={(v) => update((c) => {
+                          if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
+                          c.openspec.changeDetection = v as "mtime" | "always";
+                        })}
+                      />
+                      <NumberField
+                        label="Jitter (seconds, 0–60)"
+                        disabled={openspecOff}
+                        value={config.openspec?.jitterSeconds ?? DEFAULT_OPENSPEC_UI.jitterSeconds}
+                        onChange={(v) => update((c) => {
+                          if (!c.openspec) c.openspec = { ...DEFAULT_OPENSPEC_UI };
+                          c.openspec.jitterSeconds = v;
+                        })}
+                      />
+                    </>
+                  );
+                })()}
               </Section>
               <Section title="Editor (code-server)">
                 <p className="text-xs text-[var(--text-tertiary)] mb-2">
@@ -1047,13 +1070,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+function NumberField({ label, value, onChange, disabled }: { label: string; value: number; onChange: (v: number) => void; disabled?: boolean }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className={`flex items-center justify-between ${disabled ? "opacity-50" : ""}`}>
       <label className="text-sm text-[var(--text-secondary)]">{label}</label>
       <input
         type="number"
-        className="w-24 bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-sm text-[var(--text-primary)] text-right"
+        disabled={disabled}
+        className="w-24 bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-sm text-[var(--text-primary)] text-right disabled:cursor-not-allowed"
         value={value}
         onChange={(e) => onChange(parseInt(e.target.value, 10) || 0)}
       />
@@ -1061,13 +1085,14 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
   );
 }
 
-function ToggleField({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+function ToggleField({ label, value, onChange, disabled }: { label: string; value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className={`flex items-center justify-between ${disabled ? "opacity-50" : ""}`}>
       <label className="text-sm text-[var(--text-secondary)]">{label}</label>
       <button
+        disabled={disabled}
         onClick={() => onChange(!value)}
-        className={`relative w-10 h-5 rounded-full transition-colors ${value ? "bg-blue-600" : "bg-[var(--bg-tertiary)]"}`}
+        className={`relative w-10 h-5 rounded-full transition-colors disabled:cursor-not-allowed ${value ? "bg-blue-600" : "bg-[var(--bg-tertiary)]"}`}
       >
         <span className={`absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${value ? "translate-x-5" : "translate-x-0"}`} />
       </button>
@@ -1075,12 +1100,13 @@ function ToggleField({ label, value, onChange }: { label: string; value: boolean
   );
 }
 
-function SelectField({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
+function SelectField({ label, value, options, onChange, disabled }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void; disabled?: boolean }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className={`flex items-center justify-between ${disabled ? "opacity-50" : ""}`}>
       <label className="text-sm text-[var(--text-secondary)]">{label}</label>
       <select
-        className="bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-sm text-[var(--text-primary)]"
+        disabled={disabled}
+        className="bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-sm text-[var(--text-primary)] disabled:cursor-not-allowed"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >

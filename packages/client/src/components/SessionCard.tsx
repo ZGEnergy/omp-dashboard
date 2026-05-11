@@ -276,6 +276,9 @@ export function SessionCard({
   onUnhide,
   contextUsage,
   openspecChanges,
+  openspecInitialized,
+  openspecPending,
+  openspecHasDir,
   openspecGroups,
   openspecAssignments,
   onSendPrompt,
@@ -304,6 +307,33 @@ export function SessionCard({
   onUnhide: (id: string) => void;
   contextUsage?: ContextUsageInfo;
   openspecChanges?: OpenSpecChange[];
+  /**
+   * Whether `openspec list` returned authoritative data for this cwd.
+   * Requires both `openspec/` AND `openspec/changes/` to exist AND CLI to
+   * succeed. Does NOT capture the case "openspec project, no changes yet"
+   * — see `openspecHasDir` for the broader applicability signal.
+   */
+  openspecInitialized?: boolean;
+  /**
+   * Whether the server is still polling OpenSpec for this cwd (cold-boot).
+   * Subcard remains visible while pending so the user sees a placeholder
+   * rather than a flash of hide-then-show.
+   */
+  openspecPending?: boolean;
+  /**
+   * Whether the session's cwd is an OpenSpec project at all (server-confirmed
+   * `<cwd>/openspec/` directory exists). Strictly weaker than
+   * `openspecInitialized` — `true` when the user has run `openspec init` even
+   * before any proposals are authored. This is the primary visibility gate
+   * for the OPENSPEC subcard: when `false` (and `openspec.enabled === false`
+   * also broadcasts `false`), the subcard hides.
+   *
+   * `undefined` means the parent hasn't migrated yet; legacy fallback uses
+   * `openspecInitialized || openspecPending` to preserve current visibility.
+   *
+   * See change: auto-hide-empty-session-subcards.
+   */
+  openspecHasDir?: boolean;
   openspecGroups?: OpenSpecGroup[];
   openspecAssignments?: Record<string, string>;
   onSendPrompt?: (text: string, images?: ImageContent[]) => void;
@@ -638,8 +668,22 @@ export function SessionCard({
 
       {/* Subcard stack — see change: redesign-session-card-subcards */}
 
-      {/* OPENSPEC subcard */}
+      {/* OPENSPEC subcard
+          Hides when the cwd is not OpenSpec-applicable. Primary signal:
+          `openspecHasDir` (server-confirmed `<cwd>/openspec/` existence).
+          When the user disables OpenSpec globally, server broadcasts
+          `hasOpenspecDir: false` for every cwd — same gate, same outcome.
+          Legacy fallback (when `openspecHasDir` undefined): use the previous
+          `initialized || pending` heuristic so old clients/parents that
+          haven't migrated still see the subcard.
+          See change: auto-hide-empty-session-subcards. */}
       {openspecChanges && onSendPrompt && onAttachProposal && onDetachProposal && (
+        openspecHasDir !== undefined
+          ? Boolean(openspecHasDir) || Boolean(openspecPending)
+          : openspecInitialized === undefined
+            ? true
+            : Boolean(openspecInitialized) || Boolean(openspecPending)
+      ) && (
         <SessionSubcard title="OPENSPEC">
           <SessionOpenSpecActions
             session={session}

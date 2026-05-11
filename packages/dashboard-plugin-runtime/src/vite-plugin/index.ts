@@ -60,21 +60,21 @@ function generateRegistryContent(entries: PluginEntry[]): string {
     "",
   ];
 
-  // Named imports per claim component
+  // Named imports per claim component / predicate / shouldRender
   for (const entry of entries) {
     // Strip .ts/.tsx extension so tsc (without allowImportingTsExtensions) accepts the generated file.
     // Vite resolves the path either way via configured extensions.
     const importPath = entry.clientEntryPath!.replace(/\.(tsx?|jsx?)$/, "");
-    const componentNames = [
+    const importNames = [
       ...new Set(
         entry.manifest.claims
-          .map(c => c.component)
+          .flatMap(c => [c.component, c.predicate, c.shouldRender])
           .filter((c): c is string => Boolean(c)),
       ),
     ];
-    if (componentNames.length > 0) {
+    if (importNames.length > 0) {
       lines.push(
-        `import { ${componentNames.join(", ")} } from ${JSON.stringify(importPath)};`,
+        `import { ${importNames.join(", ")} } from ${JSON.stringify(importPath)};`,
       );
     }
   }
@@ -97,11 +97,13 @@ function generateRegistryContent(entries: PluginEntry[]): string {
     lines.push("    claims: [");
     for (const claim of manifest.claims) {
       const componentRef = claim.component ? `, Component: ${claim.component}` : "";
+      const predicateRef = claim.predicate ? `, predicate: ${claim.predicate}` : "";
+      const shouldRenderRef = claim.shouldRender ? `, shouldRender: ${claim.shouldRender}` : "";
       const tabStr = claim.tab ? `, tab: ${JSON.stringify(claim.tab)}` : "";
       const toolNameStr = claim.toolName ? `, toolName: ${JSON.stringify(claim.toolName)}` : "";
       const commandStr = claim.command ? `, command: ${JSON.stringify(claim.command)}` : "";
       lines.push(
-        `      { pluginId: ${JSON.stringify(manifest.id)}, priority: ${manifest.priority ?? 1000}, slot: ${JSON.stringify(claim.slot)}${tabStr}${toolNameStr}${commandStr}${componentRef} },`,
+        `      { pluginId: ${JSON.stringify(manifest.id)}, priority: ${manifest.priority ?? 1000}, slot: ${JSON.stringify(claim.slot)}${tabStr}${toolNameStr}${commandStr}${componentRef}${predicateRef}${shouldRenderRef} },`,
       );
     }
     lines.push("    ],");

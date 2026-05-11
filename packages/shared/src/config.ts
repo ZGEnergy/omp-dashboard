@@ -77,6 +77,16 @@ export const DEFAULT_MEMORY_LIMITS: MemoryLimitsConfig = {
 };
 
 export interface OpenSpecPollConfig {
+  /**
+   * Master gate. When `false`, the dashboard treats OpenSpec as fully disabled
+   * across the dashboard — no polling, the OPENSPEC session-card subcard hides
+   * everywhere, and `openspec_refresh` is a no-op. Other tuning fields below
+   * retain their meaning but are ignored at runtime when this is `false`.
+   *
+   * Default `true` for backwards compatibility. Existing configs without this
+   * field behave exactly as before. See change: auto-hide-empty-session-subcards.
+   */
+  enabled: boolean;
   /** Poll interval in seconds. Default 30. Clamped to [5, 3600]. */
   pollIntervalSeconds: number;
   /** Max concurrent `openspec` CLI invocations across all dirs. Default 3. Clamped to [1, 16]. */
@@ -88,6 +98,7 @@ export interface OpenSpecPollConfig {
 }
 
 export const DEFAULT_OPENSPEC_POLL: OpenSpecPollConfig = {
+  enabled: true,
   pollIntervalSeconds: 30,
   maxConcurrentSpawns: 3,
   changeDetection: "mtime",
@@ -376,6 +387,8 @@ function parseOpenSpecPollConfig(raw: any): OpenSpecPollConfig {
       ? raw.changeDetection
       : DEFAULT_OPENSPEC_POLL.changeDetection;
   return {
+    enabled:
+      typeof raw.enabled === "boolean" ? raw.enabled : DEFAULT_OPENSPEC_POLL.enabled,
     pollIntervalSeconds: clampNumber(raw.pollIntervalSeconds, DEFAULT_OPENSPEC_POLL.pollIntervalSeconds, 5, 3600),
     maxConcurrentSpawns: clampNumber(raw.maxConcurrentSpawns, DEFAULT_OPENSPEC_POLL.maxConcurrentSpawns, 1, 16),
     changeDetection,

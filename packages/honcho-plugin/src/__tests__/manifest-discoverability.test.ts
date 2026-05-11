@@ -63,6 +63,22 @@ describe("honcho-plugin manifest discoverability", () => {
     expect(components.has("HonchoCardActions")).toBe(true);
   });
 
+  it("every `session-card-memory` claim declares a shouldRender gate", () => {
+    // Post `auto-hide-empty-session-subcards`: each claim names a sync
+    // shouldRender export so the host MemorySubcard wrapper hides cleanly
+    // when pi-memory-honcho is not installed (no empty translucent panel).
+    const validated = validateManifest(manifest, pkg.name);
+    const memoryClaims = validated.claims.filter(
+      (c) => c.slot === "session-card-memory",
+    );
+    expect(memoryClaims.length).toBeGreaterThan(0);
+    for (const c of memoryClaims) {
+      expect((c as { shouldRender?: string }).shouldRender).toBe(
+        "shouldRenderHonchoMemory",
+      );
+    }
+  });
+
   it("no longer claims the deprecated session-card-badge / -action-bar slots", () => {
     const validated = validateManifest(manifest, pkg.name);
     const slots = new Set(validated.claims.map((c) => c.slot));

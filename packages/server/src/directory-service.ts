@@ -76,6 +76,23 @@ export function hasOpenSpecDir(cwd: string): boolean {
   }
 }
 
+/**
+ * `true` iff `<cwd>/openspec/` exists and is a directory. Strictly weaker than
+ * `hasOpenSpecDir` (which also requires the `changes/` subdir). Used by the
+ * WS on-connect snapshot to emit the new `hasOpenspecDir` field on every
+ * payload so freshly-initialized projects without `changes/` yet still surface
+ * the OPENSPEC subcard as an init/attach affordance on the client.
+ *
+ * See change: auto-hide-empty-session-subcards.
+ */
+export function hasOpenSpecRoot(cwd: string): boolean {
+  try {
+    return fs.statSync(path.join(cwd, "openspec")).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export interface DirectoryService {
   knownDirectories(): string[];
   discoverSessions(cwd: string): DiscoveredSession[];
@@ -274,12 +291,22 @@ export function createDirectoryService(
     const cache = caches.get(cwd) ?? emptyDirCache();
     const gateEnabled = cfg.changeDetection === "mtime" && !force;
 
+    const openspecRoot = path.join(cwd, "openspec");
     const changesRoot = path.join(cwd, "openspec", "changes");
+    // `hasOpenspecDir` is strictly weaker than `initialized`: it's true when
+    // the project is OpenSpec-initialized (`openspec/` dir exists) even if no
+    // proposals are authored yet (no `openspec/changes/` subdir). The session
+    // card visibility gate uses this signal so a fresh `openspec init` project
+    // still shows the OPENSPEC subcard as an init/attach affordance.
+    // See change: auto-hide-empty-session-subcards.
+    const hasOpenspecDir = statMtimeOr(openspecRoot) !== undefined;
     const rootMtime = statMtimeOr(changesRoot);
 
-    // If the directory doesn't exist, short-circuit (matches old behavior).
+    // If the changes/ subdirectory doesn't exist, short-circuit (matches old
+    // behavior re: list polling). `hasOpenspecDir` still carries the broader
+    // "is this an OpenSpec project?" signal for the client.
     if (rootMtime === undefined) {
-      const empty: OpenSpecData = { initialized: false, changes: [] };
+      const empty: OpenSpecData = { initialized: false, changes: [], hasOpenspecDir };
       cache.data = empty;
       cache.listMtimeMs = undefined;
       cache.listResult = undefined;
@@ -307,7 +334,7 @@ export function createDirectoryService(
     if (!listCacheValid) {
       const raw = await semaphore.run(() => runOpenSpecList(cwd));
       if (!raw || !Array.isArray(raw.changes)) {
-        const empty: OpenSpecData = { initialized: false, changes: [] };
+        const empty: OpenSpecData = { initialized: false, changes: [], hasOpenspecDir };
         cache.data = empty;
         cache.listMtimeMs = rootMtime;
         cache.listResult = undefined;
@@ -396,6 +423,10 @@ export function createDirectoryService(
       createFsProbeFactory(cwd),
       createFsSpecsProbeFactory(cwd),
     );
+    // `hasOpenspecDir` is true here by definition: we only reach Step 3 when
+    // `<cwd>/openspec/changes/` exists, which implies `<cwd>/openspec/` exists.
+    // See change: auto-hide-empty-session-subcards.
+    data = { ...data, hasOpenspecDir };
     if (enrichOpenSpecData) {
       try {
         data = await enrichOpenSpecData(cwd, data);
@@ -428,6 +459,20 @@ export function createDirectoryService(
   }
 
   async function refreshOpenSpec(cwd: string): Promise<OpenSpecData> {
+    // Master gate: when `openspec.enabled` is false, every refresh path is a
+    // no-op. Return the cleared-state shape so callers (including
+    // `openspec_refresh` browser handler) converge to the disabled UX.
+    // See change: auto-hide-empty-session-subcards.
+    if (cfg.enabled === false) {
+      // Disabled state: `hasOpenspecDir: false` ensures the client wrapper
+      // hides the OPENSPEC subcard for every cwd. See change:
+      // auto-hide-empty-session-subcards.
+      const cleared: OpenSpecData = { initialized: false, pending: false, changes: [], hasOpenspecDir: false };
+      const cache = caches.get(cwd) ?? emptyDirCache();
+      cache.data = cleared;
+      caches.set(cwd, cache);
+      return cleared;
+    }
     try {
       // User-initiated refresh bypasses the gate. The gate is heuristic; the
       // CLI is authoritative. When the user clicks the OpenSpec refresh icon
@@ -449,6 +494,15 @@ export function createDirectoryService(
   }
 
   async function pollDirectoryGated(cwd: string): Promise<OpenSpecData> {
+    // Master gate: when `openspec.enabled` is false, never spawn a CLI for the
+    // periodic poll path either. See change: auto-hide-empty-session-subcards.
+    if (cfg.enabled === false) {
+      const cleared: OpenSpecData = { initialized: false, pending: false, changes: [], hasOpenspecDir: false };
+      const cache = caches.get(cwd) ?? emptyDirCache();
+      cache.data = cleared;
+      caches.set(cwd, cache);
+      return cleared;
+    }
     return pollOne(cwd, false);
   }
 
@@ -466,6 +520,9 @@ export function createDirectoryService(
   let openspecTickInFlight = false;
   async function scheduleOpenSpecTick() {
     if (openspecTickInFlight) return;
+    // Master gate: when `openspec.enabled` is false, the tick is a no-op.
+    // No CLI spawns. See change: auto-hide-empty-session-subcards.
+    if (cfg.enabled === false) return;
     openspecTickInFlight = true;
     const tickStart = Date.now();
     let spawnsBefore = 0;
@@ -569,11 +626,29 @@ export function createDirectoryService(
 
     reconfigurePolling(newCfg: OpenSpecPollConfig) {
       const oldInterval = cfg.pollIntervalSeconds;
+      const wasEnabled = cfg.enabled;
       cfg = { ...newCfg };
       semaphore.setMax(cfg.maxConcurrentSpawns);
       // Only re-install timers if they were running and the interval actually changed.
       if (pollTimer && oldInterval !== cfg.pollIntervalSeconds) {
         installTimers();
+      }
+      // On the `true → false` transition, clear every per-cwd `OpenSpecData`
+      // cache and notify the broadcast channel so connected browsers converge
+      // to the disabled-state shape. The `false → true` transition is a
+      // no-op here — the next regular poll tick will re-populate caches.
+      // See change: auto-hide-empty-session-subcards.
+      if (wasEnabled !== false && cfg.enabled === false) {
+        const cleared: OpenSpecData = { initialized: false, pending: false, changes: [], hasOpenspecDir: false };
+        for (const [cwd, cache] of caches.entries()) {
+          cache.data = cleared;
+          caches.set(cwd, cache);
+          try {
+            onChangeCallback?.(cwd, cleared);
+          } catch (err) {
+            console.warn(`[openspec-poll] onChange after disable failed for ${cwd}:`, err);
+          }
+        }
       }
     },
 

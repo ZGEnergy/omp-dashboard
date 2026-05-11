@@ -459,6 +459,12 @@ export function deriveChangeState(change: OpenSpecChange): ChangeState {
 
 /** OpenSpec data for a session's project */
 export interface OpenSpecData {
+  /**
+   * `openspec list` returned authoritative data for this cwd. Requires both
+   * `<cwd>/openspec/` AND `<cwd>/openspec/changes/` to exist AND the CLI to
+   * succeed. Does NOT distinguish "openspec project, no changes yet" from
+   * "truly not an openspec project" — see `hasOpenspecDir` for that.
+   */
   initialized: boolean;
   changes: OpenSpecChange[];
   /**
@@ -474,6 +480,21 @@ export interface OpenSpecData {
    * See change: fix-cold-boot-openspec-protocol.
    */
   pending?: boolean;
+  /**
+   * Whether `<cwd>/openspec/` directory exists. Strictly weaker than
+   * `initialized`: this can be `true` while `initialized` is `false` when
+   * the project is OpenSpec-initialized (`openspec init` was run) but
+   * `openspec/changes/` doesn't exist yet (no proposals authored). In that
+   * case `openspec list` errors out and `initialized` stays `false`, but
+   * the session card should still show the OPENSPEC subcard as an
+   * init/attach affordance.
+   *
+   * Optional for backwards compatibility — absence means "unknown, fall
+   * back to `initialized || pending`" on the client side.
+   *
+   * See change: auto-hide-empty-session-subcards.
+   */
+  hasOpenspecDir?: boolean;
 }
 
 /** OpenSpec workflow phase detected from tool calls */

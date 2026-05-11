@@ -715,6 +715,12 @@ Fold-back is **a skill, not a server route**. The dashboard's `JjFoldBackDialog`
 7. Session cards display processes with elapsed time and a kill button (sends SIGTERM to process group)
 
 ### OpenSpec Polling (Server-Side)
+
+**Master gate**: `DashboardConfig.openspec.enabled` (boolean, default `true`).
+- `false` disables all polling. Hides OPENSPEC subcards across dashboard.
+- Tuning fields below (`pollIntervalSeconds`, `maxConcurrentSpawns`, `changeDetection`, `jitterSeconds`) ignored at runtime when `false`. Values preserved.
+- Runtime-reconfigurable via `PUT /api/config`. Disable transition clears per-cwd `OpenSpecData` cache + broadcasts cleared payload `{ initialized: false, pending: false, changes: [] }` per cwd so client predicate `openspecInitialized === false && pending === false` collapses subcards uniformly. Same broadcast shape covers "no openspec/ dir" + "openspec.enabled === false".
+
 1. Server's DirectoryService polls `openspec` CLI for each known directory (union of pinned dirs + session cwds) at a **configurable interval** (`DashboardConfig.openspec.pollIntervalSeconds`, default 30 s, range 5–3600 s).
 2. OpenSpec data is keyed by directory (cwd), not by session — one poll per directory regardless of session count.
 3. Changes are broadcast to all connected browsers via `openspec_update { cwd, data }`.

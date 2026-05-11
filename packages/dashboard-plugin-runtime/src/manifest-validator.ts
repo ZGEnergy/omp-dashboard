@@ -54,7 +54,14 @@ function validateClaim(claim: unknown, pluginId: string, index: number): PluginC
   }
 
   // optional string fields
-  for (const field of ["component", "command", "trigger", "toolName", "predicate"] as const) {
+  for (const field of [
+    "component",
+    "command",
+    "trigger",
+    "toolName",
+    "predicate",
+    "shouldRender",
+  ] as const) {
     if (c[field] !== undefined && typeof c[field] !== "string") {
       throw new ManifestValidationError(
         pluginId,
@@ -71,6 +78,7 @@ function validateClaim(claim: unknown, pluginId: string, index: number): PluginC
     ...(typeof c.toolName === "string" ? { toolName: c.toolName } : {}),
     ...(typeof c.tab === "string" ? { tab: c.tab as SettingsTab } : {}),
     ...(typeof c.predicate === "string" ? { predicate: c.predicate } : {}),
+    ...(typeof c.shouldRender === "string" ? { shouldRender: c.shouldRender } : {}),
     ...(c.config && typeof c.config === "object" && !Array.isArray(c.config)
       ? { config: c.config as Record<string, unknown> }
       : {}),

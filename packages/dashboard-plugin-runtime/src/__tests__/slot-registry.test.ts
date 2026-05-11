@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   createSlotRegistry,
   forSession,
+  forSessionRendered,
   forTab,
   forToolName,
   forCommand,
@@ -87,6 +88,84 @@ describe("forSession filter", () => {
     ];
     expect(forSession(claims, session)).toHaveLength(1);
     expect(forSession(claims, session)[0].pluginId).toBe("a");
+  });
+
+  it("ignores shouldRender (only respects predicate)", () => {
+    const session = fakeSession();
+    const claims = [
+      { ...makeClaim("a", 100), shouldRender: (_: unknown) => false },
+      { ...makeClaim("b", 200) },
+    ];
+    // forSession is the structural variant — shouldRender does not affect it.
+    expect(forSession(claims, session)).toHaveLength(2);
+  });
+});
+
+describe("forSessionRendered filter", () => {
+  it("returns all claims when neither predicate nor shouldRender declared", () => {
+    const claims = [makeClaim("a", 100), makeClaim("b", 200)];
+    expect(forSessionRendered(claims, fakeSession())).toHaveLength(2);
+  });
+
+  it("filters by predicate (same as forSession)", () => {
+    const session = fakeSession();
+    const claims = [
+      { ...makeClaim("a", 100), predicate: (_: unknown) => true },
+      { ...makeClaim("b", 200), predicate: (_: unknown) => false },
+    ];
+    expect(forSessionRendered(claims, session)).toHaveLength(1);
+    expect(forSessionRendered(claims, session)[0].pluginId).toBe("a");
+  });
+
+  it("filters by shouldRender", () => {
+    const session = fakeSession();
+    const claims = [
+      { ...makeClaim("a", 100), shouldRender: (_: unknown) => true },
+      { ...makeClaim("b", 200), shouldRender: (_: unknown) => false },
+    ];
+    expect(forSessionRendered(claims, session)).toHaveLength(1);
+    expect(forSessionRendered(claims, session)[0].pluginId).toBe("a");
+  });
+
+  it("applies BOTH predicate AND shouldRender", () => {
+    const session = fakeSession();
+    const claims = [
+      {
+        ...makeClaim("a", 100),
+        predicate: (_: unknown) => true,
+        shouldRender: (_: unknown) => true,
+      },
+      {
+        ...makeClaim("b", 200),
+        predicate: (_: unknown) => true,
+        shouldRender: (_: unknown) => false,
+      },
+      {
+        ...makeClaim("c", 300),
+        predicate: (_: unknown) => false,
+        shouldRender: (_: unknown) => true,
+      },
+    ];
+    const result = forSessionRendered(claims, session);
+    expect(result.map(c => c.pluginId)).toEqual(["a"]);
+  });
+
+  it("treats absent shouldRender as pass-through", () => {
+    const session = fakeSession();
+    const claims = [
+      { ...makeClaim("a", 100), predicate: (_: unknown) => true },
+      { ...makeClaim("b", 200) },
+    ];
+    expect(forSessionRendered(claims, session)).toHaveLength(2);
+  });
+
+  it("returns empty when every claim is gated out by shouldRender", () => {
+    const session = fakeSession();
+    const claims = [
+      { ...makeClaim("a", 100), shouldRender: (_: unknown) => false },
+      { ...makeClaim("b", 200), shouldRender: (_: unknown) => false },
+    ];
+    expect(forSessionRendered(claims, session)).toEqual([]);
   });
 });
 

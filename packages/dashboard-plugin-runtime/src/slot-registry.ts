@@ -24,7 +24,27 @@ export interface ClaimEntry {
   toolName?: string;
   tab?: string;
   config?: Record<string, unknown>;
+  /**
+   * Filters whether this claim *targets* the given props (session, folder, …).
+   * Failing the predicate removes the claim from the slot's claim list entirely.
+   * Use for structural targeting (e.g. "only sessions whose cwd is X").
+   */
   predicate?: (props: unknown) => boolean;
+  /**
+   * Indicates whether this claim's `Component` will produce visible output
+   * for the given props. Runs synchronously alongside `predicate` but at the
+   * wrapper-gate layer. When it returns `false`, the claim is NOT mounted and
+   * counts as absent for `useSlotHasClaimsForSession` (so the wrapper subcard
+   * hides).
+   *
+   * Use when the component itself conditionally returns `null` based on dynamic
+   * state (e.g. "extension not installed", "user not authenticated"). MUST be
+   * synchronous — plugins requiring async state must maintain a sync-readable
+   * cache and default to `false` (closed) while the cache is unpopulated.
+   *
+   * See change: auto-hide-empty-session-subcards.
+   */
+  shouldRender?: (props: unknown) => boolean;
   /** The resolved React component (set at registration time). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   Component?: React.ComponentType<any>;
@@ -87,6 +107,27 @@ export function createSlotRegistry(): SlotRegistry {
 /** Filter session-scoped claims using the claim's optional predicate. */
 export function forSession(claims: ClaimEntry[], session: DashboardSession): ClaimEntry[] {
   return claims.filter(c => !c.predicate || c.predicate(session));
+}
+
+/**
+ * Filter session-scoped claims by BOTH `predicate` AND `shouldRender`.
+ *
+ * Use this variant at the wrapper-gate layer (e.g. `useSlotHasClaimsForSession`,
+ * slot consumers) when an empty render path should cause the parent container
+ * to hide. The plain `forSession` should still be used when you only care about
+ * structural targeting (e.g. counting registered claims).
+ *
+ * See change: auto-hide-empty-session-subcards.
+ */
+export function forSessionRendered(
+  claims: ClaimEntry[],
+  session: DashboardSession,
+): ClaimEntry[] {
+  return claims.filter(
+    c =>
+      (!c.predicate || c.predicate(session)) &&
+      (!c.shouldRender || c.shouldRender(session)),
+  );
 }
 
 /** Filter folder-scoped claims using the claim's optional predicate. */
