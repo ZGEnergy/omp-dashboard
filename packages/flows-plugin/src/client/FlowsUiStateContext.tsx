@@ -101,8 +101,12 @@ function setState(patch: Partial<FlowsUiState>): void {
   let mutated = false;
   const next: FlowsUiState = { ...state };
   for (const key of Object.keys(patch) as Array<keyof FlowsUiState>) {
-    if (!Object.is((next as Record<string, unknown>)[key], (patch as Record<string, unknown>)[key])) {
-      (next as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nextRec = next as unknown as Record<string, any>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const patchRec = patch as unknown as Record<string, any>;
+    if (!Object.is(nextRec[key], patchRec[key])) {
+      nextRec[key] = patchRec[key];
       mutated = true;
     }
   }
@@ -134,16 +138,16 @@ export interface FlowsUiActions {
 }
 
 const ACTIONS: FlowsUiActions = Object.freeze({
-  setFlowDetailAgent: (agent) => setState({ flowDetailAgent: agent }),
-  setArchitectDetailOpen: (open) => {
+  setFlowDetailAgent: (agent: string | null) => setState({ flowDetailAgent: agent }),
+  setArchitectDetailOpen: (open: boolean | ((prev: boolean) => boolean)) => {
     if (typeof open === "function") {
       setState({ architectDetailOpen: open(state.architectDetailOpen) });
     } else {
       setState({ architectDetailOpen: open });
     }
   },
-  setSourceOpenAgent: (agent) => setState({ sourceOpenAgent: agent }),
-  setFlowYamlPreview: (value) => setState({ flowYamlPreview: value }),
+  setSourceOpenAgent: (agent: string | null) => setState({ sourceOpenAgent: agent }),
+  setFlowYamlPreview: (value: { content: string; title: string } | null) => setState({ flowYamlPreview: value }),
   dismissAll: () =>
     setState({
       flowDetailAgent: null,

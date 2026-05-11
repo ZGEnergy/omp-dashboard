@@ -10,21 +10,21 @@
 
 ## 2. Rebase execution
 
-- [ ] 2.1 Start interactive rebase: `git rebase -i origin/develop`. Do NOT reorder, squash, or drop any commits in the rebase-todo editor — accept the default order.
-- [ ] 2.2 Allow Git to replay commit 2c31067d (predicates + sync-versions). Expect clean apply; if conflict on `scripts/sync-versions.js`, accept origin's structure and re-apply our predicate-emission additions.
-- [ ] 2.3 Allow Git to replay commits e3d89324, 122d503b (doc-only OpenSpec changes). Expect clean.
-- [ ] 2.4 Allow Git to replay 8a271b60 (extract client-utils). EXPECT CONFLICT on `packages/client/src/components/AgentCardShell.tsx`. Apply the resolution recipe from `design.md` HIGH-RISK #2: choose "ours" (re-export shim) for the client file, then apply origin's CSS change to `packages/client-utils/src/AgentCardShell.tsx`. Run `git add` on both files. `git rebase --continue`.
-- [ ] 2.5 Allow Git to replay 76f1ba9d, 1d02fbf4 (UI primitive registry + wiring). Possible MED conflict on `AGENTS.md` and `CHANGELOG.md` — apply both sets of additions, verify section ordering, `git add`, `git rebase --continue`.
-- [ ] 2.6 Allow Git to replay f706218f (useSessionEvents). Possible MED conflict on `packages/dashboard-plugin-runtime/src/slot-consumers.tsx` — let it apply, will be cleaned up by 2d248280 a few commits later.
-- [ ] 2.7 Allow Git to replay 8e0980d0, 6e966e78 (flows-plugin internals + slot wrappers). Expect clean.
-- [ ] 2.8 Allow Git to replay f75b3ea9 (shell deletion). EXPECT CONFLICT on `packages/client/src/components/SessionCard.tsx`. Apply the resolution recipe from `design.md` HIGH-RISK #1: keep origin's SessionSubcard structure, delete FLOWS subcard wrapper entirely. Verify imports of `FlowActivityBadge` / `SessionFlowActions` are removed. `git add`, `git rebase --continue`.
-- [ ] 2.9 Allow Git to replay 97ea8a87 (no-flow-references lint). Expect clean.
-- [ ] 2.10 Allow Git to replay 2d248280 (revert content-view route field). Inspect `slot-consumers.tsx` post-apply — verify origin's new functions (`useSlotHasClaimsForSession`, `SessionCardMemorySlot`, `WorkspaceActionBarSlot`) are still present alongside our `forSession` predicate filter. If missing, manually copy from `git show origin/develop:packages/dashboard-plugin-runtime/src/slot-consumers.tsx` before `--continue`.
-- [ ] 2.11 Allow Git to replay 6537c876 (predicate-based content-view activation). Expect clean.
-- [ ] 2.12 Allow Git to replay 47e3b12d (archive commit). LOW conflict on `openspec/specs/dashboard-plugin-loader/spec.md` — additive, both sides extended different sections. Accept both.
-- [ ] 2.13 Allow Git to replay c7c47234 (delete superseded changes). Expect clean.
-- [ ] 2.14 Allow Git to replay 1f6a78e2 (retry banner fix). Expect clean — origin touched `bridge.ts` in `sessionPrompt` function only; we touched `message_end` handler. Different functions.
-- [ ] 2.15 Allow Git to replay fa12f4e3, b0566863 (zed + queue proposals — pure new dirs). Expect clean.
+- [x] 2.1 Used `git rebase origin/develop` (non-interactive). Submodule + generated artefact pre-stashed.
+- [x] 2.2 2c31067d replayed as 98162836. Conflicts: `scripts/sync-versions.js` (kept origin's CI note + our `if (totalRewrites > 0)` / `if (totalPreserved > 0)` block); `packages/client/src/generated/plugin-registry.tsx` (modify/delete — deleted, gitignored artefact).
+- [x] 2.3 e3d89324 → fbe4006b, 122d503b → 7ca25bc8. Both clean (doc-only).
+- [x] 2.4 8a271b60 → 9ea87b7e. HIGH-RISK #2 resolved per recipe: kept re-export shim in `packages/client/src/components/AgentCardShell.tsx`; applied origin's `ae59eed5` color-mix CSS to `packages/client-utils/src/AgentCardShell.tsx` (selected vs unselected branch).
+- [x] 2.5 76f1ba9d → c2f6a5c4, 1d02fbf4 → c7256f73. AGENTS.md + CHANGELOG.md auto-merged. Conflict only on `packages/dashboard-plugin-runtime/package.json` (kept both exports: `./manifest-validator` from origin + `./test-support` from us).
+- [x] 2.6 f706218f → 5939c074. `slot-consumers.tsx` auto-merged. `package-lock.json` conflict resolved by taking incoming version (will regen via `npm install` at end).
+- [x] 2.7 8e0980d0 → 042cc356, 6e966e78 → ada7987e. Both clean.
+- [x] 2.8 f75b3ea9 → 5f708213. HIGH-RISK #1 resolved per recipe in SessionCard.tsx: kept origin's WorkspaceSubcard (hosts SessionCardBadgeSlot internally with FlowActivityBadgeClaim contribution); deleted FLOWS subcard wrapper entirely; removed dangling `flows,` from destructured props. SessionList.tsx mini-conflict resolved: kept origin's `useFolderDragHandle` import + dropped `FlowInfo` type.
+- [x] 2.9 97ea8a87 → 302973fd. Clean.
+- [x] 2.10 2d248280 → 4b33c1e4. Clean auto-merge of slot-consumers.tsx — post-merge verification deferred to section 3.
+- [x] 2.11 6537c876 → c0feef85. Clean.
+- [x] 2.12 47e3b12d → 9fd79be4. LOW conflict on `dashboard-plugin-loader/spec.md` resolved by keeping BOTH requirements: origin's "Shell consumes the generated plugin registry" then our "Plugin runtime exposes UI primitive registry context".
+- [x] 2.13 c7c47234 → af427860. Clean.
+- [x] 2.14 1f6a78e2 → bcc5eb10. Clean — confirmed bridge.ts auto-merged (sessionPrompt edits + message_end edits in different functions).
+- [x] 2.15 fa12f4e3 → 747ae922, b0566863 → c419c42e, plus 4b73bef5 (rebase proposal) → 3a3e9a8f, plus dc0438ab (tick commit) → c7d21870. All clean (proposal dirs + tasks.md tick).
 
 ## 3. Post-rebase verification
 

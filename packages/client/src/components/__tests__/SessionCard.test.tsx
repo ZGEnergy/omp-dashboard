@@ -425,7 +425,7 @@ describe("GroupGitInfo", () => {
 // ── Subcard structure (redesign-session-card-subcards) ────────────────────────
 
 describe("SessionCard subcard structure", () => {
-  it("renders OPENSPEC, WORKSPACE, PROCESS, FLOWS subcard titles in order when populated", () => {
+  it("renders OPENSPEC, WORKSPACE, PROCESS subcard titles in order when populated", () => {
     const session = makeSession({ gitBranch: "feature/test" });
     const changes = [{ name: "feat-a", status: "in-progress" as const, completedTasks: 1, totalTasks: 3, artifacts: [] }];
     const { container } = render(
@@ -437,9 +437,7 @@ describe("SessionCard subcard structure", () => {
         onSendPrompt={() => {}}
         onAttachProposal={() => {}}
         onDetachProposal={() => {}}
-        flows={[]}
         commands={[{ name: "flows:new" } as any]}
-        onFlowAction={() => {}}
         processes={[{ pid: 123, pgid: 123, command: "node", elapsedMs: 1000 } as any]}
         onKillProcess={() => {}}
       />,
@@ -449,8 +447,10 @@ describe("SessionCard subcard structure", () => {
       (el) => el.textContent,
     );
     // MEMORY is intentionally absent (no plugin contributes).
-    const filtered = titles.filter((t) => t && /^(OPENSPEC|WORKSPACE|PROCESS|MEMORY|FLOWS)$/.test(t));
-    expect(filtered).toEqual(["OPENSPEC", "WORKSPACE", "PROCESS", "FLOWS"]);
+    // FLOWS subcard removed in pluginize-flows-via-registry — flows-plugin
+    // contributes via session-card-action-bar slot, not as a dedicated subcard.
+    const filtered = titles.filter((t) => t && /^(OPENSPEC|WORKSPACE|PROCESS|MEMORY)$/.test(t));
+    expect(filtered).toEqual(["OPENSPEC", "WORKSPACE", "PROCESS"]);
   });
 
   it("hides PROCESS subcard when processes array is empty", () => {

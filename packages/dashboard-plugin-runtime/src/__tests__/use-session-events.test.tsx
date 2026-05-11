@@ -44,13 +44,13 @@ describe("useSessionEvents", () => {
   });
 
   it("returns empty array for unknown session", () => {
-    const snaps: readonly DashboardEvent[][] = [];
+    const snaps: Array<readonly DashboardEvent[]> = [];
     renderProbe("S", (s) => snaps.push(s));
     expect(snaps[0]).toEqual([]);
   });
 
   it("re-renders when a new event is published for the subscribed session", () => {
-    const snaps: readonly DashboardEvent[][] = [];
+    const snaps: Array<readonly DashboardEvent[]> = [];
     const { getByTestId } = renderProbe("S", (s) => snaps.push(s));
     expect(getByTestId("count").textContent).toBe("0");
 
@@ -68,7 +68,7 @@ describe("useSessionEvents", () => {
   });
 
   it("preserves arrival order", () => {
-    const snaps: readonly DashboardEvent[][] = [];
+    const snaps: Array<readonly DashboardEvent[]> = [];
     renderProbe("S", (s) => snaps.push(s));
 
     act(() => {
@@ -78,12 +78,13 @@ describe("useSessionEvents", () => {
     });
 
     const last = snaps[snaps.length - 1];
-    expect(last.map((e) => e.seq)).toEqual([1, 2, 3]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(last.map((e) => (e as any).seq)).toEqual([1, 2, 3]);
   });
 
   it("scopes events per session", () => {
-    const snapsA: readonly DashboardEvent[][] = [];
-    const snapsB: readonly DashboardEvent[][] = [];
+    const snapsA: Array<readonly DashboardEvent[]> = [];
+    const snapsB: Array<readonly DashboardEvent[]> = [];
     render(
       <PluginContextProvider>
         <Probe sessionId="A" onSnapshot={(s) => snapsA.push(s)} />
@@ -97,12 +98,14 @@ describe("useSessionEvents", () => {
 
     const lastA = snapsA[snapsA.length - 1];
     const lastB = snapsB[snapsB.length - 1];
-    expect(lastA.map((e) => e.seq)).toEqual([1, 2]);
-    expect(lastB.map((e) => e.seq)).toEqual([99]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(lastA.map((e) => (e as any).seq)).toEqual([1, 2]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(lastB.map((e) => (e as any).seq)).toEqual([99]);
   });
 
   it("returns a stable reference between publishes", () => {
-    const snaps: readonly DashboardEvent[][] = [];
+    const snaps: Array<readonly DashboardEvent[]> = [];
     const { rerender } = renderProbe("S", (s) => snaps.push(s));
 
     act(() => publishSessionEvent("S", makeEvent(1)));

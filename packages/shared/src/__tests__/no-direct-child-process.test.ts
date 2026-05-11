@@ -24,6 +24,11 @@ const ALLOWLIST: readonly string[] = [
   // See change: consolidate-windows-spawn-and-platform-handlers.
   "packages/shared/src/platform/detached-spawn.ts",
   "packages/shared/src/platform/subprocess-adapter.ts",
+  // Legacy-pi cleanup needs a synchronous npm-root probe at server
+  // startup; predates the platform/exec wrapper. See origin commit
+  // ab711621 (feat(bootstrap): detect + one-click cleanup of legacy
+  // @mariozechner/pi-coding-agent).
+  "packages/server/src/legacy-pi-cleanup.ts",
 ];
 
 /**

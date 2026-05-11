@@ -71,10 +71,10 @@ describe("FlowsUiStateContext", () => {
     );
     expect(getByTestId("probe").textContent).toContain("arch=false");
 
-    act(() => actions.setArchitectDetailOpen((prev) => !prev));
+    act(() => actions.setArchitectDetailOpen((prev: boolean) => !prev));
     expect(getByTestId("probe").textContent).toContain("arch=true");
 
-    act(() => actions.setArchitectDetailOpen((prev) => !prev));
+    act(() => actions.setArchitectDetailOpen((prev: boolean) => !prev));
     expect(getByTestId("probe").textContent).toContain("arch=false");
   });
 
