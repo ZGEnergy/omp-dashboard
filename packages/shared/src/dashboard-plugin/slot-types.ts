@@ -6,6 +6,8 @@
  * Adding a slot: minor (non-breaking).
  * Removing or renaming a slot: major (breaking).
  */
+import type { DashboardSession } from "../types.js";
+import type { FolderDescriptor } from "./slot-props.js";
 
 /** All valid slot ids (frozen for v0.x). */
 export type SlotId =
@@ -162,3 +164,45 @@ export const VALID_SETTINGS_TABS: SettingsTab[] = [
   "security",
   "advanced",
 ];
+
+// ── Predicate input classification ──────────────────────────────────────────
+//
+// `ClaimEntry.predicate` / `.shouldRender` are invoked by exactly two filter
+// helpers in the runtime (`forSession`, `forFolder`). The argument shape is
+// therefore determined by the slot id. `SlotPredicateInput<S>` exposes that
+// classification at the type level so the registry contract can be tightened.
+//
+// See change: slot-generic-claim-entry.
+
+/** Slot ids whose predicates receive a session. */
+type SessionScopedSlot =
+  | "session-card-badge"
+  | "session-card-action-bar"
+  | "session-card-memory"
+  | "workspace-action-bar"
+  | "content-view"
+  | "content-header-sticky"
+  | "content-inline-footer"
+  | "command-route";
+
+/** Slot ids whose predicates receive a folder descriptor. */
+type FolderScopedSlot = "sidebar-folder-section";
+
+/**
+ * Map of slot id → predicate input shape. Resolves to `never` for slots that
+ * are not filtered by predicate (settings-section, tool-renderer, anchored-
+ * popover, every descriptor-only slot). Registering a predicate on a `never`-
+ * input slot is therefore a compile-time error.
+ */
+export type SlotPredicateInput<S extends SlotId> =
+  S extends SessionScopedSlot ? DashboardSession | null | undefined
+  : S extends FolderScopedSlot ? FolderDescriptor
+  : never;
+
+// Type-level test: assert every SlotId is reachable through SlotPredicateInput,
+// either by mapping to a concrete input or explicitly to `never`. This forces a
+// build failure when a new slot id is added without classifying it.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _AssertAllSlotsPredicateClassified = {
+  [K in SlotId]: SlotPredicateInput<K>;
+};

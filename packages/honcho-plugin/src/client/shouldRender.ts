@@ -12,11 +12,13 @@
  * completes — prevents the wrapper from flickering visible-then-hidden on cold
  * boot.
  *
- * See change: auto-hide-empty-session-subcards.
+ * See change: auto-hide-empty-session-subcards. Param retyped from `unknown` to
+ * the session-scoped slot input shape under change: slot-generic-claim-entry.
  */
+import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { getHonchoExtensionInstalledSync } from "./hooks.js";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function shouldRenderHonchoMemory(_session: unknown): boolean {
+export function shouldRenderHonchoMemory(_session: DashboardSession | null | undefined): boolean {
   return getHonchoExtensionInstalledSync();
 }

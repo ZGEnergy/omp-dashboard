@@ -4,7 +4,7 @@
  * The registry holds a Map<SlotId, ClaimEntry[]> pre-sorted by
  * (priority asc, pluginId asc) for deterministic render order.
  */
-import type { SlotId } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
+import type { SlotId, SlotPredicateInput } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
 /** A folder descriptor for sidebar-folder-section filtering. */
@@ -13,11 +13,20 @@ export interface FolderDescriptor {
   label?: string;
 }
 
-/** A resolved slot claim entry held in the registry. */
-export interface ClaimEntry {
+/**
+ * A resolved slot claim entry held in the registry.
+ *
+ * Generic over `S extends SlotId` with a default of `SlotId` so that callers
+ * iterating mixed-slot arrays (`ClaimEntry[]`) keep working unchanged, while
+ * the static-registry generator can emit each entry with its literal slot id
+ * to get strong predicate/shouldRender input typing per slot.
+ *
+ * See change: slot-generic-claim-entry.
+ */
+export interface ClaimEntry<S extends SlotId = SlotId> {
   pluginId: string;
   priority: number;
-  slot: SlotId;
+  slot: S;
   componentName?: string;
   command?: string;
   trigger?: string;
@@ -28,8 +37,21 @@ export interface ClaimEntry {
    * Filters whether this claim *targets* the given props (session, folder, …).
    * Failing the predicate removes the claim from the slot's claim list entirely.
    * Use for structural targeting (e.g. "only sessions whose cwd is X").
+   *
+   * Input shape is determined by the slot id via `SlotPredicateInput<S>`:
+   *   session-scoped slots → `DashboardSession | null | undefined`
+   *   folder-scoped slots  → `FolderDescriptor`
+   *   other slots          → `never` (registering a predicate is a type error)
+   *
+   * NOTE on syntax: this field uses TypeScript **method-shorthand** rather than
+   * arrow-property syntax. Method-shorthand parameter types are bivariant under
+   * `strictFunctionTypes`, which is required so that the static-registry
+   * generator can emit each entry as `ClaimEntry<"literal-slot-id">` and still
+   * pack the entries into a mixed-slot `ClaimEntry[]` array. Soundness is
+   * preserved by the registry's slot-pre-filtering contract (filter helpers
+   * receive only claims for one slot id). See change: slot-generic-claim-entry.
    */
-  predicate?: (props: unknown) => boolean;
+  predicate?(input: SlotPredicateInput<S>): boolean;
   /**
    * Indicates whether this claim's `Component` will produce visible output
    * for the given props. Runs synchronously alongside `predicate` but at the
@@ -42,9 +64,11 @@ export interface ClaimEntry {
    * synchronous — plugins requiring async state must maintain a sync-readable
    * cache and default to `false` (closed) while the cache is unpopulated.
    *
-   * See change: auto-hide-empty-session-subcards.
+   * See change: auto-hide-empty-session-subcards. Syntax note (method-shorthand
+   * for bivariance): see the matching note on `predicate` above and change:
+   * slot-generic-claim-entry.
    */
-  shouldRender?: (props: unknown) => boolean;
+  shouldRender?(input: SlotPredicateInput<S>): boolean;
   /** The resolved React component (set at registration time). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   Component?: React.ComponentType<any>;

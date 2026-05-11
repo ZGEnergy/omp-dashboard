@@ -40,28 +40,30 @@ describe("shouldRenderHonchoMemory", () => {
     checkExtensionInstalledMock.mockRejectedValueOnce(new Error("nope"));
     await primeExtensionInstalledCache();
     expect(getHonchoExtensionInstalledSync()).toBe(false);
-    expect(shouldRenderHonchoMemory({ id: "s1" })).toBe(false);
+    // Pass `null` to assert the gate doesn't depend on session shape
+    // (function reads the module-level installed-state cache, not its arg).
+    expect(shouldRenderHonchoMemory(null)).toBe(false);
   });
 
   it("returns false when the probe reports the extension uninstalled", async () => {
     checkExtensionInstalledMock.mockResolvedValueOnce(false);
     await primeExtensionInstalledCache();
-    expect(shouldRenderHonchoMemory({ id: "s1" })).toBe(false);
+    expect(shouldRenderHonchoMemory(null)).toBe(false);
   });
 
   it("returns true after the probe reports the extension installed", async () => {
     checkExtensionInstalledMock.mockResolvedValueOnce(true);
     await primeExtensionInstalledCache();
-    expect(shouldRenderHonchoMemory({ id: "s1" })).toBe(true);
+    expect(shouldRenderHonchoMemory(null)).toBe(true);
   });
 
   it("flips back to false when the extension is uninstalled", async () => {
     checkExtensionInstalledMock.mockResolvedValueOnce(true);
     await primeExtensionInstalledCache();
-    expect(shouldRenderHonchoMemory({ id: "s1" })).toBe(true);
+    expect(shouldRenderHonchoMemory(null)).toBe(true);
 
     checkExtensionInstalledMock.mockResolvedValueOnce(false);
     await primeExtensionInstalledCache();
-    expect(shouldRenderHonchoMemory({ id: "s1" })).toBe(false);
+    expect(shouldRenderHonchoMemory(null)).toBe(false);
   });
 });
