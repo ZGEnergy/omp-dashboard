@@ -15,7 +15,11 @@ see [`docs/release-process.md`](docs/release-process.md).
 ### Changed
 
 ### Fixed
-- Publish workflow: declared missing `tsx` devDependency so the bundle-recommended-extensions step resolves on CI. (change: fix-publish-tsx-missing)
+
+## [0.5.3] - 2026-05-11
+
+### Fixed
+- Publish workflow: declared missing `tsx` devDependency so the bundle-recommended-extensions step resolves on CI. **0.5.2 npm packages shipped but Electron installers failed to build because of this missing dep — 0.5.3 is functionally 0.5.2 + working Electron artifacts.** (change: fix-publish-tsx-missing)
 
 ## [0.5.2] - 2026-05-11
 
