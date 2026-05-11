@@ -91,6 +91,7 @@ interface Config {
     maxInstances?: number;
   };
   openspec?: {
+    enabled?: boolean;
     pollIntervalSeconds?: number;
     maxConcurrentSpawns?: number;
     changeDetection?: "mtime" | "always";
