@@ -2,11 +2,11 @@
 
 ## 1. Pre-rebase safety
 
-- [ ] 1.1 Fetch latest from origin: `git fetch origin`. Confirm origin/develop is unchanged since the analysis (current tip after fetch matches `c52fdb2f` or later).
-- [ ] 1.2 Confirm clean working tree: `git status` shows only `packages/client/src/generated/plugin-registry.tsx` (gitignored artefact) and the submodule drift in `.pi/git/.../pi-shodh`. No staged or unstaged changes to other files.
-- [ ] 1.3 Create backup branch: `git branch develop-prerebase-$(date +%Y%m%d-%H%M%S)`. Verify it exists with `git branch | grep prerebase`.
-- [ ] 1.4 Confirm current ahead/behind: `git rev-list --left-right --count origin/develop...HEAD` returns `60   18`.
-- [ ] 1.5 Document expected resolution count: 2 HIGH-risk manual merges (`SessionCard.tsx`, `AgentCardShell.tsx`), 1 MEDIUM verification (`slot-consumers.tsx`), other files via 3-way auto-merge.
+- [x] 1.1 Fetched. origin/develop tip = `ab711621` (feat(bootstrap): detect + one-click cleanup of legacy @mariozechner/pi-coding-agent) — unchanged since analysis.
+- [x] 1.2 Clean working tree confirmed. Only `.pi/git/.../pi-shodh` (submodule drift) and `packages/client/src/generated/plugin-registry.tsx` (gitignored).
+- [x] 1.3 Backup branch created: `develop-prerebase-20260511-123808`.
+- [x] 1.4 Ahead/behind: `60	19` (one more than the original 18 because the proposal commit `4b73bef5` was added). All 19 commits will be replayed.
+- [x] 1.5 Expected: 2 HIGH-risk manual merges (SessionCard.tsx, AgentCardShell.tsx), 1 MEDIUM verification (slot-consumers.tsx), AGENTS.md + CHANGELOG.md likely auto-merge, other files clean.
 
 ## 2. Rebase execution
 
