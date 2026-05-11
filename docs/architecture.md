@@ -1012,6 +1012,24 @@ To disable: set `tunnel.enabled` to `false` in `~/.pi/dashboard/config.json` or 
 The client can query `GET /api/tunnel-status` which returns `{ status: "active"|"inactive"|"unavailable", url?, serverOs }`.
 The client can connect/disconnect the tunnel via `POST /api/tunnel-connect` and `POST /api/tunnel-disconnect`.
 
+### Tunnel watchdog
+
+Long-lived `zrok share` goes stale on edge. Watchdog detects + recycles.
+
+- Probe target: `GET ${publicUrl}/api/health` through public zrok URL (real edge round-trip, not localhost).
+- Cadence: every `intervalMs` (default 60000).
+- Failure classes: HTTP 5xx, network error, timeout (`probeTimeoutMs`, default 10000). 4xx + 2xx count as healthy reachability.
+- Threshold: `failureThreshold` consecutive failures (default 2) triggers recycle.
+- Recycle action: `deleteTunnel()` then `createTunnel(port, reservedToken)`. Reserved token preserved — URL stable.
+- Counter resets to 0 on success or after successful recycle.
+- Recycle-failure backoff: next retry delay ×2 each consecutive recycle failure, capped ×8 `intervalMs`. Resets to base on first successful probe.
+- Config: `tunnel.watchdog.{enabled, intervalMs, failureThreshold, probeTimeoutMs}` in `~/.pi/dashboard/config.json`. Defaults: enabled true, 60s, 2 failures, 10s timeout.
+- Status: `GET /api/tunnel-status` active variant carries `watchdog: {lastProbeAt, lastSuccessAt, lastFailureAt, lastFailureReason, consecutiveFailures, lastRecycleAt, recycleCount}`.
+- Lifecycle: `startTunnelWatchdog` called in `server.ts` after `createTunnel` succeeds at startup + in `/api/tunnel-connect` after on-demand connect. `stopTunnelWatchdog` called before `deleteTunnel` in graceful shutdown + `/api/tunnel-disconnect`.
+- Module: `packages/server/src/tunnel-watchdog.ts`. Tests: `packages/server/src/__tests__/tunnel-watchdog.test.ts`.
+- Settings UI: Settings → Tunnel exposes watchdog enable + intervalMs + failureThreshold + probeTimeoutMs.
+- Live reload: `PUT /api/config` with `partial.tunnel` stops + restarts watchdog against new config when tunnel active. No server restart required for watchdog tweaks.
+- `writeConfigPartial` deep-merges `tunnel.watchdog` so partial UI saves preserve unspecified fields.
 
 
 ### CORS

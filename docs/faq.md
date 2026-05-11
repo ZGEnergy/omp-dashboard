@@ -314,6 +314,30 @@ Cross-refs:
 - README.md:259
 - docs/architecture.md:978
 
+## Why does my zrok tunnel sometimes return Bad Gateway, and is there auto-recovery?
+
+Long-lived `zrok share` subprocess goes stale on zrok edge after hours/days. Local process alive; edge drops backend; browser sees 502/504/Bad Gateway. Subprocess heartbeat does not detect this — only end-to-end probe through public URL does.
+
+Dashboard ships tunnel watchdog (default on). Probes `GET ${publicUrl}/api/health` via public zrok URL every 60 s; 5xx/network/timeout count as failures. After 2 consecutive failures: `deleteTunnel()` + `createTunnel()`. Reserved token preserved — URL stays same.
+
+Config under `tunnel.watchdog` in `~/.pi/dashboard/config.json`:
+- `enabled` (default true)
+- `intervalMs` (default 60000)
+- `failureThreshold` (default 2)
+- `probeTimeoutMs` (default 10000)
+
+Recycle-failure backoff ×2 up to ×8 cap; resets on first successful probe.
+
+Observe: `GET /api/tunnel-status` — active variant carries `watchdog: {lastProbeAt, lastSuccessAt, lastFailureAt, lastFailureReason, consecutiveFailures, lastRecycleAt, recycleCount}`.
+
+Tunable in Settings → Tunnel (enable toggle + Probe Interval + Failure Threshold + Probe Timeout). Saves apply live: `PUT /api/config` stops + restarts watchdog with new params. No server restart required.
+
+Disable: set `tunnel.watchdog.enabled: false` (or untick in Settings).
+
+Cross-refs:
+- docs/architecture.md → "Tunnel watchdog"
+- packages/server/src/tunnel-watchdog.ts
+
 ## How do I customize tool paths instead of using PATH?
 
 Edit `~/.pi/dashboard/tool-overrides.json` or use Settings → General → Tools.

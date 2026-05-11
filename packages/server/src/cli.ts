@@ -143,6 +143,7 @@ export function buildConfig(flags: Partial<ServerConfig>): ServerConfig {
     shutdownIdleSeconds: fileConfig.shutdownIdleSeconds,
     tunnel: flags.tunnel ?? fileConfig.tunnel.enabled,
     tunnelReservedToken: fileConfig.tunnel.reservedToken,
+    tunnelWatchdog: fileConfig.tunnel.watchdog,
     authConfig: fileConfig.auth,
     maxEventsPerSession: fileConfig.memoryLimits.maxEventsPerSession,
     maxStringFieldSize: fileConfig.memoryLimits.maxStringFieldSize,

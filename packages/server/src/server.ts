@@ -35,6 +35,7 @@ import { discoverAndBroadcastSessions } from "./session-bootstrap.js";
 import { scanAllSessions } from "./session-scanner.js";
 import { needsMigration, runMigration } from "./migrate-persistence.js";
 import { detectZrokBinary, cleanupStaleZrok, createTunnel, deleteTunnel, scavengeOrphanZrokProcesses, getTunnelUrl } from "./tunnel.js";
+import { startTunnelWatchdog, stopTunnelWatchdog } from "./tunnel-watchdog.js";
 import { registerAuthPlugin, validateWsUpgrade } from "./auth-plugin.js";
 import { findBundledExtension, registerBridgeExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
 import { createNetworkGuard, isLoopback, isBypassedHost } from "./localhost-guard.js";
@@ -91,6 +92,12 @@ export interface ServerConfig {
   shutdownIdleSeconds: number;
   tunnel: boolean;
   tunnelReservedToken?: string;
+  tunnelWatchdog?: {
+    enabled: boolean;
+    intervalMs: number;
+    failureThreshold: number;
+    probeTimeoutMs: number;
+  };
   authConfig?: AuthConfig;
   /** Override WS ping interval for pi-gateway (ms). Default 60000. Set 0 to disable. */
   pingInterval?: number;
@@ -1364,6 +1371,21 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
           const tunnelUrl = await createTunnel(config.port, config.tunnelReservedToken);
           if (tunnelUrl) {
             console.log(`🌐 Tunnel: ${tunnelUrl}`);
+            // Start the watchdog so a stale zrok edge connection is detected
+            // and recycled automatically (preserves reserved token / URL).
+            const wd = config.tunnelWatchdog;
+            if (wd?.enabled !== false) {
+              startTunnelWatchdog(
+                {
+                  getUrl: getTunnelUrl,
+                  recycle: async () => {
+                    await deleteTunnel(config.port);
+                    return await createTunnel(config.port, config.tunnelReservedToken);
+                  },
+                },
+                wd,
+              );
+            }
           }
         }
       }
@@ -1416,6 +1438,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       unsubscribeQueueComplete();
       bootstrapState.dispose();
       bootstrapQueue.clear("server shutting down");
+      stopTunnelWatchdog();
       await deleteTunnel(config.port);
       piGateway.stop();
       for (const client of browserGateway.wss.clients) {

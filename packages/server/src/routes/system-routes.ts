@@ -13,8 +13,9 @@ import type { NetworkGuard } from "./route-deps.js";
 import { detectEditors, EDITORS } from "../editor-registry.js";
 import { detectCodeServerBinary, resetDetectionCache } from "../editor-detection.js";
 import { readConfigRedacted, writeConfigPartial } from "../config-api.js";
-import { createTunnel, deleteTunnel, getTunnelStatus } from "../tunnel.js";
+import { createTunnel, deleteTunnel, getTunnelStatus, getTunnelUrl } from "../tunnel.js";
 import { getModelProxyStatus } from "../model-proxy/registry-singleton.js";
+import { startTunnelWatchdog, stopTunnelWatchdog } from "../tunnel-watchdog.js";
 import { spawnRestart } from "../restart-helper.js";
 import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import path from "node:path";
@@ -153,6 +154,29 @@ export function registerSystemRoutes(
       if (partial.openspec !== undefined && directoryService) {
         directoryService.reconfigurePolling(reloaded.openspec);
       }
+      // Live-reload tunnel watchdog when its config changes (no restart needed).
+      // We always restart the watchdog when partial.tunnel is present and a
+      // tunnel is currently active — covers both watchdog flag changes and
+      // numeric tweaks. Cheap operation: stop + start with new config.
+      if (partial.tunnel !== undefined) {
+        config.tunnelWatchdog = reloaded.tunnel.watchdog;
+        if (getTunnelUrl()) {
+          stopTunnelWatchdog();
+          const wd = reloaded.tunnel.watchdog;
+          if (wd?.enabled !== false) {
+            startTunnelWatchdog(
+              {
+                getUrl: getTunnelUrl,
+                recycle: async () => {
+                  await deleteTunnel(config.port);
+                  return await createTunnel(config.port, config.tunnelReservedToken);
+                },
+              },
+              wd,
+            );
+          }
+        }
+      }
 
       return { success: true, restartRequired: result.restartRequired };
     },
@@ -168,13 +192,29 @@ export function registerSystemRoutes(
     if (status.status === "active") return { ok: true, url: status.url };
     if (status.status === "unavailable") return { ok: false, error: "zrok not installed" };
     const url = await createTunnel(config.port, config.tunnelReservedToken);
-    if (url) return { ok: true, url };
+    if (url) {
+      const wd = config.tunnelWatchdog;
+      if (wd?.enabled !== false) {
+        startTunnelWatchdog(
+          {
+            getUrl: getTunnelUrl,
+            recycle: async () => {
+              await deleteTunnel(config.port);
+              return await createTunnel(config.port, config.tunnelReservedToken);
+            },
+          },
+          wd,
+        );
+      }
+      return { ok: true, url };
+    }
     return { ok: false, error: "Failed to create tunnel" };
   });
 
   fastify.post("/api/tunnel-disconnect", async () => {
     // Pass port so orphan zrok processes bound to this endpoint are also
     // swept (not just the one we tracked via pid-file).
+    stopTunnelWatchdog();
     await deleteTunnel(config.port);
     return { ok: true };
   });

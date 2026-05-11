@@ -17,6 +17,7 @@ import {
 
 const zrokResolver = new ToolResolver({ processExecPath: process.execPath });
 import type { TunnelStatus } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+import { getTunnelWatchdogStatus } from "./tunnel-watchdog.js";
 import { CONFIG_FILE } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 
 export type { TunnelStatus };
@@ -458,7 +459,10 @@ export function getTunnelUrl(): string | null {
 export function getTunnelStatus(): TunnelStatus {
   const serverOs = process.platform;
   if (activeTunnelUrl) {
-    return { status: "active", url: activeTunnelUrl, serverOs };
+    const wd = getTunnelWatchdogStatus();
+    return wd
+      ? { status: "active", url: activeTunnelUrl, serverOs, watchdog: wd }
+      : { status: "active", url: activeTunnelUrl, serverOs };
   }
   if (detectZrokBinary()) {
     return { status: "inactive", serverOs };

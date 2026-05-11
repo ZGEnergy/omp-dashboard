@@ -115,9 +115,17 @@ export function writeConfigPartial(partial: Record<string, any>): WriteConfigRes
       partial.auth = mergedAuth;
     }
 
-    // Merge tunnel sub-object
+    // Merge tunnel sub-object (deep-merge nested watchdog)
     if (partial.tunnel) {
-      partial.tunnel = { ...existing.tunnel, ...partial.tunnel };
+      const existingTunnel = existing.tunnel ?? {};
+      const mergedWatchdog = partial.tunnel.watchdog
+        ? { ...(existingTunnel.watchdog ?? {}), ...partial.tunnel.watchdog }
+        : existingTunnel.watchdog;
+      partial.tunnel = {
+        ...existingTunnel,
+        ...partial.tunnel,
+        ...(mergedWatchdog ? { watchdog: mergedWatchdog } : {}),
+      };
     }
 
     // Merge memoryLimits sub-object

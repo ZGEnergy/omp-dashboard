@@ -169,7 +169,16 @@ export interface DashboardConfig {
   autoShutdown: boolean;
   shutdownIdleSeconds: number;
   spawnStrategy: SpawnStrategy;
-  tunnel: { enabled: boolean; reservedToken?: string };
+  tunnel: {
+    enabled: boolean;
+    reservedToken?: string;
+    watchdog?: {
+      enabled: boolean;
+      intervalMs: number;
+      failureThreshold: number;
+      probeTimeoutMs: number;
+    };
+  };
   devBuildOnReload: boolean;
   auth?: AuthConfig;
   defaultModel: string;
@@ -256,7 +265,15 @@ const DEFAULTS: DashboardConfig = {
   autoShutdown: false,
   shutdownIdleSeconds: 300,
   spawnStrategy: "headless",
-  tunnel: { enabled: true },
+  tunnel: {
+    enabled: true,
+    watchdog: {
+      enabled: true,
+      intervalMs: 60000,
+      failureThreshold: 2,
+      probeTimeoutMs: 10000,
+    },
+  },
   devBuildOnReload: false,
   defaultModel: "",
   memoryLimits: { ...DEFAULT_MEMORY_LIMITS },
@@ -514,6 +531,21 @@ export function loadConfig(): DashboardConfig {
       tunnel: {
         enabled: parsed.tunnel?.enabled ?? defaults.tunnel.enabled,
         ...(parsed.tunnel?.reservedToken ? { reservedToken: parsed.tunnel.reservedToken } : {}),
+        watchdog: {
+          enabled: parsed.tunnel?.watchdog?.enabled ?? defaults.tunnel.watchdog!.enabled,
+          intervalMs:
+            typeof parsed.tunnel?.watchdog?.intervalMs === "number" && parsed.tunnel.watchdog.intervalMs > 0
+              ? parsed.tunnel.watchdog.intervalMs
+              : defaults.tunnel.watchdog!.intervalMs,
+          failureThreshold:
+            typeof parsed.tunnel?.watchdog?.failureThreshold === "number" && parsed.tunnel.watchdog.failureThreshold > 0
+              ? Math.floor(parsed.tunnel.watchdog.failureThreshold)
+              : defaults.tunnel.watchdog!.failureThreshold,
+          probeTimeoutMs:
+            typeof parsed.tunnel?.watchdog?.probeTimeoutMs === "number" && parsed.tunnel.watchdog.probeTimeoutMs > 0
+              ? parsed.tunnel.watchdog.probeTimeoutMs
+              : defaults.tunnel.watchdog!.probeTimeoutMs,
+        },
       },
       devBuildOnReload: parsed.devBuildOnReload ?? defaults.devBuildOnReload,
       defaultModel: typeof parsed.defaultModel === "string" ? parsed.defaultModel : defaults.defaultModel,

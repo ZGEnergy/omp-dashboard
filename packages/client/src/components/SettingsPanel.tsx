@@ -70,7 +70,16 @@ interface Config {
   askUserPromptTimeoutSeconds?: number;
   /** How long (ms) to wait for spawned pi to connect before a warning. Default 30000. See change: spawn-failure-diagnostics. */
   spawnRegisterTimeoutMs?: number;
-  tunnel: { enabled: boolean };
+  tunnel: {
+    enabled: boolean;
+    reservedToken?: string;
+    watchdog?: {
+      enabled: boolean;
+      intervalMs: number;
+      failureThreshold: number;
+      probeTimeoutMs: number;
+    };
+  };
   devBuildOnReload: boolean;
   defaultModel: string;
   auth?: AuthConfig;
@@ -181,7 +190,17 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
     if (config.spawnRegisterTimeoutMs !== original.spawnRegisterTimeoutMs) {
       partial.spawnRegisterTimeoutMs = config.spawnRegisterTimeoutMs ?? 30000;
     }
-    if (config.tunnel.enabled !== original.tunnel.enabled) partial.tunnel = { enabled: config.tunnel.enabled };
+    // Tunnel diff (top-level enabled + nested watchdog)
+    {
+      const tunnelPartial: Record<string, any> = {};
+      if (config.tunnel.enabled !== original.tunnel.enabled) {
+        tunnelPartial.enabled = config.tunnel.enabled;
+      }
+      if (JSON.stringify(config.tunnel.watchdog ?? null) !== JSON.stringify(original.tunnel.watchdog ?? null)) {
+        tunnelPartial.watchdog = config.tunnel.watchdog;
+      }
+      if (Object.keys(tunnelPartial).length > 0) partial.tunnel = tunnelPartial;
+    }
     if (config.devBuildOnReload !== original.devBuildOnReload) partial.devBuildOnReload = config.devBuildOnReload;
     if (config.defaultModel !== original.defaultModel) partial.defaultModel = config.defaultModel;
 
@@ -491,6 +510,59 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
 
               <Section title="Tunnel">
                 <ToggleField label="Enable Zrok Tunnel" value={config.tunnel.enabled} onChange={(v) => update((c) => { c.tunnel.enabled = v; })} />
+                <div className="mt-3 pt-3 border-t border-[var(--border-secondary)] space-y-2">
+                  <p className="text-xs text-[var(--text-tertiary)]">
+                    Watchdog probes the public tunnel URL periodically and recycles the tunnel after consecutive failures (e.g. zrok edge returning 502).
+                  </p>
+                  <ToggleField
+                    label="Enable Watchdog"
+                    value={config.tunnel.watchdog?.enabled ?? true}
+                    onChange={(v) => update((c) => {
+                      c.tunnel.watchdog = {
+                        enabled: v,
+                        intervalMs: c.tunnel.watchdog?.intervalMs ?? 60000,
+                        failureThreshold: c.tunnel.watchdog?.failureThreshold ?? 2,
+                        probeTimeoutMs: c.tunnel.watchdog?.probeTimeoutMs ?? 10000,
+                      };
+                    })}
+                  />
+                  <NumberField
+                    label="Probe Interval (seconds)"
+                    value={Math.round((config.tunnel.watchdog?.intervalMs ?? 60000) / 1000)}
+                    onChange={(v) => update((c) => {
+                      c.tunnel.watchdog = {
+                        enabled: c.tunnel.watchdog?.enabled ?? true,
+                        intervalMs: Math.max(5, v) * 1000,
+                        failureThreshold: c.tunnel.watchdog?.failureThreshold ?? 2,
+                        probeTimeoutMs: c.tunnel.watchdog?.probeTimeoutMs ?? 10000,
+                      };
+                    })}
+                  />
+                  <NumberField
+                    label="Failure Threshold"
+                    value={config.tunnel.watchdog?.failureThreshold ?? 2}
+                    onChange={(v) => update((c) => {
+                      c.tunnel.watchdog = {
+                        enabled: c.tunnel.watchdog?.enabled ?? true,
+                        intervalMs: c.tunnel.watchdog?.intervalMs ?? 60000,
+                        failureThreshold: Math.max(1, v),
+                        probeTimeoutMs: c.tunnel.watchdog?.probeTimeoutMs ?? 10000,
+                      };
+                    })}
+                  />
+                  <NumberField
+                    label="Probe Timeout (seconds)"
+                    value={Math.round((config.tunnel.watchdog?.probeTimeoutMs ?? 10000) / 1000)}
+                    onChange={(v) => update((c) => {
+                      c.tunnel.watchdog = {
+                        enabled: c.tunnel.watchdog?.enabled ?? true,
+                        intervalMs: c.tunnel.watchdog?.intervalMs ?? 60000,
+                        failureThreshold: c.tunnel.watchdog?.failureThreshold ?? 2,
+                        probeTimeoutMs: Math.max(1, v) * 1000,
+                      };
+                    })}
+                  />
+                </div>
               </Section>
 
               <Section title="Developer">

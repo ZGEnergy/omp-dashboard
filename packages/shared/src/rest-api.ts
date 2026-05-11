@@ -165,8 +165,22 @@ export type MkdirResponse = ApiResponse<MkdirResult>;
 
 // ── Tunnel Status ───────────────────────────────────────────────────
 
+export interface TunnelWatchdogPublicStatus {
+  running: boolean;
+  intervalMs: number;
+  failureThreshold: number;
+  probeTimeoutMs: number;
+  lastProbeAt: number | null;
+  lastSuccessAt: number | null;
+  lastFailureAt: number | null;
+  lastFailureReason: string | null;
+  consecutiveFailures: number;
+  lastRecycleAt: number | null;
+  recycleCount: number;
+}
+
 export type TunnelStatus =
-  | { status: "active"; url: string; serverOs: string }
+  | { status: "active"; url: string; serverOs: string; watchdog?: TunnelWatchdogPublicStatus }
   | { status: "inactive"; serverOs: string }
   | { status: "unavailable"; serverOs: string };
 
