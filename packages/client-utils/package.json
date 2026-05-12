@@ -1,6 +1,6 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-client-utils",
-  "version": "0.5.1",
+  "version": "0.5.3",
   "description": "Small reusable React components, hooks, and helpers shared between the pi-dashboard shell and dashboard plugins. Per-subpath exports; no markdown stack.",
   "license": "MIT",
   "publishConfig": {
@@ -82,7 +82,7 @@
     "react-dom": ">=18.0.0"
   },
   "dependencies": {
-    "@blackbelt-technology/pi-dashboard-shared": "^0.5.0",
+    "@blackbelt-technology/pi-dashboard-shared": "^0.5.3",
     "@mdi/js": "^7.4.47",
     "@mdi/react": "^1.6.1"
   },
