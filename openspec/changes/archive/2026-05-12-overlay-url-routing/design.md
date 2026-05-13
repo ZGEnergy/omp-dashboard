@@ -2,7 +2,10 @@
 
 ## Context
 
-Currently `App.tsx` mixes URL-routed views (Settings, Tunnel, Session, Folder, Terminal) with `useState`-driven overlays (OpenSpec preview, archive browser, specs browser, readme, pi-resources, pi-resource file, file diff, flow YAML, flow agent detail, architect detail). The state-driven overlays do not appear in browser history, which is the root cause of:
+Currently `App.tsx` mixes URL-routed views (Settings, Tunnel, Session, Folder, Terminal) with `useState`-driven overlays (OpenSpec preview, archive browser, specs browser, readme, pi-resources, pi-resource file, file diff). The state-driven overlays do not appear in browser history, which is the root cause of:
+
+> **Scope note.** Three additional overlays — Flow YAML preview, Flow agent detail, Flow architect detail — are owned by `flows-plugin` via `content-view` slot claims (predicate-driven, not URL-driven). They are explicitly OUT OF SCOPE for this change; see proposal §6 for the follow-up plan. All references below to "every overlay" mean every *shell-owned* overlay.
+
 
 - Back button returning to `/` instead of the previously-displayed view
 - No deep-linking, no shareable URLs, no refresh resilience for overlays
@@ -56,9 +59,8 @@ The previously-archived `fix-desktop-back-navigation` patched the symptoms (prio
   New (session-scoped overlays)
   ─────────────────────────────
   /session/:id/diff                        File diff view
-  /session/:id/flow-yaml                   Flow YAML preview (best-effort)
-  /session/:id/flow/:agentName             Flow agent detail
-  /session/:id/architect                   Flow architect detail
+
+  (Flow YAML / flow agent / architect overlays are plugin-owned and OUT OF SCOPE; see proposal §6.)
 
   New (cross-folder overlays)
   ───────────────────────────
@@ -68,7 +70,7 @@ The previously-archived `fix-desktop-back-navigation` patched the symptoms (prio
                                             may be outside any pinned folder)
 ```
 
-`:encodedCwd` is base64url-encoded via the existing `encodeFolderPath()` helper. `:changeName` and `:artifactId` are kebab-case slugs that are already URL-safe (validated by the existing OpenSpec pipeline). `:agentName` may contain spaces or special chars and is `encodeURIComponent`-encoded.
+`:encodedCwd` is base64url-encoded via the existing `encodeFolderPath()` helper. `:changeName` and `:artifactId` are kebab-case slugs that are already URL-safe (validated by the existing OpenSpec pipeline).
 
 ## Architecture
 
@@ -122,16 +124,11 @@ Existing convention (`/folder/:encodedCwd/terminals`) is path-style. Continuing 
 
 **Exception**: `/pi-resource?path=...&title=...` uses query strings because the resource path is an absolute filesystem path that may live outside any pinned folder (e.g. `~/.pi/agent/.../skill.md` outside the workspace). Encoding it as a path segment would be awkward.
 
-### D2: flowYamlPreview is URL-routed but content is best-effort
+### D2: ~~flowYamlPreview is URL-routed but content is best-effort~~ — RESCINDED
 
-The flow YAML content is computed at runtime (`state.architectState.flowYamlContent` or fetched from `state.flowState.flowSource`). On a cold load of `/session/:id/flow-yaml`, the session state may not yet be loaded, or the architect state may not be active.
+Originally this decision argued the Flow YAML overlay would be URL-routed with a placeholder fallback. After verification with subagents (see proposal §6 "Verified state of the world"), this overlay turned out to be owned by `flows-plugin` via a `content-view` claim selected by predicate, not by URL. Wiring it to a URL requires a plugin-runtime change that is out of scope here.
 
-Three options:
-- **A.** Reconstruct from URL alone (impossible — content isn't on the URL)
-- **B.** Reconstruct from session state (works once session WS loads, but blank if architect inactive)
-- **C.** Don't URL-route this overlay (inconsistent with rest of proposal)
-
-**Decision: B with a placeholder.** On match, attempt reconstruction. If session state lacks the YAML, render a placeholder: "Flow YAML not available for this session. The session may not have an active flow, or the dashboard is still loading. [Return to session]". Acceptable because deep-linking flow YAML is rare; the URL primarily serves as a back-button anchor.
+**Outcome:** the route `/session/:id/flow-yaml` is NOT added by this change. The flow YAML overlay continues to be opened via the plugin's existing `FlowsUiState.flowYamlPreview` setter until a follow-up change migrates it.
 
 ### D3: Sidebar opens push, never replace
 
@@ -156,7 +153,7 @@ interface MobileDepthInput {
   folderEditorCwd?: string | null;
   settingsMatch?: boolean;
   tunnelSetupMatch?: boolean;
-  hasPreview?: boolean;  // ← one bool flattening 8 overlays
+  hasPreview?: boolean;  // ← one bool flattening N overlays
 }
 
 // After
@@ -166,7 +163,7 @@ interface MobileDepthInput {
   hasTerminalRoute: boolean;         // /terminal/:id
   hasSettingsRoute: boolean;         // /settings
   hasTunnelRoute: boolean;           // /tunnel-setup
-  hasOverlayRoute: boolean;          // any of the 9 new overlay routes
+  hasOverlayRoute: boolean;          // any of the 6 new shell-owned overlay routes
   hasPiResourceRoute: boolean;       // /pi-resource (cross-folder)
 }
 ```
@@ -175,11 +172,11 @@ Derivation (in `App.tsx`):
 ```ts
 const [openspecPreviewMatch] = useRoute("/folder/:encodedCwd/openspec/:changeName/:artifactId");
 const [archiveMatch] = useRoute("/folder/:encodedCwd/openspec/archive");
-// ... etc, 9 useRoute calls
+// ... 6 useRoute calls total for shell-owned overlays
 const hasOverlayRoute = openspecPreviewMatch || archiveMatch || ...;
 ```
 
-The depth output (`0` = list, `1` = detail, `2` = preview-on-detail) stays the same; only the inputs change.
+The depth output (`0` = list, `1` = detail, `2` = preview-on-detail) stays the same; only the inputs change. Plugin-owned overlay state (`FlowsUiState`) is not consulted here — plugin overlays remain in the `predicate`-driven path until the follow-up change.
 
 ### D6: Mobile back arrow simplifies to a single line
 
@@ -238,11 +235,9 @@ function App() {
   const [readmeMatch, rm] = useRoute("/folder/:encodedCwd/readme");
   const [piResourcesMatch, prm] = useRoute("/folder/:encodedCwd/pi-resources");
 
-  // Session-scoped overlays
+  // Session-scoped overlays (shell-owned)
   const [diffMatch, dm] = useRoute("/session/:id/diff");
-  const [flowYamlMatch, fym] = useRoute("/session/:id/flow-yaml");
-  const [flowAgentMatch, fam] = useRoute("/session/:id/flow/:agentName");
-  const [architectMatch, ama] = useRoute("/session/:id/architect");
+  // (Flow YAML / agent / architect routes are NOT added — see D2 RESCINDED.)
 
   // Cross-folder
   const [piResourceFileMatch] = useRoute("/pi-resource");
@@ -265,8 +260,8 @@ Each overlay component drops its `onBack` prop (or accepts an optional one); bac
 | Test | What it asserts |
 |------|-----------------|
 | `route-builders.test.ts` | Each builder produces correct URL; round-trips through `decodeFolderPath`; handles special chars in `changeName`/`artifactId`/`agentName`. |
-| Per-route render test | Direct navigation to the URL renders the right component with right props. (9 tests, one per new route.) |
-| Per-route refresh test | Mount component fresh at the URL, with no prior state, and verify it fetches and renders correctly. (9 tests.) |
+| Per-route render test | Direct navigation to the URL renders the right component with right props. (6 tests, one per new shell-owned overlay route.) |
+| Per-route refresh test | Mount component fresh at the URL, with no prior state, and verify it fetches and renders correctly. (6 tests.) |
 | Back-from-overlay regression | The user's repro: navigate to `/settings`, sidebar-click an OpenSpec artifact, click back → URL is `/settings`, Settings is rendered. |
 | Cold-load `/session/:id` back | Mount at `/session/:id` with `history.length === 1`, click back, lands on `/`. (Same as fix-desktop-back-navigation Bug 2; this proposal preserves the cold-load fallback.) |
 | Mobile depth derivation | `getMobileDepth({ hasSessionRoute: true, hasOverlayRoute: false, ... })` returns 1; with `hasOverlayRoute: true`, returns 2. |
@@ -278,7 +273,6 @@ Each overlay component drops its `onBack` prop (or accepts an optional one); bac
 |------|------------|
 | Refresh on `/folder/:encodedCwd/openspec/:changeName/:artifactId` while WS-driven `openspecMap` is empty | Component shows loading spinner; populates once WS settles. If still missing after settle, render "Not found." Same pattern as session detail today. |
 | Bookmarks to `/folder/:encodedCwd/...` after the folder is unpinned | Component renders "Folder not pinned" with a back button and a link to pin. |
-| `flowYamlPreview` deep-link with no session state | Documented as best-effort; placeholder UI covers it. |
 | `decodeFolderPath` returns `null` for malformed encodedCwd | Render "Invalid path" + back button. |
 | Wouter `useSearchParam` not available in current version | Verify version; if absent, write a 5-line helper using `useEffect` + `window.location.search` + a popstate listener. |
 | Plugin slot routes (e.g. `command-route` slot) might collide with new overlay routes | Audit `packages/dashboard-plugin-runtime`'s `command-route` slot: it routes `/cmd/:command` paths, which don't overlap with folder/session-scoped overlays. No collision risk. |
@@ -289,8 +283,8 @@ Each overlay component drops its `onBack` prop (or accepts an optional one); bac
 
 1. Add `route-builders.ts` and unit tests.
 2. Add new `useRoute` calls in `App.tsx` (no behaviour change yet — both state and route paths render the same overlays).
-3. One overlay at a time: replace `setXxx({...})` callsites with `navigate(buildXxxUrl(...))`; confirm tests pass; delete the corresponding `useState` once all callsites migrated.
-4. After all 9 overlays migrated: delete `desktop-back.ts`, `useDesktopBack.ts`, parity test.
+3. One shell-owned overlay at a time: replace `setXxx({...})` callsites with `navigate(buildXxxUrl(...))`; confirm tests pass; delete the corresponding `useState` once all callsites migrated. (6 overlays: openspec preview, archive, specs, readme, pi-resources, pi-resource file, file diff.)
+4. After all 6 shell-owned overlays migrated: delete `desktop-back.ts`, `useDesktopBack.ts`, parity test.
 5. Drop `navigate`/`settingsMatch`/`tunnelSetupMatch` deps from `useOpenSpecActions` / `useContentViews`.
 6. Simplify mobile and desktop back arrows to `history.back() || navigate("/")`.
 7. Update `getMobileDepth` input type.

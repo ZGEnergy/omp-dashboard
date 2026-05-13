@@ -35,9 +35,9 @@ Complete inventory of every "window" and the URL it gets:
 | **Pi resources index** | `PiResourcesView` | `piResourcesState` (state) | `/folder/:encodedCwd/pi-resources` |
 | **Pi resource file preview** | `MarkdownPreviewView` | `piResourceFilePreview` (state) | `/pi-resource?path=<urlencoded>&title=<urlencoded>` |
 | **Session file diff view** | `FileDiffView` | `diffViewSessionId` (state) | `/session/:id/diff` |
-| **Flow YAML preview** | `MarkdownPreviewView` | `flowYamlPreview` (state) | `/session/:id/flow-yaml` (best-effort, see below) |
-| **Flow agent detail** | `FlowAgentDetail` | `flowDetailAgent` (state) | `/session/:id/flow/:agentName` |
-| **Flow architect detail** | `FlowArchitectDetail` | `architectDetailOpen` (state) | `/session/:id/architect` |
+| ~~Flow YAML preview~~ | `MarkdownPreviewView` | `flowYamlPreview` (state) | **OUT OF SCOPE — plugin-owned, see §6** |
+| ~~Flow agent detail~~ | `FlowAgentDetail` | `flowDetailAgent` (state) | **OUT OF SCOPE — plugin-owned, see §6** |
+| ~~Flow architect detail~~ | `FlowArchitectDetail` | `architectDetailOpen` (state) | **OUT OF SCOPE — plugin-owned, see §6** |
 
 `encodedCwd` uses the existing `encodeFolderPath` / `decodeFolderPath` helpers (`packages/client/src/lib/folder-encoding.ts`).
 
@@ -59,7 +59,7 @@ Settings-page sub-tabs (`general`, `pi-ecosystem`, `network`, etc.) become query
 
 - **Path style over query string.** Consistent with existing `/folder/:encodedCwd/...` convention. Cleaner, more shareable. Only `pi-resource` uses query because its `path` is an absolute filesystem path that may live outside any pinned folder.
 - **`flowYamlPreview` is URL-routed but content is best-effort.** The YAML is computed from `state.architectState.flowYamlContent` or fetched from `flowSource`. On cold load, if the session is not yet loaded or has no YAML state, the route renders a "Flow YAML not available — return to session" placeholder. Acceptable tradeoff — overrides on this overlay are rare and the URL still gives users a back-button-friendly anchor.
-- **`flowDetailAgent` and `architectDetailOpen` get URLs.** Originally I called them out as "in-component state" because they are sub-views inside FlowDashboard. But on reflection: they ARE full content-area takeovers (they replace ChatView), they survive sidebar interaction, and the user explicitly asked for "every window" to have a URL. They get one.
+- **`flowDetailAgent`, `architectDetailOpen`, and `flowYamlPreview` are explicitly OUT OF SCOPE.** These are not owned by the shell — they are rendered by `flows-plugin`'s `content-view` slot claims (`FlowAgentDetailClaim`, `FlowArchitectDetailClaim`, `FlowYamlPreviewClaim` in `packages/flows-plugin/src/client/`), selected by predicates that read from a module-level `useSyncExternalStore` (`FlowsUiStateContext`, scoped per dashboard mount, not per session). The shell's `<ContentViewSlot>` consumer (`packages/dashboard-plugin-runtime/src/slot-consumers.tsx:203–228`) filters claims by `predicate(session)` and renders the highest-priority match; URL is not consulted. Note: the slot's prop contract (`SlotPropsMap["content-view"]`) *already* declares `routeParams: Record<string, string>` and `onClose: () => void`, but the shell currently passes `routeParams={{}}` and `onClose={() => navigate("/")}` (`App.tsx:1385`), and all three flow claims explicitly ignore `routeParams` (comments in each claim: "part of the slot contract but unused"). Wiring these to real URLs is therefore a *plugin-runtime + plugin* change — out of scope here, deferred to §6.
 - **Overlays become mutually exclusive.** Today, `previewState` and `flowYamlPreview` could be set simultaneously (the JSX priority chain at App.tsx:884–895 picks the higher-priority one to render). With URL-routed overlays, only one route matches at a time. This matches what users perceive anyway and removes the priority chain and its parity test entirely.
 - **Mobile uses the same routes.** `getMobileDepth` is rewritten to derive depth from `useRoute` matches instead of state flags — no logic change, just a different input source.
 
@@ -90,8 +90,32 @@ Each new route handles cold-load gracefully:
 - `/folder/:encodedCwd/pi-resources` — fetches via existing pi-resources API.
 - `/pi-resource?path=...` — fetches via existing `/api/pi-resource-file`.
 - `/session/:id/diff` — fetches via existing `/api/session-diff`.
-- `/session/:id/flow-yaml` — best-effort placeholder if no state.
-- `/session/:id/flow/:agentName` — placeholder if session/agent not present.
+
+
+## §6 Follow-up: plugin route claims (out of scope, separate change)
+
+### Verified state of the world (do not assume)
+
+- The slot prop contract for `content-view` *already* declares `routeParams: Record<string, string>` and `onClose: () => void` (`packages/shared/src/dashboard-plugin/slot-props.ts:49–53`). No type-level change is needed to start passing route data into claims.
+- The shell currently passes `routeParams={{}}` and `onClose={() => navigate("/")}` at exactly one site: `App.tsx:1385`. There is no URL-aware path through `ContentViewSlot` today.
+- `<ContentViewSlot>` is *not* mounted inside any wouter `<Route>`. It is rendered inside `sessionDetail` and gated on `selectedId && selectedSession && forSession(claims, session).length > 0` (`App.tsx:1385`). Selection is by claim `predicate(session)`, tie-broken by `priority` then `pluginId.localeCompare` (`packages/dashboard-plugin-runtime/src/slot-registry.ts:87–91`).
+- `flows-plugin`'s three claim predicates ignore the session arg entirely and read from a module-level `useSyncExternalStore` (`FlowsUiStateContext`) per dashboard mount (`packages/flows-plugin/src/client/index.tsx:78–86`; comment at `FlowsUiStateContext.tsx:10–12` confirms "NOT per session"). Setters: `setFlowDetailAgent` (4 callsites), `setArchitectDetailOpen` (2 callsites), `setFlowYamlPreview` (1 callsite).
+- `onBack` inside each claim today calls a plugin setter THEN `onClose()` (e.g. `FlowAgentDetail.tsx:205–208`: `() => { actions.setFlowDetailAgent(null); onClose(); }`). Because shell `onClose = navigate("/")`, hitting back from a plugin overlay returns the user to the landing page, not the previous session view — this is the bug the user observed.
+- `CommandRouteSlot` consumer exists (`slot-consumers.tsx:289–310`) but is **dead code**: nothing in `packages/client/src/` invokes `<CommandRouteSlot>`. The `flows-plugin` registers four `command-route` claims (`plugin-registry.tsx:92–95`) that no consumer renders. Manifest validator enforces uniqueness on `claim.command` (`manifest-validator.ts:101–107`); no `path` field exists on `PluginClaim` today.
+- `IntentRenderer` (`packages/dashboard-plugin-runtime/src/intent-renderer.tsx`) is purely a tree walker resolving `primitive` names via `useUiPrimitive`. It contains zero URL/route/history code (grep confirmed). Server-side plugins broadcast via `broadcastToSubscribers({type:"plugin_intents",...})` (`server-context.ts:50–87`); there is no `URL→re-emit-intent` path on the server. IntentRenderer is therefore orthogonal to URL routing and unchanged by any follow-up.
+
+### What the follow-up would need to do
+
+The minimum coherent change that lets `flows-plugin` agent/architect/YAML overlays participate in the URL (so browser back returns to `/session/:id`):
+
+1. **Shell** wraps the `<ContentViewSlot>` mount site in a wouter route catch-all that derives `routeParams` from the path (e.g. `/session/:id/x/:rest*`) and passes a real `onClose = () => window.history.length > 1 ? window.history.back() : navigate("/session/:id")`. No slot-types change required — the prop contract already supports this.
+2. **Plugin claim selection** gains a URL-driven mode. Two viable shapes (decision deferred):
+   - **(a) URL-aware predicate.** Pass `routeParams` as a second arg to predicates: `predicate(session, routeParams)`. Plugins read `routeParams.agentName` instead of `getFlowsUiStateSnapshot().flowDetailAgent`. The `FlowsUiStateContext` setters become navigation calls (`navigate(´/session/${id}/flow/${name}´)`); the store is retired or kept only as a write-through cache. Smallest blast radius; requires changing `SlotPredicate<S>` signature in `slot-registry.ts` and updating every existing predicate callsite.
+   - **(b) New `content-route` claim shape.** Add `path?: string` to `PluginClaim` (`manifest-types.ts`) and validate URL-pattern uniqueness in `manifest-validator.ts`. `ContentViewSlot` first tries route-matched claims (wouter pattern match), falls back to predicate claims. Bigger change but cleaner contract; plugins opt in incrementally.
+3. **Plugin** (`flows-plugin`) drops `isFlowAgentDetailActive` / `isFlowArchitectDetailActive` / `isFlowYamlPreviewActive` predicates (or converts them to read `routeParams`), changes the four call sites of `setFlowDetailAgent` to `navigate(buildFlowAgentUrl(...))`, the two `setArchitectDetailOpen(true)` calls to `navigate(buildArchitectUrl(...))`, and the one `setFlowYamlPreview({content,title})` call to `navigate(buildFlowYamlUrl(...))`. `FlowYamlPreview`'s computed `content`/`title` survive only via re-derivation on mount — same cold-load tradeoff as the shell's `/session/:id/flow-yaml` would have had.
+4. **Dead code cleanup** (optional but adjacent): either wire `<CommandRouteSlot>` into the input handler, or delete it and the four `flows-plugin` command-route claims.
+
+None of this is required for `overlay-url-routing` to ship: the shell back-button simplification in §3–§5 already produces the right behaviour *for shell-owned* overlays, and the new normative requirement in `specs/url-routing/spec.md` explicitly excludes plugin claims so the follow-up has a clean spec delta to extend.
 
 ## Capabilities
 

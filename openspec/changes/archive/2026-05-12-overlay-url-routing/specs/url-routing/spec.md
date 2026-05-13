@@ -95,44 +95,27 @@ The client SHALL define a route `/session/:id/diff` that renders the file diff v
 - **THEN** FileDiffView SHALL be rendered for session `abc`
 - **AND** the diff data SHALL be fetched via `/api/session-diff?sessionId=abc`
 
-### Requirement: Flow YAML preview route (best-effort)
-The client SHALL define a route `/session/:id/flow-yaml` that renders the flow YAML preview for the specified session. Content reconstruction is best-effort because the YAML is not persisted and is computed at runtime from session state.
+### Requirement: Shell overlay URL reflects current state
+For every full-content-area view owned by the shell (i.e. excluding plugin-contributed `content-view` claims), the current URL SHALL be the single source of truth for which view is rendered. Shell components SHALL NOT keep parallel `useState` flags that determine which overlay is active. State derivable from the URL (cwd, change name, artifact id, session id, query params) SHALL be read from `useRoute` params or `URLSearchParams`, not from in-memory copies.
 
-#### Scenario: Flow YAML available
-- **WHEN** user navigates to `/session/abc/flow-yaml`
-- **AND** the session's `architectState.flowYamlContent` or `flowState.flowSource` is loaded
-- **THEN** the YAML SHALL be rendered as a markdown code block
+#### Scenario: URL is sole source of truth for shell overlays
+- **GIVEN** any shell overlay route in the proposal table is the current URL
+- **WHEN** the page is hard-refreshed
+- **THEN** the same overlay SHALL re-render once any required async data resolves
+- **AND** no `useState` flag in `App.tsx` or `useContentViews` SHALL gate that rendering
 
-#### Scenario: Flow YAML not available
-- **WHEN** user navigates to `/session/abc/flow-yaml`
-- **AND** the session has no flow state loaded (cold load, no active flow, or session not yet loaded)
-- **THEN** the page SHALL render a "Flow YAML not available" placeholder with a back button
-
-### Requirement: Flow agent detail route
-The client SHALL define a route `/session/:id/flow/:agentName` that renders the flow agent detail view for the specified session and agent.
-
-#### Scenario: Navigate to agent detail URL
-- **WHEN** user navigates to `/session/abc/flow/my-agent`
-- **THEN** FlowAgentDetail SHALL be rendered with the agent state from `flowState.agents.get("my-agent")`
-
-#### Scenario: Agent not found
-- **WHEN** user navigates to a flow agent URL where the agent is not in `flowState.agents`
-- **THEN** the page SHALL render a "Agent not found" placeholder with a back button
-
-### Requirement: Flow architect detail route
-The client SHALL define a route `/session/:id/architect` that renders the flow architect detail view for the specified session.
-
-#### Scenario: Navigate to architect URL
-- **WHEN** user navigates to `/session/abc/architect`
-- **AND** the session has an active `architectState`
-- **THEN** FlowArchitectDetail SHALL be rendered
+#### Scenario: Plugin-owned overlays remain out of scope
+- **GIVEN** a plugin contributes a `content-view` claim selected by predicate (e.g. `flows-plugin`'s `FlowAgentDetailClaim` / `FlowArchitectDetailClaim` / `FlowYamlPreviewClaim`)
+- **WHEN** that overlay is active
+- **THEN** the URL is NOT required to reflect it under this requirement
+- **AND** a follow-up change covers URL participation for plugin claims
 
 ### Requirement: Sidebar interactions push onto browser history
-Every sidebar action that opens a content-area view (OpenSpec artifact letters, README links, pi-resource links, archive browser, specs browser, file-diff toggle, flow agent click, architect detail toggle) SHALL invoke `navigate(<route>)` with default push semantics. Replace semantics SHALL NOT be used unless explicitly required for an invalid-URL redirect.
+Every sidebar action that opens a shell-owned content-area view (OpenSpec artifact letters, README links, pi-resource links, archive browser, specs browser, file-diff toggle) SHALL invoke `navigate(<route>)` with default push semantics. Replace semantics SHALL NOT be used unless explicitly required for an invalid-URL redirect.
 
 #### Scenario: Sidebar action grows browser history
 - **GIVEN** the user is on any URL with `window.history.length === N`
-- **WHEN** the user clicks any sidebar action that opens a content-area view
+- **WHEN** the user clicks any sidebar action that opens a shell-owned content-area view
 - **THEN** `window.history.length` SHALL be `N + 1` after the navigation
 - **AND** clicking back SHALL restore the previous URL
 
