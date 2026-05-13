@@ -34,6 +34,7 @@ the const `UI_PRIMITIVE_KEYS`.
 | `UI_PRIMITIVE_KEYS.zoomControls` | `"ui:zoom-controls"` | `ComponentType<UiZoomControlsProps>` |
 | `UI_PRIMITIVE_KEYS.formatTokens` | `"ui:format-tokens"` | `(n: number) => string` |
 | `UI_PRIMITIVE_KEYS.formatDuration` | `"ui:format-duration"` | `(ms: number) => string` |
+| `UI_PRIMITIVE_KEYS.modelSelector` | `"ui:model-selector"` | `ComponentType<UiModelSelectorProps>` — model picker. provider filter. typeahead. emits `provider/id` label via `onSelect`. |
 
 Full prop types for each are in `packages/shared/src/dashboard-plugin/ui-primitives.ts`.
 

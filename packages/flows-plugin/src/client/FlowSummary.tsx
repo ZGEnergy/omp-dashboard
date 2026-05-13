@@ -1,12 +1,13 @@
 import React, { useState, type ReactNode } from "react";
 import { Icon } from "@mdi/react";
-import { mdiCloseCircleOutline, mdiCheckCircle, mdiAlertCircle, mdiStopCircle, mdiCloseCircle, mdiCircleOutline, mdiChevronRight, mdiChevronDown, mdiFileDocumentOutline } from "@mdi/js";
+import { mdiCloseCircleOutline, mdiCheckCircle, mdiAlertCircle, mdiStopCircle, mdiCloseCircle, mdiCircleOutline, mdiChevronRight, mdiChevronDown } from "@mdi/js";
 import type { DashboardSession, FlowState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { UI_PRIMITIVE_KEYS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
 import { useUiPrimitive, usePluginSend } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { FlowGraph, flowStateToGraphSteps } from "./FlowGraph.js";
+import { FlowYamlPopoverButton } from "./FlowYamlPopoverButton.js";
 import { useFlowsSessionState } from "./FlowsSessionStateContext.js";
-import { useFlowsUiActions } from "./FlowsUiStateContext.js";
+
 
 // formatDuration moved to registry primitive lookup inside FlowSummary
 // (PH-2 fix from validation report).
@@ -20,16 +21,12 @@ const statusConfig: Record<string, { icon: ReactNode; label: string; color: stri
 
 export function FlowSummary({
   flowState,
-  onAgentClick,
   onDismiss,
   onSendPrompt,
-  onViewYaml,
 }: {
   flowState: FlowState;
-  onAgentClick: (agentName: string) => void;
   onDismiss: () => void;
   onSendPrompt?: (text: string) => void;
-  onViewYaml?: () => void;
 }) {
   const formatDuration = useUiPrimitive(UI_PRIMITIVE_KEYS.formatDuration);
   const [collapsed, setCollapsed] = useState(false);
@@ -72,15 +69,12 @@ export function FlowSummary({
           <FlowGraph
             steps={flowStateToGraphSteps(flowState)}
           />
-          {onViewYaml && (
+          {flowState.flowSource && (
             <div className="mt-1">
-              <button
-                onClick={onViewYaml}
-                className="text-[var(--text-tertiary)] hover:text-blue-400 transition-colors p-0.5 rounded hover:bg-[var(--bg-surface)] inline-flex items-center"
-                title="View flow YAML"
-              >
-                <Icon path={mdiFileDocumentOutline} size={0.5} />
-              </button>
+              <FlowYamlPopoverButton
+                flowSource={flowState.flowSource}
+                flowName={flowState.flowName}
+              />
             </div>
           )}
 
@@ -100,8 +94,7 @@ export function FlowSummary({
               return (
                 <div
                   key={agent.stepId || agent.agentName}
-                  onClick={() => onAgentClick(agent.stepId || agent.agentName)}
-                  className="flex items-center gap-1.5 text-[11px] cursor-pointer hover:bg-[var(--bg-tertiary)] rounded px-1 py-0.5"
+                  className="flex items-center gap-1.5 text-[11px] hover:bg-[var(--bg-tertiary)] rounded px-1 py-0.5"
                 >
                   <span className={`${agentColor} inline-flex`}><Icon path={agentIconPath} size={0.45} /></span>
                   <span className="text-[var(--text-primary)]">{agent.label || agent.stepId || agent.agentName}</span>
@@ -148,7 +141,6 @@ export function FlowSummary({
  */
 export function FlowSummaryClaim({ session }: { session: DashboardSession }) {
   const { flowState } = useFlowsSessionState(session.id);
-  const actions = useFlowsUiActions();
   const send = usePluginSend();
 
   if (!flowState) return null;
@@ -156,15 +148,12 @@ export function FlowSummaryClaim({ session }: { session: DashboardSession }) {
   return (
     <FlowSummary
       flowState={flowState}
-      onAgentClick={actions.setFlowDetailAgent}
       onDismiss={() =>
         send({ type: "flow_control", sessionId: session.id, action: "dismiss_summary" })
       }
       onSendPrompt={(text) =>
         send({ type: "send_prompt", sessionId: session.id, text })
       }
-      // YAML viewing routes through FlowYamlPreview content-view claim.
-      onViewYaml={undefined}
     />
   );
 }

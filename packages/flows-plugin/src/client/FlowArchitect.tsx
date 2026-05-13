@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Icon } from "@mdi/react";
 import {
   mdiChevronRight,
@@ -335,12 +335,21 @@ const AGENT_STATUS_MAP: Record<
 
 function ArchitectAgentCard({
   agent,
-  onViewSource,
 }: {
   agent: ArchitectAgentEntry;
-  onViewSource?: () => void;
 }) {
   const AgentCardShell = useUiPrimitive(UI_PRIMITIVE_KEYS.agentCard);
+  const Popover = useUiPrimitive(UI_PRIMITIVE_KEYS.popover);
+  const MarkdownContent = useUiPrimitive(UI_PRIMITIVE_KEYS.markdownContent);
+  const sourceButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [sourceOpen, setSourceOpen] = useState(false);
+
+  // Architect's custom agents carry their raw markdown inline on the
+  // ArchitectAgentEntry (set by the architect-reducer when capturing
+  // `agent_write` events). No REST fetch needed — just render in a
+  // popover anchored to the doc button.
+  const hasSource = Boolean(agent.source);
+
   return (
     <AgentCardShell
       name={agent.name}
@@ -350,39 +359,110 @@ function ArchitectAgentCard({
         <span className="text-[10px] text-[var(--text-muted)] truncate">
           {agent.type === "custom" ? "custom agent" : agent.type}
         </span>
-        {onViewSource && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onViewSource();
-            }}
-            className="text-[var(--text-tertiary)] hover:text-purple-400 transition-colors p-0.5 rounded hover:bg-[var(--bg-surface)]"
-            title={`View ${agent.name} source`}
-          >
-            <Icon path={mdiFileDocumentOutline} size={0.5} />
-          </button>
+        {hasSource && (
+          <>
+            <button
+              ref={sourceButtonRef}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSourceOpen((prev) => !prev);
+              }}
+              className={`transition-colors p-0.5 rounded ${
+                sourceOpen
+                  ? "text-purple-400 bg-purple-400/10"
+                  : "text-[var(--text-tertiary)] hover:text-purple-400 hover:bg-[var(--bg-surface)]"
+              }`}
+              title={sourceOpen ? `Close ${agent.name} source` : `View ${agent.name} source`}
+            >
+              <Icon path={mdiFileDocumentOutline} size={0.5} />
+            </button>
+            {sourceOpen && sourceButtonRef.current && (
+              <Popover
+                anchorEl={sourceButtonRef.current}
+                onDismiss={() => setSourceOpen(false)}
+              >
+                <div
+                  className="w-[640px] max-w-[90vw] max-h-[70vh] overflow-auto bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-md shadow-xl p-3"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="text-[11px] text-[var(--text-tertiary)] mb-2 font-mono">
+                    {agent.name}
+                  </div>
+                  <MarkdownContent content={agent.source!} />
+                </div>
+              </Popover>
+            )}
+          </>
         )}
       </div>
     </AgentCardShell>
   );
 }
 
-/** Small icon button for viewing files (YAML, agent source, etc.) */
-function ViewFileButton({
+/**
+ * Small icon button that opens a popover anchored to itself, showing the
+ * given markdown/YAML `content`. Replaces the previous callback-based
+ * ViewFileButton that routed via the dormant FlowYamlPreview slot.
+ *
+ * See change: add-ui-popover-primitive.
+ */
+function ViewFilePopoverButton({
   title,
-  onClick,
+  content,
+  filename,
+  language,
 }: {
   title: string;
-  onClick: () => void;
+  content: string;
+  /** Path/filename shown as a small caption above the content. */
+  filename?: string;
+  /** Hint for code fence (e.g. "yaml", "markdown"). When omitted we render raw. */
+  language?: string;
 }) {
+  const Popover = useUiPrimitive(UI_PRIMITIVE_KEYS.popover);
+  const MarkdownContent = useUiPrimitive(UI_PRIMITIVE_KEYS.markdownContent);
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+
+  // Wrap raw YAML/text in a code fence so MarkdownContent renders it as a
+  // syntax-highlighted block. Already-markdown content is shown verbatim.
+  const rendered = language
+    ? "```" + language + "\n" + content + "\n```"
+    : content;
+
   return (
-    <button
-      onClick={onClick}
-      className="text-[var(--text-tertiary)] hover:text-purple-400 transition-colors p-0.5 rounded hover:bg-[var(--bg-surface)] inline-flex items-center"
-      title={title}
-    >
-      <Icon path={mdiFileDocumentOutline} size={0.5} />
-    </button>
+    <>
+      <button
+        ref={ref}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((prev) => !prev);
+        }}
+        className={`transition-colors p-0.5 rounded inline-flex items-center ${
+          open
+            ? "text-purple-400 bg-purple-400/10"
+            : "text-[var(--text-tertiary)] hover:text-purple-400 hover:bg-[var(--bg-surface)]"
+        }`}
+        title={title}
+      >
+        <Icon path={mdiFileDocumentOutline} size={0.5} />
+      </button>
+      {open && ref.current && (
+        <Popover anchorEl={ref.current} onDismiss={() => setOpen(false)}>
+          <div
+            className="w-[640px] max-w-[90vw] max-h-[70vh] overflow-auto bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-md shadow-xl p-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {filename && (
+              <div className="text-[11px] text-[var(--text-tertiary)] mb-2 font-mono truncate" title={filename}>
+                {filename}
+              </div>
+            )}
+            <MarkdownContent content={rendered} />
+          </div>
+        </Popover>
+      )}
+    </>
   );
 }
 
@@ -391,21 +471,20 @@ function ViewFileButton({
 export function FlowArchitect({
   state,
   onAbort,
-  onClick,
-  isDetailOpen,
   onPromptRespond,
-  onViewYaml,
-  onViewAgentSource,
 }: {
   state: ArchitectState;
   onAbort: () => void;
-  onClick?: () => void;
-  isDetailOpen?: boolean;
   onPromptRespond?: (promptId: string, answer: string) => void;
-  onViewYaml?: () => void;
-  onViewAgentSource?: (agentName: string, source: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  // Popover state for the architect-detail view. Lives in this component
+  // so the eye button (the anchor) and the Popover share the same scope.
+  // Replaces the old `content-view` slot claim + global UI-state flag.
+  // See change: add-ui-popover-primitive.
+  const [detailOpen, setDetailOpen] = useState(false);
+  const detailButtonRef = useRef<HTMLButtonElement | null>(null);
+  const Popover = useUiPrimitive(UI_PRIMITIVE_KEYS.popover);
   const isActive = state.phase === "context" || state.phase === "designing";
   const isPreview = state.phase === "preview";
   const customAgents = state.agents.filter((a) => a.type === "custom");
@@ -430,7 +509,7 @@ export function FlowArchitect({
           <span className="text-purple-400 text-sm font-medium">π</span>
         )}
         <span className="text-sm text-[var(--text-primary)] truncate flex-1">
-          Flow Architect
+          Flow Architect{" "}
           <span className="text-[var(--text-tertiary)] ml-1.5">
             {state.phase === "context"
               ? "Analyzing conversation..."
@@ -537,8 +616,13 @@ export function FlowArchitect({
                     {state.flowWriteStatus === "validation-error" ? "✗" : "✓"}
                   </span>
                 )}
-                {onViewYaml && state.flowYamlContent && (
-                  <ViewFileButton title="View flow YAML" onClick={onViewYaml} />
+                {state.flowYamlContent && (
+                  <ViewFilePopoverButton
+                    title="View flow YAML"
+                    content={state.flowYamlContent}
+                    filename={state.flowName ? `${state.flowName}.yaml` : "flow.yaml"}
+                    language="yaml"
+                  />
                 )}
               </div>
             </div>
@@ -558,15 +642,7 @@ export function FlowArchitect({
                 }}
               >
                 {customAgents.map((agent) => (
-                  <ArchitectAgentCard
-                    key={agent.name}
-                    agent={agent}
-                    onViewSource={
-                      agent.source && onViewAgentSource
-                        ? () => onViewAgentSource(agent.name, agent.source!)
-                        : undefined
-                    }
-                  />
+                  <ArchitectAgentCard key={agent.name} agent={agent} />
                 ))}
               </div>
             </div>
@@ -591,20 +667,32 @@ export function FlowArchitect({
               ))}
             </div>
             <div className="flex items-center gap-2 mt-1">
-              {onClick && (
-                <button
-                  onClick={onClick}
-                  className={`transition-colors p-0.5 rounded inline-flex items-center ${
-                    isDetailOpen
-                      ? "text-purple-400 bg-purple-400/10"
-                      : "text-[var(--text-tertiary)] hover:text-purple-400 hover:bg-[var(--bg-surface)]"
-                  }`}
-                  title={isDetailOpen ? "Close architect detail" : "View full architect detail"}
-                >
-                  <Icon path={isDetailOpen ? mdiEyeOffOutline : mdiEyeOutline} size={0.5} />
-                </button>
-              )}
+              <button
+                ref={detailButtonRef}
+                onClick={() => setDetailOpen((prev) => !prev)}
+                className={`transition-colors p-0.5 rounded inline-flex items-center ${
+                  detailOpen
+                    ? "text-purple-400 bg-purple-400/10"
+                    : "text-[var(--text-tertiary)] hover:text-purple-400 hover:bg-[var(--bg-surface)]"
+                }`}
+                title={detailOpen ? "Close architect detail" : "View full architect detail"}
+              >
+                <Icon path={detailOpen ? mdiEyeOffOutline : mdiEyeOutline} size={0.5} />
+              </button>
             </div>
+            {detailOpen && detailButtonRef.current && (
+              <Popover
+                anchorEl={detailButtonRef.current}
+                onDismiss={() => setDetailOpen(false)}
+              >
+                <div className="w-[640px] max-w-[90vw] max-h-[70vh] overflow-auto bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-md shadow-xl">
+                  <FlowArchitectDetail
+                    state={state}
+                    onBack={() => setDetailOpen(false)}
+                  />
+                </div>
+              </Popover>
+            )}
           </div>
         </div>
       </div>
@@ -637,8 +725,6 @@ export function FlowArchitect({
  */
 export function FlowArchitectClaim({ session }: { session: DashboardSession }) {
   const { architectState } = useFlowsSessionState(session.id);
-  const ui = useFlowsUiState();
-  const actions = useFlowsUiActions();
   const send = usePluginSend();
 
   if (!architectState) return null;
@@ -649,44 +735,9 @@ export function FlowArchitectClaim({ session }: { session: DashboardSession }) {
       onAbort={() =>
         send({ type: "flow_control", sessionId: session.id, action: "abort" })
       }
-      onClick={() => actions.setArchitectDetailOpen((prev) => !prev)}
-      isDetailOpen={ui.architectDetailOpen}
       onPromptRespond={(promptId, answer) =>
         send({ type: "architect_prompt_response", sessionId: session.id, promptId, answer })
       }
-      // YAML and agent-source viewing routes through the FlowYamlPreview
-      // content-view claim once Part G wires the manifest. Until then,
-      // these are no-ops.
-      onViewYaml={undefined}
-      onViewAgentSource={undefined}
-    />
-  );
-}
-
-/**
- * Slot-consumer wrapper for the `content-view` claim, gated by the
- * `isFlowArchitectDetailActive` predicate. On back, clears
- * `architectDetailOpen` in the plugin's UI store and calls the slot's
- * `onClose`. See change: pluginize-flows-via-registry (design.md
- * Decision 3 RECONSIDERED — predicates over routes).
- */
-export function FlowArchitectDetailClaim({
-  session,
-  onClose,
-}: {
-  session: DashboardSession;
-  onClose: () => void;
-}) {
-  const { architectState } = useFlowsSessionState(session.id);
-  const actions = useFlowsUiActions();
-  if (!architectState) return null;
-  return (
-    <FlowArchitectDetail
-      state={architectState}
-      onBack={() => {
-        actions.setArchitectDetailOpen(false);
-        onClose();
-      }}
     />
   );
 }

@@ -25,6 +25,10 @@
       "types": "./src/DialogPortal.tsx",
       "default": "./src/DialogPortal.tsx"
     },
+    "./Popover": {
+      "types": "./src/Popover.tsx",
+      "default": "./src/Popover.tsx"
+    },
     "./ConfirmDialog": {
       "types": "./src/ConfirmDialog.tsx",
       "default": "./src/ConfirmDialog.tsx"

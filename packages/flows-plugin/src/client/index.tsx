@@ -27,8 +27,8 @@ export { SessionFlowActions } from "./SessionFlowActions.js";
 // via pluginContext.send. See change: pluginize-flows-via-registry.
 export { FlowActivityBadgeClaim } from "./FlowActivityBadge.js";
 export { FlowDashboardClaim } from "./FlowDashboard.js";
-export { FlowArchitectClaim, FlowArchitectDetailClaim } from "./FlowArchitect.js";
-export { FlowAgentDetailClaim } from "./FlowAgentDetail.js";
+export { FlowArchitectClaim } from "./FlowArchitect.js";
+
 export { FlowSummaryClaim } from "./FlowSummary.js";
 export { FlowYamlPreviewClaim } from "./FlowYamlPreview.js";
 export { SessionFlowActionsClaim } from "./SessionFlowActions.js";
@@ -95,13 +95,7 @@ export type { FlowsUiState, FlowsUiActions } from "./FlowsUiStateContext.js";
 // See change: pluginize-flows-via-registry (design.md Decision 3
 // RECONSIDERED — predicates over routes).
 
-export function isFlowAgentDetailActive(_session?: unknown): boolean {
-  return getFlowsUiStateSnapshot().flowDetailAgent !== null;
-}
 
-export function isFlowArchitectDetailActive(_session?: unknown): boolean {
-  return getFlowsUiStateSnapshot().architectDetailOpen;
-}
 
 export function isFlowYamlPreviewActive(_session?: unknown): boolean {
   return getFlowsUiStateSnapshot().flowYamlPreview !== null;

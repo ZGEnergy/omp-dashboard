@@ -22,6 +22,7 @@ import {
 import { AgentCardShell } from "@blackbelt-technology/pi-dashboard-client-utils/AgentCardShell";
 import { ConfirmDialog } from "@blackbelt-technology/pi-dashboard-client-utils/ConfirmDialog";
 import { DialogPortal } from "@blackbelt-technology/pi-dashboard-client-utils/DialogPortal";
+import { Popover } from "@blackbelt-technology/pi-dashboard-client-utils/Popover";
 import { SearchableSelectDialog } from "@blackbelt-technology/pi-dashboard-client-utils/SearchableSelectDialog";
 import { ZoomControls } from "@blackbelt-technology/pi-dashboard-client-utils/ZoomControls";
 import { ActionList } from "@blackbelt-technology/pi-dashboard-client-utils/ActionList";
@@ -31,6 +32,7 @@ import {
   formatTokens,
 } from "@blackbelt-technology/pi-dashboard-client-utils/agent-card-utils";
 import { MarkdownContent } from "./components/MarkdownContent.js";
+import { ModelSelector } from "./components/ModelSelector.js";
 
 const primitiveRegistry = createUiPrimitiveRegistry();
 registerUiPrimitive(primitiveRegistry, UI_PRIMITIVE_KEYS.agentCard, AgentCardShell);
@@ -47,6 +49,8 @@ registerUiPrimitive(primitiveRegistry, UI_PRIMITIVE_KEYS.formatTokens, formatTok
 registerUiPrimitive(primitiveRegistry, UI_PRIMITIVE_KEYS.formatDuration, formatDuration);
 registerUiPrimitive(primitiveRegistry, UI_PRIMITIVE_KEYS.actionList, ActionList);
 registerUiPrimitive(primitiveRegistry, UI_PRIMITIVE_KEYS.statusPill, StatusPill);
+registerUiPrimitive(primitiveRegistry, UI_PRIMITIVE_KEYS.modelSelector, ModelSelector);
+registerUiPrimitive(primitiveRegistry, UI_PRIMITIVE_KEYS.popover, Popover);
 
 // Register service worker for PWA installability
 if ("serviceWorker" in navigator) {

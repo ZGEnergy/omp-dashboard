@@ -36,10 +36,6 @@ import { useSyncExternalStore } from "react";
 
 /** UI selection state shared across the plugin's content-view contributions. */
 export interface FlowsUiState {
-  /** When non-null, the user is viewing this agent's detail view. */
-  flowDetailAgent: string | null;
-  /** When true, the user is viewing the architect detail view. */
-  architectDetailOpen: boolean;
   /**
    * When non-null, the user has clicked an agent's "view source"
    * action; the agent's source is displayed in the YAML preview.
@@ -54,8 +50,6 @@ export interface FlowsUiState {
 }
 
 const INITIAL_STATE: FlowsUiState = Object.freeze({
-  flowDetailAgent: null,
-  architectDetailOpen: false,
   sourceOpenAgent: null,
   flowYamlPreview: null,
 });
@@ -118,10 +112,6 @@ function setState(patch: Partial<FlowsUiState>): void {
 
 /** Setters API exposed via the hook. Stable function references — never re-created. */
 export interface FlowsUiActions {
-  /** Set the agent currently displayed in the flow agent detail view. */
-  setFlowDetailAgent(agent: string | null): void;
-  /** Toggle or set whether the architect detail view is open. */
-  setArchitectDetailOpen(open: boolean | ((prev: boolean) => boolean)): void;
   /** Set the agent whose source is currently open in the YAML preview. */
   setSourceOpenAgent(agent: string | null): void;
   /** Set the YAML preview content (or close it with null). */
@@ -138,20 +128,10 @@ export interface FlowsUiActions {
 }
 
 const ACTIONS: FlowsUiActions = Object.freeze({
-  setFlowDetailAgent: (agent: string | null) => setState({ flowDetailAgent: agent }),
-  setArchitectDetailOpen: (open: boolean | ((prev: boolean) => boolean)) => {
-    if (typeof open === "function") {
-      setState({ architectDetailOpen: open(state.architectDetailOpen) });
-    } else {
-      setState({ architectDetailOpen: open });
-    }
-  },
   setSourceOpenAgent: (agent: string | null) => setState({ sourceOpenAgent: agent }),
   setFlowYamlPreview: (value: { content: string; title: string } | null) => setState({ flowYamlPreview: value }),
   dismissAll: () =>
     setState({
-      flowDetailAgent: null,
-      architectDetailOpen: false,
       sourceOpenAgent: null,
       flowYamlPreview: null,
     }),

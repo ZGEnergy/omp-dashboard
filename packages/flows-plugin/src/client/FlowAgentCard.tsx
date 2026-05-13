@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "@mdi/react";
 import { mdiRefresh, mdiEyeOutline, mdiEyeOffOutline, mdiFileDocumentOutline } from "@mdi/js";
 import type { DashboardSession, FlowAgentState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -7,28 +7,84 @@ import { useUiPrimitive } from "@blackbelt-technology/dashboard-plugin-runtime";
 // AgentMetricSlot is a slot CONSUMER (Phase-2 decorator slot), not a primitive
 // — it stays as a direct import. See add-plugin-ui-primitive-registry Decision 4.
 import { AgentMetricSlot } from "@blackbelt-technology/pi-dashboard-client-utils/extension-ui/AgentMetricSlot";
+import { FlowAgentDetail } from "./FlowAgentDetail.js";
+
+/**
+ * State of the agent-source fetch for the document-icon popover.
+ *
+ * Self-contained inside FlowAgentCard: when the user clicks the doc icon,
+ * we open a popover anchored to that button and fetch the agent's .md
+ * via `GET /api/pi-resource-file?path=<sourcePath>`. The bytes are then
+ * rendered with the `ui:markdown-content` primitive.
+ *
+ * See change: add-ui-popover-primitive.
+ */
+type AgentSourceState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "loaded"; content: string }
+  | { kind: "error"; error: string };
 
 export function FlowAgentCard({
   agent,
-  onClick,
-  onViewSource,
   selected,
-  isDetailOpen,
-  isSourceOpen,
   session,
 }: {
   agent: FlowAgentState;
-  onClick?: () => void;
-  onViewSource?: () => void;
   selected?: boolean;
-  isDetailOpen?: boolean;
-  isSourceOpen?: boolean;
   /** Phase-2 decorator host — used for `agent-metric` filtering by agentId. */
   session?: Pick<DashboardSession, "uiDecorators">;
 }) {
   const AgentCardShell = useUiPrimitive(UI_PRIMITIVE_KEYS.agentCard);
   const formatTokens = useUiPrimitive(UI_PRIMITIVE_KEYS.formatTokens);
   const formatDuration = useUiPrimitive(UI_PRIMITIVE_KEYS.formatDuration);
+  const Popover = useUiPrimitive(UI_PRIMITIVE_KEYS.popover);
+  const MarkdownContent = useUiPrimitive(UI_PRIMITIVE_KEYS.markdownContent);
+
+  const sourceButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [sourceState, setSourceState] = useState<AgentSourceState>({ kind: "idle" });
+
+  // Eye-button popover state: shows the FlowAgentDetail run-history view
+  // anchored to the eye button. Replaces the dormant content-view slot
+  // claim (FlowAgentDetailClaim) which took over the full chat pane.
+  // See change: add-ui-popover-primitive.
+  const detailButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  // Fetch the agent's .md when the popover opens. Mirrors the pattern of
+  // `usePiResourceFileFetch` in the dashboard client: deps include only
+  // open + path. Including state in deps causes the cleanup to fire on
+  // the idle→loading transition and self-cancel the fetch.
+  // See change: add-ui-popover-primitive.
+  useEffect(() => {
+    if (!sourceOpen) return;
+    if (!agent.sourcePath) {
+      setSourceState({ kind: "error", error: "No source path recorded for this agent." });
+      return;
+    }
+    let cancelled = false;
+    setSourceState({ kind: "loading" });
+    fetch(`/api/pi-resource-file?path=${encodeURIComponent(agent.sourcePath)}`)
+      .then(async (r) => {
+        const json = await r.json();
+        if (cancelled) return;
+        if (json?.success && typeof json?.data?.content === "string") {
+          setSourceState({ kind: "loaded", content: json.data.content });
+        } else {
+          setSourceState({
+            kind: "error",
+            error: typeof json?.error === "string" ? json.error : "Failed to read source",
+          });
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setSourceState({ kind: "error", error: String(err) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceOpen, agent.sourcePath]);
 
   const displayName = agent.label || agent.stepId || agent.agentName;
   const displayRole = agent.cardRole || agent.model || "";
@@ -103,36 +159,76 @@ export function FlowAgentCard({
         </div>
 
         {/* View source / detail icons — bottom-right of card */}
-        {(onViewSource || onClick) && (
-          <div className="flex justify-end mt-auto pt-1 gap-1">
-            {onViewSource && (
-              <button
-                onClick={(e) => { e.stopPropagation(); onViewSource(); }}
-                className={`transition-colors p-0.5 rounded inline-flex items-center ${
-                  isSourceOpen
-                    ? "text-blue-400 bg-blue-400/10"
-                    : "text-[var(--text-tertiary)] hover:text-blue-400 hover:bg-[var(--bg-surface)]"
-                }`}
-                title={isSourceOpen ? `Close ${displayName} source` : `View ${displayName} source`}
-              >
-                <Icon path={mdiFileDocumentOutline} size={0.45} />
-              </button>
+        <div className="flex justify-end mt-auto pt-1 gap-1">
+            {agent.sourcePath && (
+              <>
+                <button
+                  ref={sourceButtonRef}
+                  onClick={(e) => { e.stopPropagation(); setSourceOpen((prev) => !prev); }}
+                  className={`transition-colors p-0.5 rounded inline-flex items-center ${
+                    sourceOpen
+                      ? "text-blue-400 bg-blue-400/10"
+                      : "text-[var(--text-tertiary)] hover:text-blue-400 hover:bg-[var(--bg-surface)]"
+                  }`}
+                  title={sourceOpen ? `Close ${displayName} source` : `View ${displayName} source`}
+                >
+                  <Icon path={mdiFileDocumentOutline} size={0.45} />
+                </button>
+                {sourceOpen && sourceButtonRef.current && (
+                  <Popover
+                    anchorEl={sourceButtonRef.current}
+                    onDismiss={() => setSourceOpen(false)}
+                  >
+                    <div
+                      className="w-[640px] max-w-[90vw] max-h-[70vh] overflow-auto bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-md shadow-xl p-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="text-[11px] text-[var(--text-tertiary)] mb-2 font-mono truncate" title={agent.sourcePath}>
+                        {agent.sourcePath}
+                      </div>
+                      {sourceState.kind === "loading" && (
+                        <div className="text-xs text-[var(--text-muted)]">Loading…</div>
+                      )}
+                      {sourceState.kind === "error" && (
+                        <div className="text-xs text-red-400">⚠ {sourceState.error}</div>
+                      )}
+                      {sourceState.kind === "loaded" && (
+                        <MarkdownContent content={sourceState.content} />
+                      )}
+                    </div>
+                  </Popover>
+                )}
+              </>
             )}
-            {onClick && (
-              <button
-                onClick={(e) => { e.stopPropagation(); onClick(); }}
-                className={`transition-colors p-0.5 rounded inline-flex items-center ${
-                  isDetailOpen
-                    ? "text-blue-400 bg-blue-400/10"
-                    : "text-[var(--text-tertiary)] hover:text-blue-400 hover:bg-[var(--bg-surface)]"
-                }`}
-                title={isDetailOpen ? `Close ${displayName} detail` : `View ${displayName} detail`}
+          <button
+            ref={detailButtonRef}
+            onClick={(e) => { e.stopPropagation(); setDetailOpen((prev) => !prev); }}
+            className={`transition-colors p-0.5 rounded inline-flex items-center ${
+              detailOpen
+                ? "text-blue-400 bg-blue-400/10"
+                : "text-[var(--text-tertiary)] hover:text-blue-400 hover:bg-[var(--bg-surface)]"
+            }`}
+            title={detailOpen ? `Close ${displayName} detail` : `View ${displayName} detail`}
+          >
+            <Icon path={detailOpen ? mdiEyeOffOutline : mdiEyeOutline} size={0.45} />
+          </button>
+          {detailOpen && detailButtonRef.current && (
+            <Popover
+              anchorEl={detailButtonRef.current}
+              onDismiss={() => setDetailOpen(false)}
+            >
+              <div
+                className="w-[640px] max-w-[90vw] max-h-[70vh] overflow-hidden bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-md shadow-xl"
+                onClick={(e) => e.stopPropagation()}
               >
-                <Icon path={isDetailOpen ? mdiEyeOffOutline : mdiEyeOutline} size={0.45} />
-              </button>
-            )}
-          </div>
-        )}
+                <FlowAgentDetail
+                  agent={agent}
+                  onBack={() => setDetailOpen(false)}
+                />
+              </div>
+            </Popover>
+          )}
+        </div>
       </div>
     </AgentCardShell>
   );

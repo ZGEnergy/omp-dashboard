@@ -40,10 +40,7 @@
       { "slot": "session-card-flows", "component": "SessionFlowActionsClaim", "shouldRender": "shouldRenderFlowsSubcard" },
       { "slot": "content-header-sticky", "component": "FlowDashboardClaim" },
       { "slot": "content-header-sticky", "component": "FlowArchitectClaim" },
-      { "slot": "content-view", "component": "FlowYamlPreviewClaim", "predicate": "isFlowYamlPreviewActive" },
-      { "slot": "content-view", "component": "FlowArchitectDetailClaim", "predicate": "isFlowArchitectDetailActive" },
-      { "slot": "content-view", "component": "FlowAgentDetailClaim", "predicate": "isFlowAgentDetailActive" },
-      { "slot": "content-inline-footer", "component": "FlowSummaryClaim" }
+      { "slot": "content-view", "component": "FlowYamlPreviewClaim", "predicate": "isFlowYamlPreviewActive" }
     ]
   },
   "peerDependencies": {

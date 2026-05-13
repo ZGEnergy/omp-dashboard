@@ -19,7 +19,7 @@ function Probe({ onSnapshot }: { onSnapshot: (state: FlowsUiState) => void }) {
   onSnapshot(state);
   return (
     <div data-testid="probe">
-      agent={state.flowDetailAgent ?? "(null)"} arch={String(state.architectDetailOpen)} src={state.sourceOpenAgent ?? "(null)"} yaml={state.flowYamlPreview?.title ?? "(null)"}
+      src={state.sourceOpenAgent ?? "(null)"} yaml={state.flowYamlPreview?.title ?? "(null)"}
     </div>
   );
 }
@@ -35,47 +35,9 @@ describe("FlowsUiStateContext", () => {
     const snaps: FlowsUiState[] = [];
     render(<Probe onSnapshot={(s) => snaps.push(s)} />);
     expect(snaps[0]).toEqual({
-      flowDetailAgent: null,
-      architectDetailOpen: false,
       sourceOpenAgent: null,
       flowYamlPreview: null,
     });
-  });
-
-  it("notifies subscribers when setFlowDetailAgent changes the value", () => {
-    const snaps: FlowsUiState[] = [];
-    let actions: ReturnType<typeof useFlowsUiActions>;
-    function ActionsProbe() {
-      actions = useFlowsUiActions();
-      return null;
-    }
-    const { getByTestId } = render(
-      <>
-        <ActionsProbe />
-        <Probe onSnapshot={(s) => snaps.push(s)} />
-      </>,
-    );
-
-    act(() => actions.setFlowDetailAgent("alpha"));
-    expect(getByTestId("probe").textContent).toContain("agent=alpha");
-
-    act(() => actions.setFlowDetailAgent(null));
-    expect(getByTestId("probe").textContent).toContain("agent=(null)");
-  });
-
-  it("supports functional updater for setArchitectDetailOpen", () => {
-    const { getByTestId } = render(
-      <>
-        <ActionsProbeWithUI />
-      </>,
-    );
-    expect(getByTestId("probe").textContent).toContain("arch=false");
-
-    act(() => actions.setArchitectDetailOpen((prev: boolean) => !prev));
-    expect(getByTestId("probe").textContent).toContain("arch=true");
-
-    act(() => actions.setArchitectDetailOpen((prev: boolean) => !prev));
-    expect(getByTestId("probe").textContent).toContain("arch=false");
   });
 
   it("does not notify when a setter is called with the same value", () => {
@@ -97,13 +59,13 @@ describe("FlowsUiStateContext", () => {
     );
     const initial = renderCount;
 
-    act(() => actions.setFlowDetailAgent(null)); // already null
+    act(() => actions.setSourceOpenAgent(null)); // already null
     expect(renderCount).toBe(initial); // no extra render
 
-    act(() => actions.setFlowDetailAgent("alpha")); // change
+    act(() => actions.setSourceOpenAgent("alpha")); // change
     expect(renderCount).toBe(initial + 1);
 
-    act(() => actions.setFlowDetailAgent("alpha")); // same value
+    act(() => actions.setSourceOpenAgent("alpha")); // same value
     expect(renderCount).toBe(initial + 1); // no extra render
   });
 
@@ -127,8 +89,6 @@ describe("FlowsUiStateContext", () => {
 
     // Set every field.
     act(() => {
-      actions.setFlowDetailAgent("alpha");
-      actions.setArchitectDetailOpen(true);
       actions.setSourceOpenAgent("beta");
       actions.setFlowYamlPreview({ content: "x", title: "t" });
     });
@@ -145,8 +105,6 @@ describe("FlowsUiStateContext", () => {
       return snaps[0];
     })();
     expect(probeText).toEqual({
-      flowDetailAgent: null,
-      architectDetailOpen: false,
       sourceOpenAgent: null,
       flowYamlPreview: null,
     });
@@ -176,7 +134,7 @@ function ActionsProbeWithUI() {
   const state = useFlowsUiState();
   return (
     <div data-testid="probe">
-      agent={state.flowDetailAgent ?? "(null)"} arch={String(state.architectDetailOpen)} src={state.sourceOpenAgent ?? "(null)"} yaml={state.flowYamlPreview?.title ?? "(null)"}
+      src={state.sourceOpenAgent ?? "(null)"} yaml={state.flowYamlPreview?.title ?? "(null)"}
     </div>
   );
 }

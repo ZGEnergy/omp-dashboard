@@ -16,6 +16,7 @@
  * See change: add-plugin-ui-primitive-registry.
  */
 import type { ComponentType, ReactNode } from "react";
+import type { ModelInfo } from "../types.js";
 
 /**
  * Frozen set of stable string keys identifying registered UI primitives.
@@ -48,6 +49,10 @@ export const UI_PRIMITIVE_KEYS = {
   actionList: "ui:action-list",
   /** Status pill (badge) with state-tinted background + optional icon. */
   statusPill: "ui:status-pill",
+  /** Model picker with provider filter, typeahead, keyboard navigation, pending-state. */
+  modelSelector: "ui:model-selector",
+  /** Floating panel anchored to a DOM element; dismisses on outside-click/Esc. */
+  popover: "ui:popover",
 } as const;
 
 /** Union of all valid UI primitive keys (literal-string narrowed). */
@@ -159,6 +164,49 @@ export interface UiStatusPillProps {
   tooltip?: string;
 }
 
+/**
+ * Public prop signature for the model-selector primitive.
+ *
+ * Mirrors the existing `ModelSelector` component (`packages/client/src/
+ * components/ModelSelector.tsx`) used by `StatusBar`. The primitive exposes
+ * the same model-picker UX (provider filter, typeahead, keyboard navigation,
+ * pending-state with 10 s timeout) to plugins without forcing them to depend
+ * on the client package.
+ *
+ * Role/preset props that historically existed on `ModelSelector` are NOT part
+ * of this contract — role management is a host concern (see
+ * `BuiltInRolesSettings` in builtins-plugin) layered on top.
+ */
+export interface UiModelSelectorProps {
+  /** Currently-selected model label in `"<provider>/<id>"` form, or undefined. */
+  current?: string;
+  /** Available models. When undefined, the primitive renders non-interactive text. */
+  models?: ModelInfo[];
+  /** Invoked with the full `"<provider>/<id>"` string of the chosen model. */
+  onSelect: (modelLabel: string) => void;
+}
+
+/**
+ * Public prop signature for the popover primitive.
+ *
+ * A floating panel positioned relative to `anchorEl`. Dismisses on Esc or
+ * clicks outside the popover (and outside the anchor). The host owns the
+ * open/closed state; rendering the primitive at all is the "open" signal.
+ *
+ * Differs from `dialogPortal`: no scroll lock, no modal backdrop, position
+ * is computed from the anchor's viewport rect (not centered).
+ */
+export interface UiPopoverProps {
+  /** DOM element the popover is anchored to. */
+  anchorEl: HTMLElement;
+  /** Invoked when the user clicks outside or presses Esc. */
+  onDismiss: () => void;
+  /** Popover content (any React tree). */
+  children: ReactNode;
+  /** Optional gap (px) between anchor and popover edge. Default 6. */
+  offset?: number;
+}
+
 // ── The map ────────────────────────────────────────────────────────────────
 
 /**
@@ -184,4 +232,6 @@ export interface UiPrimitiveMap {
   "ui:format-duration": (ms: number) => string;
   "ui:action-list": ComponentType<UiActionListProps>;
   "ui:status-pill": ComponentType<UiStatusPillProps>;
+  "ui:model-selector": ComponentType<UiModelSelectorProps>;
+  "ui:popover": ComponentType<UiPopoverProps>;
 }

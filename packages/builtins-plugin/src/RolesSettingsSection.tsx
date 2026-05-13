@@ -23,11 +23,35 @@ import {
   usePluginSend,
   useAllSessions,
 } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import { useUiPrimitive } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { UI_PRIMITIVE_KEYS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
 
 interface ModelInfo {
   provider: string;
   /** pi-coding-agent shape uses `id`; full label is `<provider>/<id>`. */
   id: string;
+}
+
+/**
+ * Read-time migration helper for legacy bare-id role values.
+ *
+ * Before `add-ui-model-selector-primitive`, the inline picker stripped
+ * the provider prefix on save, so older `~/.pi/agent/providers.json#roles`
+ * entries store bare ids like `"deepseek-v4-flash"`. This helper resolves
+ * those for display only — it does NOT mutate the file. On the user's
+ * next role pick, the canonical `"provider/id"` form is written.
+ *
+ * @param stored  Persisted role value (may be bare or `provider/id`).
+ * @param models  Live models list (may be empty during first render).
+ * @returns       Best-effort `provider/id` label, or `stored` unchanged.
+ */
+export function inferProviderForBareId(
+  stored: string,
+  models: ModelInfo[],
+): string {
+  if (!stored || stored.includes("/")) return stored;
+  const match = models.find((m) => m.id === stored);
+  return match ? `${match.provider}/${stored}` : stored;
 }
 
 /**
@@ -60,8 +84,9 @@ export function BuiltInRolesSettings() {
   const liveSessionId =
     allSessions.find((s) => (s as any).status !== "ended")?.id;
 
+  const ModelSelectorPrimitive = useUiPrimitive(UI_PRIMITIVE_KEYS.modelSelector);
+
   const [editingRole, setEditingRole] = useState<string | null>(null);
-  const [filter, setFilter] = useState("");
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetName, setPresetName] = useState("");
 
@@ -80,17 +105,30 @@ pi-flows is not installed (or no roles configured yet). Install `pi-flows` to as
 
   const dispatch = (msg: unknown) => send(msg);
 
-  function setRole(role: string, provider: string, modelId: string) {
+  /**
+   * Persist a role assignment.
+   *
+   * `modelLabel` is the full `"<provider>/<id>"` string emitted by the
+   * `ui:model-selector` primitive. We forward it verbatim as the `modelId`
+   * field — bridge.ts and pi-flows role-manager.ts pass it through, and
+   * pi-flows execution.ts then takes the provider-aware `modelRegistry.find(
+   * provider, id)` branch when resolving `@<role>`.
+   *
+   * The split `provider` field is sent for forward-compat with any external
+   * listener of the WS protocol; it is not load-bearing anymore.
+   */
+  function setRole(role: string, modelLabel: string) {
     if (!liveSessionId) return; // no pi session to route through; UI no-op
+    const slashIdx = modelLabel.indexOf("/");
+    const provider = slashIdx > 0 ? modelLabel.slice(0, slashIdx) : "";
     dispatch({
       type: "role_set",
       sessionId: liveSessionId,
       role,
       provider,
-      modelId,
+      modelId: modelLabel,
     });
     setEditingRole(null);
-    setFilter("");
   }
 
   function loadPreset(name: string) {
@@ -121,12 +159,6 @@ pi-flows is not installed (or no roles configured yet). Install `pi-flows` to as
       presetName: name,
     });
   }
-
-  const modelStrings = models.map((m) => `${m.provider}/${m.id}`);
-
-  const filteredModels = filter
-    ? modelStrings.filter((m) => m.toLowerCase().includes(filter.toLowerCase()))
-    : modelStrings;
 
   return (
     <section
@@ -201,77 +233,49 @@ pi-flows is not installed (or no roles configured yet). Install `pi-flows` to as
         )}
       </div>
 
-      {/* Role grid */}
+      {/* Role grid. Each pill shows the role and its stored model.
+          Bare-id legacy entries are migrated for display via inferProviderForBareId. */}
       <div className="grid grid-cols-2 gap-1 mb-2">
-        {Object.entries(rolesMap).map(([role, modelId]) => {
+        {Object.entries(rolesMap).map(([role, stored]) => {
           const isEditing = editingRole === role;
+          const displayLabel = inferProviderForBareId(stored, models);
           return (
             <button
               key={role}
               data-testid={`roles-row-${role}`}
-              onClick={() => {
-                setEditingRole(isEditing ? null : role);
-                setFilter("");
-              }}
+              onClick={() => setEditingRole(isEditing ? null : role)}
               className={`flex items-baseline gap-2 px-2 py-1 rounded text-left min-w-0 transition-all ${
                 isEditing
                   ? "bg-[color-mix(in_srgb,var(--accent-blue)_25%,transparent)] outline outline-2 outline-[var(--accent-blue)]"
                   : "bg-[var(--bg-tertiary)] hover:bg-[var(--bg-hover)]"
               }`}
-              title={modelId}
+              title={displayLabel}
             >
               <span className={`text-[11px] font-semibold shrink-0 ${isEditing ? "text-[var(--accent-blue)]" : "text-[var(--accent-blue)]/70"}`}>
                 @{role}
               </span>
               <span className="text-[11px] text-[var(--text-muted)] font-mono truncate">
-                {shortModel(modelId)}
+                {shortModel(displayLabel)}
               </span>
             </button>
           );
         })}
       </div>
 
-      {/* Inline model picker when a role is being edited */}
+      {/* Shared `ui:model-selector` primitive when a role is being edited.
+          The primitive emits the full `"<provider>/<id>"` label on select;
+          `setRole` forwards it as `modelId` so pi-flows execution.ts takes
+          its provider-aware lookup branch. */}
       {editingRole && (
         <div data-testid="roles-model-picker" className="border border-[var(--border-primary)] rounded p-2">
           <div className="text-[11px] text-[var(--text-muted)] mb-1">
             Assign model to <span className="font-semibold text-[var(--accent-blue)]">@{editingRole}</span>
           </div>
-          <input
-            autoFocus
-            data-testid="roles-model-filter"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="filter models…"
-            className="w-full px-2 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border-primary)] rounded text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-blue)]"
+          <ModelSelectorPrimitive
+            current={inferProviderForBareId(rolesMap[editingRole] ?? "", models)}
+            models={models}
+            onSelect={(modelLabel: string) => setRole(editingRole, modelLabel)}
           />
-          <div className="mt-1 max-h-60 overflow-y-auto">
-            {filteredModels.slice(0, 200).map((modelStr) => {
-              const slashIdx = modelStr.indexOf("/");
-              const provider = slashIdx > 0 ? modelStr.slice(0, slashIdx) : "";
-              const modelId = slashIdx > 0 ? modelStr.slice(slashIdx + 1) : modelStr;
-              const isCurrent = rolesMap[editingRole] === modelStr;
-              return (
-                <button
-                  key={modelStr}
-                  data-testid={`roles-model-option-${modelStr}`}
-                  onClick={() => setRole(editingRole, provider, modelId)}
-                  className={`block w-full text-left px-2 py-1 text-[11px] font-mono rounded ${
-                    isCurrent
-                      ? "bg-[var(--accent-blue)] text-white"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                  }`}
-                >
-                  {modelStr}
-                </button>
-              );
-            })}
-            {filteredModels.length === 0 && (
-              <div className="px-2 py-1 text-[11px] text-[var(--text-muted)]">
-                No models match.
-              </div>
-            )}
-          </div>
         </div>
       )}
     </section>

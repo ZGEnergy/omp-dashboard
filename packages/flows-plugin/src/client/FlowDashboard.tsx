@@ -6,38 +6,31 @@ import { usePluginSend } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { FlowAgentCard } from "./FlowAgentCard.js";
 import { FlowGraph, flowStateToGraphSteps } from "./FlowGraph.js";
 import { FlowSummary } from "./FlowSummary.js";
+import { FlowYamlPopoverButton } from "./FlowYamlPopoverButton.js";
 import { FlowTabBar, type FlowTab } from "./FlowTabBar.js";
 import { useMobile } from "@blackbelt-technology/pi-dashboard-client-utils/useMobile";
 import { BreadcrumbSlot } from "@blackbelt-technology/pi-dashboard-client-utils/extension-ui/BreadcrumbSlot";
 import { useFlowsSessionState } from "./FlowsSessionStateContext.js";
-import { useFlowsUiState, useFlowsUiActions } from "./FlowsUiStateContext.js";
+
+
+
 
 export function FlowDashboard({
   flowState,
   flowStates,
-  onAgentClick,
-  selectedAgent,
   onAbort,
   onToggleAutonomous,
   onDismiss,
   onSendPrompt,
-  onViewYaml,
-  onViewAgentSource,
-  sourceOpenAgent,
   session,
 }: {
   flowState: FlowState;
   /** All flow states (main + subflows) for tab navigation */
   flowStates?: Map<string, FlowState>;
-  onAgentClick: (agentName: string | null) => void;
-  selectedAgent?: string | null;
   onAbort: () => void;
   onToggleAutonomous: () => void;
   onDismiss: () => void;
   onSendPrompt?: (text: string, images?: import("@blackbelt-technology/pi-dashboard-shared/types.js").ImageContent[]) => void;
-  onViewYaml?: () => void;
-  onViewAgentSource?: (sourcePath: string, agentName: string) => void;
-  sourceOpenAgent?: string | null;
   /** Phase-2 decorator host — carries breadcrumb + agent-metric descriptors. */
   session?: Pick<DashboardSession, "uiDecorators">;
 }) {
@@ -86,10 +79,8 @@ export function FlowDashboard({
     return (
       <FlowSummary
         flowState={flowState}
-        onAgentClick={onAgentClick}
         onDismiss={onDismiss}
         onSendPrompt={onSendPrompt}
-        onViewYaml={onViewYaml}
       />
     );
   }
@@ -193,15 +184,12 @@ export function FlowDashboard({
           <FlowGraph
             steps={flowStateToGraphSteps(displayState)}
           />
-          {onViewYaml && (
+          {displayState.flowSource && (
             <div className="mt-1">
-              <button
-                onClick={onViewYaml}
-                className="text-[var(--text-tertiary)] hover:text-blue-400 transition-colors p-0.5 rounded hover:bg-[var(--bg-surface)] inline-flex items-center"
-                title="View flow YAML"
-              >
-                <Icon path={mdiFileDocumentOutline} size={0.5} />
-              </button>
+              <FlowYamlPopoverButton
+                flowSource={displayState.flowSource}
+                flowName={displayState.flowName}
+              />
             </div>
           )}
 
@@ -215,14 +203,6 @@ export function FlowDashboard({
                 key={agent.stepId || agent.agentName}
                 agent={agent}
                 session={session}
-                onClick={() => {
-                  const key = agent.stepId || agent.agentName;
-                  onAgentClick(selectedAgent === key ? null : key);
-                }}
-                selected={selectedAgent === (agent.stepId || agent.agentName)}
-                isDetailOpen={selectedAgent === (agent.stepId || agent.agentName)}
-                isSourceOpen={sourceOpenAgent === (agent.label || agent.stepId || agent.agentName)}
-                onViewSource={agent.sourcePath && onViewAgentSource ? () => onViewAgentSource(agent.sourcePath!, agent.label || agent.stepId || agent.agentName) : undefined}
               />
             ))}
           </div>
@@ -241,8 +221,6 @@ export function FlowDashboard({
  */
 export function FlowDashboardClaim({ session }: { session: DashboardSession }) {
   const { flowState, flowStates } = useFlowsSessionState(session.id);
-  const ui = useFlowsUiState();
-  const actions = useFlowsUiActions();
   const send = usePluginSend();
 
   if (!flowState) return null;
@@ -255,23 +233,12 @@ export function FlowDashboardClaim({ session }: { session: DashboardSession }) {
       flowState={flowState}
       flowStates={flowStates as Map<string, FlowState>}
       session={session}
-      selectedAgent={ui.flowDetailAgent}
-      onAgentClick={actions.setFlowDetailAgent}
       onAbort={() => flowControl("abort")}
       onToggleAutonomous={() => flowControl("toggle_autonomous")}
-      onDismiss={() => {
-        actions.setFlowDetailAgent(null);
-        flowControl("dismiss_summary");
-      }}
+      onDismiss={() => flowControl("dismiss_summary")}
       onSendPrompt={(text: string, images?: ImageContent[]) =>
         send({ type: "send_prompt", sessionId: session.id, text, images })
       }
-      // YAML viewing is handled by the FlowYamlPreview content-view
-      // claim (Part F.7); these callbacks navigate via pluginRouter once
-      // routes are wired in Part G. Until then they are no-ops.
-      onViewYaml={undefined}
-      onViewAgentSource={undefined}
-      sourceOpenAgent={ui.sourceOpenAgent}
     />
   );
 }
