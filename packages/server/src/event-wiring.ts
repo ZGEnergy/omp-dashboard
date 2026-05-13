@@ -565,8 +565,13 @@ export function wireEvents(deps: EventWiringDeps): void {
           text: pendingResume.text,
           images: pendingResume.images,
         });
-        sessionManager.update(sessionId, { resuming: false });
-        browserGateway.broadcastSessionUpdated(sessionId, { resuming: false });
+        // Clear `resuming` on the OLD session that triggered the auto-resume,
+        // not the new session that just registered. The new session never had
+        // `resuming: true`; clearing it there was a no-op and left the old
+        // session permanently stuck. The 30s onTimeout was also cancelled by
+        // `consume()`, so without this fix the old session stays frozen forever.
+        sessionManager.update(pendingResume.oldSessionId, { resuming: false });
+        browserGateway.broadcastSessionUpdated(pendingResume.oldSessionId, { resuming: false });
       }
     }
 
