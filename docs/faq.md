@@ -1774,3 +1774,42 @@ Cross-refs:
 - packages/server/bin/pi-dashboard.mjs
 - packages/shared/src/resolve-jiti.ts
 - See change: replace-tsx-with-jiti
+
+## Why does `/api/flows-anthropic-bridge/status` show "no sessions reporting"?
+
+pi-coding-agent reads `packages[]`, not `dashboardPluginBridges`. Pre-0.5.4 dashboards wrote bridge entry only to `dashboardPluginBridges` \u2014 invisible to pi. Bridge loaded by dashboard, never invoked by pi runtime.
+
+Fix: dashboard 0.5.4+ writes to both. Restart dashboard \u2014 one-shot `reconcilePluginBridgePackages` runs at server start.
+
+Verify: `curl -s http://localhost:8000/api/health | jq '.plugins[] | select(.id == "flows-anthropic-bridge")'`. Expect `bridgeLoadedFrom: "both"` (or `"packages[]"` post-reconcile). Value `"dashboardPluginBridges"` only = stale install, restart again.
+
+Escape hatch: env `PI_DASHBOARD_DISABLE_PLUGIN_BRIDGE_PACKAGES_WRITE=1` skips `packages[]` write. Legacy key only. Diagnostic flag.
+
+See change: fix-pi-flows-end-to-end.
+
+Cross-refs:
+- docs/architecture.md \u2014 Plugin Architecture \u2192 Plugin Bridge Registration
+- packages/shared/src/plugin-bridge-register.ts
+
+## Why does abort feel slow on parallel flows?
+
+pi-flows < 0.2.x bug: `Promise.all` over child flows did not race the AbortSignal. Children aborted at iteration boundaries; parent awaited all in-flight branches. Abort latency = slowest child remaining work, not signal-to-unwind time.
+
+Fix in pi-flows 0.2.0+: `raceWithAbort` wrapper. Parent unwinds within 100 ms of signal. Children still drain via their own AbortSignals.
+
+Upgrade pi-flows. No dashboard-side change required.
+
+See change: fix-pi-flows-end-to-end.
+
+## Where is the Roles UI?
+
+Settings \u2192 General \u2192 Roles. Moved from model dropdown in dashboard 0.5.4.
+
+Built-ins plugin (`packages/builtins-plugin/`) renders it via `settings-section` slot. Edit per-session role-to-model maps. Save/load presets.
+
+Dispatches existing `role_set` / `role_preset_*` WS messages. No protocol change.
+
+See change: fix-pi-flows-end-to-end.
+
+Cross-refs:
+- packages/builtins-plugin/src/RolesSettingsSection.tsx

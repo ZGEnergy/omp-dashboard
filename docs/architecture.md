@@ -382,6 +382,32 @@ A repository-level lint (`packages/client/src/__tests__/no-jsx-slot-nullish-fall
 
 **Authoring on-ramp:** Skill package `packages/dashboard-plugin-skill/` ships `@blackbelt-technology/pi-dashboard-plugin-skill` (publishable). Skill name `dashboard-plugin-scaffold`. Hybrid contract: `ask_user` batch up front, prescriptive steps after. Two modes. `new` mode: scaffolds `packages/<id>-plugin/` matching `packages/demo-plugin/` layout. Per-slot stubs for 10 React slots. Optional server entry. Optional bridge entry, default off. `augment` mode: runs in pi session at cwd of existing pi-extension. Grep prelude scans `ctx.ui.*`, `pi.registerTool`, banned `ctx.fork`. LLM analysis vs canonical TUI→dashboard mapping table. Per-callsite `ask_user` multiselect. Injects `pi-dashboard-plugin` field into `package.json`. Writes `src/dashboard/`. Purely additive: no existing source modified. SDK = runtime + shared package exports. No separate SDK package. Skill adds both as deps. Forward-compat contract enforced at scaffold time: top-level manifest field, package-relative paths, no `workspace:*`, exports subpaths match, `requiredApi` set. Augmented external extensions resolve under future `node_modules` discovery scan. Canonical on-ramp. `demo-plugin` = runtime fixture. Skill = authoring fixture.
 
+#### Plugin Bridge Registration
+
+Dual-write contract. `registerPluginBridge` writes BOTH locations in `~/.pi/agent/settings.json`:
+
+- `dashboardPluginBridges["dashboard-<id>"]` — legacy key. Kept for forward compat.
+- `packages[]` — user-visible package list. pi-coding-agent reads only this.
+- `_dashboardManagedPackages` — ownership map. Tracks which `packages[]` entries owned by dashboard vs user. Prevents clobbering user-added entries.
+
+pi-coding-agent ignores `dashboardPluginBridges` entirely. Bridge extensions invisible to pi until written to `packages[]`. Symptom of single-write bug: plugin bridge loaded by dashboard but never invoked by pi runtime; `/api/flows-anthropic-bridge/status` reports "no sessions reporting".
+
+Reconciliation: one-shot `reconcilePluginBridgePackages` runs at server start. Replays current plugin manifests through `ensurePackageEntry` for every claim with a `bridge` entry. Drops dangling managed entries via `removePackageEntry` when manifest gone. Atomic settings write (tmp + rename).
+
+Escape hatch: env `PI_DASHBOARD_DISABLE_PLUGIN_BRIDGE_PACKAGES_WRITE=1` skips `packages[]` write. Legacy key still written. Used for forward-compat testing against pi versions that own `packages[]` differently.
+
+Classification helper `classifyBridgeSource(settings, id)` returns `"packages[]"` / `"dashboardPluginBridges"` / `"both"` / `"none"`. `/api/health.plugins[].bridgeLoadedFrom` surfaces it. `"both"` = healthy post-0.5.4. `"dashboardPluginBridges"` only = stale install pre-reconcile.
+
+#### Plugin Staleness Detection
+
+Detects when client bundle predates installed plugin set. No new REST route. No new WS message.
+
+Build time: vite-plugin emits `export const PLUGIN_REGISTRY_HASH = "<sha256>"` into `packages/client/src/generated/plugin-registry.tsx`. Hash computed by `pluginRegistryHash(discoverPlugins())` over `deterministicSerializePlugins` output (sorted manifest fields, stable JSON).
+
+Runtime: `/api/health` returns `bundleHash` field. Server computes via same `pluginRegistryHash(discoverPlugins())`. Hash mismatch ⇒ disk has plugins client bundle does not know about (or vice versa).
+
+Client: `PluginStalenessBanner` fetches `/api/health` on mount. Compares `bundleHash` against imported `PLUGIN_REGISTRY_HASH`. Mismatch ⇒ render banner with Refresh + Dismiss buttons. Refresh calls `location.reload()`. Dismiss persists in `sessionStorage` key `pi-plugin-staleness-dismissed` (tab-scoped, clears on browser close). Dismissed banner stays hidden until next session.
+
 ### Bootstrap & First Run
 
 The dashboard has three install paths that all converge on the shared
@@ -651,15 +677,21 @@ The sidebar splits each folder's session cards into two tiers (alive on top, end
 
 Both halves share one mental model: "the session you just acted on appears at the top of its new tier." No protocol changes — the existing `sessions_reordered` broadcast carries the new order. See change `top-of-tier-on-status-change`.
 
-### Desktop back-arrow priority chain
-The desktop session-header back button used to call `window.history.back()`, which was a silent no-op on cold loads / hard refreshes / deep links. It also ignored the eight content-area overlay states (archive browser, specs browser, flow YAML preview, diff view, pi resource file preview, README preview, pi resources state, OpenSpec preview) owned by `App.tsx`.
+### Shell overlay routing
+Shell-owned content overlays URL-driven via wouter routes. Supersedes priority-chain helper from `fix-desktop-back-navigation`.
 
-The fix introduces:
-- **`packages/client/src/lib/desktop-back.ts`** — pure helper `selectDesktopBackTarget(state) → { kind: "clear", target } | { kind: "navigate", to: "/" }` that mirrors the priority chain mobile's inline `onBack` switch already uses. Pinned by a 256-combination parity test against the mobile reference implementation so the two never drift.
-- **`packages/client/src/hooks/useDesktopBack.ts`** — thin React hook that reads the live overlay state, calls the helper, and dispatches to the right setter or `navigate("/")`.
-- **Sidebar overlay auto-close** — `useOpenSpecActions.handleReadArtifact`, `useContentViews.handleViewPiResourceFile`, and `useContentViews.handleViewReadme` accept `navigate`/`settingsMatch`/`tunnelSetupMatch` and call `navigate("/")` BEFORE setting overlay state when the user is on a URL-route view (Settings / Tunnel Setup) that takes over the content area. Without this, the JSX gate `!settingsMatch && !tunnelSetupMatch` would mask the just-opened overlay until the user clicked back twice.
+Routes:
+- `/folder/:encodedCwd/openspec/:changeName/:artifactId` — OpenSpec preview.
+- `/folder/:encodedCwd/openspec/archive` — archive browser.
+- `/folder/:encodedCwd/openspec/specs` — specs browser.
+- `/folder/:encodedCwd/readme` — README preview.
+- `/folder/:encodedCwd/pi-resources` — pi resources view.
+- `/session/:id/diff` — file diff view.
+- `/pi-resource?path=&title=` — cross-folder file preview.
 
-The priority chain (alive on click): `archiveBrowserCwd → specsBrowserCwd → flowYamlPreview → diffViewSessionId → piResourceFilePreview → readmePreview → piResourcesState → previewState → navigate("/")`. Mobile is unchanged — it keeps its own inline `onBack` switch covering the same chain. See change `fix-desktop-back-navigation`.
+`App.tsx` matches via `useRoute`. URL builders in `packages/client/src/lib/route-builders.ts`. Back-arrow (desktop + mobile) calls `goBackOrHome(navigate)` from `packages/client/src/lib/history-back.ts` — `window.history.back()` when `history.length > 1`, else `navigate("/")`. No priority chain, no overlay state.
+
+Plugin content-view claims (e.g. flows-plugin) remain predicate-driven, out of scope for shell routing. See change `overlay-url-routing`.
 
 ### Model & Thinking Level Flow
 1. Bridge sends current model and thinking level in `session_register` on connect
@@ -876,15 +908,11 @@ The `ArchiveBrowserView` provides a searchable, date-grouped listing of archived
 
 ### Content View Management
 
-The content area (right panel) shows one view at a time: ChatView, ArchiveBrowserView, SpecsBrowserView, PiResourcesView, MarkdownPreviewView (readme, pi resource file, flow YAML, OpenSpec artifact), FileDiffView, FlowArchitectDetail, or FlowAgentDetail. Each view is controlled by independent state in `App.tsx` and `useContentViews`. A priority chain in the JSX determines which view renders (first truthy state wins).
+Content area (right panel) shows one view at a time: ChatView, ArchiveBrowserView, SpecsBrowserView, PiResourcesView, MarkdownPreviewView (readme, pi resource file, flow YAML, OpenSpec artifact), FileDiffView, FlowArchitectDetail, FlowAgentDetail.
 
-**Mutual exclusivity**: A `clearAllContentViews()` helper resets all content view states. It is called before opening any new content view, ensuring the previous view is always dismissed. This combines `clearAppContentViews()` (App-level states: preview, specs browser, archive browser, diff view, flow YAML, architect detail, flow agent detail) with `clearContentViews()` from `useContentViews` (pi resources, pi resource file preview, readme preview).
+Shell overlays dispatch by route match (see Shell overlay routing). Mutual exclusivity intrinsic — only one route active at a time. No `clearAllContentViews` helper, no `onBeforeOpen`. Session switch navigates; route change unmounts previous view.
 
-**Session switch**: When the selected session changes, `clearAllContentViews()` is called to dismiss any open content view.
-
-**Sub-navigation**: `handleViewPiResourceFile` (viewing a file within PiResourcesView) does not clear other views — it's sub-navigation within an already-active content view.
-
-**`onBeforeOpen` callback**: `useContentViews` accepts an optional `onBeforeOpen` callback. When `handleOpenPiResources` or `handleViewReadme` opens a new top-level view, it calls `onBeforeOpen` first so App.tsx can clear its own states, then clears the hook's sibling states internally.
+Plugin content-view claims (flows-plugin) still predicate-driven via SlotRegistry. See change `overlay-url-routing`.
 
 ### Network Access Control
 
