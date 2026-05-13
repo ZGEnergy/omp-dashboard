@@ -42,62 +42,26 @@ Clicking a session in the sidebar SHALL navigate to `/session/:id` using push hi
 - **THEN** the URL returns to `/session/<sessionA-id>` and session A is displayed
 
 ### Requirement: Back navigation button
-The session header SHALL display a back button. On desktop, clicking the back button SHALL invoke a unified back handler that pops content-area overlays in priority order before falling back to URL navigation, and SHALL never be a silent no-op. On mobile, existing behaviour SHALL be preserved.
+The session header SHALL display a back button. The back button on both desktop and mobile SHALL invoke `window.history.back()` when browser history has more than one entry, and SHALL fall back to `navigate("/")` on cold loads (history length === 1). No priority-chain dispatcher, no overlay-state cleanup, no URL-route auto-close logic.
 
-#### Scenario: Desktop back with no overlays and no history
-- **GIVEN** the user is on desktop at `/session/abc-123`
-- **AND** the browser history has only one entry (cold load / hard refresh / deep link / post-server-switch)
-- **WHEN** the user clicks the session-header back button
-- **THEN** the app SHALL navigate to `/` and display `LandingPage`
-- **AND** the click SHALL NOT be a silent no-op (regardless of whether `window.history.back()` would do nothing)
+#### Scenario: Back from sidebar-opened overlay returns to prior URL
+- **GIVEN** the user is on `/settings` on desktop or mobile
+- **WHEN** the user clicks a sidebar P/D/T/S artifact letter, which navigates to `/folder/:encodedCwd/openspec/:changeName/:artifactId`
+- **AND** then clicks the back button
+- **THEN** the URL SHALL return to `/settings`
+- **AND** the SettingsPanel SHALL be rendered
 
-#### Scenario: Desktop back with overlay set
-- **GIVEN** the user is on desktop with any of the eight content-area overlay states set (archive, specs, flowYaml, diff, piResourceFile, readme, piResources, openspecPreview)
-- **WHEN** the user clicks the session-header back button OR the overlay's own back button
-- **THEN** the highest-priority overlay state SHALL be cleared (set to null)
-- **AND** the URL SHALL NOT change as a result of that single click
+#### Scenario: Back from session detail with empty history
+- **GIVEN** the user is on `/session/abc` on desktop
+- **AND** browser history has only one entry (cold load / hard refresh / deep link)
+- **WHEN** the user clicks the back button
+- **THEN** the URL SHALL change to `/`
+- **AND** LandingPage SHALL be rendered
 
-#### Scenario: Desktop back unwinds chained overlays one click per layer
-- **GIVEN** the user has multiple overlay states set (e.g. `previewState` and `flowYamlPreview` both non-null)
+#### Scenario: Back unwinds chained overlay URLs naturally
+- **GIVEN** the user navigated `/` → `/session/abc` → `/folder/:cwd/openspec/:c/proposal` → `/folder/:cwd/openspec/archive`
 - **WHEN** the user clicks the back button repeatedly
-- **THEN** each click SHALL clear exactly one overlay state in priority order until all are cleared
-- **AND** further clicks (with no overlays remaining) SHALL navigate to `/`
-
-#### Scenario: Mobile back unchanged
-- **WHEN** a user on mobile clicks the back button or completes a swipe-back gesture
-- **THEN** the existing mobile `onBack` priority switch SHALL apply unchanged
-
-#### Scenario: Back button visibility
-- **WHEN** a session is selected (URL is `/session/:id`)
-- **THEN** the back button is visible in the session header
-
-### Requirement: Sidebar overlays auto-close URL-route views
-When a sidebar action opens a content-area overlay (OpenSpec preview, README preview, pi resource file preview) while the user is on a URL-routed view that takes over the content area (`/settings` or `/tunnel-setup`), the URL-route view SHALL be closed automatically before the overlay is shown.
-
-#### Scenario: Click sidebar OpenSpec artifact while on /settings
-- **GIVEN** the user is on `/settings` on desktop
-- **WHEN** the user clicks a P/D/T/S artifact letter in a sidebar folder's OpenSpec section
-- **THEN** the URL SHALL change to `/` (Settings closes)
-- **AND** the OpenSpec preview SHALL render in the content area
-- **AND** the SettingsPanel SHALL no longer be in the DOM
-
-#### Scenario: Click sidebar README link while on /tunnel-setup
-- **GIVEN** the user is on `/tunnel-setup` on desktop
-- **WHEN** the user clicks a README link from a sidebar folder
-- **THEN** the URL SHALL change to `/`
-- **AND** the README preview SHALL render in the content area
-
-#### Scenario: Click sidebar pi resource while on /settings
-- **GIVEN** the user is on `/settings` on desktop
-- **WHEN** the user clicks a pi resource link (skill / extension / prompt) from a sidebar folder
-- **THEN** the URL SHALL change to `/`
-- **AND** the pi resource preview SHALL render in the content area
-
-#### Scenario: Single back click reaches landing page after sidebar-triggered overlay
-- **GIVEN** the user opened an overlay from the sidebar while on `/settings` (per the scenarios above)
-- **WHEN** the user clicks the overlay's back button once
-- **THEN** the overlay state SHALL clear
-- **AND** the user SHALL land on `LandingPage` (or `sessionDetail` if a session is selected) — NOT back on Settings
+- **THEN** each click SHALL pop one URL from history in reverse order
 
 ### Requirement: Deep-link session on refresh
 When the page is refreshed at `/session/:id`, the app SHALL restore that session once session data arrives via WebSocket.
@@ -121,8 +85,15 @@ The server SHALL return `index.html` for any GET request that does not match a s
 - **WHEN** a GET request is made to `/assets/main.js`
 - **THEN** the server responds with the actual static file
 
-### Requirement: Mobile depth includes settings and tunnel routes
-The mobile `MobileShell` depth calculation SHALL treat `/settings`, `/tunnel-setup`, and `/folder/:encodedCwd/terminals` as depth-1 routes, alongside `/session/:id`.
+### Requirement: Mobile depth derives from route matches
+The mobile `getMobileDepth` SHALL derive depth from `useRoute` match flags, not from `useState` overlay flags. Specifically:
+- Depth 0 (list) when only `/` matches
+- Depth 1 (detail) when `/session/:id`, `/folder/:cwd/...`, `/terminal/:id`, `/settings`, or `/tunnel-setup` matches without an overlay sub-route
+- Depth 2 (preview) when any of the new overlay routes match
+
+#### Scenario: Depth 2 on overlay route
+- **WHEN** the URL is `/folder/:encodedCwd/openspec/:changeName/:artifactId` on mobile
+- **THEN** `getMobileDepth({ hasOverlayRoute: true, ... })` SHALL return `2`
 
 #### Scenario: Settings route sets mobile depth to 1
 - **WHEN** the current URL is `/settings` on a mobile viewport
@@ -154,4 +125,92 @@ The client SHALL define a route `/folder/:encodedCwd/editor` that displays the E
 #### Scenario: Navigate to folder editor
 - **WHEN** user navigates to `/folder/:encodedCwd/editor`
 - **THEN** the EditorView SHALL be displayed for the decoded cwd
+
+### Requirement: OpenSpec proposal preview route
+The client SHALL define a route `/folder/:encodedCwd/openspec/:changeName/:artifactId` that renders the OpenSpec proposal preview for the specified change and artifact. `:encodedCwd` is base64url-encoded via `encodeFolderPath`. `:changeName` and `:artifactId` are `encodeURIComponent`-encoded.
+
+#### Scenario: Direct navigation to preview URL
+- **WHEN** user navigates to `/folder/:encodedCwd/openspec/my-change/proposal`
+- **THEN** the OpenSpecPreview component SHALL be rendered with `cwd`, `changeName="my-change"`, and `initialArtifact="proposal"` derived from the URL
+
+#### Scenario: Refresh on preview URL
+- **WHEN** user refreshes the page at the preview URL with no in-memory state
+- **THEN** the page SHALL show a loading state until WebSocket replay populates `openspecMap`
+- **THEN** the preview SHALL render once data is available
+
+#### Scenario: Invalid change name in URL
+- **WHEN** user navigates to a preview URL with a `:changeName` that does not exist in the folder's openspec data
+- **THEN** the page SHALL render a "Not found" inline component with a back button — NOT redirect to `/` automatically
+
+### Requirement: OpenSpec archive browser route
+The client SHALL define a route `/folder/:encodedCwd/openspec/archive` that renders the archive browser for the specified folder.
+
+#### Scenario: Navigate to archive URL
+- **WHEN** user navigates to `/folder/:encodedCwd/openspec/archive`
+- **THEN** ArchiveBrowserView SHALL be rendered with the decoded `cwd`
+
+### Requirement: OpenSpec specs browser route
+The client SHALL define a route `/folder/:encodedCwd/openspec/specs` that renders the specs browser for the specified folder.
+
+#### Scenario: Navigate to specs URL
+- **WHEN** user navigates to `/folder/:encodedCwd/openspec/specs`
+- **THEN** SpecsBrowserView SHALL be rendered with the decoded `cwd`
+
+### Requirement: README preview route
+The client SHALL define a route `/folder/:encodedCwd/readme` that renders the README preview for the specified folder.
+
+#### Scenario: Navigate to README URL
+- **WHEN** user navigates to `/folder/:encodedCwd/readme`
+- **THEN** MarkdownPreviewView SHALL be rendered with the README content fetched via `/api/readme?cwd=...`
+
+### Requirement: Pi resources index route
+The client SHALL define a route `/folder/:encodedCwd/pi-resources` that renders the pi resources browser for the specified folder.
+
+#### Scenario: Navigate to pi-resources URL
+- **WHEN** user navigates to `/folder/:encodedCwd/pi-resources`
+- **THEN** PiResourcesView SHALL be rendered with the decoded `cwd`
+
+### Requirement: Pi resource file preview route
+The client SHALL define a route `/pi-resource` that accepts query parameters `path` (URL-encoded absolute filesystem path) and `title` (URL-encoded display title) and renders the resource file preview.
+
+#### Scenario: Navigate to pi-resource URL
+- **WHEN** user navigates to `/pi-resource?path=...&title=...`
+- **THEN** MarkdownPreviewView SHALL be rendered with content fetched via `/api/pi-resource-file?path=...`
+- **AND** the page header SHALL display the decoded `title`
+
+#### Scenario: Missing path parameter
+- **WHEN** user navigates to `/pi-resource` without a `path` query parameter
+- **THEN** the page SHALL redirect to `/`
+
+### Requirement: Session file diff route
+The client SHALL define a route `/session/:id/diff` that renders the file diff view for the specified session.
+
+#### Scenario: Navigate to diff URL
+- **WHEN** user navigates to `/session/abc/diff`
+- **THEN** FileDiffView SHALL be rendered for session `abc`
+- **AND** the diff data SHALL be fetched via `/api/session-diff?sessionId=abc`
+
+### Requirement: Shell overlay URL reflects current state
+For every full-content-area view owned by the shell (i.e. excluding plugin-contributed `content-view` claims), the current URL SHALL be the single source of truth for which view is rendered. Shell components SHALL NOT keep parallel `useState` flags that determine which overlay is active. State derivable from the URL (cwd, change name, artifact id, session id, query params) SHALL be read from `useRoute` params or `URLSearchParams`, not from in-memory copies.
+
+#### Scenario: URL is sole source of truth for shell overlays
+- **GIVEN** any shell overlay route in the proposal table is the current URL
+- **WHEN** the page is hard-refreshed
+- **THEN** the same overlay SHALL re-render once any required async data resolves
+- **AND** no `useState` flag in `App.tsx` or `useContentViews` SHALL gate that rendering
+
+#### Scenario: Plugin-owned overlays remain out of scope
+- **GIVEN** a plugin contributes a `content-view` claim selected by predicate (e.g. `flows-plugin`'s `FlowAgentDetailClaim` / `FlowArchitectDetailClaim` / `FlowYamlPreviewClaim`)
+- **WHEN** that overlay is active
+- **THEN** the URL is NOT required to reflect it under this requirement
+- **AND** a follow-up change covers URL participation for plugin claims
+
+### Requirement: Sidebar interactions push onto browser history
+Every sidebar action that opens a shell-owned content-area view (OpenSpec artifact letters, README links, pi-resource links, archive browser, specs browser, file-diff toggle) SHALL invoke `navigate(<route>)` with default push semantics. Replace semantics SHALL NOT be used unless explicitly required for an invalid-URL redirect.
+
+#### Scenario: Sidebar action grows browser history
+- **GIVEN** the user is on any URL with `window.history.length === N`
+- **WHEN** the user clicks any sidebar action that opens a shell-owned content-area view
+- **THEN** `window.history.length` SHALL be `N + 1` after the navigation
+- **AND** clicking back SHALL restore the previous URL
 

@@ -1,3 +1,5 @@
+> **Superseded by `overlay-url-routing`** (lifts overlay state into wouter routes; removes priority-chain helper and auto-close hack).
+
 # fix-desktop-back-navigation
 
 ## Why

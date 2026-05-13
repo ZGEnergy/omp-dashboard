@@ -1,33 +1,24 @@
 /**
  * OpenSpec action callbacks extracted from App.tsx.
+ *
+ * After overlay-url-routing: `handleReadArtifact` navigates to the URL-driven
+ * preview route instead of mutating `previewState`. The previous
+ * `navigate`/`settingsMatch`/`tunnelSetupMatch` "auto-close-before-set" hack
+ * is gone — browser history handles unwind naturally.
  */
 import { useCallback } from "react";
-import type { OpenSpecData, OpenSpecArtifact } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { OpenSpecData } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { buildOpenSpecPreviewUrl } from "../lib/route-builders.js";
 
 export interface OpenSpecActionDeps {
   send: (msg: any) => void;
   openspecMap: Map<string, OpenSpecData>;
-  setPreviewState: React.Dispatch<React.SetStateAction<{
-    cwd: string;
-    changeName: string;
-    artifactId: string;
-    artifacts: OpenSpecArtifact[];
-  } | null>>;
-  clearAllContentViews?: () => void;
-  /**
-   * When set, `handleReadArtifact` will call `navigate("/")` if
-   * `settingsMatch` or `tunnelSetupMatch` is true. Closes the URL-route
-   * view (Settings / Tunnel) BEFORE the preview is set so the preview
-   * isn't masked by the JSX gate.
-   * See change: fix-desktop-back-navigation.
-   */
-  navigate?: (to: string) => void;
-  settingsMatch?: boolean;
-  tunnelSetupMatch?: boolean;
+  /** wouter navigate — push the preview URL onto history. */
+  navigate: (to: string) => void;
 }
 
 export function useOpenSpecActions(deps: OpenSpecActionDeps) {
-  const { send, openspecMap, setPreviewState } = deps;
+  const { send, navigate } = deps;
 
   const handleOpenSpecRefresh = useCallback((cwd: string) => {
     send({ type: "openspec_refresh", cwd });
@@ -38,15 +29,8 @@ export function useOpenSpecActions(deps: OpenSpecActionDeps) {
   }, [send]);
 
   const handleReadArtifact = useCallback((cwd: string, changeName: string, artifactId: string) => {
-    const openspecData = openspecMap.get(cwd);
-    const change = openspecData?.changes.find((c) => c.name === changeName);
-    const artifacts = change?.artifacts ?? [];
-    deps.clearAllContentViews?.();
-    if ((deps.settingsMatch || deps.tunnelSetupMatch) && deps.navigate) {
-      deps.navigate("/");
-    }
-    setPreviewState({ cwd, changeName, artifactId, artifacts });
-  }, [openspecMap, setPreviewState, deps.clearAllContentViews, deps.settingsMatch, deps.tunnelSetupMatch, deps.navigate]);
+    navigate(buildOpenSpecPreviewUrl(cwd, changeName, artifactId));
+  }, [navigate]);
 
   const handleAttachProposal = useCallback((sessionId: string, changeName: string) => {
     send({ type: "attach_proposal", sessionId, changeName });

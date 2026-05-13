@@ -1,57 +1,47 @@
+/**
+ * After overlay-url-routing: useContentViews is a thin wrapper that turns
+ * action callbacks (open pi-resources / view file / view readme) into
+ * navigate() calls. There is no internal state to assert anymore.
+ *
+ * See change: overlay-url-routing.
+ */
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useContentViews } from "../useContentViews.js";
+import { encodeFolderPath } from "../../lib/folder-encoding.js";
 
 describe("useContentViews", () => {
-  it("clearAll resets all content view states", () => {
-    const { result } = renderHook(() => useContentViews());
+  it("handleOpenPiResources navigates to /folder/:encodedCwd/pi-resources", () => {
+    const navigate = vi.fn();
+    const { result } = renderHook(() => useContentViews({ navigate }));
 
-    // Open pi resources
     act(() => result.current.handleOpenPiResources("/some/cwd"));
-    expect(result.current.piResourcesState).toEqual({ cwd: "/some/cwd" });
 
-    // clearAll should reset everything
-    act(() => result.current.clearAll());
-    expect(result.current.piResourcesState).toBeNull();
-    expect(result.current.piResourceFilePreview).toBeNull();
-    expect(result.current.readmePreview).toBeNull();
+    expect(navigate).toHaveBeenCalledOnce();
+    expect(navigate).toHaveBeenCalledWith(`/folder/${encodeFolderPath("/some/cwd")}/pi-resources`);
   });
 
-  it("handleOpenPiResources clears other content views via onBeforeOpen", () => {
-    const onBeforeOpen = vi.fn();
-    const { result } = renderHook(() => useContentViews({ onBeforeOpen }));
+  it("handleViewReadme navigates to /folder/:encodedCwd/readme", () => {
+    const navigate = vi.fn();
+    const { result } = renderHook(() => useContentViews({ navigate }));
 
-    act(() => result.current.handleOpenPiResources("/cwd"));
-    expect(onBeforeOpen).toHaveBeenCalledOnce();
-    expect(result.current.piResourcesState).toEqual({ cwd: "/cwd" });
-    // piResourceFilePreview should be cleared (internal)
-    expect(result.current.piResourceFilePreview).toBeNull();
+    act(() => result.current.handleViewReadme("/readme/cwd"));
+
+    expect(navigate).toHaveBeenCalledOnce();
+    expect(navigate).toHaveBeenCalledWith(`/folder/${encodeFolderPath("/readme/cwd")}/readme`);
   });
 
-  it("handleViewReadme clears other content views via onBeforeOpen", async () => {
-    const onBeforeOpen = vi.fn();
-    const { result } = renderHook(() => useContentViews({ onBeforeOpen }));
+  it("handleViewPiResourceFile navigates to /pi-resource with query string", () => {
+    const navigate = vi.fn();
+    const { result } = renderHook(() => useContentViews({ navigate }));
 
-    // Open pi resources first
-    act(() => result.current.handleOpenPiResources("/cwd"));
-    expect(result.current.piResourcesState).toEqual({ cwd: "/cwd" });
+    act(() => result.current.handleViewPiResourceFile("/abs/file.ts", "file.ts"));
 
-    // handleViewReadme should call onBeforeOpen and clear piResourcesState
-    await act(async () => result.current.handleViewReadme("/readme-cwd"));
-    expect(onBeforeOpen).toHaveBeenCalledTimes(2); // once for piResources, once for readme
-    expect(result.current.piResourcesState).toBeNull();
-  });
-
-  it("handleViewPiResourceFile does NOT call onBeforeOpen (sub-navigation)", async () => {
-    const onBeforeOpen = vi.fn();
-    const { result } = renderHook(() => useContentViews({ onBeforeOpen }));
-
-    // Open pi resources first
-    act(() => result.current.handleOpenPiResources("/cwd"));
-    onBeforeOpen.mockClear();
-
-    // Viewing a file within pi resources is sub-navigation, not a new top-level view
-    await act(async () => result.current.handleViewPiResourceFile("/some/file.ts", "file.ts"));
-    expect(onBeforeOpen).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledOnce();
+    const url = navigate.mock.calls[0][0] as string;
+    expect(url.startsWith("/pi-resource?")).toBe(true);
+    const qs = new URLSearchParams(url.slice("/pi-resource?".length));
+    expect(qs.get("path")).toBe("/abs/file.ts");
+    expect(qs.get("title")).toBe("file.ts");
   });
 });
