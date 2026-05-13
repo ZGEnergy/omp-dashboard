@@ -57,8 +57,11 @@ describe("registerPluginBridge", () => {
     expect(managed["dashboard-demo"]).toBe("/old/bridge.js");
   });
 
-  it("never touches user-owned packages array", () => {
-    // Pre-populate settings with user packages
+  it("appends managed bridge to packages[] while preserving user-owned entries", () => {
+    // Per change fix-pi-flows-end-to-end Group 1: dual-write into packages[]
+    // is required (pi-coding-agent reads packages[], not dashboardPluginBridges).
+    // User entries MUST be preserved in original order; the managed bridge
+    // path MUST be appended and recorded in the ownership map.
     fs.mkdirSync(path.join(homedir, ".pi", "agent"), { recursive: true });
     fs.writeFileSync(
       settingsPath(),
@@ -67,8 +70,10 @@ describe("registerPluginBridge", () => {
 
     registerPluginBridge("demo", "/demo/bridge.js", { homedir });
     const s = readSettings();
-    const pkgs = s.packages as string[];
-    expect(pkgs).toEqual(["/user/extension1", "/user/extension2"]);
+    expect(s.packages).toEqual(["/user/extension1", "/user/extension2", "/demo/bridge.js"]);
+    expect((s._dashboardManagedPackages as Record<string, string>)["/demo/bridge.js"]).toBe(
+      "dashboard-demo",
+    );
   });
 });
 

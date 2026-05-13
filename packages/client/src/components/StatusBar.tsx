@@ -8,20 +8,41 @@ import type { ModelInfo, RoleInfo } from "@blackbelt-technology/pi-dashboard-sha
 interface Props {
   model?: string;
   models?: ModelInfo[];
-  roles?: RoleInfo;
   thinkingLevel?: string;
   status: "idle" | "streaming" | "ended";
   currentTool?: string;
   streamingText?: string;
   onSelectModel: (model: string) => void;
   onSelectThinkingLevel: (level: string) => void;
+
+  /**
+   * @deprecated Roles UI moved to a `settings-section` plugin contribution
+   * in `@blackbelt-technology/pi-dashboard-builtins-plugin` (Settings →
+   * General → Roles). These props are still accepted for one minor so the
+   * App.tsx call site can be cleaned up incrementally; they are not used
+   * here. See change: fix-pi-flows-end-to-end (Group 5).
+   */
+  roles?: RoleInfo;
+  /** @deprecated — moved to BuiltInRolesSettings; ignored here. */
   onRoleSet?: (role: string, modelId: string) => void;
+  /** @deprecated — moved to BuiltInRolesSettings; ignored here. */
   onPresetLoad?: (presetName: string) => void;
+  /** @deprecated — moved to BuiltInRolesSettings; ignored here. */
   onPresetSave?: (presetName: string) => void;
+  /** @deprecated — moved to BuiltInRolesSettings; ignored here. */
   onPresetDelete?: (presetName: string) => void;
 }
 
-export function StatusBar({ model, models, roles, thinkingLevel, status, currentTool, streamingText, onSelectModel, onSelectThinkingLevel, onRoleSet, onPresetLoad, onPresetSave, onPresetDelete }: Props) {
+export function StatusBar({
+  model,
+  models,
+  thinkingLevel,
+  status,
+  currentTool,
+  streamingText,
+  onSelectModel,
+  onSelectThinkingLevel,
+}: Props) {
   let statusLabel: string | null = null;
   let statusIcon = mdiLoading;
   let toolHighlight = false;
@@ -39,9 +60,12 @@ export function StatusBar({ model, models, roles, thinkingLevel, status, current
   }
 
   return (
-    <div className="flex items-center justify-between px-4 py-1 border-t border-[var(--border-primary)] text-xs" data-testid="status-bar">
+    <div
+      className="flex items-center justify-between px-4 py-1 border-t border-[var(--border-primary)] text-xs"
+      data-testid="status-bar"
+    >
       <div className="flex items-center gap-2">
-        <ModelSelector current={model} models={models} roles={roles} onSelect={onSelectModel} onRoleSet={onRoleSet} onPresetLoad={onPresetLoad} onPresetSave={onPresetSave} onPresetDelete={onPresetDelete} />
+        <ModelSelector current={model} models={models} onSelect={onSelectModel} />
         <ThinkingLevelSelector current={thinkingLevel} onSelect={onSelectThinkingLevel} />
       </div>
 

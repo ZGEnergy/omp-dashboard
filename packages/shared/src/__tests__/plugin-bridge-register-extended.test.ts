@@ -48,7 +48,10 @@ describe("bridge auto-register boot + disable lifecycle", () => {
     expect(Object.keys(managed)).toHaveLength(0);
   });
 
-  it("preserves user-owned packages array", () => {
+  it("preserves user-owned packages array and appends managed bridge", () => {
+    // Per change fix-pi-flows-end-to-end Group 1: dual-write appends the
+    // managed bridge to packages[] (with ownership marker) while leaving
+    // user entries untouched in original order.
     fs.mkdirSync(path.join(homedir, ".pi", "agent"), { recursive: true });
     fs.writeFileSync(
       settingsPath(),
@@ -58,7 +61,11 @@ describe("bridge auto-register boot + disable lifecycle", () => {
     );
     registerPluginBridge("demo", "/demo/bridge.js", { homedir });
     const settings = readSettings();
-    expect(settings.packages).toEqual(["/user/my-extension", "/user/another"]);
+    expect(settings.packages).toEqual([
+      "/user/my-extension",
+      "/user/another",
+      "/demo/bridge.js",
+    ]);
   });
 
   it("surfaces path-mismatch conflict without overwriting", () => {

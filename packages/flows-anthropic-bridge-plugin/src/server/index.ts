@@ -13,6 +13,7 @@
  * iteration can add a dedicated forwarder for the namespace.
  */
 import type { ServerPluginContext } from "@blackbelt-technology/dashboard-plugin-runtime/server";
+import { getPluginStatusStore } from "@blackbelt-technology/dashboard-plugin-runtime/server";
 
 interface PeerProbe {
   ok: boolean;
@@ -52,6 +53,19 @@ export default async function registerPlugin(ctx: ServerPluginContext): Promise<
       const s = raw as BridgeStatus;
       if (typeof s?.pid !== "number") return;
       perPid.set(s.pid, s);
+
+      // Record into the shared plugin-status-store so /api/health.plugins[]
+      // can surface `lastProbe`. See change: fix-pi-flows-end-to-end Group 2.
+      try {
+        getPluginStatusStore().recordBridgeProbe("flows-anthropic-bridge", {
+          status: s.status,
+          peers: s.peers ?? {},
+          at: s.at,
+        });
+      } catch {
+        /* never throw from probe recording */
+      }
+
       const broadcast =
         (ctx as unknown as { broadcastToSubscribers?: (m: unknown) => void }).broadcastToSubscribers;
       try {

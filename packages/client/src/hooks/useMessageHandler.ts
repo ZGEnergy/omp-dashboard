@@ -32,7 +32,7 @@ export interface SpawnErrorDetail {
   /** Effective watchdog timeout in ms, for rendering "30s" in the timeout banner. */
   timeoutMs?: number;
 }
-import { applyPluginConfigUpdate } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import { applyPluginConfigUpdate, getPluginConfig } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import {
   publishSessionEvent,
   clearSessionEvents,
@@ -266,25 +266,56 @@ export function useMessageHandler(
         setFileResults({ query: msg.query, files: msg.files });
         break;
 
-      case "models_list":
+      case "models_list": {
+        // Models are GLOBAL in pi-coding-agent (single ModelRegistry per pi
+        // process). The bridge emits this on session_start using the same
+        // shared registry; the WS `sessionId` is just the initiator. Mirror
+        // the global semantics by routing through the built-ins plugin
+        // config (merged with any existing roles already there).
+        //
+        // See change: fix-pi-flows-end-to-end (Group 5 — global roles+models).
         setModelsMap((prev) => {
           const next = new Map(prev);
           next.set(msg.sessionId, msg.models);
           return next;
         });
-        break;
-
-      case "roles_list":
-        setRolesMap((prev) => {
-          const next = new Map(prev);
-          next.set(msg.sessionId, {
-            roles: msg.roles,
-            presets: msg.presets,
-            activePreset: msg.activePreset,
-          });
-          return next;
+        const prevCfg = getPluginConfig("builtins") as Record<string, unknown>;
+        applyPluginConfigUpdate({
+          type: "plugin_config_update",
+          id: "builtins",
+          config: { ...prevCfg, models: msg.models },
         });
         break;
+      }
+
+      case "roles_list": {
+        // Roles are GLOBAL in pi-flows (single `~/.pi/agent/providers.json`).
+        // The `sessionId` on this WS message only identifies the session that
+        // *initiated* the change — the data itself has no session dimension.
+        // We mirror the global storage by routing the payload through the
+        // built-ins plugin's config (`usePluginConfig<BuiltinsConfig>` in
+        // BuiltInRolesSettings reads it). This piggybacks on the existing
+        // plugin-config plumbing used by every other plugin’s settings UI.
+        //
+        // See change: fix-pi-flows-end-to-end (Group 5 — global roles+models).
+        const roleInfo = {
+          roles: msg.roles,
+          presets: msg.presets,
+          activePreset: msg.activePreset,
+        };
+        setRolesMap((prev) => {
+          const next = new Map(prev);
+          next.set(msg.sessionId, roleInfo);
+          return next;
+        });
+        const prevCfg = getPluginConfig("builtins") as Record<string, unknown>;
+        applyPluginConfigUpdate({
+          type: "plugin_config_update",
+          id: "builtins",
+          config: { ...prevCfg, ...roleInfo },
+        });
+        break;
+      }
 
       case "process_list_update":
         setSessions((prev) => {

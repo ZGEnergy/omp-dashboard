@@ -54,6 +54,14 @@ export interface PluginContextValue {
   /** Access all sessions. */
   useAllSessions(): DashboardSession[];
   /**
+   * The session the user is currently viewing (URL `/session/:id`), or
+   * `undefined` when no session is selected. Plugins rendering in global
+   * surfaces (e.g. `settings-section`) use this to scope per-session UI.
+   *
+   * See change: fix-pi-flows-end-to-end (Group 5).
+   */
+  useSelectedSessionId(): string | undefined;
+  /**
    * Access the per-session event stream as a stable, reactive
    * snapshot. Plugins use this to derive their own state via internal
    * reducers + `useMemo`. The returned array reference is stable
@@ -124,6 +132,17 @@ export function useSessionState(sessionId: string): DashboardSession | undefined
   const ctx = useContext(PluginReactContext);
   if (!ctx) throw new Error("Slot consumer must be rendered inside <PluginContextProvider>");
   return ctx.useSessionState(sessionId);
+}
+
+/**
+ * @public — reactive: returns the currently-selected session id (URL
+ * `/session/:id`) or `undefined` when no session is selected.
+ * See change: fix-pi-flows-end-to-end (Group 5).
+ */
+export function useSelectedSessionId(): string | undefined {
+  const ctx = useContext(PluginReactContext);
+  if (!ctx) throw new Error("Slot consumer must be rendered inside <PluginContextProvider>");
+  return ctx.useSelectedSessionId();
 }
 
 /**
@@ -222,6 +241,12 @@ export interface PluginContextProviderProps {
   registry?: SlotRegistry;
   sessions?: DashboardSession[];
   sessionStates?: Map<string, DashboardSession>;
+  /**
+   * Currently-selected session id (from URL `/session/:id`). Plugins
+   * read it via `useSelectedSessionId()`. See change:
+   * fix-pi-flows-end-to-end (Group 5).
+   */
+  selectedSessionId?: string;
   send?: (message: unknown) => void;
   pluginRouter?: PluginRouter;
   ws?: WebSocket | null;
@@ -259,6 +284,17 @@ export function applyPluginConfigUpdate(update: PluginConfigUpdateMessage): void
 }
 
 /**
+ * Read the current plugin config for a given plugin id, outside the React
+ * tree. Used by the WS message handler to merge incremental updates (e.g.
+ * `roles_list` + `models_list` both target the built-ins plugin and must
+ * not overwrite each other). Plugins SHOULD read their own config via
+ * `usePluginConfig<T>()` in components.
+ */
+export function getPluginConfig(pluginId: string): Record<string, unknown> {
+  return getConfig(pluginId);
+}
+
+/**
  * Initialize plugin configs from a bulk fetch (e.g. from /api/config).
  */
 export function initPluginConfigs(pluginsBlock: Record<string, Record<string, unknown>>): void {
@@ -271,6 +307,7 @@ export function PluginContextProvider({
   children,
   registry,
   sessions = [],
+  selectedSessionId,
   send: sendFn,
   pluginRouter: routerProp,
   ws,
@@ -282,6 +319,7 @@ export function PluginContextProvider({
     (sessionId: string) => sessions.find(s => s.id === sessionId),
     [sessions],
   );
+  const useSelectedSessionIdFn = useCallback(() => selectedSessionId, [selectedSessionId]);
 
   const send = useCallback(
     (message: unknown) => {
@@ -316,6 +354,7 @@ export function PluginContextProvider({
     registry: resolvedRegistry,
     useAllSessions: useAllSessionsFn,
     useSessionState: useSessionStateFn,
+    useSelectedSessionId: useSelectedSessionIdFn,
     useSessionEvents: useSessionEventsHookImpl,
     getPluginConfig: getConfig,
     subscribePluginConfig: subscribeConfig,

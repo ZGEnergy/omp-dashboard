@@ -11,10 +11,18 @@ see [`docs/release-process.md`](docs/release-process.md).
 ## [Unreleased]
 
 ### Added
+- **Roles UI in Settings.** Built-in plugin `@blackbelt-technology/pi-dashboard-builtins-plugin` contributes a `settings-section` claim under Settings → General → Roles. Edit per-session role-to-model maps, save/load/delete presets. Replaces the inline roles dropdown inside ModelSelector. Existing protocol untouched (`role_set` / `role_preset_*`). Third-party plugins can contribute additional roles UI via the same slot. (change: `fix-pi-flows-end-to-end`)
+- **Plugin staleness banner.** `/api/health` now returns `bundleHash` (sha256 of discovered plugin set). Client compares to embedded `PLUGIN_REGISTRY_HASH`. Amber banner with Refresh button surfaces when hashes differ — remote browsers / zrok clients learn when their cached bundle is out of sync. Dismiss persists in sessionStorage. No new REST route or WS message. (change: `fix-pi-flows-end-to-end`)
+- **`/api/health.plugins[]` diagnostic fields.** Each plugin entry gains `bridgeLoadedFrom: "packages[]" | "dashboardPluginBridges" | "none"` (computed by re-reading `~/.pi/agent/settings.json`) and optional `lastProbe: { status, peers, at }` (from forwarded `flows-anthropic-bridge:status` events). One `curl /api/health` now diagnoses bridge load failures end-to-end. (change: `fix-pi-flows-end-to-end`)
 
 ### Changed
+- **Plugin bridge registration dual-writes `packages[]`.** `registerPluginBridge` / `deregisterPluginBridge` now manage both `dashboardPluginBridges[dashboard-<id>]` (forward-compat) AND `packages[]` + a `_dashboardManagedPackages` ownership map. pi-coding-agent 0.74 ignores `dashboardPluginBridges` and only loads extensions from `packages[]`; previously this meant every bundled bridge plugin (notably `flows-anthropic-bridge`) was effectively dead. One-shot reconciliation at server start heals pre-existing installs. Env escape hatch: `PI_DASHBOARD_DISABLE_PLUGIN_BRIDGE_PACKAGES_WRITE=1`. **BREAKING** for plugin authors who relied on the old write being a no-op. (change: `fix-pi-flows-end-to-end`)
+- **Dashboard no longer claims `/flows*` slash commands.** Flow operations surface through buttons only (`SessionFlowActions` Run/New/Edit/Delete, `FlowDashboard` Abort). pi-flows continues to register the slash commands for TUI users — no behavioral change for TUI hosts. (change: `fix-pi-flows-end-to-end`)
+- **`useSelectedSessionId` plugin context hook.** Plugins rendering in global surfaces (e.g. `settings-section`) can now reactively scope to the currently viewed session. (change: `fix-pi-flows-end-to-end`)
 
 ### Fixed
+- **`@pi/anthropic-messages` 0.3.0 widens the gate.** Activation no longer requires the model id to match `/claude/i`. Any `model.api === "anthropic-messages"` session opens the gate — covers OAuth + API-key + proxy providers (9Router, custom OpenAI-compatible bases) that route to Anthropic but report non-Claude model ids. `PI_ANTHROPIC_MESSAGES_FORCE_CANONICAL` now overrides `model.api` too. `isClaudeAnthropicMessages` kept as deprecated alias for one minor. (change: `fix-pi-flows-end-to-end` Group 4)
+- **pi-flows 0.2.0 abort race.** `flow-execution.ts` parallel agent batch now wraps `Promise.all` with `raceWithAbort`. Parent flow unwinds within ~10 ms of AbortSignal firing instead of waiting for every in-flight child to observe the signal at its own iteration boundary. Pending children still call `session.abort()` on themselves; cancelled results synthesized so observers (TUI, dashboard) render accurate per-agent state. Repo-lint forbids new `spawnAgent` calls without explicit `signal:`. (change: `fix-pi-flows-end-to-end` Group 3)
 
 ## [0.5.3] - 2026-05-11
 

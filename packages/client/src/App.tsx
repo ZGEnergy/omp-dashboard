@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useRoute, useLocation, Redirect, Switch, Route } from "wouter";
+import { useRoute, useLocation, useSearchParams, Redirect, Switch, Route } from "wouter";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import { useSidebarState } from "./hooks/useSidebarState.js";
 import { SessionList } from "./components/SessionList.js";
@@ -38,6 +38,7 @@ import { SettingsPanel } from "./components/SettingsPanel.js";
 import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
 import { InstallBanner } from "./components/InstallBanner.js";
 import { BootstrapBanner } from "./components/BootstrapBanner.js";
+import { PluginStalenessBanner } from "./components/PluginStalenessBanner.js";
 import { useBootstrapStatus } from "./hooks/useBootstrapStatus.js";
 import { MissingRequiredBanner } from "./components/MissingRequiredBanner.js";
 import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
@@ -49,7 +50,15 @@ import { createInitialState, findLastUserPrompt, reduceEvent, resolveInteractive
 import { useMessageHandler } from "./hooks/useMessageHandler.js";
 import { useEditors } from "./lib/use-editors.js";
 import { useContentViews } from "./hooks/useContentViews.js";
-import { useDesktopBack } from "./hooks/useDesktopBack.js";
+import { useReadmeFetch } from "./hooks/useReadmeFetch.js";
+import { usePiResourceFileFetch } from "./hooks/usePiResourceFileFetch.js";
+import {
+  buildOpenSpecArchiveUrl,
+  buildOpenSpecPreviewUrl,
+  buildOpenSpecSpecsUrl,
+  buildSessionDiffUrl,
+} from "./lib/route-builders.js";
+import { goBackOrHome } from "./lib/history-back.js";
 import { useViewDispatcher } from "./hooks/useViewDispatcher.js";
 import { selectViewedSessionId } from "./lib/selectViewedSessionId.js";
 import { useSessionActions } from "./hooks/useSessionActions.js";
@@ -114,20 +123,64 @@ function getInitialWsUrl(): string {
 
 
 
+/**
+ * URL-driven OpenSpec preview overlay.
+ *
+ * Receives cwd/change/artifact from the route params and looks up the
+ * artifacts list from `openspecMap[cwd]`. On cold load with empty
+ * `openspecMap`, renders a loading spinner; once WS replay populates the
+ * map but the change is still not found, renders an inline "Not found"
+ * with a back button.
+ *
+ * See change: overlay-url-routing.
+ */
 function OpenSpecPreview({
   cwd,
   changeName,
   initialArtifact,
-  artifacts,
+  openspecMap,
   onBack,
 }: {
   cwd: string;
   changeName: string;
   initialArtifact: string;
-  artifacts: OpenSpecArtifact[];
+  openspecMap: Map<string, OpenSpecData>;
   onBack: () => void;
 }) {
+  const openspecData = openspecMap.get(cwd);
+  const change = openspecData?.changes.find((c) => c.name === changeName);
+  const artifacts: OpenSpecArtifact[] = change?.artifacts ?? [];
+
+  // Cold-load: openspecMap empty (WS hasn't settled yet for this cwd).
+  // Render a loading spinner instead of "Not found" until WS replay finishes.
+  const isWaitingForReplay = !openspecData;
+
+  // Always invoke the reader hook (rules-of-hooks). Pass an empty artifacts
+  // list during waiting-for-replay; the placeholder JSX below masks the
+  // reader's output in that case.
   const reader = useOpenSpecReader(cwd, changeName, initialArtifact, artifacts);
+
+  if (isWaitingForReplay) {
+    return (
+      <MarkdownPreviewView
+        title={`${changeName} — loading…`}
+        isLoading
+        onBack={onBack}
+      />
+    );
+  }
+
+  if (!change) {
+    return (
+      <MarkdownPreviewView
+        title={`${changeName} — not found`}
+        content={`The OpenSpec change \`${changeName}\` was not found in this folder.\n\n[← Back](#)`}
+        error={`No change named "${changeName}" in ${cwd}.`}
+        onBack={onBack}
+      />
+    );
+  }
+
   return (
     <MarkdownPreviewView
       title={reader.title}
@@ -137,6 +190,50 @@ function OpenSpecPreview({
       tabs={reader.tabs}
       activeTab={reader.activeTab}
       onTabChange={reader.setActiveTab}
+      onBack={onBack}
+    />
+  );
+}
+
+/**
+ * URL-driven README preview overlay.
+ *
+ * Fetches `/api/readme?cwd=...` on mount; re-fetches when cwd changes.
+ * See change: overlay-url-routing.
+ */
+function ReadmePreviewRoute({ cwd, onBack }: { cwd: string; onBack: () => void }) {
+  const r = useReadmeFetch(cwd);
+  const tail = cwd.split("/").pop();
+  return (
+    <MarkdownPreviewView
+      title={`README.md — ${tail ?? cwd}`}
+      content={r.content}
+      isLoading={r.isLoading}
+      error={r.error}
+      onBack={onBack}
+    />
+  );
+}
+
+/**
+ * URL-driven pi-resource file preview overlay.
+ *
+ * Reads `path` and `title` from the URL search string and fetches
+ * `/api/pi-resource-file?path=...` on mount.
+ * See change: overlay-url-routing.
+ */
+function PiResourceFileRoute({
+  filePath,
+  title,
+  onBack,
+}: { filePath: string; title: string; onBack: () => void }) {
+  const r = usePiResourceFileFetch(filePath);
+  return (
+    <MarkdownPreviewView
+      title={title}
+      content={r.content}
+      isLoading={r.isLoading}
+      error={r.error}
       onBack={onBack}
     />
   );
@@ -162,6 +259,28 @@ export default function App() {
   const [folderEditorMatch, folderEditorParams] = useRoute("/folder/:encodedCwd/editor");
   const [settingsMatch] = useRoute("/settings");
   const [tunnelSetupMatch] = useRoute("/tunnel-setup");
+  // Shell-owned overlay routes (overlay-url-routing).
+  const [openspecPreviewMatch, openspecPreviewParams] = useRoute("/folder/:encodedCwd/openspec/:changeName/:artifactId");
+  const [archiveMatch, archiveParams] = useRoute("/folder/:encodedCwd/openspec/archive");
+  const [specsMatch, specsParams] = useRoute("/folder/:encodedCwd/openspec/specs");
+  const [readmeMatch, readmeParams] = useRoute("/folder/:encodedCwd/readme");
+  const [piResourcesMatch, piResourcesParams] = useRoute("/folder/:encodedCwd/pi-resources");
+  const [diffMatch, diffParams] = useRoute("/session/:id/diff");
+  const [piResourceFileMatch] = useRoute("/pi-resource");
+  const [piResourceFileSearch] = useSearchParams();
+  const piResourceFilePath = piResourceFileSearch.get("path");
+  const piResourceFileTitle = piResourceFileSearch.get("title") ?? "";
+  // Decoded overlay cwds (memo-free; cheap base64url decode).
+  const openspecPreviewCwd = openspecPreviewMatch && openspecPreviewParams ? decodeFolderPath(openspecPreviewParams.encodedCwd) : null;
+  const archiveCwd = archiveMatch && archiveParams ? decodeFolderPath(archiveParams.encodedCwd) : null;
+  const specsCwd = specsMatch && specsParams ? decodeFolderPath(specsParams.encodedCwd) : null;
+  const readmeCwd = readmeMatch && readmeParams ? decodeFolderPath(readmeParams.encodedCwd) : null;
+  const piResourcesCwd = piResourcesMatch && piResourcesParams ? decodeFolderPath(piResourcesParams.encodedCwd) : null;
+  const diffSessionId = diffMatch && diffParams ? diffParams.id : null;
+  const hasShellOverlayRoute =
+    !!openspecPreviewMatch || !!archiveMatch || !!specsMatch ||
+    !!readmeMatch || !!piResourcesMatch || !!diffMatch;
+  const hasPiResourceRouteFlag = !!piResourceFileMatch && !!piResourceFilePath;
   const selectedId = match ? params?.id : undefined;
   const selectedSessionIdRef = useRef<string | undefined>(selectedId);
   selectedSessionIdRef.current = selectedId;
@@ -231,48 +350,18 @@ export default function App() {
   const [discoveredServers, setDiscoveredServers] = useState<import("./components/ServerSelector.js").DiscoveredServerInfo[]>([]);
   const subscribedRef = useRef(new Set<string>());
   const maxSeqMapRef = useRef(new Map<string, number>());
-  // flowDetailAgent / architectDetailOpen state moved into flows-plugin's
-  // FlowsUiStateContext. See change: pluginize-flows-via-registry.
-  const [previewState, setPreviewState] = useState<{
-    cwd: string;
-    changeName: string;
-    artifactId: string;
-    artifacts: OpenSpecArtifact[];
-  } | null>(null);
-  const [specsBrowserCwd, setSpecsBrowserCwd] = useState<string | null>(null);
-  const [archiveBrowserCwd, setArchiveBrowserCwd] = useState<string | null>(null);
-  const [diffViewSessionId, setDiffViewSessionId] = useState<string | null>(null);
-  // flowYamlPreview / sourceOpenAgent moved into flows-plugin's
-  // FlowsUiStateContext. See change: pluginize-flows-via-registry.
-
-  // Clear all App-level content view states (everything except useContentViews-owned states)
-  const clearAppContentViews = useCallback(() => {
-    setPreviewState(null);
-    setSpecsBrowserCwd(null);
-    setArchiveBrowserCwd(null);
-    setDiffViewSessionId(null);
-  }, []);
+  // After overlay-url-routing: shell overlays are URL-driven via the
+  // useRoute matches declared above. `previewState`, `specsBrowserCwd`,
+  // `archiveBrowserCwd`, `diffViewSessionId`, and the three useContentViews
+  // `useState`s are gone; their values are derived from URL params.
+  // Flow YAML / agent detail / architect detail remain plugin-owned and
+  // are NOT migrated by this change (see proposal §6).
 
   const {
-    piResourcesState, setPiResourcesState,
-    piResourceFilePreview, setPiResourceFilePreview,
-    readmePreview, setReadmePreview,
-    clearAll: clearContentViews,
     handleOpenPiResources,
     handleViewPiResourceFile,
     handleViewReadme,
-  } = useContentViews({
-    onBeforeOpen: clearAppContentViews,
-    navigate,
-    settingsMatch: !!settingsMatch,
-    tunnelSetupMatch: !!tunnelSetupMatch,
-  });
-
-  /** Clear every content view — App-level + useContentViews-owned. */
-  const clearAllContentViews = useCallback(() => {
-    clearAppContentViews();
-    clearContentViews();
-  }, [clearAppContentViews, clearContentViews]);
+  } = useContentViews({ navigate });
 
   // Transactional server switching — see openspec/changes/safe-server-switch.
   // Opens a staging WebSocket first; only commits state/localStorage after
@@ -391,11 +480,44 @@ export default function App() {
     }
   }, [selectedId, sessionsLoaded, sessions, navigate]);
 
-  // Clear preview when session changes + lazy subscribe ended sessions
+  // Request global roles once on connect, using any available session id
+  // as a routing target (the bridge handler doesn't actually scope by it).
+  // Without this the Settings → Roles panel stays empty until something else
+  // (a `flow:role-set`, `session_start`, etc.) triggers a `roles_list`.
+  // See change: fix-pi-flows-end-to-end (Group 5 — global roles).
+  const globalRefreshRequestedRef = useRef(false);
+  useEffect(() => {
+    if (status !== "connected" || globalRefreshRequestedRef.current) return;
+    // Pick a session that's actually CONNECTED to a live pi process (the
+    // bridge handler runs in pi; ended sessions have no live WS). Status
+    // values: "active" | "idle" | "streaming" — anything but "ended".
+    let liveSession: string | undefined;
+    for (const [id, s] of sessions) {
+      if (s.status !== "ended") { liveSession = id; break; }
+    }
+    if (!liveSession) return;
+    globalRefreshRequestedRef.current = true;
+    // Both roles and models are GLOBAL in pi-flows / pi-coding-agent. The
+    // bridge re-emits them on session_start, but on a fresh dashboard load
+    // (no new pi sessions starting) the client has no copy. Pull both via
+    // any live session id; the handlers in the bridge use a local sessionId
+    // closure and don't actually scope by it.
+    send({ type: "request_roles", sessionId: liveSession });
+    send({ type: "request_models", sessionId: liveSession });
+  }, [status, sessions, send]);
+
+  // Re-arm the one-shot on reconnect.
+  useEffect(() => {
+    if (status !== "connected") globalRefreshRequestedRef.current = false;
+  }, [status]);
+
+  // After overlay-url-routing: overlays are URL-driven, so a session switch
+  // (which navigates to /session/:id) automatically clears any overlay route
+  // matches. No imperative clear-on-switch needed. We keep `prevSelectedRef`
+  // for the subscription side-effect below.
   const prevSelectedRef = useRef(selectedId);
   useEffect(() => {
     if (selectedId !== prevSelectedRef.current) {
-      clearAllContentViews();
       prevSelectedRef.current = selectedId;
     }
     // Lazy subscribe: load events for ended sessions when first selected.
@@ -632,32 +754,13 @@ export default function App() {
   const openspecActions = useOpenSpecActions({
     send,
     openspecMap,
-    setPreviewState,
-    clearAllContentViews,
     navigate,
-    settingsMatch: !!settingsMatch,
-    tunnelSetupMatch: !!tunnelSetupMatch,
   });
 
-  // Desktop back-arrow priority chain. See change: fix-desktop-back-navigation.
-  const goBackDesktop = useDesktopBack({
-    setArchiveBrowserCwd,
-    setSpecsBrowserCwd,
-    setDiffViewSessionId,
-    setPiResourceFilePreview,
-    setReadmePreview,
-    setPiResourcesState,
-    setPreviewState,
-    navigate,
-    archiveBrowserCwd,
-    specsBrowserCwd,
-    diffViewSessionId,
-    piResourceFilePreview,
-    readmePreview,
-    piResourcesState,
-    previewState,
-    selectedId,
-  });
+  // Universal back arrow: history.back() with cold-load fallback to navigate("/").
+  // Replaces the priority-chain selectDesktopBackTarget hook (see
+  // change overlay-url-routing).
+  const goBack = useCallback(() => goBackOrHome(navigate), [navigate]);
   const {
     handleOpenSpecRefresh, handleBulkArchive, handleReadArtifact,
     handleAttachProposal, handleDetachProposal,
@@ -711,8 +814,8 @@ export default function App() {
       onBulkArchive={handleBulkArchive}
       onReadArtifact={handleReadArtifact}
       onOpenPiResources={handleOpenPiResources}
-      onOpenSpecs={(cwd) => { clearAllContentViews(); setSpecsBrowserCwd(cwd); }}
-      onOpenArchive={(cwd) => { clearAllContentViews(); setArchiveBrowserCwd(cwd); }}
+      onOpenSpecs={(cwd) => navigate(buildOpenSpecSpecsUrl(cwd))}
+      onOpenArchive={(cwd) => navigate(buildOpenSpecArchiveUrl(cwd))}
       onViewReadme={handleViewReadme}
       onAttachProposal={handleAttachProposal}
       onDetachProposal={handleDetachProposal}
@@ -802,7 +905,7 @@ export default function App() {
         state={selectedState}
         onRename={handleRenameSession}
         showBack
-        onBack={isMobile ? () => navigate("/") : goBackDesktop}
+        onBack={goBack}
         onResume={selectedId ? (mode) => handleResumeSession(selectedId, mode) : undefined}
         mobileActions={isMobile ? {
           editors: selectedCwd ? editorMap.get(selectedCwd) : undefined,
@@ -837,7 +940,7 @@ export default function App() {
         onDetachProposal={() => handleDetachProposal(selectedId)}
         onReadArtifact={selectedCwd ? (changeName, artifactId) => handleReadArtifact(selectedCwd, changeName, artifactId) : undefined}
         hasFileChanges={selectedState.hasFileChanges}
-        onOpenDiffView={() => { clearAllContentViews(); setDiffViewSessionId(selectedId); }}
+        onOpenDiffView={() => navigate(buildSessionDiffUrl(selectedId))}
         onOpenExtensionModulePicker={() => setExtensionModulePickerOpen(true)}
         onRefresh={() => {
           setSessionStates((prev) => {
@@ -900,51 +1003,34 @@ export default function App() {
           onTurnClick={(turnIndex) => chatViewRef.current?.scrollToTurn(turnIndex)}
         />
       )}
-      {archiveBrowserCwd ? (
-        <ArchiveBrowserView
-          cwd={archiveBrowserCwd}
-          onBack={() => setArchiveBrowserCwd(null)}
+      {archiveMatch && archiveCwd ? (
+        <ArchiveBrowserView cwd={archiveCwd} onBack={goBack} />
+      ) : specsMatch && specsCwd ? (
+        <SpecsBrowserView cwd={specsCwd} onBack={goBack} />
+      ) : piResourceFileMatch && piResourceFilePath ? (
+        <PiResourceFileRoute
+          filePath={piResourceFilePath}
+          title={piResourceFileTitle}
+          onBack={goBack}
         />
-      ) : specsBrowserCwd ? (
-        <SpecsBrowserView
-          cwd={specsBrowserCwd}
-          onBack={() => setSpecsBrowserCwd(null)}
-        />
-      ) : piResourceFilePreview ? (
-        <MarkdownPreviewView
-          title={piResourceFilePreview.title}
-          content={piResourceFilePreview.content}
-          isLoading={piResourceFilePreview.isLoading}
-          error={piResourceFilePreview.error}
-          onBack={() => setPiResourceFilePreview(null)}
-        />
-      ) : readmePreview ? (
-        <MarkdownPreviewView
-          title={`README.md — ${readmePreview.cwd.split("/").pop()}`}
-          content={readmePreview.content}
-          isLoading={readmePreview.isLoading}
-          error={readmePreview.error}
-          onBack={() => setReadmePreview(null)}
-        />
-      ) : piResourcesState ? (
+      ) : readmeMatch && readmeCwd ? (
+        <ReadmePreviewRoute cwd={readmeCwd} onBack={goBack} />
+      ) : piResourcesMatch && piResourcesCwd ? (
         <PiResourcesView
-          cwd={piResourcesState.cwd}
-          onBack={() => setPiResourcesState(null)}
+          cwd={piResourcesCwd}
+          onBack={goBack}
           onViewFile={handleViewPiResourceFile}
         />
-      ) : previewState ? (
+      ) : openspecPreviewMatch && openspecPreviewCwd && openspecPreviewParams ? (
         <OpenSpecPreview
-          cwd={previewState.cwd}
-          changeName={previewState.changeName}
-          initialArtifact={previewState.artifactId}
-          artifacts={previewState.artifacts}
-          onBack={() => setPreviewState(null)}
+          cwd={openspecPreviewCwd}
+          changeName={decodeURIComponent(openspecPreviewParams.changeName)}
+          initialArtifact={decodeURIComponent(openspecPreviewParams.artifactId)}
+          openspecMap={openspecMap}
+          onBack={goBack}
         />
-      ) : diffViewSessionId ? (
-        <FileDiffView
-          sessionId={diffViewSessionId}
-          onBack={() => setDiffViewSessionId(null)}
-        />
+      ) : diffMatch && diffSessionId ? (
+        <FileDiffView sessionId={diffSessionId} onBack={goBack} />
       ) : (
         <>
           {/* Plugin slot: content-header-sticky — contributions from
@@ -1141,6 +1227,7 @@ export default function App() {
       <PluginContextProvider
         registry={_pluginRegistry}
         sessions={allSessionsList}
+        selectedSessionId={selectedId}
         send={(msg) => send(msg as Parameters<typeof send>[0])}
       >
         <ErrorBoundary fallback={
@@ -1160,12 +1247,12 @@ export default function App() {
   // Mobile: two-step full-screen navigation
   if (isMobile) {
     const mobileDepth = getMobileDepth({
-      selectedId,
-      folderTermCwd,
-      folderEditorCwd,
-      settingsMatch: !!settingsMatch,
-      tunnelSetupMatch: !!tunnelSetupMatch,
-      hasPreview: !!previewState || !!piResourcesState || !!piResourceFilePreview || !!readmePreview || !!specsBrowserCwd || !!archiveBrowserCwd || !!diffViewSessionId,
+      hasSessionRoute: !!selectedId,
+      hasFolderRoute: !!folderTermCwd || !!folderEditorCwd,
+      hasSettingsRoute: !!settingsMatch,
+      hasTunnelRoute: !!tunnelSetupMatch,
+      hasOverlayRoute: hasShellOverlayRoute,
+      hasPiResourceRoute: hasPiResourceRouteFlag,
     });
     return apiProvider(
       <div className="bg-[var(--bg-primary)] text-[var(--text-primary)]">
@@ -1174,6 +1261,7 @@ export default function App() {
           onRetry={bootstrapStatus.retry}
           onCleanupLegacyPi={bootstrapStatus.cleanupLegacyPi}
         />
+        <PluginStalenessBanner />
         <ConnectionStatusBanner
           status={status}
           currentServerHost={currentServerHost}
@@ -1183,23 +1271,7 @@ export default function App() {
         <MobileShell
           depth={mobileDepth}
           onBack={() => {
-            if (archiveBrowserCwd) {
-              setArchiveBrowserCwd(null);
-            } else if (specsBrowserCwd) {
-              setSpecsBrowserCwd(null);
-            } else if (diffViewSessionId) {
-              setDiffViewSessionId(null);
-            } else if (piResourceFilePreview) {
-              setPiResourceFilePreview(null);
-            } else if (readmePreview) {
-              setReadmePreview(null);
-            } else if (piResourcesState) {
-              setPiResourcesState(null);
-            } else if (previewState) {
-              setPreviewState(null);
-            } else {
-              navigate("/");
-            }
+            goBack();
           }}
           listPanel={
             <div className="flex flex-col h-full">
@@ -1214,50 +1286,33 @@ export default function App() {
               <SettingsPanel />
             ) : tunnelSetupMatch ? (
               <ZrokInstallGuide onBack={() => navigate("/")} />
-            ) : archiveBrowserCwd ? (
-              <ArchiveBrowserView
-                cwd={archiveBrowserCwd}
-                onBack={() => setArchiveBrowserCwd(null)}
+            ) : archiveMatch && archiveCwd ? (
+              <ArchiveBrowserView cwd={archiveCwd} onBack={goBack} />
+            ) : specsMatch && specsCwd ? (
+              <SpecsBrowserView cwd={specsCwd} onBack={goBack} />
+            ) : diffMatch && diffSessionId ? (
+              <FileDiffView sessionId={diffSessionId} onBack={goBack} />
+            ) : piResourceFileMatch && piResourceFilePath ? (
+              <PiResourceFileRoute
+                filePath={piResourceFilePath}
+                title={piResourceFileTitle}
+                onBack={goBack}
               />
-            ) : specsBrowserCwd ? (
-              <SpecsBrowserView
-                cwd={specsBrowserCwd}
-                onBack={() => setSpecsBrowserCwd(null)}
-              />
-            ) : diffViewSessionId ? (
-              <FileDiffView
-                sessionId={diffViewSessionId}
-                onBack={() => setDiffViewSessionId(null)}
-              />
-            ) : piResourceFilePreview ? (
-              <MarkdownPreviewView
-                title={piResourceFilePreview.title}
-                content={piResourceFilePreview.content}
-                isLoading={piResourceFilePreview.isLoading}
-                error={piResourceFilePreview.error}
-                onBack={() => setPiResourceFilePreview(null)}
-              />
-            ) : readmePreview ? (
-              <MarkdownPreviewView
-                title={`README.md — ${readmePreview.cwd.split("/").pop()}`}
-                content={readmePreview.content}
-                isLoading={readmePreview.isLoading}
-                error={readmePreview.error}
-                onBack={() => setReadmePreview(null)}
-              />
-            ) : piResourcesState ? (
+            ) : readmeMatch && readmeCwd ? (
+              <ReadmePreviewRoute cwd={readmeCwd} onBack={goBack} />
+            ) : piResourcesMatch && piResourcesCwd ? (
               <PiResourcesView
-                cwd={piResourcesState.cwd}
-                onBack={() => setPiResourcesState(null)}
+                cwd={piResourcesCwd}
+                onBack={goBack}
                 onViewFile={handleViewPiResourceFile}
               />
-            ) : previewState ? (
+            ) : openspecPreviewMatch && openspecPreviewCwd && openspecPreviewParams ? (
               <OpenSpecPreview
-                cwd={previewState.cwd}
-                changeName={previewState.changeName}
-                initialArtifact={previewState.artifactId}
-                artifacts={previewState.artifacts}
-                onBack={() => setPreviewState(null)}
+                cwd={openspecPreviewCwd}
+                changeName={decodeURIComponent(openspecPreviewParams.changeName)}
+                initialArtifact={decodeURIComponent(openspecPreviewParams.artifactId)}
+                openspecMap={openspecMap}
+                onBack={goBack}
               />
             ) : folderTermCwd ? (
               <TerminalsView
@@ -1329,45 +1384,31 @@ export default function App() {
         )}
         {/* Show session detail or landing page when no folder view is selected */}
         {!folderTermCwd && !folderEditorCwd && !settingsMatch && !tunnelSetupMatch && (
-          archiveBrowserCwd ? (
-            <ArchiveBrowserView
-              cwd={archiveBrowserCwd}
-              onBack={() => setArchiveBrowserCwd(null)}
+          archiveMatch && archiveCwd ? (
+            <ArchiveBrowserView cwd={archiveCwd} onBack={goBack} />
+          ) : specsMatch && specsCwd ? (
+            <SpecsBrowserView cwd={specsCwd} onBack={goBack} />
+          ) : piResourceFileMatch && piResourceFilePath ? (
+            <PiResourceFileRoute
+              filePath={piResourceFilePath}
+              title={piResourceFileTitle}
+              onBack={goBack}
             />
-          ) : specsBrowserCwd ? (
-            <SpecsBrowserView
-              cwd={specsBrowserCwd}
-              onBack={() => setSpecsBrowserCwd(null)}
-            />
-          ) : piResourceFilePreview ? (
-            <MarkdownPreviewView
-              title={piResourceFilePreview.title}
-              content={piResourceFilePreview.content}
-              isLoading={piResourceFilePreview.isLoading}
-              error={piResourceFilePreview.error}
-              onBack={() => setPiResourceFilePreview(null)}
-            />
-          ) : readmePreview ? (
-            <MarkdownPreviewView
-              title={`README.md — ${readmePreview.cwd.split("/").pop()}`}
-              content={readmePreview.content}
-              isLoading={readmePreview.isLoading}
-              error={readmePreview.error}
-              onBack={() => setReadmePreview(null)}
-            />
-          ) : piResourcesState && !selectedId ? (
+          ) : readmeMatch && readmeCwd ? (
+            <ReadmePreviewRoute cwd={readmeCwd} onBack={goBack} />
+          ) : piResourcesMatch && piResourcesCwd && !selectedId ? (
             <PiResourcesView
-              cwd={piResourcesState.cwd}
-              onBack={() => setPiResourcesState(null)}
+              cwd={piResourcesCwd}
+              onBack={goBack}
               onViewFile={handleViewPiResourceFile}
             />
-          ) : previewState && !selectedId ? (
+          ) : openspecPreviewMatch && openspecPreviewCwd && openspecPreviewParams && !selectedId ? (
             <OpenSpecPreview
-              cwd={previewState.cwd}
-              changeName={previewState.changeName}
-              initialArtifact={previewState.artifactId}
-              artifacts={previewState.artifacts}
-              onBack={() => setPreviewState(null)}
+              cwd={openspecPreviewCwd}
+              changeName={decodeURIComponent(openspecPreviewParams.changeName)}
+              initialArtifact={decodeURIComponent(openspecPreviewParams.artifactId)}
+              openspecMap={openspecMap}
+              onBack={goBack}
             />
           ) : (
             /* Plugin slot: content-view — only render when at least one

@@ -36,12 +36,16 @@ export { SessionFlowActionsClaim } from "./SessionFlowActions.js";
 // Manifest-level shouldRender predicate for the `session-card-flows` claim.
 // See change: add-flows-subcard.
 export { shouldRenderFlowsSubcard } from "./shouldRender.js";
-export {
-  FlowsListRoute,
-  FlowsNewRoute,
-  FlowsEditRoute,
-  FlowsDeleteRoute,
-} from "./FlowsCommandRoutes.js";
+
+// Flow slash commands (`/flows`, `/flows:new`, `/flows:edit`, `/flows:delete`)
+// are no longer claimed by the dashboard plugin manifest. Flow operations
+// surface through buttons only (`SessionFlowActions`, `FlowLaunchDialog`,
+// `FlowDashboard` Abort). pi-flows itself continues to register the slash
+// commands for TUI users. See change: fix-pi-flows-end-to-end (Group 8).
+//
+// The FlowsCommandRoutes module is no longer exported from this barrel.
+// Restore the exports here if/when the dashboard re-introduces command-route
+// claims for flows.
 
 // Plugin-internal state hooks. Components consume these in place of
 // props that previously came from App.tsx. See change:

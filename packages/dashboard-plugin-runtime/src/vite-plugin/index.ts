@@ -17,7 +17,11 @@ import type { Plugin, ViteDevServer } from "vite";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { discoverPlugins, clearDiscoveryCache } from "../server/loader.js";
+import {
+  discoverPlugins,
+  clearDiscoveryCache,
+  pluginRegistryHash,
+} from "../server/loader.js";
 import { validateManifest } from "../manifest-validator.js";
 import type { PluginManifest } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/manifest-types.js";
 
@@ -200,6 +204,12 @@ function generateRegistryContent(entries: PluginEntry[]): string {
   }
 
   lines.push("];");
+  lines.push("");
+  // Build-time hash of the registry. The client compares this against the
+  // server's live `/api/health.bundleHash` to detect a stale plugin bundle.
+  // See change: fix-pi-flows-end-to-end (Group 6).
+  const hash = pluginRegistryHash(entries);
+  lines.push(`export const PLUGIN_REGISTRY_HASH = ${JSON.stringify(hash)};`);
   lines.push("");
 
   return lines.join("\n");

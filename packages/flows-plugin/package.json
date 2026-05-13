@@ -43,11 +43,7 @@
       { "slot": "content-view", "component": "FlowYamlPreviewClaim", "predicate": "isFlowYamlPreviewActive" },
       { "slot": "content-view", "component": "FlowArchitectDetailClaim", "predicate": "isFlowArchitectDetailActive" },
       { "slot": "content-view", "component": "FlowAgentDetailClaim", "predicate": "isFlowAgentDetailActive" },
-      { "slot": "content-inline-footer", "component": "FlowSummaryClaim" },
-      { "slot": "command-route", "component": "FlowsListRoute", "command": "/flows" },
-      { "slot": "command-route", "component": "FlowsNewRoute", "command": "/flows:new" },
-      { "slot": "command-route", "component": "FlowsEditRoute", "command": "/flows:edit" },
-      { "slot": "command-route", "component": "FlowsDeleteRoute", "command": "/flows:delete" }
+      { "slot": "content-inline-footer", "component": "FlowSummaryClaim" }
     ]
   },
   "peerDependencies": {

@@ -82,7 +82,10 @@ import { writeConfigPartial } from "./config-api.js";
 import { loadServerEntries, discoverPlugins, getPluginStatusStore } from "@blackbelt-technology/dashboard-plugin-runtime/server";
 import { createServerPluginContext } from "@blackbelt-technology/dashboard-plugin-runtime/server";
 import { getPluginConfig as getPluginConfigFromFile } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { registerAllPluginBridges } from "@blackbelt-technology/pi-dashboard-shared/plugin-bridge-register.js";
+import {
+  registerAllPluginBridges,
+  reconcilePluginBridgePackages,
+} from "@blackbelt-technology/pi-dashboard-shared/plugin-bridge-register.js";
 import { registerEditorProxy, handleEditorUpgrade } from "./editor-proxy.js";
 import { detectCodeServerBinary } from "./editor-detection.js";
 
@@ -1440,6 +1443,22 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
             });
           }
         }
+      }
+
+      // One-shot reconciliation: heal pre-existing installs where the bridge
+      // was registered only in `dashboardPluginBridges` (pi ignores that key).
+      // See change: fix-pi-flows-end-to-end (Group 1, task 1.5).
+      try {
+        const summary = reconcilePluginBridgePackages();
+        for (const entry of summary) {
+          if (entry.action === "added") {
+            console.info(
+              `[plugin-bridge] Reconciled packages[] for plugin "${entry.pluginId}": ${entry.bridgePath}`,
+            );
+          }
+        }
+      } catch (err) {
+        console.warn("[plugin-bridge] Reconciliation failed (non-fatal):", err);
       }
 
       idleTimer.start();

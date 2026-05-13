@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import url from "node:url";
+import crypto from "node:crypto";
 import { validateManifest, ManifestValidationError } from "../manifest-validator.js";
 import type { PluginManifest } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/manifest-types.js";
 import type { ServerPluginContext } from "./server-context.js";
@@ -209,6 +210,63 @@ let _statusStore: PluginStatusStore | null = null;
 export function getPluginStatusStore(): PluginStatusStore {
   if (!_statusStore) _statusStore = createPluginStatusStore();
   return _statusStore;
+}
+
+// ── Registry hash (build- and runtime-shared) ──────────────────────
+
+/**
+ * Deterministic serialization of the discovered plugin set, used for
+ * staleness detection. Sorts plugins by id, sorts claims by
+ * (slot, component, predicate, command) lexicographically. Two
+ * discoveries against the same plugin set produce the same string;
+ * adding/removing a plugin or claim changes it.
+ *
+ * Shared between the vite-plugin (build-time) and the dashboard server
+ * (runtime) so `PLUGIN_REGISTRY_HASH` and `/api/health.bundleHash`
+ * compare apples-to-apples.
+ *
+ * See change: fix-pi-flows-end-to-end (Group 6).
+ */
+export function deterministicSerializePlugins(
+  plugins: ReadonlyArray<{ manifest: PluginManifest }>,
+): string {
+  const plain = plugins
+    .map((p) => ({
+      id: p.manifest.id,
+      version: (p.manifest as { version?: string }).version ?? null,
+      claims: p.manifest.claims
+        .map((c) => ({
+          slot: c.slot,
+          component: c.component ?? null,
+          predicate: c.predicate ?? null,
+          shouldRender: c.shouldRender ?? null,
+          command: c.command ?? null,
+          tab: c.tab ?? null,
+          toolName: c.toolName ?? null,
+        }))
+        .sort((a, b) =>
+          [a.slot, a.component, a.predicate, a.command]
+            .map((x) => x ?? "")
+            .join("\0")
+            .localeCompare(
+              [b.slot, b.component, b.predicate, b.command]
+                .map((x) => x ?? "")
+                .join("\0"),
+            ),
+        ),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return JSON.stringify(plain);
+}
+
+/** SHA-256 hex digest of the deterministic registry serialization. */
+export function pluginRegistryHash(
+  plugins: ReadonlyArray<{ manifest: PluginManifest }>,
+): string {
+  return crypto
+    .createHash("sha256")
+    .update(deterministicSerializePlugins(plugins))
+    .digest("hex");
 }
 
 /** Reset the status store (for testing). */

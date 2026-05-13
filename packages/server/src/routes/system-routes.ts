@@ -22,9 +22,53 @@ import path from "node:path";
 import os from "node:os";
 import { localhostGuard, netmaskToCidrBits, networkAddress } from "../localhost-guard.js";
 import { readSpawnFailures } from "../spawn-failure-log.js";
-import { getPluginStatusStore } from "@blackbelt-technology/dashboard-plugin-runtime/server";
+import {
+  getPluginStatusStore,
+  discoverPlugins,
+  pluginRegistryHash,
+} from "@blackbelt-technology/dashboard-plugin-runtime/server";
+import { classifyBridgeSource } from "@blackbelt-technology/pi-dashboard-shared/plugin-bridge-register.js";
+import fs from "node:fs";
+import type { BridgeLoadSource, PluginStatus } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/plugin-status.js";
 import type { NetworkInterface } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 import type { BootstrapStateStore } from "../bootstrap-state.js";
+
+/**
+ * Enrich each plugin status with `bridgeLoadedFrom` by classifying the
+ * plugin's resolved bridge path against the live pi settings.json.
+ *
+ * Reads settings.json once per health call; cached `discoverPlugins()`
+ * result keeps the bridge path lookup O(1).
+ *
+ * See change: fix-pi-flows-end-to-end (Group 2, task 2.4).
+ */
+function enrichWithBridgeSource(statuses: PluginStatus[]): PluginStatus[] {
+  let settings: unknown = null;
+  try {
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
+    const p = path.join(home, ".pi", "agent", "settings.json");
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, "utf-8").trim();
+      if (raw) settings = JSON.parse(raw);
+    }
+  } catch {
+    settings = null;
+  }
+
+  const plugins = discoverPlugins();
+  const bridgePaths = new Map<string, string>();
+  for (const p of plugins) {
+    if (p.bridgeEntryPath) bridgePaths.set(p.manifest.id, p.bridgeEntryPath);
+  }
+
+  return statuses.map((s) => {
+    const bp = bridgePaths.get(s.id);
+    const bridgeLoadedFrom: BridgeLoadSource = bp
+      ? classifyBridgeSource(settings, bp)
+      : "none";
+    return { ...s, bridgeLoadedFrom };
+  });
+}
 
 export function registerSystemRoutes(
   fastify: FastifyInstance,
@@ -246,7 +290,19 @@ export function registerSystemRoutes(
         totalSessions: sessionManager.listAll().length,
       },
       agents: agentMetrics,
-      plugins: getPluginStatusStore().listAll(),
+      plugins: enrichWithBridgeSource(getPluginStatusStore().listAll()),
+      // Build-time-vs-runtime plugin-bundle hash. Clients compare it to
+      // the embedded `PLUGIN_REGISTRY_HASH` to detect stale bundles.
+      // See change: fix-pi-flows-end-to-end (Group 6).
+      // Must hash over the SAME plugin set the vite-plugin used at build
+      // time — production builds exclude `fixture: true` plugins (e.g. demo).
+      // Without this filter, the runtime hash would differ from the embedded
+      // PLUGIN_REGISTRY_HASH and the staleness banner would always show.
+      bundleHash: pluginRegistryHash(
+        discoverPlugins().filter((p) =>
+          config.dev ? true : p.manifest.fixture !== true,
+        ),
+      ),
       proxy: getModelProxyStatus(),
     };
   });
