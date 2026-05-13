@@ -24,6 +24,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { readModeFile } from "./wizard-state.js";
 import { detectSystemNode, detectPiDashboardCli, detectPi } from "./dependency-detector.js";
 import { getBundledNodePath } from "./bundled-node.js";
+import { pickNodeForServer } from "./pick-node.js";
 import { isDashboardRunning } from "./health-check.js";
 import type { DashboardStatus } from "./health-check.js";
 import { MANAGED_DIR } from "./managed-paths.js";
@@ -351,11 +352,20 @@ async function launchServer(port: number, piPort: number): Promise<void> {
     throw new Error("Dashboard server CLI not found. Run the setup wizard or reinstall the app.");
   }
 
+  // Select the Node binary — bundled first, system fallback, execPath last resort.
+  const bundledNode = getBundledNodePath();
+  const bundledNodeDir = bundledNode ? path.dirname(path.dirname(bundledNode)) : null;
+  const systemNode = detectSystemNode();
+  const pick = pickNodeForServer({
+    bundledNodeDir,
+    systemNode,
+    processExecPath: process.execPath,
+    platform: process.platform,
+  });
+
   const piResult = detectPi();
   const piBinDir = piResult.found && piResult.path ? path.dirname(piResult.path) : null;
-  const systemNode = detectSystemNode();
-  const bundledNode = getBundledNodePath();
-  const nodeBinDir = bundledNode ? path.dirname(bundledNode) : (systemNode.found ? path.dirname(systemNode.path!) : null);
+  const nodeBinDir = path.dirname(pick.nodeBin);
 
   // PATH augmentation preserved from legacy V1: prepend pi bin + node bin
   // so the server's session-spawn code can find them in the spawned env.
@@ -365,6 +375,15 @@ async function launchServer(port: number, piPort: number): Promise<void> {
   }
   const extraPath = [piBinDir, nodeBinDir].filter(Boolean).join(path.delimiter);
   if (extraPath) env.PATH = `${extraPath}${path.delimiter}${env.PATH || ""}`;
+
+  if (pick.kind === "execpath-fallback") {
+    env["ELECTRON_RUN_AS_NODE"] = "1";
+    console.warn(
+      "[pick-node] No bundled or system Node found — falling back to process.execPath with " +
+      "ELECTRON_RUN_AS_NODE=1. Server launch may behave unexpectedly. " +
+      `execPath=${pick.nodeBin}`,
+    );
+  }
 
   // NODE_PATH augmentation preserved: bundled server's node_modules
   // and managed install's node_modules. The bundled server has its own
@@ -380,6 +399,7 @@ async function launchServer(port: number, piPort: number): Promise<void> {
     await launchDashboardServer({
       cliPath,
       anchor: cliPath,
+      nodeBin: pick.nodeBin,
       extraArgs: ["--port", String(port), "--pi-port", String(piPort)],
       env,
       starter: "Electron",
@@ -402,9 +422,9 @@ async function launchServer(port: number, piPort: number): Promise<void> {
     // Synthetic argv for the error message only — the real argv was
     // built and spawned by `launchDashboardServer`. Avoid a literal
     // node-import argv shape here so the lint does not match.
-    const errorArgv = ["node", "--ts-loader=jiti", cliPath, "--port", String(port), "--pi-port", String(piPort)];
+    const errorArgv = [pick.nodeBin, "--ts-loader=jiti", cliPath, "--port", String(port), "--pi-port", String(piPort)];
     throw buildServerStartupError({
-      spawnBin: process.execPath,
+      spawnBin: pick.nodeBin,
       spawnArgs: errorArgv,
       cwd: serverRoot,
       logTail: lastLines,

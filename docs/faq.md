@@ -203,6 +203,21 @@ Cross-refs:
 - README.md:268
 - packages/electron/src/lib/server-lifecycle.ts
 
+## Why does Electron show "Cannot connect to dashboard server" after fresh boot, with only a banner line in server.log?
+
+`launchDashboardServer` fell back to `process.execPath` (Electron GUI binary) as Node interpreter. Spawned child re-launched the app, hit single-instance lock, exited silently — producing only `[<ts>] Electron launch (parent pid …)` header in `~/.pi/dashboard/server.log` with no follow-up output.
+
+Fixed in change `fix-electron-server-launch-node-bin`: both Electron launchers (`spawnFromSource`, `launchServer`) call `pickNodeForServer()` — selects bundled Node first, system Node fallback, `process.execPath`+`ELECTRON_RUN_AS_NODE=1` as last resort.
+
+**Workaround (pre-fix builds):** Start a `pi` CLI session first — bridge extension spawns server with real Node binary, then Electron connects.
+
+**Verify fix:** `ps aux | grep pi-dashboard-server` shows `Resources/node/bin/node --import … cli.ts`, not the Electron binary path.
+
+Cross-refs:
+- packages/electron/src/lib/pick-node.ts
+- packages/electron/src/lib/server-lifecycle.ts
+- packages/shared/src/server-launcher.ts
+
 ## How do I configure the dashboard?
 
 Edit `~/.pi/dashboard/config.json` or click gear icon in sidebar header.

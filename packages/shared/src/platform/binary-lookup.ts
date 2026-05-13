@@ -444,6 +444,19 @@ export class ToolResolver {
    * and common user bin dirs prepended to PATH.
    */
   buildSpawnEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+    // Strip Electron-specific vars so spawned child processes (pi sessions,
+    // npm installs) don't accidentally run as Electron-node mode.
+    const ELECTRON_VARS_TO_STRIP = new Set([
+      "ELECTRON_RUN_AS_NODE",
+      "ELECTRON_DEFAULT_ERROR_MODE",
+      "ELECTRON_ENABLE_STACK_DUMPING",
+    ]);
+    const strippedBase: NodeJS.ProcessEnv = {};
+    for (const [k, v] of Object.entries(base)) {
+      if (!ELECTRON_VARS_TO_STRIP.has(k)) strippedBase[k] = v;
+    }
+    base = strippedBase;
+
     const currentPath = base.PATH || "";
     const parts: string[] = [];
 

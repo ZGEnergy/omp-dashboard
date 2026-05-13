@@ -11,6 +11,7 @@ import path from "node:path";
 import { app } from "electron";
 import { detectPi, detectOpenSpec, detectSystemNode, detectDashboardPackage } from "./dependency-detector.js";
 import { getBundledNodePath, getBundledNpmPath } from "./bundled-node.js";
+import { pickNodeForServer } from "./pick-node.js";
 import { isApiKeyConfigured } from "./wizard-state.js";
 import { MANAGED_DIR } from "./managed-paths.js";
 import { resolveOfflinePackages } from "./offline-packages.js";
@@ -396,7 +397,13 @@ async function runServerLaunchTest(
   // is forwarded so binDir-aware probes match the rest of doctor's checks.
   const resolver = new ToolResolver({});
   const jitiUrl = resolver.resolveJiti({ anchor: testCli ?? undefined });
-  const nodeBin = bundledNode ?? process.execPath;
+  const pick = pickNodeForServer({
+    bundledNodeDir: bundledNode ? path.dirname(path.dirname(bundledNode)) : null,
+    systemNode: detectSystemNode(),
+    processExecPath: process.execPath,
+    platform: process.platform,
+  });
+  const nodeBin = pick.nodeBin;
 
   if (!testCli || !jitiUrl) {
     checks.push({

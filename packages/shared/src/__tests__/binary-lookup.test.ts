@@ -180,5 +180,21 @@ describe("ToolResolver", () => {
       expect(env.PATH).toContain("/extra/one");
       expect(env.PATH).toContain("/extra/two");
     });
+
+    it("strips ELECTRON_RUN_AS_NODE and other Electron vars from the spawn env", () => {
+      const resolver = new ToolResolver();
+      const env = resolver.buildSpawnEnv({
+        PATH: "/usr/bin",
+        ELECTRON_RUN_AS_NODE: "1",
+        ELECTRON_DEFAULT_ERROR_MODE: "1",
+        ELECTRON_ENABLE_STACK_DUMPING: "1",
+        MY_APP_VAR: "hello",
+      });
+      expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+      expect(env.ELECTRON_DEFAULT_ERROR_MODE).toBeUndefined();
+      expect(env.ELECTRON_ENABLE_STACK_DUMPING).toBeUndefined();
+      // Non-Electron vars preserved
+      expect(env.MY_APP_VAR).toBe("hello");
+    });
   });
 });

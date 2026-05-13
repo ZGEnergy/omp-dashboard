@@ -20,6 +20,9 @@ import os from "node:os";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import { launchDashboardServer } from "@blackbelt-technology/pi-dashboard-shared/server-launcher.js";
 import { installStandalone } from "./dependency-installer.js";
+import { getBundledNodePath } from "./bundled-node.js";
+import { detectSystemNode } from "./dependency-detector.js";
+import { pickNodeForServer } from "./pick-node.js";
 import type { LaunchSource, SourceKind } from "@blackbelt-technology/pi-dashboard-shared/launch-source-types.js";
 import type { DashboardStarter } from "@blackbelt-technology/pi-dashboard-shared/dashboard-starter.js";
 
@@ -652,17 +655,38 @@ export async function spawnFromSource(
   opts?: { logFile?: string },
 ): Promise<SpawnResult> {
   const logFile = opts?.logFile ?? path.join(os.homedir(), ".pi", "dashboard", "server.log");
-  const baseEnv = new ToolResolver({ processExecPath: process.execPath }).buildSpawnEnv(process.env);
+
+  // Select the Node binary — bundled first, system fallback, execPath last resort.
+  const bundledNode = getBundledNodePath();
+  const bundledNodeDir = bundledNode ? path.dirname(path.dirname(bundledNode)) : null;
+  const pick = pickNodeForServer({
+    bundledNodeDir,
+    systemNode: detectSystemNode(),
+    processExecPath: process.execPath,
+    platform: process.platform,
+  });
+
+  const baseEnv = new ToolResolver({ processExecPath: pick.nodeBin }).buildSpawnEnv(process.env);
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(baseEnv)) {
     if (typeof v === "string") env[k] = v;
   }
   env["DASHBOARD_STARTER"] = "Electron";
 
+  if (pick.kind === "execpath-fallback") {
+    env["ELECTRON_RUN_AS_NODE"] = "1";
+    console.warn(
+      "[pick-node] No bundled or system Node found — falling back to process.execPath with " +
+      "ELECTRON_RUN_AS_NODE=1. Server launch may behave unexpectedly. " +
+      `execPath=${pick.nodeBin}`,
+    );
+  }
+
   try {
     const result = await launchDashboardServer({
       cliPath: source.cliPath,
       anchor: source.cliPath,
+      nodeBin: pick.nodeBin,
       extraArgs: [
         "--port", String(config.port),
         "--pi-port", String(config.piPort),
