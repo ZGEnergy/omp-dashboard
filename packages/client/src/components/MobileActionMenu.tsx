@@ -202,17 +202,17 @@ export function MobileActionMenu({ session, editors, openspecChanges, onRename, 
                       )}
                       {state === ChangeState.PLANNING && onSendPrompt && (
                         <>
-                          <MenuRow icon={mdiChevronRight} label="Continue" onClick={() => act(() => onSendPrompt(`/opsx:continue ${attached}`))} disabled={actionsDisabled} />
-                          <MenuRow icon={mdiFastForward} label="Fast-Forward" onClick={() => act(() => onSendPrompt(`/opsx:ff ${attached}`))} disabled={actionsDisabled} />
+                          <MenuRow icon={mdiChevronRight} label="Continue" onClick={() => act(() => onSendPrompt(`/skill:openspec-continue-change ${attached}`))} disabled={actionsDisabled} />
+                          <MenuRow icon={mdiFastForward} label="Fast-Forward" onClick={() => act(() => onSendPrompt(`/skill:openspec-ff-change ${attached}`))} disabled={actionsDisabled} />
                         </>
                       )}
                       {(state === ChangeState.READY || state === ChangeState.IMPLEMENTING) && onSendPrompt && (
-                        <MenuRow icon={mdiPlayCircleOutline} label="Apply" onClick={() => act(() => onSendPrompt(`/opsx:apply ${attached}`))} disabled={actionsDisabled} />
+                        <MenuRow icon={mdiPlayCircleOutline} label="Apply" onClick={() => act(() => onSendPrompt(`/skill:openspec-apply-change ${attached}`))} disabled={actionsDisabled} />
                       )}
                       {state === ChangeState.COMPLETE && onSendPrompt && (
                         <>
-                          <MenuRow icon={mdiCheckCircleOutline} label="Verify" onClick={() => act(() => onSendPrompt(`/opsx:verify ${attached}`))} disabled={actionsDisabled} />
-                          <MenuRow icon={mdiArchiveOutline} label="Archive" onClick={() => act(() => onSendPrompt(`/opsx:archive ${attached}`))} disabled={actionsDisabled} />
+                          <MenuRow icon={mdiCheckCircleOutline} label="Verify" onClick={() => act(() => onSendPrompt(`/skill:openspec-verify-change ${attached}`))} disabled={actionsDisabled} />
+                          <MenuRow icon={mdiArchiveOutline} label="Archive" onClick={() => act(() => onSendPrompt(`/skill:openspec-archive-change ${attached}`))} disabled={actionsDisabled} />
                         </>
                       )}
                     </>

@@ -1,12 +1,12 @@
 ## 1. Component string replacements
 
-- [ ] 1.1 In `packages/client/src/components/SessionOpenSpecActions.tsx`, replace `/opsx:continue` → `/skill:openspec-continue-change` (Continue button)
-- [ ] 1.2 Same file, replace `/opsx:ff` → `/skill:openspec-ff-change` (FF button)
-- [ ] 1.3 Same file, replace `/opsx:apply` → `/skill:openspec-apply-change` (Apply button)
-- [ ] 1.4 Same file, replace `/opsx:verify` → `/skill:openspec-verify-change` (Verify button)
-- [ ] 1.5 Same file, replace both `/opsx:archive` call sites → `/skill:openspec-archive-change` (Archive button + confirm path)
-- [ ] 1.6 In `packages/client/src/components/MobileActionMenu.tsx`, replace `/opsx:continue|ff|apply|verify|archive` with the matching `/skill:openspec-<verb>-change` strings (5 sites)
-- [ ] 1.7 In `packages/client/src/components/NewChangeDialog.tsx`, replace all 4 `/opsx:new` permutations with `/skill:openspec-new-change` (name+desc, name only, desc only, neither)
+- [x] 1.1 In `packages/client/src/components/SessionOpenSpecActions.tsx`, replace `/opsx:continue` → `/skill:openspec-continue-change` (Continue button)
+- [x] 1.2 Same file, replace `/opsx:ff` → `/skill:openspec-ff-change` (FF button)
+- [x] 1.3 Same file, replace `/opsx:apply` → `/skill:openspec-apply-change` (Apply button)
+- [x] 1.4 Same file, replace `/opsx:verify` → `/skill:openspec-verify-change` (Verify button)
+- [x] 1.5 Same file, replace both `/opsx:archive` call sites → `/skill:openspec-archive-change` (Archive button + confirm path)
+- [x] 1.6 In `packages/client/src/components/MobileActionMenu.tsx`, replace `/opsx:continue|ff|apply|verify|archive` with the matching `/skill:openspec-<verb>-change` strings (5 sites)
+- [x] 1.7 In `packages/client/src/components/NewChangeDialog.tsx`, replace all 4 `/opsx:new` permutations with `/skill:openspec-new-change` (name+desc, name only, desc only, neither)
 
 ## 2. Test updates
 

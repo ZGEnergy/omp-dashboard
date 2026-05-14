@@ -272,16 +272,16 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
             <ActionButton label="Explore" icon={mdiCompassOutline} onClick={() => setExploreOpen(true)} testId="explore-btn" disabled={actionsDisabled} />
             {state === ChangeState.PLANNING && (
               <>
-                <ActionButton label="Continue" icon={mdiChevronRight} onClick={() => onSendPrompt(`/opsx:continue ${attached}`)} testId="continue-btn" disabled={actionsDisabled} />
-                <ActionButton label="FF" icon={mdiFastForward} onClick={() => onSendPrompt(`/opsx:ff ${attached}`)} testId="ff-btn" disabled={actionsDisabled} />
+                <ActionButton label="Continue" icon={mdiChevronRight} onClick={() => onSendPrompt(`/skill:openspec-continue-change ${attached}`)} testId="continue-btn" disabled={actionsDisabled} />
+                <ActionButton label="FF" icon={mdiFastForward} onClick={() => onSendPrompt(`/skill:openspec-ff-change ${attached}`)} testId="ff-btn" disabled={actionsDisabled} />
               </>
             )}
             {(state === ChangeState.READY || state === ChangeState.IMPLEMENTING) && (
-              <ActionButton label="Apply" icon={mdiPlayCircleOutline} onClick={() => onSendPrompt(`/opsx:apply ${attached}`)} testId="apply-btn" disabled={actionsDisabled} />
+              <ActionButton label="Apply" icon={mdiPlayCircleOutline} onClick={() => onSendPrompt(`/skill:openspec-apply-change ${attached}`)} testId="apply-btn" disabled={actionsDisabled} />
             )}
             {state === ChangeState.COMPLETE && (
               <>
-                <ActionButton label="Verify" icon={mdiCheckCircleOutline} onClick={() => onSendPrompt(`/opsx:verify ${attached}`)} testId="verify-btn" disabled={actionsDisabled} />
+                <ActionButton label="Verify" icon={mdiCheckCircleOutline} onClick={() => onSendPrompt(`/skill:openspec-verify-change ${attached}`)} testId="verify-btn" disabled={actionsDisabled} />
                 <ActionButton label="Archive" icon={mdiArchiveOutline} onClick={() => setArchiveConfirm(true)} testId="archive-btn" disabled={actionsDisabled} />
               </>
             )}
@@ -326,7 +326,7 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
           message={`Archive "${attached}"?`}
           confirmLabel="Archive"
           onConfirm={() => {
-            onSendPrompt(`/opsx:archive ${attached}`);
+            onSendPrompt(`/skill:openspec-archive-change ${attached}`);
             setArchiveConfirm(false);
           }}
           onCancel={() => setArchiveConfirm(false)}
@@ -337,7 +337,7 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
           message={`${uncheckedCount} of ${change.totalTasks} tasks are unchecked. Archive anyway?`}
           confirmLabel="Archive anyway"
           onConfirm={() => {
-            onSendPrompt(`/opsx:archive ${attached}`);
+            onSendPrompt(`/skill:openspec-archive-change ${attached}`);
             setArchiveAnywayConfirm(false);
           }}
           onCancel={() => setArchiveAnywayConfirm(false)}

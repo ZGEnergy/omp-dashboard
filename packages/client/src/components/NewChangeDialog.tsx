@@ -10,10 +10,10 @@ interface Props {
 export function formatNewChangePrompt(name: string, description: string): string {
   const trimName = name.trim();
   const trimDesc = description.trim();
-  if (trimName && trimDesc) return `/opsx:new ${trimName}\n${trimDesc}`;
-  if (trimName) return `/opsx:new ${trimName}`;
-  if (trimDesc) return `/opsx:new\n${trimDesc}`;
-  return "/opsx:new";
+  if (trimName && trimDesc) return `/skill:openspec-new-change ${trimName}\n${trimDesc}`;
+  if (trimName) return `/skill:openspec-new-change ${trimName}`;
+  if (trimDesc) return `/skill:openspec-new-change\n${trimDesc}`;
+  return "/skill:openspec-new-change";
 }
 
 export function NewChangeDialog({ onSend, onClose }: Props) {
