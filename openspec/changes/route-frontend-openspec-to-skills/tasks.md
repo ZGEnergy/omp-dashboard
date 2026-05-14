@@ -10,10 +10,10 @@
 
 ## 2. Test updates
 
-- [ ] 2.1 Update `packages/client/src/components/__tests__/SessionOpenSpecActions.test.tsx` assertions from `/opsx:<verb>` to `/skill:openspec-<verb>-change`
-- [ ] 2.2 Update `packages/client/src/components/__tests__/MobileActionMenu.test.tsx` assertions accordingly
-- [ ] 2.3 Update `packages/client/src/components/__tests__/NewChangeDialog.test.tsx` assertions for all 4 permutations
-- [ ] 2.4 Run `npm test 2>&1 | tee /tmp/pi-test.log` and grep `/tmp/pi-test.log` for failures; fix until green
+- [x] 2.1 Update `packages/client/src/components/__tests__/SessionOpenSpecActions.test.tsx` assertions from `/opsx:<verb>` to `/skill:openspec-<verb>-change`
+- [x] 2.2 Update `packages/client/src/components/__tests__/MobileActionMenu.test.tsx` assertions accordingly
+- [x] 2.3 Update `packages/client/src/components/__tests__/NewChangeDialog.test.tsx` assertions for all 4 permutations
+- [x] 2.4 Run `npm test 2>&1 | tee /tmp/pi-test.log` and grep `/tmp/pi-test.log` for failures; fix until green
 
 ## 3. Lint guard (regression prevention)
 

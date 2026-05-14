@@ -130,7 +130,7 @@ describe("MobileActionMenu unattached OpenSpec section", () => {
     fireEvent.change(screen.getByTestId("new-change-name"), { target: { value: "add-auth" } });
     fireEvent.change(screen.getByTestId("new-change-description"), { target: { value: "Add OAuth" } });
     fireEvent.click(screen.getByTestId("new-change-send"));
-    expect(onSendPrompt).toHaveBeenCalledWith("/opsx:new add-auth\nAdd OAuth");
+    expect(onSendPrompt).toHaveBeenCalledWith("/skill:openspec-new-change add-auth\nAdd OAuth");
     // Dialog should close
     expect(screen.queryByTestId("new-change-dialog")).toBeNull();
   });

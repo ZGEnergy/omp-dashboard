@@ -293,7 +293,7 @@ describe("SessionOpenSpecActions", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("continue-btn"));
-    expect(onSendPrompt).toHaveBeenCalledWith("/opsx:continue add-auth");
+    expect(onSendPrompt).toHaveBeenCalledWith("/skill:openspec-continue-change add-auth");
   });
 
   it("Verify sends correct prompt", () => {
@@ -307,7 +307,7 @@ describe("SessionOpenSpecActions", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("verify-btn"));
-    expect(onSendPrompt).toHaveBeenCalledWith("/opsx:verify fix-bug");
+    expect(onSendPrompt).toHaveBeenCalledWith("/skill:openspec-verify-change fix-bug");
   });
 
   it("Apply sends correct prompt", () => {
@@ -321,7 +321,7 @@ describe("SessionOpenSpecActions", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("apply-btn"));
-    expect(onSendPrompt).toHaveBeenCalledWith("/opsx:apply ready-change");
+    expect(onSendPrompt).toHaveBeenCalledWith("/skill:openspec-apply-change ready-change");
   });
 
   it("Detach calls onDetach", () => {
@@ -672,7 +672,7 @@ describe("SessionOpenSpecActions", () => {
       // 2/5 complete → 3 unchecked of 5
       expect(screen.getByText(/3 of 5 tasks are unchecked/)).toBeTruthy();
       fireEvent.click(screen.getByTestId("confirm-ok"));
-      expect(onSendPrompt).toHaveBeenCalledWith("/opsx:archive impl-change");
+      expect(onSendPrompt).toHaveBeenCalledWith("/skill:openspec-archive-change impl-change");
     });
   });
 

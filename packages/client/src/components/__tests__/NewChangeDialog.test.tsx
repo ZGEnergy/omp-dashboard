@@ -7,23 +7,23 @@ afterEach(() => cleanup());
 
 describe("formatNewChangePrompt", () => {
   it("formats with name and description", () => {
-    expect(formatNewChangePrompt("add-auth", "Add OAuth support")).toBe("/opsx:new add-auth\nAdd OAuth support");
+    expect(formatNewChangePrompt("add-auth", "Add OAuth support")).toBe("/skill:openspec-new-change add-auth\nAdd OAuth support");
   });
 
   it("formats with name only", () => {
-    expect(formatNewChangePrompt("add-auth", "")).toBe("/opsx:new add-auth");
+    expect(formatNewChangePrompt("add-auth", "")).toBe("/skill:openspec-new-change add-auth");
   });
 
   it("formats with description only", () => {
-    expect(formatNewChangePrompt("", "Add OAuth support")).toBe("/opsx:new\nAdd OAuth support");
+    expect(formatNewChangePrompt("", "Add OAuth support")).toBe("/skill:openspec-new-change\nAdd OAuth support");
   });
 
   it("formats with both empty", () => {
-    expect(formatNewChangePrompt("", "")).toBe("/opsx:new");
+    expect(formatNewChangePrompt("", "")).toBe("/skill:openspec-new-change");
   });
 
   it("trims whitespace", () => {
-    expect(formatNewChangePrompt("  add-auth  ", "  desc  ")).toBe("/opsx:new add-auth\ndesc");
+    expect(formatNewChangePrompt("  add-auth  ", "  desc  ")).toBe("/skill:openspec-new-change add-auth\ndesc");
   });
 });
 
@@ -42,14 +42,14 @@ describe("NewChangeDialog", () => {
     fireEvent.change(screen.getByTestId("new-change-description"), { target: { value: "Add OAuth" } });
     fireEvent.click(screen.getByTestId("new-change-send"));
 
-    expect(onSend).toHaveBeenCalledWith("/opsx:new add-auth\nAdd OAuth");
+    expect(onSend).toHaveBeenCalledWith("/skill:openspec-new-change add-auth\nAdd OAuth");
   });
 
   it("sends prompt with both empty", () => {
     const onSend = vi.fn();
     render(<NewChangeDialog onSend={onSend} onClose={vi.fn()} />);
     fireEvent.click(screen.getByTestId("new-change-send"));
-    expect(onSend).toHaveBeenCalledWith("/opsx:new");
+    expect(onSend).toHaveBeenCalledWith("/skill:openspec-new-change");
   });
 
   it("calls onClose when Cancel clicked", () => {
@@ -71,6 +71,6 @@ describe("NewChangeDialog", () => {
     render(<NewChangeDialog onSend={onSend} onClose={vi.fn()} />);
     fireEvent.change(screen.getByTestId("new-change-name"), { target: { value: "test" } });
     fireEvent.keyDown(screen.getByTestId("new-change-name"), { key: "Enter", metaKey: true });
-    expect(onSend).toHaveBeenCalledWith("/opsx:new test");
+    expect(onSend).toHaveBeenCalledWith("/skill:openspec-new-change test");
   });
 });
