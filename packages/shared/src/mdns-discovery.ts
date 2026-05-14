@@ -5,7 +5,10 @@
 import { Bonjour, type Service, type Browser } from "bonjour-service";
 import os from "node:os";
 import { EventEmitter } from "node:events";
+import { createRequire } from "node:module";
 import { isDashboardRunning } from "./server-identity.js";
+
+const _require = createRequire(import.meta.url);
 
 const SERVICE_TYPE = "pi-dashboard";
 
@@ -43,7 +46,7 @@ export function advertiseDashboard(port: number, piPort: number): void {
   const bonjour = getBonjour();
   const pkg = { version: "0.0.0" }; // Will be replaced by actual version
   try {
-    const pkgJson = require("../../package.json");
+    const pkgJson = _require("../../package.json");
     pkg.version = pkgJson.version ?? "0.0.0";
   } catch { /* ignore */ }
 

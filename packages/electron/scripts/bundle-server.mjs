@@ -58,7 +58,19 @@ mkdirSync(path.join(SERVER_BUNDLE, "packages", "dist", "client"), {
 });
 
 // ── copy workspace source ────────────────────────────────────────────────
-for (const pkg of ["server", "shared", "extension"]) {
+// dashboard-plugin-runtime: included so the server-side plugin loader
+// (e.g. pluginRegistryHash exported from server/loader.ts) ships with the
+// bundle. Without this, npm install resolves it from the registry, which
+// can be older than the working-tree HEAD and miss symbols added in the
+// current dev cycle (e.g. pluginRegistryHash). Symlink materialization
+// below normalizes node_modules/@blackbelt-technology/* into a copy.
+const BUNDLED_WORKSPACE_PKGS = [
+  "server",
+  "shared",
+  "extension",
+  "dashboard-plugin-runtime",
+];
+for (const pkg of BUNDLED_WORKSPACE_PKGS) {
   cpSync(
     path.join(PROJECT_DIR, "packages", pkg),
     path.join(SERVER_BUNDLE, "packages", pkg),
@@ -108,7 +120,7 @@ if (clientSrc) {
 const bundlePkg = {
   name: "pi-dashboard-bundled-server",
   private: true,
-  workspaces: ["packages/server", "packages/shared", "packages/extension"],
+  workspaces: BUNDLED_WORKSPACE_PKGS.map((p) => `packages/${p}`),
 };
 writeFileSync(
   path.join(SERVER_BUNDLE, "package.json"),
@@ -122,7 +134,7 @@ writeFileSync(
 //   2. macOS xattrs (`@` flag) on these files confuse Docker Desktop's
 //      filesystem virtualization, producing EACCES during electron-
 //      forge's asar pack step.
-for (const pkg of ["server", "shared", "extension"]) {
+for (const pkg of BUNDLED_WORKSPACE_PKGS) {
   // Top-level test / lint / config files
   for (const cfg of [
     "vitest.config.ts",
@@ -202,7 +214,7 @@ if (tail) console.log(tail);
 // ── strip __tests__ from workspace source ────────────────────────────────
 // Test config + __tests__ already stripped above (before source-only exit).
 // This block kept for full-mode runs that need the same cleanup post-install.
-for (const pkg of ["server", "shared", "extension"]) {
+for (const pkg of BUNDLED_WORKSPACE_PKGS) {
   rmSync(path.join(SERVER_BUNDLE, "packages", pkg, "src", "__tests__"), {
     recursive: true,
     force: true,
@@ -269,6 +281,39 @@ if (existsSync(BB_DIR)) {
   if (materialized > 0) {
     console.log(`  Materialized ${materialized} workspace symlink(s) under @blackbelt-technology/`);
   }
+}
+
+// ── materialize pi-dashboard-web into node_modules ─────────────────────────
+// server.ts resolves the client via:
+//   createRequire(...).resolve("@blackbelt-technology/pi-dashboard-web/package.json")
+// then joins "dist" off that package dir. To make this canonical lookup
+// succeed in the extracted layout (~/.pi-dashboard/node_modules/...), copy
+// the built client into node_modules/@blackbelt-technology/pi-dashboard-web/.
+// packages/server/package.json doesn't declare pi-dashboard-web as a dep, so
+// `npm install` above did NOT pull it from the registry; we must place it
+// here explicitly. Mirrors the symlink-materialization above but for a
+// package that isn't a transitive npm dep of the server.
+//
+// Without this, the server falls back to sibling-path arithmetic which
+// silently misses the bundle's `packages/dist/client/` location.
+if (clientSrc) {
+  const webPkgDest = path.join(
+    SERVER_BUNDLE,
+    "node_modules",
+    "@blackbelt-technology",
+    "pi-dashboard-web",
+  );
+  rmSync(webPkgDest, { recursive: true, force: true });
+  mkdirSync(webPkgDest, { recursive: true });
+  cpSync(
+    path.join(PROJECT_DIR, "packages", "client", "package.json"),
+    path.join(webPkgDest, "package.json"),
+  );
+  cpSync(clientSrc, path.join(webPkgDest, "dist"), {
+    recursive: true,
+    dereference: false,
+  });
+  console.log(`  Materialized pi-dashboard-web into node_modules/@blackbelt-technology/`);
 }
 
 // ── fix spawn-helper +x on POSIX (npm hoisting may skip postinstall) ─────

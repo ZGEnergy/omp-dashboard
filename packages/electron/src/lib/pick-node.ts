@@ -11,6 +11,7 @@
  * through PickNodeInput so tests stay free of real I/O.
  */
 import path from "node:path";
+import { existsSync as fsExistsSync } from "node:fs";
 
 export interface PickNodeInput {
   /** Resolved Resources/node dir, or null in dev env without bundled node. */
@@ -39,10 +40,7 @@ export type PickNodeResult =
  */
 export function pickNodeForServer(input: PickNodeInput): PickNodeResult {
   const { bundledNodeDir, systemNode, processExecPath, platform } = input;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { existsSync: fsExists } = input.existsSync
-    ? { existsSync: input.existsSync }
-    : require("node:fs") as { existsSync: (p: string) => boolean };
+  const fsExists = input.existsSync ?? fsExistsSync;
 
   // 1. Bundled Node (preferred — zero external dependency)
   if (bundledNodeDir) {

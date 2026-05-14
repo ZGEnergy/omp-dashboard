@@ -11,7 +11,7 @@
  * See change: doctor-rich-output (proposal.md, design.md).
  */
 import { execSync } from "./platform/exec.js";
-import { existsSync, readFileSync, statSync, renameSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, renameSync, appendFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
 // ─── Types ─────────────────────────────────────────────────────────────
@@ -290,8 +290,7 @@ function rotateDoctorLogIfNeeded(logPath: string): void {
     } catch {
       // try once more after best-effort cleanup
       try {
-        const fs = require("node:fs") as typeof import("node:fs");
-        if (existsSync(rotated)) fs.rmSync(rotated, { force: true });
+        if (existsSync(rotated)) rmSync(rotated, { force: true });
         renameSync(logPath, rotated);
       } catch {
         // give up silently
@@ -321,7 +320,7 @@ export const SECTION_OF: Record<string, DoctorSection> = {
   // server
   "Dashboard server code": "server",
   "Offline packages bundle": "server",
-  "TypeScript loader (tsx)": "server",
+  "TypeScript loader": "server",
   "Dashboard server": "server",
   "Server starter": "server",
   "Installable list": "server",
@@ -399,10 +398,10 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
     status === "ok"
       ? undefined
       : "Offline packages bundle absent. First-run install will require network access to `registry.npmjs.org`.",
-  "TypeScript loader (tsx)": (status) =>
+  "TypeScript loader": (status) =>
     status === "ok"
       ? undefined
-      : "`tsx` not found. Required to run the dashboard server. Run the setup wizard (Help → Setup).",
+      : "No TypeScript loader (jiti or tsx) found. Required to run the dashboard server. Run the setup wizard (Help → Setup).",
   "Dashboard server": (status) =>
     status === "ok"
       ? undefined
@@ -548,43 +547,66 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
     }),
   );
 
-  // tsx (TypeScript loader)
+  // TypeScript loader (jiti preferred; tsx accepted as fallback)
+  // The dashboard server runs via jiti by default (see shared/server-launcher.ts
+  // resolveJiti). tsx was the legacy choice and is still accepted if jiti is
+  // unavailable. The check passes when EITHER loader is resolvable so users
+  // running on jiti don't see a spurious error.
   checks.push(
-    await safeCheck("TypeScript loader (tsx)", "server", () => {
+    await safeCheck("TypeScript loader", "server", () => {
+      const managedJitiPkg = path.join(managedDir, "node_modules", "jiti", "package.json");
       const managedTsxPkg = path.join(managedDir, "node_modules", "tsx", "package.json");
-      let tsxVersion: string | null = null;
-      try {
-        if (existsSync(managedTsxPkg)) {
-          const pkg = JSON.parse(readFileSync(managedTsxPkg, "utf-8"));
-          tsxVersion = pkg.version || null;
+
+      function readVersion(pkgPath: string): string | null {
+        try {
+          if (!existsSync(pkgPath)) return null;
+          const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+          return pkg.version || null;
+        } catch {
+          return null;
         }
-      } catch {
-        // ignore
       }
+      const jitiVersion = readVersion(managedJitiPkg);
+      const tsxVersion = readVersion(managedTsxPkg);
+
       let systemTsx: string | null = null;
       const lookupCmd = process.platform === "win32" ? "where tsx" : "which tsx"; // platform-branch-ok: localised PATH-lookup primitive
       const lookup = safeExec(lookupCmd, { timeoutMs: 5000 });
       if (lookup.ok) {
         systemTsx = lookup.stdout.trim().split("\n")[0] || null;
       }
-      const found = !!tsxVersion || !!systemTsx;
-      if (!found) {
+
+      if (jitiVersion) {
         return {
-          name: "TypeScript loader (tsx)",
+          name: "TypeScript loader",
           section: "server",
-          status: "error",
-          message: "Not found — required to run the dashboard server",
-          detail: `Looked under ${managedTsxPkg} and on PATH`,
-          fixable: true,
+          status: "ok",
+          message: `jiti v${jitiVersion} (managed) at ${path.dirname(managedJitiPkg)}`,
+        };
+      }
+      if (tsxVersion) {
+        return {
+          name: "TypeScript loader",
+          section: "server",
+          status: "ok",
+          message: `tsx v${tsxVersion} (managed) at ${path.dirname(managedTsxPkg)}`,
+        };
+      }
+      if (systemTsx) {
+        return {
+          name: "TypeScript loader",
+          section: "server",
+          status: "ok",
+          message: `tsx (system) at ${systemTsx}`,
         };
       }
       return {
-        name: "TypeScript loader (tsx)",
+        name: "TypeScript loader",
         section: "server",
-        status: "ok",
-        message: tsxVersion
-          ? `v${tsxVersion} (managed) at ${path.dirname(managedTsxPkg)}`
-          : `(system) at ${systemTsx}`,
+        status: "error",
+        message: "Not found — required to run the dashboard server",
+        detail: `Looked under ${managedJitiPkg}, ${managedTsxPkg}, and on PATH`,
+        fixable: true,
       };
     }),
   );
