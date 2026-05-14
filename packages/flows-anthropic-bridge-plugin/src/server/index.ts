@@ -18,6 +18,10 @@ import { getPluginStatusStore } from "@blackbelt-technology/dashboard-plugin-run
 interface PeerProbe {
   ok: boolean;
   reason?: string;
+  /** Which probe tier produced the hit. See change: add-shared-pi-package-resolver. */
+  via?: "node" | "pi-packages";
+  /** Absolute entry path when `via === "pi-packages"`. */
+  entryPath?: string;
 }
 
 interface BridgeStatus {

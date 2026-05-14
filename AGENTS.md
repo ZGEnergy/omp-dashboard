@@ -472,6 +472,7 @@ This section lists only the **architectural backbone** — the files agents touc
 | `packages/shared/src/installable-list.ts` | `InstallablePackage`/`InstallableList` types; `readInstallableList`, `writeInstallableList`, `mergeInstallableList` |
 | `packages/server/src/bootstrap-install-from-list.ts` | Per-package reconcile loop reading `~/.pi/dashboard/installable.json`; no-op when file absent |
 | `packages/shared/src/bridge-register.ts` | Shared bridge registration: `findBundledExtension(baseDir)` + `registerBridgeExtension(path)`; non-destructive cleanup, AppImage guard. Used by server startup and Electron wizard. |
+| `packages/shared/src/pi-package-resolver.ts` | Resolves pi `packages[]` (npm/git/https/abs/rel) to install dir + entry path. Tier-2 fallback for plugin peer imports across npm/git/local installs. See change: add-shared-pi-package-resolver. |
 | `packages/electron/src/lib/doctor.ts` | Doctor diagnostic: checks all binaries, versions, server status, offers setup |
 | `packages/shared/src/doctor-core.ts` | Shared doctor primitives: types, SECTION_OF, SUGGESTIONS, safeExec/safeCheck/assumedMandatory, runSharedChecks, formatDoctorReportMarkdown |
 | `packages/electron/src/lib/doctor-bridge-contract.ts` | Typed `DoctorBridge` interface + frozen `DOCTOR_IPC_CHANNELS` (channel-name-drift lint) |

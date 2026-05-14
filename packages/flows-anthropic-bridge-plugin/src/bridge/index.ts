@@ -22,15 +22,16 @@
  * via npm without code changes here.
  */
 import { createRequire } from "node:module";
-import { probeAll, type ProbeResult } from "../peer-probe.js";
+import { resolvePiPackageEntry } from "@blackbelt-technology/pi-dashboard-shared/pi-package-resolver.js";
+import { probeAll, type PeerProbe, type ProbeResult } from "../peer-probe.js";
 
 type Status = "probing" | "waiting_peers" | "active" | "degraded";
 
 interface BridgeStatusEvent {
   status: Status;
   peers: {
-    "@pi/anthropic-messages": { ok: boolean; reason?: string };
-    "pi-flows": { ok: boolean; reason?: string };
+    "@pi/anthropic-messages": PeerProbe;
+    "pi-flows": PeerProbe;
   };
   pid: number;
   at: number;
@@ -70,7 +71,17 @@ export default async function activate(ctx: any): Promise<void> {
 
   function runProbe(): ProbeResult {
     return probeAll({
+      // Tier 1: standard Node resolver anchored at cwd.
       resolve: (spec) => requireFromCwd.resolve(spec),
+      // Tier 2: pi-packages fallback. Reads ~/.pi/agent/settings.json +
+      // <cwd>/.pi/settings.json and returns an absolute entry path for
+      // peers installed via pi (npm/git/local) but not in any
+      // node_modules ancestor of cwd. See change:
+      // add-shared-pi-package-resolver.
+      resolvePiPackage: (spec) => {
+        const ep = resolvePiPackageEntry(spec, { cwd: process.cwd() });
+        return ep ? { entryPath: ep } : null;
+      },
       flowsListenerCount: () =>
         typeof pi?.events?.listenerCount === "function"
           ? pi.events.listenerCount("flow:register-agent-extension")
@@ -96,10 +107,20 @@ export default async function activate(ctx: any): Promise<void> {
     }
     let mod: any;
     try {
-      // Peer dependency, not a direct dep — TS can't see types here. Resolved
-      // at runtime via probeAll() before we reach this line.
-      // @ts-expect-error optional peer; resolved dynamically
-      mod = await import("@pi/anthropic-messages");
+      // Two-tier import (matches probe). When tier-1 (Node resolver) hit,
+      // use the bare specifier so Node ESM produces a single module
+      // instance shared with anyone else doing the same import. When
+      // tier-2 (pi-packages) hit, use the absolute entry path returned by
+      // the shared resolver — pi installed the peer to a path Node's
+      // node_modules walk never reaches.
+      if (probe.am.via === "pi-packages" && probe.am.entryPath) {
+        mod = await import(probe.am.entryPath);
+      } else {
+        // Peer dependency, not a direct dep — TS can't see types here.
+        // Resolved at runtime via probeAll() before we reach this line.
+        // @ts-expect-error optional peer; resolved dynamically
+        mod = await import("@pi/anthropic-messages");
+      }
     } catch (e) {
       // Resolve said yes, import said no — surface the import error and stay
       // waiting so a later /reload (with the package present) can complete.
