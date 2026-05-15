@@ -61,6 +61,20 @@
 - [x] 8.4 Removed `background` from `SubagentState.status` union and removed `isBackground` field.
 - [x] 8.5 Removed background-related test cases from `event-reducer.test.ts` and `SubagentDetailView.test.tsx`.
 
+## 11. Plugin extraction (DONE)
+
+- [x] 11.1 Created `packages/subagents-plugin/` workspace package with `package.json`, `tsconfig.json`, `pi-dashboard-plugin` manifest (`id: "subagents"`).
+- [x] 11.2 `git mv` of `SubagentDetailView.tsx` + `SubagentPopoutPage.tsx` + their tests into `packages/subagents-plugin/src/client/`.
+- [x] 11.3 Created `types.ts` (canonical `SubagentTimelineEntry` + `SubagentState`) and `index.tsx` barrel.
+- [x] 11.4 Detached plugin from shell components by switching to `useUiPrimitive(markdownContent)` for markdown rendering.
+- [x] 11.5 Shell's `event-reducer.ts` re-exports types from the plugin (single canonical source).
+- [x] 11.6 Shell's `AgentToolRenderer` imports `SubagentDetailView` from the plugin.
+- [x] 11.7 Added workspace dep on the plugin to `packages/client/package.json`.
+- [x] 11.8 Updated plugin tests to use `withUiPrimitiveProvider` from `@blackbelt-technology/dashboard-plugin-runtime/test-support`.
+- [x] 11.9 Updated `AgentToolRenderer.test.tsx` to wrap renders in `withUiPrimitiveProvider` (since the imported `SubagentDetailView` uses the primitives registry).
+- [x] 11.10 Verified vite plugin-loader discovers `subagents` plugin (build output: "discovered 7 plugin(s): …, subagents, …").
+- [x] 11.11 All tests pass; `npm run build` clean.
+
 ## 9. Validate (DONE for shipped portion)
 
 - [x] 9.1 `npm test` passes for all 5 new test files (146 tests).

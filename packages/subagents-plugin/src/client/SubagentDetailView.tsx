@@ -18,9 +18,15 @@
 import React from "react";
 import { Icon } from "@mdi/react";
 import { mdiAlertCircle, mdiArrowLeft, mdiCheckCircle, mdiCircle, mdiCircleOutline, mdiCloseCircle } from "@mdi/js";
-import type { SessionState, SubagentState, SubagentTimelineEntry } from "../lib/event-reducer.js";
+import { UI_PRIMITIVE_KEYS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
+import { useUiPrimitive } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { formatTokens, formatDuration } from "@blackbelt-technology/pi-dashboard-client-utils/agent-card-utils";
-import { MarkdownContent } from "./MarkdownContent.js";
+import type { SubagentState, SubagentTimelineEntry } from "./types.js";
+
+/** Minimal session-state shape this component cares about (just the subagents map). */
+export interface SessionStateLike {
+  subagents: Map<string, SubagentState>;
+}
 
 // ---- Helpers ----
 
@@ -98,6 +104,7 @@ function ToolCallEntry({ entry }: { entry: Extract<SubagentTimelineEntry, { kind
 }
 
 function TextEntry({ text }: { text: string }) {
+  const MarkdownContent = useUiPrimitive(UI_PRIMITIVE_KEYS.markdownContent);
   return (
     <div className="py-1.5 pl-3">
       <MarkdownContent content={text} />
@@ -134,7 +141,7 @@ function ErrorEntry({ text }: { text: string }) {
 export type SubagentDetailMode = "inline" | "popout" | "row";
 
 export interface SubagentDetailViewProps {
-  session: SessionState;
+  session: SessionStateLike;
   agentId: string;
   /** Default: "inline". `row` collapses to a single-line summary (no body). */
   mode?: SubagentDetailMode;
@@ -143,6 +150,7 @@ export interface SubagentDetailViewProps {
 }
 
 export function SubagentDetailView({ session, agentId, mode = "inline", onBack }: SubagentDetailViewProps) {
+  const MarkdownContent = useUiPrimitive(UI_PRIMITIVE_KEYS.markdownContent);
   const sub = session.subagents.get(agentId);
   if (!sub) {
     return (

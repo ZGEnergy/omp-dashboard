@@ -12,17 +12,25 @@ We need a subagent inspector that lets users:
 - **Pop out** the inspector to a dedicated route (`/session/<sid>/subagent/<aid>`) for full-window viewing in a new tab.
 - See the agent's source `.md` file path so they can open the definition (e.g. `~/.pi/agent/agents/Explore.md`).
 
-This change establishes the dashboard-side consumer contract. The producer is the new `pi-dashboard-agent` extension (separate package, `/home/skrot1/BB/pi-packages/pi-dashboard-agents/`), which spawns subagents in-memory via `createAgentSession` and emits `subagents:*` events on pi's event bus carrying the full timeline.
+This change establishes the dashboard-side consumer contract. The producer is the new `pi-dashboard-agent` extension (separate repo at `/home/skrot1/BB/pi-packages/pi-dashboard-agents/`), which spawns subagents in-memory via `createAgentSession` and emits `subagents:*` events on pi's event bus carrying the full timeline.
+
+The inspector code lives in its **own workspace plugin package** `packages/subagents-plugin/` — analogous to `packages/flows-plugin/` — so:
+
+- Shell remains free of subagent-specific rendering code.
+- Inspector ships as a discrete unit (versionable independently in principle).
+- Future `extract-subagents-as-plugin` can move the renderer + reducer slice into the same plugin without disturbing the inspector.
 
 ## Status: WIP / unfinished
 
 This change is **committed but unfinished**. Specifically:
 
-- ✅ `SubagentDetailView` component (3 modes: inline, popout, row) — DONE
-- ✅ `SubagentPopoutPage` route content — DONE
-- ✅ `AgentToolRenderer` extended with expand toggle + popout button — DONE
+- ✅ `packages/subagents-plugin/` workspace package with manifest, exports, types — DONE
+- ✅ `SubagentDetailView` component (3 modes: inline, popout, row) — DONE, in plugin
+- ✅ `SubagentPopoutPage` route content — DONE, in plugin
+- ✅ `SubagentTimelineEntry` + `SubagentState` types — DONE, in plugin; re-exported from shell's `event-reducer.ts` for legacy consumers
+- ✅ `AgentToolRenderer` extended with expand toggle + popout button (imports `SubagentDetailView` from plugin) — DONE
 - ✅ `GetSubagentResultRenderer` extended with "Show details" link — DONE
-- ✅ Reducer extended with `SubagentTimelineEntry`, `readSubagentDetails`, new fields on `SubagentState` — DONE
+- ✅ Shell reducer extended with `readSubagentDetails` helper + new fields on `SubagentState` — DONE
 - ✅ `ToolContext` extended with `sessionId` + `session` — DONE
 - ⚠️ **`App.tsx` route registration + `toolContext.sessionId` wiring — NOT YET DONE**
   - The `/session/:sid/subagent/:aid` route is not registered. Popout buttons will fail to open.
@@ -32,34 +40,47 @@ This change is **committed but unfinished**. Specifically:
 
 ## What Changes (compared to before this change)
 
-- **NEW** `packages/client/src/components/SubagentDetailView.tsx` — one component, three modes (inline, popout, row). Renders `SubagentState.entries[]` as a tool/text/thinking/error timeline. Falls back gracefully when entries are absent.
-- **NEW** `packages/client/src/components/SubagentPopoutPage.tsx` — fullscreen route content for `/session/:sid/subagent/:aid`. Shows loading / parent-not-found / subagent-not-found / detail states.
-- **MODIFY** `packages/client/src/components/tool-renderers/AgentToolRenderer.tsx` — adds expand toggle (`mdiChevronDown`/`mdiChevronUp`) and popout button (`mdiOpenInNew`) in the card header. Expanded body renders `<SubagentDetailView mode="inline" />`. Popout opens `/session/<sid>/subagent/<agentId>` in a new tab.
-- **MODIFY** `packages/client/src/components/tool-renderers/GetSubagentResultRenderer.tsx` — adds "Show details" affordance opening the popout for the resolved `agent_id`.
-- **MODIFY** `packages/client/src/components/tool-renderers/types.ts` — `ToolContext` gains optional `sessionId?: string` and `session?: SessionState` so renderers can build session-scoped URLs.
-- **MODIFY** `packages/client/src/lib/event-reducer.ts` — adds `SubagentTimelineEntry` discriminated union, `readSubagentDetails(details)` helper, and `entries / activity / displayName / modelName / subagentType / startedAt` fields on `SubagentState`. Reducer handlers for `subagent_*` events read these from `data.details`.
-- **PENDING** `packages/client/src/App.tsx` — register route `/session/:sid/subagent/:aid`, mount `<SubagentPopoutPage>`, pass `sessionId` + `session` through `toolContext`. Subscribe to the parent session in the popout page when loaded in a fresh tab.
+**NEW workspace package**
+
+- **NEW** `packages/subagents-plugin/` — workspace plugin package with `pi-dashboard-plugin` manifest (id: `subagents`, claims currently empty; future `extract-subagents-as-plugin` adds `tool-renderer` claims).
+- **NEW** `packages/subagents-plugin/src/client/SubagentDetailView.tsx` — one component, three modes (inline, popout, row). Reads `SessionStateLike.subagents`. Four-tier graceful degradation. Uses `useUiPrimitive` for markdown rendering (no hard dep on shell components).
+- **NEW** `packages/subagents-plugin/src/client/SubagentPopoutPage.tsx` — fullscreen route content for `/session/:sid/subagent/:aid`. Shows loading / parent-not-found / subagent-not-found / detail states.
+- **NEW** `packages/subagents-plugin/src/client/types.ts` — `SubagentTimelineEntry` discriminated union + `SubagentState` interface (the canonical wire-contract types).
+- **NEW** `packages/subagents-plugin/src/client/index.tsx` — barrel re-exporting the above.
+- **NEW** tests under `packages/subagents-plugin/src/client/__tests__/`.
+
+**Modified shell-side files**
+
+- **MODIFY** `packages/client/src/components/tool-renderers/AgentToolRenderer.tsx` — expand toggle + popout button; imports `SubagentDetailView` from the plugin.
+- **MODIFY** `packages/client/src/components/tool-renderers/GetSubagentResultRenderer.tsx` — adds "Show details" affordance opening the popout route.
+- **MODIFY** `packages/client/src/components/tool-renderers/types.ts` — `ToolContext` gains optional `sessionId?: string` and `session?: SessionState`.
+- **MODIFY** `packages/client/src/lib/event-reducer.ts` — `SubagentState` / `SubagentTimelineEntry` types now re-exported from the plugin (single canonical location); `readSubagentDetails(details)` helper kept in shell for now; reducer handlers for `subagent_*` events read `data.details` via the helper.
+- **MODIFY** `packages/client/package.json` — adds workspace dep on `@blackbelt-technology/pi-dashboard-subagents-plugin`.
+- **MODIFY** `packages/client/src/components/__tests__/AgentToolRenderer.test.tsx` — wraps in `withUiPrimitiveProvider` because the imported `SubagentDetailView` uses the primitives registry.
+- **PENDING** `packages/client/src/App.tsx` — register route, mount `<SubagentPopoutPage>`, pass `sessionId` + `session` through `toolContext`. Subscribe to parent session when popout loaded in a fresh tab.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `agent-tool-rendering` — extends with inline-expand, popout button, popout route, and the data-shape contract for `SubagentTimelineEntry`. Producer of the entries is `pi-dashboard-agent` v0.1.x. `@tintinweb/pi-subagents` only streams summary data, so this dashboard falls back to a "Showing summary; install pi-dashboard-agent for full timeline" footnote when entries[] is absent.
+- `agent-tool-rendering` — extends with inline-expand, popout button, popout route, and the data-shape contract for `SubagentTimelineEntry`. The renderer/route code now lives in the `subagents-plugin` workspace package; the shell imports from it. Producer of the entries is `pi-dashboard-agent` v0.1.x. `@tintinweb/pi-subagents` only streams summary data, so the inspector falls back to a "Showing summary; install pi-dashboard-agent for full timeline" footnote when entries[] is absent.
 
 ## Impact
 
-- 4 new client component files (~700 LOC including tests).
-- 5 modified client files (~150 LOC churn).
+- 5 new plugin files (~700 LOC including tests + package.json + tsconfig).
+- 5 modified shell files (~50 LOC churn since most logic moved to plugin).
 - App.tsx wiring pending (~100 LOC, NOT in this commit).
 - No server-side changes.
-- No bridge / extension package changes (the bridge already forwards `subagents:*` events as `subagent_*` via its emit-intercept).
+- No bridge / extension package changes.
 
 ## Out of scope
 
 - **Background subagents**: the producer (`pi-dashboard-agent`) is foreground-only by design. The original v1 of this change included a status-bar pill listing background subagents — that's been dropped.
-- **`get_subagent_result` / `steer_subagent` tools**: these are `@tintinweb/pi-subagents`-specific and not produced by `pi-dashboard-agent`. The renderer for `get_subagent_result` is retained to keep `@tintinweb/pi-subagents` coexistence working; nothing relies on these tools existing.
+- **`get_subagent_result` / `steer_subagent` tools**: these are `@tintinweb/pi-subagents`-specific and not produced by `pi-dashboard-agent`. The renderer for `get_subagent_result` is retained to keep `@tintinweb/pi-subagents` coexistence working.
 - **Upstream prompt-cache fork**: orthogonal concern owned by `pi-dashboard-agent`. Not visible at the dashboard layer.
+- **Moving the AgentToolRenderer + GetSubagentResultRenderer + SteerSubagentRenderer + reducer slice into the plugin**: covered by the separate `extract-subagents-as-plugin` change. That change supplements (not supersedes) this one — they compose.
 
 ## Dependencies
 
 - `pi-dashboard-agent` v0.1.x — the producer of `entries[]`. Until users install this extension, the dashboard shows Tier-2 fallback (activity + counts + footnote). The contract is documented in `/home/skrot1/BB/pi-packages/pi-dashboard-agents/openspec/changes/scaffold-foreground-subagent-extension/`.
+- `extract-subagents-as-plugin` — separate change that completes the plugin extraction (moves renderers + reducer slice). After both changes land, the shell has no subagent-specific code at all.

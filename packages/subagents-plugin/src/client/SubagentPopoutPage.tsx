@@ -12,14 +12,13 @@
 import React, { useEffect } from "react";
 import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiClose } from "@mdi/js";
-import type { SessionState } from "../lib/event-reducer.js";
-import { SubagentDetailView } from "./SubagentDetailView.js";
+import { SubagentDetailView, type SessionStateLike } from "./SubagentDetailView.js";
 
 export interface SubagentPopoutPageProps {
   sessionId: string;
   agentId: string;
-  /** SessionState for the parent session, or undefined if not (yet) subscribed. */
-  session: SessionState | undefined;
+  /** SessionState-like (just needs the subagents map) for the parent session, or undefined if not (yet) subscribed. */
+  session: SessionStateLike | undefined;
   /** True once the parent session's subscription has resolved (either with state or not-found). */
   subscriptionResolved: boolean;
   /** Optional parent-session display label (e.g. cwd basename) for the breadcrumb. */

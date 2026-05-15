@@ -161,6 +161,17 @@ export const PLUGIN_REGISTRY: RegistryEntry[] = [
   },
   {
     manifest: {
+        "id": "subagents",
+        "displayName": "Subagent Inspector",
+        "priority": 100,
+        "claims": [],
+        "client": "./src/client/index.tsx"
+    },
+    claims: [
+    ],
+  },
+  {
+    manifest: {
         "id": "flows-anthropic-bridge",
         "displayName": "pi-flows · Anthropic Messages Bridge",
         "priority": 500,
@@ -182,4 +193,4 @@ export const PLUGIN_REGISTRY: RegistryEntry[] = [
   },
 ];
 
-export const PLUGIN_REGISTRY_HASH = "439cb379f8868042ca4279972edc6cfb2c01928b15d6e8add6e14994b23fb46c";
+export const PLUGIN_REGISTRY_HASH = "9dd389443212058eece4b9ddc2950a229abeb47c49ddf39024c3dd830cc167f9";

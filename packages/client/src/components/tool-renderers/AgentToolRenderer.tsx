@@ -25,7 +25,7 @@ import { AgentCardShell } from "../AgentCardShell.js";
 import { formatDuration } from "../agent-card-utils.js";
 import { ElapsedBadge } from "../ElapsedBadge.js";
 import { MarkdownContent } from "../MarkdownContent.js";
-import { SubagentDetailView } from "../SubagentDetailView.js";
+import { SubagentDetailView } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
 
 /** Shape of AgentDetails sent by pi-subagents via partialResult.details */
 interface AgentDetails {

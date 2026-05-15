@@ -72,6 +72,28 @@ The dashboard client SHALL register a route at `/session/:sessionId/subagent/:ag
 - **WHEN** the page renders post-resolution
 - **THEN** the page SHALL render: "Parent session not found — it may have been archived or deleted. Close this tab."
 
+### Requirement: The inspector code SHALL live in a dedicated workspace plugin package
+
+The inspector components, types, and tests SHALL live in `packages/subagents-plugin/`. The shell SHALL import them via `@blackbelt-technology/pi-dashboard-subagents-plugin/client`. The plugin SHALL have a valid `pi-dashboard-plugin` manifest with `id: "subagents"` so the vite plugin loader discovers it.
+
+#### Scenario: Plugin is auto-discovered at build time
+
+- **WHEN** the dashboard runs its build (`npm run build`)
+- **THEN** the vite plugin loader SHALL include `subagents` in its discovered-plugins list
+- **AND** the generated `plugin-registry.tsx` SHALL include the subagents plugin's entry
+
+#### Scenario: SubagentDetailView is importable from the plugin's public entry
+
+- **WHEN** any consumer imports from `@blackbelt-technology/pi-dashboard-subagents-plugin/client`
+- **THEN** `SubagentDetailView`, `SubagentPopoutPage`, `SubagentTimelineEntry`, `SubagentState` SHALL be exported
+
+#### Scenario: Plugin uses UI primitives registry instead of shell components
+
+- **WHEN** `SubagentDetailView` renders markdown content
+- **THEN** it SHALL resolve the renderer via `useUiPrimitive(UI_PRIMITIVE_KEYS.markdownContent)`
+- **AND** it SHALL NOT import the shell's `MarkdownContent` component directly
+- **AND** tests SHALL provide a mock primitive via `withUiPrimitiveProvider`
+
 ### Requirement: `SubagentDetailView` SHALL render the timeline when `entries[]` is present
 
 When `SessionState.subagents[agentId].entries` is a non-empty array of `SubagentTimelineEntry` objects, `<SubagentDetailView>` SHALL render each entry using kind-specific renderers (`tool`, `text`, `thinking`, `error`).

@@ -96,35 +96,12 @@ export interface InteractiveUiRequest {
  * Shape mirrors `FlowDetailEntry` (see flows-plugin) for visual consistency.
  * See change: add-subagent-inspector.
  */
-export type SubagentTimelineEntry =
-  | { kind: "tool"; toolName: string; input: unknown; output?: unknown; isError?: boolean; ts: number }
-  | { kind: "text"; text: string; ts: number }
-  | { kind: "thinking"; text: string; ts: number }
-  | { kind: "error"; text: string; ts: number };
-
-export interface SubagentState {
-  id: string;
-  type: string;
-  description: string;
-  status: "created" | "running" | "completed" | "failed";
-  result?: string;
-  error?: string;
-  durationMs?: number;
-  tokens?: { input: number; output: number; total: number };
-  toolUses?: number;
-  /** Full per-step timeline. Producer: pi-dashboard-agent extension. */
-  entries?: SubagentTimelineEntry[];
-  /** Human-readable current activity (e.g. "reading src/foo.ts"). */
-  activity?: string;
-  /** Display name for the agent (e.g. "code-reviewer"). Falls back to `type`. */
-  displayName?: string;
-  /** Short model name if different from parent. */
-  modelName?: string;
-  /** Subagent type (e.g. "general-purpose"). May duplicate `type` — retained for forward-compat. */
-  subagentType?: string;
-  /** Started-at epoch ms (set on `subagent_started`; used for elapsed badge). */
-  startedAt?: number;
-}
+// Subagent timeline types now live in the subagents plugin so producers and
+// consumers share a single canonical location. Re-exported here for shell-side
+// consumers that still reference them via `../lib/event-reducer.js`.
+// See change: add-subagent-inspector.
+export type { SubagentTimelineEntry, SubagentState } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
+import type { SubagentState, SubagentTimelineEntry } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
 
 export interface SessionState {
   messages: ChatMessage[];

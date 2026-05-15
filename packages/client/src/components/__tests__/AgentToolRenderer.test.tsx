@@ -10,6 +10,19 @@ import { AgentToolRenderer } from "../tool-renderers/AgentToolRenderer.js";
 import { ThemeProvider } from "../ThemeProvider.js";
 import { createInitialState, type SessionState, type SubagentState } from "../../lib/event-reducer.js";
 import type { ToolContext } from "../tool-renderers/types.js";
+import { withUiPrimitiveProvider } from "@blackbelt-technology/dashboard-plugin-runtime/test-support";
+
+// SubagentDetailView (in the subagents plugin) uses useUiPrimitive for the
+// markdown renderer; tests rendering its expanded body must wrap in a
+// UiPrimitiveProvider.
+const MockMarkdown: React.FC<{ content: string }> = ({ content }) => <div>{content}</div>;
+
+function wrapInProviders(ui: React.ReactElement) {
+  return withUiPrimitiveProvider(
+    { "ui:markdown-content": MockMarkdown },
+    <ThemeProvider>{ui}</ThemeProvider>,
+  );
+}
 
 beforeAll(() => {
   Object.defineProperty(window, "matchMedia", {
@@ -43,22 +56,20 @@ describe("AgentToolRenderer — expand + popout", () => {
   afterEach(() => cleanup());
 
   it("renders collapsed by default and shows expand toggle", () => {
-    render(
-      <ThemeProvider>
-        <AgentToolRenderer
-          toolName="Agent"
-          args={{ subagent_type: "Explore", prompt: "do work" }}
-          status="running"
-          context={makeContext()}
-          toolDetails={{
-            displayName: "explorer",
-            status: "running",
-            activity: "reading",
-            agentId: "abc123",
-          }}
-        />
-      </ThemeProvider>,
-    );
+    render(wrapInProviders(
+      <AgentToolRenderer
+        toolName="Agent"
+        args={{ subagent_type: "Explore", prompt: "do work" }}
+        status="running"
+        context={makeContext()}
+        toolDetails={{
+          displayName: "explorer",
+          status: "running",
+          activity: "reading",
+          agentId: "abc123",
+        }}
+      />
+    ));
     // Expand button is present
     expect(screen.getByTitle(/Expand to inspect/i)).toBeTruthy();
     // Detail view body NOT rendered until expanded (look for the footnote that
@@ -73,22 +84,20 @@ describe("AgentToolRenderer — expand + popout", () => {
       activity: "reading src/foo.ts",
       toolUses: 3,
     });
-    render(
-      <ThemeProvider>
-        <AgentToolRenderer
-          toolName="Agent"
-          args={{ subagent_type: "Explore", prompt: "do work" }}
-          status="running"
-          context={makeContext(session, "sess_42")}
-          toolDetails={{
-            displayName: "explorer",
-            status: "running",
-            activity: "reading src/foo.ts",
-            agentId: "abc123",
-          }}
-        />
-      </ThemeProvider>,
-    );
+    render(wrapInProviders(
+      <AgentToolRenderer
+        toolName="Agent"
+        args={{ subagent_type: "Explore", prompt: "do work" }}
+        status="running"
+        context={makeContext(session, "sess_42")}
+        toolDetails={{
+          displayName: "explorer",
+          status: "running",
+          activity: "reading src/foo.ts",
+          agentId: "abc123",
+        }}
+      />
+    ));
     fireEvent.click(screen.getByTitle(/Expand to inspect/i));
     // After expanding, the Tier-2 footnote from SubagentDetailView should appear.
     expect(screen.getByText(/Live timeline requires/i)).toBeTruthy();
@@ -96,34 +105,30 @@ describe("AgentToolRenderer — expand + popout", () => {
 
   it("popout button opens new tab with the correct URL when agentId is present", () => {
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
-    render(
-      <ThemeProvider>
-        <AgentToolRenderer
-          toolName="Agent"
-          args={{ subagent_type: "Explore" }}
-          status="running"
-          context={makeContext(sessionWithAgent("abc123"), "sess_42")}
-          toolDetails={{ displayName: "explorer", status: "running", agentId: "abc123" }}
-        />
-      </ThemeProvider>,
-    );
+    render(wrapInProviders(
+      <AgentToolRenderer
+        toolName="Agent"
+        args={{ subagent_type: "Explore" }}
+        status="running"
+        context={makeContext(sessionWithAgent("abc123"), "sess_42")}
+        toolDetails={{ displayName: "explorer", status: "running", agentId: "abc123" }}
+      />
+    ));
     fireEvent.click(screen.getByTitle(/Open in new tab/i));
     expect(open).toHaveBeenCalledWith("/session/sess_42/subagent/abc123", "_blank");
     open.mockRestore();
   });
 
   it("popout button is disabled when agentId is missing", () => {
-    render(
-      <ThemeProvider>
-        <AgentToolRenderer
-          toolName="Agent"
-          args={{ subagent_type: "Explore" }}
-          status="running"
-          context={makeContext()}
-          toolDetails={{ displayName: "explorer", status: "running" }}
-        />
-      </ThemeProvider>,
-    );
+    render(wrapInProviders(
+      <AgentToolRenderer
+        toolName="Agent"
+        args={{ subagent_type: "Explore" }}
+        status="running"
+        context={makeContext()}
+        toolDetails={{ displayName: "explorer", status: "running" }}
+      />
+    ));
     const btn = screen.getByTitle(/Subagent id not yet available/i);
     expect((btn as HTMLButtonElement).disabled).toBe(true);
   });
