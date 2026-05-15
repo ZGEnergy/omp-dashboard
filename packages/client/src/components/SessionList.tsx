@@ -24,6 +24,7 @@ import {
 import { WorkspaceHeader } from "./WorkspaceHeader.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { AddToWorkspaceMenu } from "./AddToWorkspaceMenu.js";
+import { PinDirectoryDialog } from "./PinDirectoryDialog.js";
 // TerminalCard removed — terminals now in TerminalsView
 import {
   getCollapsedGroups,
@@ -383,6 +384,10 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
   // See change: folder-workspaces.
   const [addToWsMenuFor, setAddToWsMenuFor] = React.useState<string | null>(null);
   const [newWsOpen, setNewWsOpen] = React.useState<{ pendingFolder: string | null } | null>(null);
+  // Workspace id awaiting a path-picker selection. When set, a
+  // PinDirectoryDialog is open; on confirm the picked folder is added to
+  // this workspace AND silently pinned. See change: folder-workspaces.
+  const [pickFolderForWsId, setPickFolderForWsId] = React.useState<string | null>(null);
   // After creating a workspace from the AddToWorkspace flow, we need to
   // route the new id to add the pending folder. Server returns the new
   // workspace via `workspaces_updated` broadcast — we detect by ref-check
@@ -923,6 +928,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 onToggleCollapsed={() => onSetWorkspaceCollapsed?.(ws.id, !ws.collapsed)}
                 onRename={(name) => onRenameWorkspace?.(ws.id, name)}
                 onDelete={() => onDeleteWorkspace?.(ws.id)}
+                onAddFolderViaPicker={onAddFolderToWorkspace ? (wsId) => setPickFolderForWsId(wsId) : undefined}
               />
               {!ws.collapsed && (
                 <div className="flex flex-col gap-1 p-1.5">
@@ -1001,6 +1007,21 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             // arrives via `workspaces_updated`. For the standalone "+ New
             // workspace…" case (no pending folder) we close immediately.
             if (!newWsOpen.pendingFolder) setNewWsOpen(null);
+          }}
+        />
+      )}
+      {pickFolderForWsId && (
+        <PinDirectoryDialog
+          onCancel={() => setPickFolderForWsId(null)}
+          onPin={(path) => {
+            // Workspace-scoped pin: add to workspace (authoritative) AND
+            // silently pin (kept in pinnedDirectories so removal from the
+            // workspace later returns the folder to top-level pinned).
+            // Workspace folders don't display pin state, so the pin is
+            // invisible to the user inside the container.
+            onAddFolderToWorkspace?.(pickFolderForWsId, path);
+            onPinDirectory?.(path);
+            setPickFolderForWsId(null);
           }}
         />
       )}

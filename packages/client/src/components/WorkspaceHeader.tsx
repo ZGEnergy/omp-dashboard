@@ -1,7 +1,16 @@
 /**
  * WorkspaceHeader — header row for a workspace container.
- * Shows: name (editable inline), folder count, collapse chevron, and a
- * kebab menu (rename / delete). See change: folder-workspaces.
+ * Shows: name (double-click to rename), folder count, collapse chevron,
+ * pin/add-folder button, and a kebab menu (rename / delete).
+ *
+ * Rename UX mirrors session rename: double-click → InlineRenameInput,
+ * Enter to commit, Esc/blur to cancel. No explicit check/× buttons.
+ *
+ * The "pin folder" button opens a folder picker; on confirm the parent
+ * adds the folder to this workspace (and silently pins it — workspace
+ * folders don't display pin state inside the container).
+ *
+ * See change: folder-workspaces.
  */
 import React, { useState, useRef, useEffect } from "react";
 import Icon from "@mdi/react";
@@ -9,9 +18,9 @@ import {
   mdiChevronDown,
   mdiChevronRight,
   mdiDotsVertical,
-  mdiCheck,
-  mdiClose,
+  mdiPin,
 } from "@mdi/js";
+import { InlineRenameInput } from "./InlineRenameInput.js";
 
 interface Props {
   id: string;
@@ -21,6 +30,12 @@ interface Props {
   onToggleCollapsed: () => void;
   onRename: (newName: string) => void;
   onDelete: () => void;
+  /**
+   * Invoked when the pin button is clicked. Parent opens a folder picker
+   * and, on confirm, dispatches both `add_folder_to_workspace` for this
+   * id and (silently) `pin_directory`. See change: folder-workspaces.
+   */
+  onAddFolderViaPicker?: (id: string) => void;
 }
 
 const NAME_MAX = 80;
@@ -33,16 +48,11 @@ export function WorkspaceHeader({
   onToggleCollapsed,
   onRename,
   onDelete,
+  onAddFolderViaPicker,
 }: Props) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(name);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (editing) inputRef.current?.focus();
-  }, [editing]);
 
   // Close menu on outside click / Escape.
   useEffect(() => {
@@ -61,19 +71,13 @@ export function WorkspaceHeader({
     };
   }, [menuOpen]);
 
-  function commitRename() {
-    const trimmed = draft.trim();
+  function commitRename(next: string) {
+    const trimmed = next.trim();
     if (trimmed.length === 0 || trimmed.length > NAME_MAX) {
-      setDraft(name);
       setEditing(false);
       return;
     }
     if (trimmed !== name) onRename(trimmed);
-    setEditing(false);
-  }
-
-  function cancelRename() {
-    setDraft(name);
     setEditing(false);
   }
 
@@ -106,58 +110,44 @@ export function WorkspaceHeader({
       </button>
 
       {editing ? (
-        <input
-          ref={inputRef}
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitRename();
-            else if (e.key === "Escape") cancelRename();
-          }}
-          maxLength={NAME_MAX}
-          className="flex-1 min-w-0 px-2 py-0.5 text-xs rounded bg-[var(--bg-primary)] border border-[var(--accent-blue)] text-[var(--text-primary)] focus:outline-none"
-          data-testid={`workspace-rename-input-${id}`}
-          aria-label="Workspace name"
+        <InlineRenameInput
+          currentName={name}
+          onConfirm={commitRename}
+          onCancel={() => setEditing(false)}
+          className="flex-1 min-w-0 text-xs font-semibold"
         />
       ) : (
-        <button
-          onClick={() => {
-            setDraft(name);
-            setEditing(true);
-          }}
-          className="flex-1 min-w-0 text-left text-xs font-semibold text-[var(--text-primary)] truncate hover:text-[var(--text-secondary)]"
-          title="Click to rename"
+        <span
+          onDoubleClick={() => setEditing(true)}
+          className="flex-1 min-w-0 text-xs font-semibold text-[var(--text-primary)] truncate cursor-text"
+          title="Double-click to rename"
           data-testid={`workspace-name-${id}`}
         >
           {name}
-        </button>
+        </span>
       )}
 
       <span className="text-[10px] text-[var(--text-muted)] shrink-0">
         ({folderCount})
       </span>
 
-      {editing ? (
-        <>
-          <button
-            onClick={commitRename}
-            className="text-green-500 hover:text-green-400 shrink-0"
-            title="Save"
-            data-testid={`workspace-rename-save-${id}`}
-          >
-            <Icon path={mdiCheck} size={0.55} />
-          </button>
-          <button
-            onClick={cancelRename}
-            className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] shrink-0"
-            title="Cancel"
-            data-testid={`workspace-rename-cancel-${id}`}
-          >
-            <Icon path={mdiClose} size={0.55} />
-          </button>
-        </>
-      ) : (
+      {/* Pin/add-folder button: opens a folder picker via the parent.
+          The result is `add_folder_to_workspace` (+ silent `pin_directory`).
+          Workspace folders don't display pin state, so the user perceives
+          this purely as "add a folder to this workspace". */}
+      {onAddFolderViaPicker && (
+        <button
+          onClick={() => onAddFolderViaPicker(id)}
+          className="text-[var(--text-tertiary)] hover:text-yellow-400 shrink-0 px-0.5"
+          title="Add folder to workspace"
+          data-testid={`workspace-add-folder-${id}`}
+          aria-label="Add folder to workspace"
+        >
+          <Icon path={mdiPin} size={0.55} />
+        </button>
+      )}
+
+      {!editing && (
         <div className="relative shrink-0" ref={menuRef}>
           <button
             onClick={() => setMenuOpen((p) => !p)}
@@ -177,7 +167,6 @@ export function WorkspaceHeader({
             >
               <button
                 onClick={() => {
-                  setDraft(name);
                   setEditing(true);
                   setMenuOpen(false);
                 }}

@@ -1,10 +1,14 @@
 import type { DetectedEditor } from "../../lib/editor-api.js";
-import type { ChatImage } from "../../lib/event-reducer.js";
+import type { ChatImage, SessionState } from "../../lib/event-reducer.js";
 
 /** Context passed to every tool renderer */
 export interface ToolContext {
   cwd?: string;
   editors: DetectedEditor[];
+  /** Current session id — used by renderers that need to build session-scoped URLs (e.g. subagent popout). Optional for backward-compat. */
+  sessionId?: string;
+  /** Current session state — used by renderers that drill into per-session sub-state (e.g. subagent inspector). Optional. */
+  session?: SessionState;
 }
 
 /** Props every tool renderer receives */

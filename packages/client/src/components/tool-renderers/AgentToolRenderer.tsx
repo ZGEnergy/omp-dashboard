@@ -1,13 +1,31 @@
 /**
  * Custom renderer for the Agent tool (from @tintinweb/pi-subagents).
- * Shows a rich card with live progress while running, and stats + result when complete.
+ *
+ * Card layout:
+ *   ┌──────────────────────────────────────────┐
+ *   │ ⚡ name        running  ⏱ ▾ ↗           │  <- header + expand toggle + popout
+ *   │  "description"                            │
+ *   │  ▸ activity line                          │
+ *   │  stats line                               │
+ *   │  [prompt block (collapsed)]               │
+ *   │                                           │
+ *   │  ── when expanded ──                      │
+ *   │  <SubagentDetailView /> (max-h-[60vh])    │
+ *   │  ── when collapsed AND complete ──        │
+ *   │  result block                             │
+ *   └──────────────────────────────────────────┘
+ *
+ * See change: add-subagent-inspector.
  */
-import React from "react";
+import React, { useState } from "react";
+import { Icon } from "@mdi/react";
+import { mdiChevronDown, mdiChevronUp, mdiOpenInNew } from "@mdi/js";
 import type { ToolRendererProps } from "./types.js";
 import { AgentCardShell } from "../AgentCardShell.js";
 import { formatDuration } from "../agent-card-utils.js";
 import { ElapsedBadge } from "../ElapsedBadge.js";
 import { MarkdownContent } from "../MarkdownContent.js";
+import { SubagentDetailView } from "../SubagentDetailView.js";
 
 /** Shape of AgentDetails sent by pi-subagents via partialResult.details */
 interface AgentDetails {
@@ -86,8 +104,52 @@ function ResultBlock({ text }: { text: string }) {
   );
 }
 
-export function AgentToolRenderer({ args, status, result, toolDetails }: ToolRendererProps) {
+/** Header-right icon cluster: expand toggle + popout button. */
+function CardControls({
+  expanded,
+  onToggleExpand,
+  popoutUrl,
+  elapsed,
+}: {
+  expanded: boolean;
+  onToggleExpand: () => void;
+  popoutUrl?: string;
+  elapsed?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      {elapsed}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onToggleExpand(); }}
+        className="text-[var(--text-tertiary)] hover:text-blue-400 p-0.5 rounded inline-flex items-center"
+        title={expanded ? "Collapse" : "Expand to inspect"}
+      >
+        <Icon path={expanded ? mdiChevronUp : mdiChevronDown} size={0.55} />
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (popoutUrl) window.open(popoutUrl, "_blank");
+        }}
+        disabled={!popoutUrl}
+        className={`p-0.5 rounded inline-flex items-center ${
+          popoutUrl
+            ? "text-[var(--text-tertiary)] hover:text-blue-400"
+            : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"
+        }`}
+        title={popoutUrl ? "Open in new tab" : "Subagent id not yet available"}
+      >
+        <Icon path={mdiOpenInNew} size={0.5} />
+      </button>
+    </div>
+  );
+}
+
+export function AgentToolRenderer({ args, status, result, toolDetails, context }: ToolRendererProps) {
   const details = toolDetails as AgentDetails | undefined;
+  const [expanded, setExpanded] = useState(false);
 
   // Derive display values
   const displayName = details?.displayName ?? (args?.subagent_type as string) ?? "Agent";
@@ -95,15 +157,42 @@ export function AgentToolRenderer({ args, status, result, toolDetails }: ToolRen
   const cardStatus = mapStatus(details, status);
   const promptText = args?.prompt ? String(args.prompt) : undefined;
 
+  const sessionId = context?.sessionId;
+  const session = context?.session;
+  const agentId = details?.agentId;
+  const popoutUrl = sessionId && agentId ? `/session/${sessionId}/subagent/${agentId}` : undefined;
+
+  const controls = (
+    <CardControls
+      expanded={expanded}
+      onToggleExpand={() => setExpanded((v) => !v)}
+      popoutUrl={popoutUrl}
+      elapsed={
+        details?.status === "running" || details?.status === "queued"
+          ? <ElapsedBadge startedAt={details.durationMs ? Date.now() - details.durationMs : undefined} />
+          : details?.durationMs
+          ? <span className="text-[11px] text-[var(--text-tertiary)]">{formatDuration(details.durationMs)}</span>
+          : undefined
+      }
+    />
+  );
+
+  // Inline expanded body — preferred whenever the user has expanded the card,
+  // even if details/agentId are partial (SubagentDetailView handles fallbacks).
+  const expandedBody = expanded && session && agentId
+    ? <div className="mt-2"><SubagentDetailView session={session} agentId={agentId} mode="inline" /></div>
+    : null;
+
   // --- Fallback: no toolDetails (replayed/older sessions) ---
   if (!details) {
     return (
-      <AgentCardShell name={displayName} status={cardStatus}>
+      <AgentCardShell name={displayName} status={cardStatus} headerRight={controls}>
         {description && (
           <div className="text-[11px] text-[var(--text-secondary)] mt-1 truncate">"{description}"</div>
         )}
-        {promptText && <PromptBlock text={promptText} />}
-        {result && <ResultBlock text={result} />}
+        {!expanded && promptText && <PromptBlock text={promptText} />}
+        {!expanded && result && <ResultBlock text={result} />}
+        {expandedBody}
       </AgentCardShell>
     );
   }
@@ -113,13 +202,17 @@ export function AgentToolRenderer({ args, status, result, toolDetails }: ToolRen
   // --- Background agent ---
   if (details.status === "background") {
     return (
-      <AgentCardShell name={displayName} status="background"
+      <AgentCardShell
+        name={displayName}
+        status="background"
+        headerRight={controls}
         stats={details.agentId ? <span className="font-mono">ID: {details.agentId}</span> : undefined}
       >
         {description && (
           <div className="text-[11px] text-[var(--text-secondary)] mt-1 truncate">"{description}"</div>
         )}
         <div className="text-[11px] text-blue-400 mt-1">Running in background</div>
+        {expandedBody}
       </AgentCardShell>
     );
   }
@@ -127,8 +220,10 @@ export function AgentToolRenderer({ args, status, result, toolDetails }: ToolRen
   // --- Running ---
   if (details.status === "running" || details.status === "queued") {
     return (
-      <AgentCardShell name={displayName} status="running"
-        headerRight={<ElapsedBadge startedAt={details.durationMs ? Date.now() - details.durationMs : undefined} />}
+      <AgentCardShell
+        name={displayName}
+        status="running"
+        headerRight={controls}
         stats={statsText ? <span>{statsText}</span> : undefined}
       >
         {description && (
@@ -137,17 +232,19 @@ export function AgentToolRenderer({ args, status, result, toolDetails }: ToolRen
         {details.activity && (
           <div className="text-[10px] text-[var(--text-tertiary)] mt-1 truncate">▸ {details.activity}</div>
         )}
-        {promptText && <PromptBlock text={promptText} />}
+        {!expanded && promptText && <PromptBlock text={promptText} />}
+        {expandedBody}
       </AgentCardShell>
     );
   }
 
   // --- Completed / Steered ---
   if (details.status === "completed" || details.status === "steered") {
-    const durationText = details.durationMs ? formatDuration(details.durationMs) : "";
     return (
-      <AgentCardShell name={displayName} status="complete"
-        headerRight={durationText ? <span className="text-[11px] text-[var(--text-tertiary)]">{durationText}</span> : undefined}
+      <AgentCardShell
+        name={displayName}
+        status="complete"
+        headerRight={controls}
         stats={statsText ? <span>{statsText}</span> : undefined}
       >
         {description && (
@@ -156,18 +253,20 @@ export function AgentToolRenderer({ args, status, result, toolDetails }: ToolRen
         {details.status === "steered" && (
           <div className="text-[11px] text-orange-400 mt-0.5">Wrapped up (turn limit)</div>
         )}
-        {promptText && <PromptBlock text={promptText} />}
-        {result && <ResultBlock text={result} />}
+        {!expanded && promptText && <PromptBlock text={promptText} />}
+        {!expanded && result && <ResultBlock text={result} />}
+        {expandedBody}
       </AgentCardShell>
     );
   }
 
   // --- Error / Aborted / Stopped ---
   const isError = details.status === "error" || details.status === "aborted";
-  const durationText = details.durationMs ? formatDuration(details.durationMs) : "";
   return (
-    <AgentCardShell name={displayName} status={isError ? "error" : "stopped"}
-      headerRight={durationText ? <span className="text-[11px] text-[var(--text-tertiary)]">{durationText}</span> : undefined}
+    <AgentCardShell
+      name={displayName}
+      status={isError ? "error" : "stopped"}
+      headerRight={controls}
       stats={statsText ? <span>{statsText}</span> : undefined}
     >
       {description && (
@@ -182,8 +281,9 @@ export function AgentToolRenderer({ args, status, result, toolDetails }: ToolRen
       {details.status === "stopped" && (
         <div className="text-[11px] text-[var(--text-muted)] mt-1">Stopped</div>
       )}
-      {promptText && <PromptBlock text={promptText} />}
-      {result && <ResultBlock text={result} />}
+      {!expanded && promptText && <PromptBlock text={promptText} />}
+      {!expanded && result && <ResultBlock text={result} />}
+      {expandedBody}
     </AgentCardShell>
   );
 }

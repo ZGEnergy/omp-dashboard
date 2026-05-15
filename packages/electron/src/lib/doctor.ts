@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { detectPi, detectOpenSpec, detectSystemNode, detectDashboardPackage } from "./dependency-detector.js";
-import { getBundledNodePath, getBundledNpmPath } from "./bundled-node.js";
+import { getBundledNodePath, getBundledNpmPath, getBundledNodeDir } from "./bundled-node.js";
 import { pickNodeForServer } from "./pick-node.js";
 import { isApiKeyConfigured } from "./wizard-state.js";
 import { MANAGED_DIR } from "./managed-paths.js";
@@ -398,7 +398,7 @@ async function runServerLaunchTest(
   const resolver = new ToolResolver({});
   const jitiUrl = resolver.resolveJiti({ anchor: testCli ?? undefined });
   const pick = pickNodeForServer({
-    bundledNodeDir: bundledNode ? path.dirname(path.dirname(bundledNode)) : null,
+    bundledNodeDir: getBundledNodeDir(),
     systemNode: detectSystemNode(),
     processExecPath: process.execPath,
     platform: process.platform,

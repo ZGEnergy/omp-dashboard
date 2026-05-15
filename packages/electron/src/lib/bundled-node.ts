@@ -45,6 +45,24 @@ export function getBundledNodePath(): string | null {
 }
 
 /**
+ * Returns the bundled Node.js installation **directory** (the dir laid out as
+ * the upstream Node distribution), or null if not present.
+ *
+ * Both layouts share `<resources>/node` as the dir pickNodeForServer expects:
+ *   POSIX  : <resources>/node/bin/node
+ *   Windows: <resources>/node/node.exe
+ *
+ * Callers MUST prefer this helper over computing the dir via
+ * `path.dirname(path.dirname(getBundledNodePath()))` — the dirname-arithmetic
+ * is Linux-only (Windows `node.exe` is one segment shallower) and silently
+ * resolved to `<resources>` on Windows, making `pickNodeForServer` fall through
+ * to `execpath-fallback` and producing the pre-fix `code=0` symptom.
+ */
+export function getBundledNodeDir(): string | null {
+  return getBundledNodePath() ? path.join(getResourcesPath(), "node") : null;
+}
+
+/**
  * Returns the absolute path to the bundled npm CLI script, or null if not present.
  */
 export function getBundledNpmPath(): string | null {

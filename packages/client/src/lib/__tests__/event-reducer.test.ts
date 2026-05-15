@@ -1658,6 +1658,97 @@ describe("command_feedback events", () => {
       expect(sub.type).toBe("unknown");
       expect(sub.description).toBe("");
     });
+
+    // --- Phase-1 forward-compat fields (add-subagent-inspector) ---
+
+    it("subagent_started without `entries` leaves field undefined", () => {
+      const state = applyEvents([
+        {
+          eventType: "subagent_started",
+          timestamp: 1000,
+          data: { id: "sub-1", type: "Explore", description: "" },
+        },
+      ]);
+      const sub = state.subagents.get("sub-1")!;
+      expect(sub.entries).toBeUndefined();
+      expect(sub.activity).toBeUndefined();
+    });
+
+    it("subagent_started with `details.entries` stores the array", () => {
+      const entries = [
+        { kind: "tool" as const, toolName: "Read", input: { path: "/x" }, output: "...", ts: 1 },
+        { kind: "text" as const, text: "Done.", ts: 2 },
+      ];
+      const state = applyEvents([
+        {
+          eventType: "subagent_started",
+          timestamp: 1000,
+          data: {
+            id: "sub-1",
+            type: "Explore",
+            description: "",
+            details: { entries, activity: "reading /x", displayName: "my-agent" },
+          },
+        },
+      ]);
+      const sub = state.subagents.get("sub-1")!;
+      expect(sub.entries).toEqual(entries);
+      expect(sub.activity).toBe("reading /x");
+      expect(sub.displayName).toBe("my-agent");
+    });
+
+    it("consecutive subagent_started events REPLACE entries (cumulative semantic)", () => {
+      const first = [{ kind: "tool" as const, toolName: "Read", input: {}, ts: 1 }];
+      const second = [
+        { kind: "tool" as const, toolName: "Read", input: {}, ts: 1 },
+        { kind: "tool" as const, toolName: "Bash", input: {}, ts: 2 },
+        { kind: "text" as const, text: "hi", ts: 3 },
+      ];
+      const state = applyEvents([
+        {
+          eventType: "subagent_started",
+          timestamp: 1000,
+          data: { id: "s", type: "x", description: "", details: { entries: first } },
+        },
+        {
+          eventType: "subagent_started",
+          timestamp: 2000,
+          data: { id: "s", type: "x", description: "", details: { entries: second } },
+        },
+      ]);
+      const sub = state.subagents.get("s")!;
+      expect(sub.entries).toEqual(second);
+      expect(sub.entries!.length).toBe(3);
+    });
+
+    it("sets `isBackground` and status=`background` when details.isBackground is true", () => {
+      const state = applyEvents([
+        {
+          eventType: "subagent_started",
+          timestamp: 1000,
+          data: {
+            id: "sub-bg",
+            type: "general-purpose",
+            description: "long task",
+            details: { isBackground: true },
+          },
+        },
+      ]);
+      const sub = state.subagents.get("sub-bg")!;
+      expect(sub.status).toBe("background");
+      expect(sub.isBackground).toBe(true);
+    });
+
+    it("records `startedAt` from event.timestamp on subagent_started", () => {
+      const state = applyEvents([
+        {
+          eventType: "subagent_started",
+          timestamp: 1234,
+          data: { id: "s", type: "x", description: "" },
+        },
+      ]);
+      expect(state.subagents.get("s")!.startedAt).toBe(1234);
+    });
   });
 });
 

@@ -88,16 +88,44 @@ export interface InteractiveUiRequest {
   result?: unknown;
 }
 
+/**
+ * Per-step timeline entry for a subagent's run. Phase 1 ships with no producer
+ * (current `@tintinweb/pi-subagents` streams summary only); Phase 2 upstream
+ * patch will populate `details.entries[]` on streaming events.
+ *
+ * Shape mirrors `FlowDetailEntry` (see flows-plugin) for visual consistency.
+ * See change: add-subagent-inspector.
+ */
+export type SubagentTimelineEntry =
+  | { kind: "tool"; toolName: string; input: unknown; output?: unknown; isError?: boolean; ts: number }
+  | { kind: "text"; text: string; ts: number }
+  | { kind: "thinking"; text: string; ts: number }
+  | { kind: "error"; text: string; ts: number };
+
 export interface SubagentState {
   id: string;
   type: string;
   description: string;
-  status: "created" | "running" | "completed" | "failed";
+  status: "created" | "running" | "completed" | "failed" | "background";
   result?: string;
   error?: string;
   durationMs?: number;
   tokens?: { input: number; output: number; total: number };
   toolUses?: number;
+  /** Phase-2 forward-compat: full per-step timeline when upstream streams it. */
+  entries?: SubagentTimelineEntry[];
+  /** Human-readable current activity (e.g. "reading src/foo.ts"). Streamed today. */
+  activity?: string;
+  /** Display name for the agent (e.g. "code-reviewer"). Optional; falls back to `type`. */
+  displayName?: string;
+  /** Short model name if different from parent. */
+  modelName?: string;
+  /** Subagent type (e.g. "general-purpose"). May duplicate `type` — retained for forward-compat. */
+  subagentType?: string;
+  /** Started-at epoch ms (set on `subagent_started`; used for elapsed badge). */
+  startedAt?: number;
+  /** True if this subagent was launched as a background task. */
+  isBackground?: boolean;
 }
 
 export interface SessionState {
@@ -152,6 +180,31 @@ export interface SessionState {
    * See change: fix-streaming-text-vs-interactive-ui-order.
    */
   streamingTextFlushed?: boolean;
+}
+
+/**
+ * Pull optional Phase-2 fields (`entries`, `activity`, `displayName`, model,
+ * etc.) from a streamed `AgentDetails`-shaped object. Returns a partial that
+ * spreads into a `SubagentState`. All fields are optional; absent keys yield
+ * `undefined` which leaves any existing value intact when used as a `...spread`.
+ *
+ * See change: add-subagent-inspector.
+ */
+function readSubagentDetails(
+  details: Record<string, unknown> | undefined,
+): Partial<SubagentState> {
+  if (!details) return {};
+  const out: Partial<SubagentState> = {};
+  if (Array.isArray(details.entries)) {
+    out.entries = details.entries as SubagentTimelineEntry[];
+  }
+  if (typeof details.activity === "string") out.activity = details.activity;
+  if (typeof details.displayName === "string") out.displayName = details.displayName;
+  if (typeof details.modelName === "string") out.modelName = details.modelName;
+  if (typeof details.subagentType === "string") out.subagentType = details.subagentType;
+  if (typeof details.toolUses === "number") out.toolUses = details.toolUses;
+  if (typeof details.durationMs === "number") out.durationMs = details.durationMs;
+  return out;
 }
 
 export function createInitialState(): SessionState {
@@ -1253,23 +1306,32 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
 
     case "subagent_created": {
       const id = data.id as string;
+      const details = (data.details as Record<string, unknown> | undefined) ?? undefined;
       next.subagents = new Map(next.subagents);
       next.subagents.set(id, {
         id,
         type: data.type as string ?? "unknown",
         description: data.description as string ?? "",
         status: "created",
+        ...readSubagentDetails(details),
       });
       break;
     }
 
     case "subagent_started": {
       const id = data.id as string;
+      const details = (data.details as Record<string, unknown> | undefined) ?? undefined;
       next.subagents = new Map(next.subagents);
       const existing = next.subagents.get(id);
+      // background status takes precedence (e.g. `isBackground` true) so the
+      // pill keeps showing the entry while it streams.
+      const isBackground = details?.isBackground === true || details?.status === "background";
       next.subagents.set(id, {
         ...(existing ?? { id, type: data.type as string ?? "unknown", description: data.description as string ?? "" }),
-        status: "running",
+        status: isBackground ? "background" : "running",
+        startedAt: existing?.startedAt ?? (typeof event.timestamp === "number" ? event.timestamp : Date.now()),
+        ...readSubagentDetails(details),
+        isBackground: isBackground || existing?.isBackground,
       });
       break;
     }
@@ -1277,6 +1339,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
     case "subagent_completed":
     case "subagent_failed": {
       const id = data.id as string;
+      const details = (data.details as Record<string, unknown> | undefined) ?? undefined;
       next.subagents = new Map(next.subagents);
       const existing = next.subagents.get(id);
       next.subagents.set(id, {
@@ -1287,6 +1350,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
         durationMs: data.durationMs as number | undefined,
         tokens: data.tokens as SubagentState["tokens"],
         toolUses: data.toolUses as number | undefined,
+        ...readSubagentDetails(details),
       });
       break;
     }

@@ -3,7 +3,9 @@ import { Icon } from "@mdi/react";
 import { mdiLoading, mdiFlash } from "@mdi/js";
 import { ModelSelector } from "./ModelSelector.js";
 import { ThinkingLevelSelector } from "./ThinkingLevelSelector.js";
+import { BackgroundSubagentsPill } from "./BackgroundSubagentsPill.js";
 import type { ModelInfo, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { SessionState } from "../lib/event-reducer.js";
 
 interface Props {
   model?: string;
@@ -14,6 +16,16 @@ interface Props {
   streamingText?: string;
   onSelectModel: (model: string) => void;
   onSelectThinkingLevel: (level: string) => void;
+  /** Session id for the background-subagents pill (add-subagent-inspector). */
+  sessionId?: string;
+  /** Session state for the background-subagents pill (add-subagent-inspector). */
+  session?: SessionState;
+  /** Parent Session ended flag — clears the background-subagents pill. */
+  sessionEnded?: boolean;
+  /** Called when the user clicks Stop on a background subagent row. */
+  onSubagentStop?: (agentId: string) => void;
+  /** Called when the user clicks Get-result on a completed background subagent row. */
+  onSubagentGetResult?: (agentId: string) => void;
 
   /**
    * @deprecated Roles UI moved to a `settings-section` plugin contribution
@@ -42,6 +54,11 @@ export function StatusBar({
   streamingText,
   onSelectModel,
   onSelectThinkingLevel,
+  sessionId,
+  session,
+  sessionEnded,
+  onSubagentStop,
+  onSubagentGetResult,
 }: Props) {
   let statusLabel: string | null = null;
   let statusIcon = mdiLoading;
@@ -67,6 +84,13 @@ export function StatusBar({
       <div className="flex items-center gap-2">
         <ModelSelector current={model} models={models} onSelect={onSelectModel} />
         <ThinkingLevelSelector current={thinkingLevel} onSelect={onSelectThinkingLevel} />
+        <BackgroundSubagentsPill
+          sessionId={sessionId}
+          session={session}
+          sessionEnded={sessionEnded}
+          onStop={onSubagentStop}
+          onGetResult={onSubagentGetResult}
+        />
       </div>
 
       {statusLabel && (
