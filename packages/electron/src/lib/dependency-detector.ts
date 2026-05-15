@@ -11,7 +11,8 @@
  * See change: consolidate-tool-resolution.
  */
 import { execSync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import {
@@ -85,18 +86,110 @@ export function detectOpenSpec(): DetectionResult {
  */
 export function detectSystemNode(): DetectionResult {
   const base = detect("node");
-  if (!base.found || !base.path) return { found: false };
-
-  try {
-    const version = execSync(`"${base.path}" --version`, { encoding: "utf-8" }).trim();
-    const match = version.match(/^v(\d+)\.(\d+)/);
-    if (match) {
-      const major = parseInt(match[1], 10);
-      const minor = parseInt(match[2], 10);
-      if (major > 20 || (major === 20 && minor >= 6)) return base;
-    }
-  } catch { /* ignore */ }
+  if (base.found && base.path) {
+    try {
+      const version = execSync(`"${base.path}" --version`, { encoding: "utf-8" }).trim();
+      const match = version.match(/^v(\d+)\.(\d+)/);
+      if (match) {
+        const major = parseInt(match[1], 10);
+        const minor = parseInt(match[2], 10);
+        if ((major > 20 || (major === 20 && minor >= 6)) && !isVersionAffected(version)) {
+          return base;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  // Fallback: scan well-known on-disk locations for a usable Node.
+  // Required because GUI-launched apps on macOS don't inherit the user's
+  // shell PATH (where nvm/volta/brew live), and the login-shell whichifier
+  // can return a Node that is itself in the affected range. See change:
+  // skip-affected-bundled-node.
+  const scanned = scanForUsableNodeOnDisk();
+  if (scanned) {
+    return { found: true, path: scanned, source: "system" };
+  }
   return { found: false, resolution: base.resolution };
+}
+
+/**
+ * Pure-ish helper: is `version` in the nodejs/node#58515 affected range
+ * (v22.0–v22.17 or v24.1–v24.2)? Inlined to avoid pulling pick-node.ts
+ * into this module's dependency graph; mirrors `isBundledNodeAffected`
+ * in pick-node.ts and `isAffectedNode` in server/node-guard.ts.
+ */
+function isVersionAffected(version: string): boolean {
+  const m = version.match(/^v?(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return false;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  if (major === 22 && minor < 18) return true;
+  if (major === 24 && minor >= 1 && minor < 3) return true;
+  return false;
+}
+
+/**
+ * Scan well-known on-disk dirs for a Node binary that is (a) executable,
+ * (b) version >= 20.6, and (c) NOT in the nodejs/node#58515 affected
+ * range. Returns the path of the highest-version usable Node found.
+ *
+ * Searched (in order):
+ *   1. `~/.nvm/versions/node/<each>/bin/node`
+ *   2. `/opt/homebrew/bin/node`         (Apple Silicon brew)
+ *   3. `/usr/local/bin/node`            (Intel brew / classic)
+ *   4. `~/.volta/bin/node`
+ *   5. `/usr/bin/node`
+ *
+ * No version-gate fallback to affected versions — the picker would
+ * refuse to use them anyway, so emitting them here only wastes a probe.
+ */
+function scanForUsableNodeOnDisk(): string | null {
+  if (process.platform === "win32") return null; // Windows path is different; keep this Unix-only for now.
+  const home = os.homedir();
+  const candidates: string[] = [];
+  // nvm: enumerate installed versions, highest first.
+  const nvmRoot = path.join(home, ".nvm", "versions", "node");
+  if (existsSync(nvmRoot)) {
+    try {
+      const versions = readdirSync(nvmRoot)
+        .filter((d) => /^v?\d+\.\d+\.\d+/.test(d))
+        .sort((a, b) => compareSemverDesc(a, b));
+      for (const v of versions) {
+        candidates.push(path.join(nvmRoot, v, "bin", "node"));
+      }
+    } catch { /* ignore */ }
+  }
+  candidates.push(
+    "/opt/homebrew/bin/node",
+    "/usr/local/bin/node",
+    path.join(home, ".volta", "bin", "node"),
+    "/usr/bin/node",
+  );
+  for (const cand of candidates) {
+    if (!existsSync(cand)) continue;
+    try {
+      const v = execFileSync(cand, ["--version"], { encoding: "utf8", timeout: 5000 }).trim();
+      const m = v.match(/^v(\d+)\.(\d+)/);
+      if (!m) continue;
+      const major = Number(m[1]);
+      const minor = Number(m[2]);
+      if (major < 20 || (major === 20 && minor < 6)) continue;
+      if (isVersionAffected(v)) continue;
+      return cand;
+    } catch { /* skip unreadable / non-executable candidates */ }
+  }
+  return null;
+}
+
+/** Sort semver-ish version strings ("v22.22.0", "22.22.0") descending. */
+function compareSemverDesc(a: string, b: string): number {
+  const pa = a.replace(/^v/, "").split(".").map((n) => parseInt(n, 10));
+  const pb = b.replace(/^v/, "").split(".").map((n) => parseInt(n, 10));
+  for (let i = 0; i < 3; i++) {
+    const da = pa[i] ?? 0;
+    const db = pb[i] ?? 0;
+    if (da !== db) return db - da;
+  }
+  return 0;
 }
 
 /**

@@ -20,6 +20,7 @@ import os from "node:os";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import { launchDashboardServer } from "@blackbelt-technology/pi-dashboard-shared/server-launcher.js";
 import { installStandalone } from "./dependency-installer.js";
+import { execFileSync } from "node:child_process";
 import { getBundledNodePath } from "./bundled-node.js";
 import { detectSystemNode } from "./dependency-detector.js";
 import { pickNodeForServer } from "./pick-node.js";
@@ -659,11 +660,22 @@ export async function spawnFromSource(
   // Select the Node binary — bundled first, system fallback, execPath last resort.
   const bundledNode = getBundledNodePath();
   const bundledNodeDir = bundledNode ? path.dirname(path.dirname(bundledNode)) : null;
+  // Probe bundled Node's --version so pickNodeForServer can skip it when in
+  // the nodejs/node#58515 affected range. See change: skip-affected-bundled-node.
+  let bundledNodeVersion: string | undefined;
+  if (bundledNode) {
+    try {
+      bundledNodeVersion = execFileSync(bundledNode, ["--version"], { encoding: "utf8", timeout: 5000 }).trim();
+    } catch {
+      bundledNodeVersion = undefined;
+    }
+  }
   const pick = pickNodeForServer({
     bundledNodeDir,
     systemNode: detectSystemNode(),
     processExecPath: process.execPath,
     platform: process.platform,
+    bundledNodeVersion,
   });
 
   const baseEnv = new ToolResolver({ processExecPath: pick.nodeBin }).buildSpawnEnv(process.env);

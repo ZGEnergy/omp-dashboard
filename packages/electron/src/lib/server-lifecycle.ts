@@ -8,6 +8,7 @@
  * on the ESM module resolution path. All config reading and health checking is inlined.
  */
 import { spawnDetached, waitForReady } from "@blackbelt-technology/pi-dashboard-shared/platform/detached-spawn.js";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, writeFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -355,12 +356,25 @@ async function launchServer(port: number, piPort: number): Promise<void> {
   // Select the Node binary — bundled first, system fallback, execPath last resort.
   const bundledNode = getBundledNodePath();
   const bundledNodeDir = bundledNode ? path.dirname(path.dirname(bundledNode)) : null;
+  // Probe the bundled Node's --version so pickNodeForServer can skip it when
+  // it falls in the nodejs/node#58515 affected range (the server would refuse
+  // to start on it anyway). Silent on errors — absence of version means no
+  // version check, preserving legacy behavior. See change: skip-affected-bundled-node.
+  let bundledNodeVersion: string | undefined;
+  if (bundledNode) {
+    try {
+      bundledNodeVersion = execFileSync(bundledNode, ["--version"], { encoding: "utf8", timeout: 5000 }).trim();
+    } catch {
+      bundledNodeVersion = undefined;
+    }
+  }
   const systemNode = detectSystemNode();
   const pick = pickNodeForServer({
     bundledNodeDir,
     systemNode,
     processExecPath: process.execPath,
     platform: process.platform,
+    bundledNodeVersion,
   });
 
   const piResult = detectPi();

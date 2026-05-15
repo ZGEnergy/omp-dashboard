@@ -24,6 +24,36 @@ export interface PickNodeInput {
   platform: NodeJS.Platform;
   /** Injected for testability; defaults to existsSync from node:fs. */
   existsSync?: (p: string) => boolean;
+  /**
+   * Optional version string of the bundled Node binary (e.g. "v22.12.0").
+   * When provided AND the version is in the nodejs/node#58515 affected
+   * range (v22.0–v22.17, v24.1–v24.2), the bundled Node is skipped and
+   * the picker falls through to system Node. When undefined, no version
+   * check is performed (legacy behavior — keeps callers backwards-compatible).
+   * Production caller derives this by `execFileSync(<bundledNode>, ["--version"])`.
+   */
+  bundledNodeVersion?: string;
+}
+
+/**
+ * Pure predicate: is `version` in the nodejs/node#58515 affected range?
+ *
+ * Affected: Node v22.0–v22.17 and v24.1–v24.2. Fixed in v22.18+, v24.3+, v25.x.
+ *
+ * Duplicated from packages/server/src/node-guard.ts → `isAffectedNode`. We
+ * inline a copy here instead of cross-package importing because pick-node.ts
+ * is intentionally a pure leaf with no workspace dependencies, and the
+ * version ranges are stable (a Node LTS branch shipping a regression is rare).
+ * If you change the canonical predicate, mirror it here.
+ */
+export function isBundledNodeAffected(version: string): boolean {
+  const m = version.match(/^v?(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return false;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  if (major === 22 && minor < 18) return true;
+  if (major === 24 && minor >= 1 && minor < 3) return true;
+  return false;
 }
 
 export type PickNodeResult =
@@ -42,7 +72,10 @@ export function pickNodeForServer(input: PickNodeInput): PickNodeResult {
   const { bundledNodeDir, systemNode, processExecPath, platform } = input;
   const fsExists = input.existsSync ?? fsExistsSync;
 
-  // 1. Bundled Node (preferred — zero external dependency)
+  // 1. Bundled Node (preferred — zero external dependency) — BUT skip when
+  // the bundled version is known-bad (nodejs/node#58515). The dashboard
+  // server refuses to start on those versions, so picking it would loop the
+  // user into a guaranteed crash. See change: skip-affected-bundled-node.
   if (bundledNodeDir) {
     // Use platform-specific join so tests cross-compiling Windows paths on a
     // POSIX host produce the correct backslash separator.
@@ -52,7 +85,11 @@ export function pickNodeForServer(input: PickNodeInput): PickNodeResult {
         ? pjoin(bundledNodeDir, "node.exe")
         : pjoin(bundledNodeDir, "bin", "node");
     if (fsExists(nodeBin)) {
-      return { kind: "bundled", nodeBin };
+      const v = input.bundledNodeVersion;
+      if (!v || !isBundledNodeAffected(v)) {
+        return { kind: "bundled", nodeBin };
+      }
+      // else: fall through to system Node.
     }
   }
 
