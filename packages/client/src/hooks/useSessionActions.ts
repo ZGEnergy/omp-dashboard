@@ -14,6 +14,13 @@ export interface SessionActionDeps {
   send: (msg: any) => void;
   navigate: (to: string) => void;
   setMobileOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  /**
+   * Read-only handle on the sessions map. Used by queue-management
+   * actions to look up an entry's text by id before clearing the
+   * optimistic `pendingPrompt` state. Pass the latest map from the
+   * component scope; useCallback captures by ref via this object.
+   */
+  sessions: Map<string, DashboardSession>;
   setSessions: React.Dispatch<React.SetStateAction<Map<string, DashboardSession>>>;
   setSessionStates: React.Dispatch<React.SetStateAction<Map<string, SessionState>>>;
   setSpawningCwds: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -34,7 +41,7 @@ export interface SessionActionDeps {
 export function useSessionActions(deps: SessionActionDeps) {
   const {
     selectedId, send, navigate, setMobileOpen,
-    setSessions, setSessionStates, setSpawningCwds, setTerminals,
+    sessions, setSessions, setSessionStates, setSpawningCwds, setTerminals,
     clearSpawningCwd, spawnTimeoutsRef, pendingTerminalCwdRef, terminals,
     pendingSpawnsRef,
   } = deps;
@@ -93,8 +100,24 @@ export function useSessionActions(deps: SessionActionDeps) {
    * See change: surface-mid-turn-prompt-queue.
    */
   const handleClearQueue = useCallback(() => {
-    if (selectedId) send({ type: "clear_queue", sessionId: selectedId });
-  }, [selectedId, send]);
+    if (!selectedId) return;
+    // Drop any optimistic `pendingPrompt` for this session BEFORE the
+    // server round-trip empties the queue. Without this, the moment
+    // `queue_state { pending: [] }` arrives the chip-suppression rule
+    // un-fires and the optimistic card pops back into view showing the
+    // most recent send as still-pending — confusing since the user
+    // just chose to drop the whole queue.
+    // See change: surface-mid-turn-prompt-queue.
+    setSessionStates((prev) => {
+      const next = new Map(prev);
+      const current = next.get(selectedId);
+      if (current?.pendingPrompt) {
+        next.set(selectedId, { ...current, pendingPrompt: undefined });
+      }
+      return next;
+    });
+    send({ type: "clear_queue", sessionId: selectedId });
+  }, [selectedId, send, setSessionStates]);
 
   /**
    * Remove a single entry from the bridge-owned mid-turn queue by id.
@@ -103,8 +126,27 @@ export function useSessionActions(deps: SessionActionDeps) {
    * See change: surface-mid-turn-prompt-queue.
    */
   const handleRemoveQueueEntry = useCallback((id: string) => {
-    if (selectedId) send({ type: "remove_queue_entry", sessionId: selectedId, id });
-  }, [selectedId, send]);
+    if (!selectedId) return;
+    // If the entry being removed matches the optimistic `pendingPrompt`,
+    // clear that too. Pi will never run this message AND it will not
+    // appear in the next `queue_state` snapshot, so without this clear
+    // the chip-suppression rule un-fires and the optimistic card pops
+    // back showing the now-defunct send as pending. Looking up the
+    // entry's text by id requires read-access to the sessions map.
+    // See change: surface-mid-turn-prompt-queue.
+    const removedText = sessions.get(selectedId)?.queue?.pending?.find((p) => p.id === id)?.text;
+    if (removedText !== undefined) {
+      setSessionStates((prev) => {
+        const next = new Map(prev);
+        const current = next.get(selectedId);
+        if (current?.pendingPrompt && current.pendingPrompt.text === removedText) {
+          next.set(selectedId, { ...current, pendingPrompt: undefined });
+        }
+        return next;
+      });
+    }
+    send({ type: "remove_queue_entry", sessionId: selectedId, id });
+  }, [selectedId, send, sessions, setSessionStates]);
 
   const handleCancelPending = useCallback(() => {
     if (selectedId) {
