@@ -70,7 +70,7 @@ export interface BootstrapState {
     failed: string[];
   };
   /**
-   * Legacy `@mariozechner/pi-coding-agent` installs detected on disk.
+   * Legacy `@mariozechner/pi-coding-agent` (and current `@earendil-works/pi-coding-agent`) installs detected on disk.
    * Populated at server start and after every cleanup POST. See
    * `legacy-pi-cleanup.ts`.
    */
