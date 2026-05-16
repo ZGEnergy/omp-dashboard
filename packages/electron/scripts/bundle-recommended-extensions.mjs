@@ -99,7 +99,9 @@ for (const id of manifest.BUNDLED_EXTENSION_IDS) {
     console.error(`✗ manifest: unknown bundled id ${id}`);
     process.exit(2);
   }
-  targets.push({ id, source: entry.source });
+  // Prefer `bundleSource` (git URL) when present; falls back to `source`.
+  // Required when `source` is `npm:...` — bundling is git-only.
+  targets.push({ id, source: entry.bundleSource ?? entry.source });
 }
 
 if (targets.length === 0) {
@@ -207,10 +209,12 @@ function captureGit(args, cwd) {
 
 // ── process each id ────────────────────────────────────────────────────────
 for (const { id, source } of targets) {
-  // Only git sources can be bundled.
+  // Only git sources can be bundled. `bundleSource` should already have
+  // resolved this; surfacing the error here catches manifest mistakes.
   if (source.startsWith("npm:") || source.startsWith("local:")) {
     console.error(
-      `✗ ${id}: source '${source}' is not a git URL. Bundling refuses non-git sources.`,
+      `✗ ${id}: effective source '${source}' is not a git URL. ` +
+      `Add a \`bundleSource\` (git URL) to the manifest entry.`,
     );
     process.exit(1);
   }

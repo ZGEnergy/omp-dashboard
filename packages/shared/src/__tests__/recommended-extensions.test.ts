@@ -37,18 +37,24 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 		}
 	});
 
-	it("pi-anthropic-messages is marked required and uses HTTPS git URL", () => {
+	it("pi-anthropic-messages is marked required, npm-sourced, with git bundleSource", () => {
 		const entry = getRecommendedExtension("pi-anthropic-messages");
 		expect(entry).toBeDefined();
 		expect(entry?.status).toBe("required");
-		expect(entry?.source).toContain("https://github.com/BlackBeltTechnology/pi-anthropic-messages.git");
+		expect(entry?.source).toBe("npm:@blackbelt-technology/pi-anthropic-messages");
+		expect(entry?.bundleSource).toBe(
+			"https://github.com/BlackBeltTechnology/pi-anthropic-messages.git",
+		);
 		expect(entry?.autowired).toBe(true);
 	});
 
-	it("pi-flows uses HTTPS git URL and registers flow-engine tools", () => {
+	it("pi-flows is npm-sourced with git bundleSource and registers flow-engine tools", () => {
 		const entry = getRecommendedExtension("pi-flows");
 		expect(entry).toBeDefined();
-		expect(entry?.source).toBe("https://github.com/BlackBeltTechnology/pi-flows.git");
+		expect(entry?.source).toBe("npm:@blackbelt-technology/pi-flows");
+		expect(entry?.bundleSource).toBe(
+			"https://github.com/BlackBeltTechnology/pi-flows.git",
+		);
 		expect(entry?.toolsRegistered).toContain("subagent");
 		expect(entry?.toolsRegistered).toContain("flow_write");
 	});
@@ -60,11 +66,13 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 		expect(entry?.toolsRegistered).toContain("Agent");
 	});
 
-	it("npm-sourced entries use the npm: prefix", () => {
+	it("every entry is now npm-sourced (post npm-publish migration)", () => {
 		const npmEntries = RECOMMENDED_EXTENSIONS.filter((e) => e.source.startsWith("npm:"));
 		expect(npmEntries.map((e) => e.id).sort()).toEqual(
 			[
 				"pi-agent-browser",
+				"pi-anthropic-messages",
+				"pi-flows",
 				"pi-memory-honcho",
 				"pi-web-access",
 				"tintinweb-pi-subagents",
@@ -72,14 +80,12 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 		);
 	});
 
-	it("git-sourced entries use the https://github.com/.../.git HTTPS form", () => {
-		const gitEntries = RECOMMENDED_EXTENSIONS.filter((e) =>
-			e.source.startsWith("https://github.com/"),
-		);
-		for (const entry of gitEntries) {
-			expect(entry.source).toMatch(/^https:\/\/github\.com\/[^/]+\/[^/]+\.git$/);
+	it("bundleSource (when present) is an HTTPS .git URL", () => {
+		const withBundle = RECOMMENDED_EXTENSIONS.filter((e) => e.bundleSource);
+		for (const entry of withBundle) {
+			expect(entry.bundleSource).toMatch(/^https:\/\/github\.com\/[^/]+\/[^/]+\.git$/);
 		}
-		expect(gitEntries.map((e) => e.id).sort()).toEqual(
+		expect(withBundle.map((e) => e.id).sort()).toEqual(
 			["pi-anthropic-messages", "pi-flows"].sort(),
 		);
 	});
@@ -134,13 +140,9 @@ describe("RecommendedExtension type", () => {
 // ── BUNDLED_EXTENSION_IDS manifest (task 2 of bundle-first-party-extensions) ──
 
 describe("BUNDLED_EXTENSION_IDS manifest", () => {
-	it("contains exactly the v0.x initial bundled set", () => {
-		// pi-flows temporarily removed: upstream repo lacks SPDX license,
-		// blocking the bundle-recommended-extensions.mjs license check.
-		// Re-add when https://github.com/BlackBeltTechnology/pi-flows has
-		// a license declared.
+	it("contains both first-party extensions after npm-publish migration", () => {
 		expect([...BUNDLED_EXTENSION_IDS].sort()).toEqual(
-			["pi-anthropic-messages"].sort(),
+			["pi-anthropic-messages", "pi-flows"].sort(),
 		);
 	});
 
@@ -151,18 +153,19 @@ describe("BUNDLED_EXTENSION_IDS manifest", () => {
 		}
 	});
 
-	it("every bundled id has a git-based source (no npm:, no local paths)", () => {
+	it("every bundled id resolves to a git-based effective source", () => {
+		// Effective source = bundleSource ?? source. Bundling is git-only.
 		for (const id of BUNDLED_EXTENSION_IDS) {
 			const entry = RECOMMENDED_EXTENSIONS.find((e) => e.id === id);
 			expect(entry, `RECOMMENDED_EXTENSIONS missing entry for ${id}`).toBeDefined();
-			const source = entry!.source;
+			const effective = entry!.bundleSource ?? entry!.source;
 			const isGit =
-				source.endsWith(".git") ||
-				source.startsWith("git@") ||
-				source.startsWith("git:") ||
-				/^https?:\/\/.+\/.+/.test(source);
-			expect(isGit, `${id} source is not git-based: ${source}`).toBe(true);
-			expect(source.startsWith("npm:"), `${id} must not be an npm source`).toBe(false);
+				effective.endsWith(".git") ||
+				effective.startsWith("git@") ||
+				effective.startsWith("git:") ||
+				/^https?:\/\/.+\/.+/.test(effective);
+			expect(isGit, `${id} effective source is not git-based: ${effective}`).toBe(true);
+			expect(effective.startsWith("npm:"), `${id} effective source must not be npm`).toBe(false);
 		}
 	});
 });

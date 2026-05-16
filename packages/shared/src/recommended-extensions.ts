@@ -37,6 +37,17 @@ export interface RecommendedExtension {
 	 */
 	source: string;
 
+	/**
+	 * Optional git URL used **only** by the Electron offline-bundling pipeline
+	 * (`scripts/bundle-recommended-extensions.mjs` and
+	 * `installBundledExtensions` in `dependency-installer.ts`). Required when
+	 * the id appears in `BUNDLED_EXTENSION_IDS` AND the runtime `source` is not
+	 * a git URL (e.g. `npm:...`). Bundled extensions are placed in pi's git
+	 * cache; pi addresses them by this git URL in `settings.json#packages[]`.
+	 * Non-bundled users still install via `source` (npm).
+	 */
+	bundleSource?: string;
+
 	/** Human-readable package name for the UI. */
 	displayName: string;
 
@@ -82,7 +93,8 @@ export interface EnrichedRecommendedExtension extends RecommendedExtension {
 export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
 	{
 		id: "pi-anthropic-messages",
-		source: "https://github.com/BlackBeltTechnology/pi-anthropic-messages.git",
+		source: "npm:@blackbelt-technology/pi-anthropic-messages",
+		bundleSource: "https://github.com/BlackBeltTechnology/pi-anthropic-messages.git",
 		displayName: "pi-anthropic-messages",
 		fallbackDescription:
 			"Protocol bridge that makes pi's custom tools work with any " +
@@ -114,7 +126,8 @@ export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
 	},
 	{
 		id: "pi-flows",
-		source: "https://github.com/BlackBeltTechnology/pi-flows.git",
+		source: "npm:@blackbelt-technology/pi-flows",
+		bundleSource: "https://github.com/BlackBeltTechnology/pi-flows.git",
 		displayName: "pi-flows",
 		fallbackDescription:
 			"Flow engine, dashboard, and orchestration extensions for pi. " +
@@ -198,13 +211,7 @@ export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
  */
 export const BUNDLED_EXTENSION_IDS: readonly string[] = [
 	"pi-anthropic-messages",
-	// "pi-flows" is intentionally NOT bundled until the upstream repo declares
-	// an SPDX-conformant license (`LICENSE` file or `package.json#license`).
-	// The bundle-recommended-extensions.mjs license allowlist enforcement
-	// (MIT/Apache-2.0/BSD-2-Clause/BSD-3-Clause/ISC) correctly rejects it.
-	// Re-add this entry once https://github.com/BlackBeltTechnology/pi-flows
-	// has a license declared. See: openspec/changes/archive/
-	// 2026-04-21-bundle-first-party-extensions/design.md §"License blockers".
+	"pi-flows",
 ];
 
 /** Retrieve a recommended entry by id, or `undefined`. */

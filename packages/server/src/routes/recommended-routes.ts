@@ -135,22 +135,40 @@ async function enrichEntry(
 
 	if (key.kind === "npm") {
 		meta = await fetchPackageMeta(key.name);
-	} else if (key.kind === "git" && key.host.toLowerCase() === "github.com") {
+	}
+	// Fall back to GitHub when npm has no result OR when `bundleSource` points
+	// at a git URL (npm-published packages still surface their GitHub README
+	// for richer descriptions; and entries without an npm tarball still get
+	// enriched via the git repo).
+	if (!meta && entry.bundleSource) {
+		const bundleKey = parseSourceKey(entry.bundleSource);
+		if (bundleKey.kind === "git" && bundleKey.host.toLowerCase() === "github.com") {
+			meta = await fetchGithubPackageJson(bundleKey.owner, bundleKey.repo);
+		}
+	}
+	if (!meta && key.kind === "git" && key.host.toLowerCase() === "github.com") {
 		meta = await fetchGithubPackageJson(key.owner, key.repo);
 	}
 
 	const description = meta?.description ?? entry.fallbackDescription;
 	const version = meta?.version;
 
-	const inGlobal = installedGlobal.some((p) => sourcesMatch(p.source, entry.source));
-	const inLocal = installedLocal.some((p) => sourcesMatch(p.source, entry.source));
+	// Match against EITHER `source` (npm) OR `bundleSource` (git URL).
+	// Pi can install the same logical extension via either route, so an
+	// entry should be considered installed/active if either form appears.
+	const matchesEntry = (s: string): boolean =>
+		sourcesMatch(s, entry.source) ||
+		(entry.bundleSource ? sourcesMatch(s, entry.bundleSource) : false);
+
+	const inGlobal = installedGlobal.some((p) => matchesEntry(p.source));
+	const inLocal = installedLocal.some((p) => matchesEntry(p.source));
 	const installedScope: "global" | "local" | null = inGlobal
 		? "global"
 		: inLocal
 			? "local"
 			: null;
 
-	const activeInPi = activeSources.some((s) => sourcesMatch(s, entry.source));
+	const activeInPi = activeSources.some((s) => matchesEntry(s));
 
 	// Best-effort update indicator: for npm sources, try to read the installed
 	// package.json version and compare to the live registry version. For git
@@ -159,7 +177,7 @@ async function enrichEntry(
 	let updateAvailable = false;
 	if (version && key.kind === "npm" && installedScope) {
 		const installed = inGlobal ? installedGlobal : installedLocal;
-		const match = installed.find((p) => sourcesMatch(p.source, entry.source));
+		const match = installed.find((p) => matchesEntry(p.source));
 		if (match?.installedPath) {
 			try {
 				const pj = path.join(match.installedPath, "package.json");

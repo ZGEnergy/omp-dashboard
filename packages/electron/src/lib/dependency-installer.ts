@@ -794,22 +794,35 @@ export async function installBundledExtensions(
 
     const step = entry.displayName;
     const bundledSrc = path.join(bundledDir, id);
+    // `bundleSource` is the git URL that the bundled tree was cloned from.
+    // Pi addresses bundled extensions in its git cache by this URL, so it is
+    // also what we register in `settings.json#packages[]`. Fall back to
+    // `source` for legacy entries that have no `bundleSource`.
+    const effectiveSource: string = (entry as any).bundleSource ?? entry.source;
     try {
       // Skip-if-present: existing user install (CLI or prior launch) wins.
-      const existingPath = manager.getInstalledPath?.(entry.source, "user");
-      if (existingPath && existsSync(existingPath)) {
+      // Check both the npm-source (`entry.source`) and the git-source
+      // (`effectiveSource`) — either one would satisfy the user.
+      const existingNpm = manager.getInstalledPath?.(entry.source, "user");
+      const existingGit = effectiveSource !== entry.source
+        ? manager.getInstalledPath?.(effectiveSource, "user")
+        : undefined;
+      const existingPath = (existingNpm && existsSync(existingNpm))
+        ? existingNpm
+        : (existingGit && existsSync(existingGit) ? existingGit : undefined);
+      if (existingPath) {
         onProgress?.({ step, status: "done", output: "Already installed" });
         activated.push(id);
         continue;
       }
 
-      // Compute pi's git cache path for this source.
-      const parsed = parseBundledGitSource(entry.source);
+      // Compute pi's git cache path for the bundle source.
+      const parsed = parseBundledGitSource(effectiveSource);
       if (!parsed) {
         onProgress?.({
           step,
           status: "error",
-          error: `Cannot parse git source: ${entry.source}`,
+          error: `Cannot parse git source: ${effectiveSource}`,
         });
         continue;
       }
@@ -843,7 +856,9 @@ export async function installBundledExtensions(
       }
 
       // Persist the git URL in settings so pi's update() can later re-resolve.
-      manager.addSourceToSettings(entry.source, { local: false });
+      // We use `effectiveSource` (the bundle's git URL) here — pi looks up the
+      // bundled tree in its git cache by this URL.
+      manager.addSourceToSettings(effectiveSource, { local: false });
       await settingsManager.flush?.();
 
       onProgress?.({ step, status: "done", output: "Bundled" });
