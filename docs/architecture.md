@@ -1968,112 +1968,27 @@ savedDraftRef: useRef<string>  — in-progress draft captured when history mode 
 
 See change: `chat-input-draft-and-history`.
 
-## Git is required
+## Git is recommended (not required)
 
-The Electron app treats git as a hard runtime dependency. Several core code
-paths assume git is reachable (recommended-extension installs via pi's
-`DefaultPackageManager`, Settings → Packages git/HTTPS sources, BranchPicker /
-git status in session cards, attach-proposal workflow). Before the
-`require-git-on-boot` change, missing git silently degraded these features
-with cryptic errors. The change makes git a first-class detected, prompted,
-and installable dependency on every platform.
+Git no longer gates dashboard startup. First-party extensions `pi-anthropic-messages` (0.3.2) and `pi-flows` (0.2.1) publish to npm under `@blackbelt-technology` scope. Critical Claude tool-call path installs cleanly via npm. Windows hosts without git boot the dashboard and install the `required` `pi-anthropic-messages` extension without prompt.
 
-### Boot-time gate
+### Git still useful for
 
-```mermaid
-flowchart TD
-    A[app.whenReady] --> B{First run?}
-    B -- yes --> C[Wizard window]
-    C --> D{Wizard tools step\nelse fall-through}
-    D -- git missing --> C
-    D -- git ok --> E[mode.json written]
-    B -- no --> F{detectGit found?}
-    F -- yes --> H[createMainWindow]
-    F -- no --> G{escape-hatch set?\n--skip-git-gate or PI_DASHBOARD_SKIP_GIT_GATE=1}
-    G -- yes --> H
-    G -- no --> I[Open git-required.html window]
-    I -- user installs/locates --> F
-    I -- user closes window --> J[app.quit]
-    E --> H
-```
+- BranchPicker + git status pills in session cards.
+- User-pasted git / HTTPS sources in Settings → Packages.
+- Attach-proposal workflow.
+- Electron offline-bundling pipeline (build-time only; `scripts/bundle-recommended-extensions.sh`).
 
-The pure decision lives in `packages/electron/src/lib/git-gate.ts`
-(`evaluateGitGate(detection, { argv, env, wizardWillRun })`), which honors
-both escape hatches and defers to the wizard on the first-run path
-(D11 — wizard↔gate handoff). Side effects live in
-`git-gate-window.ts::openGitRequiredWindow()` and the gate orchestration
-block in `main.ts`.
+### Runtime git callers (verified)
 
-### Platform install dispatch
+- `packages/electron/src/lib/dependency-installer.ts::preClonePiExtensionIfGit` — runs `git clone` only when effective source matches `https://*.git`, `git@`, or `git:`. No-op for npm sources (early return).
+- `installBundledExtensions` (same file) — clones only entries whose `bundleSource ?? source` is a git URL.
+- BranchPicker / attach-proposal / Settings → Packages — invoke git when user explicitly opts in to a git feature.
+- `packages/shared/src/tool-registry/definitions.ts` — git registered as tracked binary; surfaced in Settings → Tools as status row, never blocks app.
 
-`installTool(toolName, action, options)` in
-`packages/electron/src/lib/system-toolchain-installer.ts` dispatches to the
-OS-native package manager:
+### Historical note
 
-| Platform | git: install | node: install / upgrade |
-|---|---|---|
-| `win32` | `winget install --id Git.Git -e --source winget --accept-…` | `winget install/upgrade --id OpenJS.NodeJS …` |
-| `darwin` (brew present) | `brew install git` | `brew install/upgrade node` |
-| `darwin` (no brew) | `xcode-select --install` (Apple's Command Line Tools GUI) | manual link to nodejs.org |
-| `linux` (pkexec + pm) | `pkexec apt-get/dnf/zypper install -y git` (or `pacman -S --noconfirm git`, `apk add git`) | `pkexec <pm> install nodejs npm` |
-| `linux` (no pkexec) | manual `sudo …` snippet | manual snippet |
-
-Pure command builders are exported and unit-tested without spawning anything
-(`buildWingetArgs`, `buildBrewArgs`, `buildXcodeSelectArgs`,
-`buildLinuxInstallArgs`, `buildSudoSnippet`); the Linux PM probe order is
-`apt-get → dnf → pacman → zypper → apk` (D10).
-
-### Single-flight + cancellation
-
-A module-level `inFlight: Map<"git" | "node", …>` enforces at most one
-in-flight install per tool. A second invocation kills the first spawn
-(`platform/process.ts::killProcess`, idempotent across OS) and settles the
-prior promise to `{ kind: "cancelled", reason: "replaced-by-new-attempt" }`.
-The renderer exposes `[Cancel] (running…)` while a spawn is alive
-(`cancelInstall(tool)` settles to `{ kind: "cancelled", reason: "user-requested" }`).
-
-### Error formatting and fault tolerance (D8a)
-
-Every installer surface returns a tagged `InstallResult` instead of throwing.
-The renderer never sees a raw stack trace — every non-`ok` result is rendered
-through `formatInstallError(result, platform)` which produces:
-- a plain-English headline (no error codes; e.g. "winget could not reach its
-  package source" rather than "exit code 1978335212")
-- the failing command verbatim in a copy-button code block
-- the last 20 lines of stdout/stderr with `… (N earlier lines)` prefix
-- 1–3 actionable next-step bullets
-
-The same formatter is used by:
-- the Electron wizard's "Last attempt" panel under the Git/Node rows
-- the boot-time `git-required.html` gate window
-- the dashboard CLI (`runInstallErrorPlainText` for non-markdown surfaces in
-  `pi-dashboard upgrade-pi` and `runDegradedModeBootstrap`)
-- bootstrap-install.ts failures (the rich `installResult` field is attached
-  to `BootstrapInstallFailure` so the CLI can render it)
-
-### Persistent log
-
-Every gate-related I/O event is appended as a single-line JSON record to
-`~/.pi-dashboard/git-gate.log` (1 MB rotation cap, one historical
-`.log.1`). Top-level `uncaughtException` and `unhandledRejection` handlers
-in `main.ts` append a `{ event: "uncaught", level: "fatal", error, stack }`
-record BEFORE Electron's default crash dialog fires, ensuring all fatal
-boot-time crashes leave a forensic trail. The dashboard server's
-`pi-core-checker` failures also append (`level: "warn"`) via the shared
-`packages/shared/src/git-gate-log.ts` mirror.
-
-See `docs/troubleshooting-windows-installer.md` §9 for the log format
-reference and grep recipes.
-
-### Escape hatches
-
-Headless / SSH-only Linux server scenarios bypass the gate via
-`--skip-git-gate` (CLI flag) or `PI_DASHBOARD_SKIP_GIT_GATE=1` (env var),
-both checked unconditionally by `evaluateGitGate(...)`. The wizard's git
-row also honors the flag — when set, the row shows an amber "skipped" pill
-instead of a red blocker and Continue is enabled.
-
-See change: require-git-on-boot.
+Earlier drafts of this document described a boot-time blocking window, a pure gate decision function, a system toolchain installer, and platform install dispatch tables. None of those modules ship in the codebase. Documentation has been corrected to match shipped behavior.
 
 ## Doctor Diagnostics
 
