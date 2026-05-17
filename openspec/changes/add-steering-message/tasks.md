@@ -18,3 +18,16 @@
 - [ ] 3.3 `CommandInput`: Enter key sends `delivery: "steer"`, Alt+Enter sends `delivery: "followUp"`. Send button defaults to steer.
 - [ ] 3.4 `ChatView` pending-prompt chip: show "(steering)" or "(follow-up)" label based on `pendingPrompt.delivery`.
 - [ ] 3.5 `App.tsx`: pass `delivery` through from `queuedTexts` computation (if needed for chip dedup).
+
+## 4. Bridge tests
+
+- [ ] 4.1 `command-handler.test.ts`: add test — `delivery: "steer"` on passthrough message calls `sendUserMessageWithImages` with `deliverAs: "steer"`, skips bridge queue.
+- [ ] 4.2 `command-handler.test.ts`: add test — `delivery: "followUp"` (or undefined) preserves existing `deliverAs: "followUp"` behavior.
+- [ ] 4.3 `command-handler.test.ts`: add test — `delivery: "steer"` on slash command passes through to `sessionPrompt` with delivery param.
+- [ ] 4.4 `bridge-slash-command-routing.test.ts`: update existing tests that call `sendUserMessage` — verify `deliverAs: "steer"` when delivery param is `"steer"`.
+
+## 5. Client tests
+
+- [ ] 5.1 `useSessionActions` tests: verify `send_prompt` payload includes `delivery` field when provided.
+- [ ] 5.2 `event-reducer.test.ts`: verify `pendingPrompt.delivery` is stored and cleared correctly on agent_start/agent_end/abort.
+- [ ] 5.3 `CommandInput` tests: verify Enter emits `delivery: "steer"`, Alt+Enter emits `delivery: "followUp"`.
