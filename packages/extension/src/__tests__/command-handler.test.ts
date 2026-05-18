@@ -12,6 +12,7 @@ describe("CommandHandler", () => {
       setSessionName: vi.fn(),
       getSessionName: vi.fn(),
       on: vi.fn(),
+      exec: vi.fn(),
     };
   }
 
@@ -789,6 +790,7 @@ describe("CommandHandler enqueueIfStreaming (mid-turn-prompt-queue)", () => {
       setSessionName: vi.fn(),
       getSessionName: vi.fn(),
       on: vi.fn(),
+      exec: vi.fn(),
     };
   }
 
