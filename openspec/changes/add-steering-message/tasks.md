@@ -24,7 +24,7 @@
 - [x] 4.1 `command-handler.test.ts`: add test — `delivery: "steer"` on passthrough message calls `sendUserMessageWithImages` with `deliverAs: "steer"`, skips bridge queue.
 - [x] 4.2 `command-handler.test.ts`: add test — `delivery: "followUp"` (or undefined) preserves existing `deliverAs: "followUp"` behavior.
 - [x] 4.3 `command-handler.test.ts`: add test — `delivery: "steer"` on slash command passes through to `sessionPrompt` with delivery param.
-- [ ] 4.4 `bridge-slash-command-routing.test.ts`: update existing tests that call `sendUserMessage` — verify `deliverAs: "steer"` when delivery param is `"steer"`.
+- [x] 4.4 `bridge-slash-command-routing.test.ts`: update existing tests that call `sendUserMessage` — verify `deliverAs: "steer"` when delivery param is `"steer"`.
 
 ## 5. Client tests
 
