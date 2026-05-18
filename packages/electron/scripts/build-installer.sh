@@ -291,21 +291,63 @@ build_native_one_arch() {
   # Per-arch cache invalidation BEFORE bundle steps so they re-run for the new arch.
   maybe_wipe_arch_caches "$target_arch"
 
-  # Bundle dashboard server (per-arch native modules)
-  if [ ! -d "$ELECTRON_DIR/resources/server/node_modules" ]; then
+  # Bundle dashboard server (per-arch native modules).
+  #
+  # Cache gate: content-staleness via .bundle-stamp sentinel. The old
+  # dir-existence check (`[ ! -d resources/server/node_modules ]`) silently
+  # shipped pre-edit source whenever resources/server/ survived from a
+  # previous build. See openspec/changes/fix-build-installer-stale-server-bundle/.
+  #
+  # is_bundle_stale() prints one of: stamp-missing | source-newer:<path>
+  # | bundler-newer | (empty = cache hit). The helper is overridable via
+  # BUNDLE_STAMP_PATH / BUNDLE_SRC_ROOTS / BUNDLER_SCRIPT env vars (used by
+  # the vitest harness).
+  : "${BUNDLE_STAMP_PATH:=$ELECTRON_DIR/.bundle-stamp}"
+  : "${BUNDLE_SRC_ROOTS:=$PROJECT_DIR/packages/server/src:$PROJECT_DIR/packages/shared/src:$PROJECT_DIR/packages/client/src:$PROJECT_DIR/packages/extension/src:$PROJECT_DIR/packages/dashboard-plugin-runtime/src}"
+  : "${BUNDLER_SCRIPT:=$ELECTRON_DIR/scripts/bundle-server.mjs}"
+  export BUNDLE_STAMP_PATH BUNDLE_SRC_ROOTS BUNDLER_SCRIPT PROJECT_DIR
+
+  is_bundle_stale() {
+    node "$ELECTRON_DIR/scripts/_bundle-stamp.mjs" check
+  }
+  write_bundle_stamp() {
+    node "$ELECTRON_DIR/scripts/_bundle-stamp.mjs" write
+  }
+  format_stamp_age() {
+    node "$ELECTRON_DIR/scripts/_bundle-stamp.mjs" age
+  }
+
+  stale_reason="$(is_bundle_stale)"
+  if [ -n "$stale_reason" ]; then
+    case "$stale_reason" in
+      source-newer:*) reason_log="reason=source-newer file=${stale_reason#source-newer:}" ;;
+      *)              reason_log="reason=$stale_reason" ;;
+    esac
     echo ""
-    echo "→ Bundling dashboard server (arch=$target_arch)..."
+    echo "↻ Bundled server stale ($reason_log) — re-bundling (arch=$target_arch)"
+    rm -rf "$ELECTRON_DIR/resources/server"
     if [ -n "$cross_prefix" ]; then
       TARGET_ARCH="$cross_target_arch_env" $cross_prefix node "$ELECTRON_DIR/scripts/bundle-server.mjs"
     else
       node "$ELECTRON_DIR/scripts/bundle-server.mjs"
     fi
+    write_bundle_stamp
   else
-    echo "✓ Bundled server already present"
+    age_str="$(format_stamp_age)"
+    echo "✓ Bundled server cache hit (built $age_str, stamp matches)"
   fi
 
   # Offline npm cache (opt-in)
   if [ "${BUNDLE_OFFLINE_PACKAGES:-0}" = "1" ]; then
+    # Stale-pin detection (change: streamline-electron-bootstrap-and-recovery, group 10).
+    # If offline-packages.json was edited since the last cache build, wipe the
+    # cache so the rebuild picks up bumped versions.
+    pins_file="$ELECTRON_DIR/offline-packages.json"
+    cache_manifest="$ELECTRON_DIR/resources/offline-packages/manifest.json"
+    if [ -f "$pins_file" ] && [ -f "$cache_manifest" ] && [ "$pins_file" -nt "$cache_manifest" ]; then
+      echo "→ offline-packages.json newer than cached manifest — invalidating cache"
+      rm -rf "$ELECTRON_DIR/resources/offline-packages"
+    fi
     if [ ! -f "$ELECTRON_DIR/resources/offline-packages/manifest.json" ]; then
       echo ""
       echo "→ Bundling offline packages (pi + openspec + tsx, arch=$target_arch)..."
@@ -315,6 +357,17 @@ build_native_one_arch() {
     fi
   else
     echo "→ Skipping offline package bundle (set BUNDLE_OFFLINE_PACKAGES=1 to enable)"
+  fi
+
+  # Bundled recommended extensions (opt-in). The bundler script wipes its
+  # output dir on every invocation, so simply re-running it covers the
+  # "BUNDLED_EXTENSION_IDS changed" invalidation case.
+  if [ "${BUNDLE_RECOMMENDED_EXTENSIONS:-0}" = "1" ]; then
+    echo ""
+    echo "→ Bundling recommended extensions (BUNDLED_EXTENSION_IDS)..."
+    BUNDLE_RECOMMENDED_EXTENSIONS=1 node "$ELECTRON_DIR/scripts/bundle-recommended-extensions.mjs"
+  else
+    echo "→ Skipping recommended-extensions bundle (set BUNDLE_RECOMMENDED_EXTENSIONS=1 to enable)"
   fi
 
   # Bundled Node.js (per-arch)

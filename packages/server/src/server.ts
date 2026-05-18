@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import { createRequire } from "node:module";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createMemoryEventStore, type EventStore } from "./memory-event-store.js";
 import { createMemorySessionManager, type SessionManager } from "./memory-session-manager.js";
 import { createPiGateway, type PiGateway } from "./pi-gateway.js";
@@ -66,6 +66,7 @@ import { detectLegacyPiInstalls } from "./legacy-pi-cleanup.js";
 import { createBootstrapQueue } from "./bootstrap-queue.js";
 import { bootstrapInstall } from "@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
+import { resolveClientDir } from "./resolve-client-dir.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
 import { PackageManagerWrapper } from "./package-manager-wrapper.js";
 import { createEditorManager, type EditorManager } from "./editor-manager.js";
@@ -571,10 +572,19 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry, pendingResumeIntents, pendingClientCorrelations);
 
-  // Resolve package version once at startup
-  const __require = createRequire(import.meta.url);
+  // Resolve package version once at startup. Uses fs.readFileSync rather
+  // than createRequire-JSON because tsx/jiti loaders silently fail JSON
+  // require under certain bundle layouts (Electron bundled server with
+  // workspace symlinks dereferenced), producing "unknown" even when the
+  // file is present and parseable. See change: streamline-electron-bootstrap-and-recovery group 15.
   let pkgVersion = "unknown";
-  try { pkgVersion = __require("../../package.json").version ?? "unknown"; } catch {}
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const pkgPath = path.resolve(here, "..", "..", "package.json");
+    pkgVersion = JSON.parse(readFileSync(pkgPath, "utf-8")).version ?? "unknown";
+  } catch {
+    // pkgVersion stays "unknown"; non-fatal.
+  }
   const selfHostname = os.hostname();
 
   // Send this server + discovered peers to new browser connections
@@ -1081,25 +1091,21 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // that works in the dev repo silently returns wrong paths in the
   // installed node_modules layout. require.resolve identifies packages
   // by name, which is the only canonical identity across layouts.
+  // Strategy chain extracted to `resolve-client-dir.ts` for unit-testability.
+  // See change: streamline-electron-bootstrap-and-recovery (Failure 2).
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const clientSearchPaths: string[] = [];
-  try {
-    const webPkgJson = createRequire(import.meta.url).resolve("@blackbelt-technology/pi-dashboard-web/package.json");
-    clientSearchPaths.push(path.join(path.dirname(webPkgJson), "dist"));
-  } catch {
-    // Web package not resolvable — fall through to path-based search.
-  }
-  clientSearchPaths.push(
-    // Installed as scoped sibling of server
-    path.join(__dirname, "..", "..", "pi-dashboard-web", "dist"),
-    // Installed in a parent node_modules (hoisted)
-    path.join(__dirname, "..", "..", "..", "@blackbelt-technology", "pi-dashboard-web", "dist"),
-    // Monorepo workspace sibling
-    path.join(__dirname, "../../client/dist"),
-    // Legacy path
-    path.join(__dirname, "../../dist/client"),
-  );
-  const clientDir = clientSearchPaths.find(p => existsSync(path.join(p, "index.html"))) ?? "";
+  const { clientDir } = resolveClientDir({
+    serverDir: __dirname,
+    resolveWebPackage: () => {
+      try {
+        return createRequire(import.meta.url).resolve(
+          "@blackbelt-technology/pi-dashboard-web/package.json",
+        );
+      } catch {
+        return null;
+      }
+    },
+  });
   const hasProductionBuild = !!clientDir;
   if (!hasProductionBuild) {
     console.log("[dashboard] No client build found — running in API-only mode");

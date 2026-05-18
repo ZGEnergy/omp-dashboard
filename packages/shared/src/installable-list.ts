@@ -4,12 +4,24 @@
  * This file describes the set of packages the dashboard needs installed.
  * Electron seeds the file on first run; Bridge / Standalone ignore it (file-absent
  * path is a no-op in the server bootstrap). The server reads it during bootstrap.
+ *
+ * Schema versions:
+ *   - v1 (legacy): no `schemaVersion` field. Entries have `name`, `version`,
+ *     `required`, `kind`, optional `deprecated`/`defaultOff`.
+ *   - v2: `schemaVersion: 2` envelope marker. Entries additionally carry
+ *     `source: "offline-cache" | "bundled-git" | "npm-registry"` describing
+ *     install provenance. v1 files are migrated in memory at read time; the
+ *     file is rewritten in v2 form on the next mutation.
+ *
+ * See change: streamline-electron-bootstrap-and-recovery.
  */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ELECTRON_OWNED_PACKAGES } from "./managed-package-whitelist.js";
 
 export type InstallableKind = "npm" | "pi-extension";
+export type InstallableSource = "offline-cache" | "bundled-git" | "npm-registry";
 
 export interface InstallablePackage {
   name: string;
@@ -19,11 +31,20 @@ export interface InstallablePackage {
   kind: InstallableKind;
   deprecated?: boolean;
   defaultOff?: boolean;
+  /**
+   * v2 field: install-source provenance. Drives routing in the server-side
+   * bootstrap reconciler. Absent on v1 files; synthesized in memory by
+   * `readInstallableList` per the migration rules documented above.
+   */
+  source?: InstallableSource;
 }
 
 export interface InstallableList {
+  /** Free-form content version string (e.g. "1.0"). NOT the schema marker. */
   version: string;
   packages: InstallablePackage[];
+  /** v2 schema marker. Absent on v1 files; set to 2 after migration. */
+  schemaVersion?: 2;
 }
 
 export interface MergeResult {
@@ -42,10 +63,43 @@ function installablePath(configDir: string): string {
 }
 
 /**
+ * Pure migration: synthesize the v2 `source` field on a single entry when
+ * absent. v1 → v2 inference rules:
+ *   - Package name is in `ELECTRON_OWNED_PACKAGES` → `source: "offline-cache"`
+ *   - Otherwise, `kind == "pi-extension"` → `source: "bundled-git"`
+ *   - Otherwise (kind == "npm" non-whitelist) → `source: "npm-registry"`
+ *
+ * Exported for unit tests; called internally by `readInstallableList`.
+ */
+export function inferSourceForPackage(pkg: InstallablePackage): InstallableSource {
+  if (pkg.source) return pkg.source;
+  if (ELECTRON_OWNED_PACKAGES.has(pkg.name)) return "offline-cache";
+  if (pkg.kind === "pi-extension") return "bundled-git";
+  return "npm-registry";
+}
+
+/**
+ * Pure migration of an entire list: stamps `schemaVersion: 2` and fills in
+ * `source` per entry. Idempotent: a v2 input is returned unchanged.
+ */
+export function migrateToV2(list: InstallableList): InstallableList {
+  if (list.schemaVersion === 2) return list;
+  return {
+    ...list,
+    schemaVersion: 2,
+    packages: list.packages.map((p) =>
+      p.source ? p : { ...p, source: inferSourceForPackage(p) },
+    ),
+  };
+}
+
+/**
  * Read `~/.pi/dashboard/installable.json` (or `configDir/installable.json`).
  *
  * Returns `null` when the file is absent. Logs a warning and drops entries
- * with an invalid `kind` field. Does NOT create the file.
+ * with an invalid `kind` field. Does NOT create the file. v1 files (missing
+ * `schemaVersion`) are migrated to v2 in memory; the file on disk is left
+ * untouched until the next mutation through `writeInstallableList`.
  */
 export async function readInstallableList(
   configDir?: string,
@@ -61,7 +115,15 @@ export async function readInstallableList(
     throw err;
   }
 
-  const parsed = JSON.parse(raw) as InstallableList;
+  let parsed: InstallableList;
+  try {
+    parsed = JSON.parse(raw) as InstallableList;
+  } catch (err: any) {
+    console.warn(
+      `[installable-list] Failed to parse "${filePath}": ${err?.message ?? err}. Treating as absent.`,
+    );
+    return null;
+  }
 
   const validPackages: InstallablePackage[] = [];
   for (const pkg of parsed.packages ?? []) {
@@ -74,7 +136,12 @@ export async function readInstallableList(
     validPackages.push(pkg);
   }
 
-  return { version: parsed.version, packages: validPackages };
+  const cleaned: InstallableList = {
+    version: parsed.version,
+    packages: validPackages,
+    schemaVersion: parsed.schemaVersion,
+  };
+  return migrateToV2(cleaned);
 }
 
 /**

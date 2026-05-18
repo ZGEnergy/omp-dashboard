@@ -116,6 +116,21 @@ export interface LaunchOpts {
    * launcher's own cwd. Electron passes the project directory.
    */
   cwd?: string;
+  /**
+   * Watchdog: callback fired exactly once if/when the spawned child
+   * emits `exit` AFTER `launchDashboardServer` resolves successfully.
+   *
+   * Wired only when readiness was confirmed (i.e. the server actually
+   * started). Pre-readiness exits surface as `EarlyExitError` from the
+   * launcher's own readiness loop and do NOT call this callback —
+   * those are setup failures, not crash-respawn cases.
+   *
+   * Used by Electron's `server-lifecycle.ts` to detect unexpected
+   * server death and route the user back to the loading-page recovery
+   * UI. See change: streamline-electron-bootstrap-and-recovery
+   * (Failure 5).
+   */
+  onExitAfterReady?: (code: number | null, signal: NodeJS.Signals | null) => void;
   // ── Test seams (production omits) ────────────────────────────────────────
   /** Replace `ToolResolver.resolveJiti` (returns loader URL or null). */
   _resolveJiti?: () => string | null;
@@ -260,6 +275,18 @@ export async function launchDashboardServer(opts: LaunchOpts): Promise<LaunchRes
       status = { running: false } as const;
     }
     if (status.running) {
+      if (opts.onExitAfterReady) {
+        // Attach the watchdog AFTER readiness so that pre-readiness exits
+        // (`EarlyExitError`) remain the responsibility of the caller's
+        // own error handling.
+        const cb = opts.onExitAfterReady;
+        let fired = false;
+        child.on("exit", (code, signal) => {
+          if (fired) return;
+          fired = true;
+          try { cb(code, signal); } catch { /* watchdog never throws */ }
+        });
+      }
       return {
         childPid: child.pid,
         reportedPid: status.pid ?? null,

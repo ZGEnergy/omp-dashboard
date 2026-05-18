@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createBootstrapState } from "../bootstrap-state.js";
 import {
   bootstrapInstallFromList,
+  buildPiInstallSpec,
   type PackageInstaller,
 } from "../bootstrap-install-from-list.js";
 import type { InstallablePackage, InstallableList } from "@blackbelt-technology/pi-dashboard-shared/installable-list.js";
@@ -258,6 +259,146 @@ describe("bootstrapInstallFromList", () => {
       });
 
       expect(progressSteps).toContain("tracked-pkg");
+    });
+  });
+
+  // ── buildPiInstallSpec ─────────────────────────────────────────────────
+  //
+  // Regression: pi's `parseSource()` falls through to `type: "local"` for any
+  // string not prefixed with `npm:` and not recognized as a git URL. Passing
+  // a bare scoped name (e.g. `@blackbelt-technology/pi-anthropic-messages`)
+  // produced `Path does not exist: <cwd>/<name>` and broke installable.json
+  // reconciliation for every pi-extension entry. See server.log report.
+  describe("buildPiInstallSpec", () => {
+    it("prefixes scoped name with npm: and pins version", () => {
+      const pkg = makePackage({
+        name: "@blackbelt-technology/pi-anthropic-messages",
+        version: "0.3.2",
+        kind: "pi-extension",
+      });
+      expect(buildPiInstallSpec(pkg)).toBe(
+        "npm:@blackbelt-technology/pi-anthropic-messages@0.3.2",
+      );
+    });
+
+    it("prefixes bare name with npm: and pins version", () => {
+      const pkg = makePackage({
+        name: "some-extension",
+        version: "1.2.3",
+        kind: "pi-extension",
+      });
+      expect(buildPiInstallSpec(pkg)).toBe("npm:some-extension@1.2.3");
+    });
+
+    it("omits version pin when pkg.version is empty", () => {
+      const pkg = makePackage({
+        name: "@scope/pkg",
+        version: "",
+        kind: "pi-extension",
+      });
+      expect(buildPiInstallSpec(pkg)).toBe("npm:@scope/pkg");
+    });
+
+    it("never returns a bare name without npm: prefix", () => {
+      // The whole point of the helper. Bare names trigger pi's local-path
+      // fallthrough and produce "Path does not exist" errors.
+      const pkg = makePackage({
+        name: "@blackbelt-technology/pi-flows",
+        version: "0.2.1",
+        kind: "pi-extension",
+      });
+      const spec = buildPiInstallSpec(pkg);
+      expect(spec.startsWith("npm:")).toBe(true);
+      expect(spec).not.toBe("@blackbelt-technology/pi-flows");
+    });
+  });
+
+  // ── isPackageRegisteredInPiSettings ────────────────────────────
+  //
+  // Group 15 dedup helper: prevents reconciler from re-registering bundled
+  // extensions that installBundledExtensions already wrote to settings.json.
+  describe("isPackageRegisteredInPiSettings", () => {
+    const fs = require("node:fs") as typeof import("node:fs");
+    const path = require("node:path") as typeof import("node:path");
+    const os = require("node:os") as typeof import("node:os");
+
+    function seedSettings(packages: string[]): string {
+      const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-settings-test-"));
+      const agentDir = path.join(tmpHome, ".pi", "agent");
+      fs.mkdirSync(agentDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(agentDir, "settings.json"),
+        JSON.stringify({ packages }),
+      );
+      return agentDir;
+    }
+
+    it("matches npm: form by exact name", async () => {
+      const { isPackageRegisteredInPiSettings } = await import("../bootstrap-install-from-list.js");
+      const agentDir = seedSettings(["npm:@blackbelt-technology/pi-anthropic-messages"]);
+      expect(
+        isPackageRegisteredInPiSettings("@blackbelt-technology/pi-anthropic-messages", agentDir),
+      ).toBe(true);
+    });
+
+    it("matches npm: form with @version suffix", async () => {
+      const { isPackageRegisteredInPiSettings } = await import("../bootstrap-install-from-list.js");
+      const agentDir = seedSettings(["npm:@blackbelt-technology/pi-flows@0.2.1"]);
+      expect(
+        isPackageRegisteredInPiSettings("@blackbelt-technology/pi-flows", agentDir),
+      ).toBe(true);
+    });
+
+    it("matches git: form by repo basename", async () => {
+      const { isPackageRegisteredInPiSettings } = await import("../bootstrap-install-from-list.js");
+      const agentDir = seedSettings(["git:github.com/BlackBeltTechnology/pi-anthropic-messages"]);
+      expect(
+        isPackageRegisteredInPiSettings("@blackbelt-technology/pi-anthropic-messages", agentDir),
+      ).toBe(true);
+    });
+
+    it("matches git: form with #ref suffix", async () => {
+      const { isPackageRegisteredInPiSettings } = await import("../bootstrap-install-from-list.js");
+      const agentDir = seedSettings(["git:github.com/BlackBeltTechnology/pi-flows#main"]);
+      expect(
+        isPackageRegisteredInPiSettings("@blackbelt-technology/pi-flows", agentDir),
+      ).toBe(true);
+    });
+
+    it("returns false when no entry matches", async () => {
+      const { isPackageRegisteredInPiSettings } = await import("../bootstrap-install-from-list.js");
+      const agentDir = seedSettings(["npm:some-other-pkg", "git:github.com/x/y"]);
+      expect(
+        isPackageRegisteredInPiSettings("@blackbelt-technology/pi-anthropic-messages", agentDir),
+      ).toBe(false);
+    });
+
+    it("returns false when settings.json absent", async () => {
+      const { isPackageRegisteredInPiSettings } = await import("../bootstrap-install-from-list.js");
+      const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-settings-empty-"));
+      const agentDir = path.join(tmpHome, ".pi", "agent");
+      expect(
+        isPackageRegisteredInPiSettings("@x/y", agentDir),
+      ).toBe(false);
+    });
+
+    it("returns false on malformed settings.json", async () => {
+      const { isPackageRegisteredInPiSettings } = await import("../bootstrap-install-from-list.js");
+      const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-settings-bad-"));
+      const agentDir = path.join(tmpHome, ".pi", "agent");
+      fs.mkdirSync(agentDir, { recursive: true });
+      fs.writeFileSync(path.join(agentDir, "settings.json"), "{ not valid json");
+      expect(
+        isPackageRegisteredInPiSettings("@x/y", agentDir),
+      ).toBe(false);
+    });
+
+    it("ignores local-path entries (cannot match by name)", async () => {
+      const { isPackageRegisteredInPiSettings } = await import("../bootstrap-install-from-list.js");
+      const agentDir = seedSettings(["/some/abs/path/to/extension"]);
+      expect(
+        isPackageRegisteredInPiSettings("extension", agentDir),
+      ).toBe(false);
     });
   });
 });

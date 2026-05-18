@@ -1,53 +1,34 @@
 /**
- * Wizard state persistence: mode.json and API key detection.
+ * Wizard state persistence (post-slim).
  *
- * TODO(simplify-electron-bootstrap-derived-state Phase C): This file is still
- * imported by the LAUNCH_SOURCE_V2=false legacy path (main.ts, wizard-ipc.ts,
- * server-lifecycle.ts, doctor.ts). Delete after the legacy path is removed
- * in a follow-up change once Phase C ships without regressions.
+ * The slimmed first-run wizard (change: streamline-electron-bootstrap-and-recovery,
+ * Group 8) derives "first run?" from filesystem state — see
+ * `isManagedDirPopulated` in `power-user-install.ts` and `cleanupLegacyStateFiles`
+ * in `legacy-cleanup.ts`. The pre-slim `mode.json` machinery
+ * (`isFirstRun`, `readModeFile`, `writeModeFile`, `ModeConfig`) is gone;
+ * legacy `mode.json` files are deleted on launch as a one-shot janitorial
+ * pass by `legacy-cleanup.ts`.
+ *
+ * What remains:
+ *   - API-key inspection helpers used by Doctor (`isApiKeyConfigured`,
+ *     `writeApiKey`). Wizard no longer collects API keys directly; the
+ *     done step deep-links to Settings → Provider Auth instead.
+ *   - Recommended-extensions skip-list helpers used by the legacy
+ *     `wizard:get-recommended` path elsewhere. Kept for the dashboard's
+ *     Packages tab which still respects the skipped list.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
 function getManagedDir() { return path.join(os.homedir(), ".pi-dashboard"); }
-function getModeFile() { return path.join(getManagedDir(), "mode.json"); }
 function getPiSettings() { return path.join(os.homedir(), ".pi", "agent", "settings.json"); }
 function getRecommendedStateFile() { return path.join(getManagedDir(), "recommended.json"); }
-
-export interface ModeConfig {
-  mode: "standalone" | "power-user";
-  completedAt: string;
-}
 
 export interface RecommendedWizardState {
   /** Recommended-extension ids the user explicitly skipped during the wizard. */
   skippedRecommended: string[];
   completedAt?: string;
-}
-
-/** Check if the first-run wizard has been completed. */
-export function isFirstRun(): boolean {
-  return !existsSync(getModeFile());
-}
-
-/** Read the persisted mode, or null if not set. */
-export function readModeFile(): ModeConfig | null {
-  try {
-    if (!existsSync(getModeFile())) return null;
-    const data = JSON.parse(readFileSync(getModeFile(), "utf-8"));
-    if (data?.mode === "standalone" || data?.mode === "power-user") {
-      return data as ModeConfig;
-    }
-  } catch { /* corrupt file */ }
-  return null;
-}
-
-/** Persist the chosen mode to ~/.pi-dashboard/mode.json. */
-export function writeModeFile(mode: "standalone" | "power-user"): void {
-  mkdirSync(getManagedDir(), { recursive: true });
-  const config: ModeConfig = { mode, completedAt: new Date().toISOString() };
-  writeFileSync(getModeFile(), JSON.stringify(config, null, 2) + "\n");
 }
 
 /** Check if any API key is configured in pi's settings. */

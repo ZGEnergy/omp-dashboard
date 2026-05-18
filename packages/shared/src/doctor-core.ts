@@ -50,6 +50,25 @@ export interface DoctorReport {
 /**
  * Strip standard ANSI CSI / OSC escape sequences. No external dependency.
  */
+/**
+ * Return true when a server.log tail contains markers indicating recent
+ * failure. Used by the Doctor "Server log" row to flip status between
+ * informational `ok` (healthy startup-only log) and `warning` (real
+ * problems present). Pure function for testability.
+ *
+ * Markers cover the most common server-startup failure modes:
+ *   - generic: error, fatal, exited, crashed, failed
+ *   - port/permission: EADDRINUSE, EACCES
+ *   - module resolution: MODULE_NOT_FOUND, ENOENT
+ *
+ * See change: streamline-electron-bootstrap-and-recovery group 15.
+ */
+export function serverLogLooksBad(logTail: string): boolean {
+  if (!logTail) return false;
+  const ERROR_MARKERS = /\b(error|fatal|EADDRINUSE|EACCES|MODULE_NOT_FOUND|ENOENT|exited|crashed|failed)\b/i;
+  return ERROR_MARKERS.test(logTail);
+}
+
 export function stripAnsi(input: string): string {
   if (!input) return "";
   // CSI sequences: ESC [ ... letter (incl. SGR colors, cursor moves)
@@ -417,7 +436,7 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
   "Server log (~/.pi-dashboard/server.log)": (status) =>
     status === "ok"
       ? undefined
-      : "Recent server log entries shown — the server may have failed to start. Open the log for full context.",
+      : "Server log contains error markers — inspect the log for full context.",
   "Server launch test": (status, _d, kind) =>
     status === "ok"
       ? undefined
@@ -657,11 +676,19 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
     if (!result.ok) {
       checks.push(result.row);
     } else if (result.value) {
+      // Promote to "warning" only when log content actually looks bad.
+      // Idle healthy-startup logs ("Launching via CLI..." + "Dashboard server
+      // started") used to flag yellow on every Doctor open. Heuristic: scan
+      // the tail for error markers; absent any, surface as "ok" informational.
+      // See change: streamline-electron-bootstrap-and-recovery group 15.
+      const looksBad = serverLogLooksBad(result.value);
       checks.push({
         name: "Server log (~/.pi-dashboard/server.log)",
         section: "server",
-        status: "warning",
-        message: "Last entries:",
+        status: looksBad ? "warning" : "ok",
+        message: looksBad
+          ? "Recent errors detected:"
+          : "Last entries:",
         detail: result.value,
       });
     }

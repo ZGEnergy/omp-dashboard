@@ -360,6 +360,7 @@ path:   C:/Program Files/nodejs/node.exe
 tried:
   override     no override set
   managed      missing: <HOME>/.pi-dashboard/node/node.exe
+  electron-bundled not running in Electron (no resourcesPath)
   managed      missing: <HOME>/.pi-dashboard/node_modules/.bin/node.cmd
   where        ok
 argv:

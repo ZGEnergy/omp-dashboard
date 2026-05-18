@@ -774,7 +774,26 @@ export async function installBundledExtensions(
       .map((d) => d.name),
   );
 
-  const pm = await loadPiPackageManager();
+  // Resilience: `loadPiPackageManager()` does dynamic `import(...)` of
+  // pi-coding-agent. That import transitively pulls in pi's extension
+  // loader, which itself ESM-imports `jiti/static`. In some Electron-main
+  // contexts the Node ESM resolver fails on this subpath (observed: Electron
+  // 32 / Node 20 on macOS after a fresh wizard install), throwing
+  // ERR_MODULE_NOT_FOUND and crashing the whole `wizard:install-bundled-
+  // extensions` IPC handler. A failed bundled-extensions step is NOT
+  // critical — pi works fine without them; users can install via
+  // Settings → Packages later. Catch and skip.
+  let pm: Awaited<ReturnType<typeof loadPiPackageManager>> | null = null;
+  try {
+    pm = await loadPiPackageManager();
+  } catch (err: any) {
+    onProgress?.({
+      step: "bundled-extensions",
+      status: "error",
+      error: `Skipped bundled-extension install: ${String(err?.message ?? err).slice(0, 200)}`,
+    });
+    return [];
+  }
   if (!pm?.DefaultPackageManager || !pm?.SettingsManager) {
     // Pi not installed yet — the earlier install step is responsible
     // for that. Bundled activation will be retried on next launch.

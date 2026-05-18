@@ -81,6 +81,12 @@ export interface FakeEnvSpec {
   overrides?: Readonly<Record<string, string>>;
   /** Override `npm root -g`. Defaults to platform-appropriate path. */
   npmRootGlobal?: string;
+  /**
+   * Simulate `process.resourcesPath` (Electron-only). Defaults to
+   * `undefined` so the `electron-bundled` strategy yields cleanly in
+   * non-Electron scenarios. See change: fix-electron-wizard-npm-root-enoent.
+   */
+  resourcesPath?: string;
 }
 
 export interface HarnessContext {
@@ -369,6 +375,10 @@ export async function withFakeEnv<T>(
     which: whichFn,
     npmRootGlobal: () => npmRootGlobal,
     resolveModule: resolveModuleFn,
+    // Default: bootstrap harness is not Electron-aware. Scenarios that
+    // want to exercise the electron-bundled strategy override this dep
+    // explicitly. See change: fix-electron-wizard-npm-root-enoent.
+    resourcesPath: () => spec.resourcesPath ?? null,
   });
 
   const createRegistry = (extra?: Partial<ToolRegistryDeps>): ToolRegistry => {

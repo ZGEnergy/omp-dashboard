@@ -16,7 +16,10 @@
     "make": "electron-forge make",
     "package": "electron-forge package",
     "icons": "electron-icon-builder --input=resources/icon.png --output=resources --flatten",
-    "test": "HOME=$(mktemp -d -t pi-elec-test-XXXXXX) vitest run"
+    "test": "HOME=$(mktemp -d -t pi-elec-test-XXXXXX) vitest run",
+    "build:local": "bash scripts/build-local.sh",
+    "build:local:offline": "BUNDLE_OFFLINE_PACKAGES=1 BUNDLE_RECOMMENDED_EXTENSIONS=1 bash scripts/build-local.sh",
+    "clean:resources": "rm -rf resources/server resources/node resources/offline-packages resources/bundled-extensions"
   },
   "dependencies": {
     "@blackbelt-technology/pi-dashboard-shared": "^0.5.3",

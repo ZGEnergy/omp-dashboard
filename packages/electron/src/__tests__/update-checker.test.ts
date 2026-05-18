@@ -13,10 +13,6 @@ vi.mock("@blackbelt-technology/pi-dashboard-shared/platform/npm.js", () => ({
   installGlobal: vi.fn(() => ({ ok: true, value: "" })),
 }));
 
-vi.mock("../lib/wizard-state.js", () => ({
-  readModeFile: () => ({ mode: "standalone" }),
-}));
-
 import { checkOutdated } from "../lib/update-checker.js";
 
 describe("update-checker", () => {

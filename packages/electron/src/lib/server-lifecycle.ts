@@ -20,10 +20,10 @@ import {
   EarlyExitError,
 } from "@blackbelt-technology/pi-dashboard-shared/server-launcher.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
+import { getDashboardServerLogPath } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { readModeFile } from "./wizard-state.js";
-import { detectSystemNode, detectPiDashboardCli, detectPi } from "./dependency-detector.js";
+import { detectSystemNode, detectPi } from "./dependency-detector.js";
 import { getBundledNodePath } from "./bundled-node.js";
 import { pickNodeForServer } from "./pick-node.js";
 import { isDashboardRunning } from "./health-check.js";
@@ -62,11 +62,67 @@ let serverStartedByUs = false;
 let storedSpawnedPid: number | null = null;
 
 /**
+ * Set to `true` immediately before Electron initiates an intentional
+ * shutdown (app `before-quit`, programmatic restart). The watchdog inspects
+ * this flag to distinguish graceful exits from crashes — a graceful exit
+ * MUST NOT trigger the loading-page recovery flow.
+ *
+ * Reset to `false` after every successful `setSpawnedPid` call so that a
+ * programmatic restart (spawn-new-child) re-arms crash detection.
+ * See change: streamline-electron-bootstrap-and-recovery (Failure 5).
+ */
+let gracefulShutdownInProgress = false;
+
+export function setGracefulShutdownInProgress(value: boolean): void {
+  gracefulShutdownInProgress = value;
+}
+
+export function isGracefulShutdownInProgress(): boolean {
+  return gracefulShutdownInProgress;
+}
+
+/**
  * Record the PID of the server we spawned (V2 launch path).
- * Called from main.ts after spawnFromSource succeeds.
+ * Called from main.ts after spawnFromSource succeeds. Resets the graceful
+ * flag so the watchdog re-arms for the new child.
  */
 export function setSpawnedPid(pid: number): void {
   storedSpawnedPid = pid;
+  gracefulShutdownInProgress = false;
+}
+
+/**
+ * Build the watchdog callback passed to `spawnFromSource` so an unexpected
+ * server-child exit routes the user to the loading-page recovery UI.
+ *
+ * Pure factory so unit tests can verify the routing decision (graceful vs
+ * crashed) without booting Electron.
+ *
+ * See change: streamline-electron-bootstrap-and-recovery (Failure 5).
+ */
+export function makeServerWatchdog(deps: {
+  isGraceful: () => boolean;
+  log: (msg: string) => void;
+  onCrash: (code: number | null, signal: NodeJS.Signals | null) => void;
+}): (code: number | null, signal: NodeJS.Signals | null) => void {
+  return (code, signal) => {
+    if (deps.isGraceful()) {
+      deps.log(
+        `[server-lifecycle] server child exited gracefully code=${code} signal=${signal ?? "null"}`,
+      );
+      return;
+    }
+    deps.log(
+      `[server-lifecycle] server child exited unexpectedly code=${code} signal=${signal ?? "null"} — routing to recovery`,
+    );
+    try {
+      deps.onCrash(code, signal);
+    } catch (err) {
+      deps.log(
+        `[server-lifecycle] crash handler threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
 }
 
 /**
@@ -225,22 +281,9 @@ export async function ensureServer(): Promise<string> {
     throw new Error(`Port ${config.port} is in use by another service. Change the dashboard port in ~/.pi/dashboard/config.json`);
   }
 
-  // 2. Mode-aware server launch
-  const mode = readModeFile();
-  const isPowerUser = mode?.mode === "power-user";
-
-  if (isPowerUser) {
-    // Power-user: prefer pi-dashboard CLI on PATH → managed → bundled
-    const cli = detectPiDashboardCli();
-    if (cli.found && cli.path) {
-      await launchViaCli(cli.path, config.port, config.piPort);
-      serverStartedByUs = true;
-      return `http://localhost:${config.port}`;
-    }
-    // Fall through to tsx + cli.ts resolution
-  }
-
-  // Standalone (or power-user fallback): bundled → managed → tsx + cli.ts
+  // 2. Server launch. The pre-slim wizard branched on mode.json (power-user
+  // vs standalone). With mode.json gone (streamline-electron-bootstrap-and-recovery,
+  // Group 8) there is one universal launch path: bundled → managed → tsx + cli.ts.
   await launchServer(config.port, config.piPort);
   serverStartedByUs = true;
   return `http://localhost:${config.port}`;
@@ -466,7 +509,14 @@ export type LaunchStatus =
   | { phase: "spawning" }
   | { phase: "waiting-health" }
   | { phase: "ready"; url: string }
-  | { phase: "failed"; message: string };
+  | { phase: "failed"; message: string }
+  // Recovery phases broadcast by `recovery-ipc.ts` (via direct `webContents.send`,
+  // bypassing the typed emitter). Listed here so the union mirrors every shape
+  // the renderer can legitimately receive on `dashboard:launch-status`.
+  // See change: streamline-electron-bootstrap-and-recovery.
+  | { phase: "reinstalling"; message?: string }
+  | { phase: "wiping"; message?: string }
+  | { phase: "force-reinstalling"; message?: string };
 
 type LaunchStatusListener = (status: LaunchStatus) => void;
 const launchStatusListeners = new Set<LaunchStatusListener>();
@@ -496,12 +546,20 @@ export async function isManagedServerRunning(): Promise<boolean> {
 }
 
 /**
- * Read the trailing `lines` lines (default 20) of `~/.pi/dashboard/server.log`.
+ * Read the trailing `lines` lines (default 20) of the dashboard server log.
+ *
+ * Source: `~/.pi/dashboard/server.log` — the live server's stdout/stderr log
+ * (V2 launch path in `main.ts` + `cli.ts` write here). Previously this read
+ * `~/.pi-dashboard/server.log`, the legacy *installer* log, which surfaced
+ * stale May-8 content on a May-16 launch (Failure 3 of
+ * streamline-electron-bootstrap-and-recovery). Resolved via the shared
+ * `getDashboardServerLogPath()` helper so any future migration is one edit.
+ *
  * Returns an empty string if the log is missing or unreadable. Reads at most
  * 8 KiB from the end of the file to bound memory.
  */
 export async function readServerLogTail(lines: number = 20): Promise<string> {
-  const logPath = path.join(MANAGED_DIR, "server.log");
+  const logPath = getDashboardServerLogPath();
   try {
     if (!existsSync(logPath)) return "";
     const fs = await import("node:fs/promises");

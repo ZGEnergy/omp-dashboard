@@ -40,6 +40,27 @@
     .empty { color: #64748b; font-style: italic; padding: 2rem; text-align: center; }
     .header-row { display: flex; align-items: baseline; justify-content: space-between; }
     .gen-at { font-size: 0.8rem; color: #475569; }
+    /* Group 7: force-reinstall danger section. */
+    .danger-card { border: 1px solid #7f1d1d; border-radius: 0.5rem; background: #1a0a0a; padding: 1rem 1.1rem; margin-top: 1.5rem; }
+    .danger-card h2 { font-size: 0.95rem; color: #fca5a5; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+    .danger-card p { color: #cbd5e1; font-size: 0.85rem; line-height: 1.5; margin-bottom: 0.5rem; }
+    .danger-card ul { color: #cbd5e1; font-size: 0.85rem; margin: 0.3rem 0 0.7rem 1.2rem; }
+    .danger-card .audit-toggle { background: transparent; color: #93c5fd; border: none; cursor: pointer; padding: 0; font-size: 0.82rem; text-decoration: underline; }
+    .danger-card .audit-toggle:hover { color: #bfdbfe; }
+    .danger-card .audit-panel { margin-top: 0.6rem; display: none; }
+    .danger-card .audit-panel.open { display: block; }
+    .audit-list { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.78rem; background: #0a0606; border: 1px solid #4b1c1c; border-radius: 0.35rem; padding: 0.5rem 0.6rem; max-height: 9rem; overflow: auto; margin-bottom: 0.6rem; }
+    .audit-list .label { color: #f59e0b; font-weight: 600; display: block; margin-bottom: 0.25rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .audit-list .path { display: block; color: #cbd5e1; line-height: 1.5; word-break: break-all; }
+    .audit-list .path.wipe { color: #fca5a5; }
+    .audit-list .path.preserve { color: #86efac; }
+    .audit-list .empty-note { color: #64748b; font-style: italic; }
+    .danger-card .actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-top: 0.6rem; }
+    .btn-danger { background: #7f1d1d; border-color: #991b1b; color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #991b1b; }
+    .force-status { color: #fcd34d; font-size: 0.82rem; }
+    .force-status.success { color: #4ade80; }
+    .force-status.error { color: #fca5a5; }
   </style>
 </head>
 <body>
@@ -62,6 +83,28 @@
 
   <div id="toast" style="display:none"></div>
   <div id="content"><div class="empty">Loading…</div></div>
+
+  <!-- Group 7: force-reinstall section. Always visible; pure UI here, work
+       runs in main via the existing piDashboard.forceReinstall channel. -->
+  <div class="danger-card" id="force-reinstall-card">
+    <h2>Force reinstall managed packages</h2>
+    <p>Replaces pi, openspec, tsx, the bundled Node runtime, and the offline cache in <code>~/.pi-dashboard/</code> from the version shipped with this app. The dashboard server is stopped before the wipe and relaunched after.</p>
+    <p style="color:#86efac;"><strong>Preserved:</strong></p>
+    <ul>
+      <li>User-installed packages under <code>~/.pi-dashboard/node_modules/</code> (e.g. <code>pi-model-proxy</code>, third-party <code>pi-*</code> extensions)</li>
+      <li>Configuration, sessions, credentials, preferences (everything under <code>~/.pi/</code>)</li>
+      <li>Wizard state, doctor log, server log</li>
+    </ul>
+    <button class="audit-toggle" id="btn-audit-toggle" type="button">Show what will be wiped…</button>
+    <div class="audit-panel" id="audit-panel">
+      <div class="audit-list" id="audit-wipe-list"><span class="label">Will be wiped</span><span class="empty-note">Loading…</span></div>
+      <div class="audit-list" id="audit-preserve-list"><span class="label">Will be preserved</span><span class="empty-note">Loading…</span></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-danger" id="btn-force-reinstall" type="button">Force reinstall…</button>
+      <span class="force-status" id="force-status"></span>
+    </div>
+  </div>
 
 <script>
   // Type-only contract is shared via DoctorBridge in src/lib/doctor-bridge-contract.ts.
@@ -284,6 +327,87 @@
   document.getElementById("btn-managed").addEventListener("click", async () => {
     try { await window.electron.doctor.openManagedDir(); }
     catch (e) { showToast("Could not open managed dir: " + (e && e.message ? e.message : String(e)), "err"); }
+  });
+
+  // ── Group 7: force-reinstall section ─────────────────────────────────
+  const auditToggleBtn = document.getElementById("btn-audit-toggle");
+  const auditPanel = document.getElementById("audit-panel");
+  const auditWipeList = document.getElementById("audit-wipe-list");
+  const auditPreserveList = document.getElementById("audit-preserve-list");
+  const forceBtn = document.getElementById("btn-force-reinstall");
+  const forceStatus = document.getElementById("force-status");
+  let auditPlanLoaded = false;
+
+  function renderAuditList(el, label, paths, cls) {
+    const head = `<span class="label">${label}</span>`;
+    if (!paths || paths.length === 0) {
+      el.innerHTML = head + `<span class="empty-note">(none)</span>`;
+      return;
+    }
+    const items = paths.map((p) => `<span class="path ${cls}">${escapeHtml(p)}</span>`).join("");
+    el.innerHTML = head + items;
+  }
+
+  async function loadAuditPlan() {
+    try {
+      const plan = await window.electron.doctor.planSafeWipe();
+      renderAuditList(auditWipeList, "Will be wiped", plan.wipe, "wipe");
+      renderAuditList(auditPreserveList, "Will be preserved (user-installed)", plan.preserve, "preserve");
+      auditPlanLoaded = true;
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      auditWipeList.innerHTML = `<span class="label">Will be wiped</span><span class="empty-note">Failed: ${escapeHtml(msg)}</span>`;
+      auditPreserveList.innerHTML = `<span class="label">Will be preserved</span><span class="empty-note">(unavailable)</span>`;
+    }
+  }
+
+  auditToggleBtn.addEventListener("click", async () => {
+    const isOpen = auditPanel.classList.toggle("open");
+    auditToggleBtn.textContent = isOpen ? "Hide audit" : "Show what will be wiped…";
+    if (isOpen && !auditPlanLoaded) await loadAuditPlan();
+  });
+
+  function setForceStatus(text, cls) {
+    forceStatus.textContent = text || "";
+    forceStatus.className = "force-status" + (cls ? " " + cls : "");
+  }
+
+  forceBtn.addEventListener("click", async () => {
+    if (forceBtn.disabled) return;
+    if (!window.piDashboard || typeof window.piDashboard.forceReinstall !== "function") {
+      setForceStatus("Force reinstall unavailable in this build.", "error");
+      return;
+    }
+    forceBtn.disabled = true;
+    setForceStatus("Confirming…");
+    // forceReinstall in main-process surfaces the dialog and runs the wipe + install.
+    // We subscribe to install-progress for live updates.
+    const unsubscribe = window.piDashboard.onInstallProgress?.((p) => {
+      if (!p) return;
+      const stage = p.step || "";
+      const out = p.output ? " — " + p.output : "";
+      setForceStatus(`Working: ${stage}${out}`);
+    });
+    try {
+      const outcome = await window.piDashboard.forceReinstall();
+      if (outcome && outcome.kind === "cancelled") {
+        setForceStatus("Cancelled.");
+      } else if (outcome && outcome.kind === "ok") {
+        setForceStatus(`Force reinstall complete. Wiped ${outcome.wiped?.length ?? 0} path(s), preserved ${outcome.preserved?.length ?? 0}.`, "success");
+        // Refresh doctor checks + audit panel so rows reflect new state.
+        auditPlanLoaded = false;
+        if (auditPanel.classList.contains("open")) await loadAuditPlan();
+        runDoctor();
+      } else {
+        const reason = (outcome && outcome.reason) || "unknown error";
+        setForceStatus("Failed: " + reason, "error");
+      }
+    } catch (err) {
+      setForceStatus("Error: " + (err && err.message ? err.message : String(err)), "error");
+    } finally {
+      if (typeof unsubscribe === "function") unsubscribe();
+      forceBtn.disabled = false;
+    }
   });
 
   // Initial run.

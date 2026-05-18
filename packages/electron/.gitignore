@@ -1,0 +1,5 @@
+# Bundle-staleness stamp written by build-installer.sh after every successful
+# bundle-server.mjs run. Lives outside resources/server/ so it never ships in
+# the packaged .app/.dmg/.deb/.AppImage. See openspec/changes/
+# fix-build-installer-stale-server-bundle/.
+.bundle-stamp

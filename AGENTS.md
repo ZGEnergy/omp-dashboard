@@ -238,7 +238,9 @@ This section lists only the **architectural backbone** — the files agents touc
 | `src/extension/flow-event-wiring.ts` | Flow event listener registration (flow:* → event_forward) |
 | `src/extension/connection.ts` | WebSocket with exponential backoff; auto-start suppression on `server_restarting` |
 | `src/extension/server-probe.ts` | TCP probe to detect running server |
-| `src/shared/server-identity.ts` | Identity-verified health check (`isDashboardRunning`) |
+| `src/shared/server-identity.ts` | Identity-verified health check (`isDashboardRunning`); retry opts (`timeoutMs/retries/retryDelayMs`); pre-wizard probe uses `{8000,3,500}`. Failure 4. |
+| `packages/shared/src/dashboard-paths.ts` | Single-source path helpers (`getDashboardConfigDir`, `getDashboardServerLogPath`, `getManagedDir`, `getInstallerLogPath`). Failure 3. |
+| `packages/shared/src/managed-workspace-materialize.ts` | `materializeWorkspaceSymlinks` re-copies scope dir from `<managed>/packages/`. Failure 1. |
 | `src/shared/mdns-discovery.ts` | mDNS advertise/discover/browse for `_pi-dashboard._tcp` |
 | `src/extension/server-launcher.ts` | Auto-start server as detached process; logs to `~/.pi/dashboard/server.log` |
 | `src/extension/command-handler.ts` | Command routing: `!`/`!!` bash, `/compact`, slash commands; slash else-arm now gates through extension-dispatch helper before `sendUserMessage`. See change: fix-extension-slash-commands-in-dashboard. |
@@ -469,8 +471,14 @@ This section lists only the **architectural backbone** — the files agents touc
 | `packages/electron/src/lib/server-lifecycle.ts` | Health check → server spawn; `setSpawnedPid` + `decideShutdownOnQuit` for V2 ownership rule |
 | `packages/electron/src/lib/launch-source.ts` | `selectLaunchSource()` resolver: attach→devMonorepo→piExtension→npmGlobal→extracted; `spawnFromSource` |
 | `packages/electron/src/lib/bundle-extract.ts` | `needsExtraction`, `migrateConfigs`, `extractBundle` with survive-extract whitelist for `~/.pi-dashboard/` |
+| `packages/electron/src/lib/power-user-install.ts` | Every-launch entry point. `decideStartupAction(state)` → `skip` / `preflight-install` / `wizard`. No `mode.json`; uses fs presence check. |
+| `packages/electron/src/lib/preflight-reconcile.ts` | Per-launch inventory diff. `readManagedInventory`, `compareWithPins`, `runPreflight`. Pure I/O, no spawn, no network. |
+| `packages/electron/src/lib/force-reinstall.ts` | Surgical reinstall. `planSafeWipe(managedDir)` whitelist-driven; `forceReinstall(opts)` shuts down server, wipes, runs `installStandalone`. |
+| `packages/electron/src/lib/installable-catalog.ts` | Wizard catalog assembly. `assembleCatalog` merges offline-cache core + bundled-git extensions. No npm-registry tier. |
+| `packages/shared/src/managed-package-whitelist.ts` | `ELECTRON_OWNED_PACKAGES: ReadonlySet<string>` single source of truth. Parity-pinned vs `offline-packages.json`. |
 | `packages/shared/src/installable-list.ts` | `InstallablePackage`/`InstallableList` types; `readInstallableList`, `writeInstallableList`, `mergeInstallableList` |
 | `packages/server/src/bootstrap-install-from-list.ts` | Per-package reconcile loop reading `~/.pi/dashboard/installable.json`; no-op when file absent |
+| `packages/server/src/resolve-client-dir.ts` | Pure client-dist resolution chain. 6 strategies; managed-dir-root strategy #6 robust to npm-install wipe. Failure 2. |
 | `packages/shared/src/bridge-register.ts` | Shared bridge registration: `findBundledExtension(baseDir)` + `registerBridgeExtension(path)`; non-destructive cleanup, AppImage guard. Used by server startup and Electron wizard. |
 | `packages/shared/src/pi-package-resolver.ts` | Resolves pi `packages[]` (npm/git/https/abs/rel) to install dir + entry path. Tier-2 fallback for plugin peer imports across npm/git/local installs. See change: add-shared-pi-package-resolver. |
 | `packages/electron/src/lib/doctor.ts` | Doctor diagnostic: checks all binaries, versions, server status, offers setup |
@@ -484,7 +492,7 @@ This section lists only the **architectural backbone** — the files agents touc
 | `packages/client/src/components/DiagnosticsSection.tsx` | Settings → Diagnostics — fetch, sections, suggestions, copy-to-clipboard with textarea fallback |
 | `packages/electron/src/lib/app-menu.ts` | App menu with About dialog and Doctor on all platforms |
 | `packages/electron/src/lib/tray.ts` | System tray with platform-specific icons |
-| `packages/electron/src/lib/dependency-installer.ts` | Async npm install of pi/openspec/tsx into `~/.pi-dashboard/` (Windows-hardened) |
+| `packages/electron/src/lib/dependency-installer.ts` | `installStandalone(onProgress, skipPackages)` npm install of whitelist into `~/.pi-dashboard/` (Windows-hardened). Selective via skip-list. |
 | `packages/electron/src/lib/dependency-detector.ts` | Detects pi/openspec/Node on PATH and managed install (AppImage + Win-ext guards) |
 | `packages/electron/src/lib/bundled-node.ts` | Resolves bundled Node.js/npm paths in Electron resources |
 | `packages/electron/src/lib/wizard-window.ts` | First-run setup wizard window with preload bridge |

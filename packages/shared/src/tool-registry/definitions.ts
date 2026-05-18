@@ -16,6 +16,7 @@ import type { ToolRegistry } from "./registry.js";
 import {
   type StrategyDeps,
   bareImportStrategy,
+  electronBundledRuntimeStrategy,
   managedBinStrategy,
   managedModuleStrategy,
   managedRuntimeStrategy,
@@ -31,6 +32,11 @@ import type { Strategy } from "./types.js";
 function classify(strategyName: string): Source {
   if (strategyName === "override") return "override";
   if (strategyName === "managed") return "managed";
+  // `electron-bundled` runtime is semantically managed (the user did
+  // not install it). Diagnostic distinguishability comes from the
+  // tried[] strategy name, not from the public Source value.
+  // See change: fix-electron-wizard-npm-root-enoent.
+  if (strategyName === "electron-bundled") return "managed";
   if (strategyName === "npm-global") return "npm-global";
   if (strategyName === "bare-import") return "bare-import";
   // `where` and anything else — resolved via PATH — classifies as system.
@@ -40,13 +46,22 @@ function classify(strategyName: string): Source {
 // ── Binary definitions ──────────────────────────────────────────────────────
 
 function binaryDef(binaryName: string, deps?: StrategyDeps): ToolDefinition {
-  // The `node` binary gets the managed-Node runtime strategy prepended
-  // (after override) so the persistent <managedDir>/node/ install wins
-  // over PATH lookup. See change: embed-managed-node-runtime.
+  // The `node` binary gets:
+  //  1. `managedRuntimeStrategy("node")` — persistent <managedDir>/node/
+  //     install (preferred once the wizard has populated it).
+  //  2. `electronBundledRuntimeStrategy("node")` — fires on first
+  //     Electron boot when managed-runtime is absent. No-op outside
+  //     Electron. See change: fix-electron-wizard-npm-root-enoent.
+  // See change: embed-managed-node-runtime for the original wiring.
   const isNode = binaryName === "node";
   const strategies = [
     overrideStrategy(binaryName, deps),
-    ...(isNode ? [managedRuntimeStrategy("node", deps)] : []),
+    ...(isNode
+      ? [
+          managedRuntimeStrategy("node", deps),
+          electronBundledRuntimeStrategy("node", deps),
+        ]
+      : []),
     managedBinStrategy(binaryName, deps),
     whereStrategy(binaryName, deps),
   ];
@@ -159,18 +174,25 @@ function packageDirModuleDef(
 /**
  * Shared `toArgv` for Node-script executors (pi, openspec, npm).
  *
- * On Windows + `.js` resolved path → prepend node.exe to bypass the
- * `.cmd` shim entirely (no cmd.exe in the spawn chain → no console
- * flash). Elsewhere → direct invocation.
+ * Any resolved path ending in `.js` → prepend the registry-resolved
+ * node interpreter, producing `[node, script.js]`. This is required on
+ * BOTH platforms because:
  *
- * This is the heart of the "no cmd flash" story: every CLI that ships
- * as `.cmd` on Windows and is actually a Node script should be
- * registered with this `toArgv` so the spawn becomes
- * `node.exe <script.js>` (pure console-subsystem inherit, no new
- * window ever).
+ *   - On Windows, bypassing the `.cmd` shim avoids cmd.exe + console
+ *     flash (the original "no cmd flash" story).
+ *   - On Unix in an Electron GUI process (e.g. PI-Dashboard.app), the
+ *     shebang `#!/usr/bin/env node` fails when node is not on the
+ *     process's PATH — which is precisely when the electron-bundled
+ *     strategy fires. Pairing the interpreter with the script makes
+ *     the spawn self-contained (no PATH dependency).
+ *     See change: fix-electron-wizard-npm-root-enoent.
+ *
+ * For non-`.js` paths (shell wrappers, native binaries) → direct
+ * invocation. Existing Unix scenarios that resolve to e.g. `/usr/bin/npm`
+ * (a shell script) keep working unchanged.
  */
-const nodeScriptToArgv: ToolDefinition["toArgv"] = (resolvedPath, { platform, registry }) => {
-  if (platform === "win32" && /\.js$/i.test(resolvedPath)) {
+const nodeScriptToArgv: ToolDefinition["toArgv"] = (resolvedPath, { platform: _platform, registry }) => {
+  if (/\.js$/i.test(resolvedPath)) {
     const node = registry.resolve("node");
     if (node.ok && node.path) return [node.path, resolvedPath];
   }
@@ -294,9 +316,16 @@ function npmExecutorDef(deps?: StrategyDeps): ToolDefinition {
   // when the runtime is installed. See change: embed-managed-node-runtime.
   const managedNpm = managedRuntimeStrategy("npm", deps);
 
+  // Electron-bundled fallback: probes <process.resourcesPath>/node/...
+  // when running inside Electron and the managed runtime has not been
+  // installed yet (first-launch wizard window). No-op outside Electron.
+  // See change: fix-electron-wizard-npm-root-enoent.
+  const electronBundledNpm = electronBundledRuntimeStrategy("npm", deps);
+
   const winStrategies = [
     overrideStrategy("npm", deps),
     managedNpm,
+    electronBundledNpm,
     npmCliBesideNodeStrategy,
     whereStrategy("npm", deps),
   ];
@@ -304,6 +333,7 @@ function npmExecutorDef(deps?: StrategyDeps): ToolDefinition {
   const unixStrategies = [
     overrideStrategy("npm", deps),
     managedNpm,
+    electronBundledNpm,
     whereStrategy("npm", deps),
   ];
 

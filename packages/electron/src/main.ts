@@ -3,7 +3,7 @@
  *
  * Flow:
  * 1. Single-instance lock
- * 2. First-run wizard (if ~/.pi-dashboard/mode.json is missing)
+ * 2. First-run wizard (when ~/.pi-dashboard/node_modules/ is empty)
  * 3. Discover or launch dashboard server (mDNS → health check → spawn)
  * 4. Open BrowserWindow pointing at the server URL
  * 5. System tray (minimize on close, Show/Quit menu)
@@ -54,16 +54,14 @@ if (disableGpu) {
   log("GPU disabled");
 }
 log("Importing lib modules...");
-import { isFirstRun, writeModeFile } from "./lib/wizard-state.js";
 import { openWizardWindow, getWizardWindow } from "./lib/wizard-window.js";
-import { registerWizardIpc } from "./lib/wizard-ipc.js";
-import { ensureServer, stopServerIfNeeded, didWeStartServer, loadMinimalConfig, setSpawnedPid, requestServerLaunch, isManagedServerRunning, readServerLogTail, onLaunchStatus } from "./lib/server-lifecycle.js";
+import { registerWizardIpc, consumeRequestedLaunchPath } from "./lib/wizard-ipc.js";
+import { ensureServer, stopServerIfNeeded, didWeStartServer, loadMinimalConfig, setSpawnedPid, requestServerLaunch, isManagedServerRunning, readServerLogTail, onLaunchStatus, makeServerWatchdog, isGracefulShutdownInProgress, setGracefulShutdownInProgress } from "./lib/server-lifecycle.js";
 import { showDoctorDialog } from "./lib/app-menu.js";
 import { isDashboardRunning } from "./lib/health-check.js";
 import { detectPi, detectBridgeExtension } from "./lib/dependency-detector.js";
-import { registerBundledBridgeExtension } from "./lib/bridge-register.js";
 import { installStandalone } from "./lib/dependency-installer.js";
-import { decideStartupAction, runPowerUserManagedInstall } from "./lib/power-user-install.js";
+import { decideStartupAction, isManagedDirPopulated } from "./lib/power-user-install.js";
 import { loadWindowState, saveWindowState } from "./lib/window-state.js";
 import { createTray, destroyTray } from "./lib/tray.js";
 import { startUpdateChecker } from "./lib/update-checker.js";
@@ -71,7 +69,13 @@ import { notifyUpdatesAvailable } from "./lib/update-notifier.js";
 import { initAutoUpdater, quitAndInstall } from "./lib/app-updater.js";
 import { setupAppMenu } from "./lib/app-menu.js";
 import { isLaunchSourceV2Enabled } from "@blackbelt-technology/pi-dashboard-shared/launch-source-flag.js";
+import { getDashboardServerLogPath } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
+import { writeAuditEntry } from "./lib/audit-log.js";
+import { cleanupLegacyStateFiles } from "./lib/legacy-cleanup.js";
 import { selectLaunchSource, spawnFromSource, parsePreferOverride, PinnedSourceUnavailableError } from "./lib/launch-source.js";
+import { runPreflight, formatDiagnosis, compareRunningServerVersion } from "./lib/preflight-reconcile.js";
+import { MANAGED_DIR } from "./lib/managed-paths.js";
+import { registerRecoveryIpc } from "./lib/recovery-ipc.js";
 import fs from "node:fs";
 log("All imports loaded");
 
@@ -206,6 +210,107 @@ function resolveLoadingPagePath(): string {
     if (fs.existsSync(packaged)) return packaged;
   }
   return dev;
+}
+
+/**
+ * Preflight prompt orchestrator. Reads the inventory diff and — when an
+ * action is needed and the managed dir is populated — prompts the user via
+ * dialog. When the user accepts, runs `installStandalone` with the
+ * up-to-date packages skipped (selective reinstall). Silent mode bypasses
+ * the dialog and reinstalls automatically.
+ *
+ * Returns:
+ *   - `skipped`  : no action needed OR user declined
+ *   - `installed`: reinstall ran successfully
+ *   - `failed`   : reinstall ran but failed
+ *
+ * Throws only on dialog/IPC errors; install failures are caught and
+ * surfaced via the return value so the caller can decide whether to
+ * proceed with server launch anyway.
+ *
+ * See change: streamline-electron-bootstrap-and-recovery.
+ */
+async function preflightAndPromptForReinstall(args: {
+  managedDir: string;
+  resourcesPath?: string;
+  silent: boolean;
+  onStatus?: (msg: string) => void;
+}): Promise<"skipped" | "installed" | "failed"> {
+  let diff;
+  try {
+    diff = runPreflight({
+      managedDir: args.managedDir,
+      resourcesPath: args.resourcesPath,
+    });
+  } catch (err: any) {
+    log(`[preflight] inventory read failed: ${err?.message ?? err} — skipping`);
+    return "skipped";
+  }
+
+  if (!diff.needsAction) return "skipped";
+
+  // Don't prompt on a truly empty managed dir — that's the first-run case,
+  // handled separately by the wizard. Preflight reinstall is for the
+  // "already installed but stale/corrupt/partially missing" steady-state.
+  if (diff.missing.length === [...diff.diffs].length && diff.upToDate.length === 0) {
+    log("[preflight] all packages missing — deferring to first-run wizard");
+    return "skipped";
+  }
+
+  const diagnosis = formatDiagnosis(diff) ?? "Managed packages need attention.";
+  log(`[preflight] needs action: ${diagnosis}`);
+
+  if (!args.silent) {
+    const { response } = await dialog.showMessageBox({
+      type: "question",
+      title: "PI Dashboard",
+      message: "Managed packages need attention",
+      detail: `${diagnosis}\n\nReinstall now from the bundled offline cache?`,
+      buttons: ["Reinstall", "Skip"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) {
+      log("[preflight] user declined reinstall");
+      return "skipped";
+    }
+  } else {
+    log("[preflight] silent mode — reinstalling automatically");
+  }
+
+  args.onStatus?.("Reinstalling managed packages…");
+  const attempted = diff.diffs
+    .filter((d) => d.status !== "current")
+    .map((d) => d.pkg);
+  try {
+    await installStandalone(
+      (p) => {
+        if (p.output) args.onStatus?.(`Reinstalling ${p.step}… ${p.output}`);
+        else if (p.status === "running") args.onStatus?.(`Reinstalling ${p.step}…`);
+      },
+      diff.upToDate, // skip the up-to-date entries
+    );
+    log("[preflight] reinstall complete");
+    writeAuditEntry({
+      operation: "preflight.reinstall",
+      packages: attempted,
+      skipped: diff.upToDate,
+      outcome: "ok",
+    });
+    return "installed";
+  } catch (err: any) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[preflight] reinstall failed: ${msg}`);
+    log(`[preflight] reinstall failed: ${msg}`);
+    writeAuditEntry({
+      operation: "preflight.reinstall",
+      packages: attempted,
+      skipped: diff.upToDate,
+      outcome: "failed",
+      error: msg,
+    });
+    return "failed";
+  }
 }
 
 /** Show a loading page that retries connecting to the server. */
@@ -404,6 +509,11 @@ function startUpdaters(): void {
 
 async function quit(): Promise<void> {
   isQuitting = true;
+  // Inform the watchdog that the impending child exit is intentional so it
+  // does NOT route the user to the loading-page recovery UI as we tear
+  // everything down. See change: streamline-electron-bootstrap-and-recovery
+  // (Failure 5).
+  setGracefulShutdownInProgress(true);
   cleanupUpdateChecker?.();
   cleanupAutoUpdater?.();
   await stopServerIfNeeded();
@@ -417,6 +527,12 @@ async function main(): Promise<void> {
     app.quit();
     return;
   }
+
+  app.on("before-quit", () => {
+    // Belt-and-suspenders: any quit path that bypasses `quit()` still flags
+    // the watchdog. Failure 5 of streamline-electron-bootstrap-and-recovery.
+    setGracefulShutdownInProgress(true);
+  });
 
   app.on("second-instance", () => {
     if (mainWindow) {
@@ -445,20 +561,54 @@ async function main(): Promise<void> {
   registerPiDashboardIpc();
   wireLaunchStatusForwarder();
 
+  // Register recovery IPC (inventory check / reinstall / force-reinstall).
+  // See change: streamline-electron-bootstrap-and-recovery.
+  registerRecoveryIpc({ installStandalone });
+
   // Allow triggering setup wizard from menu (Doctor → Run Setup)
   app.on("run-setup-wizard" as any, async () => {
     await openWizardWindow();
   });
 
-  // Pre-wizard: check if dashboard server is already running
+  // Pre-wizard: check if dashboard server is already running.
+  //
+  // Retry semantics tuned for bootstrap-in-progress detection: 4 attempts
+  // (initial + 3 retries) with 8 s per-attempt timeout and 500 ms backoff.
+  // Total wall-time cap ~33.5 s; typical case ~50 ms when server is healthy.
+  // Resolves Failure 4 of streamline-electron-bootstrap-and-recovery (the
+  // 2-second single-shot probe produced false negatives when a previous
+  // server was mid-bootstrap on the same machine).
   const config = loadMinimalConfig();
   updateSplashStatus("Checking dashboard server\u2026");
-  const preCheck = await isDashboardRunning(config.port);
-  log(`Pre-wizard health check: running=${preCheck.running}`);
+  const preCheck = await isDashboardRunning(config.port, "localhost", {
+    timeoutMs: 8000,
+    retries: 3,
+    retryDelayMs: 500,
+  });
+  log(
+    `Pre-wizard health check: running=${preCheck.running} portConflict=${
+      preCheck.portConflict ?? false
+    } pid=${preCheck.pid ?? "n/a"}`,
+  );
+
+  // Group 8/13: one-shot legacy cleanup runs in every path. `mode.json`
+  // is dead code in the slimmed wizard model; remove on every launch so
+  // it never resurrects as authoritative.
+  // See change: streamline-electron-bootstrap-and-recovery.
+  try {
+    const cleanup = cleanupLegacyStateFiles(MANAGED_DIR);
+    if (cleanup.removed.length > 0) {
+      log(`[bootstrap] legacy state cleanup removed=${cleanup.removed.join(",")}`);
+    }
+    for (const err of cleanup.errors) {
+      log(`[bootstrap] legacy state cleanup error path=${err.path} msg=${err.message}`);
+    }
+  } catch { /* janitorial; never fail launch */ }
 
   // ── LaunchSource V2 path (Phase C default; disable with LAUNCH_SOURCE_V2=false) ────
   // See change: simplify-electron-bootstrap-derived-state.
   if (isLaunchSourceV2Enabled(process.env)) {
+
     try {
       const source = await selectLaunchSource({
         isPackaged: app.isPackaged,
@@ -472,41 +622,118 @@ async function main(): Promise<void> {
 
       let spawnedPid: number | undefined;
       if (source.kind !== "attach") {
+        // Preflight: check managed package inventory vs the offline-pin
+        // floor. Prompts the user (or silent-installs when
+        // PI_DASHBOARD_SILENT_BOOTSTRAP=1) before spawning the server.
+        // Skipped when the bundle was just re-extracted (didExtract=true)
+        // because the fresh extraction already populated managed.
+        // See change: streamline-electron-bootstrap-and-recovery.
+        const justExtracted =
+          source.kind === "extracted" && (source as { didExtract?: boolean }).didExtract === true;
+        if (!justExtracted) {
+          const silent = process.env.PI_DASHBOARD_SILENT_BOOTSTRAP === "1";
+          await preflightAndPromptForReinstall({
+            managedDir: MANAGED_DIR,
+            resourcesPath: (process as any).resourcesPath ?? undefined,
+            silent,
+            onStatus: (msg) => updateSplashStatus(msg),
+          });
+        }
+
         // Log-file lifecycle (mkdir + open + write + close) is owned
         // by `launchDashboardServer` inside `spawnFromSource`. We pass
         // only the absolute path; the launcher writes a header line
         // and routes child stdout/stderr to it.
-        const logFile = path.join(os.homedir(), ".pi", "dashboard", "server.log");
+        const logFile = getDashboardServerLogPath();
+        // Watchdog: route crashes (unexpected child exit) back into the
+        // loading-page recovery flow. Graceful shutdowns (set via
+        // `setGracefulShutdownInProgress(true)` from before-quit) are
+        // ignored. See change: streamline-electron-bootstrap-and-recovery
+        // (Failure 5).
+        const watchdog = makeServerWatchdog({
+          isGraceful: isGracefulShutdownInProgress,
+          log,
+          onCrash: (code, signal) => {
+            const serverUrl = `http://localhost:${config.port}`;
+            for (const win of BrowserWindow.getAllWindows()) {
+              try {
+                win.webContents.send("dashboard:launch-status", {
+                  phase: "crashed",
+                  code,
+                  signal,
+                });
+              } catch { /* renderer may be gone */ }
+              try {
+                showLoadingPage(win, serverUrl);
+              } catch (err) {
+                log(
+                  `[watchdog] failed to route ${win.id} to loading page: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+            }
+          },
+        });
         const spawnResult = await spawnFromSource(
           source as Exclude<typeof source, { kind: "attach" }>,
           { port: config.port, piPort: config.piPort },
-          { logFile },
+          { logFile, onExitAfterReady: watchdog },
         );
         spawnedPid = spawnResult.pid;
         log(`[launch-source-v2] spawned server pid=${spawnedPid}`);
         // Record spawned PID for lifecycle ownership check on quit.
+        // Also resets the graceful flag so the new child's watchdog re-arms.
         setSpawnedPid(spawnedPid);
+      } else {
+        // Server already running. Surface cross-version skew via log line;
+        // banner UI is added by the dashboard client in a later task group.
+        // See change: streamline-electron-bootstrap-and-recovery.
+        try {
+          const healthRes = await fetch(`${source.url}/api/health`, {
+            signal: AbortSignal.timeout(2000),
+          });
+          if (healthRes.ok) {
+            const health = (await healthRes.json()) as { version?: string };
+            const skew = compareRunningServerVersion(health.version, app.getVersion());
+            if (skew !== "match" && skew !== "unknown") {
+              log(
+                `[launch-source-v2] version-skew running=${health.version} app=${app.getVersion()} verdict=${skew}`,
+              );
+            }
+          }
+        } catch {
+          // health check best-effort; non-fatal.
+        }
       }
 
-      // Show setup screen when extracted source triggered an extraction
-      // (bundle wipe + re-extract + bootstrap about to run).
-      const needsSetupScreen =
+      // Slimmed-wizard trigger: open the wizard whenever the managed dir
+      // is empty (filesystem-derived first-run; mode.json is gone).
+      // Also opens on a fresh extract (bundle wipe + re-extract) so the
+      // user sees install progress for the offline-cache restore.
+      // See change: streamline-electron-bootstrap-and-recovery (Group 8).
+      const didExtract =
         source.kind === "extracted" && (source as { didExtract?: boolean }).didExtract === true;
+      const managedPopulated = isManagedDirPopulated(MANAGED_DIR);
+      const needsSetupScreen = didExtract || !managedPopulated;
 
       const serverUrl = source.kind === "attach" ? source.url : `http://localhost:${config.port}`;
 
       if (needsSetupScreen) {
         updateSplashStatus("Preparing dashboard…");
         closeSplash();
-        log("[launch-source-v2] opening setup screen for extraction/bootstrap");
+        log(`[launch-source-v2] opening setup wizard didExtract=${didExtract} managedPopulated=${managedPopulated}`);
         await openWizardWindow();
-        log("[launch-source-v2] setup screen closed");
+        log("[launch-source-v2] setup wizard closed");
       }
 
+      // Consume any deep-link the wizard requested (e.g. /settings?tab=provider-auth
+      // when the user clicked "Configure API keys" on step-done).
+      const deepLinkPath = consumeRequestedLaunchPath();
+      const launchUrl = deepLinkPath ? `${serverUrl}${deepLinkPath}` : serverUrl;
+
       updateSplashStatus("Opening dashboard…");
-      const win = createMainWindow(serverUrl);
+      const win = createMainWindow(launchUrl);
       if (!needsSetupScreen) closeSplash();
-      showLoadingPage(win, serverUrl);
+      showLoadingPage(win, launchUrl);
       createTray(() => mainWindow, quit, {
         getServerStatus: isManagedServerRunning,
         onLaunch: (force) => { void requestServerLaunch({ force }); },
@@ -531,63 +758,50 @@ async function main(): Promise<void> {
   }
 
   // ── Legacy path (LAUNCH_SOURCE_V2=false only) ─────────────────────────────────
+  //
+  // Filesystem-derived first-run replaces the old mode.json check
+  // (change: streamline-electron-bootstrap-and-recovery, Group 8).
+  // Preflight runs first so its verdict feeds `decideStartupAction`.
 
-  if (preCheck.running && isFirstRun()) {
-    log("Server running, auto-writing mode.json as power-user");
-    writeModeFile("power-user");
-    try { registerBundledBridgeExtension(); } catch { /* non-fatal */ }
+  updateSplashStatus("Detecting pi agent…");
+  const pi = detectPi();
+  updateSplashStatus("Checking bridge extension…");
+  const bridge = detectBridgeExtension();
+  const managedPopulated = isManagedDirPopulated(MANAGED_DIR);
+  log(`Smart detection: pi=${pi.found} bridge=${bridge.found} managedPopulated=${managedPopulated}`);
+
+  // Preflight reconcile (legacy path): only meaningful when the managed
+  // dir is populated — otherwise the wizard runs and does a full install.
+  let preflightNeedsAction = false;
+  if (managedPopulated) {
+    const silent = process.env.PI_DASHBOARD_SILENT_BOOTSTRAP === "1";
+    const outcome = await preflightAndPromptForReinstall({
+      managedDir: MANAGED_DIR,
+      resourcesPath: (process as any).resourcesPath ?? undefined,
+      silent,
+      onStatus: (msg) => updateSplashStatus(msg),
+    });
+    preflightNeedsAction = outcome === "failed";
   }
 
-  const firstRun = isFirstRun();
-  log(`isFirstRun=${firstRun}`);
-  if (firstRun) {
-    updateSplashStatus("Detecting pi agent…");
-    const pi = detectPi();
-    updateSplashStatus("Checking bridge extension…");
-    const bridge = detectBridgeExtension();
-    log(`Smart detection: pi=${pi.found}, bridge=${bridge.found}`);
+  const startupAction = decideStartupAction({
+    piFound: pi.found,
+    bridgeFound: bridge.found,
+    managedPopulated,
+    preflightNeedsAction,
+  });
+  log(`startupAction=${startupAction.kind}`);
 
-    const startupAction = decideStartupAction({
-      firstRun,
-      piFound: pi.found,
-      bridgeFound: bridge.found,
-    });
-    log(`startupAction=${startupAction.kind}${"step" in startupAction ? `:${startupAction.step}` : ""}`);
-
-    if (startupAction.kind === "auto-skip-wizard-with-install") {
-      log("Pi + bridge detected, auto-writing mode.json as power-user");
-      writeModeFile("power-user");
-      try { registerBundledBridgeExtension(); } catch { /* non-fatal */ }
-      const installResult = await runPowerUserManagedInstall({
-        installStandaloneFn: installStandalone,
-        onStatus: (s) => updateSplashStatus(s),
-      });
-      log(`runPowerUserManagedInstall: ran=${installResult.ran} reason=${installResult.reason}${installResult.error ? ` error=${installResult.error.message}` : ""}`);
-      if (installResult.reason === "failed") {
-        console.error("[pi-dashboard] managed install failed:", installResult.error?.message);
-      }
-    } else if (pi.found && !bridge.found) {
-      updateSplashStatus("Opening setup wizard…");
-      closeSplash();
-      log("Opening wizard at bridge-install step...");
-      await openWizardWindow("bridge-install");
-      log("Wizard window closed");
-      if (isFirstRun()) {
-        log("Wizard not completed, quitting");
-        app.quit();
-        return;
-      }
-    } else {
-      updateSplashStatus("Opening setup wizard…");
-      closeSplash();
-      log("Opening wizard window...");
-      await openWizardWindow();
-      log("Wizard window closed");
-      if (isFirstRun()) {
-        log("Wizard not completed, quitting");
-        app.quit();
-        return;
-      }
+  if (startupAction.kind === "wizard") {
+    updateSplashStatus("Opening setup wizard…");
+    closeSplash();
+    log("Opening wizard window...");
+    await openWizardWindow();
+    log("Wizard window closed");
+    if (!isManagedDirPopulated(MANAGED_DIR)) {
+      log("Wizard not completed (managed dir still empty), quitting");
+      app.quit();
+      return;
     }
   }
 
@@ -657,10 +871,14 @@ async function main(): Promise<void> {
     }
   }
 
+  // Consume any deep-link the wizard requested.
+  const legacyDeepLinkPath = consumeRequestedLaunchPath();
+  const legacyLaunchUrl = legacyDeepLinkPath ? `${serverUrl}${legacyDeepLinkPath}` : serverUrl;
+
   updateSplashStatus("Opening dashboard\u2026");
-  const win = createMainWindow(serverUrl);
+  const win = createMainWindow(legacyLaunchUrl);
   closeSplash();
-  showLoadingPage(win, serverUrl);
+  showLoadingPage(win, legacyLaunchUrl);
   createTray(() => mainWindow, quit, {
     getServerStatus: isManagedServerRunning,
     onLaunch: (force) => { void requestServerLaunch({ force }); },

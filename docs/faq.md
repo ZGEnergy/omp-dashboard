@@ -203,6 +203,65 @@ Cross-refs:
 - README.md:268
 - packages/electron/src/lib/server-lifecycle.ts
 
+## Server won't start, what do I do?
+
+Loading page shows "Cannot connect to dashboard server" after ~15 s of health-check polling. Preflight runs `dashboard:check-inventory` IPC and renders diagnosis above the actions row.
+
+Recovery affordances, in escalation order:
+- **`[Reinstall managed packages]`** — primary button. Appears when preflight reports `missing` or `stale` entries for `pi-coding-agent` / `openspec` / `tsx`. Invokes `dashboard:reinstall-managed`; reinstalls from bundled offline cacache; retries health-check on success.
+- **`[Open Doctor]`** — full diagnostic (see "What does the Doctor diagnostic check in Electron?" below).
+- **Advanced → `[Force reinstall]`** — appears when preflight reports `corrupt` entries OR after a failed reinstall. Confirmation dialog summarises wipe scope; defaults to cancel. On confirm, safe-wipes whitelisted entries in `~/.pi-dashboard/node_modules/` and reinstalls from offline cacache.
+- **Server log panel** — expandable, last 20 lines of `~/.pi/dashboard/server.log` via `dashboard:read-server-log`.
+- **Known-servers list** — switch to a different dashboard server if local install unrecoverable.
+
+Last resort: inspect `~/.pi/dashboard/server.log` and `~/.pi/dashboard/doctor.log` directly. File an issue with both attached.
+
+Cross-refs:
+- packages/electron/src/lib/preflight-reconcile.ts
+- packages/electron/src/lib/force-reinstall.ts
+- packages/electron/src/renderer/loading.html
+
+See change: streamline-electron-bootstrap-and-recovery
+
+## Why does the dashboard fail to launch after I install or update PI-Dashboard.app?
+
+Five distinct failure modes shipped together; fixes co-land in change `streamline-electron-bootstrap-and-recovery` (Group 16).
+
+1. **Scope-dir wiped by `npm install`** — `~/.pi-dashboard/node_modules/@blackbelt-technology/` removed after bootstrap installable run. Server loses `pi-dashboard-web`. UI 404s. Fix: `materializeWorkspaceSymlinks` in `packages/shared/src/managed-workspace-materialize.ts`, called from `packages/server/src/bootstrap-install-from-list.ts` after the installable done event. Re-copies scope entries from `<managed>/packages/<short>/`. Idempotent.
+2. **Client static-file resolution misses managed-dir layout** — chain probed 4 path-arithmetic spots, none match `<managed>/packages/dist/client/`. Fix: `resolveManagedDirRoot` in `packages/shared/src/managed-paths.ts` (walks up for `.version` marker) + new strategy #6 in `packages/server/src/resolve-client-dir.ts`.
+3. **Loading page reads wrong server.log** — IPC handler read `~/.pi-dashboard/server.log` (installer log, stale). Live server writes `~/.pi/dashboard/server.log`. Fix: `getDashboardServerLogPath` in `packages/shared/src/dashboard-paths.ts`; `readServerLogTail` + Doctor `open-log` migrated.
+4. **Pre-wizard probe 2s timeout false-negative during bootstrap** — second-launch lands on loading-page with "port in use" while first is mid-install. Fix: `isDashboardRunning(port, host, opts)` retry loop in `packages/shared/src/server-identity.ts`; `main.ts` pre-wizard now passes `{ timeoutMs: 8000, retries: 3, retryDelayMs: 500 }`. Log line widened to `running=... portConflict=... pid=...`.
+5. **No watchdog respawn** — Electron-spawned server child dies, parent never notices. Fix: `LaunchOpts.onExitAfterReady` in `packages/shared/src/server-launcher.ts`; `makeServerWatchdog` + `gracefulShutdownInProgress` flag in `packages/electron/src/lib/server-lifecycle.ts`; `main.ts` wires watchdog to `showLoadingPage` and `before-quit` flips the flag.
+
+Cross-refs:
+- packages/shared/src/managed-workspace-materialize.ts
+- packages/shared/src/managed-paths.ts
+- packages/shared/src/dashboard-paths.ts
+- packages/shared/src/server-identity.ts
+- packages/shared/src/server-launcher.ts
+- packages/electron/src/lib/server-lifecycle.ts
+- packages/electron/src/main.ts
+
+See change: streamline-electron-bootstrap-and-recovery (Group 16).
+
+## How do I reinstall pi / openspec / tsx?
+
+Three paths, in order of preference:
+
+1. **Loading page** (server down) — click `[Reinstall managed packages]`. Reinstalls from bundled offline cacache; no network required.
+2. **Settings → Packages** (server up) — click Update on the affected row. Posts `/api/pi-core/update`. Same backend as path 1.
+3. **Doctor → Force reinstall** (last resort) — safe-wipe `~/.pi-dashboard/node_modules/` entries + reinstall from bundled offline cacache. Reserved for corruption or repeated failure of paths 1 and 2; requires explicit confirmation.
+
+Whitelist enforcement: only `pi-coding-agent`, `openspec`, `tsx` touched. User-installed `pi-*` ecosystem packages, `~/.pi/dashboard/config.json`, sessions under `~/.pi/agent/sessions/`, and credentials in `~/.pi/agent/auth.json` preserved across every path.
+
+Audit trail: every reinstall (including force) appends to `~/.pi/dashboard/doctor.log`.
+
+Cross-refs:
+- packages/electron/src/lib/preflight-reconcile.ts
+- packages/electron/src/lib/force-reinstall.ts
+
+See change: streamline-electron-bootstrap-and-recovery
+
 ## Why does Electron show "Cannot connect to dashboard server" after fresh boot, with only a banner line in server.log?
 
 `launchDashboardServer` fell back to `process.execPath` (Electron GUI binary) as Node interpreter. Spawned child re-launched the app, hit single-instance lock, exited silently — producing only `[<ts>] Electron launch (parent pid …)` header in `~/.pi/dashboard/server.log` with no follow-up output.
@@ -498,6 +557,28 @@ Prerequisite: Node.js 22.12+. Forge handles platform tools.
 Cross-refs:
 - README.md:586
 - README.md:590
+
+## How do I build the Electron app locally?
+
+Three scripts in `packages/electron/`, choose by use case:
+
+- `npm run build:local` — full offline-capable installer for host platform. Bundles Node runtime at `resources/node/`, server at `resources/server/`, and npm cacache at `resources/offline-packages/` for `pi-coding-agent` / `openspec` / `tsx`. First launch works offline.
+- `npm run build:local:offline` — sets `BUNDLE_OFFLINE_PACKAGES=1 BUNDLE_RECOMMENDED_EXTENSIONS=1`. Adds bundled-extensions Git cache at `resources/bundled-extensions/` for the wizard's extension tier.
+- `npm run make` — Electron Forge only. Skips cache builds. Fast iteration on Electron code; requires online first launch.
+
+Force full rebuild: `npm run clean:resources` wipes `resources/server`, `resources/node`, `resources/offline-packages`, `resources/bundled-extensions`.
+
+Stale-pin invalidation: editing `packages/electron/offline-packages.json` bumps its mtime past `resources/offline-packages/manifest.json`; next `build:local` detects mismatch, wipes cache, rebuilds.
+
+Server-bundle staleness gate: `build-installer.sh` auto-detects source mtimes via `packages/electron/.bundle-stamp` (gitignored JSON sentinel `{builtAt, srcMtime, bundlerMtime}`). Cache hit logs `✓ Bundled server cache hit (built <age>, stamp matches)`. Stale triggers re-bundle logged as `↻ Bundled server stale (reason=<token> [file=<path>]) — re-bundling`. Reasons: `stamp-missing`, `source-newer:<relpath>`, `bundler-newer`. Tracked source roots: `packages/{server,shared,client,extension,dashboard-plugin-runtime}/src`. `npm run clean:resources` forces full rebuild when auto-detection fails (clock skew, fs without mtime support).
+
+Output: `packages/electron/out/make/<platform>/...`.
+
+Cross-refs:
+- packages/electron/scripts/build-local.sh
+- packages/electron/offline-packages.json
+
+See change: streamline-electron-bootstrap-and-recovery
 
 ## How do I build Electron for multiple platforms?
 

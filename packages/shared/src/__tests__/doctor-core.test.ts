@@ -8,6 +8,7 @@ import {
   SECTION_OF,
   SUGGESTIONS,
   stampSectionsAndSuggestions,
+  serverLogLooksBad,
   type DoctorCheck,
   type DoctorStatus,
 } from "../doctor-core.js";
@@ -130,5 +131,64 @@ describe("stampSectionsAndSuggestions (Decision 8 lint)", () => {
     ];
     const out = stampSectionsAndSuggestions(checks);
     expect(out[0].suggestion).toBe("custom");
+  });
+});
+
+// ── serverLogLooksBad ───────────────────────────────────────────────────
+//
+// Group 15 fix: healthy startup-only log used to flag yellow on every
+// Doctor open. Server-log row now flips between informational ok and
+// warning based on actual error markers in the tail.
+describe("serverLogLooksBad", () => {
+  it("returns false for healthy startup-only log", () => {
+    const tail =
+      "[2026-05-08T15:45:57.243Z] Launching via CLI: /Users/r/.pi-dashboard/node_modules/.bin/pi-dashboard start --port 8000 --pi-port 9999\n" +
+      "Dashboard server started (pid 59006) at http://localhost:8000";
+    expect(serverLogLooksBad(tail)).toBe(false);
+  });
+
+  it("returns false for empty string", () => {
+    expect(serverLogLooksBad("")).toBe(false);
+  });
+
+  it("returns true on 'error' marker case-insensitive", () => {
+    expect(serverLogLooksBad("Some Error happened during startup")).toBe(true);
+    expect(serverLogLooksBad("some error happened")).toBe(true);
+    expect(serverLogLooksBad("FATAL: kaboom")).toBe(true);
+  });
+
+  it("returns true on port-collision marker", () => {
+    expect(serverLogLooksBad("listen EADDRINUSE: address already in use :::8000")).toBe(true);
+  });
+
+  it("returns true on module-not-found marker", () => {
+    expect(serverLogLooksBad("Error: Cannot find module 'foo' (MODULE_NOT_FOUND)")).toBe(true);
+    expect(serverLogLooksBad("ENOENT: no such file or directory")).toBe(true);
+  });
+
+  it("returns true on process-exit markers", () => {
+    expect(serverLogLooksBad("Server child process exited prematurely")).toBe(true);
+    expect(serverLogLooksBad("Process crashed unexpectedly")).toBe(true);
+    expect(serverLogLooksBad("npm install failed with code 1")).toBe(true);
+  });
+
+  it("requires whole-word match (avoids false positives on substring)", () => {
+    // "errorless" / "errors-list" should not match.
+    expect(serverLogLooksBad("this is errorless prose")).toBe(false);
+    // But "errors" (plural, whole word) — actually 'error' is a substring of
+    // 'errors' but \b matches at the word boundary before the 's'. Pi's word
+    // boundary regex \b(error|...)\b matches 'error' before 's' which is a
+    // word char, so 'errors' does NOT match. Confirm.
+    expect(serverLogLooksBad("running errors are tracked")).toBe(false);
+  });
+
+  it("detects markers within typical multi-line tail", () => {
+    const tail = [
+      "[2026-05-08T15:45:57.243Z] Launching via CLI...",
+      "Dashboard server started (pid 59006)",
+      "[2026-05-08T15:46:12.001Z] Error: connection refused on /api/health",
+      "Process exited with code 1",
+    ].join("\n");
+    expect(serverLogLooksBad(tail)).toBe(true);
   });
 });

@@ -1830,8 +1830,6 @@ See change: `eliminate-bash-on-windows-runners`.
 
 ## Electron Server Lifecycle
 
-### Power-user-mode managed install (Defect 1 fix)
-
 ### LaunchSource V2 Resolution (Phase C default)
 
 `selectLaunchSource()` in `packages/electron/src/lib/launch-source.ts` replaces the legacy `mode.json` + `isFirstRun` branching. Resolver walks five probe-based sources in priority order:
@@ -1846,53 +1844,98 @@ All probes are injectable (tests inject fakes). Override via `DASHBOARD_PREFER_S
 
 The spawned server receives `DASHBOARD_STARTER=Electron`. Lifecycle ownership rule: Electron calls `/api/shutdown` on quit ONLY when `health.starter === "Electron" AND health.pid === storedSpawnedPid`.
 
-The `LAUNCH_SOURCE_V2=false` escape hatch reverts to the legacy `mode.json` path (documented below). The flag and its legacy path will be removed in a follow-up change.
+The `LAUNCH_SOURCE_V2=false` escape hatch reverts to a legacy `mode.json` + `isFirstRun` resolver retained in the codebase for rollback only. The flag and its legacy path will be removed in a follow-up change.
 
-### Legacy first-launch flow (LAUNCH_SOURCE_V2=false)
+### Three surfaces, zero overlap
 
-The Electron app's first-launch flow has three branches (escape-hatch only):
+Startup splits into three UI surfaces with strict ownership.
 
+- **Wizard** (`renderer/wizard.html`). First-run welcome only. Trigger: `~/.pi-dashboard/node_modules/` empty. Four steps: `step-welcome` → `step-select-packages` (unified catalog: required disabled + bundled extensions toggleable) → `step-progress` (streams `installStandalone` callbacks) → `step-done` (deep-links to `/settings?tab=provider-auth`). Wizard never recovers from errors and never reconciles versions.
+- **Loading page** (`renderer/loading.html`). Universal recovery surface. Trigger: every launch where server unreachable within ~15 s health-poll. Always exposes `Start server`, `Open Doctor`, server-log tail, known-server selector. On preflight-detected drift, also exposes one-line diagnosis + `Reinstall managed packages`; on corrupt state or post-failure, `Force reinstall` under Advanced. Progress streams via `dashboard:launch-status` IPC.
+- **Doctor** (`renderer/doctor.html`). Diagnostics + force-reinstall. Adds danger-styled `Force reinstall managed packages` button. First click expands audit panel listing `planSafeWipe(managedDir).wipe` vs `.preserve` absolute paths; second click confirms via `dialog.showMessageBox`. On confirm: shutdown server → wipe per plan → `installStandalone()` → relaunch.
+
+### Whitelist contract
+
+`ELECTRON_OWNED_PACKAGES: ReadonlySet<string>` in `packages/shared/src/managed-package-whitelist.ts` is single source of truth for "Electron-owned" entries under `~/.pi-dashboard/node_modules/`. Current members: `@earendil-works/pi-coding-agent`, `@fission-ai/openspec`, `tsx`. `isElectronOwnedPackage(name)` is the membership predicate.
+
+Regression test asserts set equals package names in `packages/electron/offline-packages.json`. Bumping a pin without updating whitelist (or vice versa) fails the test.
+
+Consumers:
+
+- `planSafeWipe(managedDir)` in `force-reinstall.ts` — only whitelist entries enter `wipe[]`; everything else lands in `preserve[]`.
+- `readManagedInventory(managedDir)` in `preflight-reconcile.ts` — reads `package.json#version` for whitelist entries only.
+- `installStandalone()` reconciliation — operates on whitelist set, accepts `skipPackages` for already-current entries.
+
+Out of scope for whitelist: `/api/pi-core/update` (broader `pi-*` ecosystem), user-installed `pi-*` extensions, files under `~/.pi/` (config, sessions, credentials, preferences). All untouched by every Electron-owned path.
+
+### Preflight on every launch
+
+`runPreflight(opts)` in `packages/electron/src/lib/preflight-reconcile.ts` runs on every launch in the server-not-running branch of `main.ts`. Pipeline:
+
+1. `readManagedInventory(managedDir)` — for each whitelist entry, reads `node_modules/<pkg>/package.json#version`; returns `Map<pkg, version | null>` (null = missing or unparseable).
+2. `readOfflinePackagePins({ resourcesPath })` — reads pinned versions from bundled `offline-packages.json`.
+3. `compareWithPins(inventory, pins)` — pure logic; produces `InventoryDiff { diffs: PackageDiff[], needsAction: boolean, upToDate: string[] }`. Per-package `status` is `missing` | `stale` | `current` | `corrupt`.
+
+Branching on result:
+
+- Managed dir empty (no `package.json` files for any whitelist entry, via `isManagedDirPopulated()` presence check) → wizard.
+- `needsAction === false` → launch server.
+- `needsAction === true` AND `process.env.PI_DASHBOARD_SILENT_BOOTSTRAP === "1"` → silent `installStandalone({ skipPackages: upToDate })`, then launch server.
+- `needsAction === true` AND not silent → open loading page with `formatDiagnosis(diff)` one-liner and reinstall button.
+
+`runPreflight` is pure I/O (no spawn, no network). Same primitive feeds the loading-page `dashboard:check-inventory` IPC and Doctor's diagnostic section.
+
+### Cross-version banner (server-up case)
+
+When `isDashboardRunning()` returns true at startup, Electron fetches `/api/health` and calls `compareRunningServerVersion(runningVersion, app.getVersion())`. Two outcomes:
+
+- Running newer than app: non-blocking banner, dismissible per session. Copy: "Running dashboard is newer than this app (vX.Y.Z vs vA.B.C). Using running server." Default action: attach.
+- Running older than app: banner with `[Restart server]` action invoking `requestServerLaunch({ force: true })`. Copy: "Running dashboard is older than this app. Restart for new features?" Persists across launches until version changes.
+- Match: silent attach.
+
+### Force-reinstall safety model
+
+`planSafeWipe(managedDir)` returns `SafeWipePlan { wipe: string[]; preserve: string[] }`. Rules:
+
+1. Always wipe: `<managedDir>/node/` (recopied by `installManagedNode`), `<managedDir>/.offline-cache/` (transient extraction dir).
+2. Whitelist-driven wipe: each `node_modules/` entry resolved to package name; included in `wipe[]` iff `isElectronOwnedPackage(name)`.
+3. Always preserve: every `node_modules/` entry not on whitelist (user-installed `pi-*` ecosystem packages, dashboard peer deps). Listed in `preserve[]` for the audit panel.
+4. Out of scope entirely: paths outside `<managedDir>`. `~/.pi/` (config, sessions, credentials) is never touched by `forceReinstall()`.
+
+`forceReinstall(opts)` in `force-reinstall.ts` executes the plan then calls `installStandalone()` (which re-runs `installManagedNode` first, then `npm install --offline` against the offline cacache). `formatPlanSummary(plan)` renders the audit panel text. Same backend services both Doctor's button and the loading page's Advanced action.
+
+### Catalog v2 + installable list
+
+`installable.json` v2 schema adds `kind` (`core` | `extension`), `source` (`offline-cache` | `bundled-git` | `npm-registry`), and `required` per package. `assembleCatalog({ managedDir, resourcesPath })` in `packages/electron/src/lib/installable-catalog.ts` merges `readCoreFromOfflinePackagesJson` (offline-cache tier) with `readBundledExtensionsFromGitCache` (bundled-git tier, from `resources/recommended-extensions/`). `npm-registry` tier deferred to Settings → Packages, never in wizard. v1 files migrated in place on first read.
+
+Server-side `bootstrap-install-from-list.ts` routes by `source`: `offline-cache` extracts from cacache, `bundled-git` points pi's package manager at the git cache, `npm-registry` live-fetches.
+
+### Startup state machine
+
+```mermaid
+flowchart TD
+  start[App launch] --> health{Server healthy?}
+  health -->|yes| versionCheck{Version skew?}
+  versionCheck -->|match| attach[Attach to running server]
+  versionCheck -->|skew| banner[Banner + attach]
+  health -->|no| preflight[Preflight: readManagedInventory<br/>compareWithPins]
+  preflight --> populated{isManagedDirPopulated?}
+  populated -->|no| wizard[4-step wizard:<br/>welcome / select / progress / done]
+  populated -->|yes,<br/>needsAction=false| launch[Launch server]
+  populated -->|yes,<br/>needsAction=true| prompt{PI_DASHBOARD_SILENT_BOOTSTRAP=1?}
+  prompt -->|yes| selectiveInstall[installStandalone<br/>skipPackages=upToDate]
+  prompt -->|no| loadingPage[loading.html<br/>+ Reinstall button]
+  loadingPage -->|user clicks Reinstall| selectiveInstall
+  loadingPage -->|user clicks Force reinstall| forceReinstall[planSafeWipe + installStandalone]
+  selectiveInstall --> launch
+  forceReinstall --> launch
+  wizard --> launch
+  launch --> fail{Server starts?}
+  fail -->|yes| attach
+  fail -->|no| loadingPage
 ```
-  firstRun?
-     yes
-      |
-      v
-  pi.found && bridge.found?
-   /                    \
-  yes                    no
-   |                      |
-   v                      v
-  auto-skip-wizard-      pi.found?
-  with-install            /     \
-  (D3, see below)        yes     no
-   |                      |       |
-   v                      v       v
-  Write mode.json    Wizard   Wizard
-  Run install        bridge-  full
-                     install
-```
 
-The `auto-skip-wizard-with-install` branch was the source of Defect 1 in change `fix-electron-windows-installer-and-server-bootstrap`. Pre-fix, this branch wrote `mode.json` as power-user but **skipped `installStandalone()`**, leaving `~/.pi-dashboard/node_modules/` empty. The bundled server's runtime then fell back to the user's system pi for the TS loader, which on machines with `pi-coding-agent@0.71.x` ships jiti 2.6.5 — a version that misnormalizes triple-slash file:// URLs on Windows and crashes the server child with `MODULE_NOT_FOUND`.
-
-The fix:
-
-```typescript
-// packages/electron/src/lib/power-user-install.ts (pure helpers)
-export function decideStartupAction(state: StartupState): StartupAction {
-  if (!state.firstRun) return { kind: "skip-everything", reason: "not-first-run" };
-  if (state.piFound && state.bridgeFound) {
-    return { kind: "auto-skip-wizard-with-install", reason: "power-user" };
-    //         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    //         skip the WIZARD UI — still RUN install
-  }
-  if (state.piFound) return { kind: "wizard", step: "bridge-install" };
-  return { kind: "wizard", step: "full" };
-}
-```
-
-The install is idempotent: `runPowerUserManagedInstall()` short-circuits when every required package's `package.json` is present and parses (`isManagedDirPopulated()`). On subsequent launches the install is a no-op.
-
-The install runs async with status forwarded to the splash window's `updateSplashStatus("Setting up dependencies…")`. After the install resolves, the server-launch step takes over and the splash transitions to `"Launching dashboard server…"`.
+See change: streamline-electron-bootstrap-and-recovery.
 
 ### Server-startup deadline + cause-aware error wording (Defect 4 fix)
 
@@ -1911,11 +1954,13 @@ Pre-fix, both cases shared the misleading wording "Server failed to start within
 
 `shouldUrlWrapEntry()` in `packages/shared/src/platform/node-spawn.ts` decides whether the entry-script position in `node --import <loader> <entry>` argv needs `file://` URL wrapping. The Windows-non-tsx arm wraps with `file://` to sidestep Node's drive-letter URL-scheme parsing (`B:`, `A:` are otherwise treated as URL schemes). This rule **assumes** the jiti loader is from `pi-coding-agent@0.70.x` (jiti 2.x), which correctly handles `file:///` URL entries on Windows. Newer jiti versions (2.6.5 in pi 0.71.x) misnormalize triple-slash URLs.
 
-The contract holds because Defect 1's fix populates `~/.pi-dashboard/` with `pi-coding-agent` at the offline-cacache-pinned version. The runtime `resolveJitiFromPi()` chain is `managed → system`; once managed is populated with the pinned version, system pi (which may be a newer 0.71.x) is never reached.
+The contract holds because preflight reconciliation populates `~/.pi-dashboard/` with `pi-coding-agent` at the offline-cacache-pinned version on every launch where drift exists. The runtime `resolveJitiFromPi()` chain is `managed → system`; once managed is populated with the pinned version, system pi (which may be a newer 0.71.x) is never reached.
 
 The contract is documented in the function's header comment (`!! JITI VERSION CONTRACT !!` block) and regression-pinned by `packages/shared/src/__tests__/node-spawn-jiti-contract.test.ts`, which asserts `offline-packages.json` keeps `pi-coding-agent` in the `0.70.x` range. Bumping the pin past 0.70.x fires the test and forces a re-validation.
 
-See change: `fix-electron-windows-installer-and-server-bootstrap`.
+The jiti contract holds in the new bootstrap model because preflight + whitelist + offline-cacache install populate `~/.pi-dashboard/node_modules/@earendil-works/pi-coding-agent` at the pinned version on every launch where drift exists. Runtime `resolveJitiFromPi()` chain `managed → system` reaches the pinned managed copy before any newer system pi.
+
+See change: `fix-electron-windows-installer-and-server-bootstrap` (original contract); `streamline-electron-bootstrap-and-recovery` (preflight-based enforcement).
 
 ## Chat Input State (drafts & history recall)
 

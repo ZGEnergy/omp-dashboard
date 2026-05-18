@@ -1,139 +1,81 @@
 /**
- * Power-user-mode managed install helper.
+ * Every-launch startup-action decision.
  *
- * TODO(simplify-electron-bootstrap-derived-state Phase C): This file is still
- * imported by the LAUNCH_SOURCE_V2=false legacy path (main.ts).
- * Delete after the legacy path is removed in a follow-up change.
+ * After the slimmed wizard ships (change: streamline-electron-bootstrap-and-recovery,
+ * Group 8) the wizard trigger is purely filesystem-derived:
+ *   - managed dir empty   → run the wizard
+ *   - managed dir present → preflight may still want a selective reinstall
+ *   - otherwise           → skip both surfaces and launch the dashboard
  *
+ * `decideStartupAction` is a pure helper exercised by unit tests; the
+ * launch code in `main.ts` consumes its verdict.
  *
- * The Electron app's wizard auto-skips its UI when `pi.found && bridge.found`.
- * Pre-fix, that auto-skip ALSO skipped `installStandalone()`, leaving
- * `~/.pi-dashboard/node_modules/` empty. The bundled server then fell back
- * to the user's system pi for the TS loader, hitting jiti-version drift
- * (the original failure mode was `pi-coding-agent@0.71.x` shipping
- * `jiti@2.6.5`, which misnormalised file:/// URLs on Windows — see
- * `node-spawn.ts::shouldUrlWrapEntry`). The crash was `MODULE_NOT_FOUND`
- * before the dashboard could start.
- *
- * The current managed pin is `@earendil-works/pi-coding-agent@0.74.x`
- * (jiti `^2.7.0`); the 0.71.x / 2.6.5 reference is kept as the canonical
- * known-broken marker.
- *
- * Fix: every first launch SHALL run `installStandalone()` regardless of
- * wizard-UI state. This module:
- *
- *   - Decides whether to run the install (pure helper `decideStartupAction`)
- *   - Runs it with a small wrapper that adds idempotency on populated dirs
- *
- * Pure helpers are exported so unit tests can exercise the decision matrix
- * (firstRun × pi.found × bridge.found × managed-dir-populated) without any
- * filesystem or npm-spawn side effects.
- *
- * See change: fix-electron-windows-installer-and-server-bootstrap (Defect 1).
+ * `isManagedDirPopulated` is the filesystem replacement for the deleted
+ * `mode.json`-based `isFirstRun`: every required Electron-owned package's
+ * `package.json` must exist under `<managedDir>/node_modules/` and parse.
  */
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { MANAGED_DIR } from "./managed-paths.js";
-
-/** Packages `installStandalone()` writes into MANAGED_DIR. */
-export const REQUIRED_MANAGED_PACKAGES: readonly string[] = [
-  "@earendil-works/pi-coding-agent",
-  "@fission-ai/openspec",
-];
-
-/** Pure inputs for the startup-action decision. */
-export interface StartupState {
-  firstRun: boolean;
-  piFound: boolean;
-  bridgeFound: boolean;
-}
-
-/** Pure result describing what the Electron main flow should do. */
-export type StartupAction =
-  | { kind: "skip-everything"; reason: "not-first-run" }
-  | { kind: "auto-skip-wizard-with-install"; reason: "power-user" }
-  | { kind: "wizard"; step: "bridge-install" | "full" };
+import { ELECTRON_OWNED_PACKAGES } from "@blackbelt-technology/pi-dashboard-shared/managed-package-whitelist.js";
+import { isPackageInstalledOnDisk } from "@blackbelt-technology/pi-dashboard-shared/managed-package-detect.js";
 
 /**
- * Decide what the Electron main process should do at startup based on the
- * pure detection state. No I/O; no side effects. Test surface for the
- * "power-user mode still runs install" rule (D6 / Defect 1).
- */
-export function decideStartupAction(state: StartupState): StartupAction {
-  if (!state.firstRun) {
-    return { kind: "skip-everything", reason: "not-first-run" };
-  }
-  if (state.piFound && state.bridgeFound) {
-    // Auto-skip the wizard UI BUT still run the managed install.
-    return { kind: "auto-skip-wizard-with-install", reason: "power-user" };
-  }
-  if (state.piFound && !state.bridgeFound) {
-    return { kind: "wizard", step: "bridge-install" };
-  }
-  return { kind: "wizard", step: "full" };
-}
-
-/**
- * Idempotency probe: returns true when every required package's
- * `package.json` is present under MANAGED_DIR/node_modules. Pure I/O,
- * no spawn. Used to gate whether `installStandalone()` is a no-op.
+ * Idempotency probe: returns true when every Electron-owned package's
+ * `package.json` is present under `<managedDir>/node_modules/` AND parses
+ * as JSON. Pure I/O, no spawn. Used as the replacement for the deleted
+ * `wizard-state.ts::isFirstRun`.
  *
- * Note: this is a presence check, not a version check. The downstream
- * `installStandalone()` does its own version reconciliation.
+ * Delegates to the shared `isPackageInstalledOnDisk` helper which uses
+ * direct `fs.existsSync` rather than `require.resolve` — the latter
+ * fails with `ERR_PACKAGE_PATH_NOT_EXPORTED` against packages with
+ * restrictive `exports` maps even when their `package.json` is fully
+ * present, causing the wizard to re-fire on every launch.
+ *
+ * Source of truth for the package set is
+ * `@blackbelt-technology/pi-dashboard-shared/managed-package-whitelist`.
+ *
+ * See change: fix-is-npm-package-installed-exports-map.
  */
 export function isManagedDirPopulated(managedDir: string = MANAGED_DIR): boolean {
-  for (const pkg of REQUIRED_MANAGED_PACKAGES) {
-    const pkgJson = path.join(
-      managedDir,
-      "node_modules",
-      ...pkg.split("/"),
-      "package.json",
-    );
-    if (!existsSync(pkgJson)) return false;
-    try {
-      // Smoke-check that the file parses as JSON; corrupt entries trigger
-      // a full re-install via the downstream installer.
-      JSON.parse(readFileSync(pkgJson, "utf8"));
-    } catch {
-      return false;
-    }
+  for (const pkg of ELECTRON_OWNED_PACKAGES) {
+    if (!isPackageInstalledOnDisk(pkg, managedDir)) return false;
   }
   return true;
 }
 
+/** Pure inputs for the every-launch startup-action decision. */
+export interface StartupState {
+  /** True when pi-coding-agent is found on PATH or in pi's standard locations. */
+  piFound: boolean;
+  /** True when the dashboard bridge is registered in pi's `settings.json`. */
+  bridgeFound: boolean;
+  /** True when every Electron-owned package is installed in the managed dir. */
+  managedPopulated: boolean;
+  /** True when `runPreflight` reports `needsAction: true`. */
+  preflightNeedsAction: boolean;
+}
+
+/** Pure result describing what the Electron main flow should do. */
+export type StartupAction =
+  | { kind: "skip" }
+  | { kind: "preflight-install" }
+  | { kind: "wizard" };
+
 /**
- * Wrapper around `installStandalone()` that:
- *   - Short-circuits when the managed dir is already populated (idempotent).
- *   - Calls `installStandalone()` for any missing/corrupt state. The
- *     installer itself handles offline-cacache extraction, version
- *     reconciliation, and partial-state recovery.
+ * Decide what the Electron main process should do at startup based on
+ * pure detection state. No I/O; no side effects.
  *
- * `installStandaloneFn` is injectable for tests so they don't have to
- * spawn npm.
+ * Rules (in priority order):
+ *   1. Managed dir empty                   → wizard
+ *   2. Preflight reports an action needed  → preflight-install
+ *   3. Otherwise                            → skip (launch dashboard directly)
+ *
+ * `piFound` / `bridgeFound` are accepted for symmetry with the old
+ * signature and to ease logging at call sites; they do NOT affect the
+ * decision in the slimmed model (the wizard's job is only to populate
+ * `~/.pi-dashboard/node_modules/`, not to gate on system pi presence).
  */
-export async function runPowerUserManagedInstall(args: {
-  installStandaloneFn: (
-    onProgress?: (p: { step: string; status: string; output?: string; error?: string }) => void,
-    skipPackages?: string[],
-  ) => Promise<void>;
-  onStatus?: (status: string) => void;
-  managedDir?: string;
-}): Promise<{ ran: boolean; reason: "already-populated" | "installed" | "failed"; error?: Error }> {
-  const managedDir = args.managedDir ?? MANAGED_DIR;
-  if (isManagedDirPopulated(managedDir)) {
-    return { ran: false, reason: "already-populated" };
-  }
-  args.onStatus?.("Setting up dependencies\u2026");
-  try {
-    await args.installStandaloneFn((p) => {
-      if (p.output) args.onStatus?.(`Setting up dependencies\u2026 ${p.output}`);
-    });
-    return { ran: true, reason: "installed" };
-  } catch (err) {
-    return {
-      ran: true,
-      reason: "failed",
-      error: err instanceof Error ? err : new Error(String(err)),
-    };
-  }
+export function decideStartupAction(state: StartupState): StartupAction {
+  if (!state.managedPopulated) return { kind: "wizard" };
+  if (state.preflightNeedsAction) return { kind: "preflight-install" };
+  return { kind: "skip" };
 }

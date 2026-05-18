@@ -12,7 +12,9 @@
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { isPackageInstalledOnDisk } from "@blackbelt-technology/pi-dashboard-shared/managed-package-detect.js";
 import { getManagedDir } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
+import { materializeWorkspaceSymlinks } from "@blackbelt-technology/pi-dashboard-shared/managed-workspace-materialize.js";
 import {
   readInstallableList,
   type InstallablePackage,
@@ -37,12 +39,77 @@ export type PackageInstaller = (
  * we treat "resolves at all" as satisfied. This is sufficient for the
  * Phase B bootstrap use case.
  */
-export function isNpmPackageInstalled(pkgName: string, managedDir: string): boolean {
+/**
+ * Returns true when the package's `package.json` is present under
+ * `<managedDir>/node_modules/<name>/`. Delegates to the shared
+ * `isPackageInstalledOnDisk` helper, which uses `fs.existsSync` rather
+ * than `require.resolve` to avoid the `exports`-map trap that made the
+ * bootstrap fast-path always-miss for packages with restrictive
+ * exports (notably `@earendil-works/pi-coding-agent` +
+ * `@fission-ai/openspec`).
+ *
+ * See change: fix-is-npm-package-installed-exports-map.
+ */
+export function isNpmPackageInstalled(
+  pkgName: string,
+  managedDir: string,
+  expectedVersion?: string,
+): boolean {
+  return isPackageInstalledOnDisk(pkgName, managedDir, expectedVersion);
+}
+
+/**
+ * Return true if any entry in pi's `settings.json#packages[]` references
+ * `pkgName` — regardless of source form (npm/git/local).
+ *
+ * Used to dedupe reconciler installs against bundled-extensions activation
+ * (`installBundledExtensions` writes a `git:` entry; the reconciler would
+ * otherwise add a redundant `npm:` entry on every launch).
+ *
+ * Heuristic match:
+ *   - `npm:@scope/name` / `npm:@scope/name@ver`   → exact name extract
+ *   - `git:host/Org/<repo>` / `git:.../repo#ref`  → repo basename equals
+ *     unscoped name (matches the dashboard's bundled-extensions naming
+ *     convention: `pi-anthropic-messages` repo ↔ `@blackbelt-technology/pi-anthropic-messages` pkg)
+ *   - `<absolute-path>` (local)                   → not name-matchable, skipped
+ *
+ * See change: streamline-electron-bootstrap-and-recovery group 15.
+ */
+export function isPackageRegisteredInPiSettings(
+  pkgName: string,
+  agentDir: string = path.join(os.homedir(), ".pi", "agent"),
+): boolean {
   try {
-    // createRequire resolves from the given path; look in managedDir/node_modules.
-    const req = createRequire(path.join(managedDir, "package.json"));
-    req.resolve(pkgName + "/package.json");
-    return true;
+    const settingsPath = path.join(agentDir, "settings.json");
+    const fs = createRequire(import.meta.url)("node:fs") as typeof import("node:fs");
+    if (!fs.existsSync(settingsPath)) return false;
+    const raw = fs.readFileSync(settingsPath, "utf-8");
+    const settings = JSON.parse(raw) as { packages?: string[] };
+    const packages = settings.packages ?? [];
+    // Unscoped basename for git-URL matching.
+    const slash = pkgName.lastIndexOf("/");
+    const basename = slash >= 0 ? pkgName.slice(slash + 1) : pkgName;
+    for (const entry of packages) {
+      if (typeof entry !== "string") continue;
+      if (entry.startsWith("npm:")) {
+        // npm:@scope/name(@version)  or  npm:bare-name(@version)
+        const afterPrefix = entry.slice("npm:".length);
+        // Strip @version suffix — but keep leading @ of scoped names.
+        const atIdx = afterPrefix.lastIndexOf("@");
+        const name = atIdx > 0 ? afterPrefix.slice(0, atIdx) : afterPrefix;
+        if (name === pkgName) return true;
+      } else if (entry.startsWith("git:") || entry.startsWith("http") || entry.includes(".git")) {
+        // git:host/org/repo  or  git+https://... — match by repo basename.
+        // Strip trailing #ref, .git suffix.
+        const noRef = entry.split("#")[0]!;
+        const noGit = noRef.endsWith(".git") ? noRef.slice(0, -4) : noRef;
+        const repoSlash = noGit.lastIndexOf("/");
+        const repo = repoSlash >= 0 ? noGit.slice(repoSlash + 1) : noGit;
+        if (repo === basename) return true;
+      }
+      // Local-path entries cannot be matched by name; skip.
+    }
+    return false;
   } catch {
     return false;
   }
@@ -90,7 +157,27 @@ async function defaultPiExtensionInstall(
   pm.setProgressCallback((event: { message?: string }) => {
     if (event.message) onOutput(event.message);
   });
-  await pm.installAndPersist(pkg.name, { local: false });
+  await pm.installAndPersist(buildPiInstallSpec(pkg), { local: false });
+}
+
+/**
+ * Build the source spec passed to pi's `DefaultPackageManager.installAndPersist`.
+ *
+ * Pi's `parseSource()` (in `@earendil-works/pi-coding-agent`) falls through
+ * to `type: "local"` for any string that is not prefixed with `npm:` and not
+ * recognized as a git URL. A bare scoped name like
+ * `@blackbelt-technology/pi-anthropic-messages` becomes a relative-path lookup
+ * against `cwd`, producing the misleading error
+ * `Path does not exist: <cwd>/@blackbelt-technology/pi-anthropic-messages`.
+ *
+ * Prefix with `npm:` so pi resolves from the npm registry. When `pkg.version`
+ * is present, pin via `npm:<name>@<version>` so installable.json's recorded
+ * version is honored.
+ *
+ * Exported for unit testing.
+ */
+export function buildPiInstallSpec(pkg: InstallablePackage): string {
+  return pkg.version ? `npm:${pkg.name}@${pkg.version}` : `npm:${pkg.name}`;
 }
 
 // ── Options ────────────────────────────────────────────────────────────────
@@ -153,8 +240,11 @@ export async function bootstrapInstallFromList(
   // Stamp initial installable progress into bootstrap state.
   bootstrapState.set({ installable: { total, installed: 0, failed: [] } });
 
+  // Default fast-path detector: presence + (when pinned) version match.
+  // Passing `pkg.version` so a version bump in installable.json correctly
+  // triggers a reinstall, while no-op launches stay free.
   const checkInstalled =
-    opts?.isInstalled ?? ((p, dir) => isNpmPackageInstalled(p.name, dir));
+    opts?.isInstalled ?? ((p, dir) => isNpmPackageInstalled(p.name, dir, p.version));
   const doNpmInstall: PackageInstaller =
     opts?.npmInstall ??
     ((p, cb) => defaultNpmInstall(p, managedDir, cb));
@@ -162,10 +252,24 @@ export async function bootstrapInstallFromList(
     opts?.piInstall ?? defaultPiExtensionInstall;
 
   for (const pkg of packages) {
-    // Fast path: already installed (npm packages only; pi-extension always attempts).
-    if (pkg.kind === "npm" && checkInstalled(pkg, managedDir)) {
+    // Source label for progress + log lines (v2 schema). Falls back to
+    // kind-based inference when absent (v1 file pre-migration).
+    const sourceLabel = pkg.source ?? (pkg.kind === "pi-extension" ? "bundled-git" : "npm-registry");
+
+    // Fast path: already installed.
+    //   - npm packages: resolve from managedDir/node_modules.
+    //   - pi-extensions: check pi's settings.json#packages[] for ANY form
+    //     (npm:/git:/local) referring to this package name. Prevents the
+    //     reconciler from adding a duplicate npm: entry on every launch
+    //     when installBundledExtensions already registered a git: entry.
+    //     See change: streamline-electron-bootstrap-and-recovery group 15.
+    const alreadyInstalled =
+      pkg.kind === "npm"
+        ? checkInstalled(pkg, managedDir)
+        : isPackageRegisteredInPiSettings(pkg.name);
+    if (alreadyInstalled) {
       console.log(
-        `[bootstrap] bootstrap.installable.package name=${pkg.name} status=satisfied`,
+        `[bootstrap] bootstrap.installable.package name=${pkg.name} source=${sourceLabel} status=satisfied`,
       );
       installedCount++;
       bootstrapState.set({
@@ -174,9 +278,9 @@ export async function bootstrapInstallFromList(
       continue;
     }
 
-    // Emit installing progress.
+    // Emit installing progress with source prefix.
     bootstrapState.set({
-      progress: { step: pkg.name, output: "installing..." },
+      progress: { step: pkg.name, output: `[${sourceLabel}] installing...` },
       installable: { total, installed: installedCount, failed },
     });
 
@@ -197,12 +301,12 @@ export async function bootstrapInstallFromList(
         installable: { total, installed: installedCount, failed },
       });
       console.log(
-        `[bootstrap] bootstrap.installable.package name=${pkg.name} status=done`,
+        `[bootstrap] bootstrap.installable.package name=${pkg.name} source=${sourceLabel} status=done`,
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(
-        `[bootstrap] bootstrap.installable.package name=${pkg.name} status=error error=${message}`,
+        `[bootstrap] bootstrap.installable.package name=${pkg.name} source=${sourceLabel} status=error error=${message}`,
       );
       failed.push(pkg.name);
       bootstrapState.set({
@@ -229,4 +333,29 @@ export async function bootstrapInstallFromList(
   console.log(
     `[bootstrap] bootstrap.installable.done total=${total} installed=${installedCount} failed=${failed.length}`,
   );
+
+  // Re-materialize the @blackbelt-technology scope dir. `npm install`
+  // invocations during the installable run can wipe scope-dir entries
+  // because they're unreachable from the synthetic managed-dir
+  // package.json deps. Idempotent + best-effort: a materialization
+  // failure must NOT fail bootstrap (worst case: client UI 404s, server
+  // still works for API consumers).
+  // See change: streamline-electron-bootstrap-and-recovery (Failure 1).
+  try {
+    const mat = materializeWorkspaceSymlinks(managedDir);
+    const matTotal = mat.materialized.length + mat.skipped.length + mat.missingSource.length;
+    if (matTotal > 0) {
+      console.log(
+        `[bootstrap] bootstrap.materialize.done materialized=${mat.materialized.length} skipped=${mat.skipped.length} missingSource=${mat.missingSource.length} errors=${Object.keys(mat.errors).length}`,
+      );
+    }
+    for (const [name, msg] of Object.entries(mat.errors)) {
+      console.warn(
+        `[bootstrap] bootstrap.materialize.error name=${name} error=${msg}`,
+      );
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[bootstrap] bootstrap.materialize.unhandled error=${msg}`);
+  }
 }

@@ -26,12 +26,18 @@ import type { Strategy, StrategyCtx, StrategyResult } from "./types.js";
  * - `resolveModule` — node-module resolution (id, from) → absolute path.
  *   Production uses `createRequire(from).resolve(id)`; tests walk fake
  *   node_modules trees.
+ * - `resourcesPath` — `process.resourcesPath` (Electron-only). Production
+ *   reads the live global at call time; tests inject a fixed value.
+ *   Returns `null` outside Electron so `electronBundledRuntimeStrategy`
+ *   yields cleanly without filesystem probes.
+ *   See change: fix-electron-wizard-npm-root-enoent.
  */
 export interface StrategyDeps {
   exists?(p: string): boolean;
   which?(name: string): string | null;
   npmRootGlobal?(): string;
   resolveModule?(id: string, from: string): string | null;
+  resourcesPath?(): string | null;
 }
 
 function defaultResolveModule(id: string, from: string): string | null {
@@ -52,6 +58,8 @@ function defaults(): Required<StrategyDeps> {
     which: (name) => resolver.which(name),
     npmRootGlobal: () => npm.rootGlobalOr(""),
     resolveModule: defaultResolveModule,
+    resourcesPath: () =>
+      (process as unknown as { resourcesPath?: string }).resourcesPath ?? null,
   };
 }
 
@@ -64,6 +72,7 @@ function d(deps?: StrategyDeps): Required<StrategyDeps> {
     which: deps.which ?? base.which,
     npmRootGlobal: deps.npmRootGlobal ?? base.npmRootGlobal,
     resolveModule: deps.resolveModule ?? base.resolveModule,
+    resourcesPath: deps.resourcesPath ?? base.resourcesPath,
   };
 }
 
@@ -124,6 +133,72 @@ export function managedRuntimeStrategy(
       const candidate = path.join(dir, fileName);
       if (exists(candidate)) return { ok: true, path: candidate };
       return { ok: false, reason: `missing: ${candidate}` };
+    },
+  };
+}
+
+/**
+ * Electron-bundled Node runtime: `<process.resourcesPath>/node/...`.
+ *
+ * Layout mirrors `getBundledNpmPath()` / `getBundledNodePath()` in
+ * `packages/electron/src/lib/bundled-node.ts` exactly:
+ *
+ *   Unix:    <resourcesPath>/node/bin/node
+ *            <resourcesPath>/node/lib/node_modules/npm/bin/npm-cli.js
+ *   Windows: <resourcesPath>/node/node.exe
+ *            <resourcesPath>/node/node_modules/npm/bin/npm-cli.js
+ *
+ * Fires when `process.resourcesPath` is set (i.e. inside Electron) AND
+ * the wizard's `installManagedNode()` has not yet populated
+ * `~/.pi-dashboard/node/`. Reports `ok:false` cleanly outside Electron
+ * so non-Electron consumers (CLI, extension, dev server, tests) skip
+ * it without side effects.
+ *
+ * Strategy name is `"electron-bundled"` in the diagnostic trail so it
+ * is distinguishable from the persistent `managed-runtime` strategy,
+ * but `classify()` SHOULD still map it to `Source.managed` because
+ * semantically the user did not install this runtime.
+ *
+ * See change: fix-electron-wizard-npm-root-enoent.
+ */
+export function electronBundledRuntimeStrategy(
+  toolName: "node" | "npm",
+  deps?: StrategyDeps,
+): Strategy {
+  const { exists, resourcesPath } = d(deps);
+  return {
+    name: "electron-bundled",
+    run(ctx): StrategyResult {
+      const root = resourcesPath();
+      if (!root) {
+        return {
+          ok: false,
+          reason: "not running in Electron (no resourcesPath)",
+        };
+      }
+      const isWin = ctx.platform === "win32";
+      const candidates: string[] = [];
+      if (toolName === "node") {
+        candidates.push(
+          isWin
+            ? path.join(root, "node", "node.exe")
+            : path.join(root, "node", "bin", "node"),
+        );
+      } else {
+        // toolName === "npm": resolve directly to npm-cli.js so
+        // nodeScriptToArgv wraps it as `[node, npm-cli.js]`, bypassing
+        // any shell shim. Unix and Windows differ only in whether the
+        // npm package lives under `lib/node_modules` or `node_modules`.
+        candidates.push(
+          isWin
+            ? path.join(root, "node", "node_modules", "npm", "bin", "npm-cli.js")
+            : path.join(root, "node", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+        );
+      }
+      for (const candidate of candidates) {
+        if (exists(candidate)) return { ok: true, path: candidate };
+      }
+      return { ok: false, reason: `missing: ${candidates[0]}` };
     },
   };
 }

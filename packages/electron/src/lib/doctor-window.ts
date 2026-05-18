@@ -13,12 +13,14 @@
 import { app, BrowserWindow, clipboard, ipcMain, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { runDoctor } from "./doctor.js";
 import type { DoctorReport } from "@blackbelt-technology/pi-dashboard-shared/doctor-core.js";
 import { MANAGED_DIR } from "./managed-paths.js";
+import { getDashboardServerLogPath } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 import { openWizardWindow } from "./wizard-window.js";
 import { DOCTOR_IPC_CHANNELS } from "./doctor-bridge-contract.js";
+import { planSafeWipe } from "./force-reinstall.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -72,7 +74,10 @@ function registerHandlersOnce(): void {
 
   ipcMain.handle("doctor:open-log", async () => {
     try {
-      const logPath = path.join(MANAGED_DIR, "server.log");
+      // The live dashboard server log lives in `~/.pi/dashboard/server.log`,
+      // not `~/.pi-dashboard/server.log` (the legacy installer log).
+      // See change: streamline-electron-bootstrap-and-recovery (Failure 3).
+      const logPath = getDashboardServerLogPath();
       if (!existsSync(logPath)) return { ok: false, path: logPath };
       await shell.openPath(logPath);
       return { ok: true, path: logPath };
@@ -94,12 +99,12 @@ function registerHandlersOnce(): void {
 
   ipcMain.handle("doctor:run-setup", async () => {
     try {
-      // Reset wizard state to step 1: delete mode.json so isFirstRun() returns true.
-      const modeFile = path.join(MANAGED_DIR, "mode.json");
-      if (existsSync(modeFile)) {
-        try { rmSync(modeFile, { force: true }); } catch { /* best effort */ }
-      }
-      // Open wizard (does not block — fire and forget).
+      // The slimmed wizard derives "first run" from filesystem state
+      // (`isManagedDirPopulated`), not `mode.json`. Open the wizard
+      // directly — it always renders the four-step flow regardless of
+      // detection state. Legacy `mode.json` cleanup runs on launch via
+      // `cleanupLegacyStateFiles`.
+      // See change: streamline-electron-bootstrap-and-recovery (Group 8).
       void openWizardWindow();
       return;
     } catch (err) {
@@ -122,6 +127,18 @@ function registerHandlersOnce(): void {
       return { ok: true, path: MANAGED_DIR };
     } catch (err) {
       throw asStructuredError(err, "open-managed-dir");
+    }
+  });
+
+  // Group 7: audit-panel data for the force-reinstall section. Pure I/O —
+  // computes the plan without executing it. Execution happens via the
+  // existing `dashboard:force-reinstall` channel (piDashboard bridge).
+  ipcMain.handle("doctor:plan-safe-wipe", async () => {
+    try {
+      const plan = planSafeWipe(MANAGED_DIR);
+      return { wipe: plan.wipe, preserve: plan.preserve, managedDir: MANAGED_DIR };
+    } catch (err) {
+      throw asStructuredError(err, "plan-safe-wipe");
     }
   });
 }

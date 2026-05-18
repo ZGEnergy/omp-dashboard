@@ -22,6 +22,21 @@
   .link-btn { background: transparent; border: none; color: #4a90d9; padding: 8px 4px;
     font-size: 13px; cursor: pointer; text-decoration: underline; }
   .link-btn:hover { color: #6cb6ff; }
+  .secondary-btn { background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+    color: #c9d1d9; padding: 8px 16px; font-size: 13px; cursor: pointer; font-weight: 500; }
+  .secondary-btn:hover:not(:disabled) { background: #30363d; border-color: #484f58; }
+  .secondary-btn:disabled { background: #161b22; color: #6e7681; cursor: not-allowed; }
+  .danger-btn { background: transparent; border: none; color: #f85149; padding: 8px 4px;
+    font-size: 13px; cursor: pointer; text-decoration: underline; }
+  .danger-btn:hover { color: #ff7b72; }
+  .diagnosis { margin: 12px 0; padding: 10px 12px; background: #161b22;
+    border-left: 3px solid #d29922; border-radius: 4px; font-size: 13px; color: #c9d1d9;
+    line-height: 1.5; }
+  .diagnosis.error-tone { border-left-color: #f85149; }
+  details.advanced { margin-top: 12px; }
+  details.advanced summary { color: #8b949e; font-size: 12px; cursor: pointer; user-select: none; }
+  details.advanced summary:hover { color: #c9d1d9; }
+  details.advanced .advanced-body { margin-top: 8px; padding-left: 4px; }
   .server-btn { display: flex; justify-content: space-between; align-items: center; width: 100%;
     padding: 8px 12px; margin-bottom: 6px; background: #161b22; border: 1px solid #30363d;
     border-radius: 6px; color: #c9d1d9; cursor: pointer; font-size: 13px; text-align: left; }
@@ -47,10 +62,18 @@
     <div class="error" id="error">
       <h3>Cannot connect to dashboard server</h3>
       <p>The server at <code id="server-url">http://localhost:8000</code> is not responding.</p>
+      <div class="diagnosis" id="diagnosis" style="display:none;"></div>
       <div class="actions">
         <button class="primary-btn" id="start-btn">Start server</button>
+        <button class="secondary-btn" id="reinstall-btn" style="display:none;">Reinstall managed packages</button>
         <button class="link-btn" id="doctor-btn">Open Doctor</button>
       </div>
+      <details class="advanced" id="advanced-panel" style="display:none;">
+        <summary>Advanced recovery</summary>
+        <div class="advanced-body">
+          <button class="danger-btn" id="force-reinstall-btn">Force reinstall (wipe + reinstall)</button>
+        </div>
+      </details>
       <p style="color:#c9d1d9;">Or install and start the dashboard manually:</p>
       <p><code>npm install -g @blackbelt-technology/pi-dashboard</code></p>
       <p><code>pi-dashboard start</code></p>
@@ -71,8 +94,16 @@
       const errorEl = document.getElementById("error");
       const startBtn = document.getElementById("start-btn");
       const doctorBtn = document.getElementById("doctor-btn");
+      const reinstallBtn = document.getElementById("reinstall-btn");
+      const forceReinstallBtn = document.getElementById("force-reinstall-btn");
+      const advancedPanel = document.getElementById("advanced-panel");
+      const diagnosisEl = document.getElementById("diagnosis");
       const logPanel = document.getElementById("log-panel");
       const logContent = document.getElementById("log-content");
+
+      // Inventory state cached from api.checkManagedInventory().
+      let cachedDiff = null;
+      let installInflight = false;
 
       // Render known-servers list (passed via query as base64 JSON to avoid quoting issues).
       try {
@@ -121,6 +152,63 @@
             }
           }).catch(() => { /* ignore */ });
         }
+        // Run inventory probe and surface recovery affordances.
+        if (api && api.checkManagedInventory) {
+          api.checkManagedInventory()
+            .then((diff) => {
+              cachedDiff = diff;
+              applyDiagnosis(diff);
+            })
+            .catch((err) => {
+              console.warn("[loading] inventory probe failed:", err);
+            });
+        }
+      }
+
+      /**
+       * Apply diagnosis state to the UI.
+       *  - Shows diagnosis text when `needsAction` is true.
+       *  - Reveals Reinstall button when there are missing/stale entries.
+       *  - Reveals Force reinstall under Advanced when corrupt entries OR
+       *    a prior reinstall attempt failed.
+       */
+      function applyDiagnosis(diff, opts) {
+        opts = opts || {};
+        if (!diff || !diff.needsAction) {
+          diagnosisEl.style.display = "none";
+          reinstallBtn.style.display = "none";
+          if (!opts.keepAdvanced) advancedPanel.style.display = "none";
+          return;
+        }
+        const text = diff.diagnosis || formatFallbackDiagnosis(diff);
+        diagnosisEl.textContent = text;
+        diagnosisEl.style.display = "block";
+        diagnosisEl.classList.toggle("error-tone", (diff.corrupt || []).length > 0 || !!opts.reinstallFailed);
+
+        const hasFixable = (diff.missing || []).length > 0 || (diff.stale || []).length > 0;
+        reinstallBtn.style.display = hasFixable && !installInflight ? "inline-block" : "none";
+
+        const hasCorrupt = (diff.corrupt || []).length > 0;
+        if (hasCorrupt || opts.reinstallFailed) {
+          advancedPanel.style.display = "block";
+          advancedPanel.open = true;
+        }
+      }
+
+      /** Fallback diagnosis string when main process didn't provide one. */
+      function formatFallbackDiagnosis(diff) {
+        const parts = [];
+        if (diff.missing && diff.missing.length > 0) {
+          parts.push("Missing: " + diff.missing.join(", "));
+        }
+        if (diff.stale && diff.stale.length > 0) {
+          parts.push("Outdated: " + diff.stale.join(", "));
+        }
+        if (diff.corrupt && diff.corrupt.length > 0) {
+          parts.push("Corrupt: " + diff.corrupt.join(", "));
+        }
+        if (parts.length === 0) return "Managed packages need attention.";
+        return parts.join(" \u2014 ") + ". Reinstall will repair from the bundled offline cache.";
       }
 
       async function tryConnect() {
@@ -137,6 +225,119 @@
       function setBusy(busy, msg) {
         startBtn.disabled = busy;
         startBtn.textContent = busy ? (msg || "Launching\u2026") : "Start server";
+      }
+
+      function setReinstallBusy(busy, label) {
+        installInflight = busy;
+        reinstallBtn.disabled = busy;
+        reinstallBtn.textContent = busy ? (label || "Reinstalling\u2026") : "Reinstall managed packages";
+        forceReinstallBtn.disabled = busy;
+        // Hide Reinstall during a force-reinstall (different button drove the work).
+        if (busy && label && label.indexOf("Force") >= 0) {
+          reinstallBtn.style.display = "none";
+        }
+      }
+
+      /** Resume the connection polling after a successful reinstall. */
+      function resumePolling() {
+        errorShown = false;
+        errorEl.style.display = "none";
+        statusEl.style.display = "block";
+        statusEl.textContent = "Reconnecting to dashboard\u2026";
+        attempts = 0;
+        setTimeout(tryConnect, 500);
+      }
+
+      if (api && api.reinstallManaged) {
+        reinstallBtn.addEventListener("click", async () => {
+          setReinstallBusy(true, "Reinstalling\u2026");
+          try {
+            const outcome = await api.reinstallManaged();
+            if (outcome.kind === "ok") {
+              setReinstallBusy(false);
+              // Try to launch (server may have been down because packages were missing).
+              if (api.requestLaunch) {
+                api.requestLaunch(false).then((r) => {
+                  if (r && (r.kind === "started" || r.kind === "already-running")) {
+                    statusEl.style.display = "block";
+                    statusEl.textContent = "Reinstall complete \u2014 connecting\u2026";
+                    setTimeout(() => { location.href = r.url || serverUrl; }, 300);
+                  } else {
+                    resumePolling();
+                  }
+                }).catch(() => resumePolling());
+              } else {
+                resumePolling();
+              }
+            } else {
+              setReinstallBusy(false);
+              applyDiagnosis(cachedDiff, { reinstallFailed: true, keepAdvanced: true });
+              diagnosisEl.textContent = "Reinstall failed: " + (outcome.reason || "unknown error") +
+                ". Try Force reinstall under Advanced.";
+              diagnosisEl.classList.add("error-tone");
+            }
+          } catch (err) {
+            setReinstallBusy(false);
+            applyDiagnosis(cachedDiff, { reinstallFailed: true, keepAdvanced: true });
+            diagnosisEl.textContent = "Reinstall error: " + (err && err.message ? err.message : String(err));
+            diagnosisEl.classList.add("error-tone");
+          }
+        });
+      } else {
+        reinstallBtn.style.display = "none";
+      }
+
+      if (api && api.forceReinstall) {
+        forceReinstallBtn.addEventListener("click", async () => {
+          setReinstallBusy(true, "Force reinstalling\u2026");
+          try {
+            const outcome = await api.forceReinstall();
+            if (outcome.kind === "ok") {
+              setReinstallBusy(false);
+              if (api.requestLaunch) {
+                api.requestLaunch(false).then((r) => {
+                  if (r && (r.kind === "started" || r.kind === "already-running")) {
+                    statusEl.style.display = "block";
+                    statusEl.textContent = "Force reinstall complete \u2014 connecting\u2026";
+                    setTimeout(() => { location.href = r.url || serverUrl; }, 300);
+                  } else {
+                    resumePolling();
+                  }
+                }).catch(() => resumePolling());
+              } else {
+                resumePolling();
+              }
+            } else if (outcome.kind === "cancelled") {
+              setReinstallBusy(false);
+              // User cancelled in confirmation dialog \u2014 no UI change beyond busy reset.
+            } else {
+              setReinstallBusy(false);
+              diagnosisEl.style.display = "block";
+              diagnosisEl.textContent = "Force reinstall failed: " + (outcome.reason || "unknown error");
+              diagnosisEl.classList.add("error-tone");
+            }
+          } catch (err) {
+            setReinstallBusy(false);
+            diagnosisEl.style.display = "block";
+            diagnosisEl.textContent = "Force reinstall error: " + (err && err.message ? err.message : String(err));
+            diagnosisEl.classList.add("error-tone");
+          }
+        });
+      } else {
+        forceReinstallBtn.style.display = "none";
+      }
+
+      // Stream install progress into the status line during reinstall.
+      if (api && api.onInstallProgress) {
+        api.onInstallProgress((p) => {
+          if (!installInflight) return;
+          if (p.status === "running") {
+            const out = p.output ? " \u2014 " + p.output : "";
+            reinstallBtn.textContent = "Reinstalling " + p.step + out;
+          } else if (p.status === "error") {
+            reinstallBtn.textContent = "Error: " + (p.error || p.step);
+          }
+        });
       }
 
       if (api && api.requestLaunch) {

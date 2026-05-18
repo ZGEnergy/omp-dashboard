@@ -18,6 +18,7 @@
 import path from "node:path";
 import os from "node:os";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
+import { getDashboardServerLogPath } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 import { launchDashboardServer } from "@blackbelt-technology/pi-dashboard-shared/server-launcher.js";
 import { installStandalone } from "./dependency-installer.js";
 import { execFileSync } from "node:child_process";
@@ -653,9 +654,17 @@ export interface SpawnResult {
 export async function spawnFromSource(
   source: Exclude<LaunchSource, { kind: "attach" }>,
   config: { port: number; piPort: number },
-  opts?: { logFile?: string },
+  opts?: {
+    logFile?: string;
+    /**
+     * Watchdog callback — fires once if the spawned child exits after
+     * readiness. Wired through to `launchDashboardServer.onExitAfterReady`.
+     * See change: streamline-electron-bootstrap-and-recovery (Failure 5).
+     */
+    onExitAfterReady?: (code: number | null, signal: NodeJS.Signals | null) => void;
+  },
 ): Promise<SpawnResult> {
-  const logFile = opts?.logFile ?? path.join(os.homedir(), ".pi", "dashboard", "server.log");
+  const logFile = opts?.logFile ?? getDashboardServerLogPath();
 
   // Select the Node binary — bundled first, system fallback, execPath last resort.
   const bundledNode = getBundledNodePath();
@@ -710,6 +719,7 @@ export async function spawnFromSource(
       port: config.port,
       detach: false,
       cwd: source.cwd,
+      onExitAfterReady: opts?.onExitAfterReady,
     });
     return { pid: result.reportedPid ?? result.childPid };
   } catch (err: unknown) {

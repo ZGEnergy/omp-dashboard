@@ -241,9 +241,12 @@ describe("buildOfflineInstallArgs", () => {
 			"/u/.pi-dashboard",
 			"--cache",
 			"/u/.pi-dashboard/.offline-cache",
-			"--offline",
+			"--prefer-offline",
 			"--no-audit",
 			"--no-fund",
+			"--no-save",
+			"--no-package-lock",
+			"--no-prune",
 			"a@1.0.0",
 			"@scope/b@2.0.0",
 		]);

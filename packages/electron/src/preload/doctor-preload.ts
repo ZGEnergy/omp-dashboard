@@ -20,6 +20,7 @@ const doctor: DoctorBridge = {
   runSetup: () => ipcRenderer.invoke("doctor:run-setup"),
   copy: (text: string) => ipcRenderer.invoke("doctor:copy", text),
   openManagedDir: () => ipcRenderer.invoke("doctor:open-managed-dir"),
+  planSafeWipe: () => ipcRenderer.invoke("doctor:plan-safe-wipe"),
 };
 
 contextBridge.exposeInMainWorld("electron", { doctor });

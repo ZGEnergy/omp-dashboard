@@ -188,6 +188,19 @@ export function buildOfflineInstallArgs(params: {
 		"--prefer-offline",
 		"--no-audit",
 		"--no-fund",
+		// --no-save: don't rewrite package.json (caller already declared deps).
+		// --no-package-lock: don't rewrite package-lock.json.
+		// --no-prune: CRITICAL — npm install with explicit args would otherwise
+		//   prune any node_modules entry not in the resolved tree. The bundled
+		//   server's runtime deps (fastify, ajv, jsonwebtoken, readable-stream,
+		//   ~89 packages) are transitive deps of workspace packages
+		//   (@blackbelt-technology/*) that are materialized from <managed>/packages/
+		//   rather than declared in <managed>/package.json. Pruning them leaves
+		//   the server install broken: it starts on stale memory then crashes
+		//   with MODULE_NOT_FOUND on the next lazy require. See change history.
+		"--no-save",
+		"--no-package-lock",
+		"--no-prune",
 		...packages.map((p) => `${p.name}@${p.version}`),
 	];
 }
