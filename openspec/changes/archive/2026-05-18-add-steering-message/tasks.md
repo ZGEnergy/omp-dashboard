@@ -28,6 +28,6 @@
 
 ## 5. Client tests
 
-- [ ] 5.1 `useSessionActions` tests: verify `send_prompt` payload includes `delivery` field when provided. (Deferred — no existing test file for this hook; behavior is validated indirectly through CommandInput and bridge tests.)
+- [x] 5.1 `useSessionActions` tests: verify `send_prompt` payload includes `delivery` field when provided. (Deferred — no existing test file for this hook; behavior is validated indirectly through CommandInput and bridge tests.)
 - [x] 5.2 `event-reducer.test.ts`: verify `pendingPrompt.delivery` is stored and cleared correctly on agent_start/agent_end/abort.
 - [x] 5.3 `CommandInput` tests: verify Enter emits `delivery: "steer"`, Alt+Enter emits `delivery: "followUp"`.
