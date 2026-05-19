@@ -48,6 +48,7 @@ import { TerminalsView } from "./components/TerminalsView.js";
 import { EditorView } from "./components/EditorView.js";
 import { decodeFolderPath, encodeFolderPath } from "./lib/folder-encoding.js";
 import { FileDiffView } from "./components/FileDiffView.js";
+import { SubagentPopoutPage } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
 import { createInitialState, findLastUserPrompt, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { useMessageHandler } from "./hooks/useMessageHandler.js";
 import { useEditors } from "./lib/use-editors.js";
@@ -275,6 +276,8 @@ export default function App() {
   const [readmeMatch, readmeParams] = useRoute("/folder/:encodedCwd/readme");
   const [piResourcesMatch, piResourcesParams] = useRoute("/folder/:encodedCwd/pi-resources");
   const [diffMatch, diffParams] = useRoute("/session/:id/diff");
+  // Subagent inspector popout route. See change: add-subagent-inspector §7.
+  const [subagentPopoutMatch, subagentPopoutParams] = useRoute("/session/:sessionId/subagent/:agentId");
   const [piResourceFileMatch] = useRoute("/pi-resource");
   const [piResourceFileSearch] = useSearchParams();
   const piResourceFilePath = piResourceFileSearch.get("path");
@@ -286,9 +289,15 @@ export default function App() {
   const readmeCwd = readmeMatch && readmeParams ? decodeFolderPath(readmeParams.encodedCwd) : null;
   const piResourcesCwd = piResourcesMatch && piResourcesParams ? decodeFolderPath(piResourcesParams.encodedCwd) : null;
   const diffSessionId = diffMatch && diffParams ? diffParams.id : null;
+  // Subagent popout decoded params + parent-session label.
+  // See change: add-subagent-inspector §7.
+  const subagentPopoutSessionId =
+    subagentPopoutMatch && subagentPopoutParams ? subagentPopoutParams.sessionId : null;
+  const subagentPopoutAgentId =
+    subagentPopoutMatch && subagentPopoutParams ? subagentPopoutParams.agentId : null;
   const hasShellOverlayRoute =
     !!openspecPreviewMatch || !!archiveMatch || !!specsMatch ||
-    !!readmeMatch || !!piResourcesMatch || !!diffMatch;
+    !!readmeMatch || !!piResourcesMatch || !!diffMatch || !!subagentPopoutMatch;
   const hasPiResourceRouteFlag = !!piResourceFileMatch && !!piResourceFilePath;
   const selectedId = match ? params?.id : undefined;
   const selectedSessionIdRef = useRef<string | undefined>(selectedId);
@@ -544,6 +553,27 @@ export default function App() {
     }
   }, [selectedId, send, status]);
 
+  // Subagent popout: when opened in a fresh tab, the parent session is not
+  // yet subscribed (selectedId is undefined because the URL is
+  // /session/<sid>/subagent/<aid>, not /session/<sid>). Subscribe explicitly
+  // so the popout can read parent session state. See change:
+  // add-subagent-inspector §7.3 + design.md Decision 6.
+  useEffect(() => {
+    if (
+      subagentPopoutMatch &&
+      subagentPopoutSessionId &&
+      status === "connected" &&
+      !subscribedRef.current.has(subagentPopoutSessionId)
+    ) {
+      subscribedRef.current.add(subagentPopoutSessionId);
+      send({
+        type: "subscribe",
+        sessionId: subagentPopoutSessionId,
+        lastSeq: maxSeqMapRef.current.get(subagentPopoutSessionId) ?? 0,
+      });
+    }
+  }, [subagentPopoutMatch, subagentPopoutSessionId, status, send]);
+
   const selectedState = selectedId
     ? sessionStates.get(selectedId) ?? createInitialState()
     : createInitialState();
@@ -687,7 +717,9 @@ export default function App() {
   const toolContext: ToolContext = useMemo(() => ({
     cwd: selectedCwd,
     editors: selectedCwd ? editorMap.get(selectedCwd) ?? [] : [],
-  }), [selectedCwd, editorMap]);
+    sessionId: selectedId,
+    session: selectedId ? sessionStates.get(selectedId) : undefined,
+  }), [selectedCwd, editorMap, selectedId, sessionStates]);
 
   const contextUsageMap = useMemo(() => {
     const map = new Map<string, ContextUsageInfo>();
@@ -1037,7 +1069,20 @@ export default function App() {
           onTurnClick={(turnIndex) => chatViewRef.current?.scrollToTurn(turnIndex)}
         />
       )}
-      {archiveMatch && archiveCwd ? (
+      {subagentPopoutMatch && subagentPopoutSessionId && subagentPopoutAgentId ? (
+        // Subagent inspector popout (desktop layout).
+        // See change: add-subagent-inspector §7.
+        <SubagentPopoutPage
+          sessionId={subagentPopoutSessionId}
+          agentId={subagentPopoutAgentId}
+          session={sessionStates.get(subagentPopoutSessionId)}
+          subscriptionResolved={
+            status === "connected" && subscribedRef.current.has(subagentPopoutSessionId)
+          }
+          parentLabel={sessions.get(subagentPopoutSessionId)?.cwd}
+          onBack={goBack}
+        />
+      ) : archiveMatch && archiveCwd ? (
         <ArchiveBrowserView cwd={archiveCwd} onBack={goBack} />
       ) : specsMatch && specsCwd ? (
         <SpecsBrowserView cwd={specsCwd} onBack={goBack} />
@@ -1331,6 +1376,19 @@ export default function App() {
               <SettingsPanel />
             ) : tunnelSetupMatch ? (
               <ZrokInstallGuide onBack={() => navigate("/")} />
+            ) : subagentPopoutMatch && subagentPopoutSessionId && subagentPopoutAgentId ? (
+              // Subagent inspector popout (mobile shell).
+              // See change: add-subagent-inspector §7.
+              <SubagentPopoutPage
+                sessionId={subagentPopoutSessionId}
+                agentId={subagentPopoutAgentId}
+                session={sessionStates.get(subagentPopoutSessionId)}
+                subscriptionResolved={
+                  status === "connected" && subscribedRef.current.has(subagentPopoutSessionId)
+                }
+                parentLabel={sessions.get(subagentPopoutSessionId)?.cwd}
+                onBack={goBack}
+              />
             ) : archiveMatch && archiveCwd ? (
               <ArchiveBrowserView cwd={archiveCwd} onBack={goBack} />
             ) : specsMatch && specsCwd ? (

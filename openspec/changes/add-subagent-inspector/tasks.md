@@ -51,11 +51,11 @@ Phase 2 (producer adoption: tintinweb removal, settings surface, agentMdPath) is
 
 ## 7. App.tsx route + toolContext wiring (PENDING)
 
-- [ ] 7.1 Register `useRoute("/session/:sessionId/subagent/:agentId")` alongside the existing diff/folder/openspec routes.
-- [ ] 7.2 Render `<SubagentPopoutPage>` for matched routes in BOTH the desktop layout (~line 1066) and the mobile shell layout (~line 1335).
-- [ ] 7.3 Add a `useEffect` that subscribes the parent session in the popout case (so a fresh tab can load `/session/<sid>/subagent/<aid>` without needing the parent tab open elsewhere).
-- [ ] 7.4 Extend the `toolContext: ToolContext` memo around line 673 to include `sessionId: selectedId` and `session: selectedState`. Renderers will then have access to both.
-- [ ] 7.5 Update both render call-sites of the popout route to pass `subscriptionResolved` (derived from `status === "connected" && subscribedRef.current.has(sessionId)`) and `parentLabel` (from `sessions.get(sessionId)?.cwd`).
+- [x] 7.1 Register `useRoute("/session/:sessionId/subagent/:agentId")` alongside the existing diff/folder/openspec routes.
+- [x] 7.2 Render `<SubagentPopoutPage>` for matched routes in BOTH the desktop layout (~line 1072) and the mobile shell layout (~line 1361).
+- [x] 7.3 Add a `useEffect` that subscribes the parent session in the popout case (so a fresh tab can load `/session/<sid>/subagent/<aid>` without needing the parent tab open elsewhere).
+- [x] 7.4 Extend the `toolContext: ToolContext` memo to include `sessionId: selectedId` and `session: sessionStates.get(selectedId)`. Renderers now have access to both.
+- [x] 7.5 Both render call-sites of the popout route pass `subscriptionResolved` (derived from `status === "connected" && subscribedRef.current.has(sessionId)`) and `parentLabel` (from `sessions.get(sessionId)?.cwd`).
 
 ## 8. Cleanup (DONE)
 
