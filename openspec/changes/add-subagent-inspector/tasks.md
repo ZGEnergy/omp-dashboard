@@ -89,7 +89,7 @@ Phase 2 (producer adoption: tintinweb removal, settings surface, agentMdPath) is
 
 - [x] 10.1 Documented in proposal.md that `pi-dashboard-subagents` v0.1.x is the producer.
 - [x] 10.2 Cross-referenced the scaffold change in the other repo.
-- [ ] 10.3 → superseded by §14 (Tier-2 fallback is being removed wholesale, not just the footnote).
+- [x] 10.3 → superseded by §14 (Tier-2 fallback removed wholesale, not just the footnote; SubagentDetailView.tsx no longer has the running-no-entries branch).
 
 ## 12. Reducer backfill from `tool_execution_end` (PENDING)
 
