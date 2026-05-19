@@ -42,7 +42,6 @@ import { sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendSessionNameI
 import { registerFlowEventListeners, FLOW_EVENT_MAP, SUBAGENT_EVENT_MAP } from "./flow-event-wiring.js";
 import { refreshUiModules, subscribeUiInvalidate, handleUiManagement, type UiModulesBridgeCtx } from "./ui-modules.js";
 import { inlineMessageText, type ReadFileOutcome } from "./markdown-image-inliner.js";
-import { PromptQueue } from "./prompt-queue.js";
 import type { ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
 const HEARTBEAT_INTERVAL = 15_000;
@@ -203,27 +202,72 @@ function initBridge(pi: ExtensionAPI) {
   const retryTracker = new RetryTracker();
   const usageLimitOrderer = new UsageLimitOrderer();
 
-  // Bridge-owned mid-turn prompt queue per session. Holds prompts that arrive
-  // while the agent is streaming; drained on `agent_end`; cleared on user
-  // request. See change: surface-mid-turn-prompt-queue.
-  const promptQueues = new Map<string, PromptQueue>();
-  function getPromptQueue(sid: string): PromptQueue {
-    let q = promptQueues.get(sid);
-    if (!q) {
-      q = new PromptQueue(sid);
-      promptQueues.set(sid, q);
-    }
-    return q;
-  }
-  function emitQueueState(sid: string): void {
+  // Bridge-owned shadow queues. Pi's ExtensionAPI does NOT forward
+  // `queue_update` events to extensions (verified in pi-coding-agent 0.71+),
+  // so the bridge tracks steering + follow-up state itself by mirroring every
+  // mutation it performs on pi (sends, clears, edits) plus the natural drain
+  // boundaries (turn_end clears steering, agent_end clears followUp).
+  // The bridge is the source of truth that all browser clients converge on
+  // via `queue_update` ExtensionToServerMessage.
+  // See change: add-followup-edit-and-steer-cancel.
+  let bridgeSteering: string[] = [];
+  let bridgeFollowUp: string[] = [];
+  function emitQueueUpdate(): void {
     if (!isActive() || !sessionReady) return;
-    const q = promptQueues.get(sid);
-    const pending = q ? q.snapshot() : [];
     connection.send({
-      type: "event_forward",
-      sessionId: sid,
-      event: { eventType: "queue_state", timestamp: Date.now(), data: { pending } },
+      type: "queue_update",
+      sessionId,
+      steering: [...bridgeSteering],
+      followUp: [...bridgeFollowUp],
     });
+  }
+  function recordSteerSent(text: string): void {
+    // Only record when the agent was actually streaming at send time. Idle
+    // sends start a new turn directly — pi doesn't queue them, so the
+    // shadow queue must not show a chip. See change: add-followup-edit-and-steer-cancel.
+    if (!getBridgeState().isAgentStreaming) return;
+    bridgeSteering.push(text);
+    emitQueueUpdate();
+  }
+  /** v2 soft cap on follow-up queue depth. See design.md Decision 8. */
+  const FOLLOWUP_QUEUE_CAP = 20;
+  function recordFollowupSent(text: string): void {
+    if (!getBridgeState().isAgentStreaming) return;
+    // v2: multi-entry queue (was cap-1 in v1). Soft-cap; drop silently when over.
+    if (bridgeFollowUp.length >= FOLLOWUP_QUEUE_CAP) {
+      console.warn("[dashboard] follow-up queue at soft cap (" + FOLLOWUP_QUEUE_CAP + "); dropping new entry");
+      return;
+    }
+    bridgeFollowUp.push(text);
+    emitQueueUpdate();
+  }
+  /**
+   * Mirror of pi's `_getUserMessageText` (pi-coding-agent agent-session.js).
+   * Used by the per-entry shadow-queue drain matcher in the `message_start`
+   * handler. Joining all text blocks (and dropping non-text content) keeps
+   * matching parity with pi's internal queue logic.
+   */
+  function extractUserMessageText(message: any): string {
+    if (!message || message.role !== "user") return "";
+    const content = message.content;
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content
+      .filter((c: any) => c && c.type === "text")
+      .map((c: any) => c.text ?? "")
+      .join("");
+  }
+
+  /** v2 helper: rewrite the entire follow-up queue + replay to pi. */
+  function rewriteFollowupQueue(newEntries: string[]): void {
+    const capped = newEntries.slice(0, FOLLOWUP_QUEUE_CAP);
+    const clearFn = (pi as any).clearFollowUpQueue;
+    if (typeof clearFn === "function") clearFn.call(pi);
+    for (const t of capped) {
+      (pi.sendUserMessage as any)(t, { deliverAs: "followUp" });
+    }
+    bridgeFollowUp = [...capped];
+    emitQueueUpdate();
   }
 
   /** Forward a synthesized auto_retry_* event using the standard event_forward shape. */
@@ -598,25 +642,61 @@ function initBridge(pi: ExtensionAPI) {
         }
         return;
       }
-      // Bridge-owned mid-turn queue: clear on user request. Routed at the
-      // bridge level (not in commandHandler) because the queue map lives in
-      // bridge.ts's closure. See change: surface-mid-turn-prompt-queue.
-      if (msg.type === "clear_queue") {
+      // Pi-native queue control: route the three new browser messages
+      // straight to pi's clear/send APIs. See change: add-followup-edit-and-steer-cancel.
+      if (msg.type === "clear_steering_queue") {
         if (msg.sessionId === sessionId) {
-          const q = promptQueues.get(sessionId);
-          if (q) q.clear();
-          emitQueueState(sessionId);
+          const fn = (pi as any).clearSteeringQueue;
+          if (typeof fn === "function") fn.call(pi);
+          else console.warn("[dashboard] pi.clearSteeringQueue unavailable (pi version)");
+          bridgeSteering = [];
+          emitQueueUpdate();
         }
         return;
       }
-      // Bridge-owned mid-turn queue: remove a single entry by id.
-      // Idempotent on missing id (still emits a snapshot for the caller).
-      // See change: surface-mid-turn-prompt-queue.
-      if (msg.type === "remove_queue_entry") {
+      if (msg.type === "clear_followup_slot") {
         if (msg.sessionId === sessionId) {
-          const q = promptQueues.get(sessionId);
-          if (q) q.remove(msg.id);
-          emitQueueState(sessionId);
+          const fn = (pi as any).clearFollowUpQueue;
+          if (typeof fn === "function") fn.call(pi);
+          else console.warn("[dashboard] pi.clearFollowUpQueue unavailable (pi version)");
+          bridgeFollowUp = [];
+          emitQueueUpdate();
+        }
+        return;
+      }
+      if (msg.type === "edit_followup_slot") {
+        // v1 backward-compat path: "replace ALL follow-up entries with this one text."
+        // v2 clients prefer `edit_followup_entry { index: 0 }`. See change: add-followup-edit-and-steer-cancel.
+        if (msg.sessionId === sessionId) {
+          rewriteFollowupQueue([msg.text]);
+        }
+        return;
+      }
+      if (msg.type === "promote_followup_entry") {
+        if (msg.sessionId === sessionId) {
+          const idx = msg.index;
+          if (idx < 0 || idx >= bridgeFollowUp.length) return;
+          const head = bridgeFollowUp[idx];
+          const rest = bridgeFollowUp.filter((_, i) => i !== idx);
+          rewriteFollowupQueue([head, ...rest]);
+        }
+        return;
+      }
+      if (msg.type === "remove_followup_entry") {
+        if (msg.sessionId === sessionId) {
+          const idx = msg.index;
+          if (idx < 0 || idx >= bridgeFollowUp.length) return;
+          const surviving = bridgeFollowUp.filter((_, i) => i !== idx);
+          rewriteFollowupQueue(surviving);
+        }
+        return;
+      }
+      if (msg.type === "edit_followup_entry") {
+        if (msg.sessionId === sessionId) {
+          const idx = msg.index;
+          if (idx < 0 || idx >= bridgeFollowUp.length) return;
+          const next = bridgeFollowUp.map((t, i) => (i === idx ? msg.text : t));
+          rewriteFollowupQueue(next);
         }
         return;
       }
@@ -743,23 +823,6 @@ function initBridge(pi: ExtensionAPI) {
     spawnNew: () => {
       connection.send({ type: "spawn_new_session", sessionId, cwd: process.cwd() });
     },
-    enqueueIfStreaming: (text: string, images?: ImageContent[]): boolean => {
-      if (!getBridgeState().isAgentStreaming) return false;
-      const q = getPromptQueue(sessionId);
-      q.enqueue(text, images);
-      emitQueueState(sessionId);
-      return true;
-    },
-    clearQueueOnAbort: () => {
-      // User pressed Stop — drop the bridge-owned queue so the upcoming
-      // `agent_end` drain has nothing to flush. See change:
-      // surface-mid-turn-prompt-queue.
-      const q = promptQueues.get(sessionId);
-      if (q && !q.isEmpty()) {
-        q.clear();
-        emitQueueState(sessionId);
-      }
-    },
     sessionPrompt: async (text, delivery) => {
       // Route slash commands: management events, flow:run, extension dispatch, then fallback.
       // See change: fix-extension-slash-commands-in-dashboard.
@@ -794,11 +857,22 @@ function initBridge(pi: ExtensionAPI) {
       // Fallback: send as user message (template-expanded).
       // Uses delivery param to choose deliverAs: "steer" or "followUp".
       // Defaults to "followUp" when delivery is absent (backward compatible).
-      // See change: add-steering-message.
+      // v2: follow-up sends APPEND to the queue (capacity-1 invariant dropped).
+      // See change: add-followup-edit-and-steer-cancel design.md Decision 8.
+      // Capture pre-send streaming state BEFORE pi.sendUserMessage — idle
+      // sends synchronously fire agent_start which flips the flag.
       const deliverAs = delivery ?? ("followUp" as const);
+      const wasStreaming = getBridgeState().isAgentStreaming;
       const expanded = expandPromptTemplateFromDisk(text, process.cwd(), pi);
       (pi.sendUserMessage as any)(expanded, { deliverAs });
+      if (wasStreaming) {
+        if (deliverAs === "steer") recordSteerSent(expanded);
+        else recordFollowupSent(expanded);
+      }
     },
+    onSteerSent: recordSteerSent,
+    onFollowupSent: recordFollowupSent,
+    isStreaming: () => getBridgeState().isAgentStreaming === true,
   });
 
   // Reload support: extension events only provide ExtensionContext (no reload).
@@ -924,54 +998,12 @@ function initBridge(pi: ExtensionAPI) {
             sendSyntheticRetryEvent(trackerSynth.eventType, trackerSynth.data);
           }
         }
-        // Drain the bridge-owned mid-turn prompt queue. Deferred via
-        // setTimeout (NOT queueMicrotask) so any in-flight `clear_queue` /
-        // `remove_queue_entry` WS messages get processed first. Microtasks
-        // always run before I/O events; a 50ms macrotask delay gives a
-        // user's `Clear all` click time to traverse the loopback WS round-
-        // trip before the drain commits messages to pi. The drain itself
-        // also yields to I/O between entries via the sink wrapper so a
-        // late-arriving clear can still cancel remaining drains.
-        // See change: surface-mid-turn-prompt-queue.
-        const drainSid = sessionId;
-        const drainQueue = promptQueues.get(drainSid);
-        if (drainQueue && !drainQueue.isEmpty() && !drainQueue.isDraining()) {
-          const DRAIN_GRACE_MS = 50;
-          setTimeout(() => {
-            if (!isActive()) return;
-            // Re-check after the grace window: a clear_queue might have
-            // arrived and emptied the queue. Skip the drain entirely.
-            if (drainQueue.isEmpty()) return;
-            drainQueue
-              .drain(
-                async (text, images) => {
-                  if (!isActive()) return;
-                  if (images && images.length > 0) {
-                    const content = [
-                      { type: "text" as const, text },
-                      ...images.map((img) => ({
-                        type: "image" as const,
-                        data: img.data,
-                        mimeType: img.mimeType,
-                      })),
-                    ];
-                    (pi.sendUserMessage as any)(content);
-                  } else {
-                    (pi.sendUserMessage as any)(text);
-                  }
-                  // Yield to the I/O loop between drain steps so a mid-
-                  // drain `clear_queue` (or `remove_queue_entry`) can take
-                  // effect before the NEXT entry is committed to pi.
-                  await new Promise<void>((r) => setTimeout(r, 0));
-                },
-                () => emitQueueState(drainSid),
-              )
-              .catch((err) => {
-                console.error(`[dashboard] prompt queue drain failed: ${err?.message ?? err}`);
-                emitQueueState(drainSid);
-              });
-          }, DRAIN_GRACE_MS);
-        }
+        // Bridge shadow follow-up queue: the per-entry drain matcher in
+        // the `message_start` handler removes each entry as pi delivers it
+        // (mirrors pi's internal `_processAgentEvent`). No bulk clear here
+        // — it would wipe entries the user adds DURING the drain window.
+        // See change: add-followup-edit-and-steer-cancel (per-entry-drain).
+
       }
       // For model_select, enrich the event data with thinkingLevel
       if (eventType === "model_select") {
@@ -997,6 +1029,17 @@ function initBridge(pi: ExtensionAPI) {
       // We do NOT attach entryId here — the message has no id yet on pi
       // 0.69+ (persistence is deferred to message_end). See change:
       // fix-per-message-fork.
+      //
+      // USER message_start sends are deferred via setTimeout(0) so they
+      // land on the wire AFTER any pending message_end deferrals (which
+      // also use setTimeout(0) — timer FIFO preserves order). Without this,
+      // a follow-up user message_start emitted synchronously by pi during
+      // an agent_end drain would arrive BEFORE the preceding assistant
+      // message_end, and the client reducer would append the user bubble
+      // above the assistant's final response. ASSISTANT message_start stays
+      // sync because message_update events fire sync and the reducer's
+      // streamingTextFlushed reset depends on message_start being processed
+      // first. See change: add-followup-edit-and-steer-cancel (chat-order).
       if (eventType === "message_start") {
         wrapAppendMessageForCtx(ctx);
         const messageRef = (event as any).message;
@@ -1005,7 +1048,40 @@ function initBridge(pi: ExtensionAPI) {
           pendingNonces.set(messageRef as object, nonce);
           const enriched = { ...event, nonce };
           const msg = mapEventToProtocol(sessionId, enriched);
-          connection.send(msg);
+          const role = (messageRef as any).role;
+          if (role === "user") {
+            // Per-entry shadow-queue drain: mirror pi's internal logic
+            // (`_processAgentEvent` in pi-coding-agent agent-session.js).
+            // When pi delivers a queued user message, find its text in
+            // `bridgeSteering` first then `bridgeFollowUp`, remove the
+            // first occurrence, and emit a fresh `queue_update` so the
+            // dashboard shrinks the visible queue immediately rather than
+            // bulk-clearing it at the final agent_end/turn_end. This is
+            // the only mechanism that updates the shadow on drain — the
+            // previous bulk clears were removed because they would also
+            // wipe entries the user adds DURING a drain. See change:
+            // add-followup-edit-and-steer-cancel (per-entry-drain).
+            const text = extractUserMessageText(messageRef);
+            if (text) {
+              const sIdx = bridgeSteering.indexOf(text);
+              if (sIdx !== -1) {
+                bridgeSteering.splice(sIdx, 1);
+                emitQueueUpdate();
+              } else {
+                const fIdx = bridgeFollowUp.indexOf(text);
+                if (fIdx !== -1) {
+                  bridgeFollowUp.splice(fIdx, 1);
+                  emitQueueUpdate();
+                }
+              }
+            }
+            setTimeout(() => {
+              if (!isActive() || !sessionReady) return;
+              connection.send(msg);
+            }, 0);
+          } else {
+            connection.send(msg);
+          }
           return;
         }
       }
@@ -1092,6 +1168,17 @@ function initBridge(pi: ExtensionAPI) {
       connection.send(msg);
     }));
   }
+
+  // Pi does NOT forward `queue_update` events to extensions (verified in
+  // pi-coding-agent 0.71+ — see _emitExtensionEvent allowlist). Bridge
+  // tracks the shadow queues itself; drain happens on observed boundaries:
+  // turn_end drains steering (pi's mode:"all" delivers all queued steers),
+  // agent_end drains follow-up (pi has no more tool calls).
+  // See change: add-followup-edit-and-steer-cancel.
+  // Bridge shadow steering queue: per-entry drain matcher in the
+  // `message_start` handler removes each entry as pi delivers it. No bulk
+  // clear here — it would wipe entries the user adds DURING the drain.
+  // See change: add-followup-edit-and-steer-cancel (per-entry-drain).
 
   // EventBus catch-all: intercept pi.events.emit to forward all EventBus
   // traffic (flow events, subagent events, custom extension events).
@@ -1618,17 +1705,13 @@ function initBridge(pi: ExtensionAPI) {
 
   // Shared handler for session changes (new/fork/resume)
   function handleSessionChange(ctx: any) {
-    // Drop any bridge-owned prompt queue for the outgoing session. New/forked
-    // sessions start fresh; the old queue is orphaned because pi's session id
-    // has changed and we cannot route its drain target anymore.
-    // See change: surface-mid-turn-prompt-queue.
-    const oldQueue = promptQueues.get(sessionId);
-    if (oldQueue && !oldQueue.isEmpty()) {
-      oldQueue.clear();
-      emitQueueState(sessionId);
+    // Bridge shadow queues reset on session change so the new session
+    // starts with empty chips. See change: add-followup-edit-and-steer-cancel.
+    if (bridgeSteering.length > 0 || bridgeFollowUp.length > 0) {
+      bridgeSteering = [];
+      bridgeFollowUp = [];
+      emitQueueUpdate();
     }
-    promptQueues.delete(sessionId);
-
     const bc = syncBc();
     _handleSessionChange(bc, ctx, getFlowsList);
     applyBc(bc);

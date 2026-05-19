@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useCallback, useState, useMemo, forwardRef, useImperativeHandle } from "react";
 import { Icon } from "@mdi/react";
-import { mdiContentCopy, mdiTextBox, mdiLoading, mdiChevronDown, mdiSourceFork } from "@mdi/js";
+import { mdiContentCopy, mdiTextBox, mdiLoading, mdiChevronDown, mdiSourceFork, mdiClose } from "@mdi/js";
 import { ErrorBanner } from "./ErrorBanner";
 import { RetryBanner } from "./RetryBanner";
 import type { SessionState, ChatImage, InteractiveUiRequest } from "../lib/event-reducer.js";
@@ -41,6 +41,16 @@ interface Props {
    * capability + change `surface-mid-turn-prompt-queue`.
    */
   queuedTexts?: string[];
+  /**
+   * Pending steer messages from `Session.pendingQueues.steering`. Rendered
+   * inline at the bottom of the chat list as user-style bubbles with a
+   * "STEERING" header + spinner + ✕ cancel. Once pi drains them on
+   * `turn_end`, the bridge clears the shadow and the chat naturally shows
+   * the real user message via `message_end`. See change: add-followup-edit-and-steer-cancel.
+   */
+  pendingSteering?: string[];
+  /** Cancel all pending steering messages (bulk; pi exposes only clearSteeringQueue). */
+  onCancelSteering?: () => void;
 }
 
 function ImageAttachments({ images }: { images: ChatImage[] }) {
@@ -132,7 +142,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onCancelPending, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onDismissError, onRetryAfterError, queuedTexts }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onCancelPending, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onDismissError, onRetryAfterError, queuedTexts, pendingSteering, onCancelSteering }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottom = useRef(true);
   const programmaticScroll = useRef(false);
@@ -486,9 +496,40 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
         />
       )}
 
-      {/* Optimistic pending prompt card. Suppressed when the prompt text
-          has been observed in the bridge queue — the queue chip rendered
-          by QueuePanel becomes the canonical surface for that message.
+      {/* Inline-chat steering: pending steer entries render here as user-style
+          bubbles, positioned at the bottom of the chat list. Each shows a
+          STEERING header + spinner + ✕ cancel. Once pi drains the entry on
+          turn_end, the bridge clears `pendingSteering`, the bubble disappears,
+          and the chat naturally shows the prompt as a regular user message
+          via the subsequent `message_end`. See change: add-followup-edit-and-steer-cancel. */}
+      {pendingSteering && pendingSteering.length > 0 && pendingSteering.map((steerText, idx) => (
+        <div key={`pending-steer-${idx}-${steerText.slice(0, 16)}`} data-testid="pending-steer-card" className="mt-4 mb-4 flex justify-end">
+          <div className={`relative bg-blue-500/10 border border-blue-500/20 border-l-2 border-l-blue-400 rounded-xl shadow-md px-4 py-2 ${bubbleMax}`}>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-blue-400/80 font-medium">
+                <Icon path={mdiLoading} size={0.45} className="animate-spin" />
+                Steering
+              </div>
+              {idx === 0 && onCancelSteering && (
+                <button
+                  type="button"
+                  onClick={onCancelSteering}
+                  data-testid="pending-steer-cancel"
+                  aria-label="Cancel pending steering"
+                  title="Cancel all pending steering"
+                  className="inline-flex items-center justify-center w-5 h-5 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                >
+                  <Icon path={mdiClose} size={0.55} />
+                </button>
+              )}
+            </div>
+            <MarkdownContent content={steerText} />
+          </div>
+        </div>
+      ))}
+
+      {/* Legacy optimistic pending prompt card. Write site removed in v2;
+          this block stays dead-code so existing fixtures keep validating.
           See change: surface-mid-turn-prompt-queue. */}
       {state.pendingPrompt && !(queuedTexts?.includes(state.pendingPrompt.text)) && (
         <div data-testid="pending-prompt-card" className="mt-4 mb-4 flex justify-end">
@@ -513,7 +554,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
         </div>
       )}
 
-      {state.messages.length === 0 && !state.streamingText && !(state.pendingPrompt && !(queuedTexts?.includes(state.pendingPrompt.text))) && (
+      {state.messages.length === 0 && !state.streamingText && !(state.pendingPrompt && !(queuedTexts?.includes(state.pendingPrompt.text))) && !(pendingSteering && pendingSteering.length > 0) && (
         <div className="flex items-center justify-center h-full text-[var(--text-tertiary)]">
           <p>No messages yet</p>
         </div>

@@ -783,7 +783,11 @@ describe("parseSendPrompt", () => {
   });
 });
 
-describe("CommandHandler enqueueIfStreaming (mid-turn-prompt-queue)", () => {
+describe("CommandHandler delivery routing (pi-native queues)", () => {
+  // After change: add-followup-edit-and-steer-cancel, the bridge no longer
+  // owns a parallel queue. All passthrough sends go directly to pi.sendUserMessage;
+  // followUp delivery additionally calls pi.clearFollowUpQueue() first to enforce
+  // capacity-1 on the slot.
   function createMockPi() {
     return {
       sendUserMessage: vi.fn(),
@@ -792,115 +796,83 @@ describe("CommandHandler enqueueIfStreaming (mid-turn-prompt-queue)", () => {
       getSessionName: vi.fn(),
       on: vi.fn(),
       exec: vi.fn(),
+      clearFollowUpQueue: vi.fn(),
+      clearSteeringQueue: vi.fn(),
     };
   }
 
-  it("calls enqueueIfStreaming on passthrough text and skips pi.sendUserMessage when it returns true", async () => {
-    const pi = createMockPi();
-    const enqueueIfStreaming = vi.fn().mockReturnValue(true);
-    const handler = createCommandHandler(pi as any, "s1", { enqueueIfStreaming });
-
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "queue me",
-    });
-
-    expect(enqueueIfStreaming).toHaveBeenCalledWith("queue me", undefined);
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
-  });
-
-  it("falls through to pi.sendUserMessage when enqueueIfStreaming returns false (agent idle)", async () => {
-    const pi = createMockPi();
-    const enqueueIfStreaming = vi.fn().mockReturnValue(false);
-    const handler = createCommandHandler(pi as any, "s1", { enqueueIfStreaming });
-
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "send now",
-    });
-
-    expect(enqueueIfStreaming).toHaveBeenCalledWith("send now", undefined);
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("send now", { deliverAs: "followUp" });
-  });
-
-  it("forwards images to enqueueIfStreaming and skips pi.sendUserMessage when enqueued", async () => {
-    const pi = createMockPi();
-    const images = [{ type: "image" as const, data: "AAA", mimeType: "image/png" }];
-    const enqueueIfStreaming = vi.fn().mockReturnValue(true);
-    const handler = createCommandHandler(pi as any, "s1", { enqueueIfStreaming });
-
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "with image",
-      images,
-    });
-
-    expect(enqueueIfStreaming).toHaveBeenCalledWith("with image", images);
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
-  });
-
-  it("does not call enqueueIfStreaming for bash commands", async () => {
-    const pi = createMockPi();
-    pi.exec = vi.fn().mockResolvedValue({ stdout: "hi", stderr: "", exitCode: 0 });
-    const enqueueIfStreaming = vi.fn().mockReturnValue(true);
-    const handler = createCommandHandler(pi as any, "s1", { enqueueIfStreaming });
-
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "!ls",
-    });
-
-    expect(enqueueIfStreaming).not.toHaveBeenCalled();
-  });
-
-  it("does not call enqueueIfStreaming for slash commands", async () => {
-    const pi = createMockPi();
-    const enqueueIfStreaming = vi.fn().mockReturnValue(true);
-    const sessionPrompt = vi.fn();
-    const handler = createCommandHandler(pi as any, "s1", { enqueueIfStreaming, sessionPrompt });
-
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "/help",
-    });
-
-    expect(enqueueIfStreaming).not.toHaveBeenCalled();
-    expect(sessionPrompt).toHaveBeenCalledWith("/help", undefined);
-  });
-
-  it("behaves like today when enqueueIfStreaming is not provided (passthrough goes to pi)", async () => {
+  it("passthrough followUp APPENDS to pi's queue (v2: no pre-clear)", async () => {
     const pi = createMockPi();
     const handler = createCommandHandler(pi as any, "s1");
 
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "plain text",
-    });
+    await handler.handle({ type: "send_prompt", sessionId: "s1", text: "after done", delivery: "followUp" });
 
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("plain text", { deliverAs: "followUp" });
+    // v2: cap-1 invariant dropped. clearFollowUpQueue is only called by explicit
+    // promote/remove/edit operations, not on every send.
+    expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("after done", { deliverAs: "followUp" });
   });
 
-  it("abort calls clearQueueOnAbort BEFORE options.abort so the post-abort agent_end drain finds an empty queue", async () => {
+  it("passthrough delivery absent defaults to followUp and APPENDS (v2)", async () => {
     const pi = createMockPi();
-    const callOrder: string[] = [];
-    const clearQueueOnAbort = vi.fn(() => { callOrder.push("clear"); });
-    const abort = vi.fn(() => { callOrder.push("abort"); });
-    const handler = createCommandHandler(pi as any, "s1", { abort, clearQueueOnAbort });
+    const handler = createCommandHandler(pi as any, "s1");
 
-    await handler.handle({ type: "abort", sessionId: "s1" });
+    await handler.handle({ type: "send_prompt", sessionId: "s1", text: "plain" });
 
-    expect(clearQueueOnAbort).toHaveBeenCalledTimes(1);
-    expect(abort).toHaveBeenCalledTimes(1);
-    expect(callOrder).toEqual(["clear", "abort"]);
+    expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("plain", { deliverAs: "followUp" });
   });
 
-  it("abort works without clearQueueOnAbort (back-compat for callers that don't pass it)", async () => {
+  it("passthrough delivery steer does NOT call clearFollowUpQueue or clearSteeringQueue", async () => {
+    const pi = createMockPi();
+    const handler = createCommandHandler(pi as any, "s1");
+
+    await handler.handle({ type: "send_prompt", sessionId: "s1", text: "focus on X", delivery: "steer" });
+
+    expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
+    expect(pi.clearSteeringQueue).not.toHaveBeenCalled();
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("focus on X", { deliverAs: "steer" });
+  });
+
+  it("passthrough with images preserves image content (v2: no pre-clear)", async () => {
+    const pi = createMockPi();
+    const images = [{ type: "image" as const, data: "AAA", mimeType: "image/png" }];
+    const handler = createCommandHandler(pi as any, "s1");
+
+    await handler.handle({ type: "send_prompt", sessionId: "s1", text: "img", images, delivery: "followUp" });
+
+    expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
+    expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
+    const [content, opts] = pi.sendUserMessage.mock.calls[0];
+    expect(opts).toEqual({ deliverAs: "followUp" });
+    expect(Array.isArray(content)).toBe(true);
+  });
+
+  it("bash commands bypass delivery routing entirely (no clearFollowUpQueue call)", async () => {
+    const pi = createMockPi();
+    pi.exec = vi.fn().mockResolvedValue({ stdout: "hi", stderr: "", exitCode: 0 });
+    const handler = createCommandHandler(pi as any, "s1");
+
+    await handler.handle({ type: "send_prompt", sessionId: "s1", text: "!ls" });
+
+    // Bash handler forwards stdout via sendUserMessage as its result, but
+    // delivery routing is not involved — no clearFollowUpQueue or deliverAs option.
+    expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
+    expect(pi.clearSteeringQueue).not.toHaveBeenCalled();
+  });
+
+  it("slash command with delivery=steer passes delivery to sessionPrompt; no pi call from handler", async () => {
+    const pi = createMockPi();
+    const sessionPrompt = vi.fn();
+    const handler = createCommandHandler(pi as any, "s1", { sessionPrompt });
+
+    await handler.handle({ type: "send_prompt", sessionId: "s1", text: "/some-command args", delivery: "steer" });
+
+    expect(sessionPrompt).toHaveBeenCalledWith("/some-command args", "steer");
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("abort no longer requires clearQueueOnAbort option", async () => {
     const pi = createMockPi();
     const abort = vi.fn();
     const handler = createCommandHandler(pi as any, "s1", { abort });
@@ -908,88 +880,5 @@ describe("CommandHandler enqueueIfStreaming (mid-turn-prompt-queue)", () => {
     await handler.handle({ type: "abort", sessionId: "s1" });
 
     expect(abort).toHaveBeenCalledTimes(1);
-  });
-
-  // ── steering delivery mode ────────────────────────────────────
-  // See change: add-steering-message.
-
-  it("delivery steer on passthrough bypasses bridge queue and calls sendUserMessage with deliverAs: steer", async () => {
-    const pi = createMockPi();
-    const enqueueIfStreaming = vi.fn().mockReturnValue(true);
-    const handler = createCommandHandler(pi as any, "s1", { enqueueIfStreaming });
-
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "focus on X",
-      delivery: "steer",
-    });
-
-    expect(enqueueIfStreaming).not.toHaveBeenCalled();
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("focus on X", { deliverAs: "steer" });
-  });
-
-  it("delivery followUp on passthrough preserves existing enqueue+followUp behavior", async () => {
-    const pi = createMockPi();
-    const enqueueIfStreaming = vi.fn().mockReturnValue(true);
-    const handler = createCommandHandler(pi as any, "s1", { enqueueIfStreaming });
-
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "after done",
-      delivery: "followUp",
-    });
-
-    expect(enqueueIfStreaming).toHaveBeenCalledWith("after done", undefined);
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
-  });
-
-  it("delivery absent on passthrough preserves existing enqueue+followUp behavior", async () => {
-    const pi = createMockPi();
-    const enqueueIfStreaming = vi.fn().mockReturnValue(false);
-    const handler = createCommandHandler(pi as any, "s1", { enqueueIfStreaming });
-
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "plain",
-    });
-
-    expect(enqueueIfStreaming).toHaveBeenCalledWith("plain", undefined);
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("plain", { deliverAs: "followUp" });
-  });
-
-  it("delivery steer on slash command passes delivery to sessionPrompt", async () => {
-    const pi = createMockPi();
-    const sessionPrompt = vi.fn();
-    const handler = createCommandHandler(pi as any, "s1", { sessionPrompt });
-
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "/some-command args",
-      delivery: "steer",
-    });
-
-    expect(sessionPrompt).toHaveBeenCalledWith("/some-command args", "steer");
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
-  });
-
-  it("delivery steer on passthrough when enqueueIfStreaming returns false (idle) still calls sendUserMessage with steer", async () => {
-    const pi = createMockPi();
-    const enqueueIfStreaming = vi.fn().mockReturnValue(false);
-    const handler = createCommandHandler(pi as any, "s1", { enqueueIfStreaming });
-
-    await handler.handle({
-      type: "send_prompt",
-      sessionId: "s1",
-      text: "hi",
-      delivery: "steer",
-    });
-
-    // Steer bypasses enqueueIfStreaming entirely — it's not even called.
-    expect(enqueueIfStreaming).not.toHaveBeenCalled();
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("hi", { deliverAs: "steer" });
   });
 });

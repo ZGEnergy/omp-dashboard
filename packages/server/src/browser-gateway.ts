@@ -66,7 +66,7 @@ import { createViewedSessionTracker, type ViewedSessionTracker } from "./viewed-
 import type { TerminalManager } from "./terminal-manager.js";
 import type { BrowserHandlerContext } from "./browser-handlers/handler-context.js";
 import { handleSubscribe } from "./browser-handlers/subscription-handler.js";
-import { handleSendPrompt, handleResumeSession, handleSpawnSession, handleShutdown, handleAbort, handleFlowControl, handleForceKill, handleKillProcess, handleClearQueue, handleRemoveQueueEntry } from "./browser-handlers/session-action-handler.js";
+import { handleSendPrompt, handleResumeSession, handleSpawnSession, handleShutdown, handleAbort, handleFlowControl, handleForceKill, handleKillProcess, handleClearSteeringQueue, handleClearFollowupSlot, handleEditFollowupSlot, handlePromoteFollowupEntry, handleRemoveFollowupEntry, handleEditFollowupEntry } from "./browser-handlers/session-action-handler.js";
 import { handleRenameSession, handleHideSession, handleUnhideSession, handleAttachProposal, handleDetachProposal, handleFetchContent, handleListSessions } from "./browser-handlers/session-meta-handler.js";
 import { handleCreateTerminal, handleKillTerminal, handleRenameTerminal } from "./browser-handlers/terminal-handler.js";
 import { handlePinDirectory, handleUnpinDirectory, handleReorderPinnedDirs, handleReorderSessions, handleOpenSpecRefresh, handleOpenSpecBulkArchive, handleExtensionUiResponse, handlePiGatewayForward, handleCreateWorkspace, handleRenameWorkspace, handleDeleteWorkspace, handleSetWorkspaceCollapsed, handleAddFolderToWorkspace, handleRemoveFolderFromWorkspace, handleReorderWorkspaceFolders, handleReorderWorkspaces } from "./browser-handlers/directory-handler.js";
@@ -383,11 +383,23 @@ export function createBrowserGateway(
           case "abort":
             handleAbort(msg, ctx);
             break;
-          case "clear_queue":
-            handleClearQueue(msg, ctx);
+          case "clear_steering_queue":
+            handleClearSteeringQueue(msg, ctx);
             break;
-          case "remove_queue_entry":
-            handleRemoveQueueEntry(msg, ctx);
+          case "clear_followup_slot":
+            handleClearFollowupSlot(msg, ctx);
+            break;
+          case "edit_followup_slot":
+            handleEditFollowupSlot(msg, ctx);
+            break;
+          case "promote_followup_entry":
+            handlePromoteFollowupEntry(msg, ctx);
+            break;
+          case "remove_followup_entry":
+            handleRemoveFollowupEntry(msg, ctx);
+            break;
+          case "edit_followup_entry":
+            handleEditFollowupEntry(msg, ctx);
             break;
           case "force_kill":
             await handleForceKill(msg, ctx);

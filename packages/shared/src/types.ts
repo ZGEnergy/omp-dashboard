@@ -127,13 +127,13 @@ export interface DashboardSession {
    */
   assets?: Record<string, { data: string; mimeType: string }>;
   /**
-   * Bridge-owned mid-turn prompt queue snapshot. `pending` contains prompts
-   * the user typed while the agent was streaming; the bridge holds them in
-   * memory, emits this snapshot via `queue_state` events, and drains them
-   * via `pi.sendUserMessage` on `agent_end`. Default `{ pending: [] }`.
-   * See capability `mid-turn-prompt-queue`.
+   * Mirror of pi's native steering + follow-up queues for this session.
+   * Populated from pi's `queue_update` event, forwarded by the bridge.
+   * `steering[]` typically empties every turn boundary (1-15 s); `followUp`
+   * is dashboard-enforced capacity 1 and drains on `agent_end`.
+   * See capability `mid-turn-prompt-queue`. See change: add-followup-edit-and-steer-cancel.
    */
-  queue?: { pending: PendingPrompt[] };
+  pendingQueues?: { steering: string[]; followUp: string[] };
 }
 
 // ── Extension UI System (Phase 1: management-modal slot) ───────────
@@ -316,17 +316,9 @@ export interface ImageContent {
   mimeType: string;
 }
 
-/**
- * One entry in the bridge-owned mid-turn prompt queue. Pushed when a
- * `send_prompt` arrives while the agent is streaming; drained on `agent_end`.
- * `id` is a bridge-minted opaque key (`bq_<sessionId>_<counter>`). Server
- * and client treat it as black-box. See change: surface-mid-turn-prompt-queue.
- */
-export interface PendingPrompt {
-  id: string;
-  text: string;
-  images?: ImageContent[];
-}
+// PendingPrompt removed in change: add-followup-edit-and-steer-cancel.
+// Pi's native queues are now the single source of truth; `Session.pendingQueues`
+// holds `string[]` arrays directly from pi's `queue_update` event.
 
 /** File entry from directory listing */
 export interface FileEntry {

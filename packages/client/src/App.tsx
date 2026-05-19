@@ -640,11 +640,14 @@ export default function App() {
   }, []);
 
   // Safety timeout: clear stuck pendingPrompt after 30s and show error.
-  // Pauses while the prompt text appears in the bridge-owned mid-turn queue
-  // (i.e. the bridge has acknowledged custody). Resumes on removal.
-  // See change: surface-mid-turn-prompt-queue.
+  // Pauses while the prompt text appears in pi's mirrored queues
+  // (i.e. pi has acknowledged custody). Resumes on removal.
+  // See change: add-followup-edit-and-steer-cancel.
   const _selectedSessionForQueue = selectedId ? sessions.get(selectedId) : undefined;
-  const queuedTextsForSelected: string[] = _selectedSessionForQueue?.queue?.pending?.map((p) => p.text) ?? [];
+  const queuedTextsForSelected: string[] = [
+    ...(_selectedSessionForQueue?.pendingQueues?.steering ?? []),
+    ...(_selectedSessionForQueue?.pendingQueues?.followUp ?? []),
+  ];
   const safetyTimerPaused = !!(
     selectedState.pendingPrompt && queuedTextsForSelected.includes(selectedState.pendingPrompt.text)
   );
@@ -710,7 +713,7 @@ export default function App() {
     pendingSpawnsRef,
   });
   const {
-    handleAbort, handleForceKill, handleCancelPending, handleClearQueue, handleRemoveQueueEntry, handleRespondToUi, handleSend,
+    handleAbort, handleForceKill, handleCancelPending, handleClearSteeringQueue, handleClearFollowupSlot, handleEditFollowupSlot, handlePromoteFollowupEntry, handleRemoveFollowupEntry, handleEditFollowupEntry, handleRespondToUi, handleSend,
     handleSelect, handleRenameSession, handleShutdownSession, handleKillProcess,
     handleSendPromptToSession, handleResumeSession, handleResumeSessionKeepPosition, handleSpawnSession,
     handleHideSession, handleUnhideSession,
@@ -1082,7 +1085,7 @@ export default function App() {
             </div>
           }>
             <SessionAssetsProvider assets={selectedSession?.assets}>
-            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} queuedTexts={queuedTextsForSelected} onCancelPending={handleCancelPending} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} onRetryAfterError={selectedId ? () => {
+            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} queuedTexts={queuedTextsForSelected} onCancelPending={handleCancelPending} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? []} onCancelSteering={handleClearSteeringQueue} onRetryAfterError={selectedId ? () => {
               // Retry the last user prompt by re-sending it via send_prompt.
               // The previous behaviour (handleResumeSession with mode="continue")
               // no-ops on alive-but-errored sessions because the server short-
@@ -1134,13 +1137,16 @@ export default function App() {
               send({ type: "role_preset_delete", sessionId: selectedId, presetName });
             }}
           />
-          {/* Mid-turn prompt queue panel (bridge-owned). Renders only when
-              the bridge has queued prompts for this session. Sits between
-              ChatView and CommandInput. See change: surface-mid-turn-prompt-queue. */}
+          {/* Pi-native follow-up queue (v2: multi-entry cycling). Steer chips moved
+              to inline-chat rendering inside ChatView (see ChatView.tsx `pending-steer-card`).
+              See change: add-followup-edit-and-steer-cancel. */}
           <QueuePanel
-            pending={selectedSession?.queue?.pending ?? []}
-            onClearAll={handleClearQueue}
-            onRemove={handleRemoveQueueEntry}
+            followUp={selectedSession?.pendingQueues?.followUp ?? []}
+            onClearFollowup={handleClearFollowupSlot}
+            onEditFollowup={handleEditFollowupSlot}
+            onEditFollowupEntry={handleEditFollowupEntry}
+            onRemoveFollowupEntry={handleRemoveFollowupEntry}
+            onPromoteFollowupEntry={handlePromoteFollowupEntry}
           />
           <CommandInput
             commands={selectedCommands}

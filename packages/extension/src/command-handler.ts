@@ -171,25 +171,23 @@ export function createCommandHandler(
      */
     sessionPrompt?: (text: string, delivery?: "steer" | "followUp") => void | Promise<void>;
     /**
-     * If the agent is currently streaming, enqueue the user prompt into the
-     * bridge-owned mid-turn queue and return `true`. The command handler then
-     * skips its own `pi.sendUserMessage` call. Returns `false` when the agent
-     * is idle so the handler delivers the prompt normally.
-     *
-     * Only applies to the passthrough branch (regular user text and
-     * image-bearing messages). Slash commands, !bash, /compact, /reload,
-     * /new, /model, and mgmt commands bypass the queue (they run synchronously
-     * in the bridge or are dispatched as pi events, never enter pi's user-
-     * message turn loop). See capability `mid-turn-prompt-queue`.
+     * Bridge-shadow-queue hooks: called AFTER pi accepts the user message,
+     * gated by `isStreaming()` captured BEFORE the send. The capture order
+     * matters — `pi.sendUserMessage` on an idle session synchronously
+     * triggers `agent_start`, which flips bridge state to streaming. Checking
+     * AFTER the send would mis-record idle sends as chip entries.
+     * Pi doesn't expose `queue_update` to extensions, so the bridge is the
+     * source of truth. See change: add-followup-edit-and-steer-cancel.
      */
-    enqueueIfStreaming?: (text: string, images?: ImageContent[]) => boolean;
+    onSteerSent?: (text: string) => void;
+    onFollowupSent?: (text: string) => void;
     /**
-     * Drop any bridge-owned mid-turn queue entries for the current session.
-     * Invoked on user-initiated `abort` so a Stop click does NOT leave
-     * queued messages to be flushed by the upcoming `agent_end` drain.
-     * See change: surface-mid-turn-prompt-queue.
+     * Returns true iff the agent was streaming at the moment of the call.
+     * Used to capture pre-send streaming state before `pi.sendUserMessage`
+     * runs (which may flip the flag synchronously via agent_start).
+     * See change: add-followup-edit-and-steer-cancel.
      */
-    clearQueueOnAbort?: () => void;
+    isStreaming?: () => boolean;
   },
 ): CommandHandler {
   const getSessionId = typeof sessionIdOrGetter === "function" ? sessionIdOrGetter : () => sessionIdOrGetter;
@@ -362,32 +360,27 @@ export function createCommandHandler(
           if (outgoing.startsWith("/")) {
             outgoing = expandPromptTemplateFromDisk(outgoing, process.cwd(), pi);
           }
-          // Bridge-owned mid-turn prompt queue: if the agent is streaming, push
-          // to the bridge queue instead of forwarding to pi. The bridge drains
-          // on `agent_end` (see bridge.ts), so messages run after the current
-          // turn completes. Cancel via `clear_queue`.
-          // Steering messages (delivery: "steer") bypass the bridge queue —
-          // pi handles its own internal steering queue, delivering after the
-          // current turn finishes its tool calls. See change: add-steering-message.
-          // See capability `mid-turn-prompt-queue`.
-          const isSteering = msg.delivery === "steer";
-          if (!isSteering && options?.enqueueIfStreaming?.(outgoing, msg.images)) {
-            return undefined;
-          }
+          // Pi owns the steering + follow-up queues natively. The helper enforces
+          // capacity-1 on follow-up by clearing pi's slot before sending. After
+          // pi accepts, notify the bridge so it updates its shadow queue — but
+          // only if the agent was already streaming BEFORE the send. Pi flips
+          // idle→streaming synchronously on the first user message, so checking
+          // after sendUserMessage gives false positives.
+          // See change: add-followup-edit-and-steer-cancel.
+          const wasStreaming = options?.isStreaming?.() ?? false;
           sendUserMessageWithImages(pi, outgoing, msg.images, msg.delivery);
+          if (wasStreaming) {
+            const da = msg.delivery ?? "followUp";
+            if (da === "steer") options?.onSteerSent?.(outgoing);
+            else options?.onFollowupSent?.(outgoing);
+          }
           return undefined;
         }
 
         case "abort":
-          // Drop any queued mid-turn entries BEFORE invoking pi.abort().
-          // Pi will fire `agent_end` in response to the abort, which would
-          // normally trigger the bridge queue drain. Clearing first means
-          // Stop genuinely stops everything — including messages the user
-          // typed during the now-aborted turn. See change:
-          // surface-mid-turn-prompt-queue.
-          if (options?.clearQueueOnAbort) {
-            options.clearQueueOnAbort();
-          }
+          // Pi owns both queues now. abort() asks pi to halt the current turn;
+          // pi's native drain logic handles any remaining queue entries naturally.
+          // See change: add-followup-edit-and-steer-cancel.
           if (options?.abort) {
             options.abort();
           }
@@ -557,6 +550,9 @@ function sendUserMessageWithImages(
 ): void {
   const deliverAs = delivery ?? ("followUp" as const);
   const sendOptions = { deliverAs };
+  // v2: follow-up is a multi-entry queue. Sends APPEND — the cap-1 invariant
+  // is gone. See change: add-followup-edit-and-steer-cancel design.md Decision 8.
+  // (The bridge's shadow queue records the append via onFollowupSent.)
   if (images && images.length > 0) {
     const validMimeTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
     const validImages = images.filter((img) => {

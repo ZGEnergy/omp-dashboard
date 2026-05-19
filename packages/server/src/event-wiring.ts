@@ -138,20 +138,9 @@ export function wireEvents(deps: EventWiringDeps): void {
 
   piGateway.onEvent = (sessionId, msg) => {
     if (msg.type === "event_forward") {
-      // Bridge-owned mid-turn prompt queue snapshot. NOT persisted to the
-      // event store (it is UI cache state, not history); replayed on
-      // subscribe alongside other Session.* fields. See change:
-      // surface-mid-turn-prompt-queue.
-      if (msg.event.eventType === "queue_state") {
-        const data = (msg.event.data ?? {}) as { pending?: unknown };
-        const pending = Array.isArray(data.pending) ? data.pending : [];
-        const queueUpdate = { queue: { pending } } as Partial<DashboardSession>;
-        sessionManager.update(sessionId, queueUpdate);
-        if (!replayingSessions.has(sessionId)) {
-          browserGateway.broadcastSessionUpdated(sessionId, queueUpdate);
-        }
-        return;
-      }
+      // Legacy queue_state event no longer emitted (bridge removed PromptQueue).
+      // See change: add-followup-edit-and-steer-cancel.
+      if (msg.event.eventType === "queue_state") return;
       // When canSkipWipe was true, the event store already has all events —
       // don't insert replayed events again (would cause exponential duplication)
       if (replayingSessions.has(sessionId) && skipReplayInsert.has(sessionId)) {
@@ -589,6 +578,19 @@ export function wireEvents(deps: EventWiringDeps): void {
       }
     }
 
+    // Pi's queue mirror (steer + follow-up) forwarded from the bridge.
+    // Caches `pendingQueues` on the session and broadcasts to subscribed browsers.
+    // See change: add-followup-edit-and-steer-cancel.
+    if (msg.type === "queue_update") {
+      const steering = Array.isArray(msg.steering) ? msg.steering : [];
+      const followUp = Array.isArray(msg.followUp) ? msg.followUp : [];
+      const update = { pendingQueues: { steering, followUp } } as Partial<DashboardSession>;
+      sessionManager.update(sessionId, update);
+      if (!replayingSessions.has(sessionId)) {
+        browserGateway.broadcastSessionUpdated(sessionId, update);
+      }
+      return;
+    }
     if (msg.type === "first_message_update") {
       sessionManager.update(sessionId, { firstMessage: msg.firstMessage });
       browserGateway.broadcastSessionUpdated(sessionId, { firstMessage: msg.firstMessage });

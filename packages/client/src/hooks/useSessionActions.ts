@@ -93,60 +93,53 @@ export function useSessionActions(deps: SessionActionDeps) {
   }, [selectedId, send, setSessionStates]);
 
   /**
-   * Empty the bridge-owned mid-turn prompt queue for the selected session.
-   * Sends `clear_queue` to the server; the bridge drops its in-memory queue
-   * and emits a `queue_state { pending: [] }` snapshot which the server
-   * broadcasts back as a session_updated.
-   * See change: surface-mid-turn-prompt-queue.
+   * Clear pi's steering queue for the selected session.
+   * Sends `clear_steering_queue`; bridge calls `pi.clearSteeringQueue()`.
+   * Pi's resulting `queue_update` populates `Session.pendingQueues`.
+   * See change: add-followup-edit-and-steer-cancel.
    */
-  const handleClearQueue = useCallback(() => {
+  const handleClearSteeringQueue = useCallback(() => {
     if (!selectedId) return;
-    // Drop any optimistic `pendingPrompt` for this session BEFORE the
-    // server round-trip empties the queue. Without this, the moment
-    // `queue_state { pending: [] }` arrives the chip-suppression rule
-    // un-fires and the optimistic card pops back into view showing the
-    // most recent send as still-pending — confusing since the user
-    // just chose to drop the whole queue.
-    // See change: surface-mid-turn-prompt-queue.
-    setSessionStates((prev) => {
-      const next = new Map(prev);
-      const current = next.get(selectedId);
-      if (current?.pendingPrompt) {
-        next.set(selectedId, { ...current, pendingPrompt: undefined });
-      }
-      return next;
-    });
-    send({ type: "clear_queue", sessionId: selectedId });
-  }, [selectedId, send, setSessionStates]);
+    send({ type: "clear_steering_queue", sessionId: selectedId });
+  }, [selectedId, send]);
 
   /**
-   * Remove a single entry from the bridge-owned mid-turn queue by id.
-   * Sends `remove_queue_entry`; the bridge drops the matching entry and
-   * emits a fresh `queue_state` snapshot.
-   * See change: surface-mid-turn-prompt-queue.
+   * Clear pi's follow-up slot for the selected session.
+   * Sends `clear_followup_slot`; bridge calls `pi.clearFollowUpQueue()`.
+   * See change: add-followup-edit-and-steer-cancel.
    */
-  const handleRemoveQueueEntry = useCallback((id: string) => {
+  const handleClearFollowupSlot = useCallback(() => {
     if (!selectedId) return;
-    // If the entry being removed matches the optimistic `pendingPrompt`,
-    // clear that too. Pi will never run this message AND it will not
-    // appear in the next `queue_state` snapshot, so without this clear
-    // the chip-suppression rule un-fires and the optimistic card pops
-    // back showing the now-defunct send as pending. Looking up the
-    // entry's text by id requires read-access to the sessions map.
-    // See change: surface-mid-turn-prompt-queue.
-    const removedText = sessions.get(selectedId)?.queue?.pending?.find((p) => p.id === id)?.text;
-    if (removedText !== undefined) {
-      setSessionStates((prev) => {
-        const next = new Map(prev);
-        const current = next.get(selectedId);
-        if (current?.pendingPrompt && current.pendingPrompt.text === removedText) {
-          next.set(selectedId, { ...current, pendingPrompt: undefined });
-        }
-        return next;
-      });
-    }
-    send({ type: "remove_queue_entry", sessionId: selectedId, id });
-  }, [selectedId, send, sessions, setSessionStates]);
+    send({ type: "clear_followup_slot", sessionId: selectedId });
+  }, [selectedId, send]);
+
+  /**
+   * Replace pi's follow-up slot atomically with new text (v1, deprecated).
+   * v2 prefers `handleEditFollowupEntry(0, text)`. Bridge accepts both.
+   * See change: add-followup-edit-and-steer-cancel.
+   */
+  const handleEditFollowupSlot = useCallback((text: string, images?: ImageContent[]) => {
+    if (!selectedId) return;
+    send({ type: "edit_followup_slot", sessionId: selectedId, text, images });
+  }, [selectedId, send]);
+
+  /** v2: promote follow-up entry at `index` to position 0 (head). */
+  const handlePromoteFollowupEntry = useCallback((index: number) => {
+    if (!selectedId) return;
+    send({ type: "promote_followup_entry", sessionId: selectedId, index });
+  }, [selectedId, send]);
+
+  /** v2: remove follow-up entry at `index`. */
+  const handleRemoveFollowupEntry = useCallback((index: number) => {
+    if (!selectedId) return;
+    send({ type: "remove_followup_entry", sessionId: selectedId, index });
+  }, [selectedId, send]);
+
+  /** v2: replace follow-up entry at `index` with new text. */
+  const handleEditFollowupEntry = useCallback((index: number, text: string, images?: ImageContent[]) => {
+    if (!selectedId) return;
+    send({ type: "edit_followup_entry", sessionId: selectedId, index, text, images });
+  }, [selectedId, send]);
 
   const handleCancelPending = useCallback(() => {
     if (selectedId) {
@@ -202,22 +195,12 @@ export function useSessionActions(deps: SessionActionDeps) {
 
   const handleSend = useCallback((text: string, images?: ImageContent[], delivery?: "steer" | "followUp") => {
     if (selectedId) {
+      // Send and let pi's queue_update event populate authoritative chip state
+      // via `Session.pendingQueues`. No optimistic local pendingPrompt write.
+      // See change: add-followup-edit-and-steer-cancel.
       send({ type: "send_prompt", sessionId: selectedId, text, images, delivery });
-      setSessionStates((prev) => {
-        const next = new Map(prev);
-        const current = next.get(selectedId) ?? createInitialState();
-        next.set(selectedId, {
-          ...current,
-          pendingPrompt: {
-            text,
-            images: images?.map((img) => ({ data: img.data, mimeType: img.mimeType })),
-            delivery,
-          },
-        });
-        return next;
-      });
     }
-  }, [selectedId, send, setSessionStates]);
+  }, [selectedId, send]);
 
   const handleSelect = useCallback((id: string) => {
     navigate(`/session/${id}`);
@@ -365,7 +348,7 @@ export function useSessionActions(deps: SessionActionDeps) {
   }, [selectedId, send]);
 
   return {
-    handleAbort, handleForceKill, handleCancelPending, handleClearQueue, handleRemoveQueueEntry, handleRespondToUi, handleFlowAction, handleSend,
+    handleAbort, handleForceKill, handleCancelPending, handleClearSteeringQueue, handleClearFollowupSlot, handleEditFollowupSlot, handlePromoteFollowupEntry, handleRemoveFollowupEntry, handleEditFollowupEntry, handleRespondToUi, handleFlowAction, handleSend,
     handleSelect, handleRenameSession, handleShutdownSession, handleKillProcess,
     handleSendPromptToSession, handleResumeSession, handleResumeSessionKeepPosition, handleSpawnSession,
     handleHideSession, handleUnhideSession,

@@ -106,10 +106,10 @@ export function createMemorySessionManager(): SessionManager {
         firstMessage: params.firstMessage ?? existing?.firstMessage,
         dataUnavailable: false,
         pid: params.pid,
-        // Bridge-owned mid-turn prompt queue: reset to empty on register /
-        // re-register; a fresh `queue_state` snapshot from the bridge will
-        // replace it. See change: surface-mid-turn-prompt-queue.
-        queue: { pending: [] },
+        // Pi-native queue mirror: reset to empty on register / re-register;
+        // a fresh `queue_update` from the bridge populates it.
+        // See change: add-followup-edit-and-steer-cancel.
+        pendingQueues: { steering: [], followUp: [] },
       };
       sessions.set(params.id, session);
       mgr.onChange?.(params.id, {

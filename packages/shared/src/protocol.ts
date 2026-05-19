@@ -1,17 +1,19 @@
 /**
  * Extension ↔ Server WebSocket protocol messages.
  */
-import type { DashboardEvent, CommandInfo, FlowInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, ProviderInfo, PiSessionInfo, OpenSpecPhase, RoleInfo, ExtensionUiModule, DecoratorDescriptor, PendingPrompt } from "./types.js";
+import type { DashboardEvent, CommandInfo, FlowInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, ProviderInfo, PiSessionInfo, OpenSpecPhase, RoleInfo, ExtensionUiModule, DecoratorDescriptor } from "./types.js";
 
 /**
- * Bridge -> server: shape carried by `EventForwardMessage` with
- * `event.eventType === "queue_state"`. Drives the `Session.queue.pending`
- * cache via `event-wiring.ts` and the `mid-turn-prompt-queue` capability.
- * The `pending` array is the full snapshot, not a delta.
- * See change: surface-mid-turn-prompt-queue.
+ * Bridge -> server: mirror of pi's native steering + follow-up queues, forwarded
+ * from pi's `queue_update` event. Server caches the latest snapshot per session
+ * in `SessionUiState.pendingQueues` and broadcasts via `session_updated`.
+ * See change: add-followup-edit-and-steer-cancel.
  */
-export interface QueueStateEventData {
-  pending: PendingPrompt[];
+export interface QueueUpdateToServerMessage {
+  type: "queue_update";
+  sessionId: string;
+  steering: string[];
+  followUp: string[];
 }
 
 // ── Extension → Server ──────────────────────────────────────────────
@@ -383,7 +385,8 @@ export type ExtensionToServerMessage =
   | UiDataListMessage
   | ExtUiDecoratorMessage
   | AssetRegisterMessage
-  | DispatchExtensionCommandMessage;
+  | DispatchExtensionCommandMessage
+  | QueueUpdateToServerMessage;
 
 // ── Server → Extension ──────────────────────────────────────────────
 
@@ -588,26 +591,73 @@ export interface ServerRestartingExtensionMessage {
 }
 
 /**
- * Server -> bridge: empty the bridge-owned mid-turn prompt queue for the
- * given session. Bridge clears its in-memory queue and emits a follow-up
- * `queue_state` event with `pending: []`. Idempotent on already-empty.
- * See change: surface-mid-turn-prompt-queue.
+ * Server -> bridge: clear pi's steering queue for the named session.
+ * Bridge calls `pi.clearSteeringQueue()`. Idempotent on empty queue.
+ * Pi emits a fresh `queue_update` reflecting the empty array.
+ * See change: add-followup-edit-and-steer-cancel.
  */
-export interface ClearQueueExtensionMessage {
-  type: "clear_queue";
+export interface ClearSteeringQueueToExtensionMessage {
+  type: "clear_steering_queue";
   sessionId: string;
 }
 
 /**
- * Server -> bridge: remove a single entry from the bridge-owned mid-turn
- * queue by id. Bridge removes the matching entry and emits a fresh
- * `queue_state` snapshot. Idempotent on missing id.
- * See change: surface-mid-turn-prompt-queue.
+ * Server -> bridge: clear pi's follow-up queue for the named session.
+ * Bridge calls `pi.clearFollowUpQueue()` and wipes its shadow `bridgeFollowUp[]`.
+ * Idempotent on empty queue.
+ * See change: add-followup-edit-and-steer-cancel.
  */
-export interface RemoveQueueEntryExtensionMessage {
-  type: "remove_queue_entry";
+export interface ClearFollowupSlotToExtensionMessage {
+  type: "clear_followup_slot";
   sessionId: string;
-  id: string;
+}
+
+/**
+ * Server -> bridge (v1, deprecated): atomic replace of pi's follow-up slot.
+ * v2 prefers `edit_followup_entry { index: 0 }`. Bridge accepts both.
+ * See change: add-followup-edit-and-steer-cancel.
+ */
+export interface EditFollowupSlotToExtensionMessage {
+  type: "edit_followup_slot";
+  sessionId: string;
+  text: string;
+  images?: ImageContent[];
+}
+
+/**
+ * Server -> bridge (v2): move the follow-up entry at `index` to position 0
+ * (head of the queue). Bridge rewrites its shadow + replays via
+ * `clearFollowUpQueue` then `sendUserMessage` for each entry in the new
+ * order. See change: add-followup-edit-and-steer-cancel.
+ */
+export interface PromoteFollowupEntryToExtensionMessage {
+  type: "promote_followup_entry";
+  sessionId: string;
+  index: number;
+}
+
+/**
+ * Server -> bridge (v2): remove the follow-up entry at `index`. Bridge
+ * rewrites its shadow + replays the surviving entries.
+ * See change: add-followup-edit-and-steer-cancel.
+ */
+export interface RemoveFollowupEntryToExtensionMessage {
+  type: "remove_followup_entry";
+  sessionId: string;
+  index: number;
+}
+
+/**
+ * Server -> bridge (v2): replace the follow-up entry at `index` with new text.
+ * Bridge rewrites its shadow + replays.
+ * See change: add-followup-edit-and-steer-cancel.
+ */
+export interface EditFollowupEntryToExtensionMessage {
+  type: "edit_followup_entry";
+  sessionId: string;
+  index: number;
+  text: string;
+  images?: ImageContent[];
 }
 
 export type ServerToExtensionMessage =
@@ -639,5 +689,9 @@ export type ServerToExtensionMessage =
   | UiManagementMessage
   | KillProcessMessage
   | ServerRestartingExtensionMessage
-  | ClearQueueExtensionMessage
-  | RemoveQueueEntryExtensionMessage;
+  | ClearSteeringQueueToExtensionMessage
+  | ClearFollowupSlotToExtensionMessage
+  | EditFollowupSlotToExtensionMessage
+  | PromoteFollowupEntryToExtensionMessage
+  | RemoveFollowupEntryToExtensionMessage
+  | EditFollowupEntryToExtensionMessage;

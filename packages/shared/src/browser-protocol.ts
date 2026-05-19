@@ -602,7 +602,8 @@ export type ServerToBrowserMessage =
   | BrowserUiDataListMessage
   | BrowserExtUiDecoratorMessage
   | BrowserAssetRegisterMessage
-  | PluginIntentsMessage;
+  | PluginIntentsMessage
+  | QueueUpdateToBrowserMessage;
 
 // ── Browser → Server ────────────────────────────────────────────────
 
@@ -632,26 +633,83 @@ export interface AbortToBrowserMessage {
 }
 
 /**
- * Browser -> server: empty the bridge-owned mid-turn prompt queue for the
- * given session. Server forwards as `clear_queue` to the bridge, which
- * drops its in-memory queue and emits a `queue_state { pending: [] }`
- * snapshot. Idempotent. See change: surface-mid-turn-prompt-queue.
+ * Browser -> server: clear pi's steering queue for the given session.
+ * Server forwards as `clear_steering_queue`; bridge calls `pi.clearSteeringQueue()`.
+ * Pi emits a fresh `queue_update` reflecting the empty array, which the server
+ * caches + broadcasts. Idempotent on empty queue.
+ * See change: add-followup-edit-and-steer-cancel.
  */
-export interface ClearQueueBrowserMessage {
-  type: "clear_queue";
+export interface ClearSteeringQueueFromBrowserMessage {
+  type: "clear_steering_queue";
   sessionId: string;
 }
 
 /**
- * Browser -> server: remove a single entry from the bridge-owned mid-turn
- * queue by id. Server forwards to the bridge. Bridge removes the matching
- * entry and emits a fresh `queue_state` snapshot. Idempotent on missing id.
- * See change: surface-mid-turn-prompt-queue.
+ * Browser -> server: clear pi's follow-up slot for the given session.
+ * Server forwards as `clear_followup_slot`; bridge calls `pi.clearFollowUpQueue()`.
+ * Idempotent on empty slot.
+ * See change: add-followup-edit-and-steer-cancel.
  */
-export interface RemoveQueueEntryBrowserMessage {
-  type: "remove_queue_entry";
+export interface ClearFollowupSlotFromBrowserMessage {
+  type: "clear_followup_slot";
   sessionId: string;
-  id: string;
+}
+
+/**
+ * Browser -> server (v1, deprecated): replace pi's follow-up slot atomically.
+ * v2 prefers `edit_followup_entry { index: 0 }`. Bridge still accepts both
+ * for backward compatibility.
+ * See change: add-followup-edit-and-steer-cancel.
+ */
+export interface EditFollowupSlotFromBrowserMessage {
+  type: "edit_followup_slot";
+  sessionId: string;
+  text: string;
+  images?: ImageContent[];
+}
+
+/**
+ * Browser -> server (v2): move follow-up entry at `index` to position 0.
+ * See change: add-followup-edit-and-steer-cancel.
+ */
+export interface PromoteFollowupEntryFromBrowserMessage {
+  type: "promote_followup_entry";
+  sessionId: string;
+  index: number;
+}
+
+/**
+ * Browser -> server (v2): remove follow-up entry at `index`.
+ * See change: add-followup-edit-and-steer-cancel.
+ */
+export interface RemoveFollowupEntryFromBrowserMessage {
+  type: "remove_followup_entry";
+  sessionId: string;
+  index: number;
+}
+
+/**
+ * Browser -> server (v2): replace follow-up entry at `index`.
+ * See change: add-followup-edit-and-steer-cancel.
+ */
+export interface EditFollowupEntryFromBrowserMessage {
+  type: "edit_followup_entry";
+  sessionId: string;
+  index: number;
+  text: string;
+  images?: ImageContent[];
+}
+
+/**
+ * Server -> browser: broadcast pi's queue mirror after a `queue_update`
+ * arrives from the bridge. Drives `Session.pendingQueues`.
+ * See change: add-followup-edit-and-steer-cancel.
+ */
+export interface QueueUpdateToBrowserMessage {
+  type: "queue_update";
+  sessionId: string;
+  steering: string[];
+  followUp: string[];
 }
 
 export interface RequestCommandsToBrowserMessage {
@@ -1091,6 +1149,10 @@ export type BrowserToServerMessage =
   | SessionViewBrowserMessage
   | SessionUnviewBrowserMessage
   | KillProcessBrowserMessage
-  | ClearQueueBrowserMessage
-  | RemoveQueueEntryBrowserMessage
+  | ClearSteeringQueueFromBrowserMessage
+  | ClearFollowupSlotFromBrowserMessage
+  | EditFollowupSlotFromBrowserMessage
+  | PromoteFollowupEntryFromBrowserMessage
+  | RemoveFollowupEntryFromBrowserMessage
+  | EditFollowupEntryFromBrowserMessage
   | PluginActionMessage;

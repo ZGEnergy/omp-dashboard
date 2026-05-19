@@ -525,33 +525,90 @@ export function handleAbort(
 }
 
 /**
- * Empty the bridge-owned mid-turn prompt queue for the given session.
- * Forwards `clear_queue` to the bridge, which drops its in-memory queue
- * and emits a follow-up `queue_state { pending: [] }`. Drops silently
- * when the session is unknown. See change: surface-mid-turn-prompt-queue.
+ * Clear pi's steering queue for the given session. Forwards to bridge,
+ * which calls `pi.clearSteeringQueue()`. Idempotent. Drops silently when
+ * the session is unknown. See change: add-followup-edit-and-steer-cancel.
  */
-export function handleClearQueue(
-  msg: Extract<BrowserToServerMessage, { type: "clear_queue" }>,
+export function handleClearSteeringQueue(
+  msg: Extract<BrowserToServerMessage, { type: "clear_steering_queue" }>,
   ctx: BrowserHandlerContext,
 ): void {
   if (!ctx.sessionManager.get(msg.sessionId)) return;
-  ctx.piGateway.sendToSession(msg.sessionId, { type: "clear_queue", sessionId: msg.sessionId });
+  ctx.piGateway.sendToSession(msg.sessionId, { type: "clear_steering_queue", sessionId: msg.sessionId });
 }
 
 /**
- * Remove a single entry from the bridge-owned mid-turn queue. Forwards
- * `remove_queue_entry` to the bridge. Drops silently for unknown session.
- * See change: surface-mid-turn-prompt-queue.
+ * Clear pi's follow-up slot for the given session. Forwards to bridge,
+ * which calls `pi.clearFollowUpQueue()`. Idempotent.
+ * See change: add-followup-edit-and-steer-cancel.
  */
-export function handleRemoveQueueEntry(
-  msg: Extract<BrowserToServerMessage, { type: "remove_queue_entry" }>,
+export function handleClearFollowupSlot(
+  msg: Extract<BrowserToServerMessage, { type: "clear_followup_slot" }>,
+  ctx: BrowserHandlerContext,
+): void {
+  if (!ctx.sessionManager.get(msg.sessionId)) return;
+  ctx.piGateway.sendToSession(msg.sessionId, { type: "clear_followup_slot", sessionId: msg.sessionId });
+}
+
+/**
+ * Atomic replace of pi's follow-up slot (clear-then-send). Forwards text +
+ * optional images to bridge, which calls clearFollowUpQueue then sendUserMessage.
+ * See change: add-followup-edit-and-steer-cancel.
+ */
+export function handleEditFollowupSlot(
+  msg: Extract<BrowserToServerMessage, { type: "edit_followup_slot" }>,
   ctx: BrowserHandlerContext,
 ): void {
   if (!ctx.sessionManager.get(msg.sessionId)) return;
   ctx.piGateway.sendToSession(msg.sessionId, {
-    type: "remove_queue_entry",
+    type: "edit_followup_slot",
     sessionId: msg.sessionId,
-    id: msg.id,
+    text: msg.text,
+    images: msg.images,
+  });
+}
+
+/**
+ * Promote the follow-up entry at `index` to the head (position 0) of the queue.
+ * See change: add-followup-edit-and-steer-cancel (task 13.3).
+ */
+export function handlePromoteFollowupEntry(
+  msg: Extract<BrowserToServerMessage, { type: "promote_followup_entry" }>,
+  ctx: BrowserHandlerContext,
+): void {
+  if (!ctx.sessionManager.get(msg.sessionId)) return;
+  ctx.piGateway.sendToSession(msg.sessionId, {
+    type: "promote_followup_entry",
+    sessionId: msg.sessionId,
+    index: msg.index,
+  });
+}
+
+/** Remove the follow-up entry at `index` from the queue. */
+export function handleRemoveFollowupEntry(
+  msg: Extract<BrowserToServerMessage, { type: "remove_followup_entry" }>,
+  ctx: BrowserHandlerContext,
+): void {
+  if (!ctx.sessionManager.get(msg.sessionId)) return;
+  ctx.piGateway.sendToSession(msg.sessionId, {
+    type: "remove_followup_entry",
+    sessionId: msg.sessionId,
+    index: msg.index,
+  });
+}
+
+/** Replace the follow-up entry at `index` with new text. */
+export function handleEditFollowupEntry(
+  msg: Extract<BrowserToServerMessage, { type: "edit_followup_entry" }>,
+  ctx: BrowserHandlerContext,
+): void {
+  if (!ctx.sessionManager.get(msg.sessionId)) return;
+  ctx.piGateway.sendToSession(msg.sessionId, {
+    type: "edit_followup_entry",
+    sessionId: msg.sessionId,
+    index: msg.index,
+    text: msg.text,
+    images: msg.images,
   });
 }
 

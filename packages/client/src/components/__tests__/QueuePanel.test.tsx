@@ -1,100 +1,198 @@
 /**
- * Tests for QueuePanel: render rules, render cap, Clear-all wiring.
- * See change: surface-mid-turn-prompt-queue.
+ * Tests for QueuePanel: v2 multi-entry cycling follow-up rendering.
+ * Steer chips moved to inline-chat rendering in ChatView (see
+ * ChatView.inline-steer.test.tsx).
+ * See change: add-followup-edit-and-steer-cancel.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent, cleanup } from "@testing-library/react";
 import { QueuePanel } from "../QueuePanel.js";
 
 afterEach(() => cleanup());
-import type { PendingPrompt } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
-function mkPending(texts: string[]): PendingPrompt[] {
-  return texts.map((text, i) => ({ id: `bq_test_${i + 1}`, text }));
+function renderPanel(overrides: Partial<Parameters<typeof QueuePanel>[0]> = {}) {
+  const props = {
+    followUp: [] as string[],
+    onClearFollowup: vi.fn(),
+    onEditFollowup: vi.fn(),
+    onEditFollowupEntry: vi.fn(),
+    onRemoveFollowupEntry: vi.fn(),
+    onPromoteFollowupEntry: vi.fn(),
+    ...overrides,
+  };
+  return { props, ...render(<QueuePanel {...props} />) };
 }
 
-describe("QueuePanel", () => {
-  it("renders nothing when pending is empty", () => {
-    const { container } = render(
-      <QueuePanel pending={[]} onClearAll={vi.fn()} onRemove={vi.fn()} />,
-    );
+describe("QueuePanel — empty state", () => {
+  it("renders nothing when follow-up queue is empty", () => {
+    const { container } = renderPanel();
     expect(container.firstChild).toBeNull();
   });
+});
 
-  it("renders one chip per entry in insertion order", () => {
-    const { getAllByTestId } = render(
-      <QueuePanel
-        pending={mkPending(["alpha", "beta", "gamma"])}
-        onClearAll={vi.fn()}
-        onRemove={vi.fn()}
-      />,
-    );
-    const chips = getAllByTestId("queue-chip");
-    expect(chips).toHaveLength(3);
-    expect(chips[0].textContent).toContain("alpha");
-    expect(chips[1].textContent).toContain("beta");
-    expect(chips[2].textContent).toContain("gamma");
+describe("QueuePanel — followUp single entry", () => {
+  it("renders the entry with click-to-edit + remove button, no cycling controls", () => {
+    const { getByTestId, queryByTestId } = renderPanel({ followUp: ["run tests when done"] });
+    const chip = getByTestId("queue-chip-followup");
+    expect(chip.textContent).toContain("run tests when done");
+    expect(getByTestId("queue-followup-edit")).toBeTruthy();
+    expect(getByTestId("queue-followup-remove")).toBeTruthy();
+    // Cycling controls hidden for single-entry queue.
+    expect(queryByTestId("queue-followup-prev")).toBeNull();
+    expect(queryByTestId("queue-followup-next")).toBeNull();
+    expect(queryByTestId("queue-followup-promote")).toBeNull();
+    expect(queryByTestId("queue-followup-position")).toBeNull();
   });
 
-  it("shows the panel and total count when non-empty", () => {
-    const { getByTestId, getByText } = render(
-      <QueuePanel pending={mkPending(["one", "two"])} onClearAll={vi.fn()} onRemove={vi.fn()} />,
-    );
-    expect(getByTestId("queue-panel")).toBeTruthy();
-    expect(getByText(/Queued \(2\)/)).toBeTruthy();
+  it("invokes onRemoveFollowupEntry(0) when ✕ is clicked", () => {
+    const { props, getByTestId } = renderPanel({ followUp: ["x"] });
+    fireEvent.click(getByTestId("queue-followup-remove"));
+    expect(props.onRemoveFollowupEntry).toHaveBeenCalledWith(0);
+  });
+});
+
+describe("QueuePanel — followUp multi-entry cycling", () => {
+  it("renders cycling controls + position indicator when length > 1", () => {
+    const { getByTestId } = renderPanel({ followUp: ["a", "b", "c"] });
+    expect(getByTestId("queue-followup-prev")).toBeTruthy();
+    expect(getByTestId("queue-followup-next")).toBeTruthy();
+    expect(getByTestId("queue-followup-promote")).toBeTruthy();
+    const pos = getByTestId("queue-followup-position");
+    // Initial render: queue length transitioned 0 → 3 so currentIndex jumps to last.
+    expect(pos.textContent).toMatch(/3 of 3/);
   });
 
-  it("caps inline chips at 5 with '+N earlier' overflow on the LEFT and the LATEST entries visible", () => {
-    const { getAllByTestId, getByTestId } = render(
-      <QueuePanel
-        pending={mkPending(["a", "b", "c", "d", "e", "f", "g", "h"])}
-        onClearAll={vi.fn()}
-        onRemove={vi.fn()}
-      />,
-    );
-    const chips = getAllByTestId("queue-chip");
-    expect(chips).toHaveLength(5);
-    // Visible window is the LATEST 5: d, e, f, g, h
-    expect(chips[0].textContent).toContain("d");
-    expect(chips[4].textContent).toContain("h");
-    const overflow = getByTestId("queue-overflow");
-    expect(overflow.textContent).toContain("+3 earlier");
+  it("shows last entry initially (append behaviour)", () => {
+    const { getByTestId } = renderPanel({ followUp: ["a", "b", "c"] });
+    expect(getByTestId("queue-chip-followup").textContent).toBe("c");
   });
 
-  it("does NOT render overflow indicator when total <= 5", () => {
-    const { queryByTestId } = render(
-      <QueuePanel
-        pending={mkPending(["a", "b", "c", "d"])}
-        onClearAll={vi.fn()}
-        onRemove={vi.fn()}
-      />,
-    );
-    expect(queryByTestId("queue-overflow")).toBeNull();
+  it("up arrow navigates to previous entry", () => {
+    const { getByTestId } = renderPanel({ followUp: ["a", "b", "c"] });
+    fireEvent.click(getByTestId("queue-followup-prev"));
+    expect(getByTestId("queue-chip-followup").textContent).toBe("b");
+    fireEvent.click(getByTestId("queue-followup-prev"));
+    expect(getByTestId("queue-chip-followup").textContent).toBe("a");
   });
 
-  it("invokes onClearAll when the Clear-all button is clicked", () => {
-    const onClearAll = vi.fn();
+  it("up arrow disabled at first entry", () => {
+    const { getByTestId } = renderPanel({ followUp: ["a", "b"] });
+    fireEvent.click(getByTestId("queue-followup-prev"));
+    const prev = getByTestId("queue-followup-prev") as HTMLButtonElement;
+    expect(prev.disabled).toBe(true);
+  });
+
+  it("down arrow navigates forward + disabled at last entry", () => {
+    const { getByTestId } = renderPanel({ followUp: ["a", "b"] });
+    // initial: shows "b" (last), down should be disabled
+    const next = getByTestId("queue-followup-next") as HTMLButtonElement;
+    expect(next.disabled).toBe(true);
+    // Navigate up to "a", then down should re-enable
+    fireEvent.click(getByTestId("queue-followup-prev"));
+    expect(getByTestId("queue-chip-followup").textContent).toBe("a");
+    fireEvent.click(getByTestId("queue-followup-next"));
+    expect(getByTestId("queue-chip-followup").textContent).toBe("b");
+  });
+
+  it("promote dispatches onPromoteFollowupEntry with currentIndex", () => {
+    const { props, getByTestId } = renderPanel({ followUp: ["a", "b", "c"] });
+    // Initial currentIndex = 2 (last); navigate to index 1 = "b"
+    fireEvent.click(getByTestId("queue-followup-prev"));
+    fireEvent.click(getByTestId("queue-followup-promote"));
+    expect(props.onPromoteFollowupEntry).toHaveBeenCalledWith(1);
+  });
+
+  it("promote disabled when at index 0", () => {
+    const { getByTestId } = renderPanel({ followUp: ["a", "b"] });
+    fireEvent.click(getByTestId("queue-followup-prev")); // now at "a"
+    const promote = getByTestId("queue-followup-promote") as HTMLButtonElement;
+    expect(promote.disabled).toBe(true);
+  });
+
+  it("edit dispatches onEditFollowupEntry with currentIndex + new text", () => {
+    const { props, getByTestId } = renderPanel({ followUp: ["a", "b", "c"] });
+    fireEvent.click(getByTestId("queue-followup-prev")); // navigate to "b" (index 1)
+    fireEvent.click(getByTestId("queue-followup-edit"));
+    const editor = getByTestId("queue-followup-editor") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "b-revised" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(props.onEditFollowupEntry).toHaveBeenCalledWith(1, "b-revised");
+  });
+
+  it("remove dispatches onRemoveFollowupEntry with currentIndex", () => {
+    const { props, getByTestId } = renderPanel({ followUp: ["a", "b", "c"] });
+    fireEvent.click(getByTestId("queue-followup-prev")); // navigate to "b"
+    fireEvent.click(getByTestId("queue-followup-remove"));
+    expect(props.onRemoveFollowupEntry).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("QueuePanel — editor key bindings still work", () => {
+  it("Escape cancels without calling onEditFollowupEntry", () => {
+    const { props, getByTestId, queryByTestId } = renderPanel({ followUp: ["v1"] });
+    fireEvent.click(getByTestId("queue-followup-edit"));
+    const editor = getByTestId("queue-followup-editor") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "changed but cancelled" } });
+    fireEvent.keyDown(editor, { key: "Escape" });
+    expect(props.onEditFollowupEntry).not.toHaveBeenCalled();
+    expect(queryByTestId("queue-followup-editor")).toBeNull();
+  });
+
+  it("Enter saves", () => {
+    const { props, getByTestId } = renderPanel({ followUp: ["old"] });
+    fireEvent.click(getByTestId("queue-followup-edit"));
+    const editor = getByTestId("queue-followup-editor") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "via enter" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(props.onEditFollowupEntry).toHaveBeenCalledWith(0, "via enter");
+  });
+
+  it("blur saves", () => {
+    const { props, getByTestId } = renderPanel({ followUp: ["old"] });
+    fireEvent.click(getByTestId("queue-followup-edit"));
+    const editor = getByTestId("queue-followup-editor") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "via blur" } });
+    fireEvent.blur(editor);
+    expect(props.onEditFollowupEntry).toHaveBeenCalledWith(0, "via blur");
+  });
+
+  it("editing to identical text does NOT invoke handler", () => {
+    const { props, getByTestId } = renderPanel({ followUp: ["unchanged"] });
+    fireEvent.click(getByTestId("queue-followup-edit"));
+    const editor = getByTestId("queue-followup-editor") as HTMLTextAreaElement;
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(props.onEditFollowupEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe("QueuePanel — v1 backward-compat fallbacks", () => {
+  it("falls back to onEditFollowup (legacy) when onEditFollowupEntry not provided", () => {
+    const onEditFollowup = vi.fn();
     const { getByTestId } = render(
-      <QueuePanel pending={mkPending(["x"])} onClearAll={onClearAll} onRemove={vi.fn()} />,
-    );
-    fireEvent.click(getByTestId("queue-panel-clear-all"));
-    expect(onClearAll).toHaveBeenCalledTimes(1);
-  });
-
-  it("invokes onRemove with the chip's id when its X button is clicked", () => {
-    const onRemove = vi.fn();
-    const { getAllByTestId } = render(
       <QueuePanel
-        pending={mkPending(["first", "second"])}
-        onClearAll={vi.fn()}
-        onRemove={onRemove}
+        followUp={["x"]}
+        onClearFollowup={vi.fn()}
+        onEditFollowup={onEditFollowup}
+        // no onEditFollowupEntry
       />,
     );
-    const removeButtons = getAllByTestId("queue-chip-remove");
-    fireEvent.click(removeButtons[0]);
-    expect(onRemove).toHaveBeenCalledWith("bq_test_1");
-    fireEvent.click(removeButtons[1]);
-    expect(onRemove).toHaveBeenCalledWith("bq_test_2");
-    expect(onRemove).toHaveBeenCalledTimes(2);
+    fireEvent.click(getByTestId("queue-followup-edit"));
+    const editor = getByTestId("queue-followup-editor") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "via legacy" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(onEditFollowup).toHaveBeenCalledWith("via legacy");
+  });
+
+  it("falls back to onClearFollowup when onRemoveFollowupEntry not provided", () => {
+    const onClearFollowup = vi.fn();
+    const { getByTestId } = render(
+      <QueuePanel
+        followUp={["x"]}
+        onClearFollowup={onClearFollowup}
+        onEditFollowup={vi.fn()}
+      />,
+    );
+    fireEvent.click(getByTestId("queue-followup-remove"));
+    expect(onClearFollowup).toHaveBeenCalledTimes(1);
   });
 });
