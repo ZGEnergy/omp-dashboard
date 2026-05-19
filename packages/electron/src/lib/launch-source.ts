@@ -730,7 +730,11 @@ export interface SpawnResult {
 export async function spawnFromSource(
   source: Exclude<LaunchSource, { kind: "attach" }>,
   config: { port: number; piPort: number },
-  opts?: { logFile?: string },
+  opts?: {
+    logFile?: string;
+    /** Forwarded to `launchDashboardServer.onChildExit`. See change: harvest-bootstrap-survivor-fixes. */
+    onChildExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
+  },
 ): Promise<SpawnResult> {
   const logFile = opts?.logFile ?? path.join(os.homedir(), ".pi", "dashboard", "server.log");
 
@@ -788,6 +792,7 @@ export async function spawnFromSource(
       port: config.port,
       detach: false,
       cwd: source.cwd,
+      onChildExit: opts?.onChildExit,
     });
     return { pid: result.reportedPid ?? result.childPid };
   } catch (err: unknown) {
