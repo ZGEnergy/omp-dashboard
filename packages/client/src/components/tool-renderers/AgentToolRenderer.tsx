@@ -1,5 +1,5 @@
 /**
- * Custom renderer for the Agent tool (from @tintinweb/pi-subagents).
+ * Custom renderer for the Agent tool (from pi-dashboard-subagents).
  *
  * Card layout:
  *   ┌──────────────────────────────────────────┐
@@ -27,7 +27,7 @@ import { ElapsedBadge } from "../ElapsedBadge.js";
 import { MarkdownContent } from "../MarkdownContent.js";
 import { SubagentDetailView } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
 
-/** Shape of AgentDetails sent by pi-subagents via partialResult.details */
+/** Shape of AgentDetails sent by pi-dashboard-subagents via partialResult.details */
 interface AgentDetails {
   displayName?: string;
   description?: string;

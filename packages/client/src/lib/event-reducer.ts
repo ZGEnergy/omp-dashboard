@@ -91,9 +91,9 @@ export interface InteractiveUiRequest {
 }
 
 /**
- * Per-step timeline entry for a subagent's run. Phase 1 ships with no producer
- * (current `@tintinweb/pi-subagents` streams summary only); Phase 2 upstream
- * patch will populate `details.entries[]` on streaming events.
+ * Per-step timeline entry for a subagent's run. Populated by the
+ * `pi-dashboard-subagents` extension via `details.entries[]` on every
+ * `subagents:*` event.
  *
  * Shape mirrors `FlowDetailEntry` (see flows-plugin) for visual consistency.
  * See change: add-subagent-inspector.
@@ -128,7 +128,7 @@ export interface SessionState {
   interactiveRequests: InteractiveUiRequest[];
   /** Whether any Write/Edit tool calls have been seen (for Changed Files button) */
   hasFileChanges: boolean;
-  /** Active subagents from @tintinweb/pi-subagents */
+  /** Active subagents from pi-dashboard-subagents (foreground, in-memory). */
   subagents: Map<string, SubagentState>;
   /** Total turn count (for turnIndex assignment and sliding window offset) */
   turnCount: number;
@@ -181,6 +181,7 @@ function readSubagentDetails(
   if (typeof details.subagentType === "string") out.subagentType = details.subagentType;
   if (typeof details.toolUses === "number") out.toolUses = details.toolUses;
   if (typeof details.durationMs === "number") out.durationMs = details.durationMs;
+  if (typeof details.agentMdPath === "string") out.agentMdPath = details.agentMdPath;
   return out;
 }
 

@@ -113,12 +113,22 @@ export function SubagentPopoutPage({
             <Icon path={mdiArrowLeft} size={0.7} />
           </button>
         )}
-        <span className="text-[11px] text-[var(--text-tertiary)] truncate">
+        <span className="text-[11px] text-[var(--text-tertiary)] truncate flex-shrink-0">
           {parentLabel ?? sessionId} ›
         </span>
-        <span className="text-sm font-medium text-[var(--text-primary)] truncate">
-          {sub.displayName || sub.type}
-        </span>
+        <div className="flex flex-col min-w-0 flex-1">
+          <span className="text-sm font-medium text-[var(--text-primary)] truncate">
+            {sub.displayName || sub.type}
+          </span>
+          {sub.agentMdPath && (
+            <span
+              className="text-[10px] font-mono text-[var(--text-tertiary)] truncate"
+              title={sub.agentMdPath}
+            >
+              {sub.agentMdPath}
+            </span>
+          )}
+        </div>
       </div>
       <div className="flex-1 overflow-hidden">
         <SubagentDetailView session={session} agentId={agentId} mode="popout" />

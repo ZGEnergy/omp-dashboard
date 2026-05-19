@@ -8,10 +8,15 @@
  *   - BackgroundSubagentsPanel rows (row mode = single-line summary)
  *
  * Four-tier rendering precedence (graceful degradation):
- *   Tier 1: `entries[]` present (Phase 2 upstream patch) — full timeline
- *   Tier 2: running, no entries — current activity + counters + footnote
- *   Tier 3: completed/failed, no entries — result/error block
- *   Tier 4: neither — placeholder
+ *   Tier 1: `entries[]` present — full timeline (the producer streams entries
+ *           from the first `tool_execution_end` onwards)
+ *   Tier 3: completed/failed, no entries — result/error block (e.g. legacy
+ *           replay data, or producer bug)
+ *   Tier 4: neither — placeholder (brief loading window or no data)
+ *
+ * Tier 2 (running, no entries) was removed in `add-subagent-inspector` §14
+ * because `pi-dashboard-subagents` is now the sole recommended producer and
+ * reliably streams entries from its first `tool_execution_end`.
  *
  * See change: add-subagent-inspector.
  */
@@ -192,9 +197,19 @@ export function SubagentDetailView({ session, agentId, mode = "inline", onBack }
         </button>
       )}
       <span className={`${statusColor(sub.status)} inline-flex`}><Icon path={statusIconPath(sub.status)} size={0.6} /></span>
-      <span className="text-sm font-medium text-[var(--text-primary)] truncate">{displayName}</span>
+      <div className="flex flex-col min-w-0 flex-1">
+        <span className="text-sm font-medium text-[var(--text-primary)] truncate">{displayName}</span>
+        {sub.agentMdPath && (
+          <span
+            className="text-[10px] font-mono text-[var(--text-tertiary)] truncate"
+            title={sub.agentMdPath}
+          >
+            {sub.agentMdPath}
+          </span>
+        )}
+      </div>
       {sub.modelName && (
-        <span className="text-[11px] text-[var(--text-tertiary)] truncate">{sub.modelName}</span>
+        <span className="text-[11px] text-[var(--text-tertiary)] truncate flex-shrink-0">{sub.modelName}</span>
       )}
       {isComplete && sub.tokens && (
         <span className="text-[11px] text-[var(--text-muted)] ml-auto whitespace-nowrap">
@@ -235,34 +250,6 @@ export function SubagentDetailView({ session, agentId, mode = "inline", onBack }
               <MarkdownContent content={sub.result} />
             </div>
           )}
-        </div>
-      );
-    }
-
-    // Tier 2: running, no entries
-    if (sub.status === "running") {
-      return (
-        <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
-          {sub.description && (
-            <div className="text-[11px] text-[var(--text-secondary)]">"{sub.description}"</div>
-          )}
-          {sub.activity && (
-            <div className="text-xs text-[var(--text-primary)]">
-              <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mr-2">Activity</span>
-              {sub.activity}
-            </div>
-          )}
-          <div className="flex gap-4 text-[11px] text-[var(--text-muted)]">
-            {typeof sub.toolUses === "number" && (
-              <span>{sub.toolUses} tool use{sub.toolUses === 1 ? "" : "s"}</span>
-            )}
-            {sub.tokens && (
-              <span>↑{formatTokens(sub.tokens.input)} ↓{formatTokens(sub.tokens.output)}</span>
-            )}
-          </div>
-          <div className="text-[10px] text-[var(--text-muted)] italic mt-2 pt-2 border-t border-[var(--border-subtle)]">
-            Live timeline requires <code className="font-mono">@tintinweb/pi-subagents ≥ next</code>. Showing summary.
-          </div>
         </div>
       );
     }
