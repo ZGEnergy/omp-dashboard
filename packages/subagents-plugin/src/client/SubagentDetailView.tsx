@@ -29,7 +29,9 @@ import type { SubagentState, SubagentTimelineEntry } from "./types.js";
 
 /** Minimal session-state shape this component cares about. */
 export interface SessionStateLike {
-  subagents: Map<string, SubagentState>;
+  // Read-only: detail view only calls `.get(agentId)`. ReadonlyMap allows
+  // passing the shell's frozen / upcast map without an extra clone.
+  subagents: ReadonlyMap<string, SubagentState>;
 }
 
 export type SubagentDetailMode = "inline" | "popout" | "row";

@@ -84,11 +84,14 @@ import type { ToolContext } from "./components/tool-renderers/index.js";
 import type { ContextUsageInfo } from "./components/SessionList.js";
 import { ApiContext, deriveApiBase, VITE_API_URL, setGlobalApiBase } from "./lib/api-context.js";
 import { SessionAssetsProvider } from "./lib/SessionAssetsContext.js";
-import { PluginContextProvider, applyPluginConfigUpdate } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import { PluginContextProvider, applyPluginConfigUpdate, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 // Stable empty references for plugin context's session-state primitives.
 // See change: route-flow-asks-to-upper-slot + add-flow-agent-popout.
 const EMPTY_INTERACTIVE_REQUESTS: readonly never[] = Object.freeze([]);
-const EMPTY_SUBAGENTS_MAP: ReadonlyMap<string, never> = Object.freeze(new Map());
+// Typed as the runtime's snapshot type so the empty map satisfies the provider's
+// `useSessionSubagents` contract. Shell state holds the stricter `SubagentState`
+// which is upcast at the closure boundary below.
+const EMPTY_SUBAGENTS_MAP: ReadonlyMap<string, SubagentStateSnapshot> = Object.freeze(new Map());
 import {
   ContentViewSlot,
   ContentHeaderStickySlot,
@@ -1339,9 +1342,15 @@ export default function App() {
           sessionStates.get(sid)?.interactiveRequests ?? EMPTY_INTERACTIVE_REQUESTS
         }
         useSessionSubagents={(sid) =>
-          (sessionStates.get(sid)?.subagents ?? EMPTY_SUBAGENTS_MAP)
+          // Upcast `Map<string, SubagentState>` to `ReadonlyMap<string, SubagentStateSnapshot>`.
+          // `SubagentState` is structurally compatible with `SubagentStateSnapshot` but TS
+          // can't bridge the `Record<string, unknown>` index-signature requirement directly,
+          // so we route the cast through `unknown`. Plugins downcast at their boundary.
+          ((sessionStates.get(sid)?.subagents ?? EMPTY_SUBAGENTS_MAP) as unknown as ReadonlyMap<string, SubagentStateSnapshot>)
         }
-        connectionStatus={status}
+        connectionStatus={
+          status === "connected" || status === "connecting" ? status : "disconnected"
+        }
       >
       <ShellSessionsProvider value={sessions}>
         <ErrorBoundary fallback={
