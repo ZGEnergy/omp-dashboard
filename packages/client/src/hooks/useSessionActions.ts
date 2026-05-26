@@ -264,7 +264,11 @@ export function useSessionActions(deps: SessionActionDeps) {
     send({ type: "resume_session", sessionId, mode: "continue", placement: "keep", requestId });
   }, [send, setSessions, pendingSpawnsRef]);
 
-  const handleSpawnSession = useCallback((cwd: string, attachProposal?: string) => {
+  const handleSpawnSession = useCallback((
+    cwd: string,
+    attachProposal?: string,
+    opts?: { gitWorktreeBase?: string },
+  ) => {
     setSpawningCwds((prev) => {
       const next = new Set(prev);
       next.add(cwd);
@@ -282,11 +286,16 @@ export function useSessionActions(deps: SessionActionDeps) {
     // The optional `attachProposal` field is consumed server-side and applied
     // when the bridge issues `session_register`. See change:
     // add-folder-task-checker-and-spawn-attach.
+    // The optional `gitWorktreeBase` is similarly server-consumed and
+    // written to `.meta.json` on register so the WORKSPACE-subcard pill
+    // can render `created from <base>` later. See change:
+    // add-worktree-spawn-dialog.
     send({
       type: "spawn_session",
       cwd,
       requestId,
       ...(attachProposal ? { attachProposal } : {}),
+      ...(opts?.gitWorktreeBase ? { gitWorktreeBase: opts.gitWorktreeBase } : {}),
     });
   }, [send, clearSpawningCwd, setSpawningCwds, spawnTimeoutsRef, pendingSpawnsRef]);
 

@@ -39,6 +39,20 @@ export interface SessionMeta {
   contextTokens?: number;
   contextWindow?: number;
 
+  /**
+   * Base ref used to create this session's git worktree. Set ONLY when
+   * the session was spawned via the dashboard's worktree dialog (the
+   * only call site that knows the base ref). Sessions spawned by other
+   * means (CLI `pi`, manual `git worktree add`, etc.) SHALL NOT have
+   * this field.
+   *
+   * Composed into `DashboardSession.gitWorktree.base` at broadcast time
+   * when the bridge reports `gitWorktree` for the same session.
+   *
+   * See change: add-worktree-spawn-dialog.
+   */
+  gitWorktreeBase?: string;
+
   // Cache freshness — compared against .jsonl mtime
   cachedAt?: number;
 }

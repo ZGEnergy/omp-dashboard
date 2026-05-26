@@ -48,6 +48,18 @@ export const GIT_REMOTE_URL: Recipe<WithCwd & { remote?: string }, string | unde
   timeout: GIT_TIMEOUT,
 };
 
+export const GIT_COMMON_DIR: Recipe<WithCwd, string | undefined> = {
+  argv: () => ["git", "rev-parse", "--git-common-dir"],
+  parse: (out) => out.trim() || undefined,
+  timeout: GIT_TIMEOUT,
+};
+
+export const GIT_TOPLEVEL: Recipe<WithCwd, string | undefined> = {
+  argv: () => ["git", "rev-parse", "--show-toplevel"],
+  parse: (out) => out.trim() || undefined,
+  timeout: GIT_TIMEOUT,
+};
+
 export const GIT_DIFF: Recipe<WithCwd & { path: string; ref?: string }, string> = {
   argv: ({ path, ref }) => ["git", "diff", ref ?? "HEAD", "--", path],
   parse: (out) => out,
@@ -87,6 +99,8 @@ export const GIT_RECIPES = {
   GIT_CURRENT_BRANCH,
   GIT_HEAD_SHA,
   GIT_REMOTE_URL,
+  GIT_COMMON_DIR,
+  GIT_TOPLEVEL,
   GIT_DIFF,
   GIT_STATUS_PORCELAIN,
   GH_PR_NUMBER,
@@ -108,6 +122,14 @@ export function headSha(input: WithCwd & { short?: boolean }): Result<string | u
 
 export function remoteUrl(input: WithCwd & { remote?: string }): Result<string | undefined> {
   return run(GIT_REMOTE_URL, input, { cwd: input.cwd });
+}
+
+export function commonDir(input: WithCwd): Result<string | undefined> {
+  return run(GIT_COMMON_DIR, input, { cwd: input.cwd });
+}
+
+export function toplevel(input: WithCwd): Result<string | undefined> {
+  return run(GIT_TOPLEVEL, input, { cwd: input.cwd });
 }
 
 export function diff(input: WithCwd & { path: string; ref?: string }): Result<string> {
@@ -140,6 +162,14 @@ export function headShaOr(input: WithCwd & { short?: boolean }, fallback?: strin
 
 export function remoteUrlOr(input: WithCwd & { remote?: string }, fallback?: string): string | undefined {
   return unwrap(remoteUrl(input), fallback);
+}
+
+export function commonDirOr(input: WithCwd, fallback?: string): string | undefined {
+  return unwrap(commonDir(input), fallback);
+}
+
+export function toplevelOr(input: WithCwd, fallback?: string): string | undefined {
+  return unwrap(toplevel(input), fallback);
 }
 
 export function diffOr(input: WithCwd & { path: string; ref?: string }, fallback = ""): string {

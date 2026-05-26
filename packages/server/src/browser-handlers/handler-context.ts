@@ -15,6 +15,7 @@ import type { TerminalManager } from "../terminal-manager.js";
 import type { HeadlessPidRegistry } from "../headless-pid-registry.js";
 import type { PendingResumeRegistry } from "../pending-resume-registry.js";
 import type { PendingAttachRegistry } from "../pending-attach-registry.js";
+import type { PendingWorktreeBaseRegistry } from "../pending-worktree-base-registry.js";
 import type { PendingResumeIntentRegistry } from "../pending-resume-intent-registry.js";
 import type { PendingClientCorrelations } from "../pending-client-correlations.js";
 
@@ -36,6 +37,13 @@ export interface BrowserHandlerContext {
    * See change: add-folder-task-checker-and-spawn-attach.
    */
   pendingAttachRegistry?: PendingAttachRegistry;
+  /**
+   * Optional pending-worktree-base registry. Populated by the
+   * worktree dialog's spawn flow; consumed on `session_register` to
+   * write `gitWorktreeBase` to the session's `.meta.json`.
+   * See change: add-worktree-spawn-dialog.
+   */
+  pendingWorktreeBaseRegistry?: PendingWorktreeBaseRegistry;
   /**
    * Optional pending-resume-intent registry. Tagged when the user clicks
    * Resume / drags-to-resume / hits the REST resume endpoint, consumed by

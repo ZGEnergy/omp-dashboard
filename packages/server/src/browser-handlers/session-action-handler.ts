@@ -394,7 +394,7 @@ export async function handleSpawnSession(
   msg: Extract<BrowserToServerMessage, { type: "spawn_session" }>,
   ctx: BrowserHandlerContext,
 ): Promise<void> {
-  const { ws, headlessPidRegistry, pendingDashboardSpawns, pendingAttachRegistry, pendingClientCorrelations, sendTo } = ctx;
+  const { ws, headlessPidRegistry, pendingDashboardSpawns, pendingAttachRegistry, pendingWorktreeBaseRegistry, pendingClientCorrelations, sendTo } = ctx;
   const config = loadConfig();
   const strategy = config.spawnStrategy ?? "tmux";
 
@@ -406,6 +406,15 @@ export async function handleSpawnSession(
   // spawn-correlation-token.
   if (typeof msg.attachProposal === "string" && msg.attachProposal.length > 0) {
     pendingAttachRegistry?.enqueue(msg.cwd, msg.attachProposal);
+  }
+
+  // Worktree base intent — same race-safe FIFO enqueue pattern as
+  // attachProposal. Consumed by event-wiring's session_register hook to
+  // write `.meta.json#gitWorktreeBase` so the WORKSPACE-subcard pill
+  // can render `created from <base>` on later renders.
+  // See change: add-worktree-spawn-dialog.
+  if (typeof msg.gitWorktreeBase === "string" && msg.gitWorktreeBase.length > 0) {
+    pendingWorktreeBaseRegistry?.enqueue(msg.cwd, msg.gitWorktreeBase);
   }
 
   // ── Preflight: fast synchronous checks before spawning. See change: spawn-failure-diagnostics.

@@ -10,11 +10,13 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { currentBranchOr, headShaOr, remoteUrlOr, prNumberOr } = vi.hoisted(() => ({
+const { currentBranchOr, headShaOr, remoteUrlOr, prNumberOr, commonDirOr, toplevelOr } = vi.hoisted(() => ({
   currentBranchOr: vi.fn(),
   headShaOr: vi.fn(),
   remoteUrlOr: vi.fn(),
   prNumberOr: vi.fn(),
+  commonDirOr: vi.fn(),
+  toplevelOr: vi.fn(),
 }));
 
 vi.mock("@blackbelt-technology/pi-dashboard-shared/platform/git.js", () => ({
@@ -22,9 +24,11 @@ vi.mock("@blackbelt-technology/pi-dashboard-shared/platform/git.js", () => ({
   headShaOr,
   remoteUrlOr,
   prNumberOr,
+  commonDirOr,
+  toplevelOr,
 }));
 
-import { gatherGitInfo, detectBranch, detectRemoteUrl, detectPrNumber } from "../vcs-info.js";
+import { gatherGitInfo, detectBranch, detectRemoteUrl, detectPrNumber, detectWorktree } from "../vcs-info.js";
 
 describe("git-info", () => {
   beforeEach(() => {
@@ -32,6 +36,8 @@ describe("git-info", () => {
     headShaOr.mockReset();
     remoteUrlOr.mockReset();
     prNumberOr.mockReset();
+    commonDirOr.mockReset();
+    toplevelOr.mockReset();
   });
 
   describe("detectBranch", () => {
@@ -119,6 +125,95 @@ describe("git-info", () => {
 
       const info = gatherGitInfo("/test");
       expect(info?.gitBranch).toBe("abc1234");
+    });
+  });
+
+  describe("detectWorktree", () => {
+    it("returns undefined when commonDir rev-parse fails", () => {
+      commonDirOr.mockReturnValue(undefined);
+      toplevelOr.mockReturnValue("/repo");
+      expect(detectWorktree("/repo")).toBeUndefined();
+    });
+
+    it("returns undefined when toplevel rev-parse fails", () => {
+      commonDirOr.mockReturnValue("/repo/.git");
+      toplevelOr.mockReturnValue(undefined);
+      expect(detectWorktree("/repo")).toBeUndefined();
+    });
+
+    it("returns undefined for main checkout (absolute commonDir inside toplevel)", () => {
+      // cwd is the main repo; commonDir lives at /repo/.git, toplevel == /repo.
+      commonDirOr.mockReturnValue("/repo/.git");
+      toplevelOr.mockReturnValue("/repo");
+      expect(detectWorktree("/repo")).toBeUndefined();
+    });
+
+    it("returns undefined for main checkout (relative commonDir '.git')", () => {
+      // Some git versions emit a relative `.git` when run from the main repo root.
+      commonDirOr.mockReturnValue(".git");
+      toplevelOr.mockReturnValue("/repo");
+      expect(detectWorktree("/repo")).toBeUndefined();
+    });
+
+    it("detects worktree (commonDir points back at main repo's .git)", () => {
+      // cwd is /repo/.worktrees/feat-x; commonDir is the MAIN repo's .git.
+      commonDirOr.mockReturnValue("/repo/.git");
+      toplevelOr.mockReturnValue("/repo/.worktrees/feat-x");
+      const wt = detectWorktree("/repo/.worktrees/feat-x");
+      expect(wt).toEqual({ mainPath: "/repo", name: "feat-x" });
+    });
+
+    it("detects worktree at a sibling path (man-page example layout)", () => {
+      commonDirOr.mockReturnValue("/projects/myrepo/.git");
+      toplevelOr.mockReturnValue("/projects/myrepo-feat-x");
+      expect(detectWorktree("/projects/myrepo-feat-x")).toEqual({
+        mainPath: "/projects/myrepo",
+        name: "myrepo-feat-x",
+      });
+    });
+
+    it("does NOT falsely flag a nested cwd inside main checkout as worktree", () => {
+      // User runs from /repo/src; toplevel is /repo, commonDir is /repo/.git.
+      commonDirOr.mockReturnValue("/repo/.git");
+      toplevelOr.mockReturnValue("/repo");
+      expect(detectWorktree("/repo/src")).toBeUndefined();
+    });
+  });
+
+  describe("gatherGitInfo + worktree integration", () => {
+    it("populates gitWorktree when cwd is a worktree", () => {
+      currentBranchOr.mockReturnValue("feat/x");
+      remoteUrlOr.mockReturnValue(undefined);
+      prNumberOr.mockReturnValue(undefined);
+      commonDirOr.mockReturnValue("/repo/.git");
+      toplevelOr.mockReturnValue("/repo/.worktrees/feat-x");
+
+      const info = gatherGitInfo("/repo/.worktrees/feat-x");
+      expect(info?.gitBranch).toBe("feat/x");
+      expect(info?.gitWorktree).toEqual({ mainPath: "/repo", name: "feat-x" });
+    });
+
+    it("omits gitWorktree when cwd is the main checkout", () => {
+      currentBranchOr.mockReturnValue("develop");
+      remoteUrlOr.mockReturnValue(undefined);
+      prNumberOr.mockReturnValue(undefined);
+      commonDirOr.mockReturnValue("/repo/.git");
+      toplevelOr.mockReturnValue("/repo");
+
+      const info = gatherGitInfo("/repo");
+      expect(info?.gitWorktree).toBeUndefined();
+    });
+
+    it("gitWorktree is undefined when rev-parse pair fails, but branch info still flows", () => {
+      currentBranchOr.mockReturnValue("main");
+      remoteUrlOr.mockReturnValue(undefined);
+      prNumberOr.mockReturnValue(undefined);
+      commonDirOr.mockReturnValue(undefined);
+      toplevelOr.mockReturnValue(undefined);
+
+      const info = gatherGitInfo("/test");
+      expect(info?.gitBranch).toBe("main");
+      expect(info?.gitWorktree).toBeUndefined();
     });
   });
 });

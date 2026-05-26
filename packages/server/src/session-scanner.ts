@@ -88,6 +88,17 @@ function sessionFromMeta(
     // Restore unread bit from .meta.json so it survives server restart.
     // See change: session-card-unread-stripes.
     unread: meta.unread,
+    // Cache the worktree base ref from meta so a later git_info_update
+    // can compose it into gitWorktree.base for browser payloads. Field
+    // is server-internal storage on DashboardSession (the wire shape's
+    // gitWorktree.base is the merged value, not this raw cache).
+    // See change: add-worktree-spawn-dialog.
+    gitWorktreeBase: meta.gitWorktreeBase,
+    // Probe whether the session's cwd still exists on disk. Cheap stat,
+    // runs once per ended session at scan time. Avoids the dashboard
+    // showing a stale resume button on a session whose dir was removed.
+    // See change: add-worktree-lifecycle-actions.
+    cwdMissing: meta.cwd ? !existsSync(meta.cwd) : undefined,
     dataUnavailable: true,
   };
 }

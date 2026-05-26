@@ -21,6 +21,14 @@ export interface BridgeContext {
   lastGitBranch: string | undefined;
   lastGitPrNumber: number | undefined;
   /**
+   * Last serialized `GitWorktreeInfo` snapshot sent to the server, or
+   * the literal string `"null"` when we explicitly cleared worktree
+   * state. Compared on every probe tick so we only re-send when the
+   * value actually changes. `undefined` means "nothing sent yet".
+   * See change: add-worktree-spawn-dialog.
+   */
+  lastGitWorktreeJson: string | undefined;
+  /**
    * Last serialized `JjState` snapshot sent to the server, or `null`
    * when the previous probe explicitly cleared it. Compared on every
    * probe tick so we only send `jj_state_update` when the value actually
@@ -28,6 +36,15 @@ export interface BridgeContext {
    */
   lastJjStateJson: string | undefined;
   lastSessionName: string | undefined;
+  /**
+   * `true` once the bridge's VCS tick has observed `existsSync(cwd) === false`
+   * and sent the `cwd_missing` notification. Debounce flag so subsequent
+   * ticks don't re-emit. We deliberately never clear it back to `false` even
+   * if the cwd reappears (recreated dir is almost certainly a different
+   * project) — the bridge process typically dies shortly after cwd loss
+   * anyway. See change: add-worktree-lifecycle-actions.
+   */
+  lastCwdMissing: boolean | undefined;
   /**
    * `false` until the very first `sendStateSync` after the bridge
    * process boots; `true` for the rest of the process lifetime.

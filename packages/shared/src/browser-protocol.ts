@@ -874,6 +874,18 @@ export interface SpawnSessionBrowserMessage {
    */
   attachProposal?: string;
   /**
+   * Optional base ref the worktree was created from. Set ONLY by the
+   * dashboard's worktree dialog after a successful `POST /api/git/worktree`.
+   * Server queues the intent in `pendingWorktreeBaseByCwd` and consumes it
+   * on the next matching `session_register`, writing `gitWorktreeBase` to
+   * the session's `.meta.json` sidecar so the WORKSPACE-subcard pill can
+   * later render `created from <base>` as its tooltip.
+   * Old servers ignore unknown fields — degraded fallback: the pill
+   * shows the generic `git worktree` tooltip instead.
+   * See change: add-worktree-spawn-dialog.
+   */
+  gitWorktreeBase?: string;
+  /**
    * Client-minted UUIDv4 used to correlate `spawn_result` and the eventual
    * `session_added` (which echoes it as `spawnRequestId`). Optional for
    * back-compat with older clients.

@@ -12,7 +12,10 @@ import {
   mdiOpenInNew,
   mdiAlertCircleOutline,
   mdiCircleSmall,
+  mdiSourceBranchPlus,
+  mdiBroom,
 } from "@mdi/js";
+import { ConfirmDialog } from "@blackbelt-technology/pi-dashboard-client-utils/ConfirmDialog";
 import type { DetectedEditor } from "../lib/editor-api.js";
 import type { EditorInstanceStatus } from "@blackbelt-technology/pi-dashboard-shared/editor-types.js";
 
@@ -23,11 +26,28 @@ interface Props {
   editorAvailable?: boolean; // Whether code-server binary is detected
   nativeEditors: DetectedEditor[];
   spawningDisabled?: boolean;
+  /**
+   * Whether the folder is detected as a git repository. When false, the
+   * `+Worktree` button is hidden (no git ops apply). When undefined, the
+   * caller hasn't probed yet — we hide the button defensively.
+   * See change: add-worktree-spawn-dialog.
+   */
+  isGitRepo?: boolean;
+  /**
+   * Number of ended sessions in this folder whose `cwdMissing === true`.
+   * Drives the visibility + label of the `Clean up broken (N)` button.
+   * 0 / undefined hides the button. See change: add-worktree-lifecycle-actions.
+   */
+  brokenSessionCount?: number;
+  /** Called when the user confirms cleaning up. Fires hide for each broken session. */
+  onCleanUpBroken?: () => void;
   onSpawnSession: () => void;
   onOpenTerminals: () => void;
   onOpenEditor: () => void;
   onOpenNativeEditor: (editorId: string) => void;
   onOpenPiResources: () => void;
+  /** Open the worktree spawn dialog scoped to this folder's cwd. */
+  onOpenWorktreeDialog?: () => void;
 }
 
 // Icon map for native editors
@@ -42,14 +62,27 @@ export function FolderActionBar({
   editorAvailable = true,
   nativeEditors,
   spawningDisabled,
+  isGitRepo,
+  brokenSessionCount,
+  onCleanUpBroken,
   onSpawnSession,
   onOpenTerminals,
   onOpenEditor,
   onOpenNativeEditor,
   onOpenPiResources,
+  onOpenWorktreeDialog,
 }: Props) {
   // Filter out vscode/code from native editors (served via EditorView)
   const filteredNativeEditors = nativeEditors.filter((e) => e.id !== "vscode" && e.id !== "code");
+  // +Worktree button visibility: shown when the folder is a known git
+  // repo AND a handler is wired. NO loopback gate — the worktree-add
+  // happens on the server, which is the user's machine regardless of
+  // whether the browser came in via localhost or a tunnel. Server-side
+  // networkGuard already enforces access for the REST endpoint.
+  // See change: add-worktree-spawn-dialog.
+  const showWorktreeButton = isGitRepo === true && !!onOpenWorktreeDialog;
+  const showCleanUp = (brokenSessionCount ?? 0) > 0 && !!onCleanUpBroken;
+  const [confirmCleanUpOpen, setConfirmCleanUpOpen] = React.useState(false);
 
   return (
     <div className="flex items-center gap-1 flex-wrap">
@@ -67,6 +100,20 @@ export function FolderActionBar({
           <Icon path={mdiPlus} size={0.5} /> Session
         </span>
       </button>
+
+      {/* +Worktree (localhost + git only) */}
+      {showWorktreeButton && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onOpenWorktreeDialog!(); }}
+          data-testid="spawn-worktree-btn"
+          className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-yellow-400 hover:border-yellow-500/50"
+          title="New pi session in a git worktree"
+        >
+          <span className="inline-flex items-center gap-0.5">
+            <Icon path={mdiSourceBranchPlus} size={0.5} /> Worktree
+          </span>
+        </button>
+      )}
 
       {/* Terminals(N) */}
       <button
@@ -127,6 +174,27 @@ export function FolderActionBar({
           </span>
         </button>
       ))}
+
+      {showCleanUp && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setConfirmCleanUpOpen(true); }}
+          data-testid="folder-cleanup-broken-btn"
+          className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 text-red-300 hover:bg-red-500/10"
+          title={`Hide ${brokenSessionCount} session${brokenSessionCount === 1 ? "" : "s"} whose cwd no longer exists`}
+        >
+          <span className="inline-flex items-center gap-0.5">
+            <Icon path={mdiBroom} size={0.5} /> Clean up broken ({brokenSessionCount})
+          </span>
+        </button>
+      )}
+      {confirmCleanUpOpen && (
+        <ConfirmDialog
+          message={`Hide ${brokenSessionCount} session${brokenSessionCount === 1 ? "" : "s"} whose cwd no longer exists?`}
+          confirmLabel="Hide"
+          onConfirm={() => { setConfirmCleanUpOpen(false); onCleanUpBroken?.(); }}
+          onCancel={() => setConfirmCleanUpOpen(false)}
+        />
+      )}
 
       {/* Pi Resources — right-aligned */}
       <button

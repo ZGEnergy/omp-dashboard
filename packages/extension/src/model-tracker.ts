@@ -2,6 +2,7 @@
  * Model and thinking-level change detection.
  * Sends model_update only when values actually change.
  */
+import { existsSync } from "node:fs";
 import type { BridgeContext } from "./bridge-context.js";
 import { getCurrentModelString } from "./bridge-context.js";
 import { gatherGitInfo, gatherJjInfo } from "./vcs-info.js";
@@ -40,18 +41,30 @@ export function sendSessionNameIfChanged(bc: BridgeContext): void {
 }
 
 /**
- * Send git_info_update if branch or PR has changed since last send.
+ * Send git_info_update if branch, PR, or worktree state has changed since last send.
  */
 export function sendGitInfoIfChanged(bc: BridgeContext, cwd: string): void {
   const info = gatherGitInfo(cwd);
   if (!info) return;
-  if (info.gitBranch === bc.lastGitBranch && info.gitPrNumber === bc.lastGitPrNumber) return;
+  // Worktree state diff: serialise to a stable string. `"null"` marks an
+  // explicit "cwd is not a worktree" so a subsequent transition into a
+  // worktree still counts as a change.
+  const nextWorktreeJson = info.gitWorktree ? JSON.stringify(info.gitWorktree) : "null";
+  if (
+    info.gitBranch === bc.lastGitBranch &&
+    info.gitPrNumber === bc.lastGitPrNumber &&
+    nextWorktreeJson === bc.lastGitWorktreeJson
+  ) return;
   bc.lastGitBranch = info.gitBranch;
   bc.lastGitPrNumber = info.gitPrNumber;
+  bc.lastGitWorktreeJson = nextWorktreeJson;
   bc.connection.send({
     type: "git_info_update",
     sessionId: bc.sessionId,
     ...info,
+    // Use explicit `null` on the wire when worktree state went from
+    // present → absent, so the server can clear its cached value.
+    gitWorktree: info.gitWorktree ?? null,
   });
 }
 
@@ -69,6 +82,31 @@ export function resetReconnectCaches(bc: BridgeContext): void {
   // doesn't surface stale branch info if .meta.json wasn't persisted yet.
   bc.lastGitBranch = undefined;
   bc.lastGitPrNumber = undefined;
+  bc.lastGitWorktreeJson = undefined;
+}
+
+/**
+ * Emit `cwd_missing` the first time `existsSync(cwd)` flips to false.
+ * Debounced via `bc.lastCwdMissing` — once we've reported missing, the
+ * tick is a no-op forever (we never reset to false on rediscovery; see
+ * the BridgeContext doc-comment for the rationale).
+ *
+ * Pure with respect to `bc` aside from caching the flag; the only side
+ * effect is `connection.send`. See change: add-worktree-lifecycle-actions.
+ */
+export function sendCwdMissingIfChanged(
+  bc: BridgeContext,
+  cwd: string,
+  exists: (p: string) => boolean = existsSync,
+): void {
+  if (bc.lastCwdMissing === true) return;
+  if (!cwd) return;
+  if (exists(cwd)) return;
+  bc.lastCwdMissing = true;
+  bc.connection.send({
+    type: "cwd_missing",
+    sessionId: bc.sessionId,
+  });
 }
 
 /**

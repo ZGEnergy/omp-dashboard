@@ -139,6 +139,7 @@ export function createBrowserGateway(
   pendingAttachRegistry?: import("./pending-attach-registry.js").PendingAttachRegistry,
   pendingResumeIntents?: import("./pending-resume-intent-registry.js").PendingResumeIntentRegistry,
   pendingClientCorrelations?: import("./pending-client-correlations.js").PendingClientCorrelations,
+  pendingWorktreeBaseRegistry?: import("./pending-worktree-base-registry.js").PendingWorktreeBaseRegistry,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -342,6 +343,7 @@ export function createBrowserGateway(
           pendingAttachRegistry,
           pendingResumeIntents,
           pendingClientCorrelations,
+          pendingWorktreeBaseRegistry,
           sendTo, broadcast, getSubscribers, replayPendingUiRequests,
           trackUiRequest: trackUiRequest,
           markReplaying(targetWs, sessionId) {

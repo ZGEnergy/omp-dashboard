@@ -29,6 +29,31 @@ export interface JjState {
   lastError?: string;
 }
 
+/**
+ * Per-session git-worktree state. Populated by the bridge's VCS probe when
+ * `git rev-parse --git-common-dir` resolves outside `--show-toplevel` (the
+ * canonical signal that this cwd is a worktree, not the main checkout).
+ * Absent (or `undefined`) for plain checkouts — clients MUST treat absence
+ * as "not a worktree". Used by the dashboard to (a) group worktree
+ * sessions under their parent repo, (b) render the WORKSPACE-subcard
+ * worktree pill.
+ *
+ * `base` is post-create metadata, set by the server when a session is
+ * spawned via the dashboard's worktree dialog and persisted to
+ * `.meta.json` as `gitWorktreeBase`. The bridge itself never populates
+ * `base` (git does not record the ref a worktree was forked from).
+ *
+ * See change: add-worktree-spawn-dialog.
+ */
+export interface GitWorktreeInfo {
+  /** Absolute path of the main worktree (parent repo root). */
+  mainPath: string;
+  /** Basename of the worktree directory (typically `<repo>/.worktrees/<name>`). */
+  name: string;
+  /** Base ref the worktree was created from. Server-supplied, optional. */
+  base?: string;
+}
+
 /** A dashboard session representing a connected pi instance */
 export interface DashboardSession {
   id: string;
@@ -78,6 +103,34 @@ export interface DashboardSession {
    * See change: add-jj-workspace-plugin.
    */
   jjState?: JjState;
+  /**
+   * Per-session git-worktree identity. Set only when the session's cwd
+   * is a git worktree (not the main checkout). See `GitWorktreeInfo`.
+   * Absent on older bridges and for plain checkouts. Clients should read
+   * `gitWorktree.base` for the create-from ref (when known); the raw
+   * `gitWorktreeBase` field below is the server-side cache used to
+   * compose `base` on the broadcast payload.
+   * See change: add-worktree-spawn-dialog.
+   */
+  gitWorktree?: GitWorktreeInfo;
+  /**
+   * Server-cached base ref for the session's worktree, loaded from the
+   * sidecar `.meta.json` (`gitWorktreeBase`). Used internally to compose
+   * `gitWorktree.base` when broadcasting; clients SHOULD prefer
+   * `gitWorktree.base` (merged) and ignore this raw cache.
+   * See change: add-worktree-spawn-dialog.
+   */
+  gitWorktreeBase?: string;
+  /**
+   * Server-managed flag set by any of three probe sites: (1) the bridge's
+   * 30 s VCS tick (`existsSync(cwd) === false`), (2) the server's session
+   * scanner re-probing ended sessions on boot, (3) the `worktree/remove`
+   * lifecycle endpoint optimistically stamping every session under the
+   * removed path. Purely computed — NEVER persisted to `.meta.json`. Older
+   * bridges never send this; clients SHALL treat `undefined` as "not
+   * missing". See change: add-worktree-lifecycle-actions.
+   */
+  cwdMissing?: boolean;
   openspecPhase?: OpenSpecPhase | null;
   openspecChange?: string | null;
   attachedProposal?: string | null;
@@ -715,4 +768,10 @@ export interface ApiResponse<T = unknown> {
    * See change: fix-fork-empty-session-silent-timeout.
    */
   code?: string;
+  /**
+   * Optional captured stderr from a shelled-out command (e.g. `git
+   * worktree add`). Surfaced verbatim so the client can render the
+   * git error inline in dialogs. See change: add-worktree-spawn-dialog.
+   */
+  stderr?: string;
 }

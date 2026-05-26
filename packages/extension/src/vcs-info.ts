@@ -14,7 +14,7 @@ import path from "node:path";
 import * as git from "@blackbelt-technology/pi-dashboard-shared/platform/git.js";
 import * as jj from "@blackbelt-technology/pi-dashboard-shared/platform/jj.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
-import type { JjState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { GitWorktreeInfo, JjState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { buildGitLinks, type GitLinks } from "./git-link-builder.js";
 
 export interface GitInfo {
@@ -22,6 +22,13 @@ export interface GitInfo {
   gitBranchUrl?: string;
   gitPrNumber?: number;
   gitPrUrl?: string;
+  /**
+   * Worktree identity (mainPath, name) when cwd is a git worktree.
+   * Undefined for the main checkout and for any cwd where the rev-parse
+   * pair fails. Never carries `base` — that field is post-create
+   * metadata supplied by the server.
+   */
+  gitWorktree?: GitWorktreeInfo;
 }
 
 /** Detect the current git branch. Returns short SHA for detached HEAD. */
@@ -45,6 +52,50 @@ export function detectPrNumber(cwd: string): number | undefined {
   return git.prNumberOr({ cwd });
 }
 
+/**
+ * Detect whether `cwd` is a git worktree (not the main checkout).
+ *
+ * Uses the canonical signal: `git rev-parse --git-common-dir` resolves
+ * to a path OUTSIDE `git rev-parse --show-toplevel` when the cwd is a
+ * worktree (because `--git-common-dir` points back at the main repo's
+ * `.git/`, while `--show-toplevel` is the worktree's own root).
+ *
+ * Returns `undefined` when:
+ *   - either rev-parse invocation fails (not a repo, git missing,
+ *     permission, etc.),
+ *   - the cwd IS the main checkout (`commonDir` is inside `topLevel`).
+ *
+ * Resolution is path-prefix based with case-folding on Windows/macOS
+ * via the shared platform helpers; relative `commonDir` outputs (which
+ * happen on some git versions when cwd === main repo) are normalised
+ * to absolute via `path.resolve(cwd, commonDir)`.
+ */
+export function detectWorktree(cwd: string): GitWorktreeInfo | undefined {
+  const commonDirRaw = git.commonDirOr({ cwd });
+  const topLevel = git.toplevelOr({ cwd });
+  if (!commonDirRaw || !topLevel) return undefined;
+
+  // Normalise commonDir: when it's relative (`.git`), resolve against cwd.
+  // When absolute, leave as-is.
+  const commonDirAbs = path.isAbsolute(commonDirRaw)
+    ? commonDirRaw
+    : path.resolve(cwd, commonDirRaw);
+
+  // Main checkout: commonDir == <toplevel>/.git (or anywhere inside toplevel).
+  // Worktree:      commonDir == <main-repo>/.git, which is NOT inside the
+  //                worktree's toplevel.
+  const topWithSep = topLevel.endsWith(path.sep) ? topLevel : topLevel + path.sep;
+  const insideToplevel =
+    commonDirAbs === topLevel || commonDirAbs.startsWith(topWithSep);
+  if (insideToplevel) return undefined;
+
+  // `commonDir` for a worktree is `<main-repo>/.git` — the parent dir is
+  // the main worktree root.
+  const mainPath = path.dirname(commonDirAbs);
+  const name = path.basename(cwd);
+  return { mainPath, name };
+}
+
 /** Gather all git info for a directory. Returns undefined if not a git repo. */
 export function gatherGitInfo(cwd: string): GitInfo | undefined {
   const branch = detectBranch(cwd);
@@ -52,6 +103,7 @@ export function gatherGitInfo(cwd: string): GitInfo | undefined {
 
   const remoteUrl = detectRemoteUrl(cwd);
   const prNumber = detectPrNumber(cwd);
+  const gitWorktree = detectWorktree(cwd);
 
   const links: GitLinks = remoteUrl ? buildGitLinks(remoteUrl, branch, prNumber) : {};
 
@@ -60,6 +112,7 @@ export function gatherGitInfo(cwd: string): GitInfo | undefined {
     gitBranchUrl: links.branchUrl,
     gitPrNumber: prNumber,
     gitPrUrl: links.prUrl,
+    gitWorktree,
   };
 }
 

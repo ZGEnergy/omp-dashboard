@@ -38,7 +38,7 @@ import type { BridgeContext } from "./bridge-context.js";
 import { filterHiddenCommands, extractFirstMessage, getCurrentModelString } from "./bridge-context.js";
 import { tryDispatchExtensionCommand } from "./slash-dispatch.js";
 import { sendStateSync as _sendStateSync, replaySessionEntries as _replaySessionEntries, handleSessionChange as _handleSessionChange } from "./session-sync.js";
-import { sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged, sendJjStateIfChanged as _sendJjStateIfChanged, resetReconnectCaches as _resetReconnectCaches } from "./model-tracker.js";
+import { sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged, sendJjStateIfChanged as _sendJjStateIfChanged, sendCwdMissingIfChanged as _sendCwdMissingIfChanged, resetReconnectCaches as _resetReconnectCaches } from "./model-tracker.js";
 import { registerFlowEventListeners, FLOW_EVENT_MAP, SUBAGENT_EVENT_MAP } from "./flow-event-wiring.js";
 import { refreshUiModules, subscribeUiInvalidate, handleUiManagement, type UiModulesBridgeCtx } from "./ui-modules.js";
 import { inlineMessageText, type ReadFileOutcome } from "./markdown-image-inliner.js";
@@ -197,6 +197,8 @@ function initBridge(pi: ExtensionAPI) {
   let lastGitBranch: string | undefined;
   let lastGitPrNumber: number | undefined;
   let lastJjStateJson: string | undefined; // see change: add-jj-workspace-plugin
+  let lastGitWorktreeJson: string | undefined; // see change: add-worktree-spawn-dialog
+  let lastCwdMissing: boolean | undefined; // see change: add-worktree-lifecycle-actions
   let lastSessionName: string | undefined;
   let cachedHasUI: boolean | undefined = prev.hasUI;
   let cachedModelRegistry: any | undefined = prev.modelRegistry;
@@ -735,6 +737,7 @@ function initBridge(pi: ExtensionAPI) {
         if (activeCtx?.cwd) {
           sendGitInfoIfChanged(activeCtx.cwd);
           sendJjStateIfChanged(activeCtx.cwd);
+          sendCwdMissingIfChanged(activeCtx.cwd);
         }
       } catch { /* probe failure non-fatal */ }
       replaySessionEntries();
@@ -959,6 +962,8 @@ function initBridge(pi: ExtensionAPI) {
       lastSessionFile, lastSessionDir, lastFirstMessage,
       lastGitBranch, lastGitPrNumber, lastSessionName,
       lastJjStateJson,
+      lastGitWorktreeJson,
+      lastCwdMissing,
       hasRegisteredOnce,
       selfSpawnedPgids,
     };
@@ -978,6 +983,8 @@ function initBridge(pi: ExtensionAPI) {
     lastGitPrNumber = bc.lastGitPrNumber;
     lastSessionName = bc.lastSessionName;
     lastJjStateJson = bc.lastJjStateJson;
+    lastGitWorktreeJson = bc.lastGitWorktreeJson;
+    lastCwdMissing = bc.lastCwdMissing;
     hasRegisteredOnce = bc.hasRegisteredOnce;
   }
 
@@ -988,6 +995,7 @@ function initBridge(pi: ExtensionAPI) {
   function sendSessionNameIfChanged() { const bc = syncBc(); _sendSessionNameIfChanged(bc); applyBc(bc); }
   function sendGitInfoIfChanged(cwd: string) { const bc = syncBc(); _sendGitInfoIfChanged(bc, cwd); applyBc(bc); }
   function sendJjStateIfChanged(cwd: string) { const bc = syncBc(); _sendJjStateIfChanged(bc, cwd); applyBc(bc); }
+  function sendCwdMissingIfChanged(cwd: string) { const bc = syncBc(); _sendCwdMissingIfChanged(bc, cwd); applyBc(bc); }
 
   // Forward all pi core events to the dashboard.
   // Events with special enrichment logic:
@@ -1719,6 +1727,7 @@ function initBridge(pi: ExtensionAPI) {
     // Send initial git + jj info
     sendGitInfoIfChanged(ctx.cwd);
     sendJjStateIfChanged(ctx.cwd);
+    sendCwdMissingIfChanged(ctx.cwd);
 
     // Start metrics monitor and heartbeat
     startMetricsMonitor();
@@ -1737,6 +1746,7 @@ function initBridge(pi: ExtensionAPI) {
       if (!isActive()) return;
       sendGitInfoIfChanged(ctx.cwd);
       sendJjStateIfChanged(ctx.cwd);
+      sendCwdMissingIfChanged(ctx.cwd);
       sendSessionNameIfChanged();
       sendModelUpdateIfChanged();
     }, GIT_POLL_INTERVAL);
@@ -1793,6 +1803,7 @@ function initBridge(pi: ExtensionAPI) {
     gitPollTimer = setInterval(() => {
       sendGitInfoIfChanged(ctx.cwd);
       sendJjStateIfChanged(ctx.cwd);
+      sendCwdMissingIfChanged(ctx.cwd);
     }, GIT_POLL_INTERVAL);
   }
 

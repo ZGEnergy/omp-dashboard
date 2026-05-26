@@ -42,6 +42,7 @@ import { useEditors } from "../lib/use-editors.js";
 import { openEditor } from "../lib/editor-api.js";
 import { Toast, useToast } from "./Toast.js";
 import { BranchSwitchDialog } from "./BranchSwitchDialog.js";
+import { WorktreeSpawnDialog } from "./WorktreeSpawnDialog.js";
 import { truncatePathMiddle } from "../lib/truncate-path.js";
 import { selectedCardScrollFingerprint } from "../lib/session-list-scroll.js";
 import { TunnelButton } from "./TunnelButton.js";
@@ -83,7 +84,7 @@ interface Props {
   onResumeKeepPosition?: (sessionId: string) => void;
   onHideSession?: (sessionId: string) => void;
   onUnhideSession?: (sessionId: string) => void;
-  onSpawnSession?: (cwd: string, attachProposal?: string) => void;
+  onSpawnSession?: (cwd: string, attachProposal?: string, opts?: { gitWorktreeBase?: string }) => void;
   spawningCwds?: Set<string>;
   spawnResult?: { success: boolean; message: string } | null;
   onSpawnResultSeen?: () => void;
@@ -248,6 +249,9 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
   }, [spawnResult, showToast, onSpawnResultSeen]);
 
   const [branchDialogCwd, setBranchDialogCwd] = useState<string | null>(null);
+  // Worktree spawn dialog: when set, render the modal scoped to this cwd.
+  // See change: add-worktree-spawn-dialog.
+  const [worktreeDialogCwd, setWorktreeDialogCwd] = useState<string | null>(null);
 
   // Filter state - active-only defaults to ON
   // Single visibility toggle: `Show hidden`. The previous `Active only`
@@ -608,11 +612,19 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               editorAvailable={editorAvailable}
               nativeEditors={editorMap.get(group.cwd) ?? []}
               spawningDisabled={spawningCwds?.has(group.cwd)}
+              isGitRepo={group.sessions.some((s) => !!s.gitBranch)}
               onSpawnSession={() => onSpawnSession?.(group.cwd)}
               onOpenTerminals={() => onOpenTerminals?.(group.cwd)}
               onOpenEditor={() => onOpenEditor?.(group.cwd)}
               onOpenNativeEditor={(editorId) => handleOpenEditor(group.cwd, editorId)}
               onOpenPiResources={() => onOpenPiResources?.(group.cwd)}
+              onOpenWorktreeDialog={onSpawnSession ? () => setWorktreeDialogCwd(group.cwd) : undefined}
+              brokenSessionCount={group.sessions.filter((s) => s.cwdMissing === true && s.status === "ended").length}
+              onCleanUpBroken={onHideSession ? () => {
+                for (const s of group.sessions) {
+                  if (s.cwdMissing === true && s.status === "ended") onHideSession(s.id);
+                }
+              } : undefined}
             />
           </div>
           {/* Plugin slot: sidebar-folder-section (additive, coexists with FolderOpenSpecSection) */}
@@ -1029,6 +1041,16 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
         <div className="p-2 text-center text-[11px] text-[var(--text-muted)]">
           {hiddenCount} hidden
         </div>
+      )}
+      {worktreeDialogCwd && (
+        <WorktreeSpawnDialog
+          cwd={worktreeDialogCwd}
+          onCancel={() => setWorktreeDialogCwd(null)}
+          onSpawn={(path, opts) => {
+            setWorktreeDialogCwd(null);
+            onSpawnSession?.(path, undefined, opts);
+          }}
+        />
       )}
       {branchDialogCwd && (
         <BranchSwitchDialog

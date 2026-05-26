@@ -10,11 +10,12 @@ import type { SessionOrderManager } from "./session-order-manager.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { DirectoryService } from "./directory-service.js";
 import { extractSessionUpdates, isActivityEvent, isUnreadTrigger } from "./event-status-extraction.js";
+import { composeWorktreePayload } from "./git-worktree-compose.js";
 import type { ViewedSessionTracker } from "./viewed-session-tracker.js";
 import { setCatalogueForSession } from "./provider-catalogue-cache.js";
 import { spawnPiSession } from "./process-manager.js";
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
+import { mergeSessionMeta, writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { detectOpenSpecActivity, isValidOpenSpecChangeSlug } from "@blackbelt-technology/pi-dashboard-shared/openspec-activity-detector.js";
 import { extractTurnStats } from "@blackbelt-technology/pi-dashboard-shared/stats-extractor.js";
@@ -38,6 +39,15 @@ export interface EventWiringDeps {
    * auto-rename. See change: add-folder-task-checker-and-spawn-attach.
    */
   pendingAttachRegistry?: import("./pending-attach-registry.js").PendingAttachRegistry;
+  /**
+   * Optional pending-worktree-base registry. When provided, the wiring
+   * consumes a pending base ref on each `session_register` and persists
+   * it to the session's `.meta.json` sidecar + stamps the in-memory
+   * `DashboardSession.gitWorktreeBase` so a later `git_info_update`
+   * composes `gitWorktree.base` correctly.
+   * See change: add-worktree-spawn-dialog.
+   */
+  pendingWorktreeBaseRegistry?: import("./pending-worktree-base-registry.js").PendingWorktreeBaseRegistry;
   /**
    * Optional viewed-session tracker. When provided, the wiring evaluates
    * `isUnreadTrigger(...)` on each forwarded event and stamps
@@ -71,6 +81,7 @@ export function wireEvents(deps: EventWiringDeps): void {
     knownSessionIds,
     pendingDashboardSpawns,
     pendingAttachRegistry,
+    pendingWorktreeBaseRegistry,
     viewedSessionTracker,
     pendingClientCorrelations,
   } = deps;
@@ -85,24 +96,60 @@ export function wireEvents(deps: EventWiringDeps): void {
 
   // Consume any pending spawn-with-attach intent for the registering session.
   // See change: add-folder-task-checker-and-spawn-attach.
+  //
+  // Also consume any pending worktree-base intent (set by the
+  // WorktreeSpawnDialog after a successful POST /api/git/worktree) and
+  // persist it to the session's .meta.json. See change:
+  // add-worktree-spawn-dialog.
   piGateway.onSessionRegistered = (sessionId, cwd) => {
-    if (!pendingAttachRegistry) return;
-    const changeName = pendingAttachRegistry.consume(cwd);
-    if (!changeName) return;
-    // Lazy import to avoid a circular type dep at module load.
-    void import("./browser-handlers/session-meta-handler.js").then(({ applyAttachProposal }) => {
-      applyAttachProposal(sessionId, changeName, {
-        sessionManager,
-        piGateway,
-        broadcast: (msg) => {
-          // applyAttachProposal only emits `session_updated`; route via the
-          // browser gateway's typed helper to match the rest of this file.
-          if (msg.type === "session_updated") {
-            browserGateway.broadcastSessionUpdated(msg.sessionId, msg.updates);
+    // ── attachProposal arm ───────────────────────────────────────────────
+    if (pendingAttachRegistry) {
+      const changeName = pendingAttachRegistry.consume(cwd);
+      if (changeName) {
+        // Lazy import to avoid a circular type dep at module load.
+        void import("./browser-handlers/session-meta-handler.js").then(({ applyAttachProposal }) => {
+          applyAttachProposal(sessionId, changeName, {
+            sessionManager,
+            piGateway,
+            broadcast: (msg) => {
+              if (msg.type === "session_updated") {
+                browserGateway.broadcastSessionUpdated(msg.sessionId, msg.updates);
+              }
+            },
+          });
+        });
+      }
+    }
+
+    // ── gitWorktreeBase arm ───────────────────────────────────────────────
+    if (pendingWorktreeBaseRegistry) {
+      const base = pendingWorktreeBaseRegistry.consume(cwd);
+      if (base) {
+        // Stamp the in-memory session so a later git_info_update composes
+        // gitWorktree.base correctly (see composeWorktreePayload).
+        sessionManager.update(sessionId, { gitWorktreeBase: base });
+        // Persist to .meta.json so the value survives server restart.
+        // best-effort: a missing/unwritable sidecar should not break the
+        // session register flow.
+        const session = sessionManager.get(sessionId);
+        if (session?.sessionFile) {
+          try {
+            mergeSessionMeta(session.sessionFile, { gitWorktreeBase: base });
+          } catch (err) {
+            console.warn(
+              `[event-wiring] failed to persist gitWorktreeBase to .meta.json for ${sessionId}:`,
+              err,
+            );
           }
-        },
-      });
-    });
+        }
+        // Broadcast immediately so the WORKSPACE-subcard pill picks up the
+        // `base` even before the next git_info_update arrives. We don't
+        // know gitWorktree.mainPath / .name yet (bridge sends those
+        // separately in git_info_update), but stamping gitWorktreeBase on
+        // the wire is harmless — clients ignore it (see composeWorktreePayload).
+        browserGateway.broadcastSessionUpdated(sessionId, { gitWorktreeBase: base });
+      }
+    }
   };
 
   // Broadcast session ended to browsers when sessions are unregistered
@@ -497,7 +544,12 @@ export function wireEvents(deps: EventWiringDeps): void {
         browserGateway.broadcastSessionUpdated(sessionId, { source: "dashboard" });
         if (msg.sessionFile) {
           try {
-            writeSessionMeta(msg.sessionFile, { source: "dashboard" });
+            // Merge, not overwrite, so any other fields already written
+            // synchronously by sibling onSessionRegistered handlers
+            // (notably `gitWorktreeBase` from add-worktree-spawn-dialog)
+            // survive this stamp. Previously a `writeSessionMeta` here
+            // clobbered prior writes.
+            mergeSessionMeta(msg.sessionFile, { source: "dashboard" });
           } catch { /* best-effort */ }
         }
       }
@@ -637,12 +689,25 @@ export function wireEvents(deps: EventWiringDeps): void {
     }
 
     if (msg.type === "git_info_update") {
-      const gitUpdates = {
+      // Compose live worktree state from bridge + server-cached base ref
+      // (loaded earlier from .meta.json by session-scanner / spawn flow).
+      // `null` clears, `undefined` leaves existing value untouched.
+      // See change: add-worktree-spawn-dialog.
+      const composedWorktree = composeWorktreePayload(
+        msg.gitWorktree,
+        sessionManager.get(sessionId)?.gitWorktreeBase,
+      );
+      const gitUpdates: Record<string, unknown> = {
         gitBranch: msg.gitBranch,
         gitBranchUrl: msg.gitBranchUrl,
         gitPrNumber: msg.gitPrNumber,
         gitPrUrl: msg.gitPrUrl,
       };
+      if (composedWorktree !== undefined) {
+        // Map wire `null` → in-memory `undefined` so the field clears
+        // cleanly on the DashboardSession.
+        gitUpdates.gitWorktree = composedWorktree ?? undefined;
+      }
       sessionManager.update(sessionId, gitUpdates);
       browserGateway.broadcastSessionUpdated(sessionId, gitUpdates);
     }
@@ -654,6 +719,14 @@ export function wireEvents(deps: EventWiringDeps): void {
       const jjUpdates = { jjState: msg.jjState ?? undefined };
       sessionManager.update(sessionId, jjUpdates);
       browserGateway.broadcastSessionUpdated(sessionId, jjUpdates);
+    }
+
+    if (msg.type === "cwd_missing") {
+      // Bridge detected `existsSync(cwd) === false`. Stamp + broadcast.
+      // Idempotent: re-emitting on a stamped session is harmless.
+      // See change: add-worktree-lifecycle-actions.
+      sessionManager.update(sessionId, { cwdMissing: true });
+      browserGateway.broadcastSessionUpdated(sessionId, { cwdMissing: true });
     }
 
     if (msg.type === "files_list") {

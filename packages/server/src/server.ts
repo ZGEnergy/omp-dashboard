@@ -21,6 +21,7 @@ import { createSessionOrderManager, type SessionOrderManager } from "./session-o
 import { createPendingForkRegistry, type PendingForkRegistry } from "./pending-fork-registry.js";
 import { createPendingClientCorrelations } from "./pending-client-correlations.js";
 import { createPendingAttachRegistry } from "./pending-attach-registry.js";
+import { createPendingWorktreeBaseRegistry } from "./pending-worktree-base-registry.js";
 import { createPendingResumeIntentRegistry } from "./pending-resume-intent-registry.js";
 import { applyReattachPolicy } from "./reattach-placement.js";
 
@@ -207,6 +208,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       // Persist unread bit so it survives server restart.
       // See change: session-card-unread-stripes.
       unread: session.unread,
+      // Persist the worktree base ref so the WORKSPACE-subcard pill can
+      // render `created from <base>` after restart. The field is only set
+      // when a session was spawned via the dashboard's worktree dialog.
+      // See change: add-worktree-spawn-dialog.
+      gitWorktreeBase: session.gitWorktreeBase,
       cachedAt: Date.now(),
     });
     // When a session ends, drop its id from the persisted drag-reorder list
@@ -355,6 +361,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // Consumed in event-wiring.ts on session_register. See change:
   // add-folder-task-checker-and-spawn-attach.
   const pendingAttachRegistry = createPendingAttachRegistry();
+  // Pending worktree-base intents (cwd → base). Populated by the
+  // worktree spawn dialog flow, consumed by event-wiring's session_register
+  // hook to write .meta.json#gitWorktreeBase.
+  // See change: add-worktree-spawn-dialog.
+  const pendingWorktreeBaseRegistry = createPendingWorktreeBaseRegistry();
   // Pending user-initiated resume intents (sessionId → timestamp).
   // Consumed by `sessionManager.onChange` in the ended→alive branch to
   // gate the sessionOrder mutation behind explicit user intent so that
@@ -440,7 +451,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     },
   });
 
-  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry, pendingResumeIntents, pendingClientCorrelations);
+  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry, pendingResumeIntents, pendingClientCorrelations, pendingWorktreeBaseRegistry);
 
   // Resolve package version once at startup
   const __require = createRequire(import.meta.url);
@@ -475,6 +486,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     knownSessionIds,
     pendingDashboardSpawns,
     pendingAttachRegistry,
+    pendingWorktreeBaseRegistry,
     viewedSessionTracker: browserGateway.viewedSessionTracker,
     pendingClientCorrelations,
   });
@@ -580,7 +592,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   const networkGuard = createNetworkGuard(config.resolvedTrustedNetworks ?? []);
 
   registerSessionRoutes(fastify, { sessionManager, eventStore, networkGuard });
-  registerGitRoutes(fastify, { networkGuard });
+  registerGitRoutes(fastify, { networkGuard, sessionManager, browserGateway });
   registerFileRoutes(fastify, { sessionManager, preferencesStore, networkGuard });
   registerOpenSpecRoutes(fastify, {
     sessionManager,

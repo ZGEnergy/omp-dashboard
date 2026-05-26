@@ -121,6 +121,7 @@ export function handleSessionChange(
   bc.lastFirstMessage = firstMessage;
   bc.lastGitBranch = undefined;
   bc.lastGitPrNumber = undefined;
+  bc.lastGitWorktreeJson = undefined;
   bc.lastSessionName = bc.pi.getSessionName() ?? "";
   bc.lastModel = getCurrentModelString(bc);
   bc.lastThinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? undefined;
@@ -160,7 +161,13 @@ export function handleSessionChange(
   if (gitInfo) {
     bc.lastGitBranch = gitInfo.gitBranch;
     bc.lastGitPrNumber = gitInfo.gitPrNumber;
-    bc.connection.send({ type: "git_info_update", sessionId: bc.sessionId, ...gitInfo });
+    bc.lastGitWorktreeJson = gitInfo.gitWorktree ? JSON.stringify(gitInfo.gitWorktree) : "null";
+    bc.connection.send({
+      type: "git_info_update",
+      sessionId: bc.sessionId,
+      ...gitInfo,
+      gitWorktree: gitInfo.gitWorktree ?? null,
+    });
   }
 
   const commands = filterHiddenCommands(bc.pi.getCommands());
