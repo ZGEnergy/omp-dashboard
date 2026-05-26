@@ -1,3 +1,5 @@
+> **Superseded by `add-worktree-spawn-dialog`** (different layout — `.worktrees/<slug>/` nested under the parent repo rather than sibling-directory `<repo>-<branch>`; adds the grouping fix for worktree sessions; unified dialog lists existing worktrees + creates new in one flow; auto-spawns on success; never implemented).
+
 ## Why
 
 The sidebar group headers currently only show editor buttons. Users need quick actions to spawn new pi-agent sessions and create git worktrees directly from the dashboard without switching to a terminal. The process manager already supports tmux spawning but has no API endpoint. Git worktree creation is a common workflow for starting parallel work on a new branch.

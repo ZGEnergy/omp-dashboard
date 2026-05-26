@@ -1,3 +1,5 @@
+> **Superseded by `add-worktree-spawn-dialog`** (consolidates worktree detection, session grouping under parent repo, unified create/spawn dialog, and `.worktrees/<slug>` layout into one change; different card-display decision — branch text preserved with an additive `worktree` pill rather than replaced with the worktree folder name; never implemented).
+
 ## Why
 
 Git worktrees are common in multi-branch workflows — each worktree is a separate checkout directory with its own branch. The dashboard currently only detects branch names and shows them identically on group headers and session cards. When a session's CWD is a worktree, the card should show the worktree identity instead of the branch. The Zed editor open command should also target the worktree directory correctly, opening a new window when Zed doesn't already have the directory open.

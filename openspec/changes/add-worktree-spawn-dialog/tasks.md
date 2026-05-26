@@ -68,10 +68,10 @@
 
 ## 9. Supersede prior changes
 
-- [ ] 9.1 Add a top-of-file note in `openspec/changes/worktree-awareness/proposal.md`: "**Superseded by `add-worktree-spawn-dialog`**" with a one-line summary of why (different card-display decision, no grouping fix)
-- [ ] 9.2 Same note in `openspec/changes/workspace-actions/proposal.md`: "**Superseded by `add-worktree-spawn-dialog`**" (different layout, narrower scope)
-- [ ] 9.3 Move both superseded change directories to `openspec/changes/archive/superseded/` (preserve their artifacts; they were never implemented so no spec merge is needed)
-- [ ] 9.4 Confirm `openspec list` no longer shows `worktree-awareness` or `workspace-actions` in the active list
+- [x] 9.1 Added superseded note at top of `worktree-awareness/proposal.md` citing this change + summarising the deltas (different card-display choice, missed grouping fix).
+- [x] 9.2 Added superseded note at top of `workspace-actions/proposal.md` (different layout, missing grouping + auto-spawn + unified dialog).
+- [x] 9.3 Moved both directories to `openspec/changes/archive/2026-05-26-worktree-awareness/` and `archive/2026-05-26-workspace-actions/` via `git mv` (date-prefix convention matching all other archived changes; project does not use a `superseded/` subdirectory). Artifacts preserved verbatim including the superseded note.
+- [x] 9.4 `openspec list` no longer shows either change in the active list. `openspec validate add-worktree-spawn-dialog --strict` still passes.
 
 ## 10. Documentation
 
