@@ -108,6 +108,45 @@ describe("/api/doctor", () => {
     expect(body.summary.errors).toBe(err);
   });
 
+  // See change: fix-doctor-oauth-credential-detection.
+  it("API key row reports ok via OAuth-only deps", async () => {
+    app = await makeApp(() =>
+      fakeDeps({
+        isApiKeyConfigured: () => true,
+        inspectedCredentialFiles: () => [
+          "/tmp/fake-home/.pi/agent/settings.json",
+          "/tmp/fake-home/.pi/agent/auth.json",
+        ],
+      }),
+    );
+    const res = await app.inject({ method: "GET", url: "/api/doctor" });
+    const body = res.json() as DoctorReport;
+    const apiKeyRow = body.checks.find((c) => c.name === "API key");
+    expect(apiKeyRow?.status).toBe("ok");
+    expect(apiKeyRow?.suggestion).toBeUndefined();
+  });
+
+  it("API key row warning detail lists both inspected files", async () => {
+    app = await makeApp(() =>
+      fakeDeps({
+        isApiKeyConfigured: () => false,
+        inspectedCredentialFiles: () => [
+          "/tmp/fake-home/.pi/agent/settings.json",
+          "/tmp/fake-home/.pi/agent/auth.json",
+        ],
+      }),
+    );
+    const res = await app.inject({ method: "GET", url: "/api/doctor" });
+    const body = res.json() as DoctorReport;
+    const apiKeyRow = body.checks.find((c) => c.name === "API key");
+    expect(apiKeyRow?.status).toBe("warning");
+    expect(apiKeyRow?.detail).toContain("settings.json");
+    expect(apiKeyRow?.detail).toContain("auth.json");
+    // Suggestion mentions both OAuth and API key routes.
+    expect(apiKeyRow?.suggestion).toMatch(/OAuth/);
+    expect(apiKeyRow?.suggestion).toMatch(/API key/i);
+  });
+
   it("never returns Electron-only rows (4.5)", async () => {
     app = await makeApp(() => fakeDeps());
     const res = await app.inject({ method: "GET", url: "/api/doctor" });

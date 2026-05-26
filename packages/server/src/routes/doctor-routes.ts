@@ -15,7 +15,6 @@
 import type { FastifyInstance } from "fastify";
 import path from "node:path";
 import os from "node:os";
-import { existsSync, readFileSync } from "node:fs";
 import {
   runSharedChecks,
   stampSectionsAndSuggestions,
@@ -25,6 +24,10 @@ import {
   type SharedChecksDeps,
 } from "@blackbelt-technology/pi-dashboard-shared/doctor-core.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
+import {
+  hasAnyProviderCredential,
+  inspectedCredentialFiles,
+} from "@blackbelt-technology/pi-dashboard-shared/credential-detect.js";
 import { getTunnelWatchdogStatus } from "../tunnel-watchdog.js";
 
 function getManagedDir(): string {
@@ -70,21 +73,12 @@ function detectViaRegistry(name: "pi" | "openspec"): { found: boolean; path?: st
   return detectOnPath(name);
 }
 
+// Doctor's "API key" check delegates to the shared detector, which
+// inspects BOTH ~/.pi/agent/settings.json (legacy API-key fields) AND
+// ~/.pi/agent/auth.json (OAuth + provider-stored API keys written by
+// Settings → Providers). See change: fix-doctor-oauth-credential-detection.
 function isApiKeyConfigured(): boolean {
-  try {
-    const settings = path.join(os.homedir(), ".pi", "agent", "settings.json");
-    if (!existsSync(settings)) return false;
-    const data = JSON.parse(readFileSync(settings, "utf-8"));
-    if (data?.anthropicApiKey || data?.openaiApiKey || data?.apiKey) return true;
-    if (data?.providers && typeof data.providers === "object") {
-      for (const v of Object.values(data.providers as Record<string, unknown>)) {
-        if (v && typeof v === "object" && "apiKey" in (v as object)) return true;
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
+  return hasAnyProviderCredential();
 }
 
 function buildDefaultDeps(): SharedChecksDeps {
@@ -100,6 +94,7 @@ function buildDefaultDeps(): SharedChecksDeps {
     detectPiOnPath: () => detectOnPath("pi"),
     detectOpenSpecOnPath: () => detectOnPath("openspec"),
     isApiKeyConfigured,
+    inspectedCredentialFiles: () => inspectedCredentialFiles(),
     resolveZrokBinary: () => {
       // Use the same ToolRegistry that backs Settings ▸ Tools. Its
       // `whereStrategy` is login-shell-aware, so the diagnostic and the

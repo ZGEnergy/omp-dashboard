@@ -26,6 +26,7 @@ function detectOnUserPath(name: string): { found: boolean; path?: string } {
 import { getBundledNodePath, getBundledNpmPath, getBundledNodeDir } from "./bundled-node.js";
 import { pickNodeForServer } from "./pick-node.js";
 import { isApiKeyConfigured } from "./wizard-state.js";
+import { inspectedCredentialFiles } from "@blackbelt-technology/pi-dashboard-shared/credential-detect.js";
 import { MANAGED_DIR } from "./managed-paths.js";
 // resolveOfflinePackages + installManagedNode imports removed under change:
 // eliminate-electron-runtime-install (no offline cache; bundle is immutable).
@@ -274,6 +275,7 @@ async function runDoctorInner(): Promise<DoctorReport> {
     detectOpenSpecOnPath: () => detectOnUserPath("openspec"),
     probeServer,
     isApiKeyConfigured,
+    inspectedCredentialFiles: () => inspectedCredentialFiles(),
   });
   // Splice them in BEFORE the Electron-only "Dashboard server code" / offline / launch-test rows
   // for stable UI ordering. We push them inline now and rely on stampSectionsAndSuggestions for grouping.

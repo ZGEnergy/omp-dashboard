@@ -50,6 +50,18 @@ describe("wizard-state", () => {
     expect(isApiKeyConfigured()).toBe(true);
   });
 
+  // See change: fix-doctor-oauth-credential-detection.
+  it("isApiKeyConfigured returns true for OAuth-only auth.json", () => {
+    const authFile = path.join(testDir, ".pi", "agent", "auth.json");
+    fs.writeFileSync(
+      authFile,
+      JSON.stringify({
+        anthropic: { type: "oauth", access: "tok", refresh: "r", expires: 9e15 },
+      }),
+    );
+    expect(isApiKeyConfigured()).toBe(true);
+  });
+
   it("writeApiKey creates settings file if missing", () => {
     const settingsFile = path.join(testDir, ".pi", "agent", "settings.json");
     expect(fs.existsSync(settingsFile)).toBe(false);

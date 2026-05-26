@@ -9,6 +9,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { hasAnyProviderCredential } from "@blackbelt-technology/pi-dashboard-shared/credential-detect.js";
 
 function getManagedDir() { return path.join(os.homedir(), ".pi-dashboard"); }
 function getModeFile() { return path.join(getManagedDir(), "mode.json"); }
@@ -50,21 +51,17 @@ export function writeModeFile(mode: "standalone" | "power-user"): void {
   writeFileSync(getModeFile(), JSON.stringify(config, null, 2) + "\n");
 }
 
-/** Check if any API key is configured in pi's settings. */
+/**
+ * Check if any provider credential is configured for pi.
+ *
+ * Delegates to the shared detector, which inspects BOTH
+ * `~/.pi/agent/settings.json` (legacy API-key fields) and
+ * `~/.pi/agent/auth.json` (OAuth subscriptions + provider-stored API
+ * keys written by Settings → Providers). See change:
+ * fix-doctor-oauth-credential-detection.
+ */
 export function isApiKeyConfigured(): boolean {
-  try {
-    if (!existsSync(getPiSettings())) return false;
-    const data = JSON.parse(readFileSync(getPiSettings(), "utf-8"));
-    // Check common provider key patterns
-    if (data?.anthropicApiKey || data?.openaiApiKey || data?.apiKey) return true;
-    // Check providers object
-    if (data?.providers && typeof data.providers === "object") {
-      for (const provider of Object.values(data.providers) as any[]) {
-        if (provider?.apiKey) return true;
-      }
-    }
-  } catch { /* ignore */ }
-  return false;
+  return hasAnyProviderCredential();
 }
 
 /** Write an API key to pi's settings file. */

@@ -501,7 +501,7 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
   "API key": (status) =>
     status === "ok"
       ? undefined
-      : "No API key configured. Pi sessions need an LLM provider key. Configure one in **Settings → Providers**.",
+      : "Sign in to a provider in **Settings → Providers** — either an OAuth subscription (Claude Pro/Max, ChatGPT Plus/Pro) or an API key. Pi sessions need at least one credential to use LLM providers.",
   "Managed install (~/.pi-dashboard)": (status) =>
     status === "ok"
       ? undefined
@@ -603,8 +603,15 @@ export interface SharedChecksDeps {
     starter?: string | null;
     installable?: { total: number; installed: number; failed: string[] } | null;
   }>;
-  /** Optional: api-key check. */
+  /** Optional: api-key / credential check. */
   isApiKeyConfigured?: () => boolean;
+  /**
+   * Optional: absolute paths inspected by `isApiKeyConfigured`. When set,
+   * the API-key check's `detail` field names these exactly; when omitted,
+   * a generic two-file list is used. See change:
+   * fix-doctor-oauth-credential-detection.
+   */
+  inspectedCredentialFiles?: () => string[];
 }
 
 export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorCheck[]> {
@@ -892,21 +899,26 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
     }
   }
 
-  // API key
+  // API key — see change: fix-doctor-oauth-credential-detection.
+  // Detector inspects BOTH settings.json (API-key fields) and auth.json
+  // (OAuth + provider-stored keys). `deps.inspectedCredentialFiles` is
+  // optional so older deps shapes keep working; falls back to a generic
+  // file list when absent.
   if (deps.isApiKeyConfigured) {
     checks.push(
       await safeCheck("API key", "setup", () => {
         const has = deps.isApiKeyConfigured!();
+        const files = deps.inspectedCredentialFiles
+          ? deps.inspectedCredentialFiles()
+          : ["~/.pi/agent/settings.json", "~/.pi/agent/auth.json"];
         return {
           name: "API key",
           section: "setup",
           status: has ? "ok" : "warning",
           message: has
-            ? "Configured in pi settings"
-            : "Not configured — pi sessions will need a key to use LLM providers",
-          detail: has
-            ? undefined
-            : `Looked at ~/.pi/agent/settings.json (anthropicApiKey / openaiApiKey / providers[].apiKey)`,
+            ? "Configured"
+            : "Not configured — pi sessions will need a credential to use LLM providers",
+          detail: has ? undefined : `Inspected: ${files.join(", ")}`,
         };
       }),
     );
