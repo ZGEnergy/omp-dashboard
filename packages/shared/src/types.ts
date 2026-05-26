@@ -758,4 +758,10 @@ export interface ApiResponse<T = unknown> {
    * See change: fix-fork-empty-session-silent-timeout.
    */
   code?: string;
+  /**
+   * Optional captured stderr from a shelled-out command (e.g. `git
+   * worktree add`). Surfaced verbatim so the client can render the
+   * git error inline in dialogs. See change: add-worktree-spawn-dialog.
+   */
+  stderr?: string;
 }

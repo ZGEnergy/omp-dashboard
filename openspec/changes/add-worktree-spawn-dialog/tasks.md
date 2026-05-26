@@ -25,13 +25,13 @@
 
 ## 4. Server endpoints
 
-- [ ] 4.1 Add `readHead(cwd)` to `packages/server/src/git-operations.ts`; returns `{ branch, detached, sha }`
-- [ ] 4.2 Add `listWorktrees(cwd)` to `git-operations.ts`; runs `git worktree list --porcelain`; calls `parsePorcelainWorktrees`
-- [ ] 4.3 Add `addWorktree({ cwd, base, newBranch, path, force })` to `git-operations.ts`; performs path derivation, pre-flight existence check, `git worktree add` invocation, and exclude-line append; returns structured `{ path, branch }` or error code
-- [ ] 4.4 Register `GET /api/git/head` in `packages/server/src/routes/git-routes.ts` (localhost-only, `safeRealpathSync` validation, stable error codes)
-- [ ] 4.5 Register `GET /api/git/worktrees` in `git-routes.ts`
-- [ ] 4.6 Register `POST /api/git/worktree` in `git-routes.ts`; on success, persist `gitWorktreeBase` to `.meta.json` immediately if a session is later spawned (deferred — see 6.x)
-- [ ] 4.7 Integration tests for each endpoint using a tmpdir git repo: happy-path, not-a-repo, branch_in_use, path_exists, base_not_found, slug-derived paths, idempotent exclude append, exclude-write failure does NOT fail request
+- [x] 4.1 Add `readHead(cwd)` to `packages/server/src/git-operations.ts`; returns `{ branch, detached, sha }` using `git symbolic-ref --quiet --short` + `rev-parse --short HEAD`
+- [x] 4.2 Add `listWorktrees(cwd)` to `git-operations.ts`; runs `git worktree list --porcelain`; calls `parsePorcelainWorktrees`
+- [x] 4.3 Add `addWorktree({ cwd, base, newBranch, path, force })` to `git-operations.ts`; resolves parent repo via `git-common-dir` (works from any worktree); pre-flight path-exists check; runs `git worktree add` with shell-escaped args; appends `.worktrees/` to `.git/info/exclude` (idempotent, only when path was auto-derived); maps stderr patterns onto stable error codes (`branch_in_use` / `branch_exists` / `base_not_found` / `path_exists` / `git_failed`)
+- [x] 4.4 Register `GET /api/git/head` in `packages/server/src/routes/git-routes.ts` (localhost-only, `validateCwd` realpath check via `safeRealpathSync`, stable `code` field on errors)
+- [x] 4.5 Register `GET /api/git/worktrees`
+- [x] 4.6 Register `POST /api/git/worktree` returning `{ path, branch, excludeAppended }`; HTTP status 200 success / 400 input / 409 state-conflict (branch/path) / 500 unclassified. (§8 wires §-aware `gitWorktreeBase` meta-persistence into the spawn flow.)
+- [x] 4.7 Integration tests: 13 unit-level ops tests (happy path + every error arm + cross-worktree parent-resolve) + 10 HTTP-level route tests (envelope shape + status codes + stable codes for each documented arm). Also extended `ApiResponse` with `stderr?: string` to support inline git-error rendering.
 
 ## 5. Client grouping + display
 
