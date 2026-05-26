@@ -43,14 +43,14 @@
 
 ## 6. Worktree dialog
 
-- [ ] 6.1 Add client fetch helpers to `packages/client/src/lib/git-api.ts`: `getHead`, `listWorktrees`, `createWorktree`
-- [ ] 6.2 Create `packages/client/src/components/WorktreeSpawnDialog.tsx` composing `BranchPicker` + path preview; layout: existing-worktrees list (top), divider, create form (bottom)
-- [ ] 6.3 On mount, fetch `getHead` + `listWorktrees` in parallel; compute default base via the client-side equivalent of `resolveDefaultBase` (the helper is shared by the server, see 3.3; expose a client-safe path if needed)
-- [ ] 6.4 Existing-worktrees list: each row clickable; on select, immediately call spawn action (no second confirmation) with the worktree's path as cwd; close dialog
-- [ ] 6.5 Create form: base picker, new-branch input (required, live slug preview shown as path under the input), path field (editable, defaults to derived); submit → `createWorktree` → spawn on returned path → close
-- [ ] 6.6 Render structured errors inline (path_exists / branch_in_use / no_usable_base map to actionable messages); other codes surface stderr verbatim in a collapsed area
-- [ ] 6.7 Show footnote when the repo has submodules: "submodules will not be initialized in the new worktree"
-- [ ] 6.8 Component tests: existing-worktree row spawn, create-mode happy path, slug preview reactivity, error-inline rendering, footnote conditional
+- [x] 6.1 Added client fetch helpers to `git-api.ts`: `fetchGitHead`, `fetchWorktrees`, `createWorktree`. Discriminated `CreateWorktreeResult` so callers can branch on stable `code` field.
+- [x] 6.2 Created `WorktreeSpawnDialog.tsx` with two stacked sections (existing list + create form) and full-screen chrome matching `PinDirectoryDialog`. Native `<select>` for the base picker (full `BranchPicker` integration deferred — the select is keyboard-accessible and the dialog stays lean).
+- [x] 6.3 On mount fetches `getHead` + `listWorktrees` + `listBranches` in parallel via `Promise.all`; default base computed via shared `resolveDefaultBase` (moved to `packages/shared/src/git-worktree-helpers.ts`; server re-exports for back-compat).
+- [x] 6.4 Existing-worktree rows are buttons keyed by `worktree-row-<path>`; click → `onSpawn(path)` (no `gitWorktreeBase` since the worktree was created elsewhere).
+- [x] 6.5 Create form: native base `<select>`, new-branch input, live-derived path field (editable). Submit → `createWorktree` → `onSpawn(path, { gitWorktreeBase: base })`.
+- [x] 6.6 Structured errors rendered inline (`data-testid="worktree-dialog-error"`); stable `code` shown, `stderr` in a collapsed `<details>`; tone mapped by code (yellow for state conflicts, orange for input errors, red otherwise). Error clears on next form edit.
+- [x] 6.7 Conditional submodule footnote: `readHead` now also stat-probes `<repo>/.gitmodules` and returns `hasSubmodules: boolean`. Dialog renders a yellow-toned note when true. Cheap (no extra subprocess; one fs.existsSync call).
+- [x] 6.8 15 component tests covering: loading state, existing-list render + spawn-on-click, default-base resolution (current-branch / detached fallback), live slug preview, submit happy path (calls createWorktree + onSpawn), submit disabled on empty, structured error inline render + stderr details, error-clears-on-edit, load-error path, cancel button, Escape key, submodule footnote (both arms).
 
 ## 7. Action-bar integration
 

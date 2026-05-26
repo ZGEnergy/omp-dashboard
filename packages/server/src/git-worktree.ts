@@ -1,43 +1,23 @@
 /**
- * Pure helpers for the git-worktree feature. No filesystem, no child_process,
- * no platform branching — just data in / data out, easy to unit-test.
+ * Server-side helpers for the git-worktree feature.
  *
- * - `slugifyBranch`     branch name → filesystem-safe slug for path derivation
- * - `parsePorcelainWorktrees`  `git worktree list --porcelain` → typed list
- * - `resolveDefaultBase`  pick the default base ref (current → develop → main → master)
- * - `ensureWorktreeExcludeLine`  idempotent append of `.worktrees/` to .git/info/exclude
+ * Two helpers shared with the client (slug derivation, base-branch
+ * fallback chain) live in `packages/shared/src/git-worktree-helpers.ts`
+ * and are re-exported here for backward compatibility with the existing
+ * server imports. The porcelain parser and `.git/info/exclude` mutator
+ * are server-only (the client never reads / writes those).
  *
  * See change: add-worktree-spawn-dialog.
  */
 
-// ── slug ───────────────────────────────────────────────────────────────────
-
-/**
- * Convert a branch name into a filesystem-safe slug suitable for use as
- * a directory name under `.worktrees/`.
- *
- *   feat/Dark Mode!   → feat-dark-mode
- *   release/2026.05   → release-2026.05
- *   WIP: try a thing  → wip-try-a-thing
- *
- * Rules:
- *   1. Lowercase.
- *   2. Collapse `/`, `\`, `:`, and whitespace runs to a single `-`.
- *   3. Strip any character that isn't `[a-z0-9._-]`.
- *   4. Trim leading / trailing `-`.
- *   5. Cap length at 64.
- *
- * An empty / all-stripped input yields `""` — callers SHOULD treat that
- * as a validation failure rather than fabricate a path.
- */
-export function slugifyBranch(branch: string): string {
-  return branch
-    .toLowerCase()
-    .replace(/[\/\\:\s]+/g, "-")
-    .replace(/[^a-z0-9._-]/g, "")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
-}
+// Re-export shared helpers so existing server-side imports keep working
+// without churn (`import { slugifyBranch } from "./git-worktree.js"`).
+export {
+  slugifyBranch,
+  resolveDefaultBase,
+  type ResolveDefaultBaseInput,
+  type ResolveDefaultBaseResult,
+} from "@blackbelt-technology/pi-dashboard-shared/git-worktree-helpers.js";
 
 // ── porcelain parser ───────────────────────────────────────────────────────
 
@@ -109,53 +89,6 @@ export function parsePorcelainWorktrees(stdout: string): WorktreeEntry[] {
     });
   }
   return out;
-}
-
-// ── base-branch fallback ───────────────────────────────────────────────────
-
-/**
- * Input for `resolveDefaultBase`. All branch lists are bare names (no
- * `refs/heads/` or `refs/remotes/` prefix; for remotes the `origin/`
- * prefix IS included).
- */
-export interface ResolveDefaultBaseInput {
-  /** Current HEAD branch in the parent repo, or `null` if detached. */
-  currentBranch: string | null;
-  /** All local branch names. */
-  localBranches: ReadonlyArray<string>;
-  /** All remote-tracking branch names (e.g. `origin/develop`). */
-  remoteBranches: ReadonlyArray<string>;
-}
-
-export type ResolveDefaultBaseResult =
-  | { ok: true; base: string }
-  | { ok: false; error: "no_usable_base" };
-
-/**
- * Pick a base branch for a new worktree. Per change design:
- *
- *   current branch (if not detached and exists locally)
- *     → develop  (local OR origin/develop)
- *     → main
- *     → master
- *     → no_usable_base
- *
- * Detached HEAD intentionally falls through to the named fallbacks
- * because `git worktree add ... <SHA>` would silently create a detached
- * worktree — almost never what the user wants from a "+Worktree" button.
- */
-export function resolveDefaultBase(input: ResolveDefaultBaseInput): ResolveDefaultBaseResult {
-  const { currentBranch, localBranches, remoteBranches } = input;
-  const local = new Set(localBranches);
-  const remote = new Set(remoteBranches);
-  if (currentBranch && local.has(currentBranch)) {
-    return { ok: true, base: currentBranch };
-  }
-  for (const candidate of ["develop", "main", "master"] as const) {
-    if (local.has(candidate)) return { ok: true, base: candidate };
-    if (remote.has(`origin/${candidate}`)) return { ok: true, base: `origin/${candidate}` };
-  }
-  return { ok: false, error: "no_usable_base" };
 }
 
 // ── .git/info/exclude line management ──────────────────────────────────────

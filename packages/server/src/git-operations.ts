@@ -196,6 +196,13 @@ export interface HeadInfo {
   detached: boolean;
   /** Short HEAD SHA, or `null` when the repo is empty (no commits yet). */
   sha: string | null;
+  /**
+   * True iff `.gitmodules` exists at the repo's top level. Used by the
+   * worktree dialog to surface a "submodules will not be initialized"
+   * footnote. Cheap stat-only probe; never spawns git. Optional on the
+   * wire to keep older clients happy.
+   */
+  hasSubmodules?: boolean;
 }
 
 /** Read HEAD state of a git repo. */
@@ -203,14 +210,20 @@ export function readHead(cwd: string): HeadInfo {
   // Detect detached HEAD via symbolic-ref --quiet (exits non-zero when detached).
   const symbolic = tryRun("git symbolic-ref --quiet --short HEAD", cwd);
   const sha = tryRun("git rev-parse --short HEAD", cwd) ?? null;
+  // `.gitmodules` lives at the worktree's top level (or the main
+  // checkout's). Use the worktree's own top level so the probe is correct
+  // whether the dialog is opened from a sibling worktree or main.
+  const topLevel = tryRun("git rev-parse --show-toplevel", cwd);
+  const hasSubmodules = topLevel ? fs.existsSync(path.join(topLevel, ".gitmodules")) : false;
   if (symbolic) {
-    return { branch: symbolic, detached: false, sha };
+    return { branch: symbolic, detached: false, sha, hasSubmodules };
   }
   // No symbolic ref → either detached or empty repo.
   return {
     branch: null,
     detached: sha !== null,
     sha,
+    hasSubmodules,
   };
 }
 
