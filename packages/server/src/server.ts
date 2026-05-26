@@ -25,7 +25,7 @@ import { createPendingResumeIntentRegistry } from "./pending-resume-intent-regis
 import { applyReattachPolicy } from "./reattach-placement.js";
 
 // pending-load-manager removed — server loads sessions directly via DirectoryService
-import { createDirectoryService, isOpenSpecDataEmpty, type DirectoryService } from "./directory-service.js";
+import { createDirectoryService, type DirectoryService } from "./directory-service.js";
 import { createTerminalManager, type TerminalManager } from "./terminal-manager.js";
 import { createTerminalGateway, type TerminalGateway } from "./terminal-gateway.js";
 import { writePid, removePid } from "./server-pid.js";
@@ -43,6 +43,7 @@ import { createNetworkGuard, isLoopback, isBypassedHost } from "./localhost-guar
 import type { AuthConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { loadConfig, CONFIG_FILE } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { registerSessionApi } from "./session-api.js";
+import { registerManifestRoute } from "./routes/manifest-route.js";
 import { registerSessionRoutes } from "./routes/session-routes.js";
 import { registerGitRoutes } from "./routes/git-routes.js";
 import { registerFileRoutes } from "./routes/file-routes.js";
@@ -60,11 +61,6 @@ import { PiCoreChecker } from "./pi-core-checker.js";
 import { PiCoreUpdater } from "./pi-core-updater.js";
 import { registerToolRoutes } from "./routes/tool-routes.js";
 import { registerJjRoutes } from "./routes/jj-routes.js";
-import { registerBootstrapRoutes } from "./routes/bootstrap-routes.js";
-import { createBootstrapState, type BootstrapStateStore } from "./bootstrap-state.js";
-import { detectLegacyPiInstalls } from "./legacy-pi-cleanup.js";
-import { createBootstrapQueue } from "./bootstrap-queue.js";
-import { bootstrapInstall } from "@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
 import { PackageManagerWrapper } from "./package-manager-wrapper.js";
@@ -131,136 +127,10 @@ export interface DashboardServer {
   sessionManager: SessionManager;
   eventStore: EventStore;
   browserGateway: BrowserGateway;
-  /**
-   * Bootstrap state store. Exposed so the CLI can flip status during
-   * degraded-mode first-run (`pi-dashboard` without pi installed) and
-   * so the REST handler for `/api/bootstrap/upgrade-pi` can orchestrate
-   * async installs without reaching back through closures.
-   * See change: unified-bootstrap-install.
-   */
-  bootstrapState: BootstrapStateStore;
   /** Resolved HTTP port after start() (useful for port:0 in tests). Returns null if not listening. */
   httpPort(): number | null;
   /** Resolved pi gateway port after start(). Returns null if not listening. */
   piPort(): number | null;
-}
-
-// ── Post-install repair (centralized hook) ─────────────────────────
-// On every `installing → ready` bootstrap-state transition the server
-// re-runs the full ToolRegistry rescan, force-refreshes OpenSpec data
-// for every known directory, and refreshes pi-resources. Without this
-// the OpenSpec session-card buttons stay hidden until the next gated
-// poll tick (or never, if the gate's mtime heuristic declines).
-// See change: fix-openspec-buttons-after-bootstrap-install.
-
-import type { OpenSpecData } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-
-export interface PostInstallRepairDeps {
-  registry: { rescan(name?: string): void };
-  directoryService: {
-    knownDirectories(): string[];
-    getOpenSpecData(cwd: string): OpenSpecData | undefined;
-    refreshOpenSpec(cwd: string): Promise<OpenSpecData>;
-    refreshPiResources(cwd: string): Promise<unknown>;
-  };
-  browserGateway: { broadcastToAll(msg: ServerToBrowserMessage): void };
-}
-
-
-/**
- * Centralized post-install repair work fired on every `installing → ready`
- * bootstrap-state transition. Idempotent. Failures per-cwd are isolated.
- *
- * Steps:
- *   1) `registry.rescan()` (no arg — full registry invalidate). Restores
- *      the literal contract from `unified-bootstrap-install` task 4.3.
- *   2) For every `directoryService.knownDirectories()` cwd, force-refresh
- *      OpenSpec (bypassing the mtime gate). If the prior cache was empty
- *      or the refreshed payload differs, broadcast `openspec_update`.
- *   3) For every cwd, force-refresh pi-resources (silent on failure).
- *
- * The DEBUG=pi-dashboard|openspec-poll envvar enables a single-line
- * diagnostic log on completion, matching the existing daemon-log style.
- */
-export async function runPostInstallRepair(deps: PostInstallRepairDeps): Promise<void> {
-  const debug =
-    typeof process !== "undefined" &&
-    typeof process.env?.DEBUG === "string" &&
-    /pi-dashboard|openspec-poll/.test(process.env.DEBUG);
-
-  // 1) full registry rescan
-  deps.registry.rescan();
-  if (debug) console.log("[bootstrap] post-install: rescanned tool registry");
-
-  const cwds = deps.directoryService.knownDirectories();
-
-  // 2) per-cwd OpenSpec force-refresh + selective broadcast
-  await Promise.all(
-    cwds.map(async (cwd) => {
-      try {
-        const prior = deps.directoryService.getOpenSpecData(cwd);
-        const fresh = await deps.directoryService.refreshOpenSpec(cwd);
-        const priorEmpty = isOpenSpecDataEmpty(prior);
-        const dataDiffers = JSON.stringify(prior) !== JSON.stringify(fresh);
-        if (priorEmpty || dataDiffers) {
-          deps.browserGateway.broadcastToAll({ type: "openspec_update", cwd, data: fresh });
-        }
-      } catch (err) {
-        console.error(
-          `[bootstrap] post-install openspec refresh failed for ${cwd}:`,
-          err,
-        );
-      }
-    }),
-  );
-
-  // 3) per-cwd pi-resources force-refresh (silent fail)
-  await Promise.all(
-    cwds.map(async (cwd) => {
-      try {
-        await deps.directoryService.refreshPiResources(cwd);
-      } catch {
-        // matches existing pattern in directory-service.ts::schedulePiResourcesTick
-      }
-    }),
-  );
-
-  if (debug) console.log("[bootstrap] post-install: openspec + pi-resources refresh complete");
-}
-
-export interface BootstrapTransitionHandlerDeps {
-  /** Invoked once per `installing → ready` transition, fire-and-forget. */
-  onTransitionToReady: () => Promise<void> | void;
-  /** Existing queue flush invoked on the same transition. */
-  flushQueue: () => Promise<void> | void;
-}
-
-/**
- * Returns a stateful handler that drives `onTransitionToReady` and
- * `flushQueue` once per `installing → ready` (or `failed → ready`)
- * transition. The handler ignores the very first ready snapshot
- * because the bootstrap state defaults to ready.
- *
- * Both callbacks run fire-and-forget so the subscribe callback returns
- * synchronously — matches the existing `void bootstrapQueue.flushAll()`
- * pattern in the inline subscribe call site.
- */
-export function makeBootstrapTransitionHandler(
-  deps: BootstrapTransitionHandlerDeps,
-): (snapshot: { status: "ready" | "installing" | "failed" }) => void {
-  let last: "ready" | "installing" | "failed" = "ready";
-  return (snapshot) => {
-    if (last !== "ready" && snapshot.status === "ready") {
-      void Promise.resolve(deps.flushQueue()).catch((err) => {
-        console.error("[bootstrap] flushQueue failed:", err);
-      });
-      void Promise.resolve(deps.onTransitionToReady()).catch((err) => {
-        console.error("[bootstrap] post-install repair failed:", err);
-      });
-    }
-    last = snapshot.status;
-  };
 }
 
 export async function createServer(config: ServerConfig): Promise<DashboardServer> {
@@ -694,48 +564,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     fastify.get("/auth/status", async () => ({ authenticated: true, authEnabled: false }));
   }
 
-  // ── Bootstrap state + queue ──────────────────────────────────────
-  // Declared here (before session-api registration) so the session
-  // routes can gate spawn operations on bootstrap status.
-  // See change: unified-bootstrap-install.
-  const bootstrapState = createBootstrapState();
-  // Scan for legacy `@mariozechner/pi-coding-agent` installs so the UI can
-  // offer a one-click cleanup. See: legacy-pi-cleanup.ts. Best-effort —
-  // detection failure is non-fatal (returns []).
-  try {
-    bootstrapState.set({ legacyPiInstalls: detectLegacyPiInstalls() });
-  } catch (err: any) {
-    console.warn("[legacy-pi] detection failed:", err?.message ?? err);
-  }
-  const bootstrapQueue = createBootstrapQueue();
-  // Centralized post-install repair: full ToolRegistry rescan +
-  // OpenSpec / pi-resources force-refresh on every `installing → ready`
-  // transition. See change: fix-openspec-buttons-after-bootstrap-install.
-  const handleBootstrapTransition = makeBootstrapTransitionHandler({
-    flushQueue: () => bootstrapQueue.flushAll(),
-    onTransitionToReady: () =>
-      runPostInstallRepair({
-        registry: getDefaultRegistry(),
-        directoryService,
-        browserGateway,
-      }),
-  });
-  const unsubscribeBootstrap = bootstrapState.subscribe((snapshot) => {
-    browserGateway.broadcastToAll({
-      type: "bootstrap_status_update",
-      state: snapshot,
-    });
-    handleBootstrapTransition(snapshot);
-  });
-  const unsubscribeQueueComplete = bootstrapQueue.onTicketComplete((evt) => {
-    browserGateway.broadcastToAll({
-      type: "bootstrap_ticket_complete",
-      ticketId: evt.ticketId,
-      success: evt.success,
-      error: evt.error,
-    });
-  });
-
   // Session control REST API (wraps WebSocket-only operations)
   registerSessionApi(fastify, {
     sessionManager,
@@ -743,8 +571,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     browserGateway,
     pendingForkRegistry,
     pendingDashboardSpawns,
-    bootstrapState,
-    bootstrapQueue,
     pendingResumeIntents,
     pendingAttachRegistry,
   });
@@ -761,7 +587,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     preferencesStore,
     directoryService,
     networkGuard,
-    bootstrapState,
     onOpenSpecChanged: (cwd) => {
       const data = directoryService.getOpenSpecData(cwd);
       if (data) browserGateway.broadcastToAll({ type: "openspec_update", cwd, data });
@@ -790,115 +615,16 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     networkGuard,
     store: openspecGroupStore,
   });
-  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService, piGateway, bootstrapState });
+  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService, piGateway });
   // GET /api/doctor — see change: doctor-rich-output (task 4.2). Auth-gated identically to /api/config.
   registerDoctorRoutes(fastify);
   registerToolRoutes(fastify, { registry: getDefaultRegistry(), networkGuard });
   registerJjRoutes(fastify, { browserGateway, pendingAttachRegistry, networkGuard });
 
-  // ── Bootstrap REST routes ────────────────────────────────────────
-  // The routes module is registered here; state + queue are declared
-  // above (before session-api) so session routes can see them.
-  registerBootstrapRoutes(fastify, {
-    bootstrapState,
-    networkGuard,
-    triggerUpgradePi: async () => {
-      const packages = ["@earendil-works/pi-coding-agent"];
-      bootstrapState.setLastInstallPackages(packages);
-      bootstrapState.set({
-        status: "installing",
-        progress: { step: "@earendil-works/pi-coding-agent", output: "starting upgrade…" },
-        error: undefined,
-      });
-      try {
-        const res = await bootstrapInstall({
-          packages,
-          progress: (p) => {
-            bootstrapState.set({
-              progress: { step: p.step, output: p.output },
-            });
-          },
-        });
-        if (res.ok) {
-          bootstrapState.set({
-            status: "ready",
-            progress: undefined,
-            error: undefined,
-          });
-          // Broadcast /reload to connected sessions so they pick up the
-          // new pi version. Mirrors the pi-core update pattern above.
-          const connectedIds = piGateway.getConnectedSessionIds();
-          for (const sid of connectedIds) {
-            const session = sessionManager.get(sid);
-            if (session && session.status !== "ended") {
-              piGateway.sendToSession(sid, {
-                type: "send_prompt",
-                sessionId: sid,
-                text: "/reload",
-              });
-            }
-          }
-        } else {
-          bootstrapState.set({
-            status: "failed",
-            error: { message: res.error },
-            progress: undefined,
-          });
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        bootstrapState.set({
-          status: "failed",
-          error: { message },
-          progress: undefined,
-        });
-      }
-    },
-    triggerRetry: async () => {
-      // Retry re-runs the EXACT package set from the last failed install.
-      // Falls back to the default first-run set if no prior install was
-      // recorded (edge case: manual retry before any install attempt).
-      const prev = bootstrapState.getLastInstallPackages();
-      const packages = prev.length > 0
-        ? prev
-        : ["@earendil-works/pi-coding-agent", "@fission-ai/openspec"];
-      bootstrapState.set({
-        status: "installing",
-        progress: { step: "retry", output: `restarting install (${packages.length} pkg${packages.length === 1 ? "" : "s"})…` },
-        error: undefined,
-      });
-      try {
-        const res = await bootstrapInstall({
-          packages,
-          progress: (p) => {
-            bootstrapState.set({
-              progress: { step: p.step, output: p.output },
-            });
-          },
-        });
-        if (res.ok) {
-          bootstrapState.set({
-            status: "ready",
-            progress: undefined,
-            error: undefined,
-          });
-        } else {
-          bootstrapState.set({
-            status: "failed",
-            error: { message: res.error },
-            progress: undefined,
-          });
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        bootstrapState.set({
-          status: "failed",
-          error: { message },
-          progress: undefined,
-        });
-      }
-    },
-  });
+  // /api/bootstrap/* routes removed under change:
+  // eliminate-electron-runtime-install (task 3.4). pi-core in-place
+  // updates flow through /api/pi-core/update for standalone + bridge
+  // arms; Electron arm uses electron-updater whole-app replacement.
   // Package management
   const packageManagerWrapper = new PackageManagerWrapper();
 
@@ -1000,12 +726,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       message: event.message,
     });
   });
-  registerPiChangelogRoutes(fastify, { bootstrapState });
+  registerPiChangelogRoutes(fastify, {});
 
   registerPiCoreRoutes(fastify, {
     piCoreChecker,
     piCoreUpdater,
-    bootstrapState,
     onUpdateComplete: (payload) => {
       browserGateway.broadcastToAll({
         type: "pi_core_update_complete",
@@ -1104,29 +829,43 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // that works in the dev repo silently returns wrong paths in the
   // installed node_modules layout. require.resolve identifies packages
   // by name, which is the only canonical identity across layouts.
+  // Client-dir resolution — single strategy under change:
+  // eliminate-electron-runtime-install. The legacy 5-strategy chain
+  // (sibling/hoisted/monorepo/legacy paths) defended against runtime
+  // re-extraction wiping the bundled tree. Under the immutable bundle
+  // architecture that scenario cannot occur; the npm-resolver-anchored
+  // path is the only durable identity across install layouts.
+  //
+  // Dev / monorepo fallbacks are still allowed when require.resolve
+  // misses (e.g. running from a checked-out workspace where the web
+  // package hasn't been linked yet).
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const clientSearchPaths: string[] = [];
+  let clientDir = "";
   try {
-    const webPkgJson = createRequire(import.meta.url).resolve("@blackbelt-technology/pi-dashboard-web/package.json");
-    clientSearchPaths.push(path.join(path.dirname(webPkgJson), "dist"));
+    const webPkgJson = createRequire(import.meta.url).resolve(
+      "@blackbelt-technology/pi-dashboard-web/package.json",
+    );
+    const candidate = path.join(path.dirname(webPkgJson), "dist");
+    if (existsSync(path.join(candidate, "index.html"))) clientDir = candidate;
   } catch {
-    // Web package not resolvable — fall through to path-based search.
+    // Web package not resolvable — try dev-monorepo sibling.
+    const devCandidate = path.join(__dirname, "../../client/dist");
+    if (existsSync(path.join(devCandidate, "index.html"))) clientDir = devCandidate;
   }
-  clientSearchPaths.push(
-    // Installed as scoped sibling of server
-    path.join(__dirname, "..", "..", "pi-dashboard-web", "dist"),
-    // Installed in a parent node_modules (hoisted)
-    path.join(__dirname, "..", "..", "..", "@blackbelt-technology", "pi-dashboard-web", "dist"),
-    // Monorepo workspace sibling
-    path.join(__dirname, "../../client/dist"),
-    // Legacy path
-    path.join(__dirname, "../../dist/client"),
-  );
-  const clientDir = clientSearchPaths.find(p => existsSync(path.join(p, "index.html"))) ?? "";
   const hasProductionBuild = !!clientDir;
   if (!hasProductionBuild) {
     console.log("[dashboard] No client build found — running in API-only mode");
   }
+
+  // Dynamic PWA manifest — MUST be registered before fastify-static so
+  // explicit route matching wins over the static asset. See change:
+  // add-dynamic-pwa-manifest-naming.
+  registerManifestRoute(fastify, {
+    clientDir,
+    // Re-read config per request so Settings panel changes propagate
+    // without a server restart. loadConfig() is fs-cheap (<1ms).
+    getDashboardName: () => loadConfig().dashboardName,
+  });
 
   // Register static file serving for production build.
   // Always enabled — in dev mode, Vite handles most requests via the
@@ -1206,7 +945,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     sessionManager,
     eventStore,
     browserGateway,
-    bootstrapState,
 
     httpPort() {
       const addr = fastify.server.address();
@@ -1507,10 +1245,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       preferencesStore.flush();
       preferencesStore.dispose();
 
-      unsubscribeBootstrap();
-      unsubscribeQueueComplete();
-      bootstrapState.dispose();
-      bootstrapQueue.clear("server shutting down");
       stopTunnelWatchdog();
       await deleteTunnel(config.port);
       piGateway.stop();

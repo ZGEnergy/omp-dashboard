@@ -75,6 +75,16 @@ On first launch a setup wizard walks you through mode selection (standalone vs. 
 
 ### B — pi package (recommended for CLI users)
 
+If you don't have pi yet, you can install the dashboard directly via npm — pi/openspec/tsx ship as regular npm dependencies, so a single install brings everything in:
+
+```bash
+npm install -g @blackbelt-technology/pi-agent-dashboard
+pi-dashboard
+# open http://localhost:8000
+```
+
+If pi is already installed, the bridge-extension flow is equivalent:
+
 ```bash
 pi install npm:@blackbelt-technology/pi-agent-dashboard
 pi
@@ -88,15 +98,59 @@ The bridge extension auto-starts the dashboard server on first launch:
 
 Open **http://localhost:8000** in any browser. All active pi sessions appear automatically. See [Prerequisites](#prerequisites) for Node.js / build-tool requirements.
 
+#### Windows install (PowerShell, Administrator)
+
+Windows has a few extra one-time setup steps. Run the following in an **Administrator** PowerShell session:
+
+```powershell
+# 1. Enable long paths (required — npm node_modules nesting exceeds 260 chars)
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f
+
+# 2. Install Node.js LTS 22 via winget (ships >= 22.18 so no node-guard refusal)
+winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
+
+# 3. CLOSE this PowerShell, open a NEW one as Administrator (PATH refresh)
+
+# 4. Verify
+node --version    # expect v22.18+ (any 22.x >= 22.18, NOT v22.0–v22.17)
+npm --version     # expect 10.x
+
+# 5. Install
+npm install -g @blackbelt-technology/pi-agent-dashboard
+
+# 6. Start (foreground first time so you can see any errors)
+pi-dashboard start
+
+# 7. From the browser
+start http://localhost:8000
+```
+
+C++ build tools are typically **not** required — `node-pty` ships a Windows x64 prebuild. Install Visual Studio Build Tools only if the prebuild fails to load. See [docs/installation-windows.md](docs/installation-windows.md) for more detail (offline / tarball / nvm-windows caveats).
+
 ### C — From source (contributors)
 
 ```bash
 git clone https://github.com/BlackBeltTechnology/pi-agent-dashboard.git
 cd pi-agent-dashboard
 npm install
+npm run build                              # one-time client build
 pi install /path/to/pi-agent-dashboard     # global
 # or: pi install -l /path/to/pi-agent-dashboard   # project-local only
 ```
+
+#### Use the local checkout as the global `pi-dashboard` command
+
+By default, `pi-dashboard` on your PATH refers to whatever copy was installed globally (via `npm i -g` or the Electron bundle). To make it point at your working tree instead — so every edit is live and bridge auto-start uses your changes — link the workspace:
+
+```bash
+npm run link:local      # symlinks `pi-dashboard` on PATH to packages/server/bin/pi-dashboard.mjs
+pi-dashboard status
+npm run unlink:local    # restore (removes the global symlink)
+```
+
+The link survives across shells. Every invocation — including `pi`'s bridge auto-spawn — runs `packages/server/src/cli.ts` via jiti, so you don't need to rebuild the server on edits. The client still requires `npm run build` (or `npm run dev` for HMR).
+
+> **Windows note:** symlink creation needs an admin shell or Windows Developer Mode enabled. Everything else works the same as POSIX.
 
 To try the extension in a single pi session without registering it:
 
@@ -764,6 +818,20 @@ This runs CI, publishes to npm with `--provenance` for supply-chain transparency
 | `windows-latest` | Windows arm64 | `.zip` (x64 Node.js via WoW64) |
 
 All artifacts are uploaded to a **draft GitHub Release**. Release notes are extracted automatically from the matching `## [<version>]` section of [`CHANGELOG.md`](CHANGELOG.md).
+
+### On-demand Electron build (CI dispatch)
+
+Build a one-off installer for a feature branch. No release, no publish, no tag.
+
+Workflow: [`.github/workflows/ci-electron.yml`](.github/workflows/ci-electron.yml). Trigger from GitHub Actions tab → **CI Electron (on-demand)** → **Run workflow** button.
+
+Optional `legs` input narrows the matrix (default `all`; accepts `darwin`, `linux`, `win32`, or comma-list like `darwin-arm64,linux-x64` for cheap iteration).
+
+Version slug: `<base>-ci.<UTC-stamp>.<branch-slug>.<sha7>` (e.g. `0.5.3-ci.20260525-143000.feature-foo-bar.abc1234`). Prerelease segment SemVer-ranks below `<base>`.
+
+Download installers from the Actions run page → **Artifacts** section. 14-day retention.
+
+Safe by construction: no npm publish, no GitHub Release, no auto-update impact. `electron-updater` default `allowPrerelease: false` skips `-ci.` slugs — installed users unaffected.
 
 ### Trusted Publisher (OIDC) setup
 

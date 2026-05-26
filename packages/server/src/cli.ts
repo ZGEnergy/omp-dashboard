@@ -15,7 +15,16 @@
  *   --dev            Development mode (skip static files)
  *   --no-tunnel      Disable zrok tunnel
  */
-import { createServer, type ServerConfig } from "./server.js";
+// `createServer` is imported dynamically inside `runForeground()` so a
+// top-level module-resolution failure (missing `fastify` etc.) can be
+// caught and degraded into the recovery HTTP server instead of crashing
+// the process. The type-only import here is fully erased at runtime.
+import type { createServer as _CreateServerType, ServerConfig } from "./server.js";
+import {
+  startRecoveryServer,
+  isModuleNotFoundError,
+  parseModuleNotFoundError,
+} from "./recovery-server.js";
 import { loadConfig, ensureConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import {
   launchDashboardServer,
@@ -47,48 +56,13 @@ import { discoverDashboard } from "@blackbelt-technology/pi-dashboard-shared/mdn
 
 import { assertNodeVersionSupported } from "./node-guard.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
-import { bootstrapInstall } from "@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js";
 import {
   findBundledExtension,
   registerBridgeExtension,
 } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
-import type { DashboardServer } from "./server.js";
-import { updateBootstrapCompatibility } from "./pi-version-skew.js";
-import type { BootstrapStateStore } from "./bootstrap-state.js";
 import { parseDashboardStarter } from "@blackbelt-technology/pi-dashboard-shared/dashboard-starter.js";
-import { bootstrapInstallFromList } from "./bootstrap-install-from-list.js";
 
-/**
- * Emit a stderr warning at CLI startup when the resolved pi version is
- * below `piCompatibility.minimum` (blocking) or below `.recommended`
- * (advisory). Reads from the already-populated `bootstrapState` so no
- * additional I/O happens here. See change: warn-pi-version-skew-in-cli.
- */
-function logCompatibilityWarning(store: BootstrapStateStore): void {
-  const s = store.get();
-  const c = s.compatibility;
-  if (!c || !c.current) return;
-  // Below minimum: `updateBootstrapCompatibility` sets `error.message`.
-  // We treat the presence of a blocking error + upgradeRecommended as the
-  // below-minimum signal; `upgradeRecommended` alone means below-recommended.
-  if (s.error?.message && c.upgradeRecommended) {
-    console.error(
-      `[bootstrap] ⚠ pi ${c.current} is below the required minimum ${c.minimum}.`,
-    );
-    console.error(
-      `[bootstrap]   All pi-dependent features (sessions, resources, openspec) will return 503.`,
-    );
-    console.error(`[bootstrap]   Run: pi-dashboard upgrade-pi`);
-    return;
-  }
-  if (c.upgradeRecommended) {
-    console.warn(
-      `[bootstrap] pi ${c.current} is below the recommended ${c.recommended} — consider running \`pi-dashboard upgrade-pi\``,
-    );
-  }
-}
-
-const SUBCOMMANDS = ["start", "stop", "restart", "status", "upgrade-pi"] as const;
+const SUBCOMMANDS = ["start", "stop", "restart", "status"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 export interface ParsedArgs {
@@ -157,183 +131,82 @@ export function buildConfig(flags: Partial<ServerConfig>): ServerConfig {
 }
 
 /**
- * Run the server in the foreground (original behavior).
+ * Run the server in the foreground.
  *
- * After the server starts listening, the degraded-mode bootstrap kicks
- * off: if `pi` is not resolvable via the ToolRegistry, the server flips
- * `bootstrapState` to "installing" and begins a background
- * `bootstrapInstall`. Session-spawn and other pi-dependent endpoints
- * queue or 503 during this window (see change tasks §5).
- *
- * See change: unified-bootstrap-install.
+ * Pi/openspec/tsx ship as regular npm deps of this package, so the
+ * ToolRegistry resolve of "pi" at startup either succeeds (regular
+ * path) or signals a corrupted install (hard error). See change:
+ * eliminate-electron-runtime-install.
  */
 async function runForeground(config: ServerConfig): Promise<void> {
   assertNodeVersionSupported();
+
+  // Dynamic-import boundary for the main server module. If a top-level
+  // dependency (fastify, toad-cache, readable-stream, …) is missing, the
+  // import throws ERR_MODULE_NOT_FOUND here — caught and degraded to the
+  // recovery HTTP server bound to the same port.
+  let createServer: typeof _CreateServerType;
+  try {
+    ({ createServer } = await import("./server.js"));
+  } catch (err) {
+    if (isModuleNotFoundError(err)) {
+      await startRecoveryServer({
+        port: config.port,
+        error: err as Error,
+        missingModule: parseModuleNotFoundError(err),
+      });
+      // startRecoveryServer never returns — its HTTP server keeps the
+      // event loop alive until the user clicks Retry (which respawns and
+      // process.exits) or the process is killed externally.
+      return new Promise<void>(() => { /* unreachable */ });
+    }
+    throw err;
+  }
+
   const server = await createServer(config);
 
-  // Stamp the bootstrap state with who started this server process.
-  // parseDashboardStarter defaults to "Standalone" when DASHBOARD_STARTER is unset.
-  const starter = parseDashboardStarter(process.env);
-  server.bootstrapState.set({ starter });
-  console.log(`[bootstrap] starter=${starter}`);
-
-  let shuttingDown = false;
-  const shutdown = async () => {
-    if (shuttingDown) {
-      console.log("Force exit.");
-      process.exit(1);
+  // Tool-registry resolve confirms pi is reachable from the bundled
+  // node_modules/ — under change: eliminate-electron-runtime-install,
+  // pi/openspec/tsx ship as regular deps so the registry must resolve
+  // at startup. A miss here means the install tree is corrupted.
+  {
+    const registry = getDefaultRegistry();
+    const res = registry.resolve("pi");
+    if (res.ok) {
+      console.log(`[bootstrap] ready (pi resolved via ${res.source})`);
+    } else {
+      const tried = res.tried?.map((t: any) => t.strategy).join(", ") ?? "(no strategies)";
+      throw new Error(
+        `[bootstrap] pi is not resolvable from the dashboard install. ` +
+        `This indicates a corrupted node_modules/ tree. Tried: ${tried}. ` +
+        `Reinstall the dashboard (npm i -g @blackbelt-technology/pi-agent-dashboard) ` +
+        `or reinstall the Electron app.`,
+      );
     }
-    shuttingDown = true;
-    console.log("\nShutting down...");
-    await server.stop();
-    process.exit(0);
-  };
+  }
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
-
-  // Reconcile installable.json before binding the port.
-  // Required-package failures throw and prevent server start.
-  // Optional failures are logged and continue.
-  // File-absent is a no-op (Bridge/Standalone starters don't seed installable.json).
-  // See change: simplify-electron-bootstrap-derived-state.
+  // One-time advisory: legacy `~/.pi-dashboard/` directory left behind
+  // from pre-R3 versions. Nothing reads or writes it now — surface a
+  // single log line so the user knows it's safe to delete. Doctor UI
+  // shows the same advisory more visibly.
   try {
-    await bootstrapInstallFromList(server.bootstrapState);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[bootstrap] installable reconcile failed (required package): ${message}`);
-    process.exit(1);
+    const { detectLegacyManagedDir } = await import(
+      "@blackbelt-technology/pi-dashboard-shared/legacy-managed-dir.js"
+    );
+    const legacy = detectLegacyManagedDir();
+    if (legacy.present) {
+      console.log(
+        `[legacy] legacy install directory detected at ${legacy.path} ` +
+        `(${legacy.pkgCount} packages, ~${legacy.sizeMb} MB). No longer used — safe to delete.`,
+      );
+    }
+  } catch {
+    /* advisory only — never block startup */
   }
 
   await server.start();
-
-  // Kick off the degraded-mode first-run bootstrap if pi is unresolvable.
-  // Runs async — server is already listening, so UI + non-pi endpoints
-  // remain fully operational during the ~30s install window.
-  // TODO(single-dashboard-per-home): when home-lock wiring lands, wrap
-  // this inside the acquired lock to serialize concurrent first-run
-  // installs from multiple dashboard invocations on the same HOME.
-  runDegradedModeBootstrap(server).catch((err) => {
-    console.error("[bootstrap] unexpected failure in bootstrap orchestrator:", err);
-  });
 }
 
-/**
- * Orchestrate the first-run bootstrap flow.
- *
- *  - If pi is already resolvable → leave `bootstrapState` at the default
- *    "ready" and return immediately.
- *  - Otherwise flip to "installing", run `bootstrapInstall`, then:
- *      • on success, rescan the registry, attempt bridge registration
- *        (failures are non-fatal and land in `bridgeRegistrationError`),
- *        flip to "ready".
- *      • on failure, flip to "failed" with the error.
- *
- * Structured log lines at each transition aid diagnosis in daemon-mode
- * (stdout goes to ~/.pi/dashboard/server.log).
- */
-async function runDegradedModeBootstrap(server: DashboardServer): Promise<void> {
-  const registry = getDefaultRegistry();
-  const initial = registry.resolve("pi");
-
-  if (initial.ok) {
-    // Default state is "ready" — no change needed. Log once for clarity.
-    console.log(`[bootstrap] ready (pi resolved via ${initial.source})`);
-    // Populate version-skew compatibility info even when no install was
-    // needed — the UI banner renders upgradeRecommended hints.
-    try {
-      const serverPkg = path.resolve(
-        path.dirname(fileURLToPath(import.meta.url)),
-        "..",
-        "package.json",
-      );
-      updateBootstrapCompatibility(server.bootstrapState, serverPkg);
-      logCompatibilityWarning(server.bootstrapState);
-    } catch (err) {
-      console.warn("[bootstrap] version-skew check failed (non-fatal):", err);
-    }
-    return;
-  }
-
-  const installPackages = ["@earendil-works/pi-coding-agent", "@fission-ai/openspec"];
-  server.bootstrapState.setLastInstallPackages(installPackages);
-  console.log("[bootstrap] installing (pi unresolved, running background install)");
-  server.bootstrapState.set({
-    status: "installing",
-    progress: { step: "pi", output: "starting install…" },
-    error: undefined,
-  });
-
-  try {
-    const res = await bootstrapInstall({
-      packages: installPackages,
-      progress: (p) => {
-        server.bootstrapState.set({
-          progress: { step: p.step, output: p.output },
-        });
-      },
-    });
-
-    if (!res.ok) {
-      console.error(`[bootstrap] failed: ${res.error}`);
-      server.bootstrapState.set({
-        status: "failed",
-        error: { message: res.error },
-        progress: undefined,
-      });
-      return;
-    }
-
-    // Post-install registry rescan + openspec/pi-resources force-refresh
-    // are now centralized in server.ts's bootstrapState.subscribe hook,
-    // which fires on every installing → ready transition (this caller +
-    // triggerUpgradePi + triggerRetry).
-    // See change: fix-openspec-buttons-after-bootstrap-install.
-
-    // Attempt bridge registration. Failures are non-fatal per spec §10.3.
-    let bridgeErr: string | undefined;
-    try {
-      const extPath = findBundledExtension(process.cwd());
-      if (extPath) {
-        registerBridgeExtension(extPath);
-      } else {
-        bridgeErr = "bundled extension not found after install";
-      }
-    } catch (err) {
-      bridgeErr = err instanceof Error ? err.message : String(err);
-    }
-
-    server.bootstrapState.set({
-      status: "ready",
-      progress: undefined,
-      error: undefined,
-      bridgeRegistrationError: bridgeErr,
-    });
-    // Populate compatibility info after a successful install.
-    try {
-      const serverPkg = path.resolve(
-        path.dirname(fileURLToPath(import.meta.url)),
-        "..",
-        "package.json",
-      );
-      updateBootstrapCompatibility(server.bootstrapState, serverPkg);
-      logCompatibilityWarning(server.bootstrapState);
-    } catch (err) {
-      console.warn("[bootstrap] version-skew check failed (non-fatal):", err);
-    }
-    console.log(
-      `[bootstrap] ready (installed ${res.installed.join(", ")}${bridgeErr ? `; bridge warning: ${bridgeErr}` : ""})`,
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[bootstrap] failed: ${message}`);
-    server.bootstrapState.set({
-      status: "failed",
-      error: { message },
-      progress: undefined,
-    });
-  }
-}
 
 /**
  * Start the server as a detached background daemon.
@@ -522,57 +395,6 @@ async function cmdRestartImpl(
 /**
  * Show server status.
  */
-/**
- * `pi-dashboard upgrade-pi` — upgrade pi-coding-agent via bootstrap.
- *
- * If a dashboard is currently running, POST to /api/bootstrap/upgrade-pi
- * (so the running server owns the install, broadcasts state, and reloads
- * connected sessions). Otherwise run `bootstrapInstall` directly with a
- * streaming progress formatter and exit when done.
- *
- * See change: unified-bootstrap-install §8.
- */
-async function cmdUpgradePi(config: ServerConfig): Promise<void> {
-  const status = await isDashboardRunning(config.port);
-  if (status.running) {
-    console.log(
-      `[upgrade-pi] dashboard running at http://localhost:${config.port}, delegating to server`,
-    );
-    try {
-      const res = await fetch(`http://localhost:${config.port}/api/bootstrap/upgrade-pi`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        console.error(`[upgrade-pi] server rejected upgrade: HTTP ${res.status} ${body}`);
-        process.exit(1);
-      }
-      const body = (await res.json()) as { ticketId?: string };
-      console.log(`[upgrade-pi] queued (ticketId=${body.ticketId ?? "?"})`);
-      console.log("[upgrade-pi] progress is streamed to open dashboard tabs; CLI exits now.");
-      return;
-    } catch (err) {
-      console.error("[upgrade-pi] failed to reach server:", err);
-      process.exit(1);
-    }
-  }
-
-  console.log("[upgrade-pi] no dashboard running — installing directly");
-  const res = await bootstrapInstall({
-    packages: ["@earendil-works/pi-coding-agent"],
-    progress: (p) => {
-      const line = p.output
-        ? `[upgrade-pi] ${p.step} ${p.status}: ${p.output}`
-        : `[upgrade-pi] ${p.step} ${p.status}`;
-      console.log(line);
-    },
-  });
-  if (!res.ok) {
-    console.error(`[upgrade-pi] failed: ${res.error}`);
-    process.exit(1);
-  }
-  console.log(`[upgrade-pi] ✓ installed ${res.installed.join(", ")}`);
-}
 
 async function cmdStatus(port: number): Promise<void> {
   // 1. Try mDNS discovery first
@@ -663,9 +485,6 @@ async function main() {
       break;
     case "status":
       await cmdStatus(config.port);
-      break;
-    case "upgrade-pi":
-      await cmdUpgradePi(config);
       break;
     default:
       // No subcommand — run in foreground (backward compatible)

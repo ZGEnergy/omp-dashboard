@@ -14,8 +14,8 @@ import { getBundledNodePath, getBundledNpmPath, getBundledNodeDir } from "./bund
 import { pickNodeForServer } from "./pick-node.js";
 import { isApiKeyConfigured } from "./wizard-state.js";
 import { MANAGED_DIR } from "./managed-paths.js";
-import { resolveOfflinePackages } from "./offline-packages.js";
-import { installManagedNode } from "@blackbelt-technology/pi-dashboard-shared/bootstrap-install.js";
+// resolveOfflinePackages + installManagedNode imports removed under change:
+// eliminate-electron-runtime-install (no offline cache; bundle is immutable).
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import {
   type DoctorCheck,
@@ -47,76 +47,32 @@ function getPkgVersion(pkgJsonPath: string): string | null {
 }
 
 /**
- * Repair-and-report for the managed Node runtime under
- * `~/.pi-dashboard/node/`. Always invokes `installManagedNode` so a
- * missing or version-mismatched copy is restored; idempotent when the
- * marker matches.
+ * Report the bundled Node runtime status.
+ *
+ * Under the immutable-bundle architecture (see change:
+ * eliminate-electron-runtime-install), the bundled Node lives at
+ * `<resourcesPath>/node/` and is the only runtime. The legacy
+ * `~/.pi-dashboard/node/` install path is gone.
  */
 export async function checkManagedNodeRuntime(opts?: {
-  install?: typeof installManagedNode;
   bundledNodeBinary?: string | null;
-  managedDir?: string;
 }): Promise<DoctorCheck> {
-  const install = opts?.install ?? installManagedNode;
   const bundledNodeBinary = opts?.bundledNodeBinary ?? getBundledNodePath();
-  const managedDir = opts?.managedDir ?? MANAGED_DIR;
-  const bundledDir = bundledNodeBinary
-    ? (process.platform === "win32" // platform-branch-ok
-        ? path.dirname(bundledNodeBinary)
-        : path.dirname(path.dirname(bundledNodeBinary)))
-    : null;
-
-  let installError: string | undefined;
-  try {
-    const r = await install({ bundledNodeDir: bundledDir, managedDir });
-    if (!r.ok) installError = r.error;
-  } catch (err) {
-    installError = err instanceof Error ? err.message : String(err);
-  }
-
-  const managedNodeBinary = process.platform === "win32"
-    ? path.join(managedDir, "node", "node.exe")
-    : path.join(managedDir, "node", "bin", "node");
-  const markerPath = path.join(managedDir, "node", ".version");
-  const present = existsSync(managedNodeBinary);
-  const markerVersion = existsSync(markerPath)
-    ? readFileSync(markerPath, "utf-8").trim() || null
-    : null;
-
-  if (installError) {
+  if (!bundledNodeBinary || !existsSync(bundledNodeBinary)) {
     return {
-      name: "Managed Node runtime",
-      section: "runtime",
-      status: "warning",
-      message: `Failed to install: ${installError}`,
-      detail: `Target: ${path.join(managedDir, "node")}`,
-      fixable: true,
-    };
-  }
-  if (!present && !bundledDir) {
-    return {
-      name: "Managed Node runtime",
-      section: "runtime",
-      status: "warning",
-      message: "Not installed (no bundled source — standalone CLI install)",
-      detail: `System Node will be used. Target: ${path.join(managedDir, "node")}`,
-    };
-  }
-  if (!present) {
-    return {
-      name: "Managed Node runtime",
+      name: "Bundled Node runtime",
       section: "runtime",
       status: "error",
-      message: "Install attempted but binary not found",
-      detail: `Target: ${managedNodeBinary}`,
-      fixable: true,
+      message: "Bundled Node binary not found",
+      detail: "Reinstall the application from the official installer.",
+      fixable: false,
     };
   }
   return {
-    name: "Managed Node runtime",
+    name: "Bundled Node runtime",
     section: "runtime",
     status: "ok",
-    message: `${markerVersion || "installed"} at ${path.join(managedDir, "node")}`,
+    message: `Bundled at ${bundledNodeBinary}`,
   };
 }
 
@@ -142,7 +98,6 @@ async function probeServer(): Promise<{
   version?: string;
   mode?: string;
   starter?: string | null;
-  installable?: { total: number; installed: number; failed: string[] } | null;
 }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 3000);
@@ -163,17 +118,10 @@ async function probeServer(): Promise<{
     version: typeof health.version === "string" ? health.version : undefined,
     mode: typeof health.mode === "string" ? health.mode : undefined,
     starter: typeof health.starter === "string" ? health.starter : null,
-    installable:
-      health.installable && typeof health.installable === "object"
-        ? {
-            total: (health.installable as { total?: number }).total ?? 0,
-            installed: (health.installable as { installed?: number }).installed ?? 0,
-            failed: Array.isArray((health.installable as { failed?: unknown }).failed)
-              ? ((health.installable as { failed: string[] }).failed)
-              : [],
-          }
-        : null,
   };
+  // `installable` field intentionally dropped under change:
+  // eliminate-electron-runtime-install — the runtime install-list flow
+  // is gone, so /api/health no longer exposes the field.
 }
 
 /** Run all doctor checks. Wraps the body in try/catch so the renderer
@@ -340,38 +288,12 @@ async function runDoctorInner(): Promise<DoctorReport> {
     fixable: !hasBundledServer && !dashboard.found,
   });
 
-  // ── Offline packages bundle ──────────────────────────────────
-  const offlineRow = assumedMandatory(
-    "resolveOfflinePackages",
-    () => (resourcesPath ? resolveOfflinePackages(resourcesPath) : { present: false as const, reason: "no resourcesPath" }),
-    { managedDir: MANAGED_DIR },
-  );
-  if (!offlineRow.ok) {
-    checks.push(offlineRow.row);
-  } else {
-    const offlineResolution = offlineRow.value;
-    if (offlineResolution.present) {
-      const m = offlineResolution.manifest;
-      const pkgList = m.packages.map((p) => `${p.name.split("/").pop()}@${p.version}`).join(", ");
-      checks.push({
-        name: "Offline packages bundle",
-        section: "server",
-        status: "ok",
-        message: `Present (target=${m.targetPlatform}, ${m.packages.length} pinned)`,
-        detail: `${pkgList} — bundled ${m.bundledAt}, sha256 ${m.sha256.slice(0, 12)}…`,
-      });
-    } else {
-      checks.push({
-        name: "Offline packages bundle",
-        section: "server",
-        status: "warning",
-        message: "Not bundled (registry-install mode)",
-        detail: `First-run will require network access to registry.npmjs.org. Reason: ${offlineResolution.reason}`,
-      });
-    }
-  }
+  // Offline packages bundle check removed under change:
+  // eliminate-electron-runtime-install.
 
-  // ── Server starter / installable list (from health JSON) ────
+  // ── Server starter (from health JSON) ──────────────────
+  // Installable-list row removed under change:
+  // eliminate-electron-runtime-install (Phase 6.3).
   const probe = await probeServer();
   if (probe.running) {
     checks.push({
@@ -380,23 +302,36 @@ async function runDoctorInner(): Promise<DoctorReport> {
       status: probe.starter ? "ok" : "warning",
       message: probe.starter ?? "Unknown (old server?)",
     });
-    if (probe.installable) {
-      const failCount = probe.installable.failed.length;
-      checks.push({
-        name: "Installable list",
-        section: "server",
-        status: failCount > 0 ? "error" : "ok",
-        message:
-          `${probe.installable.installed}/${probe.installable.total} installed` +
-          (failCount > 0 ? `, ${failCount} failed: ${probe.installable.failed.join(", ")}` : ""),
-        fixable: failCount > 0,
-      });
-    }
   }
 
   // ── Server launch sanity test (only when server is not running) ──
   if (!probe.running) {
     await runServerLaunchTest(checks, { hasBundledServer, bundledServerCli, bundledNode });
+  }
+
+  // ── Legacy `~/.pi-dashboard/` advisory ───────────────────────
+  // Under R3 nothing reads or writes this directory. Surface a
+  // single warning row so the user knows it's safe to delete.
+  // See change: eliminate-electron-runtime-install (Phase 7).
+  try {
+    const { detectLegacyManagedDir } = await import(
+      "@blackbelt-technology/pi-dashboard-shared/legacy-managed-dir.js"
+    );
+    const legacy = detectLegacyManagedDir();
+    if (legacy.present) {
+      checks.push({
+        name: "Legacy install directory",
+        section: "diagnostics",
+        status: "warning",
+        message: `Legacy directory at ${legacy.path} — no longer used. Safe to delete manually.`,
+        detail: `${legacy.pkgCount} packages, ~${legacy.sizeMb} MB.`,
+        suggestion:
+          "This directory is left over from a previous version. Nothing reads or writes it under the immutable-bundle architecture. " +
+          `Delete it manually (e.g. \`rm -rf ${legacy.path}\`) to reclaim disk space.`,
+      });
+    }
+  } catch {
+    /* advisory only — never block doctor output */
   }
 
   // ── Stamp section + suggestion ───────────────────────────────
@@ -424,7 +359,6 @@ async function runServerLaunchTest(
   const jitiUrl = resolver.resolveJiti({ anchor: testCli ?? undefined });
   const pick = pickNodeForServer({
     bundledNodeDir: getBundledNodeDir(),
-    systemNode: detectSystemNode(),
     processExecPath: process.execPath,
     platform: process.platform,
   });

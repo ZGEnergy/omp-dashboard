@@ -97,12 +97,13 @@ When `buildExtractedSource` invokes `extractBundle` to re-extract from the bundl
 
 ### Requirement: Uniform spawn primitive
 
-The Electron app SHALL spawn the server via a single primitive `spawnFromSource(source, config)` that uses identical argv structure across `devMonorepo`, `piExtension`, `npmGlobal`, and `extracted` sources, differing only in `cliPath` and `cwd`. The primitive SHALL stamp `DASHBOARD_STARTER=Electron` on the spawned process env.
+The Electron app SHALL spawn the server via a single primitive `spawnFromSource(source, config)` that uses identical argv structure across `devMonorepo`, `piExtension`, `npmGlobal`, and `extracted` sources, differing only in `cliPath` and `cwd`. The primitive SHALL stamp `DASHBOARD_STARTER=Electron` on the spawned process env. The primitive SHALL select the Node binary used to run the server via `pickNodeForServer(input)` (bundled-first, system-fallback, `process.execPath`-with-`ELECTRON_RUN_AS_NODE=1` as last resort) and SHALL pass the result as `nodeBin` to `launchDashboardServer`. The primitive SHALL NOT rely on `launchDashboardServer`'s `process.execPath` default.
 
 #### Scenario: All non-attach sources spawn identically
 
 - **WHEN** `spawnFromSource(source, config)` is invoked for any non-`attach` source kind
-- **THEN** the spawn argv SHALL be `[process.execPath, "--import", <jiti-loader>, <cliPath-maybe-url-wrapped>, "--port", <port>, "--pi-port", <piPort>]`
+- **THEN** the spawn argv SHALL be `[<resolved-node-bin>, "--import", <jiti-loader>, <cliPath-maybe-url-wrapped>, "--port", <port>, "--pi-port", <piPort>]`
+- **AND** `<resolved-node-bin>` SHALL be the `nodeBin` returned by `pickNodeForServer`
 - **AND** the env SHALL include `DASHBOARD_STARTER: "Electron"`
 - **AND** the cwd SHALL be `source.cwd`
 - **AND** the spawn SHALL be detached with stdio piped to the dashboard log file
@@ -112,6 +113,31 @@ The Electron app SHALL spawn the server via a single primitive `spawnFromSource(
 - **WHEN** `spawnFromSource(source, config)` succeeds
 - **THEN** the primitive SHALL return `{ pid: <number> }`
 - **AND** Electron SHALL store this pid for later lifecycle ownership comparison
+
+#### Scenario: Bundled Node preferred
+
+- **WHEN** `spawnFromSource` is invoked AND the bundled Node executable at `<bundledNodeDir>/bin/node` (POSIX) or `<bundledNodeDir>\node.exe` (Windows) exists and is executable
+- **THEN** `pickNodeForServer` SHALL return `{ kind: "bundled", nodeBin: <bundled-path> }`
+- **AND** the spawn SHALL NOT set `ELECTRON_RUN_AS_NODE` in the child env
+
+#### Scenario: System Node fallback when bundled missing
+
+- **WHEN** `spawnFromSource` is invoked AND no bundled Node executable is present AND `detectSystemNode()` returns `{ found: true, path, version }`
+- **THEN** `pickNodeForServer` SHALL return `{ kind: "system", nodeBin: path, version }`
+- **AND** the spawn SHALL NOT set `ELECTRON_RUN_AS_NODE` in the child env
+
+#### Scenario: execPath fallback when neither bundled nor system Node available
+
+- **WHEN** `spawnFromSource` is invoked AND no bundled Node is present AND no system Node is detected
+- **THEN** `pickNodeForServer` SHALL return `{ kind: "execpath-fallback", nodeBin: process.execPath, needsElectronRunAsNode: true }`
+- **AND** `spawnFromSource` SHALL stamp `ELECTRON_RUN_AS_NODE = "1"` in the child env
+- **AND** a warning SHALL be logged identifying the fallback path
+
+#### Scenario: Legacy V1 launcher applies the same picker
+
+- **WHEN** `launchServer()` in `packages/electron/src/lib/server-lifecycle.ts` is reached (with `LAUNCH_SOURCE_V2=false`)
+- **THEN** it SHALL call `pickNodeForServer` and pass the result as `nodeBin` into `launchDashboardServer`
+- **AND** SHALL apply the same `ELECTRON_RUN_AS_NODE` stamping rule as `spawnFromSource`
 
 ### Requirement: pi-dashboard CLI wrapper answers metadata queries without a TypeScript loader
 
@@ -141,3 +167,27 @@ The `pi-dashboard` CLI wrapper (`packages/server/bin/pi-dashboard.mjs`) SHALL an
 - **WHEN** `pi-dashboard --version` is invoked AND the wrapper's sibling `package.json` cannot be read or parsed
 - **THEN** the wrapper SHALL fall through to the existing jiti-resolution path (which, if jiti is also absent, prints the legacy install hint)
 - **AND** SHALL NOT silently exit 0 with an empty version
+
+### Requirement: spawnFromSource passes bundled-Node dir via getBundledNodeDir()
+
+`packages/electron/src/lib/launch-source.ts::spawnFromSource` SHALL obtain the bundled-Node directory it passes to `pickNodeForServer({ bundledNodeDir, … })` by calling `getBundledNodeDir()` from `bundled-node.ts`. It SHALL NOT compute the directory by chaining `path.dirname` on the result of `getBundledNodePath()`.
+
+#### Scenario: Windows resources layout resolves to bundled Node
+
+- **WHEN** the Electron app spawns the server on Windows AND the bundled-Node binary exists at `<resources>\node\node.exe`
+- **THEN** `spawnFromSource` SHALL pass `<resources>\node` as `bundledNodeDir` to `pickNodeForServer`
+- **AND** `pickNodeForServer` SHALL return `{ kind: "bundled" }` with `nodeBin = <resources>\node\node.exe`
+- **AND** the spawned server SHALL run under real Node (no `ELECTRON_RUN_AS_NODE=1`)
+- **AND** the server log SHALL NOT contain the line `Bundled Node not found — falling back to process.execPath`
+
+#### Scenario: POSIX resources layout resolves to bundled Node
+
+- **WHEN** the Electron app spawns the server on macOS/Linux AND the bundled-Node binary exists at `<resources>/node/bin/node`
+- **THEN** `spawnFromSource` SHALL pass `<resources>/node` as `bundledNodeDir` to `pickNodeForServer`
+- **AND** `pickNodeForServer` SHALL return `{ kind: "bundled" }` with `nodeBin = <resources>/node/bin/node`
+
+#### Scenario: Lint forbids dirname-arithmetic on bundled-Node path
+
+- **WHEN** repository linters run (vitest `no-*` rule files under `packages/electron/src/__tests__/`)
+- **THEN** any source file under `packages/electron/src/` containing `path.dirname(` chained around `getBundledNodePath()` SHALL fail the lint
+- **AND** the failure message SHALL reference `getBundledNodeDir()` as the correct alternative

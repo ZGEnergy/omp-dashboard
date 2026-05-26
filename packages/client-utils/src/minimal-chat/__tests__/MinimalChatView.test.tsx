@@ -114,7 +114,7 @@ describe("MinimalChatView", () => {
       // Root has no flex-col h-full
       const root = container.firstElementChild as HTMLElement;
       expect(root.className).not.toContain("h-full");
-      expect(root.className).not.toContain("max-h-[60vh]");
+      expect(root.className).not.toContain("h-[60vh]");
     }
   });
 

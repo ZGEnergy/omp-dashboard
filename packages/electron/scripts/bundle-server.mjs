@@ -48,6 +48,13 @@ const SOURCE_ONLY = process.argv.slice(2).includes("--source-only");
 
 console.log("→ Bundling dashboard server...");
 
+// Phase 1 of change: eliminate-electron-runtime-install (R3 dep lift).
+// pi/openspec/tsx are regular `dependencies` of packages/server/package.json.
+// They get materialized under resources/server/node_modules/ by the
+// `npm install --omit=dev` step below — same as every other workspace
+// dep. No synthetic dependency block needed at this layer.
+// `offline-packages.json` is vestigial and removed in Phase 5.
+
 // ── clean & re-create target structure ───────────────────────────────────
 rmSync(SERVER_BUNDLE, { recursive: true, force: true });
 mkdirSync(path.join(SERVER_BUNDLE, "packages"), { recursive: true });
@@ -150,16 +157,20 @@ if (clientSrc) {
 // NOTE: intentionally NO "type": "module" here — node_modules contain CJS
 // packages (e.g. node-pty) that break if loaded as ESM.
 //
-// pi-coding-agent is intentionally NOT declared as a dependency here.
-// Architectural rationale: the dashboard ships pi/tsx/openspec via the
-// offline cacache (`offline-packages.json` + `offline-packages/`) which
-// `installStandalone()` extracts into `~/.pi-dashboard/` on first run.
-// At runtime, server-lifecycle.ts resolves tsx (preferred) and jiti
-// (fallback) from the managed dir first, then system pi. Bundling pi
-// inside this tree would duplicate it (~10MB) and create version-drift
-// risk against the offline cacache pin. The original D5 in the design
-// proposed this; pushed back during review — see change:
-// fix-electron-windows-installer-and-server-bootstrap (D5 reconsidered).
+// pi-coding-agent / openspec / tsx are declared as production dependencies
+// here so the `npm install --omit=dev` step below materializes them under
+// `resources/server/node_modules/`. The .app then ships a complete
+// pre-installed runtime — no offline cacache, no runtime install into
+// `~/.pi-dashboard/`. Versions come from `offline-packages.json` until
+// Phase 5 of change: eliminate-electron-runtime-install collapses the pin
+// source into a constant in this file.
+//
+// This reverses the prior architectural decision (D5 in change:
+// fix-electron-windows-installer-and-server-bootstrap) which kept pi out of
+// the bundle to defer to an in-place `/api/pi-core/update` upgrader. That
+// upgrade path is removed in Phase 3; the bundle is now the single source
+// of truth for pi/openspec/tsx versions, refreshed via electron-updater
+// whole-.app replacement.
 const bundlePkg = {
   name: "pi-dashboard-bundled-server",
   private: true,
@@ -168,6 +179,38 @@ const bundlePkg = {
 writeFileSync(
   path.join(SERVER_BUNDLE, "package.json"),
   JSON.stringify(bundlePkg, null, 2) + "\n",
+);
+
+// ── ship manual-launch helpers ────────────────────────────────────────
+// Three self-locating scripts at the server-bundle root that boot the
+// bundled dashboard server without the Electron wrapper and without a
+// system Node install. See packages/electron/scripts/server-launch-helpers/
+// README.md. Used by testers and CI smoke. Argv shape matches
+// packages/shared/src/platform/node-spawn.ts::buildNodeImportArgvParts.
+// See change: add-bundle-manual-launch-scripts.
+const LAUNCH_HELPERS_DIR = path.join(
+  ELECTRON_DIR,
+  "scripts",
+  "server-launch-helpers",
+);
+const LAUNCH_HELPER_FILES = [
+  "start-server.cmd",
+  "start-server.ps1",
+  "start-server.sh",
+  "README.md",
+];
+for (const name of LAUNCH_HELPER_FILES) {
+  const src = path.join(LAUNCH_HELPERS_DIR, name);
+  const dst = path.join(SERVER_BUNDLE, name);
+  cpSync(src, dst);
+  // Preserve executable bit on the .sh helper. Some host filesystems
+  // (notably Docker bind-mounts from macOS) strip the bit during cpSync.
+  if (name.endsWith(".sh") && process.platform !== "win32") {
+    try { chmodSync(dst, 0o755); } catch { /* best-effort */ }
+  }
+}
+console.log(
+  `  Bundled ${LAUNCH_HELPER_FILES.length} launch helper(s) into server bundle root`,
 );
 
 // ── source-only short-circuit ────────────────────────────────────────────
@@ -253,6 +296,39 @@ const npmInstall = spawnSync(
 const npmOut = (npmInstall.stdout || "") + (npmInstall.stderr || "");
 const tail = npmOut.trim().split(/\r?\n/).slice(-5).join("\n");
 if (tail) console.log(tail);
+
+// ── GO/NO-GO: assert node-pty prebuilds for all required targets ────────
+// Phase 1.1.k of eliminate-electron-runtime-install. node-pty@1.2.0-beta.13
+// ships prebuilds for all six triples; if a future bump regresses the set,
+// fail the build here rather than at user-install time.
+{
+  const prebuildsDir = path.join(SERVER_BUNDLE, "node_modules", "node-pty", "prebuilds");
+  const required = ["darwin-arm64", "darwin-x64", "linux-x64", "win32-x64"];
+  const advisory = ["linux-arm64", "win32-arm64"];
+  const missingRequired = required.filter(
+    (t) => !existsSync(path.join(prebuildsDir, t)),
+  );
+  const missingAdvisory = advisory.filter(
+    (t) => !existsSync(path.join(prebuildsDir, t)),
+  );
+  if (missingRequired.length > 0) {
+    console.error(
+      `✗ node-pty prebuilds GO/NO-GO failed at ${prebuildsDir}`,
+    );
+    console.error(`  Missing required triples: ${missingRequired.join(", ")}`);
+    console.error(
+      `  Required set: ${required.join(", ")}. See change: ` +
+        `eliminate-electron-runtime-install task 1.1.k and design.md F1.`,
+    );
+    process.exit(1);
+  }
+  console.log(
+    `  node-pty prebuilds OK — ${required.length}/${required.length} required triples present` +
+      (missingAdvisory.length > 0
+        ? ` (advisory missing: ${missingAdvisory.join(", ")})`
+        : " (all 6 triples present)"),
+  );
+}
 
 // ── strip __tests__ from workspace source ────────────────────────────────
 // Test config + __tests__ already stripped above (before source-only exit).

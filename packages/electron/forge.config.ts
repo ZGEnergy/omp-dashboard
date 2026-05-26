@@ -3,6 +3,8 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { deriveWindowsBuildVersion } from "./src/lib/build-version.js";
+
 // fileURLToPath handles Windows drive-letter paths correctly (new URL().pathname gives /C:/... which is invalid)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,10 +20,50 @@ const pkgVersion: string = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, "package.json"), "utf8"),
 ).version;
 
+// Windows PE VERSIONINFO requires MAJOR.MINOR.BUILD[.REVISION] integers;
+// SemVer prereleases like "0.5.3-ci.20260525-141712.feat.abc" (produced by
+// ci-electron.yml's slug step) are rejected by @electron/packager's
+// `resedit` step. Derive a 4-integer buildVersion from the SemVer triple +
+// GITHUB_RUN_NUMBER.
+//
+// @electron/packager wires the PE VERSIONINFO fields like this
+// (see node_modules/@electron/packager/dist/win32.js):
+//   productVersion: this.opts.appVersion             // ← no override path
+//   fileVersion:    this.opts.buildVersion || appVersion
+// Both run through parseVersionString. `buildVersion` only fixes FileVersion;
+// to satisfy ProductVersion we must also pin `appVersion` to the 4-integer
+// form, but only when building for Windows so darwin / linux artifacts keep
+// the full SemVer in CFBundleShortVersionString / Info.plist.
+//
+// Build-host detection (`process.platform === "win32"`) is correct here
+// because the ci-electron matrix builds Windows artifacts only on
+// windows-latest runners; cross-builds are not used for win32.
+//
+// See change: fix-ci-electron-windows-resedit.
+const buildVersion = deriveWindowsBuildVersion(
+  pkgVersion,
+  process.env.GITHUB_RUN_NUMBER,
+);
+const isWindowsBuildHost = process.platform === "win32";
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     name: "PI-Dashboard",
+    buildVersion,
+    // Windows-only: pin appVersion so ProductVersion (which packager's
+    // win32.js hardcodes from appVersion) is also a 4-integer string.
+    // On darwin/linux this stays unset, so packager defaults to
+    // pkgVersion (= full SemVer slug) for Info.plist visibility.
+    ...(isWindowsBuildHost ? { appVersion: buildVersion } : {}),
+    // VERSIONINFO `LegalCopyright` (Windows) + `NSHumanReadableCopyright`
+    // (macOS Info.plist). Without this override, @electron/packager copies
+    // the Electron framework's default string ("Copyright (C) 2015 GitHub,
+    // Inc.") into the produced .exe / .app metadata. See packager
+    // dist/win32.js:51 (`this.opts.appCopyright || ...framework-default`).
+    // Year hardcoded to match LICENSE (avoids non-deterministic builds).
+    // See change: fix-ci-electron-windows-resedit.
+    appCopyright: "Copyright © 2026 BlackBelt Technology",
     executableName: "pi-dashboard",
     icon: path.resolve(__dirname, "resources/icon"),
     appBundleId: "com.blackbelt-technology.pi-dashboard",
@@ -56,12 +98,10 @@ const config: ForgeConfig = {
       "./resources/loading.html",
       // Bundled server (created by scripts/bundle-server.mjs)
       ...(fs.existsSync(path.resolve(__dirname, "resources/server")) ? ["./resources/server"] : []),
-      // Bundled first-party recommended extensions (created by scripts/bundle-recommended-extensions.mjs
-      // when BUNDLE_RECOMMENDED_EXTENSIONS=1; absent on feature-branch / local builds)
-      ...(fs.existsSync(path.resolve(__dirname, "resources/bundled-extensions")) ? ["./resources/bundled-extensions"] : []),
-      // Offline npm cache for pi + openspec + tsx (created by scripts/bundle-offline-packages.mjs).
-      // Presence of the manifest file gates inclusion — dev/local forge builds skip silently.
-      ...(fs.existsSync(path.resolve(__dirname, "resources/offline-packages/manifest.json")) ? ["./resources/offline-packages"] : []),
+      // bundled-extensions + offline-packages resources removed under change:
+      // eliminate-electron-runtime-install (task 5.7). pi/openspec/tsx now
+      // ship as regular npm deps of the bundled server tree at
+      // resources/server/node_modules/; no runtime cache extraction.
     ],
     // macOS code signing — requires APPLE_IDENTITY env var in CI
     ...(process.env.APPLE_IDENTITY ? {
