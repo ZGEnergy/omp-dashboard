@@ -102,19 +102,26 @@ export function getUnifiedOrder(sessions: DashboardSession[], terminals: Termina
 }
 
 /**
- * Resolve a session's group-key path. Priority order (see Decision 15 in
- * `add-jj-workspace-plugin`):
+ * Resolve a session's group-key path. Priority order:
  *   1. Explicit pin wins — if `pathKey(cwd)` matches a pinned entry, the
  *      session groups under its own cwd.
  *   2. Else if `jjState.workspaceRoot` is set, the session collapses
  *      under the parent repo's group key (so `.shadow/<name>/` workspaces
  *      cluster with their parent).
- *   3. Else falls back to `cwd` (status quo for non-jj sessions).
+ *   3. Else if `gitWorktree.mainPath` is set, the session collapses
+ *      under the main worktree path (so `.worktrees/<slug>` sessions
+ *      cluster with their parent repo). Mirrors the jj precedent.
+ *   4. Else falls back to `cwd` (status quo for plain checkouts).
  *
  * The display path returned matches the chosen key — pinned uses cwd,
- * collapsed uses workspaceRoot, default uses cwd.
+ * collapsed (jj or worktree) uses the parent root, default uses cwd.
+ *
+ * When BOTH `jjState.workspaceRoot` AND `gitWorktree.mainPath` apply,
+ * jj wins because it is evaluated first (step 2). This is unusual in
+ * practice but documented in the design.
  *
  * Exported for tests; consumed by `groupSessionsByDirectory`.
+ * See changes: add-jj-workspace-plugin, add-worktree-spawn-dialog.
  */
 export function resolveSessionGroupPath(
   session: DashboardSession,
@@ -125,6 +132,8 @@ export function resolveSessionGroupPath(
   if (pinnedKeys.has(cwdKey)) return session.cwd;
   const wsRoot = session.jjState?.workspaceRoot;
   if (wsRoot && wsRoot.length > 0) return wsRoot;
+  const wtMain = session.gitWorktree?.mainPath;
+  if (wtMain && wtMain.length > 0) return wtMain;
   return session.cwd;
 }
 
@@ -153,12 +162,13 @@ export function groupSessionsByDirectory(
   platform?: NodeJS.Platform,
 ): { pinned: DirectoryGroup[]; unpinned: DirectoryGroup[] } {
   // Infer platform from observed paths (session cwds + pinned entries +
-  // jj workspace roots) when not explicitly supplied. Callers can still
-  // pass `platform` to force a value.
+  // jj workspace roots + git worktree main paths) when not explicitly
+  // supplied. Callers can still pass `platform` to force a value.
   const plat = inferPlatform(
     [
       ...sessions.map((s) => s.cwd),
       ...sessions.map((s) => s.jjState?.workspaceRoot),
+      ...sessions.map((s) => s.gitWorktree?.mainPath),
       ...(pinnedDirectories ?? []),
     ],
     platform,
@@ -303,20 +313,24 @@ export function groupSessionsByDirectoryWithWorkspaces(
 }
 
 /**
- * Stable cluster sort by `(jjState?.workspaceName ?? "")`. Sessions
- * sharing a workspace name end up adjacent without losing the relative
- * ordering established by the prior sort step.
+ * Stable cluster sort by `(jjState?.workspaceName ?? gitWorktree?.name ?? "")`.
+ * Sessions sharing a cluster key end up adjacent without losing the
+ * relative ordering established by the prior sort step.
  *
- * Empty workspace name (i.e. plain main-tree sessions) sorts first so
- * the parent-repo cluster appears before its workspace clusters inside
- * a collapsed group.
+ * Empty cluster key (i.e. plain main-tree / main-checkout sessions)
+ * sorts first so the parent cluster appears before its workspace /
+ * worktree clusters inside a collapsed group.
+ *
+ * When a session has both `jjState.workspaceName` AND `gitWorktree.name`,
+ * jj wins (evaluated first). Matches the precedence rule in
+ * `resolveSessionGroupPath`. See change: add-worktree-spawn-dialog.
  */
 function clusterByWorkspaceName(sessions: DashboardSession[]): DashboardSession[] {
   // Map.values() iteration is insertion-ordered, so we walk the input
   // once and bucket by name; concatenation order is name-order.
   const buckets = new Map<string, DashboardSession[]>();
   for (const s of sessions) {
-    const name = s.jjState?.workspaceName ?? "";
+    const name = s.jjState?.workspaceName ?? s.gitWorktree?.name ?? "";
     const bucket = buckets.get(name);
     if (bucket) bucket.push(s);
     else buckets.set(name, [s]);

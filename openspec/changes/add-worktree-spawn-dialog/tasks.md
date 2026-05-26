@@ -35,11 +35,11 @@
 
 ## 5. Client grouping + display
 
-- [ ] 5.1 Extend `resolveSessionGroupPath` in `packages/client/src/lib/session-grouping.ts` with the new step 3 (`gitWorktree.mainPath`)
-- [ ] 5.2 Extend `clusterByWorkspaceName` to also key on `gitWorktree?.name`; empty-key cluster sorts first; remaining keys alphabetical
-- [ ] 5.3 Unit tests in `packages/client/src/lib/__tests__/session-grouping.test.ts`: worktree session under pinned parent groups correctly; explicit pin of worktree wins; jj+worktree both present → jj wins; cluster adjacency preserved with server-provided ordering
-- [ ] 5.4 Add `WorktreePill` rendering inside `WorkspaceSubcard.tsx` (or equivalent), guarded by `session.gitWorktree`; pill text `worktree`, `data-testid="worktree-pill"`, `title` as specified
-- [ ] 5.5 Component tests: pill renders when `gitWorktree` present; absent otherwise; tooltip text reflects `base` presence; mobile branch never renders pill
+- [x] 5.1 Extend `resolveSessionGroupPath` in `packages/client/src/lib/session-grouping.ts` with the new step 3 (`gitWorktree.mainPath`); platform inference also samples worktree mainPaths
+- [x] 5.2 Extend `clusterByWorkspaceName` to also key on `gitWorktree?.name`; empty-key cluster sorts first; remaining keys alphabetical
+- [x] 5.3 7 new unit tests in `session-grouping-worktree.test.ts`: worktree session collapses under pinned/unpinned parent, explicit pin of worktree wins, jj+worktree both present → jj wins (both grouping AND clustering), cluster adjacency with server-provided ordering, plain-checkout backward-compat. Pre-existing 6 jj tests still pass (no regressions).
+- [x] 5.4 Added `<WorktreePill session>` component in `SessionCard.tsx`; rendered inline at end of `GitInfo` (after branch + PR). Renders `<span data-testid="worktree-pill">worktree</span>` with the specified styling tokens; `title` attribute reflects `base` presence. Mobile branch already does not invoke `GitInfo`, so mobile is pill-free by construction.
+- [x] 5.5 9 component tests in `WorktreePill.test.tsx`: standalone pill (3 cases: base / no-base / absent), styling-token assertions, GitInfo integration (branch unchanged + document-order check), plain-checkout absence, no-branch absence, desktop-card-renders, mobile-card-does-not-render.
 
 ## 6. Worktree dialog
 

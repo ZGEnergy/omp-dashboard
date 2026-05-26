@@ -133,7 +133,35 @@ export function GitInfo({ session }: { session: DashboardSession }) {
           )}
         </>
       )}
+      <WorktreePill session={session} />
     </div>
+  );
+}
+
+/**
+ * Inline `worktree` pill that appears immediately after the branch/PR
+ * line on the WORKSPACE subcard when the session's cwd is a git worktree.
+ * Branch text on the GitInfo line is unchanged — branches remain the
+ * primary identity; the pill is supplementary.
+ *
+ * Hover/long-press shows `created from <base>` when the worktree's base
+ * ref is known (set at spawn time by the dashboard's worktree dialog),
+ * otherwise the generic `git worktree`.
+ *
+ * See change: add-worktree-spawn-dialog.
+ */
+export function WorktreePill({ session }: { session: DashboardSession }) {
+  const wt = session.gitWorktree;
+  if (!wt) return null;
+  const title = wt.base ? `created from ${wt.base}` : "git worktree";
+  return (
+    <span
+      data-testid="worktree-pill"
+      title={title}
+      className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] uppercase tracking-wider border border-[var(--border-subtle)] text-[var(--text-muted)] bg-[var(--bg-tertiary)]"
+    >
+      worktree
+    </span>
   );
 }
 
