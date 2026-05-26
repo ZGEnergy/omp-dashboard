@@ -1,3 +1,11 @@
+## Status
+
+**Superseded / archived 2026-05-26.**
+
+- Implementation landed in commit `2c673c5e fix(bootstrap): harvest 6 survivor fixes from new_bootstap_mess WIP` (2026-05-19). Cherry-picks 1–6 (dashboard-paths, server-identity retry, health-check re-export, doctor native fetch, doctor-routes process-state, server watchdog) are all present in HEAD.
+- Open verification tasks (8.x manual smokes, 9.x branch cleanup) were absorbed into the larger bootstrap redesign rather than executed here.
+- Superseded by: `2026-05-26-eliminate-electron-runtime-install` (the redesign this was preparatory cleanup for), plus `2026-05-24-add-startup-recovery-server`, `2026-05-26-fix-electron-server-launch-node-bin`, `2026-05-26-fix-electron-launch-source-bundled-node-dir`, `2026-05-26-fix-windows-path-system32-missing`. The Electron bootstrap path no longer matches the HEAD this proposal targeted.
+
 ## Why
 
 Branch `new_bootstap_mess` (note the typo in `bootstap`) carries a single
