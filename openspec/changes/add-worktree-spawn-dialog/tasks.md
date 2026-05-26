@@ -17,11 +17,11 @@
 
 ## 3. Pure helpers
 
-- [ ] 3.1 Create `packages/server/src/git-worktree.ts` with pure `slugifyBranch(branch: string): string` matching the design's slug rule
-- [ ] 3.2 Add pure `parsePorcelainWorktrees(stdout: string): WorktreeEntry[]` parser; first record SHALL be flagged `isMain: true`
-- [ ] 3.3 Add pure `resolveDefaultBase(opts: { head: HeadInfo; localBranches: string[]; remoteBranches: string[] }): string | { error: "no_usable_base" }` implementing the fallback chain (current → develop → main → master)
-- [ ] 3.4 Add pure `ensureWorktreeExcludeLine(existing: string): { content: string; appended: boolean }` for idempotent `.git/info/exclude` mutation
-- [ ] 3.5 Unit tests for each helper (slug edge cases, porcelain fixtures incl. detached/bare/locked entries, fallback chain fork points, exclude idempotency)
+- [x] 3.1 Create `packages/server/src/git-worktree.ts` with pure `slugifyBranch(branch: string): string` matching the design's slug rule
+- [x] 3.2 Add pure `parsePorcelainWorktrees(stdout: string): WorktreeEntry[]` parser; first record flagged `isMain: true`
+- [x] 3.3 Add pure `resolveDefaultBase({ currentBranch, localBranches, remoteBranches }): { ok: true, base } | { ok: false, error: "no_usable_base" }` implementing the fallback chain (current → develop → main → master, local-first then `origin/<x>`)
+- [x] 3.4 Add pure `ensureWorktreeExcludeLine(existing: string): { content: string; appended: boolean }` for idempotent `.git/info/exclude` mutation
+- [x] 3.5 33 unit tests pass: slug (8 cases incl. spec example + length cap + all-strippable), porcelain (8 cases incl. main-only, multi, detached, bare, locked-tolerated, CRLF, malformed), fallback (9 cases incl. local-over-remote precedence + detached + total-miss), exclude (7 cases incl. CRLF + boundary substrings)
 
 ## 4. Server endpoints
 
