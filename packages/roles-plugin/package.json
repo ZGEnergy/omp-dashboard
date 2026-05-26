@@ -1,52 +1,52 @@
 {
-	"name": "@blackbelt-technology/pi-dashboard-roles-plugin",
-	"version": "0.5.3",
-	"description": "Bundled built-in plugin \u2014 ships first-party dashboard contributions (e.g. roles settings UI) so they're replaceable/augmentable by third-party plugins via the same slot system.",
-	"license": "MIT",
-	"publishConfig": {
-		"access": "public"
-	},
-	"type": "module",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard",
-		"directory": "packages/roles-plugin"
-	},
-	"exports": {
-		".": {
-			"types": "./src/index.tsx",
-			"default": "./src/index.tsx"
-		},
-		"./client": {
-			"types": "./src/index.tsx",
-			"default": "./src/index.tsx"
-		}
-	},
-	"files": [
-		"src/"
-	],
-	"peerDependencies": {
-		"react": ">=18.0.0"
-	},
-	"dependencies": {
-		"@blackbelt-technology/dashboard-plugin-runtime": "^0.5.3",
-		"@blackbelt-technology/pi-dashboard-shared": "^0.5.3"
-	},
-	"devDependencies": {
-		"@types/react": "^19.0.0",
-		"react": "^19.0.0"
-	},
-	"pi-dashboard-plugin": {
-		"id": "roles",
-		"displayName": "Roles",
-		"priority": 100,
-		"client": "./src/index.tsx",
-		"claims": [
-			{
-				"slot": "settings-section",
-				"component": "BuiltInRolesSettings",
-				"tab": "general"
-			}
-		]
-	}
+  "name": "@blackbelt-technology/pi-dashboard-roles-plugin",
+  "version": "0.5.4",
+  "description": "Bundled built-in plugin — ships first-party dashboard contributions (e.g. roles settings UI) so they're replaceable/augmentable by third-party plugins via the same slot system.",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard",
+    "directory": "packages/roles-plugin"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.tsx",
+      "default": "./src/index.tsx"
+    },
+    "./client": {
+      "types": "./src/index.tsx",
+      "default": "./src/index.tsx"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "dependencies": {
+    "@blackbelt-technology/dashboard-plugin-runtime": "^0.5.4",
+    "@blackbelt-technology/pi-dashboard-shared": "^0.5.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0"
+  },
+  "pi-dashboard-plugin": {
+    "id": "roles",
+    "displayName": "Roles",
+    "priority": 100,
+    "client": "./src/index.tsx",
+    "claims": [
+      {
+        "slot": "settings-section",
+        "component": "BuiltInRolesSettings",
+        "tab": "general"
+      }
+    ]
+  }
 }
