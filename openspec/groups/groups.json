@@ -130,7 +130,7 @@
     "server-launch-smoke-suite": "electrun-execution",
     "add-session-card-status-mosaic-rail": "ui",
     "fix-server-crash-resilience": "ui",
-    "electron-platform-extraction": "next-phase",
+    "electron-platform-extraction": "electrun-execution",
     "honcho-card-fullscreen-dialogs": "next-phase",
     "honcho-remint-proxy-key": "next-phase",
     "add-honcho-docker-integration-tests": "next-phase",
