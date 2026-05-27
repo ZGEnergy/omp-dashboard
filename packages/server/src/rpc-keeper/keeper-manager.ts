@@ -92,12 +92,23 @@ export interface KeeperEntry {
 }
 
 export interface KeeperManager {
-  /** Spawn a keeper for `sessionId`. Resolves once the keeper has a PID. */
+  /**
+   * Spawn a keeper for `sessionId`. Resolves once the keeper has a PID.
+   *
+   * `piArgs` is the pi-side argv tail (e.g. `["--mode","rpc","--session",path]`).
+   * `piCmd` is the ToolRegistry-resolved absolute argv for the pi binary
+   * (`[exe, ...prefixArgs]`). When provided and non-empty, it is JSON-encoded
+   * into the keeper's env as `PI_KEEPER_PI_CMD`; the keeper consumes it and
+   * spawns pi via that absolute path instead of bare PATH lookup. When
+   * omitted (manual / test invocations), the keeper falls back to bare
+   * `spawn("pi", …)`. See change: fix-rpc-keeper-pi-resolution.
+   */
   spawnKeeperFor(
     sessionId: string,
     cwd: string,
     env: NodeJS.ProcessEnv,
     piArgs?: string[],
+    piCmd?: string[],
   ): Promise<KeeperSpawnResult>;
   /** Connect to keeper UDS, write `line + \n`, close. Never throws. */
   writeRpc(sessionId: string, line: string): Promise<boolean>;
@@ -177,6 +188,7 @@ export function createKeeperManager(opts: KeeperManagerOptions = {}): KeeperMana
     cwd: string,
     env: NodeJS.ProcessEnv,
     piArgs?: string[],
+    piCmd?: string[],
   ): Promise<KeeperSpawnResult> {
     if (!sessionId || typeof sessionId !== "string") {
       return { success: false, error: "sessionId required" };
@@ -197,9 +209,18 @@ export function createKeeperManager(opts: KeeperManagerOptions = {}): KeeperMana
     // pitfalls of stuffing them into argv). Keeper reads PI_KEEPER_PI_ARGS
     // and strips it from pi's env before spawning pi. Defaults to bare RPC
     // when piArgs is omitted, preserving simple test/direct-invocation use.
-    const keeperEnv: NodeJS.ProcessEnv = piArgs && piArgs.length > 0
-      ? { ...env, PI_KEEPER_PI_ARGS: JSON.stringify(piArgs) }
-      : env;
+    //
+    // Likewise PI_KEEPER_PI_CMD carries the ToolRegistry-resolved absolute
+    // argv for the pi binary; keeper spawns pi via that path instead of bare
+    // PATH lookup. Both env vars are stripped by the keeper before spawning
+    // pi. See change: fix-rpc-keeper-pi-resolution.
+    let keeperEnv: NodeJS.ProcessEnv = env;
+    if (piArgs && piArgs.length > 0) {
+      keeperEnv = { ...keeperEnv, PI_KEEPER_PI_ARGS: JSON.stringify(piArgs) };
+    }
+    if (piCmd && piCmd.length > 0) {
+      keeperEnv = { ...keeperEnv, PI_KEEPER_PI_CMD: JSON.stringify(piCmd) };
+    }
 
     // Delegate to the shared cross-platform primitive so libuv-correct
     // defaults (detached: true on POSIX, Job-Object exclusion + windowsHide

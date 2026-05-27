@@ -85,6 +85,18 @@ interface SpawnKeeperOptsExt extends SpawnKeeperOpts {
   home?: string;
   /** If true, do NOT pre-create sessionsDir (tests stale-socket scenarios). */
   skipMkdir?: boolean;
+  /**
+   * Extra env vars merged into the keeper's env (after PATH/HOME defaults).
+   * Used by PI_KEEPER_PI_CMD tests to inject the resolved-pi-argv env var.
+   * See change: fix-rpc-keeper-pi-resolution.
+   */
+  extraEnv?: NodeJS.ProcessEnv;
+  /**
+   * If true, do NOT prepend the per-test PATH shim that turns `pi` into
+   * `mock-pi-shim.sh`. Used to verify the keeper can spawn pi solely via
+   * `PI_KEEPER_PI_CMD`. See change: fix-rpc-keeper-pi-resolution.
+   */
+  noPathShim?: boolean;
 }
 
 async function spawnKeeper(opts: SpawnKeeperOptsExt = {}): Promise<SpawnedKeeper> {
@@ -95,19 +107,27 @@ async function spawnKeeper(opts: SpawnKeeperOptsExt = {}): Promise<SpawnedKeeper
   const mockPiLog = path.join(sessionsDirIn(home), `mock-pi-${sessionId}.log`);
 
   // PATH shim: prepend a dir containing a `pi` script that execs our mock.
+  // Skipped when `noPathShim` is true (tests `PI_KEEPER_PI_CMD` resolution).
   const tmpBin = path.join(home, "bin");
   mkdirSync(tmpBin, { recursive: true });
   const piShimDest = path.join(tmpBin, "pi");
   const shimSrc = path.join(SHIM_DIR, "mock-pi-shim.sh");
-  writeFileSync(piShimDest, readFileSync(shimSrc, "utf8"), { mode: 0o755 });
+  if (!opts.noPathShim) {
+    writeFileSync(piShimDest, readFileSync(shimSrc, "utf8"), { mode: 0o755 });
+  }
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
-    PATH: `${tmpBin}${path.delimiter}${process.env.PATH ?? ""}`,
+    PATH: opts.noPathShim
+      // Scrub PATH so bare `spawn("pi", ...)` cannot find pi. Forces the
+      // keeper to rely on PI_KEEPER_PI_CMD.
+      ? "/usr/bin:/bin"
+      : `${tmpBin}${path.delimiter}${process.env.PATH ?? ""}`,
     MOCK_PI_CJS_PATH: path.join(SHIM_DIR, "mock-pi.cjs"),
     MOCK_PI_LOG: mockPiLog,
     MOCK_PI_MODE: opts.mode ?? "normal",
+    ...(opts.extraEnv ?? {}),
   };
 
   const child = spawn(process.execPath, [KEEPER_PATH, sessionId], {
@@ -293,6 +313,96 @@ describe.skipIf(process.platform === "win32")("rpc-keeper (Unix UDS)", () => {
     expect(existsSync(sockPathFor(k))).toBe(false);
     expect(existsSync(pidPathFor(k))).toBe(false);
   }, 5_000);
+
+  it("fix-rpc-keeper-pi-resolution: PI_KEEPER_PI_CMD resolves pi when not on PATH (node+script form)", async () => {
+    // Regression test for the Electron-launched dashboard failure mode.
+    // PATH is scrubbed (`noPathShim: true`) so bare `spawn("pi", ...)` would
+    // ENOENT. PI_KEEPER_PI_CMD points at [<node>, <mock-pi.cjs>] — the same
+    // shape `ToolResolver.resolvePi()` returns on Windows when only pi.cmd
+    // is available, exercising the multi-element argv branch of readPiCmd.
+    const mockPiAbs = path.join(SHIM_DIR, "mock-pi.cjs");
+    const k = track(
+      await spawnKeeper({
+        noPathShim: true,
+        extraEnv: { PI_KEEPER_PI_CMD: JSON.stringify([process.execPath, mockPiAbs]) },
+      }),
+    );
+    await readyKeeper(k);
+
+    const line = '{"type":"prompt","message":"abs-path","id":"1"}';
+    await writeLineToKeeper(k, line);
+    await waitFor(
+      () => existsSync(k.mockPiLog) && readFileSync(k.mockPiLog, "utf8").includes("abs-path"),
+    );
+
+    // Keeper log records the resolved exe (not bare "pi").
+    const klog = readFileSync(keeperLogFor(k), "utf8");
+    expect(klog).toContain(`spawning pi ${process.execPath} ${mockPiAbs}`);
+
+    await killAndAwait(k);
+  }, 10_000);
+
+  it("fix-rpc-keeper-pi-resolution: malformed PI_KEEPER_PI_CMD falls back to bare pi (PATH shim)", async () => {
+    // PATH shim IS present so bare `"pi"` resolves to mock-pi-shim.sh.
+    // PI_KEEPER_PI_CMD is malformed JSON — keeper must log and fall back.
+    const k = track(
+      await spawnKeeper({
+        extraEnv: { PI_KEEPER_PI_CMD: "not json at all" },
+      }),
+    );
+    await readyKeeper(k);
+
+    const line = '{"type":"prompt","message":"fallback","id":"1"}';
+    await writeLineToKeeper(k, line);
+    await waitFor(
+      () => existsSync(k.mockPiLog) && readFileSync(k.mockPiLog, "utf8").includes("fallback"),
+    );
+
+    const klog = readFileSync(keeperLogFor(k), "utf8");
+    expect(klog).toMatch(/ignoring malformed PI_KEEPER_PI_CMD/);
+    expect(klog).toMatch(/spawning pi pi /);
+
+    await killAndAwait(k);
+  }, 10_000);
+
+  it("fix-rpc-keeper-pi-resolution: empty-array PI_KEEPER_PI_CMD treated as unset", async () => {
+    // Shape check: empty array is rejected, falls back to bare "pi" via PATH.
+    const k = track(
+      await spawnKeeper({
+        extraEnv: { PI_KEEPER_PI_CMD: "[]" },
+      }),
+    );
+    await readyKeeper(k);
+    const klog = readFileSync(keeperLogFor(k), "utf8");
+    expect(klog).toMatch(/ignoring malformed PI_KEEPER_PI_CMD/);
+    expect(klog).toMatch(/spawning pi pi /);
+    await killAndAwait(k);
+  }, 10_000);
+
+  it("fix-rpc-keeper-pi-resolution: PI_KEEPER_PI_CMD stripped from pi env", async () => {
+    // The keeper must NOT leak PI_KEEPER_PI_CMD / PI_KEEPER_PI_ARGS into
+    // pi's env. Mock-pi dumps its env to a side-file via env-log mode.
+    const mockPiAbs = path.join(SHIM_DIR, "mock-pi.cjs");
+    const envLog = path.join("/tmp", `mock-pi-env-${Date.now()}.log`);
+    const k = track(
+      await spawnKeeper({
+        noPathShim: true,
+        extraEnv: {
+          PI_KEEPER_PI_CMD: JSON.stringify([process.execPath, mockPiAbs]),
+          PI_KEEPER_PI_ARGS: JSON.stringify(["--mode", "rpc"]),
+          MOCK_PI_ENV_LOG: envLog,
+        },
+      }),
+    );
+    await readyKeeper(k);
+    await waitFor(() => existsSync(envLog));
+    const envDump = readFileSync(envLog, "utf8");
+    expect(envDump).not.toMatch(/^PI_KEEPER_PI_CMD=/m);
+    expect(envDump).not.toMatch(/^PI_KEEPER_PI_ARGS=/m);
+    expect(envDump).toMatch(/^PI_DASHBOARD_SPAWNED=1$/m);
+    try { unlinkSync(envLog); } catch { /* ignore */ }
+    await killAndAwait(k);
+  }, 10_000);
 
   it("3.6 concurrent connections — 3 simultaneous UDS connections, all 3 lines forwarded", async () => {
     const k = track(await spawnKeeper());

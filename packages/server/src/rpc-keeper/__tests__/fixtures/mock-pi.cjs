@@ -29,6 +29,17 @@ if (!logPath) {
   process.exit(2);
 }
 
+// Dump env to MOCK_PI_ENV_LOG (one VAR=value per line) when set. Used by
+// keeper tests to assert that internal env vars (PI_KEEPER_PI_CMD,
+// PI_KEEPER_PI_ARGS) are stripped before pi spawn.
+// See change: fix-rpc-keeper-pi-resolution.
+if (process.env.MOCK_PI_ENV_LOG) {
+  const dump = Object.entries(process.env)
+    .map(([k, v]) => `${k}=${v ?? ""}`)
+    .join("\n");
+  try { fs.writeFileSync(process.env.MOCK_PI_ENV_LOG, dump + "\n"); } catch { /* ignore */ }
+}
+
 let buf = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {

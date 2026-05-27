@@ -447,11 +447,16 @@ async function spawnHeadless(cwd: string, options?: SessionOptions): Promise<Spa
   const env = buildSpawnEnv(process.env, { spawnToken: options?.spawnToken });
 
   // RPC keeper sidecar path (feature-flagged). When enabled, both Unix and
-  // Windows go through the keeper (uniform durability across OSes). The
-  // keeper spawns pi internally via its own PATH lookup, so we do NOT need
-  // to resolve pi here. See change: add-rpc-stdin-dispatch-with-keeper-sidecar.
+  // Windows go through the keeper (uniform durability across OSes). Pi is
+  // resolved here via the ToolRegistry and forwarded to the keeper as an
+  // absolute argv (env var `PI_KEEPER_PI_CMD`); the keeper no longer relies
+  // on bare PATH lookup. See change: fix-rpc-keeper-pi-resolution.
   if (shouldUseRpcKeeper()) {
-    return spawnHeadlessViaKeeper(cwd, env, args);
+    const piCmdForKeeper = resolvePiCommand();
+    if (!piCmdForKeeper) {
+      return { success: false, code: "PI_NOT_FOUND", message: `pi binary not found. Checked: ${MANAGED_BIN} and system PATH.` };
+    }
+    return spawnHeadlessViaKeeper(cwd, env, args, piCmdForKeeper);
   }
 
   const piCmd = resolvePiCommand();
@@ -510,6 +515,7 @@ async function spawnHeadlessViaKeeper(
   cwd: string,
   env: NodeJS.ProcessEnv,
   piArgs: string[],
+  piCmd: string[],
 ): Promise<SpawnResult> {
   // sessionId is what the keeper uses to derive its UDS / named-pipe path.
   // This is a TRANSPORT-side identifier, distinct from pi's session UUID
@@ -521,8 +527,13 @@ async function spawnHeadlessViaKeeper(
   // `buildHeadlessArgs(options)` (e.g. `--session-file <path>` for resume,
   // `--fork` for fork). Forwarding them through the keeper preserves the
   // existing resume / fork contract. See change: add-rpc-stdin-dispatch-with-keeper-sidecar.
+  //
+  // piCmd is the ToolRegistry-resolved absolute argv for pi (e.g.
+  // ["/abs/path/pi"] on Unix or ["node","/abs/path/cli.js"] on Windows).
+  // The keeper consumes it via env var `PI_KEEPER_PI_CMD` and spawns pi
+  // without relying on its own PATH. See change: fix-rpc-keeper-pi-resolution.
   const km = getKeeperManager();
-  const result = await km.spawnKeeperFor(transportId, cwd, env, piArgs);
+  const result = await km.spawnKeeperFor(transportId, cwd, env, piArgs, piCmd);
   if (!result.success || !result.pid || !result.process) {
     return {
       success: false,

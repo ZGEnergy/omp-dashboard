@@ -157,6 +157,40 @@ describe("KeeperManager.spawnKeeperFor", () => {
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/keeper\.cjs not found/);
   });
+
+  it("forwards piCmd to the keeper env as JSON-encoded PI_KEEPER_PI_CMD", async () => {
+    // See change: fix-rpc-keeper-pi-resolution.
+    const { spawn, calls } = makeFakeSpawnDetached({ pid: 7777 });
+    const km = createKeeperManager(baseOpts({ spawnDetached: spawn }));
+
+    const result = await km.spawnKeeperFor(
+      "sess-cmd",
+      "/cwd",
+      { FOO: "bar" },
+      ["--mode", "rpc"],
+      ["/abs/path/pi"],
+    );
+
+    expect(result.success).toBe(true);
+    const envOut = calls[0].env as Record<string, string | undefined>;
+    expect(envOut.PI_KEEPER_PI_CMD).toBe(JSON.stringify(["/abs/path/pi"]));
+    expect(envOut.PI_KEEPER_PI_ARGS).toBe(JSON.stringify(["--mode", "rpc"]));
+    // Caller's env entries preserved alongside the new vars.
+    expect(envOut.FOO).toBe("bar");
+  });
+
+  it("omits PI_KEEPER_PI_CMD when piCmd is undefined or empty", async () => {
+    // Preserves bare-`"pi"` fallback path in the keeper (manual / test invocation).
+    // See change: fix-rpc-keeper-pi-resolution.
+    const { spawn, calls } = makeFakeSpawnDetached({ pid: 7778 });
+    const km = createKeeperManager(baseOpts({ spawnDetached: spawn }));
+
+    await km.spawnKeeperFor("sess-a", "/cwd", {}, ["--mode", "rpc"]);
+    expect((calls[0].env as Record<string, string | undefined>).PI_KEEPER_PI_CMD).toBeUndefined();
+
+    await km.spawnKeeperFor("sess-b", "/cwd", {}, ["--mode", "rpc"], []);
+    expect((calls[1].env as Record<string, string | undefined>).PI_KEEPER_PI_CMD).toBeUndefined();
+  });
 });
 
 describe("KeeperManager.writeRpc", () => {

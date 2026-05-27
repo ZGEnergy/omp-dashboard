@@ -1002,6 +1002,18 @@ Activates the full Path B behavior automatically once upstream `pi.dispatchComma
 
 See change: `add-rpc-stdin-dispatch-with-keeper-sidecar`. See also `docs/architecture.md` § "RPC keeper sidecar" and `docs/slash-command.md` § "Path C".
 
+## Why does session resume fail with "RPC keeper exited within crash window (code 1)"?
+
+Symptom: Electron-launched dashboard. Resume returns error `RPC keeper exited within crash window (code 1)`. Keeper log `~/.pi/dashboard/sessions/keeper-<sessionId>.log` shows `spawn pi ENOENT`.
+
+Root cause: keeper inherits PATH from Electron parent. Electron bundle's `Resources/server/node_modules/.bin/` not on PATH. Bare `spawn("pi", ...)` inside keeper.cjs fails ENOENT.
+
+Fix: server resolves pi via ToolRegistry before spawning keeper. Forwards absolute argv to keeper as JSON env var `PI_KEEPER_PI_CMD`. Keeper reads + execs resolved `[exe, ...prefix, ...piArgs]`. Bare-spawn path kept as fallback when env var absent. Resolver miss surfaces `PI_NOT_FOUND` instead of opaque keeper crash.
+
+Diagnostic: tail `~/.pi/dashboard/sessions/keeper-<sessionId>.log`. `spawn pi ENOENT` confirms PATH-resolution failure. Post-fix log shows `keeper: spawning pi via resolved argv` instead.
+
+See change: `fix-rpc-keeper-pi-resolution`.
+
 ## Why does Windows session spawning fail with 'spawn npm ENOENT'?
 
 Electron wizard only — old build before commit `29af651`. Windows `npm` is actually `npm.cmd` (batch wrapper). `child_process.spawn("npm", ...)` without `.cmd` extension fails on Windows.

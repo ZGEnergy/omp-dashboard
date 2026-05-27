@@ -221,18 +221,46 @@ function readPiArgs() {
   return ["--mode", "rpc"];
 }
 
+function readPiCmd() {
+  // PI_KEEPER_PI_CMD carries the ToolRegistry-resolved absolute argv for
+  // the pi binary (e.g. ["/abs/.../pi"] on Unix or ["node","/abs/cli.js"] on
+  // Windows). When set, the keeper spawns pi via that absolute path instead
+  // of bare PATH lookup. Required for Electron-launched servers whose env
+  // PATH does not include the bundle's node_modules/.bin/. Absent / empty /
+  // malformed → null, and the caller falls back to bare "pi".
+  // See change: fix-rpc-keeper-pi-resolution.
+  const raw = process.env.PI_KEEPER_PI_CMD;
+  if (raw === undefined || raw === null || raw === "") return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    log(`keeper: ignoring malformed PI_KEEPER_PI_CMD (parse: ${e && e.message})`);
+    return null;
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every((s) => typeof s === "string")) {
+    log(`keeper: ignoring malformed PI_KEEPER_PI_CMD (shape)`);
+    return null;
+  }
+  return parsed;
+}
+
 function spawnPi() {
   const piArgs = readPiArgs();
-  log(`spawning pi ${piArgs.join(" ")}`);
+  const piCmd = readPiCmd();
+  const exe = piCmd ? piCmd[0] : "pi";
+  const argv = piCmd ? [...piCmd.slice(1), ...piArgs] : piArgs;
+  log(`spawning pi ${exe} ${argv.join(" ")}`);
   // env is inherited from process.env (KeeperManager already set up the
   // proper PATH and PI_DASHBOARD_SPAWNED). Defensively set the flag again
   // here in case the keeper is invoked manually. Strip the keeper-internal
-  // PI_KEEPER_PI_ARGS so it doesn't leak into pi's env.
+  // PI_KEEPER_PI_ARGS / PI_KEEPER_PI_CMD so they don't leak into pi's env.
   const env = Object.assign({}, process.env, { PI_DASHBOARD_SPAWNED: "1" });
   delete env.PI_KEEPER_PI_ARGS;
+  delete env.PI_KEEPER_PI_CMD;
 
   piSpawnedAt = Date.now();
-  const c = child_process.spawn("pi", piArgs, {
+  const c = child_process.spawn(exe, argv, {
     stdio: ["pipe", logFd, logFd],
     env,
     cwd: process.cwd(),

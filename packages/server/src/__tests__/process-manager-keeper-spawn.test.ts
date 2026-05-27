@@ -19,9 +19,24 @@ import type {
 } from "../rpc-keeper/keeper-manager.js";
 import {
   setKeeperManager,
+  setResolver,
+  resetResolver,
   _setUseRpcKeeperOverrideForTests,
   spawnPiSession,
 } from "../process-manager.js";
+import type { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
+
+// Fake resolver returning a fixed pi argv so spawnHeadlessViaKeeper's
+// resolvePiCommand() call succeeds. The PI_NOT_FOUND branch is exercised
+// in a dedicated test below via `setResolver` with `resolvePi: () => null`.
+function makeFakeResolver(piCmd: string[] | null = ["/usr/bin/pi"]): ToolResolver {
+  return {
+    resolvePi: () => piCmd,
+    resolveNode: () => "/usr/bin/node",
+    which: () => null,
+    buildSpawnEnv: (env: NodeJS.ProcessEnv) => env,
+  } as unknown as ToolResolver;
+}
 
 class FakeKeeperChild extends EventEmitter {
   pid: number;
@@ -32,7 +47,7 @@ class FakeKeeperChild extends EventEmitter {
 }
 
 interface FakeKeeperManagerState {
-  spawnCalls: Array<{ sessionId: string; cwd: string; env: NodeJS.ProcessEnv; piArgs?: string[] }>;
+  spawnCalls: Array<{ sessionId: string; cwd: string; env: NodeJS.ProcessEnv; piArgs?: string[]; piCmd?: string[] }>;
   writeCalls: Array<{ sessionId: string; line: string }>;
   killCalls: string[];
   spawnResult: KeeperSpawnResult;
@@ -49,8 +64,8 @@ function makeFakeKeeperManager(
   };
   const km: KeeperManager = {
     sessionsDir: "/fake/sessions",
-    spawnKeeperFor: async (sessionId, cwd, env, piArgs) => {
-      full.spawnCalls.push({ sessionId, cwd, env, piArgs });
+    spawnKeeperFor: async (sessionId, cwd, env, piArgs, piCmd) => {
+      full.spawnCalls.push({ sessionId, cwd, env, piArgs, piCmd });
       return full.spawnResult;
     },
     writeRpc: async (sessionId, line) => {
@@ -71,10 +86,14 @@ let tmpCwd: string;
 
 beforeEach(() => {
   tmpCwd = mkdtempSync(path.join("/tmp", "km-cwd-"));
+  // Default: resolver returns a fixed pi argv so spawnHeadlessViaKeeper's
+  // PI resolution succeeds. Individual tests override via setResolver.
+  setResolver(makeFakeResolver());
 });
 afterEach(() => {
   setKeeperManager(null);
   _setUseRpcKeeperOverrideForTests(null);
+  resetResolver();
   rmSync(tmpCwd, { recursive: true, force: true });
 });
 
@@ -118,6 +137,11 @@ describe("spawnHeadless (useRpcKeeper: true)", () => {
     // `headlessPidRegistry.register(..., {keeperPid, keeperSockPath})`
     // (Phase 6 contract). See change: add-rpc-stdin-dispatch-with-keeper-sidecar.
     expect(result.keeperSockPath).toBe("/fake/sessions/sid.rpc.sock");
+
+    // Resolved pi argv is forwarded as the 5th positional to spawnKeeperFor
+    // so the keeper can spawn pi via the absolute path. See change:
+    // fix-rpc-keeper-pi-resolution.
+    expect(state.spawnCalls[0].piCmd).toEqual(["/usr/bin/pi"]);
   });
 
   it("forwards resume flags (sessionFile / mode) to the keeper as piArgs", async () => {
@@ -189,6 +213,24 @@ describe("spawnHeadless (useRpcKeeper: true)", () => {
     expect(result.success).toBe(false);
     expect(result.code).toBe("PI_CRASHED");
     expect(result.message).toMatch(/crash window/);
+  });
+
+  it("returns PI_NOT_FOUND when resolver fails to resolve pi (keeper NOT spawned)", async () => {
+    // See change: fix-rpc-keeper-pi-resolution. Mirrors the non-keeper
+    // headless branch behavior: fail fast before any keeper-spawn side-effect.
+    setResolver(makeFakeResolver(null));
+    const { km, state } = makeFakeKeeperManager({
+      spawnResult: { success: true, pid: 1, sockPath: "/fake/x.sock" },
+    });
+    setKeeperManager(km);
+    _setUseRpcKeeperOverrideForTests(true);
+
+    const result = await spawnPiSession(tmpCwd, { strategy: "headless" });
+    expect(result.success).toBe(false);
+    expect(result.code).toBe("PI_NOT_FOUND");
+    expect(result.message).toMatch(/pi binary not found/);
+    // Keeper subprocess MUST NOT be spawned when pi cannot be resolved.
+    expect(state.spawnCalls).toEqual([]);
   });
 
   it("does NOT route through KeeperManager when flag is off (default)", async () => {
