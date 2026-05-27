@@ -15,7 +15,14 @@ import {
   killPidWithGroup,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 
-const zrokResolver = new ToolResolver({ processExecPath: process.execPath });
+// useLoginShell: true mirrors ToolRegistry's "where" strategy defaults so
+// GUI-launched servers (whose PATH lacks /opt/homebrew/bin etc.) still find
+// zrok via the user's login shell — keeps /api/tunnel-status consistent with
+// /api/tools.
+const zrokResolver = new ToolResolver({
+  processExecPath: process.execPath,
+  useLoginShell: true,
+});
 import type { TunnelStatus } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 import { getTunnelWatchdogStatus } from "./tunnel-watchdog.js";
 import { CONFIG_FILE } from "@blackbelt-technology/pi-dashboard-shared/config.js";
@@ -34,6 +41,11 @@ const SPAWN_TIMEOUT_MS = 30_000;
 let activeProcess: ChildProcess | null = null;
 let activeTunnelUrl: string | null = null;
 let zrokAvailable: boolean | null = null;
+// Cached absolute path to the zrok binary. Required because the server's
+// runtime PATH (GUI/launchd context) often lacks /opt/homebrew/bin, so
+// `spawn("zrok", ...)` resolves via PATH and fails with ENOENT even when
+// detection succeeded via the login-shell fallback.
+let zrokBinaryPath: string | null = null;
 // Serialization: any concurrent createTunnel() call while one is already in
 // flight returns the same promise instead of spawning a second zrok process.
 // Without this, a UI double-click or a race between startup auto-connect and
@@ -43,11 +55,11 @@ let pendingCreate: Promise<string | null> | null = null;
 
 // ── Binary Detection ────────────────────────────────────────────────
 
-function checkZrokOnPath(): boolean {
+function checkZrokOnPath(): string | null {
   // Delegate binary lookup to the shared platform primitive (handles the
   // where/which split on Windows vs Unix, managed-bin search, and login
   // shell fallback). See change: consolidate-platform-handlers.
-  return zrokResolver.which("zrok") !== null;
+  return zrokResolver.which("zrok");
 }
 
 /**
@@ -56,18 +68,32 @@ function checkZrokOnPath(): boolean {
  */
 export function detectZrokBinary(): boolean {
   if (zrokAvailable !== null) return zrokAvailable;
-  zrokAvailable = checkZrokOnPath();
+  zrokBinaryPath = checkZrokOnPath();
+  zrokAvailable = zrokBinaryPath !== null;
   return zrokAvailable;
+}
+
+/**
+ * Return the absolute path to the zrok binary, or "zrok" as a last-resort
+ * bare-name fallback. Callers should always prefer this over the literal
+ * "zrok" so that spawn/execSync don't depend on the server's runtime PATH.
+ */
+function getZrokBinary(): string {
+  if (zrokBinaryPath) return zrokBinaryPath;
+  detectZrokBinary();
+  return zrokBinaryPath ?? "zrok";
 }
 
 /** Reset the cached binary detection result (for testing). */
 export function _resetBinaryCache(): void {
   zrokAvailable = null;
+  zrokBinaryPath = null;
 }
 
 /** Override the cached binary availability (for testing). */
 export function _setBinaryAvailable(available: boolean): void {
   zrokAvailable = available;
+  if (!available) zrokBinaryPath = null;
 }
 
 // ── PID File Helpers ────────────────────────────────────────────────
@@ -158,7 +184,7 @@ function saveReservedToken(token: string): void {
 export function releaseShare(token: string): boolean {
   if (!token) return false;
   try {
-    execSync(`zrok release ${token}`, {
+    execSync(`"${getZrokBinary()}" release ${token}`, {
       timeout: 10_000,
       stdio: ["ignore", "ignore", "ignore"],
     });
@@ -225,7 +251,7 @@ function reserveShare(port: number): Promise<string | null> {
   return new Promise((resolve) => {
     try {
       const result = execSync(
-        `zrok reserve public http://localhost:${port} --json-output`,
+        `"${getZrokBinary()}" reserve public http://localhost:${port} --json-output`,
         { timeout: 30_000, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] },
       );
       const data = JSON.parse(result.trim());
@@ -306,7 +332,7 @@ function _createTunnelInner(
       ? ["share", "reserved", token, "--headless", "--override-endpoint", `http://localhost:${port}`]
       : ["share", "public", "--headless", `http://localhost:${port}`];
 
-    const child = spawn("zrok", args, {
+    const child = spawn(getZrokBinary(), args, {
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
     });
