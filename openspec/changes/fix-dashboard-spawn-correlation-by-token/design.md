@@ -1,3 +1,18 @@
+> **Supersession note (post-`5a31daa6`):** large portions of this design
+> are now historical. Commit `5a31daa6` (change
+> `fix-dashboard-source-mislabelling`) introduced a stronger signal —
+> the bridge advertises `dashboardSpawned: true` on every
+> `session_register` whenever `PI_DASHBOARD_SPAWN_TOKEN` is present in
+> env — and extracted the decision into
+> `packages/server/src/dashboard-source-decision.ts`. The three-tier
+> token/PID/cwd registry proposed below was NOT the path taken; the
+> env-flag approach is strictly stronger (survives dashboard restart
+> while pi is alive). The current proposal is now scoped to hardening
+> the **cwd-FIFO fallback branch** of that decision and migrating
+> already-written `.meta.json` sidecars. Read `proposal.md` first;
+> use the sections below only as background on why a registry-based
+> approach was considered and ultimately rejected.
+
 ## Context
 
 The dashboard server currently tracks "I just kicked off a spawn for this cwd" via a simple counter map:
