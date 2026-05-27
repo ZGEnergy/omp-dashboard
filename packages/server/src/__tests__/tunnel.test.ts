@@ -216,13 +216,22 @@ describe("createTunnel mutex", () => {
 
 describe("releaseShare", () => {
   it("should call `zrok release <token>` and return true on success", () => {
+    // Short-circuit detection so `getZrokBinary()` returns the bare-name
+    // fallback ("zrok") instead of probing the host's PATH. Without this
+    // the test is environment-dependent: on a dev box with zrok installed
+    // the command becomes `"/opt/homebrew/bin/zrok" release abc123`; on
+    // CI it falls back to `"zrok" release abc123`. Either way the binary
+    // token sits inside quotes, so the literal substring
+    // `zrok release abc123` (no quotes) never appears.
+    // See change: fix(tunnel): cache zrok absolute path (commit 346a671d).
+    _setBinaryAvailable(true);
     vi.mocked(childProcess.execSync).mockReturnValue(Buffer.from(""));
     const ok = releaseShare("abc123");
     expect(ok).toBe(true);
-    expect(childProcess.execSync).toHaveBeenCalledWith(
-      expect.stringContaining("zrok release abc123"),
-      expect.any(Object),
-    );
+    expect(childProcess.execSync).toHaveBeenCalledTimes(1);
+    const [cmd, opts] = vi.mocked(childProcess.execSync).mock.calls[0];
+    expect(cmd).toMatch(/zrok["']?\s+release\s+abc123/);
+    expect(opts).toEqual(expect.any(Object));
   });
 
   it("should return false when zrok release fails (best-effort, non-throwing)", () => {
