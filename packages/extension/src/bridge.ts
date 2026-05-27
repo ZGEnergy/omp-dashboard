@@ -37,6 +37,7 @@ import { scanChildProcesses } from "./process-scanner.js";
 import type { BridgeContext } from "./bridge-context.js";
 import { filterHiddenCommands, extractFirstMessage, getCurrentModelString } from "./bridge-context.js";
 import { tryDispatchExtensionCommand } from "./slash-dispatch.js";
+import { flipHasUI } from "./hasui-flip.js";
 import { sendStateSync as _sendStateSync, replaySessionEntries as _replaySessionEntries, handleSessionChange as _handleSessionChange } from "./session-sync.js";
 import { sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged, sendJjStateIfChanged as _sendJjStateIfChanged, sendCwdMissingIfChanged as _sendCwdMissingIfChanged, resetReconnectCaches as _resetReconnectCaches } from "./model-tracker.js";
 import { registerFlowEventListeners, FLOW_EVENT_MAP, SUBAGENT_EVENT_MAP } from "./flow-event-wiring.js";
@@ -1520,6 +1521,16 @@ function initBridge(pi: ExtensionAPI) {
         });
       };
     }
+
+    // Flip ctx.hasUI=true now that ctx.ui.* has been patched to route
+    // through PromptBus → dashboard. `cachedHasUI` (captured earlier at
+    // line ~1287) retains the pi-supplied original value, so
+    // `detectSessionSource` continues to classify dashboard-spawned RPC
+    // vs tmux correctly. Extensions that branch on `ctx.hasUI`
+    // (context-mode `/ctx-stats` / `/ctx-doctor`, pi-agent-browser auto-install)
+    // now take their UI-present branch and render output via the proxied
+    // `ctx.ui.notify`. See change: fix-bridge-hasui-for-headless-rpc.
+    flipHasUI(ctx);
 
     // Listen for adapter registrations from other extensions (e.g. pi-flows)
     if (pi.events) {

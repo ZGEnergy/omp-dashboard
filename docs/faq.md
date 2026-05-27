@@ -1901,3 +1901,13 @@ Cross-refs:
 ## Why does Doctor sometimes show server "Not running" while dashboard works?
 
 Old bug: `probeServer` inside `/api/doctor` shelled out `curl http://localhost:8000/api/health` via `execSync`. Server was handling the request when curl called — self-deadlock. After 3 s timeout, curl failed and probe reported "Not running". Fixed in change `harvest-bootstrap-survivor-fixes`: server-side probe reads process state directly; Electron Doctor uses native `fetch`. No subprocess spawned. Result: Doctor reports "ok" correctly while server handles load.
+
+## Why does /ctx-stats / /ctx-doctor show only a green "completed" pill in the dashboard chat?
+
+Extensions branch on `ctx.hasUI` to decide whether to render via `ctx.ui.notify` or return data. Dashboard-spawned `pi --mode rpc` sessions had `ctx.hasUI = false`, so context-mode took the `return { text }` branch — output dropped in RPC mode.
+
+Bridge already patches `ctx.ui.notify` to forward through PromptBus to the dashboard. Fix flips `ctx.hasUI = true` after the patch block. Extensions like context-mode and pi-agent-browser now take their UI-present branch and render in dashboard chat.
+
+Side effect: `pi-web-access` defaults curator workflow to `"summary-review"` when `hasUI` truthy. Dashboard RPC sessions now open curator on web searches. Pin `"workflow": "none"` in pi-web-access config to restore prior behavior.
+
+See change: fix-bridge-hasui-for-headless-rpc.
