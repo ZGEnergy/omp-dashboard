@@ -54,7 +54,10 @@
       "piExtensions": [
         "pi-dashboard-subagents"
       ]
-    }
+    },
+    "dependsOn": [
+      "roles"
+    ]
   },
   "peerDependencies": {
     "react": ">=18.0.0"

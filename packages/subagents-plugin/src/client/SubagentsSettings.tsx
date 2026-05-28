@@ -61,6 +61,26 @@ export function SubagentsSettings() {
 				</p>
 			</header>
 
+			{/*
+			  Plugin-level dep on the Roles plugin is declared in this plugin's
+			  manifest (`dependsOn: ["roles"]`). The Plugins tab already surfaces
+			  the relationship with cascade enable/disable; this inline disclaimer
+			  is for users who land directly on Subagent settings and would
+			  otherwise be surprised when the bundled Explore agent fails to
+			  resolve `@fast` after they disable Roles.
+			*/}
+			<div
+				data-testid="subagents-settings-roles-dep"
+				className="text-[11px] text-[var(--text-tertiary)] border border-[var(--border-secondary)] rounded px-2 py-1.5 bg-[var(--bg-tertiary)]"
+			>
+				Requires the{" "}
+				<code className="font-mono text-[var(--text-secondary)]">Roles</code> plugin
+				— the bundled <code className="font-mono">Explore</code> agent uses{" "}
+				<code className="font-mono">@fast</code> for model resolution. Disabling{" "}
+				<code className="font-mono">Roles</code> from the Plugins tab will cascade-disable
+				Subagents.
+			</div>
+
 			<label className="flex items-start gap-2 cursor-pointer">
 				<input
 					type="checkbox"
