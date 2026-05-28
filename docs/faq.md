@@ -1911,3 +1911,17 @@ Bridge already patches `ctx.ui.notify` to forward through PromptBus to the dashb
 Side effect: `pi-web-access` defaults curator workflow to `"summary-review"` when `hasUI` truthy. Dashboard RPC sessions now open curator on web searches. Pin `"workflow": "none"` in pi-web-access config to restore prior behavior.
 
 See change: fix-bridge-hasui-for-headless-rpc.
+
+## Why does the openspec-archive skill scan the whole filesystem with `find /` inside a git worktree?
+
+Agent improvisation. Worktree branch lacks `.pi/skills/openspec-*/`. Agent assumes skill file missing. Runs `find /Users/robson -name "SKILL.md" -path "*openspec-archive*"`. Empty result. Escalates to `find /`. Extremely slow.
+
+Root cause:
+- `.pi/.gitignore` line 2: `skills/openspec-*/**`. Openspec skill dirs gitignored.
+- Skill files managed by openspec CLI, not version-controlled.
+- Arbitrary worktree branches may not contain `.pi/skills/openspec-*/SKILL.md`.
+- Skill paths already injected into agent system prompt under `<available_skills>`. Filesystem search redundant.
+
+Stopgap: `.pi/skills/openspec-archive-change/SKILL.md` and `.pi/skills/openspec-bulk-archive-change/SKILL.md` carry guardrail: "Resolve `openspec/` strictly relative to CWD. Do NOT `find` the filesystem for SKILL.md, archive directories, or sibling `openspec/` trees — scoped to current working tree. In git/jj worktree, operate on worktree's own `openspec/changes/` (CWD already points there)." Edits local-only, gitignored, wiped by `openspec update`.
+
+Rule for agents: in worktree, treat CWD as openspec root. Never `find` for skill files. Use path from `<available_skills>` block.
