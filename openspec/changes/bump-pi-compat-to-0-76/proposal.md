@@ -30,8 +30,10 @@ Why a separate change (vs amending bump-pi-compat-to-0-75):
 
 ### Phase 3 — Smoke verification (no code, manual)
 
-- Spawn a session against `@earendil-works/pi-coding-agent@0.76.0`. Confirm `GET /api/health` reports the new floor and the upgrade banner shows no hint.
-- Verify a session on pi 0.75.x triggers the red "below minimum" banner after the floor lifts.
+`/api/bootstrap/status` and the bootstrap banner were removed under `eliminate-electron-runtime-install`; runtime enforcement now flows through `engines.node` + bundled-extension peer-dep resolution. Smoke targets those:
+
+- Fresh `npm install` of the server resolves `@earendil-works/pi-coding-agent@^0.76.0`.
+- Install bundled `pi-flows` against host pi 0.75.x → peer-dep warn / fail (intended); against 0.76.0 → clean.
 - (Optional) Exercise `excludeFromContext` from the dashboard's RPC keeper if a follow-up wants to consume it.
 
 ## Capabilities
@@ -45,7 +47,7 @@ Why a separate change (vs amending bump-pi-compat-to-0-75):
 
 - **Code**: 3 manifest files (server `package.json`, two bundled-extension `package.json`s).
 - **Tests**: `bundled-node-meets-pi-floor.test.ts` lookup table gains a `0.76.0 → 22.19` row (Node floor unchanged from 0.75). `pi-version-skew.test.ts` literal fixtures unaffected (synthetic versions).
-- **Migration / compat**: pi 0.75.x users see the red "below minimum" banner with upgrade hint to 0.76.0. The Node engines floor (`>=22.19.0`) is unchanged — no user-facing Node implication.
+- **Migration / compat**: pi 0.75.x users hit peer-dep failures when installing bundled extensions against the new floor (no in-app red banner today — `/api/health.compatibility` + bootstrap banner remain removed; tracked separately as `restore-pi-version-skew-surface`). Node engines floor (`>=22.19.0`) is unchanged — no user-facing Node implication.
 - **Rollback**: revert the four edits; no persisted state.
 - **Risk**: low. 0.76 ships ~4 hours before this change; if a critical regression surfaces in 0.76 we can ship `0.76.1` and update `recommended` without touching the floor.
 
