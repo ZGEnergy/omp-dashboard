@@ -107,7 +107,9 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 Rules:
 
-1. **AGENTS.md "Key Files" rows MUST stay ≤ 200 characters** — one terse purpose, no change-history, no contracts, no "See change: …" parentheticals.
+0. **AGENTS.md MUST NOT contain a per-file index.** No `Key Files` table, no per-file rows, no path → purpose lists. When you need a module's key files, read the matching `docs/file-index-<area>.md` split (delegate to a subagent per the Investigation Protocol). New files → row in the split, never here.
+
+1. **Pointers in AGENTS.md stay ≤ 200 characters** — one terse purpose, no change-history, no contracts, no "See change: …" parentheticals. Pointers only; no file enumeration.
 
 2. **Per-file detail goes into `docs/file-index-<area>.md`.** Search the matching split for the path; if a row exists, append/update; else add in path-alphabetical order.
 
