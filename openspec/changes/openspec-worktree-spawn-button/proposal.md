@@ -16,12 +16,15 @@ A new global preference `gitWorktreeEnabled` (default `true`) gates BOTH the exi
   - `attachProposal?: string` — when supplied, forwarded through `onSpawn` so the parent's `spawn_session` ws message carries `attachProposal` alongside `gitWorktreeBase`. Server already accepts `attachProposal` on `spawn_session` (via `pendingAttachRegistry`) — no server change.
 - **`onSpawn` callback shape extended**: third param becomes `{ gitWorktreeBase?: string; attachProposal?: string }`. Existing call sites pass only `gitWorktreeBase`; new per-change call site passes both.
 - **Visibility precedence (single source)**: `gitWorktreeEnabled` gates UI only. REST routes `/api/git/worktree*` remain unguarded by this flag — they're already localhost-gated and capability-bound to git availability.
+- **Orphan-path detection in `WorktreeSpawnDialog`**: the dialog SHALL detect when its derived target path already exists on disk but is NOT a registered worktree (`git worktree list --porcelain` does not include it). When detected, the dialog SHALL render an inline warning above the submit button: `This path exists but isn't a registered worktree — likely an orphan from a previous failed attempt.` A `[Clean up]` button next to the warning SHALL invoke `POST /api/git/worktree/orphan-cleanup` (new endpoint, body `{ path }`) which: (1) re-runs `git worktree list --porcelain` to confirm the path is NOT a registered worktree, (2) refuses if the dir contains a `.git` entry of any kind (file OR directory), (3) refuses if the dir contains > N (default 20) files or any file larger than a small threshold, (4) deletes the dir on pass. After successful cleanup the warning collapses and submit re-enables.
+- **Backstop in `addWorktree`**: when the route returns `path_exists`, the error envelope SHALL include `orphanLikely: boolean` (true when the path exists but isn't in the worktree list). The dialog uses this signal to show the same warning + clean-up affordance on submit failure (covers the race where the path appears between path-preview-check and submit).
 
 Out of scope:
 - Per-folder override of `gitWorktreeEnabled` (global only for v1).
 - Disabling the REST endpoints when the flag is off (preference, not capability).
 - Auto-derived worktree path UX changes (dialog's existing path preview is reused as-is).
 - Branch slug variants (we use the change name verbatim under the `os/` prefix; `slugifyBranch` is already applied downstream by the worktree route).
+- Recovering from orphan dirs that contain a `.git` file (looks like a broken worktree link rather than a stray dir — refuse and surface a manual-fix hint instead).
 
 ## Capabilities
 
@@ -30,6 +33,7 @@ Out of scope:
 - **`folder-action-bar`**: `+Worktree` visibility now AND-gated on `gitWorktreeEnabled` config flag in addition to existing `isGitRepo` + handler-wired checks.
 - **`openspec-folder-section`**: Each change row renders a new optional `⑂+` button (between letter-buttons and `▶` spawn-attached). Same visibility gate as folder `+Worktree`.
 - **`settings-panel`**: Adds a checkbox bound to `gitWorktreeEnabled`.
+- **`git-operations-api`**: Adds `POST /api/git/worktree/orphan-cleanup` endpoint (localhost-only, refuses dirs with `.git`, file-count cap, size cap). Adds `orphanLikely: boolean` field to `path_exists` error envelope from `POST /api/git/worktree`.
 
 ## Impact
 
@@ -40,7 +44,10 @@ Out of scope:
   - `packages/client/src/components/FolderOpenSpecSection.tsx` — new `⑂+` button + `onSpawnAttachedWorktree?: (cwd, changeName) => void` callback
   - `packages/client/src/components/WorktreeSpawnDialog.tsx` — `initialBranch`, `attachProposal` props; thread `attachProposal` through `onSpawn`
   - `packages/client/src/components/SessionList.tsx` — wire flag from config; route the new per-change handler through to dialog; forward `attachProposal` into `spawn_session` ws call
-- **Protocol**: none — `spawn_session.attachProposal` and `spawn_session.gitWorktreeBase` already exist (see `packages/shared/src/browser-protocol.ts:865-887`).
+  - `packages/server/src/git-operations.ts` — new `orphanCleanup(path)` pure-ish helper + tighten `addWorktree` to populate `orphanLikely` on `path_exists`
+  - `packages/server/src/routes/git-routes.ts` — register `POST /api/git/worktree/orphan-cleanup`
+  - `packages/client/src/lib/git-api.ts` — new `cleanupOrphanWorktreePath(path)` fetch helper
+- **Protocol**: none — `spawn_session.attachProposal` and `spawn_session.gitWorktreeBase` already exist (see `packages/shared/src/browser-protocol.ts:865-887`). One new REST route added (see above).
 - **Persistence**: none beyond the new config field.
 - **Tests**:
   - `FolderActionBar.test.tsx` — extend visibility-gate suite with `gitWorktreeEnabled=false` arm.
