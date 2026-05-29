@@ -1,49 +1,48 @@
 /**
- * Pi-native follow-up queue panel (v2 cycling).
+ * Follow-up queue panel — bridge-owned mutation surface.
  *
- * Steer chips moved to inline-chat rendering in `ChatView` (v2). This panel
- * surfaces only the follow-up queue. In v2 the follow-up is a multi-entry
- * queue with ONE entry visible at a time and cycling controls:
+ * The bridge owns `bridgeFollowUp` (pi 0.76.0 ExtensionAPI exposes no
+ * queue-mutation primitives). Dashboard-queued follow-ups never reach pi
+ * until the drain loop ships them on `agent_end` as fresh-turn sends.
  *
- *   ↑ prev   ↓ next   ⇧ promote-to-head
+ * Entry-chip controls:
+ *   [✎]  inline edit       (textarea, Cmd/Ctrl+Enter submits, Esc cancels)
+ *   [⇧]  promote to head   (disabled when idx === 0)
+ *   [✕]  remove            (confirm only when entry > 50 chars)
  *
- * Click the body to edit (Enter / blur saves, Esc cancels). ✕ removes the
- * currently-visible entry (not the whole queue). Clear-all is available
- * via `onClearFollowup` (still wired but currently no UI affordance in v2 —
- * users remove entries one at a time).
+ * Plus a panel-header "Clear all follow-up" button when length > 1.
  *
- * Reads `Session.pendingQueues.followUp[]` populated by the server's
- * `queue_update` forward from the bridge's shadow queue.
+ * Steer is permanently pi-owned + display-only — steer drains too fast at
+ * turn_end for mutation UI to matter. Steer chips render in ChatView as
+ * inline ghost user-message bubbles, never here.
  *
- * See capability `mid-turn-prompt-queue` / change `add-followup-edit-and-steer-cancel`.
+ * See change: rework-mid-turn-prompt-queue.
  */
 import { useState, useEffect, useRef } from "react";
 import Icon from "@mdi/react";
-import { mdiClose, mdiChevronUp, mdiChevronDown, mdiArrowUpBoldHexagonOutline } from "@mdi/js";
+import {
+  mdiChevronUp,
+  mdiChevronDown,
+  mdiPencilOutline,
+  mdiClose,
+  mdiArrowCollapseUp,
+  mdiCloseCircleOutline,
+} from "@mdi/js";
 
 interface Props {
-  /** The follow-up queue entries from `Session.pendingQueues.followUp` (v2 multi-entry). */
+  /** The follow-up queue entries from `Session.pendingQueues.followUp`. */
   followUp: string[];
-  /** Wipe pi's follow-up queue entirely (rarely surfaced in v2 UI). */
-  onClearFollowup: () => void;
-  /** v1-compat: replace ALL entries with this single text. Deprecated in v2. */
-  onEditFollowup: (text: string) => void;
-  /** v2: replace entry at `index` with `text`. */
-  onEditFollowupEntry?: (index: number, text: string) => void;
-  /** v2: remove entry at `index`. */
-  onRemoveFollowupEntry?: (index: number) => void;
-  /** v2: move entry at `index` to position 0 (head). */
-  onPromoteFollowupEntry?: (index: number) => void;
+  /** Dispatch `edit_followup_entry { index, text }` — mutates bridge buffer only. */
+  onEdit?: (index: number, text: string) => void;
+  /** Dispatch `remove_followup_entry { index }` — mutates bridge buffer only. */
+  onRemove?: (index: number) => void;
+  /** Dispatch `promote_followup_entry { index }` — mutates bridge buffer only. */
+  onPromote?: (index: number) => void;
+  /** Dispatch `clear_followup_entries { indices: "all" }`. */
+  onClearAll?: () => void;
 }
 
-export function QueuePanel({
-  followUp,
-  onClearFollowup,
-  onEditFollowup,
-  onEditFollowupEntry,
-  onRemoveFollowupEntry,
-  onPromoteFollowupEntry,
-}: Props) {
+export function QueuePanel({ followUp, onEdit, onRemove, onPromote, onClearAll }: Props) {
   const hasFollowUp = followUp.length > 0;
   if (!hasFollowUp) return null;
 
@@ -54,11 +53,10 @@ export function QueuePanel({
     >
       <FollowupCycler
         entries={followUp}
-        onClearAll={onClearFollowup}
-        onEditLegacy={onEditFollowup}
-        onEditEntry={onEditFollowupEntry}
-        onRemoveEntry={onRemoveFollowupEntry}
-        onPromoteEntry={onPromoteFollowupEntry}
+        onEdit={onEdit}
+        onRemove={onRemove}
+        onPromote={onPromote}
+        onClearAll={onClearAll}
       />
     </div>
   );
@@ -66,37 +64,37 @@ export function QueuePanel({
 
 function FollowupCycler({
   entries,
+  onEdit,
+  onRemove,
+  onPromote,
   onClearAll,
-  onEditLegacy,
-  onEditEntry,
-  onRemoveEntry,
-  onPromoteEntry,
 }: {
   entries: string[];
-  onClearAll: () => void;
-  onEditLegacy: (text: string) => void;
-  onEditEntry?: (index: number, text: string) => void;
-  onRemoveEntry?: (index: number) => void;
-  onPromoteEntry?: (index: number) => void;
+  onEdit?: (index: number, text: string) => void;
+  onRemove?: (index: number) => void;
+  onPromote?: (index: number) => void;
+  onClearAll?: () => void;
 }) {
   // currentIndex tracks which entry is visible. Initial: last entry (so the
-  // user sees what they most recently queued). Subsequent appends advance to
-  // the new last; removals clamp.
+  // user sees what they most recently queued). Subsequent appends advance
+  // to the new last; removals clamp.
   const [currentIndex, setCurrentIndex] = useState(Math.max(0, entries.length - 1));
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState("");
   const prevLenRef = useRef(entries.length);
+
   useEffect(() => {
     const len = entries.length;
     const prev = prevLenRef.current;
     prevLenRef.current = len;
     if (len === 0) {
       setCurrentIndex(0);
+      setEditing(false);
       return;
     }
     if (len > prev) {
-      // Appended → jump to new last entry.
       setCurrentIndex(len - 1);
     } else if (currentIndex >= len) {
-      // Shrunk past current → clamp to last valid index.
       setCurrentIndex(len - 1);
     }
   }, [entries.length, currentIndex]);
@@ -106,28 +104,26 @@ function FollowupCycler({
   const total = entries.length;
   const canPrev = idx > 0;
   const canNext = idx < total - 1;
-  const canPromote = total > 1 && idx > 0;
 
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(text);
-  useEffect(() => { if (!editing) setDraft(text); }, [text, editing]);
-
-  const submit = () => {
-    const trimmed = draft.trim();
-    if (trimmed && trimmed !== text) {
-      if (onEditEntry) onEditEntry(idx, trimmed);
-      else onEditLegacy(trimmed); // v1 fallback
-    }
+  const startEdit = () => {
+    setEditText(text);
+    setEditing(true);
+  };
+  const cancelEdit = () => setEditing(false);
+  const submitEdit = () => {
+    const trimmed = editText;
     setEditing(false);
+    // Skip dispatch if unchanged — bridge would just emit a no-op queue_update.
+    if (trimmed === text) return;
+    onEdit?.(idx, trimmed);
   };
-  const cancelEdit = () => { setDraft(text); setEditing(false); };
 
-  const remove = () => {
-    if (onRemoveEntry) onRemoveEntry(idx);
-    else onClearAll(); // v1 fallback: no per-entry remove → clear all
-  };
-  const promote = () => {
-    if (onPromoteEntry) onPromoteEntry(idx);
+  const handleRemove = () => {
+    // Confirmation only for entries > 50 chars (long entries are higher-cost to lose).
+    if (text.length > 50) {
+      if (typeof window !== "undefined" && !window.confirm("Remove this follow-up entry?")) return;
+    }
+    onRemove?.(idx);
   };
 
   return (
@@ -138,7 +134,7 @@ function FollowupCycler({
       <div className="flex items-center justify-between mb-1.5">
         <div className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] flex items-center gap-1.5">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400/80" aria-hidden />
-          Follow-up — delivered when agent finishes
+          Follow-up — delivered when the agent finishes the turn
           {total > 1 && (
             <span data-testid="queue-followup-position" className="ml-1 text-[var(--text-secondary)]">
               {idx + 1} of {total}
@@ -151,7 +147,7 @@ function FollowupCycler({
               <button
                 type="button"
                 onClick={() => setCurrentIndex(idx - 1)}
-                disabled={!canPrev}
+                disabled={!canPrev || editing}
                 data-testid="queue-followup-prev"
                 aria-label="Previous follow-up entry"
                 title="Previous entry"
@@ -162,7 +158,7 @@ function FollowupCycler({
               <button
                 type="button"
                 onClick={() => setCurrentIndex(idx + 1)}
-                disabled={!canNext}
+                disabled={!canNext || editing}
                 data-testid="queue-followup-next"
                 aria-label="Next follow-up entry"
                 title="Next entry"
@@ -172,56 +168,99 @@ function FollowupCycler({
               </button>
               <button
                 type="button"
-                onClick={promote}
-                disabled={!canPromote}
-                data-testid="queue-followup-promote"
-                aria-label="Promote this entry to next-in-queue"
-                title="Promote to next-in-queue"
-                className="inline-flex items-center justify-center w-6 h-6 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                onClick={() => onClearAll?.()}
+                disabled={editing}
+                data-testid="queue-followup-clear-all"
+                aria-label="Clear all follow-up entries"
+                title="Clear all follow-up"
+                className="ml-1 inline-flex items-center justify-center w-6 h-6 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
               >
-                <Icon path={mdiArrowUpBoldHexagonOutline} size={0.6} />
+                <Icon path={mdiCloseCircleOutline} size={0.65} />
               </button>
             </>
-          )}
-          {!editing && (
-            <button
-              type="button"
-              onClick={remove}
-              data-testid="queue-followup-remove"
-              aria-label="Remove this follow-up entry"
-              title="Remove this entry"
-              className="inline-flex items-center justify-center w-6 h-6 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-            >
-              <Icon path={mdiClose} size={0.6} />
-            </button>
           )}
         </div>
       </div>
       {editing ? (
-        <textarea
-          data-testid="queue-followup-editor"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
-            if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
-          }}
-          onBlur={submit}
-          autoFocus
-          rows={3}
-          className="w-full bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded px-2 py-1.5 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--border-primary)] resize-y"
-        />
+        <div className="flex flex-col gap-1.5">
+          <textarea
+            data-testid="queue-followup-editor"
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                cancelEdit();
+              } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                submitEdit();
+              }
+            }}
+            autoFocus
+            rows={Math.min(6, Math.max(2, editText.split("\n").length))}
+            className="block w-full text-sm bg-[var(--bg-primary)] border border-[var(--border-secondary)] rounded px-2 py-1 text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--border-focus)]"
+          />
+          <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
+            <span>Cmd/Ctrl+Enter to save, Esc to cancel</span>
+            <button
+              type="button"
+              onClick={cancelEdit}
+              className="ml-auto px-2 py-0.5 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submitEdit}
+              data-testid="queue-followup-editor-submit"
+              className="px-2 py-0.5 rounded bg-[var(--accent-primary)]/20 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/30"
+            >
+              Save
+            </button>
+          </div>
+        </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          data-testid="queue-followup-edit"
-          aria-label="Edit follow-up"
-          title="Click to edit"
-          className="block w-full text-left text-sm text-[var(--text-primary)] whitespace-pre-wrap break-words leading-relaxed cursor-text rounded px-1 -mx-1 py-0.5 hover:bg-[var(--bg-hover)]/50 transition-colors"
-        >
-          <span data-testid="queue-chip-followup">{text}</span>
-        </button>
+        <div className="flex items-start gap-1.5">
+          <div
+            data-testid="queue-chip-followup"
+            className="flex-1 min-w-0 text-sm text-[var(--text-primary)] whitespace-pre-wrap break-words leading-relaxed"
+          >
+            {text}
+          </div>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            <button
+              type="button"
+              onClick={startEdit}
+              data-testid="queue-followup-edit"
+              aria-label="Edit follow-up entry"
+              title="Edit"
+              className="inline-flex items-center justify-center w-6 h-6 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+            >
+              <Icon path={mdiPencilOutline} size={0.65} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onPromote?.(idx)}
+              disabled={idx === 0}
+              data-testid="queue-followup-promote"
+              aria-label="Promote follow-up entry to head"
+              title={idx === 0 ? "Already at head" : "Promote to head"}
+              className="inline-flex items-center justify-center w-6 h-6 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+            >
+              <Icon path={mdiArrowCollapseUp} size={0.65} />
+            </button>
+            <button
+              type="button"
+              onClick={handleRemove}
+              data-testid="queue-followup-remove"
+              aria-label="Remove follow-up entry"
+              title="Remove"
+              className="inline-flex items-center justify-center w-6 h-6 rounded text-[var(--text-tertiary)] hover:text-red-400 hover:bg-[var(--bg-hover)] transition-colors"
+            >
+              <Icon path={mdiClose} size={0.65} />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

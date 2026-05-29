@@ -338,49 +338,33 @@ describe("ChatView", () => {
     });
   });
 
-  describe("error banner", () => {
-    it("renders error banner when lastError is set", () => {
+  // RetryBanner + ErrorBanner moved to the unified SessionBanner mounted in
+  // App.tsx (sticky above the command input). ChatView no longer renders
+  // banners regardless of retryState/lastError. See change:
+  // unify-status-banner-and-terminal-limit-stop.
+  describe("banners no longer rendered inside ChatView (moved to App.tsx SessionBanner)", () => {
+    it("does not render error-banner when lastError is set", () => {
       const state = createInitialState();
       state.lastError = { message: "Rate limit exceeded", timestamp: Date.now() };
-
       const { container } = render(
         <ThemeProvider>
           <ChatView state={state} toolContext={defaultToolContext} />
         </ThemeProvider>,
       );
-
-      const banner = container.querySelector('[data-testid="error-banner"]');
-      expect(banner).toBeTruthy();
-      expect(banner!.textContent).toContain("Rate limit exceeded");
-    });
-
-    it("does not render error banner when lastError is undefined", () => {
-      const state = createInitialState();
-
-      const { container } = render(
-        <ThemeProvider>
-          <ChatView state={state} toolContext={defaultToolContext} />
-        </ThemeProvider>,
-      );
-
       expect(container.querySelector('[data-testid="error-banner"]')).toBeNull();
     });
 
-    it("calls onDismissError when dismiss button clicked", () => {
-      const state = createInitialState();
-      state.lastError = { message: "Quota exceeded", timestamp: Date.now() };
-      const onDismiss = vi.fn();
-
+    it("does not render retry-banner when retryState is set", () => {
+      const state = {
+        ...createInitialState(),
+        retryState: { attempt: 1, maxAttempts: 3, delayMs: 2000, reason: "rate limit", startedAt: 0 },
+      };
       const { container } = render(
         <ThemeProvider>
-          <ChatView state={state} toolContext={defaultToolContext} onDismissError={onDismiss} />
+          <ChatView state={state} toolContext={defaultToolContext} />
         </ThemeProvider>,
       );
-
-      const dismissBtn = container.querySelector('[data-testid="error-banner-dismiss"]');
-      expect(dismissBtn).toBeTruthy();
-      fireEvent.click(dismissBtn!);
-      expect(onDismiss).toHaveBeenCalledOnce();
+      expect(container.querySelector('[data-testid="retry-banner"]')).toBeNull();
     });
   });
 
@@ -438,45 +422,11 @@ describe("ChatView", () => {
     });
   });
 
-  describe("retry banner integration (provider-retry-state)", () => {
-    it("does not render retry banner when retryState is undefined", () => {
-      const state = createInitialState();
-      const { container } = render(
-        <ThemeProvider>
-          <ChatView state={state} toolContext={defaultToolContext} />
-        </ThemeProvider>,
-      );
-      expect(container.querySelector('[data-testid="retry-banner"]')).toBeNull();
-    });
-
-    it("renders retry banner when retryState is set with delayMs >= 500", () => {
-      const state = {
-        ...createInitialState(),
-        retryState: { attempt: 1, maxAttempts: 3, delayMs: 2000, reason: "rate limit", startedAt: 0 },
-      };
-      const { container } = render(
-        <ThemeProvider>
-          <ChatView state={state} toolContext={defaultToolContext} />
-        </ThemeProvider>,
-      );
-      expect(container.querySelector('[data-testid="retry-banner"]')).not.toBeNull();
-    });
-
-    it("renders retry banner with indeterminate state when delayMs is sentinel -1", () => {
-      const state = {
-        ...createInitialState(),
-        retryState: { attempt: 1, maxAttempts: -1, delayMs: -1, reason: "x", startedAt: 0 },
-      };
-      const { container } = render(
-        <ThemeProvider>
-          <ChatView state={state} toolContext={defaultToolContext} />
-        </ThemeProvider>,
-      );
-      expect(container.querySelector('[data-testid="retry-banner"]')).not.toBeNull();
-      expect(container.querySelector('[data-testid="retry-banner-indeterminate"]')).not.toBeNull();
-    });
-
-    it("retry banner and error banner can coexist (retry above error)", () => {
+  // Banner-coexistence is impossible by construction: the unified
+  // SessionBanner selector picks exactly one variant per render. See change:
+  // unify-status-banner-and-terminal-limit-stop.
+  describe("banner-state derivation is single-variant (moved to SessionBanner)", () => {
+    it("chat view stays banner-free even when both retryState and lastError are set", () => {
       const state = {
         ...createInitialState(),
         retryState: { attempt: 2, maxAttempts: 3, delayMs: 4000, reason: "x", startedAt: 0 },
@@ -487,12 +437,57 @@ describe("ChatView", () => {
           <ChatView state={state} toolContext={defaultToolContext} />
         </ThemeProvider>,
       );
-      const retry = container.querySelector('[data-testid="retry-banner"]');
-      const error = container.querySelector('[data-testid="error-banner"]');
-      expect(retry).not.toBeNull();
-      expect(error).not.toBeNull();
-      // Retry must appear before error in document order (compareDocumentPosition: 4 = following)
-      expect(retry!.compareDocumentPosition(error!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(container.querySelector('[data-testid="retry-banner"]')).toBeNull();
+      expect(container.querySelector('[data-testid="error-banner"]')).toBeNull();
+    });
+  });
+
+  // See change: unify-status-banner-and-terminal-limit-stop.
+  describe("manual-retry visual dedup", () => {
+    it("skips rendering a user bubble flagged `retriedFrom`", () => {
+      const state = createInitialState();
+      const ts = Date.now();
+      // Original user message (retained for findLastUserPrompt etc.)
+      state.messages.push({
+        id: "u1",
+        role: "user",
+        content: "fix the bug",
+        timestamp: ts,
+        entryId: "u1",
+      } as ChatMessage);
+      // Errored assistant turn
+      state.messages.push({
+        id: "a1",
+        role: "assistant",
+        content: "",
+        timestamp: ts + 1,
+        toolStatus: "error" as const,
+      } as ChatMessage);
+      // Manual-retry duplicate flagged with retriedFrom
+      state.messages.push({
+        id: "u2",
+        role: "user",
+        content: "fix the bug",
+        timestamp: ts + 2,
+        entryId: "u2",
+        retriedFrom: "u1",
+      } as ChatMessage);
+      const { container } = render(
+        <ThemeProvider>
+          <ChatView state={state} toolContext={defaultToolContext} />
+        </ThemeProvider>,
+      );
+      // Both user entries are in state.messages, but the chat view should
+      // render only ONE "fix the bug" bubble.
+      const bubbles = Array.from(container.querySelectorAll("*"))
+        .filter((el) => el.textContent === "fix the bug" && el.children.length === 0);
+      // Exactly one text-node carrying the duplicate text. (The same string
+      // may appear inside the markdown structure in slightly different DOM
+      // shapes; what matters is that we don't see TWO message bubbles.)
+      // The strict assertion: state.messages.length === 3 but the rendered
+      // node count for that exact text === 1.
+      expect(state.messages.length).toBe(3);
+      expect(bubbles.length).toBe(1);
     });
   });
 });

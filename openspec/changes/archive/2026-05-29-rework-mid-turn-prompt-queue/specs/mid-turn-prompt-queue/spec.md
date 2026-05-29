@@ -1,9 +1,61 @@
-# Mid-turn Prompt Queue
+## REMOVED Requirements
 
-## Purpose
+### Requirement: `clear_steering_queue` browser-to-server message
 
-Surface per-session pending-prompt state typed while the agent is mid-turn. Users compose steering and follow-up prompts during streaming; pi's native queues hold them, the bridge mirrors state via shadow queues, the server caches the snapshot from `queue_update` events, and the client renders the `PromptQueuePanel` above the chat input. Steering drains incrementally at `turn_end` boundaries; follow-up drains incrementally at `agent_end` boundaries — both per-entry by user `message_start` matcher.
-## Requirements
+**Reason for removal**: pi's `ExtensionAPI` does not expose `clearSteeringQueue` (verified through pi-coding-agent 0.76.0). The handler that called `(pi as any).clearSteeringQueue?.()` was a silent no-op. The message type, the server forwarder, the bridge handler, and the client sender are all deleted in §1.
+
+**Migration**: none. Steer remains pi-owned + display-only; mutation never existed honestly.
+
+### Requirement: `clear_followup_slot` browser-to-server message
+
+**Reason for removal**: same as above. The bridge's clear-then-replay strategy produced ghost duplicates because `pi.clearFollowUpQueue` was not on the ExtensionAPI; the "clear" was no-op and the replay appended to pi's real queue.
+
+**Migration**: replaced by `clear_followup_entries { indices: number[] | "all" }` (see ADDED section). Bridge-owned-buffer semantics make the operation honest.
+
+### Requirement: `edit_followup_slot` browser-to-server message
+
+**Reason for removal**: same as above. Edit-via-clear-then-resend produced ghosts.
+
+**Migration**: replaced by `edit_followup_entry { index, text, images? }` (see ADDED section). Name reused with new bridge-owned semantics.
+
+### Requirement: Send-while-occupied on follow-up replaces silently (v1, deprecated in v2)
+
+**Reason for removal**: the v1 replace semantics depended on the depth-1 invariant enforced by clear-then-send. That invariant was never enforceable (clear was no-op). Multiple follow-up entries are valid; FIFO append is the only honest operation.
+
+**Migration**: subsumed by "Follow-up send appends to the buffer" (MODIFIED below). Append-only semantics; the user sees multi-entry queue with cycling navigation.
+
+### Requirement: Client renders the `PromptQueuePanel` above `CommandInput`
+
+**Reason for removal**: the v1 panel had two sections (read-only steer chips + interactive follow-up chip with ✏ and ✕). Steer mutation never worked; follow-up mutation produced ghosts.
+
+**Migration**: replaced by "Read-only steer + bridge-owned-mutation follow-up QueuePanel" (ADDED below). Steer renders inline as ghost user-message bubbles in ChatView (not in the panel). Follow-up renders in the panel with restored `[✎] [✕] [⇧] [→ editor]` buttons that mutate the bridge buffer only.
+
+### Requirement: Session shutdown resets shadow queues and clears pi's native queues
+
+**Reason for removal**: the `pi.clearSteeringQueue()` / `pi.clearFollowUpQueue()` defensive calls in the shutdown arm were silent no-ops (not on ExtensionAPI). Their presence implied "we clear pi's queues on shutdown" — provably false. §1 deleted both the defensive calls and the shadow-reset block.
+
+**Migration**: shutdown invokes `cachedCtx.shutdown()` directly; shadows are not touched (pi's natural lifecycle handles cleanup). Session-change (`handleSessionChange`) still resets shadows — that path is a true different-session reset, not a shutdown.
+
+### Requirement: User abort resets shadow queues and clears pi's native queues
+
+**Reason for removal**: same as shutdown — defensive `pi.clear*Queue?.()` calls were no-ops; "abort wipes queues" was a lie. Pi's `Agent.abort()` only calls `AbortController.abort()`; queues persist by design.
+
+**Migration**: abort invokes `cachedCtx.abort()` + `retryTracker.noteAbort()` directly. Bridge-owned follow-up buffer survives abort (user can continue editing/sending the queued items after Stop). Pi's steer queue also survives but typically drains on the next prompt.
+
+### Requirement: Client restores aborted queue text into the command-input draft
+
+**Reason for removal**: `wrappedHandleAbort` in `App.tsx` yanked queued text into the draft on Stop. Because pi's queues persist across `abort()`, the yank produced duplicate delivery (drafted-edited copy + original drain). §1 deleted the callback; all `onAbort=` sites pass bare `handleAbort`.
+
+**Migration**: per-entry pull-to-editor (ADDED below) replaces bulk yank. Users who want to pull a specific entry back to the editor click `[→ editor]` on that chip; the bridge splices the entry from `bridgeFollowUp` and round-trips `followup_pulled { text }` to hydrate the draft atomically.
+
+### Requirement: Bridge forwards pi's `queue_update` events to the server
+
+**Reason for removal**: pi's ExtensionAPI does not emit `queue_update` events (verified). The bridge never subscribed to one; this requirement described a non-existent mechanism. The actual bridge `queue_update` ExtensionToServerMessage is BRIDGE-EMITTED on shadow / buffer mutation, not forwarded from pi.
+
+**Migration**: covered by "Bridge emits `queue_update` on every steer-shadow or follow-up-buffer mutation" (ADDED below).
+
+## MODIFIED Requirements
+
 ### Requirement: Typed-during-streaming prompts are forwarded to pi's native queues
 
 When the bridge receives a `send_prompt` message AND `getBridgeState().isAgentStreaming === true` for the target session AND the prompt is not a slash, bash, compact, reload, new, model, or mgmt command, the bridge SHALL route based on `msg.delivery` — follow-up goes to the bridge-owned buffer, steer goes to pi's queue:
@@ -36,161 +88,6 @@ When `getBridgeState().isAgentStreaming === false` (idle session), the bridge SH
 - **AND** the bridge receives `send_prompt { text: "hi" }`
 - **THEN** the bridge SHALL call `pi.sendUserMessage("hi")` with no `deliverAs`
 - **AND** the bridge SHALL NOT touch `bridgeFollowUp` or `bridgeSteering`
-
-### Requirement: Protocol `send_prompt` messages carry optional delivery field
-
-`SendPromptToExtensionMessage` and `SendPromptToBrowserMessage` SHALL include an optional `delivery?: "steer" | "followUp"` field. When absent, the receiver SHALL treat the message as `delivery: "followUp"`. The server SHALL pass `delivery` through transparently from browser → bridge without inspection or modification.
-
-#### Scenario: delivery field survives server pass-through
-- **WHEN** a browser sends `send_prompt { sessionId: "S", text: "hi", delivery: "steer" }`
-- **THEN** the server SHALL forward `send_prompt { type: "send_prompt", sessionId: "S", text: "hi", delivery: "steer" }` to the bridge
-
-#### Scenario: Absent delivery field is preserved as absent
-- **WHEN** a browser sends `send_prompt { sessionId: "S", text: "hi" }` without `delivery`
-- **THEN** the server SHALL forward without `delivery`
-- **AND** the bridge SHALL treat as followUp
-
-### Requirement: Server caches per-session queue state from `queue_update` events
-
-The server SHALL maintain a per-session `pendingQueues: { steering: string[]; followUp: string[] }` field inside `SessionUiState`. The field SHALL be updated whenever a `queue_update` ExtensionToServerMessage arrives from a bridge for that session. The server SHALL include `pendingQueues` in every `session_updated` broadcast and in the initial-state replay sent on browser subscribe.
-
-This replaces the prior `queue.pending: PendingPrompt[]` cache, which was sourced from the deleted `queue_state` event.
-
-#### Scenario: queue_update populates the cache
-- **WHEN** a bridge sends `queue_update { sessionId: "S", steering: ["a", "b"], followUp: ["c"] }`
-- **THEN** the server SHALL set `SessionUiState[S].pendingQueues = { steering: ["a", "b"], followUp: ["c"] }`
-- **AND** the server SHALL broadcast `session_updated` with the new value to subscribers
-
-#### Scenario: Empty arrays clear the cache slot
-- **WHEN** a bridge sends `queue_update { sessionId: "S", steering: [], followUp: [] }`
-- **THEN** the server SHALL set `SessionUiState[S].pendingQueues = { steering: [], followUp: [] }`
-- **AND** the server SHALL broadcast `session_updated`
-
-#### Scenario: Reconnect replays the cached state
-- **WHEN** a browser subscribes to session "S" whose `pendingQueues` is non-empty
-- **THEN** the initial-state snapshot SHALL include the current `pendingQueues` value
-- **AND** the client SHALL render chips for both arrays without waiting for a fresh `queue_update`
-
-### Requirement: Queue panel renders above the chat input
-
-When `Session.queue.pending.length > 0` for the currently selected session, the chat view SHALL render a queue panel between the message list and the chat input. The panel SHALL list each queued message as a chip displaying the message text truncated to one line with overflow ellipsis. The panel SHALL include a "Clear all" affordance that, when clicked, sends a `clear_queue { sessionId }` message for the active session.
-
-#### Scenario: Empty queue hides the panel
-- **WHEN** `Session.queue.pending` is `[]`
-- **THEN** the queue panel SHALL NOT be rendered
-
-#### Scenario: Non-empty queue renders chips in insertion order
-- **WHEN** `Session.queue.pending` is `[{id:"q1",text:"A"},{id:"q2",text:"B"},{id:"q3",text:"C"}]`
-- **THEN** the queue panel SHALL render three chips in order: `A`, `B`, `C`
-
-#### Scenario: Long message text truncates
-- **WHEN** a queue chip's message text exceeds the chip's render width
-- **THEN** the chip SHALL display the text with an ellipsis and SHALL NOT wrap to multiple lines
-
-#### Scenario: Clear all sends clear_queue
-- **WHEN** the user clicks the queue panel's "Clear all" button while subscribed to session S
-- **THEN** the client SHALL send `clear_queue { type: "clear_queue", sessionId: "S" }` to the server
-
-#### Scenario: Per-chip remove button sends remove_queue_entry
-- **WHEN** the user clicks the X button on a chip whose entry id is `E` while subscribed to session S
-- **THEN** the client SHALL send `remove_queue_entry { type: "remove_queue_entry", sessionId: "S", id: "E" }` to the server
-
-#### Scenario: Each chip exposes a remove affordance
-- **WHEN** the queue panel renders any chip
-- **THEN** that chip SHALL include an X / remove button that, on click, invokes the per-entry remove flow
-
-### Requirement: Client sends steer by default, followUp on modifier key
-
-The command input SHALL send `delivery: "steer"` when the user presses Enter, and `delivery: "followUp"` when the user presses Alt+Enter (or Option+Enter on macOS). The send button click SHALL default to `delivery: "steer"`. This mirrors pi's TUI keyboard contract where Enter = steer and Alt+Enter = followUp.
-
-The `PendingPrompt` in the client-side `SessionState` SHALL carry the `delivery` field so the optimistic chip can distinguish steering from follow-up visually.
-
-#### Scenario: Enter sends steer
-- **WHEN** the user types text and presses Enter
-- **THEN** the client SHALL send `send_prompt { delivery: "steer", text, ... }`
-
-#### Scenario: Alt+Enter sends followUp
-- **WHEN** the user types text and presses Alt+Enter
-- **THEN** the client SHALL send `send_prompt { delivery: "followUp", text, ... }`
-
-#### Scenario: Send button defaults to steer
-- **WHEN** the user clicks the send button
-- **THEN** the client SHALL send `send_prompt { delivery: "steer", text, ... }`
-
-#### Scenario: Optimistic chip shows delivery label
-- **WHEN** `pendingPrompt.delivery === "steer"` and the chip is visible
-- **THEN** the chip SHALL display a label indicating "steering" (or equivalent visual distinction)
-- **WHEN** `pendingPrompt.delivery === "followUp"` and the chip is visible
-- **THEN** the chip SHALL display a label indicating "follow-up"
-
-### Requirement: Command input handles Alt+Enter distinct from Enter
-
-The `CommandInput` component SHALL listen for `AltGraph + Enter` AND `Alt + Enter` key combinations, treating both as the follow-up send gesture. The existing `Enter` (unmodified) handler SHALL remain steer. Shift+Enter SHALL continue to insert a newline (existing behavior, unchanged).
-
-#### Scenario: Alt+Enter sends followUp
-- **WHEN** the user presses Alt+Enter (or Option+Enter on macOS) in the command input with text
-- **THEN** the `onSend` callback SHALL be invoked with `delivery: "followUp"`
-
-#### Scenario: Shift+Enter inserts newline (unchanged)
-- **WHEN** the user presses Shift+Enter in the command input
-- **THEN** a newline character SHALL be inserted and the cursor SHALL advance to the next line
-- **AND** no send action SHALL fire
-
-### Requirement: Image attachments are not displayed on chips in v1
-
-Pi 0.74 receives image-bearing prompts via `pi.sendUserMessage(content, ...)` where `content` is an array of `TextContent | ImageContent`. The bridge holds the original `images` array on the `PendingPrompt`, but in v1 the queue chips SHALL render text only and SHALL NOT display image previews. When the user sends an image-bearing prompt that enters the bridge queue, the optimistic-prompt card SHALL still render with image thumbnails (per the existing `optimistic-prompt` capability) until that prompt is observed in the queue, at which point the card SHALL be replaced by a text-only chip and the image previews SHALL no longer be visible.
-
-#### Scenario: Image-bearing send shows optimistic card with images, then text-only chip
-- **WHEN** the user sends `{ text: "describe", images: [PNG] }` while the agent is streaming
-- **THEN** initially an optimistic card SHALL render with the text and the PNG thumbnail
-- **WHEN** the next `queue_state` event reports `pending: [{id:..., text:"describe", images:[PNG]}]`
-- **THEN** the optimistic card SHALL be replaced by a text-only chip displaying "describe" with no image thumbnail
-
-#### Scenario: Drain preserves image attachments
-- **WHEN** the bridge drains a `PendingPrompt` that carries `images`
-- **THEN** the bridge SHALL call `pi.sendUserMessage` with the content array including the original images
-- **AND** the resulting agent turn SHALL receive the images via pi's standard image handling
-
-### Requirement: Session card shows a count-only queue indicator
-
-When a session's `queue.pending.length > 0`, the session card in the session list SHALL display a small queue indicator showing the total count. The indicator SHALL NOT show queue contents — it is an at-a-glance signal only. When the count is zero, no indicator SHALL be rendered.
-
-#### Scenario: Indicator appears when queue non-empty
-- **WHEN** `Session.queue.pending` has 3 entries for a session
-- **THEN** that session's card SHALL display a queue indicator with the count `3`
-
-#### Scenario: Indicator hidden when queue empty
-- **WHEN** `Session.queue.pending` is `[]` for a session
-- **THEN** no queue indicator SHALL be rendered on that session's card
-
-### Requirement: Queue render cap keeps the LATEST entries visible
-
-The queue panel SHALL render at most 5 chips inline. If `pending.length > 5`, the panel SHALL render an overflow affordance reading "+N earlier" (where N is the hidden count) on the LEFT, followed by the LATEST 5 chips on the right (in insertion order within the visible window). The just-typed entry is therefore always visible as the rightmost chip; older entries collapse into the overflow indicator. The "+N earlier" affordance is read-only in v1; clicking it has no required action and MAY be made expandable later without protocol change.
-
-#### Scenario: Queue of 4 renders all 4 chips
-- **WHEN** `pending.length === 4`
-- **THEN** the panel SHALL render 4 chips and SHALL NOT render an overflow affordance
-
-#### Scenario: Queue of 8 renders "+3 earlier" on the LEFT plus the latest 5 chips
-- **WHEN** `pending.length === 8` with entries `[A, B, C, D, E, F, G, H]` (oldest first)
-- **THEN** the panel SHALL render a single "+3 earlier" affordance followed by chips for `D, E, F, G, H` in that order
-- **AND** the rightmost chip SHALL be `H` (the latest entry)
-
-### Requirement: Client uses authoritative `pendingQueues`, no optimistic chip
-
-The client SHALL NOT maintain an optimistic `pendingPrompt` slot when sending a prompt. Pending state SHALL be rendered exclusively from `state.pendingQueues`, populated via server-broadcast `queue_update` events.
-
-`useSessionActions.handleSend` SHALL dispatch the `send_prompt` WS message and SHALL NOT mutate `state.pendingPrompt`. The `pendingPrompt` field and the `PendingPrompt` type SHALL be removed from `SessionState`.
-
-#### Scenario: Send appears in panel only after queue_update
-- **WHEN** the user sends a follow-up via Alt+Enter
-- **THEN** no chip SHALL appear immediately
-- **AND** when `queue_update` arrives with the new entry, the chip SHALL render
-
-#### Scenario: No optimistic state to reconcile on bridge error
-- **WHEN** the bridge fails to call `pi.sendUserMessage` (e.g., session ended mid-send)
-- **THEN** no stale optimistic chip SHALL be visible
-- **AND** the user retypes if they want to retry
 
 ### Requirement: Bridge maintains shadow steering and follow-up queues
 
@@ -235,56 +132,6 @@ Both structures feed the same `queue_update { sessionId, steering: [...], follow
 - **AND** either `bridgeSteering` or `bridgeFollowUp` is non-empty
 - **THEN** the bridge SHALL set both to `[]`
 - **AND** the bridge SHALL emit `queue_update { steering: [], followUp: [] }` once
-
-### Requirement: Capture-before-send streaming gate prevents idle-message false-chip
-
-Pi flips `isAgentStreaming` synchronously inside `pi.sendUserMessage` on an idle session (via `agent_start` emission to the extension runner). Therefore the bridge SHALL capture `wasStreaming = isAgentStreaming` **before** calling `pi.sendUserMessage`, and SHALL only record to the shadow queue when `wasStreaming === true`.
-
-Call sites:
-
-- `command-handler.ts` passthrough branch: capture before `sendUserMessageWithImages`, fire `onSteerSent` / `onFollowupSent` only if captured-true.
-- `bridge.ts` `sessionPrompt` fallback (slash-route follow-up/steer): same pattern.
-- `bridge.ts` `edit_followup_slot` / `edit_followup_entry` handler: same pattern.
-
-The internal gate inside `recordSteerSent` / `recordFollowupSent` SHALL also check `isAgentStreaming` as defense-in-depth.
-
-#### Scenario: Initial idle send produces no chip
-- **WHEN** the agent is idle (`isAgentStreaming === false`)
-- **AND** the bridge receives `send_prompt { text: "hello", delivery: "steer" }`
-- **AND** pi flips `isAgentStreaming` to `true` synchronously inside `pi.sendUserMessage` (via agent_start)
-- **THEN** the bridge SHALL NOT append to `bridgeSteering`
-- **AND** the bridge SHALL NOT emit `queue_update` with a chip
-- **AND** the message SHALL be processed by pi as a fresh turn
-
-#### Scenario: Mid-stream steer produces a chip
-- **WHEN** `isAgentStreaming === true` at the moment of `send_prompt {delivery:"steer"}`
-- **THEN** the bridge SHALL append to `bridgeSteering`
-- **AND** the bridge SHALL emit `queue_update` with the new entry
-
-### Requirement: Pending steer entries render inline in chat as user-style bubbles
-
-The client SHALL render each entry of `Session.pendingQueues.steering[]` as a user-message-style bubble inside `ChatView`, positioned **at the bottom of the message list** (after the last assistant turn and any streaming text). Each rendered bubble SHALL:
-
-- Use the same visual style as a real user message (`bg-blue-500/10 border border-blue-500/20 border-l-2 border-l-blue-400 rounded-xl shadow-md`).
-- Display a `STEERING` header (uppercase, tertiary text) with an animated spinner.
-- Display a top-right ✕ button that dispatches `clear_steering_queue` (bulk cancel; per-entry steer removal remains out of scope).
-- Disappear when `pendingQueues.steering[]` is empty (the bridge clears the shadow on `turn_end`). At that point pi's `message_end` will have already rendered the corresponding user message in chat, so the chat surface looks coherent.
-
-The `QueuePanel.SteerSection` component SHALL be removed.
-
-#### Scenario: Pending steer appears at the bottom of chat
-- **WHEN** `Session.pendingQueues.steering` is `["focus on X"]`
-- **AND** the message list ends with an assistant message
-- **THEN** `ChatView` SHALL render "focus on X" as a user-style bubble after the assistant message, with `STEERING` header + spinner + ✕
-
-#### Scenario: Multiple pending steers render in order
-- **WHEN** `Session.pendingQueues.steering` is `["a", "b", "c"]`
-- **THEN** `ChatView` SHALL render three bubbles in array order, all positioned at the bottom
-
-#### Scenario: Steer chip disappears when shadow clears
-- **WHEN** `Session.pendingQueues.steering` transitions from `["a"]` to `[]` (because pi emitted turn_end)
-- **THEN** the inline `STEERING` bubble SHALL disappear
-- **AND** the chat SHALL show "a" as a real user message once pi emits `message_end` for that user message
 
 ### Requirement: Follow-up is a multi-entry queue with cycling navigation
 
@@ -364,62 +211,7 @@ When the user presses Alt+Enter (or equivalent send-with-followup gesture), the 
 - **THEN** the bridge SHALL reject the new entry (drop with warn log, or emit `command_feedback { status: "error" }` — implementation choice)
 - **AND** `bridgeFollowUp` SHALL remain at length 20
 
-### Requirement: Drained queued user message renders AFTER the preceding assistant message in chat
-
-When pi drains a queued user message at either boundary (steer at `turn_end`, follow-up at `agent_end`), the resulting user `message_start` event SHALL arrive on the wire AFTER the preceding assistant `message_end` event for the same turn. The client reducer SHALL therefore append the drained user bubble to `state.messages[]` AFTER the assistant's final response, not before it.
-
-This invariant applies to BOTH drain boundaries:
-
-- **Steer drain** at `turn_end` (Enter while streaming)
-- **Follow-up drain** at `agent_end` (Alt+Enter while streaming)
-
-At either boundary pi emits four events synchronously back-to-back in this order:
-
-1. `message_end` (assistant — the final response of the just-completed turn)
-2. `turn_end` OR `agent_end` (the drain boundary)
-3. `message_start` (user — the drained steer or follow-up text)
-4. `message_end` (user — same text)
-
-The bridge defers every `message_end` send via `setTimeout(0)` for entryId capture (per `fix-per-message-fork`). To preserve pi's emit order on the wire, the bridge SHALL also defer USER `message_start` sends via the same `setTimeout(0)` so they queue in the timer FIFO behind any pending `message_end` deferrals. The check is on `messageRef.role === "user"` — it does NOT discriminate by drain source (steer / follow-up / fresh send all funnel through the same code path).
-
-The bridge SHALL NOT defer ASSISTANT `message_start` sends — `message_update` events fire synchronously and the reducer's `streamingTextFlushed` reset depends on the assistant `message_start` being processed first.
-
-#### Scenario: Drained STEER appears below the assistant's final response
-- **WHEN** the agent is mid-turn streaming `"weather report"`
-- **AND** the user types `"asd"` and presses Enter (delivery=steer)
-- **AND** the assistant finishes the current turn
-- **AND** pi drains the steer at `turn_end`, delivering `"asd"` as a new user message
-- **THEN** the wire order received by the client SHALL be: `turn_end`, `message_end` (assistant `"weather report"`), `message_start` (user `"asd"`), `message_end` (user `"asd"`)
-- **AND** the client SHALL render `"weather report"` (assistant bubble) ABOVE `"asd"` (user bubble) in the chat
-
-#### Scenario: Drained FOLLOW-UP appears below the assistant's final response
-- **WHEN** the agent is mid-turn streaming `"weather report"`
-- **AND** the user types `"asd"` and presses Alt+Enter (delivery=followUp)
-- **AND** the assistant finishes the entire agent run
-- **AND** pi drains the follow-up at `agent_end`, delivering `"asd"` as a new user message
-- **THEN** the wire order received by the client SHALL be: `agent_end`, `message_end` (assistant `"weather report"`), `message_start` (user `"asd"`), `message_end` (user `"asd"`)
-- **AND** the client SHALL render `"weather report"` (assistant bubble) ABOVE `"asd"` (user bubble) in the chat
-
-#### Scenario: Bridge defers USER message_start, sends ASSISTANT message_start sync
-- **WHEN** the bridge handles a `message_start` event
-- **AND** the message's `role` is `"user"`
-- **THEN** the bridge SHALL queue the `connection.send` via `setTimeout(0)`
-- **AND** the bridge SHALL keep `wrapAppendMessageForCtx` + `pendingNonces.set` synchronous (state mutations must run sync before the handler returns)
-- **WHEN** the bridge handles a `message_start` event
-- **AND** the message's `role` is `"assistant"`
-- **THEN** the bridge SHALL call `connection.send` synchronously (so subsequent `message_update` events arrive after the reducer has processed `message_start` and reset `streamingTextFlushed`)
-
-#### Scenario: Multiple drained entries preserve their pi emit order
-- **WHEN** a queue contains `["a", "b"]` at the drain boundary (steer or follow-up)
-- **AND** pi drains both entries in order
-- **THEN** the wire order SHALL be: assistant `message_end`, user `message_start "a"`, user `message_end "a"`, user `message_start "b"`, user `message_end "b"`
-- **AND** the chat SHALL render the assistant message first, then `"a"`, then `"b"`
-
-#### Scenario: Idle user send is unaffected by the deferral
-- **WHEN** the user sends a prompt on an idle session
-- **AND** no `message_end` is pending in the timer queue
-- **THEN** the user `message_start` SHALL still be deferred via `setTimeout(0)` (uniform handling)
-- **AND** the message SHALL appear in chat after exactly one macrotask delay (visually instant)
+## ADDED Requirements
 
 ### Requirement: Bridge follow-up drain loop runs on agent_end with pop-before-send invariant
 
@@ -626,4 +418,3 @@ If a future pi release adds these methods to the ExtensionAPI, a separate change
 - **AND** no `pi.*` method SHALL be called
 - **AND** no `queue_update` SHALL be emitted
 - **NOTE**: `edit_followup_entry`, `remove_followup_entry`, `promote_followup_entry` are RE-INTRODUCED with NEW bridge-buffer-only semantics in the ADDED requirements above. The negative-assertion test (`bridge-no-queue-mutation.test.ts`) MUST iterate only the names that remain permanently deleted: `clear_steering_queue`, `clear_followup_slot`, `edit_followup_slot`.
-

@@ -1,14 +1,18 @@
 /**
- * Tests for the bridge's shutdown-time shadow-queue reset.
+ * Tests for the bridge's shutdown extension command.
  *
- * Pure-model mirror of bridge.ts:786 `shutdown` extension command. If
- * production drifts from this shape, this test drifts in lockstep.
+ * Negative-assertion model: pi's ExtensionAPI does NOT expose
+ * clearSteeringQueue / clearFollowUpQueue to extensions (verified through
+ * pi 0.76.0). The bridge therefore SHALL NOT call them. Shadow queues
+ * persist across shutdown because pi's real queues persist until process
+ * exit. No final queue_update is emitted.
+ *
+ * Pure-model mirror of bridge.ts `shutdown` extension command.
  *
  * Spec: openspec/specs/mid-turn-prompt-queue/spec.md — requirement
- * "Session shutdown resets shadow queues and clears pi's native queues"
- * (added by change reset-shadow-queues-on-shutdown).
+ * "Session shutdown invokes cachedCtx.shutdown directly".
  *
- * See change: reset-shadow-queues-on-shutdown.
+ * See change: honest-mid-turn-queue-surface.
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -17,9 +21,11 @@ interface ShadowQueue {
   followUp: string[];
 }
 
-type QueueUpdateEmit = { steering: string[]; followUp: string[] };
-
 interface PiLike {
+  // Defined as optional so tests can verify they are NEVER invoked even
+  // when present on the pi object (e.g. if a future pi version adds them
+  // back to the ExtensionAPI surface — the dashboard's current honest
+  // policy is to ignore them).
   clearSteeringQueue?: () => void;
   clearFollowUpQueue?: () => void;
 }
@@ -29,41 +35,18 @@ interface CachedCtxLike {
 }
 
 /**
- * Pure version of the shutdown extension command. Mirrors bridge.ts
- * 1:1 — defensive pi clears (unconditional), conditional shadow reset
- * + emit, then cachedCtx.shutdown, then process.exit safety net.
+ * Pure version of the shutdown extension command. Mirrors bridge.ts 1:1.
  */
 function makeShutdown(opts: {
   pi: PiLike;
   cachedCtx: CachedCtxLike | null;
   queue: ShadowQueue;
-  onEmit: (snapshot: QueueUpdateEmit) => void;
+  onEmit: (snapshot: { steering: string[]; followUp: string[] }) => void;
   onProcessExit: () => void;
   callLog: string[];
 }) {
   return () => {
-    try {
-      if (typeof opts.pi.clearSteeringQueue === "function") {
-        opts.callLog.push("pi.clearSteeringQueue");
-        opts.pi.clearSteeringQueue();
-      }
-    } catch {
-      // swallow — teardown must not throw
-    }
-    try {
-      if (typeof opts.pi.clearFollowUpQueue === "function") {
-        opts.callLog.push("pi.clearFollowUpQueue");
-        opts.pi.clearFollowUpQueue();
-      }
-    } catch {
-      // swallow
-    }
-    if (opts.queue.steering.length > 0 || opts.queue.followUp.length > 0) {
-      opts.queue.steering = [];
-      opts.queue.followUp = [];
-      opts.callLog.push("emitQueueUpdate");
-      opts.onEmit({ steering: [], followUp: [] });
-    }
+    // Pi exposes no clear*Queue to extensions; shadow stays as-is.
     if (opts.cachedCtx?.shutdown) {
       opts.callLog.push("cachedCtx.shutdown");
       opts.cachedCtx.shutdown();
@@ -73,55 +56,58 @@ function makeShutdown(opts: {
   };
 }
 
-describe("bridge shutdown: shadow-queue reset", () => {
-  it("non-empty steering: resets shadow, emits one final queue_update with empty arrays", () => {
-    const queue: ShadowQueue = { steering: ["focus on X"], followUp: [] };
+describe("bridge shutdown: invokes cachedCtx.shutdown directly", () => {
+  it("non-empty shadows: shadows stay populated, no clear*, no emit", () => {
+    const queue: ShadowQueue = { steering: ["focus on X"], followUp: ["run tests"] };
     const onEmit = vi.fn();
-    const callLog: string[] = [];
-    const pi: PiLike = { clearSteeringQueue: vi.fn(), clearFollowUpQueue: vi.fn() };
-    const cachedCtx: CachedCtxLike = { shutdown: vi.fn() };
-
-    makeShutdown({ pi, cachedCtx, queue, onEmit, onProcessExit: vi.fn(), callLog })();
-
-    expect(queue.steering).toEqual([]);
-    expect(queue.followUp).toEqual([]);
-    expect(onEmit).toHaveBeenCalledTimes(1);
-    expect(onEmit).toHaveBeenCalledWith({ steering: [], followUp: [] });
-  });
-
-  it("non-empty followUp: resets shadow, emits one final queue_update", () => {
-    const queue: ShadowQueue = { steering: [], followUp: ["run tests when done"] };
-    const onEmit = vi.fn();
-    const pi: PiLike = { clearSteeringQueue: vi.fn(), clearFollowUpQueue: vi.fn() };
+    const clearSteer = vi.fn();
+    const clearFollow = vi.fn();
+    const pi: PiLike = { clearSteeringQueue: clearSteer, clearFollowUpQueue: clearFollow };
     const cachedCtx: CachedCtxLike = { shutdown: vi.fn() };
 
     makeShutdown({ pi, cachedCtx, queue, onEmit, onProcessExit: vi.fn(), callLog: [] })();
 
-    expect(queue).toEqual({ steering: [], followUp: [] });
-    expect(onEmit).toHaveBeenCalledTimes(1);
+    // Shadows preserved — pi's real queues also persist until process exit
+    expect(queue.steering).toEqual(["focus on X"]);
+    expect(queue.followUp).toEqual(["run tests"]);
+    // Bridge does NOT call pi.clear* — they are no-ops via the ExtensionAPI
+    expect(clearSteer).not.toHaveBeenCalled();
+    expect(clearFollow).not.toHaveBeenCalled();
+    // No misleading "queues drained" emission
+    expect(onEmit).not.toHaveBeenCalled();
   });
 
-  it("both queues non-empty: emits exactly once (not twice)", () => {
-    const queue: ShadowQueue = { steering: ["a", "b"], followUp: ["c"] };
+  it("empty shadows: still no clear*, no emit, still runs cachedCtx.shutdown + safety net", () => {
+    const queue: ShadowQueue = { steering: [], followUp: [] };
     const onEmit = vi.fn();
-    const pi: PiLike = { clearSteeringQueue: vi.fn(), clearFollowUpQueue: vi.fn() };
+    const clearSteer = vi.fn();
+    const clearFollow = vi.fn();
+    const pi: PiLike = { clearSteeringQueue: clearSteer, clearFollowUpQueue: clearFollow };
+    const cachedShutdown = vi.fn();
+    const onProcessExit = vi.fn();
 
     makeShutdown({
       pi,
-      cachedCtx: { shutdown: vi.fn() },
+      cachedCtx: { shutdown: cachedShutdown },
       queue,
       onEmit,
-      onProcessExit: vi.fn(),
+      onProcessExit,
       callLog: [],
     })();
 
-    expect(queue).toEqual({ steering: [], followUp: [] });
-    expect(onEmit).toHaveBeenCalledTimes(1);
+    expect(clearSteer).not.toHaveBeenCalled();
+    expect(clearFollow).not.toHaveBeenCalled();
+    expect(onEmit).not.toHaveBeenCalled();
+    expect(cachedShutdown).toHaveBeenCalledTimes(1);
+    expect(onProcessExit).toHaveBeenCalledTimes(1);
   });
 
-  it("both queues empty: does NOT emit queue_update, still calls pi.clear* defensively", () => {
-    const queue: ShadowQueue = { steering: [], followUp: [] };
-    const onEmit = vi.fn();
+  it("pi version with clear* methods present: still NOT called (honest policy)", () => {
+    // Even if a future pi build re-adds the methods to the ExtensionAPI,
+    // the current bridge SHALL NOT call them. A future OpenSpec change
+    // (restore-mid-turn-queue-mutation) would re-introduce calls together
+    // with the protocol + UI affordances.
+    const queue: ShadowQueue = { steering: ["a"], followUp: ["b"] };
     const clearSteer = vi.fn();
     const clearFollow = vi.fn();
     const pi: PiLike = { clearSteeringQueue: clearSteer, clearFollowUpQueue: clearFollow };
@@ -130,60 +116,17 @@ describe("bridge shutdown: shadow-queue reset", () => {
       pi,
       cachedCtx: { shutdown: vi.fn() },
       queue,
-      onEmit,
+      onEmit: vi.fn(),
       onProcessExit: vi.fn(),
       callLog: [],
     })();
 
-    expect(onEmit).not.toHaveBeenCalled();
-    // Defensive clears run unconditionally — pi's queues may be non-empty
-    // from non-dashboard sources.
-    expect(clearSteer).toHaveBeenCalledTimes(1);
-    expect(clearFollow).toHaveBeenCalledTimes(1);
+    expect(clearSteer).not.toHaveBeenCalled();
+    expect(clearFollow).not.toHaveBeenCalled();
+    expect(queue).toEqual({ steering: ["a"], followUp: ["b"] });
   });
 
-  it("pi missing clearSteeringQueue / clearFollowUpQueue: still resets shadow + emits + does not throw", () => {
-    const queue: ShadowQueue = { steering: ["a"], followUp: ["b"] };
-    const onEmit = vi.fn();
-    const pi: PiLike = {}; // both functions absent — pi version skew
-    const cachedCtx: CachedCtxLike = { shutdown: vi.fn() };
-
-    expect(() => {
-      makeShutdown({ pi, cachedCtx, queue, onEmit, onProcessExit: vi.fn(), callLog: [] })();
-    }).not.toThrow();
-
-    expect(queue).toEqual({ steering: [], followUp: [] });
-    expect(onEmit).toHaveBeenCalledTimes(1);
-  });
-
-  it("pi.clearSteeringQueue throws: teardown continues (shadow still reset, emit still fires, cachedCtx.shutdown still called)", () => {
-    const queue: ShadowQueue = { steering: ["a"], followUp: [] };
-    const onEmit = vi.fn();
-    const cachedShutdown = vi.fn();
-    const pi: PiLike = {
-      clearSteeringQueue: () => {
-        throw new Error("boom");
-      },
-      clearFollowUpQueue: vi.fn(),
-    };
-
-    expect(() => {
-      makeShutdown({
-        pi,
-        cachedCtx: { shutdown: cachedShutdown },
-        queue,
-        onEmit,
-        onProcessExit: vi.fn(),
-        callLog: [],
-      })();
-    }).not.toThrow();
-
-    expect(queue).toEqual({ steering: [], followUp: [] });
-    expect(onEmit).toHaveBeenCalledTimes(1);
-    expect(cachedShutdown).toHaveBeenCalledTimes(1);
-  });
-
-  it("order of operations: pi.clearSteeringQueue → pi.clearFollowUpQueue → emitQueueUpdate → cachedCtx.shutdown → process.exit", () => {
+  it("order of operations: cachedCtx.shutdown → setTimeout(process.exit) only", () => {
     const queue: ShadowQueue = { steering: ["a"], followUp: ["b"] };
     const callLog: string[] = [];
     const pi: PiLike = { clearSteeringQueue: vi.fn(), clearFollowUpQueue: vi.fn() };
@@ -192,34 +135,12 @@ describe("bridge shutdown: shadow-queue reset", () => {
     makeShutdown({ pi, cachedCtx, queue, onEmit: vi.fn(), onProcessExit: vi.fn(), callLog })();
 
     expect(callLog).toEqual([
-      "pi.clearSteeringQueue",
-      "pi.clearFollowUpQueue",
-      "emitQueueUpdate",
       "cachedCtx.shutdown",
       "setTimeout(process.exit)",
     ]);
   });
 
-  it("safety-net: cachedCtx.shutdown still called and process.exit scheduled when shadows are empty", () => {
-    const queue: ShadowQueue = { steering: [], followUp: [] };
-    const cachedShutdown = vi.fn();
-    const onProcessExit = vi.fn();
-    const pi: PiLike = { clearSteeringQueue: vi.fn(), clearFollowUpQueue: vi.fn() };
-
-    makeShutdown({
-      pi,
-      cachedCtx: { shutdown: cachedShutdown },
-      queue,
-      onEmit: vi.fn(),
-      onProcessExit,
-      callLog: [],
-    })();
-
-    expect(cachedShutdown).toHaveBeenCalledTimes(1);
-    expect(onProcessExit).toHaveBeenCalledTimes(1);
-  });
-
-  it("safety-net: process.exit scheduled even when cachedCtx is null", () => {
+  it("cachedCtx is null: safety-net process.exit still fires", () => {
     const queue: ShadowQueue = { steering: ["a"], followUp: [] };
     const onProcessExit = vi.fn();
     const pi: PiLike = { clearSteeringQueue: vi.fn(), clearFollowUpQueue: vi.fn() };

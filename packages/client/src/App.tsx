@@ -10,6 +10,7 @@ import { MobileShell } from "./components/MobileShell.js";
 import { useMobile } from "./hooks/useMobile.js";
 import { getMobileDepth } from "./lib/mobile-depth.js";
 import { ChatView, type ChatViewHandle } from "./components/ChatView.js";
+import { SessionBanner } from "./components/SessionBanner.js";
 import { ConfirmDialog } from "./components/ConfirmDialog.js";
 // Flow components are no longer imported by the shell. They render
 // exclusively via plugin slot claims (content-header-sticky,
@@ -52,7 +53,7 @@ import { FileDiffView } from "./components/FileDiffView.js";
 // SubagentPopoutPage no longer imported by the shell — it's registered via
 // the subagents-plugin's `shell-overlay-route` claim and mounted through
 // `<ShellOverlayRouteSlot>` below. See change: add-flow-agent-popout.
-import { createInitialState, findLastUserPrompt, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { createInitialState, deriveBannerState, findLastUserPrompt, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { useMessageHandler } from "./hooks/useMessageHandler.js";
 import { useEditors } from "./lib/use-editors.js";
 import { useContentViews } from "./hooks/useContentViews.js";
@@ -750,12 +751,18 @@ export default function App() {
     pendingSpawnsRef,
   });
   const {
-    handleAbort, handleForceKill, handleCancelPending, handleClearSteeringQueue, handleClearFollowupSlot, handleEditFollowupSlot, handlePromoteFollowupEntry, handleRemoveFollowupEntry, handleEditFollowupEntry, handleRespondToUi, handleSend,
+    // Queue-mutation action senders removed entirely (pi exposes no mutation
+    // primitives). QueuePanel is display-only; Stop is now the bare abort
+    // (no yank-to-draft, which produced ghost duplicates). See change:
+    // honest-mid-turn-queue-surface.
+    handleAbort, handleForceKill, handleCancelPending, handleRespondToUi, handleSend,
     handleSelect, handleRenameSession, handleShutdownSession, handleKillProcess,
     handleSendPromptToSession, handleResumeSession, handleResumeSessionKeepPosition, handleSpawnSession,
     handleHideSession, handleUnhideSession,
     handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleTerminalTitle,
     handleListFiles,
+    // Bridge-owned follow-up buffer mutation senders. See change: rework-mid-turn-prompt-queue.
+    removeFollowUpEntry, editFollowUpEntry, promoteFollowUpEntry, clearFollowUpEntries,
   } = sessionActions;
 
   // Flow command interception is gone. /flows, /flows:new, /flows:edit,
@@ -811,33 +818,13 @@ export default function App() {
     }
   }, [handleSend, selectedId, clearDraftForSession, clearImagesForSession, sessions, BUILTIN_SLASH_COMMANDS]);
 
-  // Wrap handleAbort to restore queued steering + follow-up text into the
-  // command-input draft, matching pi-TUI's `restoreQueuedMessagesToEditor`
-  // behavior (interactive-mode.js:3040). Order: queued text first (steering
-  // then followUp, joined with \n\n), then whatever the user was currently
-  // typing. The bridge clears both shadow queues on abort, so this snapshot
-  // happens BEFORE dispatching the WS abort message.
-  // See change: reset-shadow-queues-on-shutdown.
-  const wrappedHandleAbort = useCallback(() => {
-    if (!selectedId) {
-      handleAbort();
-      return;
-    }
-    const session = sessions.get(selectedId);
-    const steering = session?.pendingQueues?.steering ?? [];
-    const followUp = session?.pendingQueues?.followUp ?? [];
-    const queuedText = [...steering, ...followUp]
-      .filter((t) => t.trim())
-      .join("\n\n");
-    if (queuedText) {
-      const currentDraft = drafts.get(selectedId) ?? "";
-      const combined = [queuedText, currentDraft]
-        .filter((t) => t.trim())
-        .join("\n\n");
-      setDraftForSelected(combined);
-    }
-    handleAbort();
-  }, [selectedId, sessions, drafts, setDraftForSelected, handleAbort]);
+  // wrappedHandleAbort removed. The yank-to-draft UX ("restoreQueuedMessages
+  // ToEditor" parity) required pi to actually clear its queues on abort, which
+  // it does not — pi.Agent.abort() only signals the AbortController, queues
+  // persist. The yank therefore produced ghost duplicates (drafted-edited copy
+  // + original drain). Stop now invokes bare handleAbort; queued messages stay
+  // visible in QueuePanel / inline steering bubbles until pi drains them at
+  // the next prompt. See change: honest-mid-turn-queue-surface.
 
   const openspecActions = useOpenSpecActions({
     send,
@@ -1150,15 +1137,25 @@ export default function App() {
             </div>
           }>
             <SessionAssetsProvider assets={selectedSession?.assets}>
-            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} queuedTexts={queuedTextsForSelected} onCancelPending={handleCancelPending} onRespondToUi={handleRespondToUi} onAbort={wrappedHandleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? []} onCancelSteering={handleClearSteeringQueue} onRetryAfterError={selectedId ? () => {
+            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} queuedTexts={queuedTextsForSelected} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? []} />
+            </SessionAssetsProvider>
+          </ErrorBoundary>
+          {/* Unified status banner. Sticky above the command input — picks
+              exactly ONE variant from `(retryState, lastError)`. Replaces
+              RetryBanner + ErrorBanner that previously lived inside ChatView.
+              See change: unify-status-banner-and-terminal-limit-stop. */}
+          <SessionBanner
+            state={deriveBannerState(selectedState)}
+            onAbort={handleAbort}
+            onRetry={selectedId ? () => {
               // Retry the last user prompt by re-sending it via send_prompt.
-              // The previous behaviour (handleResumeSession with mode="continue")
-              // no-ops on alive-but-errored sessions because the server short-
-              // circuits with "Session is already active". See change:
+              // The reducer flags the new user message `retriedFrom` so the
+              // chat view does not render a duplicate bubble. See change:
               // fix-retry-resends-last-user-message.
               const last = findLastUserPrompt(selectedState.messages);
               if (last) handleSendPromptToSession(selectedId, last.text, last.images);
-            } : undefined} onDismissError={selectedId ? () => {
+            } : undefined}
+            onDismiss={selectedId ? () => {
               setSessionStates((prev) => {
                 const next = new Map(prev);
                 const current = next.get(selectedId!);
@@ -1167,9 +1164,8 @@ export default function App() {
                 }
                 return next;
               });
-            } : undefined} />
-            </SessionAssetsProvider>
-          </ErrorBoundary>
+            } : undefined}
+          />
           <StatusBar
             model={selectedState.model ?? selectedSession?.model}
             models={modelsMap.get(selectedId)}
@@ -1202,16 +1198,19 @@ export default function App() {
               send({ type: "role_preset_delete", sessionId: selectedId, presetName });
             }}
           />
-          {/* Pi-native follow-up queue (v2: multi-entry cycling). Steer chips moved
-              to inline-chat rendering inside ChatView (see ChatView.tsx `pending-steer-card`).
-              See change: add-followup-edit-and-steer-cancel. */}
+          {/* Pi-native follow-up queue — DISPLAY-ONLY (cycle with ↑/↓).
+              Mutation controls (clear / edit / promote / remove) removed:
+              pi's ExtensionAPI doesn't expose queue mutation; the previous
+              implementation called fictional `clearFollowUpQueue` and
+              corrupted pi's queue with append-duplicates. Empirical test:
+              /tmp/pi-queue-experiment.mjs. See change:
+              unify-status-banner-and-terminal-limit-stop. */}
           <QueuePanel
             followUp={selectedSession?.pendingQueues?.followUp ?? []}
-            onClearFollowup={handleClearFollowupSlot}
-            onEditFollowup={handleEditFollowupSlot}
-            onEditFollowupEntry={handleEditFollowupEntry}
-            onRemoveFollowupEntry={handleRemoveFollowupEntry}
-            onPromoteFollowupEntry={handlePromoteFollowupEntry}
+            onEdit={(index, text) => editFollowUpEntry(index, text)}
+            onRemove={removeFollowUpEntry}
+            onPromote={promoteFollowUpEntry}
+            onClearAll={() => clearFollowUpEntries("all")}
           />
           <CommandInput
             commands={selectedCommands}
@@ -1221,7 +1220,7 @@ export default function App() {
             disabled={false}
             sessionStatus={selectedState.status}
             retrying={selectedState.retryState !== undefined}
-            onAbort={wrappedHandleAbort}
+            onAbort={handleAbort}
             onForceKill={handleForceKill}
             pendingPrompt={!!selectedState.pendingPrompt}
             onCancelPending={handleCancelPending}

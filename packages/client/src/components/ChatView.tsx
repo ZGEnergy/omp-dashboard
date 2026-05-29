@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useCallback, useState, useMemo, forwardRef, useImperativeHandle } from "react";
 import { Icon } from "@mdi/react";
 import { mdiContentCopy, mdiTextBox, mdiLoading, mdiChevronDown, mdiSourceFork, mdiClose } from "@mdi/js";
-import { ErrorBanner } from "./ErrorBanner";
-import { RetryBanner } from "./RetryBanner";
+// RetryBanner + ErrorBanner replaced by the unified SessionBanner mounted
+// in App.tsx (sticky above the command input). See change:
+// unify-status-banner-and-terminal-limit-stop.
 import type { SessionState, ChatImage, InteractiveUiRequest } from "../lib/event-reducer.js";
 import type { ToolContext } from "./tool-renderers/index.js";
 import { MarkdownContent } from "./MarkdownContent.js";
@@ -28,13 +29,15 @@ interface Props {
   sessionId?: string;
   state: SessionState;
   toolContext: ToolContext;
-  onCancelPending?: () => void;
+  // onCancelPending removed — pi exposes no queue-mutation API, so the
+  // cancel-pending callback was always a shadow-only lie. See change:
+  // honest-mid-turn-queue-surface.
   onRespondToUi?: (requestId: string, result?: unknown, cancelled?: boolean) => void;
   onAbort?: () => void;
   onForceKill?: () => void;
   onForkFromMessage?: (entryId: string) => void;
-  onDismissError?: () => void;
-  onRetryAfterError?: () => void;
+  // onDismissError / onRetryAfterError moved to App.tsx → SessionBanner.
+  // See change: unify-status-banner-and-terminal-limit-stop.
   /**
    * Texts currently in the bridge-owned mid-turn queue. When `pendingPrompt.text`
    * matches an entry, the optimistic card is suppressed in favour of the
@@ -50,8 +53,9 @@ interface Props {
    * the real user message via `message_end`. See change: add-followup-edit-and-steer-cancel.
    */
   pendingSteering?: string[];
-  /** Cancel all pending steering messages (bulk; pi exposes only clearSteeringQueue). */
-  onCancelSteering?: () => void;
+  // onCancelSteering / onCancelPending omitted: pi exposes no queue-mutation
+  // API. Steering bubbles render display-only; cancellation requires upstream
+  // pi support (tracked separately). See change: honest-mid-turn-queue-surface.
 }
 
 function ImageAttachments({ images }: { images: ChatImage[] }) {
@@ -143,7 +147,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onCancelPending, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onDismissError, onRetryAfterError, queuedTexts, pendingSteering, onCancelSteering }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, queuedTexts, pendingSteering }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottom = useRef(true);
   const programmaticScroll = useRef(false);
@@ -251,10 +255,15 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     }
   }, [state.messages.length, state.streamingText, state.pendingPrompt, markProgrammatic]);
 
-  // Group consecutive repeated tool calls for cleaner display
+  // Group consecutive repeated tool calls for cleaner display.
+  // Also drop user messages flagged `retriedFrom` (manual Retry button
+  // produced a duplicate of the prior user bubble after an error). See
+  // change: unify-status-banner-and-terminal-limit-stop.
   const filteredMessages = useMemo(() => {
-    if (showDebugTools) return state.messages;
-    return state.messages.filter((m) => m.role !== "toolResult" || !isDebugTool(m.toolName ?? ""));
+    const base = showDebugTools
+      ? state.messages
+      : state.messages.filter((m) => m.role !== "toolResult" || !isDebugTool(m.toolName ?? ""));
+    return base.filter((m) => !m.retriedFrom);
   }, [state.messages, showDebugTools]);
   const groupedMessages = useMemo(() => groupConsecutiveToolCalls(filteredMessages), [filteredMessages]);
   const retriedErrorIds = useMemo(() => findRetriedErrorIds(filteredMessages), [filteredMessages]);
@@ -490,49 +499,25 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
         </div>
       )}
 
-      {/* Retry banner — visible while a synthesized provider retry is in flight.
-          Bridge sends `delayMs: -1` / `maxAttempts: -1` sentinels (pi does not
-          expose its retry settings); RetryBanner renders an indeterminate state.
-          See change: fix-provider-retry-infinite-loop. */}
-      {state.retryState && (
-        <RetryBanner retryState={state.retryState} onAbort={onAbort} />
-      )}
-
-      {/* Error banner */}
-      {state.lastError && (
-        <ErrorBanner
-          message={state.lastError.message}
-          onDismiss={onDismissError}
-          onRetry={onRetryAfterError}
-        />
-      )}
+      {/* Retry banner + Error banner replaced by the unified SessionBanner
+          mounted in App.tsx, sticky above the command input. Race overlap
+          between yellow + red is impossible by construction — the selector
+          picks exactly one variant. See change:
+          unify-status-banner-and-terminal-limit-stop. */}
 
       {/* Inline-chat steering: pending steer entries render here as user-style
-          bubbles, positioned at the bottom of the chat list. Each shows a
-          STEERING header + spinner + ✕ cancel. Once pi drains the entry on
-          turn_end, the bridge clears `pendingSteering`, the bubble disappears,
-          and the chat naturally shows the prompt as a regular user message
-          via the subsequent `message_end`. See change: add-followup-edit-and-steer-cancel. */}
+          bubbles, positioned at the bottom of the chat list. Once pi drains
+          the entry on turn_end, the bridge splices the shadow (drain-by-
+          matcher), the bubble disappears, and the chat shows the prompt as a
+          regular user message via the subsequent `message_end`. Display only
+          — pi exposes no queue-mutation API to extensions. See change:
+          honest-mid-turn-queue-surface. */}
       {pendingSteering && pendingSteering.length > 0 && pendingSteering.map((steerText, idx) => (
         <div key={`pending-steer-${idx}-${steerText.slice(0, 16)}`} data-testid="pending-steer-card" className="mt-4 mb-4 flex justify-end">
           <div className={`relative bg-blue-500/10 border border-blue-500/20 border-l-2 border-l-blue-400 rounded-xl shadow-md px-4 py-2 ${bubbleMax}`}>
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-blue-400/80 font-medium">
-                <Icon path={mdiLoading} size={0.45} className="animate-spin" />
-                Steering
-              </div>
-              {idx === 0 && onCancelSteering && (
-                <button
-                  type="button"
-                  onClick={onCancelSteering}
-                  data-testid="pending-steer-cancel"
-                  aria-label="Cancel pending steering"
-                  title="Cancel all pending steering"
-                  className="inline-flex items-center justify-center w-5 h-5 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                >
-                  <Icon path={mdiClose} size={0.55} />
-                </button>
-              )}
+            <div className="flex items-center gap-1.5 mb-1 text-[10px] uppercase tracking-wider text-blue-400/80 font-medium">
+              <Icon path={mdiLoading} size={0.45} className="animate-spin" />
+              Steering
             </div>
             <MarkdownContent content={steerText} />
           </div>

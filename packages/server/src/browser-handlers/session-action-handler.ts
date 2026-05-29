@@ -533,80 +533,28 @@ export function handleAbort(
   ctx.piGateway.sendToSession(msg.sessionId, { type: "abort", sessionId: msg.sessionId });
 }
 
-/**
- * Clear pi's steering queue for the given session. Forwards to bridge,
- * which calls `pi.clearSteeringQueue()`. Idempotent. Drops silently when
- * the session is unknown. See change: add-followup-edit-and-steer-cancel.
- */
-export function handleClearSteeringQueue(
-  msg: Extract<BrowserToServerMessage, { type: "clear_steering_queue" }>,
-  ctx: BrowserHandlerContext,
-): void {
-  if (!ctx.sessionManager.get(msg.sessionId)) return;
-  ctx.piGateway.sendToSession(msg.sessionId, { type: "clear_steering_queue", sessionId: msg.sessionId });
-}
+// ── Follow-up queue mutation forwarders (bridge-owned buffer) ─────────────
+//
+// These five handlers forward bridge-owned-buffer mutation messages to the
+// session's bridge. The bridge mutates `bridgeFollowUp` locally; nothing
+// touches pi. The OLD pi-mutation message types from Phase 3
+// (`clear_steering_queue`, `clear_followup_slot`, `edit_followup_slot`)
+// remain permanently deleted. Steer mutation is never exposed.
+//
+// See change: rework-mid-turn-prompt-queue.
 
-/**
- * Clear pi's follow-up slot for the given session. Forwards to bridge,
- * which calls `pi.clearFollowUpQueue()`. Idempotent.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export function handleClearFollowupSlot(
-  msg: Extract<BrowserToServerMessage, { type: "clear_followup_slot" }>,
-  ctx: BrowserHandlerContext,
-): void {
-  if (!ctx.sessionManager.get(msg.sessionId)) return;
-  ctx.piGateway.sendToSession(msg.sessionId, { type: "clear_followup_slot", sessionId: msg.sessionId });
-}
-
-/**
- * Atomic replace of pi's follow-up slot (clear-then-send). Forwards text +
- * optional images to bridge, which calls clearFollowUpQueue then sendUserMessage.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export function handleEditFollowupSlot(
-  msg: Extract<BrowserToServerMessage, { type: "edit_followup_slot" }>,
+export function handleClearFollowupEntries(
+  msg: Extract<BrowserToServerMessage, { type: "clear_followup_entries" }>,
   ctx: BrowserHandlerContext,
 ): void {
   if (!ctx.sessionManager.get(msg.sessionId)) return;
   ctx.piGateway.sendToSession(msg.sessionId, {
-    type: "edit_followup_slot",
+    type: "clear_followup_entries",
     sessionId: msg.sessionId,
-    text: msg.text,
-    images: msg.images,
+    indices: msg.indices,
   });
 }
 
-/**
- * Promote the follow-up entry at `index` to the head (position 0) of the queue.
- * See change: add-followup-edit-and-steer-cancel (task 13.3).
- */
-export function handlePromoteFollowupEntry(
-  msg: Extract<BrowserToServerMessage, { type: "promote_followup_entry" }>,
-  ctx: BrowserHandlerContext,
-): void {
-  if (!ctx.sessionManager.get(msg.sessionId)) return;
-  ctx.piGateway.sendToSession(msg.sessionId, {
-    type: "promote_followup_entry",
-    sessionId: msg.sessionId,
-    index: msg.index,
-  });
-}
-
-/** Remove the follow-up entry at `index` from the queue. */
-export function handleRemoveFollowupEntry(
-  msg: Extract<BrowserToServerMessage, { type: "remove_followup_entry" }>,
-  ctx: BrowserHandlerContext,
-): void {
-  if (!ctx.sessionManager.get(msg.sessionId)) return;
-  ctx.piGateway.sendToSession(msg.sessionId, {
-    type: "remove_followup_entry",
-    sessionId: msg.sessionId,
-    index: msg.index,
-  });
-}
-
-/** Replace the follow-up entry at `index` with new text. */
 export function handleEditFollowupEntry(
   msg: Extract<BrowserToServerMessage, { type: "edit_followup_entry" }>,
   ctx: BrowserHandlerContext,
@@ -620,6 +568,32 @@ export function handleEditFollowupEntry(
     images: msg.images,
   });
 }
+
+export function handleRemoveFollowupEntry(
+  msg: Extract<BrowserToServerMessage, { type: "remove_followup_entry" }>,
+  ctx: BrowserHandlerContext,
+): void {
+  if (!ctx.sessionManager.get(msg.sessionId)) return;
+  ctx.piGateway.sendToSession(msg.sessionId, {
+    type: "remove_followup_entry",
+    sessionId: msg.sessionId,
+    index: msg.index,
+  });
+}
+
+export function handlePromoteFollowupEntry(
+  msg: Extract<BrowserToServerMessage, { type: "promote_followup_entry" }>,
+  ctx: BrowserHandlerContext,
+): void {
+  if (!ctx.sessionManager.get(msg.sessionId)) return;
+  ctx.piGateway.sendToSession(msg.sessionId, {
+    type: "promote_followup_entry",
+    sessionId: msg.sessionId,
+    index: msg.index,
+  });
+}
+
+
 
 export function handleFlowControl(
   msg: Extract<BrowserToServerMessage, { type: "flow_control" }>,

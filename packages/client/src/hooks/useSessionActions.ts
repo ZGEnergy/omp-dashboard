@@ -92,53 +92,33 @@ export function useSessionActions(deps: SessionActionDeps) {
     send({ type: "force_kill", sessionId: selectedId });
   }, [selectedId, send, setSessionStates]);
 
-  /**
-   * Clear pi's steering queue for the selected session.
-   * Sends `clear_steering_queue`; bridge calls `pi.clearSteeringQueue()`.
-   * Pi's resulting `queue_update` populates `Session.pendingQueues`.
-   * See change: add-followup-edit-and-steer-cancel.
-   */
-  const handleClearSteeringQueue = useCallback(() => {
-    if (!selectedId) return;
-    send({ type: "clear_steering_queue", sessionId: selectedId });
-  }, [selectedId, send]);
+  // ── Follow-up queue mutation (bridge-owned buffer) ──────────────────
+  //
+  // These five senders dispatch the wire messages defined in
+  // browser-protocol.ts. The bridge mutates `bridgeFollowUp` locally; pi
+  // is not involved. Steer mutation is intentionally NOT exposed (steer
+  // drains too fast for it to matter; user direction).
+  //
+  // See change: rework-mid-turn-prompt-queue.
 
-  /**
-   * Clear pi's follow-up slot for the selected session.
-   * Sends `clear_followup_slot`; bridge calls `pi.clearFollowUpQueue()`.
-   * See change: add-followup-edit-and-steer-cancel.
-   */
-  const handleClearFollowupSlot = useCallback(() => {
-    if (!selectedId) return;
-    send({ type: "clear_followup_slot", sessionId: selectedId });
-  }, [selectedId, send]);
-
-  /**
-   * Replace pi's follow-up slot atomically with new text (v1, deprecated).
-   * v2 prefers `handleEditFollowupEntry(0, text)`. Bridge accepts both.
-   * See change: add-followup-edit-and-steer-cancel.
-   */
-  const handleEditFollowupSlot = useCallback((text: string, images?: ImageContent[]) => {
-    if (!selectedId) return;
-    send({ type: "edit_followup_slot", sessionId: selectedId, text, images });
-  }, [selectedId, send]);
-
-  /** v2: promote follow-up entry at `index` to position 0 (head). */
-  const handlePromoteFollowupEntry = useCallback((index: number) => {
-    if (!selectedId) return;
-    send({ type: "promote_followup_entry", sessionId: selectedId, index });
-  }, [selectedId, send]);
-
-  /** v2: remove follow-up entry at `index`. */
-  const handleRemoveFollowupEntry = useCallback((index: number) => {
+  const removeFollowUpEntry = useCallback((index: number) => {
     if (!selectedId) return;
     send({ type: "remove_followup_entry", sessionId: selectedId, index });
   }, [selectedId, send]);
 
-  /** v2: replace follow-up entry at `index` with new text. */
-  const handleEditFollowupEntry = useCallback((index: number, text: string, images?: ImageContent[]) => {
+  const editFollowUpEntry = useCallback((index: number, text: string, images?: ImageContent[]) => {
     if (!selectedId) return;
     send({ type: "edit_followup_entry", sessionId: selectedId, index, text, images });
+  }, [selectedId, send]);
+
+  const promoteFollowUpEntry = useCallback((index: number) => {
+    if (!selectedId) return;
+    send({ type: "promote_followup_entry", sessionId: selectedId, index });
+  }, [selectedId, send]);
+
+  const clearFollowUpEntries = useCallback((indices: number[] | "all") => {
+    if (!selectedId) return;
+    send({ type: "clear_followup_entries", sessionId: selectedId, indices });
   }, [selectedId, send]);
 
   const handleCancelPending = useCallback(() => {
@@ -357,11 +337,13 @@ export function useSessionActions(deps: SessionActionDeps) {
   }, [selectedId, send]);
 
   return {
-    handleAbort, handleForceKill, handleCancelPending, handleClearSteeringQueue, handleClearFollowupSlot, handleEditFollowupSlot, handlePromoteFollowupEntry, handleRemoveFollowupEntry, handleEditFollowupEntry, handleRespondToUi, handleFlowAction, handleSend,
+    handleAbort, handleForceKill, handleCancelPending, handleRespondToUi, handleFlowAction, handleSend,
     handleSelect, handleRenameSession, handleShutdownSession, handleKillProcess,
     handleSendPromptToSession, handleResumeSession, handleResumeSessionKeepPosition, handleSpawnSession,
     handleHideSession, handleUnhideSession,
     handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleTerminalTitle,
     handleListFiles,
+    // Bridge-owned follow-up buffer mutation senders. See change: rework-mid-turn-prompt-queue.
+    removeFollowUpEntry, editFollowUpEntry, promoteFollowUpEntry, clearFollowUpEntries,
   };
 }

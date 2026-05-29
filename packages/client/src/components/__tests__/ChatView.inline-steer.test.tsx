@@ -30,7 +30,7 @@ beforeAll(() => {
   });
 });
 
-function renderWith(overrides: { pendingSteering?: string[]; onCancelSteering?: () => void; withMessages?: boolean } = {}) {
+function renderWith(overrides: { pendingSteering?: string[]; withMessages?: boolean } = {}) {
   const state = createInitialState();
   if (overrides.withMessages) {
     state.messages.push({
@@ -53,7 +53,6 @@ function renderWith(overrides: { pendingSteering?: string[]; onCancelSteering?: 
         state={state}
         toolContext={defaultToolContext}
         pendingSteering={overrides.pendingSteering}
-        onCancelSteering={overrides.onCancelSteering}
       />
     </ThemeProvider>,
   );
@@ -86,20 +85,12 @@ describe("ChatView inline-chat steering", () => {
     expect(card.querySelector(".animate-spin")).toBeTruthy();
   });
 
-  it("cancel button on first card fires onCancelSteering", () => {
-    const onCancelSteering = vi.fn();
-    const { getByTestId } = renderWith({ pendingSteering: ["foo"], onCancelSteering });
-    fireEvent.click(getByTestId("pending-steer-cancel"));
-    expect(onCancelSteering).toHaveBeenCalledTimes(1);
-  });
-
-  it("only one cancel button rendered even with multiple pending steers (bulk cancel only)", () => {
-    const onCancelSteering = vi.fn();
-    const { queryAllByTestId } = renderWith({
-      pendingSteering: ["a", "b", "c"],
-      onCancelSteering,
-    });
-    expect(queryAllByTestId("pending-steer-cancel")).toHaveLength(1);
+  // Steering ✕ cancel button removed: pi's ExtensionAPI doesn't expose
+  // queue mutation, so the button was a silent lie — pi delivered the
+  // message anyway. See change: unify-status-banner-and-terminal-limit-stop.
+  it("no cancel button rendered on steer cards (pi API gap, fictional clearSteeringQueue)", () => {
+    const { queryAllByTestId } = renderWith({ pendingSteering: ["foo", "bar"] });
+    expect(queryAllByTestId("pending-steer-cancel")).toHaveLength(0);
   });
 
   it("cards render in user-bubble style (right-aligned + blue border)", () => {

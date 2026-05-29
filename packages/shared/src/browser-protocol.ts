@@ -632,72 +632,49 @@ export interface AbortToBrowserMessage {
   sessionId: string;
 }
 
-/**
- * Browser -> server: clear pi's steering queue for the given session.
- * Server forwards as `clear_steering_queue`; bridge calls `pi.clearSteeringQueue()`.
- * Pi emits a fresh `queue_update` reflecting the empty array, which the server
- * caches + broadcasts. Idempotent on empty queue.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export interface ClearSteeringQueueFromBrowserMessage {
-  type: "clear_steering_queue";
+// ── Follow-up queue mutation (bridge-owned buffer) ──────────────────
+//
+// Pi's ExtensionAPI (verified through 0.76.0) exposes no queue-mutation
+// primitives to extensions. The bridge owns `bridgeFollowUp: string[]`
+// authoritatively and never forwards dashboard-queued follow-ups to pi
+// until the drain loop ships them on `agent_end`. All mutation messages
+// below target the bridge buffer ONLY — never pi.
+// See change: rework-mid-turn-prompt-queue (spec mid-turn-prompt-queue).
+//
+// NOTE: the old pi-mutation message types from the deleted Phase 3
+// architecture (clear_steering_queue, clear_followup_slot,
+// edit_followup_slot) STAY PERMANENTLY DELETED. The names below for
+// edit/remove/promote_followup_entry are REUSED with new
+// bridge-buffer-only semantics — they no longer touch pi.
+
+export interface ClearFollowupEntriesFromBrowserMessage {
+  type: "clear_followup_entries";
   sessionId: string;
+  /** `"all"` empties the bridge buffer; `number[]` splices listed indices (sorted descending bridge-side to avoid index drift). */
+  indices: number[] | "all";
 }
 
-/**
- * Browser -> server: clear pi's follow-up slot for the given session.
- * Server forwards as `clear_followup_slot`; bridge calls `pi.clearFollowUpQueue()`.
- * Idempotent on empty slot.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export interface ClearFollowupSlotFromBrowserMessage {
-  type: "clear_followup_slot";
-  sessionId: string;
-}
-
-/**
- * Browser -> server (v1, deprecated): replace pi's follow-up slot atomically.
- * v2 prefers `edit_followup_entry { index: 0 }`. Bridge still accepts both
- * for backward compatibility.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export interface EditFollowupSlotFromBrowserMessage {
-  type: "edit_followup_slot";
-  sessionId: string;
-  text: string;
-  images?: ImageContent[];
-}
-
-/**
- * Browser -> server (v2): move follow-up entry at `index` to position 0.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export interface PromoteFollowupEntryFromBrowserMessage {
-  type: "promote_followup_entry";
-  sessionId: string;
-  index: number;
-}
-
-/**
- * Browser -> server (v2): remove follow-up entry at `index`.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export interface RemoveFollowupEntryFromBrowserMessage {
-  type: "remove_followup_entry";
-  sessionId: string;
-  index: number;
-}
-
-/**
- * Browser -> server (v2): replace follow-up entry at `index`.
- * See change: add-followup-edit-and-steer-cancel.
- */
+/** Replaces `bridgeFollowUp[index]`. Mutates bridge buffer only — no pi call. */
 export interface EditFollowupEntryFromBrowserMessage {
   type: "edit_followup_entry";
   sessionId: string;
   index: number;
   text: string;
   images?: ImageContent[];
+}
+
+/** Splices `bridgeFollowUp[index]`. Mutates bridge buffer only — no pi call. */
+export interface RemoveFollowupEntryFromBrowserMessage {
+  type: "remove_followup_entry";
+  sessionId: string;
+  index: number;
+}
+
+/** Moves `bridgeFollowUp[index]` to position 0 via splice + unshift. Silent no-op when `index <= 0`. No pi call. */
+export interface PromoteFollowupEntryFromBrowserMessage {
+  type: "promote_followup_entry";
+  sessionId: string;
+  index: number;
 }
 
 /**
@@ -711,6 +688,8 @@ export interface QueueUpdateToBrowserMessage {
   steering: string[];
   followUp: string[];
 }
+
+
 
 export interface RequestCommandsToBrowserMessage {
   type: "request_commands";
@@ -1161,10 +1140,8 @@ export type BrowserToServerMessage =
   | SessionViewBrowserMessage
   | SessionUnviewBrowserMessage
   | KillProcessBrowserMessage
-  | ClearSteeringQueueFromBrowserMessage
-  | ClearFollowupSlotFromBrowserMessage
-  | EditFollowupSlotFromBrowserMessage
-  | PromoteFollowupEntryFromBrowserMessage
-  | RemoveFollowupEntryFromBrowserMessage
+  | PluginActionMessage
+  | ClearFollowupEntriesFromBrowserMessage
   | EditFollowupEntryFromBrowserMessage
-  | PluginActionMessage;
+  | RemoveFollowupEntryFromBrowserMessage
+  | PromoteFollowupEntryFromBrowserMessage;

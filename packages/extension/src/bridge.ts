@@ -13,6 +13,7 @@ import { createCommandHandler } from "./command-handler.js";
 import { shouldApplyDefaultModel } from "./bridge-default-model-gate.js";
 import { RetryTracker } from "./retry-tracker.js";
 import { UsageLimitOrderer } from "./usage-limit-orderer.js";
+import { USAGE_LIMIT_PATTERN } from "@blackbelt-technology/pi-dashboard-shared/error-patterns.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -221,14 +222,26 @@ function initBridge(pi: ExtensionAPI) {
   const retryTracker = new RetryTracker();
   const usageLimitOrderer = new UsageLimitOrderer();
 
-  // Bridge-owned shadow queues. Pi's ExtensionAPI does NOT forward
-  // `queue_update` events to extensions (verified in pi-coding-agent 0.71+),
-  // so the bridge tracks steering + follow-up state itself by mirroring every
-  // mutation it performs on pi (sends, clears, edits) plus the natural drain
-  // boundaries (turn_end clears steering, agent_end clears followUp).
-  // The bridge is the source of truth that all browser clients converge on
-  // via `queue_update` ExtensionToServerMessage.
-  // See change: add-followup-edit-and-steer-cancel.
+  // Bridge-owned queue structures with TWO different ownership models:
+  //
+  // • bridgeSteering (pi-OWNED + SHADOW) — mirrors pi's Agent.steeringQueue.
+  //   Mutated only by `recordSteerSent` (on bridge-originated steer sends) +
+  //   drain-by-message_start-matcher (when pi delivers a queued steer entry,
+  //   the matching text is spliced).
+  //
+  // • bridgeFollowUp (BRIDGE-OWNED BUFFER) — authoritative store for
+  //   dashboard-originated follow-up entries while the agent is streaming.
+  //   Pi never sees these entries until `drainFollowupQueue()` ships them
+  //   one-at-a-time on `agent_end`. Mutated by `bufferFollowupSend`,
+  //   `drainFollowupQueue`, and the five mutation handlers (edit / remove /
+  //   promote / clear / pull-to-editor).
+  //
+  // Both feed the same `queue_update` ExtensionToServerMessage.
+  //
+  // Steer is permanently pi-owned + display-only (steer drains too fast at
+  // turn_end for mutation UI to matter; user direction).
+  //
+  // See change: rework-mid-turn-prompt-queue (spec mid-turn-prompt-queue).
   let bridgeSteering: string[] = [];
   let bridgeFollowUp: string[] = [];
   function emitQueueUpdate(): void {
@@ -248,17 +261,115 @@ function initBridge(pi: ExtensionAPI) {
     bridgeSteering.push(text);
     emitQueueUpdate();
   }
-  /** v2 soft cap on follow-up queue depth. See design.md Decision 8. */
+  /** Soft cap on follow-up buffer depth. See design.md Decision 8. */
   const FOLLOWUP_QUEUE_CAP = 20;
-  function recordFollowupSent(text: string): void {
+  /**
+   * Push a follow-up entry into the bridge-owned buffer.
+   *
+   * Replaces the prior `recordFollowupSent` shadow-mirror. Semantics flipped:
+   * the OLD function was called AFTER `pi.sendUserMessage(_, {deliverAs:"followUp"})`
+   * and recorded what pi already received. The NEW function is called INSTEAD
+   * of that pi call — pi never sees the entry until the drain loop ships it.
+   *
+   * The `isAgentStreaming` gate is defense-in-depth (callers already gate on
+   * `wasStreaming === true` before invoking this function).
+   *
+   * Image attachments are NOT carried in the bridge buffer in v1 (text-only).
+   * Image-bearing follow-ups buffered during streaming will lose their images
+   * on drain. Phase 1 archived contract preserved images; restoring this is
+   * deferred. See change: rework-mid-turn-prompt-queue (Known Limitation).
+   */
+  function bufferFollowupSend(text: string): void {
     if (!getBridgeState().isAgentStreaming) return;
-    // v2: multi-entry queue (was cap-1 in v1). Soft-cap; drop silently when over.
     if (bridgeFollowUp.length >= FOLLOWUP_QUEUE_CAP) {
-      console.warn("[dashboard] follow-up queue at soft cap (" + FOLLOWUP_QUEUE_CAP + "); dropping new entry");
+      console.warn("[dashboard] follow-up buffer at soft cap (" + FOLLOWUP_QUEUE_CAP + "); dropping new entry");
       return;
     }
     bridgeFollowUp.push(text);
     emitQueueUpdate();
+  }
+  /**
+   * Drain loop: on `agent_end`, pop the front of `bridgeFollowUp` and ship it
+   * to pi as a fresh-turn `sendUserMessage` (no `deliverAs`). Pop-before-send
+   * invariant: the entry is shifted off the buffer BEFORE the pi call. If
+   * `pi.sendUserMessage` throws, the entry is LOST by design (double-shipping
+   * is worse than dropping).
+   *
+   * Gates (all must pass): re-entrancy lock, idle, pi.hasPendingMessages,
+   * non-empty buffer. One entry per agent_end — the next agent_end re-enters
+   * this function for the next entry (natural serialization).
+   *
+   * See change: rework-mid-turn-prompt-queue (design.md D2).
+   */
+  let isDraining = false;
+  /**
+   * Drain the bridge-owned follow-up buffer by handing one entry to pi
+   * as a fresh-turn `sendUserMessage` (no `deliverAs`).
+   *
+   * Why no `deliverAs`: pi's agent loop calls `getFollowUpMessages()` only
+   * while the loop is active. Once `agent_end` fires and the loop's
+   * `executor` returns, pi's `finishRun()` flips `isStreaming = false` and
+   * `activeRun = undefined`. After that point, anything queued into pi's
+   * internal followUpQueue NEVER drains — pi has stopped reading it.
+   * (Verified at pi-coding-agent pi-agent-core/agent.js:307-330.)
+   *
+   * Two retry loops handle the transition window correctly:
+   *  - retryCount tracks how many setTimeout retries we've done
+   *  - if pi.isStreaming is still true (transition), we wait + retry
+   *  - once truly idle, sendUserMessage(entry) starts a fresh turn
+   *
+   * See change: rework-mid-turn-prompt-queue (post-smoke fix #3).
+   */
+  function drainFollowupQueue(retryCount = 0): void {
+    if (isDraining) return;
+    if (bridgeFollowUp.length === 0) return;
+
+    // TUI-coexistence gate: if pi has its own queued items (TUI alt+enter
+    // sends), wait for pi to drain those first via its own loop. The
+    // method lives on `ctx` (verified at pi 0.76.0 extensions/types.d.ts:227).
+    if (typeof cachedCtx?.hasPendingMessages === "function") {
+      try {
+        if (cachedCtx.hasPendingMessages()) return;
+      } catch { /* probe failure non-fatal */ }
+    }
+
+    // Idle gate: pi flips isStreaming=false in finishRun() AFTER the
+    // executor returns from runAgentLoop. queueMicrotask runs inside the
+    // executor (too early), so we use setTimeout to escape the loop AND
+    // poll for isIdle with bounded retries.
+    const idle = (() => {
+      try { return cachedCtx?.isIdle?.() === true; } catch { return false; }
+    })();
+    if (!idle) {
+      if (retryCount < 20) { // ~2s total (20 × 100ms)
+        setTimeout(() => drainFollowupQueue(retryCount + 1), 100);
+      } else {
+        console.warn("[dashboard] drainFollowupQueue: pi never idled after 2s; giving up");
+      }
+      return;
+    }
+
+    isDraining = true;
+    try {
+      // POP FIRST. Once shifted, the entry exists only on this stack frame.
+      const entry = bridgeFollowUp.shift()!;
+      // Emit immediately so wire-state matches buffer-state BEFORE the pi call.
+      emitQueueUpdate();
+
+      // Hand to pi as a fresh turn (no deliverAs). Pi is now idle, so
+      // pi.sendUserMessage starts a new run via Agent.prompt().
+      try {
+        (pi.sendUserMessage as any)(entry);
+      } catch (err) {
+        console.warn(
+          "[dashboard] drainFollowupQueue: pi.sendUserMessage threw — entry lost:",
+          err,
+        );
+        // INTENTIONAL: no re-push. Double-shipping is worse than dropping.
+      }
+    } finally {
+      isDraining = false;
+    }
   }
   /**
    * Mirror of pi's `_getUserMessageText` (pi-coding-agent agent-session.js).
@@ -277,17 +388,10 @@ function initBridge(pi: ExtensionAPI) {
       .join("");
   }
 
-  /** v2 helper: rewrite the entire follow-up queue + replay to pi. */
-  function rewriteFollowupQueue(newEntries: string[]): void {
-    const capped = newEntries.slice(0, FOLLOWUP_QUEUE_CAP);
-    const clearFn = (pi as any).clearFollowUpQueue;
-    if (typeof clearFn === "function") clearFn.call(pi);
-    for (const t of capped) {
-      (pi.sendUserMessage as any)(t, { deliverAs: "followUp" });
-    }
-    bridgeFollowUp = [...capped];
-    emitQueueUpdate();
-  }
+  // rewriteFollowupQueue removed. The clear-then-replay strategy was broken
+  // by construction (pi.clearFollowUpQueue is not on the ExtensionAPI, so the
+  // "clear" step was a no-op and the replay just appended ghosts to pi's real
+  // queue). See change: honest-mid-turn-queue-surface.
 
   /** Forward a synthesized auto_retry_* event using the standard event_forward shape. */
   const sendSyntheticRetryEvent = (eventType: string, data: Record<string, unknown>): void => {
@@ -661,62 +765,83 @@ function initBridge(pi: ExtensionAPI) {
         }
         return;
       }
-      // Pi-native queue control: route the three new browser messages
-      // straight to pi's clear/send APIs. See change: add-followup-edit-and-steer-cancel.
-      if (msg.type === "clear_steering_queue") {
-        if (msg.sessionId === sessionId) {
-          const fn = (pi as any).clearSteeringQueue;
-          if (typeof fn === "function") fn.call(pi);
-          else console.warn("[dashboard] pi.clearSteeringQueue unavailable (pi version)");
-          bridgeSteering = [];
-          emitQueueUpdate();
+      // ── Follow-up queue mutation (bridge-owned buffer) ─────────────────
+      //
+      // These five handlers mutate `bridgeFollowUp` only. NONE of them
+      // call pi.sendUserMessage, pi.clear*Queue, or any other pi method.
+      // The bridge owns the buffer; pi never sees these entries until the
+      // drain loop ships them on agent_end as fresh-turn sendUserMessage.
+      //
+      // The OLD pi-mutation handler set from Phase 3 (clear_steering_queue,
+      // clear_followup_slot, edit_followup_slot) is GONE forever — pi's
+      // ExtensionAPI exposes no clear*Queue primitives (verified through
+      // pi 0.76.0). Steer mutation will never be exposed (steer drains too
+      // fast for it to matter; user direction).
+      //
+      // See change: rework-mid-turn-prompt-queue (design.md D3).
+      if (msg.type === "edit_followup_entry") {
+        const { index, text } = msg as { type: string; index: number; text: string };
+        if (typeof index !== "number" || index < 0 || index >= bridgeFollowUp.length) {
+          connection.send({
+            type: "event_forward",
+            sessionId,
+            event: { eventType: "command_feedback", timestamp: Date.now(), data: {
+              command: "edit_followup_entry", status: "error", message: "Index out of range",
+            } },
+          });
+          return;
         }
-        return;
-      }
-      if (msg.type === "clear_followup_slot") {
-        if (msg.sessionId === sessionId) {
-          const fn = (pi as any).clearFollowUpQueue;
-          if (typeof fn === "function") fn.call(pi);
-          else console.warn("[dashboard] pi.clearFollowUpQueue unavailable (pi version)");
-          bridgeFollowUp = [];
-          emitQueueUpdate();
-        }
-        return;
-      }
-      if (msg.type === "edit_followup_slot") {
-        // v1 backward-compat path: "replace ALL follow-up entries with this one text."
-        // v2 clients prefer `edit_followup_entry { index: 0 }`. See change: add-followup-edit-and-steer-cancel.
-        if (msg.sessionId === sessionId) {
-          rewriteFollowupQueue([msg.text]);
-        }
-        return;
-      }
-      if (msg.type === "promote_followup_entry") {
-        if (msg.sessionId === sessionId) {
-          const idx = msg.index;
-          if (idx < 0 || idx >= bridgeFollowUp.length) return;
-          const head = bridgeFollowUp[idx];
-          const rest = bridgeFollowUp.filter((_, i) => i !== idx);
-          rewriteFollowupQueue([head, ...rest]);
-        }
+        bridgeFollowUp[index] = text;
+        emitQueueUpdate();
         return;
       }
       if (msg.type === "remove_followup_entry") {
-        if (msg.sessionId === sessionId) {
-          const idx = msg.index;
-          if (idx < 0 || idx >= bridgeFollowUp.length) return;
-          const surviving = bridgeFollowUp.filter((_, i) => i !== idx);
-          rewriteFollowupQueue(surviving);
+        const { index } = msg as { type: string; index: number };
+        if (typeof index !== "number" || index < 0 || index >= bridgeFollowUp.length) {
+          connection.send({
+            type: "event_forward",
+            sessionId,
+            event: { eventType: "command_feedback", timestamp: Date.now(), data: {
+              command: "remove_followup_entry", status: "error", message: "Index out of range",
+            } },
+          });
+          return;
         }
+        bridgeFollowUp.splice(index, 1);
+        emitQueueUpdate();
         return;
       }
-      if (msg.type === "edit_followup_entry") {
-        if (msg.sessionId === sessionId) {
-          const idx = msg.index;
-          if (idx < 0 || idx >= bridgeFollowUp.length) return;
-          const next = bridgeFollowUp.map((t, i) => (i === idx ? msg.text : t));
-          rewriteFollowupQueue(next);
+      if (msg.type === "promote_followup_entry") {
+        const { index } = msg as { type: string; index: number };
+        // Silent no-op for index 0 or invalid — no emit (D3).
+        if (typeof index !== "number" || index <= 0 || index >= bridgeFollowUp.length) {
+          return;
         }
+        const [entry] = bridgeFollowUp.splice(index, 1);
+        bridgeFollowUp.unshift(entry);
+        emitQueueUpdate();
+        return;
+      }
+      if (msg.type === "clear_followup_entries") {
+        const { indices } = msg as { type: string; indices: number[] | "all" };
+        if (indices === "all") {
+          if (bridgeFollowUp.length > 0) {
+            bridgeFollowUp = [];
+            emitQueueUpdate();
+          }
+          return;
+        }
+        if (!Array.isArray(indices)) return;
+        // Sort descending to avoid index drift across multiple splices.
+        const sorted = [...indices].sort((a, b) => b - a);
+        let mutated = false;
+        for (const i of sorted) {
+          if (typeof i === "number" && i >= 0 && i < bridgeFollowUp.length) {
+            bridgeFollowUp.splice(i, 1);
+            mutated = true;
+          }
+        }
+        if (mutated) emitQueueUpdate();
         return;
       }
       const response = await commandHandler.handle(msg);
@@ -804,33 +929,12 @@ function initBridge(pi: ExtensionAPI) {
       setTimeout(() => sendModelUpdateIfChanged(), 50);
     },
     shutdown: () => {
-      // Reset shadow queues + clear pi's native queues BEFORE cachedCtx.shutdown()
-      // so the bridge is still in a known-good state when the final queue_update
-      // is emitted. Pi's own teardown may fire events the bridge no longer
-      // processes after cachedCtx.shutdown(). Mirrors the session-change reset
-      // pattern at handleSessionChange (~bridge.ts:1709). See change:
-      // reset-shadow-queues-on-shutdown and capability mid-turn-prompt-queue
-      // requirement "Session shutdown resets shadow queues and clears pi's
-      // native queues".
-      try {
-        if (typeof (pi as any).clearSteeringQueue === "function") {
-          (pi as any).clearSteeringQueue();
-        }
-      } catch (err) {
-        console.warn("[dashboard] pi.clearSteeringQueue threw during shutdown:", err);
-      }
-      try {
-        if (typeof (pi as any).clearFollowUpQueue === "function") {
-          (pi as any).clearFollowUpQueue();
-        }
-      } catch (err) {
-        console.warn("[dashboard] pi.clearFollowUpQueue threw during shutdown:", err);
-      }
-      if (bridgeSteering.length > 0 || bridgeFollowUp.length > 0) {
-        bridgeSteering = [];
-        bridgeFollowUp = [];
-        emitQueueUpdate();
-      }
+      // Pi does not expose clear*Queue to extensions (verified through 0.76.0).
+      // Shadows are NOT reset here — pi's real queues persist until the process
+      // exits via the safety-net timeout below, and the shadows must mirror
+      // that. See change: honest-mid-turn-queue-surface (spec
+      // mid-turn-prompt-queue: "Session shutdown invokes cachedCtx.shutdown
+      // directly").
       if (cachedCtx?.shutdown) {
         cachedCtx.shutdown();
       }
@@ -839,36 +943,40 @@ function initBridge(pi: ExtensionAPI) {
       setTimeout(() => process.exit(0), 500);
     },
     abort: () => {
-      // Mirror shutdown-time reset: clear pi's native queues + bridge shadows
-      // so queued steers/follow-ups don't deliver after the user clicked Stop.
-      // See change: reset-shadow-queues-on-shutdown (extended scope).
-      try {
-        if (typeof (pi as any).clearSteeringQueue === "function") {
-          (pi as any).clearSteeringQueue();
-        }
-      } catch (err) {
-        console.warn("[dashboard] pi.clearSteeringQueue threw during abort:", err);
-      }
-      try {
-        if (typeof (pi as any).clearFollowUpQueue === "function") {
-          (pi as any).clearFollowUpQueue();
-        }
-      } catch (err) {
-        console.warn("[dashboard] pi.clearFollowUpQueue threw during abort:", err);
-      }
-      if (bridgeSteering.length > 0 || bridgeFollowUp.length > 0) {
-        bridgeSteering = [];
-        bridgeFollowUp = [];
-        emitQueueUpdate();
-      }
+      // Pi.abort() cancels the turn; queues persist by design (pi ExtensionAPI
+      // exposes no clear primitive). Shadows mirror pi's reality and stay
+      // populated. See change: honest-mid-turn-queue-surface (spec
+      // mid-turn-prompt-queue: "User abort invokes cachedCtx.abort directly").
       if (cachedCtx?.abort) {
         cachedCtx.abort();
       }
-      // Clear retry-synthesis trackers — the user-initiated abort path
-      // already synthesizes its own auto_retry_end via command-handler.
-      // See change: fix-provider-retry-infinite-loop.
+      // Clear retry attempt counter so a subsequent agent_end does not
+      // double-emit auto_retry_end{success:true}. See change:
+      // fix-provider-retry-infinite-loop.
       retryTracker.noteAbort(sessionId);
-      usageLimitOrderer.noteRetryEnd(sessionId);
+      // Intentionally NOT clearing usageLimitOrderer.noteRetryEnd here.
+      // The orderer's `pending` flag MUST survive user-initiated abort
+      // so pi's eventual terminal agent_end can still surface the real
+      // provider errorMessage via the orderer's maybeSynthesize path.
+      // Without this, the user would see no provider context after
+      // pressing Stop on a rate-limit retry — the placeholder
+      // "Aborted by user" used to overwrite the truth, both swallowing
+      // the real error. See change:
+      // unify-status-banner-and-terminal-limit-stop.
+    },
+    /**
+     * Raw cachedCtx.abort() only. Used by the persistent-abort scheduler
+     * after the initial wrapper-abort has run, so repeated 200ms ticks
+     * don't re-run the wrapper's queue clears / shadow resets and clobber
+     * user prompts sent within the window.
+     * See change: unify-status-banner-and-terminal-limit-stop.
+     */
+    rawAbort: () => {
+      try {
+        cachedCtx?.abort?.();
+      } catch (err) {
+        console.warn("[dashboard] cachedCtx.abort threw in rawAbort:", err);
+      }
     },
     isIdle: () => {
       try { return cachedCtx?.isIdle?.() ?? false; } catch { return false; }
@@ -923,24 +1031,34 @@ function initBridge(pi: ExtensionAPI) {
       );
       if (handled) return;
 
-      // Fallback: send as user message (template-expanded).
-      // Uses delivery param to choose deliverAs: "steer" or "followUp".
-      // Defaults to "followUp" when delivery is absent (backward compatible).
-      // v2: follow-up sends APPEND to the queue (capacity-1 invariant dropped).
-      // See change: add-followup-edit-and-steer-cancel design.md Decision 8.
-      // Capture pre-send streaming state BEFORE pi.sendUserMessage — idle
-      // sends synchronously fire agent_start which flips the flag.
+      // Fallback: route the user prompt based on delivery + streaming state.
+      //
+      //   delivery="followUp" + streaming → buffer in bridgeFollowUp ONLY
+      //                                      (pi never sees it until drain).
+      //   delivery="steer"    + streaming → pi.sendUserMessage({deliverAs:"steer"})
+      //                                      + shadow append via recordSteerSent.
+      //   any delivery        + idle      → pi.sendUserMessage no deliverAs
+      //                                      (fresh turn). No buffer push.
+      //
+      // Capture pre-send streaming state BEFORE any pi call — idle sends
+      // synchronously fire agent_start which flips isAgentStreaming.
+      //
+      // See change: rework-mid-turn-prompt-queue (design.md D1).
       const deliverAs = delivery ?? ("followUp" as const);
       const wasStreaming = getBridgeState().isAgentStreaming;
       const expanded = expandPromptTemplateFromDisk(text, process.cwd(), pi);
-      (pi.sendUserMessage as any)(expanded, { deliverAs });
-      if (wasStreaming) {
-        if (deliverAs === "steer") recordSteerSent(expanded);
-        else recordFollowupSent(expanded);
+      if (wasStreaming && deliverAs === "followUp") {
+        // Bridge-owned buffer path — do NOT call pi.sendUserMessage. The
+        // drain loop on agent_end will ship the entry as a fresh turn.
+        bufferFollowupSend(expanded);
+      } else {
+        // Idle send or steer send — forward to pi directly.
+        (pi.sendUserMessage as any)(expanded, { deliverAs });
+        if (wasStreaming && deliverAs === "steer") recordSteerSent(expanded);
       }
     },
     onSteerSent: recordSteerSent,
-    onFollowupSent: recordFollowupSent,
+    onFollowupSent: bufferFollowupSend,
     isStreaming: () => getBridgeState().isAgentStreaming === true,
   });
 
@@ -1068,9 +1186,35 @@ function initBridge(pi: ExtensionAPI) {
           sendSyntheticRetryEvent(orderedSynth.eventType, orderedSynth.data);
           retryTracker.noteAbort(sessionId); // clear tracker; orderer's event is authoritative
         } else {
-          const trackerSynth = retryTracker.observeAgentEnd(sessionId, event as any);
-          if (trackerSynth) {
-            sendSyntheticRetryEvent(trackerSynth.eventType, trackerSynth.data);
+          // First-attempt terminal USAGE_LIMIT branch: when no retry chain
+          // was in flight (RETRYABLE_PATTERN didn't match) but the terminal
+          // agent_end carries a USAGE_LIMIT_PATTERN error, synthesize the
+          // same auto_retry_end{finalError} the orderer would have produced.
+          // Without this, first-attempt terminal billing errors surface as
+          // the generic `error` banner variant instead of `limit-exceeded`.
+          // Mutually exclusive with the orderer's synth above.
+          // See change: unify-status-banner-and-terminal-limit-stop.
+          const agentMessages = (event as any)?.messages;
+          const lastMsg = Array.isArray(agentMessages) && agentMessages.length > 0
+            ? agentMessages[agentMessages.length - 1] as Record<string, unknown>
+            : undefined;
+          const lastErr = typeof lastMsg?.errorMessage === "string" ? lastMsg.errorMessage : "";
+          const isFirstAttemptTerminalLimit =
+            lastMsg?.stopReason === "error" &&
+            lastErr.length > 0 &&
+            USAGE_LIMIT_PATTERN.test(lastErr);
+
+          if (isFirstAttemptTerminalLimit) {
+            sendSyntheticRetryEvent("auto_retry_end", {
+              success: false,
+              attempt: -1,
+              finalError: lastErr,
+            });
+          } else {
+            const trackerSynth = retryTracker.observeAgentEnd(sessionId, event as any);
+            if (trackerSynth) {
+              sendSyntheticRetryEvent(trackerSynth.eventType, trackerSynth.data);
+            }
           }
         }
         // Bridge shadow follow-up queue: the per-entry drain matcher in
@@ -1078,6 +1222,15 @@ function initBridge(pi: ExtensionAPI) {
         // (mirrors pi's internal `_processAgentEvent`). No bulk clear here
         // — it would wipe entries the user adds DURING the drain window.
         // See change: add-followup-edit-and-steer-cancel (per-entry-drain).
+
+        // Bridge-owned follow-up drain: pop one entry from bridgeFollowUp
+        // and hand it to pi as a fresh turn (sendUserMessage no deliverAs).
+        // Scheduled via setTimeout (not queueMicrotask) so pi's
+        // finishRun() can flip isStreaming=false BEFORE we call back.
+        // The drain function itself polls ctx.isIdle() and retries up to
+        // ~2s if pi hasn't transitioned yet.
+        // See change: rework-mid-turn-prompt-queue (post-smoke fix #3).
+        setTimeout(() => drainFollowupQueue(0), 0);
 
       }
       // For model_select, enrich the event data with thinkingLevel
@@ -1125,17 +1278,28 @@ function initBridge(pi: ExtensionAPI) {
           const msg = mapEventToProtocol(sessionId, enriched);
           const role = (messageRef as any).role;
           if (role === "user") {
-            // Per-entry shadow-queue drain: mirror pi's internal logic
-            // (`_processAgentEvent` in pi-coding-agent agent-session.js).
-            // When pi delivers a queued user message, find its text in
-            // `bridgeSteering` first then `bridgeFollowUp`, remove the
-            // first occurrence, and emit a fresh `queue_update` so the
-            // dashboard shrinks the visible queue immediately rather than
-            // bulk-clearing it at the final agent_end/turn_end. This is
-            // the only mechanism that updates the shadow on drain — the
-            // previous bulk clears were removed because they would also
-            // wipe entries the user adds DURING a drain. See change:
-            // add-followup-edit-and-steer-cancel (per-entry-drain).
+            // Per-entry shadow-queue drain matcher: mirror pi's internal
+            // logic (`_processAgentEvent` in pi-coding-agent
+            // agent-session.js). When pi delivers a queued user message,
+            // find its text in `bridgeSteering` first then `bridgeFollowUp`,
+            // remove the first occurrence, and emit a fresh `queue_update`.
+            //
+            // POST-rework-mid-turn-prompt-queue: the steer side is
+            // unchanged — pi still owns steering. The follow-up side is
+            // now reduced in scope: dashboard-buffered follow-ups never
+            // reach pi via {deliverAs:"followUp"} (the drain loop ships
+            // them as no-deliverAs fresh-turn sends, popped from the
+            // buffer BEFORE the pi call). So this matcher will splice
+            // bridgeFollowUp ONLY for:
+            //   (a) TUI-queued follow-ups draining through pi's natural
+            //       queue (text not in bridgeFollowUp → indexOf=-1 → no-op)
+            //   (b) Any future code path that calls
+            //       pi.sendUserMessage(_, {deliverAs:"followUp"}) directly
+            //       (none exist in this codebase post-rework).
+            // The follow-up matcher is therefore defense-in-depth; cost is
+            // one indexOf per user message_start.
+            //
+            // See change: rework-mid-turn-prompt-queue (design.md D9, R7).
             const text = extractUserMessageText(messageRef);
             if (text) {
               const sIdx = bridgeSteering.indexOf(text);
@@ -1199,14 +1363,53 @@ function initBridge(pi: ExtensionAPI) {
         // affect retry-state ordering since the reducer's message_end arm
         // does not touch retryState/lastError.
         // See change: fix-retry-banner-stuck-on-limit-exceeded.
-        const synthetic = retryTracker.observeMessageEnd(sessionId, messageRef as any);
-        if (synthetic) {
-          if (synthetic.eventType === "auto_retry_start") {
-            usageLimitOrderer.noteRetryStart(sessionId);
-          } else {
-            usageLimitOrderer.noteRetryEnd(sessionId);
+        // Terminal billing/quota auto-abort: if this message_end carries a
+        // USAGE_LIMIT_PATTERN match, pi's retry sleep is pointless — the
+        // error won't resolve regardless of how many times we retry. Call
+        // cachedCtx.abort() to short-circuit pi's retry loop, then
+        // synthesize an auto_retry_end{finalError:errorMessage} so the
+        // dashboard routes straight to the limit-exceeded banner variant
+        // carrying the real provider error. Skips the retry-tracker / orderer
+        // pending-set path entirely — there is no retry chain to track.
+        // See change: unify-status-banner-and-terminal-limit-stop.
+        const msgRole = (messageRef as any)?.role;
+        const msgStopReason = (messageRef as any)?.stopReason;
+        const msgErrorMessage = typeof (messageRef as any)?.errorMessage === "string"
+          ? (messageRef as any).errorMessage as string
+          : "";
+        const isTerminalLimit =
+          msgRole === "assistant" &&
+          msgStopReason === "error" &&
+          msgErrorMessage.length > 0 &&
+          USAGE_LIMIT_PATTERN.test(msgErrorMessage);
+
+        if (isTerminalLimit) {
+          try {
+            cachedCtx?.abort?.();
+          } catch (err) {
+            console.warn("[dashboard] cachedCtx.abort threw during terminal-limit auto-abort:", err);
           }
-          sendSyntheticRetryEvent(synthetic.eventType, synthetic.data);
+          sendSyntheticRetryEvent("auto_retry_end", {
+            success: false,
+            attempt: -1,
+            finalError: msgErrorMessage,
+          });
+          // Intentionally fall through to the deferred message_end body send
+          // below; the message_end itself still goes on the wire (the
+          // reducer's message_end arm doesn't touch retryState/lastError).
+        } else {
+          // Normal path: retry-tracker / orderer state updates SYNCHRONOUSLY,
+          // before the handler returns. See change:
+          // fix-retry-banner-stuck-on-limit-exceeded.
+          const synthetic = retryTracker.observeMessageEnd(sessionId, messageRef as any);
+          if (synthetic) {
+            if (synthetic.eventType === "auto_retry_start") {
+              usageLimitOrderer.noteRetryStart(sessionId);
+            } else {
+              usageLimitOrderer.noteRetryEnd(sessionId);
+            }
+            sendSyntheticRetryEvent(synthetic.eventType, synthetic.data);
+          }
         }
         setTimeout(() => {
           if (!isActive() || !sessionReady) return;

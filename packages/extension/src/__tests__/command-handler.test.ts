@@ -202,26 +202,32 @@ describe("CommandHandler", () => {
     await handler.handle({ type: "abort", sessionId: "s1" } as ServerToExtensionMessage);
   });
 
-  it("abort schedules persistent-abort retries until isIdle returns true", async () => {
-    // See change: fix-provider-retry-infinite-loop.
+  it("abort schedules persistent-abort retries (rawAbort) until isIdle returns true", async () => {
+    // Persistent-abort scheduler uses rawAbort (not the full wrapper) for
+    // repeated 200ms ticks. See change:
+    // unify-status-banner-and-terminal-limit-stop.
     vi.useFakeTimers();
     const pi = createMockPi();
     const abort = vi.fn();
+    const rawAbort = vi.fn();
     let idleAfter = 3; // become idle after 3 polls
     const isIdle = vi.fn(() => --idleAfter <= 0);
-    const handler = createCommandHandler(pi as any, "s1", { abort, isIdle, eventSink: vi.fn() });
+    const isStreaming = vi.fn(() => true); // stays streaming, only isIdle gates
+    const handler = createCommandHandler(pi as any, "s1", { abort, rawAbort, isIdle, isStreaming, eventSink: vi.fn() });
 
     await handler.handle({ type: "abort", sessionId: "s1" } as ServerToExtensionMessage);
-    expect(abort).toHaveBeenCalledOnce();
+    expect(abort).toHaveBeenCalledOnce();   // wrapper-abort: exactly once
+    expect(rawAbort).not.toHaveBeenCalled(); // ticks haven't fired yet
 
     // Advance through the persistent-abort schedule. Each 200ms tick
-    // checks isIdle first, then calls abort if not idle.
-    vi.advanceTimersByTime(200); // tick 1: idleAfter 3→2, abort
-    vi.advanceTimersByTime(200); // tick 2: idleAfter 2→1, abort
-    vi.advanceTimersByTime(200); // tick 3: idleAfter 1→0, isIdle true, no abort, scheduler stops
-    vi.advanceTimersByTime(1000); // no more aborts
+    // checks streaming transition, then isIdle, then calls rawAbort.
+    vi.advanceTimersByTime(200); // tick 1: idleAfter 3→2, rawAbort
+    vi.advanceTimersByTime(200); // tick 2: idleAfter 2→1, rawAbort
+    vi.advanceTimersByTime(200); // tick 3: idleAfter 1→0, isIdle true, no rawAbort, scheduler stops
+    vi.advanceTimersByTime(1000); // no more rawAborts
 
-    expect(abort.mock.calls.length).toBe(3); // initial + 2 retries
+    expect(abort.mock.calls.length).toBe(1);     // wrapper still only once
+    expect(rawAbort.mock.calls.length).toBe(2);  // 2 ticks before isIdle returned true
     vi.useRealTimers();
   });
 
@@ -229,26 +235,62 @@ describe("CommandHandler", () => {
     vi.useFakeTimers();
     const pi = createMockPi();
     const abort = vi.fn();
-    const isIdle = vi.fn(() => false); // never idle
-    const handler = createCommandHandler(pi as any, "s1", { abort, isIdle, eventSink: vi.fn() });
+    const rawAbort = vi.fn();
+    const isIdle = vi.fn(() => false);            // never idle
+    const isStreaming = vi.fn(() => true);        // stays streaming
+    const handler = createCommandHandler(pi as any, "s1", { abort, rawAbort, isIdle, isStreaming, eventSink: vi.fn() });
 
     await handler.handle({ type: "abort", sessionId: "s1" } as ServerToExtensionMessage);
 
     vi.advanceTimersByTime(2500); // safely past 2s cap
-    // initial + ~10 retries (2000ms / 200ms)
-    const calls = abort.mock.calls.length;
-    expect(calls).toBeGreaterThanOrEqual(10);
-    expect(calls).toBeLessThanOrEqual(11);
+    // Wrapper-abort: exactly once. Raw-abort: ~10 ticks (2000ms / 200ms).
+    expect(abort.mock.calls.length).toBe(1);
+    const rawCalls = rawAbort.mock.calls.length;
+    expect(rawCalls).toBeGreaterThanOrEqual(9);
+    expect(rawCalls).toBeLessThanOrEqual(10);
 
     // Past cap, no more calls
-    const before = abort.mock.calls.length;
+    const before = rawAbort.mock.calls.length;
     vi.advanceTimersByTime(1000);
-    expect(abort.mock.calls.length).toBe(before);
+    expect(rawAbort.mock.calls.length).toBe(before);
     vi.useRealTimers();
   });
 
-  it("abort synthesizes auto_retry_end event after invoking abort callback (provider-retry-state)", async () => {
-    // See change: fix-provider-retry-infinite-loop.
+  it("persistent-abort scheduler stops on isAgentStreaming true→false transition", async () => {
+    // See change: unify-status-banner-and-terminal-limit-stop. Once pi's
+    // agent_end has flipped streaming off, the scheduler must stop —
+    // continuing would risk aborting a fresh user re-send.
+    vi.useFakeTimers();
+    const pi = createMockPi();
+    const abort = vi.fn();
+    const rawAbort = vi.fn();
+    let streaming = true;
+    const isStreaming = vi.fn(() => streaming);
+    const isIdle = vi.fn(() => false); // isIdle never reports idle
+    const handler = createCommandHandler(pi as any, "s1", { abort, rawAbort, isIdle, isStreaming, eventSink: vi.fn() });
+
+    await handler.handle({ type: "abort", sessionId: "s1" } as ServerToExtensionMessage);
+    expect(abort).toHaveBeenCalledOnce();
+
+    vi.advanceTimersByTime(200); // tick 1: still streaming, rawAbort fires
+    vi.advanceTimersByTime(200); // tick 2: still streaming, rawAbort fires
+    expect(rawAbort.mock.calls.length).toBe(2);
+
+    // pi's agent_end flips streaming off
+    streaming = false;
+
+    vi.advanceTimersByTime(200); // tick 3: streaming transitioned, scheduler stops
+    vi.advanceTimersByTime(2000); // no more rawAborts even past the 2s cap
+    expect(rawAbort.mock.calls.length).toBe(2);
+    vi.useRealTimers();
+  });
+
+  it("abort synthesizes auto_retry_end event without finalError after invoking abort callback", async () => {
+    // The hardcoded "Aborted by user" finalError placeholder was removed.
+    // The synth still fires (to clear retryState) but no longer sets
+    // SessionState.lastError to a misleading string — the real provider
+    // error surfaces via pi's subsequent agent_end / orderer synth.
+    // See change: unify-status-banner-and-terminal-limit-stop.
     const pi = createMockPi();
     const calls: Array<{ name: string; arg?: unknown }> = [];
     const abort = vi.fn(() => calls.push({ name: "abort" }));
@@ -266,7 +308,8 @@ describe("CommandHandler", () => {
     expect(evt.type).toBe("event_forward");
     expect(evt.sessionId).toBe("s1");
     expect(evt.event.eventType).toBe("auto_retry_end");
-    expect(evt.event.data).toEqual({ success: false, attempt: -1, finalError: "Aborted by user" });
+    expect(evt.event.data).toEqual({ success: false, attempt: -1 });
+    expect(evt.event.data.finalError).toBeUndefined();
     expect(typeof evt.event.timestamp).toBe("number");
   });
 
@@ -784,10 +827,11 @@ describe("parseSendPrompt", () => {
 });
 
 describe("CommandHandler delivery routing (pi-native queues)", () => {
-  // After change: add-followup-edit-and-steer-cancel, the bridge no longer
-  // owns a parallel queue. All passthrough sends go directly to pi.sendUserMessage;
-  // followUp delivery additionally calls pi.clearFollowUpQueue() first to enforce
-  // capacity-1 on the slot.
+  // After change: honest-mid-turn-queue-surface, the bridge appends to pi's
+  // queues via pi.sendUserMessage{deliverAs} only. clear*Queue stubs remain
+  // on the mock so we can assert they are NEVER called (negative assertion
+  // locking in the absence). Pi's real ExtensionAPI exposes no clear*Queue
+  // method; the stubs here model the policy, not the surface.
   function createMockPi() {
     return {
       sendUserMessage: vi.fn(),
@@ -801,19 +845,45 @@ describe("CommandHandler delivery routing (pi-native queues)", () => {
     };
   }
 
-  it("passthrough followUp APPENDS to pi's queue (v2: no pre-clear)", async () => {
+  it("passthrough followUp on IDLE session forwards to pi (no buffer)", async () => {
+    // Idle path (default when isStreaming option absent): pi sees the
+    // message; the bridge buffer is bypassed entirely.
+    // See change: rework-mid-turn-prompt-queue (design.md D1).
     const pi = createMockPi();
-    const handler = createCommandHandler(pi as any, "s1");
+    const onFollowupSent = vi.fn();
+    const handler = createCommandHandler(pi as any, "s1", { onFollowupSent });
 
     await handler.handle({ type: "send_prompt", sessionId: "s1", text: "after done", delivery: "followUp" });
 
-    // v2: cap-1 invariant dropped. clearFollowUpQueue is only called by explicit
-    // promote/remove/edit operations, not on every send.
     expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
     expect(pi.sendUserMessage).toHaveBeenCalledWith("after done", { deliverAs: "followUp" });
+    expect(onFollowupSent).not.toHaveBeenCalled(); // buffer untouched on idle path
   });
 
-  it("passthrough delivery absent defaults to followUp and APPENDS (v2)", async () => {
+  it("passthrough followUp while STREAMING buffers in bridge and skips pi.sendUserMessage", async () => {
+    // Streaming path: the bridge owns the follow-up buffer; pi never sees
+    // the entry until the drain loop ships it on agent_end as a fresh turn.
+    // See change: rework-mid-turn-prompt-queue (design.md D1).
+    const pi = createMockPi();
+    const onFollowupSent = vi.fn();
+    const handler = createCommandHandler(pi as any, "s1", {
+      isStreaming: () => true,
+      onFollowupSent,
+    });
+
+    await handler.handle({ type: "send_prompt", sessionId: "s1", text: "buffered", delivery: "followUp" });
+
+    // CRITICAL: pi.sendUserMessage MUST NOT be called for the streaming
+    // follow-up path — the entry lives only in the bridge buffer.
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
+    expect(pi.clearSteeringQueue).not.toHaveBeenCalled();
+    // onFollowupSent (→ bufferFollowupSend) IS called so the bridge can push
+    // the text to bridgeFollowUp + emit queue_update.
+    expect(onFollowupSent).toHaveBeenCalledWith("buffered");
+  });
+
+  it("passthrough delivery absent defaults to followUp (idle path forwards to pi)", async () => {
     const pi = createMockPi();
     const handler = createCommandHandler(pi as any, "s1");
 

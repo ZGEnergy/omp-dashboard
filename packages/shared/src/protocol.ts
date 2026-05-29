@@ -624,74 +624,41 @@ export interface ServerRestartingExtensionMessage {
   quiesceMs: number;
 }
 
-/**
- * Server -> bridge: clear pi's steering queue for the named session.
- * Bridge calls `pi.clearSteeringQueue()`. Idempotent on empty queue.
- * Pi emits a fresh `queue_update` reflecting the empty array.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export interface ClearSteeringQueueToExtensionMessage {
-  type: "clear_steering_queue";
+// ── Follow-up queue mutation forwarded server → bridge ────────────────────
+//
+// Pi's ExtensionAPI exposes no queue-mutation primitives. The bridge owns
+// `bridgeFollowUp: string[]` and handles these messages locally. None of
+// them call pi.* methods. See change: rework-mid-turn-prompt-queue.
+//
+// The old pi-mutation types from Phase 3 (clear_steering_queue,
+// clear_followup_slot, edit_followup_slot) STAY DELETED. The names
+// edit/remove/promote_followup_entry are REUSED with new
+// bridge-buffer-only semantics.
+
+export interface ClearFollowupEntriesToExtensionMessage {
+  type: "clear_followup_entries";
   sessionId: string;
+  indices: number[] | "all";
 }
 
-/**
- * Server -> bridge: clear pi's follow-up queue for the named session.
- * Bridge calls `pi.clearFollowUpQueue()` and wipes its shadow `bridgeFollowUp[]`.
- * Idempotent on empty queue.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export interface ClearFollowupSlotToExtensionMessage {
-  type: "clear_followup_slot";
-  sessionId: string;
-}
-
-/**
- * Server -> bridge (v1, deprecated): atomic replace of pi's follow-up slot.
- * v2 prefers `edit_followup_entry { index: 0 }`. Bridge accepts both.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export interface EditFollowupSlotToExtensionMessage {
-  type: "edit_followup_slot";
-  sessionId: string;
-  text: string;
-  images?: ImageContent[];
-}
-
-/**
- * Server -> bridge (v2): move the follow-up entry at `index` to position 0
- * (head of the queue). Bridge rewrites its shadow + replays via
- * `clearFollowUpQueue` then `sendUserMessage` for each entry in the new
- * order. See change: add-followup-edit-and-steer-cancel.
- */
-export interface PromoteFollowupEntryToExtensionMessage {
-  type: "promote_followup_entry";
-  sessionId: string;
-  index: number;
-}
-
-/**
- * Server -> bridge (v2): remove the follow-up entry at `index`. Bridge
- * rewrites its shadow + replays the surviving entries.
- * See change: add-followup-edit-and-steer-cancel.
- */
-export interface RemoveFollowupEntryToExtensionMessage {
-  type: "remove_followup_entry";
-  sessionId: string;
-  index: number;
-}
-
-/**
- * Server -> bridge (v2): replace the follow-up entry at `index` with new text.
- * Bridge rewrites its shadow + replays.
- * See change: add-followup-edit-and-steer-cancel.
- */
 export interface EditFollowupEntryToExtensionMessage {
   type: "edit_followup_entry";
   sessionId: string;
   index: number;
   text: string;
   images?: ImageContent[];
+}
+
+export interface RemoveFollowupEntryToExtensionMessage {
+  type: "remove_followup_entry";
+  sessionId: string;
+  index: number;
+}
+
+export interface PromoteFollowupEntryToExtensionMessage {
+  type: "promote_followup_entry";
+  sessionId: string;
+  index: number;
 }
 
 export type ServerToExtensionMessage =
@@ -723,9 +690,7 @@ export type ServerToExtensionMessage =
   | UiManagementMessage
   | KillProcessMessage
   | ServerRestartingExtensionMessage
-  | ClearSteeringQueueToExtensionMessage
-  | ClearFollowupSlotToExtensionMessage
-  | EditFollowupSlotToExtensionMessage
-  | PromoteFollowupEntryToExtensionMessage
+  | ClearFollowupEntriesToExtensionMessage
+  | EditFollowupEntryToExtensionMessage
   | RemoveFollowupEntryToExtensionMessage
-  | EditFollowupEntryToExtensionMessage;
+  | PromoteFollowupEntryToExtensionMessage;

@@ -145,7 +145,23 @@ export function createCommandHandler(
     setThinkingLevel?: (level: string) => void;
     getThinkingLevel?: () => string | undefined;
     shutdown?: () => void;
+    /**
+     * Full bridge wrapper-abort. Runs the queue clears, shadow reset,
+     * `cachedCtx.abort()`, and `retryTracker.noteAbort`. Invoked exactly
+     * once on the initial user-abort command. Subsequent persistent-abort
+     * scheduler ticks invoke `rawAbort` instead to avoid re-running the
+     * wrapper's side-effects on every tick.
+     * See change: unify-status-banner-and-terminal-limit-stop.
+     */
     abort?: () => void;
+    /**
+     * Raw `cachedCtx.abort()` only. Used by the persistent-abort scheduler
+     * after the initial wrapper-abort has run, so repeated ticks do not
+     * re-clear pi queues or reset bridge shadows. Closes the spec/impl
+     * drift where the scheduler previously re-ran the full wrapper.
+     * See change: unify-status-banner-and-terminal-limit-stop.
+     */
+    rawAbort?: () => void;
     /**
      * Probe agent idleness for the persistent-abort scheduler.
      * See change: fix-provider-retry-infinite-loop.
@@ -193,18 +209,36 @@ export function createCommandHandler(
   const getSessionId = typeof sessionIdOrGetter === "function" ? sessionIdOrGetter : () => sessionIdOrGetter;
 
   /**
-   * Persistent-abort scheduler. Re-invokes `options.abort()` at 200ms
-   * intervals for up to 2 seconds, breaking early when `options.isIdle()`
-   * returns true. Closes the retry race window in pi-coding-agent.
-   * See change: fix-provider-retry-infinite-loop.
+   * Persistent-abort scheduler. Re-invokes `options.rawAbort()` (NOT the
+   * full wrapper-abort) at 200ms intervals for up to 2 seconds, breaking
+   * early when (a) `opts.isStreaming()` transitions from true at scheduler
+   * start to false (i.e. agent_end for the aborted turn has flipped the
+   * bridge state), OR (b) `opts.isIdle()` returns true, OR (c) 2s elapsed.
+   *
+   * Closes the retry race window in pi-coding-agent (`_retryAbortController`
+   * is briefly `undefined` between sleep-end and the next `agent.continue()`
+   * call) without clobbering user prompts sent within the 2s window.
+   *
+   * See change: fix-provider-retry-infinite-loop (original scheduler).
+   * See change: unify-status-banner-and-terminal-limit-stop (rawAbort +
+   * streaming-transition break).
    */
   const PERSISTENT_ABORT_INTERVAL_MS = 200;
   const PERSISTENT_ABORT_MAX_MS = 2000;
   function schedulePersistentAbort(opts: NonNullable<typeof options>): void {
-    if (!opts.abort) return;
+    if (!opts.rawAbort) return;
     const startedAt = Date.now();
+    const wasStreamingAtStart = opts.isStreaming?.() === true;
     const interval = setInterval(() => {
       if (Date.now() - startedAt >= PERSISTENT_ABORT_MAX_MS) {
+        clearInterval(interval);
+        return;
+      }
+      // Break on the agent settling: once streaming flips back to false
+      // (agent_end for the aborted turn processed), persistent-abort has
+      // nothing left to do, and continuing would risk killing any new
+      // turn the user re-started within the window.
+      if (wasStreamingAtStart && opts.isStreaming?.() === false) {
         clearInterval(interval);
         return;
       }
@@ -214,7 +248,7 @@ export function createCommandHandler(
           return;
         }
       } catch { /* probe failure — keep trying */ }
-      try { opts.abort?.(); } catch { /* idempotent */ }
+      try { opts.rawAbort?.(); } catch { /* idempotent */ }
     }, PERSISTENT_ABORT_INTERVAL_MS);
   }
 
@@ -362,19 +396,33 @@ export function createCommandHandler(
           if (outgoing.startsWith("/")) {
             outgoing = expandPromptTemplateFromDisk(outgoing, process.cwd(), pi);
           }
-          // Pi owns the steering + follow-up queues natively. The helper enforces
-          // capacity-1 on follow-up by clearing pi's slot before sending. After
-          // pi accepts, notify the bridge so it updates its shadow queue — but
-          // only if the agent was already streaming BEFORE the send. Pi flips
-          // idle→streaming synchronously on the first user message, so checking
-          // after sendUserMessage gives false positives.
-          // See change: add-followup-edit-and-steer-cancel.
+          // Route the prompt based on delivery + streaming state:
+          //
+          //   delivery="followUp" + streaming → ONLY notify bridge buffer
+          //                                      (pi never sees it until
+          //                                      drainFollowupQueue ships it
+          //                                      on agent_end as a fresh turn).
+          //   delivery="steer"    + streaming → forward to pi + shadow-record.
+          //   any delivery        + idle      → forward to pi (fresh turn).
+          //
+          // Capture pre-send streaming state BEFORE any pi call — pi flips
+          // idle→streaming synchronously on the first user message, so
+          // checking after sendUserMessage gives false positives.
+          //
+          // Image attachments are NOT carried in the bridge buffer in v1
+          // (text-only). Image-bearing follow-ups buffered during streaming
+          // will lose their images on drain (Known Limitation).
+          //
+          // See change: rework-mid-turn-prompt-queue (design.md D1).
           const wasStreaming = options?.isStreaming?.() ?? false;
-          sendUserMessageWithImages(pi, outgoing, msg.images, msg.delivery);
-          if (wasStreaming) {
-            const da = msg.delivery ?? "followUp";
-            if (da === "steer") options?.onSteerSent?.(outgoing);
-            else options?.onFollowupSent?.(outgoing);
+          const da = msg.delivery ?? "followUp";
+          if (wasStreaming && da === "followUp") {
+            // Bridge-owned buffer path — do NOT call pi.sendUserMessage.
+            options?.onFollowupSent?.(outgoing);
+          } else {
+            // Idle or steer — forward to pi directly.
+            sendUserMessageWithImages(pi, outgoing, msg.images, msg.delivery);
+            if (wasStreaming && da === "steer") options?.onSteerSent?.(outgoing);
           }
           return undefined;
         }
@@ -393,6 +441,13 @@ export function createCommandHandler(
           // https://github.com/badlogic/pi-mono/discussions/2073). The
           // reducer no-ops auto_retry_end when retryState is undefined,
           // so this is idempotent against later events.
+          //
+          // No `finalError` is supplied: the placeholder "Aborted by user"
+          // previously overwrote SessionState.lastError, hiding the real
+          // provider error (e.g. usage_limit_reached). The orderer's pending
+          // flag now survives wrapper-abort, so pi's terminal agent_end can
+          // still synthesize a proper finalError carrying the real message.
+          // See change: unify-status-banner-and-terminal-limit-stop.
           if (options?.eventSink) {
             options.eventSink({
               type: "event_forward",
@@ -400,7 +455,7 @@ export function createCommandHandler(
               event: {
                 eventType: "auto_retry_end",
                 timestamp: Date.now(),
-                data: { success: false, attempt: -1, finalError: "Aborted by user" },
+                data: { success: false, attempt: -1 },
               },
             });
           }
@@ -552,9 +607,11 @@ function sendUserMessageWithImages(
 ): void {
   const deliverAs = delivery ?? ("followUp" as const);
   const sendOptions = { deliverAs };
-  // v2: follow-up is a multi-entry queue. Sends APPEND — the cap-1 invariant
-  // is gone. See change: add-followup-edit-and-steer-cancel design.md Decision 8.
-  // (The bridge's shadow queue records the append via onFollowupSent.)
+  // POST-rework-mid-turn-prompt-queue: this helper is called for STEER and
+  // for IDLE sends only — followUp-while-streaming is intercepted upstream
+  // (bridge buffer path; never calls this helper). The deliverAs parameter
+  // is preserved for steer routing.
+  // See change: rework-mid-turn-prompt-queue (design.md D1).
   if (images && images.length > 0) {
     const validMimeTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
     const validImages = images.filter((img) => {

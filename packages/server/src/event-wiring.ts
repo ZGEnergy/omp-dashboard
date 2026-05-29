@@ -684,6 +684,8 @@ export function wireEvents(deps: EventWiringDeps): void {
       }
       return;
     }
+
+
     if (msg.type === "first_message_update") {
       sessionManager.update(sessionId, { firstMessage: msg.firstMessage });
       browserGateway.broadcastSessionUpdated(sessionId, { firstMessage: msg.firstMessage });
