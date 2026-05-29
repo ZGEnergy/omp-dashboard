@@ -10,6 +10,7 @@ import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/t
 // state; useMessageHandler.ts mirrors every msg.event into the
 // per-session-events store the plugin runtime owns.
 import { parseSkillBlock, type SkillBlock } from "@blackbelt-technology/pi-dashboard-shared/skill-block-parser.js";
+import { USAGE_LIMIT_PATTERN } from "@blackbelt-technology/pi-dashboard-shared/error-patterns.js";
 
 export interface ChatImage {
   data: string;
@@ -54,6 +55,17 @@ export interface ChatMessage {
    * See change: render-skill-invocations-collapsibly.
    */
   skill?: SkillBlock;
+  /**
+   * When set, this user message is a duplicate produced by the manual
+   * "Retry after error" button: its text matches the immediately-preceding
+   * user message in `state.messages` AND the turn between them ended in
+   * `lastError`. The chat view SHALL skip rendering this bubble; the entry
+   * remains in `state.messages` for `findLastUserPrompt` / fork-from-here
+   * / persistence compatibility. The pi session JSONL still records both
+   * user entries.
+   * See change: unify-status-banner-and-terminal-limit-stop.
+   */
+  retriedFrom?: string;
 }
 
 export interface ToolCallState {
@@ -137,7 +149,7 @@ export interface SessionState {
   /**
    * In-flight LLM-provider auto-retry state. Set on `auto_retry_start`,
    * cleared on `auto_retry_end` / `agent_start` / `agent_end`. Drives the
-   * RetryBanner UI and the session-card amber dot.
+   * `SessionBanner` UI (retrying variant) and the session-card amber dot.
    * See change: fix-provider-retry-infinite-loop.
    */
   retryState?: {
@@ -721,6 +733,52 @@ export function extractAgentEndError(data: Record<string, unknown>): string | un
   return (last.errorMessage as string) || "An unknown error occurred";
 }
 
+/**
+ * Derived banner state for the unified `SessionBanner` component. Single
+ * source of truth: read `retryState` and `lastError`, return exactly ONE
+ * variant. Race overlap between yellow + red is impossible by
+ * construction.
+ *
+ * Precedence: retryState wins (retry is in-progress, error is settled).
+ * Within errors, `USAGE_LIMIT_PATTERN.test(lastError.message)` decides
+ * `limit-exceeded` vs generic `error`.
+ *
+ * See change: unify-status-banner-and-terminal-limit-stop.
+ */
+export type BannerState =
+  | { variant: "hidden" }
+  | {
+      variant: "retrying";
+      attempt: number;
+      maxAttempts: number;
+      delayMs: number;
+      startedAt: number;
+      reason: string;
+    }
+  | { variant: "error"; message: string }
+  | { variant: "limit-exceeded"; message: string };
+
+export function deriveBannerState(state: SessionState): BannerState {
+  if (state.retryState) {
+    return {
+      variant: "retrying",
+      attempt: state.retryState.attempt,
+      maxAttempts: state.retryState.maxAttempts,
+      delayMs: state.retryState.delayMs,
+      startedAt: state.retryState.startedAt,
+      reason: state.retryState.reason,
+    };
+  }
+  if (state.lastError) {
+    const limit = USAGE_LIMIT_PATTERN.test(state.lastError.message);
+    return {
+      variant: limit ? "limit-exceeded" : "error",
+      message: state.lastError.message,
+    };
+  }
+  return { variant: "hidden" };
+}
+
 export function reduceEvent(state: SessionState, event: DashboardEvent): SessionState {
   const next = { ...state, toolCalls: new Map(state.toolCalls) };
   const data = event.data;
@@ -820,6 +878,42 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
         // a collapsible card and ArrowUp recall can return the slash form.
         // See change: render-skill-invocations-collapsibly.
         const skill = parseSkillBlock(text) ?? undefined;
+
+        // Visual-dedup for manual retry: if the new user text matches the
+        // immediately-preceding user message AND the assistant turn between
+        // them ended in an error, flag `retriedFrom`. The chat view skips
+        // rendering flagged duplicates. The entry stays in `state.messages`
+        // for findLastUserPrompt / fork-from-here / persistence parity.
+        // See change: unify-status-banner-and-terminal-limit-stop.
+        let retriedFrom: string | undefined;
+        const trimmedText = text.trim();
+        if (trimmedText.length > 0) {
+          // Walk back to the most recent user message.
+          let lastErrorBetween = false;
+          let prevUserIdx = -1;
+          for (let i = state.messages.length - 1; i >= 0; i--) {
+            const m = state.messages[i]!;
+            if (m.role === "assistant" && m.toolStatus === "error") {
+              lastErrorBetween = true;
+            }
+            if (m.role === "user") {
+              prevUserIdx = i;
+              break;
+            }
+          }
+          // Also accept `state.lastError` (set by agent_end / auto_retry_end
+          // arms) as evidence of an error between the two user messages.
+          // This covers the common case where the error sits on lastError
+          // rather than on an assistant ChatMessage with toolStatus.
+          if (state.lastError) lastErrorBetween = true;
+          if (prevUserIdx >= 0 && lastErrorBetween) {
+            const prev = state.messages[prevUserIdx]!;
+            if (prev.content.trim() === trimmedText) {
+              retriedFrom = prev.entryId ?? prev.id;
+            }
+          }
+        }
+
         next.messages = [
           ...next.messages,
           {
@@ -827,6 +921,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
             role: "user",
             content: text,
             ...(skill ? { skill } : {}),
+            ...(retriedFrom ? { retriedFrom } : {}),
             images,
             timestamp: event.timestamp,
             // entryId from data.entryId is correct ONLY for replayed events

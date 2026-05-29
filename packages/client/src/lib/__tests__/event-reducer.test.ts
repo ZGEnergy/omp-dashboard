@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createInitialState, findLastUserPrompt, reduceEvent, toDisplayString, addInteractiveRequest, resolveInteractiveRequest, dismissInteractiveRequest, extractAgentEndError, type SessionState, type PendingPrompt, type ChatMessage } from "../event-reducer.js";
+import { createInitialState, deriveBannerState, findLastUserPrompt, reduceEvent, toDisplayString, addInteractiveRequest, resolveInteractiveRequest, dismissInteractiveRequest, extractAgentEndError, type SessionState, type PendingPrompt, type ChatMessage } from "../event-reducer.js";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
 function applyEvents(events: DashboardEvent[]): SessionState {
@@ -2562,5 +2562,173 @@ describe("auto_retry events (provider-retry-state)", () => {
       });
       expect(state.retryState).toBeDefined();
     });
+  });
+});
+
+// See change: unify-status-banner-and-terminal-limit-stop.
+describe("deriveBannerState (unified SessionBanner selector)", () => {
+  it("returns hidden when neither retryState nor lastError is set", () => {
+    const s = createInitialState();
+    expect(deriveBannerState(s)).toEqual({ variant: "hidden" });
+  });
+
+  it("returns retrying when retryState is set", () => {
+    const s = createInitialState();
+    s.retryState = {
+      attempt: 3,
+      maxAttempts: -1,
+      delayMs: -1,
+      reason: "rate limit",
+      startedAt: 1700000000000,
+    };
+    expect(deriveBannerState(s)).toEqual({
+      variant: "retrying",
+      attempt: 3,
+      maxAttempts: -1,
+      delayMs: -1,
+      startedAt: 1700000000000,
+      reason: "rate limit",
+    });
+  });
+
+  it("returns error variant for non-USAGE_LIMIT lastError", () => {
+    const s = createInitialState();
+    s.lastError = { message: "fetch failed: ECONNRESET", timestamp: 1 };
+    expect(deriveBannerState(s)).toEqual({
+      variant: "error",
+      message: "fetch failed: ECONNRESET",
+    });
+  });
+
+  it("returns limit-exceeded variant for USAGE_LIMIT_PATTERN match", () => {
+    const s = createInitialState();
+    s.lastError = { message: "monthly_spending_cap exceeded", timestamp: 1 };
+    expect(deriveBannerState(s)).toEqual({
+      variant: "limit-exceeded",
+      message: "monthly_spending_cap exceeded",
+    });
+  });
+
+  it("retryState wins over lastError when both are set", () => {
+    const s = createInitialState();
+    s.retryState = {
+      attempt: 1,
+      maxAttempts: -1,
+      delayMs: -1,
+      reason: "retrying",
+      startedAt: 0,
+    };
+    s.lastError = { message: "usage_limit_reached", timestamp: 1 };
+    const banner = deriveBannerState(s);
+    expect(banner.variant).toBe("retrying");
+  });
+
+  it("limit-exceeded distinguishes various USAGE_LIMIT_PATTERN matches", () => {
+    const cases: Array<[string, "limit-exceeded" | "error"]> = [
+      ["usage_limit_reached", "limit-exceeded"],
+      ["quota_exceeded", "limit-exceeded"],
+      ["insufficient_quota", "limit-exceeded"],
+      ["credit balance too low", "limit-exceeded"],
+      ["monthly_spending_cap", "limit-exceeded"],
+      ["reset after 12h", "limit-exceeded"],
+      ["fetch failed", "error"],
+      ["tool execution failed", "error"],
+      ["429 too many requests", "error"],
+    ];
+    for (const [msg, expected] of cases) {
+      const s = createInitialState();
+      s.lastError = { message: msg, timestamp: 1 };
+      expect(deriveBannerState(s).variant, msg).toBe(expected);
+    }
+  });
+});
+
+// See change: unify-status-banner-and-terminal-limit-stop.
+describe("manual retry visual-dedup (ChatMessage.retriedFrom)", () => {
+  it("flags new user message that duplicates the prior user text after an error", () => {
+    let state: SessionState = createInitialState();
+    // First user message arrives.
+    state = reduceEvent(state, {
+      eventType: "message_start",
+      timestamp: 1000,
+      data: { message: { role: "user", content: "fix the bug" }, entryId: "u1" },
+    });
+    // agent_end fires with an error.
+    state = reduceEvent(state, {
+      eventType: "agent_end",
+      timestamp: 1100,
+      data: {
+        messages: [{ role: "assistant", stopReason: "error", errorMessage: "fetch failed" }],
+      },
+    });
+    expect(state.lastError?.message).toBe("fetch failed");
+
+    // Retry button: same text, fresh message_start.
+    state = reduceEvent(state, {
+      eventType: "message_start",
+      timestamp: 2000,
+      data: { message: { role: "user", content: "fix the bug" }, entryId: "u2" },
+    });
+    const lastMsg = state.messages[state.messages.length - 1]!;
+    expect(lastMsg.role).toBe("user");
+    expect(lastMsg.content).toBe("fix the bug");
+    expect(lastMsg.retriedFrom).toBe("u1");
+  });
+
+  it("does NOT flag identical re-send when prior turn ended successfully", () => {
+    let state: SessionState = createInitialState();
+    state = reduceEvent(state, {
+      eventType: "message_start",
+      timestamp: 1000,
+      data: { message: { role: "user", content: "ping" }, entryId: "u1" },
+    });
+    state = reduceEvent(state, {
+      eventType: "agent_end",
+      timestamp: 1100,
+      data: {
+        messages: [{ role: "assistant", stopReason: "end_turn" }],
+      },
+    });
+    // No lastError set, so dedup must not fire.
+    state = reduceEvent(state, {
+      eventType: "message_start",
+      timestamp: 2000,
+      data: { message: { role: "user", content: "ping" }, entryId: "u2" },
+    });
+    const lastMsg = state.messages[state.messages.length - 1]!;
+    expect(lastMsg.retriedFrom).toBeUndefined();
+  });
+
+  it("does NOT flag when new text differs from prior user text", () => {
+    let state: SessionState = createInitialState();
+    state = reduceEvent(state, {
+      eventType: "message_start",
+      timestamp: 1000,
+      data: { message: { role: "user", content: "fix bug" }, entryId: "u1" },
+    });
+    state = reduceEvent(state, {
+      eventType: "agent_end",
+      timestamp: 1100,
+      data: {
+        messages: [{ role: "assistant", stopReason: "error", errorMessage: "x" }],
+      },
+    });
+    state = reduceEvent(state, {
+      eventType: "message_start",
+      timestamp: 2000,
+      data: { message: { role: "user", content: "fix the bug" }, entryId: "u2" },
+    });
+    const lastMsg = state.messages[state.messages.length - 1]!;
+    expect(lastMsg.retriedFrom).toBeUndefined();
+  });
+
+  it("does not flag the FIRST user message (no prior user to dedup against)", () => {
+    let state: SessionState = createInitialState();
+    state = reduceEvent(state, {
+      eventType: "message_start",
+      timestamp: 1000,
+      data: { message: { role: "user", content: "hello" }, entryId: "u1" },
+    });
+    expect(state.messages[0]!.retriedFrom).toBeUndefined();
   });
 });

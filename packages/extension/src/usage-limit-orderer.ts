@@ -12,24 +12,16 @@
  */
 
 /**
- * Matches terminal billing/quota error categories observed in production
- * across providers. The orderer uses this to surface a synthesized
- * `auto_retry_end{success:false}` BEFORE the bridge forwards `agent_end`,
- * so the dashboard's `retryState` clears before `lastError` is set.
+ * Terminal billing/quota error pattern. Single source of truth lives in
+ * `@blackbelt-technology/pi-dashboard-shared/error-patterns`; this module
+ * re-exports it for source compatibility with callers that imported it
+ * from here historically.
  *
- * Coverage (verified via fixture tests):
- *   - Codex / Anthropic / generic: usage_limit_reached, usage_not_included,
- *     quota_exceeded, credit_balance, insufficient_quota, monthly limit,
- *     daily limit, hourly limit, "reset after Nh|Nm|Ns".
- *   - Gemini / Google: "monthly spending cap", "spending cap",
- *     RESOURCE_EXHAUSTED.
- *   - Generic catch-all for "exceeded ... (quota|cap|spending)" within
- *     ~40 chars (avoids a string with no terminal-meaning context).
- *
- * See change: fix-retry-banner-stuck-on-limit-exceeded.
+ * See change: unify-status-banner-and-terminal-limit-stop.
+ * See change: fix-retry-banner-stuck-on-limit-exceeded (original home).
  */
-export const USAGE_LIMIT_PATTERN =
-  /usage[_ ]limit[_ ]reached|usage_not_included|insufficient_quota|credit[_ ]balance|quota[_ ]exceeded|resource[_ ]exhausted|monthly[_ ]limit|monthly[_ ]spending[_ ]cap|hourly[_ ]limit|daily[_ ]limit|spending[_ ]cap|exceeded[^"]{0,40}(quota|cap|spending)|reset after \d+[hms]/i;
+import { USAGE_LIMIT_PATTERN } from "@blackbelt-technology/pi-dashboard-shared/error-patterns.js";
+export { USAGE_LIMIT_PATTERN };
 
 export interface SyntheticEventEnvelope {
   eventType: "auto_retry_end";
