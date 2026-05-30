@@ -1,5 +1,11 @@
 # PI Dashboard
 
+<p align="center">
+  <a href="https://github.com/BlackBeltTechnology/pi-agent-dashboard">
+    <img src="docs/cover.png" alt="PI Dashboard — command an army of pi agents from one tab" />
+  </a>
+</p>
+
 [![CI](https://github.com/BlackBeltTechnology/pi-agent-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/BlackBeltTechnology/pi-agent-dashboard/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@blackbelt-technology/pi-agent-dashboard)](https://www.npmjs.com/package/@blackbelt-technology/pi-agent-dashboard)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
