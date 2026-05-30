@@ -422,6 +422,15 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
         }
       }
       const result = removeWorktree({ cwd: validated.cwd, force });
+      // Trace every call so failed clicks leave a breadcrumb in
+      // ~/.pi/dashboard/server.log (the request itself is not
+      // otherwise logged by fastify in default config).
+      // eslint-disable-next-line no-console
+      console.log(
+        `[git-routes] worktree/remove cwd=${validated.cwd} force=${force} → ${
+          result.ok ? "ok" : `fail:${result.code}`
+        }`,
+      );
       if (!result.ok) {
         const status =
           result.code === "not_a_worktree" ? 400

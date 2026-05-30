@@ -18,6 +18,11 @@ The server SHALL expose `POST /api/git/worktree/remove` (localhost-only) accepti
 - **THEN** `git worktree remove <cwd>` SHALL succeed and the response SHALL be `{ success: true, data: { removed: true } }`
 - **AND** every ended session whose `cwd` was inside the removed path SHALL receive a `session_updated` with `cwdMissing: true`
 
+#### Scenario: Server logs every remove call
+- **WHEN** `POST /api/git/worktree/remove` passes cwd validation
+- **THEN** the server SHALL emit a single log line of the form `[git-routes] worktree/remove cwd=<path> force=<bool> → <ok|fail:<code>>` to `~/.pi/dashboard/server.log` covering both success and failure outcomes
+- **AND** this breadcrumb SHALL exist independent of fastify's default request logging so failed clicks can be diagnosed from the log alone
+
 #### Scenario: Dirty worktree refused without --force
 - **WHEN** the worktree has uncommitted changes and `force` is omitted or `false`
 - **THEN** the response SHALL be `{ success: false, error: "dirty_worktree", stderr: "<git output>" }` with HTTP 409
@@ -150,7 +155,7 @@ The client SHALL render a confirm dialog before invoking `worktree/remove` whene
 #### Scenario: Two active sessions confirmation
 - **WHEN** the user clicks "Close worktree" and the server returns `sessionIds: [id1, id2]`
 - **THEN** the dialog SHALL show both session names + cwds and a confirm button labeled "End 2 sessions and remove worktree"
-- **AND** clicking confirm SHALL send `shutdown` to each session, await `session_end`, then re-invoke `worktree/remove`
+- **AND** clicking confirm SHALL send `shutdown` to each listed session, then `await` the forced `worktree/remove` call so the success branch reliably fires `onRemoved` + `onClose` before the dialog unmounts (the previous fire-and-forget shape could drop the success callback when the dashboard's own session was the one being shut down)
 
 #### Scenario: Delete merged branch checkbox
 - **WHEN** the worktree's branch is fully merged into its base ref
@@ -160,4 +165,15 @@ The client SHALL render a confirm dialog before invoking `worktree/remove` whene
 #### Scenario: Force toggle exposed when removal would refuse
 - **WHEN** the worktree is dirty or unmerged
 - **THEN** the dialog SHALL show a "--force (discard changes)" toggle
-- **AND** the toggle SHALL be unchecked by default
+- **AND** the toggle SHALL be unchecked on initial render
+
+#### Scenario: Dirty / unmerged response auto-ticks --force and surfaces hint
+- **WHEN** `worktree/remove` returns `code: "dirty_worktree"` or `code: "branch_not_merged"` without force
+- **THEN** the dialog SHALL automatically set the `--force` toggle to checked
+- **AND** the error block SHALL render an inline hint referencing `--force` so the next Remove click sends `force: true` with no extra user step
+- **AND** the dialog SHALL remain open until the user cancels or retries
+
+#### Scenario: Successful remove notifies parent menu
+- **WHEN** `worktree/remove` returns `{ ok: true }`
+- **THEN** the dialog SHALL invoke its `onRemoved` callback before `onClose`
+- **AND** `WorktreeActionsMenu` SHALL wire `onRemoved` to surface a success toast ("Worktree removed.") so the user has visible confirmation that the on-disk directory was deleted

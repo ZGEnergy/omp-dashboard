@@ -269,6 +269,7 @@ export function WorktreeActionsMenu({ session, allSessions, onShutdownSession, d
           allSessions={allSessions}
           onShutdownSession={onShutdownSession}
           onClose={() => setCloseOpen(false)}
+          onRemoved={() => setToast({ level: "success", text: "Worktree removed." })}
         />
       )}
       {mergeOpen && (

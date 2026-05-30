@@ -70,14 +70,19 @@ describe("CloseWorktreeDialog", () => {
     }
   });
 
-  it("--force checkbox is unchecked by default and re-issues with force:true on retry", async () => {
+  it("dirty_worktree response auto-ticks --force, surfaces hint, and next click sends force:true", async () => {
     removeWorktreeMock
       .mockResolvedValueOnce({ ok: false, code: "dirty_worktree", error: "dirty", stderr: "modified files" })
       .mockResolvedValueOnce({ ok: true });
     renderDialog();
     fireEvent.click(screen.getByTestId("close-confirm"));
     await waitFor(() => expect(screen.getByTestId("close-error")).toBeTruthy());
-    fireEvent.click(screen.getByTestId("close-force-toggle"));
+    // Auto-ticked.
+    const toggle = screen.getByTestId("close-force-toggle") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    // Hint visible.
+    expect(screen.getByTestId("close-error").textContent).toMatch(/--force/);
+    // Click Remove again — force is already true, no need to toggle.
     fireEvent.click(screen.getByTestId("close-confirm"));
     await waitFor(() => expect(removeWorktreeMock).toHaveBeenLastCalledWith({ cwd: "/repo/.worktrees/x", force: true }));
   });

@@ -53,18 +53,27 @@ export function CloseWorktreeDialog({ cwd, allSessions, onShutdownSession, onClo
       setActiveIds(result.data?.sessionIds ?? []);
       return;
     }
+    // When the worktree is dirty/unmerged, auto-tick --force so the user
+    // sees the obvious next step. Errors are surfaced loudly below.
+    if (result.code === "dirty_worktree" || result.code === "branch_not_merged") {
+      setForce(true);
+    }
     setError({ code: result.code, stderr: result.stderr });
   };
 
   const onEndSessionsAndRemove = async () => {
     if (!activeIds) return;
-    // Fire shutdowns in parallel with the forced remove. The server's
-    // active-session check is skipped when `force: true`, so we don't
-    // need to wait for bridges to deregister — critical because
-    // shutting down our own card's session unmounts this component
-    // before any setTimeout could fire.
+    // Fire shutdowns then the forced remove. We previously fired both in
+    // parallel and relied on `force: true` to bypass the server-side
+    // active-session check — but if this dialog belongs to the very
+    // session being shut down, the component tree unmounts mid-flight
+    // and the fetch can be dropped in some browsers / wrappers. Issuing
+    // the remove eagerly inside this handler (before unmount kicks in
+    // for the same tick) is enough because fetch() dispatches
+    // synchronously, but we now keep the call chain simple and await it
+    // so the success branch reliably reaches onRemoved/onClose.
     for (const id of activeIds) onShutdownSession(id);
-    void attempt({ force: true });
+    await attempt({ force: true });
   };
 
   const sessionName = (id: string) => {
@@ -107,7 +116,14 @@ export function CloseWorktreeDialog({ cwd, allSessions, onShutdownSession, onClo
 
         {error && (
           <div className="text-xs text-red-400 space-y-1" data-testid="close-error">
-            <div>{error.code}</div>
+            <div>
+              {error.code}
+              {(error.code === "dirty_worktree" || error.code === "branch_not_merged") && (
+                <span className="ml-2 text-[var(--text-secondary)]">
+                  — uncommitted changes. Enable <code>--force</code> above and click Remove again.
+                </span>
+              )}
+            </div>
             {error.stderr && (
               <details>
                 <summary className="cursor-pointer text-[var(--text-muted)]">stderr</summary>
