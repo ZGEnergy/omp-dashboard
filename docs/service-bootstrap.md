@@ -98,7 +98,7 @@ Client gates on `launchSource === "electron"` as proxy for "immutable bundle" (`
 
 | Component | File | Strategy |
 |-----------|------|----------|
-| Electron detector | `dependency-detector.ts` | Login shell fallback (`$SHELL -ilc "which <cmd>"`) |
+| Electron detector | `dependency-detector.ts` | Login shell fallback (`$SHELL -lc "which <cmd>"`) |
 | Electron server launch | `server-lifecycle.ts` | Prepends detected pi bin dir + bundled node to PATH |
 | Server process-manager | `process-manager.ts` | `buildSpawnEnv()` adds managed bin + node bin + user dirs |
 | Server extension-register | `extension-register.ts` | Relative path from `__dirname` |
@@ -356,12 +356,14 @@ function buildTmuxCommand(cwd, sessionExists, options, resolvedPath) {
 
 ### Login shell fallback (macOS/Linux)
 
+-lc (login, non-interactive). -i forbidden — interactive shell claims tty foreground group; parent pi receives SIGTSTP at shell exit.
+
 Used when `which <cmd>` fails on process PATH (Electron GUI apps):
 
 
 ```typescript
 const shell = process.env.SHELL || "/bin/zsh";
-const output = execSync(`${shell} -ilc "which ${cmd}"`, {
+const output = execSync(`${shell} -lc "which ${cmd}"`, {
   encoding: "utf-8",
   timeout: 5000,
 }).trim();

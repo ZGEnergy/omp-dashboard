@@ -594,11 +594,30 @@ function whichSync(cmd: string): string | null {
   return lines[0];
 }
 
-/** Resolve a command via login shell (picks up nvm/volta/homebrew paths). */
+/**
+ * Resolve a command via login shell (picks up nvm/volta/homebrew paths).
+ *
+ * INVARIANT — flags MUST stay `-lc` (login, non-interactive).
+ *
+ * - `-l` (login) is REQUIRED: sources `~/.zprofile` so nvm/volta/homebrew
+ *   PATH entries are visible when pi is launched from a GUI (Electron,
+ *   Finder, Dock) where the parent process never ran the user's login
+ *   profile.
+ *
+ * - `-i` (interactive) is FORBIDDEN: an interactive shell calls
+ *   `tcsetpgrp(stdin_fd, shell_pgid)` on startup to claim the terminal's
+ *   foreground process group. When the shell exits, the parent pi process
+ *   is no longer the foreground group and the tty driver delivers
+ *   `SIGTSTP` — pi appears stopped immediately after startup
+ *   (e.g. `[1]+ Stopped pi` in iTerm2 / macOS Terminal). Same behaviour
+ *   on bash, zsh, and fish — the no-`-i` rule generalizes across shells.
+ *
+ * See change: document-login-shell-non-interactive-fix.
+ */
 function whichViaLoginShell(cmd: string): string | null {
   const shell = process.env.SHELL || "/bin/zsh";
   try {
-    const raw = execSync(`${shell} -ilc "which ${cmd}"`, {
+    const raw = execSync(`${shell} -lc "which ${cmd}"`, {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 5000,

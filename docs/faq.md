@@ -1433,7 +1433,7 @@ Cross-refs:
 
 GUI apps receive minimal system PATH (`/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin`). Tools installed via nvm, volta, or homebrew invisible to Electron process.
 
-Mitigation: Electron wizard detects tools using login shell fallback (`$SHELL -ilc "which <cmd>"`) to access user's full `.zshrc`/`.bashrc` environment. Detected paths persisted in `toolPaths` config.
+Mitigation: Electron wizard detects tools using login shell fallback (`$SHELL -lc "which <cmd>"`) to access user's full `.zshrc`/`.bashrc` environment. Detected paths persisted in `toolPaths` config. -i omitted intentionally — interactive shell claims tty foreground group via tcsetpgrp; parent pi receives SIGTSTP at shell exit. See: packages/shared/src/platform/binary-lookup.ts whichViaLoginShell().
 
 Issue: Login shell on macOS emits session restore noise (`Restored session:...`, `Saving session...completed.`). Parser must extract first line starting with `/`.
 

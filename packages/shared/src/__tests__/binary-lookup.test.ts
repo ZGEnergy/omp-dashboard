@@ -69,9 +69,14 @@ describe("ToolResolver", () => {
     });
 
     it("tries login shell when enabled and PATH fails", () => {
+      // Capture the actual command string so we can assert flag invariants.
+      let capturedCmd: string | null = null;
       // Regular which fails
       mockExecSync.mockImplementation((cmd: string) => {
-        if (typeof cmd === "string" && cmd.includes("-ilc")) return "/nvm/bin/pi\n";
+        if (typeof cmd === "string" && cmd.includes("-lc")) {
+          capturedCmd = cmd;
+          return "/nvm/bin/pi\n";
+        }
         throw new Error("not found");
       });
 
@@ -79,6 +84,12 @@ describe("ToolResolver", () => {
       // On win32 login shell is skipped — test on non-win32 only
       if (process.platform !== "win32") {
         expect(resolver.which("pi")).toBe("/nvm/bin/pi");
+        // Invariant (see whichViaLoginShell JSDoc): interactive shell flag
+        // is FORBIDDEN — it causes SIGTSTP on the parent pi process via
+        // tcsetpgrp. Lock the absence of -i / -il / -ilc so a future
+        // refactor cannot silently regress the SIGTSTP fix.
+        expect(capturedCmd).not.toBeNull();
+        expect(capturedCmd!).not.toMatch(/-i\b|-il\b|-ilc\b/);
       }
     });
 
