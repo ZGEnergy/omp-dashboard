@@ -663,12 +663,13 @@ environment: npm-publish
 
 npm CLI ≥ 11.5.1 required; workflow runs `npm install -g npm@latest` before publish. Provenance attached automatically.
 
-Per-package npm setup (5 packages; `@blackbelt-technology/pi-dashboard-electron` private, skipped):
+Per-package npm setup (6 packages; `@blackbelt-technology/pi-dashboard-electron` private, skipped):
 - `@blackbelt-technology/pi-agent-dashboard`
 - `@blackbelt-technology/pi-dashboard-shared`
 - `@blackbelt-technology/pi-dashboard-extension`
 - `@blackbelt-technology/pi-dashboard-server`
 - `@blackbelt-technology/pi-dashboard-web`
+- `@blackbelt-technology/pi-image-fit`
 
 Steps per package: npmjs.com → package → Settings → Trusted Publisher → GitHub Actions. Fields:
 - Organization: `BlackBeltTechnology`

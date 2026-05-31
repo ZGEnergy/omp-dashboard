@@ -67,8 +67,12 @@ export function scopeFor(sessionScope: string): CacheScope {
 }
 
 function sanitize(s: string): string {
-  // Allow [A-Za-z0-9._-]; replace everything else.
-  return s.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 96) || "default";
+  // Drop anything not [A-Za-z0-9_-] (notably `.` and `/`, which would
+  // allow path traversal); collapse runs of `_`; trim leading/trailing
+  // `_`; fall back to "default" when nothing usable remains.
+  let out = s.replace(/[^A-Za-z0-9_-]/g, "_");
+  out = out.replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  return out.slice(0, 96) || "default";
 }
 
 /** Best-effort: ensure the directory exists. */

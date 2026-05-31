@@ -14,6 +14,7 @@ export default defineConfig({
       "packages/shared",
       "packages/server",
       "packages/extension",
+      "packages/image-fit-extension",
       "packages/client",
       "packages/client-utils",
       "packages/dashboard-plugin-runtime",
