@@ -56,7 +56,7 @@ describe("readConfigFromEnv", () => {
       env: { [varName]: raw },
       warn: (msg) => warnings.push(msg),
     });
-    expect((cfg as Record<string, unknown>)[field]).toBe(expected);
+    expect((cfg as unknown as Record<string, unknown>)[field]).toBe(expected);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(varName);
     expect(warnings[0]).toContain(String(expected));

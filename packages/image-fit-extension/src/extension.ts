@@ -14,7 +14,6 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { readConfigFromEnv, type ImageFitConfig } from "./policy.js";
@@ -66,7 +65,7 @@ export default function imageFitExtension(pi: ExtensionAPI): void {
 
   pi.on("tool_call", async (event, ctx) => {
     // Fast-path gates. None of these touch the filesystem.
-    if (!isToolCallEventType("read", event)) return;
+    if (event.toolName !== "read") return;
     const srcPath = event.input?.path;
     if (typeof srcPath !== "string" || srcPath.length === 0) return;
     if (!isImagePath(srcPath)) return;
