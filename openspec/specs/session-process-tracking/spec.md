@@ -162,59 +162,81 @@ The bridge SHALL maintain a `selfSpawnedPgids: Set<number>` on `BridgeContext`, 
 - **WHEN** the bridge spawns an RPC keeper sidecar
 - **THEN** the bridge SHALL add the keeper's PID to `selfSpawnedPgids` before any further use
 
-### Requirement: Session card shows active child processes
-The dashboard session card SHALL display a process list section when the session has active child processes (non-empty process list). Each visible entry SHALL show a truncated command string (max 40 characters in full layout, 30 in compact), elapsed time (human-readable), and a kill button.
+### Requirement: Client renders the PGID scan as a collapsible drawer
+The client-side `ProcessList` (renamed semantically to "BackgroundProcessesDrawer," filename unchanged) SHALL render the bridge's PGID scan as a collapsible drawer beneath the activity bar, replacing today's always-expanded list with skeleton padding.
 
-When `processes.length > 0`, the rendered list SHALL enforce a **minimum of 5 row slots** and a **maximum of 5 visible process rows**:
+#### Scenario: Drawer collapsed shows only summary row
+- **GIVEN** the drawer receives 3 processes and `expanded === false`
+- **WHEN** it renders
+- **THEN** it SHALL render a single summary row with text `"⚠ 3 background processes"` and a chevron indicator
+- **AND** it SHALL NOT render any individual process rows
+- **AND** clicking the summary row SHALL invoke `onToggle`
 
-- If `processes.length < 5`: render all process rows followed by skeleton rows to pad the total to 5. Skeleton rows SHALL match the height and chrome of a real row but contain no text, no icon, and no kill button. Skeleton rows SHALL have `aria-hidden="true"`.
-- If `processes.length === 5`: render all 5 process rows and no skeleton or overflow rows.
-- If `processes.length > 5`: render the 5 process rows with the largest `elapsedMs` (longest-running first), followed by a single overflow tail row reading `+{N} more processes` where `N = processes.length - 5`. The overflow row SHALL expose the hidden command lines via a `title` attribute. The overflow row SHALL NOT have a kill button.
+#### Scenario: Drawer expanded shows rows
+- **GIVEN** the drawer receives 3 processes and `expanded === true`
+- **WHEN** it renders
+- **THEN** it SHALL render the summary row plus 3 process rows
+- **AND** each process row SHALL retain today's truncated command, elapsed time, and ✕ kill button
 
-Process rows visible to the user SHALL be ordered by `elapsedMs` descending. This ordering applies to both the `compact` (mobile) and full layouts.
+### Requirement: Drawer per-row ✕ continues to invoke PGID kill
+The per-row ✕ button in the drawer SHALL continue to call `onKill(pgid)` (SIGTERM→SIGKILL via the existing `force_kill` path). It SHALL NOT be confused with the activity bar's stop verb.
 
-When `processes.length === 0`, the process list section SHALL NOT render (returning `null`).
+#### Scenario: Drawer kill click hits the PGID path
+- **GIVEN** an expanded drawer with a process row for `pgid=48213`
+- **WHEN** the user clicks the ✕ on that row
+- **THEN** the component SHALL invoke `onKill(48213)`
 
-#### Scenario: No active processes
-- **WHEN** a session has no child processes
-- **THEN** the process list section SHALL NOT be rendered
+#### Scenario: Drawer kill tooltip
+- **GIVEN** an expanded drawer row
+- **WHEN** the user hovers the ✕ button
+- **THEN** the tooltip SHALL indicate force-kill of the process tree (literal copy: `"Force-kill process tree"`)
 
-#### Scenario: Single process pads to floor
-- **WHEN** a session has 1 child process
-- **THEN** the card SHALL render 1 entry with command, elapsed time, and kill button, followed by 4 skeleton rows
+### Requirement: Skeleton row padding removed
+The drawer SHALL NOT pad its rendered output with invisible skeleton rows. Previous `MIN_SLOTS=5` padding is removed; the activity bar above provides the card's stable visual surface.
 
-#### Scenario: Three processes pad to floor
-- **WHEN** a session has 3 child processes
-- **THEN** the card SHALL render 3 entries followed by 2 skeleton rows
+#### Scenario: One process renders one row
+- **GIVEN** the drawer receives 1 process and `expanded === true`
+- **WHEN** it renders
+- **THEN** it SHALL render the summary row plus exactly 1 process row
+- **AND** it SHALL NOT render any aria-hidden skeleton rows
 
-#### Scenario: Exactly five processes
-- **WHEN** a session has exactly 5 child processes
-- **THEN** the card SHALL render 5 entries with no skeleton rows and no overflow row
+### Requirement: Overflow tail preserved
+Excess processes beyond `MAX_VISIBLE=5` SHALL continue to collapse into a single `+N more processes` row with a tooltip listing the hidden command lines. This behaviour is preserved from today.
 
-#### Scenario: Six processes show overflow tail
-- **WHEN** a session has 6 child processes
-- **THEN** the card SHALL render 5 entries (longest-running) followed by 1 overflow row reading "+1 more processes"
+#### Scenario: Seven processes render with overflow
+- **GIVEN** the drawer receives 7 processes and `expanded === true`
+- **WHEN** it renders
+- **THEN** it SHALL render the summary row plus 5 process rows plus 1 `+2 more processes` overflow row
+- **AND** the overflow row SHALL expose the hidden commands via its `title` attribute
 
-#### Scenario: Eight processes show overflow tail
-- **WHEN** a session has 8 child processes
-- **THEN** the card SHALL render 5 entries (longest-running) followed by 1 overflow row reading "+3 more processes"
+### Requirement: Drawer default state is collapsed and persists per session server-side
+The background-processes drawer's initial expansion state SHALL be derived from a per-session stored boolean, NOT from the activity bar context. When the session has no stored choice, the drawer SHALL render collapsed. A user toggle SHALL persist to `<session>.meta.json#processDrawerCollapsed`, SHALL be broadcast on the session object so every connected client reflects it, and SHALL be honored on reload. The stored value SHALL be pruned automatically when the session is deleted (its meta file is removed).
 
-#### Scenario: Overflow tail tooltip lists hidden commands
-- **WHEN** an overflow row is rendered for hidden processes
-- **THEN** the overflow row's `title` attribute SHALL contain the command lines of the hidden processes
+This supersedes the prior contextual default (`expanded === true` when the activity bar is empty and the drawer is non-empty).
 
-#### Scenario: Visible rows sorted by elapsed time descending
-- **WHEN** a session has 3 child processes with elapsedMs 60000, 10000, 120000
-- **THEN** the rendered order SHALL be 120000, 60000, 10000
+#### Scenario: No stored choice renders collapsed
+- **GIVEN** a session with 2 background processes and no `processDrawerCollapsed` value in its meta
+- **WHEN** the PROCESS subcard renders
+- **THEN** the drawer SHALL render collapsed (`expanded === false`)
+- **AND** the `⚠ 2 background processes` summary row SHALL still be visible
 
-#### Scenario: Skeleton row has no kill button
-- **WHEN** a skeleton row is rendered to fill the slot floor
-- **THEN** the row SHALL contain no kill button, no command text, and SHALL be marked `aria-hidden`
+#### Scenario: Stored expanded choice is honored on load
+- **GIVEN** a session whose meta has `processDrawerCollapsed === false`
+- **WHEN** the PROCESS subcard renders
+- **THEN** the drawer SHALL render expanded
 
-#### Scenario: Kill button sends kill request immediately
-- **WHEN** the user clicks the kill button for a process
-- **THEN** the browser SHALL send a `kill_process` message with the session ID and PGID immediately without confirmation
+#### Scenario: User toggle persists server-side
+- **GIVEN** a collapsed drawer for session `S`
+- **WHEN** the user clicks the summary row to expand it
+- **THEN** the client SHALL send `set_session_process_drawer { sessionId: "S", collapsed: false }`
+- **AND** the server SHALL write `processDrawerCollapsed: false` to `S`'s meta and rebroadcast the session
 
-#### Scenario: Process disappears after kill
-- **WHEN** a kill request succeeds and the next process scan excludes the killed process
-- **THEN** the entry SHALL be removed from the session card
+#### Scenario: Choice survives reload and syncs across clients
+- **GIVEN** the user has expanded the drawer for session `S` on client A
+- **WHEN** client A reloads, or client B is already connected
+- **THEN** both clients SHALL render the drawer for `S` expanded
+
+#### Scenario: Stored value pruned on session delete
+- **GIVEN** a session `S` with a stored `processDrawerCollapsed` value
+- **WHEN** session `S` is deleted and its `.meta.json` removed
+- **THEN** no orphan `processDrawerCollapsed` value SHALL persist for `S`

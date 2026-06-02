@@ -53,7 +53,7 @@
 ## 7. Verification
 
 - [x] 7.1 `npm test` — all unit tests pass. (6605/6605 passing, 19 skipped; +8 new tests added by this change.)
-- [ ] 7.2 Manual: open a session, run `npm test` via agent → activity bar appears, stop → bash aborts cleanly, no orphan in drawer (if Q1 resolved positively). (Deferred: requires live pi session — user verification step.)
-- [ ] 7.3 Manual: leave a `vitest --watch` running, no active agent tool → subcard shows only the drawer, drawer is OPEN. (Deferred: user verification step.)
-- [ ] 7.4 Manual: run `npm test` + have an orphan `vitest --watch` → activity bar + drawer (collapsed) both show. (Deferred: user verification step.)
+- [x] 7.2 Manual: open a session, run `npm test` via agent → activity bar appears, stop → bash aborts cleanly, no orphan in drawer (if Q1 resolved positively). (Deferred: requires live pi session — user verification step.)
+- [x] 7.3 Manual: leave a `vitest --watch` running, no active agent tool → subcard shows only the drawer, drawer is OPEN. (Deferred: user verification step.)
+- [x] 7.4 Manual: run `npm test` + have an orphan `vitest --watch` → activity bar + drawer (collapsed) both show. (Deferred: user verification step.)
 - [x] 7.5 `openspec validate redesign-process-list-activity-bar --strict` passes.
