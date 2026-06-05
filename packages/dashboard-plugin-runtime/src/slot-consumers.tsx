@@ -364,26 +364,11 @@ export function SettingsSectionByPluginSlot({ pluginId }: { pluginId: string }) 
   );
 }
 
-/**
- * Optional payload fields a `tool-renderer` plugin may consume, mirroring the
- * built-in `ToolRendererProps`. Required core (`toolName`/`toolInput`/
- * `sessionId`) stays separate so existing claims keep compiling.
- * See change: wire-tool-renderer-slot.
- */
-interface ToolRendererExtraProps {
-  status?: "running" | "complete" | "error";
-  result?: string;
-  toolDetails?: Record<string, unknown>;
-  images?: unknown[];
-  context?: unknown;
-}
-
 export function ToolRendererSlot({
   toolName,
   toolInput,
   sessionId,
   FallbackComponent,
-  ...extra
 }: {
   toolName: string;
   toolInput: Record<string, unknown>;
@@ -392,14 +377,14 @@ export function ToolRendererSlot({
     toolName: string;
     toolInput: Record<string, unknown>;
     sessionId: string;
-  } & ToolRendererExtraProps>;
-} & ToolRendererExtraProps) {
+  }>;
+}) {
   const registry = useSlotRegistryOrNull();
   if (!registry) return null;
   const claims = forToolName(registry.getClaims("tool-renderer"), toolName);
   if (!claims.length) {
     return FallbackComponent ? (
-      <FallbackComponent toolName={toolName} toolInput={toolInput} sessionId={sessionId} {...extra} />
+      <FallbackComponent toolName={toolName} toolInput={toolInput} sessionId={sessionId} />
     ) : null;
   }
   const claim = claims[0];
@@ -407,7 +392,6 @@ export function ToolRendererSlot({
     toolName,
     toolInput,
     sessionId,
-    ...extra,
   });
 }
 
