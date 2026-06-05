@@ -68,6 +68,24 @@ export interface SessionRegisterMessage {
    * See change: reattach-move-to-front.
    */
   registerReason?: "spawn" | "reattach";
+  /**
+   * Whether a TUI is attached to the pi process. `true` for interactive
+   * TUI sessions, `false` for headless/print-mode (`pi -p`). The bridge
+   * populates it from its cached UI state. Fact-forwarding only — the
+   * server decides what to do with it (auto-hide heuristic). Optional and
+   * back-compatible: when absent (legacy bridge), the server SHALL NOT
+   * apply the auto-hide heuristic.
+   * See change: auto-hide-headless-worker-sessions.
+   */
+  hasUI?: boolean;
+  /**
+   * Explicit visibility override derived from the bridge's environment
+   * (`PI_DASHBOARD_VISIBLE` ⇒ `"visible"`, `PI_DASHBOARD_HIDDEN` ⇒
+   * `"hidden"`; visible wins if both set). When present, it overrides the
+   * server's auto-hide heuristic at first register. Optional/back-compatible.
+   * See change: auto-hide-headless-worker-sessions.
+   */
+  visibilityIntent?: "hidden" | "visible";
 }
 
 export interface SessionUnregisterMessage {

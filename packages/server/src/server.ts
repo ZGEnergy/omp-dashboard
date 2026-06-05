@@ -1196,16 +1196,30 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         }
       }
 
+      // Opt-out for isolated / CI runs: PI_DASHBOARD_NO_MDNS=1 keeps the
+      // server network-silent (no multicast advertise, no peer browser) so a
+      // test instance never leaks onto the LAN or pollutes a live dashboard's
+      // peer list. NOTE: test-infra, not part of auto-hide-headless-worker-sessions.
+      const rawNoMdns = (process.env.PI_DASHBOARD_NO_MDNS ?? "").trim().toLowerCase();
+      const mdnsDisabled = rawNoMdns === "1" || rawNoMdns === "true" || rawNoMdns === "yes";
+
       // Advertise via mDNS
       try {
-        advertiseDashboard(config.port, config.piPort);
-        console.log(`mDNS: advertising _pi-dashboard._tcp on port ${config.port}`);
+        if (mdnsDisabled) {
+          console.log("mDNS: advertising disabled (PI_DASHBOARD_NO_MDNS)");
+        } else {
+          advertiseDashboard(config.port, config.piPort);
+          console.log(`mDNS: advertising _pi-dashboard._tcp on port ${config.port}`);
+        }
       } catch (err) {
         console.warn(`mDNS advertisement failed (will continue without):`, err);
       }
 
       // Start continuous mDNS browser for peer discovery
       try {
+        if (mdnsDisabled) {
+          // skip peer discovery entirely
+        } else {
         mdnsBrowser = createBrowser();
         mdnsBrowser.on("server-up", (server: DiscoveredServer) => {
           // Don't include ourselves
@@ -1217,6 +1231,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
           peerServers.delete(`${server.host}:${server.port}`);
           browserGateway.broadcast({ type: "servers_updated", servers: Array.from(peerServers.values()) });
         });
+        }
       } catch (err) {
         console.warn(`mDNS browser failed (peer discovery disabled):`, err);
       }
