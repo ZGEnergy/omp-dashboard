@@ -54,7 +54,7 @@ The `Show hidden` toggle, per-card hide, server-side hidden flag, and per-folder
 - **THEN** the session SHALL be visible with muted styling and resume/fork buttons inside its folder's ended group
 
 ### Requirement: Server-side hidden state
-Hidden state is managed server-side via the in-memory session manager with persistence through the JSON-backed state store (`~/.pi/dashboard/state.json`). The client-side localStorage hidden set is no longer used. The server is the source of truth for visibility.
+Hidden state SHALL be managed server-side via the in-memory session manager with persistence through the JSON-backed state store (`~/.pi/dashboard/state.json`). The client-side localStorage hidden set is no longer used. The server SHALL be the source of truth for visibility.
 
 #### Scenario: Migration from client-side hidden
 - **WHEN** the client detects a legacy `hiddenSessions` key in localStorage
@@ -104,7 +104,6 @@ The persisted drag-reorder list (`sessionOrder`) SHALL contain alive session ids
 - **THEN** `reorder_sessions` SHALL persist the new order with the ended id at the drop position
 - **AND** `resume_session` SHALL fire for that id in `continue` mode
 - **AND** when the resume completes the card SHALL remain at the dropped position
-
 
 ### Requirement: User-initiated resume tags an intent before spawn
 
@@ -183,3 +182,36 @@ The `pendingResumeIntentRegistry` SHALL hold its state in process memory only. I
 #### Scenario: Restart clears intents
 - **WHEN** the server restarts
 - **THEN** the new process's registry SHALL be empty regardless of what was tagged before the restart
+
+### Requirement: Auto-hide headless non-dashboard sessions at first registration
+
+On the **first** registration of a session, the server SHALL set `hidden = true` when `hasUI === false` AND `source !== "dashboard"`, unless overridden by an explicit visibility intent. This hides throwaway headless workers (e.g. `pi --model M -p "…"` subprocesses) by default while leaving genuine TUI sessions and dashboard-spawned headless sessions visible.
+
+When `session_register` carries `visibilityIntent`, the explicit intent SHALL win over the heuristic: `"hidden"` forces `hidden = true`, `"visible"` forces `hidden = false`.
+
+When the `session_register` message omits `hasUI` (legacy bridge), the server SHALL NOT auto-hide (the session registers with `hidden = false` as before).
+
+#### Scenario: Headless non-dashboard worker is hidden by default
+- **WHEN** a session first registers with `hasUI === false` and `source !== "dashboard"` and no `visibilityIntent`
+- **THEN** the server SHALL set `hidden = true`
+- **AND** the card SHALL be absent from the default list and revealable via `Show hidden`
+
+#### Scenario: TUI and dashboard sessions stay visible
+- **WHEN** a session first registers with `hasUI === true`, OR with `source === "dashboard"`
+- **THEN** the server SHALL set `hidden = false`
+
+#### Scenario: Explicit visibility intent overrides the heuristic
+- **WHEN** a session first registers with `visibilityIntent === "visible"` and `hasUI === false`
+- **THEN** the server SHALL set `hidden = false`
+- **AND WHEN** a session first registers with `visibilityIntent === "hidden"` and `hasUI === true`
+- **THEN** the server SHALL set `hidden = true`
+
+### Requirement: Auto-hide is one-shot; manual hide state survives re-registration
+
+The auto-hide heuristic SHALL be evaluated only on the first registration of a session. On any subsequent `session_register` for an already-known session (reattach after a dashboard restart, in-process resume), the server SHALL preserve the existing `hidden` value rather than recomputing it. This ensures a session a user has manually unhidden (or hidden) keeps that state across the worker's reconnects.
+
+#### Scenario: Manual unhide survives reconnect
+- **WHEN** an auto-hidden session is manually unhidden, then re-registers (reattach)
+- **THEN** the server SHALL keep `hidden = false`
+- **AND** SHALL NOT re-apply the auto-hide heuristic
+

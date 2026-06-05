@@ -311,6 +311,10 @@ export function createPiGateway(
                 // the configured reattach placement policy.
                 // See change: reattach-move-to-front.
                 registerReason: msg.registerReason,
+                // Fact-forwarding for the first-register auto-hide heuristic.
+                // See change: auto-hide-headless-worker-sessions.
+                hasUI: msg.hasUI,
+                visibilityIntent: msg.visibilityIntent,
               });
               console.error(`[gateway] session registered: ${msg.sessionId} cwd=${msg.cwd}`);
 

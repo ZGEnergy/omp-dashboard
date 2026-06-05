@@ -486,7 +486,12 @@ export function wireEvents(deps: EventWiringDeps): void {
         // Mark this session so replayed events are not re-inserted into the store
         skipReplayInsert.add(sessionId);
       }
-      sessionManager.update(sessionId, { hidden: false, dataUnavailable: false });
+      // NOTE: do NOT reset `hidden` here. The auto-hide decision is the sole
+      // responsibility of `memorySessionManager.register` (first register vs
+      // reattach-preserve). Resetting `hidden: false` on every register would
+      // both defeat the auto-hide heuristic and wipe a manual hide on reattach.
+      // See change: auto-hide-headless-worker-sessions.
+      sessionManager.update(sessionId, { dataUnavailable: false });
 
       if (msg.sessionFile) {
         for (const other of sessionManager.listAll()) {

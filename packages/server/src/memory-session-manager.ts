@@ -24,6 +24,21 @@ export interface RegisterSessionParams {
    * See change: reattach-move-to-front.
    */
   registerReason?: "spawn" | "reattach";
+  /**
+   * Whether a TUI is attached to the pi process (forwarded from
+   * `SessionRegisterMessage.hasUI`). `false` for headless/print-mode
+   * workers. Drives the first-register auto-hide heuristic. Absent ⇒
+   * no auto-hide (legacy bridge).
+   * See change: auto-hide-headless-worker-sessions.
+   */
+  hasUI?: boolean;
+  /**
+   * Explicit visibility override forwarded from
+   * `SessionRegisterMessage.visibilityIntent`. Wins over the heuristic at
+   * first register.
+   * See change: auto-hide-headless-worker-sessions.
+   */
+  visibilityIntent?: "hidden" | "visible";
 }
 
 export interface OnChangeContext {
@@ -102,7 +117,19 @@ export function createMemorySessionManager(): SessionManager {
         endedAt: undefined,
         sessionFile: params.sessionFile,
         sessionDir: params.sessionDir,
-        hidden: false,
+        // Auto-hide decision (single writer). On reattach (an already-known
+        // session re-registering after a dashboard restart / reconnect) the
+        // prior `hidden` is preserved so a manual unhide/hide survives. On
+        // first register (spawn / legacy / no prior record) an explicit
+        // visibilityIntent wins, else headless non-dashboard sessions are
+        // hidden. See change: auto-hide-headless-worker-sessions.
+        hidden: (params.registerReason === "reattach" && existing)
+          ? existing.hidden
+          : params.visibilityIntent === "hidden"
+            ? true
+            : params.visibilityIntent === "visible"
+              ? false
+              : params.hasUI === false && params.source !== "dashboard",
         firstMessage: params.firstMessage ?? existing?.firstMessage,
         dataUnavailable: false,
         pid: params.pid,
