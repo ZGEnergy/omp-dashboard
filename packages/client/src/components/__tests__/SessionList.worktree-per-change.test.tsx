@@ -178,7 +178,7 @@ describe("SessionList — per-change ⑂+ worktree spawn end-to-end", () => {
     fireEvent.click(screen.getByTestId("folder-openspec-header"));
     expect(screen.queryByTestId("spawn-attached-worktree-btn-add-dark-mode")).toBeNull();
     // Folder +Worktree button also hidden.
-    expect(screen.queryByTestId("spawn-worktree-btn")).toBeNull();
+    expect(screen.queryByTestId("folder-spawn-worktree-btn")).toBeNull();
   });
 
   it("⑂+ button hidden on non-git folder even with flag on", () => {

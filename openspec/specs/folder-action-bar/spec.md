@@ -1,52 +1,49 @@
-## ADDED Requirements
+# folder-action-bar Specification
 
+## Purpose
+
+Define the folder-group action bar and elevated spawn buttons rendered in the sidebar.
+## Requirements
 ### Requirement: Folder action bar layout
-Each folder group in the sidebar SHALL render a horizontal action bar below the group header containing buttons in this order: `+Session`, `+Worktree`, `Terminals(N)`, `Editor`, `Zed`, and Pi Resources (right-aligned). The action bar SHALL replace the current scattered button layout.
+Each folder group in the sidebar SHALL render a horizontal action bar below the group header containing buttons in this order: `Terminals(N)`, `Editor`, native editors (e.g. `Zed`), `Clean up broken (N)` (conditional), and Pi Resources (right-aligned). The action bar SHALL NOT contain `+Session` or `+Worktree` buttons — those are relocated to the elevated spawn-button stack (see "Elevated folder spawn buttons").
 
-The `+Worktree` button SHALL be hidden when the folder is not detected as a git repository (no `gitBranch` on any session under that folder). The button is hidden, not disabled.
-
-#### Scenario: All buttons visible with detected editors
-- **WHEN** a folder group is rendered for a git repository and Zed is detected as a running native editor
-- **THEN** the action bar SHALL display: +Session, +Worktree, Terminals(0), Editor, Zed, and Pi Resources icon
-- **THEN** buttons SHALL be arranged horizontally with consistent spacing
+#### Scenario: Action bar omits spawn buttons
+- **WHEN** a folder group action bar is rendered for a git repository with Zed detected
+- **THEN** the action bar SHALL display: Terminals(0), Editor, Zed, and the Pi Resources icon
+- **THEN** the action bar SHALL NOT contain a `+Session` button
+- **THEN** the action bar SHALL NOT contain a `+Worktree` button
 - **THEN** the action bar SHALL NOT contain a `+Terminal` button
-
-#### Scenario: Non-git folder hides +Worktree
-- **WHEN** a folder group is rendered for a directory that is not a git repository
-- **THEN** the +Worktree button SHALL NOT appear
-- **THEN** all other buttons SHALL render as before
 
 #### Scenario: Zed not detected
 - **WHEN** a folder group is rendered and Zed is not detected
 - **THEN** the Zed button SHALL NOT appear in the action bar
-- **THEN** all other buttons SHALL remain visible
+- **THEN** all other action-bar buttons SHALL remain visible
 
 ### Requirement: +Worktree button opens worktree dialog
-The `+Worktree` button in the folder action bar SHALL open the worktree spawn dialog (`WorktreeSpawnDialog`) scoped to the folder's cwd. Visibility of the button SHALL additionally be gated on the new global preference `gitWorktreeEnabled` (default `true`) — when the flag is `false`, the button SHALL NOT render even on git folders.
+The `+ New Worktree` action SHALL be presented as a full-width line button in the elevated spawn-button stack (see "Elevated folder spawn buttons"), not as a pill in the action bar. Clicking it SHALL open `WorktreeSpawnDialog` scoped to the folder's cwd. The button SHALL be hidden (not disabled) unless the folder is detected as a git repository AND the global preference `gitWorktreeEnabled` is `true` AND a spawn handler is wired.
 
 The flag is a UI preference only. The underlying `POST /api/git/worktree` endpoint is unaffected; access control remains the server-side network guard.
 
 #### Scenario: Click +Worktree with flag enabled
-- **WHEN** `gitWorktreeEnabled` is `true` AND the folder is a git repo AND a user clicks the `+Worktree` button
-- **THEN** the `WorktreeSpawnDialog` SHALL open with `cwd` set to the folder's cwd
+- **WHEN** `gitWorktreeEnabled` is `true` AND the folder is a git repo AND the user clicks `+ New Worktree`
+- **THEN** `WorktreeSpawnDialog` SHALL open with `cwd` set to the folder's cwd
 
 #### Scenario: Worktree preference disabled hides button
 - **WHEN** `gitWorktreeEnabled` is `false`
-- **THEN** the `+Worktree` button SHALL NOT render on any folder, regardless of git status
-- **THEN** all other folder-action-bar buttons SHALL render unchanged
+- **THEN** the `+ New Worktree` button SHALL NOT render on any folder, regardless of git status
 
-#### Scenario: Flag omitted from config treated as enabled
-- **WHEN** the dashboard config has no `gitWorktreeEnabled` field
-- **THEN** the client SHALL treat it as `true` (default)
-- **THEN** the `+Worktree` button SHALL render on git folders (current behavior preserved)
+#### Scenario: Non-git folder hides +Worktree
+- **WHEN** a folder group is rendered for a directory that is not a git repository
+- **THEN** the `+ New Worktree` button SHALL NOT appear
+- **THEN** the `+ New Session` button SHALL still render
 
 ### Requirement: +Session button
-The +Session button SHALL spawn a new pi session in the folder's cwd. It SHALL be disabled while a session is being spawned (existing behavior, relocated).
+The `+ New Session` action SHALL be presented as a full-width line button in the elevated spawn-button stack (see "Elevated folder spawn buttons"), not as a pill in the action bar. It SHALL spawn a new pi session in the folder's cwd and SHALL be disabled while a session is being spawned in that folder.
 
 #### Scenario: Spawn session
-- **WHEN** user clicks +Session
+- **WHEN** the user clicks `+ New Session`
 - **THEN** a new pi session SHALL be spawned in the folder's cwd
-- **THEN** the button SHALL be disabled until the session appears
+- **THEN** the button SHALL be disabled until the spawn completes
 
 ### Requirement: Terminals button with count badge
 The Terminals button SHALL display the count of open terminals for the folder as a badge (e.g., `Terminals(3)`). Clicking it SHALL navigate to the TerminalsView. When no terminals exist, the badge SHALL show 0.
@@ -101,7 +98,6 @@ The Pi Resources button SHALL be right-aligned in the action bar and use a more 
 - **WHEN** user clicks the Pi Resources icon
 - **THEN** the PiResourcesView SHALL open for the folder's cwd
 
-
 ### Requirement: Initialize button gated on worktree-init status
 
 For a row whose repo declares a worktree-init hook (`hasHook: true`), the row SHALL display an "Initialize" button when, and only when, the cached worktree-init status reports `needsInit: true`. When `hasHook` is true and `needsInit` is false, the Initialize button SHALL NOT be shown. Behavior for rows with no declared hook (`hasHook: false`) is governed by a separate capability and is out of scope here. Init-status SHALL be probed lazily per row and fail-open (on probe error the button is hidden).
@@ -134,3 +130,32 @@ Clicking Initialize SHALL run the hook via `POST /api/git/worktree/init`. When t
 - **WHEN** a hook run succeeds
 - **THEN** the client SHALL re-fetch init-status
 - **AND** the Initialize button SHALL disappear once the gate reports `needsInit: false`
+
+### Requirement: Elevated folder spawn buttons
+Each folder group SHALL render an elevated spawn-button stack in the always-visible folder header content column, positioned below the action bar and above the plugin / OpenSpec folder sections. The stack SHALL contain a full-width `+ New Session` button (always rendered) and, when worktree gating holds, a full-width `+ New Worktree` button stacked directly below it. The stack SHALL remain visible regardless of the folder's collapse state and regardless of session count (including 0 sessions).
+
+#### Scenario: Buttons visible while collapsed
+- **WHEN** a folder group is collapsed
+- **THEN** the `+ New Session` button SHALL still be visible in the header
+
+#### Scenario: Buttons visible with zero sessions
+- **WHEN** a folder group has 0 sessions (e.g. a pinned empty folder)
+- **THEN** the `+ New Session` button SHALL render
+
+#### Scenario: Worktree button stacked below session button
+- **WHEN** worktree gating holds (`isGitRepo` AND `gitWorktreeEnabled` AND handler wired)
+- **THEN** the `+ New Worktree` button SHALL render as a full-width button directly below `+ New Session`
+
+### Requirement: Spawn auto-expands collapsed folder
+When a folder is collapsed and the user clicks `+ New Session` or `+ New Worktree`, the folder SHALL first expand and then perform the spawn action, so the resulting placeholder card and new session card are visible. When the folder is already expanded, the action SHALL run without changing collapse state.
+
+#### Scenario: Spawn while collapsed expands then spawns
+- **WHEN** a folder is collapsed AND the user clicks `+ New Session`
+- **THEN** the folder SHALL expand
+- **THEN** a new pi session SHALL be spawned in the folder's cwd
+
+#### Scenario: Spawn while expanded does not toggle collapse
+- **WHEN** a folder is already expanded AND the user clicks `+ New Session`
+- **THEN** the folder SHALL remain expanded
+- **THEN** a new pi session SHALL be spawned in the folder's cwd
+

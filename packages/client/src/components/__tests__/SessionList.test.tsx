@@ -64,7 +64,7 @@ describe("SessionList spawn button", () => {
         </ThemeProvider>
       </TestRouter>,
     );
-    const btn = screen.getByTestId("spawn-session-btn");
+    const btn = screen.getByTestId("folder-spawn-session-btn");
     expect(btn).toBeTruthy();
   });
 
@@ -82,7 +82,7 @@ describe("SessionList spawn button", () => {
         </ThemeProvider>
       </TestRouter>,
     );
-    expect(screen.getByTestId("spawn-session-btn")).toBeTruthy();
+    expect(screen.getByTestId("folder-spawn-session-btn")).toBeTruthy();
   });
 
   it("should call onSpawnSession with cwd when clicked", () => {
@@ -98,9 +98,50 @@ describe("SessionList spawn button", () => {
         </ThemeProvider>
       </TestRouter>,
     );
-    const btn = screen.getByTestId("spawn-session-btn");
+    const btn = screen.getByTestId("folder-spawn-session-btn");
     fireEvent.click(btn);
     expect(onSpawn).toHaveBeenCalledWith("/my/project");
+  });
+});
+
+describe("SessionList elevated spawn buttons", () => {
+  it("expands a collapsed folder then spawns when +New Session is clicked", () => {
+    // Seed the folder as collapsed.
+    localStorage.setItem("dashboard:collapsedGroups", JSON.stringify(["/my/project"]));
+    const onSpawn = vi.fn();
+    const { container } = render(
+      <TestRouter>
+        <ThemeProvider>
+          <SessionList
+            sessions={[makeSession({ cwd: "/my/project" })]}
+            onSelect={() => {}}
+            onSpawnSession={onSpawn}
+          />
+        </ThemeProvider>
+      </TestRouter>,
+    );
+    // Starts collapsed.
+    expect(container.querySelector(".group-collapse.collapsed")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("folder-spawn-session-btn"));
+    // Folder expanded, then spawn fired.
+    expect(container.querySelector(".group-collapse.expanded")).toBeTruthy();
+    expect(onSpawn).toHaveBeenCalledWith("/my/project");
+  });
+
+  it("renders spawn buttons for a pinned folder with 0 sessions", () => {
+    render(
+      <TestRouter>
+        <ThemeProvider>
+          <SessionList
+            sessions={[]}
+            onSelect={() => {}}
+            onSpawnSession={() => {}}
+            pinnedDirectories={["/empty/folder"]}
+          />
+        </ThemeProvider>
+      </TestRouter>,
+    );
+    expect(screen.getByTestId("folder-spawn-session-btn")).toBeTruthy();
   });
 });
 
@@ -153,7 +194,7 @@ describe("SessionList placeholder spawn card", () => {
         </ThemeProvider>
       </TestRouter>,
     );
-    const btn = screen.getByTestId("spawn-session-btn");
+    const btn = screen.getByTestId("folder-spawn-session-btn");
     expect(btn.hasAttribute("disabled")).toBe(true);
   });
 
@@ -171,7 +212,7 @@ describe("SessionList placeholder spawn card", () => {
         </ThemeProvider>
       </TestRouter>,
     );
-    const btn = screen.getByTestId("spawn-session-btn");
+    const btn = screen.getByTestId("folder-spawn-session-btn");
     expect(btn.hasAttribute("disabled")).toBe(false);
   });
 });

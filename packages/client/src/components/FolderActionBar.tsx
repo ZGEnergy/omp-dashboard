@@ -1,18 +1,16 @@
 /**
  * Unified action bar for folder groups in the sidebar.
- * Buttons: +Session | Terminals(N) | Editor | Zed | Pi Resources
+ * Buttons: Terminals(N) | Editor | Zed | Clean up broken | Pi Resources
  */
 import React from "react";
 import { Icon } from "@mdi/react";
 import {
-  mdiPlus,
   mdiConsoleLine,
   mdiCodeBraces,
   mdiToyBrickOutline,
   mdiOpenInNew,
   mdiAlertCircleOutline,
   mdiCircleSmall,
-  mdiSourceBranchPlus,
   mdiBroom,
 } from "@mdi/js";
 import { ConfirmDialog } from "@blackbelt-technology/pi-dashboard-client-utils/ConfirmDialog";
@@ -26,21 +24,6 @@ interface Props {
   editorStatus?: { id: string; status: EditorInstanceStatus } | null;
   editorAvailable?: boolean; // Whether code-server binary is detected
   nativeEditors: DetectedEditor[];
-  spawningDisabled?: boolean;
-  /**
-   * Whether the folder is detected as a git repository. When false, the
-   * `+Worktree` button is hidden (no git ops apply). When undefined, the
-   * caller hasn't probed yet — we hide the button defensively.
-   * See change: add-worktree-spawn-dialog.
-   */
-  isGitRepo?: boolean;
-  /**
-   * UI preference: globally enable worktree spawn buttons. When false,
-   * the `+Worktree` button hides regardless of git status. Required — the
-   * parent (SessionList) reads `config.gitWorktreeEnabled ?? true` and
-   * passes it explicitly. See change: openspec-worktree-spawn-button.
-   */
-  gitWorktreeEnabled: boolean;
   /**
    * Number of ended sessions in this folder whose `cwdMissing === true`.
    * Drives the visibility + label of the `Clean up broken (N)` button.
@@ -49,13 +32,10 @@ interface Props {
   brokenSessionCount?: number;
   /** Called when the user confirms cleaning up. Fires hide for each broken session. */
   onCleanUpBroken?: () => void;
-  onSpawnSession: () => void;
   onOpenTerminals: () => void;
   onOpenEditor: () => void;
   onOpenNativeEditor: (editorId: string) => void;
   onOpenPiResources: () => void;
-  /** Open the worktree spawn dialog scoped to this folder's cwd. */
-  onOpenWorktreeDialog?: () => void;
 }
 
 // Icon map for native editors
@@ -69,64 +49,20 @@ export function FolderActionBar({
   editorStatus,
   editorAvailable = true,
   nativeEditors,
-  spawningDisabled,
-  isGitRepo,
-  gitWorktreeEnabled,
   brokenSessionCount,
   onCleanUpBroken,
-  onSpawnSession,
   onOpenTerminals,
   onOpenEditor,
   onOpenNativeEditor,
   onOpenPiResources,
-  onOpenWorktreeDialog,
 }: Props) {
   // Filter out vscode/code from native editors (served via EditorView)
   const filteredNativeEditors = nativeEditors.filter((e) => e.id !== "vscode" && e.id !== "code");
-  // +Worktree button visibility: shown when the folder is a known git
-  // repo AND a handler is wired. NO loopback gate — the worktree-add
-  // happens on the server, which is the user's machine regardless of
-  // whether the browser came in via localhost or a tunnel. Server-side
-  // networkGuard already enforces access for the REST endpoint.
-  // See change: add-worktree-spawn-dialog.
-  const showWorktreeButton =
-    isGitRepo === true && gitWorktreeEnabled && !!onOpenWorktreeDialog;
   const showCleanUp = (brokenSessionCount ?? 0) > 0 && !!onCleanUpBroken;
   const [confirmCleanUpOpen, setConfirmCleanUpOpen] = React.useState(false);
 
   return (
     <div className="flex items-center gap-1 flex-wrap">
-      {/* +Session */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onSpawnSession(); }}
-        disabled={spawningDisabled}
-        data-testid="spawn-session-btn"
-        className={`text-[10px] px-1.5 py-0.5 rounded border ${
-          spawningDisabled
-            ? "border-[var(--border-secondary)] text-[var(--text-secondary)] opacity-50 cursor-not-allowed"
-            : "text-green-400 border-green-500/40 bg-green-500/5 hover:text-green-300 hover:border-green-500/70"
-        }`}
-        title="New pi session"
-      >
-        <span className="inline-flex items-center gap-0.5">
-          <Icon path={mdiPlus} size={0.5} /> Session
-        </span>
-      </button>
-
-      {/* +Worktree (localhost + git only) */}
-      {showWorktreeButton && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onOpenWorktreeDialog!(); }}
-          data-testid="spawn-worktree-btn"
-          className="text-[10px] px-1.5 py-0.5 rounded border text-orange-400 border-orange-500/40 bg-orange-500/5 hover:text-orange-300 hover:border-orange-500/70"
-          title="New pi session in a git worktree"
-        >
-          <span className="inline-flex items-center gap-0.5">
-            <Icon path={mdiSourceBranchPlus} size={0.5} /> Worktree
-          </span>
-        </button>
-      )}
-
       {/* Initialize (shown iff this checkout declares a hook + gate says needsInit) */}
       <WorktreeInitButton cwd={cwd} />
 

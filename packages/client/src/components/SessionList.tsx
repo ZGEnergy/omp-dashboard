@@ -6,6 +6,7 @@ import { Icon } from "@mdi/react";
 import { mdiChevronRight, mdiChevronDown, mdiChevronUp, mdiPlus, mdiPin, mdiFolder, mdiFolderOpen, mdiConsoleLine, mdiCog, mdiPuzzleOutline, mdiFileDocumentOutline } from "@mdi/js";
 import { PiLogo } from "./PiLogo.js";
 import { FolderActionBar } from "./FolderActionBar.js";
+import { FolderSpawnButtons } from "./FolderSpawnButtons.js";
 import { encodeFolderPath } from "../lib/folder-encoding.js";
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
@@ -641,21 +642,32 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               editorStatus={editorStatuses?.get(group.cwd)}
               editorAvailable={editorAvailable}
               nativeEditors={editorMap.get(group.cwd) ?? []}
-              spawningDisabled={spawningCwds?.has(group.cwd)}
-              isGitRepo={group.sessions.some((s) => !!s.gitBranch)}
-              onSpawnSession={() => onSpawnSession?.(group.cwd)}
               onOpenTerminals={() => onOpenTerminals?.(group.cwd)}
               onOpenEditor={() => onOpenEditor?.(group.cwd)}
               onOpenNativeEditor={(editorId) => handleOpenEditor(group.cwd, editorId)}
               onOpenPiResources={() => onOpenPiResources?.(group.cwd)}
-              gitWorktreeEnabled={gitWorktreeEnabled}
-              onOpenWorktreeDialog={onSpawnSession ? () => setWorktreeDialogCwd(group.cwd) : undefined}
               brokenSessionCount={group.sessions.filter((s) => s.cwdMissing === true && s.status === "ended").length}
               onCleanUpBroken={onHideSession ? () => {
                 for (const s of group.sessions) {
                   if (s.cwdMissing === true && s.status === "ended") onHideSession(s.id);
                 }
               } : undefined}
+            />
+          </div>
+          {/* Elevated spawn buttons: full-width stacked, always visible
+              regardless of collapse state. See change: elevate-folder-spawn-buttons. */}
+          <div className="mt-1">
+            <FolderSpawnButtons
+              spawningDisabled={spawningCwds?.has(group.cwd)}
+              showWorktree={group.sessions.some((s) => !!s.gitBranch) && gitWorktreeEnabled && !!onSpawnSession}
+              onSpawnSession={() => {
+                if (isCollapsed) handleToggleCollapse(group.cwd);
+                onSpawnSession?.(group.cwd);
+              }}
+              onSpawnWorktree={() => {
+                if (isCollapsed) handleToggleCollapse(group.cwd);
+                setWorktreeDialogCwd(group.cwd);
+              }}
             />
           </div>
           {/* Plugin slot: sidebar-folder-section (additive, coexists with FolderOpenSpecSection) */}

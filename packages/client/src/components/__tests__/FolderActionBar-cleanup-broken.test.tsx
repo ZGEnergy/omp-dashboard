@@ -15,12 +15,10 @@ function renderBar(over: Partial<React.ComponentProps<typeof FolderActionBar>> =
     cwd: "/repo",
     terminalCount: 0,
     nativeEditors: [],
-    onSpawnSession: () => {},
     onOpenTerminals: () => {},
     onOpenEditor: () => {},
     onOpenNativeEditor: () => {},
     onOpenPiResources: () => {},
-    gitWorktreeEnabled: true,
     ...over,
   };
   return render(<FolderActionBar {...props} />);
