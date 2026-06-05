@@ -208,7 +208,7 @@ When the `session_register` message omits `hasUI` (legacy bridge), the server SH
 
 ### Requirement: Auto-hide is one-shot; manual hide state survives re-registration
 
-The auto-hide heuristic SHALL be evaluated only on the first registration of a session. On any subsequent `session_register` for an already-known session (reattach after a dashboard restart, in-process resume), the server SHALL preserve the existing `hidden` value rather than recomputing it. This ensures a session a user has manually unhidden (or hidden) keeps that state across the worker's reconnects.
+The auto-hide heuristic SHALL be evaluated only on the first registration of a session. On any subsequent `session_register` that the bridge tags with `registerReason: "reattach"` (a reconnect after a dashboard restart while the bridge stayed alive), the server SHALL preserve the existing `hidden` value rather than recomputing it. In-process new/fork/resume registers are tagged `registerReason: "spawn"` with a fresh `sessionId` and are therefore treated as first registers. This ensures a session a user has manually unhidden (or hidden) keeps that state across the worker's reconnects.
 
 #### Scenario: Manual unhide survives reconnect
 - **WHEN** an auto-hidden session is manually unhidden, then re-registers (reattach)

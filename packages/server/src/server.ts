@@ -1200,7 +1200,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       // server network-silent (no multicast advertise, no peer browser) so a
       // test instance never leaks onto the LAN or pollutes a live dashboard's
       // peer list. NOTE: test-infra, not part of auto-hide-headless-worker-sessions.
-      const mdnsDisabled = !!process.env.PI_DASHBOARD_NO_MDNS;
+      const rawNoMdns = (process.env.PI_DASHBOARD_NO_MDNS ?? "").trim().toLowerCase();
+      const mdnsDisabled = rawNoMdns === "1" || rawNoMdns === "true" || rawNoMdns === "yes";
 
       // Advertise via mDNS
       try {
