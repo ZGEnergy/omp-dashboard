@@ -654,22 +654,6 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               } : undefined}
             />
           </div>
-          {/* Elevated spawn buttons: full-width stacked, always visible
-              regardless of collapse state. See change: elevate-folder-spawn-buttons. */}
-          <div className="mt-1">
-            <FolderSpawnButtons
-              spawningDisabled={spawningCwds?.has(group.cwd)}
-              showWorktree={group.sessions.some((s) => !!s.gitBranch) && gitWorktreeEnabled && !!onSpawnSession}
-              onSpawnSession={() => {
-                if (isCollapsed) handleToggleCollapse(group.cwd);
-                onSpawnSession?.(group.cwd);
-              }}
-              onSpawnWorktree={() => {
-                if (isCollapsed) handleToggleCollapse(group.cwd);
-                setWorktreeDialogCwd(group.cwd);
-              }}
-            />
-          </div>
           {/* Plugin slot: sidebar-folder-section (additive, coexists with FolderOpenSpecSection) */}
           <SidebarFolderSectionSlot folder={{ cwd: group.cwd }} />
           {/* Render for both initialized (full section) and pending (spinner).
@@ -696,6 +680,22 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               selectedId={selectedId}
             />
           )}
+          {/* Elevated spawn buttons: full-width stacked, always visible
+              regardless of collapse state. Placed after OpenSpec section. */}
+          <div className="mt-1">
+            <FolderSpawnButtons
+              spawningDisabled={spawningCwds?.has(group.cwd)}
+              showWorktree={group.sessions.some((s) => !!s.gitBranch) && gitWorktreeEnabled && !!onSpawnSession}
+              onSpawnSession={() => {
+                if (isCollapsed) handleToggleCollapse(group.cwd);
+                onSpawnSession?.(group.cwd);
+              }}
+              onSpawnWorktree={() => {
+                if (isCollapsed) handleToggleCollapse(group.cwd);
+                setWorktreeDialogCwd(group.cwd);
+              }}
+            />
+          </div>
 
           </div>{/* end content column */}
         </div>

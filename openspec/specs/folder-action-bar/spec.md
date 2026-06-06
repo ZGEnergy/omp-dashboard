@@ -132,7 +132,7 @@ Clicking Initialize SHALL run the hook via `POST /api/git/worktree/init`. When t
 - **AND** the Initialize button SHALL disappear once the gate reports `needsInit: false`
 
 ### Requirement: Elevated folder spawn buttons
-Each folder group SHALL render an elevated spawn-button stack in the always-visible folder header content column, positioned below the action bar and above the plugin / OpenSpec folder sections. The stack SHALL contain a full-width `+ New Session` button (always rendered) and, when worktree gating holds, a full-width `+ New Worktree` button stacked directly below it. The stack SHALL remain visible regardless of the folder's collapse state and regardless of session count (including 0 sessions).
+Each folder group SHALL render an elevated spawn-button stack in the always-visible folder header content column, positioned below the action bar and below the plugin / OpenSpec folder sections (the OpenSpec section renders above the spawn-button stack). The stack SHALL contain a full-width `+ New Session` button (always rendered) and, when worktree gating holds, a full-width `+ New Worktree` button stacked directly below it. The stack SHALL remain visible regardless of the folder's collapse state and regardless of session count (including 0 sessions).
 
 #### Scenario: Buttons visible while collapsed
 - **WHEN** a folder group is collapsed
