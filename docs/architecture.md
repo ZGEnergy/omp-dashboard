@@ -1043,9 +1043,17 @@ The dashboard is installable as a Progressive Web App on mobile devices:
 
 ### Tool-Output File Linkification
 
-`linkify-tool-output.ts::tokenize` detects file refs in tool output. Click routes via `useFileOpenRouting`: localhost + editor detected → `openEditor`; else mount `FilePreviewOverlay`. `FileLink` + `OpenFileButton` share the hook. `MarkdownContent` linkifies prose + inline `code` when `context` prop set; fenced code blocks excluded.
+`linkify-tool-output.ts::tokenize` detects file refs in tool output.
+Click routes via `useFileOpenRouting`.
+Localhost + editor detected → `openEditor`.
+Else mount `FilePreviewOverlay`.
+`FileLink` + `OpenFileButton` share hook.
+`MarkdownContent` linkifies prose + inline `code` when `context` prop set.
+Fenced code blocks excluded.
 
-Tokenizer detects absolute POSIX paths, `file://`/`file:///` URIs (percent-decoded), Windows drive paths. Server decodes leading `file://` via `decodeFileUri` on `/api/file` (`path`) + `/api/open-editor` (`file`). Absolute paths accepted but gated by known-session-cwd + traversal check.
+Tokenizer detects absolute POSIX paths, `file://`/`file:///` URIs (percent-decoded), Windows drive paths.
+Server decodes leading `file://` via `decodeFileUri` on `/api/file` (`path`) + `/api/open-editor` (`file`).
+Absolute paths accepted, gated by known-session-cwd + traversal check.
 
 **Known limitation: wrong-base relative paths.** Relative path emitted under non-session cwd resolves against wrong base. Protocol carries no per-invocation cwd. Bash tool args = `{command, timeout}`. `browser-protocol.ts` has no `tool_call`/`tool_result` cwd field. Session cwd only available base. Correct fix needs per-tool cwd threaded bridge → server → client. Deferred follow-up. Absolute paths (change: unify-file-link-openability) = recommended mitigation.
 

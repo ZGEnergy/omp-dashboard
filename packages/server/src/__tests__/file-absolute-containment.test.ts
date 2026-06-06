@@ -78,4 +78,16 @@ describe("GET /api/file — absolute path containment", () => {
     expect(res.statusCode).toBe(403);
     expect(res.json()).toEqual({ success: false, error: "path outside working directory" });
   });
+
+  it("rejects a file:// URI with percent-encoded traversal segments", async () => {
+    // `file://` + encoded `../../etc/passwd` — decode + containment must both
+    // run so an encoded escape cannot regress silently.
+    const encoded = "file://%2e%2e%2f%2e%2e%2fetc%2fpasswd";
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/file?cwd=${encodeURIComponent(tmp)}&path=${encodeURIComponent(encoded)}`,
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ success: false, error: "path outside working directory" });
+  });
 });

@@ -56,8 +56,10 @@ const LINE_COL = "(?::\\d+(?::\\d+)?)?";
 const COMBINED = new RegExp(
   // url
   `(?<url>https?:\\/\\/[^\\s<>()"'\\\`]+)` +
-  // file:// URI (file:// or file:///) with recognised extension
-  `|(?<file_uri>file:\\/\\/\\/?(?:${URISEG}\\/)*${URISEG}\\.${EXT_GROUP}${LINE_COL})` +
+  // file:// URI (file:// or file:///) with recognised extension. An optional
+  // Windows drive segment (`C:/` / `C:\`) is admitted because URISEG excludes
+  // `:`, so `file:///C:/src/app.ts` would otherwise never tokenize.
+  `|(?<file_uri>file:\\/\\/\\/?(?:[A-Za-z]:[\\\\/])?(?:${URISEG}[\\\\/])*${URISEG}\\.${EXT_GROUP}${LINE_COL})` +
   // POSIX absolute path (dot-directory segments allowed)
   `|(?<file_posix>\\/(?:${ASEG}\\/)*${ASEG}\\.${EXT_GROUP}${LINE_COL})` +
   // Windows drive-absolute path (`\\` or `/` separators; dot-dirs allowed)
@@ -165,9 +167,20 @@ export function tokenize(text: string): Token[] {
       // degrades to a plain text token, preserving verbatim coverage.
       const payload = matchText.replace(/^file:\/\//i, "");
       const { path: rawPath, line, col } = splitLineCol(payload);
+      // Normalise root before decoding:
+      //  - `/C:/…` (leading slash + drive from `file:///C:/…`) → drop the slash
+      //    so the token path is a clean Windows-absolute `C:/…`.
+      //  - bare `Users/me/app.ts` (two-slash `file://host` form) → prepend `/`
+      //    so root semantics survive for an `absolute: true` token.
+      let normalized = rawPath;
+      if (/^\/[A-Za-z]:[\\/]/.test(rawPath)) {
+        normalized = rawPath.slice(1);
+      } else if (!rawPath.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(rawPath)) {
+        normalized = `/${rawPath}`;
+      }
       let decoded: string;
       try {
-        decoded = decodeURIComponent(rawPath);
+        decoded = decodeURIComponent(normalized);
       } catch {
         tokens.push({ kind: "text", text: matchText });
         cursor = matchEnd;

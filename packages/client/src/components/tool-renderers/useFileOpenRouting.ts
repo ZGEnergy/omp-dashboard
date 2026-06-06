@@ -42,7 +42,14 @@ export function useFileOpenRouting(context: ToolContext): FileOpenRouting {
     async (path: string, line?: number) => {
       if (!cwd) return; // no cwd → nothing actionable
       if (localEditorAvailable) {
-        await openEditor(cwd, editors[0].id, path, line);
+        // On failure (editor spawn rejected, containment 403, …) fall back to
+        // the preview overlay so a click never dead-ends or leaks an
+        // unhandled rejection.
+        try {
+          await openEditor(cwd, editors[0].id, path, line);
+        } catch {
+          setPreview({ path, line });
+        }
       } else {
         setPreview({ path, line });
       }

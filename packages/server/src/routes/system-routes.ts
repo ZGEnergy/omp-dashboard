@@ -147,6 +147,13 @@ export function registerSystemRoutes(
       }
 
       const target = file ? path.resolve(cwd, file) : cwd;
+      // Containment gate (mirrors /api/file): the resolved target MUST stay
+      // under the known session cwd. Rejects `../..` traversal and absolute
+      // paths (`/etc/...`, decoded `file://...`) outside the workspace.
+      const cwdWithSep = cwd.endsWith(path.sep) ? cwd : cwd + path.sep;
+      if (target !== cwd && !target.startsWith(cwdWithSep)) {
+        return { success: false, error: "path outside working directory" } satisfies ApiResponse;
+      }
       const args = line && file ? [`${target}:${line}`] : [target];
 
       try {

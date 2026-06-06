@@ -125,6 +125,21 @@ describe("tokenize — bare path with known extension", () => {
 describe("tokenize — absolute / file:// / Windows-drive", () => {
   type FileTok = Extract<Token, { kind: "file" }>;
 
+  it("falls back to plain text on malformed percent-encoding in file:// URI", () => {
+    const input = "file:///tmp/bad%ZZ.ts";
+    const toks = tokenize(input);
+    expect(ofKind(toks, "file")).toHaveLength(0);
+    expect(concat(toks)).toBe(input);
+  });
+
+  it("detects Windows file URI form file:///C:/... as absolute", () => {
+    const toks = tokenize("file:///C:/src/app.ts:9");
+    const f = ofKind(toks, "file")[0] as FileTok;
+    expect(f.path).toBe("C:/src/app.ts");
+    expect(f.line).toBe(9);
+    expect(f.absolute).toBe(true);
+  });
+
   it("detects a bare absolute POSIX path with root preserved", () => {
     const input = "see /Users/me/app.ts for details";
     const toks = tokenize(input);
