@@ -6,12 +6,15 @@ When a session has a proposal manually attached and the LLM emits a new
 *active* OpenSpec change (a write under `openspec/changes/<name>/` or an
 `openspec` CLI invocation naming a different change), today the server
 silently does nothing — the user is never asked whether to follow the
-LLM's apparent pivot. The auto-attach path at
-`packages/server/src/event-wiring.ts:248` only fires when (a) no proposal
-is attached, or (b) the existing attachment was itself auto-tracked
-(`name === attachedProposal`, per the witness rule in
-`proposal-attach-naming.ts`). For manual attachments, the new changeName
-is dropped on the floor.
+LLM's apparent pivot. The auto-attach path in
+`packages/server/src/event-wiring.ts` (the `if (attachmentWasAutoTracked
+&& differentChangeDetected)` block, ~line 330) only fires when (a) no
+proposal is attached, or (b) the existing attachment was itself
+auto-tracked — witnessed now by `isNameAutoSetFromAttachment(session)` in
+`proposal-attach-naming.ts` (change: fix-mobile-attach-proposal-display;
+the old `name === attachedProposal` equality was refactored into this
+helper). For manual attachments, the new changeName is dropped on the
+floor (there is no `else` branch).
 
 We want a confirmation dialog that surfaces the conflict — with one
 non-trivial twist. The LLM keeps producing tool events while the dialog
@@ -33,8 +36,10 @@ actually attaches) only changes through explicit user action.
 - **Add server state** `pendingReplaceProposal: string | null` and a
   per-session `rejectedReplaceProposals: Set<string>` (cleared on
   `agent_end`) to `DashboardSession` and the in-memory session manager.
-- **Add a third branch** to the OpenSpec activity handler in
-  `event-wiring.ts`: when `attachedProposal` is set manually, the
+- **Add an `else` branch** to the OpenSpec activity handler in
+  `event-wiring.ts` (alongside the existing `if (attachmentWasAutoTracked
+  && differentChangeDetected)`): when `attachedProposal` is set manually
+  (i.e. `!isNameAutoSetFromAttachment(session)`), the
   detected `changeName` differs from both `attachedProposal` and
   `pendingReplaceProposal`, the activity is `isActive: true`, and the
   changeName is not in `rejectedReplaceProposals`, the server SHALL set
@@ -57,7 +62,16 @@ actually attaches) only changes through explicit user action.
   but does NOT mutate `committedTarget` automatically.
 - **Clear `pendingReplaceProposal` and `rejectedReplaceProposals`** on
   `agent_end` (mirrors the existing clear of `openspecPhase` /
-  `openspecChange` at `event-wiring.ts:282`) and on session abort/end.
+  `openspecChange` in the `agent_end` handler, ~line 353 of
+  `event-wiring.ts`) and on session abort/end.
+- **Client dialog depends on `unify-dialog-system`**: the dialog body is
+  custom (it carries the `committedTarget` / "Use latest" banner logic,
+  so it is NOT a `Confirm` preset), but it MUST be built on the shared
+  `Dialog` shell that `unify-dialog-system` introduces — not hand-rolled
+  — to avoid creating another one-off dialog that change is built to
+  delete. If `unify-dialog-system` has not landed when this is
+  implemented, build against its `Dialog` primitive contract or sequence
+  this change after it.
 - **Edge case — attached proposal no longer exists on disk**: if
   `attachedProposal` points at a change that the OpenSpec poller no
   longer reports (archived/deleted), the server SHALL bypass the

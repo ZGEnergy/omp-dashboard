@@ -116,7 +116,7 @@ not all future ones.
 Lifetime: `agent_end` clears the rejection set. Rationale: same loop
 of LLM activity = same intent context; new turn = fresh slate. This
 mirrors the existing clearing of `openspecPhase` / `openspecChange`
-at `event-wiring.ts:282`.
+in the `agent_end` handler (~line 353 of `event-wiring.ts`).
 
 Alternative: 60s TTL. Rejected because turn duration is highly
 variable (a long apply-change can run >5 min) and a wall-clock TTL
@@ -157,7 +157,7 @@ would lose user focus and feel jumpy.
 | `packages/server/src/event-wiring.ts` | Add the third branch + `agent_end` clear + deleted-proposal bypass |
 | `packages/server/src/browser-handlers/session-meta-handler.ts` | Handlers for accept/dismiss; reuse `attachRenameTarget` for the rename path |
 | `packages/server/src/proposal-attach-naming.ts` | (Read-only) used by the accept handler |
-| `packages/client/src/components/SessionOpenSpecActions.tsx` (or new dialog component) | Render the dialog when `pendingReplaceProposal` is set; commit/suggestion split state |
+| `packages/client/src/components/SessionOpenSpecActions.tsx` (or new dialog component) | Render the dialog when `pendingReplaceProposal` is set; commit/suggestion split state. **Build on `unify-dialog-system`'s `Dialog` shell** (custom body, not `Confirm` preset) — do not hand-roll. |
 | `packages/server/src/__tests__/` | Tests covering coalesce, rejection memory, agent_end clear, deleted-proposal bypass, race scenarios |
 
 ## Open Question (deferred)
