@@ -2,7 +2,7 @@
  * Elevated dashboard-scope spawn-button stack for the sidebar.
  *
  * Renders full-width stacked line buttons mirroring `FolderSpawnButtons`:
- *   - `+ Add Folder` (yellow) — always rendered; pins a top-level folder
+ *   - `+ Add Folder` (blue) — always rendered; pins a top-level folder
  *     (dashboard scope) or adds a folder to a workspace (workspace scope).
  *   - `+ New Workspace` (neutral) — rendered only when `onNewWorkspace` is
  *     provided.
@@ -41,7 +41,7 @@ export function DashboardSpawnButtons({
         className={`w-full text-xs px-2 py-1 rounded border flex items-center justify-center gap-0.5 ${
           addFolderDisabled
             ? "border-[var(--border-secondary)] text-[var(--text-secondary)] opacity-50 cursor-not-allowed"
-            : "text-yellow-400 border-yellow-500/40 bg-yellow-500/5 hover:text-yellow-300 hover:border-yellow-500/70"
+            : "text-blue-500 border-blue-500/40 bg-blue-500/5 hover:text-blue-400 hover:border-blue-500/70"
         }`}
         title="Add a folder"
       >

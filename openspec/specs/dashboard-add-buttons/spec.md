@@ -8,7 +8,7 @@ The sidebar SHALL render an elevated full-width stacked line-button pair as the 
 
 #### Scenario: Add Folder button
 - **WHEN** the sidebar scroll list renders and an open-pin-dialog handler is available
-- **THEN** a full-width `+ Add Folder` line button SHALL render with yellow accent styling
+- **THEN** a full-width `+ Add Folder` line button SHALL render with blue accent styling
 - **AND** clicking it SHALL invoke the existing open-pin-dialog handler that pins a top-level folder
 
 #### Scenario: New Workspace button
@@ -26,7 +26,7 @@ The sidebar SHALL render an elevated full-width stacked line-button pair as the 
 - **THEN** the add-button pair SHALL render before all of them and SHALL scroll with the list content
 
 ### Requirement: Workspace-scoped Add Folder button
-Each expanded workspace container SHALL render a full-width `+ Add Folder` line button (yellow accent, same visual treatment as the dashboard-scope button) at the bottom of its body, below its folder list.
+Each expanded workspace container SHALL render a full-width `+ Add Folder` line button (blue accent, same visual treatment as the dashboard-scope button) at the bottom of its body, below its folder list.
 
 #### Scenario: Add Folder in workspace body
 - **WHEN** a workspace tier is expanded and an add-folder-to-workspace handler is available
