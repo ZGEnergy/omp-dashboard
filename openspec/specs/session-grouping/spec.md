@@ -72,11 +72,11 @@ When a directory has only one session, git info SHALL be displayed inline beneat
 - **THEN** the session card SHALL display as it does currently with no additional line
 
 ### Requirement: Folder group visual container
-Each folder group SHALL be rendered as a visually distinct container with `bg-[var(--bg-secondary)]` background, `rounded-lg` corners, and internal padding. The container SHALL wrap both the folder header and all session cards within the group.
+Each folder group SHALL be rendered as a visually distinct container that **recedes** below its surrounding surface: `bg-[var(--bg-primary)]` background, a subtle 1px `border border-[var(--border-subtle)]` outline, `rounded-[14px]` corners, and internal padding. The recessed fill plus subtle border SHALL separate the folder card both from the page and from a parent workspace container regardless of nesting. The container SHALL wrap both the folder header and all session cards within the group.
 
 #### Scenario: Folder group with multiple sessions
 - **WHEN** a folder group contains two or more sessions
-- **THEN** the group SHALL render as a single container with `bg-[var(--bg-secondary)]` background, `rounded-lg` corners, containing the header and all session cards
+- **THEN** the group SHALL render as a single container with `bg-[var(--bg-primary)]` background, `border-[var(--border-subtle)]` outline, `rounded-[14px]` corners, containing the header and all session cards
 
 #### Scenario: Folder group with single session
 - **WHEN** a folder group contains one session
@@ -84,7 +84,18 @@ Each folder group SHALL be rendered as a visually distinct container with `bg-[v
 
 #### Scenario: Empty pinned folder group
 - **WHEN** a pinned folder group has zero sessions
-- **THEN** the group SHALL still render as a container with `bg-[var(--bg-secondary)]` background and `rounded-lg` corners
+- **THEN** the group SHALL still render as a container with `bg-[var(--bg-primary)]` background, `border-[var(--border-subtle)]` outline, and `rounded-[14px]` corners
+
+#### Scenario: Folder group nested inside a workspace container
+- **WHEN** a folder group renders inside a workspace tier whose container uses `bg-[var(--bg-tertiary)]`
+- **THEN** the folder card's `bg-[var(--bg-primary)]` fill SHALL recede below the workspace container, reading as a distinct recessed card rather than blending into the workspace background
+
+### Requirement: Workspace container matches its header
+The workspace tier container (the `<li>` wrapping `WorkspaceHeader` and the workspace body) SHALL use `bg-[var(--bg-tertiary)]` so its background matches the `WorkspaceHeader` background (`bg-[var(--bg-tertiary)]`). Header and body SHALL read as one continuous panel with no background seam between them.
+
+#### Scenario: Expanded workspace tier
+- **WHEN** a workspace tier is expanded with its header and folder body visible
+- **THEN** the workspace container `bg-[var(--bg-tertiary)]` SHALL match the header `bg-[var(--bg-tertiary)]`, showing no color seam between header and body
 
 ### Requirement: Inter-group spacing
 Folder group containers SHALL be separated by vertical spacing so they read as distinct blocks within the sidebar.

@@ -596,7 +596,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     const isCollapsed = isFolderCollapsed(group.cwd);
 
     return (
-      <div key={group.cwd} className="bg-[var(--bg-secondary)] rounded-lg p-1.5">
+      <div key={group.cwd} className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-[14px] p-1.5">
         <div className="flex gap-1.5 px-1 py-1 min-h-[44px] md:min-h-0 rounded">
           {/* Left gutter — chevron at top, drag-handle column extending below */}
           <FolderDragGutter
@@ -997,7 +997,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
           {/* Workspace tier (folder-workspaces): rendered ABOVE the top-level
               area when at least one workspace exists. */}
           {workspaceTiers && workspaceTiers.workspaces.map((ws) => (
-            <li key={`ws-${ws.id}`} className="bg-[var(--bg-secondary)] rounded-lg">
+            <li key={`ws-${ws.id}`} className="bg-[var(--bg-tertiary)] rounded-lg">
               <WorkspaceHeader
                 id={ws.id}
                 name={ws.name}
