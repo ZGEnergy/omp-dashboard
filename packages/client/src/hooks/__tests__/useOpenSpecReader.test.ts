@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { useOpenSpecReader } from "../useOpenSpecReader.js";
 import type { OpenSpecArtifact } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
@@ -147,22 +147,37 @@ describe("useOpenSpecReader", () => {
     expect(result.current.content).toContain("Auth spec");
   });
 
-  it("refetches when tab changes", async () => {
+  it("reloads and follows initialArtifact when the prop changes", async () => {
     fetchMock.mockReturnValue(mockFileResponse("proposal content"));
 
-    const { result } = renderHook(() =>
-      useOpenSpecReader(CWD, CHANGE, "proposal", ARTIFACTS)
+    const { result, rerender } = renderHook(
+      ({ artifact }: { artifact: string }) =>
+        useOpenSpecReader(CWD, CHANGE, artifact, ARTIFACTS),
+      { initialProps: { artifact: "proposal" } }
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.content).toBe("proposal content");
+    expect(result.current.activeTab).toBe("proposal");
 
     fetchMock.mockReturnValue(mockFileResponse("design content"));
 
-    act(() => result.current.setActiveTab("design"));
+    // Simulate the URL `:artifactId` segment changing while the hook stays mounted.
+    rerender({ artifact: "design" });
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.content).toBe("design content");
     expect(result.current.activeTab).toBe("design");
+  });
+
+  it("does not expose a setActiveTab mutator (URL is the source of truth)", () => {
+    fetchMock.mockReturnValue(mockFileResponse("content"));
+
+    const { result } = renderHook(() =>
+      useOpenSpecReader(CWD, CHANGE, "proposal", ARTIFACTS)
+    );
+
+    expect((result.current as any).setActiveTab).toBeUndefined();
   });
 });

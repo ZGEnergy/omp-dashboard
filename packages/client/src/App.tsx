@@ -163,7 +163,7 @@ function getInitialWsUrl(): string {
  *
  * See change: overlay-url-routing.
  */
-function OpenSpecPreview({
+export function OpenSpecPreview({
   cwd,
   changeName,
   initialArtifact,
@@ -176,6 +176,10 @@ function OpenSpecPreview({
   openspecMap: Map<string, OpenSpecData>;
   onBack: () => void;
 }) {
+  // URL is the single source of truth for the active artifact. Switching tabs
+  // pushes the new artifact URL; `activeTab` derives from `initialArtifact`
+  // (the route's `:artifactId`). See change: fix-openspec-artifact-tab-url-sync.
+  const [, navigate] = useLocation();
   const openspecData = openspecMap.get(cwd);
   const change = openspecData?.changes.find((c) => c.name === changeName);
   const artifacts: OpenSpecArtifact[] = change?.artifacts ?? [];
@@ -218,7 +222,7 @@ function OpenSpecPreview({
       error={reader.error}
       tabs={reader.tabs}
       activeTab={reader.activeTab}
-      onTabChange={reader.setActiveTab}
+      onTabChange={(tabId) => navigate(buildOpenSpecPreviewUrl(cwd, changeName, tabId))}
       onBack={onBack}
     />
   );

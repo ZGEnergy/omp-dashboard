@@ -30,7 +30,6 @@ interface OpenSpecReaderState {
   tabs: PreviewTab[];
   activeTab: string;
   title: string;
-  setActiveTab: (tabId: string) => void;
 }
 
 async function fetchFile(cwd: string, filePath: string): Promise<string> {
@@ -78,7 +77,11 @@ export function useOpenSpecReader(
   artifacts: OpenSpecArtifact[],
   archive?: boolean,
 ): OpenSpecReaderState {
-  const [activeTab, setActiveTab] = useState(initialArtifact);
+  // The URL's `:artifactId` segment (passed as `initialArtifact`) is the single
+  // source of truth for the active tab. Deriving it here — rather than holding
+  // separate state — keeps the visible tab in sync when the route changes while
+  // the preview stays mounted. See change: fix-openspec-artifact-tab-url-sync.
+  const activeTab = initialArtifact;
   const [content, setContent] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -125,6 +128,5 @@ export function useOpenSpecReader(
     tabs,
     activeTab,
     title: changeName,
-    setActiveTab,
   };
 }

@@ -34,7 +34,12 @@ function ArchiveArtifactReader({
   artifacts: OpenSpecArtifact[];
   onBack: () => void;
 }) {
-  const reader = useOpenSpecReader(cwd, changeName, initialArtifact, artifacts, true);
+  // Archive preview is local-state driven (not URL-routed for artifacts). The
+  // reader hook now derives its active tab from `initialArtifact`, so hold the
+  // active artifact here and feed it in. See change:
+  // fix-openspec-artifact-tab-url-sync.
+  const [activeArtifact, setActiveArtifact] = useState(initialArtifact);
+  const reader = useOpenSpecReader(cwd, changeName, activeArtifact, artifacts, true);
   return (
     <MarkdownPreviewView
       title={changeName}
@@ -43,7 +48,7 @@ function ArchiveArtifactReader({
       error={reader.error}
       tabs={reader.tabs}
       activeTab={reader.activeTab}
-      onTabChange={reader.setActiveTab}
+      onTabChange={setActiveArtifact}
       onBack={onBack}
     />
   );
