@@ -1048,6 +1048,15 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       }
       await editorPidRegistry.cleanupOrphans();
 
+      // Spawned pi sessions must connect back to THIS server's gateway, not
+      // the config-default piPort. Critical for multi-instance setups (e.g. a
+      // git-worktree dashboard on a non-default --pi-port). See
+      // setSpawnDashboardPiPort in process-manager.ts.
+      {
+        const { setSpawnDashboardPiPort } = await import("./process-manager.js");
+        setSpawnDashboardPiPort(config.piPort);
+      }
+
       piGateway.start(config.piPort);
 
       // Load plugin server entries BEFORE fastify.listen() so plugins can

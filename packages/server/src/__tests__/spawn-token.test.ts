@@ -8,9 +8,9 @@
  *
  * See change: spawn-correlation-token.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import { mintSpawnToken, SPAWN_TOKEN_ENV_VAR } from "../spawn-token.js";
-import { buildSpawnEnv } from "../process-manager.js";
+import { buildSpawnEnv, setSpawnDashboardPiPort } from "../process-manager.js";
 
 describe("mintSpawnToken", () => {
 	it("returns a UUIDv4 string", () => {
@@ -53,5 +53,36 @@ describe("buildSpawnEnv: spawnToken injection", () => {
 		expect(env[SPAWN_TOKEN_ENV_VAR]).toBe("tok_xyz");
 		// PATH may be mutated by managed-node prepend, but the raw value should still appear in it.
 		expect(env.PATH).toContain("/usr/bin");
+	});
+});
+
+// See fix: spawned sessions must connect back to the owning server's gateway,
+// not the config-default piPort (multi-instance / worktree-dashboard bug).
+describe("buildSpawnEnv: PI_DASHBOARD_URL injection", () => {
+	afterEach(() => setSpawnDashboardPiPort(null));
+
+	it("sets PI_DASHBOARD_URL to the owning server's piPort", () => {
+		setSpawnDashboardPiPort(9234);
+		const env = buildSpawnEnv({ HOME: "/tmp" });
+		expect(env.PI_DASHBOARD_URL).toBe("ws://localhost:9234");
+	});
+
+	it("overrides any inherited PI_DASHBOARD_URL so spawns register with this server", () => {
+		setSpawnDashboardPiPort(9234);
+		const env = buildSpawnEnv({ HOME: "/tmp", PI_DASHBOARD_URL: "ws://localhost:9999" });
+		expect(env.PI_DASHBOARD_URL).toBe("ws://localhost:9234");
+	});
+
+	it("leaves PI_DASHBOARD_URL untouched when no server piPort is set", () => {
+		setSpawnDashboardPiPort(null);
+		const env = buildSpawnEnv({ HOME: "/tmp", PI_DASHBOARD_URL: "ws://remote:1234" });
+		expect(env.PI_DASHBOARD_URL).toBe("ws://remote:1234");
+	});
+
+	it("does not mutate the caller's baseEnv object", () => {
+		setSpawnDashboardPiPort(9234);
+		const base = { HOME: "/tmp" } as NodeJS.ProcessEnv;
+		buildSpawnEnv(base);
+		expect(base.PI_DASHBOARD_URL).toBeUndefined();
 	});
 });

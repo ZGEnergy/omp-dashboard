@@ -57,6 +57,23 @@ export function resetResolver(): void {
   resolver = new ToolResolver({ processExecPath: process.execPath });
 }
 
+// ── Spawn dashboard target seam ──────────────────────────────────────────────
+//
+// piPort of the dashboard server that owns this process. Set once at server
+// startup. Spawned pi sessions get `PI_DASHBOARD_URL=ws://localhost:<piPort>`
+// so their bridge connects back to the server that spawned them — NOT the
+// `config.piPort` default (9999). Without this, a second dashboard instance on
+// a non-default `--pi-port` (e.g. a git-worktree server) spawns sessions that
+// connect to the FIRST dashboard instead. The spawning server must own its
+// spawns (spawn-token watchdog, session tracking), so this overrides any
+// inherited `PI_DASHBOARD_URL`.
+let spawnDashboardPiPort: number | null = null;
+
+/** Set the owning server's piPort so spawned sessions connect back here. */
+export function setSpawnDashboardPiPort(piPort: number | null): void {
+  spawnDashboardPiPort = piPort;
+}
+
 // ── KeeperManager seam (injectable for tests) ──────────────────────────
 
 let keeperManager: KeeperManager | null = null;
@@ -144,12 +161,19 @@ export function buildSpawnEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
   opts?: { spawnToken?: string },
 ): NodeJS.ProcessEnv {
-  const env = prependManagedNodeToPath(resolver.buildSpawnEnv(baseEnv));
+  // Defensive copy: never mutate the caller's env (often `process.env`).
+  const env = { ...prependManagedNodeToPath(resolver.buildSpawnEnv(baseEnv)) };
+  // Point spawned bridges at THIS server's gateway so they register with the
+  // server that spawned them, not the config-default piPort. Overrides any
+  // inherited PI_DASHBOARD_URL. See setSpawnDashboardPiPort above.
+  if (spawnDashboardPiPort != null) {
+    env.PI_DASHBOARD_URL = `ws://localhost:${spawnDashboardPiPort}`;
+  }
   if (opts?.spawnToken) {
     // Inject the correlation token so the bridge inside the spawned pi
     // process can read it and echo back in `session_register`.
     // See change: spawn-correlation-token.
-    return { ...env, PI_DASHBOARD_SPAWN_TOKEN: opts.spawnToken };
+    env.PI_DASHBOARD_SPAWN_TOKEN = opts.spawnToken;
   }
   return env;
 }
