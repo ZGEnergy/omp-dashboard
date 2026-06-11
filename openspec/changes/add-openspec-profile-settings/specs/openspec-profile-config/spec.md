@@ -70,6 +70,7 @@ The server SHALL expose `POST /api/openspec/update` (localhost-only) that runs t
 
 The server SHALL expose `GET /api/openspec/update-status` that returns, for each known cwd, one of `up-to-date`, `needs-update`, or `unknown`.
 
+- "Known cwds" SHALL be the union of active session cwds and pinned directories, **filtered to OpenSpec-initialized projects only** (a `<cwd>/openspec/` directory exists). Directories where `openspec init` has not run SHALL be excluded from both the status list and the update-all target set.
 - A cwd is `up-to-date` when its recorded workflow-set signature equals the current global config's workflow-set signature.
 - A cwd is `needs-update` when a recorded signature exists but differs from the current one.
 - A cwd is `unknown` when no signature has been recorded (the dashboard has never run an update for it).
@@ -88,6 +89,12 @@ The server SHALL expose `GET /api/openspec/update-status` that returns, for each
 
 - **WHEN** the dashboard has no recorded signature for a cwd
 - **THEN** the status for that cwd is `unknown`
+
+#### Scenario: Non-initialized directories are excluded
+
+- **WHEN** a known cwd has no `openspec/` directory (`openspec init` never ran)
+- **THEN** that cwd does not appear in the update-status list
+- **AND** `POST /api/openspec/update { all: true }` does not run `openspec update` there
 
 ### Requirement: Saving the profile does not mutate project repositories
 

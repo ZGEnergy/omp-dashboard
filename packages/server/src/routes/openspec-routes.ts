@@ -4,7 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import type { SessionManager } from "../memory-session-manager.js";
 import type { PreferencesStore } from "../preferences-store.js";
-import type { DirectoryService } from "../directory-service.js";
+import { hasOpenSpecRoot, type DirectoryService } from "../directory-service.js";
 import type { ApiResponse, OpenSpecConfig } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import {
   configListOr,
@@ -12,6 +12,7 @@ import {
   update as openspecUpdate,
   writeOpenSpecConfigFile,
   workflowSetSignature,
+  openSpecConfigFilePath,
   EXPANDED_WORKFLOWS,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/openspec.js";
 import type { NetworkGuard } from "./route-deps.js";
@@ -77,13 +78,27 @@ export function registerOpenSpecRoutes(
   );
 
   // ── add-openspec-profile-settings ─────────────────────────────────────
-  // Known cwds = union(active session cwds, pinned dirs). Used by update-all
-  // and update-status.
+  // The global OpenSpec config lives at `~/.config/openspec/config.json`, so
+  // `~/.config` has an `openspec/` child and would otherwise pass the
+  // root-existence check as a bogus "project". Exclude the cwd whose
+  // `openspec/` IS that global config dir.
+  // See change: add-openspec-profile-settings.
+  const GLOBAL_OPENSPEC_DIR = path.dirname(openSpecConfigFilePath()); // ~/.config/openspec
+
+  // Known cwds = union(active session cwds, pinned dirs), filtered to only
+  // OpenSpec-initialized projects (`<cwd>/openspec/` exists). Directories
+  // where `openspec init` never ran are excluded: `openspec update` there is
+  // meaningless and they must not clutter the project list. The global config
+  // dir's parent (`~/.config`) is also excluded — its `openspec/` child is the
+  // CLI config dir, not a project.
+  // See change: add-openspec-profile-settings.
   function knownCwds(): string[] {
     const set = new Set<string>();
     for (const s of sessionManager.listAll()) if (s.cwd) set.add(s.cwd);
     for (const d of preferencesStore.getPinnedDirectories()) set.add(d);
-    return [...set];
+    return [...set].filter(
+      (cwd) => hasOpenSpecRoot(cwd) && path.join(cwd, "openspec") !== GLOBAL_OPENSPEC_DIR,
+    );
   }
 
   /** Current global workflow-set signature (drives staleness comparison). */

@@ -22,6 +22,13 @@ const mock = {
   globalWorkflows: ["propose", "explore", "apply", "archive"] as string[],
 };
 
+// `openspec init` gate: only cwds whose openspec/ dir "exists" are projects.
+// Test treats any cwd in `openspecRoots` as initialized.
+const openspecRoots = new Set<string>();
+vi.mock("../directory-service.js", () => ({
+  hasOpenSpecRoot: (cwd: string) => openspecRoots.has(cwd),
+}));
+
 vi.mock("@blackbelt-technology/pi-dashboard-shared/platform/openspec.js", () => ({
   configListOr: () => ({ workflows: mock.globalWorkflows }),
   configProfile: (...a: any[]) => mock.configProfile(...a),
@@ -30,6 +37,9 @@ vi.mock("@blackbelt-technology/pi-dashboard-shared/platform/openspec.js", () => 
   // Real signature semantics so staleness assertions are meaningful.
   workflowSetSignature: (wf: string[]) =>
     Array.from(new Set(wf.map((w) => w.trim()).filter(Boolean))).sort().join("|"),
+  // Global config dir = <fakeHome>/.config/openspec; parent (~/.config) must
+  // be excluded from the project list.
+  openSpecConfigFilePath: () => "/fake-home/.config/openspec/config.json",
   EXPANDED_WORKFLOWS: [
     "propose", "explore", "new", "continue", "ff",
     "apply", "verify", "sync", "archive", "bulk-archive", "onboard",
@@ -51,6 +61,10 @@ describe("openspec profile-config REST routes", () => {
     signatures = {};
     sessionCwds = ["/proj/a"];
     pinnedDirs = ["/proj/b"];
+    // By default both test projects are OpenSpec-initialized.
+    openspecRoots.clear();
+    openspecRoots.add("/proj/a");
+    openspecRoots.add("/proj/b");
   });
 
   afterEach(async () => {
@@ -170,12 +184,28 @@ describe("openspec profile-config REST routes", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("update all skips cwds where openspec init has not run", async () => {
+    // /proj/b is a known dir but NOT openspec-initialized.
+    openspecRoots.delete("/proj/b");
+    await setup();
+    const res = await fastify.inject({
+      method: "POST", url: "/api/openspec/update",
+      payload: { all: true },
+    });
+    const { results } = JSON.parse(res.payload).data;
+    const cwds = results.map((r: any) => r.cwd);
+    expect(cwds).toContain("/proj/a");
+    expect(cwds).not.toContain("/proj/b");
+  });
+
   // ── GET /api/openspec/update-status ────────────────────────────────
 
   it("classifies cwds as up-to-date / needs-update / unknown", async () => {
     mock.globalWorkflows = ["propose", "apply"];
     sessionCwds = ["/proj/fresh", "/proj/stale"];
     pinnedDirs = ["/proj/never"];
+    openspecRoots.clear();
+    for (const c of ["/proj/fresh", "/proj/stale", "/proj/never"]) openspecRoots.add(c);
     await setup();
     // fresh matches current signature; stale has an old one; never has none.
     signatures["/proj/fresh"] = "apply|propose";
@@ -188,5 +218,32 @@ describe("openspec profile-config REST routes", () => {
     expect(byCwd["/proj/fresh"]).toBe("up-to-date");
     expect(byCwd["/proj/stale"]).toBe("needs-update");
     expect(byCwd["/proj/never"]).toBe("unknown");
+  });
+
+  it("update-status excludes cwds where openspec init has not run", async () => {
+    sessionCwds = ["/proj/initialized", "/home", "/tmp"];
+    pinnedDirs = [];
+    openspecRoots.clear();
+    openspecRoots.add("/proj/initialized");
+    await setup();
+    const res = await fastify.inject({ method: "GET", url: "/api/openspec/update-status" });
+    const { statuses } = JSON.parse(res.payload).data;
+    const cwds = statuses.map((s: any) => s.cwd);
+    expect(cwds).toEqual(["/proj/initialized"]);
+  });
+
+  it("excludes the global config dir's parent (~/.config) even though it has openspec/", async () => {
+    // /fake-home/.config has an openspec/ child (the CLI global config dir),
+    // so hasOpenSpecRoot is true — but it is NOT a project.
+    sessionCwds = ["/proj/real", "/fake-home/.config"];
+    pinnedDirs = [];
+    openspecRoots.clear();
+    openspecRoots.add("/proj/real");
+    openspecRoots.add("/fake-home/.config");
+    await setup();
+    const res = await fastify.inject({ method: "GET", url: "/api/openspec/update-status" });
+    const cwds = JSON.parse(res.payload).data.statuses.map((s: any) => s.cwd);
+    expect(cwds).toContain("/proj/real");
+    expect(cwds).not.toContain("/fake-home/.config");
   });
 });
