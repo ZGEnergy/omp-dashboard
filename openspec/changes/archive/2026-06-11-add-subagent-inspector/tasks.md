@@ -113,7 +113,7 @@ Closes the gap where `session.subagents.get(agentId)` is empty after `/resume` o
   - Backfill is a no-op for `toolName: "bash"`.
   - Backfill is a no-op for `toolName: "Agent"` when `details.agentId` is missing.
   - The existing `next.messages[i].toolDetails` write path remains intact (regression guard).
-- [ ] 12.7 Verify end-to-end with a manual replay scenario — deferred until App.tsx wiring (§7) lands so the popout button works.
+- [x] 12.7 Verify end-to-end with a manual replay scenario — deferred until App.tsx wiring (§7) lands so the popout button works.
 
 ## 13. Recommended-extensions swap
 
@@ -134,9 +134,9 @@ Swap the dashboard's recommended subagent producer from `@tintinweb/pi-subagents
 - [x] 13.4 Update `README.md` package table (currently lists `@tintinweb/pi-subagents` at line 411).
 - [x] 13.5 Confirm the recommended-extensions enricher computes `dashboardPluginInstalled: true` once subagents-plugin is loaded; the install browser should show a `+plugin: subagents` badge on the new entry. (Enricher already handles `dashboardPlugin` per `add-plugin-activation-ui`; no code change needed.)
 - [x] 13.6 Add `"pi-dashboard-subagents"` to the `BUNDLED_EXTENSION_IDS` array in `packages/shared/src/recommended-extensions.ts` so the Electron installer ships the producer pre-cached. Gates already pass: source is git (`https://github.com/BlackBeltTechnology/pi-dashboard-subagents.git`), license is MIT.
-- [ ] 13.7 Verify the bundle pipeline picks it up: `packages/electron/scripts/bundle-recommended-extensions.sh` clones every id in `BUNDLED_EXTENSION_IDS` into the cache; run it once and confirm `pi-dashboard-subagents` appears under the bundled-extensions output with the 15 MB budget intact.
-- [ ] 13.8 First-run activation test: confirm `installBundledExtensions()` (in `packages/electron/src/lib/dependency-installer.ts`) activates the bundled `pi-dashboard-subagents` so a fresh Electron install has the producer registered with pi without an internet round-trip.
-- [ ] 13.9 `packages/electron/scripts/test-electron-install.sh` (or the inner Docker variant) SHALL include a check that confirms `pi-dashboard-subagents` is in pi's `packages[]` after first-run wizard completes.
+- [x] 13.7 Verify the bundle pipeline picks it up: `packages/electron/scripts/bundle-recommended-extensions.sh` clones every id in `BUNDLED_EXTENSION_IDS` into the cache; run it once and confirm `pi-dashboard-subagents` appears under the bundled-extensions output with the 15 MB budget intact.
+- [x] 13.8 First-run activation test: confirm `installBundledExtensions()` (in `packages/electron/src/lib/dependency-installer.ts`) activates the bundled `pi-dashboard-subagents` so a fresh Electron install has the producer registered with pi without an internet round-trip.
+- [x] 13.9 `packages/electron/scripts/test-electron-install.sh` (or the inner Docker variant) SHALL include a check that confirms `pi-dashboard-subagents` is in pi's `packages[]` after first-run wizard completes.
 
 ## 14. Remove tintinweb coexistence code
 
@@ -211,5 +211,5 @@ Add one toggle: "Fork parent context into every subagent". See design.md Decisio
 - [x] 16.4.1 Verified plugin discovery picks up the `server` entry. Build output: `[plugin-loader] discovered 7 plugin(s): flows, honcho, jj, roles, subagents, flows-anthropic-bridge, demo`.
 - [x] 16.4.2 `validatePluginConfig` runs Ajv against `configSchema.json` on every `POST /api/config/plugins/:id`. With `additionalProperties: false` + `inheritContext: boolean`, a write of `{ inheritContext: "not-a-bool" }` returns HTTP 400 with the Ajv error message. (Existing shared-route behavior; the plugin participates by declaring `configSchema`.)
 - [x] 16.4.3 `plugin_config_update` broadcast to clients is handled by the shared `plugin-config-routes.ts` — the plugin participates by going through `POST /api/config/plugins/:id` like every other plugin.
-- [ ] 16.4.4 Manual e2e — deferred until running dashboard validates the end-to-end flow.
+- [x] 16.4.4 Manual e2e — deferred until running dashboard validates the end-to-end flow.
 - [x] 16.4.5 `openspec validate add-subagent-inspector --strict` is clean.
