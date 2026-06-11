@@ -2036,3 +2036,18 @@ Fix (change: harden-worktree-spawn):
 - Off-screen `spawn_error` events (cwd not pinned, not in any workspace, no session at that cwd) now produce app-level toast. Failures no longer silent.
 
 Manual recovery if auto-install fails: `cd <worktree>; npm ci`.
+
+## How do I change the OpenSpec workflow profile from the dashboard?
+
+Settings → Advanced → OpenSpec Workflow Profile. Pick Core / Expanded / Custom. Custom exposes 11-workflow multiselect.
+
+Save profile writes global config (`~/.config/openspec/config.json`) only. Affects all tools on machine (Claude Code, Cursor, CLI). Save does not touch project files.
+
+Projects need `openspec update` to regenerate `/opsx:` skill files. Use Update all projects button, or per-cwd Update in the collapsible project list.
+
+Staleness badge shows up-to-date / needs-update / unknown per project.
+
+Cross-refs:
+- packages/client/src/components/OpenSpecProfileSection.tsx
+- packages/server/src/routes/openspec-routes.ts
+- packages/shared/src/platform/openspec.ts

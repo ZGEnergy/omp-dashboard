@@ -419,4 +419,31 @@ describe("preferences-store", () => {
       store2.dispose();
     });
   });
+
+  describe("openspec update signatures", () => {
+    it("returns undefined for unknown cwd", () => {
+      const store = createPreferencesStore(filePath);
+      expect(store.getOpenSpecUpdateSignature(A_PATH)).toBeUndefined();
+      store.dispose();
+    });
+
+    it("sets and gets a per-cwd signature, persisting across reloads", () => {
+      const store1 = createPreferencesStore(filePath);
+      store1.setOpenSpecUpdateSignature(A_PATH, "sig-abc");
+      store1.flush();
+      store1.dispose();
+      const store2 = createPreferencesStore(filePath);
+      expect(store2.getOpenSpecUpdateSignature(A_PATH)).toBe("sig-abc");
+      expect(store2.getOpenSpecUpdateSignature(B_PATH)).toBeUndefined();
+      store2.dispose();
+    });
+
+    it("overwrites an existing signature", () => {
+      const store = createPreferencesStore(filePath);
+      store.setOpenSpecUpdateSignature(A_PATH, "sig-1");
+      store.setOpenSpecUpdateSignature(A_PATH, "sig-2");
+      expect(store.getOpenSpecUpdateSignature(A_PATH)).toBe("sig-2");
+      store.dispose();
+    });
+  });
 });

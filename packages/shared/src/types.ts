@@ -534,6 +534,21 @@ export interface OpenSpecConfig {
   workflows: string[];
 }
 
+/**
+ * Canonical workflow sets per profile, shared by client + server.
+ * `core` mirrors the openspec CLI preset; `expanded` is the full set
+ * (no CLI preset exists for it — written as JSON).
+ * See change: add-openspec-profile-settings.
+ */
+export const CORE_WORKFLOWS: readonly string[] = [
+  "propose", "explore", "apply", "archive",
+];
+
+export const EXPANDED_WORKFLOWS: readonly string[] = [
+  "propose", "explore", "new", "continue", "ff",
+  "apply", "verify", "sync", "archive", "bulk-archive", "onboard",
+];
+
 /** Default config used as fallback when fetch fails or hasn't arrived yet.
  *  Assumes the full expanded set so no UI disappears unexpectedly. */
 export const DEFAULT_OPENSPEC_CONFIG: OpenSpecConfig = {

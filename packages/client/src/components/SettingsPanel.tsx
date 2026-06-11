@@ -21,6 +21,7 @@ import { useInstalledPackages } from "../hooks/useInstalledPackages.js";
 import { usePackageOperations } from "../hooks/usePackageOperations.js";
 import { UnifiedPackagesSection } from "./UnifiedPackagesSection.js";
 import { PluginsSection } from "./PluginsSection.js";
+import { OpenSpecProfileSection } from "./OpenSpecProfileSection.js";
 import type { NpmPackageResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 
 interface ProviderConfig {
@@ -868,6 +869,8 @@ export function SettingsPanel({ availableModels }: { availableModels?: Array<{ p
                   );
                 })()}
               </Section>
+              {/* See change: add-openspec-profile-settings. */}
+              <OpenSpecProfileSection />
               <Section title="Editor (code-server)">
                 <p className="text-xs text-[var(--text-tertiary)] mb-2">
                   Configure the embedded VS Code editor powered by code-server.

@@ -73,6 +73,8 @@ function createMockPreferencesStore(): PreferencesStore {
     reorderWorkspaces: vi.fn(() => false),
     flush: vi.fn(),
     getDisplayPrefs: vi.fn(() => undefined),
+    getOpenSpecUpdateSignature: vi.fn(() => undefined),
+    setOpenSpecUpdateSignature: vi.fn(),
     setDisplayPrefs: vi.fn((p) => p as any),
     dispose: vi.fn(),
   };

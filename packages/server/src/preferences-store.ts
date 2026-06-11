@@ -33,6 +33,13 @@ interface PreferencesData {
    * See change: configurable-chat-display.
    */
   displayPrefs?: DisplayPrefs;
+  /**
+   * Per-cwd signature of the workflow set at the time the dashboard last ran
+   * `openspec update` for that cwd. Used to compute profile staleness.
+   * Absence => never updated via dashboard ("unknown").
+   * See change: add-openspec-profile-settings.
+   */
+  openspecUpdateSignatures?: Record<string, string>;
 }
 
 export interface PreferencesStore {
@@ -79,6 +86,11 @@ export interface PreferencesStore {
    * `partial.toolCalls` (if any) for the nested record.
    */
   setDisplayPrefs(partial: PartialDisplayPrefs): DisplayPrefs;
+  // ── add-openspec-profile-settings ──────────────────────────
+  /** Returns the recorded workflow-set signature for `cwd`, or undefined. */
+  getOpenSpecUpdateSignature(cwd: string): string | undefined;
+  /** Records the workflow-set signature for `cwd` (after a dashboard-run update). */
+  setOpenSpecUpdateSignature(cwd: string, signature: string): void;
   flush(): void;
   dispose(): void;
 }
@@ -142,6 +154,7 @@ export function createPreferencesStore(filePath: string = PREFERENCES_FILE): Pre
   const rawWorkspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
   let workspaces: Workspace[] = rawWorkspaces.map(normalizeWorkspaceOnLoad);
   let displayPrefs: DisplayPrefs | undefined = data.displayPrefs;
+  let openspecUpdateSignatures: Record<string, string> = data.openspecUpdateSignatures ?? {};
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let dirty =
     pinnedDirectories.length !== rawPinned.length ||
@@ -161,7 +174,7 @@ export function createPreferencesStore(filePath: string = PREFERENCES_FILE): Pre
       debounceTimer = null;
       if (dirty) {
         dirty = false;
-        writeJsonFile(filePath, { sessionOrder, pinnedDirectories, workspaces, displayPrefs } satisfies PreferencesData);
+        writeJsonFile(filePath, { sessionOrder, pinnedDirectories, workspaces, displayPrefs, openspecUpdateSignatures } satisfies PreferencesData);
       }
     }, DEBOUNCE_MS);
   }
@@ -173,7 +186,7 @@ export function createPreferencesStore(filePath: string = PREFERENCES_FILE): Pre
     }
     if (dirty) {
       dirty = false;
-      writeJsonFile(filePath, { sessionOrder, pinnedDirectories, workspaces, displayPrefs } satisfies PreferencesData);
+      writeJsonFile(filePath, { sessionOrder, pinnedDirectories, workspaces, displayPrefs, openspecUpdateSignatures } satisfies PreferencesData);
     }
   }
 
@@ -312,6 +325,16 @@ export function createPreferencesStore(filePath: string = PREFERENCES_FILE): Pre
 
     getDisplayPrefs(): DisplayPrefs | undefined {
       return displayPrefs ? { ...displayPrefs, toolCalls: { ...displayPrefs.toolCalls } } : undefined;
+    },
+
+    getOpenSpecUpdateSignature(cwd: string): string | undefined {
+      return openspecUpdateSignatures[cwd];
+    },
+
+    setOpenSpecUpdateSignature(cwd: string, signature: string): void {
+      if (openspecUpdateSignatures[cwd] === signature) return;
+      openspecUpdateSignatures = { ...openspecUpdateSignatures, [cwd]: signature };
+      scheduleSave();
     },
 
     setDisplayPrefs(partial: PartialDisplayPrefs): DisplayPrefs {

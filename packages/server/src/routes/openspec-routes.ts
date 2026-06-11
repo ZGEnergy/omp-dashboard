@@ -6,7 +6,14 @@ import type { SessionManager } from "../memory-session-manager.js";
 import type { PreferencesStore } from "../preferences-store.js";
 import type { DirectoryService } from "../directory-service.js";
 import type { ApiResponse, OpenSpecConfig } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { configListOr } from "@blackbelt-technology/pi-dashboard-shared/platform/openspec.js";
+import {
+  configListOr,
+  configProfile,
+  update as openspecUpdate,
+  writeOpenSpecConfigFile,
+  workflowSetSignature,
+  EXPANDED_WORKFLOWS,
+} from "@blackbelt-technology/pi-dashboard-shared/platform/openspec.js";
 import type { NetworkGuard } from "./route-deps.js";
 import { scanOpenSpecArchive } from "../openspec-archive.js";
 import {
@@ -66,6 +73,103 @@ export function registerOpenSpecRoutes(
       };
       configCache.set(cwd, { ts: now, data });
       return { success: true, data } satisfies ApiResponse;
+    },
+  );
+
+  // ── add-openspec-profile-settings ─────────────────────────────────────
+  // Known cwds = union(active session cwds, pinned dirs). Used by update-all
+  // and update-status.
+  function knownCwds(): string[] {
+    const set = new Set<string>();
+    for (const s of sessionManager.listAll()) if (s.cwd) set.add(s.cwd);
+    for (const d of preferencesStore.getPinnedDirectories()) set.add(d);
+    return [...set];
+  }
+
+  /** Current global workflow-set signature (drives staleness comparison). */
+  function currentGlobalSignature(cwd: string): string {
+    const raw = configListOr({ cwd }, null) as { workflows?: string[] } | null;
+    return workflowSetSignature(Array.isArray(raw?.workflows) ? raw!.workflows! : []);
+  }
+
+  // POST /api/openspec/config — write the global OpenSpec workflow profile.
+  // core → CLI preset; expanded/custom → atomic JSON write. Never mutates a
+  // project repo and never runs `openspec update`.
+  fastify.post<{ Body: { profile?: string; workflows?: string[]; cwd?: string } }>(
+    "/api/openspec/config",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const profile = body.profile;
+      if (profile !== "core" && profile !== "expanded" && profile !== "custom") {
+        reply.code(400);
+        return { success: false, error: "invalid profile" } satisfies ApiResponse;
+      }
+      // cwd is only needed for the `core` preset invocation (CLI runs in a dir).
+      const cwd = body.cwd ?? knownCwds()[0] ?? process.cwd();
+
+      if (profile === "core") {
+        const res = configProfile({ cwd, preset: "core" });
+        if (!res.ok) {
+          reply.code(500);
+          return { success: false, error: "openspec config profile core failed" } satisfies ApiResponse;
+        }
+      } else {
+        const workflows = profile === "expanded"
+          ? [...EXPANDED_WORKFLOWS]
+          : Array.isArray(body.workflows) ? body.workflows : [];
+        const res = writeOpenSpecConfigFile({ profile, workflows });
+        if (!res.success) {
+          reply.code(500);
+          return { success: false, error: res.error ?? "write failed" } satisfies ApiResponse;
+        }
+      }
+
+      // Bust the 30s config cache so the next GET returns fresh data.
+      configCache.clear();
+      return { success: true } satisfies ApiResponse;
+    },
+  );
+
+  // POST /api/openspec/update — run `openspec update` for one cwd or all.
+  // Records the post-update workflow signature so staleness can be computed.
+  fastify.post<{ Body: { cwd?: string; all?: boolean } }>(
+    "/api/openspec/update",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const targets = body.all ? knownCwds() : body.cwd ? [body.cwd] : [];
+      if (targets.length === 0) {
+        reply.code(400);
+        return { success: false, error: "cwd or all required" } satisfies ApiResponse;
+      }
+      const results: Array<{ cwd: string; success: boolean; error?: string }> = [];
+      for (const cwd of targets) {
+        const res = openspecUpdate({ cwd });
+        if (res.ok) {
+          preferencesStore.setOpenSpecUpdateSignature(cwd, currentGlobalSignature(cwd));
+          results.push({ cwd, success: true });
+        } else {
+          results.push({ cwd, success: false, error: "openspec update failed" });
+        }
+      }
+      return { success: true, data: { results } } satisfies ApiResponse;
+    },
+  );
+
+  // GET /api/openspec/update-status — per-cwd staleness vs current global config.
+  fastify.get(
+    "/api/openspec/update-status",
+    { preHandler: networkGuard },
+    async () => {
+      const cwds = knownCwds();
+      const statuses = cwds.map((cwd) => {
+        const recorded = preferencesStore.getOpenSpecUpdateSignature(cwd);
+        if (!recorded) return { cwd, status: "unknown" as const };
+        const current = currentGlobalSignature(cwd);
+        return { cwd, status: recorded === current ? ("up-to-date" as const) : ("needs-update" as const) };
+      });
+      return { success: true, data: { statuses } } satisfies ApiResponse;
     },
   );
 

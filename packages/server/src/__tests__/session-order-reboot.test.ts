@@ -45,6 +45,8 @@ function makePrefs(): PreferencesStore {
     reorderWorkspaces: () => false,
     flush: () => {},
     getDisplayPrefs: () => undefined,
+    getOpenSpecUpdateSignature: () => undefined,
+    setOpenSpecUpdateSignature: () => {},
     setDisplayPrefs: (p: any) => p,
     dispose: () => {},
   };

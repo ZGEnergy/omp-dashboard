@@ -26,6 +26,58 @@ export async function fetchOpenSpecConfig(cwd: string, signal?: AbortSignal): Pr
   return body.data as OpenSpecConfig;
 }
 
+// ── add-openspec-profile-settings ─────────────────────────────────────
+
+/** Per-cwd staleness of generated /opsx: skill files vs the current profile. */
+export type OpenSpecUpdateStatus = "up-to-date" | "needs-update" | "unknown";
+export interface CwdUpdateStatus { cwd: string; status: OpenSpecUpdateStatus; }
+export interface CwdUpdateResult { cwd: string; success: boolean; error?: string; }
+
+/**
+ * Write the global OpenSpec workflow profile. `core` uses the CLI preset
+ * server-side; `expanded`/`custom` write JSON. After a successful save the
+ * caller SHOULD reset the config cache so buttons re-render.
+ */
+export async function saveOpenSpecConfig(
+  profile: OpenSpecConfig["profile"],
+  workflows: string[],
+  cwd?: string,
+): Promise<void> {
+  const res = await fetch(`${getApiBase()}/api/openspec/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile, workflows, cwd }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = await res.json();
+  if (!body?.success) throw new Error(body?.error ?? "config save failed");
+  __resetOpenSpecConfigCache();
+}
+
+/** Run `openspec update` for a single cwd or for all known cwds. */
+export async function runOpenSpecUpdate(
+  target: { cwd: string } | { all: true },
+): Promise<CwdUpdateResult[]> {
+  const res = await fetch(`${getApiBase()}/api/openspec/update`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(target),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = await res.json();
+  if (!body?.success) throw new Error(body?.error ?? "update failed");
+  return (body.data?.results ?? []) as CwdUpdateResult[];
+}
+
+/** Fetch per-cwd staleness for the project list. */
+export async function fetchUpdateStatus(): Promise<CwdUpdateStatus[]> {
+  const res = await fetch(`${getApiBase()}/api/openspec/update-status`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = await res.json();
+  if (!body?.success) throw new Error(body?.error ?? "status fetch failed");
+  return (body.data?.statuses ?? []) as CwdUpdateStatus[];
+}
+
 /**
  * useOpenSpecConfig — fetches the config for the given cwd once on mount
  * and whenever `cwd` changes. Returns the last successful config or

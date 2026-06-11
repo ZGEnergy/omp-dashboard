@@ -79,8 +79,10 @@ describe("OPENSPEC_RECIPES registry", () => {
     expect(Object.keys(OPENSPEC_RECIPES).sort()).toEqual([
       "OPENSPEC_ARCHIVE_COMPLETED",
       "OPENSPEC_CONFIG_LIST",
+      "OPENSPEC_CONFIG_PROFILE",
       "OPENSPEC_LIST",
       "OPENSPEC_STATUS",
+      "OPENSPEC_UPDATE",
     ]);
   });
 
