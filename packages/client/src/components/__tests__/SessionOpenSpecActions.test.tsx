@@ -2,7 +2,12 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import React from "react";
 import { SessionOpenSpecActions } from "../SessionOpenSpecActions.js";
-import type { DashboardSession, OpenSpecChange } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { formatProposePrompt } from "../ProposeDialog.js";
+import type { DashboardSession, OpenSpecChange, OpenSpecConfig } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { CORE_WORKFLOWS, EXPANDED_WORKFLOWS } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+
+const coreConfig: OpenSpecConfig = { profile: "core", delivery: "both", workflows: [...CORE_WORKFLOWS] };
+const expandedConfig: OpenSpecConfig = { profile: "expanded", delivery: "both", workflows: [...EXPANDED_WORKFLOWS] };
 
 afterEach(() => cleanup());
 
@@ -143,6 +148,56 @@ describe("SessionOpenSpecActions", () => {
     );
     expect(screen.getByTestId("new-change-btn")).toBeTruthy();
     expect(screen.getByTestId("explore-unattached-btn")).toBeTruthy();
+  });
+
+  // --- propose vs new split (change: split-propose-button) ---
+
+  it("core profile shows Propose + Explore, NOT Change", () => {
+    render(
+      <SessionOpenSpecActions
+        session={makeSession()}
+        changes={[planningChange]}
+        openspecConfig={coreConfig}
+        {...defaultProps}
+      />,
+    );
+    expect(screen.getByTestId("propose-btn")).toBeTruthy();
+    expect(screen.getByTestId("explore-unattached-btn")).toBeTruthy();
+    expect(screen.queryByTestId("new-change-btn")).toBeNull();
+  });
+
+  it("expanded profile shows BOTH Change and Propose (has new + propose)", () => {
+    render(
+      <SessionOpenSpecActions
+        session={makeSession()}
+        changes={[planningChange]}
+        openspecConfig={expandedConfig}
+        {...defaultProps}
+      />,
+    );
+    expect(screen.getByTestId("new-change-btn")).toBeTruthy();
+    expect(screen.getByTestId("propose-btn")).toBeTruthy();
+  });
+
+  it("Propose button opens a name-only dialog and dispatches /skill:openspec-propose", () => {
+    const onSendPrompt = vi.fn();
+    render(
+      <SessionOpenSpecActions
+        session={makeSession()}
+        changes={[planningChange]}
+        openspecConfig={coreConfig}
+        {...defaultProps}
+        onSendPrompt={onSendPrompt}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("propose-btn"));
+    expect(screen.getByTestId("propose-dialog")).toBeTruthy();
+    // Name-only: no description field like NewChangeDialog has.
+    expect(screen.getByTestId("propose-name")).toBeTruthy();
+    expect(screen.queryByTestId("new-change-description")).toBeNull();
+    fireEvent.change(screen.getByTestId("propose-name"), { target: { value: "add-dark-mode" } });
+    fireEvent.click(screen.getByTestId("propose-send"));
+    expect(onSendPrompt).toHaveBeenCalledWith("/skill:openspec-propose add-dark-mode");
   });
 
   it("hides + Change and Explore when ended and unattached", () => {

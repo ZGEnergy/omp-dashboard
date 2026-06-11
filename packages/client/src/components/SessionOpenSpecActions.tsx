@@ -10,6 +10,7 @@ import {
   mdiArchiveArrowUp,
   mdiLinkOff,
   mdiPlus,
+  mdiLightbulbOnOutline,
   mdiPaperclip,
   mdiFormatListChecks,
 } from "@mdi/js";
@@ -22,6 +23,7 @@ import { DialogPortal } from "./DialogPortal.js";
 // and replace the standalone letters button. See change:
 // redesign-session-card-and-composer (stepper-click-to-open).
 import { NewChangeDialog } from "./NewChangeDialog.js";
+import { ProposeDialog } from "./ProposeDialog.js";
 import { SearchableSelectDialog, type SelectOption } from "./SearchableSelectDialog.js";
 import { GroupedAttachDialog } from "./GroupedAttachDialog.js";
 import { StatePill } from "./StatePill.js";
@@ -101,6 +103,7 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
   const [bulkArchiveConfirm, setBulkArchiveConfirm] = useState(false);
   const [attachingName, setAttachingName] = useState<string | null>(null);
   const [newChangeOpen, setNewChangeOpen] = useState(false);
+  const [proposeOpen, setProposeOpen] = useState(false);
   const [attachPickerOpen, setAttachPickerOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   // Overflow-menu plumbing removed — the only item ever rendered there was
@@ -186,8 +189,11 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
           </button>
           {!isEnded && (
             <>
-              {(wf("new") || wf("propose")) && (
+              {wf("new") && (
                 <ActionButton label="Change" icon={mdiPlus} onClick={() => setNewChangeOpen(true)} testId="new-change-btn" variant="primary" />
+              )}
+              {wf("propose") && (
+                <ActionButton label="Propose" icon={mdiLightbulbOnOutline} onClick={() => setProposeOpen(true)} testId="propose-btn" variant="primary" />
               )}
               {wf("explore") && (
                 <ActionButton label="Explore" icon={mdiCompassOutline} onClick={() => setExploreOpen(true)} testId="explore-unattached-btn" variant="info" />
@@ -206,6 +212,15 @@ export function SessionOpenSpecActions({ session, changes, onAttach, onDetach, o
               setNewChangeOpen(false);
             }}
             onClose={() => setNewChangeOpen(false)}
+          /></DialogPortal>
+        )}
+        {proposeOpen && (
+          <DialogPortal><ProposeDialog
+            onSend={(prompt) => {
+              onSendPrompt(prompt);
+              setProposeOpen(false);
+            }}
+            onClose={() => setProposeOpen(false)}
           /></DialogPortal>
         )}
         {exploreOpen && (

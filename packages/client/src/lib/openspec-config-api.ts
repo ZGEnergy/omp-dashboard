@@ -8,7 +8,7 @@
  *
  * See change: redesign-session-card-and-composer (config-driven-workflow).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   DEFAULT_OPENSPEC_CONFIG,
   type OpenSpecConfig,
@@ -39,15 +39,22 @@ export async function fetchGlobalOpenSpecConfig(signal?: AbortSignal): Promise<O
   return body.data as OpenSpecConfig;
 }
 
-// Pub/sub so every mounted useOpenSpecConfig refetches after a save. Without
-// this, already-mounted session cards keep stale buttons until remount.
-// See change: add-openspec-profile-settings.
+// Config-change epoch: bumped on every save. Every useOpenSpecConfig hook
+// subscribes via useSyncExternalStore and refetches when the epoch changes,
+// so ALL mounted cards/composer refresh their buttons after a profile save —
+// even hooks whose cwd was undefined at save time (e.g. App's config hook
+// while the Settings panel is open). This replaces the fragile
+// "subscription-only + lastCwdRef early-return" path that served stale config
+// after an in-app save+navigate (buttons only updated on full reload).
+// See change: add-openspec-profile-settings (fix-inapp-refetch).
+let configEpoch = 0;
 const configChangeListeners = new Set<() => void>();
 export function subscribeOpenSpecConfigChange(fn: () => void): () => void {
   configChangeListeners.add(fn);
   return () => { configChangeListeners.delete(fn); };
 }
 function notifyOpenSpecConfigChanged(): void {
+  configEpoch += 1;
   for (const fn of configChangeListeners) {
     try { fn(); } catch { /* listener errors must not break the loop */ }
   }
@@ -118,21 +125,27 @@ export async function fetchUpdateStatus(): Promise<CwdUpdateStatus[]> {
 const configCache = new Map<string, OpenSpecConfig>();
 
 export function useOpenSpecConfig(cwd: string | undefined): OpenSpecConfig {
+  // Re-render + re-run the fetch effect whenever a save bumps the epoch.
+  const epoch = useSyncExternalStore(
+    subscribeOpenSpecConfigChange,
+    () => configEpoch,
+    () => configEpoch,
+  );
   const [config, setConfig] = useState<OpenSpecConfig>(() =>
     cwd ? configCache.get(cwd) ?? DEFAULT_OPENSPEC_CONFIG : DEFAULT_OPENSPEC_CONFIG,
   );
-  const lastCwdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!cwd) {
       setConfig(DEFAULT_OPENSPEC_CONFIG);
       return;
     }
-    // Hit cache synchronously.
+    // Seed synchronously from cache for snappy UX, then always refetch fresh.
+    // No early-return: the [cwd, epoch] deps guarantee a fresh fetch on cwd
+    // change AND after any save (epoch bump cleared the cache first), so
+    // buttons never serve a stale profile.
     const cached = configCache.get(cwd);
-    if (cached && lastCwdRef.current === cwd) return;
     if (cached) setConfig(cached);
-    lastCwdRef.current = cwd;
 
     const ac = new AbortController();
     fetchOpenSpecConfig(cwd, ac.signal)
@@ -141,27 +154,10 @@ export function useOpenSpecConfig(cwd: string | undefined): OpenSpecConfig {
         setConfig(data);
       })
       .catch(() => {
-        // Keep DEFAULT_OPENSPEC_CONFIG / last cached value on failure.
+        // Keep cached / DEFAULT value on failure.
       });
     return () => ac.abort();
-  }, [cwd]);
-
-  // Refetch when the profile is saved elsewhere (Settings). The save path
-  // clears the cache and notifies; we re-pull for this cwd and update buttons.
-  // See change: add-openspec-profile-settings.
-  useEffect(() => {
-    if (!cwd) return;
-    const ac = new AbortController();
-    const unsub = subscribeOpenSpecConfigChange(() => {
-      fetchOpenSpecConfig(cwd, ac.signal)
-        .then((data) => {
-          configCache.set(cwd, data);
-          setConfig(data);
-        })
-        .catch(() => { /* keep last value */ });
-    });
-    return () => { unsub(); ac.abort(); };
-  }, [cwd]);
+  }, [cwd, epoch]);
 
   return config;
 }
