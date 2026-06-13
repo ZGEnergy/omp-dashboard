@@ -4,6 +4,28 @@
 import type { BrowserToServerMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import type { BrowserHandlerContext } from "./handler-context.js";
 import { attachRenameTarget, detachShouldClearName } from "../proposal-attach-naming.js";
+import { resolveOrderKey } from "../resolve-order-key.js";
+
+/**
+ * Move a session to the front of its resolved-group order list and broadcast
+ * `sessions_reordered`. Used by hide/unhide so the card surfaces at the top
+ * of its tier (hidden, resp. ended). No-op when the order managers are absent
+ * (lean test contexts) or the session is unknown.
+ * See change: simplify-session-card-ordering.
+ */
+function moveSessionToFront(sessionId: string, ctx: BrowserHandlerContext): void {
+  const { sessionManager, sessionOrderManager, preferencesStore, broadcast } = ctx;
+  if (!sessionOrderManager) return;
+  const session = sessionManager.get(sessionId);
+  if (!session) return;
+  const key = resolveOrderKey(session, preferencesStore?.getPinnedDirectories() ?? []);
+  sessionOrderManager.moveToFront(key, sessionId);
+  broadcast({
+    type: "sessions_reordered",
+    cwd: key,
+    sessionIds: sessionOrderManager.getOrder(key) ?? [],
+  });
+}
 
 export function handleRenameSession(
   msg: Extract<BrowserToServerMessage, { type: "rename_session" }>,
@@ -23,6 +45,9 @@ export function handleHideSession(
   const updates = { hidden: true };
   ctx.sessionManager.update(msg.sessionId, updates);
   ctx.broadcast({ type: "session_updated", sessionId: msg.sessionId, updates });
+  // Surface at the top of the HIDDEN tier (stable status-partition).
+  // See change: simplify-session-card-ordering.
+  moveSessionToFront(msg.sessionId, ctx);
 }
 
 export function handleUnhideSession(
@@ -32,6 +57,9 @@ export function handleUnhideSession(
   const updates = { hidden: false };
   ctx.sessionManager.update(msg.sessionId, updates);
   ctx.broadcast({ type: "session_updated", sessionId: msg.sessionId, updates });
+  // Cleared hidden → surface at the top of the ENDED tier.
+  // See change: simplify-session-card-ordering.
+  moveSessionToFront(msg.sessionId, ctx);
 }
 
 /**

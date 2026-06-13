@@ -255,6 +255,19 @@ export interface DashboardConfig {
    * See change: reattach-move-to-front.
    */
   reattachPlacement: ReattachPlacement;
+  /**
+   * When true, a session whose turn completes (`agent_end` while still
+   * alive) or which transitions alive→ended is moved to the front of its
+   * tier (top of active, resp. top of ended). Default `false` (keep slot).
+   * See change: simplify-session-card-ordering.
+   */
+  completedFirst: boolean;
+  /**
+   * When true, an alive session issuing an `ask_user` request is moved to
+   * the front of the active tier. Default `false`.
+   * See change: simplify-session-card-ordering.
+   */
+  questionFirst: boolean;
   /** Persisted list of known remote servers */
   knownServers: KnownServer[];
   /**
@@ -329,6 +342,8 @@ const DEFAULTS: DashboardConfig = {
   knownServers: [],
   askUserPromptTimeoutSeconds: DEFAULT_ASK_USER_PROMPT_TIMEOUT_SECONDS,
   reattachPlacement: DEFAULT_REATTACH_PLACEMENT,
+  completedFirst: false,
+  questionFirst: false,
   spawnRegisterTimeoutMs: 30000,
   gitWorktreeEnabled: true,
 };
@@ -627,6 +642,8 @@ export function loadConfig(): DashboardConfig {
       electronMode: parsed.electronMode === true,
       knownServers: parseKnownServers(parsed.knownServers),
       reattachPlacement: parseReattachPlacement(parsed.reattachPlacement),
+      completedFirst: typeof parsed.completedFirst === "boolean" ? parsed.completedFirst : defaults.completedFirst,
+      questionFirst: typeof parsed.questionFirst === "boolean" ? parsed.questionFirst : defaults.questionFirst,
       plugins: parsePluginsConfig(parsed.plugins),
       askUserPromptTimeoutSeconds: typeof parsed.askUserPromptTimeoutSeconds === "number"
         ? parsed.askUserPromptTimeoutSeconds

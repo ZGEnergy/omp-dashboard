@@ -472,6 +472,53 @@ describe("loadConfig reattachPlacement", () => {
   });
 });
 
+// See change: simplify-session-card-ordering.
+describe("loadConfig completedFirst / questionFirst", () => {
+  let testDir: string;
+  let configFile: string;
+  let origHome: string;
+
+  beforeEach(() => {
+    testDir = path.join(os.tmpdir(), `test-config-cfqf-${Date.now()}-${Math.random()}`);
+    fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
+    configFile = path.join(testDir, ".pi", "dashboard", "config.json");
+    origHome = process.env.HOME!;
+    process.env.HOME = testDir;
+  });
+
+  afterEach(() => {
+    process.env.HOME = origHome;
+    if (fs.existsSync(testDir)) fs.rmSync(testDir, { recursive: true });
+  });
+
+  it("both default to false when omitted", () => {
+    fs.writeFileSync(configFile, JSON.stringify({}));
+    const cfg = loadConfig();
+    expect(cfg.completedFirst).toBe(false);
+    expect(cfg.questionFirst).toBe(false);
+  });
+
+  it("both default to false when config file missing", () => {
+    const cfg = loadConfig();
+    expect(cfg.completedFirst).toBe(false);
+    expect(cfg.questionFirst).toBe(false);
+  });
+
+  it("round-trips true values", () => {
+    fs.writeFileSync(configFile, JSON.stringify({ completedFirst: true, questionFirst: true }));
+    const cfg = loadConfig();
+    expect(cfg.completedFirst).toBe(true);
+    expect(cfg.questionFirst).toBe(true);
+  });
+
+  it("falls back to false for non-boolean", () => {
+    fs.writeFileSync(configFile, JSON.stringify({ completedFirst: "yes", questionFirst: 1 }));
+    const cfg = loadConfig();
+    expect(cfg.completedFirst).toBe(false);
+    expect(cfg.questionFirst).toBe(false);
+  });
+});
+
 describe("loadConfig spawnRegisterTimeoutMs", () => {
   let testDir: string;
   let configFile: string;

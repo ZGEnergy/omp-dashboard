@@ -25,6 +25,8 @@ import { createPendingAttachRegistry } from "./pending-attach-registry.js";
 import { createPendingWorktreeBaseRegistry } from "./pending-worktree-base-registry.js";
 import { createPendingResumeIntentRegistry } from "./pending-resume-intent-registry.js";
 import { applyReattachPolicy } from "./reattach-placement.js";
+import { resolveOrderKey } from "./resolve-order-key.js";
+import { reconcileSessionOrder } from "./reconcile-session-order.js";
 
 // pending-load-manager removed — server loads sessions directly via DirectoryService
 import { createDirectoryService, type DirectoryService } from "./directory-service.js";
@@ -118,6 +120,12 @@ export interface ServerConfig {
    *  a dashboard restart. Defaults to `"always"`.
    *  See change: reattach-move-to-front. */
   reattachPlacement?: import("@blackbelt-technology/pi-dashboard-shared/config.js").ReattachPlacement;
+  /** Gate: move completed/ended sessions to front of their tier. Default false.
+   *  See change: simplify-session-card-ordering. */
+  completedFirst?: boolean;
+  /** Gate: move ask_user sessions to front of active tier. Default false.
+   *  See change: simplify-session-card-ordering. */
+  questionFirst?: boolean;
   /** Merged trusted networks from config */
   resolvedTrustedNetworks?: string[];
   /** CORS allowed origins from config */
@@ -243,32 +251,30 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         : undefined,
       cachedAt: Date.now(),
     });
-    // When a session ends, drop its id from the persisted drag-reorder list
-    // for that cwd. Drag-reorder is meaningful for live sessions only; ended
-    // ones must fall to the bottom in their natural endedAt order (rendered
-    // top-of-bucket on most-recent-first) rather than retaining a position
-    // that interleaves them with active sessions.
-    // See change: pin-and-search-sessions, top-of-tier-on-status-change.
-    // Status-transition tracking: prune+broadcast runs ONCE per
-    // transition to ended. Subsequent `update()` calls on an already-
-    // ended session (e.g. heartbeat tail, click-induced state sync,
-    // late events from the bridge) do NOT re-trigger the prune —
-    // otherwise the card visibly jumps to the tail of the ended group
-    // every time the user interacts with it.
-    // See change: pin-and-search-sessions.
+    // Order-map key for this session: the RESOLVED group path (parent repo
+    // for worktree/jj sessions), the same key the client reads.
+    // See change: simplify-session-card-ordering.
+    const orderKey = resolveOrderKey(session, preferencesStore.getPinnedDirectories());
+    // Status-transition tracking: the gated move runs ONCE per transition
+    // to ended. Subsequent `update()` calls on an already-ended session
+    // (heartbeat tail, click-induced state sync, late bridge events) do
+    // NOT re-fire it.
+    // See changes: pin-and-search-sessions, simplify-session-card-ordering.
     const wasEnded = endedSessionIds.has(sessionId);
     const isEnded = session.status === "ended";
     if (isEnded && !wasEnded) {
-      // Just transitioned alive→ended.
+      // Just transitioned alive→ended. The id STAYS in the order map
+      // (all-status list); the client status-partition re-tiers it into
+      // the ended tier. When `completedFirst` is on, surface it at the top
+      // of the ended tier via move-to-front; otherwise no-op (keep slot).
+      // See change: simplify-session-card-ordering.
       endedSessionIds.add(sessionId);
-      const orderBefore = sessionOrderManager.getOrder(session.cwd) ?? [];
-      sessionOrderManager.remove(session.cwd, sessionId);
-      const orderAfter = sessionOrderManager.getOrder(session.cwd) ?? [];
-      if (orderBefore.length !== orderAfter.length) {
+      if (config.completedFirst) {
+        sessionOrderManager.moveToFront(orderKey, sessionId);
         browserGateway.broadcastToAll({
           type: "sessions_reordered",
-          cwd: session.cwd,
-          sessionIds: orderAfter,
+          cwd: orderKey,
+          sessionIds: sessionOrderManager.getOrder(orderKey) ?? [],
         });
       }
     } else if (!isEnded && wasEnded) {
@@ -298,7 +304,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         if (ctx?.registerReason === "reattach") {
           applyReattachPolicy(
             sessionId,
-            session.cwd,
+            orderKey,
             config.reattachPlacement ?? "always",
             { sessionManager, sessionOrderManager, browserGateway },
             ctx.priorStatus,
@@ -316,11 +322,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       // surfaces at the top of the alive tier, even on repeated end →
       // resume cycles where the id might still be in the order.
       // Registry intent overrides any `registerReason: "reattach"`.
-      sessionOrderManager.moveToFront(session.cwd, sessionId);
-      const next = sessionOrderManager.getOrder(session.cwd) ?? [];
+      sessionOrderManager.moveToFront(orderKey, sessionId);
+      const next = sessionOrderManager.getOrder(orderKey) ?? [];
       browserGateway.broadcastToAll({
         type: "sessions_reordered",
-        cwd: session.cwd,
+        cwd: orderKey,
         sessionIds: next,
       });
     } else if (!isEnded && !wasEnded && ctx?.registerReason === "reattach") {
@@ -336,11 +342,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       // See change: reattach-move-to-front.
       const intent = pendingResumeIntents.consume(sessionId);
       if (intent === "front") {
-        sessionOrderManager.moveToFront(session.cwd, sessionId);
-        const next = sessionOrderManager.getOrder(session.cwd) ?? [];
+        sessionOrderManager.moveToFront(orderKey, sessionId);
+        const next = sessionOrderManager.getOrder(orderKey) ?? [];
         browserGateway.broadcastToAll({
           type: "sessions_reordered",
-          cwd: session.cwd,
+          cwd: orderKey,
           sessionIds: next,
         });
       } else if (intent === "keep") {
@@ -348,7 +354,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       } else {
         applyReattachPolicy(
           sessionId,
-          session.cwd,
+          orderKey,
           config.reattachPlacement ?? "always",
           { sessionManager, sessionOrderManager, browserGateway },
           ctx.priorStatus,
@@ -363,21 +369,24 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     sessionManager.listAll().filter((s) => s.status === "ended").map((s) => s.id),
   );
 
-  // Startup reconciliation: persisted `sessionOrder` may contain ended
-  // session ids from before the alive→ended prune was implemented. Strip
-  // them now so the next render sees a consistent state where ended ids
-  // never appear in the order pass.
-  // See change: pin-and-search-sessions.
-  for (const [cwd, ids] of Object.entries(sessionOrderManager.getAllOrders())) {
-    const aliveIds = ids.filter((id) => {
-      const s = sessionManager.get(id);
-      // Keep ids we don't know about — they may belong to other cwds or
-      // be live but not yet registered. Strip only the ones explicitly
-      // marked ended.
-      return !s || s.status !== "ended";
-    });
-    if (aliveIds.length !== ids.length) {
-      sessionOrderManager.reorder(cwd, aliveIds);
+  // Startup reconciliation (inverted from the old alive-only prune).
+  // The order map now holds ALL-status ids. On boot:
+  //   1. Prune stale ids (no longer in the session manager at all).
+  //   2. Backfill ended ids that exist under the resolved key but are
+  //      absent from the stored list, ordered by `(endedAt ?? startedAt)`
+  //      desc — the old implicit ended-tier ordering — so pre-migration
+  //      maps (which stripped ended ids) render identically on first load.
+  // Idempotent: ended ids already present keep their slot.
+  // See changes: pin-and-search-sessions, simplify-session-card-ordering.
+  {
+    const pinnedDirs = preferencesStore.getPinnedDirectories();
+    const changes = reconcileSessionOrder(
+      sessionOrderManager.getAllOrders(),
+      sessionManager.listAll(),
+      (s) => resolveOrderKey(s, pinnedDirs),
+    );
+    for (const [key, ids] of Object.entries(changes)) {
+      sessionOrderManager.reorder(key, ids);
     }
   }
 
@@ -528,6 +537,9 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     piGateway,
     browserGateway,
     sessionOrderManager,
+    preferencesStore,
+    isCompletedFirst: () => config.completedFirst ?? false,
+    isQuestionFirst: () => config.questionFirst ?? false,
     pendingForkRegistry,
     directoryService,
     knownSessionIds,

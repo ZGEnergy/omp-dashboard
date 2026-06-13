@@ -4,47 +4,17 @@
  */
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
-import { normalizePath } from "@blackbelt-technology/pi-dashboard-shared/platform/paths.js";
+import {
+  inferPlatform,
+  pathKey,
+  resolveSessionGroupPath,
+} from "@blackbelt-technology/pi-dashboard-shared/session-group-path.js";
 
-/**
- * Infer the server's platform from any path we've seen. Client doesn't
- * have `process.platform`; rather than adding a separate protocol round
- * trip just for grouping, we sniff: anything with a `\` or a
- * `<letter>:` drive prefix is Windows, otherwise POSIX.
- *
- * Exposed for tests so they can exercise both branches deterministically.
- */
-export function inferPlatform(
-  samples: Array<string | undefined>,
-  override?: NodeJS.Platform,
-): NodeJS.Platform {
-  if (override) return override;
-  for (const s of samples) {
-    if (!s) continue;
-    if (/^[A-Za-z]:[\\/]/.test(s) || s.includes("\\")) return "win32";
-    if (s.startsWith("/")) return "linux";
-  }
-  return "linux";
-}
-
-/**
- * Build a key suitable for Map/Set lookup that collapses
- * cosmetic path drift (trailing separator, mixed separators,
- * drive-letter case on Windows, case on macOS). The original
- * display path is retained on the group's `cwd` field.
- *
- * Case folding for Windows/macOS happens here so a naive
- * string-keyed Map can host same-path entries.
- *
- * See change: platform-path-normalization.
- */
-export function pathKey(p: string, platform: NodeJS.Platform): string {
-  const normalized = normalizePath(p, platform);
-  // Match samePath's folding: case-insensitive on win32/darwin,
-  // case-sensitive on linux.
-  if (platform === "linux") return normalized;
-  return normalized.toLowerCase();
-}
+// `inferPlatform`, `pathKey`, and `resolveSessionGroupPath` now live in
+// packages/shared so the server keys its order map by the SAME resolved
+// path the client reads. Re-exported here for existing client importers
+// and tests. See change: simplify-session-card-ordering.
+export { inferPlatform, pathKey, resolveSessionGroupPath };
 
 export interface DirectoryGroup {
   cwd: string;
@@ -102,42 +72,6 @@ export function getUnifiedOrder(sessions: DashboardSession[], terminals: Termina
 }
 
 /**
- * Resolve a session's group-key path. Priority order:
- *   1. Explicit pin wins — if `pathKey(cwd)` matches a pinned entry, the
- *      session groups under its own cwd.
- *   2. Else if `jjState.workspaceRoot` is set, the session collapses
- *      under the parent repo's group key (so `.shadow/<name>/` workspaces
- *      cluster with their parent).
- *   3. Else if `gitWorktree.mainPath` is set, the session collapses
- *      under the main worktree path (so `.worktrees/<slug>` sessions
- *      cluster with their parent repo). Mirrors the jj precedent.
- *   4. Else falls back to `cwd` (status quo for plain checkouts).
- *
- * The display path returned matches the chosen key — pinned uses cwd,
- * collapsed (jj or worktree) uses the parent root, default uses cwd.
- *
- * When BOTH `jjState.workspaceRoot` AND `gitWorktree.mainPath` apply,
- * jj wins because it is evaluated first (step 2). This is unusual in
- * practice but documented in the design.
- *
- * Exported for tests; consumed by `groupSessionsByDirectory`.
- * See changes: add-jj-workspace-plugin, add-worktree-spawn-dialog.
- */
-export function resolveSessionGroupPath(
-  session: DashboardSession,
-  pinnedKeys: Set<string>,
-  platform: NodeJS.Platform,
-): string {
-  const cwdKey = pathKey(session.cwd, platform);
-  if (pinnedKeys.has(cwdKey)) return session.cwd;
-  const wsRoot = session.jjState?.workspaceRoot;
-  if (wsRoot && wsRoot.length > 0) return wsRoot;
-  const wtMain = session.gitWorktree?.mainPath;
-  if (wtMain && wtMain.length > 0) return wtMain;
-  return session.cwd;
-}
-
-/**
  * Group sessions by cwd, with pinned directories first (in pinned order),
  * then unpinned sorted by recency.
  *
@@ -148,12 +82,12 @@ export function resolveSessionGroupPath(
  * falls back to `process.platform` when absent.
  *
  * Per-session group-key precedence (see `resolveSessionGroupPath`):
- * pin > `jjState.workspaceRoot` > `cwd`. Within a group, sessions are
- * pre-sorted so all rows sharing the same `(jjState?.workspaceName ?? "")`
- * cluster adjacently (main-tree then ws-A then ws-B, etc.); existing
- * `sortSessionsByOrder` ranking applies inside each cluster.
- *
- * See change: add-jj-workspace-plugin (Decision 15).
+ * pin > `jjState.workspaceRoot` > `gitWorktree.mainPath` > `cwd`. Within a
+ * group, sessions are ordered solely by the flat `sessionOrder`
+ * (`sortSessionsByOrder` + the status-partition in SessionList) — NO
+ * workspace-cluster adjacency. Reverses Decision 15 of
+ * add-jj-workspace-plugin.
+ * See change: simplify-session-card-ordering (Decision D8).
  */
 export function groupSessionsByDirectory(
   sessions: DashboardSession[],
@@ -191,12 +125,14 @@ export function groupSessionsByDirectory(
     }
   }
 
-  // Pre-sort sessions inside each group so workspace clusters stay
-  // adjacent. Stable sort preserves prior recency/order tiers within
-  // each (workspaceName ?? "") bucket.
-  for (const g of groups.values()) {
-    g.sessions = clusterByWorkspaceName(g.sessions);
-  }
+  // No workspace-cluster adjacency: order within a folder is governed
+  // solely by the flat status-partitioned `sessionOrder` (applied by
+  // `sortSessionsByOrder` below + the per-tier partition in SessionList).
+  // A worktree/jj session can therefore surface at the top of its tier
+  // ahead of the main checkout. Grouping-under-parent (collapse) stays;
+  // only cluster ordering is dropped. Intentionally reverses Decision 15
+  // of add-jj-workspace-plugin — MUST NOT be re-introduced.
+  // See change: simplify-session-card-ordering (Decision D8).
 
   // Build pinned groups in pinned order (including zero-session groups).
   // Uses the pinned path as the display cwd so the header matches what the
@@ -211,7 +147,7 @@ export function groupSessionsByDirectory(
     );
     pinned.push({
       cwd: dir,
-      sessions: clusterByWorkspaceName(ordered),
+      sessions: ordered,
       pinned: true,
     });
   }
@@ -221,7 +157,7 @@ export function groupSessionsByDirectory(
     .filter(([key]) => !pinnedKeys.has(key))
     .map(([, g]) => ({
       cwd: g.cwd,
-      sessions: clusterByWorkspaceName(sortSessionsByOrder(g.sessions, orderMap?.get(g.cwd))),
+      sessions: sortSessionsByOrder(g.sessions, orderMap?.get(g.cwd)),
       pinned: false,
     }))
     .sort((a, b) => {
@@ -310,39 +246,6 @@ export function groupSessionsByDirectoryWithWorkspaces(
   );
 
   return { workspaces: wsTiers, topLevel };
-}
-
-/**
- * Stable cluster sort by `(jjState?.workspaceName ?? gitWorktree?.name ?? "")`.
- * Sessions sharing a cluster key end up adjacent without losing the
- * relative ordering established by the prior sort step.
- *
- * Empty cluster key (i.e. plain main-tree / main-checkout sessions)
- * sorts first so the parent cluster appears before its workspace /
- * worktree clusters inside a collapsed group.
- *
- * When a session has both `jjState.workspaceName` AND `gitWorktree.name`,
- * jj wins (evaluated first). Matches the precedence rule in
- * `resolveSessionGroupPath`. See change: add-worktree-spawn-dialog.
- */
-function clusterByWorkspaceName(sessions: DashboardSession[]): DashboardSession[] {
-  // Map.values() iteration is insertion-ordered, so we walk the input
-  // once and bucket by name; concatenation order is name-order.
-  const buckets = new Map<string, DashboardSession[]>();
-  for (const s of sessions) {
-    const name = s.jjState?.workspaceName ?? s.gitWorktree?.name ?? "";
-    const bucket = buckets.get(name);
-    if (bucket) bucket.push(s);
-    else buckets.set(name, [s]);
-  }
-  // Sort bucket keys alphabetically with empty-string first.
-  const keys = Array.from(buckets.keys()).sort((a, b) => {
-    if (a === b) return 0;
-    if (a === "") return -1;
-    if (b === "") return 1;
-    return a.localeCompare(b);
-  });
-  return keys.flatMap((k) => buckets.get(k)!);
 }
 
 /** Apply filter pipeline: active-only → hidden → visible sessions */

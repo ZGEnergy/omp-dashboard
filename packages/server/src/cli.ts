@@ -125,6 +125,8 @@ export function buildConfig(flags: Partial<ServerConfig>): ServerConfig {
     editor: fileConfig.editor,
     openspec: fileConfig.openspec,
     reattachPlacement: fileConfig.reattachPlacement,
+    completedFirst: fileConfig.completedFirst,
+    questionFirst: fileConfig.questionFirst,
     resolvedTrustedNetworks: fileConfig.resolvedTrustedNetworks,
     corsAllowedOrigins: fileConfig.cors.allowedOrigins,
   };

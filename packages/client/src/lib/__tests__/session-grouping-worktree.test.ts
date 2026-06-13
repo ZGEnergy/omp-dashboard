@@ -1,15 +1,15 @@
 /**
  * Tests for git-worktree precedence in `resolveSessionGroupPath` and
- * cluster-adjacency for worktree sessions in `groupSessionsByDirectory`.
+ * worktree-session grouping in `groupSessionsByDirectory`.
  *
- * Pins the §5 contract from `add-worktree-spawn-dialog`:
+ * Pins the §5 contract from `add-worktree-spawn-dialog` MINUS the dropped
+ * cluster-adjacency (see change: simplify-session-card-ordering, D8):
  *   - Worktree session collapses under its `gitWorktree.mainPath`.
  *   - Explicit pin of the worktree path wins (pin > worktree).
  *   - When BOTH jjState.workspaceRoot AND gitWorktree.mainPath apply,
  *     jj wins (jj is step 2, worktree is step 3).
- *   - Worktree sessions cluster adjacent within the parent group.
- *   - Cluster sort is stable: server-provided ordering is preserved
- *     within each cluster.
+ *   - Within a group, order is the flat `sessionOrder` ONLY — no cluster
+ *     adjacency. A worktree session can sort ahead of the main checkout.
  */
 import { describe, it, expect } from "vitest";
 import type {
@@ -73,7 +73,7 @@ describe("resolveSessionGroupPath — worktree precedence (step 3)", () => {
   });
 });
 
-describe("groupSessionsByDirectory — worktree clustering", () => {
+describe("groupSessionsByDirectory — worktree grouping (no clustering)", () => {
   it("worktree session collapses under pinned parent repo", () => {
     const main = mk("main", "/repo", 100);
     const wt = mk("wt", "/repo/.worktrees/feat-x", 200, {
@@ -114,10 +114,9 @@ describe("groupSessionsByDirectory — worktree clustering", () => {
     expect(wtGroup?.sessions.map((s) => s.id)).toEqual(["wt"]);
   });
 
-  it("worktree sessions cluster adjacent within parent group", () => {
-    // Order chosen so naive sort-by-startedAt would interleave (a, b, c, d, e).
-    // Cluster sort must put main-checkout first, then all feat-x adjacent,
-    // then all feat-y adjacent — regardless of startedAt.
+  it("worktree sessions ordered by flat startedAt desc, NOT clustered", () => {
+    // No order map → pure startedAt desc; worktree siblings interleave with
+    // the main checkout freely (no cluster adjacency).
     const a = mk("a", "/repo", 500); // main
     const b = mk("b", "/repo/.worktrees/feat-y", 400, {
       gitWorktree: { mainPath: "/repo", name: "feat-y" },
@@ -133,28 +132,22 @@ describe("groupSessionsByDirectory — worktree clustering", () => {
     });
     const { pinned } = groupSessionsByDirectory([a, b, c, d, e], undefined, ["/repo"], "linux");
     expect(pinned).toHaveLength(1);
-    const ids = pinned[0]!.sessions.map((s) => s.id);
-    // Expected: main (a) first, then alphabetical clusters (feat-x: c,e then
-    // feat-y: b,d). Within each cluster relative order from sortSessionsByOrder
-    // (descending startedAt) is preserved.
-    expect(ids).toEqual(["a", "c", "e", "b", "d"]);
+    expect(pinned[0]!.sessions.map((s) => s.id)).toEqual(["a", "b", "c", "d", "e"]);
   });
 
-  it("cluster sort preserves server-provided session order within each cluster", () => {
-    const a = mk("a", "/repo", 100);
+  it("a moved worktree session sorts ahead of the main checkout (flat order wins)", () => {
+    const a = mk("a", "/repo", 100); // main
     const b = mk("b", "/repo/.worktrees/feat", 200, {
       gitWorktree: { mainPath: "/repo", name: "feat" },
     });
     const c = mk("c", "/repo/.worktrees/feat", 300, {
       gitWorktree: { mainPath: "/repo", name: "feat" },
     });
-    // Server says: c before b inside the /repo group.
+    // Server surfaces worktree session c at the front, ahead of main `a`.
     const orderMap = new Map<string, string[]>([["/repo", ["c", "b", "a"]]]);
     const { pinned } = groupSessionsByDirectory([a, b, c], orderMap, ["/repo"], "linux");
-    const ids = pinned[0]!.sessions.map((s) => s.id);
-    // 'a' is main-cluster (empty cluster key), comes first.
-    // Then feat cluster preserves server order: c, b.
-    expect(ids).toEqual(["a", "c", "b"]);
+    // Flat order honored verbatim — no cluster rule pulls `a` (main) first.
+    expect(pinned[0]!.sessions.map((s) => s.id)).toEqual(["c", "b", "a"]);
   });
 
   it("jj + worktree on same session: jj wins clustering too", () => {
@@ -165,8 +158,8 @@ describe("groupSessionsByDirectory — worktree clustering", () => {
     const main = mk("main", "/repo", 200);
     const { pinned } = groupSessionsByDirectory([s, main], undefined, ["/repo"], "linux");
     expect(pinned[0]!.cwd).toBe("/repo");
-    // Both group there; clustering key is jjState.workspaceName ("jj-ws"),
-    // not the worktree name. The empty-key cluster (main) goes first.
+    // Both group under /repo (jj workspaceRoot wins the group key). Order is
+    // flat startedAt desc (no clustering): main(200) before s(100).
     expect(pinned[0]!.sessions.map((s) => s.id)).toEqual(["main", "s"]);
   });
 

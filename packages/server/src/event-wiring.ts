@@ -7,6 +7,8 @@ import type { EventStore } from "./memory-event-store.js";
 import type { PiGateway } from "./pi-gateway.js";
 import type { BrowserGateway } from "./browser-gateway.js";
 import type { SessionOrderManager } from "./session-order-manager.js";
+import type { PreferencesStore } from "./preferences-store.js";
+import { resolveOrderKey } from "./resolve-order-key.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { DirectoryService } from "./directory-service.js";
 import { extractSessionUpdates, isActivityEvent, isUnreadTrigger } from "./event-status-extraction.js";
@@ -42,6 +44,15 @@ export interface EventWiringDeps {
   piGateway: PiGateway;
   browserGateway: BrowserGateway;
   sessionOrderManager: SessionOrderManager;
+  /** Source of pinned directories so order-map keys resolve via
+   *  `resolveOrderKey` (parent repo for worktree/jj sessions).
+   *  See change: simplify-session-card-ordering. */
+  preferencesStore: PreferencesStore;
+  /** Live gate accessors for status-transition placement. Read fresh per
+   *  event so Settings toggles apply without restart.
+   *  See change: simplify-session-card-ordering. */
+  isCompletedFirst?: () => boolean;
+  isQuestionFirst?: () => boolean;
   pendingForkRegistry: PendingForkRegistry;
   directoryService: DirectoryService;
   knownSessionIds: Set<string>;
@@ -104,6 +115,9 @@ export function wireEvents(deps: EventWiringDeps): void {
     piGateway,
     browserGateway,
     sessionOrderManager,
+    preferencesStore,
+    isCompletedFirst,
+    isQuestionFirst,
     pendingForkRegistry,
     directoryService,
     knownSessionIds,
@@ -292,6 +306,44 @@ export function wireEvents(deps: EventWiringDeps): void {
           if (sessionAfter && !sessionAfter.unread) {
             sessionManager.update(sessionId, { unread: true });
             browserGateway.broadcastSessionUpdated(sessionId, { unread: true });
+          }
+        }
+      }
+
+      // Gated status-transition placement for session-card ordering.
+      //   questionFirst: alive session whose currentTool flips to
+      //     "ask_user" → move to top of active tier.
+      //   completedFirst: alive session emitting `agent_end` (turn done,
+      //     still idle) → move to top of active tier.
+      // Both gated by the live config flags, idempotent (moveToFront is a
+      // no-op when already at front, and we broadcast only on real change),
+      // and skipped during replay / for ended sessions (alive→ended is
+      // handled in server.ts onChange). See change:
+      // simplify-session-card-ordering.
+      if (!replayingSessions.has(sessionId)) {
+        const placed = sessionManager.get(sessionId);
+        if (placed && placed.status !== "ended") {
+          const askTrigger =
+            !!isQuestionFirst?.() &&
+            placed.currentTool === "ask_user" &&
+            beforeSnapshot.currentTool !== "ask_user";
+          const endTrigger =
+            !!isCompletedFirst?.() && msg.event.eventType === "agent_end";
+          if (askTrigger || endTrigger) {
+            const key = resolveOrderKey(placed, preferencesStore.getPinnedDirectories());
+            const before = sessionOrderManager.getOrder(key) ?? [];
+            sessionOrderManager.moveToFront(key, sessionId);
+            const after = sessionOrderManager.getOrder(key) ?? [];
+            const changed =
+              before.length !== after.length ||
+              before.some((id, i) => id !== after[i]);
+            if (changed) {
+              browserGateway.broadcastToAll({
+                type: "sessions_reordered",
+                cwd: key,
+                sessionIds: after,
+              });
+            }
           }
         }
       }
@@ -635,7 +687,17 @@ export function wireEvents(deps: EventWiringDeps): void {
       const forkParent = msg.spawnToken
         ? pendingForkRegistry.consumeFork(msg.spawnToken)
         : undefined;
-      sessionOrderManager.insert(msg.cwd, sessionId);
+      // Key the order map by the RESOLVED group path (parent repo for
+      // worktree/jj sessions) so the entry lands under the key the client
+      // reads. Falls back to msg.cwd when the session isn't in the manager
+      // yet (plain checkout → resolved path == cwd anyway).
+      // See change: simplify-session-card-ordering.
+      const pinned = preferencesStore.getPinnedDirectories();
+      const registeredSession = sessionManager.get(sessionId);
+      const orderKey = registeredSession
+        ? resolveOrderKey(registeredSession, pinned)
+        : msg.cwd;
+      sessionOrderManager.insert(orderKey, sessionId);
 
       if (forkParent) {
         const session = sessionManager.get(sessionId);
@@ -648,9 +710,15 @@ export function wireEvents(deps: EventWiringDeps): void {
         }
       }
 
-      const validIds = new Set(sessionManager.listAll().filter((s) => s.cwd === msg.cwd).map((s) => s.id));
-      const order = sessionOrderManager.getOrder(msg.cwd, validIds);
-      browserGateway.broadcastToAll({ type: "sessions_reordered", cwd: msg.cwd, sessionIds: order });
+      // validIds = sessions sharing the same resolved group key (not raw
+      // cwd), so worktree/jj siblings count toward the same order list.
+      const validIds = new Set(
+        sessionManager.listAll()
+          .filter((s) => resolveOrderKey(s, pinned) === orderKey)
+          .map((s) => s.id),
+      );
+      const order = sessionOrderManager.getOrder(orderKey, validIds);
+      browserGateway.broadcastToAll({ type: "sessions_reordered", cwd: orderKey, sessionIds: order });
 
       const updatedSession = sessionManager.get(sessionId);
       if (updatedSession) {

@@ -66,37 +66,37 @@ describe("groupSessionsByDirectory — Decision 15 (workspace-aware grouping)", 
     expect(unpinned[0]!.sessions.map((s) => s.id)).toEqual(["p"]);
   });
 
-  it("mixed group clusters by workspaceName (main-tree first, then ws-X)", () => {
-    // Four sessions all collapsed under /repo:
-    // A: no workspace (main-tree)
-    // B: workspace-X
-    // C: no workspace (main-tree)
-    // D: workspace-X
-    // Expected cluster order: A, C (no workspace) then B, D (ws-X).
+  it("collapsed group is NOT clustered by workspaceName — flat stored/recency order", () => {
+    // Four sessions all collapsed under /repo (mixed main-tree + ws-X).
+    // No cluster adjacency anymore: with no order map, ordering is purely
+    // startedAt desc. See change: simplify-session-card-ordering (D8).
     const a = mk("A", "/repo", 100);
-    const b = mk("B", "/repo/.shadow/x", 200, {
-      workspaceRoot: "/repo",
-      workspaceName: "x",
-    });
+    const b = mk("B", "/repo/.shadow/x", 200, { workspaceRoot: "/repo", workspaceName: "x" });
     const c = mk("C", "/repo", 300);
-    const d = mk("D", "/repo/.shadow/x", 400, {
-      workspaceRoot: "/repo",
-      workspaceName: "x",
-    });
+    const d = mk("D", "/repo/.shadow/x", 400, { workspaceRoot: "/repo", workspaceName: "x" });
 
     const { unpinned } = groupSessionsByDirectory([a, b, c, d], undefined, [], "linux");
 
     expect(unpinned).toHaveLength(1);
     const ids = unpinned[0]!.sessions.map((s) => s.id);
-    // A and C must appear adjacent; B and D must appear adjacent.
-    const aIdx = ids.indexOf("A");
-    const cIdx = ids.indexOf("C");
-    const bIdx = ids.indexOf("B");
-    const dIdx = ids.indexOf("D");
-    expect(Math.abs(aIdx - cIdx)).toBe(1);
-    expect(Math.abs(bIdx - dIdx)).toBe(1);
-    // Main-tree cluster (empty workspaceName) comes before ws-X cluster.
-    expect(Math.max(aIdx, cIdx)).toBeLessThan(Math.min(bIdx, dIdx));
+    // startedAt desc, interleaving main-tree and ws-X freely.
+    expect(ids).toEqual(["D", "C", "B", "A"]);
+  });
+
+  it("moved worktree session is NOT re-clustered back beside its siblings", () => {
+    // Main checkout `a`, two worktree siblings `b`,`c` under feat-y. The
+    // stored order surfaces a feat-y session (c) at the front, ahead of
+    // the main checkout. No cluster rule reorders it back.
+    const a = mk("a", "/repo", 100);
+    const b = mk("b", "/repo/.worktrees/feat-y", 200);
+    b.gitWorktree = { mainPath: "/repo", name: "feat-y" };
+    const c = mk("c", "/repo/.worktrees/feat-y", 300);
+    c.gitWorktree = { mainPath: "/repo", name: "feat-y" };
+    const orderMap = new Map([["/repo", ["c", "a", "b"]]]);
+
+    const { unpinned } = groupSessionsByDirectory([a, b, c], orderMap, [], "linux");
+    expect(unpinned).toHaveLength(1);
+    expect(unpinned[0]!.sessions.map((s) => s.id)).toEqual(["c", "a", "b"]);
   });
 
   it("sessions without jjState continue to group by cwd (regression guard)", () => {

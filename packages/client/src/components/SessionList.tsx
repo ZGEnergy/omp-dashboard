@@ -748,21 +748,29 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             // they don't also want a status-based reshuffling.
             // See change: pin-and-search-sessions.
             const flatMergeMode = sessionSearch.length > 0 && workspaceFilter.length === 0;
-            const activeSessions = matched.filter((s) => s.status !== "ended");
-            // Ended-tier sort: most-recently-ended first, regardless of
-            // sessionOrder (which is alive-only post-prune). Falls back
-            // to startedAt for legacy entries without endedAt. See
-            // change: top-of-tier-on-status-change.
-            const endedSessions = matched
-              .filter((s) => s.status === "ended")
-              .sort(
-                (a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt),
-              );
+            // Stable status-partition of the single stored order: each tier
+            // is ordered by the flat `sessionOrder` (relative position
+            // preserved), with ids absent from the order appended by
+            // startedAt desc. Because the partition is stable, a server
+            // `moveToFront` lands a card at the top of its OWN tier (active
+            // or ended). The old endedAt-desc ended-tier sort is gone — the
+            // ended tier now derives from the stored order, which the server
+            // backfills by endedAt on first load (migration seed).
+            // See change: simplify-session-card-ordering.
+            const order = sessionOrderMap?.get(group.cwd);
+            const activeSessions = sortSessionsByOrder(
+              matched.filter((s) => s.status !== "ended"),
+              order,
+            );
+            const endedSessions = sortSessionsByOrder(
+              matched.filter((s) => s.status === "ended"),
+              order,
+            );
             const showEnded =
               endedSessions.length > 0 &&
               (endedExpanded.has(group.cwd) || sessionSearch.length > 0);
             const visibleSessions = flatMergeMode
-              ? matched // ended interleaved naturally; sessionOrder still applies below
+              ? sortSessionsByOrder(matched, order) // mixed-status, flat stored order
               : (showEnded
                   ? [...activeSessions, ...endedSessions]
                   : activeSessions);
@@ -781,21 +789,12 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             }
             const sessionIds = visibleSessions.map((s) => s.id);
             const sessionMap = new Map(visibleSessions.map((s) => [s.id, s]));
-            // Honor `sessionOrder` for every id it contains — ended OR
-            // alive. The server-side `onChange` hook prunes ended ids
-            // from `sessionOrder` when a session naturally transitions
-            // to ended, so any ended id that's STILL in the order list
-            // got there because the user explicitly dragged it into the
-            // alive zone (drag-to-resume). Honoring its position keeps
-            // the dropped placement stable through the resume round-trip.
-            // See change: pin-and-search-sessions.
-            const orderedIds = (sessionOrderMap?.get(group.cwd) ?? sessionIds).filter(
-              (id) => sessionIds.includes(id),
-            );
-            // Tail: ids not in the persisted order. Preserves
-            // visibleSessions order, which already has ended at the end.
-            const orderedSet = new Set(orderedIds);
-            const allIds = [...orderedIds, ...sessionIds.filter((id) => !orderedSet.has(id))];
+            // `visibleSessions` is already in final render order — each tier
+            // ordered by the stored flat order (status-partition), active
+            // tier then ended tier. No further flat re-application (which
+            // would re-interleave active and ended).
+            // See change: simplify-session-card-ordering.
+            const allIds = sessionIds;
             // Index of the first ended card in the rendered order — used
             // to inject a top "Hide ended" button when ended sessions are
             // currently expanded. Only meaningful in the non-flat layout

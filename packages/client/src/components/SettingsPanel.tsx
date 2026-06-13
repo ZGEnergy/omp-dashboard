@@ -71,6 +71,10 @@ interface Config {
   spawnStrategy: string;
   /** Reattach placement policy. See change: reattach-move-to-front. */
   reattachPlacement?: "preserve" | "streaming-only" | "always";
+  /** Move completed/ended sessions to front of their tier. See change: simplify-session-card-ordering. */
+  completedFirst?: boolean;
+  /** Move ask_user sessions to front of active tier. See change: simplify-session-card-ordering. */
+  questionFirst?: boolean;
   /** Timeout for ask_user prompts in seconds; -1 (or <=0) disables timeout. */
   askUserPromptTimeoutSeconds?: number;
   /** How long (ms) to wait for spawned pi to connect before a warning. Default 30000. See change: spawn-failure-diagnostics. */
@@ -240,6 +244,12 @@ export function SettingsPanel({ availableModels, onMessage }: {
     if (config.spawnStrategy !== original.spawnStrategy) partial.spawnStrategy = config.spawnStrategy;
     if (config.reattachPlacement !== original.reattachPlacement) {
       partial.reattachPlacement = config.reattachPlacement ?? "always";
+    }
+    if ((config.completedFirst ?? false) !== (original.completedFirst ?? false)) {
+      partial.completedFirst = config.completedFirst ?? false;
+    }
+    if ((config.questionFirst ?? false) !== (original.questionFirst ?? false)) {
+      partial.questionFirst = config.questionFirst ?? false;
     }
     if (config.askUserPromptTimeoutSeconds !== original.askUserPromptTimeoutSeconds) {
       partial.askUserPromptTimeoutSeconds = config.askUserPromptTimeoutSeconds ?? 300;
@@ -520,6 +530,26 @@ export function SettingsPanel({ availableModels, onMessage }: {
                   />
                   <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                     When the dashboard restarts and a still-alive pi session reconnects, choose where its card goes in the folder list.
+                  </p>
+                </div>
+                <div>
+                  <ToggleField
+                    label="Put completed session first"
+                    value={config.completedFirst ?? false}
+                    onChange={(v) => update((c) => { c.completedFirst = v; })}
+                  />
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                    When a session finishes a turn or ends, move its card to the top of its tier (active, resp. ended). Off keeps the card in place.
+                  </p>
+                </div>
+                <div>
+                  <ToggleField
+                    label="Put question session first"
+                    value={config.questionFirst ?? false}
+                    onChange={(v) => update((c) => { c.questionFirst = v; })}
+                  />
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                    When a session asks a question (ask_user), move its card to the top of the active tier. Off keeps the card in place.
                   </p>
                 </div>
                 <div>

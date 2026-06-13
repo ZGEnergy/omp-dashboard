@@ -217,6 +217,15 @@ export function registerSystemRoutes(
       if (partial.openspec !== undefined && directoryService) {
         directoryService.reconfigurePolling(reloaded.openspec);
       }
+      // Session-ordering gates take effect immediately (no restart) so the
+      // Settings toggles apply to the next status transition.
+      // See change: simplify-session-card-ordering.
+      if (partial.completedFirst !== undefined) {
+        config.completedFirst = reloaded.completedFirst;
+      }
+      if (partial.questionFirst !== undefined) {
+        config.questionFirst = reloaded.questionFirst;
+      }
       // Live-reload tunnel watchdog when its config changes (no restart needed).
       // We always restart the watchdog when partial.tunnel is present and a
       // tunnel is currently active — covers both watchdog flag changes and
