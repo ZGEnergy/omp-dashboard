@@ -76,7 +76,7 @@
     "linked-session-pill-lifecycle-icons": "ui",
     "add-plugin-activation-ui": "next-phase",
     "external-dashboard-plugins": "next-phase",
-    "replace-proposal-dialog-with-race-handling": "sdasdasd",
+    "replace-proposal-dialog-with-race-handling": "next-phase",
     "merge-windows-integration-linear": "ui",
     "register-build-time-tools": "ui",
     "spawn-correlation-token": "ui",
@@ -91,9 +91,9 @@
     "overlay-url-routing": "sdasdasd",
     "history-nav-only-when-empty": "small-change",
     "adopt-pi-071-072-073-features": "future",
-    "docker-packaging": "future",
+    "docker-packaging": "next-phase",
     "session-card-attached-change-link": "next-phase",
-    "focus-driven-folder-compaction": "next-phase",
+    "focus-driven-folder-compaction": "sdasdasd",
     "migrate-flows-content-slots": "sdasdasd",
     "migrate-flows-jsx-to-slots": "sdasdasd",
     "inject-session-context-into-agent": "next-phase",
@@ -172,6 +172,14 @@
     "fix-doctor-stale-managed-install-check": "electrun-execution",
     "add-tunnel-diagnostic-checks": "electrun-execution",
     "bump-pi-compat-to-0.75": "ui",
-    "fix-node-resolution-under-electron": "electrun-execution"
+    "fix-node-resolution-under-electron": "electrun-execution",
+    "docker-test-harness": "ui",
+    "linkify-any-text-extension": "ui",
+    "add-goal-continuation-plugin": "ui",
+    "simplify-session-card-ordering": "ui",
+    "resolve-global-prompt-templates-from-dashboard": "ui",
+    "add-hyperframes-skills": "next-phase",
+    "add-end-user-docs": "next-phase",
+    "project-init-skill-and-profiles": "next-phase"
   }
 }
