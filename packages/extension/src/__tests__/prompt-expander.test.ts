@@ -199,6 +199,66 @@ describe("expandPromptTemplateFromDisk", () => {
     expect(result).not.toContain("prompt body");
   });
 
+  // Change: resolve-global-prompt-templates-from-dashboard — source:"prompt" via pi.getCommands().
+
+  it("expands a global prompt template resolved via pi.getCommands source:prompt (sourceInfo.path — real pi shape)", () => {
+    const promptPath = join(tmpDir, "registry", "session-summary.md");
+    mkdirSync(dirname(promptPath), { recursive: true });
+    writeFileSync(promptPath, "---\ndescription: Summarize\n---\nSummarize this session");
+    // Real pi getCommands() returns the path under sourceInfo, NOT top-level path.
+    const pi = {
+      getCommands: () => [
+        { name: "session-summary", source: "prompt", sourceInfo: { path: promptPath, source: "local", scope: "user" } },
+      ],
+    };
+    const result = expandPromptTemplateFromDisk("/session-summary extra args", tmpDir, pi);
+    // Prompt templates are NOT wrapped in a <skill> envelope.
+    expect(result).not.toContain("<skill name=");
+    expect(result.startsWith("Summarize this session")).toBe(true);
+    expect(result.endsWith("\n\nextra args")).toBe(true);
+  });
+
+  it("expands a global prompt template via top-level path (legacy / stub shape)", () => {
+    const promptPath = join(tmpDir, "registry", "legacy-summary.md");
+    mkdirSync(dirname(promptPath), { recursive: true });
+    writeFileSync(promptPath, "Legacy body");
+    const pi = {
+      getCommands: () => [
+        { name: "legacy-summary", source: "prompt", path: promptPath },
+      ],
+    };
+    expect(expandPromptTemplateFromDisk("/legacy-summary", tmpDir, pi)).toBe("Legacy body");
+  });
+
+  it("ignores a malformed getCommands entry (non-string path) without throwing", () => {
+    const pi = {
+      getCommands: () => [
+        { name: "session-summary", source: "prompt", sourceInfo: { path: 12345 } },
+        { name: "session-summary", source: "prompt", path: null },
+      ],
+    };
+    // Malformed paths => no resolution, raw text returned (no throw).
+    expect(expandPromptTemplateFromDisk("/session-summary", tmpDir, pi)).toBe("/session-summary");
+  });
+
+  it("tolerates a non-array getCommands() return", () => {
+    const pi = { getCommands: () => null };
+    expect(expandPromptTemplateFromDisk("/session-summary", tmpDir, pi)).toBe("/session-summary");
+  });
+
+  it("expands a colon-aliased prompt template registered with hyphen via pi.getCommands", () => {
+    const promptPath = join(tmpDir, "registry", "session-summary.md");
+    mkdirSync(dirname(promptPath), { recursive: true });
+    writeFileSync(promptPath, "Summarize this session");
+    const pi = {
+      getCommands: () => [
+        { name: "session-summary", source: "prompt", sourceInfo: { path: promptPath } },
+      ],
+    };
+    const result = expandPromptTemplateFromDisk("/session:summary", tmpDir, pi);
+    expect(result).toBe("Summarize this session");
+  });
+
   it("misspelled name with wrong separator returns input unchanged", () => {
     rmSync(tmpDir, { recursive: true, force: true });
     mkdirSync(tmpDir, { recursive: true });
