@@ -180,6 +180,8 @@
     "resolve-global-prompt-templates-from-dashboard": "ui",
     "add-hyperframes-skills": "next-phase",
     "add-end-user-docs": "next-phase",
-    "project-init-skill-and-profiles": "next-phase"
+    "project-init-skill-and-profiles": "next-phase",
+    "optimize-openspec-poll-derive-artifacts-locally": "ui",
+    "fix-openspec-worktree-cwd-keying": "ui"
   }
 }
