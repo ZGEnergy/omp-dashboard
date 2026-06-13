@@ -1,6 +1,6 @@
 import React from "react";
 import { Icon } from "@mdi/react";
-import { mdiCommentQuestion, mdiCheckCircle, mdiAlertCircle, mdiFormTextbox, mdiCheckboxMarkedOutline, mdiFormatListBulleted, mdiRadioboxMarked } from "@mdi/js";
+import { mdiCommentQuestion, mdiCheckCircle, mdiAlertCircle, mdiFormTextbox, mdiCheckboxMarkedOutline, mdiFormatListBulleted, mdiRadioboxMarked, mdiViewListOutline } from "@mdi/js";
 import type { ToolRendererProps } from "./types.js";
 import { MarkdownContent } from "../MarkdownContent.js";
 
@@ -18,9 +18,113 @@ const methodLabels: Record<string, string> = {
   input: "Text input",
 };
 
+interface BatchSubQuestion {
+  title?: string;
+}
+
+/**
+ * Renders a resolved `method:"batch"` ask_user on reload. The live
+ * BatchRenderer wizard is gone after a refresh (the server only replays
+ * pending prompts), so this reconstructs the per-question answers from the
+ * persisted tool result: `args.questions` for the prompts and
+ * `toolDetails.results` (index-aligned: boolean | string | string[]) for the
+ * answers. Without this branch the generic path looked for `User responded:`
+ * (batch text is `User completed batch`) and read `args.options` (batch uses
+ * `args.questions`), so no answers rendered.
+ */
+function batchAnswerNode(answer: unknown): React.ReactNode {
+  if (answer === undefined || answer === null) {
+    return <span className="text-[var(--text-tertiary)] italic">(unanswered)</span>;
+  }
+  if (typeof answer === "boolean") return answer ? "Yes" : "No";
+  if (Array.isArray(answer)) {
+    if (answer.length === 0) return <span className="text-[var(--text-tertiary)] italic">(none)</span>;
+    return (
+      <span className="flex flex-wrap gap-1">
+        {answer.map((v, i) => (
+          <span key={i} className="inline-block rounded px-1.5 py-0.5 text-[11px] bg-blue-500/15 text-blue-300">
+            {String(v)}
+          </span>
+        ))}
+      </span>
+    );
+  }
+  if (answer && typeof answer === "object" && "value" in (answer as Record<string, unknown>)) {
+    const v = (answer as Record<string, unknown>).value;
+    const atts = (answer as Record<string, unknown>).attachments;
+    const count = Array.isArray(atts) ? atts.length : 0;
+    const text = String(v ?? "");
+    return (
+      <span>
+        {text === "" ? <span className="text-[var(--text-tertiary)] italic">(no text)</span> : text}
+        {count > 0 && <span className="ml-1.5 text-[10px] text-[var(--text-tertiary)]">+{count} image{count > 1 ? "s" : ""}</span>}
+      </span>
+    );
+  }
+  const s = String(answer);
+  return s === "" ? <span className="text-[var(--text-tertiary)] italic">(left blank)</span> : s;
+}
+
+function AskUserBatchRenderer({ args, result, toolDetails }: ToolRendererProps) {
+  const title = (args?.title as string) ?? "Questions";
+  const questions = (Array.isArray(args?.questions) ? (args?.questions as BatchSubQuestion[]) : []).filter(Boolean);
+  const results = Array.isArray(toolDetails?.results) ? (toolDetails!.results as unknown[]) : undefined;
+  const cancelled = toolDetails?.cancelled === true || /cancelled batch/i.test(result ?? "");
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5">
+        <Icon path={mdiViewListOutline} size={0.5} className="text-blue-400 shrink-0" />
+        <span className="text-xs font-medium text-blue-400">Batch</span>
+        {cancelled ? (
+          <span className="text-[11px] text-[var(--text-tertiary)]">cancelled</span>
+        ) : (
+          <span className="text-[11px] text-green-400">{results?.length ?? questions.length} answers</span>
+        )}
+      </div>
+
+      {title && (
+        <div className="text-xs text-[var(--text-primary)]">
+          <MarkdownContent content={title} />
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        {questions.map((q, i) => (
+          <div
+            key={i}
+            className="flex items-start gap-2.5 px-2.5 py-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)]"
+          >
+            <span className="w-4 h-4 rounded grid place-items-center text-[10px] font-semibold bg-blue-500/20 text-blue-300 shrink-0 mt-0.5">
+              {i + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] uppercase tracking-wide text-[var(--text-tertiary)] truncate">{q.title}</div>
+              <div className="text-xs text-[var(--text-primary)] mt-0.5">
+                {cancelled && !results ? (
+                  <span className="text-[var(--text-tertiary)] italic">(not answered)</span>
+                ) : (
+                  batchAnswerNode(results?.[i])
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Rich renderer for ask_user tool calls — shows question, method, options, and response */
-export function AskUserToolRenderer({ args, status, result }: ToolRendererProps) {
+export function AskUserToolRenderer(props: ToolRendererProps) {
+  const { args, status, result } = props;
   const method = (args?.method as string) ?? "input";
+
+  // Batch dispatches multiple sub-questions; render the per-question summary.
+  if (method === "batch") {
+    return <AskUserBatchRenderer {...props} />;
+  }
+
   const title = (args?.title as string) ?? (args?.question as string) ?? "";
   const message = (args?.message as string) ?? (args?.question as string) ?? "";
   const rawOptions = args?.options;
