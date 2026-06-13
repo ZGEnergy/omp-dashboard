@@ -620,7 +620,7 @@ When a user sends a prompt to an ended session, the server automatically resumes
 9. If user sends another prompt while already resuming, the queued prompt is updated without spawning a second process
 
 ### Sidebar session ordering: top-of-tier on status change
-Server keeps ONE persisted `sessionOrder` per RESOLVED GROUP PATH holding ALL-status ids (active + ended + hidden). Group path resolves via shared `resolveSessionGroupPath`: pin > `jjState.workspaceRoot` > `gitWorktree.mainPath` > `cwd` — same resolver client groups by (server wraps it in `resolve-order-key.ts::resolveOrderKey`). Fixes worktree/jj silent-no-op keying bug where server keyed by raw cwd but client grouped by parent. See change: simplify-session-card-ordering.
+Server keeps one persisted `sessionOrder` per resolved group path. List holds all-status ids: active + ended + hidden. Group path resolves via shared `resolveSessionGroupPath`. Key priority: pin > `jjState.workspaceRoot` > `gitWorktree.mainPath` > `cwd`. Server wraps resolver in `resolve-order-key.ts::resolveOrderKey`. Client groups by same resolver. Fixes worktree/jj keying bug: server keyed raw cwd, client grouped by parent. See change: simplify-session-card-ordering.
 
 - **Render** — client partitions the single stored order into ACTIVE → ENDED → HIDDEN tiers (`SessionList` per-tier `sortSessionsByOrder`, stable status-partition). `moveToFront` lands card at top of its OWN tier. `clusterByWorkspaceName` DROPPED from ordering path (reverses add-jj-workspace-plugin Decision 15 — MUST NOT re-introduce; grouping-under-parent collapse retained). endedAt-desc ended-tier sort REMOVED — survives only as migration seed via `reconcileSessionOrder` backfill.
 - **Status transitions** — alive→ended keeps id (no `remove`). Two global config booleans gate placement (default `false`, no-op when OFF): `completedFirst` gates `agent_end`(alive)→top-of-active and alive→ended→top-of-ended; `questionFirst` gates `ask_user`→top-of-active.
@@ -628,7 +628,7 @@ Server keeps ONE persisted `sessionOrder` per RESOLVED GROUP PATH holding ALL-st
 - **Reattach** — bridge auto-reattach after dashboard restart governed by `reattachPlacement` config (`"always"` default / `"streaming-only"` / `"preserve"`): `server.ts onChange` routes into `reattach-placement.ts::applyReattachPolicy` (now keyed by resolved order key). `"preserve"` leaves order untouched.
 - **Startup reconcile** — `reconcileSessionOrder(orders, sessions, resolveKey)` prunes stale ids absent from manager; backfills absent ended ids by `(endedAt ?? startedAt)` desc; idempotent. Replaces old strip-ended reconcile.
 
-Precedence: drag-keep > registry-front (`pendingResumeIntents.consume()` `"front"`/`"keep"`) > `reattachPlacement` > gated triggers (`completedFirst`/`questionFirst`) > status-partition. No protocol changes — existing `sessions_reordered` broadcast carries new order. See change: simplify-session-card-ordering. See change: reattach-move-to-front. See change: top-of-tier-on-status-change.
+Precedence: drag-keep > registry-front (`pendingResumeIntents.consume()` `"front"`/`"keep"`) > `reattachPlacement` > gated triggers (`completedFirst`/`questionFirst`) > status-partition. No protocol changes. Existing `sessions_reordered` broadcast carries new order. See change: simplify-session-card-ordering. See change: reattach-move-to-front. See change: top-of-tier-on-status-change.
 
 ### Shell overlay routing
 Shell-owned content overlays URL-driven via wouter routes. Supersedes priority-chain helper from `fix-desktop-back-navigation`.

@@ -6,7 +6,7 @@ Card ordering today is three competing systems (alive-only order map, recomputed
 
 Store **one flat ordered list per resolved-group-path** holding *all* session ids (alive + ended + hidden). Render by a **stable status-partition**:
 
-```
+```text
 flat order[key] = [E1, A1, A2, E2, H1]      E=ended A=active H=hidden
         │ stable partition by status (relative order preserved per tier)
         ▼

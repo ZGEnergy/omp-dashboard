@@ -13,6 +13,20 @@ import { createServer, type DashboardServer, type ServerConfig } from "../server
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Poll a predicate until true or timeout. Replaces fixed sleeps so the
+ * positive-reorder assertions don't flake on slow/busy CI hosts.
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 2000, intervalMs = 20): Promise<void> {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > timeoutMs) {
+      throw new Error("waitFor: condition not met within timeout");
+    }
+    await wait(intervalMs);
+  }
+}
+
 async function connectSession(piPort: number, sessionId: string, cwd = "/tmp"): Promise<WebSocket> {
   const ws = new WebSocket(`ws://localhost:${piPort}`);
   await new Promise<void>((resolve) => {
@@ -82,10 +96,9 @@ describe("session-card ordering gates (integration)", () => {
     sockets.push(browser);
 
     fwd(s1, "s1", "agent_end");
-    await wait(120);
+    await waitFor(() => reorders.length > 0);
 
     const last = reorders[reorders.length - 1];
-    expect(last).toBeTruthy();
     expect(last.cwd).toBe("/tmp");
     expect(last.sessionIds[0]).toBe("s1"); // moved to front of active
   });
@@ -100,10 +113,9 @@ describe("session-card ordering gates (integration)", () => {
 
     // currentTool flips to "ask_user" via tool_execution_start.
     fwd(s1, "s1", "tool_execution_start", { toolName: "ask_user" });
-    await wait(120);
+    await waitFor(() => reorders.length > 0);
 
     const last = reorders[reorders.length - 1];
-    expect(last).toBeTruthy();
     expect(last.sessionIds[0]).toBe("s1");
   });
 
@@ -117,7 +129,9 @@ describe("session-card ordering gates (integration)", () => {
 
     fwd(s1, "s1", "agent_end");
     fwd(s1, "s1", "tool_execution_start", { toolName: "ask_user" });
-    await wait(150);
+    // No condition to await for a negative assertion; give the server ample
+    // time to (not) emit, then assert nothing was broadcast.
+    await wait(300);
 
     expect(reorders).toHaveLength(0);
   });
@@ -137,10 +151,9 @@ describe("session-card ordering gates (integration)", () => {
     const sessionFile = path.join(tmpDir, "s2.jsonl");
     writeFileSync(sessionFile, "");
     server.sessionManager.update("s2", { sessionFile, status: "ended", endedAt: Date.now() });
-    await wait(120);
+    await waitFor(() => reorders.length > 0);
 
     const last = reorders[reorders.length - 1];
-    expect(last).toBeTruthy();
     expect(last.sessionIds).toContain("s2"); // id RETAINED (not removed)
     expect(last.sessionIds[0]).toBe("s2"); // top of (ended) tier
   });

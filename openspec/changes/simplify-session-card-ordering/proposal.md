@@ -42,7 +42,7 @@ Unchanged: new-session prepend, fork-after-parent, resume intent contract (`fron
 - `packages/server/src/session-order-manager.ts` — no API change; callers now pass resolved group path.
 - `packages/server/src/server.ts` — `onChange`: `alive→ended` calls `moveToFront` (gated) instead of `remove`; new `agent_end`/`ask_user` alive triggers; startup reconcile stops stripping ended ids + runs backfill.
 - `packages/server/src/event-wiring.ts` — `insert` keyed by resolved group path; `agent_end` and `ask_user`/interactive-request arms call placement.
-- `packages/server/src/browser-handlers/directory-handler.ts` — hide/unhide call `moveToFront` on the resolved key.
+- `packages/server/src/browser-handlers/session-meta-handler.ts` — hide/unhide call `moveToFront` on the resolved key.
 - `packages/server/src/reattach-placement.ts` — key by resolved group path.
 - `packages/shared/src/config.ts` — add `completedFirst`, `questionFirst` booleans + parse/defaults.
 - `packages/client/src/lib/session-grouping.ts` — `sortSessionsByOrder` becomes status-partition-aware; drop `clusterByWorkspaceName` from the ordering path.
