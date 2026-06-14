@@ -129,7 +129,7 @@
     "eliminate-electron-runtime-install": "electrun-execution",
     "unify-tool-renderer-code-font-size": "ui",
     "fix-dashboard-spawn-correlation-by-token": "ui",
-    "add-internal-monaco-editor-pane": "next-phase",
+    "add-internal-monaco-editor-pane": "sdasdasd",
     "add-ask-user-input-multiline-paste": "ui",
     "fix-stale-bundled-server-cache": "electrun-execution",
     "skip-affected-bundled-node": "electrun-execution",
@@ -171,7 +171,8 @@
     "fix-mobile-back-depth-aware": "ui",
     "fix-spawn-token-env-leak": "ui",
     "fix-openspec-board-mobile-scroll": "ui",
-    "emit-openspec-pending-from-poll": "ui"
+    "emit-openspec-pending-from-poll": "ui",
+    "add-session-closing-indicator": "ui"
   },
   "changeOrder": {
     "__ungrouped__": [
@@ -182,11 +183,40 @@
     ],
     "ui": [
       "fix-openspec-board-mobile-scroll",
+      "add-session-closing-indicator",
       "docker-test-harness",
       "emit-openspec-pending-from-poll",
       "fix-openspec-worktree-cwd-keying",
-      "fix-spawn-token-env-leak",
       "replace-proposal-dialog-with-race-handling"
+    ],
+    "next-phase": [
+      "add-dashboard-slash-commands",
+      "add-end-user-docs",
+      "add-honcho-docker-integration-tests",
+      "add-hyperframes-skills",
+      "docker-packaging",
+      "external-dashboard-plugins",
+      "filter-oauth-incompatible-models",
+      "fix-jj-workspace-root-probe",
+      "honcho-card-fullscreen-dialogs",
+      "honcho-remint-proxy-key",
+      "inject-session-context-into-agent",
+      "manage-node-runtime-updates",
+      "project-init-skill-and-profiles"
+    ],
+    "sdasdasd": [
+      "fix-expanded-pinned-group-drag",
+      "focus-driven-folder-compaction",
+      "add-internal-monaco-editor-pane",
+      "jj-plugin-server-driven-flows"
+    ],
+    "ui-extensions": [
+      "add-extension-ui-a11y-baseline",
+      "add-extension-ui-action-result-contract",
+      "add-extension-ui-module-lifecycle",
+      "add-extension-ui-rjsf-form",
+      "add-extension-ui-safety-bounds",
+      "pi-flows-adopt-extension-ui"
     ]
   }
 }
