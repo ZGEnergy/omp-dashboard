@@ -46,6 +46,7 @@ import { findBundledExtension, registerBridgeExtension } from "@blackbelt-techno
 import { createNetworkGuard, isLoopback, isBypassedHost } from "./localhost-guard.js";
 import type { AuthConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { loadConfig, CONFIG_FILE } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { setWindowsGitSourceSetting } from "@blackbelt-technology/pi-dashboard-shared/platform/git-source.js";
 import { registerSessionApi } from "./session-api.js";
 import { registerManifestRoute } from "./routes/manifest-route.js";
 import { registerSessionRoutes } from "./routes/session-routes.js";
@@ -176,6 +177,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       `Sessions will spawn but never connect to the gateway. ` +
       `Manually add the extension path to ~/.pi/agent/settings.json packages[] as a workaround.`);
   }
+
+  // Seed Windows git/bash source from config so spawn-env augmentation
+  // (ToolResolver.buildSpawnEnv + PTY) picks bundled vs host correctly.
+  // No-op on macOS/Linux. See change: embed-git-bash-on-windows.
+  setWindowsGitSourceSetting(loadConfig().windowsGitSource);
 
   // Run migration from sessions.json + state.json if needed
   if (needsMigration()) {

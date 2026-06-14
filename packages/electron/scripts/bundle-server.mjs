@@ -40,6 +40,13 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ELECTRON_DIR = path.resolve(__dirname, "..");
+
+// Target platform for the bundled-git step. Cross-building win32 from
+// another OS is unsupported (win32 legs run on windows-latest), so the
+// build host is the target. See change: embed-git-bash-on-windows.
+function resolveTargetPlatformForGit() {
+  return process.env.npm_config_target_platform || process.platform;
+}
 const PROJECT_DIR = path.resolve(ELECTRON_DIR, "..", "..");
 const SERVER_BUNDLE = path.join(ELECTRON_DIR, "resources", "server");
 
@@ -328,6 +335,43 @@ if (tail) console.log(tail);
         ? ` (advisory missing: ${missingAdvisory.join(", ")})`
         : " (all 6 triples present)"),
   );
+}
+
+// ── Bundle Windows git+sh (dugite-native) — win32 targets only ───────────
+// Runs after the node-pty GO/NO-GO. download-git-windows.mjs is a no-op on
+// non-win32 hosts, so the spawn is cheap on mac/linux. Arch flows via
+// npm_config_target_arch (threaded by the win32 Bundle step env).
+// See change: embed-git-bash-on-windows.
+if (resolveTargetPlatformForGit() === "win32") {
+  const gitScript = path.join(__dirname, "download-git-windows.mjs");
+  const dl = spawnSync(process.execPath, [gitScript], {
+    cwd: ELECTRON_DIR,
+    encoding: "utf8",
+    env: process.env,
+    stdio: "inherit",
+  });
+  if (dl.status !== 0) {
+    console.error("\u2717 download-git-windows.mjs failed — bundled git GO/NO-GO failed");
+    process.exit(1);
+  }
+
+  // ── GO/NO-GO: assert the bundled git tree is complete ──────────────────
+  const GIT_DIR = path.join(ELECTRON_DIR, "resources", "git");
+  const required = [
+    path.join("cmd", "git.exe"),
+    path.join("usr", "bin", "sh.exe"), // dugite-native ships NO bash.exe (R1 spike)
+    "THIRD-PARTY-LICENSE.txt",
+  ];
+  const missing = required.filter((rel) => !existsSync(path.join(GIT_DIR, rel)));
+  const libDir = ["mingw64", "clangarm64"].find((d) => existsSync(path.join(GIT_DIR, d)));
+  if (missing.length > 0 || !libDir) {
+    console.error(`\u2717 bundled git GO/NO-GO failed at ${GIT_DIR}`);
+    if (missing.length > 0) console.error(`  Missing: ${missing.join(", ")}`);
+    if (!libDir) console.error("  Missing arch libdir (mingw64 / clangarm64)");
+    console.error("  See change: embed-git-bash-on-windows.");
+    process.exit(1);
+  }
+  console.log(`  bundled git OK — git.exe + usr/bin/sh.exe + ${libDir}/ + license present`);
 }
 
 // ── strip __tests__ from workspace source ────────────────────────────────

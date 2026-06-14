@@ -259,6 +259,13 @@ jobs:
         # which still invokes bundle-server.mjs --source-only directly via its
         # own script path — not via this workflow input). No active workflow
         # caller passes `true` today.
+        # GIT_TARGET_ARCH selects the bundled dugite-native git arch on win32
+        # legs (decoupled from node-pty arch — win32-arm64 ships native arm64
+        # git but an x64-emulated server). No-op on mac/linux. download-git
+        # failures + incomplete trees fail this step via the GO/NO-GO inside
+        # bundle-server.mjs. See change: embed-git-bash-on-windows.
+        env:
+          GIT_TARGET_ARCH: ${{ matrix.arch }}
         run: node packages/electron/scripts/bundle-server.mjs ${{ inputs.source_only_bundle && '--source-only' || '' }}
 
       - name: Assert runnable bundle (cli.ts exists)
@@ -277,6 +284,11 @@ jobs:
         # Windows. No `shell: bash` (Windows-reachable invariant pinned by
         # packages/shared/src/__tests__/no-bash-on-windows.test.ts).
         if: ${{ inputs.source_only_bundle == false }}
+        # GIT_TARGET_ARCH lets the win32 git libdir assertion pick the exact
+        # expected dir (mingw64 x64 / clangarm64 arm64). See change:
+        # embed-git-bash-on-windows.
+        env:
+          GIT_TARGET_ARCH: ${{ matrix.arch }}
         run: node packages/electron/scripts/assert-runnable-bundle.mjs
 
       - name: Use x64 Node.js for Windows arm64 bundled server

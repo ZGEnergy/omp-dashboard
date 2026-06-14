@@ -6,6 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { loadConfig, type DashboardConfig, type AuthConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { refreshModelRegistry } from "./model-proxy/registry-singleton.js";
+import { setWindowsGitSourceSetting } from "@blackbelt-technology/pi-dashboard-shared/platform/git-source.js";
 
 const REDACTED = "***";
 
@@ -150,6 +151,14 @@ export function writeConfigPartial(partial: Record<string, any>): WriteConfigRes
 
     // Eager-refresh model proxy registry (config may affect proxy settings).
     refreshModelRegistry().catch(() => {});
+
+    // windowsGitSource change takes effect for newly spawned children
+    // (existing children keep their PATH). Update the cached setting +
+    // invalidate; no server restart required. See change:
+    // embed-git-bash-on-windows.
+    if (partial.windowsGitSource === "auto" || partial.windowsGitSource === "host" || partial.windowsGitSource === "bundled") {
+      setWindowsGitSourceSetting(partial.windowsGitSource);
+    }
 
     return { success: true, restartRequired };
   } catch (err: any) {

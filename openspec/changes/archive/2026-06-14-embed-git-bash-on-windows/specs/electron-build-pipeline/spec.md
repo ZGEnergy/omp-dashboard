@@ -14,7 +14,7 @@ targeting `darwin` or `linux` SHALL NOT fetch or extract the tarball.
 - **WHEN** the `_electron-build.yml` matrix leg with
   `platform=win32, arch=x64` runs `bundle-server.mjs`
 - **THEN** `packages/electron/resources/git/cmd/git.exe`,
-  `packages/electron/resources/git/usr/bin/bash.exe`, and
+  `packages/electron/resources/git/usr/bin/sh.exe`, and
   `packages/electron/resources/git/THIRD-PARTY-LICENSE.txt` SHALL all
   exist before the `electron:make` step is invoked
 
@@ -44,7 +44,7 @@ targeting `darwin` or `linux` SHALL NOT fetch or extract the tarball.
 #### Scenario: GO/NO-GO guard on incomplete embed
 
 - **WHEN** any of `resources/git/cmd/git.exe`,
-  `resources/git/usr/bin/bash.exe`, or
+  `resources/git/usr/bin/sh.exe`, or
   `resources/git/THIRD-PARTY-LICENSE.txt` is missing on a win32 target
 - **THEN** `bundle-server.mjs` SHALL fail the build with a "bundled git
   GO/NO-GO failed" error listing the missing paths

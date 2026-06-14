@@ -16,6 +16,8 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import dns from "node:dns";
 import { readZrokEnvironment } from "./zrok-env.js";
+import { getGitSourceReadout } from "./platform/git-source.js";
+import { whichSync } from "./platform/binary-lookup.js";
 
 // Used by the TypeScript-loader check to locate bundled jiti/tsx via
 // Node's standard module resolution — finds copies under
@@ -1087,6 +1089,37 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
         suggestion:
           "Left over from a previous version. Nothing reads or writes it under the immutable-bundle architecture. " +
           `Delete it manually (e.g. \`rm -rf ${legacy.path}\`) to reclaim disk space.`,
+      });
+    }
+  } catch {
+    /* advisory only — never block doctor output */
+  }
+
+  // Windows-only: bundled-vs-host git & shell source. See change:
+  // embed-git-bash-on-windows.
+  try {
+    const readout = getGitSourceReadout(whichSync);
+    if (readout) {
+      const tag = `(${readout.source})`;
+      const wantHostButBundled = readout.setting === "host" && readout.source === "bundled";
+      checks.push({
+        name: "git source",
+        section: "runtime",
+        status: wantHostButBundled ? "error" : readout.gitPath ? "ok" : "warning",
+        message: wantHostButBundled
+          ? "windowsGitSource is 'host' but git/bash are not on PATH; using bundled fallback"
+          : `${readout.gitVersion ?? "git"} ${tag}`,
+        detail: readout.gitPath ?? "git.exe not resolved",
+        suggestion: wantHostButBundled
+          ? "Install Git for Windows, or set windowsGitSource to 'auto' / 'bundled'."
+          : undefined,
+      });
+      checks.push({
+        name: "bash source",
+        section: "runtime",
+        status: readout.shellPath ? "ok" : "warning",
+        message: readout.shellPath ? `sh ${tag}` : "no POSIX shell resolved",
+        detail: readout.shellPath ?? "sh.exe / bash.exe not resolved",
       });
     }
   } catch {

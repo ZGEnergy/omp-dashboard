@@ -1220,6 +1220,26 @@ Every exported helper that depends on OS takes an optional `platform: NodeJS.Pla
 
 Electron-bound presentation concerns (tray icons, menu template, dock behavior, bundled Node path) remain in `packages/electron/src/lib/` because they import from the `electron` package and cannot live in shared.
 
+### Windows runtime dependencies (git + bash)
+
+On Windows agent needs `git.exe` + POSIX shell. git backs repo ops; `pi.exec("sh")` backs `!`/`!!` bang commands. macOS/Linux ship both system-wide; Windows-only problem.
+
+Installers embed dugite-native (git 2.53.0 + GNU bash as `usr/bin/sh.exe`). Config key `windowsGitSource`: `"auto"`\|`"host"`\|`"bundled"`, default `"auto"`.
+
+- `auto` → host when git+bash both on PATH, else bundled (atomic).
+- `host` → host, bundled fallback + Doctor error.
+- `bundled` → always bundled.
+
+`selectGitSource()` decides. Cached process-lifetime (`git-source.ts`); invalidated on `/api/restart` (fresh process) + config-write.
+
+`ensureBundledGitOnPath()` prepends `resources/git/{cmd,usr/bin,<libdir>/bin}` to PATH (after `ensureWindowsSystemPath`, lands before System32). Sets `GIT_EXEC_PATH` + `SSL_CERT_FILE`. `<libdir>` = `mingw64` (x64) / `clangarm64` (arm64).
+
+Hooked into `ToolResolver.buildSpawnEnv` (covers server-launcher + process-manager) and `terminal-manager` PTY env separately (PTY bypasses `buildSpawnEnv`).
+
+Build-time: `download-git-windows.mjs` runs in `bundle-server.mjs`, SHA-256 fail-closed, GO/NO-GO.
+
+PATH semantics: bundled entries lead. Takes effect for newly spawned sessions only (existing children keep old PATH). No-op on macOS/Linux.
+
 ### Session spawn dispatch
 
 Session spawning uses a two-tier type system:

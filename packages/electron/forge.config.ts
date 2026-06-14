@@ -98,6 +98,10 @@ const config: ForgeConfig = {
       "./resources/loading.html",
       // Bundled server (created by scripts/bundle-server.mjs)
       ...(fs.existsSync(path.resolve(__dirname, "resources/server")) ? ["./resources/server"] : []),
+      // Bundled Windows git+sh (created by scripts/download-git-windows.mjs on
+      // win32 builds only). Lands at app resources/git/. Resolved at runtime
+      // by resolveBundledGitDir(). See change: embed-git-bash-on-windows.
+      ...(fs.existsSync(path.resolve(__dirname, "resources/git")) ? ["./resources/git"] : []),
       // bundled-extensions + offline-packages resources removed under change:
       // eliminate-electron-runtime-install (task 5.7). pi/openspec/tsx now
       // ship as regular npm deps of the bundled server tree at

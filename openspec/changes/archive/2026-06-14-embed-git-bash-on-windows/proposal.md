@@ -6,8 +6,12 @@ On Windows the pi agent cannot operate without two host-supplied tools:
 
 - **git.exe** — every flow that reads/writes the repo (status, diff, log,
   branch listing, checkout, stash) shells out to `git`.
-- **bash.exe** — pi's `!` and `!!` prompt prefixes pipe the command through
-  bash; without it, half the agent's interaction model is dead.
+- **a POSIX shell** — pi's `!` and `!!` prompt prefixes run via
+  `pi.exec("sh", ["-c", cmd])` (verified in `command-handler.ts`), so the
+  agent needs an `sh` on PATH; without it, half the interaction model is
+  dead. NOTE (R1 spike): dugite-native ships **no `bash.exe`** — the
+  shell is `usr/bin/sh.exe` (GNU bash 5.2.37 under the name `sh`). Since
+  pi calls `sh`, this matches exactly.
 
 Today we silently assume both are on `PATH`. On a fresh Windows laptop
 without **Git for Windows** installed:
@@ -33,7 +37,7 @@ regress mac/linux behaviour and does not bloat their installers.
    `THIRD-PARTY-LICENSE.txt`. Mac/Linux builds skip the step entirely.
 
 2. **GO/NO-GO guard in `bundle-server.mjs`.** When the target is win32,
-   assert `resources/git/cmd/git.exe`, `resources/git/usr/bin/bash.exe`,
+   assert `resources/git/cmd/git.exe`, `resources/git/usr/bin/sh.exe`,
    and `resources/git/THIRD-PARTY-LICENSE.txt` exist. Fail the build
    loudly if missing (mirrors the existing node-pty prebuilds guard).
 
@@ -55,17 +59,31 @@ regress mac/linux behaviour and does not bloat their installers.
 
 4. **PATH augmentation helper.** A new
    `ensureBundledGitOnPath(env, opts)` sibling to
-   `ensureWindowsSystemPath`, called from
-   `packages/shared/src/server-launcher.ts` and `process-manager.ts`.
-   When active, it prepends:
+   `ensureWindowsSystemPath`. It hooks into the single spawn-env
+   chokepoint `ToolResolver.buildSpawnEnv`
+   (`packages/shared/src/platform/binary-lookup.ts`), running **after**
+   the existing `ensureWindowsSystemPath` call at the end of that method.
+   That one hook covers both the server-launcher startup env and every
+   `process-manager.ts` bridge/headless spawn (both flow through
+   `buildSpawnEnv`). The PTY path is separate: `terminal-manager.ts`
+   builds its env as `{ ...process.env, ...getTerminalEnvHints() }` and
+   does **not** go through `buildSpawnEnv`, so it gets its own
+   `ensureBundledGitOnPath` call (or `getTerminalEnvHints` in
+   `packages/shared/src/platform/shell.ts` is extended) — otherwise
+   `!`/`!!` bang-prefix commands running in the terminal would miss
+   bundled git/bash. When active, it prepends:
    - `resources/git/cmd` (git.exe)
-   - `resources/git/usr/bin` (bash + coreutils: grep, sed, find, awk,
+   - `resources/git/usr/bin` (sh + coreutils: grep, sed, find, awk,
      tar, etc.)
-   - `resources/git/mingw64/bin` (DLLs)
+   - `resources/git/<libdir>/bin` (DLLs)
 
    …and sets:
-   - `GIT_EXEC_PATH=resources/git/mingw64/libexec/git-core`
+   - `GIT_EXEC_PATH=resources/git/<libdir>/libexec/git-core`
    - `SSL_CERT_FILE=resources/git/ssl/certs/ca-bundle.crt`
+
+   **`<libdir>` is arch-specific (R1 spike).** win32-x64 → `mingw64`;
+   win32-arm64 → `clangarm64`. `resolveBundledGitDir()` detects which of
+   `mingw64/`/`clangarm64/` exists; never hardcode `mingw64`.
 
 5. **Settings UI.** New Windows-only section in `SettingsPanel.tsx`
    exposing the radio (`auto` / `host` / `bundled`) with a live readout
@@ -113,9 +131,10 @@ Rejected alternatives:
 Power users who installed Git for Windows themselves expect their
 version, their `~/.gitconfig`, their credential manager, their PATH to
 win. The bundled git exists for the fresh-laptop case. Atomicity rule:
-`auto` requires **both** `git.exe` **and** `bash.exe` on host PATH
-before falling back to host; otherwise we use bundled (both, atomically)
-to avoid the Frankenstein "git from winget, bash from us" case.
+`auto` requires **both** `git` **and** a POSIX shell (`bash`/`sh`) on
+host PATH before using host; otherwise we use bundled (both, atomically)
+to avoid the Frankenstein "git from winget, shell from us" case. (Host
+Git for Windows ships `bash.exe`; the bundle ships `sh.exe`.)
 
 Rejected alternatives:
 - *Always prefer bundled* (dugite's own model) — deterministic, but
@@ -127,22 +146,36 @@ Rejected alternatives:
 The CI matrix in `.github/workflows/_electron-build.yml` already
 includes both Windows architectures. `download-git-windows.mjs` reads
 the target arch (via `process.env.npm_config_target_arch`, already
-threaded by `bundle-server.mjs`) and fetches the matching
-`dugite-native-v<tag>-windows-<arch>.tar.gz`. No new CI legs.
+threaded by `bundle-server.mjs`) and fetches the matching tarball.
+
+**Asset-naming caveat (verified against `v2.53.0-3`).** The release
+tag and the asset filename infix differ: the tag is the URL path segment
+(`v2.53.0-3`) but the filename embeds a git short-SHA
+(`dugite-native-v2.53.0-f49d009-windows-x64.tar.gz`). The download URL is
+`…/releases/download/<tag>/dugite-native-<assetInfix>-windows-<arch>.tar.gz`.
+A single-`<tag>` template builds a 404. `_git-version.json` therefore
+carries **both** `dugiteNativeTag` (URL path) and `assetInfix`
+(filename), and the script composes the URL from both. No new CI legs.
 
 ### D4. Pin the dugite-native release in `_git-version.json`
 
-Mirrors the existing `_node-version.sh` pattern. Schema:
+Mirrors the existing `_node-version.sh` pattern. Schema (pinned to the
+latest release `v2.53.0-3` = Git v2.53.0, Git LFS v3.7.1, GCM v2.7.3,
+with real hashes verified from the release body):
 
 ```json
 {
-  "dugiteNativeTag": "v2.53.0-2",
+  "dugiteNativeTag": "v2.53.0-3",
+  "assetInfix": "v2.53.0-f49d009",
   "sha256": {
-    "windows-x64":   "<sha256>",
-    "windows-arm64": "<sha256>"
+    "windows-x64":   "f843a87a693bfdabed83b8492bca59db6f64d1168c74d23e2c8dfb7388a97142",
+    "windows-arm64": "e16e7023942499c093c8520a145bf20287a08d38d8d69197355df154a8598b06"
   }
 }
 ```
+
+The `assetInfix` is release-specific (changes on every dugite-native
+bump) and must be updated alongside `dugiteNativeTag` and the hashes.
 
 Renovate / Dependabot can be configured later to auto-bump this file.
 Out of scope for the initial change.
@@ -173,12 +206,24 @@ confusion with future non-Windows toggles. Values
 ### R1. Symlinks in dugite-native tarball surviving Windows packaging
 
 `dugite-native` uses symlinks inside the tarball to dedupe binaries.
-On Linux/macOS extraction these survive. On Windows extraction (NSIS
-install, ZIP extraction by end users) symlinks may become file copies,
-fail without admin elevation, or silently lose target. We need a spike
-on a Windows runner: extract the tarball, NSIS-package it, install on
-a clean Windows VM, run `git --version` and `bash --version`. Track as
-a task; resolve before merge.
+On Linux/macOS extraction these survive. On Windows extraction (ZIP
+extraction by end users) symlinks may become file copies, fail without
+admin elevation, or silently lose target.
+
+**Packaging correction.** This repo dropped the NSIS installer (archived
+`simplify-electron-bootstrap-derived-state`); current Windows
+distribution is **ZIP + portable.exe** (`forge package` → unpacked dir →
+`Compress-Archive` + 7z SFX). The faithful symlink-survival test is a
+**ZIP round-trip**: `Compress-Archive` the extracted tree, then
+`Expand-Archive` (the end-user path), then re-probe — that is where
+Windows symlink loss is most likely. NSIS returns later via
+`restore-windows-nsis-installer`; the spike covers an NSIS package +
+silent install as a secondary, forward-looking check.
+
+The spike runs on CI (`windows-latest` for x64, `windows-11-arm` for
+real arm64 execution): download tarball, SHA-256 verify, Node-`tar`
+extract, probe `git.exe`/`bash.exe`/`sh.exe --version`, ZIP round-trip,
+re-probe. Resolve before merge.
 
 ### R2. SmartScreen / Defender false positives on bundled bash + DLLs
 
@@ -216,11 +261,15 @@ gracefully, or crash the bridge? This shapes whether the change is a
 
 ### R6. Order of PATH prepends
 
-`ensureWindowsSystemPath` already prepends System32 et al.
-`ensureBundledGitOnPath` must run **after** so its entries land
-*before* System32 in PATH — but only when `selectGitSource()` returned
-`"bundled"`. `bash.exe` does not exist in System32, so no shadowing
-risk on coreutils. Verify in tests.
+`ToolResolver.buildSpawnEnv` calls `ensureWindowsSystemPath` last, which
+prepends System32 et al. `ensureBundledGitOnPath` must run **after**
+that call so its entries land *before* System32 in PATH — but only when
+`selectGitSource()` returned `"bundled"`. `sh.exe` does not exist in
+System32, so no shadowing risk on coreutils. R1 spike confirmed the
+bundled shell is a real copied binary (not a symlink), so there is no
+symlink elevation/loss risk on extraction. Verify in tests. Note the
+terminal-manager PTY path does not call `buildSpawnEnv`; its separate
+hook must apply the same after-System32 ordering.
 
 ## Migration / compatibility / rollback
 

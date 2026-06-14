@@ -16,6 +16,8 @@ import { detectCodeServerBinary, resetDetectionCache } from "../editor-detection
 import { readConfigRedacted, writeConfigPartial } from "../config-api.js";
 import { createTunnel, deleteTunnel, getTunnelStatus, getTunnelUrl } from "../tunnel.js";
 import { getModelProxyStatus } from "../model-proxy/registry-singleton.js";
+import { getGitSourceReadout } from "@blackbelt-technology/pi-dashboard-shared/platform/git-source.js";
+import { whichSync } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import { startTunnelWatchdog, stopTunnelWatchdog } from "../tunnel-watchdog.js";
 import { spawnRestart } from "../restart-helper.js";
 import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
@@ -344,6 +346,9 @@ export function registerSystemRoutes(
         ),
       ),
       proxy: getModelProxyStatus(),
+      // Windows-only: active git/sh source readout for Settings + Diagnostics.
+      // null on macOS/Linux. See change: embed-git-bash-on-windows.
+      gitSource: getGitSourceReadout(whichSync),
     };
   });
 

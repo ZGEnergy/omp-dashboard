@@ -18,6 +18,8 @@ import {
   getTerminalEnvHints as platformTerminalEnvHints,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/shell.js";
 import { killProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
+import { augmentEnvWithGitSource } from "@blackbelt-technology/pi-dashboard-shared/platform/git-source.js";
+import { whichSync } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 
 /** Detect the appropriate shell for the current platform. */
 export function detectShell(platform?: string): string {
@@ -122,7 +124,11 @@ export function createTerminalManager(options?: TerminalManagerOptions): Termina
     const shell = detectShell();
     const id = generateId();
 
-    const env = { ...process.env, ...platformTerminalEnvHints() } as Record<string, string>;
+    // PTY bypasses ToolResolver.buildSpawnEnv, so augment bundled git/sh
+    // here too — otherwise `!`/`!!` bang-prefix commands run in the
+    // terminal would miss bundled git/sh. See change: embed-git-bash-on-windows.
+    const baseEnv = { ...process.env, ...platformTerminalEnvHints() } as Record<string, string>;
+    const env = augmentEnvWithGitSource(baseEnv, whichSync) as Record<string, string>;
 
     const p = pty.spawn(shell, [], {
       cwd,

@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownContent } from "./MarkdownContent.js";
 import { DialogPortal } from "./DialogPortal.js";
 import { fetchDoctorReport, DoctorFetchError } from "../lib/doctor-api.js";
+import { getApiBase } from "../lib/api-context.js";
 import type { DoctorReport, DoctorCheck } from "../lib/doctor-api.js";
 import { t as i18nT } from "../lib/i18n";
 
@@ -148,6 +149,31 @@ export function DiagnosticsSection({ fetcher }: Props = {}) {
       if (mountedRef.current) setRunning(false);
     }
   }, [fetch, running]);
+
+  // Switch windowsGitSource then re-run diagnostics. Takes effect for newly
+  // spawned sessions. /api/config is PUT (matches SettingsPanel); check the
+  // response + body success and surface failures. See change:
+  // embed-git-bash-on-windows.
+  const switchGitSource = useCallback(async (value: "host" | "bundled") => {
+    try {
+      const res = await window.fetch(`${getApiBase()}/api/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ windowsGitSource: value }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || body?.success === false) {
+        const msg = body?.error || `HTTP ${res.status}`;
+        setError({ status: res.status, excerpt: "", message: `Failed to set git source: ${msg}` });
+        return;
+      }
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      setError({ status: null, excerpt: "", message: `Failed to set git source: ${e.message}` });
+      return;
+    }
+    await run();
+  }, [run]);
 
   // Initial load
   useEffect(() => {
@@ -284,6 +310,26 @@ export function DiagnosticsSection({ fetcher }: Props = {}) {
                     {c.status !== "ok" && c.suggestion ? (
                       <div className="mt-2 px-3 py-2 border-l-2 border-yellow-600 bg-stone-900/40 rounded-r text-xs text-yellow-100">
                         <MarkdownContent content={c.suggestion} />
+                      </div>
+                    ) : null}
+                    {c.name === "git source" ? (
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void switchGitSource("host")}
+                          className="px-2 py-1 text-xs rounded bg-slate-700 text-slate-200 hover:bg-slate-600"
+                          data-testid="git-source-switch-host"
+                        >
+                          {i18nT("auto.switch_to_host", undefined, "Switch to host")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void switchGitSource("bundled")}
+                          className="px-2 py-1 text-xs rounded bg-slate-700 text-slate-200 hover:bg-slate-600"
+                          data-testid="git-source-switch-bundled"
+                        >
+                          {i18nT("auto.switch_to_bundled", undefined, "Switch to bundled")}
+                        </button>
                       </div>
                     ) : null}
                   </div>

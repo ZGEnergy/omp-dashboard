@@ -2209,3 +2209,30 @@ curl -sSf https://get.openziti.io/install.bash | sudo bash -s zrok
 ```
 
 Vendor docs: https://docs.zrok.io/docs/guides/install/
+
+## How do I switch between bundled and host git on Windows?
+
+Three ways. Takes effect for newly spawned sessions.
+
+- Settings → general → "Git & Bash source" selector (Windows-only): Auto / Host only / Bundled only.
+- Diagnostics → git source row → Switch to host / Switch to bundled buttons.
+- Set `windowsGitSource` in `~/.pi/dashboard/config.json`.
+
+Live "Currently active" readout shows source + path + version.
+
+Cross-refs:
+- packages/client/src/components/SettingsPanel.tsx
+- packages/client/src/components/DiagnosticsSection.tsx
+- packages/shared/src/platform/select-git-source.ts
+
+## Why does my Windows installer include a copy of git?
+
+Windows lacks system git + bash. Fresh Windows without Git for Windows → git status, branch picker, `!`/`!!` bang commands all fail.
+
+Installer embeds dugite-native (git 2.53.0 + sh) so agent works out of box. ~110 MB Windows-only. macOS/Linux installers unchanged (ship git + `/bin/sh`).
+
+`windowsGitSource="auto"` prefers host git when installed.
+
+Cross-refs:
+- packages/electron/scripts/download-git-windows.mjs
+- packages/shared/src/platform/ensure-bundled-git.ts

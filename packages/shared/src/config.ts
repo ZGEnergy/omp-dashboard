@@ -5,6 +5,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import type { WindowsGitSourceSetting } from "./platform/select-git-source.js";
+export type { WindowsGitSourceSetting } from "./platform/select-git-source.js";
 
 export const CONFIG_DIR = path.join(os.homedir(), ".pi", "dashboard");
 export const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
@@ -287,6 +289,14 @@ export interface DashboardConfig {
    */
   gitWorktreeEnabled: boolean;
   /**
+   * Windows-only: where git + the POSIX shell come from.
+   *   "auto"    — host when git+bash on PATH, else bundled (default).
+   *   "host"    — host tools only (Doctor errors if absent).
+   *   "bundled" — always the bundled dugite-native git/sh.
+   * No-op on macOS/Linux. See change: embed-git-bash-on-windows.
+   */
+  windowsGitSource: WindowsGitSourceSetting;
+  /**
    * Per-plugin config namespaces. Reserved top-level key.
    * Each plugin's config lives at plugins.<id>.*
    * Plugin-shaped legacy top-level keys (e.g. openspec.*) stay at top-level
@@ -349,6 +359,7 @@ const DEFAULTS: DashboardConfig = {
   questionFirst: false,
   spawnRegisterTimeoutMs: 30000,
   gitWorktreeEnabled: true,
+  windowsGitSource: "auto",
 };
 
 /**
@@ -656,6 +667,12 @@ export function loadConfig(): DashboardConfig {
         typeof parsed.gitWorktreeEnabled === "boolean"
           ? parsed.gitWorktreeEnabled
           : defaults.gitWorktreeEnabled,
+      windowsGitSource:
+        parsed.windowsGitSource === "host" ||
+        parsed.windowsGitSource === "bundled" ||
+        parsed.windowsGitSource === "auto"
+          ? parsed.windowsGitSource
+          : defaults.windowsGitSource,
       modelProxy: parseModelProxyConfig(parsed.modelProxy),
     };
 

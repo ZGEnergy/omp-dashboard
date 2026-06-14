@@ -47,6 +47,33 @@ const required = [
   path.join(serverBundle, "start-server.sh"),
 ];
 
+// Bundled Windows git+sh — only on win32 builds (which run on a Windows
+// runner). dugite-native ships sh.exe, NOT bash.exe (R1 spike). Arch libdir
+// is mingw64 (x64) / clangarm64 (arm64). See change: embed-git-bash-on-windows.
+if (process.platform === "win32") {
+  const gitDir = path.join("packages", "electron", "resources", "git");
+  required.push(
+    path.join(gitDir, "cmd", "git.exe"),
+    path.join(gitDir, "usr", "bin", "sh.exe"),
+    path.join(gitDir, "THIRD-PARTY-LICENSE.txt"),
+  );
+  // Assert the EXACT libdir for the target arch (x64 -> mingw64,
+  // arm64 -> clangarm64). An either/or check would let an x64 leg pass with
+  // only the arm64 tree (or vice versa) and ship an invalid runtime.
+  // GIT_TARGET_ARCH (set by the Bundle + Assert steps) drives this; process.arch
+  // is the x64 runner even on the arm64 cross-build leg. See change:
+  // embed-git-bash-on-windows.
+  const gitArch = (process.env.GIT_TARGET_ARCH || process.arch) === "arm64" ? "arm64" : "x64";
+  const expectedLibDir = gitArch === "arm64" ? "clangarm64" : "mingw64";
+  if (!existsSync(path.join(gitDir, expectedLibDir))) {
+    console.error(
+      `\u2717 Runnable-bundle assertion failed. Missing bundled git libdir ` +
+        `'${expectedLibDir}' for GIT_TARGET_ARCH=${gitArch}.`,
+    );
+    process.exit(1);
+  }
+}
+
 const missing = required.filter((p) => !existsSync(p));
 
 if (missing.length > 0) {

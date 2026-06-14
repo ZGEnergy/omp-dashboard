@@ -3,16 +3,48 @@
  * - macOS: App menu (About, Doctor), Edit, View, Window
  * - Windows/Linux: top-level About, Doctor, View (reload, devtools, zoom)
  */
-import { app, Menu, dialog, BrowserWindow, type MenuItemConstructorOptions } from "electron";
+import { app, Menu, dialog, shell, BrowserWindow, type MenuItemConstructorOptions } from "electron";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { openDoctorWindow } from "./doctor-window.js";
 
+/**
+ * Bundled Git for Windows license probe. Returns the THIRD-PARTY-LICENSE.txt
+ * path + parsed git version when the bundled git tree is present (win32
+ * installs only). See change: embed-git-bash-on-windows.
+ */
+function bundledGitLicense(): { file: string; version: string } | null {
+  const resourcesPath = (process as { resourcesPath?: string }).resourcesPath;
+  if (!resourcesPath) return null;
+  const file = path.join(resourcesPath, "git", "THIRD-PARTY-LICENSE.txt");
+  if (!existsSync(file)) return null;
+  let version = "";
+  try {
+    const m = readFileSync(file, "utf8").match(/^Git version:\s*(.+)$/m);
+    if (m) version = m[1].trim();
+  } catch { /* ignore */ }
+  return { file, version };
+}
+
 function showAboutDialog(): void {
-  dialog.showMessageBox({
-    type: "info",
-    title: `About ${app.name}`,
-    message: `${app.name}`,
-    detail: `Version ${app.getVersion()}\n\nMonitor and interact with pi agent sessions.\n\n© Blackbelt Technology`,
-  });
+  const git = bundledGitLicense();
+  const detail =
+    `Version ${app.getVersion()}\n\nMonitor and interact with pi agent sessions.\n\n© Blackbelt Technology` +
+    (git ? `\n\nBundled Git for Windows v${git.version || "(bundled)"} — GPLv2` : "");
+  const buttons = git ? ["OK", "Open Bundled Git License"] : ["OK"];
+  dialog
+    .showMessageBox({
+      type: "info",
+      title: `About ${app.name}`,
+      message: `${app.name}`,
+      detail,
+      buttons,
+      defaultId: 0,
+      cancelId: 0,
+    })
+    .then((res) => {
+      if (git && res.response === 1) shell.openPath(git.file);
+    });
 }
 
 /**

@@ -115,6 +115,8 @@ interface Config {
   modelProxy?: Record<string, any>;
   /** UI preference: show worktree spawn buttons in folder + OpenSpec rows. Default true. See change: openspec-worktree-spawn-button. */
   gitWorktreeEnabled?: boolean;
+  /** Windows-only git/bash source. See change: embed-git-bash-on-windows. */
+  windowsGitSource?: "auto" | "host" | "bundled";
   /** Keeper log behavior — gates capture of pi stdout/stderr into keeper-<id>.log. Default off. See change: add-keeper-output-capture-toggle. */
   keeperLog?: { capturePiOutput?: boolean };
 }
@@ -203,6 +205,22 @@ export function SettingsPanel({ availableModels, onMessage }: {
     return tab && ["general", "servers", "packages", "plugins", "providers", "security", "advanced"].includes(tab) ? tab : "general";
   });
 
+  // Windows-only live git/sh source readout from /api/health. null on
+  // macOS/Linux (section hidden). See change: embed-git-bash-on-windows.
+  const [gitSourceReadout, setGitSourceReadout] = useState<{
+    setting: string; source: string; gitPath: string | null;
+    gitVersion: string | null; shellPath: string | null;
+  } | null>(null);
+  const refreshGitSourceReadout = useCallback(() => {
+    return fetch(`${getApiBase()}/api/health`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((h) => setGitSourceReadout(h?.gitSource ?? null))
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    void refreshGitSourceReadout();
+  }, [refreshGitSourceReadout]);
+
   useEffect(() => {
     const configPromise = fetch(`${getApiBase()}/api/config`).then((res) => res.json());
     const providersPromise = fetch(`${getApiBase()}/api/providers`)
@@ -259,6 +277,9 @@ export function SettingsPanel({ availableModels, onMessage }: {
     }
     if (config.spawnRegisterTimeoutMs !== original.spawnRegisterTimeoutMs) {
       partial.spawnRegisterTimeoutMs = config.spawnRegisterTimeoutMs ?? 30000;
+    }
+    if ((config.windowsGitSource ?? "auto") !== (original.windowsGitSource ?? "auto")) {
+      partial.windowsGitSource = config.windowsGitSource ?? "auto";
     }
     if ((config.gitWorktreeEnabled ?? true) !== (original.gitWorktreeEnabled ?? true)) {
       partial.gitWorktreeEnabled = config.gitWorktreeEnabled ?? true;
@@ -346,6 +367,12 @@ export function SettingsPanel({ availableModels, onMessage }: {
         }
         restartRequired = data.restartRequired;
         setOriginal(JSON.parse(JSON.stringify(config)));
+        // windowsGitSource change re-resolves the active source server-side;
+        // refresh the "Currently active" readout so it doesn't stay stale.
+        // See change: embed-git-bash-on-windows.
+        if (partial.windowsGitSource !== undefined) {
+          void refreshGitSourceReadout();
+        }
       }
 
       // Save LLM providers
@@ -613,6 +640,30 @@ export function SettingsPanel({ availableModels, onMessage }: {
                     {i18nT("auto.ui_preference_only_hides_the_folder", undefined, "UI preference only. Hides the folder")} <code>+Worktree</code> {i18nT("auto.button_and_the_per_change", undefined, "button and the per-change")} <code>⥂2+</code> {i18nT("auto.button_on_openspec_rows_the", undefined, "button on OpenSpec rows. The")} <code>/api/git/worktree*</code> {i18nT("auto.rest_endpoints_stay_reachable_for_tooling", undefined, "REST endpoints stay reachable for tooling. Default on.")}
                   </p>
                 </div>
+                {/* Windows-only: bundled-vs-host git & bash. Hidden on
+                    macOS/Linux (gitSourceReadout null). See change:
+                    embed-git-bash-on-windows. */}
+                {gitSourceReadout && (
+                  <div>
+                    <SelectField
+                      label={i18nT("auto.git_bash_source", undefined, "Git & Bash source (Windows)")}
+                      value={config.windowsGitSource ?? "auto"}
+                      options={[
+                        { value: "auto", label: "Auto — host when installed, else bundled (default)" },
+                        { value: "host", label: "Host only — use the installed Git for Windows" },
+                        { value: "bundled", label: "Bundled only — always use the shipped git" },
+                      ]}
+                      onChange={(v) => update((c) => { c.windowsGitSource = v as "auto" | "host" | "bundled"; })}
+                    />
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      {i18nT("auto.currently_active", undefined, "Currently active:")}{" "}
+                      <strong>{gitSourceReadout.source}</strong>
+                      {gitSourceReadout.gitPath ? <> — <code>{gitSourceReadout.gitPath}</code></> : null}
+                      {gitSourceReadout.gitVersion ? <> ({gitSourceReadout.gitVersion})</> : null}
+                      . {i18nT("auto.git_source_takes_effect", undefined, "Takes effect for newly spawned sessions. macOS/Linux ignore this setting.")}
+                    </p>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                     <label className="text-sm text-[var(--text-secondary)]">{t("settings.defaultModel", undefined, "Default Model")}</label>
                   <ModelSelector

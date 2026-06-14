@@ -17,6 +17,7 @@ packages/*/src/**/*.js.map
 packages/*/src/**/*.d.ts
 packages/electron/resources/server
 packages/electron/resources/node
+packages/electron/resources/git
 packages/electron/resources/icons
 packages/electron/resources/offline-packages
 packages/electron/resources/bundled-extensions

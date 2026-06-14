@@ -5,6 +5,7 @@
  */
 import { execSync, spawnSync, buildSafeArgv } from "./exec.js";
 import { ensureWindowsSystemPath } from "./ensure-windows-path.js";
+import { augmentEnvWithGitSource } from "./git-source.js";
 import { existsSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -499,7 +500,11 @@ export class ToolResolver {
     const out = parts.length === 0
       ? base
       : { ...base, PATH: `${parts.join(path.delimiter)}${path.delimiter}${currentPath}` };
-    return ensureWindowsSystemPath(out, opts);
+    // System32 first, then bundled git/sh (lands before System32 in PATH
+    // when active). Single chokepoint for server-launcher + process-manager
+    // spawns. See change: embed-git-bash-on-windows.
+    const withSystem = ensureWindowsSystemPath(out, opts);
+    return augmentEnvWithGitSource(withSystem, whichSync);
   }
 }
 
@@ -554,7 +559,7 @@ function extOf(p: string): string {
  * Single `where` invocation — no per-extension probe loop — to keep
  * resolution fast (especially when the command is missing entirely).
  */
-function whichSync(cmd: string): string | null {
+export function whichSync(cmd: string): string | null {
   const isWin = process.platform === "win32";
   if (!isWin) {
     const lines = whereAllLines("which", cmd);
