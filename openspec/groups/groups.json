@@ -172,7 +172,8 @@
     "fix-spawn-token-env-leak": "ui",
     "fix-openspec-board-mobile-scroll": "ui",
     "emit-openspec-pending-from-poll": "ui",
-    "add-session-closing-indicator": "ui"
+    "add-session-closing-indicator": "ui",
+    "fix-popover-viewport-flip": "ui"
   },
   "changeOrder": {
     "__ungrouped__": [
@@ -183,8 +184,8 @@
     ],
     "ui": [
       "emit-openspec-pending-from-poll",
-      "replace-proposal-dialog-with-race-handling",
       "fix-openspec-board-mobile-scroll",
+      "fix-popover-viewport-flip",
       "add-session-closing-indicator",
       "docker-test-harness",
       "fix-openspec-worktree-cwd-keying"
