@@ -182,12 +182,12 @@
       "restore-pi-version-skew-surface"
     ],
     "ui": [
+      "emit-openspec-pending-from-poll",
+      "replace-proposal-dialog-with-race-handling",
       "fix-openspec-board-mobile-scroll",
       "add-session-closing-indicator",
       "docker-test-harness",
-      "emit-openspec-pending-from-poll",
-      "fix-openspec-worktree-cwd-keying",
-      "replace-proposal-dialog-with-race-handling"
+      "fix-openspec-worktree-cwd-keying"
     ],
     "next-phase": [
       "add-dashboard-slash-commands",
