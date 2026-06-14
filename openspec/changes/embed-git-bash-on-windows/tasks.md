@@ -2,14 +2,21 @@
 
 ## Spikes (resolve before implementation)
 
-- [ ] **R1 spike** — On a Windows runner (or `windows-latest` GitHub Action):
-  download `dugite-native-v2.53.0-2-windows-x64.tar.gz`, extract with
-  Node's `tar` package (matches what `download-git-windows.mjs` will use),
-  verify `git --version`, `bash --version`, and that internal symlinks
-  (e.g. `usr/bin/sh.exe` → `bash.exe`) resolve correctly. Then NSIS-package
-  the extracted tree via a throwaway Forge config and install on a clean
-  VM; re-run the same probes. **Block merge if either fails.**
+- [ ] **R1 spike (on CI)** — `.github/workflows/spike-git-bash.yml`,
+  `windows-latest` (x64) + `windows-11-arm` (arm64): download the pinned
+  `dugite-native-<assetInfix>-windows-<arch>.tar.gz` (tag `v2.53.0-3`),
+  SHA-256 verify fail-closed, extract with Node `tar` (matches what
+  `download-git-windows.mjs` will use), probe `git.exe`/`bash.exe`/
+  `sh.exe --version`, then **ZIP round-trip** (`Compress-Archive` →
+  `Expand-Archive`, the real current Windows distribution path) and
+  re-probe; inspect `usr/bin/sh.exe` LinkType. Secondary: NSIS package +
+  silent install + re-probe (forward-looking for
+  `restore-windows-nsis-installer`). **Block merge if x64/arm64 probes
+  or the ZIP round-trip fail.** NOTE: NSIS removed from current build
+  (archived `simplify-electron-bootstrap-derived-state`); ZIP round-trip
+  is the faithful packaging test.
 - [ ] **R5 investigation** — Read `packages/extension/src/command-handler.ts`
+  (path confirmed current)
   (`!` and `!!` prefix path) on a clean Windows VM without Git for Windows.
   Capture exact failure mode (silent ENOENT, bridge crash, error toast).
   Decides framing in proposal §Why.
@@ -56,10 +63,19 @@
 
 ## Runtime — wiring
 
-- [ ] Call `ensureBundledGitOnPath` after `ensureWindowsSystemPath` in:
+- [ ] Hook `ensureBundledGitOnPath` into the central spawn-env
+  chokepoint `ToolResolver.buildSpawnEnv`
+  (`packages/shared/src/platform/binary-lookup.ts`), **after** its
+  existing `ensureWindowsSystemPath` call. This single hook covers:
   - `packages/shared/src/server-launcher.ts` (server startup env)
-  - `src/server/process-manager.ts` (every bridge / headless spawn)
-  - `src/server/terminal-manager.ts` (PTY spawn env)
+  - `packages/server/src/process-manager.ts` (every bridge / headless
+    spawn — `buildSpawnEnv` is reached via `resolver.buildSpawnEnv`)
+- [ ] Separately wire the PTY path, which bypasses `buildSpawnEnv`:
+  `packages/server/src/terminal-manager.ts` builds env as
+  `{ ...process.env, ...getTerminalEnvHints() }`. Either add an
+  `ensureBundledGitOnPath` call there or extend `getTerminalEnvHints`
+  in `packages/shared/src/platform/shell.ts`. Required so `!`/`!!`
+  bang-prefix commands in the terminal see bundled git/bash.
 - [ ] Cache `selectGitSource()` result for the life of the server
   process; expose via `getActiveGitSource()` for Diagnostics + Settings
   readout.

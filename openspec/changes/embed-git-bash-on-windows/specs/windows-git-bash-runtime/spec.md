@@ -31,8 +31,8 @@ server (bridge, headless agent, terminal PTYs).
 
 ### Requirement: selectGitSource implements the auto/host/bundled truth table
 
-On Windows the helper `selectGitSource({ setting, env, fsExists,
-which })` SHALL return `"host"` or `"bundled"` according to:
+The helper `selectGitSource({ setting, env, fsExists, which })` SHALL on
+Windows return `"host"` or `"bundled"` according to:
 
 | setting     | host has git AND bash | result    |
 |-------------|------------------------|-----------|
@@ -72,8 +72,8 @@ which })` SHALL return `"host"` or `"bundled"` according to:
 
 ### Requirement: ensureBundledGitOnPath prepends bundled tools when active
 
-When `selectGitSource()` returns `"bundled"`, `ensureBundledGitOnPath(env)`
-SHALL prepend `resources/git/cmd`, `resources/git/usr/bin`, and
+The helper `ensureBundledGitOnPath(env)` SHALL, when `selectGitSource()`
+returns `"bundled"`, prepend `resources/git/cmd`, `resources/git/usr/bin`, and
 `resources/git/mingw64/bin` to `env.PATH` (in that order), set
 `env.GIT_EXEC_PATH` to `resources/git/mingw64/libexec/git-core`, and set
 `env.SSL_CERT_FILE` to `resources/git/ssl/certs/ca-bundle.crt`. The
@@ -91,12 +91,24 @@ helper SHALL be idempotent.
 - **WHEN** `selectGitSource()` returns `"host"`
 - **THEN** `ensureBundledGitOnPath` SHALL leave `env` unchanged
 
-#### Scenario: Runs AFTER ensureWindowsSystemPath
+#### Scenario: Runs AFTER ensureWindowsSystemPath in buildSpawnEnv
 
-- **WHEN** both helpers are applied to the same env
-- **THEN** `ensureBundledGitOnPath` SHALL be called after
-  `ensureWindowsSystemPath` so bundled-git directories land before
-  System32 in PATH precedence (bundled git wins lookups when active)
+- **WHEN** `ToolResolver.buildSpawnEnv` augments a spawn env on win32
+- **THEN** `ensureBundledGitOnPath` SHALL run after that method's
+  existing `ensureWindowsSystemPath` call so bundled-git directories
+  land before System32 in PATH precedence (bundled git wins lookups
+  when active)
+
+#### Scenario: PTY terminal env receives bundled git
+
+- **WHEN** the terminal-manager spawns a PTY on win32 with
+  `selectGitSource()` returning `"bundled"`
+- **THEN** the PTY env SHALL include the bundled-git PATH prepends even
+  though the PTY path does not flow through
+  `ToolResolver.buildSpawnEnv` (wired via a direct
+  `ensureBundledGitOnPath` call or `getTerminalEnvHints`)
+- **AND** `!`/`!!` bang-prefix commands run in that terminal SHALL
+  resolve bundled git/bash
 
 ### Requirement: Active git/bash source is observable via API and UI
 

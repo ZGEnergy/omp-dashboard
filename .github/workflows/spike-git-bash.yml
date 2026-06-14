@@ -1,0 +1,145 @@
+# THROWAWAY spike workflow for OpenSpec change `embed-git-bash-on-windows` (R1).
+# Verifies that the pinned dugite-native Windows tarball downloads, checksum-
+# verifies, extracts (Node `tar`), runs git/bash/sh, and — critically —
+# SURVIVES the real Windows distribution packaging path (ZIP round-trip), plus
+# an informational NSIS package+install. Delete this file once R1 is resolved.
+#
+# Constraints honoured:
+#   - No `shell: bash` on Windows runners (repo invariant
+#     `no-bash-on-windows.test.ts`). All steps are `pwsh` or `node`.
+#   - arm64 binaries cannot execute on the x64 runner, so arm64 runs on a real
+#     `windows-11-arm` runner.
+name: Spike — embed git+bash (R1)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [os/embed-git-bash-on-windows]
+    paths:
+      - .github/workflows/spike-git-bash.yml
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    name: R1 ${{ matrix.arch }} on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+            sha256: f843a87a693bfdabed83b8492bca59db6f64d1168c74d23e2c8dfb7388a97142
+          - os: windows-11-arm
+            arch: arm64
+            sha256: e16e7023942499c093c8520a145bf20287a08d38d8d69197355df154a8598b06
+    runs-on: ${{ matrix.os }}
+    env:
+      DUGITE_TAG: v2.53.0-3
+      DUGITE_INFIX: v2.53.0-f49d009
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Download dugite-native tarball
+        shell: pwsh
+        run: |
+          $file = "dugite-native-$env:DUGITE_INFIX-windows-${{ matrix.arch }}.tar.gz"
+          $url  = "https://github.com/desktop/dugite-native/releases/download/$env:DUGITE_TAG/$file"
+          Write-Host "GET $url"
+          Invoke-WebRequest -Uri $url -OutFile git.tar.gz
+          "{0:N1} MB" -f ((Get-Item git.tar.gz).Length / 1MB)
+
+      - name: Verify SHA-256 (fail-closed)
+        shell: pwsh
+        run: |
+          $expected = "${{ matrix.sha256 }}".ToLower()
+          $actual   = (Get-FileHash git.tar.gz -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) {
+            Write-Error "checksum mismatch - refusing to extract`n  expected $expected`n  actual   $actual"
+            exit 1
+          }
+          Write-Host "checksum OK: $actual"
+
+      - name: Extract with Node tar
+        shell: pwsh
+        run: |
+          npm init -y | Out-Null
+          npm install tar@6 --no-audit --no-fund
+          New-Item -ItemType Directory -Force git | Out-Null
+          node -e "require('tar').x({ file: 'git.tar.gz', C: 'git', sync: true })"
+          Write-Host "Top-level entries:"
+          Get-ChildItem git | Select-Object Name | Format-Table -AutoSize
+
+      - name: Probe binaries (direct extract)
+        shell: pwsh
+        run: |
+          $ok = $true
+          foreach ($rel in @('cmd/git.exe','usr/bin/bash.exe','usr/bin/sh.exe')) {
+            $p = Join-Path git $rel
+            if (-not (Test-Path $p)) { Write-Host "::error::missing $rel"; $ok = $false; continue }
+            Write-Host "--- $rel --version ---"
+            & $p --version
+            if ($LASTEXITCODE -ne 0) { Write-Host "::error::$rel exited $LASTEXITCODE"; $ok = $false }
+          }
+          if (-not $ok) { exit 1 }
+
+      - name: Inspect sh.exe link type (symlink vs copy)
+        shell: pwsh
+        run: |
+          $sh = Get-Item git/usr/bin/sh.exe
+          $sh | Format-List Name, Length, LinkType, Target
+          Write-Host "Attributes: $($sh.Attributes)"
+
+      - name: ZIP round-trip (real Windows distribution path) + re-probe
+        shell: pwsh
+        run: |
+          # maker-zip / end-user extraction path. Compress then Expand into a
+          # fresh dir, simulating download->extract on a clean machine.
+          Compress-Archive -Path git/* -DestinationPath git-dist.zip -Force
+          New-Item -ItemType Directory -Force git-extracted | Out-Null
+          Expand-Archive -Path git-dist.zip -DestinationPath git-extracted -Force
+          $ok = $true
+          foreach ($rel in @('cmd/git.exe','usr/bin/bash.exe','usr/bin/sh.exe')) {
+            $p = Join-Path git-extracted $rel
+            if (-not (Test-Path $p)) { Write-Host "::error::ZIP round-trip lost $rel"; $ok = $false; continue }
+            Write-Host "--- (post-zip) $rel --version ---"
+            & $p --version
+            if ($LASTEXITCODE -ne 0) { Write-Host "::error::(post-zip) $rel exited $LASTEXITCODE"; $ok = $false }
+          }
+          $sh = Get-Item git-extracted/usr/bin/sh.exe -ErrorAction SilentlyContinue
+          if ($sh) { Write-Host "post-zip sh.exe LinkType=$($sh.LinkType) Length=$($sh.Length)" }
+          if (-not $ok) { Write-Error "ZIP round-trip broke the git tree (symlink loss?)"; exit 1 }
+          Write-Host "ZIP round-trip OK"
+
+      - name: NSIS package + silent install + re-probe (informational)
+        # Forward-looking for restore-windows-nsis-installer. Non-blocking:
+        # the ZIP round-trip above is the authoritative current-distribution
+        # test. makensis is installed via Chocolatey (preinstalled on the
+        # windows-latest image; may be absent on windows-11-arm).
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $nsi = @"
+          OutFile "git-setup.exe"
+          InstallDir "\$LOCALAPPDATA\PiGitSpike"
+          RequestExecutionLevel user
+          SilentInstall silent
+          Section
+            SetOutPath "\$INSTDIR"
+            File /r "git\*.*"
+          SectionEnd
+          "@
+          Set-Content -Path spike.nsi -Value $nsi -Encoding ASCII
+          & "$env:ProgramFiles(x86)\NSIS\makensis.exe" spike.nsi
+          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::makensis failed (arch may lack NSIS)"; exit 0 }
+          & ./git-setup.exe | Out-Null
+          $dest = Join-Path $env:LOCALAPPDATA "PiGitSpike"
+          foreach ($rel in @('cmd/git.exe','usr/bin/sh.exe')) {
+            $p = Join-Path $dest $rel
+            if (Test-Path $p) { Write-Host "--- (post-NSIS) $rel ---"; & $p --version }
+            else { Write-Host "::warning::(post-NSIS) missing $rel" }
+          }
