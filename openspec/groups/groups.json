@@ -185,14 +185,9 @@
       "restore-pi-version-skew-surface"
     ],
     "ui": [
-      "surface-input-streaming-behavior",
-      "add-board-drag-visual-feedback",
-      "fix-openspec-board-mobile-scroll",
-      "stepper-compact-done-letters",
-      "fix-popover-viewport-flip",
-      "add-session-closing-indicator",
       "docker-test-harness",
-      "fix-openspec-worktree-cwd-keying"
+      "fix-openspec-worktree-cwd-keying",
+      "stepper-compact-done-letters"
     ],
     "next-phase": [
       "add-dashboard-slash-commands",
