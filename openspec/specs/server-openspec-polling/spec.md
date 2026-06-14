@@ -144,12 +144,17 @@ The gate SHALL use **file-aware effective mtime** rather than directory mtime al
 - **WHEN** `changeDetection` is `"always"`
 - **THEN** the server SHALL run `openspec list` and all `openspec status` invocations on every poll tick (matching pre-change behavior)
 
-#### Scenario: Force refresh uses the gate (not bypass)
+#### Scenario: Force refresh bypasses the gate
 
-- **WHEN** `openspec_refresh { cwd }` is received, or `refreshOpenSpec(cwd)` is called by server code, or `onDirectoryAdded(cwd)` runs
+- **WHEN** `openspec_refresh { cwd }` is received, or `refreshOpenSpec(cwd)` is called by server code (`force === true`)
+- **THEN** the change-detection gate SHALL be bypassed and the CLI SHALL be invoked authoritatively (the list step plus `openspec status` per change)
+- **AND** force-mode is the manual escape hatch when local derivation and the CLI disagree
+
+#### Scenario: Internal gated paths honor the gate
+
+- **WHEN** the periodic poll, `pollDirectoryGated(cwd)`, or `onDirectoryAdded(cwd)` runs (`force === false`)
 - **THEN** the change-detection gate SHALL be evaluated with the file-aware effective mtime
-- **AND** the CLI SHALL be invoked only for the list step and per-change steps whose effective mtime has advanced
-- **AND** the gate SHALL still be honored — force-mode is no longer required for correctness, because the gate now correctly reflects in-place file edits
+- **AND** the per-change step SHALL run only for changes whose effective mtime has advanced
 
 NOTE: This is a third delta on the same `Change-detection gate to avoid redundant CLI invocations` requirement. Prior deltas: `fix-openspec-mtime-gate-blind-spots` (added `tasks.md`/`proposal.md`/`design.md` to the watch set), `fix-openspec-mtime-gate-toctou` (added the post-call effective-mtime re-check). This delta extends the watch set to `specs/**` and is otherwise additive — every prior scenario remains in force.
 
@@ -402,3 +407,52 @@ The server SHALL maintain a per-cwd filesystem watcher on `<cwd>/openspec/change
 #### Scenario: Server graceful shutdown
 - **WHEN** the server stops (SIGTERM / `pi-dashboard stop` / `/api/restart`)
 - **THEN** all attached watchers SHALL be detached before process exit
+
+### Requirement: Periodic poll derives artifact status without per-change CLI spawn
+
+On the periodic / gated poll path (`force === false`), the server SHALL derive
+each change's per-artifact status (`proposal`, `design`, `tasks`, `specs`) and
+change-level `isComplete` from local files and the `openspec list --json`
+entry, WITHOUT spawning `openspec status` per change. The CLI `openspec status`
+spawn is reserved for user-initiated force-refresh (`force === true`).
+
+Net openspec CLI spawns on the periodic path SHALL be at most one per
+directory per tick (`openspec list`), independent of the number of changes.
+
+#### Scenario: Many changes → one spawn per cwd per tick
+
+- **GIVEN** a cwd with N active changes (N large, e.g. 66)
+- **WHEN** the periodic poll tick runs for that cwd
+- **THEN** the server spawns `openspec list` at most once for that cwd
+- **AND** spawns `openspec status` zero times
+- **AND** still returns an `OpenSpecData` whose `changes[].artifacts` and
+  `changes[].isComplete` are populated from local derivation
+
+#### Scenario: Artifact status derived from local evidence
+
+- **GIVEN** a change whose `tasks.md` has all checkboxes ticked, a
+  `design.md` present, and at least one `specs/**/*.md`
+- **WHEN** the periodic poll derives status
+- **THEN** the `tasks`, `design`, `specs`, and `proposal` artifacts are
+  reported `done` and the change `isComplete` is `true`
+
+#### Scenario: Force-refresh remains CLI-authoritative
+
+- **GIVEN** the user clicks the OpenSpec Refresh control (`force === true`)
+- **WHEN** `refreshOpenSpec(cwd)` runs
+- **THEN** the server spawns `openspec status` per change as the authoritative
+  source and the gate is bypassed
+
+### Requirement: Local derivation parity with CLI is guarded by test
+
+The derived per-artifact status SHALL match `openspec status --json` output
+artifact-for-artifact for a representative change set, enforced by an
+automated test that skips gracefully when the `openspec` CLI is unavailable.
+
+#### Scenario: Derived status equals CLI status
+
+- **GIVEN** the `openspec` CLI is available and the repo has active changes
+- **WHEN** the parity test derives status locally and via the CLI for each
+  change
+- **THEN** the two artifact lists are equal per change
+

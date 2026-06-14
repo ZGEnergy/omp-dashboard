@@ -87,7 +87,7 @@ export interface OpenSpecPollConfig {
    * field behave exactly as before. See change: auto-hide-empty-session-subcards.
    */
   enabled: boolean;
-  /** Poll interval in seconds. Default 30. Clamped to [5, 3600]. */
+  /** Poll interval in seconds. Default 60. Clamped to [5, 3600]. */
   pollIntervalSeconds: number;
   /** Max concurrent `openspec` CLI invocations across all dirs. Default 3. Clamped to [1, 16]. */
   maxConcurrentSpawns: number;
@@ -99,7 +99,10 @@ export interface OpenSpecPollConfig {
 
 export const DEFAULT_OPENSPEC_POLL: OpenSpecPollConfig = {
   enabled: true,
-  pollIntervalSeconds: 30,
+  // 60s baseline: even after local derivation kills the per-change spawn
+  // storm, a larger interval reduces churn for large change sets.
+  // See change: optimize-openspec-poll-derive-artifacts-locally.
+  pollIntervalSeconds: 60,
   maxConcurrentSpawns: 3,
   changeDetection: "mtime",
   jitterSeconds: 5,
