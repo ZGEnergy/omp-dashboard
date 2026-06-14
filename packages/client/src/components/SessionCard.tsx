@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, type ReactNode } from "react";
 import { getApiBase } from "../lib/api-context.js";
 import { Icon } from "@mdi/react";
-import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiCommentQuestion, mdiPlayCircleOutline, mdiSourceFork, mdiPaperclip, mdiConsoleLine, mdiPlus, mdiSourceBranchPlus } from "@mdi/js";
+import { mdiFlash, mdiOpenInNew, mdiPencil, mdiPencilOutline, mdiSourceBranch, mdiClose, mdiEyeOffOutline, mdiEyeOutline, mdiCommentQuestion, mdiPlayCircleOutline, mdiSourceFork, mdiPaperclip, mdiConsoleLine, mdiPlus, mdiSourceBranchPlus, mdiLoading } from "@mdi/js";
 import {
   statusColors as statusColorsExt,
   sourceBadgeColors as sourceBadgeColorsExt,
@@ -488,7 +488,7 @@ export function SessionCard({
         onClick={() => onSelect(session.id)}
         className={`px-4 py-3 cursor-pointer rounded-xl shadow-md shadow-[var(--shadow-card)] border hover:shadow-lg transition-all duration-200 ${
           isSelected ? "border-blue-500/60 bg-blue-500/5 ring-1 ring-blue-500/30" : "border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"
-        } ${isHidden ? "opacity-40" : ""} ${getCardPulseClass(session, hasWidgetBarPrompt)}`}
+        } ${isHidden ? "opacity-40" : ""} ${session.closing ? "opacity-50" : ""} ${getCardPulseClass(session, hasWidgetBarPrompt)}`}
       >
         {/* Line 1: source icon (colored by status) + name + age */}
         <div className="flex items-center gap-2">
@@ -599,7 +599,7 @@ export function SessionCard({
         isSelected
           ? "border-blue-500/60 bg-blue-500/5 ring-1 ring-blue-500/30 card-selected-ring"
           : "border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"
-      } ${isHidden ? "opacity-40" : ""} ${getCardPulseClass(session, hasWidgetBarPrompt)}`}
+      } ${isHidden ? "opacity-40" : ""} ${session.closing ? "opacity-50" : ""} ${getCardPulseClass(session, hasWidgetBarPrompt)}`}
       data-testid="session-card-desktop"
     >
       <div className="flex gap-1.5">
@@ -696,16 +696,18 @@ export function SessionCard({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              if (session.closing) return;
               if (session.status === "streaming") {
                 if (!window.confirm("Session is currently running. Exit anyway?")) return;
               }
               onShutdown(session.id);
             }}
-            className="text-[var(--text-muted)] hover:text-red-400 p-0.5 flex-shrink-0"
-            title="Exit pi session"
+            disabled={session.closing}
+            className="text-[var(--text-muted)] hover:text-red-400 p-0.5 flex-shrink-0 disabled:cursor-default disabled:hover:text-[var(--text-muted)]"
+            title={session.closing ? "Closing…" : "Exit pi session"}
             data-testid="session-close-btn"
           >
-            <Icon path={mdiClose} size={0.5} />
+            <Icon path={session.closing ? mdiLoading : mdiClose} size={0.5} className={session.closing ? "animate-spin" : undefined} />
           </button>
         )}
       </div>

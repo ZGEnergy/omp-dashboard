@@ -200,8 +200,31 @@ export function useSessionActions(deps: SessionActionDeps) {
   }, [send]);
 
   const handleShutdownSession = useCallback((sessionId: string) => {
+    // Optimistically flip the transient `closing` flag so the card can render
+    // a closing state (dim + spinner + disabled ✕) immediately, instead of
+    // sitting visually identical until `session_removed` lands 2-4s later.
+    // Mirrors handleResumeSession's optimistic `resuming` flip.
+    setSessions((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(sessionId);
+      if (existing) next.set(sessionId, { ...existing, closing: true });
+      return next;
+    });
     send({ type: "shutdown", sessionId });
-  }, [send]);
+    // Safety revert: the normal path never reaches this — `session_removed`
+    // removes the card first. But if that broadcast never arrives, clear
+    // `closing` after a bounded timeout so the card can't spin forever and
+    // the user can retry.
+    setTimeout(() => {
+      setSessions((prev) => {
+        const existing = prev.get(sessionId);
+        if (!existing || !existing.closing) return prev;
+        const next = new Map(prev);
+        next.set(sessionId, { ...existing, closing: false });
+        return next;
+      });
+    }, 10_000);
+  }, [send, setSessions]);
 
   const handleKillProcess = useCallback((sessionId: string, pgid: number) => {
     send({ type: "kill_process", sessionId, pgid });

@@ -163,6 +163,14 @@ export interface DashboardSession {
   firstMessage?: string;
   dataUnavailable?: boolean;
   resuming?: boolean;
+  /**
+   * Client-side transient: set optimistically when the user triggers
+   * shutdown so the card can render a "closing" state (dim + spinner +
+   * disabled ✕) while the server kill ladder runs. Mirrors `resuming`.
+   * Cleared when `session_removed` removes the card, or by a bounded
+   * safety-revert timer. Bridges and server SHALL NOT send it.
+   */
+  closing?: boolean;
   /** Last known bridge entry count (for skip-wipe comparison on reconnect) */
   lastEntryCount?: number;
   /** OS process ID of the pi agent — used for force-kill escalation */
