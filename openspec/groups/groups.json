@@ -143,13 +143,13 @@
     "fix-windows-path-system32-missing": "electrun-execution",
     "replace-wmic-with-powershell": "electrun-execution",
     "fix-electron-launch-source-bundled-node-dir": "electrun-execution",
-    "embed-git-bash-on-windows": "electrun-execution",
+    "embed-git-bash-on-windows": "ui",
     "fix-doctor-oauth-credential-detection": "electrun-execution",
     "add-extension-ui-a11y-baseline": "ui-extensions",
     "add-extension-ui-module-lifecycle": "ui-extensions",
     "add-extension-ui-safety-bounds": "ui-extensions",
     "add-extension-ui-action-result-contract": "ui-extensions",
-    "restore-windows-nsis-installer": "electrun-execution",
+    "restore-windows-nsis-installer": "ui",
     "enable-rpc-keeper-by-default": "electrun-execution",
     "add-bundle-immutable-health-flag": "electrun-execution",
     "retire-rpc-keeper-when-dispatchcommand-available": "electrun-execution",
@@ -177,17 +177,21 @@
     "add-board-drag-visual-feedback": "ui",
     "surface-input-streaming-behavior": "ui",
     "stepper-compact-done-letters": "ui",
-    "register-bash-and-tool-install-help": "ui"
+    "register-bash-and-tool-install-help": "ui",
+    "reorganize-settings-into-pages": "ui",
+    "add-faux-model-integration-tests": "ui",
+    "restore-pi-version-skew-surface": "sdasdasd",
+    "add-release-video-pipeline": "future"
   },
   "changeOrder": {
-    "__ungrouped__": [
-      "add-release-video-pipeline",
-      "restore-pi-version-skew-surface"
-    ],
+    "__ungrouped__": [],
     "ui": [
-      "docker-test-harness",
+      "embed-git-bash-on-windows",
+      "reorganize-settings-into-pages",
       "add-end-user-docs",
-      "register-bash-and-tool-install-help"
+      "docker-test-harness",
+      "restore-windows-nsis-installer",
+      "add-faux-model-integration-tests"
     ],
     "next-phase": [
       "add-dashboard-slash-commands",
@@ -207,7 +211,8 @@
       "fix-expanded-pinned-group-drag",
       "focus-driven-folder-compaction",
       "add-internal-monaco-editor-pane",
-      "jj-plugin-server-driven-flows"
+      "jj-plugin-server-driven-flows",
+      "restore-pi-version-skew-surface"
     ],
     "ui-extensions": [
       "add-extension-ui-a11y-baseline",
@@ -216,6 +221,21 @@
       "add-extension-ui-rjsf-form",
       "add-extension-ui-safety-bounds",
       "pi-flows-adopt-extension-ui"
+    ],
+    "electrun-execution": [],
+    "future": [
+      "add-capacitor-mobile-shell",
+      "add-server-push-notifications",
+      "adopt-pi-071-072-073-features",
+      "automate-windows-remote-qa",
+      "modernize-pi-version-handling",
+      "new-spec-spawn",
+      "pi-log-miner-skill",
+      "skip-rpc-probes-in-event-forwarder",
+      "spec-file-git-history-header",
+      "unify-pi-core-into-package-queue",
+      "accordion-workspace-folders",
+      "add-release-video-pipeline"
     ]
   }
 }
