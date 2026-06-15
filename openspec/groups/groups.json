@@ -183,18 +183,20 @@
     "restore-pi-version-skew-surface": "sdasdasd",
     "add-release-video-pipeline": "future",
     "scope-openspec-poll-to-active-cwds": "ui",
-    "offload-openspec-poll-to-worker": "ui"
+    "offload-openspec-poll-to-worker": "ui",
+    "instrument-session-hydration-timing": "ui",
+    "offload-session-events-load-to-worker": "ui",
+    "fix-worktree-spawn-placeholder-and-ordering": "ui",
+    "auto-init-worktree-on-spawn": "ui"
   },
   "changeOrder": {
     "__ungrouped__": [],
     "ui": [
-      "scope-openspec-poll-to-active-cwds",
-      "offload-openspec-poll-to-worker",
-      "reorganize-settings-into-pages",
       "add-end-user-docs",
       "docker-test-harness",
       "restore-windows-nsis-installer",
-      "add-faux-model-integration-tests"
+      "offload-session-events-load-to-worker",
+      "auto-init-worktree-on-spawn"
     ],
     "next-phase": [
       "add-dashboard-slash-commands",
