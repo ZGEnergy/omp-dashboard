@@ -1,9 +1,10 @@
 /**
  * Repo-lint contracts for change: add-plugin-activation-ui.
  *
- *  - SettingsPanel STILL calls <SettingsSectionSlot tab="..."> for every
- *    legacy tab value, preserving backward compatibility for plugins that
- *    target a specific tab via `claim.tab`.
+ *  - SettingsPanel mounts <SettingsSectionSlot tab="..."> on every page so
+ *    plugin-contributed `settings-section` claims render on their targeted
+ *    page (claim.tab; default general).
+ *    See change: reorganize-settings-into-pages.
  *  - browser-protocol introduces NO new message types in this change
  *    (toggles ride on existing plugin_config_update; requirement installs
  *    ride on existing package_progress / package_operation_complete).
@@ -12,22 +13,25 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { VALID_SETTINGS_TABS } from "../dashboard-plugin/slot-types.js";
 
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
 
 describe("add-plugin-activation-ui repo-lint", () => {
-  it("SettingsPanel does NOT render plugin-contributed settings in legacy tabs", () => {
-    // Plugin-contributed `settings-section` claims render ONLY under the
-    // owning plugin's row in Settings ▸ Plugins. The legacy
-    // <SettingsSectionSlot tab="..." /> consumers have been removed; the
-    // `claim.tab` manifest field is now an inert hint.
-    // See change: add-plugin-activation-ui (settings-consolidation).
+  it("SettingsPanel mounts a per-page SettingsSectionSlot", () => {
+    // Plugin-contributed `settings-section` claims render on the page their
+    // `claim.tab` targets (default general). Each page mounts
+    // <SettingsSectionSlot tab={page} /> so the registry filter matches.
+    // See change: reorganize-settings-into-pages.
     const panel = fs.readFileSync(
       path.join(REPO_ROOT, "packages/client/src/components/SettingsPanel.tsx"),
       "utf-8",
     );
-    expect(panel.includes("<SettingsSectionSlot")).toBe(false);
-    expect(panel.includes("SettingsSectionSlot")).toBe(false);
+    expect(panel.includes("<SettingsSectionSlot")).toBe(true);
+    // One mount per page id; assert exact set matches VALID_SETTINGS_TABS.
+    const mounts = [...panel.matchAll(/<SettingsSectionSlot tab="([^"]+)"/g)].map((m) => m[1]);
+    expect(mounts.length).toBe(VALID_SETTINGS_TABS.length);
+    expect(new Set(mounts)).toEqual(new Set(VALID_SETTINGS_TABS));
   });
 
   it("browser-protocol introduces no new message types in this change", () => {
