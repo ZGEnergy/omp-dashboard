@@ -119,6 +119,9 @@ export interface ServerConfig {
   editor: import("@blackbelt-technology/pi-dashboard-shared/config.js").EditorConfig;
   /** OpenSpec polling config (interval, concurrency, change detection, jitter) */
   openspec?: import("@blackbelt-technology/pi-dashboard-shared/config.js").OpenSpecPollConfig;
+  /** Session behavior — hydration worker offload toggle.
+   *  See change: offload-session-events-load-to-worker. */
+  sessions?: import("@blackbelt-technology/pi-dashboard-shared/config.js").SessionsConfig;
   /** Reattach-placement policy applied when a bridge re-registers after
    *  a dashboard restart. Defaults to `"always"`.
    *  See change: reattach-move-to-front. */
@@ -491,6 +494,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         }
       },
       hydrationMetrics,
+      useLoadWorker: config.sessions?.useLoadWorker !== false,
     },
   );
 

@@ -257,6 +257,11 @@ export function handleSubscribe(
             replayPendingUiRequests(sub, msg.sessionId);
             replayUiState(sub, msg.sessionId, ctx);
           }
+        } else if (result.error === "cancelled") {
+          // The load was cancelled because the subscriber left before it
+          // resolved. Do NOT mark the session dataUnavailable or replay to a
+          // gone ws — the session is fine, the work was just abandoned.
+          // See change: offload-session-events-load-to-worker.
         } else {
           sendTo(ws, { type: "event_replay", sessionId: msg.sessionId, events: [], isLast: true });
           sessionManager.update(msg.sessionId, { dataUnavailable: true });

@@ -27,6 +27,10 @@ import {
   createOpenSpecPollWorkerPool,
   type PollWorkerPool,
 } from "./openspec-poll-worker-pool.js";
+import {
+  createSessionLoadWorkerPool,
+  type SessionLoadWorkerPool,
+} from "./session-load-worker-pool.js";
 import type {
   PollWorkerRequest,
   PollWorkerPerChangeIn,
@@ -35,7 +39,6 @@ import { DEFAULT_OPENSPEC_POLL, type OpenSpecPollConfig } from "@blackbelt-techn
 import { createSemaphore, type Semaphore } from "@blackbelt-technology/pi-dashboard-shared/semaphore.js";
 import { createOpenSpecChangeWatcher, type OpenSpecChangeWatcher } from "./openspec-change-watcher.js";
 import { discoverSessionsForCwd } from "./session-discovery.js";
-import { replayEntriesAsEvents } from "@blackbelt-technology/pi-dashboard-shared/state-replay.js";
 import { scanPiResources } from "./pi-resource-scanner.js";
 import type { HydrationMetrics } from "./hydration-metrics.js";
 import type { OpenSpecData, OpenSpecChange } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -117,6 +120,14 @@ export interface DirectoryService {
   knownDirectories(): string[];
   discoverSessions(cwd: string): DiscoveredSession[];
   loadSessionEvents(sessionId: string, sessionFile: string, knownContextWindow?: number): Promise<LoadResult>;
+  /**
+   * Cancel an in-flight hydration for `sessionId` (e.g. on unsubscribe before
+   * it resolves). No-op when no load is in flight. The cancelled load's
+   * `loadSessionEvents` promise resolves `{success:false, error:"cancelled"}`
+   * so callers skip the insert/broadcast. See change:
+   * offload-session-events-load-to-worker.
+   */
+  cancelLoad(sessionId: string): void;
   getOpenSpecData(cwd: string): OpenSpecData | undefined;
   /** Force refresh: bypasses the mtime gate. Still honors the semaphore. */
   refreshOpenSpec(cwd: string): Promise<OpenSpecData>;
@@ -221,6 +232,12 @@ export interface DirectoryServiceOptions {
    * read by `/api/health`. See change: instrument-session-hydration-timing.
    */
   hydrationMetrics?: HydrationMetrics;
+  /**
+   * When `false`, session-event hydration runs in-process (no worker spawn).
+   * Default `true`. Mirrors `DashboardConfig.sessions.useLoadWorker`. See
+   * change: offload-session-events-load-to-worker.
+   */
+  useLoadWorker?: boolean;
 }
 
 export function createDirectoryService(
@@ -280,6 +297,23 @@ export function createDirectoryService(
   // In-progress session loads for dedup
   const loadingSet = new Set<string>();
 
+  // Lazy session-load worker pool. Constructed on first `loadSessionEvents`;
+  // disposed on `stopPolling`. `useLoadWorker === false` → in-process-only
+  // pool (no thread spawn). Maps sessionId → in-flight jobId so `cancelLoad`
+  // can drop a wasted hydration. See change: offload-session-events-load-to-worker.
+  let loadWorkerPool: SessionLoadWorkerPool | null = null;
+  const useLoadWorker = options.useLoadWorker !== false;
+  const inFlightLoadJobs = new Map<string, number>();
+  function ensureLoadWorkerPool(): SessionLoadWorkerPool {
+    if (loadWorkerPool) return loadWorkerPool;
+    const cpuCount = os.cpus().length || 1;
+    loadWorkerPool = createSessionLoadWorkerPool({
+      size: Math.max(1, Math.min(cfg.maxConcurrentSpawns, cpuCount)),
+      useWorker: useLoadWorker,
+    });
+    return loadWorkerPool;
+  }
+
   function computeKnownDirectories(): string[] {
     const dirs = new Set<string>();
     for (const dir of preferencesStore.getPinnedDirectories()) dirs.add(dir);
@@ -313,21 +347,22 @@ export function createDirectoryService(
     }
     let entryCount = 0;
     let eventCount = 0;
+    // Parse + replay run in a worker_threads worker (off the main loop) when
+    // `useLoadWorker` is on; the pool falls back in-process on
+    // spawn/crash/timeout. `cancelLoad(sessionId)` drops the job via this
+    // jobId. See change: offload-session-events-load-to-worker.
+    const pool = ensureLoadWorkerPool();
+    const { jobId, result } = pool.load({ sessionId, sessionFile, knownContextWindow });
+    inFlightLoadJobs.set(sessionId, jobId);
     try {
-      const { loadSessionEntries } = await import("./session-file-reader.js");
-      const entries = loadSessionEntries(sessionFile);
-      entryCount = entries.length;
-      // Pass persisted contextWindow so replay's stats_update events use the
-      // real value instead of inferContextWindow(modelId)'s 200k Claude default.
-      const eventMessages = replayEntriesAsEvents(sessionId, entries, knownContextWindow);
-      const events = eventMessages.map((m) => m.event);
-      eventCount = events.length;
-      return { success: true, events };
-    } catch (err: any) {
-      const error = err?.code === "ENOENT" ? "file_not_found" : (err?.message ?? "parse_error");
-      return { success: false, events: [], error };
+      const out = await result;
+      entryCount = out.entryCount ?? 0;
+      eventCount = out.events.length;
+      if (out.success) return { success: true, events: out.events };
+      return { success: false, events: [], error: out.error };
     } finally {
       loadingSet.delete(sessionId);
+      inFlightLoadJobs.delete(sessionId);
       // Instrumentation must never change the load outcome — isolate any
       // recorder/logging throw so it can't reject a successful LoadResult.
       try {
@@ -340,6 +375,11 @@ export function createDirectoryService(
         // swallow — measurement-only path
       }
     }
+  }
+
+  function cancelLoad(sessionId: string): void {
+    const jobId = inFlightLoadJobs.get(sessionId);
+    if (jobId !== undefined) loadWorkerPool?.cancel(jobId);
   }
 
   // ── Core gated poll ──────────────────────────────────────────────
@@ -826,6 +866,7 @@ export function createDirectoryService(
     knownDirectories: computeKnownDirectories,
     discoverSessions,
     loadSessionEvents,
+    cancelLoad,
 
     getOpenSpecData(cwd: string): OpenSpecData | undefined {
       return caches.get(cwd)?.data;
@@ -862,6 +903,13 @@ export function createDirectoryService(
         const p = workerPool;
         workerPool = null;
         void p.dispose().catch(() => { /* ignore shutdown errors */ });
+      }
+      // Terminate the session-load worker pool too (respawns lazily if polling
+      // restarts). See change: offload-session-events-load-to-worker.
+      if (loadWorkerPool) {
+        const lp = loadWorkerPool;
+        loadWorkerPool = null;
+        void lp.dispose().catch(() => { /* ignore shutdown errors */ });
       }
     },
 

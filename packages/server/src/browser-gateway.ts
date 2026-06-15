@@ -423,6 +423,14 @@ export function createBrowserGateway(
             break;
           case "unsubscribe":
             subs.delete(msg.sessionId);
+            // Cancel an in-flight hydration once the last subscriber leaves,
+            // so clicking session A then B doesn't waste A's parse+replay and
+            // deliver an event_replay to a now-unsubscribed ws. Guarded by the
+            // subscriber count so co-subscribers' loads aren't dropped.
+            // See change: offload-session-events-load-to-worker.
+            if (directoryService && getSubscribers(msg.sessionId).length === 0) {
+              directoryService.cancelLoad(msg.sessionId);
+            }
             break;
           case "send_prompt":
             await handleSendPrompt(msg, ctx);

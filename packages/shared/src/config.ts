@@ -122,6 +122,23 @@ export const DEFAULT_OPENSPEC_POLL: OpenSpecPollConfig = {
   jitterSeconds: 5,
 };
 
+export interface SessionsConfig {
+  /**
+   * When `true` (the default) session-event hydration (JSONL parse + replay)
+   * runs in a `worker_threads` worker, off the main event loop. When `false`,
+   * hydration runs in-process exactly as on the pre-worker path — a permanent
+   * escape hatch for environments where `worker_threads` is unavailable. The
+   * in-process fallback also activates automatically on worker
+   * spawn/crash/timeout regardless of this flag. See change:
+   * offload-session-events-load-to-worker.
+   */
+  useLoadWorker: boolean;
+}
+
+export const DEFAULT_SESSIONS: SessionsConfig = {
+  useLoadWorker: true,
+};
+
 export interface KeeperLogConfig {
   /**
    * When `true`, per-session keepers archive pi's stdout/stderr (including full
@@ -238,6 +255,8 @@ export interface DashboardConfig {
   editor: EditorConfig;
   /** OpenSpec background polling behavior (interval, concurrency, change detection, jitter) */
   openspec: OpenSpecPollConfig;
+  /** Session behavior — hydration worker offload toggle. */
+  sessions: SessionsConfig;
   /** Keeper log behavior — gates capture of pi stdout/stderr into keeper-<id>.log. */
   keeperLog: KeeperLogConfig;
   /**
@@ -359,6 +378,7 @@ const DEFAULTS: DashboardConfig = {
   memoryLimits: { ...DEFAULT_MEMORY_LIMITS },
   editor: { ...DEFAULT_EDITOR_CONFIG },
   openspec: { ...DEFAULT_OPENSPEC_POLL },
+  sessions: { ...DEFAULT_SESSIONS },
   keeperLog: { ...DEFAULT_KEEPER_LOG },
   trustedNetworks: [],
   resolvedTrustedNetworks: [],
@@ -455,6 +475,14 @@ function clampNumber(raw: any, fallback: number, min: number, max: number): numb
   if (n < min) return min;
   if (n > max) return max;
   return n;
+}
+
+function parseSessionsConfig(raw: any): SessionsConfig {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_SESSIONS };
+  return {
+    useLoadWorker:
+      typeof raw.useLoadWorker === "boolean" ? raw.useLoadWorker : DEFAULT_SESSIONS.useLoadWorker,
+  };
 }
 
 function parseOpenSpecPollConfig(raw: any): OpenSpecPollConfig {
@@ -655,6 +683,7 @@ export function loadConfig(): DashboardConfig {
       memoryLimits: parseMemoryLimits(parsed.memoryLimits),
       editor: parseEditorConfig(parsed.editor),
       openspec: parseOpenSpecPollConfig(parsed.openspec),
+      sessions: parseSessionsConfig(parsed.sessions),
       keeperLog: parseKeeperLogConfig(parsed.keeperLog),
       trustedNetworks: parseTrustedNetworks(parsed.trustedNetworks),
       resolvedTrustedNetworks: [],
