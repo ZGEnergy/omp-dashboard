@@ -123,7 +123,7 @@ When `run.type === "agent"`, the server SHALL spawn a DETACHED headless pi proce
 
 ### Requirement: First-use trust (TOFU) gates hook execution
 
-Before running a hook for a checkout, the server SHALL require trust keyed by `repoRoot + sha256(canonical(worktreeInit))`. `isTrusted(repoRoot, hash)` SHALL be false until `recordTrust(repoRoot, hash)` is called. A run request for an untrusted hook SHALL NOT execute; it SHALL return an `init_untrusted` response carrying the hook definition so the client can prompt for confirmation. Editing any part of `worktreeInit` changes the hash and SHALL require re-confirmation.
+Before running a hook for a checkout, the server SHALL require trust keyed by `repoRoot + sha256(canonical(worktreeInit))`. `isTrusted(repoRoot, hash)` SHALL be false until `recordTrust(repoRoot, hash)` is called. A run request for an untrusted hook SHALL NOT execute; it SHALL return an `init_untrusted` response carrying the hook definition so the client can prompt for confirmation. Editing any part of `worktreeInit` changes the hash and SHALL require re-confirmation. This trust gate SHALL apply identically whether the run is triggered manually (via `WorktreeInitButton`) or automatically (via the `autoInitWorktreeOnSpawn` preference); no caller may cause an untrusted hook to run without an explicit user trust grant.
 
 #### Scenario: Untrusted hook blocks run
 
@@ -141,3 +141,9 @@ Before running a hook for a checkout, the server SHALL require trust keyed by `r
 - **WHEN** the `worktreeInit` definition changes (gate, command, prompt, or model)
 - **THEN** the computed hash SHALL differ
 - **AND** `isTrusted` SHALL return false until trust is recorded for the new hash
+
+#### Scenario: Auto-trigger cannot bypass trust
+
+- **WHEN** the `autoInitWorktreeOnSpawn` preference is ON and a spawned checkout's hook is untrusted
+- **THEN** the auto-trigger SHALL NOT call the init endpoint with any forged or implied trust
+- **AND** initialization SHALL only proceed via the manual, user-confirmed path

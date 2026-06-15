@@ -77,6 +77,7 @@ import { registerEditorRoutes } from "./routes/editor-routes.js";
 import { registerKnownServersRoutes } from "./routes/known-servers-routes.js";
 import { registerPluginConfigRoutes } from "./routes/plugin-config-routes.js";
 import { registerPreferencesDisplayRoutes } from "./routes/preferences-display-routes.js";
+import { registerPreferencesWorktreeInitRoutes } from "./routes/preferences-worktree-init-routes.js";
 import { registerPluginActivationRoutes } from "./routes/plugin-activation-routes.js";
 import { createModelProxyAuthGate } from "./model-proxy/auth-gate.js";
 import { registerModelProxyRoutes } from "./routes/model-proxy-routes.js";
@@ -913,6 +914,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     networkGuard,
     broadcast: (msg) => browserGateway.broadcastToAll(msg),
   });
+  // Opt-in worktree auto-init-on-spawn preference (auto-init-worktree-on-spawn).
+  registerPreferencesWorktreeInitRoutes(fastify, { preferencesStore, networkGuard });
   registerPluginActivationRoutes(fastify, {
     networkGuard,
     broadcast: (msg) => browserGateway.broadcast(msg),

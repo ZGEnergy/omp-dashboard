@@ -6,6 +6,7 @@ import { DISPLAY_PRESETS, type DisplayPrefs } from "@blackbelt-technology/pi-das
 import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiContentSave, mdiAlert, mdiPlus, mdiDelete, mdiRestart, mdiUpdate, mdiCheckCircle, mdiCloseCircle, mdiPlay, mdiLoading, mdiCog, mdiServer, mdiViewDashboard, mdiWeb, mdiLock, mdiKey, mdiPackageVariant, mdiPuzzle, mdiClipboardText, mdiWrench } from "@mdi/js";
 import { testProvider, type TestProviderResult } from "../lib/providers-api.js";
+import { fetchAutoInitWorktreePref, setAutoInitWorktreePref } from "../lib/git-api.js";
 import { useLocation, useRoute } from "wouter";
 import { SettingsSectionSlot } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { VALID_SETTINGS_TABS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
@@ -810,6 +811,12 @@ export function SettingsPanel({ availableModels, onMessage }: {
                       {i18nT("auto.ui_preference_only_hides_the_folder", undefined, "UI preference only. Hides the folder")} <code>+Worktree</code> {i18nT("auto.button_and_the_per_change", undefined, "button and the per-change")} <code>⥂2+</code> {i18nT("auto.button_on_openspec_rows_the", undefined, "button on OpenSpec rows. The")} <code>/api/git/worktree*</code> {i18nT("auto.rest_endpoints_stay_reachable_for_tooling", undefined, "REST endpoints stay reachable for tooling. Default on.")}
                     </p>
                   </div>
+                  <div>
+                    <WorktreeAutoInitToggle />
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      {i18nT("auto.after_spawning_a_worktree_auto_run", undefined, "After spawning a worktree, automatically run its declared")} <code>worktreeInit</code> {i18nT("auto.hook_only_when_already_trusted", undefined, "hook — only when the hook is already trusted. Untrusted hooks still require a manual Initialize click to grant trust. Default off.")}
+                    </p>
+                  </div>
                   {/* Windows-only: bundled-vs-host git & bash. Hidden on
                       macOS/Linux (gitSourceReadout null). See change:
                       embed-git-bash-on-windows. */}
@@ -1151,6 +1158,29 @@ function DebugToolsToggle() {
       label={t("settings.showDebugEvents", undefined, "Show debug events (raw events, flow:list-flows, resources_discover)")}
       value={visible}
       onChange={setVisible}
+    />
+  );
+}
+
+// ── Worktree auto-init toggle (auto-init-worktree-on-spawn) ───────────────
+// Self-contained: reads the preference on mount, PATCHes immediately on
+// toggle (decoupled from the config Save button). Fail-safe to OFF.
+function WorktreeAutoInitToggle() {
+  const [value, setValue] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void fetchAutoInitWorktreePref().then((v) => { if (alive) setValue(v); });
+    return () => { alive = false; };
+  }, []);
+  const onChange = useCallback((next: boolean) => {
+    setValue(next); // optimistic
+    void setAutoInitWorktreePref(next).then((persisted) => setValue(persisted)).catch(() => setValue(!next));
+  }, []);
+  return (
+    <ToggleField
+      label={i18nT("auto.initialize_on_worktree", undefined, "Initialize on worktree")}
+      value={value}
+      onChange={onChange}
     />
   );
 }

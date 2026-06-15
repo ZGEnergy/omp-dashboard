@@ -45,6 +45,7 @@ import { openEditor } from "../lib/editor-api.js";
 import { Toast, useToast } from "./Toast.js";
 import { BranchSwitchDialog } from "./BranchSwitchDialog.js";
 import { WorktreeSpawnDialog } from "./WorktreeSpawnDialog.js";
+import { maybeAutoInitWorktreeOnSpawn } from "../lib/auto-init-worktree.js";
 import { truncatePathMiddle } from "../lib/truncate-path.js";
 import { selectedCardScrollFingerprint } from "../lib/session-list-scroll.js";
 import { TunnelButton } from "./TunnelButton.js";
@@ -1120,6 +1121,8 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             const placeholderCwd = worktreeDialogCwd;
             setWorktreeDialogCwd(null);
             onSpawnSession?.(path, opts?.attachProposal, { ...opts, placeholderCwd });
+            // Opt-in trusted-only worktree auto-init. See change: auto-init-worktree-on-spawn.
+            void maybeAutoInitWorktreeOnSpawn(path);
           }}
         />
       )}
@@ -1135,6 +1138,8 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             const placeholderCwd = worktreeForChange.cwd;
             setWorktreeForChange(null);
             onSpawnSession?.(path, opts?.attachProposal, { ...opts, placeholderCwd });
+            // Opt-in trusted-only worktree auto-init. See change: auto-init-worktree-on-spawn.
+            void maybeAutoInitWorktreeOnSpawn(path);
           }}
         />
       )}

@@ -46,6 +46,13 @@ interface PreferencesData {
    * See change: add-openspec-profile-settings.
    */
   openspecUpdateSignatures?: Record<string, string>;
+  /**
+   * Opt-in: after a successful worktree spawn, auto-run the trusted
+   * `worktreeInit` hook (no manual Initialize click). Absent/legacy files →
+   * `false`. Untrusted hooks never auto-run regardless of this flag.
+   * See change: auto-init-worktree-on-spawn.
+   */
+  autoInitWorktreeOnSpawn?: boolean;
 }
 
 export interface PreferencesStore {
@@ -104,6 +111,11 @@ export interface PreferencesStore {
   getOpenSpecUpdateSignature(cwd: string): string | undefined;
   /** Records the workflow-set signature for `cwd` (after a dashboard-run update). */
   setOpenSpecUpdateSignature(cwd: string, signature: string): void;
+  // ── auto-init-worktree-on-spawn ────────────────────────────
+  /** Returns the opt-in auto-init-on-spawn flag. Absent → `false`. */
+  getAutoInitWorktreeOnSpawn(): boolean;
+  /** Persists the opt-in auto-init-on-spawn flag. */
+  setAutoInitWorktreeOnSpawn(value: boolean): void;
   flush(): void;
   dispose(): void;
 }
@@ -168,6 +180,8 @@ export function createPreferencesStore(filePath: string = PREFERENCES_FILE): Pre
   let workspaces: Workspace[] = rawWorkspaces.map(normalizeWorkspaceOnLoad);
   let displayPrefs: DisplayPrefs | undefined = data.displayPrefs;
   let openspecUpdateSignatures: Record<string, string> = data.openspecUpdateSignatures ?? {};
+  // Opt-in auto-init flag. Absent/non-boolean → false (today's behavior).
+  let autoInitWorktreeOnSpawn: boolean = data.autoInitWorktreeOnSpawn === true;
   // Favorite model labels — deduped, insertion-ordered. Default [] for legacy files.
   let favoriteModels: string[] = dedupePreserveOrder(
     Array.isArray(data.favoriteModels) ? data.favoriteModels.filter((l) => typeof l === "string") : [],
@@ -191,7 +205,7 @@ export function createPreferencesStore(filePath: string = PREFERENCES_FILE): Pre
       debounceTimer = null;
       if (dirty) {
         dirty = false;
-        writeJsonFile(filePath, { sessionOrder, pinnedDirectories, favoriteModels, workspaces, displayPrefs, openspecUpdateSignatures } satisfies PreferencesData);
+        writeJsonFile(filePath, { sessionOrder, pinnedDirectories, favoriteModels, workspaces, displayPrefs, openspecUpdateSignatures, autoInitWorktreeOnSpawn } satisfies PreferencesData);
       }
     }, DEBOUNCE_MS);
   }
@@ -203,7 +217,7 @@ export function createPreferencesStore(filePath: string = PREFERENCES_FILE): Pre
     }
     if (dirty) {
       dirty = false;
-      writeJsonFile(filePath, { sessionOrder, pinnedDirectories, favoriteModels, workspaces, displayPrefs, openspecUpdateSignatures } satisfies PreferencesData);
+      writeJsonFile(filePath, { sessionOrder, pinnedDirectories, favoriteModels, workspaces, displayPrefs, openspecUpdateSignatures, autoInitWorktreeOnSpawn } satisfies PreferencesData);
     }
   }
 
@@ -375,6 +389,17 @@ export function createPreferencesStore(filePath: string = PREFERENCES_FILE): Pre
     setOpenSpecUpdateSignature(cwd: string, signature: string): void {
       if (openspecUpdateSignatures[cwd] === signature) return;
       openspecUpdateSignatures = { ...openspecUpdateSignatures, [cwd]: signature };
+      scheduleSave();
+    },
+
+    getAutoInitWorktreeOnSpawn(): boolean {
+      return autoInitWorktreeOnSpawn;
+    },
+
+    setAutoInitWorktreeOnSpawn(value: boolean): void {
+      const next = value === true;
+      if (autoInitWorktreeOnSpawn === next) return;
+      autoInitWorktreeOnSpawn = next;
       scheduleSave();
     },
 

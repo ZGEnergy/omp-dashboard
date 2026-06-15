@@ -50,6 +50,8 @@ function makePrefs(): PreferencesStore {
     flush: () => {},
     getDisplayPrefs: () => undefined,
     getOpenSpecUpdateSignature: () => undefined,
+    getAutoInitWorktreeOnSpawn: () => false,
+    setAutoInitWorktreeOnSpawn: () => {},
     setOpenSpecUpdateSignature: () => {},
     setDisplayPrefs: (p: any) => p,
     dispose: () => {},

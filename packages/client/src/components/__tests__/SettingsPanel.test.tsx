@@ -1,6 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import { SettingsPanel } from "../SettingsPanel.js";
+
+// Worktree auto-init preference is fetched/persisted through git-api, not
+// /api/config. Mock those so the Sessions-tab toggle drives them.
+// See change: auto-init-worktree-on-spawn.
+const { fetchAutoInitWorktreePref, setAutoInitWorktreePref } = vi.hoisted(() => ({
+  fetchAutoInitWorktreePref: vi.fn(),
+  setAutoInitWorktreePref: vi.fn(),
+}));
+vi.mock("../../lib/git-api.js", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/git-api.js")>("../../lib/git-api.js");
+  return { ...actual, fetchAutoInitWorktreePref, setAutoInitWorktreePref };
+});
 
 // Dual-URL routing is exercised against real wouter + jsdom history (no mock)
 // so route-param / ?tab= resolution and the replace-redirects run for real.
@@ -59,6 +71,10 @@ function gotoPage(name: string) {
 describe("SettingsPanel", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    // Safe defaults so the Sessions-tab WorktreeAutoInitToggle never throws
+    // when other tests navigate there.
+    fetchAutoInitWorktreePref.mockResolvedValue(false);
+    setAutoInitWorktreePref.mockResolvedValue(true);
     setPath("/settings/general");
   });
 
@@ -419,5 +435,20 @@ describe("SettingsPanel", () => {
       expect(screen.getByText("No changes to save")).toBeTruthy();
     });
     expect(putCalled).toBe(false);
+  });
+
+  it("toggling 'Initialize on worktree' PATCHes the preference", async () => {
+    global.fetch = mockFetchConfig();
+    setPath("/settings/sessions");
+
+    render(<SettingsPanel />);
+    await waitFor(() => screen.getByText("Initialize on worktree"));
+
+    const row = screen.getByText("Initialize on worktree").closest("div")!;
+    fireEvent.click(within(row).getByRole("button"));
+
+    await waitFor(() => {
+      expect(setAutoInitWorktreePref).toHaveBeenCalledWith(true);
+    });
   });
 });

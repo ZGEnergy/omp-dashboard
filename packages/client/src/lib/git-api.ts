@@ -192,6 +192,34 @@ export async function fetchWorktreeInitStatus(cwd: string): Promise<WorktreeInit
   }
 }
 
+/**
+ * GET /api/preferences/worktree-auto-init. Fail-safe: returns `false` on any
+ * error so a probe failure never silently auto-runs a hook.
+ * See change: auto-init-worktree-on-spawn.
+ */
+export async function fetchAutoInitWorktreePref(): Promise<boolean> {
+  try {
+    const res = await fetch(`${getApiBase()}/api/preferences/worktree-auto-init`);
+    if (!res.ok) return false;
+    const json = await res.json();
+    return json?.autoInitWorktreeOnSpawn === true;
+  } catch {
+    return false;
+  }
+}
+
+/** PATCH /api/preferences/worktree-auto-init. Returns the persisted value. */
+export async function setAutoInitWorktreePref(value: boolean): Promise<boolean> {
+  const res = await fetch(`${getApiBase()}/api/preferences/worktree-auto-init`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) throw new Error("failed to update worktree auto-init preference");
+  const json = await res.json();
+  return json?.autoInitWorktreeOnSpawn === true;
+}
+
 export interface WorktreeInitRanOk {
   ok: true;
   ran: boolean;

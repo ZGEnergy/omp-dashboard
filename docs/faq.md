@@ -2236,3 +2236,18 @@ Installer embeds dugite-native (git 2.53.0 + sh) so agent works out of box. ~110
 Cross-refs:
 - packages/electron/scripts/download-git-windows.mjs
 - packages/shared/src/platform/ensure-bundled-git.ts
+
+## How do I auto-initialize worktrees on spawn?
+
+Enable Settings → Sessions → "Initialize on worktree". Default off.
+
+After worktree spawn, trusted `worktreeInit` hook auto-runs.
+
+Untrusted hook → no auto-run. Use manual Initialize button (grants TOFU trust first).
+
+Pref stored in `preferences.json` key `autoInitWorktreeOnSpawn`.
+
+Cross-refs:
+- packages/client/src/lib/auto-init-worktree.ts
+- packages/client/src/components/SettingsPanel.tsx
+- packages/server/src/routes/preferences-worktree-init-routes.ts

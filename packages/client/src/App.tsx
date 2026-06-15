@@ -25,6 +25,7 @@ import { SpecsBrowserView } from "./components/SpecsBrowserView.js";
 import { ArchiveBrowserView } from "./components/ArchiveBrowserView.js";
 import { OpenSpecBoardView } from "./components/OpenSpecBoardView.js";
 import { WorktreeSpawnDialog } from "./components/WorktreeSpawnDialog.js";
+import { maybeAutoInitWorktreeOnSpawn } from "./lib/auto-init-worktree.js";
 import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
 import type { OpenSpecArtifact } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { SessionHeader } from "./components/SessionHeader.js";
@@ -1956,6 +1957,8 @@ export default function App() {
             const placeholderCwd = boardWorktreeForChange.cwd;
             setBoardWorktreeForChange(null);
             handleSpawnSession(path, opts?.attachProposal, { ...opts, placeholderCwd });
+            // Opt-in trusted-only worktree auto-init. See change: auto-init-worktree-on-spawn.
+            void maybeAutoInitWorktreeOnSpawn(path);
           }}
         />
       )}

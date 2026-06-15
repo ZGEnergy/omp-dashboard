@@ -96,6 +96,37 @@ describe("preferences-store", () => {
     store.dispose();
   });
 
+  // ── auto-init-worktree-on-spawn ─────────────────────────────────────────
+
+  it("defaults autoInitWorktreeOnSpawn to false when key absent", () => {
+    const store = createPreferencesStore(filePath);
+    expect(store.getAutoInitWorktreeOnSpawn()).toBe(false);
+    store.dispose();
+  });
+
+  it("reads autoInitWorktreeOnSpawn from an existing file", () => {
+    fs.writeFileSync(filePath, JSON.stringify({ autoInitWorktreeOnSpawn: true }));
+    const store = createPreferencesStore(filePath);
+    expect(store.getAutoInitWorktreeOnSpawn()).toBe(true);
+    store.dispose();
+  });
+
+  it("persists autoInitWorktreeOnSpawn to preferences.json", () => {
+    const store = createPreferencesStore(filePath);
+    store.setAutoInitWorktreeOnSpawn(true);
+    store.flush();
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    expect(data.autoInitWorktreeOnSpawn).toBe(true);
+    store.dispose();
+  });
+
+  it("setAutoInitWorktreeOnSpawn(false) is a no-op when already false (no write)", () => {
+    const store = createPreferencesStore(filePath);
+    store.setAutoInitWorktreeOnSpawn(false);
+    expect(fs.existsSync(filePath)).toBe(false);
+    store.dispose();
+  });
+
   it("should flush pending writes", () => {
     const store = createPreferencesStore(filePath);
     store.pinDirectory("/a");
