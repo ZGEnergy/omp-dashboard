@@ -66,6 +66,7 @@ import { FileDiffView } from "./components/FileDiffView.js";
 import { createInitialState, deriveBannerState, findLastUserPrompt, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { selectInflightBashTools } from "./hooks/useInflightBashTools.js";
 import { useMessageHandler } from "./hooks/useMessageHandler.js";
+import { clearLoadingHistory } from "./lib/loading-history.js";
 import { useEditors } from "./lib/use-editors.js";
 import { useContentViews } from "./hooks/useContentViews.js";
 import { useReadmeFetch } from "./hooks/useReadmeFetch.js";
@@ -478,6 +479,11 @@ export default function App() {
   const [displayPrefsLoaded, setDisplayPrefsLoaded] = useState(false);
   const subscribedRef = useRef(new Set<string>());
   const maxSeqMapRef = useRef(new Map<string, number>());
+  // Per-session "history loading" flag: true between sending `subscribe`
+  // and the first content / terminal / failure / timeout. Drives the
+  // ChatView loading indicator. See change: show-chat-history-loading-indicator.
+  const [loadingHistory, setLoadingHistory] = useState<Map<string, boolean>>(new Map());
+  const loadingHistoryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // After overlay-url-routing: shell overlays are URL-driven via the
   // useRoute matches declared above. `previewState`, `specsBrowserCwd`,
   // `archiveBrowserCwd`, `diffViewSessionId`, and the three useContentViews
@@ -591,9 +597,27 @@ export default function App() {
     sessions: Array.from(sessions.values()).map((s) => ({ cwd: s.cwd })),
   };
 
+  // Enter LOADING for a session: set the flag and arm a 15s safety-net
+  // timer (clearing any prior timer). Called from every `subscribe` send
+  // site so cleared / refreshed chats show the spinner during replay, not
+  // the empty placeholder. See change: show-chat-history-loading-indicator.
+  const beginLoadingHistory = useCallback((id: string) => {
+    const existingTimer = loadingHistoryTimersRef.current.get(id);
+    if (existingTimer) clearTimeout(existingTimer);
+    setLoadingHistory((prev) => {
+      const next = new Map(prev);
+      next.set(id, true);
+      return next;
+    });
+    loadingHistoryTimersRef.current.set(
+      id,
+      setTimeout(() => clearLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, id), 15000),
+    );
+  }, []);
+
   const handleMessage = useMessageHandler(
-    { setSessions, setSessionStates, setSessionCommands, setFileResults, setOpenspecMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap },
-    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef },
+    { setSessions, setSessionStates, setSessionCommands, setFileResults, setOpenspecMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap, setLoadingHistory },
+    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef },
   );
 
   useEffect(() => {
@@ -738,6 +762,11 @@ export default function App() {
     if (selectedId && !subscribedRef.current.has(selectedId) && status === "connected") {
       subscribedRef.current.add(selectedId);
       send({ type: "subscribe", sessionId: selectedId, lastSeq: maxSeqMapRef.current.get(selectedId) ?? 0 });
+      // Enter LOADING. Covers warm (in-memory replay / reconnect re-subscribe)
+      // and cold (disk-load) paths uniformly, since the warm path never sends
+      // an empty `isLast:false` start marker.
+      // See change: show-chat-history-loading-indicator.
+      beginLoadingHistory(selectedId);
       // Request model list for this session if we don't have it yet (e.g. after page refresh)
       if (!modelsMap.has(selectedId)) {
         send({ type: "request_models", sessionId: selectedId });
@@ -1274,6 +1303,7 @@ export default function App() {
             subscribedRef.current.delete(selectedId);
             subscribedRef.current.add(selectedId);
             send({ type: "subscribe", sessionId: selectedId, lastSeq: 0 });
+            beginLoadingHistory(selectedId);
           },
         } : undefined}
         commands={selectedCommands}
@@ -1295,6 +1325,7 @@ export default function App() {
           subscribedRef.current.delete(selectedId);
           subscribedRef.current.add(selectedId);
           send({ type: "subscribe", sessionId: selectedId, lastSeq: 0 });
+          beginLoadingHistory(selectedId);
         }}
       />
       {/* Mobile info strip */}
@@ -1419,7 +1450,7 @@ export default function App() {
             </div>
           }>
             <SessionAssetsProvider assets={selectedSession?.assets}>
-            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} queuedTexts={queuedTextsForSelected} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} onCloseInlineTerminal={selectedId ? (tid) => handleCloseInlineTerminal(selectedId, tid) : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? []} />
+            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} queuedTexts={queuedTextsForSelected} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} onCloseInlineTerminal={selectedId ? (tid) => handleCloseInlineTerminal(selectedId, tid) : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? []} loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false} />
             </SessionAssetsProvider>
           </ErrorBoundary>
           {/* Unified status banner. Sticky above the command input — picks
