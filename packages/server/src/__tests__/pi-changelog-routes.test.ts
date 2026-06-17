@@ -130,13 +130,25 @@ describe("pi-changelog-routes", () => {
     expect(body.hasBreaking).toBe(false);
   });
 
-  it("rejects pkg outside the core whitelist with 400", async () => {
+  it("rejects a malformed package name (path traversal) with 400", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/pi-core/changelog?pkg=..%2F..%2Fetc%2Fpasswd&from=0.0.1&to=0.0.2",
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/valid npm package name/);
+  });
+
+  it("accepts any valid npm name (non-core) and returns 200 empty when no CHANGELOG", async () => {
+    // `evil-pkg` is a syntactically valid name; with no CHANGELOG located
+    // it degrades to the empty response, not a 400. See change:
+    // extend-whats-new-to-all-packages.
     const res = await app.inject({
       method: "GET",
       url: "/api/pi-core/changelog?pkg=evil-pkg&from=0.0.1&to=0.0.2",
     });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().error).toMatch(/pkg must be one of/);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().releases).toEqual([]);
   });
 
   it("returns 200 with empty releases when CHANGELOG missing", async () => {

@@ -28,6 +28,22 @@ function defaultManagedDir(): string {
 }
 
 /**
+ * Candidate global `node_modules` roots, derived from the running Node
+ * binary path. Covers globally-installed packages (npm `-g`, nvm) that
+ * are NOT dependencies of the dashboard and so are invisible to the
+ * bare-import / walk-up strategies.
+ *   - Unix/nvm: `<prefix>/bin/node` -> `<prefix>/lib/node_modules`
+ *   - Windows:  `<prefix>\node.exe` -> `<prefix>\node_modules`
+ */
+function defaultGlobalNodeModules(): string[] {
+  const binDir = path.dirname(process.execPath);
+  return [
+    path.join(binDir, "..", "lib", "node_modules"), // Unix / nvm
+    path.join(binDir, "node_modules"), // Windows
+  ];
+}
+
+/**
  * Locate a package's CHANGELOG.md on disk.
  *
  * Returns `{ changelogPath, packageDir }` so callers can read the
@@ -61,6 +77,12 @@ export interface FindOptions {
    * Tests point this at a tmp tree.
    */
   moduleUrl?: string;
+  /**
+   * Override the global node_modules roots searched by Strategy 4.
+   * Defaults to roots derived from `process.execPath`. Tests point
+   * this at a tmp tree.
+   */
+  globalNodeModules?: string[];
 }
 
 export function findChangelogPath(
@@ -110,6 +132,19 @@ export function findChangelogPath(
     const parent = path.dirname(walkDir);
     if (parent === walkDir) break; // reached filesystem root
     walkDir = parent;
+  }
+
+  // Strategy 4: global node_modules (npm -g / nvm). Covers any
+  // globally-installed package that is not a dashboard dependency, so
+  // the What's-New changelog works for every installed package, not
+  // just pi core. See change: extend-whats-new-to-all-packages.
+  const globalRoots = opts.globalNodeModules ?? defaultGlobalNodeModules();
+  for (const root of globalRoots) {
+    const dir = path.join(root, pkg);
+    const cl = path.join(dir, "CHANGELOG.md");
+    if (fs.existsSync(cl)) {
+      return { changelogPath: cl, packageDir: dir };
+    }
   }
 
   return null;
@@ -193,4 +228,33 @@ function parseGitHubUrl(s: string): { org: string; repo: string } | null {
 
 function stripGitSuffix(repo: string): string {
   return repo.replace(/\.git$/i, "");
+}
+
+/**
+ * Validate that `pkg` is a syntactically valid npm package name.
+ *
+ * Pre-filesystem gate for the changelog endpoint: blocks path traversal
+ * (`..`, stray separators) while accepting ANY real package name — scoped
+ * (`@scope/name`) or unscoped (`name`) — not just a fixed core whitelist.
+ * Mirrors the npm name grammar closely enough to be a safe guard without
+ * depending on the `validate-npm-package-name` module.
+ *
+ * See change: extend-whats-new-to-all-packages.
+ */
+export function isValidNpmPackageName(pkg: unknown): pkg is string {
+  if (typeof pkg !== "string") return false;
+  const name = pkg.trim();
+  if (!name || name.length > 214) return false;
+  if (name.includes("..")) return false;
+  // Single name segment: lowercase/digit start, url-safe chars, no separators.
+  const segment = /^[a-z0-9][a-z0-9._-]*$/;
+  if (name.startsWith("@")) {
+    const slash = name.indexOf("/");
+    if (slash < 0) return false;
+    const scope = name.slice(1, slash);
+    const rest = name.slice(slash + 1);
+    if (rest.includes("/")) return false; // exactly one separator allowed
+    return segment.test(scope) && segment.test(rest);
+  }
+  return segment.test(name);
 }

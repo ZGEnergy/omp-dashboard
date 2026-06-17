@@ -21,7 +21,7 @@ import { usePiCoreVersions } from "../hooks/usePiCoreVersions.js";
 import { useLaunchSource } from "../hooks/useLaunchSource.js";
 import { useInstalledPackages } from "../hooks/useInstalledPackages.js";
 import { usePackageOperations } from "../hooks/usePackageOperations.js";
-import { PackageRow } from "./PackageRow.js";
+import { PackageRow, type PackageRowProps } from "./PackageRow.js";
 import {
 	classifySource,
 	groupInstalledPackages,
@@ -35,11 +35,29 @@ import type { NpmPackageResult } from "@blackbelt-technology/pi-dashboard-shared
 import { PackageReadmeDialog } from "./PackageReadmeDialog.js";
 import { PinDirectoryDialog } from "./PinDirectoryDialog.js";
 import { WhatsNewDialog } from "./WhatsNewDialog.js";
+import { WhatsNewPackageRow } from "./WhatsNewPackageRow.js";
 import { usePiChangelog } from "../hooks/usePiChangelog.js";
 import { useI18n } from "../lib/i18n.js";
 
 /** Single core package the breaking-change icon is wired for. v1 scope. */
-const PI_CORE_PKG = "@mariozechner/pi-coding-agent";
+const PI_CORE_PKG = "@earendil-works/pi-coding-agent";
+/** Legacy pre-rename scope, still accepted so installs on the old name keep the icon. */
+const PI_CORE_PKG_LEGACY = "@mariozechner/pi-coding-agent";
+const isPiCorePkg = (name: string): boolean =>
+	name === PI_CORE_PKG || name === PI_CORE_PKG_LEGACY;
+
+/**
+ * Extract the bare npm package name from an installed-package `source`
+ * (`npm:<name>` or `npm:<name>@<version>`). Returns null for non-npm
+ * sources (git/local) where a changelog query is not meaningful.
+ */
+function npmNameFromSource(source: string): string | null {
+	if (!source.startsWith("npm:")) return null;
+	const spec = source.slice(4);
+	const at = spec.lastIndexOf("@");
+	// at>0 strips a trailing @version while preserving a leading @scope.
+	return at > 0 ? spec.slice(0, at) : spec;
+}
 
 type ProgressMap = Map<string, { phase: "start" | "output" | "complete" | "error"; message?: string }>;
 
@@ -153,13 +171,13 @@ export function UnifiedPackagesSection() {
 	// Only fetched for pi-coding-agent when it has an update available.
 	// See change: pi-update-whats-new-panel.
 	const piPkg = useMemo(
-		() => corePackages.find((p) => p.name === PI_CORE_PKG),
+		() => corePackages.find((p) => isPiCorePkg(p.name)),
 		[corePackages],
 	);
 	const piChangelogEnabled =
 		!!piPkg && !!piPkg.updateAvailable && !!piPkg.latestVersion && piPkg.latestVersion !== piPkg.currentVersion;
 	const piChangelog = usePiChangelog(
-		PI_CORE_PKG,
+		piPkg?.name ?? PI_CORE_PKG,
 		piPkg?.currentVersion,
 		piPkg?.latestVersion ?? undefined,
 		{ enabled: piChangelogEnabled },
@@ -269,33 +287,38 @@ export function UnifiedPackagesSection() {
 		const rowError = moveState?.phase === "error"
 			? moveState.message
 			: opStatus === "error" ? opMessage : undefined;
+		const hasUpdate = updatesAvailable.has(pkg.source);
+		const changelogPkg = npmNameFromSource(pkg.source);
+		const rowProps: PackageRowProps = {
+			displayName: pkg.displayName ?? pkg.source,
+			source: pkg.source,
+			sourceType: classifySource(pkg.source),
+			isBundled: !!pkg.isBundled,
+			currentVersion: pkg.version,
+			updateAvailable: hasUpdate,
+			busy: rowBusy,
+			progress: rowProgress,
+			error: rowError,
+			canUpdate: true,
+			canUninstall: true,
+			onUpdate: () => operations.update(pkg.source),
+			onUninstall: () => operations.remove(pkg.source),
+			onViewReadme: changelogPkg
+				? () => setReadmePkg({ name: changelogPkg } as any)
+				: undefined,
+			onMove: () => setMovePickerSource(pkg.source),
+			currentScope: "global",
+			testId: `pkg-row-${pkg.source.replace(/[^a-z0-9]/gi, "-")}`,
+		};
 		return (
-			<PackageRow
+			<WhatsNewPackageRow
 				key={pkg.source}
-				displayName={pkg.displayName ?? pkg.source}
-				source={pkg.source}
-				sourceType={classifySource(pkg.source)}
-				isBundled={!!pkg.isBundled}
+				rowProps={rowProps}
+				changelogPkg={changelogPkg}
 				currentVersion={pkg.version}
-				updateAvailable={updatesAvailable.has(pkg.source)}
-				busy={rowBusy}
-				progress={rowProgress}
-				error={rowError}
-				canUpdate={true}
-				canUninstall={true}
+				enabled={hasUpdate}
+				dialogDisplayName={pkg.displayName ?? pkg.source}
 				onUpdate={() => operations.update(pkg.source)}
-				onUninstall={() => operations.remove(pkg.source)}
-				onViewReadme={
-					pkg.source.startsWith("npm:")
-						? () => {
-								const name = pkg.source.slice(4).split("@")[0];
-								setReadmePkg({ name } as any);
-							}
-						: undefined
-				}
-				onMove={() => setMovePickerSource(pkg.source)}
-				currentScope="global"
-				testId={`pkg-row-${pkg.source.replace(/[^a-z0-9]/gi, "-")}`}
 			/>
 		);
 	};
@@ -357,7 +380,7 @@ export function UnifiedPackagesSection() {
 					)}
 					<div className="space-y-1 mb-4">
 						{corePackages.map((pkg) => {
-							const isPi = pkg.name === PI_CORE_PKG;
+							const isPi = isPiCorePkg(pkg.name);
 							return (
 								<PackageRow
 									key={pkg.name}
@@ -436,7 +459,7 @@ export function UnifiedPackagesSection() {
 					displayName={piPkg.displayName}
 					latestVersion={piPkg.latestVersion ?? piChangelog.data.to}
 					onClose={() => setWhatsNewOpen(false)}
-					onUpdate={() => doCoreUpdate([PI_CORE_PKG])}
+					onUpdate={() => doCoreUpdate([piPkg?.name ?? PI_CORE_PKG])}
 				/>
 			)}
 		</div>

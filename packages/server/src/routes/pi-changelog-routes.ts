@@ -12,7 +12,7 @@ import type { FastifyInstance } from "fastify";
 import type {
   ChangelogResponse,
 } from "@blackbelt-technology/pi-dashboard-shared/changelog-types.js";
-import { CORE_PACKAGE_NAMES } from "../pi-core-checker.js";
+import { isValidNpmPackageName } from "../changelog-fs.js";
 import { parseVersion, compareVersions } from "../pi-version-skew.js";
 import {
   findChangelogPath,
@@ -55,13 +55,14 @@ export function registerPiChangelogRoutes(
       const from = (request.query.from ?? "").trim();
       const to = (request.query.to ?? "").trim();
 
-      // Validate `pkg` against the core whitelist BEFORE touching
-      // the filesystem — prevents arbitrary path reads via crafted
-      // input.
-      if (!pkg || !CORE_PACKAGE_NAMES.includes(pkg)) {
+      // Validate `pkg` as a syntactically valid npm package name BEFORE
+      // touching the filesystem — blocks path traversal (`..`, stray
+      // separators) while accepting any real package, not just a fixed
+      // core whitelist. See change: extend-whats-new-to-all-packages.
+      if (!isValidNpmPackageName(pkg)) {
         return reply.code(400).send({
           success: false,
-          error: `pkg must be one of: ${CORE_PACKAGE_NAMES.join(", ")}`,
+          error: "pkg must be a valid npm package name",
         });
       }
 

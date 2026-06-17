@@ -16,7 +16,7 @@ import {
   _resetChangelogCache,
 } from "../changelog-parser.js";
 
-const FIXTURE_PKG = "@mariozechner/pi-coding-agent";
+const FIXTURE_PKG = "@earendil-works/pi-coding-agent";
 
 describe("pi-changelog integration", () => {
   let app: FastifyInstance;
@@ -46,7 +46,7 @@ describe("pi-changelog integration", () => {
 
 ### Breaking Changes
 
-- changed default of OSC 9;4 ([#3588](https://github.com/badlogic/pi-mono/issues/3588))
+- changed default of OSC 9;4 ([#3588](https://github.com/earendil-works/pi/issues/3588))
 
 ### Fixed
 
@@ -72,7 +72,7 @@ describe("pi-changelog integration", () => {
         version: "0.70.0",
         repository: {
           type: "git",
-          url: "git+https://github.com/badlogic/pi-mono.git",
+          url: "git+https://github.com/earendil-works/pi.git",
         },
       }),
     );
@@ -106,12 +106,12 @@ describe("pi-changelog integration", () => {
     expect(body.releases.map((r: any) => r.version)).toEqual(["0.70.0", "0.69.0"]);
     expect(body.hasBreaking).toBe(true);
     expect(body.changelogUrl).toBe(
-      "https://github.com/badlogic/pi-mono/blob/main/CHANGELOG.md",
+      "https://github.com/earendil-works/pi/blob/main/CHANGELOG.md",
     );
     // Issue link extracted on the breaking bullet.
     const r070 = body.releases[0];
     expect(r070.breaking[0].issues).toEqual([
-      { num: 3588, url: "https://github.com/badlogic/pi-mono/issues/3588" },
+      { num: 3588, url: "https://github.com/earendil-works/pi/issues/3588" },
     ]);
   });
 
