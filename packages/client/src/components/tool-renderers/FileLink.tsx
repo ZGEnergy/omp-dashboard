@@ -73,10 +73,15 @@ export function FileLink({ path, line, col, absolute, context, children }: Props
         type="button"
         onClick={handleClick}
         title={title}
-        // Inline-only styling, no padding/margin/user-select so native text
-        // selection across the link boundary is preserved (D8).
+        // Not draggable + user-select:text so a click-drag that starts on or
+        // crosses the link extends the text selection (a <button> otherwise
+        // swallows the drag and excludes its label from the selection). A
+        // plain click still opens; native click-vs-drag suppression handles it.
+        draggable={false}
+        // Inline-only styling, no padding/margin so native text selection
+        // across the link boundary is preserved (D8).
         className="text-blue-400 hover:underline bg-transparent border-0 p-0 m-0 font-inherit cursor-pointer"
-        style={{ font: "inherit" }}
+        style={{ font: "inherit", userSelect: "text" }}
       >
         {children}
       </button>

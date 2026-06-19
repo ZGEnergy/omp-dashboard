@@ -108,6 +108,25 @@ describe("FileLink — click routing", () => {
     expect(await findByTestId("file-preview-overlay")).toBeTruthy();
   });
 
+  it("button is non-draggable and user-select:text so drag-select works", () => {
+    setHost("localhost");
+    const ctx: ToolContext = {
+      cwd: "/Users/me/repo",
+      editors: [{ id: "code", name: "VS Code" }],
+    };
+    const { getByRole } = renderFL(
+      <FileLink path="src/foo.ts" context={ctx}>
+        src/foo.ts
+      </FileLink>,
+    );
+    const button = getByRole("button") as HTMLButtonElement;
+    expect(button.getAttribute("draggable")).toBe("false");
+    expect(button.style.userSelect).toBe("text");
+    // A plain click still opens (calls openEditor on localhost+editor).
+    fireEvent.click(button);
+    expect(editorApi.openEditor).toHaveBeenCalled();
+  });
+
   it("title exposes resolved absolute path on hover", () => {
     setHost("localhost");
     const ctx: ToolContext = {

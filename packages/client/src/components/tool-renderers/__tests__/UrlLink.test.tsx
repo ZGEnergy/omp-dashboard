@@ -13,6 +13,12 @@ describe("UrlLink", () => {
     expect(a.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
+  it("renders the <a> as non-draggable so drag-select is not hijacked", () => {
+    const { container } = render(<UrlLink href="https://example.com/foo">https://example.com/foo</UrlLink>);
+    const a = container.querySelector("a")!;
+    expect(a.getAttribute("draggable")).toBe("false");
+  });
+
   it("renders <a> for http URL", () => {
     const { container } = render(<UrlLink href="http://x.test/path">x</UrlLink>);
     expect(container.querySelector("a")).not.toBeNull();

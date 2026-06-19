@@ -23,6 +23,9 @@ export function UrlLink({ href, children }: Props) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
+      // Not draggable so a click-drag that starts on or crosses the link
+      // extends the text selection instead of starting a native link-drag.
+      draggable={false}
       className="text-blue-400 hover:underline"
     >
       {children}
