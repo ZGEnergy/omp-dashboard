@@ -20,7 +20,7 @@ import {
   CurrentPluginLayer,
   applyPluginConfigUpdate,
 } from "@blackbelt-technology/dashboard-plugin-runtime/context";
-import { createSlotRegistry } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { createSlotRegistry, SettingsDraftProvider, type RegisteredSource } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { withUiPrimitiveProvider } from "@blackbelt-technology/dashboard-plugin-runtime/test-support";
 import type { UiModelSelectorProps } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
 import {
@@ -64,7 +64,15 @@ function makeSend(): SendCapture {
   return { messages, fn: (m: unknown) => messages.push(m) };
 }
 
-function wrap(children: React.ReactNode, send?: (m: unknown) => void) {
+function wrap(
+  children: React.ReactNode,
+  send?: (m: unknown) => void,
+  sources?: Map<string, RegisteredSource>,
+) {
+  const draft = {
+    upsert: (id: string, s: RegisteredSource) => { sources?.set(id, s); },
+    remove: (id: string) => { sources?.delete(id); },
+  };
   return withUiPrimitiveProvider(
     { "ui:model-selector": MockModelSelector },
     <PluginContextProvider
@@ -72,7 +80,9 @@ function wrap(children: React.ReactNode, send?: (m: unknown) => void) {
       sessions={[{ id: "sess-live", cwd: "/x", status: "idle" } as any]}
       send={send}
     >
-      <CurrentPluginLayer pluginId="roles">{children}</CurrentPluginLayer>
+      <SettingsDraftProvider registry={draft}>
+        <CurrentPluginLayer pluginId="roles">{children}</CurrentPluginLayer>
+      </SettingsDraftProvider>
     </PluginContextProvider>,
   );
 }
@@ -157,8 +167,6 @@ describe("BuiltInRolesSettings", () => {
     expect(send.messages).toEqual([]);
     // Dirty marker should be present on the architect pill.
     expect(getByTestId("roles-row-architect-dirty")).toBeTruthy();
-    // Save button label reflects dirty count.
-    expect(getByTestId("roles-save").textContent).toContain("Save (1)");
   });
 
   describe("inferProviderForBareId (read-time migration)", () => {
@@ -302,11 +310,12 @@ describe("BuiltInRolesSettings", () => {
       expect(send.messages).toEqual([]);
     });
 
-    it("Save dispatches one role_set per dirty role and clears pending", () => {
+    it("unified Save commit() dispatches one role_set per dirty role and clears pending", async () => {
       const send = makeSend();
+      const sources = new Map<string, RegisteredSource>();
       seedConfig(sampleConfig);
       const { getByTestId, queryByTestId } = render(
-        wrap(<BuiltInRolesSettings />, send.fn),
+        wrap(<BuiltInRolesSettings />, send.fn, sources),
       );
       // Pick architect → openai/gpt-4o
       fireEvent.click(getByTestId("roles-row-architect"));
@@ -314,9 +323,9 @@ describe("BuiltInRolesSettings", () => {
       // Pick planner → openai/gpt-4o-mini
       fireEvent.click(getByTestId("roles-row-planner"));
       fireEvent.click(getByTestId("roles-model-option-openai/gpt-4o-mini"));
-      expect(getByTestId("roles-save").textContent).toContain("Save (2)");
-      // Click Save
-      fireEvent.click(getByTestId("roles-save"));
+      expect(sources.get("plugin:roles")?.isDirty).toBe(true);
+      // The host's unified Save commits the buffered picks.
+      await act(async () => { await sources.get("plugin:roles")!.commit(); });
       // Two role_set dispatches (order is by Object.keys, which preserves
       // insertion for plain objects in modern V8 — but we don't depend
       // on it; sort both sides).
@@ -339,31 +348,28 @@ describe("BuiltInRolesSettings", () => {
       expect(queryByTestId("roles-row-planner-dirty")).toBeNull();
     });
 
-    it("Save with no dirty roles dispatches nothing and is disabled", () => {
+    it("with no dirty roles the source is clean and commit() dispatches nothing", async () => {
       const send = makeSend();
+      const sources = new Map<string, RegisteredSource>();
       seedConfig(sampleConfig);
-      const { getByTestId } = render(
-        wrap(<BuiltInRolesSettings />, send.fn),
-      );
-      const saveBtn = getByTestId("roles-save") as HTMLButtonElement;
-      expect(saveBtn.disabled).toBe(true);
-      fireEvent.click(saveBtn);
+      render(wrap(<BuiltInRolesSettings />, send.fn, sources));
+      expect(sources.get("plugin:roles")?.isDirty).toBe(false);
+      await act(async () => { await sources.get("plugin:roles")!.commit(); });
       expect(send.messages).toEqual([]);
     });
 
-    it("Reload dispatches request_roles and clears pending", () => {
+    it("reset() discards pending without dispatching", () => {
       const send = makeSend();
+      const sources = new Map<string, RegisteredSource>();
       seedConfig(sampleConfig);
       const { getByTestId, queryByTestId } = render(
-        wrap(<BuiltInRolesSettings />, send.fn),
+        wrap(<BuiltInRolesSettings />, send.fn, sources),
       );
       fireEvent.click(getByTestId("roles-row-architect"));
       fireEvent.click(getByTestId("roles-model-option-openai/gpt-4o"));
       expect(getByTestId("roles-row-architect-dirty")).toBeTruthy();
-      fireEvent.click(getByTestId("roles-reload"));
-      expect(send.messages).toEqual([
-        { type: "request_roles", sessionId: "sess-live" },
-      ]);
+      act(() => { sources.get("plugin:roles")!.reset(); });
+      expect(send.messages).toEqual([]);
       expect(queryByTestId("roles-row-architect-dirty")).toBeNull();
     });
 

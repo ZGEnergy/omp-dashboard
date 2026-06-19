@@ -9,7 +9,8 @@ Opt-in dashboard preference (`autoInitWorktreeOnSpawn`, default `false`) that au
 ### Requirement: Auto-init-on-spawn preference
 The dashboard SHALL expose a global boolean preference `autoInitWorktreeOnSpawn`,
 default `false`, persisted via the preferences store. When absent it SHALL read as
-`false`.
+`false`. The Settings-panel toggle SHALL buffer its edit into the Settings draft and
+persist only on Save; it SHALL NOT write the preference optimistically on each toggle.
 
 #### Scenario: Preference defaults off
 - **WHEN** a fresh install reads `autoInitWorktreeOnSpawn`
@@ -17,8 +18,9 @@ default `false`, persisted via the preferences store. When absent it SHALL read 
 - **AND** worktree spawn SHALL behave as today (manual Initialize button only)
 
 #### Scenario: Preference toggled in Settings
-- **WHEN** the user enables "Initialize on worktree" in Settings
+- **WHEN** the user enables "Initialize on worktree" in Settings and saves from the Save Bar
 - **THEN** the server SHALL persist `autoInitWorktreeOnSpawn = true` to `preferences.json`
+- **AND** toggling without saving SHALL NOT write the preference
 
 ### Requirement: Trusted hook auto-runs after spawn
 When `autoInitWorktreeOnSpawn` is `true`, after a successful worktree spawn the client SHALL probe init-status for the new checkout and SHALL auto-invoke the existing init flow ONLY when the hook is trusted and `needsInit` is true.

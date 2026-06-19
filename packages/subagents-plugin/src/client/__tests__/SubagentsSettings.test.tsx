@@ -8,6 +8,8 @@ import { render, screen, fireEvent, act, cleanup, waitFor } from "@testing-libra
 import React from "react";
 import {
 	createSlotRegistry,
+	SettingsDraftProvider,
+	type RegisteredSource,
 } from "@blackbelt-technology/dashboard-plugin-runtime";
 import {
 	applyPluginConfigUpdate,
@@ -16,13 +18,19 @@ import {
 } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import { SubagentsSettings } from "../SubagentsSettings.js";
 
-function renderInPluginContext() {
+function renderInPluginContext(sources?: Map<string, RegisteredSource>) {
 	const registry = createSlotRegistry();
+	const draft = {
+		upsert: (id: string, s: RegisteredSource) => { sources?.set(id, s); },
+		remove: (id: string) => { sources?.delete(id); },
+	};
 	return render(
 		<PluginContextProvider registry={registry}>
-			<CurrentPluginLayer pluginId="subagents">
-				<SubagentsSettings />
-			</CurrentPluginLayer>
+			<SettingsDraftProvider registry={draft}>
+				<CurrentPluginLayer pluginId="subagents">
+					<SubagentsSettings />
+				</CurrentPluginLayer>
+			</SettingsDraftProvider>
 		</PluginContextProvider>,
 	);
 }
@@ -79,35 +87,41 @@ describe("SubagentsSettings", () => {
 		expect(checkbox.checked).toBe(true);
 	});
 
-	it("clicking the toggle POSTs to /api/config/plugins/subagents with the new value", async () => {
+	it("buffers the toggle (no POST on click); commit() POSTs the new value", async () => {
 		const fetchMock = vi
 			.fn()
 			.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
 		global.fetch = fetchMock as unknown as typeof fetch;
 
-		renderInPluginContext();
+		const sources = new Map<string, RegisteredSource>();
+		renderInPluginContext(sources);
 		const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
 		fireEvent.click(checkbox);
 
-		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+		// Buffered — toggling does NOT autosave.
+		expect(fetchMock).not.toHaveBeenCalled();
+		await waitFor(() => expect(sources.get("plugin:subagents")?.isDirty).toBe(true));
+		await sources.get("plugin:subagents")!.commit();
 		const [url, init] = fetchMock.mock.calls[0];
 		expect(url).toBe("/api/config/plugins/subagents");
 		expect((init as RequestInit).method).toBe("POST");
 		expect(JSON.parse((init as RequestInit).body as string)).toEqual({ inheritContext: false });
 	});
 
-	it("shows error message and stays in old state on non-200", async () => {
+	it("commit() rejects on non-200 so the host keeps the source dirty", async () => {
 		const fetchMock = vi
 			.fn()
 			.mockResolvedValue(new Response("validation failed", { status: 400 }));
 		global.fetch = fetchMock as unknown as typeof fetch;
 
-		renderInPluginContext();
+		const sources = new Map<string, RegisteredSource>();
+		renderInPluginContext(sources);
 		const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
 		fireEvent.click(checkbox);
 
-		await waitFor(() => expect(screen.getByText(/Failed to save:/i)).toBeTruthy());
-		// Config did not flip — usePluginConfig still reads the seeded value
-		expect(checkbox.checked).toBe(true);
+		await waitFor(() => expect(sources.get("plugin:subagents")?.isDirty).toBe(true));
+		await expect(sources.get("plugin:subagents")!.commit()).rejects.toThrow();
+		// Draft retains the user's choice for retry.
+		expect(checkbox.checked).toBe(false);
 	});
 });

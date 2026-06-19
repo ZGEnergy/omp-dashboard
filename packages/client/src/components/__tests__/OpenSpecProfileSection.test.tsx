@@ -27,6 +27,19 @@ vi.mock("../../lib/openspec-config-api.js", () => ({
 }));
 
 import { OpenSpecProfileSection } from "../OpenSpecProfileSection.js";
+import { SettingsDraftProvider, type RegisteredSource } from "@blackbelt-technology/dashboard-plugin-runtime";
+
+// Renders the section inside a draft registry and returns the live source map
+// so tests can assert dirtiness and drive the unified-Save commit().
+function renderWithDraft(ui: React.ReactElement) {
+  const sources = new Map<string, RegisteredSource>();
+  const registry = {
+    upsert: (id: string, s: RegisteredSource) => { sources.set(id, s); },
+    remove: (id: string) => { sources.delete(id); },
+  };
+  render(<SettingsDraftProvider registry={registry}>{ui}</SettingsDraftProvider>);
+  return sources;
+}
 
 beforeEach(() => {
   api.saveOpenSpecConfig.mockClear();
@@ -109,25 +122,42 @@ describe("OpenSpecProfileSection", () => {
     expect(screen.getByTestId("workflow-multiselect").className).not.toContain("pointer-events-none");
   });
 
-  it("Save posts the selected profile + workflows", async () => {
-    render(<OpenSpecProfileSection />);
+  it("buffers the selected profile and the unified Save commit() posts it", async () => {
+    api.fetchGlobalOpenSpecConfig.mockResolvedValue({
+      profile: "core", delivery: "both",
+      workflows: ["propose", "explore", "apply", "archive"],
+    });
+    const sources = renderWithDraft(<OpenSpecProfileSection />);
+    await waitFor(() =>
+      expect(screen.getByTestId("profile-option-core").dataset.selected).toBe("true"),
+    );
     fireEvent.click(screen.getByTestId("profile-option-expanded"));
-    fireEvent.click(screen.getByTestId("save-profile-btn"));
-    await waitFor(() => expect(api.saveOpenSpecConfig).toHaveBeenCalled());
+    // Selecting a profile must NOT autosave — it buffers into the draft.
+    expect(api.saveOpenSpecConfig).not.toHaveBeenCalled();
+    await waitFor(() => expect(sources.get("openspec-profile")?.isDirty).toBe(true));
+    await sources.get("openspec-profile")!.commit();
     const [profile, workflows] = api.saveOpenSpecConfig.mock.calls[0];
     expect(profile).toBe("expanded");
     expect(workflows).toContain("verify");
     expect(workflows).toHaveLength(11);
   });
 
-  it("custom toggling chips changes the saved set", async () => {
-    render(<OpenSpecProfileSection />);
+  it("custom toggling chips buffers and commit() posts the changed set", async () => {
+    api.fetchGlobalOpenSpecConfig.mockResolvedValue({
+      profile: "core", delivery: "both",
+      workflows: ["propose", "explore", "apply", "archive"],
+    });
+    const sources = renderWithDraft(<OpenSpecProfileSection />);
+    await waitFor(() =>
+      expect(screen.getByTestId("profile-option-core").dataset.selected).toBe("true"),
+    );
     fireEvent.click(screen.getByTestId("profile-option-custom"));
     // core seed → toggle off 'apply', toggle on 'verify'
     fireEvent.click(screen.getByTestId("wf-chip-apply"));
     fireEvent.click(screen.getByTestId("wf-chip-verify"));
-    fireEvent.click(screen.getByTestId("save-profile-btn"));
-    await waitFor(() => expect(api.saveOpenSpecConfig).toHaveBeenCalled());
+    expect(api.saveOpenSpecConfig).not.toHaveBeenCalled();
+    await waitFor(() => expect(sources.get("openspec-profile")?.isDirty).toBe(true));
+    await sources.get("openspec-profile")!.commit();
     const [profile, workflows] = api.saveOpenSpecConfig.mock.calls[0];
     expect(profile).toBe("custom");
     expect(workflows).not.toContain("apply");

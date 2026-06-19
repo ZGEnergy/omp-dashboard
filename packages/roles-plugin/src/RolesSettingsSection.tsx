@@ -30,7 +30,7 @@ import {
   usePluginSend,
   useAllSessions,
 } from "@blackbelt-technology/dashboard-plugin-runtime/context";
-import { useUiPrimitive } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { useUiPrimitive, useSettingsDraftSource } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { UI_PRIMITIVE_KEYS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
 
 interface ModelInfo {
@@ -210,7 +210,7 @@ export function BuiltInRolesSettings() {
    *
    * See change: defer-role-persistence-with-save-reload (D2).
    */
-  function save() {
+  function flushPending() {
     if (!liveSessionId) return;
     for (const role of dirtyRoles) {
       const newVal = pending[role];
@@ -227,20 +227,17 @@ export function BuiltInRolesSettings() {
     setPending({});
   }
 
-  /**
-   * Discard pending edits and force the bridge to re-broadcast disk state.
-   *
-   * `request_roles` is the pre-existing "give me current roles_list"
-   * message (bridge.ts handler emits flow:role-get-all → roles_list).
-   *
-   * See change: defer-role-persistence-with-save-reload (D3).
-   */
-  function reload() {
-    setPending({});
-    if (liveSessionId) {
-      dispatch({ type: "request_roles", sessionId: liveSessionId });
-    }
-  }
+  // Buffered source: pending role picks persist via the host Settings panel's
+  // unified Save (no section-local Save/Reload toolbar). commit flushes the
+  // staged role_set dispatches; reset discards pending (revert to disk state).
+  // The rolesMap effect above still auto-reconciles inbound acks/external edits.
+  // See change: unify-settings-save-contract.
+  const commit = async () => {
+    if (!liveSessionId) throw new Error("No live pi session to apply role changes");
+    flushPending();
+  };
+  const reset = () => setPending({});
+  useSettingsDraftSource({ id: "plugin:roles", page: "general", isDirty, commit, reset });
 
   function loadPreset(name: string) {
     if (!liveSessionId) return;
@@ -264,7 +261,7 @@ export function BuiltInRolesSettings() {
     if (!liveSessionId) return;
     // "Save current as preset" snapshots config.roles on the server,
     // so unsaved edits must be flushed first to be captured. See D8.
-    if (isDirty) save();
+    if (isDirty) flushPending();
     dispatch({
       type: "role_preset_save",
       sessionId: liveSessionId,
@@ -393,36 +390,6 @@ export function BuiltInRolesSettings() {
                 Unsaved edits will be saved first.
               </span>
             )}
-          </span>
-        )}
-      </div>
-
-      {/* Save / Reload toolbar (deferred persistence).
-          See change: defer-role-persistence-with-save-reload (D9). */}
-      <div className="flex items-center gap-2">
-        <button
-          data-testid="roles-save"
-          onClick={save}
-          disabled={!isDirty}
-          aria-disabled={!isDirty}
-          className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
-            isDirty
-              ? "bg-[var(--accent-blue)] text-white hover:bg-[var(--accent-blue-hover,var(--accent-blue))]"
-              : "bg-[var(--bg-tertiary)] text-[var(--text-muted)] cursor-not-allowed"
-          }`}
-        >
-          {isDirty ? `Save (${dirtyRoles.length})` : "Save"}
-        </button>
-        <button
-          data-testid="roles-reload"
-          onClick={reload}
-          className="px-2 py-0.5 text-[11px] rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-        >
-          Reload
-        </button>
-        {isDirty && (
-          <span className="text-[10px] text-[var(--accent-warning,#f59e0b)]">
-            {dirtyRoles.length} unsaved
           </span>
         )}
       </div>
