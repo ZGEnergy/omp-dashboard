@@ -703,7 +703,7 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
       )}
 
       {/* Body: left nav rail + page content */}
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex flex-col md:flex-row min-h-0">
         <nav
           data-testid="settings-nav-rail"
           aria-label={t("common.settings", undefined, "Settings")}

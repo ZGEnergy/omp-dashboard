@@ -16,7 +16,9 @@ The sidebar header SHALL include a gear icon button positioned at the end of the
 - **THEN** the app SHALL navigate to `/settings` and the main content area SHALL show the settings panel
 
 ### Requirement: Settings panel view
-The settings panel SHALL render as a full-page view in the main content area when the route matches `/settings/:page?`. It SHALL display a fixed header (back button, title, Restart button), a **left navigation rail** listing pages grouped by concern, and a content area for the active page. The header SHALL remain visible at all times regardless of scroll position. A single `SettingsPanel` instance SHALL remain mounted across page changes so unsaved edits on any page persist until Save. Persistence SHALL be driven by a dirty-gated **Save Bar** (see "Settings Save Bar"), not by a header Save button.
+The settings panel SHALL render as a full-page view in the main content area when the route matches `/settings/:page?`. It SHALL display a fixed header (back button, title, Restart button), a navigation listing pages grouped by concern, and a content area for the active page. The header SHALL remain visible at all times regardless of scroll position. A single `SettingsPanel` instance SHALL remain mounted across page changes so unsaved edits on any page persist until Save. Persistence SHALL be driven by a dirty-gated **Save Bar** (see "Settings Save Bar"), not by a header Save button.
+
+The navigation + content layout SHALL be responsive. The wrapper element containing the nav and the content area SHALL stack vertically on narrow (mobile) viewports and arrange side-by-side on wide (desktop, `md` breakpoint and up) viewports. On mobile the navigation SHALL render as a full-width horizontal, horizontally-scrollable tab strip positioned above the content, and the content area SHALL fill the remaining space below it with a non-zero width. On desktop the navigation SHALL render as a fixed-width vertical rail to the left of the content. At no viewport width SHALL the content area collapse to zero width or be positioned outside the visible viewport.
 
 The panel SHALL provide these pages (nav groups in brackets):
 - **General** [Dashboard]: Interface language, display preferences
@@ -58,6 +60,17 @@ The General page SHALL be the default when no page is specified. Each settings s
 #### Scenario: Settings panel back navigation
 - **WHEN** the user clicks the back button in the header and the draft is clean
 - **THEN** the app SHALL navigate away from settings to the previous view
+
+#### Scenario: Mobile layout keeps content visible
+- **WHEN** the user opens `/settings/general` at a viewport width below the `md` breakpoint (e.g. 390 px)
+- **THEN** the nav + content wrapper SHALL be laid out vertically (nav above content)
+- **AND** the navigation SHALL render as a full-width horizontal, horizontally-scrollable tab strip
+- **AND** the content area SHALL have a non-zero width and be fully within the visible viewport (form fields visible without horizontal scrolling)
+
+#### Scenario: Desktop layout unchanged
+- **WHEN** the user opens `/settings/general` at a viewport width at or above the `md` breakpoint
+- **THEN** the navigation SHALL render as a fixed-width vertical rail to the left of the content
+- **AND** the content area SHALL occupy the remaining horizontal space to the right of the rail
 
 ### Requirement: Canonical and legacy settings URLs
 The settings panel SHALL be addressable at the canonical path `/settings/:page?` and SHALL continue to honor the legacy query form `/settings?tab=<id>` indefinitely. Resolution SHALL run inside the single mounted panel in this order: (1) a valid route `:page`; (2) a valid legacy `?tab=<id>`, which SHALL trigger a history-`replace` navigation to `/settings/<id>`; (3) otherwise default to `/settings/general` via history-`replace`. The alias map `advanced → developer` and `servers → remote` SHALL be applied before validation so old links resolve to the new page homes.
