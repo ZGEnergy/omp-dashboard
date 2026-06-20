@@ -9,18 +9,21 @@ interface Props {
 }
 
 /**
- * Context channel that hands the dnd-kit drag handle props (attributes +
- * listeners) from `SortablePinnedGroup` down to the folder header. Using
- * context (instead of cloneElement) lets the wrapper accept arbitrary
- * children without traversal.
+ * Context channel handing dnd-kit drag-handle props (attributes + listeners)
+ * from `SortableWorkspace` down to `WorkspaceHeader`. Mirrors the
+ * `FolderDragHandleCtx` pattern in `SortablePinnedGroup`.
+ *
+ * See change: workspace-directory-drag-reorder.
  */
-export const FolderDragHandleCtx = React.createContext<React.HTMLAttributes<HTMLDivElement> | null>(null);
+const WorkspaceDragHandleCtx =
+  React.createContext<React.HTMLAttributes<HTMLDivElement> | null>(null);
 
-export function useFolderDragHandle() {
-  return React.useContext(FolderDragHandleCtx);
+export function useWorkspaceDragHandle() {
+  return React.useContext(WorkspaceDragHandleCtx);
 }
 
-export function SortablePinnedGroup({ id, children }: Props) {
+/** Wraps a workspace tier with dnd-kit sortable behavior + drop indicator. */
+export function SortableWorkspace({ id, children }: Props) {
   const {
     attributes,
     listeners,
@@ -30,7 +33,7 @@ export function SortablePinnedGroup({ id, children }: Props) {
     isDragging,
     isOver,
     active,
-  } = useSortable({ id, data: { type: "pinned-group" } });
+  } = useSortable({ id, data: { type: "workspace" } });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -50,11 +53,13 @@ export function SortablePinnedGroup({ id, children }: Props) {
     <div
       ref={setNodeRef}
       style={style}
-      className={indicator.className}
+      className={`rounded-lg ${indicator.className}`}
       data-over={indicator["data-over"]}
-      data-testid="sortable-pinned-group"
+      data-testid="sortable-workspace"
     >
-      <FolderDragHandleCtx.Provider value={dragHandleProps}>{children}</FolderDragHandleCtx.Provider>
+      <WorkspaceDragHandleCtx.Provider value={dragHandleProps}>
+        {children}
+      </WorkspaceDragHandleCtx.Provider>
     </div>
   );
 }

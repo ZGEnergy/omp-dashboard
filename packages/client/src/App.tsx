@@ -1169,6 +1169,8 @@ export default function App() {
         setPinnedDirectories(paths);
         send({ type: "reorder_pinned_dirs", paths });
       }}
+      onReorderWorkspaces={(ids) => send({ type: "reorder_workspaces", ids })}
+      onReorderWorkspaceFolders={(id, paths) => send({ type: "reorder_workspace_folders", id, paths })}
       // folder-workspaces — optimistic UI is intentionally omitted: server
       // is the single source of truth and broadcasts `workspaces_updated`
       // for every mutation, so we just dispatch and let the broadcast

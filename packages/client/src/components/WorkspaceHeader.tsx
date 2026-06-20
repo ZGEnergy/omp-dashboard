@@ -18,8 +18,10 @@ import {
   mdiChevronDown,
   mdiChevronRight,
   mdiDotsVertical,
+  mdiDrag,
 } from "@mdi/js";
 import { InlineRenameInput } from "./InlineRenameInput.js";
+import { useWorkspaceDragHandle } from "./SortableWorkspace.js";
 import { t as i18nT } from "../lib/i18n";
 
 interface Props {
@@ -45,6 +47,7 @@ export function WorkspaceHeader({
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const dragHandleProps = useWorkspaceDragHandle();
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Close menu on outside click / Escape.
@@ -92,6 +95,17 @@ export function WorkspaceHeader({
       className="flex items-center gap-1.5 px-2 py-1.5 bg-[var(--bg-tertiary)] rounded-t-lg select-none"
       data-testid={`workspace-header-${id}`}
     >
+      {dragHandleProps && (
+        <div
+          {...dragHandleProps}
+          className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] shrink-0 cursor-grab active:cursor-grabbing"
+          title="Drag to reorder workspace"
+          data-testid={`workspace-drag-handle-${id}`}
+          aria-label="Drag to reorder workspace"
+        >
+          <Icon path={mdiDrag} size={0.6} />
+        </div>
+      )}
       <button
         onClick={onToggleCollapsed}
         className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] shrink-0"

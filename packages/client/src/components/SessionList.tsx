@@ -9,10 +9,13 @@ import { FolderActionBar } from "./FolderActionBar.js";
 import { FolderSpawnButtons } from "./FolderSpawnButtons.js";
 import { DashboardSpawnButtons } from "./DashboardSpawnButtons.js";
 import { encodeFolderPath } from "../lib/folder-encoding.js";
-import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { DndContext, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { SortableSessionCard } from "./SortableSessionCard.js";
 import { SortablePinnedGroup, useFolderDragHandle } from "./SortablePinnedGroup.js";
+import { SortableWorkspace } from "./SortableWorkspace.js";
+import { SortableWorkspaceFolder } from "./SortableWorkspaceFolder.js";
+import { sameTypeClosestCenter, resolveWorkspaceReorder, resolveWorkspaceFolderReorder } from "../lib/sidebar-dnd.js";
 import type { DashboardSession, OpenSpecData, OpenSpecGroup, CommandInfo, ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import {
@@ -112,6 +115,10 @@ interface Props {
   onUnpinDirectory?: (dirPath: string) => void;
   onReorderPinnedDirs?: (paths: string[]) => void;
   // ── folder-workspaces ──────────────────────────────────
+  /** Reorder workspace containers. Sends `reorder_workspaces`. */
+  onReorderWorkspaces?: (ids: string[]) => void;
+  /** Reorder folders within one workspace. Sends `reorder_workspace_folders`. */
+  onReorderWorkspaceFolders?: (id: string, paths: string[]) => void;
   workspaces?: import("@blackbelt-technology/pi-dashboard-shared/browser-protocol.js").Workspace[];
   onCreateWorkspace?: (name: string) => void;
   onRenameWorkspace?: (id: string, name: string) => void;
@@ -199,7 +206,7 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, openspecGroupsMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onReplaceProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onResumeKeepPosition, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, addSpawningCwd, clearSpawningCwd, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onOpenPinDialog, onUnpinDirectory, onReorderPinnedDirs, workspaces, onCreateWorkspace, onRenameWorkspace, onDeleteWorkspace, onSetWorkspaceCollapsed, onAddFolderToWorkspace, onRemoveFolderFromWorkspace, terminals, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, onKillProcess, onSetProcessDrawer, inflightBashMap, onAbortTool, onOpenSpecs, onOpenArchive, onOpenBoard, onViewReadme, onOpenTerminals, onOpenEditor, editorStatuses, editorAvailable, headerExtra, errorSessionIds, retrySessionIds, spawnErrors, onDismissSpawnError, resumeErrors, onDismissResumeError, gitWorktreeEnabled: gitWorktreeEnabledProp }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, openspecGroupsMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onReplaceProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onResumeKeepPosition, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, addSpawningCwd, clearSpawningCwd, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onOpenPinDialog, onUnpinDirectory, onReorderPinnedDirs, onReorderWorkspaces, onReorderWorkspaceFolders, workspaces, onCreateWorkspace, onRenameWorkspace, onDeleteWorkspace, onSetWorkspaceCollapsed, onAddFolderToWorkspace, onRemoveFolderFromWorkspace, terminals, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, onKillProcess, onSetProcessDrawer, inflightBashMap, onAbortTool, onOpenSpecs, onOpenArchive, onOpenBoard, onViewReadme, onOpenTerminals, onOpenEditor, editorStatuses, editorAvailable, headerExtra, errorSessionIds, retrySessionIds, spawnErrors, onDismissSpawnError, resumeErrors, onDismissResumeError, gitWorktreeEnabled: gitWorktreeEnabledProp }: Props) {
   const { t } = useI18n();
   // UI preference flag, default-on. Gates folder `+Worktree` and per-change
   // `⥂2+` buttons. See change: openspec-worktree-spawn-button.
@@ -466,8 +473,26 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   );
 
+  // Drag-collapse (workspace, local-only, visual). While a workspace is
+  // dragged it renders collapsed regardless of its server-persisted state.
+  // MUST NOT emit `set_workspace_collapsed` — only the dragged workspace is
+  // affected; restore is automatic via fallback to the server value.
+  // See change: workspace-directory-drag-reorder.
+  const [forceCollapsed, setForceCollapsed] = useState<Set<string>>(() => new Set());
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    if (event.active.data.current?.type === "workspace") {
+      setForceCollapsed(new Set([event.active.id as string]));
+    }
+  }, []);
+
+  const handleDragCancel = useCallback(() => {
+    setForceCollapsed((prev) => (prev.size === 0 ? prev : new Set()));
+  }, []);
+
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
+    setForceCollapsed((prev) => (prev.size === 0 ? prev : new Set()));
     if (!over || active.id === over.id) return;
 
     const activeType = active.data.current?.type;
@@ -523,8 +548,24 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
         const newOrder = arrayMove(ids, oldIndex, newIndex);
         onReorderPinnedDirs?.(newOrder);
       }
+    } else if (activeType === "workspace") {
+      const ids = (workspaces ?? []).map((w) => w.id);
+      const newOrder = resolveWorkspaceReorder(ids, active.id as string, over.id as string);
+      if (newOrder) onReorderWorkspaces?.(newOrder);
+    } else if (activeType === "workspace-folder") {
+      const wsId = active.data.current?.wsId as string | undefined;
+      const ws = (workspaces ?? []).find((w) => w.id === wsId);
+      if (!ws) return;
+      const newOrder = resolveWorkspaceFolderReorder(
+        ws.folders,
+        active.id as string,
+        over.id as string,
+        wsId,
+        over.data.current?.wsId as string | undefined,
+      );
+      if (newOrder) onReorderWorkspaceFolders?.(wsId!, newOrder);
     }
-  }, [allGroups, pinnedGroups, onReorderSessions, onReorderPinnedDirs, onResume, onResumeKeepPosition]);
+  }, [allGroups, pinnedGroups, workspaces, onReorderSessions, onReorderPinnedDirs, onReorderWorkspaces, onReorderWorkspaceFolders, onResume, onResumeKeepPosition]);
 
   /**
    * Decide whether a folder should be visible given the active filters.
@@ -987,7 +1028,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
       {filteredSessions.length === 0 && pinnedGroups.length === 0 && (workspaces?.length ?? 0) === 0 ? (
         <div className="p-4 text-sm text-[var(--text-tertiary)]">{t("sessionList.noActiveSessions", undefined, "No active sessions")}</div>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <DndContext sensors={sensors} collisionDetection={sameTypeClosestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
         <ul className="flex flex-col gap-2 p-2">
           {/* Elevated dashboard-scope add buttons: rendered as the FIRST list
               item, above workspace tiers and pinned folder groups.
@@ -1002,51 +1043,68 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
           )}
           {/* Workspace tier (folder-workspaces): rendered ABOVE the top-level
               area when at least one workspace exists. */}
-          {workspaceTiers && workspaceTiers.workspaces.map((ws) => (
-            <li key={`ws-${ws.id}`} className="bg-[var(--bg-tertiary)] rounded-lg">
-              <WorkspaceHeader
-                id={ws.id}
-                name={ws.name}
-                collapsed={ws.collapsed}
-                folderCount={ws.folders.length}
-                onToggleCollapsed={() => onSetWorkspaceCollapsed?.(ws.id, !ws.collapsed)}
-                onRename={(name) => onRenameWorkspace?.(ws.id, name)}
-                onDelete={() => onDeleteWorkspace?.(ws.id)}
-              />
-              {!ws.collapsed && (
-                <div className="flex flex-col gap-1 p-1.5">
-                  {ws.folders.length === 0 && (
-                    <div className="text-[11px] text-[var(--text-muted)] italic px-2 py-2 text-center">
-                      {t("sessionList.emptyWorkspace", undefined, "Empty workspace. Use \"+ Add to workspace\" on a folder's actions to assign it here.")}
+          {workspaceTiers && (
+            <SortableContext items={workspaceTiers.workspaces.map((w) => w.id)} strategy={verticalListSortingStrategy}>
+              {workspaceTiers.workspaces.map((ws) => {
+                // Drag-collapse: dragged workspace renders collapsed locally
+                // (OR of forceCollapsed and the server value). Never persisted.
+                const displayCollapsed = forceCollapsed.has(ws.id) || ws.collapsed;
+                return (
+                <li key={`ws-${ws.id}`}>
+                  <SortableWorkspace id={ws.id}>
+                    <div className="bg-[var(--bg-tertiary)] rounded-lg">
+                      <WorkspaceHeader
+                        id={ws.id}
+                        name={ws.name}
+                        collapsed={displayCollapsed}
+                        folderCount={ws.folders.length}
+                        onToggleCollapsed={() => onSetWorkspaceCollapsed?.(ws.id, !ws.collapsed)}
+                        onRename={(name) => onRenameWorkspace?.(ws.id, name)}
+                        onDelete={() => onDeleteWorkspace?.(ws.id)}
+                      />
+                      {!displayCollapsed && (
+                        <div className="flex flex-col gap-1 p-1.5">
+                          {ws.folders.length === 0 && (
+                            <div className="text-[11px] text-[var(--text-muted)] italic px-2 py-2 text-center">
+                              {t("sessionList.emptyWorkspace", undefined, "Empty workspace. Use \"+ Add to workspace\" on a folder's actions to assign it here.")}
+                            </div>
+                          )}
+                          <SortableContext items={ws.folders.map((f) => f.cwd)} strategy={verticalListSortingStrategy}>
+                            {ws.folders.map((folder) => (
+                              <SortableWorkspaceFolder key={`ws-${ws.id}-f-${folder.cwd}`} id={folder.cwd} wsId={ws.id}>
+                                <div className="relative">
+                                  {renderGroup(folder, folder.pinned, true)}
+                                  {/* Quick "remove from workspace" affordance —
+                                      full menu lives on the folder action bar. */}
+                                  <button
+                                    onClick={() => onRemoveFolderFromWorkspace?.(ws.id, folder.cwd)}
+                                    className="absolute top-1 right-1 text-[10px] text-[var(--text-muted)] hover:text-red-400 px-1"
+                                    title={t("sessionList.removeFromWorkspace", undefined, "Remove from workspace")}
+                                    data-testid={`ws-remove-${ws.id}-${folder.cwd}`}
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              </SortableWorkspaceFolder>
+                            ))}
+                          </SortableContext>
+                          {/* Workspace-scope Add Folder button at the bottom of the
+                              expanded body. See change: elevate-dashboard-add-buttons. */}
+                          {onAddFolderToWorkspace && (
+                            <DashboardSpawnButtons
+                              onAddFolder={() => setPickFolderForWsId(ws.id)}
+                              addFolderTestId={`workspace-add-folder-btn-${ws.id}`}
+                            />
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {ws.folders.map((folder) => (
-                    <div key={`ws-${ws.id}-f-${folder.cwd}`} className="relative">
-                      {renderGroup(folder, folder.pinned, true)}
-                      {/* Quick "remove from workspace" affordance —
-                          full menu lives on the folder action bar. */}
-                      <button
-                        onClick={() => onRemoveFolderFromWorkspace?.(ws.id, folder.cwd)}
-                        className="absolute top-1 right-1 text-[10px] text-[var(--text-muted)] hover:text-red-400 px-1"
-                        title={t("sessionList.removeFromWorkspace", undefined, "Remove from workspace")}
-                        data-testid={`ws-remove-${ws.id}-${folder.cwd}`}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  {/* Workspace-scope Add Folder button at the bottom of the
-                      expanded body. See change: elevate-dashboard-add-buttons. */}
-                  {onAddFolderToWorkspace && (
-                    <DashboardSpawnButtons
-                      onAddFolder={() => setPickFolderForWsId(ws.id)}
-                      addFolderTestId={`workspace-add-folder-btn-${ws.id}`}
-                    />
-                  )}
-                </div>
-              )}
-            </li>
-          ))}
+                  </SortableWorkspace>
+                </li>
+                );
+              })}
+            </SortableContext>
+          )}
           {/* Pinned directory groups (filtered if workspace/session filter active).
               Workspace-owned folders are filtered out via visibleTopPinned. */}
           {visibleTopPinned.length > 0 && (
