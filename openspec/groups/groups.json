@@ -105,15 +105,22 @@
     "project-init-skill-and-profiles": "next-phase",
     "restore-pi-version-skew-surface": "sdasdasd",
     "add-release-video-pipeline": "future",
-    "fix-settings-mobile-layout": "ui"
+    "fix-settings-mobile-layout": "ui",
+    "remove-project-readme-button": "ui",
+    "fix-automation-slot-parity-and-routing": "ui",
+    "add-goals-folder-page": "ui"
   },
   "changeOrder": {
-    "__ungrouped__": [],
+    "__ungrouped__": [
+      "add-connector-layer",
+      "selectable-tool-output-links"
+    ],
     "ui": [
+      "remove-project-readme-button",
+      "fix-automation-slot-parity-and-routing",
+      "add-goals-folder-page",
       "add-end-user-docs",
       "docker-test-harness",
-      "fix-settings-mobile-layout",
-      "show-chat-history-loading-indicator",
       "restore-windows-nsis-installer"
     ],
     "next-phase": [
