@@ -15,6 +15,7 @@ import type {
   FileEntry,
   OpenSpecData,
   OpenSpecGroup,
+  GoalRecord,
   ModelInfo,
   PiSessionInfo,
   ExtensionUiModule,
@@ -163,6 +164,18 @@ export interface BrowserOpenSpecGroupsUpdateMessage {
    * See change: redesign-openspec-board.
    */
   changeOrder?: Record<string, string[]>;
+}
+
+/**
+ * Folder-scoped goals update. Broadcast after every successful mutation of
+ * the per-folder goals file (`~/.pi/dashboard/goals/<folderHash>.json`),
+ * debounced 100 ms per cwd. Full payload (no incremental delta).
+ * See change: add-goals-folder-page.
+ */
+export interface BrowserGoalsUpdateMessage {
+  type: "goals_update";
+  cwd: string;
+  goals: GoalRecord[];
 }
 
 export interface BrowserModelsListMessage {
@@ -686,6 +699,7 @@ export type ServerToBrowserMessage =
   | BrowserFilesListMessage
   | BrowserOpenSpecUpdateMessage
   | BrowserOpenSpecGroupsUpdateMessage
+  | BrowserGoalsUpdateMessage
   | BrowserModelsListMessage
   | SessionsListBrowserMessage
   | ResumeResultBrowserMessage

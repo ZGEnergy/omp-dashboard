@@ -96,6 +96,9 @@ function sessionFromMeta(
     // gitWorktree.base is the merged value, not this raw cache).
     // See change: add-worktree-spawn-dialog.
     gitWorktreeBase: meta.gitWorktreeBase,
+    // Restore goal ownership from meta so the session-card goal chip resolves
+    // its owning goal after a server restart. See change: add-goals-folder-page.
+    goalId: meta.goalId,
     // Reconstruct worktree/jj parentage from the persisted grouping subset so
     // cold-start grouping (no live bridge) collapses this session under its
     // parent repo via `resolveSessionGroupPath`, matching live-bridge grouping.

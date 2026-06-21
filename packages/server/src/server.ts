@@ -60,6 +60,10 @@ import { registerFileRoutes } from "./routes/file-routes.js";
 import { registerOpenSpecRoutes } from "./routes/openspec-routes.js";
 import { registerOpenSpecGroupRoutes } from "./routes/openspec-group-routes.js";
 import { createOpenSpecGroupStore, joinGroupIdsToOpenSpecData } from "./openspec-group-store.js";
+import { registerGoalRoutes } from "./routes/goal-routes.js";
+import { createGoalStore } from "./goal-store.js";
+import { createPendingGoalLinkRegistry } from "./pending-goal-link-registry.js";
+import { mergeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
 import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerDoctorRoutes } from "./routes/doctor-routes.js";
 import { registerProviderAuthRoutes } from "./routes/provider-auth-routes.js";
@@ -266,6 +270,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       // when a session was spawned via the dashboard's worktree dialog.
       // See change: add-worktree-spawn-dialog.
       gitWorktreeBase: session.gitWorktreeBase,
+      // Persist the owning goal id so the session-card goal chip resolves its
+      // goal after restart. MUST be listed here because this save does a full
+      // .meta.json overwrite (not a merge) — omitting it wipes the field set
+      // by event-wiring / goal routes. See change: add-goals-folder-page.
+      goalId: session.goalId,
       // Persist the grouping-relevant worktree/jj parentage so a rebooted
       // (bridge-less) scan can collapse this session under its parent repo.
       // Only the subset `resolveSessionGroupPath` needs is stored; volatile
@@ -455,6 +464,13 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // See change: add-openspec-change-grouping (task 4.2).
   const openspecGroupStore = createOpenSpecGroupStore();
 
+  // Folder-scoped goal store + pending-link registry. The store owns durable
+  // GoalRecords (objective, criteria, linked sessions); the pending registry
+  // correlates spawn-from-goal sessions to their goalId at session_register.
+  // See change: add-goals-folder-page.
+  const goalStore = createGoalStore();
+  const pendingGoalLinkRegistry = createPendingGoalLinkRegistry();
+
   // Process-local instrumentation for session hydration. The same instance is
   // shared with the directory-service (records per `loadSessionEvents`) and the
   // `/api/health` route (reads `snapshot()`). See change:
@@ -615,6 +631,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     pendingAttachRegistry,
     pendingWorktreeBaseRegistry,
     pendingAutomationRunRegistry,
+    pendingGoalLinkRegistry,
+    goalStore,
     viewedSessionTracker: browserGateway.viewedSessionTracker,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
@@ -770,6 +788,58 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     preferencesStore,
     networkGuard,
     store: openspecGroupStore,
+  });
+
+  // Folder-scoped goals: broadcast on mutation + REST surface.
+  // See change: add-goals-folder-page.
+  goalStore.subscribe((cwd, payload) => {
+    browserGateway.broadcastToAll({ type: "goals_update", cwd, goals: payload.goals });
+  });
+  // Stamp/clear goalId on a session: in-memory + .meta.json + broadcast.
+  const applyGoalIdToSession = (sessionId: string, goalId: string | null): void => {
+    const next = goalId ?? undefined;
+    sessionManager.update(sessionId, { goalId: next });
+    const session = sessionManager.get(sessionId);
+    if (session?.sessionFile) {
+      try {
+        mergeSessionMeta(session.sessionFile, { goalId: next });
+      } catch (err) {
+        console.warn(`[goal-routes] failed to persist goalId to .meta.json for ${sessionId}:`, err);
+      }
+    }
+    browserGateway.broadcastSessionUpdated(sessionId, { goalId: next });
+  };
+  registerGoalRoutes(fastify, {
+    sessionManager,
+    preferencesStore,
+    networkGuard,
+    store: goalStore,
+    applyGoalIdToSession,
+    spawnGoalSession: async (cwd, goalId, opts) => {
+      pendingGoalLinkRegistry.enqueue(cwd, goalId);
+      try {
+        const result = await spawnPiSession(cwd, {
+          strategy: "headless",
+          ...(opts?.model ? { model: opts.model } : {}),
+        });
+        if (result.process && result.pid) {
+          browserGateway.headlessPidRegistry.register(
+            result.pid,
+            cwd,
+            result.process,
+            result.spawnToken,
+            keeperOptsFromSpawnResult(result),
+          );
+        }
+        // On spawn failure, drop the goalId we just enqueued so it can't be
+        // mis-consumed by a later unrelated session in the same cwd.
+        if (!result.success) pendingGoalLinkRegistry.consume(cwd);
+        return { success: result.success, ...(result.message ? { message: result.message } : {}) };
+      } catch (err) {
+        pendingGoalLinkRegistry.consume(cwd);
+        return { success: false, message: err instanceof Error ? err.message : String(err) };
+      }
+    },
   });
   registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService, piGateway, browserGateway, hydrationMetrics, readEventLoopDelay });
   // GET /api/doctor — see change: doctor-rich-output (task 4.2). Auth-gated identically to /api/config.

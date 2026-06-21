@@ -52,6 +52,20 @@
         "component": "GoalControl"
       },
       {
+        "slot": "sidebar-folder-section",
+        "component": "FolderGoalsSection"
+      },
+      {
+        "slot": "shell-overlay-route",
+        "component": "GoalsBoardClaim",
+        "path": "/folder/:encodedCwd/goals"
+      },
+      {
+        "slot": "shell-overlay-route",
+        "component": "GoalDetailClaim",
+        "path": "/folder/:encodedCwd/goals/:goalId"
+      },
+      {
         "slot": "settings-section",
         "component": "GoalPluginSettings",
         "tab": "general"
@@ -65,7 +79,8 @@
   },
   "peerDependencies": {
     "react": ">=18.0.0",
-    "react-dom": ">=18.0.0"
+    "react-dom": ">=18.0.0",
+    "wouter": ">=3.0.0"
   },
   "dependencies": {
     "@blackbelt-technology/dashboard-plugin-runtime": "^0.5.4",
@@ -77,6 +92,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "wouter": "^3.9.0"
   }
 }

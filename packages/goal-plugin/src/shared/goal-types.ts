@@ -17,6 +17,15 @@ export interface GoalStatusSnapshot {
   status: GoalStatus;
   /** The standing objective text. */
   goal: string;
+  /**
+   * Owning dashboard `GoalRecord` id, when this session is linked to a
+   * folder-scoped goal. Optional + dashboard-assigned (the
+   * @ricoyudog/pi-goal-hermes extension does not emit it): the dashboard
+   * associates a session's live snapshot to its `GoalRecord` by `goalId`
+   * so the goals board can roll up live turns/verdict/paused per goal.
+   * See change: add-goals-folder-page.
+   */
+  goalId?: string;
   /** Continuation turns consumed so far. */
   turnsUsed: number;
   /** Turn budget (extension default 20). */

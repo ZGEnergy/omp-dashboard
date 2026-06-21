@@ -254,6 +254,13 @@ export interface DashboardSession {
    * See change: add-automation-plugin.
    */
   automationRun?: { name: string; runId: string; visibility?: "hidden" | "shown" };
+  /**
+   * Owning goal id when this session was spawned under / linked to a
+   * folder-scoped `GoalRecord`. Persisted to `.meta.json`. The session-card
+   * goal chip reads this to navigate to the owning goal's detail page.
+   * See change: add-goals-folder-page.
+   */
+  goalId?: string;
 }
 
 // ── Extension UI System (Phase 1: management-modal slot) ───────────
@@ -558,6 +565,57 @@ export interface OpenSpecChange {
  *  `<cwd>/openspec/groups/groups.json`. Bumped only on incompatible shape changes.
  *  See change: add-openspec-change-grouping. */
 export const OPENSPEC_GROUPS_SCHEMA_VERSION = 1 as const;
+
+/** Schema version for the per-folder goals file under the dashboard data dir
+ *  (`~/.pi/dashboard/goals/<folderHash>.json`). Bumped only on incompatible
+ *  shape changes. See change: add-goals-folder-page. */
+export const GOALS_SCHEMA_VERSION = 1 as const;
+
+/** Durable lifecycle status of a folder-scoped goal. Distinct from the
+ *  goal-plugin's live `GoalStatus` ("active"/"done") — this is the dashboard's
+ *  owned intent. See change: add-goals-folder-page. */
+export type GoalRecordStatus = "pursuing" | "paused" | "achieved" | "cleared";
+
+/** A single success criterion on a goal. */
+export interface GoalCriterion {
+  text: string;
+  done: boolean;
+}
+
+/** Optional budget config mirrored onto the in-session loop. */
+export interface GoalBudget {
+  maxTurns?: number;
+  maxSpendUsd?: number;
+}
+
+/** Folder-scoped goal record. Dashboard owns the durable definition
+ *  (objective, criteria, status intent, linked sessions); the
+ *  @ricoyudog/pi-goal-hermes extension stays source of truth for live loop
+ *  state, associated by `goalId` on the `goal_status` snapshot.
+ *  See change: add-goals-folder-page. */
+export interface GoalRecord {
+  /** Server-generated unique id. */
+  id: string;
+  /** Folder scope key (absolute cwd). */
+  cwd: string;
+  objective: string;
+  criteria: GoalCriterion[];
+  status: GoalRecordStatus;
+  budget?: GoalBudget;
+  /** Sessions opened in service of this goal (drivers + workers, incl. hidden). */
+  sessionIds: string[];
+  /** Session running the pi-goal-hermes loop, when known. */
+  driverSessionId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Shape of the on-disk goals file under the dashboard data dir.
+ *  See change: add-goals-folder-page. */
+export interface GoalsFile {
+  schemaVersion: number;
+  goals: GoalRecord[];
+}
 
 /** A user-defined group of OpenSpec changes within a single repo.
  *  See change: add-openspec-change-grouping. */

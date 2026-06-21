@@ -8,5 +8,8 @@
 export { GoalChip } from "./GoalChip.js";
 export { GoalControl } from "./GoalControl.js";
 export { GoalPluginSettings } from "./GoalPluginSettings.js";
+export { FolderGoalsSection } from "./FolderGoalsSection.js";
+export { GoalsBoardClaim } from "./GoalsBoardClaim.js";
+export { GoalDetailClaim } from "./GoalDetailClaim.js";
 export { hasGoal } from "./predicates.js";
 export { deriveSnapshot } from "./goal-state.js";

@@ -2,7 +2,7 @@
 
 import { FolderAutomationSection, AutomationBoard, AutomationRunMonitor, AutomationBadge, isAutomationRun, AutomationSettings } from "@blackbelt-technology/pi-dashboard-automation-plugin";
 import { SessionFlowActionsClaim, shouldRenderFlowsSubcard, FlowDashboardClaim, FlowArchitectClaim, FlowYamlPreviewClaim, isFlowYamlPreviewActive, FlowAgentPopoutClaim, FlowArchitectPopoutClaim } from "@blackbelt-technology/pi-dashboard-flows-plugin";
-import { GoalChip, hasGoal, GoalControl, GoalPluginSettings } from "@blackbelt-technology/pi-dashboard-goal-plugin";
+import { GoalChip, hasGoal, GoalControl, FolderGoalsSection, GoalsBoardClaim, GoalDetailClaim, GoalPluginSettings } from "@blackbelt-technology/pi-dashboard-goal-plugin";
 import { HonchoSettings, HonchoBadge, shouldRenderHonchoMemory, HonchoCardActions, HonchoMapPopover } from "@blackbelt-technology/pi-dashboard-honcho-plugin";
 import { JjWorkspaceBadge, isInJjWorkspace, JjActionBar, isInJjRepo, JjInitAffordance, isInGitRepoButNotJj, JjWorkspaceList, JjWorkspaceView, JjPluginSettings } from "@blackbelt-technology/pi-dashboard-jj-plugin";
 import { BuiltInRolesSettings } from "@blackbelt-technology/pi-dashboard-roles-plugin";
@@ -129,6 +129,20 @@ export const PLUGIN_REGISTRY: RegistryEntry[] = [
                 "component": "GoalControl"
             },
             {
+                "slot": "sidebar-folder-section",
+                "component": "FolderGoalsSection"
+            },
+            {
+                "slot": "shell-overlay-route",
+                "component": "GoalsBoardClaim",
+                "path": "/folder/:encodedCwd/goals"
+            },
+            {
+                "slot": "shell-overlay-route",
+                "component": "GoalDetailClaim",
+                "path": "/folder/:encodedCwd/goals/:goalId"
+            },
+            {
                 "slot": "settings-section",
                 "component": "GoalPluginSettings",
                 "tab": "general"
@@ -147,6 +161,9 @@ export const PLUGIN_REGISTRY: RegistryEntry[] = [
     claims: [
       { pluginId: "goal", priority: 100, slot: "session-card-badge", Component: GoalChip, predicate: hasGoal },
       { pluginId: "goal", priority: 100, slot: "session-card-action-bar", Component: GoalControl },
+      { pluginId: "goal", priority: 100, slot: "sidebar-folder-section", Component: FolderGoalsSection },
+      { pluginId: "goal", priority: 100, slot: "shell-overlay-route", path: "/folder/:encodedCwd/goals", Component: GoalsBoardClaim },
+      { pluginId: "goal", priority: 100, slot: "shell-overlay-route", path: "/folder/:encodedCwd/goals/:goalId", Component: GoalDetailClaim },
       { pluginId: "goal", priority: 100, slot: "settings-section", tab: "general", Component: GoalPluginSettings },
     ],
   },
@@ -322,4 +339,4 @@ export const PLUGIN_REGISTRY: RegistryEntry[] = [
   },
 ];
 
-export const PLUGIN_REGISTRY_HASH = "c574d72d4c93072352bbe4c4e215e0ed51a38bf4eb356270ee9116e92f3fac32";
+export const PLUGIN_REGISTRY_HASH = "072048891ae2e1f66ac2308231303be2632c940e872e30df8ad27769493bfe2a";

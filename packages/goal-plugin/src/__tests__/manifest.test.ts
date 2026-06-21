@@ -31,13 +31,25 @@ describe("goal-plugin manifest", () => {
     expect(v.client).toBeTruthy();
   });
 
-  it("declares badge + action-bar + settings claims", () => {
+  it("declares badge + action-bar + folder-section + two overlay routes + settings claims", () => {
     const v = validateManifest(manifest, "goal");
     expect(v.claims.map((c) => c.slot).sort()).toEqual([
       "session-card-action-bar",
       "session-card-badge",
       "settings-section",
+      "shell-overlay-route",
+      "shell-overlay-route",
+      "sidebar-folder-section",
     ]);
+  });
+
+  it("registers the goals board + detail overlay routes", () => {
+    const v = validateManifest(manifest, "goal");
+    const paths = v.claims
+      .filter((c) => c.slot === "shell-overlay-route")
+      .map((c) => (c as { path?: string }).path)
+      .sort();
+    expect(paths).toEqual(["/folder/:encodedCwd/goals", "/folder/:encodedCwd/goals/:goalId"]);
   });
 
   it("requires the @ricoyudog/pi-goal-hermes pi extension", () => {

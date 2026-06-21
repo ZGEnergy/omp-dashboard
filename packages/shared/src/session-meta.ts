@@ -109,6 +109,13 @@ export interface SessionMeta {
    */
   automationRun?: { name: string; runId: string; visibility?: "hidden" | "shown" };
 
+  /**
+   * Owning goal id when this session was spawned under / linked to a
+   * folder-scoped `GoalRecord`. Cleared on unlink / goal delete.
+   * See change: add-goals-folder-page.
+   */
+  goalId?: string;
+
   // Cache freshness — compared against .jsonl mtime
   cachedAt?: number;
 }

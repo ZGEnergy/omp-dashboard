@@ -1,78 +1,59 @@
 /**
- * GoalControl dispatch matrix: each control emits the expected `plugin_action`
- * (captured via setSender) for the current goal status.
+ * GoalControl (demoted) — read-only link chip to the owning goal.
  *
- * See change: add-goal-continuation-plugin.
+ * After add-goals-folder-page (task 2.2) the session-card action-bar no
+ * longer hosts the "Set a goal…" input or the set/pause/done/clear controls.
+ * It renders nothing without an owning `goalId`, and a single link chip that
+ * navigates to the goal's detail route when `goalId` is present.
+ *
+ * See change: add-goals-folder-page.
  */
 import React from "react";
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { render, cleanup, fireEvent } from "@testing-library/react";
-import {
-  publishSessionEvent,
-  clearSessionEvents,
-  PluginContextProvider,
-  setSender,
-} from "@blackbelt-technology/dashboard-plugin-runtime";
+import { Router } from "wouter";
+import { memoryLocation } from "wouter/memory-location";
+import { PluginContextProvider } from "@blackbelt-technology/dashboard-plugin-runtime";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { GoalControl } from "../client/GoalControl.js";
-import { detailsToSnapshot, GOAL_STATUS_EVENT_TYPE, type GoalHermesEventDetails } from "../shared/goal-types.js";
+import { goalDetailUrl } from "../client/goals-api.js";
 
-const session = { id: "s1", cwd: "/repo", source: "dashboard", status: "active" } as unknown as DashboardSession;
-let sent: any[] = [];
+afterEach(() => cleanup());
 
-beforeEach(() => {
-  sent = [];
-  setSender((m) => sent.push(m));
-});
-afterEach(() => {
-  cleanup();
-  clearSessionEvents("s1");
-  setSender(null);
-});
-
-function emit(over: Partial<GoalHermesEventDetails>): void {
-  const snap = detailsToSnapshot({
-    eventType: "goal-set", goal: "Ship it", status: "active",
-    turnsUsed: 0, maxTurns: 20, lastVerdict: null, lastReason: null, pausedReason: null,
-    ...over,
-  });
-  publishSessionEvent("s1", { eventType: GOAL_STATUS_EVENT_TYPE, timestamp: Date.now(), data: snap as unknown as Record<string, unknown> });
+function renderControl(session: DashboardSession, hook?: any) {
+  return render(
+    <Router hook={hook}>
+      <PluginContextProvider>
+        <GoalControl session={session} />
+      </PluginContextProvider>
+    </Router>,
+  );
 }
 
-const renderControl = () =>
-  render(
-    <PluginContextProvider>
-      <GoalControl session={session} />
-    </PluginContextProvider>,
-  );
-
-describe("GoalControl dispatch", () => {
-  it("empty state: Enter on the input dispatches set with the goal text", () => {
-    const { getByPlaceholderText } = renderControl();
-    const input = getByPlaceholderText("Set a goal…");
-    fireEvent.change(input, { target: { value: "Get CI green" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(sent).toEqual([
-      { type: "plugin_action", pluginId: "goal", sessionId: "s1", action: "set", payload: { goal: "Get CI green" } },
-    ]);
+describe("GoalControl (demoted link chip)", () => {
+  it("renders nothing when the session has no owning goalId", () => {
+    const session = { id: "s1", cwd: "/repo", source: "dashboard" } as unknown as DashboardSession;
+    const { queryByTestId } = renderControl(session);
+    expect(queryByTestId("goal-control-link")).toBeNull();
   });
 
-  it("active state: Pause / Done / Clear dispatch their actions", () => {
-    emit({ eventType: "goal-continuing", turnsUsed: 3 });
-    const { getByText } = renderControl();
-    fireEvent.click(getByText("⏸ Pause"));
-    fireEvent.click(getByText("✓ Done"));
-    fireEvent.click(getByText("Clear"));
-    expect(sent.map((m) => m.action)).toEqual(["pause", "done", "clear"]);
-    expect(sent.every((m) => m.pluginId === "goal" && m.sessionId === "s1")).toBe(true);
+  it("renders nothing when goalId is present but cwd is missing", () => {
+    const session = { id: "s1", source: "dashboard", goalId: "g1" } as unknown as DashboardSession;
+    const { queryByTestId } = renderControl(session);
+    expect(queryByTestId("goal-control-link")).toBeNull();
   });
 
-  it("paused state: Resume + Clear, no Pause/Done", () => {
-    emit({ eventType: "goal-paused", pausedReason: "budget" });
-    const { getByText, queryByText } = renderControl();
-    expect(queryByText("⏸ Pause")).toBeNull();
-    fireEvent.click(getByText("▶ Resume"));
-    fireEvent.click(getByText("Clear"));
-    expect(sent.map((m) => m.action)).toEqual(["resume", "clear"]);
+  it("has no 'Set a goal…' input even when linked", () => {
+    const session = { id: "s1", cwd: "/repo", source: "dashboard", goalId: "g1" } as unknown as DashboardSession;
+    const { queryByPlaceholderText } = renderControl(session);
+    expect(queryByPlaceholderText("Set a goal…")).toBeNull();
+  });
+
+  it("renders a link chip that navigates to the owning goal detail", () => {
+    const { hook, history } = memoryLocation({ path: "/", record: true });
+    const session = { id: "s1", cwd: "/repo", source: "dashboard", goalId: "g1" } as unknown as DashboardSession;
+    const { getByTestId } = renderControl(session, hook);
+    fireEvent.click(getByTestId("goal-control-link"));
+    expect(history[history.length - 1]).toBe(goalDetailUrl("/repo", "g1"));
   });
 });
