@@ -26,6 +26,8 @@ export function useGoals(cwd: string | null | undefined): UseGoalsResult {
   useEffect(() => {
     if (!cwd) {
       setGoals([]);
+      setLoading(false);
+      setError(null);
       return;
     }
     const ac = new AbortController();

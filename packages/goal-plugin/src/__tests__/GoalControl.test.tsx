@@ -37,6 +37,12 @@ describe("GoalControl (demoted link chip)", () => {
     expect(queryByTestId("goal-control-link")).toBeNull();
   });
 
+  it("renders nothing when goalId is present but cwd is missing", () => {
+    const session = { id: "s1", source: "dashboard", goalId: "g1" } as unknown as DashboardSession;
+    const { queryByTestId } = renderControl(session);
+    expect(queryByTestId("goal-control-link")).toBeNull();
+  });
+
   it("has no 'Set a goal…' input even when linked", () => {
     const session = { id: "s1", cwd: "/repo", source: "dashboard", goalId: "g1" } as unknown as DashboardSession;
     const { queryByPlaceholderText } = renderControl(session);

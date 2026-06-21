@@ -270,6 +270,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       // when a session was spawned via the dashboard's worktree dialog.
       // See change: add-worktree-spawn-dialog.
       gitWorktreeBase: session.gitWorktreeBase,
+      // Persist the owning goal id so the session-card goal chip resolves its
+      // goal after restart. MUST be listed here because this save does a full
+      // .meta.json overwrite (not a merge) — omitting it wipes the field set
+      // by event-wiring / goal routes. See change: add-goals-folder-page.
+      goalId: session.goalId,
       // Persist the grouping-relevant worktree/jj parentage so a rebooted
       // (bridge-less) scan can collapse this session under its parent repo.
       // Only the subset `resolveSessionGroupPath` needs is stored; volatile
@@ -826,8 +831,12 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
             keeperOptsFromSpawnResult(result),
           );
         }
+        // On spawn failure, drop the goalId we just enqueued so it can't be
+        // mis-consumed by a later unrelated session in the same cwd.
+        if (!result.success) pendingGoalLinkRegistry.consume(cwd);
         return { success: result.success, ...(result.message ? { message: result.message } : {}) };
       } catch (err) {
+        pendingGoalLinkRegistry.consume(cwd);
         return { success: false, message: err instanceof Error ? err.message : String(err) };
       }
     },

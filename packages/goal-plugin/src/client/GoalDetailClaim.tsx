@@ -46,6 +46,7 @@ export function GoalDetailClaim({ params, onBack }: GoalDetailClaimProps): React
   const allSessions = useAllSessions();
   const [linking, setLinking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [actionErr, setActionErr] = useState<string | null>(null);
 
   const goal = useMemo(() => goals.find((g) => g.id === goalId), [goals, goalId]);
 
@@ -62,11 +63,12 @@ export function GoalDetailClaim({ params, onBack }: GoalDetailClaimProps): React
 
   const run = async (fn: () => Promise<unknown>): Promise<void> => {
     setBusy(true);
+    setActionErr(null);
     try {
       await fn();
       refetch();
-    } catch {
-      /* surfaced via error state on next fetch */
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : "Action failed");
     } finally {
       setBusy(false);
     }
@@ -110,6 +112,7 @@ export function GoalDetailClaim({ params, onBack }: GoalDetailClaimProps): React
     <div className="flex flex-col h-full overflow-hidden" data-testid="goal-detail-page">
       {header}
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-4">
+        {actionErr && <div className="text-xs text-red-400" data-testid="goal-detail-error">{actionErr}</div>}
         {/* Definition panel */}
         <section className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3" data-testid="goal-definition">
           <div className="text-sm text-[var(--text-primary)] font-medium">{goal.objective}</div>

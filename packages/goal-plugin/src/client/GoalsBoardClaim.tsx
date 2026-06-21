@@ -106,6 +106,7 @@ export function GoalsBoardClaim({ params, onBack }: GoalsBoardClaimProps): React
   const [filter, setFilter] = useState<"all" | GoalRecordStatus>("all");
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState("");
+  const [createErr, setCreateErr] = useState<string | null>(null);
 
   const visible = useMemo(
     () => (filter === "all" ? goals : goals.filter((g) => g.status === filter)),
@@ -115,13 +116,14 @@ export function GoalsBoardClaim({ params, onBack }: GoalsBoardClaimProps): React
   const submit = async (): Promise<void> => {
     const objective = draft.trim();
     if (!objective || !cwd) return;
+    setCreateErr(null);
     try {
       await createGoal(cwd, { objective });
       setDraft("");
       setCreating(false);
       refetch();
-    } catch {
-      /* error surfaces below */
+    } catch (e) {
+      setCreateErr(e instanceof Error ? e.message : "Failed to create goal");
     }
   };
 
@@ -161,6 +163,7 @@ export function GoalsBoardClaim({ params, onBack }: GoalsBoardClaimProps): React
           </button>
         </div>
       )}
+      {createErr && <div className="px-3 py-1 text-xs text-red-400" data-testid="goals-board-create-error">{createErr}</div>}
 
       <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center gap-1.5 flex-shrink-0">
         {FILTERS.map((f) => (

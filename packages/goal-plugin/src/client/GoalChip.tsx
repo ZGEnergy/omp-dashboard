@@ -79,12 +79,18 @@ export function GoalChip({
   // read-only link to that goal's detail page (task 5.1). Otherwise it stays
   // a plain status badge.
   const linkable = !!(session.goalId && session.cwd);
+  const goTo = (e: React.SyntheticEvent): void => {
+    e.stopPropagation();
+    navigate(goalDetailUrl(session.cwd, session.goalId!));
+  };
   return (
     <span
       data-testid="goal-chip"
       title={tooltip}
-      onClick={linkable ? (e) => { e.stopPropagation(); navigate(goalDetailUrl(session.cwd, session.goalId!)); } : undefined}
+      onClick={linkable ? goTo : undefined}
+      onKeyDown={linkable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); goTo(e); } } : undefined}
       role={linkable ? "link" : undefined}
+      tabIndex={linkable ? 0 : undefined}
       className={`inline-flex items-center gap-1 px-1.5 py-[1px] rounded-full font-mono text-[10px]${linkable ? " cursor-pointer hover:brightness-110" : ""}`}
       style={{ ...palette, verticalAlign: "middle" }}
     >

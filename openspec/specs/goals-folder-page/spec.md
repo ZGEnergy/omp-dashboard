@@ -1,7 +1,7 @@
 # goals-folder-page Specification
 
 ## Purpose
-TBD - created by archiving change add-goals-folder-page. Update Purpose after archive.
+Folder-scoped goals. Dashboard owns durable `GoalRecord` (objective, criteria, status, linked sessions) per cwd; the @ricoyudog/pi-goal-hermes extension owns live loop state, associated by `goalId`. Surfaces a `Goals (N) →` folder nav slot, a goals board, and a goal detail page that links 1:N sessions and opens their chat views (including hidden driver/worker sessions).
 ## Requirements
 ### Requirement: Folder-scoped goal record store
 
@@ -67,13 +67,13 @@ A goal SHALL own zero or more sessions, trackable and mutable from the goal card
 The goal detail page SHALL open the chat view of any linked session, including auto-hidden driver/worker sessions, without changing their `hidden` status in the sidebar.
 
 #### Scenario: Open the driver session chatview
-- **WHEN** the user opens goal detail for `G` whose `driverSessionId` is an auto-hidden session
-- **THEN** that session's chat view renders embedded in the goal detail page
+- **WHEN** the user opens a linked session from goal detail for `G` whose `driverSessionId` is an auto-hidden session
+- **THEN** that session's chat view opens (v1: in-app navigation to `/session/:id`; a richer embedded variant is a tracked follow-up)
 - **AND** the session remains `hidden` in the sidebar (not auto-navigated, not unhidden)
 
 #### Scenario: Switch between linked sessions
 - **WHEN** goal `G` has multiple linked sessions
-- **THEN** the goal detail page provides tabs to switch the embedded chatview across `G.sessionIds`
+- **THEN** the goal detail page lists every session in `G.sessionIds` and can open each one's chat view
 
 ### Requirement: Per-session goal control demotes to a link chip
 

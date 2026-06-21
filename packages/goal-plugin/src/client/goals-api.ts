@@ -15,15 +15,22 @@ import type {
   GoalRecordStatus,
 } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
-// ── Folder-path codec (mirrors client lib/folder-encoding.ts) ─────
+// ── Folder-path codec (base64url, UTF-8 safe) ─────────────────────
+// `btoa`/`atob` only handle Latin1, so a cwd with non-ASCII chars (accents,
+// CJK) would throw. Round-trip through UTF-8 bytes first.
 export function encodeFolderPath(cwd: string): string {
-  return btoa(cwd).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const bytes = new TextEncoder().encode(cwd);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 export function decodeFolderPath(encoded: string): string | null {
   try {
     const padded = encoded.replace(/-/g, "+").replace(/_/g, "/");
     const pad = (4 - (padded.length % 4)) % 4;
-    return atob(padded + "=".repeat(pad));
+    const bin = atob(padded + "=".repeat(pad));
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
   } catch {
     return null;
   }

@@ -307,22 +307,29 @@ export function wireEvents(deps: EventWiringDeps): void {
     if (pendingGoalLinkRegistry && goalStore) {
       const goalId = pendingGoalLinkRegistry.consume(cwd);
       if (goalId) {
-        sessionManager.update(sessionId, { goalId });
-        const session = sessionManager.get(sessionId);
-        if (session?.sessionFile) {
-          try {
-            mergeSessionMeta(session.sessionFile, { goalId });
-          } catch (err) {
-            console.warn(
-              `[event-wiring] failed to persist goalId to .meta.json for ${sessionId}:`,
-              err,
-            );
-          }
-        }
-        goalStore.linkSession(cwd, goalId, sessionId).catch((err) => {
-          console.warn(`[event-wiring] failed to link session ${sessionId} to goal ${goalId}:`, err);
-        });
-        browserGateway.broadcastSessionUpdated(sessionId, { goalId });
+        const gs = goalStore;
+        // Link in the goal store FIRST; only stamp the session + .meta.json +
+        // broadcast once linking succeeds, so a failed link (e.g. goal
+        // deleted mid-spawn) can't leave session state diverged from the store.
+        gs.linkSession(cwd, goalId, sessionId)
+          .then(() => {
+            sessionManager.update(sessionId, { goalId });
+            const session = sessionManager.get(sessionId);
+            if (session?.sessionFile) {
+              try {
+                mergeSessionMeta(session.sessionFile, { goalId });
+              } catch (err) {
+                console.warn(
+                  `[event-wiring] failed to persist goalId to .meta.json for ${sessionId}:`,
+                  err,
+                );
+              }
+            }
+            browserGateway.broadcastSessionUpdated(sessionId, { goalId });
+          })
+          .catch((err) => {
+            console.warn(`[event-wiring] failed to link session ${sessionId} to goal ${goalId}:`, err);
+          });
       }
     }
   };

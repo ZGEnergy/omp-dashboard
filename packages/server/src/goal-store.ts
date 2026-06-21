@@ -107,7 +107,11 @@ export function createGoalStore(opts: GoalStoreOptions = {}): GoalStore {
       const raw = await fs.readFile(fileFor(cwd), "utf-8");
       const parsed = JSON.parse(raw) as GoalsFile;
       data = parsed && Array.isArray(parsed.goals) ? parsed : emptyFile();
-    } catch {
+    } catch (err: any) {
+      // Only a genuinely-absent file is an empty store. Surfacing parse/perm
+      // errors prevents a malformed file from being silently replaced with an
+      // empty store (whose next write would erase persisted goals).
+      if (err?.code && err.code !== "ENOENT") throw err;
       data = emptyFile();
     }
     cache.set(cwd, data);
@@ -148,9 +152,10 @@ export function createGoalStore(opts: GoalStoreOptions = {}): GoalStore {
     const timer = setTimeout(() => {
       debounceTimers.delete(cwd);
       const latest = cache.get(cwd) ?? file;
+      const goals = latest.goals.map((g) => ({ ...g }));
       for (const cb of subscribers) {
         try {
-          cb(cwd, { goals: latest.goals });
+          cb(cwd, { goals });
         } catch {
           /* swallow so other subscribers still fire */
         }
@@ -168,7 +173,9 @@ export function createGoalStore(opts: GoalStoreOptions = {}): GoalStore {
   // ── Public methods ───────────────────────────────────────────
 
   async function list(cwd: string): Promise<GoalRecord[]> {
-    return (await read(cwd)).goals;
+    // Return shallow copies so callers/subscribers can't mutate cached records
+    // outside the mutate() critical section.
+    return (await read(cwd)).goals.map((g) => ({ ...g }));
   }
 
   async function create(cwd: string, body: GoalCreateBody): Promise<GoalRecord> {

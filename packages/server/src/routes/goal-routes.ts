@@ -63,26 +63,46 @@ export function registerGoalRoutes(fastify: FastifyInstance, deps: GoalRoutesDep
       reply.code(404);
       return { success: false, error: "Goal not found" } satisfies ApiResponse;
     }
+    // Log the real error server-side; return a fixed public message so internal
+    // details (paths, store internals) don't leak to callers.
+    console.error("[goal-routes] internal error:", err);
     reply.code(500);
-    const msg = err instanceof Error ? err.message : "internal error";
-    return { success: false, error: msg } satisfies ApiResponse;
+    return { success: false, error: "internal error" } satisfies ApiResponse;
   }
 
-  function parseCriteria(raw: unknown): GoalCriterion[] | undefined {
+  /** True when `sessionId` is a known session in the same folder. */
+  function sessionInCwd(sessionId: string, cwd: string): boolean {
+    return sessionManager.listAll().some((s) => s.id === sessionId && s.cwd === cwd);
+  }
+
+  /** Returns `undefined` when absent, a validated array, or `null` when present-but-malformed. */
+  function parseCriteria(raw: unknown): GoalCriterion[] | undefined | null {
     if (raw === undefined) return undefined;
-    if (!Array.isArray(raw)) return undefined;
-    return raw
-      .filter((c): c is { text: unknown; done?: unknown } => typeof c === "object" && c !== null)
-      .map((c) => ({ text: String((c as { text: unknown }).text ?? ""), done: !!(c as { done?: unknown }).done }))
-      .filter((c) => c.text.length > 0);
+    if (!Array.isArray(raw)) return null;
+    const out: GoalCriterion[] = [];
+    for (const c of raw) {
+      if (typeof c !== "object" || c === null) return null;
+      const text = (c as { text?: unknown }).text;
+      if (typeof text !== "string" || text.trim().length === 0) return null;
+      out.push({ text, done: !!(c as { done?: unknown }).done });
+    }
+    return out;
   }
 
-  function parseBudget(raw: unknown): GoalBudget | undefined {
-    if (raw === undefined || typeof raw !== "object" || raw === null) return undefined;
+  /** Returns `undefined` when absent, a validated budget, or `null` when present-but-malformed. */
+  function parseBudget(raw: unknown): GoalBudget | undefined | null {
+    if (raw === undefined) return undefined;
+    if (typeof raw !== "object" || raw === null) return null;
     const b = raw as { maxTurns?: unknown; maxSpendUsd?: unknown };
     const budget: GoalBudget = {};
-    if (typeof b.maxTurns === "number" && Number.isFinite(b.maxTurns)) budget.maxTurns = b.maxTurns;
-    if (typeof b.maxSpendUsd === "number" && Number.isFinite(b.maxSpendUsd)) budget.maxSpendUsd = b.maxSpendUsd;
+    if (b.maxTurns !== undefined) {
+      if (typeof b.maxTurns !== "number" || !Number.isFinite(b.maxTurns)) return null;
+      budget.maxTurns = b.maxTurns;
+    }
+    if (b.maxSpendUsd !== undefined) {
+      if (typeof b.maxSpendUsd !== "number" || !Number.isFinite(b.maxSpendUsd)) return null;
+      budget.maxSpendUsd = b.maxSpendUsd;
+    }
     return budget;
   }
 
@@ -119,7 +139,15 @@ export function registerGoalRoutes(fastify: FastifyInstance, deps: GoalRoutesDep
         return { success: false, error: "objective is required" } satisfies ApiResponse;
       }
       const criteria = parseCriteria(body.criteria);
+      if (criteria === null) {
+        reply.code(400);
+        return { success: false, error: "criteria must be an array of { text, done? }" } satisfies ApiResponse;
+      }
       const budget = parseBudget(body.budget);
+      if (budget === null) {
+        reply.code(400);
+        return { success: false, error: "budget must be { maxTurns?, maxSpendUsd? } numbers" } satisfies ApiResponse;
+      }
       try {
         const created = await store.create(cwd!, {
           objective,
@@ -163,8 +191,16 @@ export function registerGoalRoutes(fastify: FastifyInstance, deps: GoalRoutesDep
         update.status = body.status as GoalRecordStatus;
       }
       const criteria = parseCriteria(body.criteria);
+      if (criteria === null) {
+        reply.code(400);
+        return { success: false, error: "criteria must be an array of { text, done? }" } satisfies ApiResponse;
+      }
       if (criteria !== undefined) update.criteria = criteria;
       const budget = parseBudget(body.budget);
+      if (budget === null) {
+        reply.code(400);
+        return { success: false, error: "budget must be { maxTurns?, maxSpendUsd? } numbers" } satisfies ApiResponse;
+      }
       if (budget !== undefined) update.budget = budget;
       try {
         const updated = await store.update(cwd!, id, update);
@@ -234,6 +270,10 @@ export function registerGoalRoutes(fastify: FastifyInstance, deps: GoalRoutesDep
       if (!sessionId) {
         reply.code(400);
         return { success: false, error: "sessionId or spawn:true required" } satisfies ApiResponse;
+      }
+      if (!sessionInCwd(sessionId, cwd!)) {
+        reply.code(400);
+        return { success: false, error: "sessionId is not a known session in this folder" } satisfies ApiResponse;
       }
       try {
         const updated = await store.linkSession(cwd!, id, sessionId);

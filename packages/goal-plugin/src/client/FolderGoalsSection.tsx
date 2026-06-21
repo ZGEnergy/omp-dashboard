@@ -23,6 +23,7 @@ export function FolderGoalsSection({ folder }: { folder: FolderDescriptor }): Re
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   if (!cwd) return null;
 
@@ -30,14 +31,16 @@ export function FolderGoalsSection({ folder }: { folder: FolderDescriptor }): Re
     const objective = draft.trim();
     if (!objective || busy) return;
     setBusy(true);
+    setErr(null);
     try {
       await createGoal(cwd, { objective });
       setDraft("");
       setCreating(false);
       refetch();
       navigate(goalsBoardUrl(cwd));
-    } catch {
-      /* surfaced on the board; keep the input open so the user can retry */
+    } catch (e) {
+      // Keep the input open so the user can retry; show why it failed.
+      setErr(e instanceof Error ? e.message : "Failed to create goal");
     } finally {
       setBusy(false);
     }
@@ -92,6 +95,7 @@ export function FolderGoalsSection({ folder }: { folder: FolderDescriptor }): Re
           </button>
         </div>
       )}
+      {err && <div className="mt-1 text-[10px] text-red-400" data-testid="folder-goal-error">{err}</div>}
     </div>
   );
 }
