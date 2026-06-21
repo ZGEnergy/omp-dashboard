@@ -1,21 +1,22 @@
 /**
- * Automation board (command-route `/automation`): lists this folder's
- * automations + their runs (Triage). Auto-archived empty runs are filtered
- * out of the default (unread) view; a toggle reveals all runs.
+ * Automation board (shell-overlay-route `/folder/:encodedCwd/automations`):
+ * lists this folder's automations + their runs (Triage). Auto-archived empty
+ * runs are filtered out of the default (unread) view; a toggle reveals all
+ * runs. cwd derives from the decoded `encodedCwd` route param (not a session).
  *
- * See change: add-automation-plugin.
+ * See change: add-automation-plugin, fix-automation-slot-parity-and-routing.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { listAutomations, listRuns } from "./api.js";
 import { CreateAutomationDialog } from "./CreateAutomationDialog.js";
+import { decodeFolderPath } from "./folder-encoding.js";
 import type { DiscoveredAutomation, RunRecord } from "../shared/automation-types.js";
 
 export interface AutomationBoardProps {
-  /** Active session (command-route slot prop) — its cwd scopes the folder view. */
-  session?: DashboardSession;
-  routeParams?: Record<string, string>;
-  onClose?: () => void;
+  /** shell-overlay-route params; `encodedCwd` scopes the folder view. */
+  params?: Record<string, string>;
+  /** Back action provided by the shell-overlay-route slot. */
+  onBack?: () => void;
 }
 
 const STATUS_LABEL: Record<RunRecord["status"], string> = {
@@ -24,8 +25,12 @@ const STATUS_LABEL: Record<RunRecord["status"], string> = {
   error: "error",
 };
 
-export function AutomationBoard({ session }: AutomationBoardProps): React.ReactElement {
-  const cwd = session?.cwd;
+export function AutomationBoard({ params, onBack }: AutomationBoardProps): React.ReactElement {
+  // encodedCwd is route-controlled input; reject an undecodable param rather
+  // than falling through to unscoped data calls (breaks the folder contract).
+  const decoded = params?.encodedCwd ? decodeFolderPath(params.encodedCwd) : undefined;
+  const invalidRoute = !!params?.encodedCwd && decoded === null;
+  const cwd = decoded ?? undefined;
   const [automations, setAutomations] = useState<DiscoveredAutomation[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [showAll, setShowAll] = useState(false);
@@ -33,6 +38,7 @@ export function AutomationBoard({ session }: AutomationBoardProps): React.ReactE
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    if (invalidRoute) return;
     let cancelled = false;
     async function load() {
       const a = await listAutomations(cwd);
@@ -47,7 +53,7 @@ export function AutomationBoard({ session }: AutomationBoardProps): React.ReactE
     return () => {
       cancelled = true;
     };
-  }, [cwd, reloadKey]);
+  }, [cwd, reloadKey, invalidRoute]);
 
   const visibleRuns = useMemo(() => {
     const filtered = showAll ? runs : runs.filter((r) => !r.archived);
@@ -55,10 +61,44 @@ export function AutomationBoard({ session }: AutomationBoardProps): React.ReactE
     return [...filtered].sort((a, b) => b.startedAt - a.startedAt);
   }, [runs, showAll]);
 
+  if (invalidRoute) {
+    return (
+      <div data-testid="automation-board" className="flex flex-col gap-3 p-3 text-sm">
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              type="button"
+              data-testid="automation-board-back"
+              onClick={onBack}
+              className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            >
+              ← Back
+            </button>
+          )}
+          <p className="text-xs text-[var(--danger,#ef4444)]" data-testid="automation-board-invalid">
+            Invalid folder route.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div data-testid="automation-board" className="flex flex-col gap-3 p-3 text-sm">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">Automations</h2>
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              type="button"
+              data-testid="automation-board-back"
+              onClick={onBack}
+              className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            >
+              ← Back
+            </button>
+          )}
+          <h2 className="text-base font-semibold">Automations</h2>
+        </div>
         <div className="flex items-center gap-3">
           <button
             type="button"

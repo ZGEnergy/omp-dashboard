@@ -1,6 +1,8 @@
 /**
- * Base64url encode/decode for folder paths in URL routes.
- * Encodes cwd paths to URL-safe strings for use in /folder/:encodedCwd/* routes.
+ * Base64url encode/decode for folder paths in shell-overlay-route URLs.
+ * Mirrors the shell's `packages/client/src/lib/folder-encoding.ts` so the
+ * automation board route shape (`/folder/:encodedCwd/automations`) matches the
+ * OpenSpec board route. See change: fix-automation-slot-parity-and-routing.
  */
 
 export function encodeFolderPath(cwd: string): string {
@@ -16,7 +18,6 @@ export function encodeFolderPath(cwd: string): string {
 
 export function decodeFolderPath(encoded: string): string | null {
   try {
-    // Restore base64 padding and characters
     const padded = encoded.replace(/-/g, "+").replace(/_/g, "/");
     const pad = (4 - (padded.length % 4)) % 4;
     const binary = atob(padded + "=".repeat(pad));
