@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: NSIS Windows installer
-The Windows installer SHALL be produced by `electron-builder --win nsis` extended with a custom include script at `packages/electron/build/installer.nsh` (consumed via electron-builder's `nsis.include` config option). The installer SHALL be a multi-user wizard install — NOT a one-click silent install — that asks the user to choose between per-user and per-machine install modes, then lets them choose the install directory. Installer filename, default install directories, Start Menu shortcut, Apps & Features registry entry, and uninstaller display name SHALL all be pinned explicitly via electron-builder NSIS config so that defaults derived from the npm package name cannot reintroduce mismatches. The `appId` SHALL be `hu.blackbelt.pi-dashboard` and SHALL NOT change once shipped.
+The Windows installer SHALL be produced by `electron-builder --win nsis` extended with a custom include script at `packages/electron/build/installer.nsh` (consumed via electron-builder's `nsis.include` config option). The installer SHALL be a per-user assisted wizard install — NOT a one-click silent install AND NOT a multi-user install — that lets the user choose the install directory. The installer SHALL NOT present an install-mode page and SHALL NOT offer a per-machine ("Install for everyone") option. Installer filename, default install directory, Start Menu shortcut, Apps & Features registry entry, and uninstaller display name SHALL all be pinned explicitly via electron-builder NSIS config so that defaults derived from the npm package name cannot reintroduce mismatches. The `appId` SHALL be `hu.blackbelt.pi-dashboard` and SHALL NOT change once shipped.
 
 #### Scenario: NSIS toolchain
 - **WHEN** the Windows installer is built
@@ -10,25 +10,21 @@ The Windows installer SHALL be produced by `electron-builder --win nsis` extende
 - **AND** the build SHALL NOT use `@felixrieseberg/electron-forge-maker-nsis` (removed in v0.5.0 and not reintroduced)
 - **AND** the build SHALL NOT use `nsis.script` (full script replacement — we extend electron-builder's generated script, not replace it)
 
-#### Scenario: Multi-user wizard install
+#### Scenario: Per-user assisted wizard install
 - **WHEN** the user runs Setup.exe
-- **THEN** electron-builder NSIS config SHALL set `oneClick: false`, `allowToChangeInstallationDirectory: true`, `allowElevation: true`, and SHALL OMIT `perMachine` (omission enables multi-user mode)
-- **AND** the wizard SHALL present, in order: Welcome → Install Mode (radio buttons: "Install for just me (no admin required)" / "Install for everyone (requires admin)", default "just me") → Choose Install Location (editable, pre-filled with mode-appropriate default) → Install progress → Finish
+- **THEN** electron-builder NSIS config SHALL set `oneClick: false`, `perMachine: false`, `allowToChangeInstallationDirectory: true`, and `allowElevation: true`
+- **AND** the config SHALL NOT omit `perMachine` (omission would enable multi-user mode, which is forbidden)
+- **AND** the wizard SHALL present, in order: Welcome → Choose Install Location (editable, pre-filled with the per-user default) → Install progress → Finish
+- **AND** the wizard SHALL NOT present an install-mode page
 - **AND** the Finish page SHALL offer a "Launch PI Dashboard" checkbox (default checked)
 
-#### Scenario: Per-user install mode
-- **WHEN** the user picks "Install for just me"
+#### Scenario: Per-user install (default path)
+- **WHEN** the user accepts the default install location
 - **THEN** the install SHALL proceed without UAC elevation
 - **AND** the default install dir SHALL be `%LOCALAPPDATA%\Programs\PI Dashboard\`
 - **AND** the Add/Remove Programs entry SHALL be registered under `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\PI Dashboard`
 - **AND** the Start Menu shortcut SHALL be created under the user's per-profile Start Menu
-
-#### Scenario: Per-machine install mode
-- **WHEN** the user picks "Install for everyone"
-- **THEN** the installer SHALL trigger a UAC elevation prompt before proceeding
-- **AND** the default install dir SHALL be `%PROGRAMFILES%\PI Dashboard\`
-- **AND** the Add/Remove Programs entry SHALL be registered under `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\PI Dashboard`
-- **AND** the Start Menu shortcut SHALL be created under the machine-wide Start Menu (visible to all users on the machine)
+- **AND** the installer SHALL NOT write to `HKLM` and SHALL NOT register a per-machine entry
 
 #### Scenario: User-chosen install location
 - **WHEN** the user changes the install location in the Choose-Install-Location page (or passes `/D=<path>` on a silent install)
@@ -44,7 +40,7 @@ The Windows installer SHALL be produced by `electron-builder --win nsis` extende
 
 #### Scenario: Add/Remove Programs entry contents
 - **WHEN** installation completes
-- **THEN** the Add/Remove Programs entry (under HKCU for per-user, HKLM for per-machine) SHALL contain: DisplayName `PI Dashboard`, Publisher `BlackBelt Technology`, DisplayVersion matching the release version, DisplayIcon pointing at `<install dir>\PI Dashboard.exe`, UninstallString and QuietUninstallString pointing at `<install dir>\Uninstall PI Dashboard.exe`, InstallLocation equal to the actual install dir, EstimatedSize, NoModify=1, NoRepair=1
+- **THEN** the Add/Remove Programs entry (under HKCU — per-user only) SHALL contain: DisplayName `PI Dashboard`, Publisher `BlackBelt Technology`, DisplayVersion matching the release version, DisplayIcon pointing at `<install dir>\PI Dashboard.exe`, UninstallString and QuietUninstallString pointing at `<install dir>\Uninstall PI Dashboard.exe`, InstallLocation equal to the actual install dir, EstimatedSize, NoModify=1, NoRepair=1
 - **AND** the entry SHALL be visible in Settings → Apps → Installed apps
 
 #### Scenario: Uninstaller preserves user data
@@ -64,50 +60,73 @@ The Windows installer SHALL be produced by `electron-builder --win nsis` extende
 - **WHEN** the app is installed via Setup.exe on Windows
 - **THEN** the on-disk layout SHALL be compatible with `electron-updater`'s NSIS differ channel (wiring of the channel itself is out of scope for this requirement; see `fix-electron-auto-update-pipeline`)
 
-### Requirement: CI produces Windows x64 NSIS installer
-The CI `windows-latest` x64 leg SHALL produce a Setup.exe installer AND a ZIP archive. It SHALL NOT produce a portable.exe (the 7-Zip SFX portable target was removed by this change).
+### Requirement: CI build matrix
+A GitHub Actions workflow SHALL build Electron installers for all target platforms AND every supported (platform, arch) tuple. The matrix SHALL include exactly one row per published artifact; missing rows are a regression.
 
-#### Scenario: CI produces Windows x64 artifacts
+#### Scenario: CI produces macOS arm64 DMG
+- **WHEN** the CI workflow runs on `macos-14` runner
+- **THEN** it SHALL produce a `.dmg` for arm64
+- **AND** the matrix row SHALL declare `platform: darwin, arch: arm64, node-arch: arm64`
+
+#### Scenario: CI produces macOS x64 DMG
+- **WHEN** the CI workflow runs on the GitHub-hosted Intel x86_64 macOS runner (currently `macos-15-intel`; was `macos-13` until its retirement on 2025-12-08)
+- **THEN** it SHALL produce a `.dmg` for x64
+- **AND** the matrix row SHALL declare `platform: darwin, arch: x64, node-arch: x64`
+- **AND** the row SHALL NOT be omitted on the grounds that `forge.config.ts` declares `packagerConfig.arch: "universal"` — the workflow's `--arch=${{ matrix.arch }}` CLI flag overrides packagerConfig and the universal hint is a no-op in the current pipeline
+- **AND** when GitHub retires `macos-15-intel` (announced end-of-life 2027-08), the team MUST migrate to a universal-binary build OR a self-hosted Intel runner OR drop x64 macOS support — there will be no GitHub-hosted Intel x86_64 replacement after that date
+
+#### Scenario: CI produces Linux x64 artifacts
+- **WHEN** the CI workflow runs on `ubuntu-latest` runner
+- **THEN** it SHALL produce an `.AppImage` and `.deb` for x64
+
+#### Scenario: CI produces Linux arm64 artifacts
+- **WHEN** the CI workflow runs on `ubuntu-24.04-arm` runner
+- **THEN** it SHALL produce a `.deb` for arm64
+- **AND** AppImage SHALL be skipped (appimagetool has no arm64 build)
+
+#### Scenario: CI produces Windows x64 NSIS installer
 - **WHEN** the CI workflow runs on `windows-latest` runner with `arch: x64`
-- **THEN** it SHALL produce `PI-Dashboard-Setup-${version}-x64.exe` (NSIS) AND `PI-Dashboard-win32-x64.zip` (ZIP)
-- **AND** it SHALL NOT invoke any `electron-builder --win portable` step
+- **THEN** it SHALL produce a `PI-Dashboard-Setup-${version}-x64.exe` (NSIS) and a ZIP archive
+- **AND** it SHALL NOT produce a portable `.exe` (the 7-Zip SFX portable target was removed by this change)
 
-### Requirement: CI produces Windows arm64 NSIS installer
-The CI `windows-latest` arm64 leg SHALL produce a Setup.exe installer AND a ZIP archive. arm64 NSIS support is provided by electron-builder's native arm64 NSIS templating.
-
-#### Scenario: CI produces Windows arm64 artifacts
+#### Scenario: CI produces Windows arm64 NSIS installer
 - **WHEN** the CI workflow runs on `windows-latest` runner with `arch: arm64`
-- **THEN** it SHALL produce `PI-Dashboard-Setup-${version}-arm64.exe` (NSIS) AND `PI-Dashboard-win32-arm64.zip` (ZIP)
-- **AND** it SHALL NOT invoke any `electron-builder --win portable` step
+- **THEN** it SHALL produce a `PI-Dashboard-Setup-${version}-arm64.exe` (NSIS) and a ZIP archive
+- **AND** it SHALL NOT produce a portable `.exe`
+- **AND** arm64 NSIS support SHALL be provided by electron-builder's native arm64 NSIS templating
 
-## REMOVED Requirements
+#### Scenario: CI installs Linux build dependencies
+- **WHEN** the CI workflow runs on any Linux runner
+- **THEN** it SHALL install `dpkg`, `fakeroot`, `libarchive-tools`, `libfuse2`, and `squashfs-tools` before building
 
-### Requirement: Windows portable .exe artifact
-**Reason:** The 7-Zip SFX portable target accumulated three structural problems (SFX path drift across launches, SmartScreen blocks unsigned SFX before extraction, ephemeral `%LOCALAPPDATA%\Temp\<random>\` working dir incompatible with the per-user managed-dir bootstrap model). The use case ("single-file no-installer experience") is now served by Setup.exe (real installer) and `.zip` (extract-and-run).
-
-**Migration:** Users on portable.exe migrate to either Setup.exe or `.zip`. Their `~/.pi/` user data is untouched in either path. The active `fix-windows-portable-exe` proposal's §4 (Drop path) is taken by this change; that proposal SHALL be archived once this lands.
-
-The following scenarios are removed:
-- `Scenario: CI produces Windows x64 NSIS installer` clause "and a portable `.exe`" (replaced by the modified scenario above).
-- `Scenario: CI produces Windows arm64 ZIP and portable` (entire scenario; replaced by the modified arm64 scenario above).
-- All `out/make/portable/` artifact paths in upload globs.
+#### Scenario: Per-(platform, arch) artifact upload
+- **WHEN** any matrix row completes successfully
+- **THEN** its artifacts SHALL be uploaded with name `electron-${platform}-${arch}` so the `github-release` job can collect every distributable
 
 ## ADDED Requirements
 
-### Requirement: NSIS install location is bootstrap-agnostic
-The NSIS install location SHALL NOT be hardcoded anywhere in the bootstrap, server, or shared code. The bootstrap state machine SHALL resolve the running install location dynamically via `app.getPath('exe')` and `process.resourcesPath`. This guarantees the existing `selectLaunchSource()` resolver in `packages/electron/src/lib/launch-source.ts` works identically for per-user installs (`%LOCALAPPDATA%\Programs\PI Dashboard\`), per-machine installs (`%PROGRAMFILES%\PI Dashboard\`), and user-chosen paths like `D:\MyApps\PI Dashboard\`.
+### Requirement: CI smoke-tests the NSIS installer on the build runner
+The `windows-latest` legs that build Setup.exe SHALL smoke-test it on the same runner, after the build, via a `.github/workflows/_electron-build.yml` step (`if: matrix.platform == 'win32'`). Because the installer is per-user (`/S` needs no admin), the smoke runs unprivileged with no VM and no external QA harness. The step SHALL run install, no-per-machine, branding, and uninstall assertions as **hard gates** (fail the job). It SHALL NOT launch the app: `pi-dashboard.exe` is a GUI-subsystem binary and GitHub-hosted runners have no interactive desktop session, so the Electron main process never reaches the server-spawn step (observed: process stays alive, `~/.pi/dashboard/server.log` never created, stdout/stderr empty). Launch + server-start validation is therefore out of scope for the build-runner smoke; it runs on a VM with a real desktop (`qa/tests/07-electron-bootstrap-v2.ps1` + `windows-nsis-launch.ps1` via the `automate-windows-remote-qa` harness) or by manual install.
 
-#### Scenario: Setup.exe-installed app resolves via existing launch source regardless of install mode or dir
-- **WHEN** the user launches `PI Dashboard.exe` from any directory chosen during install (per-user default, per-machine default, or user-chosen)
+#### Scenario: each win32 leg runs install→uninstall hard gates
+- **WHEN** a `windows-latest` win32 leg finishes building `PI-Dashboard-Setup-${version}-${arch}.exe`
+- **THEN** the workflow SHALL run `qa/tests/windows-nsis-install.ps1`, `windows-nsis-no-permachine.ps1`, `windows-nsis-branding.ps1`, and `windows-nsis-uninstall.ps1` as hard gates against the built artifact
+- **AND** a hard-gate failure SHALL fail the job
+- **AND** the workflow SHALL NOT attempt to launch the app on the runner (no display; GUI Electron cannot start the server headlessly)
+
+#### Scenario: launch / server-start validated off the build runner
+- **WHEN** launch / server-start needs verification (e.g. the nodejs#58515 Node-version regression)
+- **THEN** it SHALL be validated on a VM with a desktop session via `qa/tests/07-electron-bootstrap-v2.ps1` / `windows-nsis-launch.ps1`, or by manual install
+- **AND** the build-runner smoke SHALL NOT be relied upon for server-start coverage
+
+### Requirement: NSIS install location is bootstrap-agnostic
+The NSIS install location SHALL NOT be hardcoded anywhere in the bootstrap, server, or shared code. The bootstrap state machine SHALL resolve the running install location dynamically via `app.getPath('exe')` and `process.resourcesPath`. This guarantees the existing `selectLaunchSource()` resolver in `packages/electron/src/lib/launch-source.ts` works identically for the per-user default (`%LOCALAPPDATA%\Programs\PI Dashboard\`) and any user-chosen path like `D:\MyApps\PI Dashboard\`.
+
+#### Scenario: Setup.exe-installed app resolves via existing launch source regardless of install dir
+- **WHEN** the user launches `PI Dashboard.exe` from any directory chosen during install (per-user default or user-chosen)
 - **THEN** `selectLaunchSource()` SHALL resolve to the same `installed` / `extracted` branch that today's `.zip`-extracted install resolves to
 - **AND** no new source kind SHALL be added to handle Setup.exe installs
-- **AND** no module under `packages/electron/src/`, `packages/server/src/`, or `packages/shared/src/` SHALL contain a hardcoded path matching `%LOCALAPPDATA%\Programs\PI Dashboard` or `%PROGRAMFILES%\PI Dashboard` outside of documentation strings
-
-#### Scenario: Per-machine install handles per-user state correctly
-- **WHEN** the app is installed per-machine and launched by user A, then launched by user B on the same machine
-- **THEN** user A's `~/.pi/` and `~/.pi-dashboard/` SHALL be independent of user B's
-- **AND** each user's bootstrap SHALL run `installable.json` reconciliation against their own per-user managed dir
-- **AND** the per-machine install dir SHALL be read-only from the running app's perspective (the app writes only to per-user dirs at runtime, matching today's `.zip`-installed behaviour)
+- **AND** no module under `packages/electron/src/`, `packages/server/src/`, or `packages/shared/src/` SHALL contain a hardcoded path matching `%LOCALAPPDATA%\Programs\PI Dashboard` outside of documentation strings
 
 ### Requirement: NSIS appId is stable across releases
 The electron-builder NSIS `appId` value SHALL be pinned to `hu.blackbelt.pi-dashboard` and SHALL NOT change between releases once the first NSIS release has shipped. Changing the appId strands users on the old appId (their uninstaller stays registered under the old GUID and the new installer registers a second, parallel entry).
@@ -129,7 +148,7 @@ The NSIS installer SHALL display Pi branding throughout the wizard: a Pi-branded
 #### Scenario: MUI2 page bitmaps are Pi-branded
 - **WHEN** the installer wizard is open on the Welcome or Finish page
 - **THEN** the left-edge side bitmap SHALL render as Pi-branded `welcome-banner.bmp` (164×314, 24-bit BMP)
-- **WHEN** the installer wizard is on any other page (Install Mode, Choose Install Location, Install Progress)
+- **WHEN** the installer wizard is on any other page (Choose Install Location, Install Progress)
 - **THEN** the top header bitmap SHALL render as Pi-branded `header-banner.bmp` (150×57, 24-bit BMP)
 
 #### Scenario: Uninstaller icon is Pi-branded
