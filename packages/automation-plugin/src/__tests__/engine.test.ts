@@ -216,6 +216,45 @@ describe("engine run lifecycle", () => {
     expect(listRuns(repo, "nightly")).toHaveLength(2);
   });
 
+  it("pendingForRunId binds the exact run, immune to same-cwd FIFO races", () => {
+    // Two parallel runs share a cwd (mode: local). A runId-keyed lookup must
+    // return the matching context regardless of enqueue/registration order —
+    // this is what lets prompt delivery target the host-stamped session
+    // instead of whatever session emits an event first at that cwd.
+    const calls: any[] = [];
+    const engine = makeEngine(calls);
+    const base = promptAutomation("par", "p");
+    const a: DiscoveredAutomation = { ...base, config: { ...base.config!, concurrency: "parallel" } };
+    const r1 = engine.startRunFor(a)!;
+    const r2 = engine.startRunFor(a)!;
+
+    // Lookup by runId returns the right pending context.
+    expect(engine.pendingForRunId(r1.runId)!.runId).toBe(r1.runId);
+    expect(engine.pendingForRunId(r2.runId)!.runId).toBe(r2.runId);
+
+    // Bind sessions to runs by runId (the order is intentionally "wrong" for
+    // FIFO: r2 first). Each prompt must still land on its own run.
+    engine.onSessionRegisteredForRun("sessB", r2.runId);
+    engine.onSessionRegisteredForRun("sessA", r1.runId);
+    engine.onSessionEnded("sessA", "findings A");
+    engine.onSessionEnded("sessB", "findings B");
+
+    const runs = listRuns(repo, "par");
+    const recA = runs.find((x) => x.runId === r1.runId)!;
+    const recB = runs.find((x) => x.runId === r2.runId)!;
+    expect(fs.readFileSync(path.join(recA.dir, "result.md"), "utf-8")).toContain("findings A");
+    expect(fs.readFileSync(path.join(recB.dir, "result.md"), "utf-8")).toContain("findings B");
+  });
+
+  it("pendingForRunId returns undefined once a run is delivered", () => {
+    const calls: any[] = [];
+    const engine = makeEngine(calls);
+    const { runId } = engine.startRunFor(promptAutomation("once", "x"))!;
+    expect(engine.pendingForRunId(runId)).toBeDefined();
+    engine.onSessionRegisteredForRun("sess-1", runId);
+    expect(engine.pendingForRunId(runId)).toBeUndefined();
+  });
+
   it("arms valid automations via start()", () => {
     const calls: any[] = [];
     const engine = makeEngine(calls);

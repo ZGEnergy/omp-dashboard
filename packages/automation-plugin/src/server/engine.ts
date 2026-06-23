@@ -113,8 +113,16 @@ export interface Engine {
   startRunFor(automation: DiscoveredAutomation): { runId: string } | null;
   /** Run-context lookup by cwd (used by the register correlation). */
   pendingForCwd(cwd: string): RunContext | undefined;
+  /** Run-context lookup by runId (exact, race-free correlation). */
+  pendingForRunId(runId: string): RunContext | undefined;
   /** Mark a registered run session, delivering its action prompt once. */
   onSessionRegistered(sessionId: string, cwd: string): void;
+  /**
+   * Bind a registered session to its run by the host-applied automationRun
+   * stamp (runId). Exact — immune to the same-cwd FIFO races that
+   * `onSessionRegistered` is subject to. Preferred correlation path.
+   */
+  onSessionRegisteredForRun(sessionId: string, runId: string): void;
   /** Capture result.md + transition status when a run session ends. */
   onSessionEnded(sessionId: string, result: string): void;
   scheduler: Scheduler;
@@ -158,6 +166,13 @@ export function createEngine(deps: EngineDeps): Engine {
   }
   function firstUndeliveredForCwd(cwd: string): RunContext | undefined {
     return (pending.get(normalize(cwd)) ?? []).find((c) => !c.delivered);
+  }
+  function firstUndeliveredForRunId(runId: string): RunContext | undefined {
+    for (const q of pending.values()) {
+      const hit = q.find((c) => c.runId === runId && !c.delivered);
+      if (hit) return hit;
+    }
+    return undefined;
   }
   function findBySession(sessionId: string): RunContext | undefined {
     for (const q of pending.values()) {
@@ -289,8 +304,20 @@ export function createEngine(deps: EngineDeps): Engine {
       return firstUndeliveredForCwd(cwd);
     },
 
+    pendingForRunId(runId: string): RunContext | undefined {
+      return firstUndeliveredForRunId(runId);
+    },
+
     onSessionRegistered(sessionId: string, cwd: string): void {
       const ctx = firstUndeliveredForCwd(cwd);
+      if (!ctx) return;
+      ctx.sessionId = sessionId;
+      ctx.delivered = true;
+      log(`[engine] delivering action to run ${ctx.runId} (session ${sessionId})`);
+    },
+
+    onSessionRegisteredForRun(sessionId: string, runId: string): void {
+      const ctx = firstUndeliveredForRunId(runId);
       if (!ctx) return;
       ctx.sessionId = sessionId;
       ctx.delivered = true;

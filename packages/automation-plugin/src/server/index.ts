@@ -121,11 +121,23 @@ async function initEngine(ctx: ServerPluginContext): Promise<void> {
     const event = rawEvent as { eventType?: string; data?: Record<string, unknown> } | undefined;
 
     // Correlate a registering run session to its pending run (prompt delivery).
-    const session = ctx.sessionManager.getSession(sessionId) as { cwd?: string } | undefined;
-    if (session?.cwd) {
-      const pendingRun = engine.pendingForCwd(session.cwd);
+    //
+    // Correlate strictly by the host-applied `automationRun.runId` stamp: the
+    // server stamps the *spawned* session on `session_register` (before any
+    // pi event reaches this handler), so matching by runId targets the
+    // correct session exactly. A cwd match must NOT be used — onEvent fires
+    // for ANY session sharing the run's cwd (incl. pre-existing busy ones
+    // with no stamp), and a cwd-FIFO bind delivers the run's prompt to the
+    // wrong session, leaving the real run session idle forever.
+    // See change: fix-automation-run-correlation.
+    const session = ctx.sessionManager.getSession(sessionId) as
+      | { automationRun?: { runId?: string } }
+      | undefined;
+    const stampedRunId = session?.automationRun?.runId;
+    if (stampedRunId) {
+      const pendingRun = engine.pendingForRunId(stampedRunId);
       if (pendingRun && !pendingRun.delivered) {
-        engine.onSessionRegistered(sessionId, session.cwd);
+        engine.onSessionRegisteredForRun(sessionId, stampedRunId);
         runText.set(sessionId, []);
         if (pendingRun.promptText) ctx.sendToSession(sessionId, pendingRun.promptText);
       }
