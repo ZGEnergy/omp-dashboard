@@ -6,7 +6,8 @@
 
 - [ ] 2.1 Add a capture unit test feeding `[injected-prompt echo, assistant reply, agent_end]`; assert `result.md` == reply text and does NOT contain the injected prompt. → verify: test fails against current code.
 - [ ] 2.2 Add a unit test feeding `[injected-prompt echo, agent_end]` (no reply); assert run auto-archives (empty result). → verify: test fails or is wrong against current code.
-- [ ] 2.3 Update `extractAssistantText` to require explicit `role === "assistant"` / the verified assistant `eventType`; a role-less text event is no longer assistant output. → verify: 2.1/2.2 pass.
+- [ ] 2.3 Update `extractAssistantText` to (a) require explicit `role === "assistant"` / the verified assistant `eventType`, and (b) handle array-of-blocks `content` (concat `{type:"text"}` block text), not only string content. → verify: 2.1/2.2 pass.
+- [ ] 2.3b Add a unit test feeding an assistant message with `content: [{type:"text",text:"PONG"}]`; assert it is captured. → verify: fails against current string-only extractor.
 - [ ] 2.4 Defensively exclude any captured chunk equal to the run's injected `promptText`. → verify: 2.1 still passes if the echo ever carries an assistant-ish shape.
 
 ## 3. Regression + live

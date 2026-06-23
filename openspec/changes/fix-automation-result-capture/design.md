@@ -6,7 +6,16 @@
 2. For every subsequent forwarded event on a tracked session, `extractAssistantText(event)` is pushed into `runText[sessionId]`.
 3. On `agent_end`, `runText[sessionId]` is joined and handed to `engine.onSessionEnded(sessionId, result)` which writes `result.md` (empty → auto-archive).
 
-The defect is step 2's extractor. It accepts any event whose `data.text | data.content | data.message.content` is non-empty and whose role is not explicitly a non-assistant role. The injected prompt — delivered by step 1 — round-trips through the session as an input/echo event with no explicit assistant role, so it is captured; the assistant's real reply is shaped differently and slips through.
+The defect is step 2's extractor. Two compounding problems, confirmed against the run session `019ef1f5-8850-7609-ad1d-6b1cca4b1a6c`:
+
+- **Array content dropped.** Persisted messages carry `content` as an array of blocks:
+  ```jsonc
+  { "type": "message", "message": { "role": "assistant", "content": [{ "type": "text", "text": "PONG" }] } }
+  ```
+  The extractor only accepts a *string* `content`/`text`, so the assistant reply yields `null` and is never captured.
+- **Prompt leaks in.** The injected prompt (step 1, `sendToSession`) round-trips as a differently-shaped forwarded event (string text, no explicit assistant role). The guard rejects only *explicit* non-assistant roles, so the prompt passes and is buffered; `agent_end` flushes it to `result.md`.
+
+The persisted JSONL shape above is the on-disk record; the **forwarded wire event** the plugin's `onEvent` actually receives may differ and MUST be captured live before pinning the extractor (task 1.1).
 
 ## Goals / Non-Goals
 
@@ -20,9 +29,9 @@ The defect is step 2's extractor. It accepts any event whose `data.text | data.c
 
 ### Decision 1: Anchor capture to the verified assistant-output event shape
 
-Before coding, enumerate the real event shapes pi forwards for the run session (instrument `ctx.onEvent` once against a live run, or read pi's event contract). Capture text only from the event(s) that carry assistant message output. Treat a role-less text event as NON-assistant (invert the current lenient guard): require `role === "assistant"` explicitly, or match the specific assistant message `eventType`.
+Before coding, enumerate the real event shapes pi forwards for the run session (instrument `ctx.onEvent` once against a live run, or read pi's event contract). Capture text only from the event(s) that carry assistant message output. Treat a role-less text event as NON-assistant (invert the current lenient guard): require `role === "assistant"` explicitly, or match the specific assistant message `eventType`. Extraction MUST handle the array-of-blocks `content` shape — concatenate the `text` of `{type:"text"}` blocks — not only string content.
 
-Rationale: the empirical failure (prompt captured, `PONG` never captured) proves the current heuristic both over-captures the prompt and under-captures the reply. Pinning to the actual assistant event shape fixes both.
+Rationale: the empirical failure (prompt captured, `PONG` reply discarded because its `content` is a block array) proves the current heuristic both over-captures the prompt and under-captures the reply. Pinning to the actual assistant event shape AND handling array content fixes both.
 
 ### Decision 2: Exclude the injected prompt by identity, defensively
 
