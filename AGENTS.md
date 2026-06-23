@@ -182,6 +182,10 @@ Always grep the file — never rerun `npm test` just to see errors.
 
 ## Cross-Platform QA Testing
 
+Two QA layers, additive — neither replaces the other:
+- **VM smoke (`qa/`)** — clean-install + process runtime across OSes (below).
+- **Browser E2E (`tests/e2e/`)** — Playwright rendered-UI behaviour (see next section).
+
 VM-based QA testing for verifying clean-state installation and runtime across platforms.
 
 ```bash
@@ -202,6 +206,16 @@ make clean              # Destroy all cloned VMs
 | `qa/scripts/` | VM lifecycle (clone, wait-ssh, destroy, run-test) |
 | `qa/tests/` | Test suite (install, server, websocket, terminal, git) |
 | `qa/README.md` | Full setup and usage documentation |
+
+### Playwright Browser E2E (`tests/e2e/`)
+
+**Convention: new browser-level QA scenarios are authored as Playwright specs in `tests/e2e/`, run against the Docker test container.** Do NOT add browser-rendered assertions to `qa/tests/*.sh,*.ps1` (those stay CLI/process smoke).
+
+- Target: `http://localhost:18000` (the disposable `docker/` test harness).
+- Lifecycle: Playwright `globalSetup` runs `docker/test-up.sh` and waits for `/api/health` → 200; `globalTeardown` runs `docker/test-down.sh` (discards all state).
+- Fast path: `PW_E2E_USE_RUNNING=1 npm run test:e2e` attaches to an already-running container and skips teardown.
+- E2E is opt-in (`npm run test:e2e`), separate from the vitest unit run (`npm test`). Requires Docker + `npx playwright install chromium`.
+- Spec/tasks: `openspec/changes/add-playwright-e2e/` (harness lands first; scenarios tracked as follow-up tasks).
 
 ## Investigation Protocol — Index First
 
