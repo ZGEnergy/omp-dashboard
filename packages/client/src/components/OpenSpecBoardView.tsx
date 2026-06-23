@@ -160,6 +160,7 @@ export function OpenSpecBoardView(props: OpenSpecBoardViewProps) {
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
   const lastClickedRef = useRef<string | null>(null);
   const firstMountRef = useRef(true);
+  const prevSelectedIdRef = useRef<string | undefined>(selectedId);
   const askUserFingerprint = useMemo(
     () => sessions.filter((s) => s.currentTool === "ask_user").map((s) => s.id).sort().join(","),
     [sessions],
@@ -167,7 +168,12 @@ export function OpenSpecBoardView(props: OpenSpecBoardViewProps) {
   useEffect(() => {
     const isFirstMount = firstMountRef.current;
     firstMountRef.current = false;
-    const wasClick = lastClickedRef.current === selectedId;
+    // Only treat as a click when the selection actually changed to the clicked
+    // id. A re-run driven by askUserFingerprint (selectedId unchanged) must NOT
+    // inherit a stale click marker, or attention scrolls get suppressed.
+    const selectedChanged = prevSelectedIdRef.current !== selectedId;
+    prevSelectedIdRef.current = selectedId;
+    const wasClick = selectedChanged && lastClickedRef.current === selectedId;
     lastClickedRef.current = null;
     if (!selectedId) return;
     if (wasClick && !isFirstMount) return;

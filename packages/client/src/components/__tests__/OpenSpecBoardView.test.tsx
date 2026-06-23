@@ -164,6 +164,11 @@ describe("OpenSpecBoardView", () => {
 
 // ── Status stripes + auto-scroll (port-session-card-state-visuals-to-openspec-board)
 describe("OpenSpecBoardView status stripes", () => {
+  const originalScrollIntoView = Element.prototype.scrollIntoView;
+  afterEach(() => {
+    Element.prototype.scrollIntoView = originalScrollIntoView;
+  });
+
   function rowStripe() {
     return screen.getByTestId("board-session-row").querySelector(".card-stripes-fx");
   }
