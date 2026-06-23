@@ -22,6 +22,20 @@ A fired trigger SHALL spawn a pi session stamped `kind="automation"` carrying `a
 - **WHEN** the settings default is `hidden` and an automation declares `visibility: shown`
 - **THEN** that automation's runs SHALL appear on the board while other automations' runs stay hidden.
 
+### Requirement: Action prompt delivered to the correlated run session
+
+The engine SHALL deliver a run's action prompt to the exact session it spawned for that run, correlated by the host-applied `automationRun.runId` stamp. Correlation SHALL NOT rely on the run session's working directory: when other sessions share the run's `cwd`, the prompt SHALL still reach only the spawned run session. A session that does not carry a matching `automationRun.runId` stamp SHALL NOT receive the prompt, and the run SHALL remain `running` until its own stamped session registers.
+
+#### Scenario: Prompt reaches the spawned session despite same-cwd siblings
+
+- **WHEN** a run is spawned in a `cwd` where one or more unrelated sessions are already active and emitting events
+- **THEN** the action prompt SHALL be delivered only to the session stamped with that run's `runId`, AND the run SHALL progress to `done` once that session ends.
+
+#### Scenario: Unrelated same-cwd session never captures the prompt
+
+- **WHEN** an unrelated session at the run's `cwd` emits events before the spawned run session registers
+- **THEN** that session SHALL NOT receive the run's action prompt AND SHALL NOT be bound to the run.
+
 ### Requirement: Model resolution at spawn time
 
 When `model` is an `@role` alias, it SHALL be resolved to a concrete provider/model at spawn time via the roles plugin. A bare provider/model id SHALL be used as-is. An unresolvable `@role` SHALL fall back to a configured default model and surface a run error rather than silently selecting a model.
