@@ -68,6 +68,6 @@ Corrected understanding (design D8): hermes is a **pi extension**, not a server 
 
 ## 8. Phase-A close-out (Piece A only; Piece B deferred)
 
-- [ ] 8.1 CHANGELOG `[Unreleased]`: `requires`+probe on recommended extensions (Piece A). (Hermes offline-bundling deferred — no CHANGELOG entry.)
-- [ ] 8.2 Update `docs/file-index-shared.md` (recommended-extensions `requires` field + probe) via subagent, caveman style
-- [ ] 8.3 Code-review gate; full `npm test` + `npm run build` green (Piece A: done — 8218 passed, build clean)
+- [x] 8.1 CHANGELOG `[Unreleased]` Added entry for `requires`+probe (Piece A); hermes offline-bundling deferred — no CHANGELOG entry
+- [x] 8.2 `docs/file-index-shared.md` recommended-extensions.ts row updated (requires field + probe) via subagent, caveman style
+- [x] 8.3 Full `npm test` 8218 passed / `npm run build` clean. (Code-review gate: CodeRabbit cloud rate-limited — advisory, deferred per warn-and-continue.)
