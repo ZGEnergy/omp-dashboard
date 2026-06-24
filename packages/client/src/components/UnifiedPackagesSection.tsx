@@ -14,6 +14,7 @@ import {
 	mdiAlertCircle,
 	mdiArrowUpBold,
 	mdiLoading,
+	mdiMenuDown,
 	mdiRefresh,
 } from "@mdi/js";
 import { getApiBase } from "../lib/api-context.js";
@@ -94,6 +95,9 @@ export function UnifiedPackagesSection() {
 	const [coreUpdating, setCoreUpdating] = useState<Set<string>>(new Set());
 	const [coreProgress, setCoreProgress] = useState<ProgressMap>(new Map());
 	const [coreErrors, setCoreErrors] = useState<Map<string, string>>(new Map());
+	// Update-all split control: bulk delegation in flight + dropdown open.
+	const [bulkUpdating, setBulkUpdating] = useState(false);
+	const [updateMenuOpen, setUpdateMenuOpen] = useState(false);
 
 	// Live tick for "last checked N min ago"
 	const [, setTick] = useState(0);
@@ -162,8 +166,11 @@ export function UnifiedPackagesSection() {
 	);
 
 	const corePackages: PiCorePackage[] = status?.packages ?? [];
+	// Only count packages that have an update AND can be updated in place.
+	// A workspace/source pi has updateAvailable=true but updatable=false — it
+	// shows a per-row instruction, not a clickable/Update-all action.
 	const updatableCore = useMemo(
-		() => corePackages.filter((p) => p.updateAvailable),
+		() => corePackages.filter((p) => p.updateAvailable && p.updatable !== false),
 		[corePackages],
 	);
 
@@ -230,6 +237,45 @@ export function UnifiedPackagesSection() {
 			if (!opts.silent) refresh(true);
 		},
 		[refresh],
+	);
+
+	// Bulk delegation to the resolved pi's own updater. `mode: "all"` runs
+	// `pi update --all` (pi + extensions); `mode: "extensions"` runs
+	// `pi update --extensions`. See change: align-pi-update-with-resolved-pi.
+	const doPiUpdate = useCallback(
+		async (mode: "all" | "extensions") => {
+			setUpdateMenuOpen(false);
+			setBulkUpdating(true);
+			setCoreErrors(new Map());
+			try {
+				const res = await fetch(`${getApiBase()}/api/pi-core/update`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ mode }),
+				});
+				const body = await res.json();
+				if (!body.success) {
+					const raw = body.error ?? "Update failed";
+					const friendly =
+						res.status === 409 || /already in progress|busy/i.test(raw)
+							? t("settings.updateBusy", undefined, "An update is already running — please wait for it to finish.")
+							: raw;
+					setCoreErrors(new Map([["*", friendly]]));
+				} else {
+					const data = body.data as PiCoreUpdateResponse;
+					const errs = new Map<string, string>();
+					for (const r of data.results) if (!r.success && r.error) errs.set(r.name, r.error);
+					setCoreErrors(errs);
+					refresh(true);
+					handleCheckUpdates({ silent: true });
+				}
+			} catch (err: any) {
+				setCoreErrors(new Map([["*", err?.message ?? "Network error"]]));
+			} finally {
+				setBulkUpdating(false);
+			}
+		},
+		[refresh, handleCheckUpdates],
 	);
 
 	// Auto-check installed packages for updates: fires once after the
@@ -323,15 +369,80 @@ export function UnifiedPackagesSection() {
 		);
 	};
 
+	// Total updates across core + extensions drives the header indicator and
+	// whether the Update-all control renders at all. See change:
+	// align-pi-update-with-resolved-pi.
+	const updateCount = updatableCore.length + updatesAvailable.size;
+	const bulkBusy = bulkUpdating || coreUpdating.size > 0;
+
 	return (
 		<div>
 			<h2 className="text-sm font-semibold text-[var(--text-primary)] mb-3 pb-1 border-b border-[var(--border-secondary)] flex items-center justify-between">
-				<span>{t("settings.piEcosystem", undefined, "Pi Ecosystem")}</span>
+				<span className="flex items-center gap-2">
+					{t("settings.piEcosystem", undefined, "Pi Ecosystem")}
+					{updateCount > 0 && (
+						<span
+							className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[var(--accent-primary)]/15 text-[var(--accent-primary)]"
+							data-testid="pi-update-badge"
+						>
+							{t("settings.nUpdates", { count: updateCount }, `${updateCount} updates`)}
+						</span>
+					)}
+				</span>
 				<div className="flex items-center gap-2">
 					{status?.lastChecked && (
 						<span className="text-[10px] font-normal text-[var(--text-muted)]">
 								{t("settings.lastChecked", { time: relativeTime(status.lastChecked, t) }, `Last checked: ${relativeTime(status.lastChecked, t)}`)}
 						</span>
+					)}
+					{/* Update-all split control: renders ONLY when an update exists. */}
+					{updateCount > 0 && (
+						<div className="relative">
+							<div className="flex">
+								<button
+									onClick={() => doPiUpdate("all")}
+									disabled={bulkBusy}
+									className="text-xs pl-2.5 pr-2 py-1 rounded-l bg-[var(--accent-primary)]/20 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/30 disabled:opacity-50 flex items-center gap-1 font-semibold"
+									data-testid="pi-update-all"
+								>
+									<Icon path={bulkBusy ? mdiLoading : mdiArrowUpBold} size={0.55} spin={bulkBusy} />
+									{bulkBusy
+										? t("common.updating", undefined, "Updating\u2026")
+										: t("settings.updateAll", undefined, "Update all")}
+								</button>
+								<button
+									onClick={() => setUpdateMenuOpen((o) => !o)}
+									disabled={bulkBusy}
+									className="text-xs px-1 py-1 rounded-r border-l border-black/25 bg-[var(--accent-primary)]/20 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/30 disabled:opacity-50"
+									data-testid="pi-update-all-caret"
+									aria-label={t("settings.updateOptions", undefined, "Update options")}
+								>
+									<Icon path={mdiMenuDown} size={0.6} />
+								</button>
+							</div>
+							{updateMenuOpen && (
+								<div
+									className="absolute right-0 mt-1 z-10 w-60 rounded-md border border-[var(--border-primary)] bg-[var(--bg-surface)] shadow-lg p-1"
+									data-testid="pi-update-all-menu"
+								>
+									<button
+										onClick={() => { setUpdateMenuOpen(false); doCoreUpdate(piPkg ? [piPkg.name] : []); }}
+										disabled={!piPkg}
+										className="w-full text-left px-2 py-1.5 rounded hover:bg-[var(--accent-primary)]/10 disabled:opacity-40"
+									>
+										<span className="block text-xs font-semibold text-[var(--text-primary)]">{t("settings.updatePiOnly", undefined, "Update pi only")}</span>
+										<span className="block text-[10px] text-[var(--text-tertiary)] font-mono">pi update --self</span>
+									</button>
+									<button
+										onClick={() => doPiUpdate("extensions")}
+										className="w-full text-left px-2 py-1.5 rounded hover:bg-[var(--accent-primary)]/10"
+									>
+										<span className="block text-xs font-semibold text-[var(--text-primary)]">{t("settings.updateExtensionsOnly", undefined, "Update extensions only")}</span>
+										<span className="block text-[10px] text-[var(--text-tertiary)] font-mono">pi update --extensions</span>
+									</button>
+								</div>
+							)}
+						</div>
 					)}
 					<button
 						onClick={() => {
@@ -365,19 +476,8 @@ export function UnifiedPackagesSection() {
 				<EmptyHint>{t("settings.noCorePackages", undefined, "No pi ecosystem core packages detected.")}</EmptyHint>
 			) : (
 				<>
-					{updatableCore.length > 1 && (
-						<div className="mb-2">
-							<button
-								onClick={() => doCoreUpdate(updatableCore.map((p) => p.name))}
-								disabled={coreUpdating.size > 0}
-								className="text-xs px-3 py-1 rounded bg-[var(--accent-primary)]/20 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/30 disabled:opacity-50 flex items-center gap-1"
-								data-testid="pi-core-update-all"
-							>
-								<Icon path={coreUpdating.size > 0 ? mdiLoading : mdiArrowUpBold} size={0.55} spin={coreUpdating.size > 0} />
-									{t("common.updateAll", { count: updatableCore.length }, `Update All (${updatableCore.length})`)}
-							</button>
-						</div>
-					)}
+					{/* Per-group "Update All" button removed — replaced by the panel-header
+					    Update-all split control. See change: align-pi-update-with-resolved-pi. */}
 					<div className="space-y-1 mb-4">
 						{corePackages.map((pkg) => {
 							const isPi = isPiCorePkg(pkg.name);
@@ -392,8 +492,8 @@ export function UnifiedPackagesSection() {
 									updateAvailable={pkg.updateAvailable}
 									busy={coreUpdating.has(pkg.name)}
 									progress={coreProgress.get(pkg.name)?.message}
-									error={coreErrors.get(pkg.name)}
-									canUpdate={true}
+									error={coreErrors.get(pkg.name) ?? (pkg.updatable === false ? pkg.manualAction : undefined)}
+									canUpdate={pkg.updatable !== false}
 									canUninstall={false}
 									onUpdate={() => doCoreUpdate([pkg.name])}
 									breakingChangeCount={isPi ? piBreakingCount : undefined}

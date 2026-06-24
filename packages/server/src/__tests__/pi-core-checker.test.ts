@@ -75,6 +75,8 @@ describe("PiCoreChecker.getStatus", () => {
 				return null;
 			},
 			managedDir: tmpManagedDir,
+			// Isolate from the real resolved pi so the npm-list version is asserted.
+			resolveWiredPi: () => null,
 		});
 
 		const status = await checker.getStatus();
@@ -127,6 +129,7 @@ describe("PiCoreChecker.getStatus", () => {
 				}),
 			fetchLatest: async () => "0.67.6",
 			managedDir: tmpManagedDir,
+			resolveWiredPi: () => null,
 		});
 
 		const status = await checker.getStatus();
@@ -359,6 +362,7 @@ describe("PiCoreChecker pi.dev integration", () => {
 				packageName: "@earendil-works/pi-coding-agent",
 			}),
 			managedDir: tmpManagedDir,
+			resolveWiredPi: () => null,
 		});
 		await checker.getStatus();
 

@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Update All — Pi Ecosystem packages page mockups</title>
+<style>
+  /* Dashboard dark-theme tokens (approximated from --text/--border/--accent vars) */
+  :root{
+    --bg:#0d0f14; --surface:#141821; --surface2:#1a1f2b; --row:#11151d;
+    --text-primary:#e8ebf1; --text-secondary:#aeb6c4; --text-tertiary:#8b93a3; --text-muted:#5f6776;
+    --border-primary:#3a4250; --border-secondary:#262c38;
+    --accent-primary:#5b9dff; --good:#3fb950; --warn:#d29922; --bad:#f85149;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text-primary);
+       font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:2rem}
+  .wrap{max-width:760px;margin:0 auto}
+  .pagetitle{font-size:1.3rem;margin:0 0 .2rem}
+  .pagesub{color:var(--text-tertiary);font-size:.85rem;margin:0 0 1.6rem}
+  .variant-label{color:var(--accent-primary);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;
+                 font-weight:700;margin:2rem 0 .5rem}
+
+  /* ── Panel ── */
+  .panel{background:var(--surface);border:1px solid var(--border-secondary);border-radius:10px;padding:14px 16px;margin-bottom:1rem}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;
+              border-bottom:1px solid var(--border-secondary);padding-bottom:8px;margin-bottom:10px}
+  .panel-title{font-size:.9rem;font-weight:600;display:flex;align-items:center;gap:8px}
+  .count{font-size:10px;color:var(--text-muted);font-weight:400}
+  .badge{font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(91,157,255,.16);color:var(--accent-primary)}
+  .head-actions{display:flex;align-items:center;gap:8px}
+  .desc{color:var(--text-tertiary);font-size:.78rem;margin:0 0 12px}
+
+  /* ── Buttons ── */
+  .btn{font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid var(--border-secondary);
+       color:var(--text-secondary);background:transparent;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .btn:hover{color:var(--text-primary);border-color:var(--border-primary)}
+  .btn-primary{background:rgba(91,157,255,.18);border-color:transparent;color:var(--accent-primary);font-weight:600}
+  .btn-primary:hover{background:rgba(91,157,255,.28);color:var(--accent-primary)}
+  .btn[disabled]{opacity:.45;cursor:default}
+  .split{display:inline-flex}
+  .split .btn-primary{border-top-right-radius:0;border-bottom-right-radius:0}
+  .split .caret{border-top-left-radius:0;border-bottom-left-radius:0;border-left:1px solid rgba(0,0,0,.25);
+                background:rgba(91,157,255,.18);color:var(--accent-primary);padding:5px 7px}
+  .ico{width:13px;height:13px;display:inline-block;vertical-align:-2px}
+  .spin{animation:r 1s linear infinite;transform-origin:50% 50%} @keyframes r{to{transform:rotate(360deg)}}
+
+  /* ── Sub-group + rows ── */
+  .subhead{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);
+           font-weight:700;margin:12px 0 6px}
+  .row{display:flex;align-items:center;justify-content:space-between;background:var(--row);
+       border:1px solid var(--border-secondary);border-radius:7px;padding:8px 10px;margin-bottom:6px}
+  .row .left{display:flex;align-items:center;gap:9px;min-width:0}
+  .pkg{font-size:13px}
+  .pkg .name{font-weight:600}
+  .ver{font-family:var(--mono);font-size:11px;color:var(--text-tertiary)}
+  .arrow{color:var(--text-muted);font-family:var(--mono);font-size:11px}
+  .vnew{color:var(--good);font-family:var(--mono);font-size:11px}
+  .pill{font-size:9px;font-weight:700;padding:1px 6px;border-radius:999px}
+  .pill-upd{background:rgba(63,185,80,.15);color:var(--good)}
+  .pill-locked{background:rgba(210,153,34,.15);color:var(--warn)}
+  .pill-ok{background:rgba(120,130,150,.15);color:var(--text-muted)}
+  .rowbtn{font-size:11px;padding:3px 9px;border-radius:5px;border:1px solid var(--border-secondary);color:var(--text-secondary);background:transparent;cursor:pointer}
+  .rowbtn.upd{background:rgba(91,157,255,.16);border-color:transparent;color:var(--accent-primary);font-weight:600}
+  .hint{font-size:10px;color:var(--text-muted);margin-top:2px}
+
+  /* progress + menu + banners */
+  .progress{margin-top:10px;background:#0a0c11;border:1px solid var(--border-secondary);border-radius:6px;
+            padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--text-secondary)}
+  .progress .line{white-space:pre;opacity:.9}
+  .bar{height:3px;border-radius:2px;background:var(--border-secondary);margin-top:6px;overflow:hidden}
+  .bar>i{display:block;height:100%;width:62%;background:var(--accent-primary)}
+  .menu{margin-top:6px;background:var(--surface2);border:1px solid var(--border-primary);border-radius:8px;
+        width:280px;padding:5px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .mi{display:flex;flex-direction:column;gap:1px;padding:7px 9px;border-radius:6px;cursor:pointer}
+  .mi:hover{background:rgba(91,157,255,.12)}
+  .mi .t{font-size:12.5px;font-weight:600;color:var(--text-primary)}
+  .mi .d{font-size:10.5px;color:var(--text-tertiary)}
+  .mi.sep{border-top:1px solid var(--border-secondary);border-radius:0;margin-top:3px;padding-top:8px}
+  .banner{display:flex;gap:8px;align-items:flex-start;font-size:11px;border-radius:6px;padding:7px 9px;margin-bottom:10px}
+  .banner.warn{background:rgba(210,153,34,.1);border:1px solid rgba(210,153,34,.3);color:var(--warn)}
+  .note{color:var(--text-tertiary);font-size:.78rem;border-left:3px solid var(--accent-primary);padding:.4rem .8rem;background:var(--surface2);border-radius:0 8px 8px 0;margin:.5rem 0 1.4rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1 class="pagetitle">Settings · Pi Ecosystem</h1>
+  <p class="pagesub">Top-level <b>Update All</b> (resolved pi's <code style="font-family:var(--mono)">pi update --all</code>). Button shows <b>only when an update exists</b>; a <b>dot indicator</b> surfaces updates without opening the panel.</p>
+
+  <!-- ════════ 0 · VISUAL INDICATOR (nav / collapsed) ════════ -->
+  <div class="variant-label">0 · Visual indicator — so updates are noticed without opening</div>
+  <div class="panel" style="display:flex;gap:28px;align-items:center;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="position:relative;display:inline-flex">
+        <svg class="ico" style="width:20px;height:20px;color:var(--text-secondary)" viewBox="0 0 24 24" fill="currentColor"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-3.8l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L4.6 11a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h3.8l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4L19.4 13zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"/></svg>
+        <span style="position:absolute;top:-3px;right:-3px;width:9px;height:9px;border-radius:50%;background:var(--good);border:2px solid var(--surface);box-shadow:0 0 0 1px var(--good)"></span>
+      </span>
+      <span style="font-size:12px;color:var(--text-secondary)">Settings nav — dot when any update available</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:12px;color:var(--text-tertiary)">Pi Ecosystem row</span>
+      <span class="badge">3 updates</span>
+      <span style="width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block"></span>
+    </div>
+  </div>
+  <div class="note"><b>Indicator, not just a button:</b> a small dot on the Settings nav icon + the count badge on the section title mean a user sees "updates available" without opening the panel. Dot clears when everything is current.</div>
+
+  <!-- ════════ A · DEFAULT — updates available ════════ -->
+  <div class="variant-label">A · Default — updates available (the new header button)</div>
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title"><span style="width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block"></span> Pi Ecosystem <span class="count">· 7 packages</span> <span class="badge">3 updates</span></div>
+      <div class="head-actions">
+        <button class="btn"><svg class="ico" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A8 8 0 1 0 19.74 14h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg>Check now</button>
+        <span class="split">
+          <button class="btn btn-primary"><svg class="ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>Update all</button>
+          <button class="btn caret" title="Update options">▾</button>
+        </span>
+      </div>
+    </div>
+    <p class="desc">Pi tooling, recommended extensions, and any other packages your pi loads.</p>
+
+    <div class="subhead">Core</div>
+    <div class="row"><div class="left"><span class="pkg"><span class="name">pi</span> <span class="ver">0.78.0</span> <span class="arrow">→</span> <span class="vnew">0.80.2</span></span><span class="pill pill-upd">update</span></div><button class="rowbtn upd">Update</button></div>
+    <div class="row"><div class="left"><span class="pkg"><span class="name">pi-dashboard</span> <span class="ver">0.5.4</span></span><span class="pill pill-ok">up to date</span></div><button class="rowbtn" disabled>—</button></div>
+    <div class="row"><div class="left"><span class="pkg"><span class="name">pi-model-proxy</span> <span class="ver">0.3.1</span></span><span class="pill pill-ok">up to date</span></div><button class="rowbtn" disabled>—</button></div>
+
+    <div class="subhead">Recommended extensions</div>
+    <div class="row"><div class="left"><span class="pkg"><span class="name">pi-web-access</span> <span class="ver">0.11.0</span> <span class="arrow">→</span> <span class="vnew">0.12.0</span></span><span class="pill pill-upd">update</span></div><button class="rowbtn upd">Update</button></div>
+    <div class="row"><div class="left"><span class="pkg"><span class="name">context-mode</span> <span class="ver">1.4.2</span> <span class="arrow">→</span> <span class="vnew">1.5.0</span></span><span class="pill pill-upd">update</span></div><button class="rowbtn upd">Update</button></div>
+  </div>
+  <div class="note"><b>Placement:</b> sits in the panel header next to <i>Check now</i>, as a split button. Badge "3 updates" makes it discoverable. Disabled (greyed) when nothing has an update.</div>
+
+  <!-- ════════ B · SPLIT MENU OPEN ════════ -->
+  <div class="variant-label">B · Split-menu open — choose scope (self vs all)</div>
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Pi Ecosystem <span class="badge">3 updates</span></div>
+      <div class="head-actions">
+        <button class="btn">Check now</button>
+        <span class="split">
+          <button class="btn btn-primary">Update all</button>
+          <button class="btn caret">▾</button>
+        </span>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end">
+      <div class="menu">
+        <div class="mi"><span class="t">Update pi only</span><span class="d">pi update --self · the pi wired to this dashboard</span></div>
+        <div class="mi"><span class="t">Update pi &amp; extensions</span><span class="d">pi update --all · pi + all installed packages (recommended)</span></div>
+        <div class="mi sep"><span class="t">Update extensions only</span><span class="d">pi update --extensions · keep current pi</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>Why a split button:</b> primary click = the safe common case (<code style="font-family:var(--mono)">--all</code>); the caret exposes <code style="font-family:var(--mono)">--self</code> / <code style="font-family:var(--mono)">--extensions</code> for control. Each item names the exact <code style="font-family:var(--mono)">pi update</code> flag it runs.</div>
+
+  <!-- ════════ C · IN PROGRESS ════════ -->
+  <div class="variant-label">C · Running — streamed output from the resolved pi</div>
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Pi Ecosystem</div>
+      <div class="head-actions">
+        <button class="btn" disabled>Check now</button>
+        <span class="split">
+          <button class="btn btn-primary" disabled><svg class="ico spin" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7z"/></svg>Updating…</button>
+          <button class="btn caret" disabled>▾</button>
+        </span>
+      </div>
+    </div>
+    <p class="desc" style="margin-bottom:8px">Running <code style="font-family:var(--mono)">pi update --all</code> on the wired pi (<span class="ver">~/.pi-dashboard/…/pi · managed</span>)</p>
+    <div class="progress">
+      <div class="line">↑ pi            0.78.0 → 0.80.2   ✓</div>
+      <div class="line">↑ pi-web-access 0.11.0 → 0.12.0   ✓</div>
+      <div class="line">↑ context-mode  1.4.2  → 1.5.0    …installing</div>
+      <div class="bar"><i></i></div>
+    </div>
+  </div>
+  <div class="note"><b>One progress surface</b> for the whole run (rows also flip to per-package spinners). On success the dashboard auto-restarts so the new pi is the one that spawns sessions.</div>
+
+  <!-- ════════ D · PARTIAL REFUSAL ════════ -->
+  <div class="variant-label">D · Not updatable here — pi's own refusal surfaced</div>
+  <div class="panel">
+    <div class="banner warn">
+      <svg class="ico" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;margin-top:1px"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+      <div><b>pi can’t self-update this install.</b> Detected method: <code style="font-family:var(--mono)">source checkout (monorepo)</code>.
+      Run <code style="font-family:var(--mono)">npm install</code> from the repo root, then restart the dashboard. Extensions can still update below.</div>
+    </div>
+    <div class="panel-head" style="border:0;padding:0;margin:0 0 8px">
+      <div class="panel-title">Pi Ecosystem</div>
+      <div class="head-actions">
+        <button class="btn">Check now</button>
+        <span class="split">
+          <button class="btn btn-primary">Update extensions</button>
+          <button class="btn caret">▾</button>
+        </span>
+      </div>
+    </div>
+    <div class="subhead">Core</div>
+    <div class="row"><div class="left"><span class="pkg"><span class="name">pi</span> <span class="ver">0.78.0</span> <span class="arrow">→</span> <span class="vnew">0.80.2</span></span><span class="pill pill-locked">manual</span></div><button class="rowbtn" disabled title="source checkout">Locked</button></div>
+    <div class="row" style="opacity:.7"><div class="hint" style="margin:0">⤷ npm install   (from the repo root), then restart</div></div>
+  </div>
+  <div class="note"><b>No false success.</b> When the resolved pi is a source/electron/brew install, pi exits non-zero with its <code style="font-family:var(--mono)">getSelfUpdateUnavailableInstruction()</code>; the dashboard shows that text and the primary button degrades to <i>Update extensions</i> (still safe).</div>
+
+  <!-- ════════ E · UP TO DATE ════════ -->
+  <div class="variant-label">E · Everything current — no button, no indicator</div>
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Pi Ecosystem <span class="count">· 7 packages</span></div>
+      <div class="head-actions">
+        <button class="btn">Check now</button>
+        <!-- Update-all button is NOT rendered when nothing has an update -->
+      </div>
+    </div>
+    <p class="desc" style="margin-bottom:4px"><span style="color:var(--good)">●</span> All packages up to date · pi <span class="ver">0.80.2</span> (wired, managed) · checked just now</p>
+  </div>
+  <div class="note"><b>Hidden, not disabled.</b> With zero updates the split button is removed entirely (no greyed control), the count badge and nav dot are gone — the panel reads as calm/done. The button only ever appears when <code style="font-family:var(--mono)">updatableCount &gt; 0</code>.</div>
+
+</div>
+</body>
+</html>

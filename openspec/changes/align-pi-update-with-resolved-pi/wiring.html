@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Update the pi wired to the dashboard — delegate to its own `pi update`</title>
+<style>
+  :root{--bg:#0f1117;--panel:#171a23;--panel2:#1d212d;--ink:#e6e9ef;--muted:#9aa3b2;
+    --line:#2a2f3c;--accent:#5b9dff;--good:#3fb950;--warn:#d29922;--bad:#f85149;--code:#0b0d13;}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);padding:2rem}
+  main{max-width:1000px;margin:0 auto}
+  h1{font-size:1.7rem;margin:0 0 .25rem}
+  h2{font-size:1.2rem;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--line)}
+  h3{font-size:1rem;margin:1.4rem 0 .4rem;color:var(--accent)}
+  .sub{color:var(--muted);margin-top:0}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.86em;background:var(--code);padding:.1em .4em;border-radius:4px;color:#cfe1ff}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow:auto;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;color:#cfe1ff}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.88rem}
+  th,td{border:1px solid var(--line);padding:.55rem .7rem;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--muted);font-weight:600}
+  .tag{display:inline-block;padding:.05em .5em;border-radius:999px;font-size:.74rem;font-weight:700}
+  .t-good{background:rgba(63,185,80,.15);color:var(--good)} .t-warn{background:rgba(210,153,34,.15);color:var(--warn)} .t-bad{background:rgba(248,81,73,.15);color:var(--bad)}
+  .step{display:flex;gap:.8rem;margin:.5rem 0}
+  .step .n{flex:0 0 1.6rem;height:1.6rem;border-radius:50%;background:var(--accent);color:#06122b;font-weight:700;display:grid;place-items:center;font-size:.85rem}
+  .flow{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;white-space:pre;overflow:auto;font-family:"SF Mono",ui-monospace,monospace;font-size:.8rem;color:#aecbff;line-height:1.5}
+  .note{border-left:3px solid var(--accent);padding:.5rem .9rem;background:var(--panel2);border-radius:0 8px 8px 0;margin:1rem 0}
+  .good-note{border-left-color:var(--good)} .bad-note{border-left-color:var(--bad)}
+  .kicker{color:var(--accent);font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;font-weight:700}
+  ul{margin:.4rem 0 .4rem 1.1rem;padding:0} li{margin:.2rem 0}
+</style>
+</head>
+<body>
+<main>
+
+  <p class="kicker">OpenSpec · align-pi-update-with-resolved-pi</p>
+  <h1>Update the pi <em>wired to the dashboard</em> — by delegating to its own <code>pi update</code></h1>
+  <p class="sub">Stop re-implementing the update. Resolve pi once, run <i>that</i> pi's built-in updater, surface <i>that</i> pi's version.</p>
+
+  <h2>The key realisation</h2>
+  <div class="note good-note">
+    pi already owns install-location logic. Its CLI exports
+    <code>detectInstallMethod()</code>, <code>getSelfUpdateCommand()</code>, and
+    <code>getSelfUpdateUnavailableInstruction()</code>, pins the exact checked version
+    (<code>getSelfUpdatePlan</code>), handles the <code>@mariozechner→@earendil-works</code> scope migration,
+    and already <b>refuses</b> unsupported installs: <code>"pi cannot self-update this installation."</code><br><br>
+    So the dashboard should <b>not</b> classify install trees or shell out to <code>npm install -g</code> itself.
+    It should invoke <b>the resolved pi's own</b> <code>pi update</code> and relay the result.
+  </div>
+
+  <h2>Before vs after</h2>
+  <table>
+    <tr><th>Concern</th><th>Today (broken)</th><th>After (delegated)</th></tr>
+    <tr><td>What runs the update</td>
+        <td class="t-bad">dashboard runs raw <code>npm install -g &lt;pkg&gt;@latest</code></td>
+        <td class="t-good">dashboard runs <code>&lt;resolvedPiArgv&gt; update --self</code></td></tr>
+    <tr><td>Which pi gets updated</td>
+        <td class="t-bad">whatever tree <code>installSource</code> guessed (global/managed)</td>
+        <td class="t-good">the exact pi the dashboard spawns — it updates itself</td></tr>
+    <tr><td>Install-method knowledge</td>
+        <td class="t-bad">re-implemented in the dashboard (global|managed only)</td>
+        <td class="t-good">pi's own <code>detectInstallMethod()</code> (npm/pnpm/bun/managed/…)</td></tr>
+    <tr><td>Unsupported install (electron/source)</td>
+        <td class="t-bad">silently updates a different tree, reports success</td>
+        <td class="t-good">pi refuses → dashboard shows its <code>getSelfUpdateUnavailableInstruction()</code></td></tr>
+    <tr><td>Extension skew (e.g. pi-web-access)</td>
+        <td class="t-bad">untouched — extensions update separately</td>
+        <td class="t-good"><code>pi update --all</code> refreshes pi + extensions together, in lockstep</td></tr>
+    <tr><td>Version shown in stats</td>
+        <td class="t-bad"><code>npm list -g</code> / managed scan — can disagree with spawn</td>
+        <td class="t-good">read from the resolved pi's own <code>package.json</code></td></tr>
+  </table>
+
+  <h2>The data flow</h2>
+  <div class="flow">  ┌──────────────────────────────────────────────────────────────┐
+  │  RESOLVE ONCE  — the existing spawn source of truth            │
+  │     resolvePi() → ToolRegistry.resolveExecutor("pi").argv      │
+  │     realpath → pkgRoot → read package.json  →  version, path   │
+  └───────────────────────────┬────────────────────────────────────┘
+                              │  the SAME argv used to spawn sessions
+              ┌───────────────┼────────────────────┐
+              ▼               ▼                    ▼
+   ── STATS / HEALTH ──   ── UPDATE ──        ── CHECK ──
+   wiredPi:{version,      spawn:              ask pi for latest
+     path, method,          &lt;argv&gt; update      via its own update
+     updatable}             --self  (or --all  check (pinned ver,
+   shown in Settings        to fix extensions) scope-migration aware)
+                              │
+                              ▼
+                  pi runs detectInstallMethod():
+                    npm|pnpm|bun|managed  → builds correct self-update cmd, runs it
+                    unsupported (source/electron/brew) → prints the manual
+                      instruction + exits non-zero
+                              │
+              ┌───────────────┴────────────────┐
+              ▼                                ▼
+   exit 0: stream output,          non-zero: capture stderr instruction,
+   then POST /api/restart          show it on the row, button stays disabled
+   (+ reload sessions)             (no false success)</div>
+
+  <h2>What the dashboard does (thin wrapper)</h2>
+  <div class="step"><div class="n">1</div><div>
+    <b>Resolve once.</b> <code>resolveWiredPi()</code> returns <code>{ argv, pkgRoot, version, path }</code>
+    from <code>ToolRegistry.resolveExecutor("pi")</code> — identical to the spawn path. One source of truth for
+    spawn + stats + update.</div></div>
+  <div class="step"><div class="n">2</div><div>
+    <b>Stats.</b> <code>/api/health</code> (and the Settings → Pi Ecosystem row) report
+    <code>wiredPi: { version, path }</code> read from <code>pkgRoot/package.json</code> — never a separate
+    <code>npm list</code> enumeration.</div></div>
+  <div class="step"><div class="n">3</div><div>
+    <b>Update = delegate.</b> Replace <code>defaultRunNpmUpdate</code>'s <code>npm install</code> for the pi row
+    with <code>spawn(argv[0], [...argv.slice(1), "update", "--self"])</code> (or <code>"--all"</code>). Stream
+    stdout/stderr to the existing progress events. pi decides method + does it.</div></div>
+  <div class="step"><div class="n">4</div><div>
+    <b>Honest refusal for free.</b> When pi exits non-zero with
+    <code>getSelfUpdateUnavailableInstruction()</code> text (source checkout, electron bundle, brew, …), the
+    dashboard shows that exact instruction. No dashboard-side install-kind table to maintain.</div></div>
+  <div class="step"><div class="n">5</div><div>
+    <b>Restart after success.</b> On exit 0, <code>POST /api/restart</code> + reload sessions so the new pi is
+    actually picked up (the running server resolved the old binary).</div></div>
+
+  <h2>What stays npm-based: the dashboard package itself</h2>
+  <div class="note">
+    <code>@blackbelt-technology/pi-agent-dashboard</code> is <b>not</b> pi — there is no <code>pi update</code> for
+    it. It keeps an npm/refuse path, but driven by the <b>already-existing</b>
+    <code>detectInstallLayout()</code> + <code>suggestedReinstallCommand()</code> in
+    <code>recovery-server.ts</code> (electron → reinstall app · monorepo → <code>npm install</code> from repo root ·
+    npm-global → <code>npm install -g</code>). Same "update the real tree, else instruct" contract, smaller surface.
+  </div>
+
+  <h2>Update-target matrix (now owned by pi, not the dashboard)</h2>
+  <table>
+    <tr><th>Resolved pi install method (pi's own detection)</th><th>pi update --self</th></tr>
+    <tr><td>npm global / npm local</td><td><span class="tag t-good">runs</span> npm install at its own location</td></tr>
+    <tr><td>managed (<code>~/.pi-dashboard</code> via its npmCommand)</td><td><span class="tag t-good">runs</span></td></tr>
+    <tr><td>pnpm / bun</td><td><span class="tag t-good">runs</span> the matching PM command</td></tr>
+    <tr><td>source checkout / monorepo</td><td><span class="tag t-bad">refuses</span> → "update via your checkout"</td></tr>
+    <tr><td>electron bundle / brew / OS pkg</td><td><span class="tag t-bad">refuses</span> → manual instruction</td></tr>
+  </table>
+
+  <h2>Why this is the right shape</h2>
+  <ul>
+    <li><b>Can't target the wrong tree</b> — you invoke the resolved pi; it updates <i>itself</i>.</li>
+    <li><b>Zero duplicated logic</b> — install-method detection, version pinning, scope migration, Windows
+        quarantine, and refusal all live in pi and are reused, not re-implemented.</li>
+    <li><b>Fixes extension skew too</b> — <code>--all</code> updates pi + extensions in one consistent step
+        (the exact failure that broke session spawning).</li>
+    <li><b>Stats and updates agree</b> — both read/act on the one resolved path.</li>
+  </ul>
+
+  <h2>Open decision</h2>
+  <div class="note bad-note">
+    <code>--self</code> (pi only) vs <code>--all</code> (pi + extensions) as the dashboard's default button action.
+    <b>--all</b> would have prevented this incident, but it also updates every extension on a single click — more
+    surface, longer run. Likely: button = <code>--self</code>; a separate "Update pi &amp; extensions" action =
+    <code>--all</code>.
+  </div>
+
+</main>
+</body>
+</html>

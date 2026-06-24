@@ -391,6 +391,18 @@ export interface PiCorePackage {
   latestVersion: string | null;
   updateAvailable: boolean;
   installSource: "global" | "managed";
+  /**
+   * Whether the dashboard can perform this update in place. False when the
+   * install is not npm-updatable here (e.g. Electron bundle, source checkout).
+   * Undefined is treated as updatable. See change: align-pi-update-with-resolved-pi.
+   */
+  updatable?: boolean;
+  /** Manual instruction shown when `updatable === false`. */
+  manualAction?: string;
+  /** Classified update method for the resolved install (pi row). */
+  updateMethod?: "npm" | "pnpm" | "yarn" | "bun" | "npx" | "homebrew" | "source" | "workspace" | "unknown";
+  /** Install scope for the resolved install (pi row). */
+  updateScope?: "global" | "local";
 }
 
 export interface PiCoreStatus {
@@ -401,9 +413,17 @@ export interface PiCoreStatus {
 
 export type PiCoreVersionsResponse = ApiResponse<PiCoreStatus>;
 
-/** Request body for POST /api/pi-core/update. Empty packages = update all. */
+/**
+ * Request body for POST /api/pi-core/update.
+ * - `mode: "all"`  → delegate to the resolved pi's `pi update --all` (pi + extensions).
+ * - `mode: "self"` → `pi update --self` (pi only).
+ * - `mode: "extensions"` → `pi update --extensions`.
+ * - omitted `mode` → per-package update of `packages` (empty = all updatable core packages).
+ * See change: align-pi-update-with-resolved-pi.
+ */
 export interface PiCoreUpdateRequest {
   packages?: string[];
+  mode?: "self" | "all" | "extensions";
 }
 
 /** Result of a single package update. */

@@ -63,6 +63,26 @@ export function registerPiCoreRoutes(
 	fastify.post<{ Body: PiCoreUpdateRequest }>(
 		"/api/pi-core/update",
 		async (request, reply) => {
+			// Mode-based delegation: "all" / "extensions" run a single
+			// `pi update --all|--extensions` on the resolved pi. See change:
+			// align-pi-update-with-resolved-pi.
+			const mode = request.body?.mode;
+			if (mode === "all" || mode === "extensions") {
+				try {
+					const out = await piCoreUpdater.updateViaPi(mode);
+					piCoreChecker.invalidate();
+					deps.onUpdateComplete?.(out);
+					return { success: true, data: out } satisfies ApiResponse<PiCoreUpdateResponse>;
+				} catch (err: any) {
+					if (err instanceof PackageOperationBusyError) {
+						reply.code(409);
+						return { success: false, error: err.message } satisfies ApiResponse;
+					}
+					return { success: false, error: err?.message ?? String(err) } satisfies ApiResponse;
+				}
+			}
+			// mode === "self" is expressed as a per-package update of pi below.
+
 			const requested = request.body?.packages ?? [];
 
 			// Load current status to determine install source and eligibility.

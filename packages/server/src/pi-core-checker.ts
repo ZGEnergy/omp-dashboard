@@ -24,6 +24,8 @@ import os from "node:os";
 import { fetchPackageMeta } from "./npm-search-proxy.js";
 import { invalidateChangelogCache } from "./changelog-parser.js";
 import { getLatestPiRelease, type PiDevReleaseInfo } from "./pi-dev-version-check.js";
+import { resolveWiredPi, classifyPiInstall, type WiredPi } from "./resolved-pi.js";
+import { detectInstallLayout, suggestedReinstallCommand } from "./recovery-server.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -57,7 +59,25 @@ export interface PiCorePackage {
 	latestVersion: string | null;
 	updateAvailable: boolean;
 	installSource: "global" | "managed";
+	/** Whether the dashboard can update this in place. Undefined = updatable. */
+	updatable?: boolean;
+	/** Manual instruction when `updatable === false`. */
+	manualAction?: string;
+	/** Classified update method for the resolved pi install (pi row). */
+	updateMethod?: "npm" | "pnpm" | "yarn" | "bun" | "npx" | "homebrew" | "source" | "workspace" | "unknown";
+	/** Install scope for the resolved pi install (pi row). */
+	updateScope?: "global" | "local";
 }
+
+/** Dashboard's own package name (no `pi update` equivalent). */
+const DASHBOARD_PACKAGE = "@blackbelt-technology/pi-agent-dashboard";
+
+/** pi-coding-agent package names (current + legacy fork) for version-override. */
+const PI_CORE_AGENT_NAMES = [
+	"@earendil-works/pi-coding-agent",
+	"@mariozechner/pi-coding-agent",
+];
+const isPiCoreAgent = (name: string): boolean => PI_CORE_AGENT_NAMES.includes(name);
 
 export interface PiCoreStatus {
 	packages: PiCorePackage[];
@@ -123,6 +143,8 @@ export interface PiCoreCheckerOptions {
 	fetchPiDevRelease?: (currentVersion: string) => Promise<PiDevReleaseInfo | undefined>;
 	/** Override managed directory (for tests). */
 	managedDir?: string;
+	/** Inject resolved-pi lookup (for tests). Default: real `resolveWiredPi`. */
+	resolveWiredPi?: () => WiredPi | null;
 }
 
 /** Default npm runner uses execFile for safety. */
@@ -145,11 +167,13 @@ export class PiCoreChecker {
 	private readonly fetchLatest: (packageName: string) => Promise<string | null>;
 	private readonly fetchPiDevRelease: (currentVersion: string) => Promise<PiDevReleaseInfo | undefined>;
 	private readonly managedNodeModules: string;
+	private readonly resolveWiredPiFn: () => WiredPi | null;
 
 	constructor(opts: PiCoreCheckerOptions = {}) {
 		this.npmList = opts.npmList ?? defaultNpmList;
 		this.fetchLatest = opts.fetchLatest ?? defaultFetchLatest;
 		this.fetchPiDevRelease = opts.fetchPiDevRelease ?? getLatestPiRelease;
+		this.resolveWiredPiFn = opts.resolveWiredPi ?? resolveWiredPi;
 		this.managedNodeModules = opts.managedDir
 			? path.join(opts.managedDir, "node_modules")
 			: MANAGED_NODE_MODULES;
@@ -177,6 +201,11 @@ export class PiCoreChecker {
 		// Discover packages from both sources. Managed takes precedence on conflict.
 		const global = await this.discoverGlobal();
 		const managed = this.discoverManaged();
+
+		// The pi row's version + update target must match the pi the dashboard
+		// actually spawns, not the npm-list enumeration. See change:
+		// align-pi-update-with-resolved-pi.
+		const wired = this.resolveWiredPiFn();
 
 		const byName = new Map<string, { version: string; source: "global" | "managed" }>();
 		for (const entry of global) byName.set(entry.name, { version: entry.version, source: "global" });
@@ -214,14 +243,47 @@ export class PiCoreChecker {
 						latest = null;
 					}
 				}
-				const updateAvailable = latest !== null && latest !== info.version;
+				// For pi, prefer the RESOLVED-install version so the displayed
+				// version matches the spawned binary (not the npm-list tree). Note:
+				// the existing `isPi` only matches the legacy scope (pi.dev keying),
+				// so use the both-scope check here. See change:
+				// align-pi-update-with-resolved-pi.
+				const effectiveCurrent =
+					isPiCoreAgent(name) && wired?.version ? wired.version : info.version;
+				const updateAvailable = latest !== null && latest !== effectiveCurrent;
+
+				// Updatability: pi delegates to `pi update --self` (pi refuses
+				// unsupported installs at update time). The dashboard package has
+				// no `pi update`, so classify by install layout. Others stay npm.
+				let updatable = true;
+				let manualAction: string | undefined;
+				let updateMethod: PiCorePackage["updateMethod"];
+				let updateScope: PiCorePackage["updateScope"];
+				if (isPiCoreAgent(name) && wired) {
+					// Classify the bridge-resolved pi so the row shows the right
+					// affordance pre-click. See change: align-pi-update-with-resolved-pi.
+					const cls = classifyPiInstall(wired);
+					updatable = cls.updatable;
+					manualAction = cls.manualAction;
+					updateMethod = cls.method;
+					if (cls.scope !== "none") updateScope = cls.scope;
+				} else if (name === DASHBOARD_PACKAGE) {
+					const layout = detectInstallLayout();
+					updatable = layout === "npm-global";
+					if (!updatable) manualAction = suggestedReinstallCommand(layout);
+				}
+
 				const pkg: PiCorePackage = {
 					name,
 					displayName: resolveDisplayName(name),
-					currentVersion: info.version,
+					currentVersion: effectiveCurrent,
 					latestVersion: latest,
 					updateAvailable,
 					installSource: info.source,
+					updatable,
+					...(manualAction ? { manualAction } : {}),
+					...(updateMethod ? { updateMethod } : {}),
+					...(updateScope ? { updateScope } : {}),
 				};
 				return pkg;
 			}),

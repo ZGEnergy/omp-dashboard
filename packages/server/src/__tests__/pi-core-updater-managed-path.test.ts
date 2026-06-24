@@ -20,8 +20,11 @@ import type { PiCorePackage } from "@blackbelt-technology/pi-dashboard-shared/re
 
 function makePkg(overrides: Partial<PiCorePackage> = {}): PiCorePackage {
 	return {
-		name: "@earendil-works/pi-coding-agent",
-		displayName: "pi",
+		// Use a non-pi core package: pi packages now delegate to `pi update`,
+		// so the npm-install path is exercised by model-proxy. See change:
+		// align-pi-update-with-resolved-pi.
+		name: "@blackbelt-technology/pi-model-proxy",
+		displayName: "pi-model-proxy",
 		currentVersion: "0.1.0",
 		latestVersion: "0.2.0",
 		updateAvailable: true,
@@ -94,7 +97,7 @@ describe("defaultRunNpmUpdate — registry resolution + managed PATH", () => {
 		]);
 		// Anchor the @latest suffix — the regression guard for
 		// fix-pi-core-update-cross-minor.
-		expect(capturedArgs).toContain("@earendil-works/pi-coding-agent@latest");
+		expect(capturedArgs).toContain("@blackbelt-technology/pi-model-proxy@latest");
 	});
 
 	it("rejects with a clear 'npm' error when registry can't resolve", async () => {
@@ -174,7 +177,7 @@ describe("defaultRunNpmUpdate — registry resolution + managed PATH", () => {
 		fs.mkdirSync(managedDir, { recursive: true });
 
 		await defaultRunNpmUpdate(
-			makePkg({ name: "@mariozechner/pi-coding-agent", installSource: "managed" }),
+			makePkg({ name: "@blackbelt-technology/pi-model-proxy", installSource: "managed" }),
 			() => {},
 			{
 				_resolveNpm: () => ({ ok: true, argv: ["/usr/bin/npm"] }),
@@ -187,7 +190,7 @@ describe("defaultRunNpmUpdate — registry resolution + managed PATH", () => {
 		// NOT "-g" for managed installs.
 		expect(capturedArgs).not.toContain("-g");
 		// The hot bit: @latest suffix.
-		expect(capturedArgs.some((a) => a === "@mariozechner/pi-coding-agent@latest")).toBe(true);
+		expect(capturedArgs.some((a) => a === "@blackbelt-technology/pi-model-proxy@latest")).toBe(true);
 	});
 
 	it("spawns npm install -g with @latest suffix for global install (regression guard)", async () => {
@@ -200,7 +203,7 @@ describe("defaultRunNpmUpdate — registry resolution + managed PATH", () => {
 		});
 
 		await defaultRunNpmUpdate(
-			makePkg({ name: "@mariozechner/pi-coding-agent", installSource: "global" }),
+			makePkg({ name: "@blackbelt-technology/pi-model-proxy", installSource: "global" }),
 			() => {},
 			{
 				_resolveNpm: () => ({ ok: true, argv: ["/usr/bin/npm"] }),
