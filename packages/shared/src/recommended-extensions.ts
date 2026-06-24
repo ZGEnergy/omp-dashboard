@@ -136,7 +136,11 @@ export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
 	},
 	{
 		id: "pi-flows",
-		source: "https://github.com/BlackBeltTechnology/pi-flows.git",
+		// Published to the @blackbelt-technology npm scope. Source is the npm
+		// spec so sourcesMatch() recognizes the npm install. NOTE: still excluded
+		// from BUNDLED_EXTENSION_IDS until upstream declares an SPDX license — the
+		// pre-bundle path is git-only and license-gated; the npm recommend path is not.
+		source: "npm:@blackbelt-technology/pi-flows",
 		displayName: "pi-flows",
 		fallbackDescription:
 			"Flow engine, dashboard, and orchestration extensions for pi. " +
@@ -192,10 +196,12 @@ export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
 		source: "npm:pi-memory-honcho",
 		displayName: "pi-memory-honcho",
 		fallbackDescription:
-			"Persistent cross-session memory backed by Honcho. Pairs with " +
-			"the @blackbelt-technology/pi-dashboard-honcho-plugin dashboard " +
-			"plugin which adds a settings panel, per-card actions, and " +
-			"optional self-hosted Honcho server lifecycle.",
+			"Alternative cross-session memory backend, backed by a Honcho " +
+			"server (the default backend is pi-hermes-memory). Pairs with the " +
+			"@blackbelt-technology/pi-dashboard-honcho-plugin dashboard plugin " +
+			"which adds a settings panel, per-card actions, and optional " +
+			"self-hosted Honcho server lifecycle. Choose this over hermes when " +
+			"you want a shared/self-hosted memory service rather than local SQLite.",
 		status: "optional",
 		unlocks: [
 			"Honcho memory tools (honcho_search, honcho_context, honcho_profile)",
@@ -220,6 +226,93 @@ export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
 		status: "optional",
 		unlocks: [
 			"Automatic image downscaling on Read (saves tokens, avoids provider image-size limits)",
+		],
+	},
+	{
+		id: "context-mode",
+		source: "npm:context-mode",
+		displayName: "context-mode",
+		fallbackDescription:
+			"Context-window saver: sandboxed code execution over large outputs, " +
+			"an FTS5 knowledge base, and intent-driven search. Processes big logs " +
+			"and files in a sandbox so only summaries reach the model context.",
+		status: "strongly-suggested",
+		unlocks: [
+			"ctx_execute / ctx_execute_file (run code over large data, return only summaries)",
+			"ctx_search / ctx_index (persistent FTS5 knowledge base)",
+			"ctx_batch_execute (multi-command gather + query in one round trip)",
+		],
+		toolsRegistered: [
+			"ctx_execute",
+			"ctx_execute_file",
+			"ctx_batch_execute",
+			"ctx_search",
+			"ctx_index",
+			"ctx_fetch_and_index",
+		],
+		autowired: true,
+	},
+	{
+		id: "pi-hermes-memory",
+		source: "npm:pi-hermes-memory",
+		displayName: "pi-hermes-memory",
+		fallbackDescription:
+			"Default persistent cross-session memory backend: token-aware, " +
+			"policy-only memory, SQLite FTS5 session search, secret scanning, " +
+			"auto-consolidation, and procedural skills. Local-first; no external " +
+			"service required. (See pi-memory-honcho for a server-backed alternative.)",
+		status: "optional",
+		unlocks: [
+			"Persistent memory (memory, memory_search)",
+			"Cross-session conversation search (session_search)",
+			"Procedural skills (skill_manage)",
+		],
+		toolsRegistered: [
+			"memory",
+			"memory_search",
+			"session_search",
+			"skill_manage",
+		],
+		autowired: true,
+	},
+	{
+		id: "@ricoyudog/pi-goal-hermes",
+		source: "npm:@ricoyudog/pi-goal-hermes",
+		displayName: "pi-goal-hermes",
+		fallbackDescription:
+			"Goal-driven autonomous continuation: set a goal and let the agent " +
+			"work until done, with an LLM-based judge evaluating completion before " +
+			"stopping.",
+		status: "optional",
+		unlocks: [
+			"Goal-driven autonomous loop with LLM judge evaluation",
+		],
+		autowired: true,
+	},
+	{
+		id: "@blackbelt-technology/pi-model-proxy",
+		source: "npm:@blackbelt-technology/pi-model-proxy",
+		displayName: "pi-model-proxy",
+		fallbackDescription:
+			"Exposes pi's authenticated models as a local OpenAI-compatible and " +
+			"Anthropic-compatible API server, so other tools can route through " +
+			"pi's provider auth without re-entering credentials.",
+		status: "optional",
+		unlocks: [
+			"Local OpenAI-/Anthropic-compatible proxy over pi's authenticated models",
+		],
+		autowired: true,
+	},
+	{
+		id: "pi-simplify",
+		source: "npm:pi-simplify",
+		displayName: "pi-simplify",
+		fallbackDescription:
+			"Reviews recently changed code for clarity, consistency, and " +
+			"maintainability, surfacing simplification opportunities.",
+		status: "optional",
+		unlocks: [
+			"Clarity / consistency / maintainability review of recent changes",
 		],
 	},
 ];

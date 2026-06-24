@@ -195,7 +195,7 @@ describe("GET /api/packages/recommended", () => {
 		return fastify;
 	}
 
-	it("returns the 7 manifest entries with default (offline) descriptions", async () => {
+	it("returns the 12 manifest entries with default (offline) descriptions", async () => {
 		vi.mocked(fetchPackageMeta).mockResolvedValue(null);
 		vi.mocked(fetchGithubPackageJson).mockResolvedValue(null);
 		await setupRoute();
@@ -208,7 +208,7 @@ describe("GET /api/packages/recommended", () => {
 		const body = JSON.parse(res.payload);
 		expect(body.success).toBe(true);
 		const entries = body.data.recommended;
-		expect(entries).toHaveLength(7);
+		expect(entries).toHaveLength(12);
 		// Every entry falls back to fallbackDescription and has no version.
 		for (const e of entries) {
 			expect(typeof e.description).toBe("string");
@@ -237,11 +237,14 @@ describe("GET /api/packages/recommended", () => {
 		expect(pwa.version).toBe("9.9.9");
 	});
 
-	it("uses GitHub metadata for git-sourced entries", async () => {
-		vi.mocked(fetchPackageMeta).mockResolvedValue(null);
-		vi.mocked(fetchGithubPackageJson).mockImplementation(async (owner, repo) => {
-			if (owner === "BlackBeltTechnology" && repo === "pi-flows") {
-				return { description: "LIVE github desc", version: "0.1.0" };
+	it("enriches the now-npm-sourced pi-flows entry from npm metadata", async () => {
+		// pi-flows migrated from a git source to npm:@blackbelt-technology/pi-flows,
+		// so it enriches via the npm registry path, not GitHub. No recommended
+		// entry is git-sourced anymore.
+		vi.mocked(fetchGithubPackageJson).mockResolvedValue(null);
+		vi.mocked(fetchPackageMeta).mockImplementation(async (name: string) => {
+			if (name === "@blackbelt-technology/pi-flows") {
+				return { description: "LIVE npm desc", version: "0.2.4" };
 			}
 			return null;
 		});
@@ -250,8 +253,8 @@ describe("GET /api/packages/recommended", () => {
 		const res = await fastify.inject({ method: "GET", url: "/api/packages/recommended" });
 		const body = JSON.parse(res.payload);
 		const flows = body.data.recommended.find((e: any) => e.id === "pi-flows");
-		expect(flows.description).toBe("LIVE github desc");
-		expect(flows.version).toBe("0.1.0");
+		expect(flows.description).toBe("LIVE npm desc");
+		expect(flows.version).toBe("0.2.4");
 	});
 
 	it("reports installed + activeInPi correctly when settings.json lists the source", async () => {

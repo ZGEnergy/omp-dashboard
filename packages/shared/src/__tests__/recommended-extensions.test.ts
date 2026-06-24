@@ -8,7 +8,7 @@ import {
 } from "../recommended-extensions.js";
 
 describe("RECOMMENDED_EXTENSIONS manifest", () => {
-	it("contains exactly the seven expected entries", () => {
+	it("contains exactly the twelve expected entries", () => {
 		const ids = RECOMMENDED_EXTENSIONS.map((e) => e.id).sort();
 		expect(ids).toEqual(
 			[
@@ -16,8 +16,13 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 				"pi-agent-browser",
 				"@blackbelt-technology/pi-dashboard-subagents",
 				"@blackbelt-technology/pi-image-fit-extension",
+				"@blackbelt-technology/pi-model-proxy",
+				"@ricoyudog/pi-goal-hermes",
+				"context-mode",
 				"pi-flows",
+				"pi-hermes-memory",
 				"pi-memory-honcho",
+				"pi-simplify",
 				"pi-web-access",
 			].sort(),
 		);
@@ -61,10 +66,13 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 		expect(entry?.autowired).toBe(true);
 	});
 
-	it("pi-flows uses HTTPS git URL and registers flow-engine tools", () => {
+	it("pi-flows uses the npm source and registers flow-engine tools", () => {
+		// Switched from the git URL to the published npm package so
+		// sourcesMatch recognizes the npm install. Still NOT bundled
+		// (absent from BUNDLED_EXTENSION_IDS) until upstream declares a license.
 		const entry = getRecommendedExtension("pi-flows");
 		expect(entry).toBeDefined();
-		expect(entry?.source).toBe("https://github.com/BlackBeltTechnology/pi-flows.git");
+		expect(entry?.source).toBe("npm:@blackbelt-technology/pi-flows");
 		expect(entry?.toolsRegistered).toContain("subagent");
 		expect(entry?.toolsRegistered).toContain("flow_write");
 	});
@@ -81,30 +89,19 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 		expect(entry?.autowired).toBe(true);
 	});
 
-	it("npm-sourced entries use the npm: prefix", () => {
+	it("every entry uses the npm: prefix (all recommended entries are now npm-sourced)", () => {
 		const npmEntries = RECOMMENDED_EXTENSIONS.filter((e) => e.source.startsWith("npm:"));
 		expect(npmEntries.map((e) => e.id).sort()).toEqual(
-			[
-				"pi-anthropic-messages",
-				"pi-agent-browser",
-				"pi-memory-honcho",
-				"pi-web-access",
-				"@blackbelt-technology/pi-dashboard-subagents",
-				"@blackbelt-technology/pi-image-fit-extension",
-			].sort(),
+			RECOMMENDED_EXTENSIONS.map((e) => e.id).sort(),
 		);
 	});
 
-	it("git-sourced entries use the https://github.com/.../.git HTTPS form", () => {
-		const gitEntries = RECOMMENDED_EXTENSIONS.filter((e) =>
-			e.source.startsWith("https://github.com/"),
+	it("has no git-sourced entries", () => {
+		// pi-flows moved to its npm source; no recommended entry is git-based.
+		const gitEntries = RECOMMENDED_EXTENSIONS.filter(
+			(e) => !e.source.startsWith("npm:"),
 		);
-		for (const entry of gitEntries) {
-			expect(entry.source).toMatch(/^https:\/\/github\.com\/[^/]+\/[^/]+\.git$/);
-		}
-		expect(gitEntries.map((e) => e.id).sort()).toEqual(
-			["pi-flows"].sort(),
-		);
+		expect(gitEntries).toEqual([]);
 	});
 });
 
@@ -128,7 +125,7 @@ describe("getRecommendedByStatus", () => {
 	it("filters by strongly-suggested", () => {
 		const suggested = getRecommendedByStatus("strongly-suggested");
 		expect(suggested.map((e) => e.id).sort()).toEqual(
-			["pi-flows", "pi-web-access"].sort(),
+			["pi-flows", "pi-web-access", "context-mode"].sort(),
 		);
 	});
 
@@ -139,7 +136,11 @@ describe("getRecommendedByStatus", () => {
 				"pi-agent-browser",
 				"@blackbelt-technology/pi-dashboard-subagents",
 				"@blackbelt-technology/pi-image-fit-extension",
+				"@blackbelt-technology/pi-model-proxy",
+				"@ricoyudog/pi-goal-hermes",
+				"pi-hermes-memory",
 				"pi-memory-honcho",
+				"pi-simplify",
 			].sort(),
 		);
 	});
