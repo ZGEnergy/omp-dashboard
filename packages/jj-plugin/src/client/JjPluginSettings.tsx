@@ -64,8 +64,8 @@ export function JjPluginSettings(): React.ReactElement {
   baseRef.current = { baseDefaultPushTarget, baseWorkspaceRoot, baseAllowDirectTrunkPush, baseShowInit };
   const commit = useCallback(async () => {
     const v = valuesRef.current;
-    send({
-      type: "plugin_config_write" as never,
+    await send({
+      type: "plugin_config_write",
       id: "jj",
       config: {
         defaultPushTarget: v.defaultPushTarget,

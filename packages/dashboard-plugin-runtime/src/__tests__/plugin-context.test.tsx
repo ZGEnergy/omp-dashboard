@@ -8,6 +8,7 @@ import {
   useAllSessions,
   usePluginLogger,
   applyPluginConfigUpdate,
+  initPluginConfigs,
 } from "../plugin-context.js";
 import { createSlotRegistry } from "../slot-registry.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -123,6 +124,34 @@ describe("usePluginConfig", () => {
 
     expect(renderCount).toBeGreaterThan(countBefore);
     expect(lastConfig.bar).toBe(99);
+  });
+
+  it("hydrates from initPluginConfigs and notifies already-mounted subscribers (reload path)", async () => {
+    const registry = createSlotRegistry();
+    let lastConfig: Record<string, unknown> = {};
+
+    function Comp() {
+      lastConfig = usePluginConfig<Record<string, unknown>>();
+      return null;
+    }
+
+    // Component mounts BEFORE the /api/config seed arrives (post-render effect).
+    render(
+      <PluginContextProvider registry={registry}>
+        <CurrentPluginLayer pluginId="hydrate-plugin">
+          <Comp />
+        </CurrentPluginLayer>
+      </PluginContextProvider>,
+    );
+    expect(lastConfig.editFlow).toBeUndefined();
+
+    // Simulate the boot /api/config fetch seeding the persisted plugins block.
+    await act(async () => {
+      initPluginConfigs({ "hydrate-plugin": { enabled: true, editFlow: true } });
+    });
+
+    expect(lastConfig.editFlow).toBe(true);
+    expect(lastConfig.enabled).toBe(true);
   });
 });
 

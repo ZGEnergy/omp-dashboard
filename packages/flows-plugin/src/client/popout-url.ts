@@ -43,17 +43,3 @@ export function buildFlowAgentPopoutUrl(
   return buildPopoutUrl(path);
 }
 
-export function buildFlowArchitectPopoutUrl(
-  sessionId: string | null | undefined,
-): string | null {
-  if (!sessionId) {
-    if (typeof console !== "undefined") {
-      console.warn(
-        "[flows-plugin] buildFlowArchitectPopoutUrl: missing sessionId",
-      );
-    }
-    return null;
-  }
-  const path = `/session/${encodeURIComponent(sessionId)}/architect`;
-  return buildPopoutUrl(path);
-}

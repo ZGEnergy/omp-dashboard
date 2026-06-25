@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useRoute, useLocation, useSearchParams, Redirect, Switch, Route } from "wouter";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import { setInitSender } from "./lib/worktree-init-bus.js";
+import { dispatchPluginMessage } from "./lib/plugins-api.js";
 import { useSidebarState } from "./hooks/useSidebarState.js";
 import { useDocumentTitle } from "./hooks/useDocumentTitle.js";
 import { useAppHidden } from "./hooks/useAppHidden.js";
@@ -114,7 +115,7 @@ import { DisplayPrefsProvider } from "./lib/DisplayPrefsContext.js";
 import { FirstLaunchDisplayModal } from "./components/FirstLaunchDisplayModal.js";
 import { SessionAssetsProvider } from "./lib/SessionAssetsContext.js";
 import { useI18n } from "./lib/i18n.js";
-import { PluginContextProvider, applyPluginConfigUpdate, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import { PluginContextProvider, applyPluginConfigUpdate, initPluginConfigs, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 // Stable empty references for plugin context's session-state primitives.
 // See change: route-flow-asks-to-upper-slot + add-flow-agent-popout.
 const EMPTY_INTERACTIVE_REQUESTS: readonly never[] = Object.freeze([]);
@@ -621,6 +622,13 @@ export default function App() {
       .then((d) => {
         if (d.success && typeof d.data?.gitWorktreeEnabled === "boolean") {
           setGitWorktreeEnabled(d.data.gitWorktreeEnabled);
+        }
+        // Seed plugin configs from persisted config.json so plugin settings
+        // (e.g. flows.editFlow) survive reload. The POST write path persists +
+        // broadcasts; this is the missing read-back/hydration half.
+        // See change: fix-plugin-config-write-persistence.
+        if (d.success && d.data?.plugins && typeof d.data.plugins === "object") {
+          initPluginConfigs(d.data.plugins as Record<string, Record<string, unknown>>);
         }
       })
       .catch(() => {});
@@ -1413,9 +1421,9 @@ export default function App() {
       ) : (
         <>
           {/* Plugin slot: content-header-sticky — contributions from
-              flows-plugin (FlowArchitectClaim, FlowDashboardClaim) and
-              future plugins. The shell renders zero flow-specific
-              content. See change: pluginize-flows-via-registry. */}
+              flows-plugin (FlowDashboardClaim) and future plugins. The
+              shell renders zero flow-specific content. See change:
+              pluginize-flows-via-registry. */}
           {selectedSession && (
             <div className="sticky top-0 z-10">
               <ContentHeaderStickySlot session={selectedSession} />
@@ -1676,7 +1684,11 @@ export default function App() {
         registry={_pluginRegistry}
         sessions={allSessionsList}
         selectedSessionId={selectedId}
-        send={(msg) => send(msg as Parameters<typeof send>[0])}
+        // Plugin settings-section writes persist via the canonical REST route
+        // (validated, broadcast) instead of the dead WS frame; all other
+        // messages pass through to the WebSocket. See change:
+        // fix-plugin-config-write-persistence.
+        send={(msg) => dispatchPluginMessage(msg, (m) => send(m as Parameters<typeof send>[0]))}
         useSessionInteractiveRequests={(sid) =>
           sessionStates.get(sid)?.interactiveRequests ?? EMPTY_INTERACTIVE_REQUESTS
         }

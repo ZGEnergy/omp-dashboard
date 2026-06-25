@@ -701,16 +701,14 @@ function initBridge(pi: ExtensionAPI) {
       if (msg.type === "flow_management" && pi.events) {
         if (msg.action === "run") {
           pi.events.emit("flow:run", { flowName: msg.flowName, task: msg.task || undefined });
-        } else if (msg.action === "new") {
-          pi.events.emit("flows:new-request", { description: msg.description || "" });
-        } else if (msg.action === "edit") {
-          const editFlows = getFlowsList() as Array<{ name: string; source?: string }>;
-          const editMatch = editFlows.find(f => f.name === msg.flowName);
-          const resolvedPath = editMatch?.source || "";
-          if (!resolvedPath) {
-            console.error(`[dashboard] flow_management edit: could not resolve path for "${msg.flowName}" (${editFlows.length} flows)`);
+        } else if (msg.action === "set-edit-mode") {
+          // Edit-mode toggle (rework-flows-plugin-for-new-pi-flows). pi-flows
+          // persists flows.editFlow, syncs skill visibility, reloads.
+          // /flows:new + /flows:edit removed upstream — authoring is now the
+          // edit-flow skill via send_prompt from the dashboard.
+          if (typeof (msg as { enabled?: unknown }).enabled === "boolean") {
+            pi.events.emit("flow:set-edit-mode", { enabled: (msg as { enabled: boolean }).enabled });
           }
-          pi.events.emit("flows:edit-request", { flowName: msg.flowName || "", flowPath: resolvedPath, modificationRequest: msg.description || "" });
         } else if (msg.action === "delete") {
           // Dashboard already confirmed upfront — delete directly
           pi.events.emit("flow:delete-request", { flowName: msg.flowName });

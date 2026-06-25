@@ -892,12 +892,34 @@ export interface FlowAgentCardConfig {
   sourcePath?: string;
 }
 
-/** Per-agent state tracked in flow state */
+/** First-class node-kind discriminator emitted by every pi-flows executor.
+ *  Decided once at the node's started event; carried on the event payload so it
+ *  persists + replays. Distinct from FlowDetailEntry.kind (text|thinking|tool|error).
+ *  See change: rework-flows-plugin-for-new-pi-flows (consumes pi-flows surface-node-kind). */
+export type NodeKind =
+  | "agent"
+  | "agent-decision"
+  | "code"
+  | "code-decision"
+  | "fork"
+  | "flow-ref";
+
+/** Per-agent (per-step) state tracked in flow state */
 export interface FlowAgentState {
   agentName: string;
   stepId: string;
-  /** Step type from the flow config (agent, fork, agent-decision, agent-loop-decision, etc.) */
+  /** Step type from the flow config (agent, fork, agent-decision, etc.) */
   stepType?: string;
+  /** Node-kind from the lifecycle started event; selects the card renderer. */
+  nodeKind?: NodeKind;
+  /** Failure outcome from the completion event: routed-soft vs flow-halting-hard. */
+  outcome?: "success" | "soft" | "hard";
+  /** Typed outputs from the completion event (code/agent contract). */
+  typedOutputs?: Record<string, string>;
+  /** Chosen branch label for code-decision / agent-decision nodes. */
+  branch?: string;
+  /** Resolved handler target path for code / code-decision nodes (from started). */
+  codeTarget?: string;
   status: FlowAgentStatus;
   label?: string;
   model?: string;
@@ -916,8 +938,9 @@ export interface FlowAgentState {
   runCount?: number;
 }
 
-/** Overall flow execution status */
-export type FlowStatus = "running" | "success" | "error" | "aborted";
+/** Overall flow execution status. `interrupted` = orphaned run reconciled on resume
+ *  (pi-flows clear-orphaned synthesized terminal). */
+export type FlowStatus = "running" | "success" | "error" | "aborted" | "interrupted";
 
 /** Flow execution state tracked client-side by the event reducer */
 export interface FlowState {

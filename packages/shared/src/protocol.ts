@@ -634,10 +634,12 @@ export interface CredentialsUpdatedMessage {
 export interface FlowManagementExtensionMessage {
   type: "flow_management";
   sessionId: string;
-  action: "run" | "new" | "edit" | "delete";
+  action: "run" | "new" | "edit" | "delete" | "set-edit-mode";
   flowName?: string;
   task?: string;
   description?: string;
+  /** For action "set-edit-mode": toggles pi-flows `flows.editFlow`. */
+  enabled?: boolean;
 }
 
 export interface ArchitectPromptResponseExtensionMessage {

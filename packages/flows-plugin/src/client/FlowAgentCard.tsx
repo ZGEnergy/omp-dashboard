@@ -112,12 +112,26 @@ export function FlowAgentCard({
   const rawModel = agent.model || "";
   const hasAlias = rawModel.startsWith("@");
 
-  // Step type badge for non-agent steps
-  const stepTypeBadge = agent.stepType === "fork" || agent.stepType === "agent-decision"
+  // Node-kind badge. Card type is decided by `nodeKind` (surface-node-kind
+  // contract); falls back to `stepType` for runs persisted before the
+  // contract. See change: rework-flows-plugin-for-new-pi-flows.
+  const kind = agent.nodeKind ?? agent.stepType;
+  const isCodeKind = kind === "code" || kind === "code-decision";
+  const kindBadge =
+    kind === "code"
+    ? <span className="text-[9px] text-cyan-400/80 bg-cyan-400/10 px-1 rounded flex-shrink-0 font-mono">⌗ code</span>
+    : kind === "code-decision"
+    ? <span className="text-[9px] text-cyan-400/80 bg-cyan-400/10 px-1 rounded flex-shrink-0 font-mono">◈ decision</span>
+    : kind === "fork" || kind === "agent-decision"
     ? <span className="text-[9px] text-amber-400/70 bg-amber-400/10 px-1 rounded flex-shrink-0">◇ fork</span>
-    : agent.stepType === "agent-loop-decision"
-    ? <span className="text-[9px] text-purple-400/70 bg-purple-400/10 px-1 rounded flex-shrink-0">↻ loop</span>
     : null;
+
+  // Code-node program logs ride the assistant-text channel; the card's
+  // nodeKind makes them "logs". (surface-node-kind D1.)
+  const logLines = isCodeKind
+    ? agent.detailHistory.flatMap((e) => (e.kind === "text" ? [e.text] : []))
+    : [];
+  const outputs = agent.typedOutputs ? Object.entries(agent.typedOutputs).filter(([k]) => k !== "branch") : [];
 
   const headerRight = agent.loopIteration != null && agent.loopIteration > 0 ? (
     <span className="text-[10px] text-blue-400 flex-shrink-0 inline-flex items-center gap-0.5">
@@ -127,7 +141,7 @@ export function FlowAgentCard({
     <span className="text-[10px] text-blue-400 flex-shrink-0 inline-flex items-center gap-0.5">
       <Icon path={mdiRefresh} size={0.4} />{agent.runCount}
     </span>
-  ) : stepTypeBadge;
+  ) : kindBadge;
 
   const stats = isComplete && agent.tokens ? (
     <span>↑{formatTokens(agent.tokens.input)} ↓{formatTokens(agent.tokens.output)} · {formatDuration(agent.duration ?? 0)}</span>
@@ -161,18 +175,62 @@ export function FlowAgentCard({
         {/* Phase-2 agent-metric decorator slot. See change: add-extension-ui-decorations. */}
         <AgentMetricSlot session={session} agentId={agent.agentName} />
 
-        {/* Recent tools */}
-        <div className="mt-1 space-y-0">
-          {agent.recentTools.map((tool, i) => (
-            <div key={i} className="text-[10px] text-[var(--text-tertiary)] truncate">
-              {i === agent.recentTools.length - 1 ? "▸" : "·"} {tool.toolName} {tool.inputPreview}
-            </div>
-          ))}
-          {/* Pad to 3 lines for consistent height */}
-          {Array.from({ length: Math.max(0, 3 - agent.recentTools.length) }).map((_, i) => (
-            <div key={`pad-${i}`} className="text-[10px]">&nbsp;</div>
-          ))}
-        </div>
+        {/* Body: code nodes show a Log preview (program logs); agent nodes
+            show their recent tool calls. */}
+        {isCodeKind ? (
+          <div className="mt-1 space-y-0">
+            {logLines.slice(-3).map((line, i) => (
+              <div key={i} className="text-[10px] text-[var(--text-tertiary)] truncate font-mono" title={line}>{line}</div>
+            ))}
+            {Array.from({ length: Math.max(0, 3 - Math.min(3, logLines.length)) }).map((_, i) => (
+              <div key={`pad-${i}`} className="text-[10px]">&nbsp;</div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-1 space-y-0">
+            {agent.recentTools.map((tool, i) => (
+              <div key={i} className="text-[10px] text-[var(--text-tertiary)] truncate">
+                {i === agent.recentTools.length - 1 ? "▸" : "·"} {tool.toolName} {tool.inputPreview}
+              </div>
+            ))}
+            {/* Pad to 3 lines for consistent height */}
+            {Array.from({ length: Math.max(0, 3 - agent.recentTools.length) }).map((_, i) => (
+              <div key={`pad-${i}`} className="text-[10px]">&nbsp;</div>
+            ))}
+          </div>
+        )}
+
+        {/* Chosen branch (code-decision / agent-decision) */}
+        {agent.branch && (
+          <div className="mt-1 text-[10px] font-mono">
+            <span className="text-[var(--text-muted)]">branch </span>
+            <span className="text-cyan-400 font-semibold">{agent.branch}</span>
+          </div>
+        )}
+
+        {/* Typed outputs (agent + code contract) */}
+        {outputs.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {outputs.map(([k, v]) => (
+              <span key={k} className="text-[10px] font-mono bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded px-1 py-0.5 truncate max-w-[160px]" title={`${k}: ${v}`}>
+                <span className="text-cyan-400">{k}</span>: {v}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Soft (routed) vs hard (halted) failure outcome */}
+        {agent.status === "error" && agent.outcome === "soft" && (
+          <div className="mt-1 text-[10px] text-amber-400">⚠ soft-failed — routed to on_error</div>
+        )}
+        {agent.status === "error" && agent.outcome === "hard" && (
+          <div className="mt-1 text-[10px] text-red-400">✕ hard-failed — halted flow</div>
+        )}
+
+        {/* Resolved handler target for code nodes */}
+        {isCodeKind && agent.codeTarget && (
+          <div className="mt-1 text-[10px] text-[var(--text-muted)] font-mono truncate" title={agent.codeTarget}>‹› {agent.codeTarget}</div>
+        )}
 
         {/* View source / detail icons — bottom-right of card */}
         <div className="flex justify-end mt-auto pt-1 gap-1">

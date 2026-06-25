@@ -68,27 +68,36 @@ describe("flows-plugin: flowsAvailability cache", () => {
     off1();
   });
 
-  it("subscriber populates cache to `true` when flowsList is non-empty", () => {
+  it("subscriber populates cache to `true` when the /flows command is registered", () => {
     const off = installFlowsAvailabilitySubscriber();
     expect(getFlowsAvailabilitySync("s1")).toBe(false); // closed-by-default
 
-    publishSessionData("s1", "flowsList", [
-      { name: "deploy", description: "Deploy the app" },
-    ]);
+    // pi-flows registers `/flows` in every session it loads into.
+    publishSessionData("s1", "commandsList", [{ name: "flows" }]);
     expect(getFlowsAvailabilitySync("s1")).toBe(true);
     off();
   });
 
-  it("subscriber populates cache to `true` when commandsList contains flows:new", () => {
+  it("subscriber populates cache to `true` for any flows-namespaced command", () => {
     const off = installFlowsAvailabilitySubscriber();
-    publishSessionData("s2", "commandsList", [{ name: "flows:new" }]);
+    publishSessionData("s2", "commandsList", [{ name: "flows:delete" }]);
     expect(getFlowsAvailabilitySync("s2")).toBe(true);
     off();
   });
 
-  it("subscriber leaves cache `false` when neither flows nor flows:new are available", () => {
+  it("shows for an active-but-empty flows cwd (presence, not flow count)", () => {
     const off = installFlowsAvailabilitySubscriber();
-    publishSessionData("s3", "flowsList", []);
+    // Extension active (registered /flows) but zero flows authored yet.
+    publishSessionData("s-empty", "flowsList", []);
+    publishSessionData("s-empty", "commandsList", [{ name: "flows" }]);
+    expect(getFlowsAvailabilitySync("s-empty")).toBe(true);
+    off();
+  });
+
+  it("leaves cache `false` when no flows command is registered (even with flows in the list)", () => {
+    const off = installFlowsAvailabilitySubscriber();
+    // Defensive: presence is gated on the command, not flowsList content.
+    publishSessionData("s3", "flowsList", [{ name: "deploy" }]);
     publishSessionData("s3", "commandsList", [{ name: "skill:foo" }]);
     expect(getFlowsAvailabilitySync("s3")).toBe(false);
     off();
@@ -96,7 +105,7 @@ describe("flows-plugin: flowsAvailability cache", () => {
 
   it("subscriber drops availability to false when session data is cleared", () => {
     const off = installFlowsAvailabilitySubscriber();
-    publishSessionData("s4", "flowsList", [{ name: "x" }]);
+    publishSessionData("s4", "commandsList", [{ name: "flows" }]);
     expect(getFlowsAvailabilitySync("s4")).toBe(true);
 
     clearSessionData("s4");
@@ -106,8 +115,8 @@ describe("flows-plugin: flowsAvailability cache", () => {
 
   it("subscriber tracks multiple sessions independently", () => {
     const off = installFlowsAvailabilitySubscriber();
-    publishSessionData("sA", "flowsList", [{ name: "a" }]);
-    publishSessionData("sB", "flowsList", []);
+    publishSessionData("sA", "commandsList", [{ name: "flows" }]);
+    publishSessionData("sB", "commandsList", [{ name: "skill:foo" }]);
     expect(getFlowsAvailabilitySync("sA")).toBe(true);
     expect(getFlowsAvailabilitySync("sB")).toBe(false);
     off();

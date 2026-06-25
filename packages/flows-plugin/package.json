@@ -33,6 +33,7 @@
     "id": "flows",
     "displayName": "Flows",
     "priority": 100,
+    "configSchema": "./src/configSchema.json",
     "client": "./src/client/index.tsx",
     "server": "./src/server/index.ts",
     "bridge": "./src/bridge/index.ts",
@@ -47,13 +48,19 @@
         "component": "FlowDashboardClaim"
       },
       {
-        "slot": "content-header-sticky",
-        "component": "FlowArchitectClaim"
-      },
-      {
         "slot": "content-view",
         "component": "FlowYamlPreviewClaim",
         "predicate": "isFlowYamlPreviewActive"
+      },
+      {
+        "slot": "tool-renderer",
+        "component": "FlowWriteToolRenderer",
+        "toolName": "flow_write"
+      },
+      {
+        "slot": "tool-renderer",
+        "component": "FlowAgentsToolRenderer",
+        "toolName": "flow_agents"
       },
       {
         "slot": "shell-overlay-route",
@@ -62,10 +69,9 @@
         "sessionParam": "sid"
       },
       {
-        "slot": "shell-overlay-route",
-        "component": "FlowArchitectPopoutClaim",
-        "path": "/session/:sid/architect",
-        "sessionParam": "sid"
+        "slot": "settings-section",
+        "component": "FlowsSettings",
+        "tab": "general"
       }
     ]
   },
@@ -77,7 +83,8 @@
   "dependencies": {
     "@blackbelt-technology/dashboard-plugin-runtime": "^0.5.4",
     "@blackbelt-technology/pi-dashboard-client-utils": "^0.5.4",
-    "@blackbelt-technology/pi-dashboard-shared": "^0.5.4"
+    "@blackbelt-technology/pi-dashboard-shared": "^0.5.4",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

@@ -1645,10 +1645,8 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       // reducer falls through to the rawEvent message rendering, which
       // shows up as an expandable JSON block in the chat. See change:
       // pluginize-flows-via-registry.
-      const isFlowOrArchitect =
-        event.eventType.startsWith("flow_") ||
-        event.eventType.startsWith("architect_");
-      if (!isFlowOrArchitect) {
+      const isFlow = event.eventType.startsWith("flow_");
+      if (!isFlow) {
         next.messages = [...next.messages, {
           id: `raw-${event.eventType}-${event.timestamp}-${next.messages.length}`,
           role: "rawEvent" as const,

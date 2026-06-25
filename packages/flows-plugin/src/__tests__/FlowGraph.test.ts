@@ -1,5 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { computeLayout, type FlowGraphStep } from "../client/FlowGraph.js";
+import { computeLayout, mapStepType, type FlowGraphStep } from "../client/FlowGraph.js";
+
+describe("mapStepType (canonical node set)", () => {
+  it("maps the new code node kinds", () => {
+    expect(mapStepType("code")).toBe("code");
+    expect(mapStepType("code-decision")).toBe("code-decision");
+  });
+  it("maps fork + agent-decision to fork shape, flow-ref to flow-ref", () => {
+    expect(mapStepType("fork")).toBe("fork");
+    expect(mapStepType("agent-decision")).toBe("fork");
+    expect(mapStepType("flow-ref")).toBe("flow-ref");
+  });
+  it("agent and removed legacy types map to default (undefined)", () => {
+    expect(mapStepType("agent")).toBeUndefined();
+    expect(mapStepType("conditional")).toBeUndefined();
+    expect(mapStepType("agent-loop-decision")).toBeUndefined();
+  });
+});
 
 describe("computeLayout", () => {
   it("lays out a linear flow A→B→C left-to-right", () => {

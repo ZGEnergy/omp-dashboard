@@ -9,7 +9,29 @@ import type {
   FlowRecentTool,
   FlowState,
   FlowAgentCardConfig,
+  NodeKind,
 } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+
+/** Map a flow-config stepType to a NodeKind for provisional pre-listing at
+ *  flow_started. The authoritative nodeKind arrives on the started event. */
+function stepTypeToNodeKind(stepType: string | undefined): NodeKind | undefined {
+  switch (stepType) {
+    case "agent":
+    case "agent-decision":
+    case "code":
+    case "code-decision":
+    case "fork":
+    case "flow-ref":
+      return stepType;
+    default:
+      return undefined;
+  }
+}
+
+/** Step kinds that render as a card (have no agent but still get a node card). */
+function isCardableNonAgentKind(nodeKind: NodeKind | undefined): boolean {
+  return nodeKind === "code" || nodeKind === "code-decision";
+}
 
 /** Extract a short input preview for tool call display */
 function extractToolInputPreview(toolName: string, input: unknown): string {
@@ -88,14 +110,16 @@ export function reduceFlowEvent(
       const agents = new Map<string, FlowAgentState>();
       if (steps) {
         for (const step of steps) {
-          // Include all steps that have an agent (not just stepType "agent")
-          // This covers fork (with agent), agent-loop-decision, agent-decision, etc.
-          if (step.agent) {
-            // Key by step ID to avoid deduplication when multiple steps share an agent
+          const nodeKind = stepTypeToNodeKind(step.stepType);
+          // Pre-list a pending card for agent-bearing steps AND for code/
+          // code-decision steps (which have no agent but still render a card).
+          // Keeps the grid consistent live and on replay (task 2.6).
+          if (step.agent || isCardableNonAgentKind(nodeKind)) {
             agents.set(step.id, {
-              agentName: step.agent,
+              agentName: step.agent || step.id,
               stepId: step.id,
               stepType: step.stepType,
+              nodeKind,
               status: "pending",
               blockedBy: step.blockedBy || [],
               recentTools: [],
@@ -144,6 +168,11 @@ export function reduceFlowEvent(
         }),
         ...(isRerun ? { recentTools: [], detailHistory: [] } : {}),
         status: "running",
+        // nodeKind is decided ONCE here at started (surface-node-kind contract).
+        // Fall back to the provisional kind from flow_started, else "agent".
+        nodeKind: (data.nodeKind as NodeKind | undefined) ?? existing?.nodeKind ?? "agent",
+        // Resolved handler target for code / code-decision nodes (started only).
+        codeTarget: (data.target as string | undefined) ?? existing?.codeTarget,
         label: config?.card?.label,
         model: config?.model,
         resolvedModel: (data.resolvedModel as string) || undefined,
@@ -165,10 +194,17 @@ export function reduceFlowEvent(
         files?: string[];
         tokens?: { input: number; output: number };
         duration?: number;
+        outcome?: "success" | "soft" | "hard";
+        typedOutputs?: Record<string, string>;
       } | undefined;
       const agents = new Map(flowState.agents);
       const [key, existing] = findAgent(agents, agentName, stepId);
       if (key && existing) {
+        const typedOutputs = result?.typedOutputs;
+        // outcome may ride on the result or the event data; default success.
+        const outcome =
+          result?.outcome ?? (data.outcome as "success" | "soft" | "hard" | undefined) ??
+          (result?.success ? "success" : "soft");
         agents.set(key, {
           ...existing,
           status: result?.status === "blocked" ? "blocked" : result?.success ? "complete" : "error",
@@ -176,6 +212,10 @@ export function reduceFlowEvent(
           duration: result?.duration,
           summary: result?.summary,
           files: result?.files,
+          outcome,
+          typedOutputs,
+          // code-decision exposes the chosen branch via typedOutputs.branch.
+          branch: typedOutputs?.branch ?? (data.branch as string | undefined) ?? existing.branch,
         });
       }
       return { ...flowState, agents };
@@ -308,10 +348,23 @@ export function reduceFlowEvent(
 
     case "flow_complete": {
       if (!flowState) return null;
-      const status = (data.status as string) || "success";
+      const status = ((data.status as string) || "success") as FlowState["status"];
+      // When the flow ends non-successfully (error / aborted / interrupted),
+      // downgrade any step left running/pending so its card does not spin
+      // forever (task 3.6; covers the synthesized interrupted terminal).
+      let agents = flowState.agents;
+      if (status !== "success") {
+        agents = new Map(flowState.agents);
+        for (const [k, a] of agents) {
+          if (a.status === "running" || a.status === "pending") {
+            agents.set(k, { ...a, status: "error", outcome: a.outcome ?? "hard" });
+          }
+        }
+      }
       return {
         ...flowState,
-        status: status as FlowState["status"],
+        status,
+        agents,
         flowResult: data as Record<string, unknown>,
       };
     }

@@ -350,7 +350,7 @@ type FlowQuestionCardType = "select" | "input" | "confirm" | "editor" | "multise
  * pluginize-flows-via-registry.
  */
 export function FlowDashboardClaim({ session }: { session: DashboardSession }) {
-  const { flowState, flowStates, architectState } = useFlowsSessionState(session.id);
+  const { flowState, flowStates } = useFlowsSessionState(session.id);
   const send = usePluginSend();
 
   // Diagnostic logging — helps trace why the upper slot might be empty when
@@ -365,8 +365,6 @@ export function FlowDashboardClaim({ session }: { session: DashboardSession }) {
         flowName: flowState?.flowName,
         flowStatus: flowState?.status,
         flowsCount: flowStates.size,
-        hasArchitect: !!architectState,
-        architectPhase: architectState?.phase,
       },
     );
   }

@@ -1216,10 +1216,23 @@ export interface RequestInstalledPackagesBrowserMessage {
 export interface FlowManagementBrowserMessage {
   type: "flow_management";
   sessionId: string;
-  action: "run" | "new" | "edit" | "delete";
+  action: "run" | "new" | "edit" | "delete" | "set-edit-mode";
   flowName?: string;
   task?: string;
   description?: string;
+  /** For action "set-edit-mode": toggles pi-flows `flows.editFlow`. */
+  enabled?: boolean;
+}
+
+/**
+ * Plugin settings-section write. The shell intercepts this in the plugin `send`
+ * and routes it to `POST /api/config/plugins/:id` (it is NOT forwarded over the
+ * WebSocket). See change: fix-plugin-config-write-persistence.
+ */
+export interface PluginConfigWriteBrowserMessage {
+  type: "plugin_config_write";
+  id: string;
+  config: Record<string, unknown>;
 }
 
 export interface ArchitectPromptResponseBrowserMessage {
@@ -1374,6 +1387,7 @@ export type BrowserToServerMessage =
   | FlowControlBrowserMessage
   | ForceKillBrowserMessage
   | FlowManagementBrowserMessage
+  | PluginConfigWriteBrowserMessage
   | ArchitectPromptResponseBrowserMessage
   | PromptResponseBrowserMessage
   | RoleSetBrowserMessage

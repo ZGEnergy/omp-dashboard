@@ -596,6 +596,7 @@ export function createBrowserGateway(
               flowName: msg.flowName,
               task: msg.task,
               description: msg.description,
+              enabled: msg.enabled,
             });
             break;
           }

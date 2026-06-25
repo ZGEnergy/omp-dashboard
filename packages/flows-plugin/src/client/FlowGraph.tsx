@@ -6,7 +6,7 @@ import { UI_PRIMITIVE_KEYS } from "@blackbelt-technology/pi-dashboard-shared/das
 import { useUiPrimitive } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { graphlib } from "dagre-d3-es";
 import { layout as dagreLayout } from "dagre-d3-es/src/dagre/index.js";
-import type { FlowState, ArchitectDagStep } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { FlowState } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -16,15 +16,18 @@ import type { FlowState, ArchitectDagStep } from "@blackbelt-technology/pi-dashb
  *  - "loop": rounded rect with loop icon/double border
  *  - "flow-ref": dashed border for subflows
  */
-export type FlowStepType = "agent" | "fork" | "loop" | "conditional" | "flow-ref";
+export type FlowStepType = "agent" | "fork" | "code" | "code-decision" | "flow-ref";
 
-/** Map flow engine stepType string to graph visual type */
+/** Map flow engine stepType/nodeKind string to graph visual type.
+ *  Canonical node set (unify-decision-routing): agent, agent-decision, code,
+ *  code-decision, fork, flow-ref. Dead types (conditional, agent-loop-decision)
+ *  removed. See change: rework-flows-plugin-for-new-pi-flows. */
 export function mapStepType(stepType: string | undefined): FlowStepType | undefined {
   switch (stepType) {
     case "fork":
-    case "conditional":
     case "agent-decision": return "fork";
-    case "agent-loop-decision": return "loop";
+    case "code": return "code";
+    case "code-decision": return "code-decision";
     case "flow-ref": return "flow-ref";
     default: return undefined; // "agent" → default styling
   }
@@ -41,7 +44,7 @@ export interface FlowGraphStep {
 }
 
 /** Step types that act as segment separators (non-agent control flow) */
-const SEPARATOR_STEP_TYPES = new Set(["fork", "conditional", "agent-decision", "agent-loop-decision", "flow-ref"]);
+const SEPARATOR_STEP_TYPES = new Set(["fork", "agent-decision", "code-decision", "flow-ref"]);
 
 /** Synthesize implicit sequential edges that aren't expressed in blockedBy.
  *  - Steps after a separator with no blockedBy get an edge from the preceding separator.
@@ -143,22 +146,6 @@ export function flowStateToGraphSteps(flowState: FlowState): FlowGraphStep[] {
     type: "flow-ref" as const,
   }));
   return [...agentSteps, ...flowRefSteps];
-}
-
-/** Convert ArchitectState dagSteps (design-time, all pending) to FlowGraphStep array. */
-export function architectStepsToGraphSteps(dagSteps: ArchitectDagStep[]): FlowGraphStep[] {
-  const allStepIds = new Set(dagSteps.map(s => s.id));
-  const steps: FlowGraphStep[] = dagSteps.map((step) => ({
-    id: step.id,
-    label: step.agentName || step.id,
-    status: "pending" as const,
-    blockedBy: [...step.blockedBy],
-    type: mapStepType(step.stepType),
-    loopTarget: step.loopTarget && allStepIds.has(step.loopTarget) ? step.loopTarget : undefined,
-  }));
-
-  synthesizeImplicitEdges(steps, dagSteps);
-  return steps;
 }
 
 interface PositionedNode {
@@ -518,8 +505,8 @@ export function FlowGraph({ steps }: { steps: FlowGraphStep[] }) {
             const isRunning = node.status === "running";
             // Add type prefix icon to label
             const typePrefix = node.type === "fork" ? "◇ "
-              : node.type === "loop" ? "↻ "
-              : node.type === "conditional" ? "? "
+              : node.type === "code" ? "⌗ "
+              : node.type === "code-decision" ? "◈ "
               : "";
             const displayLabel = typePrefix + node.label;
             const availW = node.width - 16;
