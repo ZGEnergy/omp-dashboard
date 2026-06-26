@@ -141,6 +141,20 @@ export function tableToTsv(table: HTMLTableElement): string {
   return lines.join("\n");
 }
 
+/**
+ * Returns true when the fenced block holding `code` has a closing fence in the
+ * raw markdown `content`. During streaming an unclosed mermaid block is the
+ * trailing fence: its content grows token-by-token with no closing ``` yet, so
+ * `after` carries no fence and we report incomplete. Once the fence arrives the
+ * block's source is final. Unmatched `code` (e.g. HTML-entity differences) falls
+ * back to `true` so rendering is never blocked — worst case is prior behaviour.
+ */
+export function isFencedBlockComplete(content: string, code: string): boolean {
+  const idx = content.indexOf(code);
+  if (idx === -1) return true;
+  return content.slice(idx + code.length).includes("```");
+}
+
 function CodeBlockWrapper({ codeString, children }: { codeString: string; children: React.ReactNode }) {
   return (
     <div>
@@ -383,7 +397,12 @@ export const MarkdownContent = React.memo(function MarkdownContent({ content, co
             const codeString = String(children).replace(/\n$/, "");
 
             if (match && match[1] === "mermaid") {
-              return <MermaidBlock code={codeString} />;
+              return (
+                <MermaidBlock
+                  code={codeString}
+                  complete={isFencedBlockComplete(processedContent, codeString)}
+                />
+              );
             }
 
             if (match) {

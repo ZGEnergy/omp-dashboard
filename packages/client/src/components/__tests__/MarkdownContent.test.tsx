@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
 import { render, screen, act, fireEvent, cleanup } from "@testing-library/react";
 import React, { useState } from "react";
-import { MarkdownContent, tableToMarkdown, tableToTsv } from "../MarkdownContent.js";
+import { MarkdownContent, tableToMarkdown, tableToTsv, isFencedBlockComplete } from "../MarkdownContent.js";
 import { ThemeProvider } from "../ThemeProvider.js";
 import { SessionAssetsProvider } from "../../lib/SessionAssetsContext.js";
 import type { ToolContext } from "../tool-renderers/types.js";
@@ -29,6 +29,29 @@ beforeAll(() => {
 function renderMd(content: string) {
   return render(<ThemeProvider><MarkdownContent content={content} /></ThemeProvider>);
 }
+
+describe("isFencedBlockComplete — mermaid streaming gate", () => {
+  const code = "graph TD; A-->B";
+
+  it("reports incomplete while the fence is still open (streaming)", () => {
+    const streaming = "```mermaid\n" + code;
+    expect(isFencedBlockComplete(streaming, code)).toBe(false);
+  });
+
+  it("reports complete once the closing fence arrives", () => {
+    const closed = "```mermaid\n" + code + "\n```";
+    expect(isFencedBlockComplete(closed, code)).toBe(true);
+  });
+
+  it("reports complete with trailing content after the block", () => {
+    const after = "```mermaid\n" + code + "\n```\n\nmore text";
+    expect(isFencedBlockComplete(after, code)).toBe(true);
+  });
+
+  it("falls back to complete when code is not found verbatim", () => {
+    expect(isFencedBlockComplete("unrelated content", code)).toBe(true);
+  });
+});
 
 describe("MarkdownContent — prose & inline-code linkification", () => {
   const ctx: ToolContext = { cwd: "/Users/me/repo", editors: [] };
