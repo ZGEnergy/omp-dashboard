@@ -8,7 +8,7 @@ import {
 } from "../recommended-extensions.js";
 
 describe("RECOMMENDED_EXTENSIONS manifest", () => {
-	it("contains exactly the twelve expected entries", () => {
+	it("contains exactly the sixteen expected entries", () => {
 		const ids = RECOMMENDED_EXTENSIONS.map((e) => e.id).sort();
 		expect(ids).toEqual(
 			[
@@ -24,6 +24,10 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 				"pi-memory-honcho",
 				"pi-simplify",
 				"pi-web-access",
+				"@blackbelt-technology/pi-dashboard-kb-extension",
+				"@blackbelt-technology/frontend-mockup-loop",
+				"@blackbelt-technology/pi-dashboard-plugin-skill",
+				"@blackbelt-technology/pi-dashboard-document-converter",
 			].sort(),
 		);
 	});
@@ -142,7 +146,12 @@ describe("getRecommendedByStatus", () => {
 	it("filters by strongly-suggested", () => {
 		const suggested = getRecommendedByStatus("strongly-suggested");
 		expect(suggested.map((e) => e.id).sort()).toEqual(
-			["pi-flows", "pi-web-access", "context-mode"].sort(),
+			[
+				"pi-flows",
+				"pi-web-access",
+				"context-mode",
+				"@blackbelt-technology/pi-dashboard-kb-extension",
+			].sort(),
 		);
 	});
 
@@ -158,6 +167,9 @@ describe("getRecommendedByStatus", () => {
 				"pi-hermes-memory",
 				"pi-memory-honcho",
 				"pi-simplify",
+				"@blackbelt-technology/frontend-mockup-loop",
+				"@blackbelt-technology/pi-dashboard-plugin-skill",
+				"@blackbelt-technology/pi-dashboard-document-converter",
 			].sort(),
 		);
 	});
