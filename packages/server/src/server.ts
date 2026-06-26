@@ -65,6 +65,7 @@ import { createGoalStore } from "./goal-store.js";
 import { createGoalVerdictAccumulator } from "./goal-verdict-accumulator.js";
 import { decideBudgetHalt } from "./goal-budget-guard.js";
 import { createPendingGoalLinkRegistry } from "./pending-goal-link-registry.js";
+import { primeGoalSession } from "./goal-session-primer.js";
 import { mergeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
 import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerDoctorRoutes } from "./routes/doctor-routes.js";
@@ -677,6 +678,28 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     pluginPiHandlers.set(GOAL_STATUS_MESSAGE, arr);
   }
 
+  // Rename a session card + dispatch the goal kickoff so a goal-linked session
+  // actually pursues its objective. Shared by the spawn path (event-wiring
+  // goal-link arm) and the explicit link path (goal-routes).
+  const primeGoalSessionImpl = (
+    sessionId: string,
+    goal: { objective: string; criteria?: import("@blackbelt-technology/pi-dashboard-shared/types.js").GoalCriterion[] },
+  ): void => {
+    primeGoalSession(
+      {
+        sendPrompt: (sid, text) => piGateway.sendToSession(sid, { type: "send_prompt", sessionId: sid, text }),
+        renameSession: (sid, name) => {
+          const updates = { name: name || undefined };
+          sessionManager.update(sid, updates);
+          browserGateway.broadcastSessionUpdated(sid, updates);
+          piGateway.sendToSession(sid, { type: "rename_session", sessionId: sid, name });
+        },
+      },
+      sessionId,
+      goal,
+    );
+  };
+
   // Wire up event forwarding from pi gateway to browser gateway
   wireEvents({
     sessionManager,
@@ -696,6 +719,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     pendingAutomationRunRegistry,
     pendingGoalLinkRegistry,
     goalStore,
+    primeGoalSession: primeGoalSessionImpl,
     viewedSessionTracker: browserGateway.viewedSessionTracker,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
@@ -878,6 +902,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     networkGuard,
     store: goalStore,
     applyGoalIdToSession,
+    primeGoalSession: primeGoalSessionImpl,
     spawnGoalSession: async (cwd, goalId, opts) => {
       pendingGoalLinkRegistry.enqueue(cwd, goalId);
       try {

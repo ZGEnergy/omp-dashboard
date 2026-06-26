@@ -108,6 +108,15 @@ export interface EventWiringDeps {
   pendingGoalLinkRegistry?: import("./pending-goal-link-registry.js").PendingGoalLinkRegistry;
   goalStore?: import("./goal-store.js").GoalStore;
   /**
+   * Optional goal-session primer. When provided, a session linked to a goal on
+   * `session_register` is renamed to the objective and dispatched `/goal …` so
+   * the pi-goal-hermes loop actually starts. See change: prime-goal-linked-sessions.
+   */
+  primeGoalSession?: (
+    sessionId: string,
+    goal: { objective: string; criteria?: import("@blackbelt-technology/pi-dashboard-shared/types.js").GoalCriterion[] },
+  ) => void;
+  /**
    * Optional viewed-session tracker. When provided, the wiring evaluates
    * `isUnreadTrigger(...)` on each forwarded event and stamps
    * `session.unread = true` for sessions no browser is currently viewing.
@@ -162,6 +171,7 @@ export function wireEvents(deps: EventWiringDeps): void {
     pendingAutomationRunRegistry,
     pendingGoalLinkRegistry,
     goalStore,
+    primeGoalSession,
     viewedSessionTracker,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
@@ -312,7 +322,7 @@ export function wireEvents(deps: EventWiringDeps): void {
         // broadcast once linking succeeds, so a failed link (e.g. goal
         // deleted mid-spawn) can't leave session state diverged from the store.
         gs.linkSession(cwd, goalId, sessionId)
-          .then(() => {
+          .then((updated) => {
             sessionManager.update(sessionId, { goalId });
             const session = sessionManager.get(sessionId);
             if (session?.sessionFile) {
@@ -326,6 +336,10 @@ export function wireEvents(deps: EventWiringDeps): void {
               }
             }
             browserGateway.broadcastSessionUpdated(sessionId, { goalId });
+            // Kick off the pursuit: rename the card to the objective + dispatch
+            // `/goal …` so the pi-goal-hermes loop starts. Without this the
+            // session boots idle and never tries to reach the goal target.
+            primeGoalSession?.(sessionId, updated);
           })
           .catch((err) => {
             console.warn(`[event-wiring] failed to link session ${sessionId} to goal ${goalId}:`, err);
