@@ -1,8 +1,8 @@
-import React from "react";
+import type React from "react";
 import { resolveLinkOrigin } from "../../lib/link-origin.js";
 import { FilePreviewOverlay } from "../FilePreviewOverlay.js";
-import { useFileOpenRouting } from "./useFileOpenRouting.js";
 import type { ToolContext } from "./types.js";
+import { useFileOpenRouting } from "./useFileOpenRouting.js";
 
 interface Props {
   path: string;
@@ -29,7 +29,7 @@ interface Props {
  * See change: unify-file-link-openability, fix-worktree-link-origin.
  */
 export function FileLink({ path, line, col, absolute, context, children }: Props) {
-  const { cwd, localEditorAvailable, editorName, preview, openFile, closePreview } =
+  const { cwd, localEditorAvailable, editorName, openFile, hostManaged, previewTarget, closePreview } =
     useFileOpenRouting(context);
 
   // Re-root an absolute parent-checkout path onto the worktree (worktree
@@ -53,30 +53,30 @@ export function FileLink({ path, line, col, absolute, context, children }: Props
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handleClick}
-        title={title}
-        // Not draggable + user-select:text so a click-drag that starts on or
-        // crosses the link extends the text selection (a <button> otherwise
-        // swallows the drag and excludes its label from the selection). A
-        // plain click still opens; native click-vs-drag suppression handles it.
-        draggable={false}
-        // Inline-only styling, no padding/margin so native text selection
-        // across the link boundary is preserved (D8).
-        className="text-blue-400 hover:underline bg-transparent border-0 p-0 m-0 font-inherit cursor-pointer"
-        style={{ font: "inherit", userSelect: "text" }}
-      >
-        {children}
-      </button>
-      {preview && cwd && (
-        <FilePreviewOverlay
-          cwd={cwd}
-          path={preview.path}
-          line={preview.line}
-          onClose={closePreview}
-        />
-      )}
+    <button
+      type="button"
+      onClick={handleClick}
+      title={title}
+      // Not draggable + user-select:text so a click-drag that starts on or
+      // crosses the link extends the text selection (a <button> otherwise
+      // swallows the drag and excludes its label from the selection). A
+      // plain click still opens; native click-vs-drag suppression handles it.
+      draggable={false}
+      // Inline-only styling, no padding/margin so native text selection
+      // across the link boundary is preserved (D8).
+      className="text-blue-400 hover:underline bg-transparent border-0 p-0 m-0 font-inherit cursor-pointer"
+      style={{ font: "inherit", userSelect: "text" }}
+    >
+      {children}
+    </button>
+    {!hostManaged && previewTarget && (
+      <FilePreviewOverlay
+        cwd={previewTarget.cwd}
+        path={previewTarget.path}
+        line={previewTarget.line}
+        onClose={closePreview}
+      />
+    )}
     </>
   );
 }

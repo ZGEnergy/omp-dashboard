@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, cleanup } from "@testing-library/react";
-import React from "react";
-import { FileLink } from "../FileLink.js";
-import { ThemeProvider } from "../../ThemeProvider.js";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import type React from "react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as editorApi from "../../../lib/editor-api.js";
+import { FilePreviewHost, FilePreviewProvider } from "../../FilePreviewContext.js";
+import { ThemeProvider } from "../../ThemeProvider.js";
+import { FileLink } from "../FileLink.js";
 import type { ToolContext } from "../types.js";
 
 const originalLocation = window.location;
@@ -20,6 +21,21 @@ function restoreHost() {
 // FilePreviewOverlay (rendered on the no-editor path) reads ThemeProvider for
 // syntax highlighting, so every render is wrapped.
 function renderFL(ui: React.ReactElement) {
+  return render(
+    <ThemeProvider>
+      <FilePreviewProvider>
+        {ui}
+        <FilePreviewHost />
+      </FilePreviewProvider>
+    </ThemeProvider>,
+  );
+}
+
+// No-provider render: exercises FileLink's leaf-local fallback overlay (the
+// path used on non-chat surfaces like README dialogs / markdown preview, where
+// no FilePreviewProvider is mounted). renderFL above always goes through the
+// hosted path, so this keeps the fallback branch covered.
+function renderFLNoProvider(ui: React.ReactElement) {
   return render(<ThemeProvider>{ui}</ThemeProvider>);
 }
 
@@ -125,6 +141,25 @@ describe("FileLink — click routing", () => {
     // A plain click still opens (calls openEditor on localhost+editor).
     fireEvent.click(button);
     expect(editorApi.openEditor).toHaveBeenCalled();
+  });
+
+  it("no provider → FileLink renders its own fallback preview overlay", async () => {
+    setHost("dashboard.example.com");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: { type: "file", content: "" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }) as any,
+    );
+    const ctx: ToolContext = { cwd: "/Users/me/repo", editors: [] };
+    const { getByRole, findByTestId } = renderFLNoProvider(
+      <FileLink path="src/foo.ts" context={ctx}>
+        src/foo.ts
+      </FileLink>,
+    );
+    fireEvent.click(getByRole("button"));
+    expect(await findByTestId("file-preview-overlay")).toBeTruthy();
+    fetchSpy.mockRestore();
   });
 
   it("title exposes resolved absolute path on hover", () => {
