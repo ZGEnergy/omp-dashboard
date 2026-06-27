@@ -45,7 +45,7 @@
     }
   ],
   "assignments": {
-    "add-dashboard-slash-commands": "next-phase",
+    "add-dashboard-slash-commands": "ui",
     "filter-oauth-incompatible-models": "next-phase",
     "external-dashboard-plugins": "next-phase",
     "fix-windows-portable-exe": "electrun-execution",
@@ -129,23 +129,28 @@
     "add-connector-layer": "next-phase",
     "improve-dashboard-attention-routing": "ui",
     "extend-client-utils-state-feedback-primitives": "ui",
-    "add-authoring-skills": "ui"
+    "add-authoring-skills": "ui",
+    "serve-agent-artifact-previews": "ui",
+    "fix-file-preview-survives-message-churn": "ui",
+    "default-node-24-keep-22-floor": "ui",
+    "inline-agent-screenshot-artifacts": "ui",
+    "refresh-folder-header-branch": "ui",
+    "fix-worktree-link-origin": "ui"
   },
   "changeOrder": {
     "__ungrouped__": [],
     "ui": [
-      "extend-client-utils-state-feedback-primitives",
-      "improve-dashboard-attention-routing",
-      "add-authoring-skills",
-      "fix-plugin-config-write-persistence",
-      "add-e2e-faux-model-roundtrip",
-      "selectable-tool-output-links",
-      "configurable-bind-host"
+      "fix-worktree-link-origin",
+      "refresh-folder-header-branch",
+      "inline-agent-screenshot-artifacts",
+      "serve-agent-artifact-previews",
+      "default-node-24-keep-22-floor",
+      "fix-file-preview-survives-message-churn",
+      "add-dashboard-slash-commands"
     ],
     "next-phase": [
       "add-connector-layer",
       "add-end-user-docs",
-      "add-dashboard-slash-commands",
       "add-hyperframes-skills",
       "external-dashboard-plugins",
       "filter-oauth-incompatible-models",
