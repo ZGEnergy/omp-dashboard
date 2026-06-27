@@ -11,7 +11,7 @@
     "directory": "packages/document-converter"
   },
   "pi": {
-    "skills": [".pi/skills/document-converter"]
+    "skills": [".pi/skills/document-converter", ".pi/skills/doc-summarizer"]
   },
   "exports": {
     ".": "./src/index.ts",
