@@ -211,3 +211,64 @@ describe("FileLink — absolute paths skip the cwd join", () => {
     fetchSpy.mockRestore();
   });
 });
+
+describe("FileLink — worktree link-origin re-rooting", () => {
+  const worktreeCtx: ToolContext = {
+    cwd: "/repo/.worktrees/x",
+    editors: [{ id: "code", name: "VS Code" }],
+  };
+
+  beforeEach(() => {
+    vi.spyOn(editorApi, "openEditor").mockResolvedValue({ success: true });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    restoreHost();
+  });
+
+  it("opens the worktree copy for a parent-rooted absolute path", async () => {
+    setHost("localhost");
+    const { getByRole } = renderFL(
+      <FileLink path="/repo/node_modules/vitest/package.json" absolute context={worktreeCtx}>
+        /repo/node_modules/vitest/package.json
+      </FileLink>,
+    );
+    fireEvent.click(getByRole("button"));
+    await Promise.resolve();
+    expect(editorApi.openEditor).toHaveBeenCalledWith(
+      "/repo/.worktrees/x",
+      "code",
+      "/repo/.worktrees/x/node_modules/vitest/package.json",
+      undefined,
+    );
+  });
+
+  it("tooltip shows the re-rooted worktree path", () => {
+    setHost("localhost");
+    const { getByRole } = renderFL(
+      <FileLink path="/repo/vitest.config.ts" line={3} absolute context={worktreeCtx}>
+        /repo/vitest.config.ts:3
+      </FileLink>,
+    );
+    const title = getByRole("button").getAttribute("title") ?? "";
+    expect(title).toContain("/repo/.worktrees/x/vitest.config.ts");
+  });
+
+  it("leaves a foreign absolute path verbatim in a worktree session", async () => {
+    setHost("localhost");
+    const { getByRole } = renderFL(
+      <FileLink path="/etc/hosts" absolute context={worktreeCtx}>
+        /etc/hosts
+      </FileLink>,
+    );
+    fireEvent.click(getByRole("button"));
+    await Promise.resolve();
+    expect(editorApi.openEditor).toHaveBeenCalledWith(
+      "/repo/.worktrees/x",
+      "code",
+      "/etc/hosts",
+      undefined,
+    );
+  });
+});
