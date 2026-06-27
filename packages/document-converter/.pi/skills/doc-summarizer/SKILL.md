@@ -35,7 +35,7 @@ Call the facade; never invoke Python, docling, or pdftotext directly.
 import { createDocumentConverter } from "@blackbelt-technology/pi-dashboard-document-converter";
 const dc = createDocumentConverter({ image: "pi-doc-engine:0.1.0", stagingDir: "/abs/staging" });
 
-const { outputPath } = await dc.convertToMarkdown("<file_path>");          // digital PDF/DOCX/…
+const { output } = await dc.convertToMarkdown("<file_path>");              // digital PDF/DOCX/…
 // scanned PDF: pass OCR explicitly
 await dc.convertToMarkdown("<file_path>", { ocr: { mode: "force", lang: ["english"] } });
 ```

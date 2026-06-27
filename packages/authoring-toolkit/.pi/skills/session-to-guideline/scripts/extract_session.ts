@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S npx tsx
 /**
  * Extract a structured "facts sheet" from a pi session JSONL file.
  *
@@ -7,9 +7,8 @@
  * errors) that the agent then synthesizes into a human-readable collaboration
  * guideline (see SKILL.md).
  *
- * Run with Bun (preferred) or Node >=22:
+ * Run with npx tsx:
  *     npx tsx scripts/extract_session.ts <selector> [options]
- *     node scripts/extract_session.ts <selector> [options]
  *
  * Selector:
  *     /abs/path/to/session.jsonl   explicit file
@@ -106,7 +105,10 @@ function findSession(selector: string, cwd: string, index: number): string {
   // 2) latest / . -> most recent for cwd
   if (["latest", ".", ""].includes(selector)) {
     const d = join(SESS_ROOT, encodeCwd(cwd));
-    const files = listJsonl(d).sort().reverse();
+    const files = listJsonl(d)
+      .map((f) => ({ f, mt: statSync(f).mtimeMs }))
+      .sort((a, b) => b.mt - a.mt)
+      .map((x) => x.f);
     if (!files.length) die(`No sessions found for cwd ${cwd}\n  (looked in ${d})`);
     if (index >= files.length) die(`--index ${index} out of range; only ${files.length} sessions for ${cwd}`);
     return files[index];
@@ -122,8 +124,9 @@ function findSession(selector: string, cwd: string, index: number): string {
     }
   }
   if (!hits.length) die(`No session file matches '${selector}'`);
-  hits.sort().reverse();
-  return hits[0];
+  return hits
+    .map((f) => ({ f, mt: statSync(f).mtimeMs }))
+    .sort((a, b) => b.mt - a.mt)[0].f;
 }
 
 // ---------- parsing ----------

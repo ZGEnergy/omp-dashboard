@@ -1,8 +1,8 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S npx tsx
 /**
  * List recent pi sessions so a session can be chosen for documentation.
  *
- * Run with Bun (preferred) or Node >=22:
+ * Run with npx tsx:
  *     npx tsx scripts/list_sessions.ts [--cwd PATH] [--limit N] [--all]
  *
  * Without --all, lists sessions for --cwd (default: current working directory),
@@ -107,8 +107,8 @@ function main(): void {
     const label = name ?? (prompt.slice(0, 70) + (prompt.length > 70 ? "…" : ""));
     console.log(`${String(i).padStart(2)}  ${when.padEnd(19)}  ${String(msgs).padStart(4)}  ${sid.slice(0, 8)}  ${label}`);
   });
-  console.log("\nPick with:  npx tsx scripts/extract_session.ts <id-or-index> --cwd <dir>");
-  console.log("  (index = the # column when using --index N with selector 'latest')");
+  console.log("\nPick with:  npx tsx scripts/extract_session.ts <id-or-'latest'> --cwd <dir>");
+  console.log("  (use 'latest --index N' to pick the Nth-most-recent by the # column)");
 }
 
 main();

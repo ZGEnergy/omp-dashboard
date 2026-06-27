@@ -1,7 +1,7 @@
 # authoring-skills Specification
 
 ## Purpose
-TBD - created by archiving change add-authoring-skills. Update Purpose after archive.
+Define the contract for general-purpose authoring skills ported into the monorepo: the `authoring-toolkit` pure-skill package (`skill-creator`, `session-to-guideline`) and the `doc-summarizer` skill folded into `document-converter`. Specifies skill registration via `pi.skills[]`, absence of personal coupling, the `npx tsx` toolchain for `session-to-guideline`, and reuse of the existing Docker-quarantined engine for `doc-summarizer` extraction (no host-side extractors).
 ## Requirements
 ### Requirement: Authoring-toolkit skill package
 
