@@ -462,6 +462,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
               output={msg.content}
               exitCode={args?.exitCode ?? 0}
               excludeFromContext={args?.excludeFromContext ?? false}
+              source={args?.source}
               timestamp={msg.timestamp}
             />
           );
