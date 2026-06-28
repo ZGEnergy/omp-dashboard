@@ -652,7 +652,7 @@ export function WorktreeSpawnDialog({ cwd, onSpawn, onCancel, initialBranch, att
           <button
             type="button"
             disabled={!canSubmit || orphanDetected || cleaningOrphan}
-            onClick={handleCreateAndSpawn}
+            onClick={() => void handleCreateAndSpawn()}
             data-testid="worktree-dialog-create-submit"
             className="px-3 py-1 text-sm rounded bg-blue-500/80 hover:bg-blue-500 disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-muted)] text-white"
           >
