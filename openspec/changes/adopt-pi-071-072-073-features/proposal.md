@@ -1,6 +1,6 @@
 ## Why
 
-With the pi compatibility floor lifted to 0.73.0 by the sibling `modernize-pi-version-handling` change, the dashboard can — and should — adopt the new APIs, events, and UX affordances pi gained in 0.71/0.72/0.73. Six related but independent improvements consolidate here because they all answer the same question: "what does pi 0.73 give us?" Bundling them under one narrative matches how a release-notes reader will think about them.
+The pi compatibility floor is already at 0.78.0 (`packages/server/package.json::piCompatibility`), so pi 0.71/0.72/0.73 are firmly below the floor — every API, event, and UX affordance those releases shipped is guaranteed present at runtime, no version guard required. The dashboard still has not adopted them. This change closes that gap. Six related but independent improvements consolidate here because they all answer the same question: "what does pi 0.73 give us?" Bundling them under one narrative matches how a release-notes reader will think about them.
 
 The six pieces, ordered by pi version they target:
 
@@ -108,7 +108,7 @@ Each of the six is a small focused change (~5-70 LOC each, ~220 LOC total). Bund
 - A.3 + B.1 are tiny defensive additions: missing pi 0.71/0.72 fields fall through to today's behavior.
 
 **Cross-references**:
-- Hard precondition: `modernize-pi-version-handling` (this change assumes the floor is 0.73 and the version probe is correct).
+- No version-floor precondition: floor is already 0.78.0 (> 0.73), so all targeted APIs are unconditionally present.
 - Builds on archived `replace-hardcoded-provider-lists` (catalogue path makes A.1 + B.1 safe — no hardcoded provider/model lists to drift).
 
 ## Out of Scope

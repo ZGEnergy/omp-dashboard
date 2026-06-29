@@ -113,5 +113,5 @@
 ## Archive readiness
 
 - [ ] R.1 `openspec validate adopt-pi-071-072-073-features` passes.
-- [ ] R.2 Confirm precondition: `modernize-pi-version-handling` is archived first.
+- [ ] R.2 No version-floor precondition: floor already 0.78.0 (> 0.73). Confirm `packages/server/package.json::piCompatibility.minimum` is still >= 0.73.0 at archive time.
 - [ ] R.3 Hand off for archival via `openspec-archive-change` once V.1-V.8 + D.1-D.8 green.
