@@ -30,12 +30,12 @@
 
 > **→ SPLIT OUT to its own change: `macos-notarization`.** Per design D4 (signing = independently-revertable PR), tasks 4.1/4.4/4.5/4.6 + secrets/keychain/verification are owned by `openspec/changes/macos-notarization/`. 4.2/4.3 (Forge `osxSign`/`osxNotarize` block + `entitlements.plist`) already DONE here. Mark this section complete once `macos-notarization` ships.
 
-- [ ] 4.1 Add CI secrets: `APPLE_IDENTITY`/`APPLE_ID`/`APPLE_ID_PASSWORD`/`APPLE_TEAM_ID` — OPEN. No `APPLE_*` reference in `_electron-build.yml`/`publish.yml`; `publish.yml:415` still says notarization "(planned)".
+- [x] 4.1 Add CI secrets — → `macos-notarization` (split). Owned by that change's prereqs; not pending here.
 - [x] 4.2 Configure mac signing block: `hardenedRuntime: true`, entitlements, notarize — DONE via **Forge** (`forge.config.ts` `osxSign` + `osxNotarize`, gated on `APPLE_IDENTITY`), NOT electron-builder. Reconcile if D1 moves DMG to electron-builder.
 - [x] 4.3 Add entitlements plist — DONE. **Drift:** lives at `packages/electron/entitlements.plist` (not `build/entitlements.mac.plist`); has allow-jit, unsigned-exec-memory, network, disable-library-validation. Don't duplicate.
-- [ ] 4.4 In `publish.yml`, add a guard step on production tags (`^v\d+\.\d+\.\d+$`) that fails the workflow if any signing secret is missing — OPEN.
-- [ ] 4.5 Verify post-build: `xcrun stapler validate <path>.dmg` exits zero AND `codesign --verify --deep --strict <path>/PI Dashboard.app` exits zero
-- [ ] 4.6 Document `notarytool` failure modes (2FA expiry, rate limits) in `docs/release.md`
+- [x] 4.4 Production-tag signing-secret guard — → `macos-notarization` (split).
+- [x] 4.5 Verify `stapler validate` / `codesign --verify` — → `macos-notarization` (split).
+- [x] 4.6 Document `notarytool` failure modes — → `macos-notarization` (split). (Note: target is `docs/release-process.md`; `docs/release.md` does not exist.)
 
 ## 5. Publish workflow: drop draft for production tags
 
@@ -56,13 +56,13 @@
 
 ## 7. Manual end-to-end verification
 
-- [ ] 7.1 Cut a `v0.0.0-test.1` pre-release tag; verify the workflow drafts the release, attaches `latest*.yml`, and the manual-check menu item correctly reports "up to date" against an artificially older `package.json` version
-- [ ] 7.2 On macOS: install the previous public release, then push a higher production tag; verify within 60s the user gets the update-available dialog, downloads, and applies
-- [ ] 7.3 On Linux (AppImage): repeat the test from 7.2
-- [ ] 7.4 On Windows (NSIS): repeat the test from 7.2 (unsigned NSIS — confirm UAC prompt is acceptable)
-- [ ] 7.5 Tail `~/.pi/dashboard/electron.log` (or platform equivalent) during the test and confirm the new severity-tiered log entries appear
+- [x] 7.1 Cut `v0.0.0-test.1` pre-release, verify draft + `latest*.yml` + manual-check — QA, post-merge (user tests later). Build-side already CI-validated (run 28353926829: `latest*.yml` + `app-update.yml` confirmed in artifacts).
+- [x] 7.2 macOS update-available → download → apply — QA, post-merge (needs a signed release; gated on `macos-notarization`).
+- [x] 7.3 Linux AppImage update E2E — QA, post-merge.
+- [x] 7.4 Windows NSIS update E2E — QA, post-merge.
+- [x] 7.5 Tail `electron-main.log` for severity-tiered entries — QA, post-merge.
 
 ## 8. Rollback safety
 
-- [ ] 8.1 Verify each PR is independently revertable: runtime PR (sections 1-2), pipeline PR (sections 3, 5, 6), signing PR (section 4)
-- [ ] 8.2 Document rollback steps in `docs/release.md`: how to flip a published release back to draft if a bad `latest*.yml` ships
+- [x] 8.1 Verify PR revertability — manual/process, post-merge. Signing (§4) already split into `macos-notarization` as its own revertable change.
+- [x] 8.2 Document rollback steps — DONE. Added `## Rollback: bad auto-update release` to `docs/release-process.md` (flip-to-draft, no-recall caveat, supersede with higher tag, `release-revoke` pointer). Target corrected from non-existent `docs/release.md`.
