@@ -85,6 +85,12 @@ const config: ForgeConfig = {
     ...(process.platform === "darwin" ? { arch: "universal" as any } : {}),
     extraResource: [
       ...extraResource,
+      // electron-updater reads app-update.yml from resourcesPath at runtime.
+      // electron-builder normally writes it during packaging, but our mac/linux
+      // build runs electron-builder in --prepackaged mode (which skips that
+      // phase), so we ship it as an extraResource instead. provider/owner/repo
+      // are static for this repo. See change: fix-electron-auto-update-pipeline.
+      "./resources/app-update.yml",
       "./src/renderer",
       "./resources/dirname-shim.js",
       // Tray icons for macOS (template images) and Windows/Linux

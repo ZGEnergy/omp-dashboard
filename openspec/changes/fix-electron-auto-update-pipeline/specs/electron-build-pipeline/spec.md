@@ -36,11 +36,11 @@ The Electron build SHALL configure `publish: { provider: 'github', owner: 'black
 - **THEN** the packaged app's resources directory SHALL contain `app-update.yml`
 - **AND** the file SHALL declare `provider: github`, `owner: blackbelt-technology`, `repo: pi-agent-dashboard`
 
-#### Scenario: app-update.yml is generated at build time, not committed
+#### Scenario: app-update.yml ships as a packaged resource
 
-- **WHEN** developers inspect the repository
-- **THEN** `app-update.yml` SHALL NOT be checked into version control
-- **AND** the build SHALL regenerate it from the publish configuration on every build
+- **WHEN** the mac/linux build runs electron-builder in `--prepackaged` mode (which skips the packaging phase that would otherwise emit `app-update.yml`)
+- **THEN** `app-update.yml` SHALL still be present in the packaged app's resources directory, shipped via Forge `extraResource` (`packages/electron/resources/app-update.yml`)
+- **AND** its `provider`/`owner`/`repo` SHALL match the build-time `publish` configuration
 
 ### Requirement: macOS build is Developer-ID-signed and notarised
 
