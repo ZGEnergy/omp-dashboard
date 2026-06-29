@@ -32,9 +32,16 @@ export { parseSourceKey, sourcesMatch, type SourceKey };
 import {
 	fetchPackageMeta,
 	fetchGithubPackageJson,
+	deriveSkillIds,
 	type PackageMeta,
 } from "../npm-search-proxy.js";
 import type { PackageManagerWrapper } from "../package-manager-wrapper.js";
+import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
+import {
+	runRequirementProbesFor,
+	missingFromReport,
+	type RequirementProbeDeps,
+} from "@blackbelt-technology/dashboard-plugin-runtime/server";
 
 const CACHE_TTL_MS = 60 * 1000;
 
@@ -129,6 +136,7 @@ async function enrichEntry(
 	installedGlobal: Array<{ source: string; installedPath?: string }>,
 	installedLocal: Array<{ source: string; installedPath?: string }>,
 	activeSources: string[],
+	reqDeps: RequirementProbeDeps,
 ): Promise<EnrichedRecommendedExtension> {
 	const key = parseSourceKey(entry.source);
 	let meta: PackageMeta | null = null;
@@ -141,6 +149,9 @@ async function enrichEntry(
 
 	const description = meta?.description ?? entry.fallbackDescription;
 	const version = meta?.version;
+	// Skills DERIVED from the package's own pi.skills manifest. Default to the
+	// registry / GitHub blob; an installed copy (read below) overrides it.
+	let skillsRegistered: string[] | undefined = meta?.skills;
 
 	const inGlobal = installedGlobal.some((p) => sourcesMatch(p.source, entry.source));
 	const inLocal = installedLocal.some((p) => sourcesMatch(p.source, entry.source));
@@ -157,7 +168,10 @@ async function enrichEntry(
 	// sources we currently don't track ref pins, so updateAvailable defaults
 	// to false (the Packages-tab check-updates action handles this separately).
 	let updateAvailable = false;
-	if (version && key.kind === "npm" && installedScope) {
+	// Read the installed package.json once for both updateAvailable AND the
+	// authoritative pi.skills (single source of truth when the package is on
+	// disk; the registry blob is the pre-install fallback).
+	if (installedScope) {
 		const installed = inGlobal ? installedGlobal : installedLocal;
 		const match = installed.find((p) => sourcesMatch(p.source, entry.source));
 		if (match?.installedPath) {
@@ -165,7 +179,11 @@ async function enrichEntry(
 				const pj = path.join(match.installedPath, "package.json");
 				if (fs.existsSync(pj)) {
 					const parsed = JSON.parse(fs.readFileSync(pj, "utf-8"));
-					updateAvailable = semverOlder(parsed?.version, version);
+					if (version && key.kind === "npm") {
+						updateAvailable = semverOlder(parsed?.version, version);
+					}
+					const installedSkills = deriveSkillIds(parsed?.pi?.skills);
+					if (installedSkills) skillsRegistered = installedSkills;
 				}
 			} catch {
 				/* ignore */
@@ -191,6 +209,20 @@ async function enrichEntry(
 		}
 	}
 
+	// Probe declarative external requirements (Piece A). Only entries that
+	// declare `requires` carry a `requirements` report + `missingRequirements`.
+	let requirements: EnrichedRecommendedExtension["requirements"];
+	let missingRequirements: string[] | undefined;
+	if (entry.requires) {
+		try {
+			const report = await runRequirementProbesFor(entry.requires, reqDeps);
+			requirements = report;
+			missingRequirements = missingFromReport(report);
+		} catch {
+			/* probe failure is non-fatal — leave requirements undefined */
+		}
+	}
+
 	return {
 		...entry,
 		description,
@@ -198,9 +230,11 @@ async function enrichEntry(
 		installed: { scope: installedScope },
 		activeInPi,
 		updateAvailable,
+		...(skillsRegistered ? { skillsRegistered } : {}),
 		...(entry.dashboardPlugin
 			? { dashboardPluginInstalled: dashboardPluginInstalled ?? false }
 			: {}),
+		...(requirements ? { requirements, missingRequirements: missingRequirements ?? [] } : {}),
 	};
 }
 
@@ -231,9 +265,17 @@ export function registerRecommendedRoutes(
 		// The server's CWD is a reasonable proxy for the active project.
 		const activeSources = readActiveSources(process.cwd());
 
+		// Probe deps reused across entries: pi-extension matches come from the
+		// already-fetched installed lists; binaries resolve via the shared
+		// ToolRegistry; services use the closed built-in registry.
+		const reqDeps: RequirementProbeDeps = {
+			listInstalled: async () => [...installedGlobal, ...installedLocal],
+			toolRegistry: getDefaultRegistry(),
+		};
+
 		const enriched = await Promise.all(
 			RECOMMENDED_EXTENSIONS.map((entry) =>
-				enrichEntry(entry, installedGlobal, installedLocal, activeSources),
+				enrichEntry(entry, installedGlobal, installedLocal, activeSources, reqDeps),
 			),
 		);
 

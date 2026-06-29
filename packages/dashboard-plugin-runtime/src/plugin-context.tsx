@@ -145,8 +145,10 @@ export interface PluginContextValue {
     pluginId: string,
     cb: (config: Record<string, unknown>) => void,
   ): () => void;
-  /** Dispatch a message over the active WebSocket. */
-  send(message: unknown): void;
+  /** Dispatch a message. Returns a Promise for messages the shell handles
+   *  asynchronously (e.g. `plugin_config_write` → POST). See change:
+   *  fix-plugin-config-write-persistence. */
+  send(message: unknown): void | Promise<void>;
   /** Router to open/close content views. */
   pluginRouter: PluginRouter;
   /** WebSocket connection (used internally for subscriptions). */
@@ -328,7 +330,7 @@ export function usePluginLogger(): PluginLogger {
 }
 
 /** @public */
-export function usePluginSend(): (message: unknown) => void {
+export function usePluginSend(): (message: unknown) => void | Promise<void> {
   const ctx = useContext(PluginReactContext);
   if (!ctx) throw new Error("Slot consumer must be rendered inside <PluginContextProvider>");
   return ctx.send;
@@ -393,7 +395,7 @@ export interface PluginContextProviderProps {
    * fix-pi-flows-end-to-end (Group 5).
    */
   selectedSessionId?: string;
-  send?: (message: unknown) => void;
+  send?: (message: unknown) => void | Promise<void>;
   pluginRouter?: PluginRouter;
   ws?: WebSocket | null;
 }
@@ -441,11 +443,17 @@ export function getPluginConfig(pluginId: string): Record<string, unknown> {
 }
 
 /**
- * Initialize plugin configs from a bulk fetch (e.g. from /api/config).
+ * Initialize plugin configs from a bulk fetch (e.g. from /api/config) so
+ * settings persisted to config.json hydrate on client boot / reload.
+ *
+ * Uses `setConfig` (not a raw Map set) so subscribers that mounted before this
+ * runs are notified — the `/api/config` fetch happens in a post-render effect,
+ * by which point `usePluginConfig` consumers have already read the (empty)
+ * initial value. See change: fix-plugin-config-write-persistence.
  */
 export function initPluginConfigs(pluginsBlock: Record<string, Record<string, unknown>>): void {
   for (const [id, config] of Object.entries(pluginsBlock)) {
-    pluginConfigs.set(id, config);
+    setConfig(id, config);
   }
 }
 
@@ -489,8 +497,8 @@ export function PluginContextProvider({
   );
 
   const send = useCallback(
-    (message: unknown) => {
-      if (sendFn) sendFn(message);
+    (message: unknown): void | Promise<void> => {
+      return sendFn ? sendFn(message) : undefined;
     },
     [sendFn],
   );

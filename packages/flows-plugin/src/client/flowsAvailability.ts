@@ -2,7 +2,7 @@
  * Per-session sync availability cache for flows-plugin's
  * `shouldRenderFlowsSubcard` predicate.
  *
- * The MEMORY/honcho path uses a global boolean (extension installed or not).
+ * A global-boolean path keys availability on extension-installed state.
  * Flow availability is per-session: session A may have `flowsList`, session
  * B may not. The cache is therefore keyed by sessionId.
  *
@@ -67,14 +67,22 @@ export function setFlowsAvailability(sessionId: string, has: boolean): void {
 /**
  * Compute availability from the published per-session-data store values.
  * Pure helper — no side effects.
+ *
+ * Gate on EXTENSION PRESENCE in this cwd, not flow count: pi-flows registers a
+ * `/flows` command (plus `flows:*`) in every session it loads into
+ * (flow-context `registerCommand("flows", …)`), so a flows-namespaced command
+ * in the session's commandsList means the extension is active here — show the
+ * subcard even when the cwd has zero flows yet (the author-first-flow / edit-
+ * mode case). Mirrors a per-cwd predicate using already-published data.
+ * (`flows` (non-`flowsList`) param kept for signature stability; presence is
+ * derived from commands.) See change: rework-flows-plugin-for-new-pi-flows.
  */
 function computeAvailability(
-  flows: FlowInfo[] | undefined,
+  _flows: FlowInfo[] | undefined,
   commands: CommandInfo[] | undefined,
 ): boolean {
-  const hasFlows = Array.isArray(flows) && flows.length > 0;
-  const hasFlowsNew = Array.isArray(commands) && commands.some((c) => c.name === "flows:new");
-  return hasFlows || hasFlowsNew;
+  return Array.isArray(commands)
+    && commands.some((c) => c.name === "flows" || c.name.startsWith("flows:"));
 }
 
 let installed = false;

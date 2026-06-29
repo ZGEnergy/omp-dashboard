@@ -64,8 +64,8 @@ export function AutomationSettings(): React.ReactElement {
 
   const commit = useCallback(async () => {
     const v = valuesRef.current;
-    send({
-      type: "plugin_config_write" as never,
+    await send({
+      type: "plugin_config_write",
       id: "automation",
       config: {
         defaultVisibility: v.defaultVisibility,

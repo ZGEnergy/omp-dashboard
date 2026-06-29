@@ -417,6 +417,51 @@ describe("SettingsPanel", () => {
     });
   });
 
+  it("blank-name LLM provider blocks save with an error and stays dirty", async () => {
+    // Regression: a provider row with an empty name must NOT be silently
+    // dropped. The save fails with a visible error and the source stays dirty
+    // (PUT /api/providers never fires). See change: fix-custom-provider-save-and-auth.
+    let putProvidersCalled = false;
+    global.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url === "/api/config" && !options?.method) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: mockConfig }) });
+      }
+      if (url === "/api/providers" && options?.method === "PUT") {
+        putProvidersCalled = true;
+        return Promise.resolve({ json: () => Promise.resolve({ success: true }) });
+      }
+      if (url === "/api/providers") {
+        return Promise.resolve({ json: () => Promise.resolve({ success: true, providers: {} }) });
+      }
+      if (url === "/api/provider-auth/status") {
+        return Promise.resolve({ json: () => Promise.resolve([]) });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
+    });
+    setPath("/settings/providers");
+
+    render(<SettingsPanel />);
+    await waitFor(() => screen.getByRole("button", { name: "Add Provider" }));
+
+    // Add a provider, leave the Name blank but fill Base URL + API Key.
+    fireEvent.click(screen.getByRole("button", { name: "Add Provider" }));
+    fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
+      target: { value: "https://proxy.example.com/v1" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("sk-... or $ENV_VAR_NAME"), {
+      target: { value: "sk-real-123" },
+    });
+
+    // Save bar appears (the new row makes the source dirty).
+    await waitFor(() => screen.getByTestId("save-btn"));
+    fireEvent.click(screen.getAllByTestId("save-btn")[0]);
+
+    // Error surfaced; PUT never fired; row not dropped; source stays dirty.
+    await waitFor(() => expect(screen.getByText(/Provider name is required/)).toBeTruthy());
+    expect(putProvidersCalled).toBe(false);
+    expect(screen.getByTestId("settings-save-bar")).toBeTruthy();
+  });
+
   it("does NOT include modelProxy in the save payload when unchanged", async () => {
     const configWithModelProxy = {
       ...mockConfig,
@@ -515,5 +560,89 @@ describe("SettingsPanel", () => {
     await waitFor(() => expect(screen.queryByTestId("unsaved-changes-dialog")).toBeNull());
     // Still dirty — edits preserved.
     expect(screen.getByTestId("settings-save-bar")).toBeTruthy();
+  });
+});
+
+// Listen-interface picker (Server page). See change: configurable-bind-host.
+describe("SettingsPanel listen-interface picker", () => {
+  const NIC = { name: "en0", address: "10.0.0.5", netmask: "255.255.255.0", cidr: "10.0.0.0/24" };
+
+  function mockFetchWithInterfaces(configOverrides?: any) {
+    const cfg = {
+      port: 8000, piPort: 9999, autoStart: true, autoShutdown: false,
+      shutdownIdleSeconds: 300, spawnStrategy: "headless", tunnel: { enabled: true },
+      devBuildOnReload: false,
+      memoryLimits: { maxEventsPerSession: 200, maxStringFieldSize: 4000, maxWsBufferBytes: 4194304 },
+      ...configOverrides,
+    };
+    return vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url === "/api/network-interfaces") {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: [NIC] }) });
+      }
+      if (url === "/api/config" && !options?.method) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: cfg }) });
+      }
+      if (url === "/api/config" && options?.method === "PUT") {
+        return Promise.resolve({ json: () => Promise.resolve({ success: true }) });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
+    });
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    fetchAutoInitWorktreePref.mockResolvedValue(false);
+    setAutoInitWorktreePref.mockResolvedValue(true);
+    setPath("/settings/server");
+  });
+
+  afterEach(() => cleanup());
+
+  it("renders the three listen options and no warning by default (loopback)", async () => {
+    global.fetch = mockFetchWithInterfaces();
+    render(<SettingsPanel />);
+    await waitFor(() => screen.getByTestId("listen-interface-field"));
+
+    const field = screen.getByTestId("listen-interface-field");
+    expect(within(field).getByText("Local only")).toBeTruthy();
+    expect(within(field).getByText("All interfaces")).toBeTruthy();
+    expect(within(field).getByText("Specific interface")).toBeTruthy();
+    expect(screen.queryByTestId("listen-exposure-warning")).toBeNull();
+  });
+
+  it("shows the exposure warning when All interfaces is selected without guard config", async () => {
+    global.fetch = mockFetchWithInterfaces();
+    render(<SettingsPanel />);
+    await waitFor(() => screen.getByTestId("listen-interface-field"));
+
+    const field = screen.getByTestId("listen-interface-field");
+    fireEvent.click(within(field).getByText("All interfaces").closest("label")!.querySelector("input")!);
+    await waitFor(() => expect(screen.getByTestId("listen-exposure-warning")).toBeTruthy());
+  });
+
+  it("suppresses the exposure warning when trusted networks are configured", async () => {
+    global.fetch = mockFetchWithInterfaces({ trustedNetworks: ["10.0.0.0/24"] });
+    render(<SettingsPanel />);
+    await waitFor(() => screen.getByTestId("listen-interface-field"));
+
+    const field = screen.getByTestId("listen-interface-field");
+    fireEvent.click(within(field).getByText("All interfaces").closest("label")!.querySelector("input")!);
+    // Mode flips to all, but guard config suppresses the warning.
+    expect(screen.queryByTestId("listen-exposure-warning")).toBeNull();
+  });
+
+  it("exposes the detected NIC under Specific interface", async () => {
+    global.fetch = mockFetchWithInterfaces();
+    render(<SettingsPanel />);
+    await waitFor(() => screen.getByTestId("listen-interface-field"));
+
+    const field = screen.getByTestId("listen-interface-field");
+    const specificRadio = within(field).getByText("Specific interface").closest("label")!.querySelector("input")! as HTMLInputElement;
+    // Radio is disabled until GET /api/network-interfaces resolves.
+    await waitFor(() => expect(specificRadio.disabled).toBe(false));
+    fireEvent.click(specificRadio);
+    await waitFor(() => screen.getByTestId("listen-interface-select"));
+    const select = screen.getByTestId("listen-interface-select") as HTMLSelectElement;
+    expect(within(select).getByText("en0 — 10.0.0.5")).toBeTruthy();
   });
 });

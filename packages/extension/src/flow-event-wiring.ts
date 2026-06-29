@@ -23,22 +23,11 @@ export const FLOW_EVENT_MAP: Record<string, string> = {
   "flow:summary-started": "flow_summary_started",
   "flow:summary-ready": "flow_summary_ready",
   "flow:summary-dismissed": "flow_summary_dismissed",
-  // Architect lifecycle events
-  "flow:architect-started": "architect_started",
-  "flow:architect-tool-call": "architect_tool_call",
-  "flow:architect-tool-result": "architect_tool_result",
-  "flow:architect-text": "architect_text",
-  "flow:architect-preview": "architect_preview",
-  "flow:architect-complete": "architect_complete",
-  "flow:architect-replan": "architect_replan",
-  "flow:architect-cancelled": "architect_cancelled",
-  "flow:architect-saved": "architect_saved",
-  "flow:architect-error": "architect_error",
-  "flow:architect-context-generating": "architect_context_generating",
-  "flow:architect-context-ready": "architect_context_ready",
-  "flow:architect-run-handoff": "architect_run_handoff",
   // Autonomous mode feedback
   "flow:autonomous-mode-changed": "flow_autonomous_changed",
+  // NOTE: nodeKind / outcome / typed outputs ride INSIDE the event `data` and are
+  // forwarded verbatim by the bridge.ts EventBus catch-all — no per-field map entry.
+  // See change: rework-flows-plugin-for-new-pi-flows (consumes pi-flows surface-node-kind).
 };
 
 /** Map of pi-subagents event names to dashboard protocol event types */

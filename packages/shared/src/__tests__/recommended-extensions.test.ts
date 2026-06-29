@@ -8,17 +8,28 @@ import {
 } from "../recommended-extensions.js";
 
 describe("RECOMMENDED_EXTENSIONS manifest", () => {
-	it("contains exactly the seven expected entries", () => {
+	it("contains exactly the eighteen expected entries", () => {
 		const ids = RECOMMENDED_EXTENSIONS.map((e) => e.id).sort();
 		expect(ids).toEqual(
 			[
 				"pi-anthropic-messages",
 				"pi-agent-browser",
 				"@blackbelt-technology/pi-dashboard-subagents",
-				"@blackbelt-technology/pi-image-fit",
+				"@blackbelt-technology/pi-image-fit-extension",
+				"@blackbelt-technology/pi-model-proxy",
+				"@ricoyudog/pi-goal-hermes",
+				"context-mode",
 				"pi-flows",
-				"pi-memory-honcho",
+				"pi-hermes-memory",
+				"pi-simplify",
 				"pi-web-access",
+				"@blackbelt-technology/pi-dashboard-kb-extension",
+				"@blackbelt-technology/frontend-mockup-loop",
+				"@blackbelt-technology/pi-dashboard-plugin-skill",
+				"@blackbelt-technology/pi-dashboard-document-converter",
+				"@blackbelt-technology/anti-slop-frontend",
+				"@blackbelt-technology/pi-dashboard-eng-disciplines",
+				"@blackbelt-technology/pi-dashboard-authoring-toolkit",
 			].sort(),
 		);
 	});
@@ -44,12 +55,6 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 		}
 	});
 
-	it("pi-memory-honcho declares its companion dashboard plugin id", () => {
-		// See change: add-plugin-activation-ui (Layer 1.5).
-		const entry = getRecommendedExtension("pi-memory-honcho");
-		expect(entry?.dashboardPlugin).toBe("honcho");
-	});
-
 	it("pi-anthropic-messages is marked required and uses the npm: source", () => {
 		// Republished to the @blackbelt-technology npm scope; the source MUST be
 		// the npm spec so sourcesMatch recognizes the npm install. See change:
@@ -61,10 +66,13 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 		expect(entry?.autowired).toBe(true);
 	});
 
-	it("pi-flows uses HTTPS git URL and registers flow-engine tools", () => {
+	it("pi-flows uses the npm source and registers flow-engine tools", () => {
+		// Switched from the git URL to the published npm package so
+		// sourcesMatch recognizes the npm install. Still NOT bundled
+		// (absent from BUNDLED_EXTENSION_IDS) until upstream declares a license.
 		const entry = getRecommendedExtension("pi-flows");
 		expect(entry).toBeDefined();
-		expect(entry?.source).toBe("https://github.com/BlackBeltTechnology/pi-flows.git");
+		expect(entry?.source).toBe("npm:@blackbelt-technology/pi-flows");
 		expect(entry?.toolsRegistered).toContain("subagent");
 		expect(entry?.toolsRegistered).toContain("flow_write");
 	});
@@ -81,30 +89,36 @@ describe("RECOMMENDED_EXTENSIONS manifest", () => {
 		expect(entry?.autowired).toBe(true);
 	});
 
-	it("npm-sourced entries use the npm: prefix", () => {
+	it("every entry uses the npm: prefix (all recommended entries are now npm-sourced)", () => {
 		const npmEntries = RECOMMENDED_EXTENSIONS.filter((e) => e.source.startsWith("npm:"));
 		expect(npmEntries.map((e) => e.id).sort()).toEqual(
-			[
-				"pi-anthropic-messages",
-				"pi-agent-browser",
-				"pi-memory-honcho",
-				"pi-web-access",
-				"@blackbelt-technology/pi-dashboard-subagents",
-				"@blackbelt-technology/pi-image-fit",
-			].sort(),
+			RECOMMENDED_EXTENSIONS.map((e) => e.id).sort(),
 		);
 	});
 
-	it("git-sourced entries use the https://github.com/.../.git HTTPS form", () => {
-		const gitEntries = RECOMMENDED_EXTENSIONS.filter((e) =>
-			e.source.startsWith("https://github.com/"),
+	it("has no git-sourced entries", () => {
+		// pi-flows moved to its npm source; no recommended entry is git-based.
+		const gitEntries = RECOMMENDED_EXTENSIONS.filter(
+			(e) => !e.source.startsWith("npm:"),
 		);
-		for (const entry of gitEntries) {
-			expect(entry.source).toMatch(/^https:\/\/github\.com\/[^/]+\/[^/]+\.git$/);
+		expect(gitEntries).toEqual([]);
+	});
+
+	it("pi-agent-browser declares its agent-browser binary requirement", () => {
+		const entry = getRecommendedExtension("pi-agent-browser");
+		expect(entry?.requires?.binaries).toContain("agent-browser");
+	});
+
+	it("requires, when present, only names binaries/services/piExtensions that are probeable", () => {
+		// Guard against shipping always-red requirements: a declared `services`
+		// entry must be a known service probe (V1 closed registry: pi-model-proxy).
+		const KNOWN_SERVICES = new Set(["pi-model-proxy"]);
+		for (const e of RECOMMENDED_EXTENSIONS) {
+			if (!e.requires) continue;
+			for (const svc of e.requires.services ?? []) {
+				expect(KNOWN_SERVICES.has(svc)).toBe(true);
+			}
 		}
-		expect(gitEntries.map((e) => e.id).sort()).toEqual(
-			["pi-flows"].sort(),
-		);
 	});
 });
 
@@ -128,7 +142,12 @@ describe("getRecommendedByStatus", () => {
 	it("filters by strongly-suggested", () => {
 		const suggested = getRecommendedByStatus("strongly-suggested");
 		expect(suggested.map((e) => e.id).sort()).toEqual(
-			["pi-flows", "pi-web-access"].sort(),
+			[
+				"pi-flows",
+				"pi-web-access",
+				"context-mode",
+				"@blackbelt-technology/pi-dashboard-kb-extension",
+			].sort(),
 		);
 	});
 
@@ -138,8 +157,17 @@ describe("getRecommendedByStatus", () => {
 			[
 				"pi-agent-browser",
 				"@blackbelt-technology/pi-dashboard-subagents",
-				"@blackbelt-technology/pi-image-fit",
-				"pi-memory-honcho",
+				"@blackbelt-technology/pi-image-fit-extension",
+				"@blackbelt-technology/pi-model-proxy",
+				"@ricoyudog/pi-goal-hermes",
+				"pi-hermes-memory",
+				"pi-simplify",
+				"@blackbelt-technology/frontend-mockup-loop",
+				"@blackbelt-technology/pi-dashboard-plugin-skill",
+				"@blackbelt-technology/pi-dashboard-document-converter",
+				"@blackbelt-technology/anti-slop-frontend",
+				"@blackbelt-technology/pi-dashboard-eng-disciplines",
+				"@blackbelt-technology/pi-dashboard-authoring-toolkit",
 			].sort(),
 		);
 	});

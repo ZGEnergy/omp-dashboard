@@ -295,15 +295,20 @@ jobs:
             "@blackbelt-technology/dashboard-plugin-runtime"
             "@blackbelt-technology/pi-dashboard-client-utils"
             "@blackbelt-technology/pi-dashboard-flows-plugin"
-            "@blackbelt-technology/pi-dashboard-jj-plugin"
             "@blackbelt-technology/pi-dashboard-plugin-skill"
             "@blackbelt-technology/pi-dashboard-roles-plugin"
-            "@blackbelt-technology/pi-dashboard-honcho-plugin"
             "@blackbelt-technology/pi-dashboard-flows-anthropic-bridge-plugin"
             "@blackbelt-technology/pi-dashboard-subagents-plugin"
             "@blackbelt-technology/pi-dashboard-goal-plugin"
             "@blackbelt-technology/pi-dashboard-automation-plugin"
-            "@blackbelt-technology/pi-image-fit"
+            "@blackbelt-technology/pi-image-fit-extension"
+            "@blackbelt-technology/frontend-mockup-loop"
+            "@blackbelt-technology/pi-dashboard-kb"
+            "@blackbelt-technology/pi-dashboard-kb-extension"
+            "@blackbelt-technology/pi-dashboard-document-converter"
+            "@blackbelt-technology/anti-slop-frontend"
+            "@blackbelt-technology/pi-dashboard-eng-disciplines"
+            "@blackbelt-technology/pi-dashboard-authoring-toolkit"
             "@blackbelt-technology/pi-agent-dashboard"
           )
           VERSION="${{ needs.resolve.outputs.version }}"
@@ -424,6 +429,66 @@ jobs:
         # user-facing release artifacts.
         run: find electron-* -name builder-debug.yml -delete || true
 
+      # The arm64 + x64 macOS legs each emit their own latest-mac.yml (one DMG
+      # in files[]). softprops dedups release assets by basename, so without a
+      # merge one arch's metadata silently overwrites the other's. Merge into a
+      # single latest-mac.yml whose files[] lists every DMG, and drop the
+      # duplicates so only the merged file uploads.
+      # See change: fix-electron-auto-update-pipeline (ci-cd-pipeline spec).
+      # ⚠️ CI-VALIDATE: confirm electron-updater resolves the merged file on a
+      # native arm64 Mac (picks the right files[] entry).
+      - name: Merge macOS update metadata (arm64 + x64 → one latest-mac.yml)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t MAC_YML < <(find electron-darwin-* -name 'latest-mac.yml' 2>/dev/null || true)
+          if [ "${#MAC_YML[@]}" -le 1 ]; then
+            echo "${#MAC_YML[@]} latest-mac.yml found — no merge needed"; exit 0
+          fi
+          python3 -m pip install --quiet pyyaml
+          python3 - "${MAC_YML[@]}" <<'PY'
+          import sys, os, yaml
+          paths = sys.argv[1:]
+          merged, seen, files = None, set(), []
+          for p in paths:
+              with open(p) as fh:
+                  d = yaml.safe_load(fh)
+              if merged is None:
+                  merged = dict(d)
+              for fe in d.get("files", []):
+                  if fe["url"] not in seen:
+                      seen.add(fe["url"]); files.append(fe)
+          merged["files"] = files
+          # path/sha512 mirror the first file for single-file legacy readers.
+          merged["path"] = files[0]["url"]
+          merged["sha512"] = files[0]["sha512"]
+          with open(paths[0], "w") as fh:
+              yaml.safe_dump(merged, fh, sort_keys=False)
+          for extra in paths[1:]:
+              os.remove(extra)
+          print(f"Merged {len(files)} macOS file(s) into {paths[0]}")
+          PY
+
+      # Fail the release if any platform produced an installer but no matching
+      # update-metadata file — a partial upload would brick that platform's
+      # auto-update channel. See change: fix-electron-auto-update-pipeline.
+      - name: Assert update metadata present for each installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          check() { # <installer-glob> <metadata-name> <label>
+            if find electron-* -type f -name "$1" 2>/dev/null | grep -q .; then
+              if ! find electron-* -type f -name "$2" 2>/dev/null | grep -q .; then
+                echo "::error::$3 installer present but $2 is missing"; fail=1
+              fi
+            fi
+          }
+          check '*.exe' 'latest.yml' 'Windows'
+          check '*.dmg' 'latest-mac.yml' 'macOS'
+          check '*.AppImage' 'latest-linux.yml' 'Linux'
+          exit $fail
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -431,7 +496,13 @@ jobs:
           files: electron-*/**/*
           body_path: release-notes.md
           generate_release_notes: ${{ steps.notes.outputs.fallback == 'true' }}
-          draft: true
+          # Production tags (no SemVer prerelease segment) publish immediately so
+          # electron-updater's default GitHub provider — which queries
+          # /releases/latest and excludes drafts — can resolve them. Pre-release
+          # tags stay drafts so a maintainer can eyeball artifacts before
+          # flipping to published. See change: fix-electron-auto-update-pipeline
+          # (ci-cd-pipeline spec: "Production tags publish GitHub Releases").
+          draft: ${{ needs.resolve.outputs.is_prerelease == 'true' }}
           # Prereleases (anything with a SemVer prerelease segment, e.g.
           # `0.4.5-rc.1`) surface as GitHub `prerelease: true` Releases
           # so they don't appear as the latest release on the repo page

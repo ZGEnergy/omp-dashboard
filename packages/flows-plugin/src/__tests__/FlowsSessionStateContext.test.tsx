@@ -59,20 +59,6 @@ function flowSummaryDismissedEvent(seq: number): DashboardEvent {
   } as any;
 }
 
-function architectStartedEvent(seq: number): DashboardEvent {
-  return {
-    seq,
-    timestamp: new Date(seq * 1000).toISOString(),
-    eventType: "architect_started",
-    data: {
-      mode: "new",
-      iteration: 1,
-      resolvedModel: "claude-sonnet-4",
-    },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any;
-}
-
 function unrelatedEvent(seq: number): DashboardEvent {
   return {
     seq,
@@ -91,17 +77,15 @@ describe("reduceFlowsSessionState (pure)", () => {
     const b = reduceFlowsSessionState([]);
     expect(a).toBe(b);
     expect(a.flowState).toBeNull();
-    expect(a.architectState).toBeNull();
     expect(a.flowStates.size).toBe(0);
   });
 
-  it("returns EMPTY_STATE when no flow / architect events are present", () => {
+  it("returns EMPTY_STATE when no flow events are present", () => {
     const result = reduceFlowsSessionState([
       unrelatedEvent(1),
       unrelatedEvent(2),
     ]);
     expect(result.flowState).toBeNull();
-    expect(result.architectState).toBeNull();
   });
 
   it("derives flowState from a flow_started event", () => {
@@ -120,26 +104,6 @@ describe("reduceFlowsSessionState (pure)", () => {
     // flow_summary_dismissed clears flowStates per
     // event-reducer.ts:1298-1300 behavior.
     expect(result.flowStates.size).toBe(0);
-  });
-
-  it("derives architectState from architect_started", () => {
-    const result = reduceFlowsSessionState([architectStartedEvent(1)]);
-    expect(result.architectState).not.toBeNull();
-    // architect_started doesn't carry flowName — that's filled in by
-    // later events (architect_preview / architect_complete). What
-    // architect_started DOES set is phase + architectMode + iteration.
-    expect(result.architectState!.phase).toBe("designing");
-    expect(result.architectState!.architectMode).toBe("new");
-  });
-
-  it("derives both flow and architect state when events of both kinds are present", () => {
-    const result = reduceFlowsSessionState([
-      architectStartedEvent(1),
-      flowStartedEvent(2, "build"),
-    ]);
-    expect(result.architectState).not.toBeNull();
-    expect(result.flowState).not.toBeNull();
-    expect(result.flowState!.flowName).toBe("build");
   });
 
   it("ignores unrelated events between flow events", () => {
@@ -162,7 +126,7 @@ function Probe({ sessionId, onSnapshot }: {
   onSnapshot(state);
   return (
     <div data-testid="probe">
-      flow={state.flowState?.flowName ?? "(none)"} arch={state.architectState?.flowName ?? "(none)"}
+      flow={state.flowState?.flowName ?? "(none)"}
     </div>
   );
 }
@@ -179,7 +143,6 @@ describe("useFlowsSessionState (hook)", () => {
       </PluginContextProvider>,
     );
     expect(snaps[0].flowState).toBeNull();
-    expect(snaps[0].architectState).toBeNull();
   });
 
   it("re-renders with derived state when a flow event arrives", () => {

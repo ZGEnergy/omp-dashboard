@@ -16,6 +16,9 @@
  * from the npm registry or GitHub (see `/api/packages/recommended`).
  */
 
+import type { PluginRequirements } from "./dashboard-plugin/manifest-types.js";
+import type { PluginRequirementReport } from "./dashboard-plugin/plugin-status.js";
+
 /** Relative importance of a recommended extension. */
 export type RecommendedExtensionStatus =
 	| "required"            // dashboard features or provider paths break without it
@@ -64,13 +67,29 @@ export interface RecommendedExtension {
 
 	/**
 	 * Companion dashboard plugin id, if this extension is paired with one
-	 * (e.g. `pi-memory-honcho` extension <-> `honcho` dashboard plugin).
+	 * (e.g. an extension paired with its companion dashboard plugin).
 	 * The recommended-extensions enricher carries this through alongside a
 	 * computed `dashboardPluginInstalled: boolean` so the install browser
 	 * can render a "+plugin: <id>" badge.
 	 * See change: add-plugin-activation-ui (Layer 1.5).
 	 */
 	dashboardPlugin?: string;
+
+	/**
+	 * Optional declarative external requirements (system binaries, named
+	 * service probes, or sibling pi extensions) that the extension needs to
+	 * function. Reuses the dashboard-plugin `PluginRequirements` schema and is
+	 * probed server-side with the same machinery; the result is surfaced as
+	 * `EnrichedRecommendedExtension.requirements`.
+	 *
+	 * NOTE: declare ONLY genuinely-probeable, user-actionable requirements.
+	 * Do NOT list a native npm dependency the package bundles itself (e.g.
+	 * better-sqlite3) — that is an install concern, not a user requirement.
+	 * Do NOT list a `services` name absent from the closed service-probe
+	 * registry (it would always report unsatisfied).
+	 * See change: align-pi-080-and-publish-baseline-packages (Piece A).
+	 */
+	requires?: PluginRequirements;
 }
 
 /** Enriched manifest entry returned by GET /api/packages/recommended. */
@@ -88,11 +107,34 @@ export interface EnrichedRecommendedExtension extends RecommendedExtension {
 	/** True iff a newer version is available upstream. */
 	updateAvailable: boolean;
 	/**
+	 * Skill ids this extension ships, DERIVED from the package's own
+	 * `pi.skills` manifest (installed package.json preferred, else the
+	 * registry / GitHub package.json). Skill id = basename of each pi.skills
+	 * path. Absent when the package ships no skills. Not curated in the
+	 * static manifest — single source of truth is the package itself.
+	 */
+	skillsRegistered?: string[];
+	/**
 	 * True iff the entry declares a `dashboardPlugin` and the named plugin is
 	 * present in the dashboard's plugin status store.
 	 * See change: add-plugin-activation-ui.
 	 */
 	dashboardPluginInstalled?: boolean;
+
+	/**
+	 * Structured probe result for the entry's declarative `requires`, computed
+	 * server-side with the same probe used for dashboard plugins. Absent when
+	 * the entry declares no `requires`.
+	 * See change: align-pi-080-and-publish-baseline-packages (Piece A).
+	 */
+	requirements?: PluginRequirementReport;
+
+	/**
+	 * Flat list of unsatisfied requirement names across all categories. `[]`
+	 * when everything is satisfied; absent when the entry declares no
+	 * `requires`.
+	 */
+	missingRequirements?: string[];
 }
 
 export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
@@ -136,7 +178,11 @@ export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
 	},
 	{
 		id: "pi-flows",
-		source: "https://github.com/BlackBeltTechnology/pi-flows.git",
+		// Published to the @blackbelt-technology npm scope. Source is the npm
+		// spec so sourcesMatch() recognizes the npm install. NOTE: still excluded
+		// from BUNDLED_EXTENSION_IDS until upstream declares an SPDX license — the
+		// pre-bundle path is git-only and license-gated; the npm recommend path is not.
+		source: "npm:@blackbelt-technology/pi-flows",
 		displayName: "pi-flows",
 		fallbackDescription:
 			"Flow engine, dashboard, and orchestration extensions for pi. " +
@@ -186,30 +232,14 @@ export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
 		status: "optional",
 		unlocks: ["browser tool (open, snapshot, click, screenshot)"],
 		toolsRegistered: ["browser"],
+		// The browser tool shells out to the `agent-browser` CLI; probed on PATH
+		// via the shared ToolRegistry. See change:
+		// align-pi-080-and-publish-baseline-packages (Piece A).
+		requires: { binaries: ["agent-browser"] },
 	},
 	{
-		id: "pi-memory-honcho",
-		source: "npm:pi-memory-honcho",
-		displayName: "pi-memory-honcho",
-		fallbackDescription:
-			"Persistent cross-session memory backed by Honcho. Pairs with " +
-			"the @blackbelt-technology/pi-dashboard-honcho-plugin dashboard " +
-			"plugin which adds a settings panel, per-card actions, and " +
-			"optional self-hosted Honcho server lifecycle.",
-		status: "optional",
-		unlocks: [
-			"Honcho memory tools (honcho_search, honcho_context, honcho_profile)",
-			"Honcho settings panel (when honcho-plugin is loaded)",
-			"Per-card 🧠 status badge + interview/sync/map actions",
-		],
-		toolsRegistered: ["honcho_search", "honcho_context", "honcho_profile"],
-		autowired: true,
-		// Companion dashboard plugin id. See change: add-plugin-activation-ui.
-		dashboardPlugin: "honcho",
-	},
-	{
-		id: "@blackbelt-technology/pi-image-fit",
-		source: "npm:@blackbelt-technology/pi-image-fit",
+		id: "@blackbelt-technology/pi-image-fit-extension",
+		source: "npm:@blackbelt-technology/pi-image-fit-extension",
 		displayName: "pi-image-fit",
 		fallbackDescription:
 			"Transparently downsizes oversize images before they reach the " +
@@ -220,6 +250,208 @@ export const RECOMMENDED_EXTENSIONS: readonly RecommendedExtension[] = [
 		status: "optional",
 		unlocks: [
 			"Automatic image downscaling on Read (saves tokens, avoids provider image-size limits)",
+		],
+	},
+	{
+		id: "context-mode",
+		source: "npm:context-mode",
+		displayName: "context-mode",
+		fallbackDescription:
+			"Context-window saver: sandboxed code execution over large outputs, " +
+			"an FTS5 knowledge base, and intent-driven search. Processes big logs " +
+			"and files in a sandbox so only summaries reach the model context.",
+		status: "strongly-suggested",
+		unlocks: [
+			"ctx_execute / ctx_execute_file (run code over large data, return only summaries)",
+			"ctx_search / ctx_index (persistent FTS5 knowledge base)",
+			"ctx_batch_execute (multi-command gather + query in one round trip)",
+		],
+		toolsRegistered: [
+			"ctx_execute",
+			"ctx_execute_file",
+			"ctx_batch_execute",
+			"ctx_search",
+			"ctx_index",
+			"ctx_fetch_and_index",
+		],
+		autowired: true,
+	},
+	{
+		id: "pi-hermes-memory",
+		source: "npm:pi-hermes-memory",
+		displayName: "pi-hermes-memory",
+		fallbackDescription:
+			"Default persistent cross-session memory backend: token-aware, " +
+			"policy-only memory, SQLite FTS5 session search, secret scanning, " +
+			"auto-consolidation, and procedural skills. Local-first; no external " +
+			"service required.",
+		status: "optional",
+		unlocks: [
+			"Persistent memory (memory, memory_search)",
+			"Cross-session conversation search (session_search)",
+			"Procedural skills (skill_manage)",
+		],
+		toolsRegistered: [
+			"memory",
+			"memory_search",
+			"session_search",
+			"skill_manage",
+		],
+		autowired: true,
+	},
+	{
+		id: "@ricoyudog/pi-goal-hermes",
+		source: "npm:@ricoyudog/pi-goal-hermes",
+		displayName: "pi-goal-hermes",
+		fallbackDescription:
+			"Goal-driven autonomous continuation: set a goal and let the agent " +
+			"work until done, with an LLM-based judge evaluating completion before " +
+			"stopping.",
+		status: "optional",
+		unlocks: [
+			"Goal-driven autonomous loop with LLM judge evaluation",
+		],
+		autowired: true,
+	},
+	{
+		id: "@blackbelt-technology/pi-model-proxy",
+		source: "npm:@blackbelt-technology/pi-model-proxy",
+		displayName: "pi-model-proxy",
+		fallbackDescription:
+			"Exposes pi's authenticated models as a local OpenAI-compatible and " +
+			"Anthropic-compatible API server, so other tools can route through " +
+			"pi's provider auth without re-entering credentials.",
+		status: "optional",
+		unlocks: [
+			"Local OpenAI-/Anthropic-compatible proxy over pi's authenticated models",
+		],
+		autowired: true,
+	},
+	{
+		id: "pi-simplify",
+		source: "npm:pi-simplify",
+		displayName: "pi-simplify",
+		fallbackDescription:
+			"Reviews recently changed code for clarity, consistency, and " +
+			"maintainability, surfacing simplification opportunities.",
+		status: "optional",
+		unlocks: [
+			"Clarity / consistency / maintainability review of recent changes",
+		],
+	},
+	// ── First-party monorepo extensions (published to the @blackbelt-technology
+	// npm scope). See change: recommend-monorepo-extensions.
+	{
+		id: "@blackbelt-technology/pi-dashboard-kb-extension",
+		source: "npm:@blackbelt-technology/pi-dashboard-kb-extension",
+		displayName: "pi-dashboard-kb-extension",
+		fallbackDescription:
+			"Isolated pi extension over @blackbelt-technology/pi-dashboard-kb: " +
+			"registers kb_search/kb_neighbors/kb_get tools and a tool_result hook " +
+			"that reindexes markdown on edit and (opt-in) nudges DOX AGENTS.md row " +
+			"upkeep. Directory-based SQLite/FTS5 knowledge base over markdown.",
+		status: "strongly-suggested",
+		unlocks: [
+			"kb_search / kb_neighbors / kb_get (FTS5 knowledge base over repo markdown)",
+			"Auto-reindex markdown on edit",
+		],
+		toolsRegistered: ["kb_search", "kb_neighbors", "kb_get"],
+		autowired: true,
+	},
+	{
+		id: "@blackbelt-technology/frontend-mockup-loop",
+		source: "npm:@blackbelt-technology/frontend-mockup-loop",
+		displayName: "frontend-mockup-loop",
+		fallbackDescription:
+			"Pi extension + skill for a ground\u2192contract\u2192mockup\u2192test\u2192fix\u2192learn " +
+			"frontend design loop. Ships a live mockup server tool, a Playwright " +
+			"breakpoint-screenshot scorer, and a design-contract scaffolder. Works " +
+			"in any React/Tailwind/shadcn project.",
+		status: "optional",
+		unlocks: [
+			"frontend-mockup-loop skill (7-step design loop)",
+			"serve_mockup / score_mockup / init_ui_contract / validate_mockup tools",
+		],
+		toolsRegistered: [
+			"serve_mockup",
+			"score_mockup",
+			"init_ui_contract",
+			"list_design_systems",
+			"validate_mockup",
+		],
+		autowired: true,
+	},
+	{
+		id: "@blackbelt-technology/pi-dashboard-plugin-skill",
+		source: "npm:@blackbelt-technology/pi-dashboard-plugin-skill",
+		displayName: "pi-dashboard-plugin-skill",
+		fallbackDescription:
+			"Pi skill that scaffolds new dashboard plugins or augments existing " +
+			"pi-extension projects with dashboard plugin contributions (manifest, " +
+			"renderer, slots). Use when building a new dashboard plugin.",
+		status: "optional",
+		unlocks: [
+			"dashboard-plugin-scaffold skill (scaffold / augment dashboard plugins)",
+		],
+	},
+	{
+		id: "@blackbelt-technology/pi-dashboard-document-converter",
+		source: "npm:@blackbelt-technology/pi-dashboard-document-converter",
+		displayName: "pi-dashboard-document-converter",
+		fallbackDescription:
+			"TypeScript facade + skill over a Dockerized Python document engine " +
+			"(pi-doc-engine). Ingest PDF/DOCX/PPTX/XLSX \u2192 provenance-stamped " +
+			"Markdown for kb (selectable OCR); produce templated DOCX/PDF from " +
+			"Markdown with diagrams, TOC, cover page, and round-trip edit/merge. " +
+			"Requires Docker.",
+		status: "optional",
+		unlocks: [
+			"document-converter skill (bidirectional doc conversion)",
+			"Ingest docs \u2192 Markdown for kb; produce DOCX/PDF from Markdown",
+		],
+		// Facade orchestrates a Dockerized engine; docker must be on PATH.
+		requires: { binaries: ["docker"] },
+	},
+	{
+		id: "@blackbelt-technology/anti-slop-frontend",
+		source: "npm:@blackbelt-technology/anti-slop-frontend",
+		displayName: "anti-slop-frontend",
+		fallbackDescription:
+			"Pi skill: a mechanical, countable anti-slop checklist for " +
+			"AI-generated frontend. Catches the specific tells an undirected " +
+			"model defaults to (AI-purple, Inter-everywhere, em-dashes, " +
+			"div-based fake screenshots, Jane Doe / Acme data). Advisory; " +
+			"pairs with frontend-mockup-loop. Works in any React/Tailwind/HTML " +
+			"project.",
+		status: "optional",
+		unlocks: [
+			"anti-slop-frontend skill (countable AI-tell checklist for frontend)",
+		],
+	},
+	{
+		id: "@blackbelt-technology/pi-dashboard-eng-disciplines",
+		source: "npm:@blackbelt-technology/pi-dashboard-eng-disciplines",
+		displayName: "pi-dashboard-eng-disciplines",
+		fallbackDescription:
+			"Pi skills bundle for engineering disciplines: doubt-driven review, " +
+			"interview-me requirements elicitation, observability " +
+			"instrumentation, performance optimization, and security hardening.",
+		status: "optional",
+		unlocks: [
+			"doubt-driven-review / interview-me / observability-instrumentation / performance-optimization / security-hardening skills",
+		],
+	},
+	{
+		id: "@blackbelt-technology/pi-dashboard-authoring-toolkit",
+		source: "npm:@blackbelt-technology/pi-dashboard-authoring-toolkit",
+		displayName: "pi-dashboard-authoring-toolkit",
+		fallbackDescription:
+			"Pi skills for authoring pi artifacts: session-to-guideline distills " +
+			"a session into a reusable guideline, and skill-creator scaffolds new " +
+			"pi skills.",
+		status: "optional",
+		unlocks: [
+			"session-to-guideline / skill-creator skills (author guidelines and new skills)",
 		],
 	},
 ];

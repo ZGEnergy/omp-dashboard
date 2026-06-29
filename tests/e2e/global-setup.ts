@@ -2,9 +2,12 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { chromium } from "@playwright/test";
 import {
+  DASHBOARD_PORT,
   HEALTH_URL,
   MARKER_PATH,
+  PI_GATEWAY_PORT,
   TEST_UP,
   USE_RUNNING,
   waitForHealth,
@@ -12,7 +15,31 @@ import {
 
 const CHANGE = "change add-playwright-e2e";
 
+// Fail fast (sub-second) if the host Chromium binary is absent, BEFORE the
+// container boot (≤180s). Resolves the executable via the @playwright/test
+// module (not the node_modules/.bin/playwright shim), so a missing bin symlink
+// does not block the suite. executablePath() returns a path even when the
+// binary is not downloaded; existsSync is the real gate. try/catch backstops
+// versions that throw instead. See change self-heal-host-playwright-browser.
+function assertBrowserInstalled(): void {
+  let execPath: string | undefined;
+  try {
+    execPath = chromium.executablePath();
+  } catch {
+    execPath = undefined;
+  }
+  if (!execPath || !fs.existsSync(execPath)) {
+    throw new Error(
+      "[change self-heal-host-playwright-browser] Chromium for Playwright is not installed. " +
+        "Install it first: npx playwright install chromium",
+    );
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
+  // Preflight FIRST: never pay the container boot only to die at browser launch.
+  assertBrowserInstalled();
+
   fs.mkdirSync(path.dirname(MARKER_PATH), { recursive: true });
 
   if (USE_RUNNING) {
@@ -34,12 +61,29 @@ export default async function globalSetup(): Promise<void> {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "pi-e2e-ws-"));
   const logPath = path.join(path.dirname(MARKER_PATH), "test-up.log");
   const logFd = fs.openSync(logPath, "a");
+  // PI_E2E_SEED=1 tells test-entrypoint.sh to seed a fake provider credential
+  // (clears the LandingPage onboarding gate) and open the network guard (lets
+  // the in-container browser reach guarded endpoints like directory listing).
+  // Without it, scenario specs cannot pin a folder or spawn a session. Blank
+  // any host provider keys so they never leak into the disposable container.
+  // Override-as-a-pair: the container binds + listens on exactly the port
+  // Playwright probes (D1 override path), keeping baseURL in sync.
+  const env = {
+    ...process.env,
+    PI_E2E_SEED: "1",
+    ANTHROPIC_API_KEY: "",
+    OPENAI_API_KEY: "",
+    GEMINI_API_KEY: "",
+    DASHBOARD_PORT: String(DASHBOARD_PORT),
+    PI_GATEWAY_PORT: String(PI_GATEWAY_PORT),
+  };
   let child;
   try {
     child = spawn("bash", [TEST_UP, "-d"], {
       cwd: workspace,
       detached: true,
       stdio: ["ignore", logFd, logFd],
+      env,
     });
   } finally {
     fs.closeSync(logFd);

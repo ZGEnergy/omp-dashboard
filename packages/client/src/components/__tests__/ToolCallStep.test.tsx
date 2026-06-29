@@ -87,6 +87,21 @@ describe("ToolCallStep", () => {
     expect(button!.textContent).toContain("Pick a color");
   });
 
+  it("hides the leading status glyph when hideStatusIcon is set (and shows it by default)", () => {
+    const base = {
+      toolName: "bash",
+      toolCallId: "tc-hide",
+      args: { command: "echo hi" },
+      status: "complete" as const,
+      result: "hi",
+    };
+    const shown = renderStep(base);
+    const hidden = renderStep({ ...base, hideStatusIcon: true });
+    const headerIcons = (c: HTMLElement) => c.querySelectorAll("button svg").length;
+    // hideStatusIcon removes exactly the leading status glyph; chevron etc. stay.
+    expect(headerIcons(hidden.container)).toBe(headerIcons(shown.container) - 1);
+  });
+
   it("renders non-ask_user tools normally", () => {
     const { container } = renderStep({
       toolName: "bash",
@@ -144,6 +159,65 @@ describe("ToolCallStep", () => {
     expect(img).not.toBeNull();
     expect(img!.getAttribute("alt")).toBe("screenshot.jpg");
     expect(img!.className).toContain("max-w-[512px]");
+  });
+
+  // Fix B: live auto-expand. The card mounts at tool_execution_start WITHOUT
+  // images, then images arrive at tool_execution_end. The useState seed misses
+  // them; a one-shot effect must expand when images first appear.
+  // See change: inline-agent-screenshot-artifacts.
+  it("auto-expands when images arrive AFTER mount (live tool_execution_end)", () => {
+    const base = {
+      toolName: "bash",
+      toolCallId: "tc-live-img",
+      args: { command: "agent-browser screenshot --full" },
+      context: defaultContext,
+    } as const;
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ToolCallStep {...base} status="running" />
+      </ThemeProvider>,
+    );
+    // No images at mount → collapsed → no <img>.
+    expect(container.querySelector("img")).toBeNull();
+
+    // Images arrive at completion → effect auto-expands → <img> renders.
+    rerender(
+      <ThemeProvider>
+        <ToolCallStep
+          {...base}
+          status="complete"
+          result="Screenshot saved: "
+          images={[{ data: "c2hvdA==", mimeType: "image/png" }]}
+        />
+      </ThemeProvider>,
+    );
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toContain("data:image/png;base64,c2hvdA==");
+  });
+
+  // Fix B: a non-Read tool (bash/browser screenshot) carrying an inlined image
+  // block renders an inline <img>, auto-expanded, with no path-link.
+  // See change: inline-agent-screenshot-artifacts.
+  it("renders an inline image for a bash screenshot result, auto-expanded, no path-link", () => {
+    const { container } = renderStep({
+      toolName: "bash",
+      toolCallId: "tc-shot-1",
+      args: { command: "agent-browser screenshot --full" },
+      status: "complete",
+      // Path was consumed by the bridge inliner → only neutral text remains.
+      result: "Screenshot saved: ",
+      images: [{ data: "c2hvdA==", mimeType: "image/png" }],
+    });
+
+    // Auto-expanded → inline <img> visible without clicking.
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toContain("data:image/png;base64,c2hvdA==");
+
+    // No dead path-link rendered for the consumed screenshot path.
+    expect(container.querySelector("a[href*='.png']")).toBeNull();
+    expect(container.textContent).not.toContain(".png");
   });
 
   describe("ask_user auto-expand behavior", () => {
@@ -241,9 +315,13 @@ describe("ToolCallStep", () => {
       images: [{ data: "iVBORw0KGgo=", mimeType: "image/png" }],
     });
 
+    // The thumbnail is wrapped in a keyboard-accessible button (a11y);
+    // clicking it (or the img inside it) opens the lightbox.
     const img = container.querySelector("img");
     expect(img).not.toBeNull();
-    expect(img!.className).toContain("cursor-pointer");
+    const trigger = img!.closest("button");
+    expect(trigger).not.toBeNull();
+    expect(trigger!.className).toContain("cursor-pointer");
     fireEvent.click(img!);
     const lightbox = document.body.querySelector("[data-testid='lightbox-backdrop']");
     expect(lightbox).not.toBeNull();

@@ -19,7 +19,7 @@ function claimShouldRender(claim: ClaimEntry, toolName: string): boolean {
   if (!claim.shouldRender) return true;
   try {
     // tool-renderer claims take no predicate input (SlotPredicateInput = never);
-    // honcho-style claims read a sync cache. Pass undefined.
+    // some claims read a sync cache. Pass undefined.
     return (claim.shouldRender as (input?: unknown) => boolean)(undefined) !== false;
   } catch (err) {
     console.warn(
@@ -51,6 +51,13 @@ interface Props {
    * See change: configurable-chat-display.
    */
   showResultBody?: boolean;
+  /**
+   * When true, the leading status glyph (status/`ask_user` icon) is omitted.
+   * Defaults to `false` (icon shown) so the main chat is unchanged; flow agent
+   * detail views opt in via MinimalChatView's `hideToolStatusIcon`.
+   * See change: improve-flow-ui.
+   */
+  hideStatusIcon?: boolean;
   onAbort?: () => void;
   onForceKill?: () => void;
 }
@@ -88,7 +95,7 @@ const statusIcons: Record<string, ReactNode> = {
   error: <Icon path={mdiAlertCircle} size={0.55} />,
 };
 
-export function ToolCallStep({ toolName, toolCallId, args, status, result, images, context, startedAt, duration, toolDetails, showResultBody = true, onAbort, onForceKill }: Props) {
+export function ToolCallStep({ toolName, toolCallId, args, status, result, images, context, startedAt, duration, toolDetails, showResultBody = true, hideStatusIcon = false, onAbort, onForceKill }: Props) {
   const isMobile = useMobile();
   const hasImages = images && images.length > 0;
   const isAgentRunning = toolName === "Agent" && status === "running";
@@ -119,6 +126,19 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
     if (status !== "running") setStopState("idle");
   }, [status]);
 
+  // Live tool results attach images at tool_execution_end, AFTER this card
+  // mounted at tool_execution_start — so the useState(hasImages) seed above
+  // missed them (replay/refresh seed at mount and are unaffected). Auto-expand
+  // once when images first arrive; a ref guards against re-expanding a card the
+  // user later collapsed. See change: inline-agent-screenshot-artifacts.
+  const autoExpandedForImages = React.useRef(false);
+  React.useEffect(() => {
+    if (hasImages && !autoExpandedForImages.current) {
+      autoExpandedForImages.current = true;
+      setExpanded(true);
+    }
+  }, [hasImages]);
+
   return (
     <div className={`${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3`}>
       <button
@@ -126,19 +146,21 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
         title={getSummary(toolName, args)}
         className={`flex items-center gap-1.5 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] w-full text-left ${isMobile ? "min-h-[44px] py-2" : ""}`}
       >
-        <span className={`inline-flex ${
-          status === "error"
-            ? "text-red-400"
-            : isAskUser
-              ? "text-sky-400"
-              : status === "complete"
-                ? "text-green-400"
-                : "text-yellow-400"
-        }`}>
-          {isAskUser && status !== "error" && status !== "running"
-            ? <Icon path={mdiHelpCircleOutline} size={0.55} />
-            : statusIcons[status]}
-        </span>
+        {!hideStatusIcon && (
+          <span className={`inline-flex ${
+            status === "error"
+              ? "text-red-400"
+              : isAskUser
+                ? "text-sky-400"
+                : status === "complete"
+                  ? "text-green-400"
+                  : "text-yellow-400"
+          }`}>
+            {isAskUser && status !== "error" && status !== "running"
+              ? <Icon path={mdiHelpCircleOutline} size={0.55} />
+              : statusIcons[status]}
+          </span>
+        )}
         <span className="truncate">{getSummary(toolName, args)}</span>
         <ElapsedBadge startedAt={startedAt} duration={duration} />
         {status === "running" && onAbort && stopState === "idle" && (

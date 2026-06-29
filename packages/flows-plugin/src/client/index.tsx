@@ -14,13 +14,9 @@
 export { FlowDashboard } from "./FlowDashboard.js";
 export { FlowAgentCard } from "./FlowAgentCard.js";
 export { FlowAgentDetail } from "./FlowAgentDetail.js";
-export { FlowAgentPopoutPage } from "./FlowAgentPopoutPage.js";
-export { FlowAgentPopoutClaim } from "./FlowAgentPopoutClaim.js";
-export { FlowArchitectPopoutPage } from "./FlowArchitectPopoutPage.js";
-export { FlowArchitectPopoutClaim } from "./FlowArchitectPopoutClaim.js";
+
 export { FlowSummary } from "./FlowSummary.js";
-export { FlowGraph, flowStateToGraphSteps, architectStepsToGraphSteps, computeLayout } from "./FlowGraph.js";
-export { FlowArchitect, FlowArchitectDetail, ArchitectInputPrompt } from "./FlowArchitect.js";
+export { FlowGraph, flowStateToGraphSteps, computeLayout } from "./FlowGraph.js";
 export { FlowActivityBadge } from "./FlowActivityBadge.js";
 export { FlowLaunchDialog } from "./FlowLaunchDialog.js";
 export { FlowTabBar } from "./FlowTabBar.js";
@@ -34,7 +30,15 @@ export { SessionFlowActions } from "./SessionFlowActions.js";
 // FLOWS subcard, not WORKSPACE. SessionFlowActions now renders the badge
 // directly via the FlowActivityBadge component.
 export { FlowDashboardClaim } from "./FlowDashboard.js";
-export { FlowArchitectClaim } from "./FlowArchitect.js";
+
+// Authoring tool-renderers (main-session timeline) — referenced by the
+// manifest's `tool-renderer` claims. See change: rework-flows-plugin-for-new-pi-flows.
+export { FlowWriteToolRenderer } from "./FlowWriteToolRenderer.js";
+export { FlowAgentsToolRenderer } from "./FlowAgentsToolRenderer.js";
+
+// Settings section (global edit-mode default) — manifest `settings-section` claim.
+export { FlowsSettings } from "./FlowsSettings.js";
+export type { FlowsPluginConfig } from "./FlowsSettings.js";
 
 export { FlowSummaryClaim } from "./FlowSummary.js";
 export { FlowYamlPreviewClaim } from "./FlowYamlPreview.js";

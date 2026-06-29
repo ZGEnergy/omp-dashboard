@@ -147,6 +147,20 @@ export interface BrowserOpenSpecUpdateMessage {
 }
 
 /**
+ * Folder-HEAD branch update. Broadcast by the server folder-head poll /
+ * watcher when a folder group key's git HEAD is first observed or changes.
+ * `branch` is the branch name, the short SHA for detached HEAD, or `null`
+ * when the folder is not a git repository. `cwd` is the resolved folder
+ * group key (matches the client's `group.cwd`).
+ * See change: refresh-folder-header-branch.
+ */
+export interface BrowserGitHeadUpdateMessage {
+  type: "git_head_update";
+  cwd: string;
+  branch: string | null;
+}
+
+/**
  * Per-repo OpenSpec change-grouping update. Broadcast after every successful
  * write to `<cwd>/openspec/groups/groups.json`, debounced 100 ms per cwd.
  * Full payload (no incremental delta) so client logic stays simple.
@@ -698,6 +712,7 @@ export type ServerToBrowserMessage =
   | BrowserUiDismissMessage
   | BrowserFilesListMessage
   | BrowserOpenSpecUpdateMessage
+  | BrowserGitHeadUpdateMessage
   | BrowserOpenSpecGroupsUpdateMessage
   | BrowserGoalsUpdateMessage
   | BrowserModelsListMessage
@@ -1216,10 +1231,23 @@ export interface RequestInstalledPackagesBrowserMessage {
 export interface FlowManagementBrowserMessage {
   type: "flow_management";
   sessionId: string;
-  action: "run" | "new" | "edit" | "delete";
+  action: "run" | "new" | "edit" | "delete" | "set-edit-mode";
   flowName?: string;
   task?: string;
   description?: string;
+  /** For action "set-edit-mode": toggles pi-flows `flows.editFlow`. */
+  enabled?: boolean;
+}
+
+/**
+ * Plugin settings-section write. The shell intercepts this in the plugin `send`
+ * and routes it to `POST /api/config/plugins/:id` (it is NOT forwarded over the
+ * WebSocket). See change: fix-plugin-config-write-persistence.
+ */
+export interface PluginConfigWriteBrowserMessage {
+  type: "plugin_config_write";
+  id: string;
+  config: Record<string, unknown>;
 }
 
 export interface ArchitectPromptResponseBrowserMessage {
@@ -1374,6 +1402,7 @@ export type BrowserToServerMessage =
   | FlowControlBrowserMessage
   | ForceKillBrowserMessage
   | FlowManagementBrowserMessage
+  | PluginConfigWriteBrowserMessage
   | ArchitectPromptResponseBrowserMessage
   | PromptResponseBrowserMessage
   | RoleSetBrowserMessage

@@ -113,11 +113,17 @@ export async function probeService(
   return { name, ...(await fn(deps)) };
 }
 
-export async function runRequirementProbes(
-  manifest: PluginManifest,
+/**
+ * Probe a bare `PluginRequirements` (no manifest wrapper). Used by the
+ * recommended-extensions enricher, which carries `requires` directly on each
+ * RecommendedExtension. `runRequirementProbes` delegates here.
+ * See change: align-pi-080-and-publish-baseline-packages (Piece A).
+ */
+export async function runRequirementProbesFor(
+  requires: PluginRequirements | undefined,
   deps: RequirementProbeDeps,
 ): Promise<PluginRequirementReport> {
-  const req: PluginRequirements = manifest.requires ?? {};
+  const req: PluginRequirements = requires ?? {};
   const piExtNames = req.piExtensions ?? [];
   const binNames = req.binaries ?? [];
   const svcNames = req.services ?? [];
@@ -129,6 +135,13 @@ export async function runRequirementProbes(
   const services = await Promise.all(svcNames.map((n) => probeService(n, deps)));
 
   return { piExtensions, binaries, services };
+}
+
+export async function runRequirementProbes(
+  manifest: PluginManifest,
+  deps: RequirementProbeDeps,
+): Promise<PluginRequirementReport> {
+  return runRequirementProbesFor(manifest.requires, deps);
 }
 
 /** Flatten unsatisfied names from a probe report. */

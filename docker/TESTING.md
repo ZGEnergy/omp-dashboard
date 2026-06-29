@@ -34,13 +34,35 @@ A test instance cannot touch the host dashboard across any collision vector:
 |---|---|---|---|
 | home-lock | holds `~/.pi/dashboard` lock | own `$HOME=/home/pi` | container filesystem |
 | `~/.pi` state | persists | wiped every run | `pi-state` → tmpfs |
-| HTTP port | 8000 | 18000 | published port remap |
-| pi gateway port | 9999 | 18999 (loopback only) | port remap + `PI_GATEWAY_BIND=127.0.0.1` |
+| HTTP port | 8000 | dynamic 18000–18999 | hash-derived + probed, published port remap |
+| pi gateway port | 9999 | dynamic 19000–19999 (loopback only) | port remap + `PI_GATEWAY_BIND=127.0.0.1` |
 | mDNS advertise/browse | on | off | `PI_DASHBOARD_NO_MDNS=1` |
 | LAN multicast | — | none | default bridge network (NAT) |
 | zrok tunnel | optional | off | `TUNNEL_ENABLED=false` |
 
 Verify after a run: `~/.pi` is byte-identical and your project is untouched.
+
+## Parallel worktrees
+
+Two `test-up.sh` instances from different git worktrees no longer collide.
+Each derives a stable, free port pair and a unique compose project name from a
+hash of `HOST_CWD` (`$PWD`). See change: parallelize-test-harness.
+
+- **Ports** — `cksum(HOST_CWD)` picks a base offset inside a fixed window
+  (dashboard `18000–18999`, gateway `19000–19999`), then probes for a free port,
+  wrapping at the window edge. Same worktree → same ports across restarts.
+- **Project name** — `pi-dash-test-<hash>`, a pure function of `HOST_CWD`, passed
+  as `docker compose -p`. Distinct project → distinct containers/network/volume,
+  so one worktree never recreates another's stack.
+- **State file** — `${HOST_CWD}/.pi-test-harness.json` =
+  `{ project, dashboardPort, gatewayPort }`. Gitignored. `test-down.sh`
+  re-derives the project from `$PWD` (works even if the file is missing/corrupt)
+  and removes it after `down`.
+- **Override** — export **both** `DASHBOARD_PORT` and `PI_GATEWAY_PORT` to skip
+  derivation (exactly one = error). The Playwright lifecycle uses this path.
+- **Playwright** — `tests/e2e/lifecycle.ts` probes a free port (managed) or reads
+  `PW_E2E_PORT` (default 18000) when attaching with `PW_E2E_USE_RUNNING=1`, and
+  keeps `use.baseURL` in sync with the container.
 
 ## Path-parity mount
 
@@ -81,9 +103,9 @@ TEST_COPY_MODE=1 /path/to/pi-agent-dashboard/docker/test-up.sh
 
 Two orthogonal ways to get a workspace; neither required:
 
-- **Baked fixtures** — `/fixtures/sample-git` and `/fixtures/sample-jj` are
-  initialized as real git / jj repos at startup. Pin them from the UI to
-  exercise the VCS panels with zero host coupling.
+- **Baked fixtures** — `/fixtures/sample-git` is initialized as a real git repo
+  at startup. Pin it from the UI to exercise the VCS panels with zero host
+  coupling.
 - **Path-parity mount** — the "open my real project" path (above). Launch
   `test-up.sh` from the project; it appears at its identical host path.
 
@@ -112,9 +134,9 @@ and a single `/ws` WebSocket connect. A broken image/build exits non-zero
 
 | File | Role |
 |---|---|
-| `compose.test.yml` | overlay: isolation env, SYS_ADMIN, tmpfs state, mounts, entrypoint |
+| `compose.test.yml` | overlay: isolation env, SYS_ADMIN, tmpfs state, mounts, entrypoint; container `DASHBOARD_PORT`/`PI_GATEWAY_PORT` interpolate `${…:-default}` |
+| `lib-ports.sh` | sourced pure helpers: `derive_hash`, `derive_project`, `is_free`, `find_free_in_window` |
 | `test-entrypoint.sh` | builds overlay, inits fixtures, smoke check, execs base entrypoint |
-| `test-up.sh` | exports `HOST_CWD=$PWD`, runs compose up, prints URL |
-| `test-down.sh` | `compose down -v` — discards all state |
+| `test-up.sh` | derives port pair + project from `HOST_CWD`, writes state file, `compose -p … up`, prints chosen URL |
+| `test-down.sh` | re-derives project from `$PWD`, `compose -p … down -v`, removes state file |
 | `fixtures/sample-git/` | git fixture source files |
-| `fixtures/sample-jj/` | jj fixture source files |

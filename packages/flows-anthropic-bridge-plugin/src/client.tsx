@@ -207,10 +207,10 @@ export function FlowsAnthropicBridgeSettings() {
           data-testid="flows-anthropic-bridge-save"
           onClick={() =>
             send({
-              type: "plugin_config_write" as never,
+              type: "plugin_config_write",
               id: "flows-anthropic-bridge",
               config: draft,
-            } as never)
+            })
           }
           style={{
             marginTop: "6px",

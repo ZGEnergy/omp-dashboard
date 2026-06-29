@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "@mdi/react";
-import { mdiPlay, mdiPlus } from "@mdi/js";
+import { mdiPlay, mdiPencil } from "@mdi/js";
 import type {
   CommandInfo,
   DashboardSession,
@@ -8,6 +8,7 @@ import type {
   FlowState,
 } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { FlowLaunchDialog } from "./FlowLaunchDialog.js";
+import { FlowAuthorPromptDialog } from "./FlowAuthorPromptDialog.js";
 import { FlowActivityBadge } from "./FlowActivityBadge.js";
 import { useFlowsSessionState } from "./FlowsSessionStateContext.js";
 import { UI_PRIMITIVE_KEYS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
@@ -17,21 +18,29 @@ import {
   usePluginSend,
   useSessionData,
 } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { usePluginConfig } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import type { FlowsPluginConfig } from "./FlowsSettings.js";
 
 export function SessionFlowActions({
   flows,
-  hasFlowsNew,
-  hasFlowsEdit,
+  editMode,
   hasFlowsDelete,
   onFlowAction,
+  onEditFlow,
   flowState,
   onAbortFlow,
 }: {
   flows: FlowInfo[];
-  hasFlowsNew: boolean;
-  hasFlowsEdit?: boolean;
+  /** Edit-mode on → show the New / Edit launcher (authoring via the skill). */
+  editMode: boolean;
   hasFlowsDelete?: boolean;
   onFlowAction: (action: string, opts?: { flowName?: string; task?: string; description?: string }) => void;
+  /**
+   * Launch the manage-flows skill for an existing flow (name) or a new flow
+   * (undefined), carrying the user's stated intent (description for new, change
+   * instruction for edit; empty string when none given).
+   */
+  onEditFlow: (flowName: string | undefined, instruction: string) => void;
   /** Current flow state for this session. Drives the status pill rendered above the action buttons. */
   flowState?: FlowState | null;
   /** Dispatch flow_control abort. Called by the running-flow pill's Abort button. */
@@ -41,11 +50,11 @@ export function SessionFlowActions({
   const SearchableSelectDialog = useUiPrimitive(UI_PRIMITIVE_KEYS.searchableSelectDialog);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editPickerOpen, setEditPickerOpen] = useState(false);
-  const [editFlowName, setEditFlowName] = useState<string | null>(null);
+  // After picking from the edit launcher, capture intent before launching the skill.
+  const [authorTarget, setAuthorTarget] = useState<{ mode: "new" | "edit"; flowName?: string } | null>(null);
   const [deletePickerOpen, setDeletePickerOpen] = useState(false);
   const [deleteFlowName, setDeleteFlowName] = useState<string | null>(null);
   const [selectedFlow, setSelectedFlow] = useState<FlowInfo | null>(null);
-  const [newFlowOpen, setNewFlowOpen] = useState(false);
 
   // Compute running-flow badge inputs from flowState (when present).
   // See change: fix-flows-plugin-polish (A5 + A6).
@@ -65,13 +74,18 @@ export function SessionFlowActions({
       })()
     : null;
 
-  if (flows.length === 0 && !hasFlowsNew && !badgeProps) return null;
+  if (flows.length === 0 && !editMode && !badgeProps) return null;
 
   const flowOptions: SelectOption[] = flows.map((f) => ({
     value: f.name,
     label: f.name,
     description: f.description,
   }));
+  // Edit launcher options: existing flows + a "new flow" sentinel.
+  const editOptions: SelectOption[] = [
+    { value: "__new__", label: "+ New flow", description: "Author a new flow with the edit-flow skill" },
+    ...flowOptions,
+  ];
 
   return (
     <>
@@ -91,20 +105,13 @@ export function SessionFlowActions({
               <Icon path={mdiPlay} size={0.4} className="inline mr-0.5" />Run Flow...
             </button>
           )}
-          {hasFlowsNew && (
-            <button
-              onClick={(e) => { e.stopPropagation(); setNewFlowOpen(true); }}
-              className="text-[10px] px-1.5 py-0.5 rounded border border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
-            >
-              <Icon path={mdiPlus} size={0.4} className="inline mr-0.5" />New Flow
-            </button>
-          )}
-          {hasFlowsEdit && flows.length > 0 && (
+          {editMode && (
             <button
               onClick={(e) => { e.stopPropagation(); setEditPickerOpen(true); }}
-              className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-subtle)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+              className="text-[10px] px-1.5 py-0.5 rounded border border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
+              data-testid="flows-new-edit-button"
             >
-              &#x270E;&#xFE0E; Edit
+              <Icon path={mdiPencil} size={0.4} className="inline mr-0.5" />New / Edit…
             </button>
           )}
           {hasFlowsDelete && flows.length > 0 && (
@@ -146,32 +153,33 @@ export function SessionFlowActions({
         />
       )}
 
-      {/* Edit: pick flow → modification input dialog */}
+      {/* New / Edit: pick an existing flow or "new" → launch the edit-flow skill */}
       {editPickerOpen && (
         <SearchableSelectDialog
-          title="Edit Flow"
-          options={flowOptions}
-          placeholder="Search flows..."
-          emptyMessage="No flows available"
+          title="New / Edit flow"
+          options={editOptions}
+          placeholder="Pick a flow to edit, or + New flow…"
+          emptyMessage="No flows yet — pick + New flow"
           onSelect={(value) => {
-            setEditFlowName(value);
+            setAuthorTarget(
+              value === "__new__" ? { mode: "new" } : { mode: "edit", flowName: value },
+            );
             setEditPickerOpen(false);
           }}
           onCancel={() => setEditPickerOpen(false)}
         />
       )}
 
-      {editFlowName && (
-        <FlowLaunchDialog
-          flowName={editFlowName}
-          description="Describe how this flow should be updated"
-          onSubmit={(desc) => {
-            if (desc.trim()) {
-              onFlowAction("edit", { flowName: editFlowName, description: desc.trim() });
-            }
-            setEditFlowName(null);
+      {/* New / Edit: capture intent → launch the manage-flows skill */}
+      {authorTarget && (
+        <FlowAuthorPromptDialog
+          mode={authorTarget.mode}
+          flowName={authorTarget.flowName}
+          onSubmit={(instruction) => {
+            onEditFlow(authorTarget.flowName, instruction);
+            setAuthorTarget(null);
           }}
-          onCancel={() => setEditFlowName(null)}
+          onCancel={() => setAuthorTarget(null)}
         />
       )}
 
@@ -201,21 +209,6 @@ export function SessionFlowActions({
           onCancel={() => setDeleteFlowName(null)}
         />
       )}
-
-      {/* New: description dialog */}
-      {newFlowOpen && (
-        <FlowLaunchDialog
-          flowName="flows:new"
-          description="Design a new flow with the Flow Architect"
-          onSubmit={(task) => {
-            if (task.trim()) {
-              onFlowAction("new", { description: task.trim() });
-            }
-            setNewFlowOpen(false);
-          }}
-          onCancel={() => setNewFlowOpen(false)}
-        />
-      )}
     </>
   );
 }
@@ -236,23 +229,44 @@ export function SessionFlowActionsClaim({ session }: { session: DashboardSession
   const commands = useSessionData<CommandInfo[]>(session.id, "commandsList") ?? [];
   const { flowState } = useFlowsSessionState(session.id);
   const send = usePluginSend();
+  const config = usePluginConfig<FlowsPluginConfig>();
+  const editMode = config.editFlow ?? false;
 
-  const hasFlowsNew = commands.some((c) => c.name === "flows:new");
-  const hasFlowsEdit = commands.some((c) => c.name === "flows:edit");
   const hasFlowsDelete = commands.some((c) => c.name === "flows:delete");
 
+  // Reconcile the GLOBAL edit-mode default down to this session once its flows
+  // plugin is available (flowsList observed). pi-flows persists it to the
+  // project .pi/settings.json. Idempotent — re-emits only when the default
+  // changes. See change: rework-flows-plugin-for-new-pi-flows (D4).
+  const reconciledRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (flows.length === 0) return; // wait until flows-plugin is available
+    if (reconciledRef.current === editMode) return;
+    reconciledRef.current = editMode;
+    send({ type: "flow_management", sessionId: session.id, action: "set-edit-mode", enabled: editMode });
+  }, [flows.length, editMode, session.id, send]);
+
   // Render when there's a flow active OR action buttons are available.
-  // See change: fix-flows-plugin-polish (A5).
-  if (flows.length === 0 && !hasFlowsNew && !flowState) return null;
+  if (flows.length === 0 && !editMode && !flowState) return null;
 
   return (
     <SessionFlowActions
       flows={flows}
-      hasFlowsNew={hasFlowsNew}
-      hasFlowsEdit={hasFlowsEdit}
+      editMode={editMode}
       hasFlowsDelete={hasFlowsDelete}
       flowState={flowState}
       onAbortFlow={() => send({ type: "flow_control", sessionId: session.id, action: "abort" })}
+      onEditFlow={(flowName, instruction) => {
+        const intent = instruction.trim();
+        // New flow: instruction describes what to build. Edit: flow name is
+        // token-1 (the skill reads that file), instruction follows on a new line.
+        const text = flowName
+          ? intent
+            ? `/skill:manage-flows ${flowName}\n\n${intent}`
+            : `/skill:manage-flows ${flowName}`
+          : `/skill:manage-flows ${intent}`;
+        send({ type: "send_prompt", sessionId: session.id, text });
+      }}
       onFlowAction={(action, opts) =>
         send({
           type: "flow_management",

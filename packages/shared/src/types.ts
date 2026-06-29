@@ -5,38 +5,6 @@ export type SessionSource = "tui" | "zed" | "tmux" | "dashboard" | "terminal" | 
 export type SessionStatus = "active" | "idle" | "streaming" | "ended";
 
 /**
- * Per-session jj (Jujutsu) probe state. Populated by the bridge when the
- * cwd contains a `.jj/` directory and the `jj` tool resolves; otherwise
- * left undefined.
- * See change: add-jj-workspace-plugin.
- */
-export interface JjState {
-  /** True iff cwd is inside a jj repo (`.jj/` reachable). */
-  isJjRepo: boolean;
-  /** True iff the repo is jj-colocated with git (both `.jj/` and `.git/`). */
-  isColocated: boolean;
-  /**
-   * Name of the workspace whose working copy is at this cwd.
-   * `"default"` for the original/source workspace; user-named for siblings
-   * created via `jj workspace add`.
-   */
-  workspaceName?: string;
-  /**
-   * Absolute path of the **parent repo root** (== cwd for the default
-   * workspace; the parent directory of `.shadow/<name>/` for any
-   * `jj workspace add`-created workspace). Derived via `jj root`, NOT
-   * `jj workspace root` — the latter returns the current workspace's own
-   * cwd, which would defeat workspace-aware session grouping. See change:
-   * fix-jj-workspace-root-probe.
-   */
-  workspaceRoot?: string;
-  /** Bookmarks present on the workspace's `@-` (used by the badge / fold-back). */
-  bookmarks?: string[];
-  /** Last probe error, surfaced for diagnostics. Empty when probe succeeded. */
-  lastError?: string;
-}
-
-/**
  * Per-session git-worktree state. Populated by the bridge's VCS probe when
  * `git rev-parse --git-common-dir` resolves outside `--show-toplevel` (the
  * canonical signal that this cwd is a worktree, not the main checkout).
@@ -101,15 +69,6 @@ export interface DashboardSession {
   gitBranchUrl?: string;
   gitPrNumber?: number;
   gitPrUrl?: string;
-  /**
-   * Per-session jj (Jujutsu) state. Populated by the bridge's per-session
-   * VCS probe when (a) the tool registry resolves `jj` AND (b) `.jj/` exists
-   * in the session cwd. Absent or `{ isJjRepo: false }` for sessions outside
-   * a jj repo — jj-plugin slot predicates treat both as inactive. NOT
-   * persisted to `.meta.json`; refreshed on every probe tick.
-   * See change: add-jj-workspace-plugin.
-   */
-  jjState?: JjState;
   /**
    * Per-session git-worktree identity. Set only when the session's cwd
    * is a git worktree (not the main checkout). See `GitWorktreeInfo`.
@@ -831,6 +790,15 @@ export interface BashOutputData {
   /** true for !! (silent), false for ! (sent to LLM) */
   excludeFromContext: boolean;
   /**
+   * Set to "slash-exec" when the output originates from an executable-mode
+   * slash template (`executable: bash` frontmatter). The client renders an
+   * "ℹ ran locally — LLM not invoked" footer for this source. Absent for
+   * `!` / `!!` invocations — additive, backward-compatible (older clients
+   * ignore the field and render no footer).
+   * See change: add-dashboard-slash-commands.
+   */
+  source?: "slash-exec";
+  /**
    * Set when the shell binary could not be resolved (e.g. no bash on a
    * clean Windows host). The client renders MissingToolInlineError
    * instead of plain output; no command actually ran.
@@ -892,12 +860,33 @@ export interface FlowAgentCardConfig {
   sourcePath?: string;
 }
 
-/** Per-agent state tracked in flow state */
+/** First-class node-kind discriminator emitted by every pi-flows executor.
+ *  Decided once at the node's started event; carried on the event payload so it
+ *  persists + replays. Distinct from FlowDetailEntry.kind (text|thinking|tool|error).
+ *  See change: rework-flows-plugin-for-new-pi-flows (consumes pi-flows surface-node-kind). */
+export type NodeKind =
+  | "agent"
+  | "agent-decision"
+  | "code"
+  | "code-decision"
+  | "fork";
+
+/** Per-agent (per-step) state tracked in flow state */
 export interface FlowAgentState {
   agentName: string;
   stepId: string;
-  /** Step type from the flow config (agent, fork, agent-decision, agent-loop-decision, etc.) */
+  /** Step type from the flow config (agent, fork, agent-decision, etc.) */
   stepType?: string;
+  /** Node-kind from the lifecycle started event; selects the card renderer. */
+  nodeKind?: NodeKind;
+  /** Failure outcome from the completion event: routed-soft vs flow-halting-hard. */
+  outcome?: "success" | "soft" | "hard";
+  /** Typed outputs from the completion event (code/agent contract). */
+  typedOutputs?: Record<string, string>;
+  /** Chosen branch label for code-decision / agent-decision nodes. */
+  branch?: string;
+  /** Resolved handler target path for code / code-decision nodes (from started). */
+  codeTarget?: string;
   status: FlowAgentStatus;
   label?: string;
   model?: string;
@@ -916,8 +905,9 @@ export interface FlowAgentState {
   runCount?: number;
 }
 
-/** Overall flow execution status */
-export type FlowStatus = "running" | "success" | "error" | "aborted";
+/** Overall flow execution status. `interrupted` = orphaned run reconciled on resume
+ *  (pi-flows clear-orphaned synthesized terminal). */
+export type FlowStatus = "running" | "success" | "error" | "aborted" | "interrupted";
 
 /** Flow execution state tracked client-side by the event reducer */
 export interface FlowState {
@@ -930,10 +920,9 @@ export interface FlowState {
   /** Ordered map — insertion order matches step order from flow config */
   agents: Map<string, FlowAgentState>;
   /** All steps from the flow configuration — used for DAG graph rendering.
-   *  Includes non-agent steps (fork, conditional, agent-loop-decision). */
-  dagSteps?: Array<{ id: string; stepType: string; agent?: string; blockedBy: string[]; loopTarget?: string; exitTarget?: string }>;
-  /** Flow-ref steps from the flow configuration (subflows) */
-  flowRefSteps?: Array<{ id: string; label: string; blockedBy: string[] }>;
+   *  Includes non-agent steps (fork, agent-decision, code-decision). `branches`
+   *  carries decision routing (label → target) emitted by `flow:flow-started`. */
+  dagSteps?: Array<{ id: string; stepType: string; agent?: string; blockedBy: string[]; branches?: Record<string, string> }>;
   /** Set after flow_complete event */
   flowResult?: Record<string, unknown>;
 
@@ -969,7 +958,7 @@ export interface ArchitectDagStep {
   agentName?: string;
   blockedBy: string[];
   /** Step type — matches flow engine step types */
-  stepType?: "agent" | "fork" | "conditional" | "agent-decision" | "agent-loop-decision" | "flow-ref";
+  stepType?: "agent" | "fork" | "conditional" | "agent-decision" | "agent-loop-decision";
   /** For loop steps: the step ID to loop back to */
   loopTarget?: string;
   /** For loop steps: the step ID to continue to after exiting the loop */

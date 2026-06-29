@@ -52,7 +52,7 @@ export function DemoSettings() {
         data-testid="demo-save"
         onClick={() =>
           send({
-            type: "plugin_config_write" as never,
+            type: "plugin_config_write",
             id: "demo",
             config: { greeting, count: parseInt(count, 10) || 0 },
           })

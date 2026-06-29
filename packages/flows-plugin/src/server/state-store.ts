@@ -2,14 +2,12 @@
  * Per-session flow state holder on the server.
  *
  * Holds Map<sessionId, FlowsSessionServerState>. Subscribes (TODO 17.3)
- * to event broadcasts and applies the pure reducers from flow-reducer.ts
- * and architect-reducer.ts.
+ * to event broadcasts and applies the pure reducer from flow-reducer.ts.
  *
  * See change: adopt-server-driven-intent-rendering.
  */
-import type { FlowState, ArchitectState, FlowInfo, CommandInfo, DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { FlowState, FlowInfo, CommandInfo, DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { isFlowEvent, reduceFlowEvent } from "../flow-reducer.js";
-import { isArchitectEvent, reduceArchitectEvent } from "../architect-reducer.js";
 
 export interface FlowsSessionServerState {
   /** Available flows for this session (from pi-flows extension). */
@@ -18,8 +16,6 @@ export interface FlowsSessionServerState {
   commands: CommandInfo[];
   /** Current flow state derived from event stream. Null when no flow active. */
   flowState?: FlowState | null;
-  /** Architect state derived from event stream. */
-  architectState?: ArchitectState | null;
 }
 
 class StateStore {
@@ -39,7 +35,7 @@ class StateStore {
     return this.map.get(sessionId);
   }
 
-  /** Apply an event from pi (flow_*, architect_*, etc.) to the session's state. */
+  /** Apply an event from pi (flow_*, etc.) to the session's state. */
   applyEvent(sessionId: string, event: DashboardEvent): boolean {
     const s = this.ensure(sessionId);
     let changed = false;
@@ -47,13 +43,6 @@ class StateStore {
       const next = reduceFlowEvent(s.flowState ?? null, event);
       if (next !== s.flowState) {
         s.flowState = next;
-        changed = true;
-      }
-    }
-    if (isArchitectEvent(event.eventType)) {
-      const next = reduceArchitectEvent(s.architectState ?? null, event);
-      if (next !== s.architectState) {
-        s.architectState = next;
         changed = true;
       }
     }
