@@ -651,6 +651,24 @@ Cross-refs:
 - README.md:674
 - docs/release-process.md:60
 
+## Why didn't I get an update?
+
+Four historical failure modes, all fixed by `fix-electron-auto-update-pipeline`:
+
+1. Releases drafted. electron-updater `/releases/latest` excludes drafts → updater sees no release. Now production tags `vX.Y.Z` publish automatically.
+2. No `latest*.yml` metadata in releases. Updater cannot resolve version/sha512 → no update. Now `latest.yml`/`latest-mac.yml`/`latest-linux.yml` attached; publish.yml asserts presence, fails release without it.
+3. Unsigned / un-notarised macOS build. Squirrel.Mac rejects update at apply. macOS update needs Developer-ID signature + notarisation.
+4. `onError` swallowed all failures. No log, no dialog, no signal. Now logged before forward, never swallowed.
+
+Diagnostics:
+- Tail `electron-main.log` under `app.getPath('logs')`. Grep `[updater]` severity lines (`debug`/`warn`/`error`).
+- App menu "Check for Updates…" forces a check.
+- App menu "View Update Log" opens the log in file manager.
+
+Production tags `vX.Y.Z` publish automatically → reach stable channel. Pre-release tags `-rc.N` stay drafts → invisible to stable users.
+
+See change: fix-electron-auto-update-pipeline.
+
 ## How do I get an installer for a feature branch without cutting a release?
 
 CI dispatch workflow. No release, no publish, no tag.
