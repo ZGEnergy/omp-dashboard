@@ -46,15 +46,15 @@
   ],
   "assignments": {
     "add-dashboard-slash-commands": "ui",
-    "filter-oauth-incompatible-models": "next-phase",
+    "filter-oauth-incompatible-models": "ui",
     "external-dashboard-plugins": "next-phase",
     "fix-windows-portable-exe": "electrun-execution",
     "automate-windows-remote-qa": "future",
     "unify-pi-core-into-package-queue": "future",
     "spec-file-git-history-header": "future",
     "skip-rpc-probes-in-event-forwarder": "future",
-    "modernize-pi-version-handling": "future",
-    "adopt-pi-071-072-073-features": "future",
+    "modernize-pi-version-handling": "ui",
+    "adopt-pi-071-072-073-features": "ui",
     "docker-packaging": "next-phase",
     "focus-driven-folder-compaction": "sdasdasd",
     "inject-session-context-into-agent": "ui",
@@ -66,7 +66,7 @@
     "new-spec-spawn": "future",
     "accordion-workspace-folders": "future",
     "pi-log-miner-skill": "future",
-    "fix-expanded-pinned-group-drag": "sdasdasd",
+    "fix-expanded-pinned-group-drag": "ui",
     "extract-openspec-as-plugin": "separate-functions-to-plugins",
     "extract-git-as-plugin": "separate-functions-to-plugins",
     "server-launch-smoke-suite": "electrun-execution",
@@ -135,24 +135,40 @@
     "default-node-24-keep-22-floor": "ui",
     "inline-agent-screenshot-artifacts": "ui",
     "refresh-folder-header-branch": "ui",
-    "fix-worktree-link-origin": "ui"
+    "fix-worktree-link-origin": "ui",
+    "add-macos-electron-launch-smoke": "ui",
+    "add-workspace-reorder-dnd": "ui",
+    "macos-notarization": "next-phase",
+    "unify-error-retry-lifecycle": "ui",
+    "configurable-pi-sessions-dir": "ui",
+    "guard-client-fetch-json": "ui",
+    "remove-vestigial-tsconfig-references": "ui",
+    "distinguish-offline-from-network-denied": "ui",
+    "reduce-session-replay-traffic": "ui",
+    "fix-bridge-server-start-diagnostics": "ui"
   },
   "changeOrder": {
     "__ungrouped__": [],
     "ui": [
-      "fix-doctor-windows-launch-test"
+      "fix-bridge-server-start-diagnostics",
+      "modernize-pi-version-handling",
+      "adopt-pi-071-072-073-features",
+      "filter-oauth-incompatible-models",
+      "remove-vestigial-tsconfig-references",
+      "distinguish-offline-from-network-denied",
+      "reduce-session-replay-traffic",
+      "unify-error-retry-lifecycle"
     ],
     "next-phase": [
+      "macos-notarization",
       "add-connector-layer",
       "add-end-user-docs",
       "add-hyperframes-skills",
       "external-dashboard-plugins",
-      "filter-oauth-incompatible-models",
       "manage-node-runtime-updates",
       "project-init-skill-and-profiles"
     ],
     "sdasdasd": [
-      "fix-expanded-pinned-group-drag",
       "focus-driven-folder-compaction",
       "add-internal-monaco-editor-pane",
       "restore-pi-version-skew-surface"
@@ -166,19 +182,6 @@
       "pi-flows-adopt-extension-ui"
     ],
     "electrun-execution": [],
-    "future": [
-      "add-capacitor-mobile-shell",
-      "add-server-push-notifications",
-      "adopt-pi-071-072-073-features",
-      "automate-windows-remote-qa",
-      "modernize-pi-version-handling",
-      "new-spec-spawn",
-      "pi-log-miner-skill",
-      "skip-rpc-probes-in-event-forwarder",
-      "spec-file-git-history-header",
-      "unify-pi-core-into-package-queue",
-      "accordion-workspace-folders",
-      "add-release-video-pipeline"
-    ]
+    "future": []
   }
 }
