@@ -57,12 +57,16 @@ describe("flowToMermaid", () => {
     expect(m).toContain('approve -. "rework ↺" .-> extract'); // backward branch (loop)
   });
 
-  it("renders on_complete routing edges (route wins de-dup over sequential)", () => {
+  it("renders on_complete routing edges UNLABELED (happy-path default)", () => {
+    // Policy (change: fix-flow-ui-graph-zoom-summary): an `on_complete` route is
+    // the happy path — render as a plain arrow, never `|on_complete|`, so an
+    // on_complete-wired flow's spine isn't labelled on every edge.
     const flow = parseFlowYaml(YAML)!;
     const m = flowToMermaid(flow);
-    // extract.on_complete=validate-nav AND validate-nav.blockedBy=[extract] -> one route edge
-    expect(m).toContain("extract -->|on_complete| validate-nav");
-    expect(m).not.toContain("extract --> validate-nav");
+    // extract.on_complete=validate-nav AND validate-nav.blockedBy=[extract] -> one route edge, unlabeled
+    expect(m).toContain("extract --> validate-nav");
+    expect(m).not.toContain("extract -->|on_complete| validate-nav");
+    expect(m).not.toContain("|on_complete|");
     // on_error -> park, but no `park` step exists -> edge skipped
     expect(m).not.toContain("park");
   });

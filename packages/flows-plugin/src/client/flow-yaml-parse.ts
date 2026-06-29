@@ -122,12 +122,18 @@ export function flowToMermaid(flow: ParsedFlow): string {
       // Always dashed so it reads as an exception edge, never the happy path.
       const marker = e.routeTopology === "terminal" ? "⊗" : "↺";
       lines.push(`  ${e.from} -. "on_error ${marker}" .-> ${e.to}`);
-    } else if (e.backward) {
-      lines.push(`  ${e.from} -. "${e.label ?? ""} ↺" .-> ${e.to}`);
-    } else if (e.label) {
-      lines.push(`  ${e.from} -->|${e.label}| ${e.to}`);
     } else {
-      lines.push(`  ${e.from} --> ${e.to}`);
+      // `on_complete` is the happy-path default — render unlabeled so an
+      // on_complete-wired flow's spine reads as plain arrows, not repeated
+      // labels (matches the live FlowGraph). See change: fix-flow-ui-graph-zoom-summary.
+      const lbl = e.label === "on_complete" ? undefined : e.label;
+      if (e.backward) {
+        lines.push(`  ${e.from} -. "${lbl ?? ""} ↺" .-> ${e.to}`);
+      } else if (lbl) {
+        lines.push(`  ${e.from} -->|${lbl}| ${e.to}`);
+      } else {
+        lines.push(`  ${e.from} --> ${e.to}`);
+      }
     }
   }
   return lines.join("\n");

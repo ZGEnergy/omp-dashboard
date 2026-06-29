@@ -922,7 +922,7 @@ export interface FlowState {
   /** All steps from the flow configuration — used for DAG graph rendering.
    *  Includes non-agent steps (fork, agent-decision, code-decision). `branches`
    *  carries decision routing (label → target) emitted by `flow:flow-started`. */
-  dagSteps?: Array<{ id: string; stepType: string; agent?: string; blockedBy: string[]; branches?: Record<string, string> }>;
+  dagSteps?: Array<{ id: string; stepType: string; agent?: string; blockedBy: string[]; branches?: Record<string, string>; onComplete?: string; onError?: string }>;
   /** Set after flow_complete event */
   flowResult?: Record<string, unknown>;
 

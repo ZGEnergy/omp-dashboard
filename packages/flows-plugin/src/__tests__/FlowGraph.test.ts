@@ -1,5 +1,39 @@
-import { describe, expect, it } from "vitest";
-import { computeLayout, type FlowGraphStep, mapStepType } from "../client/FlowGraph.js";
+import {
+  createUiPrimitiveRegistry,
+  registerUiPrimitive,
+  UiPrimitiveProvider,
+} from "@blackbelt-technology/dashboard-plugin-runtime";
+import { UI_PRIMITIVE_KEYS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
+import { cleanup, render } from "@testing-library/react";
+import { createElement } from "react";
+import { afterEach, describe, expect, it } from "vitest";
+import { computeLayout, FlowGraph, type FlowGraphStep, mapStepType } from "../client/FlowGraph.js";
+
+const registry = createUiPrimitiveRegistry();
+registerUiPrimitive(registry, UI_PRIMITIVE_KEYS.zoomControls, ((() => null) as never));
+
+afterEach(() => cleanup());
+
+describe("FlowGraph render: on_complete label suppression", () => {
+  it("renders branch labels but never the on_complete label", () => {
+    // See change: fix-flow-ui-graph-zoom-summary — on_complete is the happy-path
+    // default and renders as a plain arrow; branch labels stay visible.
+    const steps: FlowGraphStep[] = [
+      { id: "load", label: "load", status: "complete", blockedBy: [], type: "code", onComplete: "gate" },
+      { id: "gate", label: "gate", status: "complete", blockedBy: [], type: "code-decision", branches: { go: "done" } },
+      { id: "done", label: "done", status: "pending", blockedBy: [] },
+    ];
+    const { container } = render(
+      createElement(UiPrimitiveProvider, {
+        value: registry,
+        children: createElement(FlowGraph, { steps }),
+      }),
+    );
+    const text = container.textContent ?? "";
+    expect(text).toContain("go"); // branch label rendered
+    expect(text).not.toContain("on_complete"); // route happy-path label suppressed
+  });
+});
 
 describe("mapStepType (canonical node set)", () => {
   it("maps the new code node kinds", () => {

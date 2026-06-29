@@ -276,13 +276,42 @@ describe("FlowSummary expandable rows", () => {
     expect(getByTestId("md").textContent).toContain("Coverage gate failed");
   });
 
-  it("row without summary/files/typedOutputs is not interactive", () => {
+  it("row without summary text is omitted from the list; section hidden when it is the only agent", () => {
     const state = makeState([
       agent({ stepId: "bare", label: "bare-step", status: "complete" }),
     ]);
-    const { getByText, queryByTestId } = renderSummary(state);
-    fireEvent.click(getByText("bare-step", { selector: "span" }));
-    expect(queryByTestId("md")).toBeNull();
+    const { queryByText, queryByTestId, getAllByTestId } = renderSummary(state);
+    // The bare step has no summary text → not listed, and as the only agent the
+    // whole Summaries subsection is hidden.
+    expect(queryByTestId("flow-summaries")).toBeNull();
+    expect(queryByTestId("flow-summary-toggle")).toBeNull();
+    expect(queryByText("bare-step", { selector: "span" })).toBeNull();
+    // Frozen agent card still present (the filter only affects the Summaries list).
+    expect(getAllByTestId("agent-card")).toHaveLength(1);
+  });
+
+  it("Summaries count reflects only summary-bearing agents", () => {
+    const state = makeState([
+      agent({ stepId: "one", label: "step-one", status: "complete", summary: "S1" }),
+      agent({ stepId: "two", label: "step-two", status: "complete" }),
+      agent({ stepId: "three", label: "step-three", status: "complete", summary: "S3" }),
+    ]);
+    const { getByText, queryByText } = renderSummary(state);
+    expect(getByText("Summaries (2)")).toBeTruthy();
+    // The summary-less middle step is not rendered as a row.
+    expect(queryByText("step-two", { selector: "span" })).toBeNull();
+  });
+
+  it("hides the whole Summaries section when no agent has summary text", () => {
+    const state = makeState([
+      agent({ stepId: "a", label: "a", status: "complete", typedOutputs: { verdict: "pass" } }),
+      agent({ stepId: "b", label: "b", status: "complete" }),
+    ]);
+    const { queryByTestId, getAllByTestId } = renderSummary(state);
+    expect(queryByTestId("flow-summaries")).toBeNull();
+    expect(queryByTestId("flow-summary-toggle")).toBeNull();
+    // Both still appear as frozen cards.
+    expect(getAllByTestId("agent-card")).toHaveLength(2);
   });
 
   it("expanding one row leaves siblings collapsed", () => {

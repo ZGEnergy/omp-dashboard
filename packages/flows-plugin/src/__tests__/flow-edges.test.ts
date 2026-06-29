@@ -136,6 +136,49 @@ describe("deriveFlowEdges", () => {
     expect(edges).toHaveLength(0);
   });
 
+  // Regression: a flow wired entirely via on_complete (no blockedBy), with a
+  // routing step declared BEFORE any separator — the InvoiceBot `process` shape.
+  // The pre-separator root must NOT be orphaned, and a routing target must not
+  // also get a spurious implicit edge from the nearest separator.
+  // See change: fix-flow-ui-graph-zoom-summary.
+  it("on_complete-routed pre-separator root is connected (no orphan)", () => {
+    const steps: FlowEdgeStep[] = [
+      { id: "load-state", type: "code", blockedBy: [], onComplete: "resume-gate", onError: "hold" },
+      { id: "resume-gate", type: "code-decision", blockedBy: [], branches: { new: "intake" } },
+      { id: "intake", type: "code", blockedBy: [], onComplete: "hold" },
+      { id: "hold", type: "code", blockedBy: [] },
+    ];
+    const edges = deriveFlowEdges(steps);
+    const byKey = new Map(edges.map((e) => [key(e), e]));
+    // load-state routes forward (not orphaned) and to its error sink.
+    expect(byKey.get("load-state->resume-gate")?.kind).toBe("route");
+    expect(byKey.get("load-state->hold")?.kind).toBe("route");
+    // load-state has at least one outgoing edge.
+    expect(edges.some((e) => e.from === "load-state")).toBe(true);
+  });
+
+  it("routing target suppresses a spurious implicit edge", () => {
+    // `intake` has no blockedBy but is the on_complete target of `gate`; it must
+    // get the route edge and NOT also an implicit edge from the separator.
+    const steps: FlowEdgeStep[] = [
+      { id: "gate", type: "code-decision", blockedBy: [], onComplete: "intake" },
+      { id: "intake", type: "code", blockedBy: [] },
+    ];
+    const edges = deriveFlowEdges(steps);
+    const incoming = edges.filter((e) => e.to === "intake");
+    expect(incoming).toHaveLength(1);
+    expect(incoming[0].kind).toBe("route");
+  });
+
+  it("omitting routing fields produces no route edges (backward compat)", () => {
+    const steps: FlowEdgeStep[] = [
+      { id: "a", type: "code", blockedBy: [] },
+      { id: "b", type: "code", blockedBy: [] },
+    ];
+    const edges = deriveFlowEdges(steps);
+    expect(edges.some((e) => e.kind === "route")).toBe(false);
+  });
+
   it("live (branches only) and static (branches + routes) agree on shared classes", () => {
     const base: FlowEdgeStep[] = [
       { id: "a", type: "agent", blockedBy: [] },

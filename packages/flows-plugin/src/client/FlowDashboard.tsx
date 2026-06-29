@@ -1,24 +1,25 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { Icon } from "@mdi/react";
-import { mdiRobotOutline, mdiStop, mdiChevronUp, mdiChevronRight, mdiChevronDown, mdiFileDocumentOutline, mdiLoading } from "@mdi/js";
-import type { DashboardSession, FlowState, ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import {
+  type InteractiveUiRequestSnapshot,
   usePluginSend,
   useSessionInteractiveRequests,
   useUiPrimitiveOrNull,
-  type InteractiveUiRequestSnapshot,
 } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { BreadcrumbSlot } from "@blackbelt-technology/pi-dashboard-client-utils/extension-ui/BreadcrumbSlot";
+import { useMobile } from "@blackbelt-technology/pi-dashboard-client-utils/useMobile";
 import { UI_PRIMITIVE_KEYS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
+import type { DashboardSession, FlowState, ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { mdiChevronDown, mdiChevronRight, mdiChevronUp, mdiFileDocumentOutline, mdiLoading, mdiRobotOutline, mdiStop } from "@mdi/js";
+import { Icon } from "@mdi/react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlowAgentCard } from "./FlowAgentCard.js";
+import { FlowGraph, flowStateToGraphSteps } from "./FlowGraph.js";
 import { FlowQuestionCard } from "./FlowQuestionCard.js";
 import { FlowQuestionTranscriptPill } from "./FlowQuestionTranscriptPill.js";
-import { FlowGraph, flowStateToGraphSteps } from "./FlowGraph.js";
 import { FlowSummary } from "./FlowSummary.js";
-import { FlowYamlPopoverButton } from "./FlowYamlPopoverButton.js";
-import { FlowTabBar, type FlowTab } from "./FlowTabBar.js";
-import { useMobile } from "@blackbelt-technology/pi-dashboard-client-utils/useMobile";
-import { BreadcrumbSlot } from "@blackbelt-technology/pi-dashboard-client-utils/extension-ui/BreadcrumbSlot";
 import { useFlowsSessionState } from "./FlowsSessionStateContext.js";
+import { type FlowTab, FlowTabBar } from "./FlowTabBar.js";
+import { FlowYamlPopoverButton } from "./FlowYamlPopoverButton.js";
+import { useFlowCollapsePersisted } from "./flow-collapse-storage.js";
 
 
 
@@ -53,7 +54,9 @@ export function FlowDashboard({
   // improve-flow-graph-dialog-and-card-interaction.
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  // Persisted per session so a collapsed dashboard stays collapsed across
+  // remounts. See change: fix-flow-ui-graph-zoom-summary.
+  const [collapsed, toggleCollapsed] = useFlowCollapsePersisted(sessionId, "dashboard");
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const [activeTabId, setActiveTabId] = useState<string>(flowState.flowName);
   const [followMode, setFollowMode] = useState(true);
@@ -119,13 +122,16 @@ export function FlowDashboard({
   const isRunning = flowState.status === "running";
   const isComplete = !isRunning;
 
-  // After completion, show summary
+  // After completion, show summary. Forward sessionId so the summary's per-session
+  // collapse state persists (the hook no-ops without a session id).
+  // See change: fix-flow-ui-graph-zoom-summary.
   if (isComplete) {
     return (
       <FlowSummary
         flowState={flowState}
         onDismiss={onDismiss}
         onSendPrompt={onSendPrompt}
+        sessionId={sessionId}
       />
     );
   }
@@ -166,7 +172,7 @@ export function FlowDashboard({
       <div className="flex items-center gap-2 mb-2">
         <span
           className="inline-flex text-[var(--text-tertiary)] cursor-pointer"
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={toggleCollapsed}
         >
           <Icon path={collapsed ? mdiChevronRight : mdiChevronDown} size={0.6} />
         </span>

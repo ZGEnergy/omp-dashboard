@@ -8,6 +8,7 @@ import { FlowAgentCard } from "./FlowAgentCard.js";
 import { FlowGraph, flowStateToGraphSteps } from "./FlowGraph.js";
 import { useFlowsSessionState } from "./FlowsSessionStateContext.js";
 import { FlowYamlPopoverButton } from "./FlowYamlPopoverButton.js";
+import { useFlowCollapsePersisted } from "./flow-collapse-storage.js";
 
 
 // formatDuration moved to registry primitive lookup inside FlowSummary
@@ -40,13 +41,21 @@ export function FlowSummary({
   // Whole-panel collapse (distinct from the footer `collapsed` above, which only
   // hides the Summaries list). Shrinks the completed-flow summary to its header
   // bar, mirroring FlowDashboard's collapse affordance. See change: improve-flow-graph-fidelity.
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  // Persisted per session so a collapsed panel stays collapsed across remounts.
+  // See change: fix-flow-ui-graph-zoom-summary.
+  const [panelCollapsed, togglePanelCollapsed] = useFlowCollapsePersisted(
+    sessionId ?? session?.id,
+    "summary",
+  );
   const [graphOpen, setGraphOpen] = useState(false);
   // Shared graph⇄card selection (ephemeral). See change:
   // improve-flow-graph-dialog-and-card-interaction.
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const agents = Array.from(flowState.agents.values());
+  // Only summary-bearing agents are listed in the Summaries subsection (others
+  // stay in the frozen cards + graph). See change: fix-flow-ui-graph-zoom-summary.
+  const summarised = agents.filter(a => a.summary);
   const { icon, label, color } = statusConfig[flowState.status] ?? statusConfig.success;
   const totalDuration = flowState.flowResult?.totalDuration as number | undefined;
   const totalFiles = agents.reduce((sum, a) => sum + (a.files?.length ?? 0), 0);
@@ -87,7 +96,7 @@ export function FlowSummary({
       <div className="flex items-center gap-2 mb-1.5">
         {/* Minimal disclosure chevron, left of the flow name (not near Dismiss). */}
         <button
-          onClick={() => setPanelCollapsed(v => !v)}
+          onClick={togglePanelCollapsed}
           data-testid="flow-summary-panel-toggle"
           title={panelCollapsed ? "Expand summary" : "Collapse summary"}
           aria-expanded={!panelCollapsed}
@@ -155,24 +164,29 @@ export function FlowSummary({
           </div>
         )}
 
-        {/* Summaries — collapsible; each row expands inline. */}
-        <div className="mt-2 pt-1.5 border-t border-[var(--border-subtle)]">
-          <div
-            data-testid="flow-summary-toggle"
-            className="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)] cursor-pointer mb-1 hover:text-[var(--text-primary)]"
-            onClick={() => setCollapsed(!collapsed)}
-          >
-            <Icon path={collapsed ? mdiChevronRight : mdiChevronDown} size={0.5} />
-            <span>Summaries ({agents.length})</span>
-          </div>
-          {!collapsed && (
-            <div className="space-y-0.5" data-testid="flow-summaries">
-              {agents.map(agent => (
-                <FlowSummaryRow key={agent.stepId || agent.agentName} agent={agent} />
-              ))}
+        {/* Summaries — collapsible; each row expands inline. Only agents with
+            summary text are listed; the subsection is hidden when none qualify
+            (summary-less steps remain visible in the frozen cards above + graph).
+            See change: fix-flow-ui-graph-zoom-summary. */}
+        {summarised.length > 0 && (
+          <div className="mt-2 pt-1.5 border-t border-[var(--border-subtle)]">
+            <div
+              data-testid="flow-summary-toggle"
+              className="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)] cursor-pointer mb-1 hover:text-[var(--text-primary)]"
+              onClick={() => setCollapsed(!collapsed)}
+            >
+              <Icon path={collapsed ? mdiChevronRight : mdiChevronDown} size={0.5} />
+              <span>Summaries ({summarised.length})</span>
             </div>
-          )}
-        </div>
+            {!collapsed && (
+              <div className="space-y-0.5" data-testid="flow-summaries">
+                {summarised.map(agent => (
+                  <FlowSummaryRow key={agent.stepId || agent.agentName} agent={agent} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Next step suggestion */}
         {flowState.nextStep && onSendPrompt && (

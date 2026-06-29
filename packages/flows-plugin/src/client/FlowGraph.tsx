@@ -9,6 +9,7 @@ import { graphlib } from "dagre-d3-es";
 import { layout as dagreLayout } from "dagre-d3-es/src/dagre/index.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deriveFlowEdges, type FlowEdge, type FlowEdgeKind, type FlowEdgeStep } from "./flow-edges.js";
+import { FLOW_SHOW_ERROR_ROUTES_KEY, usePersistedToggle } from "./flow-collapse-storage.js";
 
 /** Per-kind visual identity for graph nodes, mirroring the FlowAgentCard badges:
  *  code/code-decision = cyan, fork/agent-decision = amber, agent = green/status.
@@ -80,6 +81,11 @@ export function flowStateToGraphSteps(flowState: FlowState): FlowGraphStep[] {
       blockedBy: step.blockedBy.filter(dep => allStepIds.has(dep)),
       type: mapStepType(step.stepType),
       branches: step.branches,
+      // Forward/error routing (present once pi-flows emits it on flow:flow-started)
+      // so on_complete-wired flows draw `route` edges live. See change:
+      // fix-flow-ui-graph-zoom-summary.
+      onComplete: step.onComplete,
+      onError: step.onError,
     }));
   }
 
@@ -192,8 +198,9 @@ export function computeLayout(
   const showErrorRoutes = opts.showErrorRoutes ?? true;
 
   // Single edge derivation (shared with the static Mermaid snapshot). Route
-  // edges (on_complete/on_error) appear only when the caller passes them; the
-  // live path gains them once pi-flows emits on_error on flow:flow-started (§8).
+  // edges (on_complete/on_error) appear whenever the caller passes them: the
+  // static path parses YAML, the live path now receives them on
+  // flow:flow-started. See change: fix-flow-ui-graph-zoom-summary.
   const flowEdges = deriveFlowEdges(
     steps.map((s): FlowEdgeStep => ({
       id: s.id,
@@ -364,7 +371,10 @@ export function FlowGraph({ steps, fit = false, onExpand, selectedStepId, onSele
   // arcs, terminal handlers collapse to one sink. OFF removes them from the
   // dagre input entirely (zero footprint). Only relevant when on_error exists.
   const hasErrorRoutes = useMemo(() => steps.some(s => s.onError), [steps]);
-  const [showErrorRoutes, setShowErrorRoutes] = useState(true);
+  // Error routes are an exception layer — hidden by default to keep the happy
+  // path legible; the ⚠ toggle reveals them. Visibility persists globally (a
+  // viewing preference across all graphs). See change: fix-flow-ui-graph-zoom-summary.
+  const [showErrorRoutes, toggleShowErrorRoutes] = usePersistedToggle(FLOW_SHOW_ERROR_ROUTES_KEY, false);
   const [sinkExpanded, setSinkExpanded] = useState(false);
 
   const layout = useMemo(() => {
@@ -427,13 +437,13 @@ export function FlowGraph({ steps, fit = false, onExpand, selectedStepId, onSele
       onMouseLeave={() => setHovered(false)}
       {...panHandlers}
     >
-      {/* Controls stopPropagation on pointerdown so the container's pan handler
-          (which calls setPointerCapture) doesn't swallow their click. */}
+      {/* No onPointerDown stopPropagation needed: useZoomPan defers pointer
+          capture until movement exceeds the drag threshold, so a click on these
+          controls stays a click. ZoomControls still self-guards its own drag. */}
       {fit && onExpand && (
         <button
           type="button"
           onClick={onExpand}
-          onPointerDown={(e) => e.stopPropagation()}
           title="Expand graph"
           className="absolute bottom-1 right-1 z-10 text-[11px] px-1.5 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
         >
@@ -443,8 +453,7 @@ export function FlowGraph({ steps, fit = false, onExpand, selectedStepId, onSele
       {hasErrorRoutes && (
         <button
           type="button"
-          onClick={() => setShowErrorRoutes(v => !v)}
-          onPointerDown={(e) => e.stopPropagation()}
+          onClick={toggleShowErrorRoutes}
           title={showErrorRoutes ? "Hide error routes" : "Show error routes"}
           aria-pressed={showErrorRoutes}
           className={`absolute top-1 left-1 z-10 text-[11px] px-1.5 py-0.5 rounded border ${showErrorRoutes ? "border-[#ef4444]/60 text-[#ef4444]" : "border-[var(--border-subtle)] text-[var(--text-tertiary)]"} bg-[var(--bg-secondary)]/80 hover:text-[var(--text-primary)]`}
@@ -453,7 +462,7 @@ export function FlowGraph({ steps, fit = false, onExpand, selectedStepId, onSele
         </button>
       )}
       {hovered && (
-        <div onPointerDown={(e) => e.stopPropagation()}>
+        <div>
           <ZoomControls
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
@@ -514,7 +523,12 @@ export function FlowGraph({ steps, fit = false, onExpand, selectedStepId, onSele
               animated = c.animated;
             }
             const mid = edge.points[Math.floor(edge.points.length / 2)];
-            const label = edge.isError ? `on_error ${edge.isReturning ? "↺" : "⊗"}` : edge.label;
+            // `on_complete` is the happy-path default — render unlabeled to avoid
+            // labelling every arrow on an on_complete-wired flow. Keep branch +
+            // on_error labels. See change: fix-flow-ui-graph-zoom-summary.
+            const label = edge.isError
+              ? `on_error ${edge.isReturning ? "↺" : "⊗"}`
+              : edge.label === "on_complete" ? undefined : edge.label;
             const labelColor = edge.isError ? "#ef4444" : edge.isLoop ? "#a855f7" : "#888";
             return (
               <g key={`edge-${i}`}>
