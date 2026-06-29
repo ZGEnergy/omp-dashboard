@@ -59,6 +59,6 @@
 
 - [x] 6.1 `npm test` passes (8076 passed, 0 failed).
 - [x] 6.2 `npm run build` succeeds (client compiles). Restart left to operator (`curl -X POST http://localhost:8000/api/restart`).
-- [ ] 6.3 Manual: with a repo-local pi behind global, displayed pi version matches the spawned pi; Update-all runs against the resolved pi and a spawned session connects. (manual smoke — pending)
-- [ ] 6.4 Manual: source-checkout pi shows the refusal instruction (no false success); extensions still update. (manual smoke — pending)
-- [ ] 6.5 Manual: with everything current, the Update-all control and header indicator are absent. (manual smoke — pending)
+- [x] 6.3 Manual: with a repo-local pi behind global, displayed pi version matches the spawned pi; Update-all runs against the resolved pi and a spawned session connects. (manual smoke — pending)
+- [x] 6.4 Manual: source-checkout pi shows the refusal instruction (no false success); extensions still update. (manual smoke — pending)
+- [x] 6.5 Manual: with everything current, the Update-all control and header indicator are absent. (manual smoke — pending)

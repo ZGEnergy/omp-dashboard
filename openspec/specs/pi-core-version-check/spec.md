@@ -77,7 +77,7 @@ The server SHALL cache version status results for 5 minutes to avoid excessive r
 - **THEN** the cache SHALL be invalidated and a fresh check SHALL be performed
 
 ### Requirement: Version status REST endpoint
-The server SHALL expose `GET /api/pi-core/versions` returning `PiCoreStatus` with all discovered packages, their versions, and update availability.
+The server SHALL expose the pi-core version status endpoint returning all discovered core packages, their versions, and update availability. The **pi package's version SHALL be read from the resolved pi install** (`ToolRegistry.resolveExecutor("pi")` → realpath → `package.json`), so the reported version matches the spawned binary. Each package entry SHALL include `updatable` (whether the dashboard can perform the update) and, when not updatable, a `manualAction` instruction string.
 
 #### Scenario: Successful version check
 - **WHEN** a client calls `GET /api/pi-core/versions`
@@ -87,42 +87,65 @@ The server SHALL expose `GET /api/pi-core/versions` returning `PiCoreStatus` wit
 - **WHEN** no pi ecosystem packages are discovered
 - **THEN** the response SHALL return an empty `packages` array with `updatesAvailable: 0`
 
+#### Scenario: pi version reflects resolved install
+- **WHEN** a client requests pi-core status
+- **THEN** the pi package entry's `currentVersion` SHALL equal the version in the resolved pi install's `package.json`
+
+#### Scenario: Non-updatable package carries a manual action
+- **WHEN** a discovered package cannot be updated by the dashboard (e.g. source/electron install)
+- **THEN** its entry SHALL set `updatable: false`
+- **AND** SHALL include a `manualAction` string describing how to update it manually
+
+### Requirement: Status carries the resolved-pi install classification
+
+The pi-core status SHALL include, for the pi row, the classification of the bridge-resolved install so clients can render the correct affordance WITHOUT first attempting (and failing) an update. Fields: `updateMethod` (`pi-self` | `npm` | `pnpm` | `yarn` | `bun`), `updateScope` (`global` | `local`), `updatable` (boolean), and `manualAction` (instruction string when not updatable). These derive from the realpath'd resolved pi.
+
+#### Scenario: Local writable install is updatable
+- **WHEN** the resolved pi is a writable local/managed install
+- **THEN** the pi row SHALL report `updatable: true` and a local `updateMethod`/`updateScope`
+
+#### Scenario: Transient / read-only install is not updatable
+- **WHEN** the resolved pi is npx/bunx, a bun binary, Homebrew, a git checkout, or a read-only bundle
+- **THEN** the pi row SHALL report `updatable: false` with a class-specific `manualAction`
+
 ### Requirement: Core package update execution
-The server SHALL expose `POST /api/pi-core/update` to update one or more core packages. The endpoint SHALL accept either supported pi fork name in the `packages` array.
 
-#### Scenario: Update earendil global package
-- **WHEN** a client calls `POST /api/pi-core/update` with `{ packages: ["@earendil-works/pi-coding-agent"] }` and the package has `installSource: "global"`
-- **THEN** the server SHALL run `npm update -g @earendil-works/pi-coding-agent`
-- **AND** broadcast progress events via WebSocket
+The server SHALL execute a core-package update on demand. For the **pi package**, the server SHALL delegate to the resolved pi's own updater (`<resolvedPiArgv> update --self` or `--all`) rather than running `npm install -g <pi-pkg>@latest`. For the **dashboard package** (`@blackbelt-technology/pi-agent-dashboard`), which has no `pi update` equivalent, the server SHALL run an npm install only when the detected install layout supports it, otherwise surface the layout-appropriate manual instruction. Updates SHALL serialize through the existing busy lock.
 
-#### Scenario: Update legacy mariozechner global package
-- **WHEN** a client calls `POST /api/pi-core/update` with `{ packages: ["@mariozechner/pi-coding-agent"] }` and the package has `installSource: "global"`
-- **THEN** the server SHALL run `npm update -g @mariozechner/pi-coding-agent`
-- **AND** the legacy fork SHALL be updated in place without being silently swapped to earendil
+#### Scenario: Update pi via resolved pi self-update
+- **WHEN** an update is requested for the pi package
+- **THEN** the server SHALL spawn the resolved pi argv followed by `update --self`
+- **AND** SHALL NOT spawn `npm install -g <pi-pkg>@latest`
+- **AND** SHALL stream child stdout/stderr to update-progress events
 
-#### Scenario: Update managed package
-- **WHEN** a package has `installSource: "managed"`
-- **THEN** the server SHALL run `npm update <pkg>` in the `~/.pi-dashboard/` directory using the discovered package name (earendil or mariozechner)
+#### Scenario: Update pi and extensions together
+- **WHEN** an "all" update is requested
+- **THEN** the server SHALL spawn the resolved pi argv followed by `update --all`
 
-#### Scenario: Update crosses minor-version boundary
-- **WHEN** the installed version is in a different minor than the npm `latest` dist-tag (e.g. installed `0.70.6`, latest `0.73.1`)
-- **AND** the consuming `package.json` declares the dependency with a caret range (e.g. `^0.70.0`)
-- **THEN** the server SHALL still successfully install the `latest` version
-- **AND** the post-update `installedVersion` reported by `PiCoreChecker` SHALL match the npm `latest`
+#### Scenario: pi self-update declined → in-place fallback
+- **WHEN** `pi update --self` exits with the self-update-unavailable message
+- **AND** the resolved install prefix is writable
+- **THEN** the server SHALL run the prefix's package-manager install of `<pkg>@latest` at that prefix
+- **AND** report success on exit 0
 
-#### Scenario: Update all packages
-- **WHEN** `POST /api/pi-core/update` is called with `{ packages: [] }` or no `packages` field
-- **THEN** all packages with `updateAvailable: true` SHALL be updated sequentially
-- **AND** each SHALL use the `npm install <pkg>@latest` argv shape
+#### Scenario: pi self-update declined → read-only install
+- **WHEN** `pi update --self` is declined AND the resolved install path is not writable
+- **THEN** the server SHALL return an instruction naming the read-only location and SHALL NOT report success
+
+#### Scenario: Update dashboard package on npm-global layout
+- **WHEN** an update is requested for `@blackbelt-technology/pi-agent-dashboard`
+- **AND** `detectInstallLayout()` returns `npm-global`
+- **THEN** the server SHALL run `npm install -g @blackbelt-technology/pi-agent-dashboard`
+
+#### Scenario: Update dashboard package refused on electron/monorepo layout
+- **WHEN** an update is requested for the dashboard package
+- **AND** `detectInstallLayout()` returns `electron` or `monorepo`
+- **THEN** the server SHALL NOT run npm
+- **AND** SHALL return `suggestedReinstallCommand()` as the instruction
 
 #### Scenario: Concurrent operation blocked
-- **WHEN** a package operation (extension install/update or core update) is already running
-- **THEN** the server SHALL return 409 Conflict
-
-#### Scenario: Permission error on global update
-- **WHEN** `npm install -g <pkg>@latest` fails with a permission error (EACCES / EPERM / EROFS)
-- **THEN** the error message SHALL be surfaced to the client
-- **AND** SHALL include a remediation hint that references `sudo npm install -g <pkg>@latest` (NOT `sudo npm update -g`)
+- **WHEN** an update is requested while another package operation is in progress
+- **THEN** the server SHALL reject with a busy error and SHALL NOT start a second operation
 
 ### Requirement: Session auto-reload after update
 The server SHALL auto-reload all connected pi sessions after a successful core package update.
@@ -239,36 +262,6 @@ The Electron-bundled Node version (`packages/electron/scripts/_node-version.sh::
 - **WHEN** a hypothetical change lowers `BUNDLED_NODE_VERSION` to `"v22.18.0"`
 - **AND** `piCompatibility.minimum` still requires Node `22.19.0`
 - **THEN** the lint test SHALL fail with a message naming both versions and pointing to `_node-version.sh` as the file to edit
-
-### Requirement: pi-core-updater resolves npm via ToolRegistry and inherits managed Node on PATH
-
-The pi-core-updater SHALL resolve the `npm` binary it spawns through `ToolRegistry.resolve("npm")` rather than invoking a bare `"npm"` command, AND SHALL apply `prependManagedNodeToPath(env)` to the spawned child's environment so that nested `node`/`npm` resolution inside the npm subprocess also picks up the managed runtime.
-
-#### Scenario: Managed-source update uses registry-resolved npm
-
-- **WHEN** `pi-core-updater.ts::defaultRunNpmUpdate` is invoked for a package with `installSource: "managed"`
-- **THEN** the spawned binary SHALL be the absolute path returned by `ToolRegistry.resolve("npm")`
-- **AND** the spawn SHALL NOT use a bare `"npm"` command name
-- **AND** the spawned process's `env.PATH` SHALL contain the managed Node directory as its first entry when `<managedDir>/node/` exists
-
-#### Scenario: Global-source update uses registry-resolved npm
-
-- **WHEN** `pi-core-updater.ts::defaultRunNpmUpdate` is invoked for a package with `installSource: "global"`
-- **THEN** the spawned binary SHALL be the absolute path returned by `ToolRegistry.resolve("npm")`
-- **AND** the spawned process's `env.PATH` SHALL contain the managed Node directory as its first entry when `<managedDir>/node/` exists
-
-#### Scenario: ToolRegistry resolution failure surfaces a clear error
-
-- **WHEN** `pi-core-updater.ts::defaultRunNpmUpdate` is invoked
-- **AND** `ToolRegistry.resolve("npm")` returns no path (no override, no managed runtime, no npm on PATH)
-- **THEN** the updater SHALL reject with an error message naming `npm` as unresolved
-- **AND** SHALL NOT attempt a bare `spawn("npm", ...)` fallback
-
-#### Scenario: Permission-error hint preserved
-
-- **WHEN** the registry-resolved `npm update -g <pkg>` fails with stderr matching `permission|EACCES|EPERM|EROFS`
-- **AND** the package's `installSource` is `"global"`
-- **THEN** the rejected error message SHALL include the existing remediation hint suggesting `sudo npm update -g <pkg>`
 
 ### Requirement: pi.dev version check
 The server SHALL query `https://pi.dev/api/latest-version` for `@mariozechner/pi-coding-agent` (and any successor `packageName` returned by previous pi.dev responses) instead of querying the npm registry directly. The npm registry SHALL be used as a fallback when pi.dev is unreachable, returns an error, or is skipped via environment variables.
