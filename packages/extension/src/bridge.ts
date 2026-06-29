@@ -43,6 +43,7 @@ import type { BridgeContext } from "./bridge-context.js";
 import { filterHiddenCommands, extractFirstMessage, getCurrentModelString } from "./bridge-context.js";
 import { tryDispatchExtensionCommand } from "./slash-dispatch.js";
 import { flipHasUI } from "./hasui-flip.js";
+import { runGitPollTick } from "./git-poll.js";
 import { sendStateSync as _sendStateSync, replaySessionEntries as _replaySessionEntries, handleSessionChange as _handleSessionChange } from "./session-sync.js";
 import { sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged, sendCwdMissingIfChanged as _sendCwdMissingIfChanged, resetReconnectCaches as _resetReconnectCaches } from "./model-tracker.js";
 import { registerFlowEventListeners, FLOW_EVENT_MAP, SUBAGENT_EVENT_MAP } from "./flow-event-wiring.js";
@@ -178,6 +179,11 @@ function initBridge(pi: ExtensionAPI) {
   let lastSessionFile: string | undefined;
   let lastSessionDir: string | undefined;
   let lastFirstMessage: string | undefined;
+  // ctx.cwd is a guarded getter on ExtensionRunner that throws once the session
+  // is replaced (new/fork/resume/reload). Poll timers must read this cached copy
+  // instead of the captured ctx, or they crash the host after a session change.
+  // See change: fix-stale-ctx-cwd-crash.
+  let cachedCwd: string | undefined;
   let pendingDefaultModel: string | null = null; // non-null if default model not yet applied (custom provider not ready)
 
   /** Try to apply the default model from config. Returns the model string if not found (pending), null if applied or no default. */
@@ -2253,14 +2259,7 @@ function initBridge(pi: ExtensionAPI) {
     getBridgeState().timers!.push(heartbeatTimer);
 
     // Start git + name/model polling
-    gitPollTimer = setInterval(() => {
-      if (!isActive()) return;
-      sendGitInfoIfChanged(ctx.cwd);
-      sendCwdMissingIfChanged(ctx.cwd);
-      sendSessionNameIfChanged();
-      sendModelUpdateIfChanged();
-    }, GIT_POLL_INTERVAL);
-    getBridgeState().timers!.push(gitPollTimer);
+    startGitPollTimer(ctx);
 
     // Start process scanner (detect stalled child processes)
     // Captures new child PGIDs during active bash calls, then checks tracked PGIDs
@@ -2316,11 +2315,24 @@ function initBridge(pi: ExtensionAPI) {
     applyBc(bc);
 
     // Restart polling timers
+    startGitPollTimer(ctx);
+  }
+
+  // Single source of truth for the git + name/model poll loop. Both session
+  // start and session change call this so the two timers can never drift.
+  // Caches ctx.cwd (the throwing getter) and clears any prior timer first.
+  function startGitPollTimer(ctx: any) {
     if (gitPollTimer) clearInterval(gitPollTimer);
-    gitPollTimer = setInterval(() => {
-      sendGitInfoIfChanged(ctx.cwd);
-      sendCwdMissingIfChanged(ctx.cwd);
-    }, GIT_POLL_INTERVAL);
+    cachedCwd = ctx.cwd;
+    gitPollTimer = setInterval(() => runGitPollTick({
+      isActive,
+      cachedCwd: () => cachedCwd,
+      sendGitInfoIfChanged,
+      sendCwdMissingIfChanged,
+      sendSessionNameIfChanged,
+      sendModelUpdateIfChanged,
+    }), GIT_POLL_INTERVAL);
+    getBridgeState().timers!.push(gitPollTimer);
   }
 
   // session_switch and session_fork events removed in pi 0.65.0.
