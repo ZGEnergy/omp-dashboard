@@ -189,7 +189,10 @@ export async function checkForUpdatesNow(): Promise<ManualCheckResult> {
 export function downloadAndInstall(): void {
   const autoUpdater = getAutoUpdater();
   // After download completes, autoInstallOnAppQuit will handle restart.
-  autoUpdater?.downloadUpdate();
+  // downloadUpdate() returns a Promise that rejects on failure; the 'error'
+  // listener logs it, so swallow the rejection here to avoid an unhandled
+  // promise rejection. See CodeRabbit review on PR #192.
+  autoUpdater?.downloadUpdate?.()?.catch(() => {});
 }
 
 /**
