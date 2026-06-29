@@ -25,7 +25,9 @@ Stakeholders: macOS end users (Gatekeeper block + no updates), maintainers (manu
 
 ### D1: Sign in the Forge package step, not electron-builder
 
-**Decision:** Keep signing where it already lives — `forge.config.ts` `osxSign`/`osxNotarize`, run by `electron-forge package`. Provide the secrets as env vars on that CI step. electron-builder stays `--prepackaged` + `CSC_IDENTITY_AUTO_DISCOVERY=false` (no re-sign).
+**Decision:** Sign in `electron-forge package` via `forge.config.ts` `osxSign`/`osxNotarize`. Provide the secrets as env vars on that CI step. electron-builder stays `--prepackaged` + `CSC_IDENTITY_AUTO_DISCOVERY=false` (no re-sign).
+
+**Note:** `fix-electron-auto-update-pipeline` REMOVED the inline `osxSign`/`osxNotarize` block from `forge.config.ts` (it was dead — no `APPLE_IDENTITY` in any workflow — and broke `tsc` once the DMG maker was dropped). This change RE-ADDS it with the current `@electron/osx-sign` option shape (verify `entitlements`/`entitlementsInherit` field names against the installed version; the old `entitlements-inherit` kebab key no longer typechecks).
 
 **Why:** `fix-electron-auto-update-pipeline` already wired this split. Re-signing in electron-builder would double-sign (or strip the Forge signature) and duplicate config. One signing point = one place to reason about.
 

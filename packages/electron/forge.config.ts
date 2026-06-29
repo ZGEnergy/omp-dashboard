@@ -111,20 +111,12 @@ const config: ForgeConfig = {
       // ship as regular npm deps of the bundled server tree at
       // resources/server/node_modules/; no runtime cache extraction.
     ],
-    // macOS code signing — requires APPLE_IDENTITY env var in CI
-    ...(process.env.APPLE_IDENTITY ? {
-      osxSign: {
-        identity: process.env.APPLE_IDENTITY,
-        hardenedRuntime: true,
-        entitlements: "entitlements.plist",
-        "entitlements-inherit": "entitlements.plist",
-      },
-      osxNotarize: {
-        appleId: process.env.APPLE_ID || "",
-        appleIdPassword: process.env.APPLE_ID_PASSWORD || "",
-        teamId: process.env.APPLE_TEAM_ID || "",
-      },
-    } : {}),
+    // macOS signing + notarisation are owned by the `macos-notarization`
+    // change (split per fix-electron-auto-update-pipeline D4). That change
+    // re-adds osxSign/osxNotarize here with the CI keychain wiring and the
+    // current @electron/osx-sign option shape. The previous inline block was
+    // dead (no APPLE_IDENTITY set in any workflow) and broke `tsc` after a
+    // dependency bump, so it is removed here rather than carried broken.
   },
   makers: [
     // macOS DMG + Linux AppImage are produced by electron-builder (config:
