@@ -343,18 +343,22 @@ jobs:
           cd packages/electron
           # 1. Package (+ sign + notarize) the universal .app via Forge.
           ../../node_modules/.bin/electron-forge package --arch=${{ matrix.arch }} --platform=darwin
-          PKG_DIR=$(find out -maxdepth 1 -type d -name 'PI-Dashboard-darwin-*' | head -1)
-          if [ -z "$PKG_DIR" ]; then
-            echo "::error::Forge packaged dir not found under out/"; ls -la out || true; exit 1
+          # electron-builder --mac --prepackaged expects the .app PATH (not its
+          # parent dir, unlike --win/--linux which take the unpacked dir).
+          # Passing the dir produces a malformed bundle. See change:
+          # fix-electron-auto-update-pipeline (CI-validate fix).
+          APP_PATH=$(find out -maxdepth 2 -name '*.app' -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Forge .app not found under out/"; ls -laR out | head -50 || true; exit 1
           fi
-          echo "Packaged dir: $PKG_DIR"
+          echo "App bundle: $APP_PATH"
           # 2. Wrap into a DMG + emit latest-mac.yml + app-update.yml. Do NOT
           #    re-sign (Forge already did): disable cert auto-discovery.
           export CSC_IDENTITY_AUTO_DISCOVERY=false
           # Tag the DMG basename by host arch so the arm64 + x64 legs don't
           # collide on upload (softprops dedups by basename).
           npx electron-builder --mac dmg \
-            --prepackaged "$PKG_DIR" \
+            --prepackaged "$APP_PATH" \
             --config electron-builder.yml \
             -c.mac.artifactName='PI-Dashboard-${version}-${{ matrix.arch }}.${ext}' \
             --publish never
@@ -409,9 +413,13 @@ jobs:
             exit 1
           fi
           echo "Inspecting $APP"
-          # 1. LSMinimumSystemVersion in Info.plist
-          MIN_OS=$(plutil -extract LSMinimumSystemVersion raw "$APP/Contents/Info.plist" 2>/dev/null || echo "missing")
-          echo "  Info.plist LSMinimumSystemVersion = $MIN_OS"
+          ls -la "$APP/Contents" 2>/dev/null || echo "  (no Contents/ — unexpected app layout)"
+          # 1. LSMinimumSystemVersion in Info.plist. Locate the plist
+          # dynamically (the electron-builder app bundle name differs from the
+          # legacy Forge maker output). See change: fix-electron-auto-update-pipeline.
+          INFO_PLIST=$(find "$APP" -path '*/Contents/Info.plist' -maxdepth 2 2>/dev/null | head -1)
+          MIN_OS=$(plutil -extract LSMinimumSystemVersion raw "$INFO_PLIST" 2>/dev/null || echo "missing")
+          echo "  Info.plist ($INFO_PLIST) LSMinimumSystemVersion = $MIN_OS"
           if [ "$MIN_OS" != "10.15" ]; then
             echo "::error::LSMinimumSystemVersion is '$MIN_OS', expected '10.15'. Pin via packagerConfig.extendInfo in packages/electron/forge.config.ts. See change: add-darwin-x64-build."
             hdiutil detach "$MOUNT_POINT" -quiet || true
@@ -422,8 +430,8 @@ jobs:
           # (Apple Silicon hardware launched on Big Sur/11.0 — arm64 binaries
           # CANNOT declare minos < 11). Anything higher than the arch's floor
           # major means the runner SDK leaked into the build.
-          BIN="$APP/Contents/MacOS/pi-dashboard"
-          if [ -f "$BIN" ]; then
+          BIN=$(find "$APP/Contents/MacOS" -maxdepth 1 -type f 2>/dev/null | head -1)
+          if [ -n "$BIN" ] && [ -f "$BIN" ]; then
             # Capture minos via a state-machine awk that's tolerant of otool's
             # actual layout (LC_BUILD_VERSION header is followed by cmd /
             # cmdsize / platform / minos lines, then the next Load command).
