@@ -63,9 +63,11 @@ export function registerPiCoreRoutes(
 	fastify.post<{ Body: PiCoreUpdateRequest }>(
 		"/api/pi-core/update",
 		async (request, reply) => {
-			// Mode-based delegation: "all" / "extensions" run a single
-			// `pi update --all|--extensions` on the resolved pi. See change:
-			// align-pi-update-with-resolved-pi.
+			// Mode-based delegation via updateViaPi. "extensions" → single
+			// `pi update --extensions`. "all" → TWO steps: pi (self-update +
+			// in-place fallback) AND extensions — NOT a monolithic `pi update
+			// --all` (which declines self-update on a managed/local pi with no
+			// fallback). See change: align-pi-update-with-resolved-pi.
 			const mode = request.body?.mode;
 			if (mode === "all" || mode === "extensions") {
 				try {

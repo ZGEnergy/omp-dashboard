@@ -398,10 +398,15 @@ export class PiCoreUpdater {
 	}
 
 	/**
-	 * Delegate a whole-scope update to the resolved pi's own updater in a
-	 * single invocation: `mode: "all"` → `pi update --all` (pi + extensions),
-	 * `mode: "extensions"` → `pi update --extensions`. Serializes through the
-	 * shared busy-lock. See change: align-pi-update-with-resolved-pi.
+	 * Update a whole scope via the resolved pi. NOT a monolithic `pi update
+	 * --all`: `mode: "all"` runs TWO steps — pi via runPiSelfUpdateWithFallback
+	 * (`pi update --self`, then in-place install when pi declines a non-global
+	 * install) PLUS `pi update --extensions`; `mode: "extensions"` runs only
+	 * `pi update --extensions`. The split gives the pi step the in-place
+	 * fallback that managed/local installs need — pi's own `--all` declines
+	 * self-update on those with no fallback, leaving the spawned pi stale.
+	 * Serializes through the shared busy-lock.
+	 * See change: align-pi-update-with-resolved-pi.
 	 */
 	async updateViaPi(
 		mode: "all" | "extensions",
