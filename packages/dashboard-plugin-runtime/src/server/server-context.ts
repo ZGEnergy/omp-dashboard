@@ -112,6 +112,22 @@ export type SpawnSessionFn = (opts: PluginSpawnOptions) => Promise<PluginSpawnRe
  */
 export type AbortSessionFn = (sessionId: string) => boolean;
 
+/**
+ * Publish a value under `name` into the host-owned cross-plugin service
+ * registry (last write wins). In-process only — values never cross the
+ * bridge. See change: register-plugin-automation-events.
+ */
+export type ProvideFn = (name: string, value: unknown) => void;
+
+/**
+ * Read a value previously published via `provide(name, ...)`. Returns
+ * `undefined` when nothing was provided under `name` (never throws). The
+ * loader's topological order (manifest.dependsOn) guarantees a provider's
+ * registerPlugin runs before a dependent that declares it.
+ * See change: register-plugin-automation-events.
+ */
+export type ConsumeFn = <T = unknown>(name: string) => T | undefined;
+
 /** Full ServerPluginContext API exposed to plugin server entries. */
 export interface ServerPluginContext {
   fastify: FastifyInstance;
@@ -136,6 +152,16 @@ export interface ServerPluginContext {
    * automation-ui-mockup-parity.
    */
   abortSession: AbortSessionFn;
+  /**
+   * Publish a value other plugins can consume. See change:
+   * register-plugin-automation-events.
+   */
+  provide: ProvideFn;
+  /**
+   * Consume a value published by another plugin. Returns `undefined` when
+   * absent. See change: register-plugin-automation-events.
+   */
+  consume: ConsumeFn;
   getPluginConfig<T = Record<string, unknown>>(): T;
   updatePluginConfig<T = Record<string, unknown>>(partial: Partial<T>): Promise<void>;
   logger: PluginLogger;
@@ -153,6 +179,8 @@ export interface ServerContextDeps {
   sendToSession: SendToSessionFn;
   spawnSession: SpawnSessionFn;
   abortSession: AbortSessionFn;
+  provide: ProvideFn;
+  consume: ConsumeFn;
   getPluginConfig: (pluginId: string) => Record<string, unknown>;
   updatePluginConfig: (pluginId: string, partial: Record<string, unknown>) => Promise<void>;
 }
@@ -177,6 +205,8 @@ export function createServerPluginContext(
     sendToSession: deps.sendToSession,
     spawnSession: deps.spawnSession,
     abortSession: deps.abortSession,
+    provide: deps.provide,
+    consume: deps.consume,
 
     getPluginConfig<T>(): T {
       return deps.getPluginConfig(pluginId) as T;

@@ -10,6 +10,7 @@
 import type { ServerPluginContext } from "@blackbelt-technology/dashboard-plugin-runtime/server";
 import { stateStore } from "./state-store.js";
 import { renderSessionFlowActions } from "./render-actions.js";
+import { wireFlowAutomationActions } from "./automation-actions.js";
 
 const PLUGIN_ID = "flows";
 
@@ -19,6 +20,16 @@ const PLUGIN_ID = "flows";
 export async function registerPlugin(ctx: ServerPluginContext): Promise<void> {
   const { logger, broadcastToSubscribers, registerBrowserHandler } = ctx;
   logger.info("flows-plugin server entry activated (server-driven intents)");
+
+  // Register flows as automation actions (flows.run/resume/cancel) into the
+  // automation plugin's action registry, consumed via the cross-plugin
+  // service seam. No-ops when automation is absent. See change:
+  // register-plugin-automation-events.
+  wireFlowAutomationActions(
+    (name) => ctx.consume(name),
+    (m) => logger.info(m),
+    (m) => logger.warn(m),
+  );
 
   /**
    * Broadcast the current intent tree for one session's slot.

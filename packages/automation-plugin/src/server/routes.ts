@@ -19,7 +19,7 @@
  */
 import os from "node:os";
 import type { FastifyInstance } from "fastify";
-import type { AutomationConfig, AutomationScope } from "../shared/automation-types.js";
+import type { ActionDescriptor, AutomationConfig, AutomationScope } from "../shared/automation-types.js";
 
 /** Phase-1 registered trigger kinds (mirrors the server registry). */
 const KNOWN_KINDS = new Set(["schedule"]);
@@ -43,6 +43,12 @@ export interface AutomationRouteHooks {
     cwd?: string;
     runId: string;
   }) => { ok: boolean; error?: string };
+  /**
+   * Registered automation actions resolved for a cwd (availability +
+   * enum options). Reads the live action registry shared with the engine.
+   * See change: register-plugin-automation-events.
+   */
+  listActions?: (cwd?: string) => ActionDescriptor[];
 }
 
 export function mountAutomationRoutes(
@@ -91,6 +97,12 @@ export function mountAutomationRoutes(
       return { error: res.error ?? "stop failed" };
     }
     return { ok: true };
+  });
+
+  fastify.get("/api/plugins/automation/actions", async (req) => {
+    const q = (req.query ?? {}) as { cwd?: string };
+    if (!hooks.listActions) return { actions: [] };
+    return { actions: hooks.listActions(q.cwd) };
   });
 
   fastify.get("/api/plugins/automation/trigger-kinds", async () => {

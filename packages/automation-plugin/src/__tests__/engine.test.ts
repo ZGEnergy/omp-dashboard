@@ -10,6 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createEngine, buildRunPrompt, effectiveVisibility } from "../server/engine.js";
+import { ActionRegistry } from "../server/action-registry.js";
 import { listRuns } from "../server/run-store.js";
 import type { DiscoveredAutomation } from "../shared/automation-types.js";
 
@@ -91,6 +92,30 @@ describe("buildRunPrompt", () => {
   });
   it("emits the $skill token for skill actions", () => {
     expect(buildRunPrompt(skillAutomation("s"))).toBe("$recent-code-bugfix");
+  });
+  it("delegates to a registered plugin action's buildPrompt with the payload", () => {
+    const reg = new ActionRegistry();
+    reg.register({
+      id: "flows.run",
+      source: "flows",
+      label: "Run",
+      buildPrompt: ({ payload }) => `/flows run ${payload.flow as string} :: ${payload.task as string}`,
+    });
+    const a: DiscoveredAutomation = {
+      name: "f",
+      scope: "folder",
+      dir: "/tmp/x/.pi/automation/f",
+      valid: true,
+      config: {
+        on: { kind: "schedule", cron: "* * * * *" },
+        action: { kind: "flows.run", payload: { flow: "nightly", task: "build" } },
+        model: "@fast",
+        mode: "local",
+        sandbox: "workspace-write",
+        concurrency: "skip",
+      },
+    };
+    expect(buildRunPrompt(a, reg)).toBe("/flows run nightly :: build");
   });
 });
 

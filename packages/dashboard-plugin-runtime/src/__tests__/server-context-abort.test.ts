@@ -21,6 +21,8 @@ function deps(abortSession: ServerContextDeps["abortSession"]): ServerContextDep
     sendToSession: () => true,
     spawnSession: async () => ({ success: true }),
     abortSession,
+    provide: () => {},
+    consume: () => undefined,
     getPluginConfig: () => ({}),
     updatePluginConfig: async () => {},
   };

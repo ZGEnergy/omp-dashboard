@@ -607,6 +607,12 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // out to raw-event subscribers. See change: add-goal-continuation-plugin.
   const pluginPiHandlers = new Map<string, Array<(msg: unknown) => void>>();
   const pluginRawEventSubs = new Set<(sessionId: string, event: unknown) => void>();
+  // Host-owned cross-plugin service registry backing ServerPluginContext
+  // provide/consume. One instance shared across every plugin context; the
+  // loader's topological order guarantees a provider's registerPlugin runs
+  // before a dependent's consume. In-process only.
+  // See change: register-plugin-automation-events.
+  const pluginServiceRegistry = new Map<string, unknown>();
   function dispatchPluginPiMessage(messageType: string, msg: unknown): void {
     const arr = pluginPiHandlers.get(messageType);
     if (!arr) return;
@@ -1438,6 +1444,9 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
                 if (!trusted) return false;
                 return piGateway.sendToSession(sessionId, { type: "abort", sessionId });
               },
+              provide: (name, value) => { pluginServiceRegistry.set(name, value); },
+              consume: <T = unknown>(name: string) =>
+                pluginServiceRegistry.get(name) as T | undefined,
               registerBrowserHandler: (type, handler) =>
                 browserGateway.registerHandler(type, (msg, ws) =>
                   handler(msg, ws as unknown),

@@ -23,8 +23,12 @@ import type { ServerPluginContext } from "@blackbelt-technology/dashboard-plugin
 import type { AutomationScope, Visibility } from "../shared/automation-types.js";
 import { mountAutomationRoutes } from "./routes.js";
 import type { Engine } from "./engine.js";
+import { ActionRegistry, createActionRegistryWithBuiltins } from "./action-registry.js";
 
 const PLUGIN_ID = "automation";
+
+/** Service-seam key the action registry is published under. */
+export const ACTION_REGISTRY_SERVICE = "automation.action-registry";
 
 interface AutomationPluginConfig {
   defaultVisibility?: Visibility;
@@ -38,13 +42,25 @@ interface AutomationPluginConfig {
  *  once it inits (~1 s after boot). */
 let engineRef: Engine | null = null;
 
+/** Action registry — created + published synchronously at registerPlugin so
+ *  later-loaded plugins (e.g. flows, depends-on automation) can consume it
+ *  before the engine inits ~1 s later. The engine reuses this same instance. */
+let actionRegistryRef: ActionRegistry | null = null;
+
 export async function registerPlugin(ctx: ServerPluginContext): Promise<void> {
   ctx.logger.info("automation-plugin server entry activated");
+  // Create + publish the action registry SYNCHRONOUSLY (before any dependent
+  // plugin's registerPlugin runs) so consumers see it. See change:
+  // register-plugin-automation-events.
+  const actionRegistry = createActionRegistryWithBuiltins({ warn: (m) => ctx.logger.warn(m) });
+  actionRegistryRef = actionRegistry;
+  ctx.provide(ACTION_REGISTRY_SERVICE, actionRegistry);
   // Mount REST routes synchronously (must register before fastify.listen).
   // Handler bodies lazy-import heavy modules so this stays cheap.
   mountAutomationRoutes(ctx.fastify, {
     runNow: ({ scope, cwd, name }) => runNowViaEngine(scope, cwd, name),
     stopRun: ({ runId }) => stopRunViaEngine(runId),
+    listActions: (cwd) => actionRegistry.descriptorsForCwd(cwd ?? process.cwd()),
   });
   // Detach: do not block server boot on engine init / heavy imports, and
   // delay past the immediate post-boot window so short integration tests
@@ -102,6 +118,7 @@ async function initEngine(ctx: ServerPluginContext): Promise<void> {
   const engine = createEngine({
     spawnSession: (opts) => ctx.spawnSession(opts),
     abortSession: (id) => ctx.abortSession(id),
+    ...(actionRegistryRef ? { actionRegistry: actionRegistryRef } : {}),
     listScopes,
     config: pluginConfig,
     homeDir,
@@ -262,6 +279,7 @@ async function runNowViaEngine(
       ? { homeDir: base, scanGlobal: true, scanFolder: false }
       : { repoRoot: base, scanFolder: true, scanGlobal: false },
     eng.registry.kinds(),
+    eng.actionRegistry.ids(),
   ).find((a) => a.name === name && a.scope === scope && a.valid);
   if (!found) return { ok: false, error: `automation "${name}" not found or invalid in ${scope} scope` };
   const r = eng.startRunFor(found);
