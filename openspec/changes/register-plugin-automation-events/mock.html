@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Automation × Plugin Actions — full design mock</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#11151f; --panel-2:#161b27; --line:#222a3a;
+    --line-2:#2c3650; --txt:#e6ebf5; --muted:#8a95ad; --muted-2:#5d6781;
+    --accent:#6aa6ff; --accent-2:#3a7bd5; --good:#39d98a; --warn:#ffb454;
+    --chip:#1b2233; --flow:#b78bff; --git:#f0883e; --slack:#36c5f0; --radius:12px;
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 800px at 70% -10%,#16203a 0%,var(--bg) 55%);
+    color:var(--txt);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
+    min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:36px 16px}
+  .wrap{width:100%;max-width:1220px;display:grid;grid-template-columns:1fr 392px;gap:24px}
+  @media(max-width:1000px){.wrap{grid-template-columns:1fr}}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* dialog shell */
+  .dialog{background:linear-gradient(180deg,var(--panel) 0%,#0e121b 100%);
+    border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.55)}
+  .dlg-head{display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--line)}
+  .dlg-head .ico{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:linear-gradient(135deg,#2a3a5e,#1a2336);border:1px solid var(--line-2);font-size:18px}
+  .dlg-head h2{margin:0;font-size:15px;font-weight:650}
+  .dlg-head .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .dlg-head .scopepill{margin-left:auto;font-size:11px;color:var(--accent);
+    background:rgba(106,166,255,.12);border:1px solid rgba(106,166,255,.3);padding:4px 10px;border-radius:999px}
+  .body{padding:18px 20px;display:flex;flex-direction:column;gap:16px}
+
+  .group{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel-2)}
+  .group > .g-head{display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--line)}
+  .group > .g-head .num{width:20px;height:20px;border-radius:6px;background:#202a3f;color:var(--accent);
+    font-size:11px;font-weight:700;display:grid;place-items:center}
+  .group > .g-head .t{font-size:12.5px;font-weight:600;letter-spacing:.3px}
+  .group > .g-head .hint{margin-left:auto;font-size:11px;color:var(--muted-2)}
+  .g-body{padding:14px}
+  .field{margin-bottom:13px}.field:last-child{margin-bottom:0}
+  label.lbl{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:6px}
+  .ctl{width:100%;background:#0c1019;border:1px solid var(--line-2);border-radius:9px;color:var(--txt);padding:9px 11px;font-size:13px;outline:none}
+  .ctl:focus{border-color:var(--accent-2);box-shadow:0 0 0 3px rgba(58,123,213,.18)}
+  textarea.ctl{resize:vertical;min-height:70px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+  select.ctl{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+    background-position:calc(100% - 18px) 17px,calc(100% - 13px) 17px;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+  .help{font-size:10.5px;color:var(--muted-2);margin-top:5px}
+
+  .seg{display:flex;background:#0c1019;border:1px solid var(--line-2);border-radius:9px;padding:3px;gap:3px}
+  .seg button{flex:1;border:0;background:transparent;color:var(--muted);font-size:12px;font-weight:600;padding:7px 8px;border-radius:6px;cursor:pointer}
+  .seg button.on{background:linear-gradient(180deg,#27406e,#1c2d4d);color:#fff}
+
+  /* ── ACTION PICKER (grouped + searchable) ── */
+  .picker{border:1px solid var(--line-2);border-radius:10px;background:#0c1019;overflow:hidden}
+  .picker .search{display:flex;align-items:center;gap:9px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .picker .search input{flex:1;background:transparent;border:0;outline:none;color:var(--txt);font-size:13px}
+  .picker .search .cnt{font-size:10.5px;color:var(--muted-2)}
+  .acc{border-bottom:1px solid #1a2030}
+  .acc:last-child{border-bottom:0}
+  .acc .ah{display:flex;align-items:center;gap:9px;padding:9px 12px;cursor:pointer;user-select:none}
+  .acc .ah .car{color:var(--muted-2);font-size:10px;width:10px;transition:.15s}
+  .acc.open .ah .car{transform:rotate(90deg)}
+  .acc .ah .src{font-size:12px;font-weight:650;letter-spacing:.3px}
+  .acc .ah .badge{font-size:10px;color:var(--muted);background:#161d2c;border:1px solid var(--line);padding:1px 8px;border-radius:999px}
+  .acc .ah .meta{margin-left:auto;font-size:10.5px;color:var(--muted-2)}
+  .acc .items{display:none;padding:4px 8px 10px 30px;gap:6px;grid-template-columns:1fr 1fr}
+  .acc.open .items{display:grid}
+  .it{display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:8px;background:#0e131e;padding:8px 10px;cursor:pointer}
+  .it:hover{border-color:#3a445e}
+  .it.on{border-color:var(--flow);box-shadow:0 0 0 2px rgba(183,139,255,.18);background:linear-gradient(180deg,#1a142b,#0e0c17)}
+  .it .id{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  .it .id b{color:var(--muted-2);font-weight:500}
+  .it .d{font-size:10px;color:var(--muted);margin-left:auto}
+  .acc.disabled{opacity:.5}
+  .acc.disabled .ah .meta{color:var(--warn)}
+  .dot{width:8px;height:8px;border-radius:50%}
+
+  /* dynamic payload */
+  .payload{margin-top:14px;border:1px dashed var(--line-2);border-radius:10px;background:linear-gradient(180deg,#0f0b18,#0c0a14);padding:13px}
+  .payload .ph{display:flex;align-items:center;gap:8px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--flow);margin-bottom:11px}
+  .payload .ph .auto{margin-left:auto;font-size:10px;text-transform:none;letter-spacing:0;color:var(--muted-2)}
+
+  .foot{display:flex;align-items:center;gap:10px;padding:15px 20px;border-top:1px solid var(--line);background:#0c1019}
+  .foot .files{font-size:11px;color:var(--muted-2)}
+  .foot .files code{color:var(--muted);background:#11151f;padding:1px 6px;border-radius:5px}
+  .btn{margin-left:auto;border:1px solid var(--line-2);background:#161d2c;color:var(--txt);padding:9px 16px;border-radius:9px;font-weight:600;font-size:13px;cursor:pointer}
+  .btn.primary{margin-left:8px;background:linear-gradient(180deg,#3a7bd5,#2a5bb0);border-color:#3a7bd5;color:#fff}
+
+  .side{display:flex;flex-direction:column;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .card h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)}
+  .mono{font:12px/1.7 ui-monospace,Menlo,monospace;color:var(--muted)}
+  .mono .k{color:var(--flow)} .mono .v{color:var(--good)} .mono b{color:var(--txt)}
+  .legend{font-size:11.5px;color:var(--muted);line-height:1.8}
+  .legend b{color:var(--txt)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ════ DIALOG ════ -->
+  <div class="dialog">
+    <div class="dlg-head">
+      <div class="ico">🤖</div>
+      <div><h2>New Automation</h2><div class="sub">folder scope · ~/code/acme-api</div></div>
+      <div class="scopepill">armed on save</div>
+    </div>
+
+    <div class="body">
+
+      <!-- 1 · IDENTITY -->
+      <div class="group">
+        <div class="g-head"><span class="num">1</span><span class="t">IDENTITY</span></div>
+        <div class="g-body">
+          <div class="field"><label class="lbl">Name</label>
+            <input class="ctl" value="nightly-release-flow" /></div>
+        </div>
+      </div>
+
+      <!-- 2 · TRIGGER (= "event", inbound) -->
+      <div class="group">
+        <div class="g-head"><span class="num">2</span><span class="t">TRIGGER · when it runs</span>
+          <span class="hint">term reserved: “event” = inbound trigger</span></div>
+        <div class="g-body">
+          <div class="seg" style="margin-bottom:12px">
+            <button class="on">⏰ Scheduled</button><button>OpenSpec</button><button>Git</button><button>File</button>
+          </div>
+          <div class="field"><label class="lbl">Cron</label>
+            <input class="ctl" value="0 2 * * *" />
+            <div class="help">Every day at 02:00 · 🟢 next: tomorrow 02:00</div></div>
+        </div>
+      </div>
+
+      <!-- 3 · ACTION (= registered, outbound, namespaced) -->
+      <div class="group">
+        <div class="g-head"><span class="num">3</span><span class="t">ACTION · what it does</span>
+          <span class="hint">contributed by installed plugins · namespaced</span></div>
+        <div class="g-body">
+
+          <div class="picker">
+            <div class="search">🔍
+              <input value="" placeholder="Filter 9 actions across 4 sources…" />
+              <span class="cnt">9 actions</span>
+            </div>
+
+            <!-- Core (always present, open) -->
+            <div class="acc open">
+              <div class="ah"><span class="car">▶</span><span class="dot" style="background:var(--accent)"></span>
+                <span class="src">Core</span><span class="badge">built-in</span><span class="meta">2 actions</span></div>
+              <div class="items">
+                <div class="it"><span class="id"><b>core.</b>prompt</span><span class="d">seed prompt</span></div>
+                <div class="it"><span class="id"><b>core.</b>skill</span><span class="d">$skill</span></div>
+              </div>
+            </div>
+
+            <!-- Flows (open, selected) -->
+            <div class="acc open">
+              <div class="ah"><span class="car">▶</span><span class="dot" style="background:var(--flow)"></span>
+                <span class="src">Flows</span><span class="badge">plugin</span><span class="meta">4 flows in this cwd</span></div>
+              <div class="items">
+                <div class="it on"><span class="id"><b>flows.</b>run</span><span class="d">run a flow</span></div>
+                <div class="it"><span class="id"><b>flows.</b>resume</span><span class="d">resume run</span></div>
+                <div class="it"><span class="id"><b>flows.</b>cancel</span><span class="d">cancel run</span></div>
+                <div class="it"><span class="id"><b>flows.</b>list</span><span class="d">report</span></div>
+              </div>
+            </div>
+
+            <!-- Git (collapsed) -->
+            <div class="acc">
+              <div class="ah"><span class="car">▶</span><span class="dot" style="background:var(--git)"></span>
+                <span class="src">Git</span><span class="badge">plugin</span><span class="meta">3 actions ▸</span></div>
+              <div class="items">
+                <div class="it"><span class="id"><b>git.</b>commit</span></div>
+                <div class="it"><span class="id"><b>git.</b>tag</span></div>
+                <div class="it"><span class="id"><b>git.</b>push</span></div>
+              </div>
+            </div>
+
+            <!-- Slack (not installed → dimmed, gated by available(cwd)) -->
+            <div class="acc disabled">
+              <div class="ah"><span class="car">▶</span><span class="dot" style="background:var(--slack)"></span>
+                <span class="src">Slack</span><span class="badge">plugin</span><span class="meta">⚠ not installed — hidden by default</span></div>
+            </div>
+          </div>
+
+          <!-- DYNAMIC PAYLOAD for flows.run -->
+          <div class="payload">
+            <div class="ph">⚡ flows.run payload
+              <span class="auto">auto-generated from action schema</span></div>
+            <div class="field"><label class="lbl">Flow <span style="color:var(--flow)">●</span> (enum — live from this cwd)</label>
+              <select class="ctl">
+                <option>release-checklist</option>
+                <option selected>nightly-build-and-tag</option>
+                <option>changelog-digest</option>
+                <option>security-audit</option>
+              </select>
+              <div class="help">4 flows discovered in .pi/flows · refreshed from pi <code>flows_list</code></div></div>
+            <div class="field"><label class="lbl">Task (string)</label>
+              <textarea class="ctl">Build, run the full test matrix, bump the patch version, tag the release. Stop and report if any gate fails.</textarea>
+              <div class="help">Passed as the flow's initial task input.</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4 · ADVANCED -->
+      <div class="group">
+        <div class="g-head"><span class="num">4</span><span class="t">ADVANCED</span>
+          <span class="hint">model · mode · sandbox · concurrency · visibility ▸</span></div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <div class="files">writes <code>.pi/automation/nightly-release-flow/automation.yaml</code></div>
+      <button class="btn">Cancel</button><button class="btn primary">Create automation</button>
+    </div>
+  </div>
+
+  <!-- ════ SIDE ════ -->
+  <div class="side">
+    <div class="card"><h3>Naming — ambiguity killed</h3>
+      <div class="legend">
+        <b>event</b> = inbound TRIGGER (cron, git push, openspec) — what fires it.<br/>
+        <b>action</b> = outbound REGISTERED capability (core.prompt, flows.run) — what it does.<br/>
+        One word per direction. No collision in YAML, docs, or UI.
+      </div>
+    </div>
+
+    <div class="card"><h3>Namespacing — no clutter, no clash</h3>
+      <div class="mono">
+id = <span class="v">"&lt;source&gt;.&lt;verb&gt;"</span><br/>
+&nbsp;&nbsp;<span class="k">flows.run</span> ≠ <span class="k">git.run</span> ≠ bare run<br/>
+&nbsp;&nbsp;source owns its group + ≤12 actions<br/>
+&nbsp;&nbsp;available(cwd) ⇒ whole group hidden
+      </div>
+    </div>
+
+    <div class="card"><h3>Clutter controls (in order)</h3>
+      <div class="legend">
+        1. <b>available(cwd)</b> — uninstalled / N/A sources don't render.<br/>
+        2. <b>collapse by source</b> — one accordion row per plugin.<br/>
+        3. <b>search box</b> — auto-shows past ~8 actions; type <code>flow</code> → jump.<br/>
+        4. <b>cap ≤12/plugin</b> — registry warns + truncates beyond.
+      </div>
+    </div>
+
+    <div class="card"><h3>What flows registers</h3>
+      <div class="mono">
+ctx.<span class="k">provide</span>(<span class="v">"automation.action"</span>,{<br/>
+&nbsp;&nbsp;source:<span class="v">"flows"</span>, id:<span class="v">"flows.run"</span>,<br/>
+&nbsp;&nbsp;available:(cwd)=&gt;hasFlows(cwd),<br/>
+&nbsp;&nbsp;payloadSchema:{<br/>
+&nbsp;&nbsp;&nbsp;flow:{type:<span class="v">"enum"</span>,<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;options:(cwd)=&gt;listFlows(cwd)},<br/>
+&nbsp;&nbsp;&nbsp;task:{type:<span class="v">"string"</span>,multiline:1}<br/>
+&nbsp;&nbsp;}, dispatch:(payload,run)=&gt;… })
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
