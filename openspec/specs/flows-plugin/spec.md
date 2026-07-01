@@ -128,27 +128,22 @@ The availability cache SHALL remain closed-by-default (returns `false` until the
 
 ### Requirement: Flows registers automation actions
 
-The flows plugin SHALL declare `dependsOn: ["automation"]`, consume the automation action registry at startup, and register the actions `flows.run`, `flows.resume`, and `flows.cancel`. Each action's `available(cwd)` SHALL return true only when one or more flows exist in that cwd. Registration SHALL no-op gracefully (logged) when the action registry is absent.
+The flows plugin SHALL register `flows.run` as an automation action that dispatches by **emitting a configured event** into the run session (not by seeding a slash-command prompt), gated on flows existing in the cwd. `flows.run` SHALL declare a `flow` enum field (options = flows discovered in the cwd) and a `task` multiline field. Its `buildEvent` SHALL return `{ eventType: "flow:run", data: { flowName, task } }`; a malformed `flow` id SHALL emit nothing (`null`). The run SHALL finalize on `agent_end`.
 
-`flows.run` SHALL declare a `payloadSchema` with a `flow` enum field whose options resolve to the flows discovered in the cwd (from the `flows_list` source) and a `task` multiline string field. Its `dispatch` SHALL run the selected flow with the given task via the flows plugin's existing flow-run path.
+The flows plugin SHALL NOT register `flows.resume` or `flows.cancel` — pi-flows exposes no run-scoped resume/cancel command reachable by the automation dispatch path. Registration SHALL be a no-op (with a warning) when the action registry is absent, and SHALL honor the registry's rejection result.
 
-#### Scenario: Actions available only where flows exist
+#### Scenario: flows.run emits flow:run
 
-- **WHEN** the dialog requests actions in a cwd containing flows
-- **THEN** the Flows group SHALL be enabled and `flows.run`/`flows.resume`/`flows.cancel` SHALL be selectable.
+- **WHEN** `flows.run` fires with `payload { flow: "test:x", task: "go" }`
+- **THEN** its `buildEvent` SHALL return `{ eventType: "flow:run", data: { flowName: "test:x", task: "go" } }`.
 
-#### Scenario: Disabled where no flows exist
+#### Scenario: malformed flow id emits nothing
 
-- **WHEN** the dialog requests actions in a cwd with no flows
-- **THEN** the Flows group SHALL be present but disabled with a reason and its actions SHALL NOT be selectable.
+- **WHEN** `flows.run` fires with a `flow` payload that is not `<ns>:<name>`
+- **THEN** its `buildEvent` SHALL return `null` and no event SHALL be emitted.
 
-#### Scenario: flows.run dispatches the selected flow
+#### Scenario: resume and cancel are not offered
 
-- **WHEN** an armed automation with `action.kind: flows.run`, `action.payload: { flow: "nightly-build-and-tag", task: "build and tag" }` fires
-- **THEN** the flows plugin SHALL run the `nightly-build-and-tag` flow seeded with the given task.
-
-#### Scenario: Registry absent degrades gracefully
-
-- **WHEN** the flows plugin loads and `consume("automation.action-registry")` returns undefined
-- **THEN** flows SHALL log and continue without registering actions, and SHALL NOT crash.
+- **WHEN** the flows plugin registers its actions
+- **THEN** neither `flows.resume` nor `flows.cancel` SHALL be present in the registry.
 

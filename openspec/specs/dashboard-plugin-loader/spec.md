@@ -6,6 +6,48 @@ This capability covers the **plugin loader runtime**: monorepo manifest discover
 
 The requirements below are layered: the design-level (contract) requirements come from change `dashboard-plugin-architecture`, and the implementation-level (runtime) requirements come from change `add-dashboard-shell-slots-runtime`. The motivating design notes live in `openspec/changes/dashboard-plugin-architecture/design.md`.
 ## Requirements
+### Requirement: Emit a configured event into a session
+
+`ServerPluginContext` SHALL expose `emitEventToSession(sessionId: string, eventType: string, data?: Record<string, unknown>): boolean`. It SHALL relay a `plugin_emit_event` control message to the target session over the bridge so the in-session bridge re-emits `eventType` with `data` on `pi.events`. It SHALL be gated to first-party / trusted plugins using the same gate as `spawnSession`/`abortSession`: an untrusted plugin SHALL receive a hook that returns `false` and sends nothing. A non-string or empty `eventType` SHALL return `false` without sending. It SHALL return `true` only when the control message is dispatched to a connected session.
+
+The host SHALL NOT enumerate or validate `eventType` against a fixed set — a plugin emits whatever event it registered.
+
+#### Scenario: Trusted plugin emits an event
+
+- **WHEN** a trusted plugin calls `ctx.emitEventToSession("sess-1", "flow:run", { flowName: "test:x", task: "go" })` for a connected session
+- **THEN** a `plugin_emit_event` control message carrying `eventType: "flow:run"` and the data SHALL be dispatched to that session and the call SHALL return `true`.
+
+#### Scenario: Untrusted plugin is denied
+
+- **WHEN** an untrusted plugin (manifest priority > 100) calls `ctx.emitEventToSession(...)`
+- **THEN** the call SHALL return `false` and SHALL send nothing.
+
+#### Scenario: Invalid event type
+
+- **WHEN** `emitEventToSession` is called with an empty string `eventType`
+- **THEN** it SHALL return `false` and SHALL send nothing.
+
+### Requirement: Prefix enumeration over the service board
+
+`ServerPluginContext` SHALL expose `consumeAll<T = unknown>(prefix: string): Array<{ key: string; value: T }>` returning every value published via `provide(name, …)` whose `name` starts with `prefix`, paired with its key. It SHALL read the same host-owned in-process service registry as `consume`; values SHALL NOT cross the bridge. Order of results is unspecified. An empty result SHALL be returned (never throw) when no key matches.
+
+`consumeAll` enables publish/collect: a producer `provide`s a namespaced key and a consumer enumerates the namespace lazily, independent of plugin load order.
+
+#### Scenario: Collect all publishers under a namespace
+
+- **WHEN** plugin A calls `provide("automation.action.flows", cA)` and plugin B calls `provide("automation.action.core", cB)`, then a consumer calls `consumeAll("automation.action.")`
+- **THEN** the consumer SHALL receive entries for both keys with values `cA` and `cB`.
+
+#### Scenario: Order independence
+
+- **WHEN** a consumer calls `consumeAll(prefix)` after all plugins have loaded
+- **THEN** it SHALL observe every matching contribution regardless of the order in which producers and the consumer were loaded.
+
+#### Scenario: No match
+
+- **WHEN** `consumeAll("nope.")` is called and no provided key starts with `nope.`
+- **THEN** it SHALL return an empty array and SHALL NOT throw.
+
 ### Requirement: Plugin runtime is a separate workspace package
 
 The plugin runtime SHALL live in its own monorepo workspace package `packages/dashboard-plugin-runtime/`. The package SHALL export at minimum the following entry points:
