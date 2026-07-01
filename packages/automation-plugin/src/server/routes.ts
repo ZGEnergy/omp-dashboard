@@ -29,6 +29,26 @@ function scopeBaseFor(scope: AutomationScope, cwd: string | undefined): string {
   return scope === "global" ? os.homedir() : (cwd ?? process.cwd());
 }
 
+/** Built-in action kinds always accepted (aliased to core.* at read time). */
+const BUILTIN_ACTION_KINDS = new Set(["prompt", "skill"]);
+
+/**
+ * Reject an automation whose `action.kind` is neither a built-in alias nor a
+ * registered action id, BEFORE it is written to disk. Mirrors the read-path
+ * validation so `/create` + `/update` cannot persist a config that `/list`
+ * would later mark invalid. See change: register-plugin-automation-events.
+ */
+function unknownActionKind(
+  config: AutomationConfig | undefined,
+  ids: ReadonlySet<string> | undefined,
+): string | undefined {
+  const kind = config?.action?.kind;
+  if (typeof kind !== "string" || kind.length === 0) return undefined; // writer surfaces shape errors
+  if (BUILTIN_ACTION_KINDS.has(kind)) return undefined;
+  if (ids?.has(kind)) return undefined;
+  return kind;
+}
+
 /** Optional hooks supplied by the engine for routes that need run control. */
 export interface AutomationRouteHooks {
   /** Trigger exactly one run of an automation now (manual fire). */
@@ -190,6 +210,11 @@ export function mountAutomationRoutes(
       reply.code(400);
       return { error: `invalid automation name: "${body.name}"` };
     }
+    const badKind = unknownActionKind(body.config, hooks.actionIds?.());
+    if (badKind) {
+      reply.code(400);
+      return { error: `unknown action kind: "${badKind}"` };
+    }
     const scope = body.scope ?? "folder";
     const base = scopeBaseFor(scope, body.cwd);
     try {
@@ -222,6 +247,11 @@ export function mountAutomationRoutes(
     if (!isValidAutomationName(body.name)) {
       reply.code(400);
       return { error: `invalid automation name: "${body.name}"` };
+    }
+    const badKind = unknownActionKind(body.config, hooks.actionIds?.());
+    if (badKind) {
+      reply.code(400);
+      return { error: `unknown action kind: "${badKind}"` };
     }
     const scope = body.scope ?? "folder";
     const base = scopeBaseFor(scope, body.cwd);
