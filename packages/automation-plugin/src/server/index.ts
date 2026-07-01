@@ -55,12 +55,28 @@ export async function registerPlugin(ctx: ServerPluginContext): Promise<void> {
   const actionRegistry = createActionRegistryWithBuiltins({ warn: (m) => ctx.logger.warn(m) });
   actionRegistryRef = actionRegistry;
   ctx.provide(ACTION_REGISTRY_SERVICE, actionRegistry);
+  // Per-cwd descriptor cache: descriptorsForCwd() runs each action's
+  // available(cwd) + enum options(cwd), which hit the filesystem (e.g. flows
+  // discovery). Cache briefly so a burst of `/actions` requests for one cwd
+  // does not re-walk disk per call; the TTL keeps it responsive to on-disk
+  // flow changes. See change: register-plugin-automation-events.
+  const descriptorCache = new Map<string, { ts: number; value: ReturnType<typeof actionRegistry.descriptorsForCwd> }>();
+  const DESCRIPTOR_TTL_MS = 3000;
+  function descriptorsForCwdCached(cwd: string) {
+    const hit = descriptorCache.get(cwd);
+    const now = Date.now();
+    if (hit && now - hit.ts < DESCRIPTOR_TTL_MS) return hit.value;
+    const value = actionRegistry.descriptorsForCwd(cwd);
+    descriptorCache.set(cwd, { ts: now, value });
+    return value;
+  }
   // Mount REST routes synchronously (must register before fastify.listen).
   // Handler bodies lazy-import heavy modules so this stays cheap.
   mountAutomationRoutes(ctx.fastify, {
     runNow: ({ scope, cwd, name }) => runNowViaEngine(scope, cwd, name),
     stopRun: ({ runId }) => stopRunViaEngine(runId),
-    listActions: (cwd) => actionRegistry.descriptorsForCwd(cwd ?? process.cwd()),
+    listActions: (cwd) => descriptorsForCwdCached(cwd ?? process.cwd()),
+    actionIds: () => actionRegistry.ids(),
   });
   // Detach: do not block server boot on engine init / heavy imports, and
   // delay past the immediate post-boot window so short integration tests

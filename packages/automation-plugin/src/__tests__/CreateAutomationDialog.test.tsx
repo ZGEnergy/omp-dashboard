@@ -164,6 +164,16 @@ describe("CreateAutomationDialog (redesign)", () => {
     });
   });
 
+  it("blocks core.skill submission when the skill field is empty (no `$` skill)", async () => {
+    const { getByTestId } = render(wrap(<CreateAutomationDialog cwd="/repo" onClose={() => {}} />));
+    fireEvent.change(getByTestId("create-name"), { target: { value: "sk" } });
+    fireEvent.click(getByTestId("create-action-core.skill"));
+    fireEvent.click(getByTestId("create-submit"));
+    // submit stays disabled / rejects — no create call fires with a bare "$"
+    await Promise.resolve();
+    expect(createAutomation).not.toHaveBeenCalled();
+  });
+
   it("renders a plugin action's schema-driven payload and writes kind + payload", async () => {
     listActions.mockResolvedValue([
       { id: "core.prompt", source: "core", label: "Prompt", available: true, payloadSchema: [] },

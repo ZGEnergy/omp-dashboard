@@ -7,9 +7,7 @@ Flow rendering for the pi-dashboard, packaged as a dedicated workspace plugin (`
 `SessionState.flowState` remains a typed field on the central `SessionState` (declared in `packages/shared/src/types.ts`) so both the plugin and the core client can reference it without an import cycle. The core `event-reducer.ts` continues to dispatch `flow_*` events, but the per-event reducer logic and the rendered UI are owned by this capability.
 
 The motivating design lives in `openspec/changes/extract-flows-as-plugin/design.md`.
-
 ## Requirements
-
 ### Requirement: Flow rendering is packaged as a workspace plugin
 The dashboard SHALL ship flow rendering as a dedicated workspace package at `packages/flows-plugin/`. The package SHALL declare a `pi-dashboard-plugin` manifest field claiming the slots that mount its UI components, and SHALL expose its reducer logic via an `exports` map so that `packages/client/src/lib/event-reducer.ts` can import it as a workspace dependency.
 
@@ -127,3 +125,30 @@ The availability cache SHALL remain closed-by-default (returns `false` until the
 #### Scenario: `flows:new` is not a signal
 - **WHEN** availability is computed for a session
 - **THEN** the presence of (or absence of) a `flows:new` command SHALL NOT affect the result (the command was removed upstream)
+
+### Requirement: Flows registers automation actions
+
+The flows plugin SHALL declare `dependsOn: ["automation"]`, consume the automation action registry at startup, and register the actions `flows.run`, `flows.resume`, and `flows.cancel`. Each action's `available(cwd)` SHALL return true only when one or more flows exist in that cwd. Registration SHALL no-op gracefully (logged) when the action registry is absent.
+
+`flows.run` SHALL declare a `payloadSchema` with a `flow` enum field whose options resolve to the flows discovered in the cwd (from the `flows_list` source) and a `task` multiline string field. Its `dispatch` SHALL run the selected flow with the given task via the flows plugin's existing flow-run path.
+
+#### Scenario: Actions available only where flows exist
+
+- **WHEN** the dialog requests actions in a cwd containing flows
+- **THEN** the Flows group SHALL be enabled and `flows.run`/`flows.resume`/`flows.cancel` SHALL be selectable.
+
+#### Scenario: Disabled where no flows exist
+
+- **WHEN** the dialog requests actions in a cwd with no flows
+- **THEN** the Flows group SHALL be present but disabled with a reason and its actions SHALL NOT be selectable.
+
+#### Scenario: flows.run dispatches the selected flow
+
+- **WHEN** an armed automation with `action.kind: flows.run`, `action.payload: { flow: "nightly-build-and-tag", task: "build and tag" }` fires
+- **THEN** the flows plugin SHALL run the `nightly-build-and-tag` flow seeded with the given task.
+
+#### Scenario: Registry absent degrades gracefully
+
+- **WHEN** the flows plugin loads and `consume("automation.action-registry")` returns undefined
+- **THEN** flows SHALL log and continue without registering actions, and SHALL NOT crash.
+

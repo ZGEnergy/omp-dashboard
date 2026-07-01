@@ -49,6 +49,12 @@ export interface AutomationRouteHooks {
    * See change: register-plugin-automation-events.
    */
   listActions?: (cwd?: string) => ActionDescriptor[];
+  /**
+   * All registered action ids (cwd-independent), for schema validation on the
+   * `/list` + `/definition` routes so plugin-backed automations parse as valid.
+   * See change: register-plugin-automation-events.
+   */
+  actionIds?: () => ReadonlySet<string>;
 }
 
 export function mountAutomationRoutes(
@@ -136,6 +142,7 @@ export function mountAutomationRoutes(
     const automations = scanAutomations(
       { repoRoot: q.cwd, homeDir: os.homedir(), scanFolder: !!q.cwd, scanGlobal: true },
       KNOWN_KINDS,
+      hooks.actionIds?.(),
     );
     return { automations };
   });
@@ -256,7 +263,7 @@ export function mountAutomationRoutes(
       reply.code(404);
       return { error: "automation not found" };
     }
-    const { config, error } = parseAutomationYaml(rawText, KNOWN_KINDS);
+    const { config, error } = parseAutomationYaml(rawText, KNOWN_KINDS, hooks.actionIds?.());
     if (!config) {
       reply.code(422);
       return { error: error ?? "invalid automation.yaml" };

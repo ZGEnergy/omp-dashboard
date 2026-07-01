@@ -76,6 +76,27 @@ describe("registerFlowAutomationActions", () => {
       .toBe("/test:capabilities do it");
     expect(run.buildPrompt({ payload: { flow: "", task: "x" }, automation: {} })).toBe("");
   });
+
+  it("rejects malformed flow/runId payloads (no mangled slash command)", () => {
+    const { registry, regs } = capturingRegistry();
+    registerFlowAutomationActions(registry, () => {});
+    const run = regs.find((r) => r.id === "flows.run")!;
+    const resume = regs.find((r) => r.id === "flows.resume")!;
+    const cancel = regs.find((r) => r.id === "flows.cancel")!;
+    // whitespace / control chars / missing ns shift the command boundary → empty
+    expect(run.buildPrompt({ payload: { flow: "test:cap x", task: "t" }, automation: {} })).toBe("");
+    expect(run.buildPrompt({ payload: { flow: "nocolon", task: "t" }, automation: {} })).toBe("");
+    expect(resume.buildPrompt({ payload: { flow: "a b:c" }, automation: {} })).toBe("");
+    expect(cancel.buildPrompt({ payload: { runId: "bad id" }, automation: {} })).toBe("");
+    expect(cancel.buildPrompt({ payload: { runId: "run-123" }, automation: {} })).toBe("/flows:cancel run-123");
+  });
+
+  it("warns and skips when a registration is rejected by the registry", () => {
+    const warn = vi.fn();
+    const registry: ActionRegistryLike = { register: (r) => r.id !== "flows.resume" };
+    registerFlowAutomationActions(registry, () => {}, warn);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("flows.resume"));
+  });
 });
 
 describe("wireFlowAutomationActions", () => {

@@ -73,60 +73,81 @@ export function discoverFlows(cwd: string): string[] {
   return out.sort();
 }
 
+/**
+ * A flow id is `<ns>:<name>` (from discoverFlows); a run id is an opaque
+ * token. Both are interpolated into slash commands, so anything with
+ * whitespace/control chars would shift the command boundary — reject it and
+ * emit no prompt (the run then seeds nothing rather than a mangled command).
+ */
+const FLOW_ID_RE = /^[\w.-]+:[\w.-]+$/;
+const RUN_ID_RE = /^[\w.-]+$/;
+
 /** Register flows.run/resume/cancel into a (structurally-typed) registry. */
 export function registerFlowAutomationActions(
   registry: ActionRegistryLike,
   log: (m: string) => void,
+  warn?: (m: string) => void,
 ): void {
   const hasFlows = (cwd: string) => discoverFlows(cwd).length > 0;
   const REASON = "no flows in this folder";
 
-  registry.register({
-    id: "flows.run",
-    source: "flows",
-    label: "Run a flow",
-    description: "Run a flow with a task.",
-    available: hasFlows,
-    unavailableReason: REASON,
-    payloadSchema: [
-      { key: "flow", label: "Flow", type: "enum", options: discoverFlows, help: "Discovered in .pi/flows/flows" },
-      { key: "task", label: "Task", type: "multiline", help: "Passed as the flow's initial task." },
-    ],
-    buildPrompt: ({ payload }) => {
-      const flow = String(payload.flow ?? "").trim();
-      const task = String(payload.task ?? "").trim();
-      if (!flow) return "";
-      return `/${flow}${task ? ` ${task}` : ""}`;
+  const registrations: ActionRegistrationLike[] = [
+    {
+      id: "flows.run",
+      source: "flows",
+      label: "Run a flow",
+      description: "Run a flow with a task.",
+      available: hasFlows,
+      unavailableReason: REASON,
+      payloadSchema: [
+        { key: "flow", label: "Flow", type: "enum", options: discoverFlows, help: "Discovered in .pi/flows/flows" },
+        { key: "task", label: "Task", type: "multiline", help: "Passed as the flow's initial task." },
+      ],
+      buildPrompt: ({ payload }) => {
+        const flow = String(payload.flow ?? "").trim();
+        const task = String(payload.task ?? "").trim();
+        if (!FLOW_ID_RE.test(flow)) return "";
+        return `/${flow}${task ? ` ${task}` : ""}`;
+      },
     },
-  });
-
-  registry.register({
-    id: "flows.resume",
-    source: "flows",
-    label: "Resume a run",
-    available: hasFlows,
-    unavailableReason: REASON,
-    payloadSchema: [{ key: "flow", label: "Flow", type: "enum", options: discoverFlows }],
-    buildPrompt: ({ payload }) => {
-      const flow = String(payload.flow ?? "").trim();
-      return flow ? `/flows:resume ${flow}` : "";
+    {
+      id: "flows.resume",
+      source: "flows",
+      label: "Resume a run",
+      available: hasFlows,
+      unavailableReason: REASON,
+      payloadSchema: [{ key: "flow", label: "Flow", type: "enum", options: discoverFlows }],
+      buildPrompt: ({ payload }) => {
+        const flow = String(payload.flow ?? "").trim();
+        return FLOW_ID_RE.test(flow) ? `/flows:resume ${flow}` : "";
+      },
     },
-  });
-
-  registry.register({
-    id: "flows.cancel",
-    source: "flows",
-    label: "Cancel a run",
-    available: hasFlows,
-    unavailableReason: REASON,
-    payloadSchema: [{ key: "runId", label: "Run id", type: "string" }],
-    buildPrompt: ({ payload }) => {
-      const runId = String(payload.runId ?? "").trim();
-      return runId ? `/flows:cancel ${runId}` : "";
+    {
+      id: "flows.cancel",
+      source: "flows",
+      label: "Cancel a run",
+      available: hasFlows,
+      unavailableReason: REASON,
+      payloadSchema: [{ key: "runId", label: "Run id", type: "string" }],
+      buildPrompt: ({ payload }) => {
+        const runId = String(payload.runId ?? "").trim();
+        return RUN_ID_RE.test(runId) ? `/flows:cancel ${runId}` : "";
+      },
     },
-  });
+  ];
 
-  log("[flows] registered automation actions: flows.run, flows.resume, flows.cancel");
+  const registered: string[] = [];
+  const rejected: string[] = [];
+  for (const reg of registrations) {
+    if (registry.register(reg)) registered.push(reg.id);
+    else rejected.push(reg.id);
+  }
+  if (registered.length > 0) {
+    log(`[flows] registered automation actions: ${registered.join(", ")}`);
+  }
+  if (rejected.length > 0) {
+    (warn ?? log)(`[flows] automation action registration rejected: ${rejected.join(", ")}`);
+  }
 }
 
 /**
@@ -144,5 +165,5 @@ export function wireFlowAutomationActions(
     warn("[flows] automation action registry unavailable; skipping action registration");
     return;
   }
-  registerFlowAutomationActions(reg, log);
+  registerFlowAutomationActions(reg, log, warn);
 }

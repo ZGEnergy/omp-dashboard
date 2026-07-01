@@ -31,7 +31,7 @@
 - [x] 5.1 Add `listActions(cwd)` to `packages/automation-plugin/src/client/api.ts`
 - [x] 5.2 Replace the `prompt|skill` segmented control in `CreateAutomationDialog.tsx` with the grouped accordion picker (group-by-source, search filter, disabled-with-reason, zero-results)
 - [x] 5.3 Render the schema-driven payload form from the selected action's `payloadSchema` (string/multiline/text/enum); empty schema → no form
-- [~] 5.4 Accessibility: aria-expanded groups, aria-pressed items, aria-label search, disabled-with-reason title; full focus-ring/44px/contrast polish per `mock-ux.html` deferred
+- [~] 5.4 Accessibility: aria-expanded groups, aria-pressed items, aria-label search, disabled-with-reason title; full focus-ring/44px/contrast polish deferred
 - [x] 5.5 Persist selected `kind` + `payload` into the create/update POST body
 
 ## 6. Flows plugin registers actions

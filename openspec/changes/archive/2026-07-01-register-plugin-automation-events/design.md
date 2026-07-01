@@ -6,7 +6,7 @@ Plugins load through `loadServerEntries` (`dashboard-plugin-runtime`) which alre
 
 First consumer: the flows plugin already models `action: "flow.run"` with `payload: { flow }` and gets its flow list from pi's `flows_list` message. It just has no way to offer that as an automation action.
 
-Chosen UI: Direction A (inline grouped accordion picker) — see `directions.html`, `mock-ux.html`. Selected over command-palette (B) and two-pane (C) for lowest build cost, best discoverability, and reuse of the current dialog structure.
+Chosen UI: Direction A (inline grouped accordion picker). Selected over command-palette (B) and two-pane (C) for lowest build cost, best discoverability, and reuse of the current dialog structure.
 
 ## Goals / Non-Goals
 
@@ -39,7 +39,7 @@ Registry key = `source.verb` (e.g. `flows.run`). Prevents collisions when many p
 The action registry lives in the engine and is also referenced by the kinds route. Replace the throwaway-registry pattern: the route returns descriptors from the live registry filtered by `available(cwd)`.
 
 **D5 — Dialog = inline accordion (Direction A).**
-Replace the `prompt|skill` segmented control with a grouped accordion: one collapsible group per source, search filter, disabled-with-reason for unavailable sources, schema-driven payload form below. ARIA: combobox over grouped listbox, focus-visible, 44px targets, reduced-motion. Reference `mock-ux.html`.
+Replace the `prompt|skill` segmented control with a grouped accordion: one collapsible group per source, search filter, disabled-with-reason for unavailable sources, schema-driven payload form below. ARIA: combobox over grouped listbox, focus-visible, 44px targets, reduced-motion.
 
 **D6 — Dispatch routing.**
 On run, the engine resolves `action.kind` → registered descriptor → `dispatch(payload, runCtx)`. `core.prompt`/`core.skill` dispatch via the existing seed-prompt path. `flows.run` dispatches into the flow-run path the flows plugin already owns.

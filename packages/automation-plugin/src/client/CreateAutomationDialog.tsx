@@ -274,8 +274,9 @@ export function CreateAutomationDialog({
   const needsEvents = !isScheduled && (activeCategory?.events.length ?? 0) > 0;
   const eventsMissing = needsEvents && selectedEvents.length === 0;
   const cronInvalid = isScheduled && !nextRun;
+  const skillMissing = actionId === "core.skill" && !skill.trim();
   const submitDisabled =
-    busy || categoryPlanned || eventsMissing || (isScheduled && cronInvalid) || !model;
+    busy || categoryPlanned || eventsMissing || (isScheduled && cronInvalid) || !model || skillMissing;
 
   function toggleEvent(ev: string): void {
     setSelectedEvents((prev) =>
@@ -291,6 +292,10 @@ export function CreateAutomationDialog({
     }
     if (categoryPlanned) {
       setError("This trigger category is not available yet.");
+      return;
+    }
+    if (actionId === "core.skill" && !skill.trim()) {
+      setError("Skill name is required.");
       return;
     }
     const onBlock: AutomationConfig["on"] = isScheduled
