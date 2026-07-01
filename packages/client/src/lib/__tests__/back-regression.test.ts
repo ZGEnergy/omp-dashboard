@@ -15,6 +15,7 @@ import {
   recordNavigation,
   predecessor,
   popNav,
+  initNavTracker,
 } from "../nav-tracker.js";
 
 const tracker = { predecessor, popNav };
@@ -189,5 +190,35 @@ describe("plugin overlay back — automations", () => {
     // URL (with its cwd), which computeBackTarget cannot reconstruct alone.
     expect(back).toHaveBeenCalledOnce();
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  // End-to-end: the run monitor is reached by wouter's raw `useLocation`
+  // (history.pushState), NOT App's wrapped navigate — so before the tracker
+  // observed pushState the launching route was never recorded and back fell to
+  // computeParent → "/" (the reported "goes home" bug). With the pushState
+  // patch the launching session is recorded and back history-walks to it.
+  // See change: fix-plugin-and-scoped-back-navigation.
+  it("run monitor opened via RAW pushState from a session → back returns to that session", () => {
+    resetNavStack("/");
+    const detach = initNavTracker();
+    const back = vi.fn();
+    window.history.back = back;
+    const navigate = vi.fn();
+    try {
+      // Simulate the real plugin/session-card path: raw pushState, no
+      // recordNavigation call.
+      window.history.pushState(null, "", "/session/abc"); // launching session (depth 1)
+      window.history.pushState(null, "", "/automation/run/S"); // run monitor (depth 2)
+
+      goBack(navigate, "/automation/run/S", tracker);
+
+      // predecessor /session/abc (depth 1) < run depth 2 → history.back() →
+      // the launching session, not "/".
+      expect(back).toHaveBeenCalledOnce();
+      expect(navigate).not.toHaveBeenCalled();
+    } finally {
+      detach();
+      window.history.replaceState(null, "", "/");
+    }
   });
 });
