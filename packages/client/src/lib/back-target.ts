@@ -46,8 +46,9 @@ function parentSession(params: Record<string, string>): string {
  * sorts by specificity regardless.
  */
 const STATIC_DESCRIPTORS: StaticRouteDescriptor[] = [
-  // depth 2 — session diff (parent is URL-computable).
+  // depth 2 — session diff + internal Monaco editor pane (parents URL-computable).
   { pattern: "/session/:id/diff", depth: 2, computeParent: parentSession },
+  { pattern: "/session/:id/editor", depth: 2, computeParent: parentSession },
   // depth 2 — ambiguous overlays (launching detail not encoded in URL) → cards.
   { pattern: "/folder/:cwd/openspec/*", depth: 2 },
   { pattern: "/folder/:cwd/pi-resources", depth: 2 },

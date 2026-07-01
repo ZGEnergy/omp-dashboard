@@ -53,6 +53,16 @@ describe("computeBackTarget", () => {
       expect(computeBackTarget("/session/abc/diff")).toBe("/session/abc");
     });
 
+    // Internal Monaco editor pane (change: add-internal-monaco-editor-pane),
+    // opened from a file-read preview's "Open" button. Was missing from the
+    // classifier → depth 0 → dead back button. See change:
+    // fix-plugin-and-scoped-back-navigation.
+    it("/session/:id/editor strips /editor → /session/:id (with ?file=)", () => {
+      expect(routeDepth("/session/abc/editor")).toBe(2);
+      expect(computeBackTarget("/session/abc/editor")).toBe("/session/abc");
+      expect(computeBackTarget("/session/abc/editor?file=AGENTS.md")).toBe("/session/abc");
+    });
+
     const ambiguous = [
       "/folder/Zm9v/openspec/my-change/proposal",
       "/folder/Zm9v/openspec/archive",

@@ -29,5 +29,5 @@
 ## 5. Verify + gate
 
 - [x] 5.1 All touched-project tests green (web, runtime, shared, automation). Remaining full-suite failures pre-existing + unrelated: 16× `pi-image-fit-extension` (`Jimp is not a constructor`, env), 1× `DiagnosticsSection` clipboard flake (passes in isolation). Types validated against worktree src (0 errors in touched files); root `tsc --noEmit` can't see cross-package edits in a worktree (symlinks → main repo)
-- [ ] 5.2 Manual smoke (dev) — pending human verification
+- [x] 5.2 Manual smoke (dev) — verified in running prod build. Found + fixed regression class the migration missed: `/session/:id/editor` (internal Monaco editor pane, opened via file-read preview "Open") was absent from `STATIC_DESCRIPTORS` → `routeDepth`=0 → `goBack` dead no-op. Added `{ pattern: "/session/:id/editor", depth: 2, computeParent: parentSession }` (mirrors `/diff`); `back-target.test.ts` case added; browser-verified Back → `/session/:id`
 - [ ] 5.3 CodeRabbit review gate + Biome ratchet — pending (Biome `quality:changed` runs root `tsc`, unreliable in this worktree; run on merge)
