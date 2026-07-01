@@ -813,6 +813,19 @@ export interface AttachProposalChangedExtensionMessage {
   attachedChange: string | null;
 }
 
+/**
+ * Server → extension: a dashboard plugin action emits a configured event INTO
+ * this session. The in-session bridge relays it onto `pi.events`. The bridge
+ * does not know which events exist — it is a generic relay. Gated server-side
+ * to trusted (priority ≤ 100) plugins. See change: automation-emit-configured-event.
+ */
+export interface PluginEmitEventExtensionMessage {
+  type: "plugin_emit_event";
+  sessionId: string;
+  eventType: string;
+  data: Record<string, unknown>;
+}
+
 export type ServerToExtensionMessage =
   | SendPromptToExtensionMessage
   | AbortToExtensionMessage
@@ -847,4 +860,5 @@ export type ServerToExtensionMessage =
   | EditFollowupEntryToExtensionMessage
   | RemoveFollowupEntryToExtensionMessage
   | PromoteFollowupEntryToExtensionMessage
-  | AttachProposalChangedExtensionMessage;
+  | AttachProposalChangedExtensionMessage
+  | PluginEmitEventExtensionMessage;
