@@ -20,6 +20,7 @@
 import os from "node:os";
 import type { FastifyInstance } from "fastify";
 import type { ActionDescriptor, AutomationConfig, AutomationScope } from "../shared/automation-types.js";
+import { BUILTIN_ACTION_ALIASES } from "../shared/automation-types.js";
 
 /** Phase-1 registered trigger kinds (mirrors the server registry). */
 const KNOWN_KINDS = new Set(["schedule"]);
@@ -30,7 +31,7 @@ function scopeBaseFor(scope: AutomationScope, cwd: string | undefined): string {
 }
 
 /** Built-in action kinds always accepted (aliased to core.* at read time). */
-const BUILTIN_ACTION_KINDS = new Set(["prompt", "skill"]);
+const BUILTIN_ACTION_KINDS = new Set(Object.keys(BUILTIN_ACTION_ALIASES));
 
 /**
  * Reject an automation whose `action.kind` is neither a built-in alias nor a

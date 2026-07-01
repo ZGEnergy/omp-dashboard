@@ -78,4 +78,23 @@ describe("action.kind validation on write", () => {
     expect(res.statusCode).toBe(200);
     await app.close();
   });
+
+  it("/update allows a registered plugin action id (writes in place)", async () => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "routes-kind-"));
+    const app = await appWith();
+    // seed it first, then update in place
+    await app.inject({
+      method: "POST",
+      url: "/api/plugins/automation/create",
+      payload: { scope: "folder", cwd: tmp, name: "nightly", config: configWith("flows.run") },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/plugins/automation/update",
+      payload: { scope: "folder", cwd: tmp, name: "nightly", config: configWith("flows.run") },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ok).toBe(true);
+    await app.close();
+  });
 });

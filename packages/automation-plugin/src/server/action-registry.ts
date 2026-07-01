@@ -20,6 +20,7 @@ import type {
   ActionPayloadField,
   DiscoveredAutomation,
 } from "../shared/automation-types.js";
+import { BUILTIN_ACTION_ALIASES } from "../shared/automation-types.js";
 
 /** Max actions a single source may register (clutter guard). */
 export const MAX_PER_SOURCE = 12;
@@ -185,7 +186,5 @@ export function createActionRegistryWithBuiltins(opts?: { warn?: (msg: string) =
 
 /** Normalize a bare `prompt`/`skill` action kind to its `core.*` id. */
 export function normalizeActionKind(kind: string): string {
-  if (kind === "prompt") return "core.prompt";
-  if (kind === "skill") return "core.skill";
-  return kind;
+  return (BUILTIN_ACTION_ALIASES as Record<string, string>)[kind] ?? kind;
 }

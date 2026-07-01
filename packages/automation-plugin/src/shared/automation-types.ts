@@ -62,6 +62,11 @@ export interface AutomationAction {
   payload?: Record<string, unknown>;
 }
 
+/** Bare `action.kind` aliases that map to the built-in `core.*` actions.
+ *  Single source of truth for read-path + write-path validation and the
+ *  registry's `normalizeActionKind`. See change: register-plugin-automation-events. */
+export const BUILTIN_ACTION_ALIASES = { prompt: "core.prompt", skill: "core.skill" } as const;
+
 /** One field in an action's payload schema. `enum` options are resolved
  *  per-cwd server-side and sent to the client already-populated.
  *  See change: register-plugin-automation-events. */
