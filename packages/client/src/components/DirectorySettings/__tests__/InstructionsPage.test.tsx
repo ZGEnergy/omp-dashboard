@@ -38,6 +38,8 @@ const btn = (id: string) => screen.getByTestId(id) as HTMLButtonElement;
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  // Reset the URL so a `?file=` pushed by one test does not leak into the next.
+  window.history.replaceState(null, "", "/");
 });
 
 describe("InstructionsPage", () => {
@@ -69,6 +71,48 @@ describe("InstructionsPage", () => {
     fireEvent.click(btn("instructions-save-btn"));
     await waitFor(() => expect(btn("instructions-save-btn").disabled).toBe(true));
     expect(screen.getByText("Saved")).toBeDefined();
+  });
+
+  // URL is the source of truth for the active file (change:
+  // fix-plugin-and-scoped-back-navigation).
+  it("selecting a file pushes ?file= and derives selection from the query", async () => {
+    window.history.replaceState(null, "", "/folder/Zm9v/settings/instructions");
+    mockFetch();
+    render(<InstructionsPage cwd="/repo" />);
+    await screen.findByTestId("monaco"); // AGENTS.md auto-selected (default)
+    const items = screen.getAllByTestId("file-picker-item");
+    fireEvent.click(items[1]); // README.md — clean buffer → navigates
+    await waitFor(() => {
+      expect(window.location.search).toContain("file=README.md");
+    });
+    await waitFor(() => {
+      const readme = screen.getAllByTestId("file-picker-item")[1];
+      expect(readme.getAttribute("aria-current")).toBe("true");
+    });
+  });
+
+  it("restores the selected file from ?file= on deep-link / refresh", async () => {
+    window.history.replaceState(null, "", "/folder/Zm9v/settings/instructions?file=README.md");
+    mockFetch();
+    render(<InstructionsPage cwd="/repo" />);
+    await waitFor(() => {
+      const readme = screen.getAllByTestId("file-picker-item")[1];
+      expect(readme.getAttribute("aria-current")).toBe("true");
+    });
+  });
+
+  it("falls back to the default selection when ?file= names an unknown file", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/folder/Zm9v/settings/instructions?file=does/not/exist.md",
+    );
+    mockFetch();
+    render(<InstructionsPage cwd="/repo" />);
+    await waitFor(() => {
+      const agents = screen.getAllByTestId("file-picker-item")[0];
+      expect(agents.getAttribute("aria-current")).toBe("true");
+    });
   });
 
   it("prompts a confirm when switching files with unsaved edits", async () => {

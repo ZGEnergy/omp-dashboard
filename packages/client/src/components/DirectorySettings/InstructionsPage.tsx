@@ -23,6 +23,7 @@ import type {
 } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation, useSearchParams } from "wouter";
 import { getApiBase } from "../../lib/api-context.js";
 import { t as i18nT } from "../../lib/i18n";
 import { FilePicker } from "./FilePicker.js";
@@ -45,6 +46,13 @@ function fileReadUrl(cwd: string | undefined, absPath: string): string {
 }
 
 export function InstructionsPage({ cwd }: Props) {
+  // URL is the source of truth for the active file (`?file=<relPath>`), so each
+  // selection is a discrete, refresh-safe, back-walkable history entry.
+  // See change: fix-plugin-and-scoped-back-navigation.
+  const [location, navigate] = useLocation();
+  const [searchParams] = useSearchParams();
+  const fileParam = searchParams.get("file");
+  const [candidates, setCandidates] = useState<MdCandidate[]>([]);
   const [selected, setSelected] = useState<MdCandidate | null>(null);
   const [loadedContent, setLoadedContent] = useState<string>("");
   const [loadedMtime, setLoadedMtime] = useState<number | null>(null);
@@ -116,15 +124,29 @@ export function InstructionsPage({ cwd }: Props) {
     [cwd],
   );
 
-  // Default selection: AGENTS.md if present (directory scope), else first.
-  const handleCandidatesLoaded = useCallback(
-    (candidates: MdCandidate[]) => {
-      if (selected || candidates.length === 0) return;
-      const preferred =
-        candidates.find((c) => c.relPath === "AGENTS.md") ?? candidates[0];
-      loadCandidate(preferred);
+  const handleCandidatesLoaded = useCallback((cands: MdCandidate[]) => {
+    setCandidates(cands);
+  }, []);
+
+  // Resolve the active file from `?file=` against the loaded candidates. Falls
+  // back to AGENTS.md/first when `?file=` is absent, or when it names a path not
+  // in the current candidate set (e.g. deleted or out of scope after refresh).
+  useEffect(() => {
+    if (candidates.length === 0) return;
+    const target = fileParam
+      ? candidates.find((c) => c.relPath === fileParam)
+      : undefined;
+    const next =
+      target ?? candidates.find((c) => c.relPath === "AGENTS.md") ?? candidates[0];
+    if (next && next.path !== selected?.path) loadCandidate(next);
+  }, [fileParam, candidates, selected?.path, loadCandidate]);
+
+  // Selection is a URL push so browser/OS back walks file→file→page→launcher.
+  const selectFile = useCallback(
+    (candidate: MdCandidate) => {
+      navigate(`${location}?file=${encodeURIComponent(candidate.relPath)}`);
     },
-    [selected, loadCandidate],
+    [location, navigate],
   );
 
   // Picker click: guard with a confirm when the buffer is dirty.
@@ -135,16 +157,16 @@ export function InstructionsPage({ cwd }: Props) {
         setPendingSwitch(candidate);
         return;
       }
-      loadCandidate(candidate);
+      selectFile(candidate);
     },
-    [selected, loadCandidate],
+    [selected, selectFile],
   );
 
   const confirmSwitch = useCallback(() => {
     const next = pendingSwitch;
     setPendingSwitch(null);
-    if (next) loadCandidate(next);
-  }, [pendingSwitch, loadCandidate]);
+    if (next) selectFile(next);
+  }, [pendingSwitch, selectFile]);
 
   const handleDiscard = useCallback(() => {
     setBuffer(loadedContent);

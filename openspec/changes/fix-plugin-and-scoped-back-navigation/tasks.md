@@ -1,33 +1,33 @@
 ## 1. Table-driven route classifier (D1 + D2, behavior-preserving)
 
-- [ ] 1.1 Add `RouteDescriptor` type (`{ pattern, depth, computeParent? }`) and a most-specific-first, first-match resolver in `packages/client/src/lib/back-target.ts`
-- [ ] 1.2 Migrate every existing hardcoded branch (`/session/:id`, `/session/:id/diff`, `/folder/:cwd/settings/:page?`, `/folder/:cwd/terminals|editor`, `/folder/:cwd/openspec/*`, `/folder/:cwd/pi-resources`, `/folder/:cwd/view`, `/settings/:page?`, `/tunnel-setup`, `/pi-view`, `/pi-resource`) into static descriptors; keep `parseRouteDepthInput`/`getMobileDepth`/`computeBackTarget` public signatures unchanged
-- [ ] 1.3 Verify `back-target.test.ts` + `mobile-depth.test.ts` pass unchanged (regression fence for the migration) → `npm test 2>&1 | tee /tmp/pi-test.log`
-- [ ] 1.4 Add a dev-time duplicate-pattern warning when two descriptors share a pattern
+- [x] 1.1 `RouteDescriptor` type + most-specific-first resolver in `back-target.ts` (type in shared `dashboard-plugin/route-descriptor.ts`, re-exported)
+- [x] 1.2 Every hardcoded branch migrated to static descriptors; `parseRouteDepthInput`/`getMobileDepth`/`computeBackTarget` signatures unchanged (`routeDepth` resolves via the table)
+- [x] 1.3 `back-target.test.ts` + `mobile-depth.test.ts` pass unchanged (regression fence)
+- [x] 1.4 Dev-time duplicate-pattern warning in `registerPluginRouteDescriptors`
 
 ## 2. Phase 1 hotfix — automations static descriptors + picker `?file=`
 
-- [ ] 2.1 Add failing tests: `routeDepth("/folder/CWD/automations") === 1`, `routeDepth("/automation/run/:sid") === 2`, `computeBackTarget("/automation/run/S")` → the board route (`back-target.test.ts`)
-- [ ] 2.2 Add static descriptors for `/folder/:encodedCwd/automations` (depth 1 → `/`) and `/automation/run/:sid` (depth 2 → board) to unblock automations back immediately; make 2.1 pass
-- [ ] 2.3 Add failing test: selecting a file in `FilePicker` pushes `?file=<relPath>` and `InstructionsPage` derives selection from the query (component/integration test)
-- [ ] 2.4 Change `FilePicker.onSelect` to `navigate(/folder/:cwd/settings/instructions?file=<encoded relPath>)`; derive `selectedPath` in `InstructionsPage` from `?file=` with default + unknown-file fallback; make 2.3 pass
-- [ ] 2.5 Add `history-back`/`back-regression` cases: back walks `?file=` selections then to the launcher; board back → cards; run → board
+- [x] 2.1 `back-target.test.ts`: board depth 1, run depth 2. NOTE: `computeBackTarget(run)` degrades to `/` (run URL has no cwd); run→board is via the nav-tracker fast-path (`back-regression.test.ts`)
+- [x] 2.2 COLLAPSED into 4.1 (approved): automation depth resolves via the registry-fed table directly, no throwaway statics
+- [x] 2.3 `InstructionsPage.test.tsx`: push `?file=`, derive from query, deep-link restore, unknown-file fallback
+- [x] 2.4 `InstructionsPage` selection = URL push via `useLocation`+`useSearchParams`; effect derives selection with default + unknown-file fallback (FilePicker stays presentational; page owns navigation)
+- [x] 2.5 `back-regression.test.ts`: cold-load board back → cards; board with shallower predecessor → history.back(); run→board via tracker
 
 ## 3. Phase 2 — plugin claims declare depth (D3 + D4)
 
-- [ ] 3.1 Add optional top-level `depth?: 1|2` and `parentPath?: string` to `ShellOverlayRouteClaim` (`packages/dashboard-plugin-runtime/src/slot-consumers.tsx`) and the shared claim type
-- [ ] 3.2 Emit one `RouteDescriptor` per `shell-overlay-route` claim from the plugin registry; `parentPath` `:params` interpolated from the current match; feed descriptors into the classifier table (static ∪ plugin)
-- [ ] 3.3 Add failing test: a claim without `depth` defaults to descriptor `depth: 2` + back target `/`, and `manifest-validator.ts` emits a non-fatal warning; implement to pass
-- [ ] 3.4 Add registry→descriptor unit test in `dashboard-plugin-runtime` (declared depth/parentPath produces the expected descriptor + `computeParent` interpolation)
+- [x] 3.1 `depth?: 1|2` + `parentPath?: string` added to shared `PluginClaim`, runtime `ClaimEntry`, local `ShellOverlayRouteClaim`
+- [x] 3.2 `claimsToRouteDescriptors` emits one descriptor per claim; `parentPath` → `computeParent` interpolating match `:params`. App boot feeds static ∪ plugin into the classifier. NOTE: emitter lives in shared (not runtime) so the client resolves it via the fully-aliased shared package in a worktree, avoiding a dual-instance context split; runtime re-exports it
+- [x] 3.3 `manifest-validator.test.ts`: missing `depth` warns + omits (descriptor defaults 2 → `/`); depth/parentPath pass through; bad depth + non-rooted parentPath rejected
+- [x] 3.4 `route-descriptors.test.ts` in `dashboard-plugin-runtime`: depth default, computeParent interpolation, missing-param degrade to `/`
 
 ## 4. Migrate automations to declared depth + remove Phase-1 statics
 
-- [ ] 4.1 Add `depth: 1` to the board claim and `depth: 2` + `parentPath: "/folder/:encodedCwd/automations"` to the run-monitor claim in `packages/automation-plugin/package.json`; regenerate the static plugin registry
-- [ ] 4.2 Remove the Phase-1 static automation descriptors from `back-target.ts`; add a test asserting automation depth now resolves via the registry-fed table (not the static list)
-- [ ] 4.3 Confirm automations board + run-monitor back still pass their scenarios end-to-end
+- [x] 4.1 `depth: 1` board claim, `depth: 2` + `parentPath` run-monitor claim in `automation-plugin/package.json`; generated `plugin-registry.tsx` updated (regenerates on next build)
+- [x] 4.2 No Phase-1 statics existed (collapsed); `back-target.test.ts` asserts automation depth resolves via registered plugin descriptors, not the static core list
+- [x] 4.3 Board + run-monitor back scenarios green in `back-regression.test.ts`
 
 ## 5. Verify + gate
 
-- [ ] 5.1 Full unit run green: `npm test 2>&1 | tee /tmp/pi-test.log` → `grep -nE 'FAIL|Error|✗' /tmp/pi-test.log` empty
-- [ ] 5.2 Manual smoke (dev): automations board back → cards; run monitor back → board; Directory Settings Instructions file switch + browser Back walks files; deep-link `?file=` restores selection
-- [ ] 5.3 Run the CodeRabbit review gate on the diff (`review-changes.ts`) and the Biome ratchet (`npm run quality:changed`); fix Critical/Warning before commit
+- [x] 5.1 All touched-project tests green (web, runtime, shared, automation). Remaining full-suite failures pre-existing + unrelated: 16× `pi-image-fit-extension` (`Jimp is not a constructor`, env), 1× `DiagnosticsSection` clipboard flake (passes in isolation). Types validated against worktree src (0 errors in touched files); root `tsc --noEmit` can't see cross-package edits in a worktree (symlinks → main repo)
+- [ ] 5.2 Manual smoke (dev) — pending human verification
+- [ ] 5.3 CodeRabbit review gate + Biome ratchet — pending (Biome `quality:changed` runs root `tsc`, unreliable in this worktree; run on merge)

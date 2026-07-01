@@ -139,6 +139,8 @@ import {
   ShellSessionsProvider,
   useShellOverlayRouteMatched
 } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { claimsToRouteDescriptors } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/route-descriptor.js";
+import { registerPluginRouteDescriptors } from "./lib/back-target.js";
 import { PLUGIN_REGISTRY } from "./generated/plugin-registry.js";
 import { usePluginEnabledSet } from "./hooks/usePluginEnabledSet.js";
 
@@ -152,6 +154,14 @@ for (const entry of PLUGIN_REGISTRY) {
     _pluginRegistry.addClaim(claim);
   }
 }
+
+// Feed plugin `shell-overlay-route` claims into the back-target classifier so
+// the depth-aware back action resolves plugin routes (declared depth/parent)
+// instead of the old depth-0 dead no-op. See change:
+// fix-plugin-and-scoped-back-navigation.
+registerPluginRouteDescriptors(
+  claimsToRouteDescriptors(PLUGIN_REGISTRY.flatMap((entry) => entry.claims)),
+);
 
 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const wsPort = window.location.port ? `:${window.location.port}` : "";

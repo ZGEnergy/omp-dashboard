@@ -8,8 +8,17 @@
  *   - depth 2 ambiguous overlays (openspec/pi-resources/pi-resource/view) → "/"
  *   - depth 0 ("/") → null (no-op)
  */
-import { describe, expect, it } from "vitest";
-import { computeBackTarget, isModalRoute, routeDepth } from "../back-target.js";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  interpolateParentPath,
+  type RouteDescriptor,
+} from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/route-descriptor.js";
+import {
+  computeBackTarget,
+  isModalRoute,
+  registerPluginRouteDescriptors,
+  routeDepth,
+} from "../back-target.js";
 
 describe("computeBackTarget", () => {
   it("returns null at depth 0 (cards)", () => {
@@ -59,6 +68,51 @@ describe("computeBackTarget", () => {
         expect(computeBackTarget(route)).toBe("/");
       });
     }
+  });
+});
+
+// Registry-fed plugin descriptors — the Automations board + run monitor were
+// depth-0 dead no-ops before the classifier learned plugin routes.
+// See change: fix-plugin-and-scoped-back-navigation.
+describe("plugin route descriptors (registry-fed)", () => {
+  // Mirrors what `claimsToRouteDescriptors` emits for the automation manifest
+  // (that emission is unit-tested in dashboard-plugin-runtime); here we pin the
+  // classifier's resolution of registered plugin descriptors.
+  const automationDescriptors: RouteDescriptor[] = [
+    { pattern: "/folder/:encodedCwd/automations", depth: 1 },
+    {
+      pattern: "/automation/run/:sid",
+      depth: 2,
+      computeParent: (p) => interpolateParentPath("/folder/:encodedCwd/automations", p) ?? "/",
+    },
+  ];
+
+  afterEach(() => registerPluginRouteDescriptors([]));
+
+  it("without descriptors, a plugin route is depth 0 (the reported dead no-op)", () => {
+    registerPluginRouteDescriptors([]);
+    expect(routeDepth("/folder/Zm9v/automations")).toBe(0);
+    expect(computeBackTarget("/folder/Zm9v/automations")).toBeNull();
+  });
+
+  it("board resolves depth 1 → / via the registry-fed table", () => {
+    registerPluginRouteDescriptors(automationDescriptors);
+    expect(routeDepth("/folder/Zm9v/automations")).toBe(1);
+    expect(computeBackTarget("/folder/Zm9v/automations")).toBe("/");
+  });
+
+  it("run monitor resolves depth 2; cold-load parent degrades to / (cwd not in URL)", () => {
+    registerPluginRouteDescriptors(automationDescriptors);
+    expect(routeDepth("/automation/run/S")).toBe(2);
+    // The run URL carries no cwd, so a cold-load back degrades to cards; the
+    // run→board walk is guaranteed by the nav-tracker fast-path instead.
+    expect(computeBackTarget("/automation/run/S")).toBe("/");
+  });
+
+  it("a depth-2 plugin descriptor with no computeParent backs to / (legacy default)", () => {
+    registerPluginRouteDescriptors([{ pattern: "/legacy/:id", depth: 2 }]);
+    expect(routeDepth("/legacy/abc")).toBe(2);
+    expect(computeBackTarget("/legacy/abc")).toBe("/");
   });
 });
 
