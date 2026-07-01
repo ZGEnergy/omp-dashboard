@@ -20,4 +20,4 @@
 
 - [x] 4.1 `npm test 2>&1 | tee /tmp/pi-test.log` — new specs pass, no regressions.
   (23 web specs pass incl. new refresh tests; only pre-existing `pi-image-fit-extension` Jimp env failures remain — untouched package.)
-- [ ] 4.2 Client rebuild + restart (`npm run build` → `POST /api/restart`); manually confirm a live session's dropdown updates after authenticating a provider and clicking refresh.
+- [x] 4.2 Client rebuild + restart (`npm run build` → `POST /api/restart`); manually confirm a live session's dropdown updates after authenticating a provider and clicking refresh. — verified: refresh footer button renders, dropdown updates after provider auth without session restart.
