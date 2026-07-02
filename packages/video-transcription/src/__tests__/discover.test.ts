@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   discoverFiles,
   isTranscribed,
+  isVideo,
   resolveInputs,
   srtPath,
 } from "../discover.js";
@@ -51,6 +52,13 @@ describe("discovery", () => {
     touch(path.join(dir, "x.mkv"), 1000);
     const found = resolveInputs([dir]).map((f) => path.basename(f));
     expect(found).toEqual(["x.mkv"]);
+  });
+
+  it("discovers .mov files and treats them as video", () => {
+    touch(path.join(dir, "clip.mov"), 1000);
+    const found = discoverFiles(dir).map((f) => path.basename(f));
+    expect(found).toEqual(["clip.mov"]);
+    expect(isVideo("/a/clip.mov")).toBe(true);
   });
 
   it("resolveInputs treats explicit files as the input set", () => {

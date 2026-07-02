@@ -1,6 +1,6 @@
 ---
 name: video-transcription
-description: Transcribe video and audio files to SRT subtitle format with speaker diarization using the Soniox API. Use when the user wants to transcribe meeting recordings, videos, or audio files. Supports MKV, MP4, M4A, and MP3 files. Triggers on "/transcribe", "transcribe my meetings", "transcribe videos in ~/Movies", "create subtitles for recordings", or any request to convert audio/video to text.
+description: Transcribe video and audio files to SRT subtitle format with speaker diarization using the Soniox API. Use when the user wants to transcribe meeting recordings, videos, or audio files. Supports MKV, MP4, MOV, M4A, and MP3 files. Triggers on "/transcribe", "transcribe my meetings", "transcribe videos in ~/Movies", "create subtitles for recordings", or any request to convert audio/video to text.
 ---
 
 # Video Transcription
