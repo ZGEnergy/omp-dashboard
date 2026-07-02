@@ -98,7 +98,7 @@
     "add-hyperframes-skills": "next-phase",
     "add-end-user-docs": "next-phase",
     "project-init-skill-and-profiles": "next-phase",
-    "restore-pi-version-skew-surface": "sdasdasd",
+    "restore-pi-version-skew-surface": "ui",
     "add-release-video-pipeline": "future",
     "scope-openspec-poll-to-active-cwds": "ui",
     "offload-openspec-poll-to-worker": "ui",
@@ -145,12 +145,22 @@
     "remove-vestigial-tsconfig-references": "ui",
     "distinguish-offline-from-network-denied": "ui",
     "reduce-session-replay-traffic": "ui",
-    "fix-bridge-server-start-diagnostics": "ui"
+    "fix-bridge-server-start-diagnostics": "ui",
+    "card-gradient-state-animation": "ui",
+    "optimistic-prompt-progress": "ui",
+    "directory-settings-page-and-scoped-md-editing": "ui",
+    "fix-parallel-e2e-docker-collisions": "ui",
+    "fix-file-preview-backdrop-blocks-composer": "ui",
+    "split-editor-workspace": "ui"
   },
   "changeOrder": {
-    "__ungrouped__": [],
+    "__ungrouped__": [
+      "reopen-sessions-after-shutdown"
+    ],
     "ui": [
-      "add-internal-monaco-editor-pane"
+      "filter-oauth-incompatible-models",
+      "split-editor-workspace",
+      "remove-vestigial-tsconfig-references"
     ],
     "next-phase": [
       "macos-notarization",
@@ -161,7 +171,9 @@
       "manage-node-runtime-updates",
       "project-init-skill-and-profiles"
     ],
-    "sdasdasd": [],
+    "sdasdasd": [
+      "focus-driven-folder-compaction"
+    ],
     "ui-extensions": [
       "add-extension-ui-a11y-baseline",
       "add-extension-ui-action-result-contract",
