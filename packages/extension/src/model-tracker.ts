@@ -3,7 +3,8 @@
  * Sends model_update only when values actually change.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { BridgeContext } from "./bridge-context.js";
 import { getCurrentModelString } from "./bridge-context.js";
 import { gatherGitInfo } from "./vcs-info.js";
@@ -77,11 +78,55 @@ export function sendGitInfoIfChanged(bc: BridgeContext, cwd: string): void {
  */
 let lastPiVersion: string | undefined;
 
-/** Default reader: pi-coding-agent version from inside the bridge's own tree. */
+const PI_PKG = "@earendil-works/pi-coding-agent";
+
+/**
+ * Read a package's `version` without resolving its `./package.json` subpath.
+ *
+ * Node gates subpath resolution on the package's `exports` map: a package that
+ * exports only `"."` makes resolving the `"<pkg>/package.json"` subpath throw
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED` (pi 0.80.2 is such a package). So we resolve
+ * the always-present `"."` entry instead, then walk up to the nearest
+ * `package.json` whose `name` matches — the `name` check avoids grabbing an
+ * ancestor workspace manifest under hoisted/linked layouts. Returns `undefined`
+ * (not throw) when no matching manifest is found; a truly-uninstalled package
+ * still throws from `resolveEntry`, which the caller catches.
+ *
+ * `resolveEntry`/`readFile`/`fileExists` are injectable for tests.
+ */
+export function readPkgVersionByWalkUp(
+  pkgName: string,
+  resolveEntry: (spec: string) => string,
+  readFile: (p: string) => string = (p) => readFileSync(p, "utf8"),
+  fileExists: (p: string) => boolean = existsSync,
+): string | undefined {
+  let dir = dirname(resolveEntry(pkgName));
+  for (let i = 0; i < 10; i++) {
+    const candidate = join(dir, "package.json");
+    if (fileExists(candidate)) {
+      const parsed = JSON.parse(readFile(candidate)) as { name?: string; version?: string };
+      if (parsed.name === pkgName) {
+        return typeof parsed.version === "string" ? parsed.version : undefined;
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+}
+
+/**
+ * Default reader: pi-coding-agent version from inside the bridge's own tree.
+ *
+ * Uses `import.meta.resolve` (the ESM resolver, `import` condition) rather than
+ * `createRequire().resolve` (CJS, `require` condition): pi's `"."` export defines
+ * only `import`/`types`, so the CJS resolver would itself throw
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED` ("No exports main defined"). `import.meta.resolve`
+ * returns a `file://` URL, converted to a path for the walk-up.
+ */
 function defaultReadPiVersion(): string | undefined {
-  const pkg = createRequire(import.meta.url).resolve("@earendil-works/pi-coding-agent/package.json");
-  const parsed = JSON.parse(readFileSync(pkg, "utf8")) as { version?: string };
-  return typeof parsed.version === "string" ? parsed.version : undefined;
+  return readPkgVersionByWalkUp(PI_PKG, (spec) => fileURLToPath(import.meta.resolve(spec)));
 }
 
 /**
