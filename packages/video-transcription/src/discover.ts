@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-export const VIDEO_EXTENSIONS = new Set([".mkv", ".mp4"]);
+export const VIDEO_EXTENSIONS = new Set([".mkv", ".mp4", ".mov"]);
 export const AUDIO_EXTENSIONS = new Set([".m4a", ".mp3"]);
 export const ALL_EXTENSIONS = new Set([...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS]);
 
