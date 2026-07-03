@@ -97,7 +97,7 @@
     "docker-test-harness": "ui",
     "add-hyperframes-skills": "next-phase",
     "add-end-user-docs": "next-phase",
-    "project-init-skill-and-profiles": "next-phase",
+    "project-init-skill-and-profiles": "ui",
     "restore-pi-version-skew-surface": "ui",
     "add-release-video-pipeline": "future",
     "scope-openspec-poll-to-active-cwds": "ui",
@@ -151,26 +151,30 @@
     "directory-settings-page-and-scoped-md-editing": "ui",
     "fix-parallel-e2e-docker-collisions": "ui",
     "fix-file-preview-backdrop-blocks-composer": "ui",
-    "split-editor-workspace": "ui"
+    "split-editor-workspace": "ui",
+    "migrate-file-index-to-agents-tree": "ui",
+    "add-kb-folder-slot": "ui",
+    "fix-thinking-level-supported-projection": "ui",
+    "add-kb-index-to-worktree-init": "ui",
+    "colorize-mermaid-default-nodes": "ui",
+    "fix-automation-stop-zombie-runs": "ui",
+    "fix-dox-lint-false-positives": "ui",
+    "improve-content-editor": "ui",
+    "fix-duplicate-inlined-screenshot": "ui"
   },
   "changeOrder": {
     "__ungrouped__": [
+      "fix-openspec-config-read-bundled-node",
       "reopen-sessions-after-shutdown"
     ],
     "ui": [
-      "filter-oauth-incompatible-models",
-      "split-editor-workspace",
+      "fix-dox-lint-false-positives",
+      "fix-automation-stop-zombie-runs",
+      "fix-duplicate-inlined-screenshot",
+      "improve-content-editor",
       "remove-vestigial-tsconfig-references"
     ],
-    "next-phase": [
-      "macos-notarization",
-      "add-connector-layer",
-      "add-end-user-docs",
-      "add-hyperframes-skills",
-      "external-dashboard-plugins",
-      "manage-node-runtime-updates",
-      "project-init-skill-and-profiles"
-    ],
+    "next-phase": [],
     "sdasdasd": [
       "focus-driven-folder-compaction"
     ],
