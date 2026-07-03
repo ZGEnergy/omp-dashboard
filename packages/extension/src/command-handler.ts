@@ -2,27 +2,91 @@
  * Handles server→extension messages by dispatching to pi API.
  */
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
 import { homedir } from "node:os";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { join, relative } from "node:path";
 import type {
-  ServerToExtensionMessage,
   ExtensionToServerMessage,
+  ServerToExtensionMessage,
 } from "@blackbelt-technology/pi-dashboard-shared/protocol.js";
-import { killProcessByPgid } from "./process-scanner.js";
-import type { FileEntry, PiSessionInfo, MissingToolError } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
+import type { FileEntry, MissingToolError, PiSessionInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { filterHiddenCommands } from "./bridge-context.js";
+import { killProcessByPgid } from "./process-scanner.js";
 import { expandPromptTemplateFromDisk, loadPromptTemplate } from "./prompt-expander.js";
-import { tryDispatchExtensionCommand } from "./slash-dispatch.js";
 import { buildProviderCatalogue, toModelInfo } from "./provider-register.js";
+import { tryDispatchExtensionCommand } from "./slash-dispatch.js";
 
 const IGNORE_DIRS = new Set([".git", "node_modules", ".next", "dist", "build", ".cache", "__pycache__", ".venv"]);
 const MAX_RESULTS = 50;
 /** Entries scanned budget — decoupled from the result cap so a deep first
- *  subtree no longer starves shallow sibling matches.
- *  See change: fix-file-mention-search-ranking. */
-const MAX_VISITS = 4000;
+ *  subtree no longer starves shallow sibling matches. Softened from 4000 so
+ *  matches in later top-level subtrees of a large monorepo are no longer
+ *  dropped at the horizon; `.gitignore` pruning keeps the real per-walk cost
+ *  low despite the higher ceiling.
+ *  See change: fix-file-mention-search-ranking, split-editor-workspace. */
+const MAX_VISITS = 20000;
+/** Depth guard, relaxed from 6 so deeply-nested source is reachable.
+ *  See change: split-editor-workspace. */
+const MAX_DEPTH = 12;
+
+/**
+ * Translate one `.gitignore` pattern into a matcher regex (best-effort — not
+ * full gitignore semantics). Bare names match a path segment anywhere; slashed
+ * patterns anchor at the root. `*`/`?` become segment-scoped globs. Negations
+ * and comments are filtered before this is called. Mirrored in the server
+ * content-grep JS fallback (`packages/server/src/lib/grep.ts`) — kept inline
+ * rather than shared because the worktree resolves the shared package to the
+ * main checkout. See change: split-editor-workspace.
+ */
+export function gitignoreToRegex(pattern: string): RegExp | null {
+  let p = pattern.trim();
+  if (!p || p.startsWith("#") || p.startsWith("!")) return null;
+  const anchored = p.startsWith("/");
+  p = p.replace(/^\/+/, "").replace(/\/+$/, "");
+  if (!p) return null;
+  const esc = p
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\?/g, "[^/]");
+  const hasSlash = p.includes("/");
+  try {
+    const body = anchored || hasSlash ? `^${esc}(/|$)` : `(^|/)${esc}(/|$)`;
+    return new RegExp(body, "i");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build a `.gitignore`-backed pruning predicate for `cwd`. Best-effort: a
+ * missing or unreadable `.gitignore` yields a predicate that ignores nothing.
+ * The returned fn receives a slash-normalised rel-path (no trailing slash).
+ * See change: split-editor-workspace.
+ */
+export function loadGitignoreMatcher(cwd: string): (relPath: string) => boolean {
+  let regexes: RegExp[] = [];
+  try {
+    const raw = readFileSync(join(cwd, ".gitignore"), "utf-8");
+    regexes = raw
+      .split(/\r?\n/)
+      .map((l) => gitignoreToRegex(l))
+      .filter((r): r is RegExp => r !== null);
+  } catch {
+    return () => false;
+  }
+  return (relPath: string) => regexes.some((re) => re.test(relPath));
+}
+
+/** Score a leaf against a candidate using a precompiled regex (flat tiers). */
+export function scoreRegexMatch(relPath: string, re: RegExp): number {
+  const lower = relPath.toLowerCase();
+  const trimmed = lower.endsWith("/") ? lower.slice(0, -1) : lower;
+  const base = trimmed.slice(trimmed.lastIndexOf("/") + 1);
+  if (re.test(base)) return 2;
+  if (re.test(trimmed)) return 1;
+  return 0;
+}
 
 /**
  * Split a (lowercased) query at the LAST slash. The prefix (up to and
@@ -70,28 +134,42 @@ export function scoreMatch(relPath: string, leaf: string): number {
  * file-autocomplete anti-starvation requirement forbids.
  * See change: fix-file-mention-search-ranking.
  */
-export function searchFiles(cwd: string, query: string): FileEntry[] {
+export function searchFiles(cwd: string, query: string, opts?: { regex?: boolean }): FileEntry[] {
   const lowerQuery = query?.toLowerCase() ?? "";
   const { prefix, leaf } = splitQuery(lowerQuery);
+
+  // Optional regexp leaf: compile once, degrade to substring on an invalid
+  // pattern so a half-typed regex never errors the walk. See change:
+  // split-editor-workspace.
+  let leafRe: RegExp | null = null;
+  if (opts?.regex && leaf !== "") {
+    try { leafRe = new RegExp(leaf, "i"); } catch { leafRe = null; }
+  }
+
+  const isIgnored = loadGitignoreMatcher(cwd);
   const candidates: Array<{ path: string; isDirectory: boolean; depth: number; score: number }> = [];
   let visits = 0;
 
   const queue: Array<{ dir: string; depth: number }> = [{ dir: cwd, depth: 0 }];
   while (queue.length > 0 && visits < MAX_VISITS) {
     const { dir, depth } = queue.shift()!;
-    if (depth > 6) continue;
+    if (depth > MAX_DEPTH) continue;
     let entries;
     try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     for (const entry of entries) {
       if (visits >= MAX_VISITS) break;
       if (IGNORE_DIRS.has(entry.name)) continue;
-      visits++;
       const fullPath = join(dir, entry.name);
       const isDirectory = entry.isDirectory();
-      const relPath = relative(cwd, fullPath).replace(/\\/g, "/") + (isDirectory ? "/" : "");
+      const relNoSlash = relative(cwd, fullPath).replace(/\\/g, "/");
+      // `.gitignore` pruning: skip ignored files and do not descend ignored
+      // dirs, so the visit budget is spent on real source.
+      if (isIgnored(relNoSlash)) continue;
+      visits++;
+      const relPath = relNoSlash + (isDirectory ? "/" : "");
       const inScope = !prefix || relPath.toLowerCase().includes(prefix);
       if (inScope) {
-        const score = scoreMatch(relPath, leaf);
+        const score = leafRe ? scoreRegexMatch(relPath, leafRe) : scoreMatch(relPath, leaf);
         if (leaf === "" || score > 0) {
           candidates.push({ path: relPath, isDirectory, depth, score });
         }
@@ -600,7 +678,8 @@ export function createCommandHandler(
         }
 
         case "list_files": {
-          const files = searchFiles(process.cwd(), msg.query);
+          // `regex` is optional (editor filename search); absent for `@`-mention.
+          const files = searchFiles(process.cwd(), msg.query, { regex: msg.regex });
           return {
             type: "files_list",
             sessionId,

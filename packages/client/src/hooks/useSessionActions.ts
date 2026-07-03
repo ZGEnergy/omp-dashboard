@@ -422,8 +422,8 @@ export function useSessionActions(deps: SessionActionDeps) {
     }
   }, [send, terminals, setTerminals]);
 
-  const handleListFiles = useCallback((query: string) => {
-    if (selectedId) send({ type: "list_files", sessionId: selectedId, query });
+  const handleListFiles = useCallback((query: string, regex?: boolean) => {
+    if (selectedId) send({ type: "list_files", sessionId: selectedId, query, ...(regex ? { regex: true } : {}) });
   }, [selectedId, send]);
 
   return {

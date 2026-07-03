@@ -6,6 +6,7 @@ import { useLocation } from "wouter";
 import { isLocalhost, openEditor } from "../../lib/editor-api.js";
 import { buildEditorUrl } from "../../lib/route-builders.js";
 import { FilePreviewOverlay } from "../FilePreviewOverlay.js";
+import { useOptionalSplitWorkspace } from "../SplitWorkspaceContext.js";
 import type { ToolContext } from "./types.js";
 import { useFileOpenRouting } from "./useFileOpenRouting.js";
 
@@ -32,6 +33,7 @@ export function OpenFileButton({ filePath, line, context }: Props) {
   const { cwd, sessionId, editors } = context;
   const [, navigate] = useLocation();
   const { openFile, hostManaged, previewTarget, closePreview } = useFileOpenRouting(context);
+  const ws = useOptionalSplitWorkspace();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeItem, setActiveItem] = useState(0);
@@ -51,7 +53,11 @@ export function OpenFileButton({ filePath, line, context }: Props) {
 
   const openInternal = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (sessionId) {
+    if (ws && sessionId && ws.sessionId === sessionId) {
+      // In-dashboard split is live for this session — open without a route swap.
+      ws.openInSplit(filePath, line);
+    } else if (sessionId) {
+      // Deep-link fallback (cross-session / no provider): the route reopens the split.
       navigate(buildEditorUrl(sessionId, filePath, line));
     } else {
       // No session context to build a route — preserve a working open path.

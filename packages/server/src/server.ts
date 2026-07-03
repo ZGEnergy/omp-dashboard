@@ -14,6 +14,7 @@ import { createMemoryEventStore, type EventStore } from "./memory-event-store.js
 import { createMemorySessionManager, type SessionManager } from "./memory-session-manager.js";
 import { createPiGateway, type PiGateway } from "./pi-gateway.js";
 import { createBrowserGateway, type BrowserGateway } from "./browser-gateway.js";
+import { createFileWatchManager } from "./file-watch-manager.js";
 import { pluginIntentCache } from "./plugin-intent-cache.js";
 import { createPreferencesStore, type PreferencesStore } from "./preferences-store.js";
 import { createMetaPersistence, type MetaPersistence } from "./meta-persistence.js";
@@ -57,6 +58,7 @@ import { registerManifestRoute } from "./routes/manifest-route.js";
 import { registerSessionRoutes } from "./routes/session-routes.js";
 import { registerGitRoutes } from "./routes/git-routes.js";
 import { registerFileRoutes } from "./routes/file-routes.js";
+import { registerGrepRoutes } from "./routes/grep-routes.js";
 import { registerOpenSpecRoutes } from "./routes/openspec-routes.js";
 import { registerOpenSpecGroupRoutes } from "./routes/openspec-group-routes.js";
 import { createOpenSpecGroupStore, joinGroupIdsToOpenSpecData } from "./openspec-group-store.js";
@@ -580,6 +582,22 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry, pendingResumeIntents, pendingClientCorrelations, pendingWorktreeBaseRegistry, metaPersistence);
 
+  // Editor-pane changed-on-disk watch: the browser declares its open files via
+  // `watch_files`; the server watches exactly those and pushes `file_changed`.
+  // Torn down on disconnect so no fd leaks. See change: split-editor-workspace.
+  const fileWatchManager = createFileWatchManager();
+  browserGateway.registerHandler("watch_files", (msg: { sessionId?: string; cwd?: string; paths?: unknown }, _ws) => {
+    if (!msg?.sessionId || !msg?.cwd) return;
+    // Gate: only watch under a known session cwd (mirrors /api/file).
+    if (!sessionManager.listAll().some((s) => s.cwd === msg.cwd)) return;
+    // Harden against a malformed client payload: keep only string rel-paths.
+    const paths = Array.isArray(msg.paths) ? msg.paths.filter((p): p is string => typeof p === "string") : [];
+    fileWatchManager.setWatched(_ws, msg.sessionId, msg.cwd, paths, (sessionId, path) =>
+      browserGateway.broadcast({ type: "file_changed", sessionId, path }),
+    );
+  });
+  browserGateway.registerDisconnectHandler((ws) => fileWatchManager.clearConnection(ws));
+
   // Resolve package version once at startup
   const __require = createRequire(import.meta.url);
   let pkgVersion = "unknown";
@@ -852,6 +870,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     if (requestId) worktreeInitRegistry.unsubscribe(requestId);
   });
   registerFileRoutes(fastify, { sessionManager, preferencesStore, networkGuard });
+  registerGrepRoutes(fastify, { sessionManager, networkGuard });
   registerOpenSpecRoutes(fastify, {
     sessionManager,
     preferencesStore,

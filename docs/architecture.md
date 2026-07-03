@@ -935,6 +935,16 @@ Three file-open paths coexist; nothing removed. This pane = quick read-only glan
 
 v2–v4 follow-on (pin-to-split, create-file, edit-with-conflicts) deferred to separate proposals.
 
+### Split editor workspace
+
+`SplitWorkspaceProvider` lifts split state + editor-pane state per session.
+
+`openInSplit` = single file-open helper. Auto-opens split. Callers: chat file-link, tool-result path, tree click, search result, `/session/:id/editor` deep-link.
+
+Content search: `GET /api/grep` → `rg` preferred, bounded JS fallback. Filename search: bridge `list_files` walk (`.gitignore`-aware, softened budget).
+
+Changed-on-disk: browser `watch_files` (open files only) → `file-watch-manager` `fs.watch` → `file_changed` broadcast → per-tab banner (Refresh, no auto-reload). Torn down on disconnect.
+
 ### Directory Settings + scoped markdown editing
 
 Dashboard's first user-facing WRITE surface. Prior dashboard read-only.

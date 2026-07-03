@@ -12,6 +12,7 @@ import { useMobile } from "../hooks/useMobile.js";
 // flows-plugin's command-route claims (/flows, /flows:new, etc.) and
 // SessionFlowActionsClaim. See change: pluginize-flows-via-registry.
 import { SearchableSelectDialog, type SelectOption } from "./SearchableSelectDialog.js";
+import { SplitToggleButton } from "./SplitToggleButton.js";
 import { FooterSegmentSlot } from "./extension-ui/FooterSegmentSlot.js";
 import { ArtifactLettersButton } from "./openspec-helpers.js";
 import { t as i18nT } from "../lib/i18n";
@@ -409,6 +410,8 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
       <FooterSegmentSlot session={session} />
       {/* OpenSpec + Flow buttons */}
       <span className="flex-1" />
+      {/* Split/unsplit editor toggle (self-contained; no-op without a session). */}
+      <SplitToggleButton />
       {onAttachProposal && openspecChanges && openspecChanges.length > 0 && (
         attached ? (
           <span className="text-[10px] flex items-center gap-1 mr-2">

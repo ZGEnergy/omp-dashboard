@@ -151,14 +151,18 @@ describe("searchFiles ranking", () => {
     expect(searchFiles(join(tmpdir(), "searchfiles-does-not-exist-xyz"), "")).toEqual([]);
   });
 
-  it("IGNORE_DIRS and depth > 6 pruned", () => {
+  it("IGNORE_DIRS pruned; depth guard relaxed past the old 6-level limit", () => {
+    // Depth guard softened from 6 to MAX_DEPTH=12 (change: split-editor-workspace):
+    // a depth-7 file is now reachable; a file beyond depth 12 is still pruned.
     const r = search([
       "node_modules/pkg/index.ts",
-      "a/b/c/d/e/f/g/toodeep.ts",
+      "a/b/c/d/e/f/g/nowreachable.ts",
+      "l1/l2/l3/l4/l5/l6/l7/l8/l9/l10/l11/l12/l13/l14/toodeep.ts",
       "keep.ts",
     ], "");
     expect(r.some((p) => p.startsWith("node_modules"))).toBe(false);
-    expect(r).not.toContain("a/b/c/d/e/f/g/toodeep.ts");
+    expect(r).toContain("a/b/c/d/e/f/g/nowreachable.ts");
+    expect(r).not.toContain("l1/l2/l3/l4/l5/l6/l7/l8/l9/l10/l11/l12/l13/l14/toodeep.ts");
     expect(r).toContain("keep.ts");
   });
 });
