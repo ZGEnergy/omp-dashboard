@@ -15,9 +15,14 @@ root/area pointer whose target path does not resolve), and over-threshold areas
 
 The command SHALL resolve each row's path **relative to the directory of the
 `AGENTS.md` that declares the row** (per the DOX schema "path relative to that
-`AGENTS.md`"), NOT relative to the project root. The command SHALL treat a table
-row as a DOX file row **only when it appears under a `# DOX —` heading**; rows in
-any other table (routing, QA, prose) SHALL be ignored.
+`AGENTS.md`"), NOT relative to the project root. When the dir-relative target does
+not exist, the command SHALL fall back to resolving the path **relative to the
+project root** before classifying the row as an orphan (so a sub-directory
+`AGENTS.md` — e.g. `docs/AGENTS.md` — may document a root-level config file that
+lives at the project root); a row is an orphan only when the file exists at
+neither location. The command SHALL treat a table row as a DOX file row **only
+when it appears under a `# DOX —` heading**; rows in any other table (routing, QA,
+prose) SHALL be ignored.
 
 It SHALL support `--json` for machine consumption (CI gates) and SHALL exit
 non-zero when issues are found. It SHALL support `--fix` that performs only the
@@ -31,6 +36,13 @@ any LLM or embedding model.
 - **WHEN** `kb dox lint` audits a sub-directory `AGENTS.md` whose row
   `| \`api.ts\` |` names a file that exists in that same directory
 - **THEN** the row SHALL NOT be reported as an orphan
+- **AND** `kb dox lint --fix` SHALL NOT remove that row
+
+#### Scenario: Root-level config documented in a sub-dir AGENTS.md
+
+- **WHEN** `kb dox lint` audits `docs/AGENTS.md` whose row `| \`biome.json\` |`
+  names a file that exists at the **project root** (not in `docs/`)
+- **THEN** the row SHALL NOT be reported as an orphan (repo-root fallback)
 - **AND** `kb dox lint --fix` SHALL NOT remove that row
 
 #### Scenario: Non-DOX table rows are ignored

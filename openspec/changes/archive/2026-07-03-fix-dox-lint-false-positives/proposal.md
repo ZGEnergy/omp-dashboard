@@ -56,10 +56,19 @@ heading is a reliable scope marker the lint currently ignores.
 ## What Changes
 
 1. **Resolve row paths relative to the owning `AGENTS.md` directory**, not `cwd`
-   (fixes Defect A; removes the `--fix` data-loss hazard).
+   (fixes Defect A; removes the `--fix` data-loss hazard). Add a shared
+   `resolveRowPath` primitive with a **repo-root (`cwd`) fallback** so
+   `docs/AGENTS.md` rows for root-level config (`biome.json`,
+   `playwright.config.ts`) — which live at the repo root, not in `docs/` — are
+   not falsely orphaned (and thus not pruned by `--fix`).
 2. **Scope row parsing to tables under a `# DOX —` heading** — rows outside a DOX
-   table are ignored, not linted (fixes Defect B).
-3. Apply the same scoping in `doxInit` (`dox.ts:134`) so init/lint agree.
+   table are ignored, not linted (fixes Defect B). Applied in the shared
+   `parseRowPaths` (so `doxInit` inherits it) and the `doxLint` inline scan.
+3. **Extend the fix to `kb-extension/src/reindex.ts`** — it shares the identical
+   two-bug family: `acknowledgeRows` resolved rows against `cwd` (wrong dir),
+   and `decideNudge` compared a cwd-relative path against a basename row → the
+   DOX-upkeep nudge always fired `"missing a row"`. Both now use dir-relative
+   resolution (+ root fallback) and cwd-relative staleness keys.
 4. Add regression scenarios to the `kb dox lint` requirement.
 
 Out of scope: over-threshold splitting and missing-companion detection (already
@@ -69,7 +78,17 @@ eligibility-rules question, tracked as a follow-up).
 ## Impact
 
 - Affected spec: `markdown-knowledge-base` (MODIFIED: DOX tree health-check).
-- Affected code: `packages/kb/src/dox.ts` (`doxLint`, `doxInit`, row parser).
-- Behavior: `kb dox lint` on this repo drops from 1226 → ~38 real issues;
-  `--fix` becomes safe to run.
+- Affected code: `packages/kb/src/dox.ts` (`doxLint`, `parseRowPaths`, new
+  `resolveRowPath`); `packages/kb-extension/src/reindex.ts` (`acknowledgeRows`,
+  `decideNudge`, local `resolveRowPath` mirror).
+- Behavior: `kb dox lint` on this repo (measured from the **main** checkout, not
+  a `.worktrees/**` cwd) drops from 1226 → 133 real issues — orphan 1069 → 1
+  (the 1 = genuinely-absent `.pi-test-harness.json`), over-threshold 8 (real,
+  preserved), missing 94 (out-of-scope `.md`-convention), missing-companion 30.
+  `--fix` becomes safe to run. The extension DOX-upkeep nudge stops
+  false-firing `"missing a row"`.
 - No API/flag changes; no migration.
+- Measurement caveat: `doxLint`'s AGENTS.md walk matches `DEFAULT_EXCLUDE`
+  against absolute paths, so a cwd under `.worktrees/**` excludes the whole tree
+  and scans nothing — always measure from the main checkout. (Pre-existing;
+  out of scope to change here.)

@@ -14,6 +14,18 @@ import { SqliteFtsStore } from "@blackbelt-technology/pi-dashboard-kb";
 import { indexSource } from "@blackbelt-technology/pi-dashboard-kb";
 import { agentsChain, parseRowPaths } from "@blackbelt-technology/pi-dashboard-kb";
 
+/** Resolve a DOX row path relative to its AGENTS.md dir, with a project-root
+ *  fallback (a nested AGENTS.md may document a file living at the root).
+ *  Local mirror of kb's `resolveRowPath` — kept inline so this package does not
+ *  depend on an unreleased kb export across the versioned package boundary. */
+function resolveRowPath(agentsDir: string, cwd: string, rp: string): string {
+  if (isAbsolute(rp)) return rp;
+  const dirRel = resolve(agentsDir, rp);
+  if (existsSync(dirRel)) return dirRel;
+  const rootRel = resolve(cwd, rp);
+  return existsSync(rootRel) ? rootRel : dirRel;
+}
+
 export const DEFAULT_DEBOUNCE_MS = 800;
 
 export interface ReindexState {
@@ -48,10 +60,12 @@ function fileSha(p: string): string {
 export function acknowledgeRows(cwd: string, agentsFile: string): void {
   const abs = isAbsolute(agentsFile) ? agentsFile : resolve(cwd, agentsFile);
   if (!existsSync(abs)) return;
+  const dir = dirname(abs);
   const map = loadStaleness(cwd);
   for (const rp of parseRowPaths(abs)) {
-    const ap = isAbsolute(rp) ? rp : resolve(cwd, rp);
-    if (existsSync(ap)) map[rp] = fileSha(ap);
+    // Rows are relative to their AGENTS.md dir; key staleness by cwd-relative path.
+    const ap = resolveRowPath(dir, cwd, rp);
+    if (existsSync(ap)) map[relative(cwd, ap)] = fileSha(ap);
   }
   saveStaleness(cwd, map);
 }
@@ -68,9 +82,11 @@ export function decideNudge(cwd: string, editedPath: string): NudgeDecision {
   const { chain } = agentsChain(cwd, abs, { claudeMd: true });
   if (chain.length === 0) return { kind: "treeless" };
   const nearest = chain[chain.length - 1];
-  const rows = parseRowPaths(nearest.path);
+  // Rows document paths relative to their own AGENTS.md dir — resolve before compare.
+  const nearestDir = dirname(nearest.path);
+  const rowAbs = new Set(parseRowPaths(nearest.path).map((rp) => resolveRowPath(nearestDir, cwd, rp)));
   const rel = relative(cwd, abs) || abs;
-  if (!rows.includes(rel)) return { kind: "missing", agentsFile: nearest.rel };
+  if (!rowAbs.has(abs)) return { kind: "missing", agentsFile: nearest.rel };
   const map = loadStaleness(cwd);
   const disk = fileSha(abs);
   if (map[rel] && disk && map[rel] !== disk) return { kind: "stale", agentsFile: nearest.rel };
