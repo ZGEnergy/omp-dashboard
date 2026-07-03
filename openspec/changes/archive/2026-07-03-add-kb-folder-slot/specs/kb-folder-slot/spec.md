@@ -6,8 +6,13 @@ The dashboard server SHALL expose `GET /api/kb/stats?cwd=<abs>` returning the kn
 
 #### Scenario: Populated folder returns counts
 - **WHEN** `GET /api/kb/stats?cwd=C` is called and folder `C`'s KB db has entries
-- **THEN** the response is `200` with `{ files, chunks, indexed: true, staleCount, indexing }`
+- **THEN** the response is `200` with `{ files, chunks, indexed: true, staleCount, indexing, jobStatus, lastError }`
 - **AND** `chunks` equals `store.counts().chunks` for `C`'s resolved `dbAbsPath`
+
+#### Scenario: Stats surface the last job error
+- **WHEN** `GET /api/kb/stats?cwd=C` is called after the last reindex job for `C` failed
+- **THEN** the response reports `jobStatus: "error"` with a `lastError` string
+- **AND** the client can distinguish this failed state from a never-indexed folder (`chunks: 0`, `jobStatus: "idle"`)
 
 #### Scenario: Un-indexed folder reports empty
 - **WHEN** `GET /api/kb/stats?cwd=W` is called for a worktree `W` whose KB db is absent or empty
@@ -39,7 +44,7 @@ The dashboard server SHALL expose `POST /api/kb/reindex?cwd=<abs>` that indexes 
 #### Scenario: Failure surfaces an error
 - **WHEN** a reindex job for cwd `C` throws
 - **THEN** the route responds `500` with an `error`
-- **AND** a subsequent `GET /api/kb/stats?cwd=C` reports the folder as not currently indexing
+- **AND** a subsequent `GET /api/kb/stats?cwd=C` reports the folder as not currently indexing (`indexing: false`) with `jobStatus: "error"` and the `lastError`
 
 ### Requirement: KB folder nav slot
 
@@ -78,8 +83,9 @@ The KB folder row SHALL derive its presentation from the folder's KB stats, dist
 - **AND** the stale count reflects drifted source files only, not markdown drift
 
 #### Scenario: Failed reindex offers retry
-- **WHEN** the last reindex for folder `C` ended in error
+- **WHEN** the last reindex for folder `C` ended in error (`jobStatus: "error"`)
 - **THEN** the row shows a failed state with a `Retry` action
+- **AND** the failed state is distinguished from not-indexed even when `chunks` is `0`
 
 ### Requirement: KB config read route
 

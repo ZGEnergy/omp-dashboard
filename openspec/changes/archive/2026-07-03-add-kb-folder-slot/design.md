@@ -74,16 +74,24 @@ The dashboard server already runs as a long-lived Node process and already hosts
 
 ```
 GET  /api/kb/stats?cwd=<abs>
-     → 200 { files, chunks, indexed, staleCount, indexing }
+     → 200 { files, chunks, indexed, staleCount, indexing, jobStatus, lastError }
         indexed    = chunks > 0
         staleCount = count of drifted rows from dox-staleness.json (source files only)
-        indexing   = a job is currently running for this cwd
+        indexing   = a job is currently running for this cwd (jobStatus === "running")
+        jobStatus  = last/current reindex job state: "idle" | "running" | "error"
+        lastError  = error string from the last failed job (present iff jobStatus === "error")
 
 POST /api/kb/reindex?cwd=<abs>
      → 202 { jobId, status: "running" }   (job started or already running)
      → 200 { changed, chunks }            (if run synchronously and fast)
      on failure → 500 { error }
 ```
+
+`jobStatus` / `lastError` are sourced from the §4 job registry, not recomputed. They
+let the client distinguish the `error` row state (a *failed* reindex → `Retry`) from the
+`not-indexed` state (`chunks: 0`, never run → `Index now`). Without them a folder that
+failed its first index would poll back `{ indexing:false, chunks:0 }` and misrender as
+`not-indexed`. `jobStatus` resets to `"idle"` once a subsequent job succeeds.
 
 Both resolve the store via `loadConfig(cwd)` → `new SqliteFtsStore(cfg.dbAbsPath)`. `cwd` MUST be validated against known folder cwds (the dashboard already tracks folder descriptors) to avoid arbitrary-path indexing.
 
@@ -104,18 +112,21 @@ Structural copy of `FolderGoalsSection.tsx`:
 useKbStats(cwd) → { files, chunks, indexed, staleCount, indexing, reindex() }
 
 render state = derive(stats):
-  !indexed            → "KB · not indexed"   [Index now]      (teal, prominent)
+  jobStatus==="error" → "KB · index failed"  [↻ Retry]        (red)
   indexing            → "KB · indexing… N files"  ↻(spin)
+  !indexed            → "KB · not indexed"   [Index now]      (teal, prominent)
   staleCount > 0      → "KB · C chunks · S stale"  ↻          (amber flag)
   indexed             → "KB · C chunks"  ↻                    (default)
-  error               → "KB · index failed"  [↻ Retry]        (red)
+
+Derivation is ordered: `error` (from `jobStatus`) wins over `not-indexed`, so a failed
+first index shows `Retry`, not `Index now`. `indexing` outranks the count states.
 ```
 
 - `e.stopPropagation()` on all clicks (matches sibling sections — folder header owns the row click).
 - Tooltip on the count = `${files} files · ${chunks} chunks`.
 - The `→` arrow (KB detail page) is **out of scope v1**; leave count non-navigational or point at a stub disabled affordance.
 
-Mockup: `mockups/sidebar-kb-slot.html` (all five states rendered side by side).
+Mockup: `openspec/changes/add-kb-folder-slot/mockups/sidebar-kb-slot.html` (all five states rendered side by side).
 
 ## 6. Stale count — honest scope
 
