@@ -1,6 +1,7 @@
 import type React from "react";
 import { resolveLinkOrigin } from "../../lib/link-origin.js";
 import { FilePreviewOverlay } from "../FilePreviewOverlay.js";
+import { useOptionalSplitWorkspace } from "../SplitWorkspaceContext.js";
 import type { ToolContext } from "./types.js";
 import { useFileOpenRouting } from "./useFileOpenRouting.js";
 
@@ -39,9 +40,19 @@ export function FileLink({ path, line, col, absolute, context, children }: Props
   const origin = resolveLinkOrigin(cwd, path, absolute);
   const openTarget = absolute ? origin : path;
 
+  // Prefer the in-dashboard editor split when it is available for this session
+  // and the token is a cwd-relative path (the pane is rooted at cwd). Falls
+  // back to the external-editor / preview routing everywhere else.
+  const ws = useOptionalSplitWorkspace();
+  const canSplitOpen = !!ws && !absolute && !!context.sessionId && ws.sessionId === context.sessionId;
+
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (canSplitOpen && ws) {
+      ws.openInSplit(path, line);
+      return;
+    }
     void openFile(openTarget, line);
   };
 

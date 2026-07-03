@@ -56,6 +56,8 @@ export interface MessageHandlerSetters {
   // the per-session-data store directly. See change:
   // pluginize-flows-via-registry.
   setFileResults: React.Dispatch<React.SetStateAction<{ query: string; files: FileEntry[] } | null>>;
+  /** Per-session set of rel-paths that changed on disk (editor-pane banner). See change: split-editor-workspace. */
+  setChangedOnDisk: React.Dispatch<React.SetStateAction<Map<string, Set<string>>>>;
   setOpenspecMap: React.Dispatch<React.SetStateAction<Map<string, OpenSpecData>>>;
   /**
    * Folder-HEAD branch map (`cwd → branch | null`), fed by `git_head_update`.
@@ -143,7 +145,7 @@ export function useMessageHandler(
 ): (msg: ServerToBrowserMessage) => void {
   const {
     setSessions, setSessionStates, setSessionCommands,
-    setFileResults, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult,
+    setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult,
     setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses,
     setDiscoveredServers, setSpawnErrors, setResumeErrors,
     setDisplayPrefs, setViewMessagesMap, setLoadingHistory,
@@ -383,6 +385,20 @@ export function useMessageHandler(
 
       case "files_list":
         setFileResults({ query: msg.query, files: msg.files });
+        break;
+
+      case "file_changed":
+        // An open editor-pane file changed on disk. Record it per-session; the
+        // pane surfaces a per-tab banner (no auto-reload).
+        // See change: split-editor-workspace.
+        if (typeof msg.path !== "string" || typeof msg.sessionId !== "string") break;
+        setChangedOnDisk((prev) => {
+          const next = new Map(prev);
+          const set = new Set(next.get(msg.sessionId) ?? []);
+          set.add(msg.path);
+          next.set(msg.sessionId, set);
+          return next;
+        });
         break;
 
       case "models_list": {
@@ -951,5 +967,5 @@ export function useMessageHandler(
         break;
       }
     }
-  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setFileResults, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses, setDiscoveredServers, setLoadingHistory, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef, selectedSessionIdRef, loadingHistoryTimersRef, replayPersister]);
+  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses, setDiscoveredServers, setLoadingHistory, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef, selectedSessionIdRef, loadingHistoryTimersRef, replayPersister]);
 }

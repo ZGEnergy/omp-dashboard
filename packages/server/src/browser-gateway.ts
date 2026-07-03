@@ -132,6 +132,12 @@ export interface BrowserGateway {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     handler: (msg: any, ws: WebSocket) => void,
   ): void;
+  /**
+   * Register a callback invoked when any browser connection closes, so
+   * per-connection resources (e.g. the open-files watch) are torn down.
+   * See change: split-editor-workspace.
+   */
+  registerDisconnectHandler(handler: (ws: WebSocket) => void): void;
 }
 
 export function createBrowserGateway(
@@ -162,6 +168,10 @@ export function createBrowserGateway(
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const customHandlers = new Map<string, (msg: any, ws: WebSocket) => void>();
+
+  // Callbacks invoked on browser disconnect (per-connection resource cleanup).
+  // See change: split-editor-workspace.
+  const disconnectHandlers: Array<(ws: WebSocket) => void> = [];
 
   // Track subscriptions: ws → Set<sessionId>
   const subscriptions = new Map<WebSocket, Set<string>>();
@@ -729,6 +739,15 @@ export function createBrowserGateway(
       // Drop this ws from every viewed-session entry so disconnected browsers
       // don't hold sessions in the viewed state. See change: session-card-unread-stripes.
       viewedSessionTracker.unviewAll(ws);
+      // Tear down per-connection resources (open-files watch, …).
+      // See change: split-editor-workspace.
+      for (const fn of disconnectHandlers) {
+        try {
+          fn(ws);
+        } catch (err) {
+          console.error("[browser-gw] disconnect handler error:", err);
+        }
+      }
     });
   });
 
@@ -745,6 +764,10 @@ export function createBrowserGateway(
 
     registerHandler(type, handler) {
       customHandlers.set(type, handler);
+    },
+
+    registerDisconnectHandler(handler) {
+      disconnectHandlers.push(handler);
     },
 
     broadcastEvent(sessionId: string, seq: number, event: any) {

@@ -1,8 +1,25 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent, act } from "@testing-library/react";
 import React from "react";
-import { CommandInput } from "../CommandInput.js";
+import { CommandInput, shouldWalkFileQuery } from "../CommandInput.js";
 import type { CommandInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+
+describe("shouldWalkFileQuery (min-3-char guard)", () => {
+  it("fires for a bare @ (empty query, top-level listing)", () => {
+    expect(shouldWalkFileQuery("")).toBe(true);
+  });
+  it("suppresses a 1\u20132 char bare leaf", () => {
+    expect(shouldWalkFileQuery("a")).toBe(false);
+    expect(shouldWalkFileQuery("ab")).toBe(false);
+  });
+  it("fires at 3 chars", () => {
+    expect(shouldWalkFileQuery("abc")).toBe(true);
+  });
+  it("fires for any slashed (scoped) query regardless of leaf length", () => {
+    expect(shouldWalkFileQuery("src/db")).toBe(true);
+    expect(shouldWalkFileQuery("a/b")).toBe(true);
+  });
+});
 
 const commands: CommandInfo[] = [
   { name: "deploy", description: "Deploy to production", source: "extension" },

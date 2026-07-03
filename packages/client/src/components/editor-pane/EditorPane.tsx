@@ -1,48 +1,88 @@
 /**
- * Editor pane shell — composes the tab strip, the collapsible file-tree rail,
- * and the active viewer (resolved via the viewer registry). Replaces ChatView
- * in the content area, mirroring FileDiffView. Read-only in v1.
+ * Editor pane shell — composes the tab strip, the collapsible + resizable
+ * file-tree rail, and the active viewer (resolved via the viewer registry).
+ * Co-mounts alongside `ChatView` inside `SplitWorkspace`. Read-only in v1.
  *
- * See change: add-internal-monaco-editor-pane.
+ * State (open tabs, tree expansion) and the file-open plumbing come from
+ * `SplitWorkspaceContext` so tree clicks, chat file-links, and search results
+ * all funnel through one `openInSplit`. The inner rail↔viewer divider resizes
+ * the rail independently of the outer chat/editor split.
+ *
+ * See change: add-internal-monaco-editor-pane, split-editor-workspace.
  */
 
-import { fileKind, type ViewerKind } from "@blackbelt-technology/pi-dashboard-shared/file-kind.js";
-import { mdiArrowLeft, mdiFileTreeOutline, mdiRefresh } from "@mdi/js";
+import { fileKind } from "@blackbelt-technology/pi-dashboard-shared/file-kind.js";
+import { mdiClose, mdiFileTreeOutline, mdiMagnify, mdiRefresh } from "@mdi/js";
 import { Icon } from "@mdi/react";
-import { Suspense, useEffect, useState } from "react";
-import { useEditorPaneState } from "../../lib/editor-pane-state.js";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { grepContents } from "../../lib/grep-api.js";
+import { useRailWidth } from "../../lib/rail-width.js";
+import { SplitDivider } from "../SplitDivider.js";
+import { useSplitWorkspace } from "../SplitWorkspaceContext.js";
+import { ChangedOnDiskBanner } from "./ChangedOnDiskBanner.js";
 import { EditorFileTree } from "./EditorFileTree.js";
+import { EditorSearchPanel } from "./EditorSearchPanel.js";
 import { EditorTabs } from "./EditorTabs.js";
 import { viewerRegistry } from "./viewer-registry.js";
 
-interface EditorPaneProps {
-  sessionId: string;
-  cwd: string;
-  initialFile?: string | null;
-  initialLine?: number | null;
-  onBack: () => void;
-}
-
 const absOf = (cwd: string, rel: string): string => (rel ? `${cwd}/${rel}` : cwd);
 
-export function EditorPane({ sessionId, cwd, initialFile, initialLine, onBack }: EditorPaneProps) {
-  const [state, dispatch] = useEditorPaneState(sessionId);
+export function EditorPane() {
+  const {
+    sessionId,
+    cwd,
+    paneState: state,
+    dispatch,
+    updateSplit,
+    openInSplit,
+    pendingScroll,
+    consumePendingScroll,
+    fileResults,
+    onFilenameSearch,
+    changedFiles,
+    clearChanged,
+  } = useSplitWorkspace();
   const [treeVisible, setTreeVisible] = useState(true);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [railWidth, setRailWidth] = useRailWidth(sessionId);
 
-  // Open the route-requested file on mount / when it changes.
+  // Cmd/Ctrl-P (filenames) or Cmd/Ctrl-Shift-F (contents) toggles the search.
   useEffect(() => {
-    if (initialFile) {
-      const viewer = fileKind(absOf(cwd, initialFile)).viewer;
-      dispatch({ type: "openFile", path: initialFile, viewer });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialFile, cwd]);
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      if (e.key === "p" || e.key === "P" || (e.shiftKey && (e.key === "f" || e.key === "F"))) {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const onContentSearch = useCallback(
+    (q: string, regex: boolean) => grepContents(cwd, q, regex),
+    [cwd],
+  );
+  // Tree+viewer row — its left edge anchors the rail-width drag math so the
+  // width stays correct regardless of the outer split ratio.
+  const rowRef = useRef<HTMLDivElement>(null);
+  // Scroll target for the active tab, latched from the pending-scroll signal.
+  const [scrollTo, setScrollTo] = useState<{ path: string; line: number } | null>(null);
 
   const activeTab = state.activeIndex >= 0 ? state.openFiles[state.activeIndex] : null;
   const activePath = activeTab?.path ?? null;
 
-  const openFile = (relPath: string, viewer: ViewerKind) => dispatch({ type: "openFile", path: relPath, viewer });
+  // Honour a pending scroll for the active tab exactly once, then clear it.
+  useEffect(() => {
+    if (pendingScroll && pendingScroll.path === activePath) {
+      setScrollTo(pendingScroll);
+      consumePendingScroll();
+    }
+  }, [pendingScroll, activePath, consumePendingScroll]);
+
+  const lineForTab = scrollTo && scrollTo.path === activePath ? scrollTo.line : undefined;
 
   let body: React.ReactNode;
   if (!activeTab) {
@@ -54,11 +94,10 @@ export function EditorPane({ sessionId, cwd, initialFile, initialLine, onBack }:
   } else {
     const classification = fileKind(absOf(cwd, activeTab.path));
     const Viewer = viewerRegistry[activeTab.viewer];
-    const lineForTab = activeTab.path === initialFile ? (initialLine ?? undefined) : undefined;
     body = (
       <Suspense fallback={<div className="p-4 text-sm text-[var(--text-tertiary)]">Loading viewer…</div>}>
         <Viewer
-          key={`${activeTab.path}:${refreshNonce}`}
+          key={`${activeTab.path}:${refreshNonce}:${lineForTab ?? ""}`}
           cwd={cwd}
           path={activeTab.path}
           kind={classification.kind}
@@ -76,9 +115,6 @@ export function EditorPane({ sessionId, cwd, initialFile, initialLine, onBack }:
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Header */}
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border-primary)] px-3 py-2">
-        <button type="button" onClick={onBack} className="text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)]" title="Back to chat">
-          <Icon path={mdiArrowLeft} size={0.6} className="mr-0.5 inline" />Back
-        </button>
         <button
           type="button"
           onClick={() => setTreeVisible((v) => !v)}
@@ -89,6 +125,16 @@ export function EditorPane({ sessionId, cwd, initialFile, initialLine, onBack }:
         </button>
         <span className="truncate text-sm font-medium">{activePath ?? "Editor"}</span>
         <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setSearchOpen((v) => !v)}
+          aria-pressed={searchOpen}
+          data-testid="editor-search-toggle"
+          className={searchOpen ? "text-blue-400" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"}
+          title="Search (Cmd-P / Cmd-Shift-F)"
+        >
+          <Icon path={mdiMagnify} size={0.7} />
+        </button>
         {activeTab && (
           <button
             type="button"
@@ -99,6 +145,14 @@ export function EditorPane({ sessionId, cwd, initialFile, initialLine, onBack }:
             <Icon path={mdiRefresh} size={0.7} />
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => updateSplit({ open: false })}
+          className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+          title="Close editor (unsplit)"
+        >
+          <Icon path={mdiClose} size={0.7} />
+        </button>
       </div>
 
       {/* Tabs */}
@@ -112,20 +166,53 @@ export function EditorPane({ sessionId, cwd, initialFile, initialLine, onBack }:
         />
       )}
 
-      {/* Tree + viewer */}
-      <div className="flex min-h-0 flex-1">
+      {/* Tree + inner divider + viewer */}
+      <div ref={rowRef} className="flex min-h-0 flex-1">
         {treeVisible && (
-          <div className="w-56 shrink-0">
-            <EditorFileTree
-              cwd={cwd}
-              treeOpenRoots={state.treeOpenRoots}
-              onToggleRoot={(relPath) => dispatch({ type: "toggleTreeRoot", relPath })}
-              onOpenFile={openFile}
-              activePath={activePath}
+          <>
+            <div className="shrink-0" style={{ width: railWidth }}>
+              <EditorFileTree
+                cwd={cwd}
+                treeOpenRoots={state.treeOpenRoots}
+                onToggleRoot={(relPath) => dispatch({ type: "toggleTreeRoot", relPath })}
+                onOpenFile={(relPath) => openInSplit(relPath)}
+                activePath={activePath}
+              />
+            </div>
+            <SplitDivider
+              orientation="h"
+              onResize={(clientX) => {
+                const left = rowRef.current?.getBoundingClientRect().left ?? 0;
+                setRailWidth(clientX - left);
+              }}
+              data-testid="rail-divider"
+              title="Drag to resize the browse rail"
             />
-          </div>
+          </>
         )}
-        <div className="min-w-0 flex-1">{body}</div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          {searchOpen && (
+            <EditorSearchPanel
+              cwd={cwd}
+              fileResults={fileResults}
+              onFilenameSearch={onFilenameSearch}
+              onContentSearch={onContentSearch}
+              onOpen={(relPath, line) => openInSplit(relPath, line)}
+              onClose={() => setSearchOpen(false)}
+            />
+          )}
+          {activePath && changedFiles?.has(activePath) && (
+            <ChangedOnDiskBanner
+              fileName={activePath}
+              onRefresh={() => {
+                setRefreshNonce((n) => n + 1);
+                clearChanged(activePath);
+              }}
+              onDismiss={() => clearChanged(activePath)}
+            />
+          )}
+          <div className="min-h-0 flex-1">{body}</div>
+        </div>
       </div>
 
       {/* Status footer */}

@@ -152,6 +152,22 @@ function extractAtQuery(text: string): string | null {
   return null;
 }
 
+/** Minimum bare-leaf length before a walk-backed `list_files` request fires. */
+export const MIN_FILE_QUERY_LEN = 3;
+
+/**
+ * Whether an `@`-mention query should issue a walk-backed `list_files` request.
+ * A bare `@` (empty query) lists top-level entries; a slashed query is scoped
+ * cheaply by its prefix; a bare leaf must reach the minimum length before the
+ * walk fires (short 1–2 char leaves flood the walk for little signal).
+ * See change: split-editor-workspace (spec: file-autocomplete).
+ */
+export function shouldWalkFileQuery(query: string): boolean {
+  if (query.length === 0) return true; // bare @ → top-level listing
+  if (query.includes("/")) return true; // scoped by prefix → cheap walk
+  return query.length >= MIN_FILE_QUERY_LEN;
+}
+
 type StopState = "idle" | "aborting" | "killing";
 
 export function CommandInput({ commands: externalCommands, onSend, onListFiles, fileResults, disabled, sessionStatus, retrying, onAbort, onForceKill, onStopAfterTurn, pendingPrompt, onCancelPending, sessionId, draft, onDraftChange, history, images, onImagesChange, currentCwd, onViewLocal, onOpenInlineTerminal, sessionMessages }: Props) {
@@ -246,6 +262,9 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
       return;
     }
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    // Min-length guard: a 1–2 char bare leaf issues no walk; the dropdown keeps
+    // the last valid result or nothing. See change: split-editor-workspace.
+    if (!shouldWalkFileQuery(atQuery)) return;
     debounceRef.current = setTimeout(() => {
       lastFileQueryRef.current = atQuery;
       onListFiles(atQuery);

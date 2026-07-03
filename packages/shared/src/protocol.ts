@@ -578,6 +578,10 @@ export interface ListFilesMessage {
   type: "list_files";
   sessionId: string;
   query: string;
+  /** Optional regexp interpretation of the leaf (editor filename search).
+   *  Absent for `@`-mention (substring) — wire shape unchanged for that path.
+   *  See change: split-editor-workspace. */
+  regex?: boolean;
 }
 
 // OpenSpecRefreshMessage removed — server refreshes directly via DirectoryService
@@ -862,3 +866,5 @@ export type ServerToExtensionMessage =
   | PromoteFollowupEntryToExtensionMessage
   | AttachProposalChangedExtensionMessage
   | PluginEmitEventExtensionMessage;
+
+

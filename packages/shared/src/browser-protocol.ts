@@ -759,7 +759,21 @@ export type ServerToBrowserMessage =
   | DisplayPrefsUpdatedMessage
   | QueueUpdateToBrowserMessage
   | PromptReceivedToBrowserMessage
-  | ViewMessagesUpdateMessage;
+  | ViewMessagesUpdateMessage
+  | FileChangedMessage;
+
+/**
+ * Server push: an open editor-pane file changed on disk (agent edit or
+ * external change), detected by the narrow open-files watch. The pane shows a
+ * per-tab "changed on disk" banner offering Refresh (no auto-reload).
+ * See change: split-editor-workspace.
+ */
+export interface FileChangedMessage {
+  type: "file_changed";
+  sessionId: string;
+  /** Path relative to the session cwd. */
+  path: string;
+}
 
 // ── Browser → Server ────────────────────────────────────────────────
 
@@ -1447,7 +1461,22 @@ export type BrowserToServerMessage =
   | WorktreeInitUnsubscribeMessage
   | SetSessionDisplayPrefsBrowserMessage
   | SetSessionProcessDrawerBrowserMessage
-  | InjectViewMessageBrowserMessage;
+  | InjectViewMessageBrowserMessage
+  | WatchFilesBrowserMessage;
+
+/**
+ * Browser declares the editor pane's currently-open files for a session so the
+ * server watches exactly those (and no more). Sent on open-set change and on
+ * pane unmount / session switch (with an empty `paths` to clear).
+ * See change: split-editor-workspace.
+ */
+export interface WatchFilesBrowserMessage {
+  type: "watch_files";
+  sessionId: string;
+  cwd: string;
+  /** Rel-paths of the open tabs; `[]` tears the session's watchers down. */
+  paths: string[];
+}
 
 /**
  * Browser registers interest in worktree-init events for a given

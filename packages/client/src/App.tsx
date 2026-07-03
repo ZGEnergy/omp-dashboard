@@ -12,7 +12,8 @@ import { ComposerSessionActions } from "./components/ComposerSessionActions.js";
 import { ConnectionStatusBanner } from "./components/ConnectionStatusBanner.js";
 import { DirectorySettings, type DirectorySettingsPage } from "./components/DirectorySettings/DirectorySettings.js";
 import { EditorView } from "./components/EditorView.js";
-import { EditorPane } from "./components/editor-pane/EditorPane.js";
+import { SessionSplitView, SplitRouteSync } from "./components/SessionSplitView.js";
+import { SplitWorkspaceProvider } from "./components/SplitWorkspaceContext.js";
 import { FileDiffView } from "./components/FileDiffView.js";
 import { InstallBanner } from "./components/InstallBanner.js";
 import { LandingPage } from "./components/LandingPage.js";
@@ -450,6 +451,9 @@ export default function App() {
   // (mirrored by useMessageHandler on `flows_list` messages). See
   // change: pluginize-flows-via-registry.
   const [fileResults, setFileResults] = useState<{ query: string; files: FileEntry[] } | null>(null);
+  // Per-session rel-paths that changed on disk while open in the editor pane
+  // (drives the changed-on-disk banner). See change: split-editor-workspace.
+  const [changedOnDisk, setChangedOnDisk] = useState<Map<string, Set<string>>>(() => new Map());
   const [openspecMap, setOpenspecMap] = useState<Map<string, OpenSpecData>>(new Map());
   // Folder-HEAD branch map (`cwd → branch | null`), synced via `git_head_update`.
   // See change: refresh-folder-header-branch.
@@ -649,7 +653,7 @@ export default function App() {
   }, []);
 
   const handleMessage = useMessageHandler(
-    { setSessions, setSessionStates, setSessionCommands, setFileResults, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap, setLoadingHistory },
+    { setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap, setLoadingHistory },
     { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, replayPersister: replayPersisterRef.current },
   );
 
@@ -1499,16 +1503,10 @@ export default function App() {
         />
       ) : diffMatch && diffSessionId ? (
         <FileDiffView sessionId={diffSessionId} onBack={goBack} />
-      ) : editorMatch && editorSessionId && selectedSession ? (
-        <EditorPane
-          sessionId={editorSessionId}
-          cwd={selectedSession.cwd}
-          initialFile={editorFile}
-          initialLine={editorLine}
-          onBack={goBack}
-        />
       ) : (
-        <>
+        <SessionSplitView
+          chat={
+            <>
           {/* Plugin slot: content-header-sticky — contributions from
               flows-plugin (FlowDashboardClaim) and future plugins. The
               shell renders zero flow-specific content. See change:
@@ -1726,7 +1724,9 @@ export default function App() {
               />
             );
           })()}
-        </>
+            </>
+          }
+        />
       )}
     </div>
   ) : null;
@@ -1816,7 +1816,30 @@ export default function App() {
             </div>
           </div>
         }>
-          {children}
+          <SplitWorkspaceProvider
+            sessionId={selectedId ?? ""}
+            cwd={selectedSession?.cwd ?? ""}
+            orientation={isMobile ? "v" : "h"}
+            fileResults={fileResults}
+            onFilenameSearch={handleListFiles}
+            changedFiles={selectedId ? changedOnDisk.get(selectedId) ?? null : null}
+            onWatchFiles={(sid, cwd, paths) => send({ type: "watch_files", sessionId: sid, cwd, paths })}
+            onClearChanged={(path) => {
+              if (!selectedId) return;
+              setChangedOnDisk((prev) => {
+                const set = prev.get(selectedId);
+                if (!set || !set.has(path)) return prev;
+                const next = new Map(prev);
+                const copy = new Set(set);
+                copy.delete(path);
+                next.set(selectedId, copy);
+                return next;
+              });
+            }}
+          >
+            <SplitRouteSync active={!!editorMatch} file={editorFile} line={editorLine} />
+            {children}
+          </SplitWorkspaceProvider>
         </ErrorBoundary>
       </ShellSessionsProvider>
       </PluginContextProvider>
@@ -1887,14 +1910,6 @@ export default function App() {
               <SpecsBrowserView cwd={specsCwd} onBack={goBack} />
             ) : diffMatch && diffSessionId ? (
               <FileDiffView sessionId={diffSessionId} onBack={goBack} />
-            ) : editorMatch && editorSessionId && selectedSession ? (
-              <EditorPane
-                sessionId={editorSessionId}
-                cwd={selectedSession.cwd}
-                initialFile={editorFile}
-                initialLine={editorLine}
-                onBack={goBack}
-              />
             ) : piResourceFileMatch && piResourceFilePath ? (
               <PiResourceFileRoute
                 filePath={piResourceFilePath}
