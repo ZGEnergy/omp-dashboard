@@ -4,7 +4,7 @@
 - [x] `dox.ts` `doxLint` — resolve row paths against `dirname(af)`, not `cwd`, via shared `resolveRowPath` → verify: unit fixture with a valid basename row in a sub-dir `AGENTS.md` reports 0 orphans
 - [x] Add `resolveRowPath(agentsDir, cwd, rp)`: dir-relative first, then repo-root (`cwd`) fallback before orphan — rescues `docs/AGENTS.md` root-config rows (`biome.json`, `playwright.config.ts`) → verify: unit fixture (docs/ sub-dir row for a repo-root file) reports 0 orphans
 - [x] Confirm `broken-pointer` + absolute-path branches still behave → verify: existing dox tests green
-- [x] Guard `--fix`: no valid rows pruned → verify: patched `doxLint` on main repo drops orphan 1069 → 1 (the 1 = genuinely-absent `.pi-test-harness.json`, a correct stale-row finding)
+- [x] Guard `--fix`: no valid rows pruned → verify: patched `doxLint` on main repo drops orphan 1069 → 1 (the 1 = genuinely-absent `.pi-test-harness.json`, a correct **orphan** finding — absent file, not stale, which requires an existing-but-drifted file)
 
 ## 2. DOX-table scoping (Defect B)
 - [x] Add heading-tracking (`# DOX —` scope) to shared `parseRowPaths` + the `doxLint` inline row scan — only rows under a `DOX` heading count → verify: unit fixture with a non-DOX prose table (backtick path cell) yields 0 rows
