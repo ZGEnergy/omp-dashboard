@@ -11,7 +11,8 @@
 
 ## 1b. DOX doctrine artifact + seed-if-absent
 
-- [ ] 1b.1 Add `skills/project-init/dox-doctrine.md` — one canonical doctrine (adapted from agent0ai/dox: read-before-editing chain walk, update-after-editing pass, hierarchy, child-doc shape, closeout). Under a kb-indexed path so `kb_search "dox doctrine"` returns it.
+- [ ] 1b.1 Add `skills/project-init/dox-doctrine.md` — one canonical doctrine covering WRITE discipline (adapted from agent0ai/dox: read-before-editing chain walk, update-after-editing pass, hierarchy, child-doc shape, closeout) AND a READ discipline "Finding docs" section. Under a kb-indexed path so `kb_search "dox doctrine"` returns it.
+- [ ] 1b.1a Read section is toolset-conditional: kb-wired variant instructs `kb agents <path>` + `kb_search` before grepping; kb-absent variant uses manual chain-walk wording with no `kb_search`/`kb agents` reference. → verify: unit test asserts kb-wired seed contains `kb_search`, kb-absent seed does not.
 - [ ] 1b.2 Add an optional `dox: boolean` flag to the profile shape (default `false`); resolver surfaces it. Unit-test default + explicit `true`.
 - [ ] 1b.3 Seed step: given a DOX-opted profile, detect a stable marker (e.g. `<!-- dox-doctrine -->`) in the target `AGENTS.md`; append `dox-doctrine.md` (with the marker) only when absent. Idempotent. → verify: unit test asserts absent→seeded-once, present→no-op, re-run→no double-seed.
 - [ ] 1b.4 DOX-opted `settings.json.tmpl` sets `indexAgentsFiles: true` + `directoryLevelAgents.enabled: true`. → verify: rendered settings validate against the kb config schema.

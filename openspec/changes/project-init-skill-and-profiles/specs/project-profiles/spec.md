@@ -18,6 +18,8 @@ A project profile SHALL be a directory bundling: an `AGENTS.md.tmpl` (instructio
 
 A profile MAY declare an optional `dox` opt-in (default off). The DOX doctrine SHALL be a single canonical artifact shipped once with the project-init skill (not embedded per profile) and SHALL live under a kb-indexed path so it is retrievable by search. When a DOX-opted profile is scaffolded, the skill SHALL seed the doctrine into the target root `AGENTS.md` only when that file does not already carry it, detected by a stable marker; when the marker is present the seed SHALL be a no-op. A DOX-opted profile's rendered `settings.json` SHALL enable the directory-level AGENTS.md toolset (`indexAgentsFiles`, `directoryLevelAgents`).
 
+The seeded doctrine SHALL cover both a WRITE discipline (maintaining the per-directory `AGENTS.md` tree) and a READ discipline (finding docs). The READ discipline wording SHALL be conditional on the kb toolset: when the profile wires the kb toolset, the doctrine SHALL instruct retrieval via `kb agents <path>` (nearest-chain walk) and `kb_search` (full-text) before grepping source; when the kb toolset is NOT wired, the doctrine SHALL use the manual chain-walk wording and SHALL NOT reference `kb_search` or `kb agents`.
+
 #### Scenario: Doctrine seeded when AGENTS.md lacks it
 
 - **GIVEN** a profile with `dox: true` and a target `AGENTS.md` with no doctrine marker
@@ -30,6 +32,19 @@ A profile MAY declare an optional `dox` opt-in (default off). The DOX doctrine S
 - **GIVEN** a target `AGENTS.md` that already carries the doctrine marker
 - **WHEN** a `dox: true` profile is scaffolded (or re-run)
 - **THEN** the doctrine SHALL NOT be appended again (idempotent no-op)
+
+#### Scenario: Seeded doctrine includes kb retrieval instruction when kb toolset is wired
+
+- **GIVEN** a `dox: true` profile whose rendered `settings.json` enables `indexAgentsFiles` + `directoryLevelAgents`
+- **WHEN** the doctrine is seeded
+- **THEN** the doctrine SHALL include a read-side instruction to use `kb agents <path>` and `kb_search` before grepping source
+
+#### Scenario: Seeded doctrine omits kb wording when kb toolset absent
+
+- **GIVEN** a DOX-opted scaffold where the kb toolset is not wired
+- **WHEN** the doctrine is seeded
+- **THEN** the doctrine SHALL use the manual chain-walk wording
+- **AND** SHALL NOT reference `kb_search` or `kb agents`
 
 #### Scenario: Non-DOX profile leaves AGENTS.md doctrine-free
 
