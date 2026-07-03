@@ -103,6 +103,30 @@ Writing `worktreeInit` flips the directory to "configured." The next Initialize 
 
 **Constraint:** `settings.json.tmpl`'s `worktreeInit` MUST conform to change A's schema (gate + run script|agent), or the directory ends up half-configured (a hook that A rejects → fail-open `null` → Initialize loops back to the skill).
 
+### Decision 6: DOX doctrine is a shared artifact, seeded into the root AGENTS.md when absent
+
+The user's ask: *"the prompt which describes the [DOX] MD [placed] in kb ... so when I create a new project and agents.md does not have the DOX update mechanism it can be initialized with that doctrine."* Fold this in as a profile opt-in, not a new change.
+
+- **One canonical file, not per-profile copies.** Ship `skills/project-init/dox-doctrine.md` (adapted from agent0ai/dox: read-before-editing chain walk, update-after-editing pass, hierarchy, child-doc shape, closeout). Profiles reference it via a `dox: true` flag; they do not each embed the text. Single source of truth = edit once.
+- **kb-retrievable.** The doctrine file lives under a kb-indexed path (`.pi/skills/...` is already a configured source in this repo's `knowledge_base.json`), so `kb_search "dox doctrine"` returns it for any agent that needs the rules.
+- **Seed-if-absent, marker-gated.** The scaffold detects the doctrine by a stable marker (e.g. an HTML comment `<!-- dox-doctrine -->` or the `## DOX` heading) in the target `AGENTS.md`. Absent → append the doctrine block. Present → no-op. This is the idempotent "agents.md does not have the DOX update mechanism" check.
+- **Toolset flip.** A DOX-opted profile's `settings.json.tmpl` sets `indexAgentsFiles: true` and `directoryLevelAgents.enabled: true` so the seeded doctrine is backed by the existing `kb dox` tooling.
+
+```
+   profile.dox === true ?
+        │ yes
+        ▼
+   root AGENTS.md contains dox marker ?
+     ┌──────┴───────┐
+    yes            no
+     │              │
+   no-op      append dox-doctrine.md  +  settings: indexAgentsFiles/directoryLevelAgents ON
+```
+
+**Boundary (why this is NOT `migrate-file-index-to-agents-tree`):** that change makes `kb dox init` source-aware and stands up the *recursive per-directory tree* for THIS repo (migrating `docs/file-index-*.md`). This decision only seeds the *root* doctrine text into a *new/bare* project. Building the child tree afterward is the agent's job, driven by the seeded doctrine — not scaffolded here. The two never write the same file: migrate owns child `AGENTS.md` under an existing tree; this owns the initial root doctrine block for a project that has none.
+
+**Why not a `dox` profile instead of a flag:** DOX is orthogonal to project kind — a `coding` OR a `docs` project may want it. A flag composes; a separate profile would force an N×2 profile explosion.
+
 ## Flow
 
 ```
@@ -127,6 +151,9 @@ Writing `worktreeInit` flips the directory to "configured." The next Initialize 
 ## Open Questions
 
 - Exact on-disk location for profile prompt files in the scaffolded project (`.pi/prompts/` vs profile-defined paths).
+- Doctrine marker form: HTML comment sentinel vs `## DOX` heading match — comment is robust to heading renames, heading is human-visible. Lean comment.
+- Whether the shipped `coding` / `docs` profiles default `dox: true` or `false`. Lean `false` (opt-in) so existing centralized-index projects aren't nudged onto the tree unless chosen.
+- Whether to also run `kb init` + `kb index` during scaffold, or leave kb bring-up to `add-kb-folder-slot` / the worktree-init hook. Lean: leave it — avoid overlap; the doctrine is seeded as text regardless, indexing follows on first `kb_search`.
 - Whether profile enumeration needs a server endpoint or the skill reads the dirs itself (skill runs in a session with fs access → likely skill-side).
 - Template substitution surface (project name, package manager) — keep minimal; the skill can ask and fill.
 - Whether `docs` profile's hook is "no-op gate" (never needs init) or a real docs-build; depends on shipped profile content.

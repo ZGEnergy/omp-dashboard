@@ -2,7 +2,7 @@
 
 ### Requirement: Profile bundle shape
 
-A project profile SHALL be a directory bundling: an `AGENTS.md.tmpl` (instructions template), a `settings.json.tmpl` (which SHALL contain a `worktreeInit` hook conforming to the worktree-init-hook schema plus toolset toggles), and a `prompts/` directory of separate, individually-editable prompt files.
+A project profile SHALL be a directory bundling: an `AGENTS.md.tmpl` (instructions template), a `settings.json.tmpl` (which SHALL contain a `worktreeInit` hook conforming to the worktree-init-hook schema plus toolset toggles), a `prompts/` directory of separate, individually-editable prompt files, and an optional `dox` opt-in flag (default off).
 
 #### Scenario: Profile carries required artifacts
 
@@ -13,6 +13,28 @@ A project profile SHALL be a directory bundling: an `AGENTS.md.tmpl` (instructio
 
 - **WHEN** a profile's `settings.json.tmpl` is rendered
 - **THEN** its `worktreeInit` SHALL be a valid hook (a `gate` plus a `script` or `agent` `run`)
+
+### Requirement: Profile MAY opt into DOX and seed the doctrine when absent
+
+A profile MAY declare an optional `dox` opt-in (default off). The DOX doctrine SHALL be a single canonical artifact shipped once with the project-init skill (not embedded per profile) and SHALL live under a kb-indexed path so it is retrievable by search. When a DOX-opted profile is scaffolded, the skill SHALL seed the doctrine into the target root `AGENTS.md` only when that file does not already carry it, detected by a stable marker; when the marker is present the seed SHALL be a no-op. A DOX-opted profile's rendered `settings.json` SHALL enable the directory-level AGENTS.md toolset (`indexAgentsFiles`, `directoryLevelAgents`).
+
+#### Scenario: Doctrine seeded when AGENTS.md lacks it
+
+- **GIVEN** a profile with `dox: true` and a target `AGENTS.md` with no doctrine marker
+- **WHEN** the profile is scaffolded
+- **THEN** the canonical DOX doctrine SHALL be appended to `AGENTS.md` with its marker
+- **AND** the written `settings.json` SHALL set `indexAgentsFiles: true` and enable `directoryLevelAgents`
+
+#### Scenario: Doctrine not re-seeded when already present
+
+- **GIVEN** a target `AGENTS.md` that already carries the doctrine marker
+- **WHEN** a `dox: true` profile is scaffolded (or re-run)
+- **THEN** the doctrine SHALL NOT be appended again (idempotent no-op)
+
+#### Scenario: Non-DOX profile leaves AGENTS.md doctrine-free
+
+- **WHEN** a profile without `dox: true` is scaffolded
+- **THEN** no DOX doctrine SHALL be seeded and the directory-level AGENTS.md toolset SHALL NOT be force-enabled by this profile
 
 ### Requirement: Profile resolution merges shipped and user profiles
 

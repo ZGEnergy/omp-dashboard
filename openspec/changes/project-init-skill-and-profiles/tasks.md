@@ -9,10 +9,17 @@
 - [ ] 1.3 `docs` profile: writing-structure AGENTS.md; appropriate hook (no-op gate or docs build); OpenSpec disabled, docs toolset.
 - [ ] 1.4 Profile resolver: enumerate `<skill>/profiles/*` ∪ `~/.pi/project-profiles/*`, user-wins-by-name. Unit-test the merge precedence.
 
+## 1b. DOX doctrine artifact + seed-if-absent
+
+- [ ] 1b.1 Add `skills/project-init/dox-doctrine.md` — one canonical doctrine (adapted from agent0ai/dox: read-before-editing chain walk, update-after-editing pass, hierarchy, child-doc shape, closeout). Under a kb-indexed path so `kb_search "dox doctrine"` returns it.
+- [ ] 1b.2 Add an optional `dox: boolean` flag to the profile shape (default `false`); resolver surfaces it. Unit-test default + explicit `true`.
+- [ ] 1b.3 Seed step: given a DOX-opted profile, detect a stable marker (e.g. `<!-- dox-doctrine -->`) in the target `AGENTS.md`; append `dox-doctrine.md` (with the marker) only when absent. Idempotent. → verify: unit test asserts absent→seeded-once, present→no-op, re-run→no double-seed.
+- [ ] 1b.4 DOX-opted `settings.json.tmpl` sets `indexAgentsFiles: true` + `directoryLevelAgents.enabled: true`. → verify: rendered settings validate against the kb config schema.
+
 ## 2. project-init skill
 
-- [ ] 2.1 Author `skills/project-init/SKILL.md`: interactive flow — list profiles, `ask_user` to select, preview planned writes, confirm, scaffold.
-- [ ] 2.2 Scaffold step writes `<dir>/AGENTS.md`, `<dir>/.pi/settings.json` (with `worktreeInit` + toolset), and prompt files from the chosen profile.
+- [ ] 2.1 Author `skills/project-init/SKILL.md`: interactive flow — list profiles, `ask_user` to select, preview planned writes, confirm, scaffold. When the chosen profile opts into DOX, the preview SHALL name the doctrine seed + toolset flip.
+- [ ] 2.2 Scaffold step writes `<dir>/AGENTS.md`, `<dir>/.pi/settings.json` (with `worktreeInit` + toolset), prompt files, and — for a DOX-opted profile — the seeded doctrine block (task 1b.3) from the chosen profile.
 - [ ] 2.3 Validate the written `worktreeInit` against change-A schema before finishing; warn if it would fail-open.
 - [ ] 2.4 Idempotency note: if files already exist, ask before overwriting.
 
@@ -29,6 +36,6 @@
 
 ## 5. Docs + validation
 
-- [ ] 5.1 Add file-index rows for the new skill + profiles (delegate to docs subagent, caveman style).
+- [ ] 5.1 Add file-index rows for the new skill + profiles + `dox-doctrine.md` (delegate to docs subagent, caveman style).
 - [ ] 5.2 `openspec validate project-init-skill-and-profiles --strict` passes.
 - [ ] 5.3 `npm test` green; manual: bare dir → Initialize → pick profile → scaffold → init-status flips to hasHook → next Initialize runs the hook.
