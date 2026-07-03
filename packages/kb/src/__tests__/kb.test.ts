@@ -530,4 +530,32 @@ describe("dox: kb dox lint", () => {
     expect(Array.isArray(r.issues)).toBe(true);
     for (const i of r.issues) expect(i).toHaveProperty("kind"), expect(i).toHaveProperty("agentsFile");
   });
+
+  it("resolves row paths relative to the owning AGENTS.md dir (Defect A)", () => {
+    // sub-dir AGENTS.md with a BARE BASENAME row for a sibling file that exists
+    const sub = join(dir, "src", "nested");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, "AGENTS.md"), "# DOX \u2014 src/nested\n\n| `api.ts` |  |\n");
+    writeFileSync(join(sub, "api.ts"), "export const api = 1;\n");
+    const r = doxLint({ cwd: dir });
+    // api.ts exists next to its AGENTS.md → must NOT be an orphan
+    expect(r.issues.filter((i) => i.kind === "orphan" && i.path === "api.ts").length).toBe(0);
+  });
+
+  it("falls back to repo-root for root-config rows documented in a sub-dir AGENTS.md (Option B)", () => {
+    // docs/AGENTS.md documents root-level config that lives at the repo root
+    mkdirSync(join(dir, "docs"), { recursive: true });
+    writeFileSync(join(dir, "docs", "AGENTS.md"), "# DOX \u2014 docs\n\n| `biome.json` |  |\n");
+    writeFileSync(join(dir, "biome.json"), "{}\n"); // at repo root, not in docs/
+    const r = doxLint({ cwd: dir });
+    expect(r.issues.filter((i) => i.kind === "orphan" && i.path === "biome.json").length).toBe(0);
+  });
+
+  it("ignores backtick cells in non-DOX prose tables (Defect B)", () => {
+    writeFileSync(join(dir, "AGENTS.md"),
+      "# DOX\n\n| `src/a.md` |  |\n| `src/b.md` |  |\n\n## Subagent Routing\n\n| Agent | Use |\n| `Explore` | search |\n");
+    const r = doxLint({ cwd: dir });
+    // `Explore` lives under a non-DOX heading → not a file row, no orphan
+    expect(r.issues.filter((i) => i.path === "Explore").length).toBe(0);
+  });
 });

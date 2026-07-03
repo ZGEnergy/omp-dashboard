@@ -88,6 +88,18 @@ describe("DOX nudge Job 2: decideNudge + acknowledgeRows", () => {
     expect(after).toBeNull(); // acknowledged → current hash → not stale
   });
 
+  it("resolves basename rows against the owning AGENTS.md dir (nested, Defect A)", () => {
+    const sub = mkdtempSync(join(tmpdir(), "kb-nested-"));
+    try {
+      mkdirSync(join(sub, "pkg", "src"), { recursive: true });
+      // AGENTS.md lives in pkg/src with a BARE BASENAME row
+      writeFileSync(join(sub, "pkg", "src", "AGENTS.md"), "# DOX \u2014 pkg/src\n\n| `api.ts` |  |\n");
+      writeFileSync(join(sub, "pkg", "src", "api.ts"), "export const api = 1;\n");
+      // row exists (resolved dir-relative) → not "missing"
+      expect(decideNudge(sub, join(sub, "pkg", "src", "api.ts"))).toBeNull();
+    } finally { rmSync(sub, { recursive: true, force: true }); }
+  });
+
   it("dedup: a path nudged once is not nudged again (session state)", () => {
     const state = createReindexState();
     const key = `missing:src/b.ts`;

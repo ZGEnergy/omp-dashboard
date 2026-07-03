@@ -125,12 +125,31 @@ function walkSource(dir: string, out: string[] = []): string[] {
   return walkFiles(dir, isSourceFile, out);
 }
 
+/** Resolve a DOX row path. Rows document paths RELATIVE TO THEIR OWN AGENTS.md
+ *  dir. A directory may also document a file that lives OUTSIDE its own dir (a
+ *  nested AGENTS.md referencing a project-root file) — so fall back to `cwd`
+ *  when the dir-relative target is absent. Returns the dir-relative candidate
+ *  when neither exists (caller flags orphan). */
+export function resolveRowPath(agentsDir: string, cwd: string, rp: string): string {
+  if (isAbsolute(rp)) return rp;
+  const dirRel = resolve(agentsDir, rp);
+  if (existsSync(dirRel)) return dirRel;
+  const rootRel = resolve(cwd, rp);
+  return existsSync(rootRel) ? rootRel : dirRel;
+}
+
 /** Parse existing row paths from an AGENTS.md file. */
 export function parseRowPaths(agentsFile: string): string[] {
   if (!existsSync(agentsFile)) return [];
   const text = readFileSync(agentsFile, "utf8");
   const paths: string[] = [];
+  // Only rows under a `# DOX —` heading are file-index rows. Prose tables
+  // (Subagent Routing, QA globs, …) under other headings are NOT DOX rows.
+  let inDox = false;
   for (const line of text.split("\n")) {
+    const h = line.match(/^#{1,6}\s+(.*)$/);
+    if (h) { inDox = /^DOX\b/.test(h[1].trim()); continue; }
+    if (!inDox) continue;
     const m = line.match(/^\|\s*`([^`]+)`\s*\|/);
     if (m) paths.push(m[1]);
   }
@@ -255,18 +274,23 @@ export function doxLint(opts: DoxLintOptions): DoxLintResult {
     if (afBytes > AGENTS_BYTE_CAP) issues.push({ kind: "over-threshold", agentsFile: afRel, detail: `${afBytes} bytes > cap ${AGENTS_BYTE_CAP}; auto-injected per turn — promote heaviest rows to <File>.AGENTS.md sidecars` });
     const survivingRows: string[] = [];
     const text = readFileSync(af, "utf8").split("\n");
+    const afDir = dirname(af);
+    let inDox = false;
     for (const line of text) {
-      const m = line.match(/^\|\s*`([^`]+)`\s*\|/);
+      const h = line.match(/^#{1,6}\s+(.*)$/);
+      if (h) { inDox = /^DOX\b/.test(h[1].trim()); if (opts.fix) survivingRows.push(line); continue; }
+      const m = inDox ? line.match(/^\|\s*`([^`]+)`\s*\|/) : null;
       if (!m) { if (opts.fix) survivingRows.push(line); continue; }
       const rp = m[1];
-      rowPaths.add(rp);
-      const abs = isAbsolute(rp) ? rp : resolve(cwd, rp);
+      const abs = resolveRowPath(afDir, cwd, rp);
+      const rel = relative(cwd, abs);
+      rowPaths.add(rel);
       if (!existsSync(abs)) {
         // could be a broken pointer to an area AGENTS.md, or an orphan source row
         const kind = rp.endsWith("AGENTS.md") ? "broken-pointer" : "orphan";
         issues.push({ kind, agentsFile: afRel, path: rp, detail: `${kind}: ${rp} does not exist` });
         if (opts.fix && kind === "orphan") { fixed++; continue; } // prune orphan row
-      } else if (staleness[rp] && fileSha(abs) && staleness[rp] !== fileSha(abs)) {
+      } else if (staleness[rel] && fileSha(abs) && staleness[rel] !== fileSha(abs)) {
         issues.push({ kind: "stale", agentsFile: afRel, path: rp, detail: `tracked source-hash drifted` });
       }
       if (opts.fix) survivingRows.push(line);
