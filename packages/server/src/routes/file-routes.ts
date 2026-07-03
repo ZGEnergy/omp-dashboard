@@ -292,6 +292,65 @@ export function registerFileRoutes(
     },
   );
 
+  // Tree-listing endpoint — single source of truth for the editor-pane file
+  // rail. Returns `{ entries: {name,isDir}[] }` from ONE
+  // `readdir(withFileTypes)`, hidden entries INCLUDED, behind the same gate as
+  // `/api/file` (known-cwd + containment). Replaces the old
+  // `/api/file`(names)+`/api/browse`(dirs, hidden-stripped) merge that
+  // mislabelled hidden directories (`.git`, `.pi`) as files.
+  // See change: improve-content-editor.
+  fastify.get<{ Querystring: { cwd?: string; path?: string } }>(
+    "/api/file/tree",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const cwd = request.query.cwd;
+      const relPath = request.query.path ? decodeFileUri(request.query.path) : request.query.path;
+      if (!cwd || !relPath) {
+        reply.code(400);
+        return { success: false, error: "cwd and path parameters required" } satisfies ApiResponse;
+      }
+
+      if (!sessionManager.listAll().some((s) => s.cwd === cwd)) {
+        reply.code(403);
+        return { success: false, error: "unknown session path" } satisfies ApiResponse;
+      }
+
+      const resolved = path.resolve(cwd, relPath);
+      if (!(await isAllowed(resolved, { anchors: [cwd] }))) {
+        reply.code(403);
+        return { success: false, error: "path outside working directory" } satisfies ApiResponse;
+      }
+
+      try {
+        const dirents = await fs.readdir(resolved, { withFileTypes: true });
+        // `Dirent.isDirectory()` reflects the entry itself, so a symlink → dir
+        // reports `false` (isSymbolicLink true). Follow symlinks with a bounded
+        // `stat` so symlinked directories still render + expand as folders. Only
+        // symlink entries pay the extra stat; normal entries stay single-readdir.
+        const entries = await Promise.all(
+          dirents.map(async (d) => {
+            let isDir = d.isDirectory();
+            if (!isDir && d.isSymbolicLink()) {
+              try {
+                isDir = (await fs.stat(path.join(resolved, d.name))).isDirectory();
+              } catch {
+                isDir = false; // dangling symlink → treat as a (broken) file
+              }
+            }
+            return { name: d.name, isDir };
+          }),
+        );
+        entries.sort((a, b) =>
+          a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1,
+        );
+        return { success: true, data: { entries } } satisfies ApiResponse;
+      } catch {
+        reply.code(404);
+        return { success: false, error: "not found" } satisfies ApiResponse;
+      }
+    },
+  );
+
   // Markdown write endpoint — the dashboard's first user-facing write surface.
   //
   // Body: { cwd?, path, content, mtime }.
