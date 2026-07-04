@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Node-wrapped spawns to the Electron binary always run as Node
 
