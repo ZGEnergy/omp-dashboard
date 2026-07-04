@@ -10,6 +10,9 @@ Files in this directory. One row per file. Topic docs + repo-root config (root c
 | `chat-display-preferences.md` | `DisplayPrefs` storage, merge rule, transport, migration, first-launch. See change: configurable-chat-display. |
 | `code-quality.md` | Biome ratchet system. tier ladder. graduation criterion. rollout phases. oracle. rough edge. See change: add-code-quality-skill. |
 | `electron-bootstrap-flow.md` | Electron startup state machine. `app.whenReady()` → dashboard window. 5 states, 3 triggers, 3 end states (attach/done/loading-page-error). Health-probe `GET /api/health` port 8000. Electron launcher only. |
+| `context-mode-roi-report.md` | ROI analysis. context-mode MCP plugin vs kb extension. Verdict: trim not drop. Sandbox tools (ctx_execute*) = 97% calls, keep. Retrieval tools (ctx_search/index/fetch) redundant with kb, drop. ~24k token/session schema tax. 79% sessions never touch context-mode. Source markdown for PDF. |
+| `context-mode-roi-report.pdf` | Rendered PDF of context-mode-roi-report.md. 13 pages. Built via document-converter facade (DOCX) + LibreOffice (DOCX→PDF). |
+| `electron-bootstrap-flow.md` | Electron startup state machine. `app.whenReady()` → dashboard window. 6 states, 3 triggers, 3 end states (attach/done/loading-page-error). Health-probe `GET /api/health` port 8000. Electron launcher only. |
 | `electron-build-methods.md` | 3 Electron build paths: local native (`npm run electron:build`), Docker cross-compile (--windows/--linux), CI publish.yml (tag push). Per-platform artifact/signing/node-pty matrix. |
 | `electron-immutable-bundle.md` | Invariant: Electron bundle read-only at runtime. No post-install `npm install`. pi/openspec/tsx ship as deps under `<resourcesPath>/server/node_modules/`. electron-updater whole-app replacement. |
 | `electron-session.md` | Implementation session log. Branding/icons, packaging formats (NSIS/AppImage), dead ends, gotchas. Records what failed + lessons. |
