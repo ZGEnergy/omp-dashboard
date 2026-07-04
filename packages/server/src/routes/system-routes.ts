@@ -21,12 +21,14 @@ import { classifyBridgeSource } from "@blackbelt-technology/pi-dashboard-shared/
 import type { NetworkInterface } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { FastifyInstance } from "fastify";
+import { bootParentPid, computeBootParentAlive, readLivePpid } from "../boot-parent-liveness.js";
 import { readConfigRedacted, writeConfigPartial } from "../config-api.js";
 import type { DirectoryService } from "../directory-service.js";
 import { detectCodeServerBinary, resetDetectionCache } from "../editor-detection.js";
 import { detectEditors, EDITORS } from "../editor-registry.js";
 import type { EventLoopSpikeMetrics } from "../eventloop-spike-metrics.js";
 import type { HydrationMetrics } from "../hydration-metrics.js";
+import { computeEffectiveLaunchSource } from "../launch-source-effective.js";
 import { decodeFileUri } from "../lib/decode-file-uri.js";
 import { isAllowed } from "../lib/path-containment.js";
 import { localhostGuard, netmaskToCidrBits, networkAddress } from "../localhost-guard.js";
@@ -363,6 +365,26 @@ export function registerSystemRoutes(
       // node_modules/ is read-only). See change:
       // eliminate-electron-runtime-install task 3.2.
       launchSource: parseLaunchSource(process.env),
+      // Boot parent PID (static, captured at module load) + live parent PID
+      // (reparenting-aware, read fresh per request) + boot-parent liveness.
+      // Powers Electron zombie detection: POSIX compares live `ppid` against
+      // `bootParentPid` plus `bootParentAlive`; Windows uses `bootParentAlive`
+      // alone (Windows never reparents). See change:
+      // electron-attach-ownership-fixes.
+      bootParentPid,
+      ppid: readLivePpid(),
+      bootParentAlive: computeBootParentAlive(),
+      // Count of pi WebSocket connections held by the pi-gateway. Feeds the
+      // bridge-orphan promotion below and future Doctor advisories.
+      activeBridgeCount: piGateway?.connectionCount() ?? 0,
+      // Derived label: promotes a stale `bridge` (no live session, past the
+      // 30 s grace window) to `bridge-orphaned`. Static `launchSource` above
+      // is left untouched for the `decideShutdownOnQuit` back-compat rule.
+      launchSourceEffective: computeEffectiveLaunchSource({
+        raw: parseLaunchSource(process.env),
+        activeBridgeCount: piGateway?.connectionCount() ?? 0,
+        uptimeMs: Date.now() - serverStartTime,
+      }),
       // Host OS the dashboard server runs on. Used by Settings → Tools to
       // filter install hints to the host (not the browser) OS — a mobile
       // browser hitting a Linux dashboard must see Linux install commands.

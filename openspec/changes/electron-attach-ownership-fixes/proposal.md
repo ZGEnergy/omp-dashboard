@@ -18,8 +18,12 @@ These four are independent in code but share one root: **`launchSource` is a sta
 
 ### `/api/health` additions (foundation)
 
-- Add `ppid: number` — the server process's parent PID at boot time. Used to detect zombies (POSIX: `ppid === 1` means reparented to init/launchd).
-- Add `activeBridgeCount: number` — count of pi WebSocket connections currently held by the pi-gateway on `:9999`. Re-evaluated per health request.
+- Add `bootParentPid: number` — the server process's parent PID captured ONCE at boot (module-load const). The Electron PID it was spawned under.
+- Add `ppid: number` — the server's **live** parent PID, read fresh per request (Linux `/proc/self/stat` field 4; macOS `ps -o ppid=`; Windows `process.ppid`). Used with `bootParentPid` to detect POSIX zombies: `ppid !== bootParentPid` AND `bootParentPid` no longer alive. NOT `process.ppid` on POSIX (Node caches it) and NOT `=== 1` (Linux subreapers/containers reparent to a non-1 PID).
+- Add `bootParentAlive: boolean` — whether the recorded boot parent (`bootParentPid`) is still the live process it was at boot. Powers Windows zombie detection (Windows never reparents, so the ppid signal is unavailable — liveness of the original parent is the only signal). Two-tier server-side computation:
+  - **Tier 1 (baseline, all platforms, zero-dep):** `isProcessAlive(bootParentPid)` — the existing `packages/shared/src/platform/process.ts` helper (`process.kill(pid, 0)`). PID-reuse-vulnerable: a recycled parent PID can read as "alive" and hide a zombie (safe direction — only ever under-detects, never mis-targets).
+  - **Tier 2 (Windows identity-safe upgrade, via `koffi` FFI):** at boot, `OpenProcess(SYNCHRONIZE, false, bootParentPid)` retains a handle to the *specific* parent process object; per request `WaitForSingleObject(handle, 0) === WAIT_OBJECT_0` means that exact process exited → `bootParentAlive = false`. Immune to PID reuse (the kernel keeps the object alive while the handle is held). Falls back to Tier 1 if `koffi` fails to load or `OpenProcess` is denied.
+- Add `activeBridgeCount: number` — count of pi WebSocket connections held by the pi-gateway on `:9999`, via the existing `pi-gateway.connectionCount()` getter (no new gateway surface). Re-evaluated per health request.
 - Add `launchSourceEffective: "electron" | "standalone" | "bridge" | "bridge-orphaned"` — derived field. Equals `launchSource` except when `launchSource === "bridge"` AND `activeBridgeCount === 0` AND `uptimeMs > 30_000`, in which case it returns `"bridge-orphaned"`. The 30 s grace window absorbs the bootstrap race (server up before bridge reconnects after `server_restarting`).
 - `launchSource` retains its current value (closed union over `electron | standalone | bridge`) for back-compat.
 
@@ -43,10 +47,13 @@ These four are independent in code but share one root: **`launchSource` is a sta
 
   ```
   isZombie =
-    health.launchSource === "electron"
-    AND storedSpawnedPid === null         // we didn't spawn it this lifetime
-    AND (POSIX: health.ppid === 1)         // reparented to init/launchd
-    AND (Windows: skip — Job Object kills children with parent)
+    health.launchSourceEffective === "electron"
+    AND storedSpawnedPid === null                    // we didn't spawn it this lifetime
+    AND health.bootParentAlive === false             // original Electron parent is gone (Tier 1/2)
+    AND (POSIX only, extra guard: health.ppid !== health.bootParentPid)  // reparented away
+    // Windows: bootParentAlive is the sole signal (no reparenting); Job Object still
+    //   kills the child on the common crash path — detection covers the bypass cases.
+    // NOT `ppid === 1`: Linux subreapers / containers reparent to a non-1 PID
   ```
 
 - When `isZombie === true`, a modal dialog asks the user:
@@ -59,7 +66,7 @@ These four are independent in code but share one root: **`launchSource` is a sta
 
   - **Take ownership** → call `setSpawnedPid(health.pid)`. Subsequent quit triggers `decideShutdownOnQuit` true.
   - **Leave running** → no state change. Modal won't re-prompt this launch (in-memory "asked this session" flag). Will re-prompt next launch if still a zombie.
-  - **Stop now** → send SIGTERM to `health.pid`, wait up to 5 s, then attach as if no server was running (falls back to normal launch path).
+  - **Stop now** → send SIGTERM to `health.pid`, wait up to 5 s (SIGKILL if still alive), then re-enter the normal launch path to spawn a fresh server. Once the new server passes a health probe, **reload the BrowserWindow** — it was already pointing at the killed server's URL, so without a reload the user lands on a connection-refused page.
 
 - The modal is suppressed when `app.commandLine.hasSwitch("no-zombie-prompt")` (for QA/test runs).
 
@@ -90,20 +97,23 @@ These four are independent in code but share one root: **`launchSource` is a sta
 
 - **Scope**: ~5 files changed.
   - `packages/server/src/routes/system-routes.ts` — extend `/api/health` payload + add `launchSourceEffective` helper.
-  - `packages/server/src/pi-gateway.ts` — expose `getActiveBridgeCount()` getter.
+  - `packages/server/src/pi-gateway.ts` — reuse existing `connectionCount()` getter (no change needed).
   - `packages/electron/src/lib/tray.ts` — widen `buildTrayMenuTemplate` contract, swap probe, add disabled-row rendering.
   - `packages/electron/src/main.ts` — wire `getServerOwnership` adapter; zombie detection + modal at end of attach arm.
-  - `packages/shared/src/doctor-core.ts` — add `checkAttachedServerVersion` to `runSharedChecks`.
-  - `packages/electron/src/lib/server-lifecycle.ts` — small helper `decideIsZombie(...)` (pure, testable).
+  - `packages/shared/src/doctor-core.ts` — add `checkAttachedServerVersion` to `runSharedChecks`; wired into the Electron arm only (server-arm self-fetch is a tautology).
+  - `packages/electron/src/lib/server-lifecycle.ts` — small helper `decideIsZombie(...)` (pure, testable; platform-branched — Windows uses `bootParentAlive` only).
   - New file: `packages/electron/src/lib/zombie-adoption-dialog.ts` — modal renderer + IPC.
-  - Estimated ~350 LOC + tests.
+  - New file: `packages/server/src/boot-parent-liveness.ts` — computes `bootParentAlive`. Tier 1 (`isProcessAlive`) on every platform; Tier 2 loads `koffi` on `win32` to hold a `SYNCHRONIZE` handle + `WaitForSingleObject`, with graceful fallback to Tier 1 when `koffi`/`OpenProcess` is unavailable.
+  - `packages/server/package.json` — add `koffi` under **`optionalDependencies`** (Tier 2 only; failed native install never breaks `npm install`; absence degrades to Tier 1). Loaded jiti-safely via `createRequire(import.meta.url)("koffi")` (the bundled server runs TS under jiti — same native-load path `node-pty` already uses successfully).
+  - `packages/electron/scripts/bundle-server.mjs` (or `assert-runnable-bundle.mjs`) — GO/NO-GO assert for the koffi `win32` prebuild in `resources/server/node_modules/koffi/`, mirroring the existing `node-pty` prebuild check. No `forge.config.ts` change: koffi rides along in the outside-asar server tree; no `asarUnpack`, no `electron-rebuild` (server runs under bundled standalone Node, not Electron's process).
+  - Estimated ~450 LOC + tests.
 
 - **User-visible**:
   - Tray: power users who run `pi-dashboard` from a terminal alongside the Electron app no longer see a misleading "Restart server" item that could nuke their terminal session.
-  - Zombie modal: only appears after an Electron crash on POSIX where the prior server survived. Most users see it zero times.
+  - Zombie modal: appears after an Electron crash where the prior server survived — POSIX (reparented orphan) and Windows (Job Object bypassed). Most users see it zero times.
   - Doctor row: only appears in Doctor. Passive.
 
-- **Performance**: `/api/health` adds two cheap reads (process.ppid is cached at boot; bridge count is an in-memory `Set.size`). No measurable cost.
+- **Performance**: `/api/health` adds cheap reads — live ppid (one POSIX syscall / cached on Windows), `bootParentAlive` (a `process.kill(pid,0)` in Tier 1, or a non-blocking `WaitForSingleObject(h,0)` in Tier 2), and bridge count (in-memory `Set.size`). No measurable cost.
 
 - **Privacy**: PIDs are local-only and already exposed via `health.pid`. No new PII.
 
@@ -115,7 +125,7 @@ These four are independent in code but share one root: **`launchSource` is a sta
 - **Out of scope**:
   - Auto-killing zombies on launch without prompting (deliberate: respect user intent).
   - Title-bar pill or toast for version skew (revisit if Doctor-only proves insufficient).
-  - Windows zombie handling (Job Object already covers it).
+  - Tier 2 on POSIX (macOS/Linux already get identity-safe detection via `ppid !== bootParentPid`; the koffi handle-wait is a Windows-only upgrade).
   - Refactoring `launchSource` to a fully dynamic field — would break `decideShutdownOnQuit`'s "starter === Electron" check during the same Electron lifetime.
   - Bridge reconnection / handoff after pi session quits.
 

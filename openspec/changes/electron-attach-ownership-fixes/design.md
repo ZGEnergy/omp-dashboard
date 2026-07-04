@@ -49,11 +49,48 @@ flowchart LR
   B --> F[Doctor row: choose suggestion text]
 ```
 
-## Zombie detection — POSIX-only, opt-in adoption
+## Zombie detection — cross-platform, opt-in adoption
 
-Windows is a non-issue: `spawnDetached({ detach: false })` puts the server in Electron's Job Object, which the OS terminates with the parent. On macOS/Linux, `detach: false` only means "don't `child.unref()`" — the OS-level process tree relationship doesn't protect against an abnormal Electron exit. The detached child gets reparented (POSIX rule: orphaned processes adopt PID 1, i.e. init/launchd).
+**Windows still has the Job Object as first line of defence:** `spawnDetached({ detach: false })` keeps the server inside Electron's global Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), which the OS terminates with the parent — including on forced/abnormal exit (`taskkill /F`, crash), because terminating a process closes its handles, closing the job's last handle. So on the **common** Windows crash path no zombie forms. Detection is the safety net for the bypass cases (`CREATE_BREAKAWAY_FROM_JOB`, nested-job assignment failure on locked-down/CI hosts, self-respawn outside the job).
 
-**Detection signal:** `health.ppid === 1` on POSIX. This is unambiguous — it means "my original parent is gone." We could also probe "is there any live Electron process whose PID matches my known parent PID at boot" but ppid is simpler and equally reliable.
+On macOS/Linux, `detach: false` only means "don't `child.unref()`" — the OS-level tree relationship doesn't survive an abnormal Electron exit, and the detached child is reparented to a subreaper.
+
+### The detection signals (three health fields)
+- `bootParentPid` — captured ONCE at server boot (module-load const). The Electron PID the server was spawned under.
+- `ppid` — the server's **live** parent PID, read fresh per health request (POSIX signal only).
+- `bootParentAlive` — whether `bootParentPid` is still the *same* live process it was at boot (Windows signal + POSIX guard).
+
+### `bootParentAlive` — two-tier computation (folds Tier 1 + Tier 2)
+
+Windows never reparents an orphan (the recorded parent PID dangles at the dead value), so the POSIX "ppid changed" signal is unavailable there. The only Windows signal is **liveness of the original parent** — which runs into Windows PID reuse. Hence two tiers, chosen server-side by capability:
+
+| Tier | Mechanism | PID-reuse safe? | Deps | When |
+|------|-----------|:---:|------|------|
+| **1** (baseline) | `isProcessAlive(bootParentPid)` — existing `platform/process.ts` (`process.kill(pid,0)`) | ❌ (recycled PID reads "alive" → under-detects; never mis-targets) | none | every platform, always |
+| **2** (Windows upgrade) | boot: `OpenProcess(SYNCHRONIZE, false, bootParentPid)` → hold handle; per request: `WaitForSingleObject(h, 0) === WAIT_OBJECT_0` ⇒ that exact process exited | ✅ (kernel pins the object while the handle is held) | `koffi` (optional) | `win32`, when `koffi` + `OpenProcess` succeed |
+
+Tier 2 falls back to Tier 1 if `koffi` fails to load or `OpenProcess` is denied — so the server always reports a `bootParentAlive`, degrading gracefully rather than throwing. `koffi` (v3, 0-dep, prebuilt Win x64/arm64, actively maintained) is the chosen FFI; `ffi-napi` is effectively unmaintained and `ps-list`/`pidtree` can't supply a reuse-proof identity on Windows (`fastlist.exe` returns pid/ppid/name only; wmic-based trees are removed in Win11 24H2).
+
+### Packaging & loader (Windows Tier 2)
+
+koffi ships **prebuilt binaries in its npm tarball** (`koffi/build/koffi/win32_x64/koffi.node`, etc.) — no node-gyp/compile at install. Delivery on Windows is a solved problem in this repo because of two existing facts:
+
+1. **The server ships outside asar.** `forge.config.ts` packages the app with `asar: true`, but the dashboard server is an `extraResource` (`resources/server/`) — a plain directory whose `node_modules/` are materialized by `bundle-server.mjs`'s `npm install --omit=dev` (which installs optionals). So koffi's `.node` lands as a normal file: **no `asarUnpack`.**
+2. **The server runs under bundled standalone Node, not Electron's process.** koffi's prebuilt targets standard Node N-API — **no `electron-rebuild`, no ABI mismatch.**
+
+Precedent: `node-pty` (also native) already ships this exact way, guarded by a GO/NO-GO prebuild assertion in the bundle scripts. koffi mirrors it — an assert on `resources/server/node_modules/koffi/build/koffi/win32_x64/koffi.node` turns a dropped-prebuild regression into a build failure instead of a silent Windows-wide Tier-1 downgrade.
+
+**jiti interaction (low risk, guarded).** The bundled server executes TS via jiti (`node --import <jiti>`). jiti transforms first-party TS but passes `node_modules` native addons through to Node's native `require`/`process.dlopen` untouched — proven here by `node-pty` loading successfully under the same loader. Two guardrails make koffi's load robust regardless: (a) load via `createRequire(import.meta.url)("koffi")` (bypasses jiti ESM-interop wrapping, resolves from the bundled tree — the same `createRequire` pattern `server.ts` uses for the client), with `mod.default ?? mod` to absorb default-interop; (b) use only **synchronous** koffi calls (`WaitForSingleObject(h, 0)`), so koffi's async worker thread never enters the picture. The whole load sits in a try/catch that degrades to Tier 1, so even an unforeseen jiti/koffi edge case cannot break `/api/health`.
+
+### `decideIsZombie` — platform-branched, one shared field
+
+- **Common gates:** `launchSourceEffective === "electron"` AND `storedSpawnedPid === null`.
+- **POSIX:** AND `ppid !== bootParentPid` AND `bootParentAlive === false` (reparented away *and* original parent gone).
+- **Windows:** AND `bootParentAlive === false` (no ppid signal; liveness is the whole test).
+
+**Two traps this avoids (both flagged in doubt-driven review, confirmed cross-model):**
+1. **Never cache `process.ppid`.** Node's `process.ppid` is a cache-on-first-access getter and does NOT reflect reparenting. A module-cached `ppid` stays pinned to the original (now-dead) Electron PID forever, so `ppid === 1` never becomes true — zombie detection would silently no-op on every POSIX system. The live per-request read (Linux `/proc/self/stat` field 4; macOS `ps -o ppid=`) is load-bearing.
+2. **Never test `ppid === 1`.** Modern Linux user sessions run under a subreaper (systemd `--user` calls `PR_SET_CHILD_SUBREAPER`), and containers reparent to a non-1 init. Orphans do NOT reliably adopt PID 1. Comparing against the known `bootParentPid` + liveness is subreaper- and container-safe; macOS (launchd = PID 1) is a special case of the same rule.
 
 ```mermaid
 sequenceDiagram
@@ -63,12 +100,12 @@ sequenceDiagram
   participant U as User
 
   E1->>S: spawn (detach:false, DASHBOARD_STARTER=Electron)
-  Note over S: ppid = E1.pid
+  Note over S: bootParentPid = E1.pid<br/>ppid = E1.pid
   E1->>E1: SIGKILL (crash)
-  Note over S: orphaned → reparented to init<br/>ppid = 1
+  Note over S: orphaned → reparented to subreaper<br/>live ppid ≠ bootParentPid; E1.pid now dead
   E2->>S: GET /api/health
-  S-->>E2: {launchSource: "electron", pid, ppid: 1}
-  E2->>E2: decideIsZombie → true
+  S-->>E2: {launchSource: "electron", pid, bootParentPid: E1.pid, ppid: <subreaper>}
+  E2->>E2: decideIsZombie: ppid≠bootParentPid AND !isPidAlive(bootParentPid) → true
   E2->>U: showMessageBox("Leftover server...")
   U-->>E2: "Take ownership"
   E2->>E2: setSpawnedPid(health.pid)
@@ -109,6 +146,8 @@ Two reasons to keep `launchSource` static and derive `launchSourceEffective`:
 
 ## Doctor row — why versioned suggestions
 
+The version-skew check is wired into the **Electron arm only**. Wiring it into the server arm would be a loopback tautology — a server comparing its own pkg version to its own `/api/health` always matches, giving false coverage. Skew is only observable across the Electron-shell ↔ attached-server boundary.
+
 The version-skew row's `suggestion` field varies by `launchSource` because the fix path is different in each case:
 
 - `standalone`: the user installed pi-dashboard via npm; the upgrade path is `npm i -g`.
@@ -119,11 +158,12 @@ Single hard-coded suggestion would mislead at least two of the three cases.
 
 ## Trade-offs & risks
 
-- **Adding fields to `/api/health` is a forever-supported contract.** We're adding three. Mitigation: each one has a clear, narrow consumer; `launchSourceEffective` is the only derived value and its derivation rule is small and pure. Health tests assert presence.
+- **Adding fields to `/api/health` is a forever-supported contract.** We're adding five (`bootParentPid`, `ppid`, `bootParentAlive`, `activeBridgeCount`, `launchSourceEffective`). Mitigation: each one has a clear, narrow consumer; `launchSourceEffective` is the only derived-union value and its rule is small and pure; `activeBridgeCount` reuses the existing `pi-gateway.connectionCount()` (no new gateway surface); `bootParentAlive` is a single boolean whose computation is isolated in `boot-parent-liveness.ts`. Health tests assert presence.
+- **`koffi` is an optional native FFI dep (Tier 2).** Risk: a native module raises the server package's install/build surface. Mitigation: it is an *optional* dependency, loaded lazily only on `win32`, behind a try/catch that degrades to Tier 1 (`isProcessAlive`). If `koffi` is absent, un-prebuilt for the arch, or `OpenProcess` is denied, detection still works PID-reuse-vulnerably rather than failing. Windows ARM64 note: verify `koffi` prebuilt availability; fall back to Tier 1 otherwise. The Job Object remains the first-line guarantee regardless of tier.
 - **Modal-on-launch is intrusive.** Mitigated by `askedThisSession`, by the `--no-zombie-prompt` switch for QA, and by the fact that real users rarely hit Electron crashes. If telemetry showed the modal firing more than a few percent of launches, we'd revisit.
 - **`storedSpawnedPid` is module-private.** Adding a read-only accessor (`getStoredSpawnedPid`) for the tray probe widens the module's surface slightly. Acceptable: it's still pure-read, and the alternative (passing the pid through every callsite) is worse.
 
 ## Open questions
 
-- Should the zombie modal's "Stop now" path re-enter `selectLaunchSource()` or just `app.quit()` + restart-message? The proposal commits to re-enter — gives the user immediate recovery without an app restart. If that introduces edge cases (e.g. BrowserWindow already created pointing at the soon-to-die server), we might switch to a soft-restart flow.
+- ~~Should the zombie modal's "Stop now" path re-enter `selectLaunchSource()`?~~ **Resolved (doubt-driven review):** re-enter `selectLaunchSource()`, then **reload the BrowserWindow after a positive health probe against the fresh server**. The window loaded the soon-to-be-killed server's URL before the modal fired, so the reload is mandatory — otherwise "Stop now" leaves the user on a connection-refused page.
 - Should `launchSourceEffective` also promote stale `electron` (other-Electron-leftover) to a new value like `"electron-orphaned"`? Currently the zombie modal handles this case, so a separate label seems redundant. Could revisit if non-Electron consumers (e.g. server-side update strategy) need to distinguish.

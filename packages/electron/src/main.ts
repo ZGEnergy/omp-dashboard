@@ -14,8 +14,8 @@
  * `~/.pi/dashboard/first-run-done` marker.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { fileURLToPath } from "node:url";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { decideWillNavigate } from "./lib/link-handling.js";
 import { resolveCdpActivation } from "./lib/resolve-cdp-activation.js";
 
@@ -38,9 +38,10 @@ if (_cdp.enabled && _cdp.port !== undefined) {
 if (process.platform === "linux" && !process.env.ELECTRON_OZONE_PLATFORM_HINT) {
   app.commandLine.appendSwitch("ozone-platform-hint", "auto");
 }
-import { mkdirSync, appendFileSync, existsSync, writeFileSync } from "node:fs";
-import path from "node:path";
+
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
+import path from "node:path";
 
 // Startup log for debugging
 const _LOG_DIR = process.env.TEMP || process.env.TMP || os.tmpdir();
@@ -57,9 +58,9 @@ log(`platform=${process.platform} arch=${process.arch} pid=${process.pid}`);
 log(`resourcesPath=${(process as any).resourcesPath || "(none)"}`);
 log(`execPath=${process.execPath}`);
 
+import { getFirstRunMarkerPath } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 // Disable GPU acceleration in VMs (prevents white screen on VMware/VirtualBox).
 import { isVirtualMachine } from "@blackbelt-technology/pi-dashboard-shared/platform/commands.js";
-import { getFirstRunMarkerPath } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 const isVM = isVirtualMachine();
 const disableGpu = process.env.ELECTRON_DISABLE_GPU || isVM;
@@ -71,41 +72,166 @@ if (disableGpu) {
   log("GPU disabled");
 }
 log("Importing lib modules...");
-import { registerWizardIpc, writeFirstRunMarker } from "./lib/wizard-ipc.js";
-import { readModeFile } from "./lib/wizard-state.js";
-import {
-  stopServerIfNeeded,
-  loadMinimalConfig,
-  setSpawnedPid,
-  requestServerLaunch,
-  isManagedServerRunning,
-  readServerLogTail,
-  onLaunchStatus,
-  setGracefulShutdownInProgress,
-  isGracefulShutdownInProgress,
-  makeServerWatchdog,
-} from "./lib/server-lifecycle.js";
-import { showDoctorDialog } from "./lib/app-menu.js";
+
+import fs from "node:fs";
+import { setupAppMenu, showDoctorDialog } from "./lib/app-menu.js";
+import { downloadAndInstall, initAutoUpdater, quitAndInstall } from "./lib/app-updater.js";
 import { registerBundledBridgeExtension } from "./lib/bridge-register.js";
-import { loadWindowState, saveWindowState } from "./lib/window-state.js";
-import { createTray, destroyTray } from "./lib/tray.js";
-import { startUpdateChecker } from "./lib/update-checker.js";
-import { notifyUpdatesAvailable } from "./lib/update-notifier.js";
-import { initAutoUpdater, downloadAndInstall, quitAndInstall } from "./lib/app-updater.js";
-import { setupAppMenu } from "./lib/app-menu.js";
+import { isDashboardRunning } from "./lib/health-check.js";
 import {
+  BundledServerMissingError,
+  PinnedSourceUnavailableError,
+  parsePreferOverride,
   selectLaunchSource,
   spawnFromSource,
-  parsePreferOverride,
-  PinnedSourceUnavailableError,
-  BundledServerMissingError,
 } from "./lib/launch-source.js";
-import fs from "node:fs";
+import {
+  decideIsZombie,
+  decideOwnership,
+  getStoredSpawnedPid,
+  isGracefulShutdownInProgress,
+  loadMinimalConfig,
+  makeServerWatchdog,
+  onLaunchStatus,
+  readServerLogTail,
+  requestServerLaunch,
+  setGracefulShutdownInProgress,
+  setSpawnedPid,
+  stopServerIfNeeded,
+} from "./lib/server-lifecycle.js";
+import { createTray, destroyTray, type TrayOwnership } from "./lib/tray.js";
+import { startUpdateChecker } from "./lib/update-checker.js";
+import { notifyUpdatesAvailable } from "./lib/update-notifier.js";
+import { loadWindowState, saveWindowState } from "./lib/window-state.js";
+import { registerWizardIpc, writeFirstRunMarker } from "./lib/wizard-ipc.js";
+import { readModeFile } from "./lib/wizard-state.js";
+import { promptZombieAdoption, stopZombieServer } from "./lib/zombie-adoption-dialog.js";
+
 log("All imports loaded");
 
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
 let isStartingUp = true;
+
+// Zombie-adoption modal: in-memory "already asked this launch" guard so a
+// user who picks "Leave running" is not re-prompted by any later re-evaluation
+// this process lifetime. Reset only on the next Electron launch.
+// See change: electron-attach-ownership-fixes.
+let zombieAskedThisSession = false;
+
+/**
+ * Ownership probe for the tray. GET /api/health with a 1 s timeout; classifies
+ * via `decideOwnership`. Returns "unknown" on fetch error or non-200 so the
+ * tray omits the launch item rather than showing a misleading one.
+ * See change: electron-attach-ownership-fixes.
+ */
+async function getServerOwnership(): Promise<TrayOwnership> {
+  const config = loadMinimalConfig();
+  try {
+    const res = await fetch(`http://localhost:${config.port}/api/health`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    if (!res.ok) return "unknown";
+    const body = await res.json() as Record<string, unknown>;
+    return decideOwnership({
+      healthLaunchSource:
+        typeof body.launchSourceEffective === "string"
+          ? (body.launchSourceEffective as any)
+          : null,
+      healthPid: typeof body.pid === "number" ? body.pid : undefined,
+      storedSpawnedPid: getStoredSpawnedPid(),
+    });
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * On the attach arm: detect a leftover server from a prior Electron lifetime
+ * and offer adoption. Suppressed under --no-zombie-prompt (detection still
+ * runs for logging). See change: electron-attach-ownership-fixes.
+ */
+async function maybePromptZombieAdoption(): Promise<void> {
+  if (zombieAskedThisSession) return;
+  const config = loadMinimalConfig();
+  let body: Record<string, unknown>;
+  try {
+    const res = await fetch(`http://localhost:${config.port}/api/health`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    if (!res.ok) return;
+    body = await res.json() as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  const healthPid = typeof body.pid === "number" ? body.pid : undefined;
+  const isZombie = decideIsZombie({
+    healthLaunchSourceEffective:
+      typeof body.launchSourceEffective === "string" ? (body.launchSourceEffective as any) : null,
+    healthPid,
+    healthPpid: typeof body.ppid === "number" ? body.ppid : undefined,
+    healthBootParentPid: typeof body.bootParentPid === "number" ? body.bootParentPid : undefined,
+    healthBootParentAlive: typeof body.bootParentAlive === "boolean" ? body.bootParentAlive : undefined,
+    storedSpawnedPid: getStoredSpawnedPid(),
+    platform: process.platform,
+  });
+  if (!isZombie || healthPid === undefined) return;
+  log(`[zombie] detected leftover server PID ${healthPid}`);
+
+  if (app.commandLine.hasSwitch("no-zombie-prompt")) {
+    log("[zombie] --no-zombie-prompt set; skipping modal");
+    return;
+  }
+
+  const choice = await promptZombieAdoption({ pid: healthPid });
+  if (choice === "adopt") {
+    setSpawnedPid(healthPid);
+    log(`[zombie] adopted PID ${healthPid}`);
+    return;
+  }
+  if (choice === "leave") {
+    zombieAskedThisSession = true;
+    log("[zombie] left running, will prompt next launch");
+    return;
+  }
+  // "stop": SIGTERM → SIGKILL, then respawn a fresh server + reload the window
+  // (which was pointed at the now-killed server's URL).
+  log(`[zombie] stopping PID ${healthPid} and respawning`);
+  await stopZombieServer(healthPid, {
+    kill: (pid, signal) => process.kill(pid, signal),
+    isRunning: async () => (await isDashboardRunning(config.port)).running,
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  });
+  try {
+    const source = await selectLaunchSource({
+      isPackaged: app.isPackaged,
+      cwd: process.cwd(),
+      preferOverride: parsePreferOverride(process.env),
+      resourcesPath: (process as any).resourcesPath ?? "",
+      port: config.port,
+    });
+    if (source.kind !== "attach") {
+      const spawnResult = await spawnFromSource(
+        source as Exclude<typeof source, { kind: "attach" }>,
+        { port: config.port, piPort: config.piPort },
+        { logFile: path.join(os.homedir(), ".pi", "dashboard", "server.log") },
+      );
+      setSpawnedPid(spawnResult.pid);
+      log(`[zombie] respawned server pid=${spawnResult.pid}`);
+    }
+    // Reload the window only after the fresh server passes a health probe.
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if ((await isDashboardRunning(config.port)).running) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(`http://localhost:${config.port}`);
+    }
+  } catch (err: any) {
+    log(`[zombie] respawn failed: ${err?.message || err}`);
+  }
+}
 
 /** Show a splash screen immediately while the app boots. */
 function showSplash(): void {
@@ -432,7 +558,7 @@ async function main(): Promise<void> {
       closeSplash();
       showLoadingPage(win, remoteUrl);
       createTray(() => mainWindow, quit, {
-        getServerStatus: isManagedServerRunning,
+        getServerOwnership,
         onLaunch: (force) => { void requestServerLaunch({ force }); },
       });
       startUpdaters();
@@ -458,11 +584,15 @@ async function main(): Promise<void> {
       closeSplash();
       showLoadingPage(win, source.url);
       createTray(() => mainWindow, quit, {
-        getServerStatus: isManagedServerRunning,
+        getServerOwnership,
         onLaunch: (force) => { void requestServerLaunch({ force }); },
       });
       startUpdaters();
       isStartingUp = false;
+      // Detect + offer adoption of a leftover server from a prior Electron
+      // lifetime. Fire-and-forget; the modal is non-blocking for startup.
+      // See change: electron-attach-ownership-fixes.
+      void maybePromptZombieAdoption();
       return;
     }
 
@@ -514,7 +644,7 @@ async function main(): Promise<void> {
     closeSplash();
     showLoadingPage(win, serverUrl);
     createTray(() => mainWindow, quit, {
-      getServerStatus: isManagedServerRunning,
+      getServerOwnership,
       onLaunch: (force) => { void requestServerLaunch({ force }); },
     });
     startUpdaters();
@@ -561,7 +691,7 @@ async function main(): Promise<void> {
     closeSplash();
     showLoadingPage(win, serverUrl);
     createTray(() => mainWindow, quit, {
-      getServerStatus: isManagedServerRunning,
+      getServerOwnership,
       onLaunch: (force) => { void requestServerLaunch({ force }); },
     });
     startUpdaters();

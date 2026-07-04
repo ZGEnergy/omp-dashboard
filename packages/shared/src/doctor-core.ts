@@ -10,14 +10,15 @@
  *
  * See change: doctor-rich-output (proposal.md, design.md).
  */
-import { execSync } from "./platform/exec.js";
-import { existsSync, readFileSync, statSync, renameSync, appendFileSync, rmSync } from "node:fs";
-import path from "node:path";
-import { createRequire } from "node:module";
+
 import dns from "node:dns";
-import { readZrokEnvironment } from "./zrok-env.js";
-import { getGitSourceReadout } from "./platform/git-source.js";
+import { appendFileSync, existsSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { whichSync } from "./platform/binary-lookup.js";
+import { execSync } from "./platform/exec.js";
+import { getGitSourceReadout } from "./platform/git-source.js";
+import { readZrokEnvironment } from "./zrok-env.js";
 
 // Used by the TypeScript-loader check to locate bundled jiti/tsx via
 // Node's standard module resolution — finds copies under
@@ -383,6 +384,7 @@ export const SECTION_OF: Record<string, DoctorSection> = {
   // setup
   "Setup wizard": "setup",
   "API key": "setup",
+  "Attached server version": "setup",
   // tunnel
   "zrok binary": "tunnel",
   "zrok environment": "tunnel",
@@ -505,6 +507,15 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
     status === "ok"
       ? undefined
       : "Sign in to a provider in **Settings → Providers** — either an OAuth subscription (Claude Pro/Max, ChatGPT Plus/Pro) or an API key. Pi sessions need at least one credential to use LLM providers.",
+  // Defensive fallback only — the live emission path in
+  // `checkAttachedServerVersion` sets a launch-source-specific `suggestion`
+  // inline, so the stamping `!c.suggestion` guard means this never runs in
+  // production. Kept to satisfy the Decision-8 lint. See change:
+  // electron-attach-ownership-fixes.
+  "Attached server version": (status) =>
+    status === "ok"
+      ? undefined
+      : "The attached dashboard server's version differs from this app bundle, or the server is unreachable. See the row detail for the launch-source-specific fix.",
   "zrok binary": (status) =>
     status === "ok"
       ? undefined
@@ -624,6 +635,78 @@ export async function defaultDnsLookup(host: string, timeoutMs: number): Promise
         reject(err);
       });
   });
+}
+
+// ─── Attached-server version skew (Electron arm only) ────────────
+
+/** Minimal `/api/health` shape the version-skew check consumes. */
+export interface AttachedHealthLike {
+  version?: string;
+  launchSource?: string;
+}
+
+export interface AttachedServerVersionDeps {
+  /** The running shell's application version (Electron `app.getVersion()`). */
+  appVersion: string;
+  /** Fetch `/api/health`; resolve null (or throw) when unreachable. */
+  healthFetcher: () => Promise<AttachedHealthLike | null>;
+}
+
+/**
+ * Compare the shell's bundled version against the attached server's
+ * `/api/health.version`. Electron-arm only — a server comparing its own pkg
+ * version to its own self-fetch is a loopback tautology. Suggestion text is
+ * launch-source-specific (npm upgrade vs stop-the-pi-session vs quit-other-
+ * Electron). See change: electron-attach-ownership-fixes.
+ */
+export async function checkAttachedServerVersion(
+  deps: AttachedServerVersionDeps,
+): Promise<DoctorCheck> {
+  let health: AttachedHealthLike | null = null;
+  try {
+    health = await deps.healthFetcher();
+  } catch {
+    health = null;
+  }
+  if (!health || !health.version) {
+    return {
+      name: "Attached server version",
+      section: "setup",
+      status: "error",
+      message: "Attached dashboard server is unreachable or reports no version",
+      detail: "GET /api/health returned no response or a body without a `version` field",
+      suggestion:
+        "Confirm a dashboard server is running on the configured port, then re-run Doctor.",
+    };
+  }
+  if (deps.appVersion === health.version) {
+    return {
+      name: "Attached server version",
+      section: "setup",
+      status: "ok",
+      message: `Server and app bundle both v${health.version}`,
+    };
+  }
+  const ls = health.launchSource;
+  let suggestion: string;
+  if (ls === "standalone") {
+    suggestion =
+      `Run \`npm i -g @blackbelt-technology/pi-dashboard@${deps.appVersion}\` and restart your terminal session.`;
+  } else if (ls === "bridge" || ls === "bridge-orphaned") {
+    suggestion =
+      "Stop the pi session that started this server (or run `pi-dashboard stop`) and relaunch the app.";
+  } else {
+    suggestion =
+      "Quit the other Electron instance or use the zombie-adoption prompt to take ownership.";
+  }
+  return {
+    name: "Attached server version",
+    section: "setup",
+    status: "warning",
+    message: `Dashboard server reports v${health.version}; this app bundle is v${deps.appVersion}`,
+    detail: `launchSource: ${ls ?? "unknown"}`,
+    suggestion,
+  };
 }
 
 // ─── runSharedChecks ──────────────────────────────────────────────────

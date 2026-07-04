@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { app } from "electron";
-import { detectPi, detectOpenSpec, detectSystemNode, detectDashboardPackage } from "./dependency-detector.js";
+import { detectDashboardPackage, detectOpenSpec, detectPi, detectSystemNode } from "./dependency-detector.js";
 
 /**
  * PATH-only lookup for the CLI-on-PATH Doctor rows. Bypasses the
@@ -24,26 +24,28 @@ function detectOnUserPath(name: string): { found: boolean; path?: string } {
   const first = r.stdout.trim().split("\n")[0];
   return first ? { found: true, path: first } : { found: false };
 }
-import { getBundledNodePath, getBundledNpmPath, getBundledNodeDir } from "./bundled-node.js";
-import { pickNodeForServer } from "./pick-node.js";
-import { isApiKeyConfigured } from "./wizard-state.js";
+
 import { inspectedCredentialFiles } from "@blackbelt-technology/pi-dashboard-shared/credential-detect.js";
-import { MANAGED_DIR } from "./managed-paths.js";
-// resolveOfflinePackages + installManagedNode imports removed under change:
-// eliminate-electron-runtime-install (no offline cache; bundle is immutable).
-import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import {
+  assumedMandatory,
+  checkAttachedServerVersion,
   type DoctorCheck,
   type DoctorReport,
   type DoctorStatus,
-  runSharedChecks,
-  safeExec,
-  safeCheck,
-  assumedMandatory,
-  stampSectionsAndSuggestions,
   formatDoctorReportPlain,
+  runSharedChecks,
+  safeCheck,
+  safeExec,
   formatDoctorReportMarkdown as sharedFormatDoctorReportMarkdown,
+  stampSectionsAndSuggestions,
 } from "@blackbelt-technology/pi-dashboard-shared/doctor-core.js";
+// resolveOfflinePackages + installManagedNode imports removed under change:
+// eliminate-electron-runtime-install (no offline cache; bundle is immutable).
+import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
+import { getBundledNodeDir, getBundledNodePath, getBundledNpmPath } from "./bundled-node.js";
+import { MANAGED_DIR } from "./managed-paths.js";
+import { pickNodeForServer } from "./pick-node.js";
+import { isApiKeyConfigured } from "./wizard-state.js";
 
 export type { DoctorCheck, DoctorReport, DoctorStatus } from "@blackbelt-technology/pi-dashboard-shared/doctor-core.js";
 
@@ -281,6 +283,37 @@ async function runDoctorInner(): Promise<DoctorReport> {
   // Splice them in BEFORE the Electron-only "Dashboard server code" / offline / launch-test rows
   // for stable UI ordering. We push them inline now and rely on stampSectionsAndSuggestions for grouping.
   for (const c of shared) checks.push(c);
+
+  // ── Attached-server version skew (Electron arm ONLY) ─────────
+  // A server comparing its own pkg version to its own self-fetch is a
+  // loopback tautology, so this check is wired here (Electron shell ↔
+  // attached server) and NOT in the server-side doctor route.
+  // See change: electron-attach-ownership-fixes.
+  checks.push(
+    await safeCheck("Attached server version", "setup", () =>
+      checkAttachedServerVersion({
+        appVersion,
+        healthFetcher: async () => {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 3000);
+          try {
+            const res = await fetch("http://localhost:8000/api/health", { signal: ctrl.signal });
+            if (!res.ok) return null;
+            const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+            if (!body) return null;
+            return {
+              version: typeof body.version === "string" ? body.version : undefined,
+              launchSource: typeof body.launchSource === "string" ? body.launchSource : undefined,
+            };
+          } catch {
+            return null;
+          } finally {
+            clearTimeout(timer);
+          }
+        },
+      }),
+    ),
+  );
 
   // ── Dashboard server code (Electron-only path) ──────────────
   const resourcesPath = (process as { resourcesPath?: string }).resourcesPath;

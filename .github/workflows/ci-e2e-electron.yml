@@ -1,0 +1,103 @@
+name: CI Electron E2E
+
+# On-demand Playwright-Electron suite (native-surface flows the web-client E2E
+# and unit tests cannot reach): zombie-adoption modal + Doctor version-skew row.
+# Packages the app (electron-forge package) then runs the specs.
+# Matrix: ubuntu-latest (POSIX zombie branch, under xvfb) + windows-latest (the
+# win32 `decideIsZombie` branch — bootParentAlive-only — in the REAL app; task
+# 7.4b detection safety net). workflow_dispatch only — packaging is slow, so
+# this is not on the PR path.
+# See change: electron-attach-ownership-fixes (Electron-E2E harness).
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-e2e-electron-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  electron-e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` fallback covers npm/cli#4828 (platform optional-deps, incl. the
+      # koffi optionalDependency). OS-split so the cleanup stays shell-correct.
+      - name: Install dependencies (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: npm ci || (echo "npm ci failed (npm/cli#4828); clean install" && rm -rf node_modules package-lock.json && npm install)
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "npm ci failed (npm/cli#4828); clean install"
+            Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+            npm install
+          }
+
+      # Package the app for this OS (bundled Node skipped when absent; the E2E
+      # attaches to a fake server, so no real server spawn is needed).
+      - name: Package Electron app
+        run: npm run -w packages/electron package
+
+      # Linux needs a virtual display (xvfb); Windows runners have a desktop
+      # session, so Electron launches directly. Playwright uses the packaged
+      # app's own Electron binary (no chromium download needed).
+      - name: Run Electron E2E under xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:e2e:electron
+        env:
+          CI: "1"
+      - name: Run Electron E2E (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: npm run test:e2e:electron
+        env:
+          CI: "1"
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-electron-${{ matrix.os }}
+          path: playwright-report-electron
+          retention-days: 14
+
+  # Job Object kill-on-close (task 7.4a) — spawn-mode (NOT the fake-server
+  # attach specs): the app must boot a real server so the taskkill /F cascade
+  # can be observed. Separate job so it never shares :8000 with the E2E specs.
+  job-object-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "npm ci failed (npm/cli#4828); clean install"
+            Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+            npm install
+          }
+      - name: Package Electron app
+        run: npm run -w packages/electron package
+      - name: Job Object kill-on-close smoke (taskkill /F cascade)
+        shell: pwsh
+        run: npx tsx scripts/windows-job-object-smoke.ts
