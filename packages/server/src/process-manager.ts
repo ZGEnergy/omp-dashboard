@@ -23,6 +23,7 @@ import { loadConfig, type SpawnStrategy } from "@blackbelt-technology/pi-dashboa
 import { MANAGED_BIN } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import { prependManagedNodeToPath } from "@blackbelt-technology/pi-dashboard-shared/platform/managed-node-path.js";
+import { electronAsNodeRequired } from "@blackbelt-technology/pi-dashboard-shared/platform/runner.js";
 import { mintSpawnToken } from "./spawn-token.js";
 import {
   createKeeperManager,
@@ -165,10 +166,29 @@ export interface SpawnResult {
  */
 export function buildSpawnEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
-  opts?: { spawnToken?: string },
+  opts?: {
+    spawnToken?: string;
+    /**
+     * The node-wrapped `argv[0]` this env will spawn (e.g. `piCmd[0]`).
+     * When it is the Electron GUI binary (`execpath-fallback` topology),
+     * re-add `ELECTRON_RUN_AS_NODE=1` that `resolver.buildSpawnEnv` strips.
+     * Absent ⇒ env byte-identical to today. See change:
+     * fix-nodescript-argv-electron-execpath-fallback.
+     */
+    argv0?: string;
+    /** Injected `execPath`/`electronVersion` for deterministic tests. */
+    electronDeps?: { execPath?: string; electronVersion?: string };
+  },
 ): NodeJS.ProcessEnv {
   // Defensive copy: never mutate the caller's env (often `process.env`).
   const env = { ...prependManagedNodeToPath(resolver.buildSpawnEnv(baseEnv)) };
+  // Re-add the Electron-as-node flag that `resolver.buildSpawnEnv` strips,
+  // but ONLY when the argv[0] we are about to spawn is the Electron binary.
+  // The argv-aware chokepoint that keeps this builder in agreement with
+  // `runner.buildSpawnEnvForArgv`. No argv0 ⇒ no-op (byte-identical).
+  if (opts?.argv0 && electronAsNodeRequired(opts.argv0, opts.electronDeps)) {
+    env.ELECTRON_RUN_AS_NODE = "1";
+  }
   // Point spawned bridges at THIS server's gateway so they register with the
   // server that spawned them, not the config-default piPort. Overrides any
   // inherited PI_DASHBOARD_URL. See setSpawnDashboardPiPort above.
@@ -442,7 +462,9 @@ async function spawnWt(cwd: string, options?: SessionOptions): Promise<SpawnResu
     cmd: wt,
     args,
     cwd,
-    env: buildSpawnEnv(process.env, { spawnToken: options?.spawnToken }),
+    // pass the node-wrapped pi argv[0] so the Electron-as-node flag is
+    // re-added when it is the Electron binary (execpath-fallback topology).
+    env: buildSpawnEnv(process.env, { spawnToken: options?.spawnToken, argv0: piCmd[0] }),
   });
 
   if (!r.ok) {
@@ -467,11 +489,14 @@ async function spawnHeadless(cwd: string, options?: SessionOptions): Promise<Spa
   // See change: add-rpc-stdin-dispatch-with-keeper-sidecar (introduced keeper),
   //             enable-rpc-keeper-by-default (made keeper the only path).
   const args = buildHeadlessArgs(options);
-  const env = buildSpawnEnv(process.env, { spawnToken: options?.spawnToken });
   const piCmd = resolvePiCommand();
   if (!piCmd) {
     return { success: false, code: "PI_NOT_FOUND", message: `pi binary not found. Checked: ${MANAGED_BIN} and system PATH.` };
   }
+  // Build env AFTER resolving piCmd so the node-wrapped pi argv[0] re-adds
+  // the Electron-as-node flag when it is the Electron binary. This env is
+  // the keeper's base env, so the forwarded pi child inherits the flag too.
+  const env = buildSpawnEnv(process.env, { spawnToken: options?.spawnToken, argv0: piCmd[0] });
   return spawnHeadlessViaKeeper(cwd, env, args, piCmd);
 }
 

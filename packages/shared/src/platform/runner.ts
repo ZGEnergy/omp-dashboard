@@ -105,6 +105,34 @@ function tryGetRegistry(): LazyRegistry | null {
 }
 
 /**
+ * Decide whether a spawn whose `argv[0]` is `argv0` must carry
+ * `ELECTRON_RUN_AS_NODE=1`.
+ *
+ * True iff the server runs under Electron (`process.versions.electron`)
+ * AND `argv0` is the host `process.execPath` — i.e. a Node-script executor
+ * node-wrapped to the Electron GUI binary (the `execpath-fallback`
+ * topology). That interpreter only behaves as `node` with the flag set.
+ * When a real `node` resolves, `argv0` is that real node and this is false.
+ *
+ * Script-agnostic — fires for `cli.js` and `keeper.cjs` alike. The one
+ * authoritative rule; every executor spawn site consults it so the
+ * argv-blind `resolver.buildSpawnEnv` strip cannot desync from the
+ * argv-aware re-add. `deps` are injected for deterministic testing;
+ * production callers omit them and read the live process.
+ *
+ * See change: fix-nodescript-argv-electron-execpath-fallback.
+ */
+export function electronAsNodeRequired(
+  argv0: string,
+  deps?: { execPath?: string; electronVersion?: string },
+): boolean {
+  const execPath = deps?.execPath ?? process.execPath;
+  const electronVersion =
+    deps?.electronVersion ?? (process as { versions?: { electron?: string } }).versions?.electron;
+  return Boolean(electronVersion) && argv0 === execPath;
+}
+
+/**
  * Build the spawn env for a resolved executor argv.
  *
  * Default behavior is unchanged: when the caller supplied `ctx.env`, merge
@@ -114,9 +142,10 @@ function tryGetRegistry(): LazyRegistry | null {
  * Node-script executor node-wraps to `process.execPath` and the server is
  * itself running under Electron (`process.versions.electron`), that
  * interpreter is the Electron binary. It only behaves as `node` with
- * `ELECTRON_RUN_AS_NODE=1`, so force that flag on the child's env. This is
- * the safety net for the `execpath-fallback` topology; when
- * `registry.resolve("node")` yields a real node it is never triggered.
+ * `ELECTRON_RUN_AS_NODE=1`, so force that flag on the child's env (via the
+ * shared `electronAsNodeRequired` predicate). This is the safety net for
+ * the `execpath-fallback` topology; when `registry.resolve("node")` yields
+ * a real node it is never triggered.
  *
  * `deps` (execPath / electronVersion) are injected for deterministic
  * testing; production callers omit them and read the live process.
@@ -127,10 +156,7 @@ export function buildSpawnEnvForArgv(
   ctxEnv?: NodeJS.ProcessEnv,
   deps?: { execPath?: string; electronVersion?: string },
 ): NodeJS.ProcessEnv | undefined {
-  const execPath = deps?.execPath ?? process.execPath;
-  const electronVersion =
-    deps?.electronVersion ?? (process as { versions?: { electron?: string } }).versions?.electron;
-  const electronAsNode = Boolean(electronVersion) && execCmd === execPath;
+  const electronAsNode = electronAsNodeRequired(execCmd, deps);
   if (!ctxEnv && !electronAsNode) return undefined;
   const merged: NodeJS.ProcessEnv = ctxEnv ? { ...process.env, ...ctxEnv } : { ...process.env };
   if (electronAsNode) merged.ELECTRON_RUN_AS_NODE = "1";

@@ -21,6 +21,7 @@ import { DiagnosticsSection } from "./DiagnosticsSection.js";
 import { DialogPortal } from "./DialogPortal.js";
 import { InstructionsPage } from "./DirectorySettings/InstructionsPage.js";
 import { KnownServersSection } from "./KnownServersSection.js";
+import { PairedDevicesSection } from "./PairedDevicesSection.js";
 import { ModelProxySection } from "./ModelProxySection.js";
 import { ModelSelector } from "./ModelSelector.js";
 import { NetworkDiscoverySection } from "./NetworkDiscoverySection.js";
@@ -1121,6 +1122,9 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                     c.auth.bypassHosts = nets;
                   })}
                 />
+                <Section title={t("settings.pairedDevices", undefined, "Paired Devices")}>
+                  <PairedDevicesSection />
+                </Section>
                 <SettingsSectionSlot tab="security" />
               </>
             )}
@@ -1525,6 +1529,12 @@ function DisplayPrefsSection() {
       <ToggleField label={t("settings.tokenStatsBar", undefined, "Token stats bar")} value={prefs.tokenStatsBar} onChange={(v) => patch({ tokenStatsBar: v })} />
       <ToggleField label={t("settings.contextUsageBar", undefined, "Context usage bar")} value={prefs.contextUsageBar} onChange={(v) => patch({ contextUsageBar: v })} />
       <ToggleField label={t("settings.reasoningBlocks", undefined, "Reasoning blocks")} value={prefs.reasoning} onChange={(v) => patch({ reasoning: v })} />
+      <NumberField
+        label={t("settings.reasoningAutoCollapse", undefined, "Reasoning auto-collapse (seconds, 0 = never)")}
+        value={Math.round(prefs.reasoningAutoCollapseMs / 1000)}
+        onChange={(v) => patch({ reasoningAutoCollapseMs: Math.max(0, v) * 1000 })}
+        disabled={!prefs.reasoning}
+      />
       <ToggleField label={t("settings.toolResultBodies", undefined, "Tool result bodies")} value={prefs.toolResults} onChange={(v) => patch({ toolResults: v })} />
       <ToggleField label={t("settings.turnMetadata", undefined, "Turn metadata separators")} value={prefs.turnMetadata} onChange={(v) => patch({ turnMetadata: v })} />
       <ToggleField label={t("settings.debugEvents", undefined, "Debug events")} value={prefs.debugTools} onChange={(v) => patch({ debugTools: v })} />

@@ -1,21 +1,21 @@
 /**
  * Electron main process entry point.
  *
- * Six-state startup flow (see openspec/specs/electron-bootstrap-flow/spec.md
- * and change: eliminate-electron-runtime-install):
+ * Five-state startup flow (see openspec/specs/electron-bootstrap-flow/spec.md
+ * and change: auto-launch-first-run-skip-welcome):
  *
  *   checking-server-health
  *     ├─→ attach            (a server is already running on the port)
- *     └─→ wizard-welcome    (first launch; marker absent)
- *           └─→ launch-server → health-wait → done
- *                                            └─→ loading-page-error (on timeout)
+ *     └─→ launch-server → health-wait → done
+ *                                        └─→ loading-page-error (on timeout)
  *
- * On second+ launches the wizard-welcome state is skipped via the
- * `~/.pi/dashboard/first-run-done` marker.
+ * There is no first-run wizard: launch is unconditional. The
+ * `~/.pi/dashboard/first-run-done` marker is still written on the first
+ * `done` for backwards compatibility (Doctor / support tooling read it).
  */
 
-import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { fileURLToPath } from "node:url";
 import { decideWillNavigate } from "./lib/link-handling.js";
 import { resolveCdpActivation } from "./lib/resolve-cdp-activation.js";
 
@@ -38,10 +38,9 @@ if (_cdp.enabled && _cdp.port !== undefined) {
 if (process.platform === "linux" && !process.env.ELECTRON_OZONE_PLATFORM_HINT) {
   app.commandLine.appendSwitch("ozone-platform-hint", "auto");
 }
-
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, appendFileSync, existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 // Startup log for debugging
 const _LOG_DIR = process.env.TEMP || process.env.TMP || os.tmpdir();
@@ -58,9 +57,9 @@ log(`platform=${process.platform} arch=${process.arch} pid=${process.pid}`);
 log(`resourcesPath=${(process as any).resourcesPath || "(none)"}`);
 log(`execPath=${process.execPath}`);
 
-import { getFirstRunMarkerPath } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 // Disable GPU acceleration in VMs (prevents white screen on VMware/VirtualBox).
 import { isVirtualMachine } from "@blackbelt-technology/pi-dashboard-shared/platform/commands.js";
+import { getFirstRunMarkerPath } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 const isVM = isVirtualMachine();
 const disableGpu = process.env.ELECTRON_DISABLE_GPU || isVM;
@@ -72,41 +71,39 @@ if (disableGpu) {
   log("GPU disabled");
 }
 log("Importing lib modules...");
-
-import fs from "node:fs";
-import { setupAppMenu, showDoctorDialog } from "./lib/app-menu.js";
-import { downloadAndInstall, initAutoUpdater, quitAndInstall } from "./lib/app-updater.js";
-import { registerBundledBridgeExtension } from "./lib/bridge-register.js";
-import { isDashboardRunning } from "./lib/health-check.js";
+import { readModeFile } from "./lib/wizard-state.js";
 import {
-  BundledServerMissingError,
-  PinnedSourceUnavailableError,
-  parsePreferOverride,
-  selectLaunchSource,
-  spawnFromSource,
-} from "./lib/launch-source.js";
-import {
-  decideIsZombie,
-  decideOwnership,
-  getStoredSpawnedPid,
-  isGracefulShutdownInProgress,
-  loadMinimalConfig,
-  makeServerWatchdog,
-  onLaunchStatus,
-  readServerLogTail,
-  requestServerLaunch,
-  setGracefulShutdownInProgress,
-  setSpawnedPid,
   stopServerIfNeeded,
+  loadMinimalConfig,
+  setSpawnedPid,
+  requestServerLaunch,
+  readServerLogTail,
+  onLaunchStatus,
+  setGracefulShutdownInProgress,
+  isGracefulShutdownInProgress,
+  makeServerWatchdog,
+  decideOwnership,
+  decideIsZombie,
+  getStoredSpawnedPid,
 } from "./lib/server-lifecycle.js";
+import { promptZombieAdoption, stopZombieServer } from "./lib/zombie-adoption-dialog.js";
+import { isDashboardRunning } from "./lib/health-check.js";
+import { showDoctorDialog } from "./lib/app-menu.js";
+import { registerBundledBridgeExtension } from "./lib/bridge-register.js";
+import { loadWindowState, saveWindowState } from "./lib/window-state.js";
 import { createTray, destroyTray, type TrayOwnership } from "./lib/tray.js";
 import { startUpdateChecker } from "./lib/update-checker.js";
 import { notifyUpdatesAvailable } from "./lib/update-notifier.js";
-import { loadWindowState, saveWindowState } from "./lib/window-state.js";
-import { registerWizardIpc, writeFirstRunMarker } from "./lib/wizard-ipc.js";
-import { readModeFile } from "./lib/wizard-state.js";
-import { promptZombieAdoption, stopZombieServer } from "./lib/zombie-adoption-dialog.js";
-
+import { initAutoUpdater, downloadAndInstall, quitAndInstall } from "./lib/app-updater.js";
+import { setupAppMenu } from "./lib/app-menu.js";
+import {
+  selectLaunchSource,
+  spawnFromSource,
+  parsePreferOverride,
+  PinnedSourceUnavailableError,
+  BundledServerMissingError,
+} from "./lib/launch-source.js";
+import fs from "node:fs";
 log("All imports loaded");
 
 let mainWindow: BrowserWindow | null = null;
@@ -323,9 +320,6 @@ function registerPiDashboardIpc(): void {
 
   ipcMain.removeAllListeners("dashboard:open-doctor");
   ipcMain.on("dashboard:open-doctor", () => { void showDoctorDialog(); });
-
-  ipcMain.removeAllListeners("wizard:open-doctor");
-  ipcMain.on("wizard:open-doctor", () => { void showDoctorDialog(); });
 }
 
 /**
@@ -464,44 +458,6 @@ async function quit(): Promise<void> {
   app.quit();
 }
 
-/**
- * True when the first-run-done marker is absent (i.e. this is the first
- * launch of the .app on this machine).
- */
-function isFirstRun(): boolean {
-  return !existsSync(getFirstRunMarkerPath());
-}
-
-/**
- * Show the one-step welcome window. Opens the slim wizard.html (single
- * step: welcome message + [Launch dashboard] CTA + Advanced disclosure
- * with remote-connect probe). Resolves when the user closes the wizard
- * window (either by clicking [Launch dashboard] which calls
- * `wizard:complete` then `window.close()`, or by closing manually).
- *
- * `writeFirstRunMarker` is called inside the wizard renderer via the
- * preload `wizard:complete` IPC. As a defensive fallback, we also write
- * the marker here if it's still absent after the window closes — this
- * keeps subsequent launches stable even if the user dismisses the
- * window via the OS chrome.
- */
-async function showWelcomeStep(): Promise<void> {
-  log("wizard-welcome: opening welcome window");
-  try {
-    const { openWizardWindow } = await import("./lib/wizard-window.js");
-    await openWizardWindow();
-  } catch (err: any) {
-    log(`wizard-welcome: failed to open wizard window: ${err?.message || err}`);
-  }
-  // Defensive: ensure the marker is written even if the renderer never
-  // called wizard:complete (e.g. user closed via OS chrome).
-  try {
-    if (!existsSync(getFirstRunMarkerPath())) writeFirstRunMarker();
-  } catch (err: any) {
-    log(`wizard-welcome: marker write fallback failed: ${err?.message || err}`);
-  }
-}
-
 async function main(): Promise<void> {
   // Single-instance lock
   if (!app.requestSingleInstanceLock()) {
@@ -534,9 +490,6 @@ async function main(): Promise<void> {
 
   app.name = "PI Dashboard";
   setupAppMenu();
-
-  // Register slim wizard IPC (currently only wizard:complete + open-doctor).
-  registerWizardIpc(() => null);
 
   // Register loading-page IPC (Start server / Open Doctor / Server log).
   registerPiDashboardIpc();
@@ -596,21 +549,11 @@ async function main(): Promise<void> {
       return;
     }
 
-    // ── State: wizard-welcome (first launch only) ────────────────────────────
-    if (isFirstRun()) {
-      // Best-effort bundled bridge registration; non-fatal.
-      try { registerBundledBridgeExtension(); } catch { /* non-fatal */ }
-      // Close splash BEFORE opening the wizard. The splash is alwaysOnTop;
-      // leaving it visible occludes the wizard on Windows (no [Launch dashboard]
-      // CTA reachable) and freezes the startup machine waiting for the wizard's
-      // 'closed' event that can never fire. See change: fix-wizard-occluded-by-splash.
-      closeSplash();
-      await showWelcomeStep();
-      // Re-open splash for subsequent status updates between wizard-close and
-      // main-window-open. Without this, updateSplashStatus calls below are
-      // silent no-ops and the user sees no progress feedback.
-      showSplash();
-    }
+    // Best-effort bundled bridge registration on every launch; non-fatal.
+    // Registers the bundled bridge so pi sessions forward events to the
+    // dashboard. Formerly gated behind the first-run wizard arm.
+    // See change: auto-launch-first-run-skip-welcome (task 1.1a).
+    try { registerBundledBridgeExtension(); } catch { /* non-fatal */ }
 
     // ── State: launch-server ─────────────────────────────────────────────────
     updateSplashStatus("Launching dashboard server…");

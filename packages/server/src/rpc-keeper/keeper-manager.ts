@@ -33,6 +33,7 @@ import {
   isProcessAlive,
   killPidWithGroup,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
+import { electronAsNodeRequired } from "@blackbelt-technology/pi-dashboard-shared/platform/runner.js";
 
 // ── Path conventions ─────────────────────────────────────────────────────────
 
@@ -220,6 +221,17 @@ export function createKeeperManager(opts: KeeperManagerOptions = {}): KeeperMana
     }
     if (piCmd && piCmd.length > 0) {
       keeperEnv = { ...keeperEnv, PI_KEEPER_PI_CMD: JSON.stringify(piCmd) };
+    }
+
+    // Guard the keeper's OWN launch argv `[nodeBinary, keeper.cjs]`. When
+    // `nodeBinary` is `process.execPath` under Electron (execpath-fallback
+    // topology), it is the Electron GUI binary and only runs `keeper.cjs`
+    // as Node with `ELECTRON_RUN_AS_NODE=1`. Independent of the pi argv:
+    // this keeps the keeper process itself from re-launching the GUI even
+    // if the pi argv did not carry the flag. Shared predicate = one rule.
+    // See change: fix-nodescript-argv-electron-execpath-fallback.
+    if (electronAsNodeRequired(nodeBinary)) {
+      keeperEnv = { ...keeperEnv, ELECTRON_RUN_AS_NODE: "1" };
     }
 
     // Delegate to the shared cross-platform primitive so libuv-correct
