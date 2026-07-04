@@ -16,7 +16,7 @@
 - [x] 4.2 Healthy-path invariant: real `node` resolvable ⇒ argv[0] is real node, predicate no-op, non-Electron spawn env byte-identical. → verify: equality assertion.
 - [x] 4.3 Confirm excluded vectors stay untouched: `pi-core-updater` + `package-manager-wrapper` (inherit flag), `spawnTmux`/`spawnWslTmux` (shell token), `runner.buildSpawnEnvForArgv` (already argv-aware) get no behavior change. → verify: no edits / snapshot equal.
 - [x] 4.4 `definitions.ts` `nodeScriptToArgv` fallback UNEDITED (avoid conflict with `fix-node-electron-resolution-test-isolation`). → verify: `git diff` shows no change to lines 426-434.
-- [x] 4.5 Full `npm test` green (one pre-existing failure `node-electron-resolution.test.ts` — test-isolation leak owned by `fix-node-electron-resolution-test-isolation`, reproduces without this change; all touched code green); no edits under `packages/electron/`; no edits under `packages/electron/`. → verify: `git diff --name-only` = `packages/shared/**` + `packages/server/**` (incl. `rpc-keeper/`) only.
+- [x] 4.5 `npm test`: touched code green. A pre-existing `node-electron-resolution.test.ts` isolation leak (owned by `fix-node-electron-resolution-test-isolation`, reproduces without this change) failed locally on the dev machine but is resolved on the develop-merged tree once that sibling change landed. No edits under `packages/electron/`. → verify: `git diff --name-only` = `packages/shared/**` + `packages/server/**` (incl. `rpc-keeper/`) only.
 
 ## 5. Close out
 - [x] 5.1 `openspec validate fix-nodescript-argv-electron-execpath-fallback --strict`. → verify: passes.
