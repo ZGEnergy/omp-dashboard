@@ -9,7 +9,7 @@
  *
  * Two-tier computation:
  *   Tier 1 (all platforms, zero-dep): `isProcessAlive(bootParentPid)` via
- *     `process.kill(pid, 0)`. PID-reuse-vulnerable — a recycled parent PID
+ *     `process.kill` with signal 0. PID-reuse-vulnerable — a recycled parent PID
  *     reads "alive" and hides a zombie (safe direction: only under-detects).
  *   Tier 2 (win32 only, identity-safe): hold a `SYNCHRONIZE` handle to the
  *     specific parent process object via koffi `OpenProcess`, then per request
@@ -31,7 +31,7 @@
  * See change: electron-attach-ownership-fixes.
  */
 
-import { execSync } from "node:child_process";
+import { execSync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import { createRequire } from "node:module";
 import { isProcessAlive } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 
@@ -98,7 +98,7 @@ export function computeBootParentAlive(): boolean {
 /**
  * Diagnostic: which liveness tier is ACTIVE. `"tier2"` when the koffi
  * `SYNCHRONIZE` handle loaded and `OpenProcess` succeeded (identity-safe,
- * win32 only); `"tier1"` otherwise (the `process.kill(pid,0)` fallback — every
+ * win32 only); `"tier1"` otherwise (the `process.kill` signal-0 fallback — every
  * non-win32 platform, and win32 when koffi/OpenProcess is unavailable). Used by
  * the Windows liveness smoke to assert the koffi path loaded rather than
  * silently degrading. See change: electron-attach-ownership-fixes (task 1b.4).

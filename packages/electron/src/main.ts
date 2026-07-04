@@ -195,7 +195,9 @@ async function maybePromptZombieAdoption(): Promise<void> {
   // (which was pointed at the now-killed server's URL).
   log(`[zombie] stopping PID ${healthPid} and respawning`);
   await stopZombieServer(healthPid, {
-    kill: (pid, signal) => process.kill(pid, signal),
+    // Signal a specific pid (not a group) — the injected fn drives the
+    // stopZombieServer SIGTERM→poll→SIGKILL ladder.
+    kill: (pid, signal) => process.kill(pid, signal), // ban:process-kill-ok
     isRunning: async () => (await isDashboardRunning(config.port)).running,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   });
