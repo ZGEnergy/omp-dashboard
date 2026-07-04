@@ -12,52 +12,56 @@
  * See change: optimize-openspec-poll-burst for the cost model.
  */
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
+import type { BrowserGitHeadUpdateMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import { DEFAULT_OPENSPEC_POLL, type OpenSpecPollConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import {
   buildOpenSpecData,
+  createFsProbeFactory,
+  createFsSpecsProbeFactory,
   deriveArtifactStatus,
   pollOpenSpecAsync,
   runOpenSpecList,
   runOpenSpecStatus,
-  createFsProbeFactory,
-  createFsSpecsProbeFactory,
 } from "@blackbelt-technology/pi-dashboard-shared/openspec-poller.js";
+import type { PiResourcesResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+import { createSemaphore, type Semaphore } from "@blackbelt-technology/pi-dashboard-shared/semaphore.js";
+import type { OpenSpecChange, OpenSpecData } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { EventLoopSpikeMetrics, EventLoopTurn } from "./eventloop-spike-metrics.js";
+import { createFolderHeadPoll, type FolderHeadPoll } from "./folder-head-poll.js";
+import { createFolderHeadWatcher, type FolderHeadWatcher } from "./folder-head-watcher.js";
+import type { HeadInfo } from "./git-operations.js";
+import type { HydrationMetrics } from "./hydration-metrics.js";
+import type { SessionManager } from "./memory-session-manager.js";
+import { createOpenSpecChangeWatcher, type OpenSpecChangeWatcher } from "./openspec-change-watcher.js";
+import {
+  effectiveMtimeOr,
+  perChangeArtifactPaths,
+  statMtimeOr,
+} from "./openspec-poll-fs-helpers.js";
+import type {
+  PollWorkerPerChangeIn,
+  PollWorkerRequest,
+} from "./openspec-poll-worker.js";
 import {
   createOpenSpecPollWorkerPool,
   type PollWorkerPool,
 } from "./openspec-poll-worker-pool.js";
+import { scanPiResources } from "./pi-resource-scanner.js";
+import type { PreferencesStore } from "./preferences-store.js";
+import { discoverSessionsForCwd } from "./session-discovery.js";
 import {
   createSessionLoadWorkerPool,
   type SessionLoadWorkerPool,
 } from "./session-load-worker-pool.js";
-import type {
-  PollWorkerRequest,
-  PollWorkerPerChangeIn,
-} from "./openspec-poll-worker.js";
-import { DEFAULT_OPENSPEC_POLL, type OpenSpecPollConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { createSemaphore, type Semaphore } from "@blackbelt-technology/pi-dashboard-shared/semaphore.js";
-import { createOpenSpecChangeWatcher, type OpenSpecChangeWatcher } from "./openspec-change-watcher.js";
-import { createFolderHeadPoll, type FolderHeadPoll } from "./folder-head-poll.js";
-import { createFolderHeadWatcher, type FolderHeadWatcher } from "./folder-head-watcher.js";
-import type { BrowserGitHeadUpdateMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import { discoverSessionsForCwd } from "./session-discovery.js";
-import { scanPiResources } from "./pi-resource-scanner.js";
-import type { HydrationMetrics } from "./hydration-metrics.js";
-import type { OpenSpecData, OpenSpecChange } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import type { PiResourcesResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
-import type { PreferencesStore } from "./preferences-store.js";
-import type { SessionManager } from "./memory-session-manager.js";
-import {
-  statMtimeOr,
-  effectiveMtimeOr,
-  perChangeArtifactPaths,
-} from "./openspec-poll-fs-helpers.js";
+
 // Re-export `effectiveMtimeOr` here to preserve the prior public symbol for
 // external importers. See change: offload-openspec-poll-to-worker.
 export { effectiveMtimeOr } from "./openspec-poll-fs-helpers.js";
 
 import type { DiscoveredSession } from "./session-discovery.js";
+
 export type { DiscoveredSession } from "./session-discovery.js";
 
 export interface LoadResult {
@@ -239,11 +243,37 @@ export interface DirectoryServiceOptions {
    */
   folderHeadWatcher?: FolderHeadWatcher;
   /**
+   * Optional override for the folder-HEAD HEAD reader (may be sync or async).
+   * When omitted, the async non-blocking `readHeadDisplayAsync` is used. Tests
+   * inject a fast deterministic reader (no real git spawn). See change:
+   * attribute-openspec-poll-eventloop-stalls.
+   */
+  folderHeadReadHead?: (cwd: string) => Promise<HeadInfo> | HeadInfo;
+  /**
    * Shared in-memory recorder for session-hydration timings. When set,
    * `loadSessionEvents` records a sample per call and the same instance is
    * read by `/api/health`. See change: instrument-session-hydration-timing.
    */
   hydrationMetrics?: HydrationMetrics;
+  /**
+   * Shared ring buffer for worst-case event-loop stalls. When set, each
+   * instrumented poll turn (`tickOpen`, `dirPollPre`, `dirPollPost`) whose own
+   * synchronous run exceeds `eventLoopSpikeFloorMs` self-records `{at, ms, turn}`.
+   * Read by `/api/health`. See change: attribute-openspec-poll-eventloop-stalls.
+   */
+  eventLoopSpikes?: EventLoopSpikeMetrics;
+  /**
+   * Floor (ms) at or above which an instrumented turn self-records a spike.
+   * Default 100. See change: attribute-openspec-poll-eventloop-stalls.
+   */
+  eventLoopSpikeFloorMs?: number;
+  /**
+   * Per-turn slow-tick alarm threshold (ms). Independent of the retained wall
+   * `durationMs` alarm: fires when any single instrumented turn's synchronous
+   * run exceeds this, naming the turn. Default 250. See change:
+   * attribute-openspec-poll-eventloop-stalls.
+   */
+  perTurnWarnMs?: number;
   /**
    * When `false`, session-event hydration runs in-process (no worker spawn).
    * Default `true`. Mirrors `DashboardConfig.sessions.useLoadWorker`. See
@@ -264,6 +294,40 @@ export function createDirectoryService(
   const hydrationMetrics = options.hydrationMetrics;
   // Reuse the openspec-poll slow-tick convention for the hydration warning.
   const HYDRATION_SLOW_WARN_MS = 5000;
+
+  // Per-turn event-loop attribution. `eventLoopSpikes` (when set) receives a
+  // self-record for any instrumented turn whose OWN synchronous run exceeds
+  // `eventLoopSpikeFloorMs`; the per-turn alarm fires (independently of the
+  // wall `durationMs` alarm) at `perTurnWarnMs`. Attribution is per single
+  // synchronous turn, NEVER a sum across turns.
+  // See change: attribute-openspec-poll-eventloop-stalls.
+  const eventLoopSpikes = options.eventLoopSpikes;
+  const eventLoopSpikeFloorMs = Number.isFinite(options.eventLoopSpikeFloorMs)
+    ? Math.max(0, options.eventLoopSpikeFloorMs as number)
+    : 100;
+  const perTurnWarnMs = Number.isFinite(options.perTurnWarnMs)
+    ? Math.max(1, options.perTurnWarnMs as number)
+    : 250;
+  /**
+   * Time a single synchronous event-loop turn: given its `performance.now()`
+   * start, self-record `{at, ms, turn}` when its run reaches the spike floor,
+   * and emit the per-turn slow-tick warning when it reaches `perTurnWarnMs`.
+   * Measurement failures never propagate. Call at the turn's synchronous exit
+   * (before any `await`), NEVER across an await. See change above.
+   */
+  function recordTurn(turn: Exclude<EventLoopTurn, null>, startPerf: number): void {
+    try {
+      const ms = performance.now() - startPerf;
+      if (ms >= eventLoopSpikeFloorMs) {
+        eventLoopSpikes?.record({ at: Date.now(), ms, turn });
+      }
+      if (ms >= perTurnWarnMs) {
+        console.warn(
+          `[openspec-poll] slow turn: ${turn} ${Math.round(ms)}ms (threshold ${perTurnWarnMs}ms). Single synchronous turn blocked the event loop.`,
+        );
+      }
+    } catch { /* attribution must never break the poll */ }
+  }
 
   // Lazy worker pool for the periodic / gated poll path. Constructed on
   // `startPolling()`; disposed on `stopPolling()`. `cfg.useWorker === false`
@@ -298,14 +362,17 @@ export function createDirectoryService(
   // See change: refresh-folder-header-branch.
   let folderHeadPoll: FolderHeadPoll | null = null;
   const folderHeadWatcher: FolderHeadWatcher = options.folderHeadWatcher ?? createFolderHeadWatcher({
-    onChange: (cwd) => { folderHeadPoll?.refreshOne(cwd); },
+    // `refreshOne` is async (non-blocking git read); fire-and-forget with a
+    // catch so a rejected read can't surface as an unhandled rejection.
+    // See change: attribute-openspec-poll-eventloop-stalls.
+    onChange: (cwd) => { folderHeadPoll?.refreshOne(cwd)?.catch(() => { /* logged inside */ }); },
   });
   const attachedFolderHeadCwds = new Set<string>();
 
   const caches = new Map<string, DirCache>();
   const piResourcesCache = new Map<string, PiResourcesResult>();
 
-  let semaphore: Semaphore = createSemaphore(cfg.maxConcurrentSpawns);
+  const semaphore: Semaphore = createSemaphore(cfg.maxConcurrentSpawns);
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let piResourcesTimer: ReturnType<typeof setInterval> | null = null;
@@ -762,9 +829,11 @@ export function createDirectoryService(
    * HEAD refresh). No-op until `startPolling` installs the broadcast callback.
    * See change: refresh-folder-header-branch.
    */
-  function tickFolderHeads(): void {
+  async function tickFolderHeads(): Promise<void> {
     if (!folderHeadPoll) return;
-    const keys = folderHeadPoll.poll(
+    // Async, concurrency-bounded HEAD reads (no `execSync` burst on this turn).
+    // See change: attribute-openspec-poll-eventloop-stalls.
+    const keys = await folderHeadPoll.poll(
       sessionManager.listAll(),
       preferencesStore.getPinnedDirectories(),
     );
@@ -830,14 +899,24 @@ export function createDirectoryService(
 
   let openspecTickInFlight = false;
   async function scheduleOpenSpecTick() {
+    // `tickOpen` = the `setInterval` fire's single synchronous turn:
+    // `tickFolderHeads` + `reconcileWatchers` + `computeKnownDirectories` +
+    // the timer setup, all before the first `await`. Time from entry and
+    // self-record at each synchronous exit (early return OR just before the
+    // `await Promise.all`). See change: attribute-openspec-poll-eventloop-stalls.
+    const tickOpenStart = performance.now();
     // Folder-HEAD poll runs every tick regardless of openspec enablement and
-    // regardless of an in-flight openspec tick. Cheap (one `readHead` per
-    // rendered folder). See change: refresh-folder-header-branch.
-    try { tickFolderHeads(); } catch (err) { console.warn("[folder-head] tick failed:", err); }
-    if (openspecTickInFlight) return;
+    // regardless of an in-flight openspec tick. The HEAD reads are now async +
+    // non-blocking (change: attribute-openspec-poll-eventloop-stalls) — the
+    // previous synchronous `execSync` fan-out was the attributed ~700ms
+    // `tickOpen` stall. Kick it off WITHOUT blocking the loop; await it before
+    // the openspec fan-out so `git_head_update` still precedes `openspec_update`
+    // per cwd. See change: refresh-folder-header-branch.
+    const folderHeadDone = tickFolderHeads().catch((err) => { console.warn("[folder-head] tick failed:", err); });
+    if (openspecTickInFlight) { recordTurn("tickOpen", tickOpenStart); await folderHeadDone; return; }
     // Master gate: when `openspec.enabled` is false, the tick is a no-op.
     // No CLI spawns. See change: auto-hide-empty-session-subcards.
-    if (cfg.enabled === false) return;
+    if (cfg.enabled === false) { recordTurn("tickOpen", tickOpenStart); await folderHeadDone; return; }
     openspecTickInFlight = true;
     // Reconcile watcher attachments at the top of every tick. Catches
     // newly-known cwds (e.g. session_register) and forgotten ones (unpin /
@@ -851,20 +930,40 @@ export function createDirectoryService(
       const dirs = computeKnownDirectories();
       // Track spawn count by hooking the semaphore's size(). Approximation.
       spawnsBefore = semaphore.size();
+      // End of the `tickOpen` synchronous turn: everything above ran in the
+      // one `setInterval` fire; the `await` below yields. With the folder-head
+      // reads now async, this synchronous head no longer includes the git burst.
+      recordTurn("tickOpen", tickOpenStart);
+      // Ordering guard: every `git_head_update` for this tick completes before
+      // the openspec fan-out begins, preserving per-cwd git-head-before-openspec
+      // ordering. See change: attribute-openspec-poll-eventloop-stalls.
+      await folderHeadDone;
       await Promise.all(dirs.map((cwd) => new Promise<void>((resolve) => {
         const delay = phaseOffsetMs(cwd, cfg.jitterSeconds);
         const timer = setTimeout(async () => {
           scheduledPhaseTimers.delete(timer);
+          // `dirPollPre` = this `setTimeout` fire's synchronous prefix, INCLUDING
+          // `pollOne`'s synchronous run before the worker `await` (root
+          // `statMtimeOr` + list-signal `effectiveMtimeOr` stat-fan). We call
+          // `pollDirectoryGated(cwd)` to kick off that synchronous prefix, then
+          // record BEFORE awaiting so we never time across the await.
+          const dirPollPreStart = performance.now();
           try {
             const prevCache = caches.get(cwd);
             const prevJson = prevCache?.serialized ?? (prevCache?.data ? JSON.stringify(prevCache.data) : undefined);
-            const next = await pollDirectoryGated(cwd);
+            const nextPromise = pollDirectoryGated(cwd);
+            recordTurn("dirPollPre", dirPollPreStart);
+            const next = await nextPromise;
+            // `dirPollPost` = the continuation after the worker resolves:
+            // `nextJson` compare + `JSON.stringify` fallback + broadcast.
+            const dirPollPostStart = performance.now();
             const nextSerialized = caches.get(cwd)?.serialized;
             const nextJson = nextSerialized ?? JSON.stringify(next);
             // See change: emit-openspec-pending-from-poll — clear the spinner
             // even when the final JSON equals the prior cache.
             const pendingWasEmitted = pendingEmittedCwds.delete(cwd);
             if (nextJson !== prevJson || pendingWasEmitted) onChangeCallback?.(cwd, next, nextSerialized);
+            recordTurn("dirPollPost", dirPollPostStart);
           } catch (err) {
             // Swallow — the next tick will retry.
             console.error(`[openspec-poll] tick failed for ${cwd}:`, err);
@@ -948,10 +1047,10 @@ export function createDirectoryService(
       // known. The poll's diff cache lives for the polling lifetime.
       // See change: refresh-folder-header-branch.
       if (onFolderHead) {
-        folderHeadPoll = createFolderHeadPoll({ broadcast: onFolderHead });
+        folderHeadPoll = createFolderHeadPoll({ broadcast: onFolderHead, readHead: options.folderHeadReadHead });
         // Run an immediate folder-HEAD tick so the first paint reflects
         // current HEADs without waiting a full poll interval.
-        try { tickFolderHeads(); } catch (err) { console.warn("[folder-head] initial tick failed:", err); }
+        void tickFolderHeads().catch((err) => { console.warn("[folder-head] initial tick failed:", err); });
       }
       // Lazy worker pool spawn happens on first request from `ensureWorkerPool()`.
       installTimers();
