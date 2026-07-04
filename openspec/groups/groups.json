@@ -165,22 +165,25 @@
     "attribute-openspec-poll-eventloop-stalls": "ui",
     "bundle-disciplines-in-project-init": "ui",
     "flag-package-source-overrides": "ui",
-    "wire-discipline-skills-into-openspec": "ui"
+    "wire-discipline-skills-into-openspec": "ui",
+    "add-panel-elevation-system": "ui",
+    "folder-resource-activation-toggle": "ui",
+    "fix-nodescript-argv-electron-execpath-fallback": "ui",
+    "reasoning-auto-collapse-timer": "ui",
+    "fix-node-electron-resolution-test-isolation": "ui"
   },
   "changeOrder": {
     "__ungrouped__": [
       "fix-openspec-config-read-bundled-node",
-      "reopen-sessions-after-shutdown",
-      "folder-resource-activation-toggle",
-      "reasoning-auto-collapse-timer"
+      "reopen-sessions-after-shutdown"
     ],
     "ui": [
-      "improve-content-editor",
-      "attribute-openspec-poll-eventloop-stalls",
-      "bundle-disciplines-in-project-init",
+      "fix-node-electron-resolution-test-isolation",
       "flag-package-source-overrides",
-      "wire-discipline-skills-into-openspec",
-      "add-debugging-skills",
+      "reasoning-auto-collapse-timer",
+      "fix-nodescript-argv-electron-execpath-fallback",
+      "folder-resource-activation-toggle",
+      "add-panel-elevation-system",
       "remove-vestigial-tsconfig-references"
     ],
     "next-phase": [],
