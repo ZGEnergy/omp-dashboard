@@ -13,6 +13,7 @@ import type { FolderDescriptor } from "./slot-props.js";
 export type SlotId =
   // React-only slots
   | "sidebar-folder-section"
+  | "folder-settings-section"
   | "worktree-card-section"
   | "session-card-action-bar"
   | "workspace-action-bar"
@@ -56,6 +57,11 @@ export const SLOT_DEFINITIONS: Record<SlotId, SlotDefinition> = {
     multiplicity: "many",
     payloadTier: "react-only",
     description: "Collapsible block above session list per workspace folder",
+  },
+  "folder-settings-section": {
+    multiplicity: "many",
+    payloadTier: "react-only",
+    description: "Plugin-contributed section on the DirectorySettings surface (/folder/:cwd/settings), receives { cwd }. See change: flows-edit-mode-folder-settings.",
   },
   "worktree-card-section": {
     multiplicity: "many",

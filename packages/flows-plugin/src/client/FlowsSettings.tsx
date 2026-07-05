@@ -1,29 +1,35 @@
 /**
- * Settings-section for the flows plugin: a global edit-mode default.
+ * Settings-section for the flows plugin: the GLOBAL edit-mode default.
  *
- * Edit-mode on → the main session sees the `edit-flow` skill and the
- * `flow_agents` / `flow_write` authoring tools. The global default here is
- * reconciled down to each session (via `flow:set-edit-mode`) when that
- * session's flows plugin becomes available — see SessionFlowActionsClaim.
+ * Reads/writes pi's own global layer (`~/.pi/agent/settings.json`
+ * `flows.editFlow`) via the flows edit-mode route — the dashboard keeps no
+ * private plugin-config copy. Per-cwd overrides live on each folder's
+ * settings page (`FlowsFolderSettings`); pi-flows resolves
+ * `project ?? global` at session_start.
  *
- * Uses the unified buffered-draft save contract (commits via the host Settings
- * panel's Save). See change: rework-flows-plugin-for-new-pi-flows.
+ * Uses the unified buffered-draft save contract (commits via the host
+ * Settings panel's Save). See change: flows-edit-mode-folder-settings.
  */
-import React, { useCallback, useRef, useState } from "react";
-import { usePluginConfig, usePluginSend } from "@blackbelt-technology/dashboard-plugin-runtime/context";
-import { useSettingsDraftSource } from "@blackbelt-technology/dashboard-plugin-runtime";
 
-export interface FlowsPluginConfig {
-  /** Global default for pi-flows `flows.editFlow`. Default off. */
-  editFlow?: boolean;
-}
+import { useSettingsDraftSource } from "@blackbelt-technology/dashboard-plugin-runtime";
+import type React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useEditMode } from "./useEditMode.js";
 
 export function FlowsSettings(): React.ReactElement {
-  const config = usePluginConfig<FlowsPluginConfig>();
-  const send = usePluginSend();
+  const { state, setEditMode } = useEditMode();
 
-  const [editFlow, setEditFlow] = useState<boolean>(config.editFlow ?? false);
-  const base = config.editFlow ?? false;
+  const base = state?.global ?? false;
+  const [editFlow, setEditFlow] = useState<boolean>(base);
+  // Adopt the server value once it arrives (state starts null).
+  const loadedRef = useRef(false);
+  useEffect(() => {
+    if (state !== null && !loadedRef.current) {
+      loadedRef.current = true;
+      setEditFlow(state.global ?? false);
+    }
+  }, [state]);
+
   const isDirty = editFlow !== base;
 
   const valuesRef = useRef(editFlow);
@@ -32,8 +38,8 @@ export function FlowsSettings(): React.ReactElement {
   baseRef.current = base;
 
   const commit = useCallback(async () => {
-    await send({ type: "plugin_config_write", id: "flows", config: { editFlow: valuesRef.current } });
-  }, [send]);
+    await setEditMode("global", valuesRef.current);
+  }, [setEditMode]);
   const reset = useCallback(() => setEditFlow(baseRef.current), []);
   useSettingsDraftSource({ id: "plugin:flows", page: "plugins", isDirty, commit, reset });
 
@@ -41,7 +47,8 @@ export function FlowsSettings(): React.ReactElement {
     <section className="border border-[var(--border-primary)] rounded-lg p-4">
       <h3 className="text-sm font-semibold mb-0.5">Flows</h3>
       <p className="text-xs text-[var(--text-tertiary)] mb-3">
-        Multi-agent workflow orchestration. Applies globally; sessions inherit this default.
+        Multi-agent workflow orchestration. Global default (stored in pi's own
+        settings); per-directory overrides live on each folder's settings page.
       </p>
       <label className="flex gap-2.5 items-start text-[13px] cursor-pointer">
         <input
@@ -56,7 +63,8 @@ export function FlowsSettings(): React.ReactElement {
           {" — allow the main session to author flows & agents"}
           <span className="block text-[11px] text-[var(--text-muted)] mt-0.5">
             Activates <code>flow_agents</code> / <code>flow_write</code> and makes the
-            edit-flow skill model-visible. Off by default.
+            edit-flow skill model-visible. Off by default. Applies at each
+            session's next start unless a directory overrides it.
           </span>
         </span>
       </label>

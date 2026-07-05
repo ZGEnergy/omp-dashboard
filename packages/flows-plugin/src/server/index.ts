@@ -11,6 +11,7 @@ import type { ServerPluginContext } from "@blackbelt-technology/dashboard-plugin
 import { stateStore } from "./state-store.js";
 import { renderSessionFlowActions } from "./render-actions.js";
 import { provideFlowsActions } from "./automation-actions.js";
+import { mountEditModeRoutes } from "./edit-mode-routes.js";
 
 const PLUGIN_ID = "flows";
 
@@ -25,6 +26,10 @@ export async function registerPlugin(ctx: ServerPluginContext): Promise<void> {
   // to collect. Pure publisher: no consume, no automation dependency, no load
   // order requirement. See change: decouple-automation-action-registry.
   provideFlowsActions((name, value) => ctx.provide(name, value), (m) => logger.info(m));
+
+  // Edit-mode REST routes (folder settings toggle + retargeted global toggle).
+  // Must register before fastify.listen. See change: flows-edit-mode-folder-settings.
+  mountEditModeRoutes(ctx.fastify);
 
   /**
    * Broadcast the current intent tree for one session's slot.

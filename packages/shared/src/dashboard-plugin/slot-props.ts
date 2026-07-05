@@ -57,6 +57,11 @@ export interface SlotPropsMap {
     folder: FolderDescriptor;
     pluginContext: AnyPluginContext;
   };
+  "folder-settings-section": {
+    /** Absolute path of the folder whose settings page hosts the section. */
+    cwd: string;
+    pluginContext: AnyPluginContext;
+  };
   "session-card-badge": {
     session: DashboardSession;
     pluginContext: AnyPluginContext;

@@ -102,6 +102,37 @@ export function SidebarFolderSectionSlot({ folder }: { folder: FolderDescriptor 
 }
 
 /**
+ * `folder-settings-section` — plugin-contributed section on the
+ * DirectorySettings surface (`/folder/:cwd/settings`). Claims receive the
+ * folder's `cwd` as a prop; ordering follows registry priority. Renders
+ * nothing when no plugin claims the slot.
+ * See change: flows-edit-mode-folder-settings.
+ */
+export function FolderSettingsSectionSlot({ cwd }: { cwd: string }) {
+  const registry = useSlotRegistryOrNull();
+  if (!registry) return null;
+  const claims = registry.getClaims("folder-settings-section");
+  if (!claims.length) return null;
+  return (
+    <>
+      {claims.map(c =>
+        renderClaim(c as Parameters<typeof renderClaim>[0], "folder-settings-section", { cwd }),
+      )}
+    </>
+  );
+}
+
+/**
+ * True when at least one plugin claims `folder-settings-section`. Lets the
+ * DirectorySettings shell show/hide its Plugins nav item without rendering
+ * the slot. See change: flows-edit-mode-folder-settings.
+ */
+export function useFolderSettingsSectionHasClaims(): boolean {
+  const registry = useSlotRegistryOrNull();
+  return !!registry && registry.getClaims("folder-settings-section").length > 0;
+}
+
+/**
  * `worktree-card-section` — folder-scoped block rendered INSIDE a worktree
  * session card, scoped to the worktree's own `cwd` (not the parent repo it
  * collapses under). The KB plugin claims this slot with `FolderKbSection` so a

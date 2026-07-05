@@ -36,9 +36,13 @@ export { FlowDashboardClaim } from "./FlowDashboard.js";
 export { FlowWriteToolRenderer } from "./FlowWriteToolRenderer.js";
 export { FlowAgentsToolRenderer } from "./FlowAgentsToolRenderer.js";
 
-// Settings section (global edit-mode default) — manifest `settings-section` claim.
+// Settings section (global edit-mode default, stored in pi's own global
+// settings) — manifest `settings-section` claim.
 export { FlowsSettings } from "./FlowsSettings.js";
-export type { FlowsPluginConfig } from "./FlowsSettings.js";
+
+// Per-folder edit-mode toggle — manifest `folder-settings-section` claim.
+// See change: flows-edit-mode-folder-settings.
+export { FlowsFolderSettings } from "./FlowsFolderSettings.js";
 
 export { FlowSummaryClaim } from "./FlowSummary.js";
 export { FlowYamlPreviewClaim } from "./FlowYamlPreview.js";

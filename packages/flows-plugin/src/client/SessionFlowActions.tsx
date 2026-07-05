@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import { Icon } from "@mdi/react";
 import { mdiPlay, mdiPencil } from "@mdi/js";
 import type {
@@ -18,8 +18,7 @@ import {
   usePluginSend,
   useSessionData,
 } from "@blackbelt-technology/dashboard-plugin-runtime";
-import { usePluginConfig } from "@blackbelt-technology/dashboard-plugin-runtime/context";
-import type { FlowsPluginConfig } from "./FlowsSettings.js";
+import { useEditMode } from "./useEditMode.js";
 
 export function SessionFlowActions({
   flows,
@@ -229,22 +228,13 @@ export function SessionFlowActionsClaim({ session }: { session: DashboardSession
   const commands = useSessionData<CommandInfo[]>(session.id, "commandsList") ?? [];
   const { flowState } = useFlowsSessionState(session.id);
   const send = usePluginSend();
-  const config = usePluginConfig<FlowsPluginConfig>();
-  const editMode = config.editFlow ?? false;
+  // Effective edit-mode for this session's cwd (project ?? global), read from
+  // pi-flows' own settings files. The old global-config reconcile is gone —
+  // per-cwd control lives on the folder settings page (FlowsFolderSettings).
+  // See change: flows-edit-mode-folder-settings.
+  const editMode = useEditMode(session.cwd).state?.effective ?? false;
 
   const hasFlowsDelete = commands.some((c) => c.name === "flows:delete");
-
-  // Reconcile the GLOBAL edit-mode default down to this session once its flows
-  // plugin is available (flowsList observed). pi-flows persists it to the
-  // project .pi/settings.json. Idempotent — re-emits only when the default
-  // changes. See change: rework-flows-plugin-for-new-pi-flows (D4).
-  const reconciledRef = useRef<boolean | null>(null);
-  useEffect(() => {
-    if (flows.length === 0) return; // wait until flows-plugin is available
-    if (reconciledRef.current === editMode) return;
-    reconciledRef.current = editMode;
-    send({ type: "flow_management", sessionId: session.id, action: "set-edit-mode", enabled: editMode });
-  }, [flows.length, editMode, session.id, send]);
 
   // Render when there's a flow active OR action buttons are available.
   if (flows.length === 0 && !editMode && !flowState) return null;

@@ -376,7 +376,7 @@ export default function App() {
   const specsCwd = specsMatch && specsParams ? decodeFolderPath(specsParams.encodedCwd) : null;
   const piResourcesCwd = piResourcesMatch && piResourcesParams ? decodeFolderPath(piResourcesParams.encodedCwd) : null;
   const folderSettingsCwd = folderSettingsMatch && folderSettingsParams ? decodeFolderPath(folderSettingsParams.encodedCwd) : null;
-  const VALID_FOLDER_SETTINGS_PAGES = ["instructions", "packages", "resources"] as const;
+  const VALID_FOLDER_SETTINGS_PAGES = ["instructions", "packages", "resources", "plugins"] as const;
   const folderSettingsPageRaw = folderSettingsMatch ? folderSettingsParams?.page : undefined;
   const folderSettingsPage: DirectorySettingsPage =
     folderSettingsPageRaw && (VALID_FOLDER_SETTINGS_PAGES as readonly string[]).includes(folderSettingsPageRaw)

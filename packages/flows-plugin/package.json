@@ -66,6 +66,10 @@
         "slot": "settings-section",
         "component": "FlowsSettings",
         "tab": "general"
+      },
+      {
+        "slot": "folder-settings-section",
+        "component": "FlowsFolderSettings"
       }
     ]
   },

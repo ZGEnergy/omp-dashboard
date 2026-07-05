@@ -13,7 +13,11 @@
  * See change: directory-settings-page-and-scoped-md-editing.
  */
 
-import { mdiArrowLeft, mdiFileDocumentOutline, mdiPackageVariant, mdiViewListOutline } from "@mdi/js";
+import {
+  FolderSettingsSectionSlot,
+  useFolderSettingsSectionHasClaims,
+} from "@blackbelt-technology/dashboard-plugin-runtime";
+import { mdiArrowLeft, mdiFileDocumentOutline, mdiPackageVariant, mdiPuzzleOutline, mdiViewListOutline } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import { useLocation } from "wouter";
 import { t as i18nT } from "../../lib/i18n";
@@ -22,7 +26,7 @@ import { InstructionsPage } from "./InstructionsPage.js";
 import { PackagesPage } from "./PackagesPage.js";
 import { ResourcesPage } from "./ResourcesPage.js";
 
-export type DirectorySettingsPage = "instructions" | "packages" | "resources";
+export type DirectorySettingsPage = "instructions" | "packages" | "resources" | "plugins";
 
 interface Props {
   cwd: string;
@@ -33,11 +37,17 @@ interface Props {
 
 export function DirectorySettings({ cwd, page, onBack, onViewFile }: Props) {
   const [, navigate] = useLocation();
+  const hasPluginSections = useFolderSettingsSectionHasClaims();
 
   const navItems: { id: DirectorySettingsPage; label: string; icon: string }[] = [
     { id: "instructions", label: i18nT("auto.instructions", undefined, "Instructions"), icon: mdiFileDocumentOutline },
     { id: "packages", label: i18nT("auto.packages", undefined, "Packages"), icon: mdiPackageVariant },
     { id: "resources", label: i18nT("auto.resources", undefined, "Resources"), icon: mdiViewListOutline },
+    // Plugin-contributed per-folder settings (folder-settings-section slot);
+    // the nav item exists only when at least one plugin claims the slot.
+    ...(hasPluginSections
+      ? [{ id: "plugins" as const, label: i18nT("auto.plugins", undefined, "Plugins"), icon: mdiPuzzleOutline }]
+      : []),
   ];
 
   return (
@@ -80,6 +90,7 @@ export function DirectorySettings({ cwd, page, onBack, onViewFile }: Props) {
               <button
                 type="button"
                 key={item.id}
+                data-testid={`directory-settings-nav-${item.id}`}
                 onClick={() => navigate(buildFolderSettingsUrl(cwd, item.id))}
                 aria-current={active ? "page" : undefined}
                 className={`flex items-center gap-2.5 px-3 py-2 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${
@@ -100,6 +111,11 @@ export function DirectorySettings({ cwd, page, onBack, onViewFile }: Props) {
           {page === "instructions" && <InstructionsPage cwd={cwd} />}
           {page === "packages" && <PackagesPage cwd={cwd} />}
           {page === "resources" && <ResourcesPage cwd={cwd} onViewFile={onViewFile} />}
+          {page === "plugins" && (
+            <div className="p-4 flex flex-col gap-4">
+              <FolderSettingsSectionSlot cwd={cwd} />
+            </div>
+          )}
         </div>
       </div>
     </div>
