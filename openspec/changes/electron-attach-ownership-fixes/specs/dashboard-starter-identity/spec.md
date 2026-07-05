@@ -2,19 +2,27 @@
 
 ## ADDED Requirements
 
-### Requirement: /api/health exposes parent PID and active bridge count
+### Requirement: /api/health exposes boot parent PID, live parent PID, and active bridge count
 
-The HTTP health endpoint SHALL include two additional fields beyond the existing `starter`/`launchSource`, `version`, `mode`, and `pid`:
+The HTTP health endpoint SHALL include additional fields beyond the existing `starter`/`launchSource`, `version`, `mode`, and `pid`:
 
-- `ppid: number` — the parent PID of the server process at boot time. Cached at module load (since `process.ppid` is stable for the process lifetime).
-- `activeBridgeCount: number` — the count of pi WebSocket connections currently held by the pi-gateway. Re-evaluated per health request.
+- `bootParentPid: number` — the parent PID captured ONCE at server boot (module-load const). Static by design; the parent the server was spawned under.
+- `ppid: number` — the server's **live** parent PID, read fresh per request. On POSIX it is read via a syscall (Linux `/proc/self/stat` field 4; macOS `ps -o ppid=`) and SHALL NOT be `process.ppid` (Node caches that getter on first access, so it would not reflect reparenting). On `win32` the field is populated from `process.ppid` — Windows never reparents an orphan, so the cached getter is correct there and zombie detection relies on `bootParentAlive` (not `ppid`) on that platform. The platform branch (not the value) is cached.
+- `bootParentAlive: boolean` — whether `bootParentPid` is still the same live process it was at boot. Computed server-side with a two-tier check: Tier 1 (`isProcessAlive(bootParentPid)`, all platforms, PID-reuse-vulnerable) and, on `win32`, an optional Tier 2 identity-safe upgrade holding a `SYNCHRONIZE` process handle (`OpenProcess` + `WaitForSingleObject`, via `koffi`) that is immune to PID reuse. Tier 2 degrades to Tier 1 when `koffi`/`OpenProcess` is unavailable; the field SHALL always be present and SHALL NOT throw.
+- `activeBridgeCount: number` — the count of pi WebSocket connections currently held by the pi-gateway, via the existing `connectionCount()` getter. Re-evaluated per health request.
 
-These fields enable downstream consumers (Electron zombie detection, bridge-orphan classification, Doctor diagnostics) to make ownership decisions without out-of-band probes.
+These fields enable downstream consumers (Electron zombie detection, bridge-orphan classification, Doctor diagnostics) to make ownership decisions without out-of-band probes. Zombie detection compares live `ppid` against `bootParentPid` plus a liveness check — not `ppid === 1`, which is unreliable under Linux subreapers and containers.
 
-#### Scenario: /api/health includes ppid
+#### Scenario: /api/health includes boot and live parent PIDs and liveness
 
 - **WHEN** a client requests `GET /api/health`
-- **THEN** the response body SHALL include `ppid` set to the server's parent PID at boot
+- **THEN** the response body SHALL include `bootParentPid` (captured at boot), `ppid` (read live per request), AND `bootParentAlive` (a boolean)
+
+#### Scenario: bootParentAlive degrades gracefully without native FFI
+
+- **GIVEN** the server runs on a platform/arch where `koffi` (Tier 2) cannot load
+- **WHEN** a client requests `GET /api/health`
+- **THEN** `bootParentAlive` SHALL still be present as a boolean, computed via the Tier 1 `isProcessAlive` path, without throwing
 
 #### Scenario: /api/health includes active bridge count
 

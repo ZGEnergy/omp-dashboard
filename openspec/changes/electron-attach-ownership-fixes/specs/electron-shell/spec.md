@@ -38,15 +38,17 @@ The tray polling probe SHALL re-evaluate ownership every 3 seconds and rebuild t
 - **THEN** the menu SHALL NOT contain any Start/Restart/managed-externally item
 - **AND** the Show/Quit items SHALL still be present
 
-### Requirement: Zombie server adoption modal on POSIX
+### Requirement: Zombie server adoption modal (cross-platform)
 
-When the Electron app launches and takes the `attach` arm of the bootstrap state machine on macOS or Linux, the main process SHALL evaluate whether the discovered server is a zombie left over from a prior Electron lifetime. A server is classified as a zombie when ALL of the following hold:
+When the Electron app launches and takes the `attach` arm of the bootstrap state machine, the main process SHALL evaluate whether the discovered server is a zombie left over from a prior Electron lifetime. Detection is platform-branched but shares the server-computed `health.bootParentAlive` signal. Common gates (all platforms):
 
 - `health.launchSourceEffective === "electron"`
 - This Electron lifetime's `storedSpawnedPid === null` (we did not spawn it)
-- `health.ppid === 1` (the server was reparented to init/launchd, meaning its original parent process is gone)
 
-On Windows the Job Object integration ensures spawned children die with the parent, so zombie detection SHALL be skipped (the helper SHALL return `false` unconditionally on `process.platform === "win32"`).
+Platform-specific final gate:
+
+- **macOS / Linux:** `health.ppid !== health.bootParentPid` AND `health.bootParentAlive === false` — the server was reparented away from its boot parent AND that parent is gone. It SHALL NOT test `ppid === 1` (unreliable under Linux subreapers and containers).
+- **Windows** (`process.platform === "win32"`): `health.bootParentAlive === false` — Windows never reparents an orphan, so liveness of the boot parent is the sole signal. The Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) remains the first-line guarantee that kills the server on the common crash path; detection is the safety net for bypass cases (`CREATE_BREAKAWAY_FROM_JOB`, nested-job assignment failure, self-respawn). `bootParentAlive` is identity-safe when Tier 2 (`koffi` handle-wait) is available and PID-reuse-vulnerable but functional under Tier 1 fallback.
 
 When a zombie is detected the app SHALL present a modal dialog with three buttons (default: "Leave running"):
 
@@ -56,11 +58,17 @@ When a zombie is detected the app SHALL present a modal dialog with three button
 
 The modal SHALL be suppressed when Electron is invoked with the command-line switch `--no-zombie-prompt` (used by QA/test runs).
 
-#### Scenario: Zombie detected with reparenting
+#### Scenario: Zombie detected with reparenting (POSIX)
 
 - **GIVEN** Electron is running on macOS or Linux
-- **WHEN** the app launches AND `/api/health` returns `launchSourceEffective: "electron"`, `ppid: 1`, and `storedSpawnedPid` is null
+- **WHEN** the app launches AND `/api/health` returns `launchSourceEffective: "electron"`, a live `ppid` that differs from `bootParentPid`, `bootParentAlive: false`, and `storedSpawnedPid` is null
 - **THEN** the main process SHALL display the adoption modal
+
+#### Scenario: Zombie detected via parent liveness (Windows)
+
+- **GIVEN** Electron is running on Windows AND a prior server survived a Job Object bypass
+- **WHEN** the app launches AND `/api/health` returns `launchSourceEffective: "electron"`, `bootParentAlive: false`, and `storedSpawnedPid` is null
+- **THEN** the main process SHALL display the adoption modal (regardless of the `ppid` value, since Windows does not reparent)
 
 #### Scenario: Take-ownership transfers shutdown responsibility
 
@@ -86,10 +94,3 @@ The modal SHALL be suppressed when Electron is invoked with the command-line swi
 - **WHEN** Electron is launched with `--no-zombie-prompt`
 - **THEN** zombie detection SHALL still run for logging purposes
 - **AND** the modal SHALL NOT be displayed regardless of the result
-
-#### Scenario: Windows skips zombie detection
-
-- **GIVEN** Electron is running on Windows
-- **WHEN** the app launches AND attaches to any existing server
-- **THEN** the zombie classifier SHALL return false
-- **AND** no modal SHALL be displayed

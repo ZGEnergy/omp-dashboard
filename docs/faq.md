@@ -264,6 +264,23 @@ Cross-refs:
 - packages/electron/src/lib/server-lifecycle.ts
 - packages/shared/src/server-launcher.ts
 
+## Electron shows "Server managed externally" in the tray — what does that mean?
+
+Tray menu ownership-aware. Shows "Server managed externally" (disabled row) when server on port not owned by this Electron. Happens when server started by `pi-dashboard start` terminal (standalone), by a pi session (bridge), or by another Electron instance.
+
+Ownership from `/api/health.launchSourceEffective` + local `storedSpawnedPid` via `decideOwnership(...)`.
+
+| Ownership | Tray item |
+|---|---|
+| "electron"-owned | "Restart server" |
+| No server | "Start server" |
+| Foreign | disabled "Server managed externally" |
+| Probe error | item omitted |
+
+Prevents tray Restart nuking a terminal/bridge server on port 8000.
+
+To manage that server: stop it from its owner (terminal `pi-dashboard stop`, or quit the pi session / other Electron), then Electron can start its own.
+
 ## How do I configure the dashboard?
 
 Edit `~/.pi/dashboard/config.json` or click gear icon in sidebar header.

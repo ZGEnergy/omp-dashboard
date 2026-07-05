@@ -7,21 +7,22 @@
  * Electron app, those packages are inside resources/server/node_modules/ which is NOT
  * on the ESM module resolution path. All config reading and health checking is inlined.
  */
-import { spawnDetached } from "@blackbelt-technology/pi-dashboard-shared/platform/detached-spawn.js";
+
 import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import { getDashboardServerLogPath } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
+import type { spawnDetached } from "@blackbelt-technology/pi-dashboard-shared/platform/detached-spawn.js";
 
 import { isDashboardRunning } from "./health-check.js";
-import { readModeFile } from "./wizard-state.js";
 import {
+  BundledServerMissingError,
+  PinnedSourceUnavailableError,
+  parsePreferOverride,
   selectLaunchSource,
   spawnFromSource,
-  parsePreferOverride,
-  PinnedSourceUnavailableError,
-  BundledServerMissingError,
 } from "./launch-source.js";
+import { readModeFile } from "./wizard-state.js";
 
 /**
  * Pure helper: build the options object passed to spawnDetached for the
@@ -135,9 +136,93 @@ export function decideShutdownOnQuit(params: {
   return params.starter === "Electron" && params.healthPid === params.storedPid;
 }
 
+/**
+ * Effective launch-source union as reported by `/api/health.launchSourceEffective`.
+ * Declared locally (not imported from the server package) because this Electron
+ * module must not resolve `@blackbelt-technology/pi-dashboard-server` at runtime
+ * (it lives in resources/server/node_modules, off the ESM path).
+ */
+export type HealthLaunchSourceEffective =
+  | "electron"
+  | "standalone"
+  | "bridge"
+  | "bridge-orphaned";
+
+/**
+ * Pure helper: classify who owns the reachable server, from the tray probe's
+ * point of view. Consumes `launchSourceEffective` (so a bridge-orphaned server
+ * classifies as foreign, not electron).
+ *
+ * - `null` health (server unreachable) → "none".
+ * - server reachable but not spawned by this Electron lifetime, or
+ *   launchSourceEffective !== "electron", or pid mismatch → "foreign".
+ * - launchSourceEffective === "electron" AND pid === storedSpawnedPid →
+ *   "electron".
+ *
+ * See change: electron-attach-ownership-fixes.
+ */
+export function decideOwnership(params: {
+  healthLaunchSource: HealthLaunchSourceEffective | null;
+  healthPid: number | undefined;
+  storedSpawnedPid: number | null;
+}): "electron" | "foreign" | "none" {
+  if (params.healthLaunchSource === null) return "none";
+  if (params.storedSpawnedPid === null) return "foreign";
+  if (params.healthLaunchSource !== "electron") return "foreign";
+  if (params.healthPid !== params.storedSpawnedPid) return "foreign";
+  return "electron";
+}
+
+/**
+ * Pure helper: is the reachable server a zombie left over from a prior Electron
+ * lifetime? Platform-branched; all liveness is precomputed server-side into
+ * `healthBootParentAlive` (the server, not Electron, holds the Tier-2 handle).
+ *
+ * Common gates (all platforms): launchSourceEffective === "electron" AND we did
+ * not spawn it this lifetime (storedSpawnedPid === null).
+ *
+ * - POSIX: AND reparented away (`ppid !== bootParentPid`) AND the boot parent
+ *   is gone (`bootParentAlive === false`). NOT `ppid === 1` (unreliable under
+ *   Linux subreapers / containers).
+ * - Windows: AND `bootParentAlive === false` (Windows never reparents, so
+ *   liveness of the boot parent is the whole signal; the Job Object covers the
+ *   common crash path, this catches the bypass cases).
+ *
+ * See change: electron-attach-ownership-fixes.
+ */
+export function decideIsZombie(params: {
+  healthLaunchSourceEffective: HealthLaunchSourceEffective | null;
+  healthPid: number | undefined;
+  healthPpid: number | undefined;
+  healthBootParentPid: number | undefined;
+  healthBootParentAlive: boolean | undefined;
+  storedSpawnedPid: number | null;
+  platform: NodeJS.Platform;
+}): boolean {
+  if (params.storedSpawnedPid !== null) return false;
+  if (params.healthLaunchSourceEffective !== "electron") return false;
+  if (params.platform === "win32") {
+    return params.healthBootParentAlive === false;
+  }
+  // POSIX
+  return (
+    params.healthPpid !== params.healthBootParentPid &&
+    params.healthBootParentAlive === false
+  );
+}
+
 /** Did Electron start the server this session? */
 export function didWeStartServer(): boolean {
   return serverStartedByUs;
+}
+
+/**
+ * Read-only accessor for the module-private `storedSpawnedPid`. Used by the
+ * tray ownership probe and the zombie-detection gate in main.ts.
+ * See change: electron-attach-ownership-fixes.
+ */
+export function getStoredSpawnedPid(): number | null {
+  return storedSpawnedPid;
 }
 
 // Server-startup deadline constants + helper live in `launch-source.ts`
@@ -146,9 +231,9 @@ export function didWeStartServer(): boolean {
 // `server-lifecycle.ts` keep working. See change:
 // fix-mode-aware-server-ready-deadlines.
 export {
-  SERVER_READY_DEADLINE_MS,
-  SERVER_READY_DEADLINE_DEV_MS,
   getServerReadyDeadlineMs,
+  SERVER_READY_DEADLINE_DEV_MS,
+  SERVER_READY_DEADLINE_MS,
 } from "./launch-source.js";
 
 /**

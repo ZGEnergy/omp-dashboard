@@ -8,6 +8,7 @@ import {
   SECTION_OF,
   SUGGESTIONS,
   stampSectionsAndSuggestions,
+  checkAttachedServerVersion,
   type DoctorCheck,
   type DoctorStatus,
 } from "../doctor-core.js";
@@ -151,5 +152,72 @@ describe("stampSectionsAndSuggestions (Decision 8 lint)", () => {
     ];
     const out = stampSectionsAndSuggestions(checks);
     expect(out[0].suggestion).toBe("custom");
+  });
+});
+
+describe("checkAttachedServerVersion", () => {
+  const fetcher = (health: { version?: string; launchSource?: string } | null) =>
+    async () => health;
+
+  it("matching versions → ok", async () => {
+    const c = await checkAttachedServerVersion({
+      appVersion: "0.5.3",
+      healthFetcher: fetcher({ version: "0.5.3", launchSource: "electron" }),
+    });
+    expect(c.status).toBe("ok");
+    expect(c.section).toBe("setup");
+  });
+
+  it("mismatch + standalone → warning, suggestion mentions npm", async () => {
+    const c = await checkAttachedServerVersion({
+      appVersion: "0.5.3",
+      healthFetcher: fetcher({ version: "0.5.1", launchSource: "standalone" }),
+    });
+    expect(c.status).toBe("warning");
+    expect(c.suggestion).toContain("npm i -g @blackbelt-technology/pi-dashboard@0.5.3");
+  });
+
+  it("mismatch + bridge → warning, suggestion mentions pi session", async () => {
+    const c = await checkAttachedServerVersion({
+      appVersion: "0.5.3",
+      healthFetcher: fetcher({ version: "0.5.1", launchSource: "bridge" }),
+    });
+    expect(c.status).toBe("warning");
+    expect(c.suggestion?.toLowerCase()).toContain("pi session");
+  });
+
+  it("mismatch + bridge-orphaned → same bridge suggestion", async () => {
+    const c = await checkAttachedServerVersion({
+      appVersion: "0.5.3",
+      healthFetcher: fetcher({ version: "0.5.1", launchSource: "bridge-orphaned" }),
+    });
+    expect(c.status).toBe("warning");
+    expect(c.suggestion?.toLowerCase()).toContain("pi session");
+  });
+
+  it("mismatch + electron → warning, suggestion mentions other Electron", async () => {
+    const c = await checkAttachedServerVersion({
+      appVersion: "0.5.3",
+      healthFetcher: fetcher({ version: "0.5.1", launchSource: "electron" }),
+    });
+    expect(c.status).toBe("warning");
+    expect(c.suggestion?.toLowerCase()).toContain("electron");
+  });
+
+  it("healthFetcher returns null → error with non-empty message", async () => {
+    const c = await checkAttachedServerVersion({
+      appVersion: "0.5.3",
+      healthFetcher: fetcher(null),
+    });
+    expect(c.status).toBe("error");
+    expect(c.message.length).toBeGreaterThan(0);
+  });
+
+  it("healthFetcher throws → error", async () => {
+    const c = await checkAttachedServerVersion({
+      appVersion: "0.5.3",
+      healthFetcher: async () => { throw new Error("ECONNREFUSED"); },
+    });
+    expect(c.status).toBe("error");
   });
 });

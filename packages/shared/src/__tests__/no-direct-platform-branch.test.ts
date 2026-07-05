@@ -60,6 +60,12 @@ const ALLOWLIST: readonly string[] = [
   // mechanism into two is tracked as a follow-up.
   "packages/server/src/process-manager.ts",
 
+  // Boot-parent liveness primitive: genuinely OS-specific — live-ppid read
+  // (Linux /proc/self/stat vs macOS `ps` vs Windows process.ppid) + the
+  // win32-only koffi Tier-2 handle load. A platform primitive that happens
+  // to live in the server package. See change: electron-attach-ownership-fixes.
+  "packages/server/src/boot-parent-liveness.ts",
+
   // Server editor registry: selects per-OS process patterns from a data
   // table. Genuine data-lookup branching, benign.
   "packages/server/src/editor-registry.ts",

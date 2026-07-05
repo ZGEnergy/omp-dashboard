@@ -6,7 +6,7 @@
 
 The Doctor diagnostic SHALL include a check named "Attached server version" in the `setup` section that compares the running shell's application version against `/api/health.version` and emits a `warning` when they differ. The suggestion text SHALL be selected from `health.launchSource` to give the user a launch-source-appropriate fix path.
 
-The check is implemented in `runSharedChecks` so both the Electron arm (`packages/electron/src/lib/doctor.ts`) and the server arm (`packages/server/src/routes/doctor-routes.ts`) emit it.
+The check helper (`checkAttachedServerVersion`) lives in the shared doctor core (`packages/shared/src/doctor-core.ts`) but SHALL be wired into the Electron arm (`packages/electron/src/lib/doctor.ts`) ONLY. The server arm (`packages/server/src/routes/doctor-routes.ts`) SHALL NOT emit it: a server comparing its own package version to its own self-fetched `/api/health` is a loopback tautology (always `ok`, never detects skew). Version skew is only observable across the Electron-shell ↔ attached-server boundary.
 
 - Status `ok` when `appVersion === health.version`.
 - Status `warning` when the versions differ. Message format: `Dashboard server reports v<server>; this app bundle is v<app>`. Suggestion:
@@ -48,3 +48,8 @@ The check is implemented in `runSharedChecks` so both the Electron arm (`package
 - **WHEN** Doctor runs
 - **THEN** the "Attached server version" row SHALL have status `error`
 - **AND** the message SHALL indicate the server was unreachable
+
+#### Scenario: Server-side Doctor omits the row
+
+- **WHEN** the server-side Doctor route (`/api/doctor`) runs
+- **THEN** the report SHALL NOT include an "Attached server version" row (the check is Electron-arm only; a server self-comparison is a loopback tautology)

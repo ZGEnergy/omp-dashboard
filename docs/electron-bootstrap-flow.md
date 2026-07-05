@@ -62,6 +62,16 @@ Override: `DASHBOARD_PREFER_SOURCE=attach|bundled|devMonorepo`. Pre-R3 kinds (`p
 
 `/api/health` returns `launchSource: "electron" | "standalone" | "bridge"`. `decideShutdownOnQuit` stops server only when `health.launchSource === "electron" AND health.pid === storedSpawnedPid`.
 
+`/api/health` also returns derived `launchSourceEffective: "electron" | "standalone" | "bridge" | "bridge-orphaned"`. Computed per request by `computeEffectiveLaunchSource({raw, activeBridgeCount, uptimeMs})` in `packages/server/src/launch-source-effective.ts`. Rule: `raw === "bridge"` AND `activeBridgeCount === 0` AND `uptimeMs > 30_000` → `"bridge-orphaned"`; else `raw`. 30 s grace window absorbs restart→bridge-reconnect race (server up before bridge reconnects after `server_restarting`). Static `launchSource` unchanged (back-compat with `decideShutdownOnQuit`); only `launchSourceEffective` promotes bridge-orphan. Tray ownership probe + Doctor version-skew row read `launchSourceEffective`.
+
+| launchSource | activeBridgeCount | uptime | launchSourceEffective |
+|---|---|---|---|
+| bridge | 0 | >30s | bridge-orphaned |
+| bridge | 0 | <30s | bridge |
+| bridge | ≥1 | any | bridge |
+| electron | any | any | electron |
+| standalone | any | any | standalone |
+
 ## Invariants
 
 | Invariant | Source |
@@ -72,3 +82,40 @@ Override: `DASHBOARD_PREFER_SOURCE=attach|bundled|devMonorepo`. Pre-R3 kinds (`p
 | Electron stops server only when it owns it | `decideShutdownOnQuit` pure helper |
 | first-run-done marker written on first `done` | `~/.pi/dashboard/first-run-done` |
 | Bundled-server missing → `BundledServerMissingError` | corrupted-install signal |
+
+## Zombie adoption
+
+Electron `attach` arm runs `maybePromptZombieAdoption()` (in `packages/electron/src/main.ts`) after BrowserWindow created. Detects leftover server from prior Electron lifetime via `decideIsZombie(...)` in `packages/electron/src/lib/server-lifecycle.ts`.
+
+Common gates (all platforms): `health.launchSourceEffective === "electron"` AND `storedSpawnedPid === null`.
+
+| Platform | Final gate |
+|---|---|
+| POSIX (macOS/Linux) | `health.ppid !== health.bootParentPid` AND `health.bootParentAlive === false` (reparented away AND boot parent gone). NOT `ppid === 1` (unreliable under Linux subreapers/containers). |
+| Windows | `health.bootParentAlive === false` alone (Windows never reparents). Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) kills server on common crash path; detection covers bypass cases (`CREATE_BREAKAWAY_FROM_JOB`, nested-job assignment failure, self-respawn). |
+
+`bootParentAlive` computed server-side, two tiers (in `packages/server/src/boot-parent-liveness.ts`):
+- Tier 1: `isProcessAlive(bootParentPid)` all platforms, PID-reuse-vulnerable.
+- Tier 2: win32-only optional `koffi` FFI holds `SYNCHRONIZE` `OpenProcess` handle + `WaitForSingleObject(h,0)`, PID-reuse-safe, falls back to Tier 1.
+
+Modal: `promptZombieAdoption({pid})` (`packages/electron/src/lib/zombie-adoption-dialog.ts`), 3 buttons, default "Leave running".
+
+| Button | Action |
+|---|---|
+| Take ownership | `setSpawnedPid(health.pid)`; subsequent quit stops server. |
+| Leave running | In-memory `zombieAskedThisSession` flag; no re-prompt this process lifetime; re-evaluated next launch. |
+| Stop now | `stopZombieServer` (SIGTERM → poll ≤5 s → SIGKILL), re-enter `selectLaunchSource()`, spawn fresh server, reload BrowserWindow after positive health probe. |
+
+`--no-zombie-prompt` switch suppresses modal (detection still runs for logging). Used by QA.
+
+```mermaid
+flowchart TD
+  A[attach arm: BrowserWindow created] --> B[maybePromptZombieAdoption]
+  B --> C{decideIsZombie}
+  C -->|common gates fail| Z[no prompt]
+  C -->|POSIX/Windows final gate fails| Z
+  C -->|zombie| M[promptZombieAdoption]
+  M -->|Take ownership| O[setSpawnedPid]
+  M -->|Leave running| L[zombieAskedThisSession]
+  M -->|Stop now| S[stopZombieServer → selectLaunchSource → spawn → reload]
+```
