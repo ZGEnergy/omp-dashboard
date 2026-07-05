@@ -39,7 +39,52 @@ interface SessionBuffer {
 }
 
 export const DEFAULT_MAX_CACHED_SESSIONS = 100;
-export const DEFAULT_MAX_EVENTS_PER_SESSION = 5000;
+// Raised 5000 → 20000: sessions that run subagents forward every subagent
+// lifecycle + inner tool-call/result event into the PARENT session buffer, so a
+// single subagent-heavy turn can emit thousands of events and blow the old cap,
+// trimming the start of the chat. See change: preserve-chat-head-on-event-trim.
+export const DEFAULT_MAX_EVENTS_PER_SESSION = 20000;
+
+/**
+ * Event types that carry the visible conversation transcript. The per-session
+ * trim NEVER drops these — only the surrounding heavy/ephemeral events
+ * (tool_execution_*, subagent_*, flow_*, reasoning, stats_update, streaming
+ * message_update deltas). `message_start` + `message_end` are sufficient to
+ * rebuild a completed message's text on the client (the finalized content lands
+ * at message_end; intermediate `message_update` deltas only matter for the
+ * still-streaming tail, which is newest and never trimmed).
+ * See change: preserve-chat-head-on-event-trim.
+ */
+const ESSENTIAL_CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "message_start",
+  "message_end",
+]);
+
+/**
+ * Trim `buf.events` down to `cap` in a SINGLE O(n) pass, dropping the oldest
+ * NON-essential events first (tool/subagent/flow/reasoning/stats/streaming
+ * noise) and only dropping the oldest essential chat events when essentials
+ * alone exceed the cap. Reassigns `buf.events`; safe because seq values ride
+ * on the surviving entries and `getEvents` filters by seq (gaps are fine).
+ * See change: preserve-chat-head-on-event-trim.
+ */
+function trimBufferToLimit(buf: SessionBuffer, cap: number): void {
+  let toDrop = buf.events.length - cap;
+  if (toDrop <= 0) return;
+  const kept: StoredEvent[] = [];
+  // Pass 1 (fused into the copy): drop the oldest non-essential entries.
+  for (const e of buf.events) {
+    if (toDrop > 0 && !ESSENTIAL_CHAT_EVENT_TYPES.has(e.event.eventType)) {
+      toDrop--;
+      continue;
+    }
+    kept.push(e);
+  }
+  // Pass 2: essentials alone still exceed the cap → drop oldest essentials to
+  // hold the memory bound (pathological; cap is 20000 so never hit in practice).
+  if (kept.length > cap) kept.splice(0, kept.length - cap);
+  buf.events = kept;
+}
 
 /** Default max size for any string field within event data */
 const DEFAULT_MAX_STRING_SIZE = 4_000;
@@ -111,6 +156,11 @@ export function createMemoryEventStore(
 ): EventStore {
   const truncateEventData = createTruncator(maxStringFieldSize);
   const buffers = new Map<string, SessionBuffer>();
+  // Overshoot allowed before a reclaim pass runs. Scales to 0 for the tiny
+  // caps used in unit tests (so they trim on every over-cap insert, exercising
+  // the exact-cap behavior) and to 256 for the 20000 production cap (~1 pass
+  // per 256 inserts). See change: preserve-chat-head-on-event-trim.
+  const trimSlack = Math.min(256, Math.floor(maxEventsPerSession * 0.05));
 
   function getOrCreate(sessionId: string): SessionBuffer {
     let buf = buffers.get(sessionId);
@@ -148,10 +198,20 @@ export function createMemoryEventStore(
       const buf = getOrCreate(sessionId);
       const seq = buf.nextSeq++;
       buf.events.push({ seq, event: truncateEventData(event) });
-      // Trim oldest events when over the per-session limit (0 = unlimited)
-      if (maxEventsPerSession > 0 && buf.events.length > maxEventsPerSession) {
-        const excess = buf.events.length - maxEventsPerSession;
-        buf.events.splice(0, excess);
+      // Trim over the per-session limit (0 = unlimited). Hysteresis: only
+      // reclaim once the buffer overshoots the cap by TRIM_SLACK, then trim
+      // back to the cap in one O(n) pass. This amortizes the trim cost to O(1)
+      // per insert (vs O(n) per insert if we trimmed on every over-cap insert)
+      // — critical because the history-load path inserts every replayed event
+      // through here in a loop, and subagent floods emit thousands at the cap.
+      // The pass preserves the chat head (message_start/end) and drops the
+      // oldest tool/subagent/flow noise first. See change:
+      // preserve-chat-head-on-event-trim.
+      if (
+        maxEventsPerSession > 0 &&
+        buf.events.length > maxEventsPerSession + trimSlack
+      ) {
+        trimBufferToLimit(buf, maxEventsPerSession);
       }
       evictIfNeeded();
       return seq;

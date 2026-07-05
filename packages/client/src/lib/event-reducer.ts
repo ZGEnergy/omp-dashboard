@@ -1211,6 +1211,35 @@ export function reduceEvent(
         if (CONFIRMED_GOOD_STOP_REASONS.has(msg.stopReason)) {
           next.lastError = undefined;
         }
+        // Reasoning reconstruction on REPLAY. Live turns build `thinking` rows
+        // from thinking_start/delta/end events (see message_update), but the
+        // cold-load path (state-replay.ts) emits NO thinking_* events — the
+        // reasoning lives inline in the finalized message's content as
+        // `{ type: "thinking", thinking: "…" }` blocks. Rebuild the rows here so
+        // reopened sessions show reasoning. Guarded to `!isLive` so the live
+        // path (which already created them) does not double-create. Appended
+        // before the assistant text row below → correct [thinking, text] order;
+        // for tool-bearing messages the reorder pass repositions by content
+        // order. See change: reconstruct-reasoning-on-replay.
+        if (!isLive && Array.isArray(msg.content)) {
+          const thinkingRows: ChatMessage[] = [];
+          for (const block of msg.content as any[]) {
+            if (block?.type !== "thinking") continue;
+            const text = typeof block.thinking === "string" ? block.thinking
+              : typeof block.text === "string" ? block.text : "";
+            if (!text) continue;
+            thinkingRows.push({
+              id: `thinking-${next.messages.length + thinkingRows.length}`,
+              role: "thinking",
+              content: text,
+              timestamp: event.timestamp,
+              streamedLive: false,
+            });
+          }
+          if (thinkingRows.length > 0) {
+            next.messages = [...next.messages, ...thinkingRows];
+          }
+        }
         // Pi 0.71+ message_end may REPLACE the finalized content. Compute the
         // effective text once and apply uniformly across branches.
         // See change: adopt-pi-071-072-073-features.

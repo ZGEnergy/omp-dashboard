@@ -74,7 +74,10 @@ export interface MemoryLimitsConfig {
 }
 
 export const DEFAULT_MEMORY_LIMITS: MemoryLimitsConfig = {
-  maxEventsPerSession: 5000,
+  // 20000 (was 5000): subagent-heavy turns forward thousands of inner events
+  // into the parent buffer; the old cap trimmed the chat head.
+  // See change: preserve-chat-head-on-event-trim.
+  maxEventsPerSession: 20000,
   maxStringFieldSize: 0,
   maxWsBufferBytes: 4 * 1024 * 1024,
 };

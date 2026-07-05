@@ -810,6 +810,56 @@ describe("thinking events", () => {
     expect(state.messages[1].content).toBe("Second thought");
   });
 
+  // See change: reconstruct-reasoning-on-replay. On reopen, state-replay emits
+  // no thinking_* events — the reasoning is inline in the finalized message's
+  // content blocks, and the reducer must rebuild the thinking rows.
+  describe("reasoning reconstruction on replay (reopened session)", () => {
+    it("rebuilds a thinking row from message_end content, before the text", () => {
+      // applyEvents => reduceEvent with no opts => isLive=false (replay path).
+      const content = [
+        { type: "thinking", thinking: "Let me reason about this." },
+        { type: "text", text: "Here is the answer." },
+      ];
+      const state = applyEvents([
+        { eventType: "message_update", timestamp: 1000, data: { message: { role: "assistant", content } } },
+        { eventType: "message_end", timestamp: 1000, data: { message: { role: "assistant", content }, entryId: "e1" } },
+      ]);
+      expect(state.messages.map((m) => m.role)).toEqual(["thinking", "assistant"]);
+      expect(state.messages[0].content).toBe("Let me reason about this.");
+      expect(state.messages[0].streamedLive).toBe(false);
+      expect(state.messages[1].content).toBe("Here is the answer.");
+    });
+
+    it("rebuilds multiple thinking rows in content order", () => {
+      const content = [
+        { type: "thinking", thinking: "First" },
+        { type: "thinking", thinking: "Second" },
+        { type: "text", text: "Done" },
+      ];
+      const state = applyEvents([
+        { eventType: "message_update", timestamp: 1, data: { message: { role: "assistant", content } } },
+        { eventType: "message_end", timestamp: 1, data: { message: { role: "assistant", content } } },
+      ]);
+      const thinking = state.messages.filter((m) => m.role === "thinking");
+      expect(thinking.map((m) => m.content)).toEqual(["First", "Second"]);
+    });
+
+    it("does NOT double-create on the LIVE path (isLive=true)", () => {
+      // Live: thinking_end already pushed the row; the terminal message_end
+      // carries the same thinking block in content but must be ignored.
+      let state = createInitialState();
+      const live = (e: DashboardEvent) => { state = reduceEvent(state, e, { isLive: true }); };
+      live({ eventType: "message_update", timestamp: 1, data: { message: { role: "assistant", content: [] }, assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } } });
+      live({ eventType: "message_update", timestamp: 1, data: { message: { role: "assistant", content: [] }, assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "streamed reasoning" } } });
+      live({ eventType: "message_update", timestamp: 1, data: { message: { role: "assistant", content: [] }, assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "streamed reasoning" } } });
+      live({ eventType: "message_update", timestamp: 1, data: { message: { role: "assistant", content: [{ type: "thinking", thinking: "streamed reasoning" }, { type: "text", text: "answer" }] } } });
+      live({ eventType: "message_end", timestamp: 1, data: { message: { role: "assistant", content: [{ type: "thinking", thinking: "streamed reasoning" }, { type: "text", text: "answer" }] } } });
+      const thinking = state.messages.filter((m) => m.role === "thinking");
+      expect(thinking).toHaveLength(1);
+      expect(thinking[0].content).toBe("streamed reasoning");
+    });
+  });
+
   it("should store full reasoning text without truncation", () => {
     const longThinking = "x".repeat(10000);
     let state = createInitialState();
