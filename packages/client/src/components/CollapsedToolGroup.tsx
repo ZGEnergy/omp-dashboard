@@ -2,32 +2,21 @@
  * Renders a collapsed group of repeated tool calls.
  * Shows a count badge and summary; expands to reveal all individual calls.
  */
-import React, { useState } from "react";
-import { Icon } from "@mdi/react";
-import { mdiChevronRight, mdiChevronDown, mdiRepeat } from "@mdi/js";
-import { ToolCallStep } from "./ToolCallStep.js";
-import type { ToolCallGroup } from "../lib/group-tool-calls.js";
-import type { ToolContext } from "./tool-renderers/index.js";
-import { useMobile } from "../hooks/useMobile.js";
-import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
+
 import { toolCallPrefKey } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
+import { mdiChevronDown, mdiChevronRight, mdiRepeat } from "@mdi/js";
+import { Icon } from "@mdi/react";
+import React, { useState } from "react";
+import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
+import { useMobile } from "../hooks/useMobile.js";
+import type { ToolCallGroup } from "../lib/group-tool-calls.js";
+import { getSummary } from "../lib/tool-summary.js";
+import { ToolCallStep } from "./ToolCallStep.js";
+import type { ToolContext } from "./tool-renderers/index.js";
 
 interface Props {
   group: ToolCallGroup;
   toolContext: ToolContext;
-}
-
-const toolSummaries: Record<string, (args?: Record<string, unknown>) => string> = {
-  bash: (args) => `$ ${String(args?.command ?? "")}`,
-  read: (args) => `Read ${args?.path ?? "file"}`,
-  edit: (args) => `Edit ${args?.path ?? "file"}`,
-  write: (args) => `Write ${args?.path ?? "file"}`,
-};
-
-function getSummary(toolName: string, args?: Record<string, unknown>): string {
-  const fn = toolSummaries[toolName];
-  if (fn) return fn(args);
-  return toolName;
 }
 
 export function CollapsedToolGroup({ group, toolContext }: Props) {

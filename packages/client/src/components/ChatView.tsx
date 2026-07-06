@@ -14,10 +14,12 @@ import { findActiveInteractiveToolResultIds, findRetriedErrorIds, findSurfaceSup
 // unify-status-banner-and-terminal-limit-stop.
 import type { ChatImage, InteractiveUiRequest, SessionState } from "../lib/event-reducer.js";
 import { formatMessageTime } from "../lib/format.js";
-import { type ChatItem, groupConsecutiveToolCalls, type ToolCallGroup } from "../lib/group-tool-calls.js";
+import type { ToolCallGroup } from "../lib/group-tool-calls.js";
+import { type BurstItem, groupToolBursts, type ToolBurstGroup as ToolBurstGroupData } from "../lib/group-tool-bursts.js";
 import { t as i18nT } from "../lib/i18n";
 import { BashOutputCard } from "./BashOutputCard.js";
 import { CollapsedToolGroup } from "./CollapsedToolGroup.js";
+import { ToolBurstGroup } from "./ToolBurstGroup.js";
 import { CommandFeedbackCard } from "./CommandFeedbackCard.js";
 import { CopyButton } from "./CopyButton.js";
 import { MissingToolInlineError } from "./chat/MissingToolInlineError.js";
@@ -290,7 +292,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
       : state.messages.filter((m) => m.role !== "toolResult" || !isDebugTool(m.toolName ?? ""));
     return base.filter((m) => !m.retriedFrom);
   }, [state.messages, showDebugTools]);
-  const groupedMessages = useMemo(() => groupConsecutiveToolCalls(filteredMessages), [filteredMessages]);
+  const groupedMessages = useMemo(() => groupToolBursts(filteredMessages), [filteredMessages]);
   const retriedErrorIds = useMemo(() => findRetriedErrorIds(filteredMessages), [filteredMessages]);
   const hiddenToolResultIds = useMemo(() => findActiveInteractiveToolResultIds(filteredMessages), [filteredMessages]);
   // Single-red-surface: while the error-lifecycle surface (SessionBanner) owns
@@ -326,11 +328,18 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     <FilePreviewProvider key={sessionId}>
     <div className="flex-1 relative overflow-hidden flex flex-col">
     <div ref={scrollRef} onScroll={handleScroll} style={{ overflowAnchor: "auto" }} className={`h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"} space-y-1`}>
-      {groupedMessages.map((item, idx) => {
-        // Collapsed group of repeated tool calls
+      {groupedMessages.map((item: BurstItem) => {
+        // Temporal burst group of heterogeneous tool calls (carries collapse
+        // state → key by first-member id, NOT positional idx, so event-trim
+        // head churn cannot bleed one burst's state into another (finding 3).
+        if ((item as ToolBurstGroupData).type === "burst") {
+          const burst = item as ToolBurstGroupData;
+          return <ToolBurstGroup key={burst.id} burst={burst} toolContext={toolContext} />;
+        }
+        // Bare semantic ×N group (sub-threshold burst that still folded a poll).
         if ((item as ToolCallGroup).type === "group") {
           const group = item as ToolCallGroup;
-          return <CollapsedToolGroup key={`group-${idx}`} group={group} toolContext={toolContext} />;
+          return <CollapsedToolGroup key={group.messages[0]?.id ?? group.toolName} group={group} toolContext={toolContext} />;
         }
 
         const msg = item as import("../lib/event-reducer.js").ChatMessage;

@@ -1,16 +1,17 @@
-import React, { useState, type ReactNode } from "react";
+import { type ClaimEntry, CurrentPluginLayer, forToolName } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { useSlotRegistryOrNull } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import { mdiAlert, mdiAlertCircle, mdiCheck, mdiChevronDown, mdiChevronRight, mdiHelpCircleOutline, mdiLoading, mdiStop } from "@mdi/js";
 import { Icon } from "@mdi/react";
-import { mdiLoading, mdiCheck, mdiAlertCircle, mdiChevronRight, mdiChevronDown, mdiStop, mdiAlert, mdiHelpCircleOutline } from "@mdi/js";
-import { getToolRenderer, type ToolContext } from "./tool-renderers/index.js";
+import React, { type ReactNode, useState } from "react";
+import { useMobile } from "../hooks/useMobile.js";
+import { useToolFullResult } from "../hooks/useToolFullResult.js";
 import type { ChatImage } from "../lib/event-reducer.js";
 import { TRUNCATION_MARKER_PREFIX } from "../lib/event-reducer.js";
-import { useToolFullResult } from "../hooks/useToolFullResult.js";
-import { useMobile } from "../hooks/useMobile.js";
+import { t as i18nT } from "../lib/i18n";
+import { getSummary } from "../lib/tool-summary.js";
 import { ElapsedBadge } from "./ElapsedBadge.js";
 import { ErrorBoundary } from "./ErrorBoundary.js";
-import { forToolName, CurrentPluginLayer, type ClaimEntry } from "@blackbelt-technology/dashboard-plugin-runtime";
-import { useSlotRegistryOrNull } from "@blackbelt-technology/dashboard-plugin-runtime/context";
-import { t as i18nT } from "../lib/i18n";
+import { getToolRenderer, type ToolContext } from "./tool-renderers/index.js";
 
 /**
  * Evaluate a `tool-renderer` claim's optional `shouldRender`. Absent or truthy
@@ -62,33 +63,6 @@ interface Props {
   hideStatusIcon?: boolean;
   onAbort?: () => void;
   onForceKill?: () => void;
-}
-
-const toolSummaries: Record<string, (args?: Record<string, unknown>) => string> = {
-  read: (args) => `Read ${args?.path ?? "file"}`,
-  bash: (args) => `$ ${String(args?.command ?? "")}`,
-  edit: (args) => `Edit ${args?.path ?? "file"}`,
-  write: (args) => `Write ${args?.path ?? "file"}`,
-  grep: (args) => `Grep ${args?.pattern ?? ""}`,
-  find: (args) => `Find ${args?.glob ?? ""}`,
-  ls: (args) => `ls ${args?.path ?? "."}`,
-  ask_user: (args) => `${String(args?.title ?? "ask_user")}`,
-  Agent: (args) => `${args?.subagent_type ?? "Agent"}: ${String(args?.description ?? "")}`,
-  get_subagent_result: (args) => `Get result: ${String(args?.agent_id ?? "")}`,
-  steer_subagent: (args) => `Steer: ${String(args?.agent_id ?? "")}`,
-  ctx_execute: (args) => `ctx_execute ${String(args?.language ?? "")}`.trim(),
-  ctx_execute_file: (args) => `ctx_execute_file ${String(args?.path ?? "")}`.trim(),
-  ctx_batch_execute: (args) => `ctx_batch_execute ${Array.isArray(args?.commands) ? `${args.commands.length} cmds` : ""}`.trim(),
-  ctx_search: (args) => `ctx_search ${Array.isArray(args?.queries) ? `${args.queries.length} queries` : ""}`.trim(),
-  ctx_index: (args) => `ctx_index ${String(args?.source ?? args?.path ?? "")}`.trim(),
-  ctx_fetch_and_index: (args) => `ctx_fetch_and_index ${String(args?.url ?? args?.source ?? "")}`.trim(),
-  ctx_insight: () => `ctx_insight`,
-};
-
-function getSummary(toolName: string, args?: Record<string, unknown>): string {
-  const fn = toolSummaries[toolName];
-  if (fn) return fn(args);
-  return toolName;
 }
 
 const statusIcons: Record<string, ReactNode> = {
