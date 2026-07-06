@@ -66,6 +66,29 @@ describe("flowsActionContributions", () => {
       .toEqual({ eventType: "flow:run", data: { flowName: "test:capabilities" } });
   });
 
+  it("flows.run emits data.inputs (per-fire resolved, types preserved), task optional", () => {
+    const run = flowsActionContributions()[0]!;
+    // payload arrives already interpolated by the engine: ${{trigger}} resolved.
+    expect(
+      run.buildEvent!({
+        payload: { flow: "invoicebot:process", inputs: { invoice: "/spool/inv-042.pdf", priority: 5, dry: true } },
+        automation: {},
+      }),
+    ).toEqual({
+      eventType: "flow:run",
+      data: { flowName: "invoicebot:process", inputs: { invoice: "/spool/inv-042.pdf", priority: 5, dry: true } },
+    });
+    // task + inputs coexist
+    expect(
+      run.buildEvent!({ payload: { flow: "a:b", task: "label", inputs: { x: 1 } }, automation: {} }),
+    ).toEqual({ eventType: "flow:run", data: { flowName: "a:b", task: "label", inputs: { x: 1 } } });
+    // empty / non-object inputs omitted
+    expect(run.buildEvent!({ payload: { flow: "a:b", inputs: {} }, automation: {} }))
+      .toEqual({ eventType: "flow:run", data: { flowName: "a:b" } });
+    expect(run.buildEvent!({ payload: { flow: "a:b", inputs: "nope" }, automation: {} }))
+      .toEqual({ eventType: "flow:run", data: { flowName: "a:b" } });
+  });
+
   it("flows.run rejects a malformed flow id (emits nothing)", () => {
     const run = flowsActionContributions()[0]!;
     expect(run.buildEvent!({ payload: { flow: "test:cap x", task: "t" }, automation: {} })).toBeNull();

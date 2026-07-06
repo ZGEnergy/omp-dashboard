@@ -26,6 +26,13 @@ export interface Disposable {
 export interface FireContext {
   /** Epoch ms of the occurrence that fired. */
   firedAt: number;
+  /**
+   * Single per-fire value the trigger produced (e.g. the file trigger's
+   * arrived file path). Resolved into the action payload's `${{trigger}}`
+   * token at dispatch. Absent for triggers that carry no value (e.g.
+   * `schedule`). See change: wire-flow-inputs-in-automation.
+   */
+  value?: unknown;
 }
 
 export interface TriggerType<Cfg = unknown> {
@@ -139,9 +146,9 @@ export const TRIGGER_TAXONOMY: readonly TaxonomyCategory[] = [
     label: "File",
     multiType: true,
     events: [
-      { event: "created", label: "File created" },
-      { event: "changed", label: "File changed" },
-      { event: "deleted", label: "File deleted" },
+      { event: "created", label: "File created", baseStatus: "enabled" },
+      { event: "changed", label: "File changed", baseStatus: "enabled" },
+      { event: "deleted", label: "File deleted", baseStatus: "enabled" },
     ],
   },
   {

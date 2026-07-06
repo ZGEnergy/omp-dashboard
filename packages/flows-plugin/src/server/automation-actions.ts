@@ -78,6 +78,14 @@ export function discoverFlows(cwd: string): string[] {
  */
 const FLOW_ID_RE = /^[\w.-]+:[\w.-]+$/;
 
+/** A plain-object `payload.inputs` with at least one key, else undefined.
+ *  Values are forwarded as-is (already per-fire resolved, types preserved). */
+function normalizeInputs(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const obj = raw as Record<string, unknown>;
+  return Object.keys(obj).length > 0 ? obj : undefined;
+}
+
 /** Build the flows action contribution(s): flows.run only. */
 export function flowsActionContributions(): ActionContributionLike[] {
   const hasFlows = (cwd: string) => discoverFlows(cwd).length > 0;
@@ -95,11 +103,22 @@ export function flowsActionContributions(): ActionContributionLike[] {
       ],
       // Emit flow:run into the run session (the event pi-flows listens for),
       // not a slash-command prompt. Runs finalize on agent_end.
+      //
+      // `payload` is already per-fire interpolated by the engine (the
+      // `${{trigger}}` token in `payload.inputs` is resolved to the fired
+      // value, type preserved). We forward `payload.inputs` as `data.inputs`,
+      // which pi-flows consumes as `flowInput` → `${{flow.input.<name>}}`.
+      // `task` stays optional and may coexist with `inputs`.
+      // See change: wire-flow-inputs-in-automation.
       buildEvent: ({ payload }) => {
         const flow = String(payload.flow ?? "").trim();
         if (!FLOW_ID_RE.test(flow)) return null;
         const task = String(payload.task ?? "").trim();
-        return { eventType: "flow:run", data: { flowName: flow, ...(task ? { task } : {}) } };
+        const inputs = normalizeInputs(payload.inputs);
+        const data: Record<string, unknown> = { flowName: flow };
+        if (task) data.task = task;
+        if (inputs) data.inputs = inputs;
+        return { eventType: "flow:run", data };
       },
     },
   ];

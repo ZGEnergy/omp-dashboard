@@ -87,4 +87,21 @@ describe("runner concurrency", () => {
     expect(started).toHaveLength(2);
     expect(runner.queuedCount("folder:nightly")).toBe(0);
   });
+
+  it("queued fires retain their own per-fire ctx value (no collapse)", () => {
+    const values: unknown[] = [];
+    const runner = createRunner({
+      startRun: (_a, ctx) => {
+        values.push(ctx?.value);
+        return { runId: `run-${values.length}` };
+      },
+    });
+    const a = automation("queue");
+    runner.fire(a, { firedAt: 1, value: "/spool/a.pdf" }); // starts run 1 (a.pdf)
+    runner.fire(a, { firedAt: 2, value: "/spool/b.pdf" }); // queued (b.pdf)
+    runner.fire(a, { firedAt: 3, value: "/spool/c.pdf" }); // queued (c.pdf)
+    runner.completeRun("folder:nightly"); // drains → run 2 (b.pdf)
+    runner.completeRun("folder:nightly"); // drains → run 3 (c.pdf)
+    expect(values).toEqual(["/spool/a.pdf", "/spool/b.pdf", "/spool/c.pdf"]);
+  });
 });
