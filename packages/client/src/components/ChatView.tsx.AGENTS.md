@@ -29,3 +29,5 @@ Wraps message list in `FilePreviewProvider`; renders single `FilePreviewHost`. S
 `bashOutput` branch passes `args.source` to `BashOutputCard source={...}`. See change: add-dashboard-slash-commands.
 
 See change: unify-error-retry-lifecycle — computes `surfaceActive = !!(lastError||retryState)`; `findSurfaceSuppressedErrorIds` collapses trailing inline failed-tool card to `RetriedErrorBadge` while surface active (single-red-surface). Optimistic pending-prompt card re-activated, idle-scoped; sending/sent states off `pendingPrompt.status`; removed `queuedTexts` suppression; sweep clipped via `prompt-sending-fx`. See change: optimistic-prompt-progress.
+
+See change: group-tool-call-bursts — message-grouping `useMemo` now calls `groupToolBursts` (temporal burst-outer) instead of `groupConsecutiveToolCalls`; renders `<ToolBurstGroup>` for `type:"burst"` items, `<CollapsedToolGroup>` for bare `type:"group"` (sub-threshold poll). Keys bursts + groups by first-member `id` (NOT positional `idx`) so event-trim head churn cannot bleed collapse state. Auto-collapse SHRINK handled by the container's existing `overflowAnchor:"auto"` scroll anchoring.
