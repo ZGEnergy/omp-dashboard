@@ -26,6 +26,18 @@ interface Props {
    */
   autoCollapseMs?: number;
   /**
+   * When true, a live-streamed block stays expanded for the whole active turn
+   * (the `autoCollapseMs` timer is suppressed) and collapses on the turn-end
+   * edge (`turnActive` true→false). When false, `autoCollapseMs` governs.
+   * See change: keep-reasoning-open-until-turn-ends.
+   */
+  keepOpenUntilTurnEnds?: boolean;
+  /**
+   * True while the session turn is streaming. Only consulted when
+   * `keepOpenUntilTurnEnds` is set. See change: keep-reasoning-open-until-turn-ends.
+   */
+  turnActive?: boolean;
+  /**
    * Called when the user manually collapses the LIVE streaming block. Lets the
    * parent lift the collapse into session state so it survives the swap.
    * See change: reasoning-auto-collapse-timer.
@@ -41,6 +53,8 @@ export function ThinkingBlock({
   duration,
   streamedLive,
   autoCollapseMs,
+  keepOpenUntilTurnEnds,
+  turnActive,
   onUserCollapse,
 }: Props) {
   // Live blocks mount expanded (0 disables the TIMER, not the open state);
@@ -48,10 +62,22 @@ export function ThinkingBlock({
   const [expanded, setExpanded] = useState(streamedLive ?? defaultExpanded);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchedRef = useRef(false);
+  // Per-block latch for the turn-scoped hold: set once this block collapses on
+  // its OWN turn-end edge. `turnActive` is session-wide in ChatView, so without
+  // this latch a later turn (turnActive false→true again) would reopen every
+  // untouched historical block. Once latched, the hold never reopens the block.
+  // See change: collapse-tool-calls-across-narration.
+  const turnEndedRef = useRef(false);
   // autoCollapseMs captured at mount — deliberately NOT an effect dep, so a
   // mid-window pref change never restarts an in-flight timer (W1).
   const msRef = useRef(autoCollapseMs ?? 0);
 
+  // Effect 1 — per-block ms auto-collapse timer + demotion (original behavior).
+  // Governs ONLY when the turn-scoped hold is OFF. `turnActive` is deliberately
+  // NOT a dep here: when keepOpenUntilTurnEnds is false, a turn-end status
+  // change must not clear+re-arm an in-flight timer (that would reset the
+  // collapse countdown to fire relative to turn-end instead of when the block
+  // finished). See change: keep-reasoning-open-until-turn-ends.
   useEffect(() => {
     // The live streaming block is user-controlled only: no timer, no demotion.
     // Auto-collapse applies solely to the persisted role="thinking" block.
@@ -68,6 +94,8 @@ export function ThinkingBlock({
       setExpanded(false);
       return;
     }
+    // Turn-scoped hold governs instead; ms timer suppressed (effect 2 owns it).
+    if (keepOpenUntilTurnEnds) return;
     if (msRef.current > 0) {
       timerRef.current = setTimeout(() => {
         if (!touchedRef.current) setExpanded(false);
@@ -79,7 +107,27 @@ export function ThinkingBlock({
         timerRef.current = null;
       }
     };
-  }, [streamedLive, isStreaming]);
+  }, [streamedLive, isStreaming, keepOpenUntilTurnEnds]);
+
+  // Effect 2 — turn-scoped hold. Active ONLY when keepOpenUntilTurnEnds. Keeps a
+  // live block expanded while turnActive, collapses on the true→false edge.
+  // Demotion (!streamedLive) and the manual-toggle freeze are handled by
+  // effect 1 / touchedRef. See change: keep-reasoning-open-until-turn-ends.
+  useEffect(() => {
+    if (!keepOpenUntilTurnEnds) return;
+    if (isStreaming) return;
+    if (touchedRef.current) return;
+    if (!streamedLive) return;
+    // Latched: this block already handled its own turn-end collapse; a later
+    // session-wide turn must not reopen it.
+    if (turnEndedRef.current) return;
+    if (turnActive) {
+      setExpanded(true);
+    } else {
+      turnEndedRef.current = true;
+      setExpanded(false);
+    }
+  }, [keepOpenUntilTurnEnds, turnActive, streamedLive, isStreaming]);
 
   const onToggle = () => {
     touchedRef.current = true;

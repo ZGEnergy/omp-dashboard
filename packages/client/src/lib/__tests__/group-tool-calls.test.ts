@@ -75,6 +75,19 @@ describe("groupConsecutiveToolCalls", () => {
     expect(isGroup(result[1])).toBe(false);
   });
 
+  it("does not absorb a RUN-STARTING running toolResult into a group", () => {
+    // A live (running) row that starts the run must render standalone, not be
+    // hidden inside a ×N pill. The following 3 identical completes still group.
+    const running = toolMsg({ toolStatus: "running" });
+    const msgs = [running, toolMsg(), toolMsg(), toolMsg()];
+    const result = groupConsecutiveToolCalls(msgs);
+    expect(result).toHaveLength(2);
+    expect(isGroup(result[0])).toBe(false);
+    expect((result[0] as ChatMessage).toolStatus).toBe("running");
+    expect(isGroup(result[1])).toBe(true);
+    expect((result[1] as ToolCallGroup).messages).toHaveLength(3);
+  });
+
   it("preserves non-tool messages between groups", () => {
     const msgs = [toolMsg(), toolMsg(), toolMsg(), userMsg(), toolMsg(), toolMsg(), toolMsg()];
     const result = groupConsecutiveToolCalls(msgs);
@@ -144,6 +157,43 @@ describe("groupConsecutiveToolCalls", () => {
     // the read breaks the run; the trailing 2 bash calls are also too few.
     // So nothing is grouped.
     expect(result.every((r) => !isGroup(r))).toBe(true);
+  });
+
+  it("carries absorbed narration in `rendered`, keeps `messages` toolResult-only", () => {
+    const t1 = sep("thinking");
+    const prose = { id: "prose-1", role: "assistant", content: "still starting", timestamp: Date.now() } as ChatMessage;
+    const msgs = [toolMsg(), t1, toolMsg(), prose, toolMsg()];
+    const result = groupConsecutiveToolCalls(msgs);
+    expect(result).toHaveLength(1);
+    expect(isGroup(result[0])).toBe(true);
+    const group = result[0] as ToolCallGroup;
+    // messages = the 3 toolResults only.
+    expect(group.messages).toHaveLength(3);
+    expect(group.messages.every((m) => m.role === "toolResult")).toBe(true);
+    // rendered = full interleaved slice (3 tools + thinking + prose) in order.
+    expect(group.rendered).toHaveLength(5);
+    expect(group.rendered).toContain(t1);
+    expect(group.rendered).toContain(prose);
+    expect(group.rendered.map((m) => m.role)).toEqual([
+      "toolResult",
+      "thinking",
+      "toolResult",
+      "assistant",
+      "toolResult",
+    ]);
+  });
+
+  it("does not absorb trailing transparents after the final grouped call", () => {
+    // Trailing thinking after the last grouped toolResult belongs to the next
+    // row, not the group's `rendered`.
+    const trailing = sep("thinking");
+    const msgs = [toolMsg(), toolMsg(), toolMsg(), trailing];
+    const result = groupConsecutiveToolCalls(msgs);
+    expect(result).toHaveLength(2);
+    const group = result[0] as ToolCallGroup;
+    expect(group.rendered).toHaveLength(3);
+    expect(group.rendered).not.toContain(trailing);
+    expect((result[1] as ChatMessage).id).toBe(trailing.id);
   });
 
   it("emits intermediate transparent rows verbatim when no group forms", () => {

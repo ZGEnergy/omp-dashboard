@@ -24,6 +24,14 @@ export interface ToolCallGroup {
   type: "group";
   toolName: string;
   messages: ChatMessage[];
+  /**
+   * Full walked slice `[start, lastToolEnd)` in original order: the grouped
+   * `toolResult` rows PLUS the absorbed transparent rows (thinking, prose,
+   * separators) that sat between them. Drives the EXPANDED view so narration
+   * renders interleaved with its tool calls. `messages` (toolResult-only) still
+   * drives the ×N count and summary. See change: collapse-tool-calls-across-narration.
+   */
+  rendered: ChatMessage[];
   /** Summary from the first message's args */
   summary: string;
 }
@@ -64,6 +72,15 @@ export function groupConsecutiveToolCalls(messages: ChatMessage[]): ChatItem[] {
       i++;
       continue;
     }
+    // A live (running) toolResult is never absorbed into a collapsed group —
+    // it is always rendered as a live card. Guard the RUN-STARTING row too
+    // (the inner loop only guards subsequent rows). See change:
+    // collapse-tool-calls-across-narration.
+    if (msg.toolStatus === "running") {
+      result.push(msg);
+      i++;
+      continue;
+    }
 
     // Collect consecutive toolResults with same name and similar args.
     // Transparent intermediate rows (separator/thinking/empty assistant
@@ -92,6 +109,7 @@ export function groupConsecutiveToolCalls(messages: ChatMessage[]): ChatItem[] {
         type: "group",
         toolName: msg.toolName ?? "unknown",
         messages: group,
+        rendered: messages.slice(i, lastToolEnd),
         summary: msg.toolName ?? "unknown",
       });
       // Skip past the last grouped toolResult only — trailing transparent
