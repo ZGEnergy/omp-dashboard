@@ -60,7 +60,7 @@ function formatDuration(ms: number): string {
   return `${s.toFixed(s < 10 ? 1 : 0)}s`;
 }
 
-/** `9 greps · 8 reads · 1 git` from a count over `toolName`. */
+/** `9× grep · 8× read · 1× git` from a count over `toolName`. */
 function breakdown(members: ChatMessage[]): string {
   const counts = new Map<string, number>();
   for (const m of members) {
@@ -68,7 +68,7 @@ function breakdown(members: ChatMessage[]): string {
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   return [...counts.entries()]
-    .map(([name, n]) => `${n} ${name}${n > 1 ? "s" : ""}`)
+    .map(([name, n]) => `${n}× ${name}`)
     .join(" · ");
 }
 
