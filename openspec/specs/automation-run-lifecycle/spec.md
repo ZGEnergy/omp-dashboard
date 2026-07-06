@@ -169,3 +169,46 @@ Automation runs are spawned as persistent `--mode rpc` pi sessions that do not s
 - **WHEN** terminating a completed run's session causes a further session-end signal
 - **THEN** the run SHALL NOT be finalized a second time and no duplicate run record SHALL be produced.
 
+### Requirement: Event-dispatch actions declare their completion signal
+
+An event-dispatch action contribution (one providing `buildEvent`) MAY declare a `completion` object, and the automation plugin SHALL NOT hardcode any action-specific completion event.
+The `completion` object, returned from `buildEvent`, names the forwarded event type
+that signals a run of that action has finished, plus an optional summarizer that
+derives the run result from that event's payload. The completion declaration
+travels across the action publish/collect bus with the rest of the contribution.
+
+#### Scenario: Action declares completion alongside its start event
+
+- **WHEN** an action's `buildEvent` returns `{ eventType, data, completion: { eventType, summarize } }`
+- **THEN** the collected registry carries the `completion` declaration for that run's dispatch.
+
+### Requirement: Event-dispatched runs finalize on their declared completion event
+
+An event-dispatched run, which produces no agent turn in the host session and emits no `agent_end`, SHALL finalize on its declared `completion` event instead.
+When such a run declared a `completion` event, the engine
+finalizes the run the first time it observes that declared event for the
+run's session: it captures the run result (buffered assistant text if any, else
+the declared summarizer applied to the event payload) and calls `onSessionEnded`,
+which terminates the now-idle spawned session and frees the concurrency slot.
+Finalization SHALL occur exactly once; a later `agent_end` is a no-op. A run that
+did not declare a completion event (including every prompt-dispatch run) SHALL
+continue to finalize on `agent_end`.
+
+#### Scenario: Event-dispatched run finalizes on its declared completion event
+
+- **WHEN** a tracked run that declared `completion.eventType` observes that event
+- **THEN** the run finalizes once with the summarized result and its spawned
+  session is terminated so the next scheduled fire can start.
+
+#### Scenario: Prompt-dispatched run is unaffected by the completion event
+
+- **WHEN** a prompt-dispatch run (no declared completion) observes an unrelated
+  forwarded event
+- **THEN** it is not finalized by it and still finalizes on `agent_end`.
+
+#### Scenario: agent_end after completion is a no-op
+
+- **WHEN** an event-dispatched run already finalized on its declared completion
+  event later observes an `agent_end`
+- **THEN** no second finalization occurs.
+

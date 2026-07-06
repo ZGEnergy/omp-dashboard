@@ -2,12 +2,11 @@
 
 ### Requirement: Event-dispatch actions declare their completion signal
 
-An event-dispatch action contribution (one providing `buildEvent`) MAY declare,
-in its `buildEvent` return, a `completion` object naming the forwarded event type
+An event-dispatch action contribution (one providing `buildEvent`) MAY declare a `completion` object, and the automation plugin SHALL NOT hardcode any action-specific completion event.
+The `completion` object, returned from `buildEvent`, names the forwarded event type
 that signals a run of that action has finished, plus an optional summarizer that
 derives the run result from that event's payload. The completion declaration
-travels across the action publish/collect bus with the rest of the contribution;
-the automation plugin SHALL NOT hardcode any action-specific completion event.
+travels across the action publish/collect bus with the rest of the contribution.
 
 #### Scenario: Action declares completion alongside its start event
 
@@ -16,9 +15,9 @@ the automation plugin SHALL NOT hardcode any action-specific completion event.
 
 ### Requirement: Event-dispatched runs finalize on their declared completion event
 
-An event-dispatched run produces no agent turn in the host session and therefore
-emits no `agent_end`. When such a run declared a `completion` event, the engine
-SHALL finalize the run the first time it observes that declared event for the
+An event-dispatched run, which produces no agent turn in the host session and emits no `agent_end`, SHALL finalize on its declared `completion` event instead.
+When such a run declared a `completion` event, the engine
+finalizes the run the first time it observes that declared event for the
 run's session: it captures the run result (buffered assistant text if any, else
 the declared summarizer applied to the event payload) and calls `onSessionEnded`,
 which terminates the now-idle spawned session and frees the concurrency slot.
