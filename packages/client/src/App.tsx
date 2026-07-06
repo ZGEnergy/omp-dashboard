@@ -36,6 +36,8 @@ import { SessionList } from "./components/SessionList.js";
 import { SessionSplitView, SplitRouteSync } from "./components/SessionSplitView.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { SpawnErrorToastHost } from "./components/SpawnErrorToastHost.js";
+import { RecoveryOfferHost } from "./components/RecoveryOfferHost.js";
+import { clearRecoveryOffer } from "./lib/recovery-offer-bus.js";
 import { SpecsBrowserView } from "./components/SpecsBrowserView.js";
 import { SplitWorkspaceProvider } from "./components/SplitWorkspaceContext.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -557,6 +559,10 @@ export default function App() {
           // with a stale maxSeq against the now-empty sessionStates map.
           maxSeqMapRef.current.clear();
           rehydratedRef.current.clear();
+          // A recovery offer is scoped to one server boot; drop it so a
+          // stale offer from server A can't reopen IDs on server B.
+          // See change: reopen-sessions-after-shutdown.
+          clearRecoveryOffer();
         },
         setWsUrl,
         persistLastServer: (h, p) => {
@@ -1877,6 +1883,7 @@ export default function App() {
         />
         <Toast messages={toastMessages} onDismiss={dismissToast} />
         <SpawnErrorToastHost />
+        <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} />
         {/* First-launch chat-display preset picker. Opens once when the
             server reports `displayPrefs: undefined`. See change:
             configurable-chat-display. */}
@@ -2012,6 +2019,7 @@ export default function App() {
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {connectionBanner}
+        <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} />
         {/* Folder views (TerminalsView or EditorView) — single owner of
             <TerminalView> mounting. The legacy keep-alive list above
             (mounted unconditionally for the /terminal/:id route) was

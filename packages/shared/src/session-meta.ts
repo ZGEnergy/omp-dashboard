@@ -105,8 +105,57 @@ export interface SessionMeta {
    */
   goalId?: string;
 
+  /**
+   * Liveness marker — stamped eagerly (atomic, NOT debounced) while a
+   * session runs. `live: true` + `liveEpoch` (server boot id) persist on
+   * disk before an unclean host shutdown so cold start can tell an
+   * interrupted session from an intentionally-closed one. A clean close
+   * sets `live: false`; manual close / force-kill also set
+   * `closedReason: "manual"`. Absent on pre-feature sidecars (treated as
+   * not-live, not a recovery candidate).
+   * See change: reopen-sessions-after-shutdown.
+   */
+  live?: boolean;
+  liveEpoch?: number;
+  closedReason?: string;
+
   // Cache freshness — compared against .jsonl mtime
   cachedAt?: number;
+}
+
+/**
+ * Classify a session as an interrupted-session recovery candidate.
+ *
+ * A candidate was RUNNING when the host died. Detection uses BOTH durable
+ * signals, because neither alone is sufficient:
+ *   - `status !== "ended"` — the persisted lifecycle status. A clean close
+ *     runs `unregister()` which sets + persists `status: "ended"` (dashboard
+ *     ✕ AND a pi TUI quit both go through this). A crash never reaches
+ *     `unregister()`, so the sidecar keeps its last running status
+ *     (`idle`/`streaming`/`active`). This half excludes every clean
+ *     unregister, including a TUI quit.
+ *   - `live === true` — the eager (atomic, crash-durable) liveness bit. A
+ *     clean server `stop()` (idle timer / app quit) clears it to `false`
+ *     WITHOUT unregistering each session, so its persisted status stays
+ *     non-`ended`. This half excludes the idle/app-quit stop that the status
+ *     half would otherwise wrongly grab.
+ *
+ * Together they recover EXACTLY the crash case: persisted non-`ended` status
+ * AND a still-set `live` marker. Pre-feature sidecars (no `live`) are never
+ * candidates. Reads ONLY per-session meta — never the home-lock.
+ * See change: reopen-sessions-after-shutdown.
+ */
+export function isRecoveryCandidate(meta: SessionMeta | undefined): boolean {
+  return (
+    meta?.live === true &&
+    meta.status !== "ended" &&
+    meta.closedReason !== "manual" &&
+    // Automation run sessions are FULLY exempt: respawning a headless rpc
+    // run detached from its automation (no per-fire context, no run
+    // finalization) recreates the zombie class fix-automation-stop-zombie-runs
+    // exists to kill. They normalize to `ended` like any non-candidate.
+    meta.kind !== "automation"
+  );
 }
 
 /**
