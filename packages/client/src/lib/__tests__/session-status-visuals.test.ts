@@ -2,6 +2,7 @@ import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared
 import { describe, expect, it } from "vitest";
 import {
   countNeedsYou,
+  countStatusRollup,
   deriveDotColor,
   deriveDotColorWithFlags,
   deriveIconStatusColor,
@@ -37,6 +38,24 @@ function makeSession(overrides: Partial<DashboardSession> = {}): DashboardSessio
     ...overrides,
   } as DashboardSession;
 }
+
+describe("countStatusRollup", () => {
+  it("counts working (streaming/resuming) and idle (active/idle), excludes needs-you and ended", () => {
+    const rollup = countStatusRollup([
+      makeSession({ id: "a", status: "streaming" }),
+      makeSession({ id: "b", status: "idle", resuming: true }),
+      makeSession({ id: "c", status: "active" }),
+      makeSession({ id: "d", status: "idle" }),
+      makeSession({ id: "e", status: "idle", currentTool: "ask_user" }),
+      makeSession({ id: "f", status: "ended" }),
+    ]);
+    expect(rollup).toEqual({ working: 2, idle: 2 });
+  });
+
+  it("returns zeros for an empty folder", () => {
+    expect(countStatusRollup([])).toEqual({ working: 0, idle: 0 });
+  });
+});
 
 describe("session-status-visuals constants", () => {
   it("statusColors uses semantic tokens", () => {
