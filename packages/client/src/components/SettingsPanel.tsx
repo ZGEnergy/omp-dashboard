@@ -17,14 +17,13 @@ import { getApiBase } from "../lib/api-context.js";
 import { useDisplayPrefsContext } from "../lib/DisplayPrefsContext.js";
 import { fetchAutoInitWorktreePref, setAutoInitWorktreePref } from "../lib/git-api.js";
 import { t as i18nT } from "../lib/i18n";
-import { buildPiResourceFileUrl } from "../lib/route-builders.js";
 import { LANGUAGE_OPTIONS, type Language, useI18n } from "../lib/i18n.js";
 import { type TestProviderResult, testProvider } from "../lib/providers-api.js";
+import { buildPiResourceFileUrl } from "../lib/route-builders.js";
 import { DiagnosticsSection } from "./DiagnosticsSection.js";
 import { DialogPortal } from "./DialogPortal.js";
 import { InstructionsPage } from "./DirectorySettings/InstructionsPage.js";
 import { KnownServersSection } from "./KnownServersSection.js";
-import { PairedDevicesSection } from "./PairedDevicesSection.js";
 import { ModelProxySection } from "./ModelProxySection.js";
 import { ModelSelector } from "./ModelSelector.js";
 import { NetworkDiscoverySection } from "./NetworkDiscoverySection.js";
@@ -32,11 +31,13 @@ import { OpenSpecProfileSection } from "./OpenSpecProfileSection.js";
 import { PackageBrowser } from "./PackageBrowser.js";
 import { PackageInstallConfirmDialog } from "./PackageInstallConfirmDialog.js";
 import { PackageReadmeDialog } from "./PackageReadmeDialog.js";
+import { PairedDevicesSection } from "./PairedDevicesSection.js";
+import { PairingView } from "./PairingView.js";
 import { PiVersionAdvisory } from "./PiVersionAdvisory.js";
 import { PluginsSection } from "./PluginsSection.js";
+import { ProviderAuthSection } from "./ProviderAuthSection.js";
 import type { ResourceType } from "./ResourceCardGrid.js";
 import { ResourceGridPanel } from "./ResourceGridPanel.js";
-import { ProviderAuthSection } from "./ProviderAuthSection.js";
 import { SpawnFailuresSection, ToolsSection } from "./ToolsSection.js";
 import { UnifiedPackagesSection } from "./UnifiedPackagesSection.js";
 
@@ -1213,6 +1214,9 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                     c.auth.bypassHosts = nets;
                   })}
                 />
+                <Section title={t("settings.pairDevice", undefined, "Pair a device")}>
+                  <PairingView />
+                </Section>
                 <Section title={t("settings.pairedDevices", undefined, "Paired Devices")}>
                   <PairedDevicesSection />
                 </Section>

@@ -85,6 +85,7 @@ Files in this directory. One row per source file.
 | `PackageInstallConfirmDialog.tsx` | Pre-install confirmation dialog. Exports `PackageInstallConfirmDialog`. Shows source + optional name + scope. → see `PackageInstallConfirmDialog.tsx.AGENTS.md` |
 | `PackageReadmeDialog.tsx` | Dialog fetching + rendering a package README. Exports `PackageReadmeDialog`. → see `PackageReadmeDialog.tsx.AGENTS.md` |
 | `PackageRow.tsx` | Generic installed-package row used across unified packages sections. Exports `PackageRow`, `PackageRowProps`. → see `PackageRow.tsx.AGENTS.md` |
+| `PairingView.tsx` | Settings→Security operator pairing view. Exports `PairingView`. Fetches `GET /api/pair/payload`; renders QR (`qrcode` idiom) + base64url copy-string + fingerprint + 60s TTL countdown + `urls[]`. `no_reachable_endpoint`→empty state (start tunnel + localhost note; never implies plain-http LAN pairs). Typed confirm-code → `approvePairing` (`POST /api/pair/approve`). See change: wire-nonzrok-pairing-view. |
 | `PathPicker.tsx` | Reusable keyboard-first path picker with typeahead directory list. → see `PathPicker.tsx.AGENTS.md` |
 | `PiLogo.tsx` | Inline SVG brand mark (geometric Π). Exports `PiLogo`. Props: `size` (default 24), `className`, `title`. → see `PiLogo.tsx.AGENTS.md` |
 | `PinDirectoryDialog.tsx` | Dialog to pin directory (wraps PathPicker) |
