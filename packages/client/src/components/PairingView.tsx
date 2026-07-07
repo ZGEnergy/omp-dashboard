@@ -114,7 +114,7 @@ export function PairingView() {
   };
 
   const handleApprove = async () => {
-    if (!payload || approving || !confirmCode.trim()) return;
+    if (!payload || approving || !confirmCode.trim() || expired) return;
     setApproving(true);
     setApproveError(null);
     try {

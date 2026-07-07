@@ -33,8 +33,10 @@ export type PairPayloadResult =
  * as `{ ok: false, error }` — not a thrown transport error.
  */
 export async function getPairPayload(): Promise<PairPayloadResult> {
-  const { json } = await fetchJsonResponse(`${getApiBase()}/api/pair/payload`);
-  if (json.success) return { ok: true, payload: json.data as PairingPayload };
+  const { json } = await fetchJsonResponse<{ success: boolean; data?: PairingPayload; error?: string }>(
+    `${getApiBase()}/api/pair/payload`,
+  );
+  if (json.success && json.data) return { ok: true, payload: json.data };
   return { ok: false, error: json.error ?? "unknown" };
 }
 
@@ -49,11 +51,14 @@ export async function approvePairing(
   confirmCode: string,
   label?: string,
 ): Promise<PairedDeviceView> {
-  const { json } = await fetchJsonResponse(`${getApiBase()}/api/pair/approve`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code, confirmCode, label }),
-  });
-  if (!json.success) throw new Error(json.error ?? "approve failed");
-  return json.data as PairedDeviceView;
+  const { json } = await fetchJsonResponse<{ success: boolean; data?: PairedDeviceView; error?: string }>(
+    `${getApiBase()}/api/pair/approve`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code, confirmCode, label }),
+    },
+  );
+  if (!json.success || !json.data) throw new Error(json.error ?? "approve failed");
+  return json.data;
 }
