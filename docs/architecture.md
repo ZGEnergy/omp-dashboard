@@ -1067,6 +1067,18 @@ Loopback auth-exemption replaced by `isGenuinelyLocal(ip, headers)` = loopback A
 
 Payload plus handshake carry `v`. Server keeps backward-compatible pairing routes. `PAIRING_PROTOCOL_VERSION`, `SUPPORTED_PAIRING_VERSIONS`.
 
+#### Operator pairing view — client
+
+Operator-side pairing view = `packages/client/src/components/PairingView.tsx`. Mounts Settings → Security ("Pair a device"). Client-only change: no new server route. `/api/pair/payload` + `/api/pair/approve` already shipped by `add-server-keypair-pairing`. Change: `wire-nonzrok-pairing-view`.
+
+On open calls `GET /api/pair/payload` → `{v,id,code,urls[]}`. Renders QR (`qrcode` dep, `QRCode.toCanvas` idiom) plus base64url copy-string. Device accepts raw JSON or base64url via `decodePayloadString`. Shows fingerprint `id`, one-time code TTL countdown (~60s, `CODE_TTL_MS`), advertised `urls[]`.
+
+Approval: operator types numeric confirm code shown on device → `POST /api/pair/approve` (D12 typed compare-and-match). Client lib `packages/client/src/lib/pairing-api.ts` `approvePairing(code, confirmCode, label?)`. Success → device joins paired list.
+
+`no_reachable_endpoint` → empty state. Pairing needs secure context. Empty state offers Start tunnel (`/tunnel-setup`) plus `http://localhost` same-machine note. Never implies plain-http LAN pairs in a browser.
+
+Gate: `reachableUrls()` (`packages/server/src/pairing.ts`) read-time filter (D4/D14) advertises only secure `wss`/`https` endpoints. Keeps `urls[]` secure. `createPayload()` returns null when no reachable url → route returns `{success:false,error:"no_reachable_endpoint"}` (HTTP 200).
+
 ### Settings Panel
 The web client includes a Settings panel (gear icon in sidebar header → `/settings` route) that lets users view and edit all dashboard configuration. The panel:
 1. Loads config via `GET /api/config` (secrets redacted as `***`)

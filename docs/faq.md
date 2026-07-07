@@ -361,6 +361,22 @@ Docker all-in-one already sets `PI_DASHBOARD_HOST=0.0.0.0` to stay reachable thr
 
 See change: configurable-bind-host.
 
+## Pairing ≠ LAN access; how to get a secure road for LAN pairing
+
+Pairing not the plain-LAN path. Plain-LAN access = Network Guard / `bindHost` + trusted networks. See [How do I expose the dashboard on my LAN?](#how-do-i-expose-the-dashboard-on-my-lan).
+
+QR pairing needs a secure context. Client identity-verify uses `crypto.subtle` (Ed25519 verify). `crypto.subtle` undefined on plain-http non-localhost origin.
+
+Browser plus plain-http LAN (`http://192.168.x.x:8000`) cannot pair. Not fixable in-project.
+
+Get a secure road:
+- zrok tunnel (`/tunnel-setup`, `wss://…zrok.io`), or
+- publicly-trusted TLS via reverse proxy — Caddy + Let's Encrypt DNS-01, `tailscale cert` / `tailscale serve`, or mkcert local CA.
+
+HTTP-01 / TLS-ALPN-01 fail on a box with no public inbound → DNS-01 only. mkcert CA must install on each client device.
+
+Paired bearer token replaces trusted networks. No `trustedNetworks` / OAuth needed once paired over TLS'd LAN.
+
 ## Why do all my PWA installs of the dashboard have the same name on the launcher?
 
 Server serves `/manifest.json` dynamically per request.
