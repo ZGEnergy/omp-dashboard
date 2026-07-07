@@ -582,10 +582,12 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
         />
       )}
 
-      {/* Streaming text */}
+      {/* Streaming text — carries the same liveness cue as a running group
+          (edge-pulse glow + shimmer sweep) while the turn is alive. Settles
+          static the instant streaming ends. See change: enhance-tool-call-grouping. */}
       {state.streamingText && (
         <div className="flex justify-start">
-          <div className={`bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl shadow-md px-4 py-2 ${hasMermaid(state.streamingText) ? bubbleWide : bubbleMax}`}>
+          <div className={`chat-stream-live bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl shadow-md px-4 py-2 ${hasMermaid(state.streamingText) ? bubbleWide : bubbleMax}`}>
             <MarkdownContent content={state.streamingText} context={toolContext} />
             <span className="inline-block w-1.5 h-4 bg-[var(--bg-surface)] animate-pulse ml-0.5" />
           </div>
