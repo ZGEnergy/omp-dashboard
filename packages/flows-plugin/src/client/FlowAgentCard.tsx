@@ -19,6 +19,15 @@ import { FlowAgentDetail } from "./FlowAgentDetail.js";
  *
  * See change: add-ui-popover-primitive.
  */
+/**
+ * Format an accumulated USD cost, matching the pi-flows TUI precision
+ * (`agent-card.ts`): two decimals at or above $1, four decimals sub-dollar.
+ * Exported so `FlowAgentDetail` renders identical values (DRY, D4).
+ */
+export function formatCost(n: number): string {
+  return `$${n >= 1 ? n.toFixed(2) : n.toFixed(4)}`;
+}
+
 type AgentSourceState =
   | { kind: "idle" }
   | { kind: "loading" }
@@ -173,7 +182,7 @@ export function FlowAgentCard({
   ) : kindBadge;
 
   const stats = isComplete && agent.tokens ? (
-    <span>↑{formatTokens(agent.tokens.input)} ↓{formatTokens(agent.tokens.output)} · {formatDuration(agent.duration ?? 0)}</span>
+    <span>↑{formatTokens(agent.tokens.input)} ↓{formatTokens(agent.tokens.output)}{agent.cost != null && agent.cost > 0 ? ` · ${formatCost(agent.cost)}` : ""} · {formatDuration(agent.duration ?? 0)}</span>
   ) : displayModel ? (
     <span>{displayModel}</span>
   ) : displayRole ? (

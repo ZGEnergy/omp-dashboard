@@ -3,7 +3,11 @@
  * See change: restore-pi-version-skew-surface.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { sendPiVersionIfChanged, _resetPiVersionCache } from "../model-tracker.js";
+import {
+  sendPiVersionIfChanged,
+  _resetPiVersionCache,
+  readPkgVersionByWalkUp,
+} from "../model-tracker.js";
 import type { BridgeContext } from "../bridge-context.js";
 
 function makeBc() {
@@ -50,5 +54,56 @@ describe("sendPiVersionIfChanged", () => {
     const { bc, send } = makeBc();
     sendPiVersionIfChanged(bc, () => undefined);
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("readPkgVersionByWalkUp", () => {
+  const PKG = "@earendil-works/pi-coding-agent";
+
+  // Simulate a restrictive-exports install: resolve(".") lands on dist/index.js,
+  // and package.json (omitting the ./package.json subpath) sits one level up.
+  it("reads version by walking up when ./package.json subpath is not exported", () => {
+    const root = "/node_modules/@earendil-works/pi-coding-agent";
+    const entry = `${root}/dist/index.js`;
+    const files: Record<string, string> = {
+      [`${root}/package.json`]: JSON.stringify({ name: PKG, version: "0.80.2" }),
+    };
+    const v = readPkgVersionByWalkUp(
+      PKG,
+      () => entry,
+      (p) => {
+        const f = files[p];
+        if (f === undefined) throw new Error(`ENOENT ${p}`);
+        return f;
+      },
+      (p) => p in files,
+    );
+    expect(v).toBe("0.80.2");
+  });
+
+  it("skips a non-matching ancestor package.json (workspace root)", () => {
+    const root = "/repo/node_modules/@earendil-works/pi-coding-agent";
+    const entry = `${root}/dist/index.js`;
+    const files: Record<string, string> = {
+      "/repo/package.json": JSON.stringify({ name: "the-workspace", version: "9.9.9" }),
+      [`${root}/package.json`]: JSON.stringify({ name: PKG, version: "0.80.2" }),
+    };
+    const v = readPkgVersionByWalkUp(
+      PKG,
+      () => entry,
+      (p) => files[p] ?? (() => { throw new Error(`ENOENT ${p}`); })(),
+      (p) => p in files,
+    );
+    expect(v).toBe("0.80.2");
+  });
+
+  it("returns undefined (no throw) when no matching manifest is found", () => {
+    const v = readPkgVersionByWalkUp(
+      PKG,
+      () => "/nowhere/dist/index.js",
+      () => { throw new Error("should not read"); },
+      () => false,
+    );
+    expect(v).toBeUndefined();
   });
 });

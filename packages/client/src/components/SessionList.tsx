@@ -40,6 +40,7 @@ import { DashboardSpawnButtons } from "./DashboardSpawnButtons.js";
 import { FolderActionBar } from "./FolderActionBar.js";
 import { FolderNeedsYouPill } from "./FolderNeedsYouPill.js";
 import { FolderOpenSpecSection } from "./FolderOpenSpecSection.js";
+import { FolderStatusRollup } from "./FolderStatusRollup.js";
 import { FolderSpawnButtons } from "./FolderSpawnButtons.js";
 import { InstallButton } from "./InstallButton.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
@@ -678,6 +679,11 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 });
               }}
             />
+            {/* Collapsed status rollup (variant B): working/idle dot-counts so a
+                collapsed folder still shows liveness at a glance. Needs-you is
+                covered by the pill above. See change:
+                condense-collapsed-folder-header. */}
+            {isCollapsed && <FolderStatusRollup sessions={group.sessions} />}
             {/* Opt-in per-folder urgency sort toggle (default off). Floats
                 blocked sessions to the top. See change:
                 improve-dashboard-attention-routing. */}
@@ -710,6 +716,13 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               </button>
             )}
           </div>
+          {/* Collapsed density (variant B): when collapsed, the heavy slots
+              (git · action bar · plugin sections · OpenSpec proposal state ·
+              spawn buttons) are hidden — the header keeps only name + status.
+              The drag gutter/head row live ABOVE this block, so drag-reorder
+              of a collapsed folder is unaffected.
+              See change: condense-collapsed-folder-header. */}
+          {!isCollapsed && (<>
           <div className="flex items-center gap-1">
             <GroupGitInfo
               sessions={group.sessions}
@@ -768,6 +781,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               }}
             />
           </div>
+          </>)}
 
           </div>{/* end content column */}
         </div>

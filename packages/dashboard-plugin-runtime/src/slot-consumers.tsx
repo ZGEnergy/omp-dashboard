@@ -8,7 +8,6 @@
  *    and a CurrentPluginLayer (so plugin hooks work correctly).
  * 4. Renders nothing when zero claims match.
  */
-
 import type { IntentNode } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/intent-types.js";
 import type { SlotId } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -21,7 +20,7 @@ import { CurrentPluginLayer, useSlotRegistryOrNull } from "./plugin-context.js";
 import { useShellSessionOrNull } from "./shell-sessions-context.js";
 import { SlotErrorBoundary } from "./slot-error-boundary.js";
 import type { FolderDescriptor } from "./slot-registry.js";
-import { forFolder, forSession, forSessionRendered, forTab, forToolName, type SlotRegistry } from "./slot-registry.js";
+import { forActionId, forFolder, forSession, forSessionRendered, forTab, forToolName, type SlotRegistry } from "./slot-registry.js";
 
 /**
  * Returns true when at least one plugin claim exists for `slotId` AND matches
@@ -432,6 +431,52 @@ export function ToolRendererSlot({
     sessionId,
     ...extra,
   });
+}
+
+/**
+ * Render the first `automation-action-editor` claim whose `config.actionId`
+ * matches `actionId`. Used by the create-automation dialog to host a plugin-
+ * contributed payload editor (e.g. flows-plugin's input-wiring form) for a
+ * specific action id, additively below the generic `ActionPayloadForm`.
+ *
+ * Renders nothing when no claim targets the action id (the dialog then shows
+ * only the generic form). The contributed component receives the current
+ * `payload`, an `onChange(payload)` callback, and the run `cwd`.
+ *
+ * See change: wire-flow-inputs-in-automation.
+ */
+export function AutomationActionEditorSlot({
+  actionId,
+  payload,
+  onChange,
+  cwd,
+}: {
+  actionId: string;
+  payload: Record<string, unknown>;
+  onChange: (payload: Record<string, unknown>) => void;
+  cwd?: string;
+}) {
+  const registry = useSlotRegistryOrNull();
+  if (!registry) return null;
+  const claims = forActionId(registry.getClaims("automation-action-editor"), actionId);
+  if (!claims.length) return null;
+  const claim = claims[0];
+  return renderClaim(claim as Parameters<typeof renderClaim>[0], "automation-action-editor", {
+    payload,
+    onChange,
+    cwd,
+  });
+}
+
+/**
+ * Returns `true` when at least one `automation-action-editor` claim targets
+ * `actionId`. Lets the dialog decide render/submit paths without mounting the
+ * editor. See change: wire-flow-inputs-in-automation.
+ */
+export function useHasAutomationActionEditor(actionId: string): boolean {
+  const registry = useSlotRegistryOrNull();
+  if (!registry) return false;
+  return forActionId(registry.getClaims("automation-action-editor"), actionId).length > 0;
 }
 
 // ── shell-overlay-route ───────────────────────────────────────────────────────

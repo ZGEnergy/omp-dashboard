@@ -242,3 +242,13 @@ export function forTab(claims: ClaimEntry[], tab: string): ClaimEntry[] {
 export function forToolName(claims: ClaimEntry[], toolName: string): ClaimEntry[] {
   return claims.filter(c => c.toolName === toolName);
 }
+
+/**
+ * Filter `automation-action-editor` claims by the automation action id.
+ * A claim targets an action id via `config.actionId` (the generic config
+ * escape hatch — there is no first-class field for it).
+ * See change: wire-flow-inputs-in-automation.
+ */
+export function forActionId(claims: ClaimEntry[], actionId: string): ClaimEntry[] {
+  return claims.filter(c => c.config?.actionId === actionId);
+}

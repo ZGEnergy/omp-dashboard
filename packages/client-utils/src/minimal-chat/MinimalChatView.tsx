@@ -277,11 +277,12 @@ export function MinimalChatView({
   const showMeta =
     !!meta &&
     (meta.modelName !== undefined ||
+      meta.cost !== undefined ||
       meta.durationMs !== undefined ||
       (meta.tokens !== undefined && (meta.tokens.input !== undefined || meta.tokens.output !== undefined)));
 
   const hasTokensOrDuration =
-    !!meta && (meta.tokens !== undefined || meta.durationMs !== undefined);
+    !!meta && (meta.tokens !== undefined || meta.durationMs !== undefined || meta.cost !== undefined);
 
   // Header (inline + popout share)
   const header = (
@@ -322,9 +323,11 @@ export function MinimalChatView({
           {meta?.tokens && (
             <>
               ↑{formatTokens(meta.tokens.input ?? 0)} ↓{formatTokens(meta.tokens.output ?? 0)}
-              {meta.durationMs !== undefined && " · "}
+              {(meta.cost !== undefined || meta.durationMs !== undefined) && " · "}
             </>
           )}
+          {meta?.cost !== undefined && meta.cost}
+          {meta?.cost !== undefined && meta.durationMs !== undefined && " · "}
           {meta?.durationMs !== undefined && formatDuration(meta.durationMs)}
         </span>
       )}

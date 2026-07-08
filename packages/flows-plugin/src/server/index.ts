@@ -8,9 +8,10 @@
  * See change: adopt-server-driven-intent-rendering.
  */
 import type { ServerPluginContext } from "@blackbelt-technology/dashboard-plugin-runtime/server";
-import { stateStore } from "./state-store.js";
-import { renderSessionFlowActions } from "./render-actions.js";
 import { provideFlowsActions } from "./automation-actions.js";
+import { readFlowInputs } from "./flow-inputs.js";
+import { renderSessionFlowActions } from "./render-actions.js";
+import { stateStore } from "./state-store.js";
 
 const PLUGIN_ID = "flows";
 
@@ -25,6 +26,16 @@ export async function registerPlugin(ctx: ServerPluginContext): Promise<void> {
   // to collect. Pure publisher: no consume, no automation dependency, no load
   // order requirement. See change: decouple-automation-action-registry.
   provideFlowsActions((name, value) => ctx.provide(name, value), (m) => logger.info(m));
+
+  // Read-only endpoint: a flow's declared `inputs:` schema, for the automation
+  // input-wiring UI. Never writes a flow file. See change:
+  // wire-flow-inputs-in-automation.
+  ctx.fastify.get("/api/plugins/flows/flow-inputs", async (req) => {
+    const q = (req.query ?? {}) as Record<string, unknown>;
+    const cwd = typeof q.cwd === "string" ? q.cwd : process.cwd();
+    const flow = typeof q.flow === "string" ? q.flow : "";
+    return { inputs: flow ? readFlowInputs(cwd, flow) : [] };
+  });
 
   /**
    * Broadcast the current intent tree for one session's slot.

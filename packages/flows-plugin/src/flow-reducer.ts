@@ -199,6 +199,7 @@ export function reduceFlowEvent(
         summary?: string;
         files?: string[];
         tokens?: { input: number; output: number };
+        cost?: number;
         duration?: number;
         outcome?: "success" | "soft" | "hard";
         typedOutputs?: Record<string, string>;
@@ -215,6 +216,7 @@ export function reduceFlowEvent(
           ...existing,
           status: result?.status === "blocked" ? "blocked" : result?.success ? "complete" : "error",
           tokens: result?.tokens,
+          cost: result?.cost,
           duration: result?.duration,
           summary: result?.summary,
           files: result?.files,

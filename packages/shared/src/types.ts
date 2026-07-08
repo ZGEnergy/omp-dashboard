@@ -920,6 +920,9 @@ export interface FlowAgentState {
   cardRole?: string;
   blockedBy: string[];
   tokens?: { input: number; output: number };
+  /** Accumulated per-agent USD cost from `flow_agent_complete` (`result.cost`).
+   *  Sibling of `tokens`; `undefined` when the session predates cost surfacing. */
+  cost?: number;
   duration?: number;
   summary?: string;
   files?: string[];
