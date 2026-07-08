@@ -16,29 +16,29 @@
  * unit-testable without a live server. See change: add-automation-plugin.
  */
 import fs from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import type {
-  DiscoveredAutomation,
   AutomationScope,
-  Visibility,
+  DiscoveredAutomation,
   RunMode,
   Sandbox,
+  Visibility,
 } from "../shared/automation-types.js";
-import { TriggerRegistry, type FireContext } from "./trigger-registry.js";
-import { interpolate } from "./interpolate.js";
-import { scheduleTrigger } from "./schedule-trigger.js";
-import { fileTrigger } from "./file-trigger.js";
 import {
-  ActionRegistry,
+  type ActionRegistry,
   createActionRegistryWithBuiltins,
   normalizeActionKind,
 } from "./action-registry.js";
-import { createScheduler, automationKey, type Scheduler } from "./scheduler.js";
+import { fileTrigger } from "./file-trigger.js";
+import { interpolate } from "./interpolate.js";
+import { resolveModel } from "./model-resolver.js";
+import { finishRun as storeFinishRun, startRun as storeStartRun } from "./run-store.js";
 import { createRunner, type Runner } from "./runner.js";
 import { scanAutomations } from "./scanner.js";
-import { resolveModel } from "./model-resolver.js";
-import { startRun as storeStartRun, finishRun as storeFinishRun } from "./run-store.js";
+import { scheduleTrigger } from "./schedule-trigger.js";
+import { automationKey, createScheduler, type Scheduler } from "./scheduler.js";
+import { type FireContext, TriggerRegistry } from "./trigger-registry.js";
 
 /**
  * Build the prompt text delivered to a run session for an automation action.

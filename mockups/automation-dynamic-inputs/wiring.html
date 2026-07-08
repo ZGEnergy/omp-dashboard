@@ -55,7 +55,7 @@
 <div class="wrap">
   <h1>Automation dialog — unchanged, plus inputs wiring</h1>
   <p class="sub">Same dialog. The only addition: one extra field per input the flow declares. Type a literal, or
-  <span class="pill">${{trigger}}</span> to use the fired value (the arrived file path).</p>
+  <span class="pill">$&#123;&#123;trigger&#125;&#125;</span> to use the fired value (the arrived file path).</p>
 
   <div class="dialog">
     <div class="dhead"><b>Create Automation</b><span style="color:var(--muted);font-size:12px;font-family:var(--mono)">folder · /repo</span></div>
@@ -82,7 +82,7 @@
 
           <div class="irow">
             <label>invoice <span class="ty">string</span><span class="req"> *</span></label>
-            <input class="input" value="${{trigger}}" />
+            <input class="input" value="$&#123;&#123;trigger&#125;&#125;" />
           </div>
           <div class="irow">
             <label>priority <span class="ty">number</span></label>
@@ -93,7 +93,7 @@
             <input class="input" value="false" />
           </div>
 
-          <p class="newnote">Use <b>${{trigger}}</b> for the file that fired · leave blank to skip an optional input.</p>
+          <p class="newnote">Use <b>$&#123;&#123;trigger&#125;&#125;</b> for the file that fired · leave blank to skip an optional input.</p>
         </div>
       </div>
 

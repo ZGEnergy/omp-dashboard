@@ -22,7 +22,7 @@ import {
   mdiClipboardTextOutline,
   mdiFlashOutline,
 } from "@mdi/js";
-import { useUiPrimitive } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { useUiPrimitive, AutomationActionEditorSlot } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { getPluginConfig } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import { UI_PRIMITIVE_KEYS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
 import {
@@ -58,11 +58,26 @@ function normalizeActionId(kind: string): string {
   return kind;
 }
 
-/** Initial payload string-map from a saved action payload. */
+/** Initial payload string-map from a saved action payload. The `inputs` key is
+ *  an object owned by a contributed `automation-action-editor` (kept out of the
+ *  string-map). See change: wire-flow-inputs-in-automation. */
 function coercePayload(payload?: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
-  if (payload) for (const [k, v] of Object.entries(payload)) out[k] = v == null ? "" : String(v);
+  if (payload)
+    for (const [k, v] of Object.entries(payload)) {
+      if (k === "inputs") continue;
+      out[k] = v == null ? "" : String(v);
+    }
   return out;
+}
+
+/** Extract a saved `payload.inputs` object (wired flow inputs), else `{}`.
+ *  See change: wire-flow-inputs-in-automation. */
+function extractInputs(payload?: Record<string, unknown>): Record<string, unknown> {
+  const inp = payload?.inputs;
+  return inp && typeof inp === "object" && !Array.isArray(inp)
+    ? { ...(inp as Record<string, unknown>) }
+    : {};
 }
 
 /** Default payload values for an action's schema (enum → first option). */
@@ -189,6 +204,16 @@ export function CreateAutomationDialog({
   const [actionPayload, setActionPayload] = useState<Record<string, string>>(() =>
     coercePayload(initialConfig?.action.payload),
   );
+  // Object payload written by a contributed `automation-action-editor` (e.g.
+  // flows-plugin's input wiring). Persisted as `payload.inputs`. Kept separate
+  // from the string-map above. See change: wire-flow-inputs-in-automation.
+  const [actionInputs, setActionInputs] = useState<Record<string, unknown>>(() =>
+    extractInputs(initialConfig?.action.payload),
+  );
+  // File-trigger folder path (`on.path`). See change: wire-flow-inputs-in-automation.
+  const [filePath, setFilePath] = useState<string>(
+    (initialConfig?.on.path as string | undefined) ?? "",
+  );
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({ core: true });
   const [promptBody, setPromptBody] = useState(initialPromptBody ?? "");
   const [skill, setSkill] = useState(initialConfig?.action.skill ?? "");
@@ -275,8 +300,10 @@ export function CreateAutomationDialog({
   const eventsMissing = needsEvents && selectedEvents.length === 0;
   const cronInvalid = isScheduled && !nextRun;
   const skillMissing = actionId === "core.skill" && !skill.trim();
+  const isFile = category === "file";
+  const filePathMissing = isFile && !filePath.trim();
   const submitDisabled =
-    busy || categoryPlanned || eventsMissing || (isScheduled && cronInvalid) || !model || skillMissing;
+    busy || categoryPlanned || eventsMissing || (isScheduled && cronInvalid) || filePathMissing || !model || skillMissing;
 
   function toggleEvent(ev: string): void {
     setSelectedEvents((prev) =>
@@ -298,16 +325,24 @@ export function CreateAutomationDialog({
       setError("Skill name is required.");
       return;
     }
+    if (filePathMissing) {
+      setError("Folder to watch is required for a file trigger.");
+      return;
+    }
     const onBlock: AutomationConfig["on"] = isScheduled
       ? { kind: "schedule", cron: effectiveCron }
-      : { kind: mapCategoryToKind(category), events: selectedEvents };
+      : isFile
+        ? { kind: "file", path: filePath.trim(), events: selectedEvents, settle: "rename-only" }
+        : { kind: mapCategoryToKind(category), events: selectedEvents };
     let actionBlock: AutomationConfig["action"];
     if (actionId === "core.prompt") {
       actionBlock = { kind: "prompt", prompt: "./prompt.md" };
     } else if (actionId === "core.skill") {
       actionBlock = { kind: "skill", skill: skill.trim().startsWith("$") ? skill.trim() : `$${skill.trim()}` };
     } else {
-      actionBlock = { kind: actionId, payload: { ...actionPayload } };
+      const payload: Record<string, unknown> = { ...actionPayload };
+      if (Object.keys(actionInputs).length > 0) payload.inputs = actionInputs;
+      actionBlock = { kind: actionId, payload };
     }
     const config: AutomationConfig = {
       on: onBlock,
@@ -509,6 +544,26 @@ export function CreateAutomationDialog({
             </div>
           ) : (
             <div className="space-y-1" data-testid="trigger-events">
+              {isFile && (
+                <Field label="Folder to watch">
+                  <input
+                    type="text"
+                    value={filePath}
+                    onChange={(e) => setFilePath(e.target.value)}
+                    placeholder="/spool/invoices"
+                    data-testid="create-file-path"
+                    className="input font-mono"
+                  />
+                  <p className="text-[10px] text-[var(--text-muted)]" data-testid="create-file-path-help">
+                    Fires once per new file that arrives here (settle: rename-only).
+                  </p>
+                  {filePathMissing && (
+                    <p className="text-[10px] text-[var(--danger,#ef4444)]" data-testid="file-path-missing">
+                      Folder to watch is required.
+                    </p>
+                  )}
+                </Field>
+              )}
               <p className="text-[10px] text-[var(--text-muted)]">Select one or more event types:</p>
               <div className="grid grid-cols-2 gap-1">
               {activeCategory?.events.map((ev) => {
@@ -554,6 +609,9 @@ export function CreateAutomationDialog({
               setActionId(desc.id);
               if (desc.id !== "core.prompt" && desc.id !== "core.skill") {
                 setActionPayload(defaultsForSchema(desc.payloadSchema));
+                // Reset wired inputs when switching actions; a contributed
+                // editor re-populates from the new action's own schema.
+                setActionInputs({});
               }
             }}
           />
@@ -581,11 +639,26 @@ export function CreateAutomationDialog({
             </Field>
           )}
           {actionId !== "core.prompt" && actionId !== "core.skill" && (
-            <ActionPayloadForm
-              schema={actions.find((a) => a.id === actionId)?.payloadSchema ?? []}
-              values={actionPayload}
-              onChange={(k, v) => setActionPayload((p) => ({ ...p, [k]: v }))}
-            />
+            <>
+              <ActionPayloadForm
+                schema={actions.find((a) => a.id === actionId)?.payloadSchema ?? []}
+                values={actionPayload}
+                onChange={(k, v) => setActionPayload((p) => ({ ...p, [k]: v }))}
+              />
+              {/* Contributed payload editor for this action id (e.g. flows-plugin's
+                  input wiring), rendered additively below the generic form. Renders
+                  nothing when no plugin claims the action id. See change:
+                  wire-flow-inputs-in-automation. */}
+              <AutomationActionEditorSlot
+                actionId={actionId}
+                payload={{
+                  ...actionPayload,
+                  ...(Object.keys(actionInputs).length > 0 ? { inputs: actionInputs } : {}),
+                }}
+                onChange={(p) => setActionInputs(extractInputs(p))}
+                cwd={cwd}
+              />
+            </>
           )}
           <Field label="Model">
             <div className="flex gap-1 mb-1">

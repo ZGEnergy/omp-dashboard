@@ -17,8 +17,8 @@
  * unit-testable. See change: add-automation-plugin.
  */
 import type { DiscoveredAutomation } from "../shared/automation-types.js";
-import type { FireContext } from "./trigger-registry.js";
 import { automationKey } from "./scheduler.js";
+import type { FireContext } from "./trigger-registry.js";
 
 export interface StartedRun {
   runId: string;

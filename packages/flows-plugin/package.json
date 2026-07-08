@@ -66,6 +66,13 @@
         "slot": "settings-section",
         "component": "FlowsSettings",
         "tab": "general"
+      },
+      {
+        "slot": "automation-action-editor",
+        "component": "FlowInputWiringClaim",
+        "config": {
+          "actionId": "flows.run"
+        }
       }
     ]
   },

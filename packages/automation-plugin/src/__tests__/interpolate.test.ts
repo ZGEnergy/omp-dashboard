@@ -2,7 +2,7 @@
  * Per-fire `${{trigger}}` interpolation tests.
  * See change: wire-flow-inputs-in-automation.
  */
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { interpolate } from "../server/interpolate.js";
 
 describe("interpolate ${{trigger}}", () => {

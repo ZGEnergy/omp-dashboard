@@ -8,10 +8,10 @@
  * See change: adopt-server-driven-intent-rendering.
  */
 import type { ServerPluginContext } from "@blackbelt-technology/dashboard-plugin-runtime/server";
-import { stateStore } from "./state-store.js";
-import { renderSessionFlowActions } from "./render-actions.js";
 import { provideFlowsActions } from "./automation-actions.js";
 import { readFlowInputs } from "./flow-inputs.js";
+import { renderSessionFlowActions } from "./render-actions.js";
+import { stateStore } from "./state-store.js";
 
 const PLUGIN_ID = "flows";
 

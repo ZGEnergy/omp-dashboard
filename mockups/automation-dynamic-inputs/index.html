@@ -3,342 +3,38 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Automation → Flow: dynamic per-fire inputs</title>
+<title>Automation input wiring — mockups</title>
+<link rel="stylesheet" href="shell.css" />
 <style>
-  :root {
-    --bg: #0f1115; --panel: #171a21; --panel-2: #1d212b; --border: #2a2f3a;
-    --border-2: #363c4a; --text: #e6e9ef; --text-2: #a4acbd; --muted: #6b7383;
-    --accent: #6366f1; --accent-2: #818cf8; --green: #22c55e; --amber: #f59e0b;
-    --cyan: #22d3ee; --pink: #ec4899; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  a { color: var(--accent-2); }
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 80px; }
-  h1 { font-size: 24px; margin: 0 0 4px; }
-  h2 { font-size: 15px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-2);
-    margin: 36px 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
-  .sub { color: var(--text-2); margin: 0 0 8px; }
-  code, .mono { font-family: var(--mono); }
-  .pill { display: inline-block; font-family: var(--mono); font-size: 12px;
-    background: #2a2140; color: var(--accent-2); border: 1px solid #3a2f5c;
-    padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
-  .pill.trig { background: #06283a; color: var(--cyan); border-color: #0d425c; }
-  .pill.git { background: #3a2418; color: #fdba74; border-color: #5c3a24; }
-  .ok { color: var(--green); } .no { color: var(--pink); } .amber { color: var(--amber); }
-
-  .grid { display: grid; grid-template-columns: 420px 1fr; gap: 22px; align-items: start; }
-  @media (max-width: 900px){ .grid { grid-template-columns: 1fr; } }
-
-  /* ---- dialog mock ---- */
-  .dialog { background: var(--panel); border: 1px solid var(--border-2); border-radius: 12px;
-    overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,.45); }
-  .dialog-head { padding: 12px 16px; border-bottom: 1px solid var(--border);
-    display:flex; justify-content:space-between; align-items:center; }
-  .dialog-head b { font-size: 14px; }
-  .dialog-body { padding: 14px 16px; }
-  .group { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 14px;
-    background: var(--panel-2); }
-  .group > .gtitle { font-size: 11px; letter-spacing:.08em; text-transform: uppercase;
-    color: var(--muted); margin: 0 0 10px; }
-  .tabs { display:flex; gap:4px; flex-wrap: wrap; margin-bottom: 10px; }
-  .tab { font-size: 12px; padding: 4px 9px; border-radius: 7px; border:1px solid var(--border);
-    color: var(--text-2); cursor: default; background: #131722; }
-  .tab.on { border-color: var(--accent); color: var(--accent-2); background:#1b1836; }
-  .tab.soon { opacity:.4; }
-  .field { margin-bottom: 10px; }
-  .field label { display:block; font-size: 11px; color: var(--text-2); margin-bottom: 4px; }
-  .input { width:100%; background:#0d1017; border:1px solid var(--border-2); border-radius:8px;
-    color: var(--text); padding: 7px 9px; font-size: 13px; font-family: var(--mono); }
-  .row { display:flex; gap:8px; align-items:center; }
-  .checks { display:flex; gap:14px; font-size:12px; color: var(--text-2); }
-  .checks input { accent-color: var(--accent); }
-
-  /* variable palette */
-  .palette { margin-top: 10px; border-top: 1px dashed var(--border-2); padding-top: 10px; }
-  .palette .lead { font-size: 11px; color: var(--cyan); margin-bottom: 6px; display:flex; align-items:center; gap:6px;}
-  .chips { display:flex; gap:6px; flex-wrap: wrap; }
-  .chip { font-family: var(--mono); font-size: 11.5px; background:#06283a; color: var(--cyan);
-    border:1px solid #0d425c; padding: 2px 8px; border-radius: 7px; cursor: default; }
-  .chip:hover { background:#0a3550; }
-  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
-  .preview { font-family: var(--mono); font-size: 11.5px; margin-top: 6px;
-    background:#0d1017; border:1px solid var(--border); border-radius:7px; padding:6px 8px; }
-  .preview .lab { color: var(--muted); }
-  .preview .val { color: var(--green); }
-  .btns { display:flex; justify-content:flex-end; gap:8px; padding: 12px 16px; border-top:1px solid var(--border); }
-  .btn { font-size:13px; padding:6px 14px; border-radius:8px; border:1px solid var(--border-2);
-    background:#131722; color: var(--text-2); }
-  .btn.primary { background: var(--accent); color:white; border-color: var(--accent); }
-
-  /* ---- explainer callouts ---- */
-  .note { background: var(--panel); border:1px solid var(--border); border-left:3px solid var(--accent);
-    border-radius:8px; padding: 12px 14px; margin: 0 0 14px; }
-  .note.trig { border-left-color: var(--cyan); }
-  .note.eng { border-left-color: var(--amber); }
-  .note.flow { border-left-color: var(--green); }
-  .note h4 { margin:0 0 6px; font-size: 13px; }
-  .note p { margin: 0 0 6px; color: var(--text-2); font-size: 13px; }
-  .note p:last-child { margin-bottom: 0; }
-
-  /* ---- pipeline diagram ---- */
-  .pipe { display:grid; grid-template-columns: 1fr; gap: 0; }
-  .stage { background: var(--panel); border:1px solid var(--border); border-radius: 10px;
-    padding: 12px 14px; position: relative; }
-  .stage + .stage { margin-top: 26px; }
-  .stage::after { content:"▼"; position:absolute; left:50%; bottom:-22px; transform:translateX(-50%);
-    color: var(--border-2); font-size: 14px; }
-  .stage:last-child::after { content:""; }
-  .stage .st-h { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-  .stage .tag { font-size:10px; text-transform:uppercase; letter-spacing:.06em; padding:2px 7px;
-    border-radius:6px; font-weight:600; }
-  .tag.author { background:#2a2140; color:var(--accent-2); }
-  .tag.trigger { background:#06283a; color:var(--cyan); }
-  .tag.engine { background:#3a2c10; color:#fbbf24; }
-  .tag.flows { background:#0c2f1a; color:#4ade80; }
-  .tag.pi { background:#2b1030; color:#f0abfc; }
-  .stage pre { margin: 6px 0 0; background:#0d1017; border:1px solid var(--border);
-    border-radius:8px; padding:10px 12px; overflow-x:auto; font-size: 12px; }
-  .stage .desc { font-size: 12.5px; color: var(--text-2); margin: 2px 0 0; }
-  .kw { color: var(--accent-2); } .str { color: var(--green); } .var { color: var(--cyan); }
-  .cm { color: var(--muted); } .del { color: var(--pink); text-decoration: line-through; }
-
-  table { border-collapse: collapse; width:100%; font-size: 13px; }
-  th, td { border:1px solid var(--border); padding: 7px 10px; text-align:left; vertical-align: top; }
-  th { background: var(--panel-2); color: var(--text-2); font-weight:600; }
-  td .mono { font-size:12px; }
-  .legend { font-size:12px; color:var(--muted); margin-top:8px; }
+  .frames{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+  @media(max-width:900px){.frames{grid-template-columns:1fr}}
+  .frames iframe{width:100%;height:1180px;border:1px solid var(--border-secondary);border-radius:12px;background:var(--bg)}
+  .frames .cap{font-size:12px;color:var(--text-muted);margin:0 0 8px;text-align:center}
+  .frames .cap b{color:var(--text)}
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="page">
+  <h1>Automation input wiring — design mockups</h1>
+  <p class="sub">Groups 5–7 of <code>wire-flow-inputs-in-automation</code>. A <b>file trigger</b> fires per new file;
+  its path is wired into a flow's declared inputs via a new dialog form. Two integration models below.</p>
+  <div class="nav">
+    <a href="additive.html">Additive (chosen) →</a>
+    <a href="replacement.html">Full replacement →</a>
+    <a href="index.html" class="on">Side by side</a>
+    <a href="wiring.html">Original sketch</a>
+  </div>
 
-  <h1>Feeding dynamic inputs to a flow — via an automation</h1>
-  <p class="sub">Mockup + annotated data flow. The automation carries <b>one</b> per-fire value (the file that
-  arrived) into the flow's <span class="pill">task</span> using a generic <span class="pill trig">${{trigger.*}}</span>
-  variable channel. Any trigger fills the bag; any action's payload consumes it; the UI shows a palette of whatever
-  the selected trigger provides.</p>
-
-  <h2>1 · The dialog</h2>
-  <div class="grid">
-
-    <!-- DIALOG MOCK -->
-    <div class="dialog">
-      <div class="dialog-head"><b>Create Automation</b><span class="mono" style="color:var(--muted);font-size:12px">folder scope · /repo</span></div>
-      <div class="dialog-body">
-
-        <div class="group">
-          <p class="gtitle">Trigger</p>
-          <div class="tabs">
-            <span class="tab">Scheduled</span>
-            <span class="tab soon">OpenSpec</span>
-            <span class="tab soon">Git</span>
-            <span class="tab on">File</span>
-            <span class="tab soon">Webhook</span>
-          </div>
-
-          <div class="field">
-            <label>Watch folder</label>
-            <div class="row"><input class="input" value="/spool" /></div>
-          </div>
-          <div class="field">
-            <label>On event</label>
-            <div class="checks">
-              <label><input type="checkbox" checked /> created</label>
-              <label><input type="checkbox" /> changed</label>
-              <label><input type="checkbox" /> deleted</label>
-            </div>
-          </div>
-          <div class="field">
-            <label>Settle (avoid half-written files)</label>
-            <div class="checks">
-              <label><input type="radio" name="settle" checked /> rename-only</label>
-              <label><input type="radio" name="settle" /> size-stable 500ms</label>
-            </div>
-          </div>
-
-          <!-- VARIABLE PALETTE : the new UI primitive -->
-          <div class="palette">
-            <div class="lead">◈ Variables this trigger provides <span style="color:var(--muted)">(click to insert)</span></div>
-            <div class="chips">
-              <span class="chip">${{trigger.file}}</span>
-              <span class="chip">${{trigger.filename}}</span>
-              <span class="chip">${{trigger.dir}}</span>
-              <span class="chip">${{trigger.ext}}</span>
-            </div>
-            <p class="hint">Provided by the <b>File</b> trigger. Pick <b>Git</b> and this strip becomes
-              <span class="pill git">${{trigger.sha}}</span> <span class="pill git">${{trigger.branch}}</span> —
-              the dialog renders whatever the trigger declares.</p>
-          </div>
-        </div>
-
-        <div class="group">
-          <p class="gtitle">Action</p>
-          <div class="field">
-            <label>Action</label>
-            <input class="input" value="Run a flow  (flows.run)" />
-          </div>
-          <div class="field">
-            <label>Flow</label>
-            <input class="input" value="invoicebot:process" />
-          </div>
-          <div class="field">
-            <label>Task <span style="color:var(--muted)">— the flow's initial task</span></label>
-            <textarea class="input" rows="2">Process invoice at ${{trigger.file}}</textarea>
-            <div class="chips" style="margin-top:6px">
-              <span class="chip">insert ▸ ${{trigger.file}}</span>
-              <span class="chip">${{trigger.dir}}</span>
-            </div>
-            <div class="preview"><span class="lab">preview ▸ </span><span class="val">Process invoice at /spool/inv-042.pdf</span></div>
-            <p class="hint">Preview substitutes each token's declared <i>sample</i> value — like the cron field's
-              "Next run". No real file needed to validate the template.</p>
-          </div>
-        </div>
-      </div>
-      <div class="btns"><span class="btn">Cancel</span><span class="btn primary">Create</span></div>
-    </div>
-
-    <!-- DIALOG EXPLAINERS -->
+  <div class="frames">
     <div>
-      <div class="note trig">
-        <h4>◈ Where the variables come from</h4>
-        <p>The chips are <b>not hardcoded in the dialog</b>. The selected trigger declares them
-          (<span class="mono">TriggerType.vars</span>), and the server sends them to the client on the same
-          descriptor that already carries the trigger taxonomy.</p>
-        <p>Add a new trigger → its variables appear automatically. <b>Zero dialog edits.</b> This is what
-          "any code can fill the event" looks like in the UI.</p>
-      </div>
-      <div class="note">
-        <h4>Why <span class="pill">task</span>, not typed <span class="pill">inputs</span>, here</h4>
-        <p>The automation carries exactly one value — the file path. A single value rides <span class="pill">task</span>
-          cleanly. Typed <span class="pill">inputs</span> is for <i>structured</i> per-fire data
-          (<span class="mono">{file, connector_id, receivedAt}</span>) — which the file trigger doesn't have.</p>
-        <p class="mono" style="font-size:12px;color:var(--muted)">one value → task &nbsp;·&nbsp; many/typed values → inputs</p>
-      </div>
-      <div class="note eng">
-        <h4>The author never edits YAML to discover names</h4>
-        <p>Palette lists the tokens. Preview shows the shape. Unknown token
-          (<span class="mono">${{trigger.fil}}</span>) → preview renders <span class="amber">""</span> + amber hint.
-          Same chips work in <span class="pill">task</span>, a prompt, or any action's payload field.</p>
-      </div>
+      <p class="cap"><b>Additive</b> — generic Flow+Task form + inputs rows below (chosen)</p>
+      <iframe src="additive.html" title="additive"></iframe>
+    </div>
+    <div>
+      <p class="cap"><b>Full replacement</b> — flows editor owns Flow+Task+Inputs (needs new endpoint)</p>
+      <iframe src="replacement.html" title="replacement"></iframe>
     </div>
   </div>
-
-  <h2>2 · What the dialog writes — automation.yaml</h2>
-  <div class="stage" style="margin-bottom:0">
-    <div class="st-h"><span class="tag author">author output</span><b>&lt;repo&gt;/.pi/automation/invoice-watch/automation.yaml</b></div>
-    <pre><span class="kw">on</span>:
-  <span class="kw">kind</span>: file           <span class="cm"># the File trigger</span>
-  <span class="kw">path</span>: <span class="str">/spool</span>          <span class="cm"># static config (from the folder field)</span>
-  <span class="kw">events</span>: [created]
-<span class="kw">action</span>:
-  <span class="kw">kind</span>: flows.run
-  <span class="kw">payload</span>:
-    <span class="kw">flow</span>: <span class="str">invoicebot:process</span>
-    <span class="kw">task</span>: <span class="str">"Process invoice at </span><span class="var">${{trigger.file}}</span><span class="str">"</span>   <span class="cm"># ← template; filled per-fire</span>
-<span class="kw">concurrency</span>: queue         <span class="cm"># FIFO — one file = one session (already built)</span></pre>
-    <p class="desc">Static config (folder, flow) is entered once. The <span class="var">${{trigger.file}}</span> token
-      is the only dynamic part — a placeholder resolved at fire-time, not at save-time.</p>
-  </div>
-
-  <h2>3 · The per-fire data flow (five hops, three boundaries)</h2>
-  <p class="sub">Each arriving file walks this path. The <span class="var">variable bag</span> is the new channel;
-    everything green already exists.</p>
-
-  <div class="pipe">
-
-    <div class="stage">
-      <div class="st-h"><span class="tag trigger">1 · file trigger &nbsp;(new)</span></div>
-      <div class="desc"><code>fs.watch("/spool")</code> sees <code>inv-042.pdf</code> land, then fires with a
-        <b>generic variable bag</b> — any trigger fills whatever it knows:</div>
-      <pre><span class="kw">fire</span>({ firedAt, <span class="var">vars</span>: {
-  <span class="var">file</span>:     <span class="str">"/spool/inv-042.pdf"</span>,
-  <span class="var">filename</span>: <span class="str">"inv-042.pdf"</span>,
-  <span class="var">dir</span>:      <span class="str">"/spool"</span>,
-  <span class="var">ext</span>:      <span class="str">".pdf"</span>
-}})</pre>
-    </div>
-
-    <div class="stage">
-      <div class="st-h"><span class="tag engine">2 · automation engine &nbsp;(un-cut the wire)</span></div>
-      <div class="desc">Today the fire context is <span class="del">dropped</span> at <code>onFire</code>. Fix = thread
-        <code>ctx</code> through scheduler → runner (queue holds <code>{automation, ctx}</code>) → dispatch.</div>
-      <pre><span class="cm">// engine.buildRunDispatch — ONE central interpolation pass</span>
-<span class="kw">const</span> payload = <span class="var">interpolate</span>(action.payload, ctx.vars);
-<span class="cm">//   "Process invoice at ${{trigger.file}}"</span>
-<span class="cm">// → "Process invoice at /spool/inv-042.pdf"</span></pre>
-      <p class="desc"><b>No action-specific code.</b> Interpolation runs over the whole payload for <i>every</i>
-        action. <span class="pill">flows.run</span> stays untouched — it just reads an already-filled payload.</p>
-    </div>
-
-    <div class="stage">
-      <div class="st-h"><span class="tag flows">3 · flows.run action &nbsp;(unchanged)</span></div>
-      <div class="desc">Builds the cross-boundary event from the (already-substituted) payload:</div>
-      <pre><span class="kw">buildEvent</span>({ payload }) ⟶
-  { eventType: <span class="str">"flow:run"</span>,
-    data: { flowName: <span class="str">"invoicebot:process"</span>,
-            <span class="var">task</span>: <span class="str">"Process invoice at /spool/inv-042.pdf"</span> } }</pre>
-    </div>
-
-    <div class="stage">
-      <div class="st-h"><span class="tag engine">4 · emit into the spawned run session</span></div>
-      <div class="desc">Automation spawns a fresh pi session for this run, then emits the event into it
-        (<b>not</b> a direct call to flows — a third boundary):</div>
-      <pre>ctx.<span class="var">emitEventToSession</span>(sessionId, <span class="str">"flow:run"</span>, data)</pre>
-    </div>
-
-    <div class="stage">
-      <div class="st-h"><span class="tag pi">5 · pi-flows inside that session &nbsp;(already wired)</span></div>
-      <div class="desc">A copy of pi-flows runs in the spawned session and listens for the event:</div>
-      <pre>pi.events.<span class="kw">on</span>(<span class="str">"flow:run"</span>, d ⟶
-  runFlow(d.flowName, { <span class="var">task</span>: d.task }))
-
-<span class="cm"># flow step resolves ${{task}} → the real path</span>
-- id: process
-  task: Process invoice at <span class="var">${{task}}</span>
-      <span class="cm"># → "Process invoice at /spool/inv-042.pdf"</span></pre>
-      <p class="desc"><span class="ok">✔ Zero flow.yaml change.</span> The flow already treats <code>task</code> as a
-        file path (<code>contentHash(task)</code>). Next file → fresh <code>ctx</code> → its own run.</p>
-    </div>
-  </div>
-
-  <h2>4 · task vs inputs — when to use which</h2>
-  <table>
-    <tr><th>Path</th><th>What it sends</th><th>Channel</th><th>Status</th></tr>
-    <tr>
-      <td>Fresh — automation / file trigger</td>
-      <td>one file path</td>
-      <td><span class="pill">dynamic task</span> via <span class="pill trig">${{trigger.file}}</span></td>
-      <td class="amber">← the dashboard fix</td>
-    </tr>
-    <tr>
-      <td>Resume — your CLI tool</td>
-      <td>structured <span class="mono">{invoice_id}</span></td>
-      <td><span class="pill">typed inputs</span> → <span class="mono">${{flow.input.invoice_id}}</span></td>
-      <td class="ok">✔ works today</td>
-    </tr>
-  </table>
-  <p class="legend">The automation only ever has one value → it uses <b>task</b>. Structured values → <b>inputs</b>.
-    Both ride the same <code>flow:run</code> event (<code>data.task</code> / <code>data.inputs</code>); pi-flows
-    consumes either.</p>
-
-  <h2>5 · Change surface</h2>
-  <table>
-    <tr><th>#</th><th>File</th><th>Change</th><th></th></tr>
-    <tr><td>1</td><td class="mono">trigger-registry.ts</td><td><code>FireContext.vars?: Record&lt;string,unknown&gt;</code> + optional <code>TriggerType.vars</code> descriptors</td><td>wire + UI feed</td></tr>
-    <tr><td>2</td><td class="mono">interpolate.ts <span class="ok">(new)</span></td><td>pure recursive <code>${{trigger.*}}</code> substitution over payload</td><td>consumer</td></tr>
-    <tr><td>3</td><td class="mono">engine.ts</td><td>thread <code>ctx</code>; run <code>interpolate(payload, ctx.vars)</code> in dispatch</td><td>wire</td></tr>
-    <tr><td>4</td><td class="mono">runner.ts</td><td><code>fire(a, ctx)</code>; queue holds <code>{automation, ctx}</code></td><td>wire</td></tr>
-    <tr><td>5</td><td class="mono">file-trigger.ts <span class="ok">(new)</span></td><td>watch folder; fill <code>vars.file/filename/dir/ext</code>; declare <code>vars</code></td><td>producer</td></tr>
-    <tr><td>6</td><td class="mono">CreateAutomationDialog.tsx</td><td>folder field + variable palette + live preview</td><td>UI</td></tr>
-    <tr><td>—</td><td class="mono no">flows-plugin</td><td class="no">untouched</td><td>—</td></tr>
-    <tr><td>—</td><td class="mono no">flow.yaml</td><td class="no">untouched</td><td>—</td></tr>
-    <tr><td>—</td><td class="mono no">action-registry signatures</td><td class="no">untouched</td><td>—</td></tr>
-  </table>
-  <p class="legend">Generic-by-design: rows 1–4 un-cut the wire once; the producer (5) and UI (6) are the only
-    per-trigger work. Every future trigger reuses the same bag + interpolator + palette.</p>
-
 </div>
 </body>
 </html>

@@ -2,11 +2,12 @@
  * Read-only flow input-schema reader tests.
  * See change: wire-flow-inputs-in-automation.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readFlowInputs, flowYamlPath } from "../server/flow-inputs.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { flowYamlPath, readFlowInputs } from "../server/flow-inputs.js";
 
 function writeFlow(cwd: string, ns: string, name: string, yaml: string): void {
   const dir = path.join(cwd, ".pi", "flows", "flows", ns, name);

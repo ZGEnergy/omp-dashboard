@@ -4,15 +4,16 @@
  * pure-publisher wiring (provide, no consume). See change:
  * decouple-automation-action-registry.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ACTION_CONTRIBUTION_KEY,
   discoverFlows,
   flowsActionContributions,
   provideFlowsActions,
-  ACTION_CONTRIBUTION_KEY,
 } from "../server/automation-actions.js";
 
 function mkFlow(root: string, ns: string, name: string): void {

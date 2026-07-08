@@ -2,10 +2,9 @@
  * Runner concurrency-policy tests: skip-drop, queue-defer, parallel.
  * See change: add-automation-plugin.
  */
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createRunner } from "../server/runner.js";
-import type { DiscoveredAutomation } from "../shared/automation-types.js";
-import type { Concurrency } from "../shared/automation-types.js";
+import type { Concurrency, DiscoveredAutomation } from "../shared/automation-types.js";
 
 let counter = 0;
 function automation(concurrency: Concurrency, name = "nightly"): DiscoveredAutomation {

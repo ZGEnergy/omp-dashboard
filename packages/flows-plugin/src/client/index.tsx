@@ -40,6 +40,10 @@ export { FlowAgentsToolRenderer } from "./FlowAgentsToolRenderer.js";
 export { FlowsSettings } from "./FlowsSettings.js";
 export type { FlowsPluginConfig } from "./FlowsSettings.js";
 
+// Input-wiring editor claimed into automation-plugin's `automation-action-editor`
+// slot for `flows.run`. See change: wire-flow-inputs-in-automation.
+export { FlowInputWiring, FlowInputWiringClaim } from "./FlowInputWiring.js";
+
 export { FlowSummaryClaim } from "./FlowSummary.js";
 export { FlowYamlPreviewClaim } from "./FlowYamlPreview.js";
 export { SessionFlowActionsClaim } from "./SessionFlowActions.js";

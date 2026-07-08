@@ -3,11 +3,12 @@
  * Uses a fake watcher (deterministic event control) + real tmp files for
  * existence checks. See change: wire-flow-inputs-in-automation.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { makeFileTrigger, type DirWatcher } from "../server/file-trigger.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { type DirWatcher, makeFileTrigger } from "../server/file-trigger.js";
 import type { ArmDeps, FireContext } from "../server/trigger-registry.js";
 
 const armDeps: ArmDeps = { now: () => 111, setTimer: (fn) => ({ clear: () => {} }) };

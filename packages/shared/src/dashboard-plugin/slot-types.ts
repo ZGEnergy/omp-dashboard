@@ -21,6 +21,7 @@ export type SlotId =
   | "anchored-popover"
   | "command-route"
   | "tool-renderer"
+  | "automation-action-editor"
   // React-or-descriptor slots
   | "session-card-memory"
   | "session-card-flows"
@@ -120,6 +121,12 @@ export const SLOT_DEFINITIONS: Record<SlotId, SlotDefinition> = {
     multiplicity: "many",
     payloadTier: "react-only",
     description: "Custom React renderer for a specific tool call by toolName",
+  },
+  "automation-action-editor": {
+    multiplicity: "many",
+    payloadTier: "react-only",
+    description:
+      "Custom React payload editor for a specific automation action id (keyed by config.actionId). Rendered by the create-automation dialog additively below the generic ActionPayloadForm; receives { payload, onChange, cwd }.",
   },
   // Descriptor-only (extension-ui-system)
   "management-modal": {
