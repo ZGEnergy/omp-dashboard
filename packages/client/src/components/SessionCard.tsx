@@ -30,6 +30,7 @@ export const sourceBadgeColors = sourceBadgeColorsExt;
 import { SessionCardActionBarSlot, SessionCardBadgeSlot, SessionCardFlowsSlot, SessionCardMemorySlot, useHasWidgetBarPrompt, useSlotHasClaimsForSession, WorktreeCardSectionSlot } from "@blackbelt-technology/dashboard-plugin-runtime";
 import type { CommandInfo, DashboardSession, ImageContent, OpenSpecChange, OpenSpecData, OpenSpecGroup } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
+import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import type { InflightBashTool } from "../hooks/useInflightBashTools.js";
 import { useMobile } from "../hooks/useMobile.js";
 import type { DetectedEditor } from "../lib/editor-api.js";
@@ -502,6 +503,12 @@ export function SessionCard({
   // See change: throttle-idle-ui-animations.
   const pulseClass = getCardPulseClass(session, hasWidgetBarPrompt);
   const stripeFxClass = getCardStripeFxClass(pulseClass);
+  // Pause the card's compositor FX (neon glow/ring when selected, stripe sweep
+  // when active) while the card is scrolled off-screen in the sidebar. Only
+  // cards that actually carry an animation are observed. See change:
+  // reduce-chat-render-cpu-umbrella (Phase 1, task 2.5).
+  const cardFxRef = useFxVisibility<HTMLLIElement>();
+  const hasAnimatedFx = isSelected || !!stripeFxClass;
   // OpenSpec workflow config gates which action buttons render in the
   // OPENSPEC subcard. See change: redesign-session-card-and-composer
   // (config-driven-workflow).
@@ -530,6 +537,7 @@ export function SessionCard({
   if (isMobile) {
     return (
       <li
+        ref={hasAnimatedFx ? cardFxRef : undefined}
         data-session-id={session.id}
         onClick={() => onSelect(session.id)}
         className={`relative isolate px-4 py-3 cursor-pointer rounded-xl shadow-[inset_0_1px_0_var(--elevation-rim),0_4px_8px_var(--shadow-card)] border hover:shadow-[inset_0_1px_0_var(--elevation-rim),0_6px_12px_var(--shadow-card)] transition-all duration-200 ${
@@ -642,6 +650,7 @@ export function SessionCard({
 
   return (
     <li
+      ref={hasAnimatedFx ? cardFxRef : undefined}
       data-session-id={session.id}
       onClick={() => onSelect(session.id)}
       className={`relative isolate px-2 py-2 cursor-pointer rounded-xl shadow-[inset_0_1px_0_var(--elevation-rim),0_4px_8px_var(--shadow-card)] border hover:shadow-[inset_0_1px_0_var(--elevation-rim),0_6px_12px_var(--shadow-card)] hover:-translate-y-0.5 transition-all duration-200 ${

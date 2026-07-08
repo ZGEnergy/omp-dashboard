@@ -2,7 +2,7 @@
  * Hook that handles ServerToBrowserMessage dispatch.
  * Extracted from App.tsx — maps each message type to the correct state setter.
  */
-import { setRecoveryOffer, clearRecoveryOffer } from "../lib/recovery-offer-bus.js";
+
 import type {
   PreflightReason,
   ServerToBrowserMessage,
@@ -12,12 +12,14 @@ import type { DisplayPrefs } from "@blackbelt-technology/pi-dashboard-shared/dis
 import type { EditorInstanceStatus } from "@blackbelt-technology/pi-dashboard-shared/editor-types.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, FileEntry, ModelInfo, OpenSpecData, OpenSpecGroup, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { DiscoveredServerInfo } from "../components/ServerSelector.js";
+import { foldLiveEvents, type QueuedLiveEvent } from "../lib/coalesce-live-events.js";
 import { isVisibleCwd } from "../lib/cwd-visibility.js";
-import { addInteractiveRequest, applyPromptReceived, createInitialState, dismissInteractiveRequest, reduceEvent, resolveInteractiveRequest, type SessionState } from "../lib/event-reducer.js";
+import { addInteractiveRequest, applyPromptReceived, createInitialState, dismissInteractiveRequest, reduceEvent, type SessionState } from "../lib/event-reducer.js";
 import { encodeFolderPath } from "../lib/folder-encoding.js";
 import { clearLoadingHistory, HYDRATE_CEILING_MS, rearmLoadingHistory } from "../lib/loading-history.js";
+import { clearRecoveryOffer, setRecoveryOffer } from "../lib/recovery-offer-bus.js";
 import type { ReplayPersister } from "../lib/replay-persist.js";
 import { inferPlatform, pathKey } from "../lib/session-grouping.js";
 import { pushSpawnErrorToast } from "../lib/spawn-error-toast-bus.js";
@@ -154,7 +156,81 @@ export function useMessageHandler(
   } = setters;
   const { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, loadingHistoryTimersRef, replayPersister } = deps;
 
+  // Phase 3 (change: reduce-chat-render-cpu-umbrella): live `event` bursts
+  // arrive one-per-WS-frame in separate macrotasks, so React 18 automatic
+  // batching does NOT merge their setSessionStates calls — N events cost N
+  // ChatView renders. We queue the (cheap) per-event side effects aside and
+  // coalesce the (expensive) state application into one fold per animation
+  // frame. Per-event side effects (seq tracking, durable replay buffer, plugin
+  // mirror) stay synchronous in `case "event"`, so their timing is unchanged.
+  const liveQueueRef = useRef<Map<string, QueuedLiveEvent[]>>(new Map());
+  const flushRafRef = useRef<number | null>(null);
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushLiveEvents = useCallback(() => {
+    if (flushRafRef.current != null) {
+      cancelAnimationFrame(flushRafRef.current);
+      flushRafRef.current = null;
+    }
+    if (flushTimerRef.current != null) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    const queues = liveQueueRef.current;
+    if (queues.size === 0) return;
+    // Snapshot + clear so events arriving during the flush go to the next frame.
+    const drained = new Map(queues);
+    queues.clear();
+    setSessionStates((prev) => {
+      let next: Map<string, SessionState> | null = null;
+      for (const [sessionId, events] of drained) {
+        if (events.length === 0) continue;
+        const base = next ?? prev;
+        const current = base.get(sessionId) ?? createInitialState();
+        const { state } = foldLiveEvents(current, events);
+        if (!next) next = new Map(prev);
+        next.set(sessionId, state);
+      }
+      return next ?? prev;
+    });
+  }, [setSessionStates]);
+
+  const scheduleLiveFlush = useCallback(() => {
+    if (flushRafRef.current != null || flushTimerRef.current != null) return;
+    // rAF is throttled/suspended on a backgrounded tab — fall back to a
+    // macrotask so events still apply and none is delayed indefinitely.
+    if (typeof document !== "undefined" && document.hidden) {
+      flushTimerRef.current = setTimeout(() => {
+        flushTimerRef.current = null;
+        flushLiveEvents();
+      }, 0);
+    } else if (typeof requestAnimationFrame === "function") {
+      flushRafRef.current = requestAnimationFrame(() => {
+        flushRafRef.current = null;
+        flushLiveEvents();
+      });
+    } else {
+      flushTimerRef.current = setTimeout(() => {
+        flushTimerRef.current = null;
+        flushLiveEvents();
+      }, 0);
+    }
+  }, [flushLiveEvents]);
+
+  useEffect(
+    () => () => {
+      if (flushRafRef.current != null) cancelAnimationFrame(flushRafRef.current);
+      if (flushTimerRef.current != null) clearTimeout(flushTimerRef.current);
+    },
+    [],
+  );
+
   return useCallback((msg: ServerToBrowserMessage) => {
+    // Preserve strict ordering: any queued live events must apply before a
+    // non-`event` message can mutate the same session's state (reset, replay,
+    // interactive request, removal). Draining here keeps coalescing on the hot
+    // path (consecutive `event` bursts) while guaranteeing correctness.
+    if (msg.type !== "event" && liveQueueRef.current.size > 0) flushLiveEvents();
     switch (msg.type) {
       case "session_added":
         setSessions((prev) => {
@@ -293,13 +369,9 @@ export function useMessageHandler(
         clearSessionEvents(msg.sessionId);
         break;
 
-      case "event":
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          const current = next.get(msg.sessionId) ?? createInitialState();
-          next.set(msg.sessionId, reduceEvent(current, msg.event, { isLive: true }));
-          return next;
-        });
+      case "event": {
+        // Per-event side effects stay synchronous — timing identical to the
+        // old per-event path (verified against the replay-cache test):
         if (msg.seq > (maxSeqMapRef.current.get(msg.sessionId) ?? 0)) {
           maxSeqMapRef.current.set(msg.sessionId, msg.seq);
         }
@@ -311,7 +383,15 @@ export function useMessageHandler(
         // and the plugin store consume the same `msg.event`. See
         // change: pluginize-flows-via-registry.
         publishSessionEvent(msg.sessionId, msg.event);
+        // Coalesce the expensive part — the ChatView re-render via
+        // setSessionStates — into one fold per frame. See change:
+        // reduce-chat-render-cpu-umbrella (Phase 3).
+        const queued = liveQueueRef.current.get(msg.sessionId);
+        if (queued) queued.push({ seq: msg.seq, event: msg.event });
+        else liveQueueRef.current.set(msg.sessionId, [{ seq: msg.seq, event: msg.event }]);
+        scheduleLiveFlush();
         break;
+      }
 
       // Bridge ack for an idle-scoped optimistic send. fresh:true promotes the
       // pendingPrompt bubble to "sent"; fresh:false drops it (the send raced
@@ -985,5 +1065,5 @@ export function useMessageHandler(
         break;
       }
     }
-  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses, setDiscoveredServers, setLoadingHistory, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef, selectedSessionIdRef, loadingHistoryTimersRef, replayPersister]);
+  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses, setDiscoveredServers, setLoadingHistory, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef, selectedSessionIdRef, loadingHistoryTimersRef, replayPersister, flushLiveEvents, scheduleLiveFlush]);
 }

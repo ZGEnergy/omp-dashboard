@@ -7,6 +7,7 @@ import { Icon } from "@mdi/react";
 import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isDebugTool } from "../hooks/useDebugToolsVisible.js";
 import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
+import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import { useMobile } from "../hooks/useMobile.js";
 import { findActiveInteractiveToolResultIds, findRetriedErrorIds, findSurfaceSuppressedErrorIds } from "../lib/collapse-retried-errors.js";
 // RetryBanner + ErrorBanner replaced by the unified SessionBanner mounted
@@ -199,7 +200,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, onCollapseStreamingThinking }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, onCollapseStreamingThinking }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // True when the user wants the chat to chase new content. Flips to false on
   // any real scroll-up gesture, on explicit navigation (scrollToTurn), and on
@@ -212,6 +213,9 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   const showDebugTools = prefs.debugTools;
   const prevSessionRef = useRef(sessionId);
   const isMobile = useMobile();
+  // Pause the streaming bubble's glow/shimmer when it scrolls off-screen.
+  // See change: reduce-chat-render-cpu-umbrella (Phase 1, task 2.5).
+  const streamFxRef = useFxVisibility<HTMLDivElement>();
   const bubbleMax = isMobile ? "max-w-[95%]" : "max-w-[80%]";
   /** Force wide when message contains a mermaid diagram */
   const bubbleWide = isMobile ? "w-[95%]" : "w-[95%]";
@@ -327,7 +331,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     // resets the hoisted preview — a preview open in session A never leaks into B.
     <FilePreviewProvider key={sessionId}>
     <div className="flex-1 relative overflow-hidden flex flex-col">
-    <div ref={scrollRef} onScroll={handleScroll} style={{ overflowAnchor: "auto" }} className={`h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"} space-y-1`}>
+    <div ref={scrollRef} onScroll={handleScroll} style={{ overflowAnchor: "auto" }} className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"} space-y-1`}>
       {groupedMessages.map((item: BurstItem) => {
         // Temporal burst group of heterogeneous tool calls (carries collapse
         // state → key by first-member id, NOT positional idx, so event-trim
@@ -571,23 +575,27 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
         );
       })}
 
-      {/* Streaming thinking */}
+      {/* Streaming thinking. `chat-cv-skip` opts the live tail out of the
+          content-visibility optimization so it is never skipped. See change:
+          reduce-chat-render-cpu-umbrella (Phase 2, task 4.2). */}
       {state.streamingThinking && prefs.reasoning && (
-        <ThinkingBlock
-          content={state.streamingThinking}
-          isStreaming
-          defaultExpanded
-          startedAt={state.thinkingStartedAt}
-          onUserCollapse={onCollapseStreamingThinking}
-        />
+        <div className="chat-cv-skip">
+          <ThinkingBlock
+            content={state.streamingThinking}
+            isStreaming
+            defaultExpanded
+            startedAt={state.thinkingStartedAt}
+            onUserCollapse={onCollapseStreamingThinking}
+          />
+        </div>
       )}
 
       {/* Streaming text — carries the same liveness cue as a running group
           (edge-pulse glow + shimmer sweep) while the turn is alive. Settles
           static the instant streaming ends. See change: enhance-tool-call-grouping. */}
       {state.streamingText && (
-        <div className="flex justify-start">
-          <div className={`chat-stream-live bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl shadow-md px-4 py-2 ${hasMermaid(state.streamingText) ? bubbleWide : bubbleMax}`}>
+        <div className="flex justify-start chat-cv-skip">
+          <div ref={streamFxRef} className={`chat-stream-live bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl shadow-md px-4 py-2 ${hasMermaid(state.streamingText) ? bubbleWide : bubbleMax}`}>
             <MarkdownContent content={state.streamingText} context={toolContext} />
             <span className="inline-block w-1.5 h-4 bg-[var(--bg-surface)] animate-pulse ml-0.5" />
           </div>
@@ -608,7 +616,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
           — pi exposes no queue-mutation API to extensions. See change:
           honest-mid-turn-queue-surface. */}
       {pendingSteering && pendingSteering.length > 0 && pendingSteering.map((steerText, idx) => (
-        <div key={`pending-steer-${idx}-${steerText.slice(0, 16)}`} data-testid="pending-steer-card" className="mt-4 mb-4 flex justify-end">
+        <div key={`pending-steer-${idx}-${steerText.slice(0, 16)}`} data-testid="pending-steer-card" className="mt-4 mb-4 flex justify-end chat-cv-skip">
           <div className={`relative bg-blue-500/10 border border-blue-500/20 border-l-2 border-l-blue-400 rounded-xl shadow-md px-4 py-2 ${bubbleMax}`}>
             <div className="flex items-center gap-1.5 mb-1 text-[10px] uppercase tracking-wider text-blue-400/80 font-medium">
               <Icon path={mdiLoading} size={0.45} className="animate-spin" />
@@ -699,3 +707,12 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     </FilePreviewProvider>
   );
 });
+
+// Memoized so keystrokes into the command input (which re-render App) do not
+// re-render the full transcript. Prerequisite for honest Phase 3 batching
+// measurement — un-memoized renders otherwise mask the gains.
+// See change: reduce-chat-render-cpu-umbrella (Phase 4).
+// Props are stabilized at the call site (App.tsx): the 4 previously-unstable
+// props (onForkFromMessage, onCloseInlineTerminal, onCollapseStreamingThinking,
+// pendingSteering) are now referentially stable via useCallback / EMPTY const.
+export const ChatView = React.memo(ChatViewInner);

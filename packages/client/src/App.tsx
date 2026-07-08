@@ -289,6 +289,11 @@ function PiResourceFileRoute({
   );
 }
 
+// Referentially-stable empty steering array so the common (no-pending) case
+// does not hand ChatView a fresh [] literal every render, which would defeat
+// its React.memo. See change: reduce-chat-render-cpu-umbrella (Phase 4).
+const EMPTY_STEERING: string[] = [];
+
 export default function App() {
   const { t } = useI18n();
   // Pause all CSS animations while the window is hidden to the tray /
@@ -1063,6 +1068,33 @@ export default function App() {
     removeFollowUpEntry, editFollowUpEntry, promoteFollowUpEntry, clearFollowUpEntries,
   } = sessionActions;
 
+  // Stabilized ChatView callbacks: hoisted from inline arrows at the call site
+  // so keystrokes into the command input (which re-render App) do not defeat
+  // ChatView's React.memo. Deps include selectedId so a session switch still
+  // rebinds. See change: reduce-chat-render-cpu-umbrella (Phase 4).
+  const handleForkFromMessage = useCallback(
+    (entryId: string) => {
+      if (selectedId) handleResumeSession(selectedId, "fork", entryId);
+    },
+    [selectedId, handleResumeSession],
+  );
+  const handleCloseInlineTerminalForSelected = useCallback(
+    (terminalId: string) => {
+      if (selectedId) handleCloseInlineTerminal(selectedId, terminalId);
+    },
+    [selectedId, handleCloseInlineTerminal],
+  );
+  const handleCollapseStreamingThinking = useCallback(() => {
+    if (!selectedId) return;
+    setSessionStates((prev) => {
+      const cur = prev.get(selectedId);
+      if (!cur || cur.streamingThinkingCollapsed) return prev;
+      const next = new Map(prev);
+      next.set(selectedId, { ...cur, streamingThinkingCollapsed: true });
+      return next;
+    });
+  }, [selectedId, setSessionStates]);
+
   // Flow command interception is gone. /flows, /flows:new, /flows:edit,
   // /flows:delete are now handled by flows-plugin's command-route claims
   // (see manifest claims in packages/flows-plugin/package.json). The
@@ -1542,13 +1574,7 @@ export default function App() {
             </div>
           }>
             <SessionAssetsProvider assets={selectedSession?.assets}>
-            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} onCloseInlineTerminal={selectedId ? (tid) => handleCloseInlineTerminal(selectedId, tid) : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? []} loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false} onCollapseStreamingThinking={selectedId ? () => setSessionStates((prev) => {
-              const cur = prev.get(selectedId);
-              if (!cur || cur.streamingThinkingCollapsed) return prev;
-              const next = new Map(prev);
-              next.set(selectedId, { ...cur, streamingThinkingCollapsed: true });
-              return next;
-            }) : undefined} />
+            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? handleForkFromMessage : undefined} onCloseInlineTerminal={selectedId ? handleCloseInlineTerminalForSelected : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? EMPTY_STEERING} loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false} onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined} />
             </SessionAssetsProvider>
           </ErrorBoundary>
           {/* Unified status banner. Sticky above the command input — ONE

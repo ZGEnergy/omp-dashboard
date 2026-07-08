@@ -30,6 +30,7 @@ import { mdiCheck, mdiChevronDown, mdiChevronRight, mdiConsoleLine, mdiLoading }
 import { Icon } from "@mdi/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
+import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import { useMobile } from "../hooks/useMobile.js";
 import type { ChatMessage } from "../lib/event-reducer.js";
 import type { ToolBurstGroup as ToolBurstGroupData } from "../lib/group-tool-bursts.js";
@@ -110,8 +111,14 @@ function GroupFrame({
   children: ReactNode;
 }) {
   const isMobile = useMobile();
+  // Pause the header shimmer + spinner pulse while this running group is
+  // off-screen. Only running groups are observed (completed groups carry no
+  // animation, and a long transcript has thousands of them). See change:
+  // reduce-chat-render-cpu-umbrella (Phase 1, task 2.5).
+  const fxRef = useFxVisibility<HTMLDivElement>();
   return (
     <div
+      ref={isRunning ? fxRef : undefined}
       className={`${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3`}
       data-testid="tool-burst-group"
       data-running={isRunning ? "true" : "false"}

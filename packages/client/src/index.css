@@ -277,9 +277,13 @@ body {
    group header carries an indeterminate shimmer sweep + a pulsing spinner; the
    running→done flip plays a one-shot completion flash. Reduced-motion strips
    every animation, leaving static text/icons. */
+/* Compositor-only sweep: the highlight band is a full-bleed pseudo-element
+   translated across the (overflow-hidden) parent. Was `background-position`
+   (non-composited, forces paint every frame). See change:
+   reduce-chat-render-cpu-umbrella (Phase 1, task 2.3). */
 @keyframes tool-group-sweep {
-  0%   { background-position: 160% 0; }
-  100% { background-position: -60% 0; }
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 @keyframes tool-group-spin-pulse {
   0%, 100% { opacity: 1; }
@@ -300,8 +304,8 @@ body {
   pointer-events: none;
   border-radius: inherit;
   background: linear-gradient(100deg, transparent 20%, rgba(250, 204, 21, 0.10) 45%, rgba(250, 204, 21, 0.16) 50%, rgba(250, 204, 21, 0.10) 55%, transparent 80%);
-  background-size: 220% 100%;
   animation: tool-group-sweep 1.6s linear infinite;
+  will-change: transform;
 }
 .tool-group-spin-pulse { animation: tool-group-spin-pulse 1.8s ease-in-out infinite; }
 .tool-group-flash { animation: tool-group-flash 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
@@ -339,8 +343,8 @@ body {
   pointer-events: none;
   border-radius: inherit;
   background: linear-gradient(100deg, transparent 20%, rgba(96, 165, 250, 0.09) 45%, rgba(96, 165, 250, 0.15) 50%, rgba(96, 165, 250, 0.09) 55%, transparent 80%);
-  background-size: 220% 100%;
   animation: tool-group-sweep 1.6s linear infinite;
+  will-change: transform;
 }
 @media (prefers-reduced-motion: reduce) {
   .tool-group-shimmer::after,
@@ -391,6 +395,21 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .card-stripes-fx::before { animation: none; }
+}
+
+/* ── Transcript off-screen render skipping (Phase 2, Step A) ──────────────
+   `content-visibility: auto` lets the browser skip layout + paint for message
+   rows that are outside the viewport, bounding per-pass layout work to the
+   viewport working set instead of the whole (~7 000-object) transcript. The
+   `auto` keyword in `contain-intrinsic-size` caches each row's real rendered
+   height after first paint, so the scrollbar stays stable (the placeholder
+   length is only the pre-first-paint estimate). Live tails (streaming
+   thinking/text, pending steer) carry `chat-cv-skip` and always render.
+   Toggle the whole optimization by adding/removing `chat-cv` on the scroll
+   container. See change: reduce-chat-render-cpu-umbrella (Phase 2, task 4.2). */
+.chat-cv > *:not(.chat-cv-skip) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
 }
 
 /* Collapsible group animation — grid row trick for auto-height transitions */
@@ -472,6 +491,18 @@ mark.markdown-search-highlight-active {
 :root.app-hidden *,
 :root.app-hidden *::before,
 :root.app-hidden *::after { animation-play-state: paused !important; }
+
+/* ── Pause off-screen liveness/decorative animations ──────────
+   Toggled by the shared IntersectionObserver (lib/fx-visibility.ts) on FX
+   containers that scroll out of the viewport. Covers the element and its
+   descendants (nested shimmer / spin / glow / neon layers). See change:
+   reduce-chat-render-cpu-umbrella (Phase 1, task 2.5). */
+.fx-offscreen,
+.fx-offscreen *,
+.fx-offscreen::before,
+.fx-offscreen::after,
+.fx-offscreen *::before,
+.fx-offscreen *::after { animation-play-state: paused !important; }
 
 /* ── Selected-card iridescent ring ────────────────────────────
    See change: redesign-session-card-and-composer (1.1–1.5).
@@ -623,15 +654,30 @@ mark.markdown-search-highlight-active {
     var(--bg-tertiary);
   background-color: var(--bg-tertiary);
 }
+/* Opacity cross-fade of two pre-painted box-shadow rings instead of animating
+   box-shadow itself (non-composited — repaints every frame). Base ring painted
+   once on the node; a larger static ring on the ::after cross-fades in/out.
+   Reuses the chat-stream-glow-pulse pattern. See change:
+   reduce-chat-render-cpu-umbrella (Phase 1, task 2.4). */
 @keyframes openspec-stepper-pulse-current {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(251, 146, 60, 0.18); }
-  50%      { box-shadow: 0 0 0 5px rgba(251, 146, 60, 0.30); }
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 1; }
 }
 .openspec-stepper-node-current {
+  box-shadow: 0 0 0 3px rgba(251, 146, 60, 0.18);
+}
+.openspec-stepper-node-current::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 5px rgba(251, 146, 60, 0.30);
+  opacity: 0;
   animation: openspec-stepper-pulse-current 2.4s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .openspec-stepper-node-current { animation: none; }
+  .openspec-stepper-node-current::after { animation: none; opacity: 0; }
 }
 
 /* ── OpenSpec board responsive column layout ──────────────────

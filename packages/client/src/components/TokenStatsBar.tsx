@@ -126,7 +126,11 @@ export function TokenStatsBar({ turnStats, contextUsage, tokensIn, tokensOut, ca
         </div>
       )}
 
-      {/* Context window stacked progress bar */}
+      {/* Context window stacked progress bar. Segments update their width
+          instantly (no `transition-all`): a width transition is a
+          non-composited, layout-animating offender and the value change is
+          imperceptible without the tween. See change:
+          reduce-chat-render-cpu-umbrella (Phase 1, task 2.2). */}
       {showContextBar && contextUsage && contextUsage.contextWindow > 0 && (
         <div className="flex items-center gap-2 text-[9px] text-[var(--text-tertiary)]">
           <span>{contextUsage.tokens != null ? formatTokens(contextUsage.tokens) : "—"}</span>
@@ -135,30 +139,30 @@ export function TokenStatsBar({ turnStats, contextUsage, tokensIn, tokensOut, ca
               <>
                 {latestTurn.cacheRead > 0 && (
                   <div
-                    className="h-full transition-all"
+                    className="h-full"
                     style={{ width: `${(latestTurn.cacheRead / latestTotal) * contextPercent}%`, backgroundColor: gradientColor! }}
                   />
                 )}
                 {latestTurn.cacheWrite > 0 && (
                   <div
-                    className="h-full transition-all"
+                    className="h-full"
                     style={{ width: `${(latestTurn.cacheWrite / latestTotal) * contextPercent}%`, backgroundColor: gradientColor! }}
                   />
                 )}
                 <div
-                  className="h-full transition-all"
+                  className="h-full"
                   style={{ width: `${(latestTurn.input / latestTotal) * contextPercent}%`, backgroundColor: gradientColor! }}
                 />
                 {latestTurn.output > 0 && (
                   <div
-                    className="h-full transition-all"
+                    className="h-full"
                     style={{ width: `${(latestTurn.output / latestTotal) * contextPercent}%`, backgroundColor: gradientColor! }}
                   />
                 )}
               </>
             ) : contextPercent != null ? (
               <div
-                className="h-full transition-all"
+                className="h-full"
                 style={{ width: `${Math.min(contextPercent, 100)}%`, backgroundColor: gradientColor! }}
               />
             ) : null}
