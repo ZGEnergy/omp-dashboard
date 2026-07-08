@@ -83,6 +83,28 @@ describe("reloadProviders", () => {
     expect(unregisterProvider).not.toHaveBeenCalled();
   });
 
+  // ── auth pre-registration race fix (see change: fix-flow-agent-model-resolution) ──
+  it("preRegisterProviderAuth registers the apiKey synchronously with NO models", async () => {
+    const mod = await importFresh();
+    const { pi, registerProvider } = makeMockPi();
+
+    mod.preRegisterProviderAuth(pi, "home-proxy", {
+      baseUrl: "http://localhost:20128/v1",
+      apiKey: "sk-literal-key",
+      api: "anthropic-messages",
+    });
+
+    // Exactly one call, carrying auth, and crucially WITHOUT `models` so the
+    // existing catalog is left untouched (storeProviderRequestConfig only).
+    expect(registerProvider).toHaveBeenCalledTimes(1);
+    const [name, config] = registerProvider.mock.calls[0];
+    expect(name).toBe("home-proxy");
+    expect(config.baseUrl).toBe("http://localhost:20128/v1");
+    expect(config.api).toBe("anthropic-messages");
+    expect(config.apiKey).toBe("sk-literal-key");
+    expect(config.models).toBeUndefined();
+  });
+
   it("removes a provider when its entry disappears from providers.json", async () => {
     const mod = await importFresh();
     const { pi, registerProvider, unregisterProvider } = makeMockPi();
@@ -299,13 +321,21 @@ describe("reloadProviders", () => {
     });
 
     // 1) activate() registers the provider BEFORE ctx.modelRegistry is
-    //    available — first registration hits the fallback path.
+    //    available. It now issues TWO calls per provider: an auth-only
+    //    pre-registration (no `models`, closes the spawn race — see change:
+    //    fix-flow-agent-model-resolution) followed by the fire-and-forget
+    //    registerEntry() fallback-enriched call.
     mod.activate(pi);
     // Wait a microtask for the fire-and-forget registerEntry inside activate.
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(registerProvider).toHaveBeenCalledTimes(1);
-    const firstCall = registerProvider.mock.calls[0];
+    expect(registerProvider).toHaveBeenCalledTimes(2);
+    // call[0] = auth-only pre-registration: carries the apiKey, no models.
+    const preRegCall = registerProvider.mock.calls[0];
+    expect(preRegCall[0]).toBe("proxy");
+    expect(preRegCall[1].models).toBeUndefined();
+    // call[1] = registerEntry() fallback path (no captured registry yet).
+    const firstCall = registerProvider.mock.calls[1];
     expect(firstCall[1].models[0].contextWindow).toBe(200_000); // fallback
 
     // 2) Fire session_start with ctx.modelRegistry — the handler captures it
@@ -318,10 +348,10 @@ describe("reloadProviders", () => {
       model: undefined,
     });
 
-    // 3) The re-registration should have issued a second registerProvider
+    // 3) The re-registration should have issued a third registerProvider
     //    call, this time with the catalog-enriched metadata.
-    expect(registerProvider).toHaveBeenCalledTimes(2);
-    const secondCall = registerProvider.mock.calls[1];
+    expect(registerProvider).toHaveBeenCalledTimes(3);
+    const secondCall = registerProvider.mock.calls[2];
     const [name, config] = secondCall;
     expect(name).toBe("proxy");
     const [opus] = config.models;

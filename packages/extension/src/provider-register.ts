@@ -574,6 +574,34 @@ function getModelRegistry(): any {
 
 // -- Provider registration (with auto-discovery) --------------------------
 
+/**
+ * Synchronously register a provider's AUTH config (no models) on the current
+ * session's ModelRegistry. Stores `providerRequestConfigs[name] = { apiKey }`
+ * via pi's `storeProviderRequestConfig` immediately, without waiting for the
+ * async `/v1/models` discovery that `registerEntry` performs.
+ *
+ * Rationale: spawned flow/subagent sessions inherit the parent session's
+ * ModelRegistry instance. If the flow spawns before discovery resolves, the
+ * child registry has no auth for the provider and requests fail with
+ * `No API key found for <provider>`. Pre-registering the auth closes that
+ * window. `models` is omitted (ProviderConfig.models is optional) so the
+ * existing catalog is untouched; `registerEntry` adds models once discovery
+ * resolves. See change: fix-flow-agent-model-resolution.
+ */
+export function preRegisterProviderAuth(pi: ExtensionAPI, name: string, entry: ProviderEntry): void {
+  try {
+    pi.registerProvider(name, {
+      baseUrl: entry.baseUrl,
+      apiKey: toRegisterApiKey(entry.apiKey),
+      api: (entry.api ?? "openai-completions") as any,
+    });
+  } catch (err: any) {
+    console.error(
+      `[dashboard] preRegisterProviderAuth("${name}") failed: ${err?.message ?? String(err)}`,
+    );
+  }
+}
+
 async function registerEntry(pi: ExtensionAPI, name: string, entry: ProviderEntry): Promise<number> {
   // Record snapshot SYNCHRONOUSLY before awaiting discovery so the very
   // first providers_list push (typically fired from `session_start`
@@ -788,9 +816,26 @@ export function activate(pi: ExtensionAPI) {
   piRef = pi;
   const providers = loadProviders();
 
-  // Register providers (async discovery, fire-and-forget at startup)
+  // Register providers (async discovery, fire-and-forget at startup).
   for (const [name, entry] of Object.entries(providers)) {
-    registerEntry(pi, name, entry).catch(() => {});
+    // Register the auth config SYNCHRONOUSLY, before kicking off the async
+    // registerEntry() (which awaits a up-to-10s /v1/models discovery). This
+    // populates `providerRequestConfigs` with the apiKey the instant the
+    // session starts, so spawned flow/subagent sessions — which inherit THIS
+    // session's ModelRegistry instance (pi-flows via `options.modelRegistry`,
+    // pi-dashboard-subagents via `ctx.modelRegistry`) — never spawn into the
+    // discovery window and fail with `No API key found for <provider>`.
+    // `models` is intentionally OMITTED (ProviderConfig.models is optional):
+    // this stores only the auth (storeProviderRequestConfig) and leaves any
+    // existing catalog untouched (the model-replacement branch is guarded by
+    // models.length > 0). registerEntry() below then adds the discovered
+    // models via a full re-registration. See change: fix-flow-agent-model-resolution.
+    preRegisterProviderAuth(pi, name, entry);
+    registerEntry(pi, name, entry).catch((err: any) => {
+      console.error(
+        `[dashboard] registerEntry("${name}") failed during activate(): ${err?.message ?? String(err)}`,
+      );
+    });
   }
 
   // ── Event API: Model Resolution ─────────────────────────────────────
