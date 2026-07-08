@@ -277,6 +277,7 @@ export function MinimalChatView({
   const showMeta =
     !!meta &&
     (meta.modelName !== undefined ||
+      meta.cost !== undefined ||
       meta.durationMs !== undefined ||
       (meta.tokens !== undefined && (meta.tokens.input !== undefined || meta.tokens.output !== undefined)));
 

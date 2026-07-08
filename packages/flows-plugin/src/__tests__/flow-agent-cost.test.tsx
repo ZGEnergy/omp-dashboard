@@ -66,6 +66,7 @@ describe("formatCost helper (task 1.3)", () => {
   it("uses two decimals at or above $1", () => {
     expect(formatCost(1.2)).toBe("$1.20");
     expect(formatCost(12)).toBe("$12.00");
+    expect(formatCost(1)).toBe("$1.00"); // exact >= 1 boundary
   });
   it("uses four decimals below $1", () => {
     expect(formatCost(0.0142)).toBe("$0.0142");

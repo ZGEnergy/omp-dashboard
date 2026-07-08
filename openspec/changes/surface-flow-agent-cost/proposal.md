@@ -6,7 +6,7 @@ pi-flows now emits per-agent USD cost on `flow:agent-complete` (change `surface-
 
 - `FlowAgentState` gains an optional `cost?: number` (USD), a sibling of the existing `tokens` field.
 - The `flow_agent_complete` reducer case reads `result.cost` and stores it on the agent state (mirroring how it already reads `result.tokens`).
-- `FlowAgentCard` appends a `$` segment to its complete-state stats line (`↑12k ↓3k · $0.0142 · 4.2s`) only when `cost > 0`, mirroring the existing token/duration suppression and matching pi-flows' `formatCost` precision (`$0.01` when ≥ 1, `$0.0142` sub-dollar).
+- `FlowAgentCard` appends a `$` segment to its complete-state stats line (`↑12k ↓3k · $0.0142 · 4.2s`) only when `cost > 0`, mirroring the existing token/duration suppression and matching pi-flows' `formatCost` precision (`$1.20` when ≥ 1, `$0.0142` sub-dollar).
 - `FlowAgentDetail` header shows cost alongside the tokens/duration it already displays, when present and nonzero.
 - No transport or event-contract change: the bridge already forwards `result.cost` verbatim. No new dependency.
 

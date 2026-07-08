@@ -42,8 +42,8 @@
   `packages/flows-plugin/src/client/FlowAgentCard.tsx` matching pi-flows:
   `"$" + (n >= 1 ? n.toFixed(2) : n.toFixed(4))`. Export it for reuse (D4).
 - [x] 4.2 In the complete-state stats line (currently
-  `↑{in} ↓{out} · {duration}`), insert ` · ${formatCost(agent.cost)}` between
-  tokens and duration only when `agent.cost != null && agent.cost > 0` (D3).
+  `↑{in} ↓{out} · {duration}`), insert a leading space plus `· ${formatCost(agent.cost)}`
+  between tokens and duration only when `agent.cost != null && agent.cost > 0` (D3).
 
 ## 5. Detail render
 
