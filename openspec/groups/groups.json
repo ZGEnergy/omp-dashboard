@@ -86,15 +86,26 @@
     "add-server-keypair-pairing": "ui",
     "fix-local-electron-dmg-build": "ui",
     "reopen-sessions-after-shutdown": "ui",
-    "fix-openspec-config-read-bundled-node": "ui"
+    "fix-openspec-config-read-bundled-node": "ui",
+    "fix-history-loading-false-empty-flash": "ui",
+    "group-tool-call-bursts": "ui",
+    "surface-model-introspection-to-agents": "ui",
+    "open-loopback-links-in-split-viewer": "ui",
+    "fix-double-thinking-row-on-replay-reconstruction": "ui",
+    "add-tunnel-providers": "ui",
+    "wire-nonzrok-pairing-view": "ui",
+    "finalize-event-dispatched-automation-runs": "ui",
+    "enhance-tool-call-grouping": "ui",
+    "fix-first-launch-display-modal-stuck-on-mobile": "ui"
   },
   "changeOrder": {
     "__ungrouped__": [],
     "ui": [
-      "fix-local-electron-dmg-build",
-      "fix-openspec-config-read-bundled-node",
-      "reopen-sessions-after-shutdown",
-      "electron-attach-ownership-fixes"
+      "fix-first-launch-display-modal-stuck-on-mobile",
+      "enhance-tool-call-grouping",
+      "wire-nonzrok-pairing-view",
+      "add-tunnel-providers",
+      "fix-local-electron-dmg-build"
     ],
     "next-phase": [],
     "sdasdasd": [
@@ -108,7 +119,19 @@
       "add-extension-ui-safety-bounds",
       "pi-flows-adopt-extension-ui"
     ],
-    "electrun-execution": [],
+    "electrun-execution": [
+      "add-bundle-immutable-health-flag",
+      "add-bundle-manual-launch-scripts",
+      "add-bundle-mode-marker",
+      "add-package-health-cleanup",
+      "add-wizard-launch-progress-log",
+      "electron-platform-extraction",
+      "fix-doctor-bundle-aware-probes",
+      "fix-windows-portable-exe",
+      "server-launch-smoke-suite",
+      "windows-authenticode-signing",
+      "retire-rpc-keeper-when-dispatchcommand-available"
+    ],
     "future": []
   }
 }
