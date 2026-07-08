@@ -4,23 +4,24 @@ import { Skeleton } from "@blackbelt-technology/pi-dashboard-client-utils/Skelet
 import { toolCallPrefKey } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
 import { mdiCheck, mdiChevronDown, mdiClose, mdiContentCopy, mdiLoading, mdiSourceFork, mdiTextBox } from "@mdi/js";
 import { Icon } from "@mdi/react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isDebugTool } from "../hooks/useDebugToolsVisible.js";
 import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
 import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import { useMobile } from "../hooks/useMobile.js";
+import { buildTurnToFirstRowIndex, estimateVirtualRowSize, isBurst, isGroup, virtualRowKey } from "../lib/chat-virtual-rows.js";
 import { findActiveInteractiveToolResultIds, findRetriedErrorIds, findSurfaceSuppressedErrorIds } from "../lib/collapse-retried-errors.js";
 // RetryBanner + ErrorBanner replaced by the unified SessionBanner mounted
 // in App.tsx (sticky above the command input). See change:
 // unify-status-banner-and-terminal-limit-stop.
 import type { ChatImage, InteractiveUiRequest, SessionState } from "../lib/event-reducer.js";
 import { formatMessageTime } from "../lib/format.js";
-import type { ToolCallGroup } from "../lib/group-tool-calls.js";
 import { type BurstItem, groupToolBursts, type ToolBurstGroup as ToolBurstGroupData } from "../lib/group-tool-bursts.js";
+import type { ToolCallGroup } from "../lib/group-tool-calls.js";
 import { t as i18nT } from "../lib/i18n";
 import { BashOutputCard } from "./BashOutputCard.js";
 import { CollapsedToolGroup } from "./CollapsedToolGroup.js";
-import { ToolBurstGroup } from "./ToolBurstGroup.js";
 import { CommandFeedbackCard } from "./CommandFeedbackCard.js";
 import { CopyButton } from "./CopyButton.js";
 import { MissingToolInlineError } from "./chat/MissingToolInlineError.js";
@@ -34,6 +35,7 @@ import { RawEventCard } from "./RawEventCard.js";
 import { RetriedErrorBadge } from "./RetriedErrorBadge.js";
 import { SkillInvocationCard } from "./SkillInvocationCard.js";
 import { ThinkingBlock } from "./ThinkingBlock.js";
+import { ToolBurstGroup } from "./ToolBurstGroup.js";
 import { ToolCallStep } from "./ToolCallStep.js";
 import type { ToolContext } from "./tool-renderers/index.js";
 
@@ -194,7 +196,7 @@ function hasMermaid(content: string): boolean {
 const SCROLL_THRESHOLD = 50;
 
 // Per-session scroll state, persisted across session switches
-const scrollStateMap = new Map<string, { scrollTop: number; nearBottom: boolean }>();
+const scrollStateMap = new Map<string, { anchorRowId: string | null; offset: number; nearBottom: boolean }>();
 
 export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
@@ -207,6 +209,9 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // session restore when the saved position was away from the bottom. Re-arms
   // when the user clicks the scroll-to-bottom button or scrolls back to the end.
   const stickToBottomRef = useRef(true);
+  // Last observed scroll height, used to distinguish content growth (legit
+  // re-pin) from a user scroll (must NOT re-pin) in the virtualizer onChange.
+  const lastScrollHeightRef = useRef(0);
   const [showScrollButton, setShowScrollButton] = useState(false);
   // Effective display prefs for this session (configurable-chat-display).
   const prefs = useDisplayPrefs(sessionId);
@@ -219,72 +224,6 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   const bubbleMax = isMobile ? "max-w-[95%]" : "max-w-[80%]";
   /** Force wide when message contains a mermaid diagram */
   const bubbleWide = isMobile ? "w-[95%]" : "w-[95%]";
-
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
-    stickToBottomRef.current = nearBottom;
-    setShowScrollButton(!nearBottom);
-    // Persist scroll position for this session
-    if (sessionId) {
-      scrollStateMap.set(sessionId, { scrollTop: el.scrollTop, nearBottom });
-    }
-  }, [sessionId]);
-
-  const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // Smooth when quiet, instant when streaming/tool output is active so the
-    // animation cannot race with incoming chunks and re-introduce jumps.
-    const isStreaming = Boolean(state.streamingText || state.streamingThinking || pendingSteering?.length);
-    el.scrollTo({ top: el.scrollHeight, behavior: isStreaming ? "instant" : "smooth" });
-    stickToBottomRef.current = true;
-    setShowScrollButton(false);
-    if (sessionId) {
-      scrollStateMap.set(sessionId, { scrollTop: el.scrollHeight, nearBottom: true });
-    }
-  }, [sessionId, state.streamingText, state.streamingThinking, pendingSteering]);
-
-  // Save scroll state when leaving, restore when arriving. Layout effect keeps
-  // the restored position synchronized with the first paint so there is no flash.
-  useLayoutEffect(() => {
-    if (sessionId !== prevSessionRef.current) {
-      // Save outgoing session scroll position
-      const prevId = prevSessionRef.current;
-      if (prevId && scrollRef.current) {
-        scrollStateMap.set(prevId, {
-          scrollTop: scrollRef.current.scrollTop,
-          nearBottom: stickToBottomRef.current,
-        });
-      }
-      prevSessionRef.current = sessionId;
-
-      // Restore incoming session scroll state
-      const saved = sessionId ? scrollStateMap.get(sessionId) : undefined;
-      if (saved && !saved.nearBottom) {
-        // Scroll-locked: restore exact position
-        stickToBottomRef.current = false;
-        setShowScrollButton(true);
-        scrollRef.current?.scrollTo(0, saved.scrollTop);
-      } else {
-        // Near bottom or first visit: scroll to end and follow new content
-        stickToBottomRef.current = true;
-        setShowScrollButton(false);
-        scrollRef.current?.scrollTo(0, scrollRef.current!.scrollHeight);
-      }
-    }
-  }, [sessionId]);
-
-  // Auto-scroll on new content when the user has not escaped the bottom.
-  // Layout effect keeps the DOM and scroll position synchronized before paint,
-  // eliminating the per-line jumps caused by async scrollTo calls.
-  useLayoutEffect(() => {
-    if (stickToBottomRef.current) {
-      const el = scrollRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-    }
-  }, [state.messages.length, state.streamingText, state.pendingPrompt, state.streamingThinking, pendingSteering]);
 
   // Group consecutive repeated tool calls for cleaner display.
   // Also drop user messages flagged `retriedFrom` (manual Retry button
@@ -308,31 +247,193 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     [filteredMessages, surfaceActive],
   );
 
+  // Prefs-gated / suppressed rows (the render's ~7 `return null` sites) are
+  // filtered OUT here so the virtualizer's `count === displayRows.length` and
+  // no index reserves empty spacer space (CR-5). getItemKey, the turn map, and
+  // per-session persistence all key off displayRows.
+  const isRowVisible = useCallback(
+    (item: BurstItem): boolean => {
+      if (isBurst(item) || isGroup(item)) return true;
+      const msg = item as import("../lib/event-reducer.js").ChatMessage;
+      if (msg.view) return true;
+      switch (msg.role) {
+        case "turnSeparator":
+          return prefs.turnMetadata;
+        case "thinking":
+          return prefs.reasoning;
+        case "toolResult": {
+          if (!showDebugTools && isDebugTool(msg.toolName ?? "")) return false;
+          const kindKey = toolCallPrefKey(msg.toolName ?? "");
+          if (kindKey !== null && !prefs.toolCalls[kindKey]) return false;
+          if (hiddenToolResultIds.has(msg.id)) return false;
+          return true;
+        }
+        case "interactiveUi": {
+          const args = msg.args as Record<string, unknown> | undefined;
+          const cmp = (args?.params as Record<string, unknown> | undefined)?._promptBusComponent as
+            | { type?: string }
+            | undefined;
+          return !(cmp?.type && isWidgetBarPrompt(cmp.type));
+        }
+        case "rawEvent":
+          return showDebugTools;
+        default:
+          return true;
+      }
+    },
+    [prefs, showDebugTools, hiddenToolResultIds],
+  );
+  const displayRows = useMemo(() => groupedMessages.filter(isRowVisible), [groupedMessages, isRowVisible]);
+  const turnToFirstRowIndex = useMemo(() => buildTurnToFirstRowIndex(displayRows), [displayRows]);
+
+  const virtualizer = useVirtualizer({
+    count: displayRows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (i) => estimateVirtualRowSize(displayRows[i]),
+    getItemKey: (i) => virtualRowKey(displayRows[i], i),
+    overscan: 6,
+    // Re-pin the bottom on measurement-driven size changes while following.
+    // Bottom-pin stays DOM-measured (CR-1): getTotalSize() excludes the live
+    // tail siblings, so pin to the real scrollHeight, not the virtual total.
+    //
+    // onChange fires on EVERY scroll (range recompute), not only on growth.
+    // Guard the pin on an actual scrollHeight change so a small user scroll-up
+    // inside the near-bottom band is NOT yanked back to the bottom (the
+    // ping-pong bug). A pin sets scrollTop, not scrollHeight, so the next
+    // onChange sees no growth and the loop cannot sustain itself.
+    onChange: () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const grew = el.scrollHeight !== lastScrollHeightRef.current;
+      lastScrollHeightRef.current = el.scrollHeight;
+      if (grew && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+    },
+  });
+  const virtualItems = virtualizer.getVirtualItems();
+  const totalSize = virtualizer.getTotalSize();
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+    stickToBottomRef.current = nearBottom;
+    setShowScrollButton(!nearBottom);
+    // Persist scroll position for this session in VIRTUAL coordinates (CR-6):
+    // the first below-the-fold row's stable id + its intra-row offset. Raw
+    // scrollTop is meaningless once total size is an estimate across a remount.
+    if (sessionId) {
+      const items = virtualizer.getVirtualItems();
+      const anchor = items.find((vi) => vi.start + vi.size > el.scrollTop) ?? items[0];
+      scrollStateMap.set(sessionId, {
+        anchorRowId: anchor ? String(anchor.key) : null,
+        offset: anchor ? el.scrollTop - anchor.start : el.scrollTop,
+        nearBottom,
+      });
+    }
+  }, [sessionId, virtualizer]);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // Smooth when quiet, instant when streaming/tool output is active so the
+    // animation cannot race with incoming chunks and re-introduce jumps.
+    const isStreaming = Boolean(state.streamingText || state.streamingThinking || pendingSteering?.length);
+    el.scrollTo({ top: el.scrollHeight, behavior: isStreaming ? "instant" : "smooth" });
+    stickToBottomRef.current = true;
+    setShowScrollButton(false);
+    if (sessionId) {
+      scrollStateMap.set(sessionId, { anchorRowId: null, offset: 0, nearBottom: true });
+    }
+  }, [sessionId, state.streamingText, state.streamingThinking, pendingSteering]);
+
+  // Save scroll state when leaving, restore when arriving. Layout effect keeps
+  // the restored position synchronized with the first paint so there is no flash.
+  // Restore runs ONLY on session switch; displayRows/virtualizer are read via
+  // the current-render closure. Listing them would re-run restore on every row
+  // change (CR-6), so the dep list is intentionally [sessionId] only.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional session-switch-only restore; see comment above.
+  useLayoutEffect(() => {
+    if (sessionId !== prevSessionRef.current) {
+      // Outgoing scroll state is kept fresh by handleScroll (persists the
+      // virtual anchor on every scroll), so no re-capture here — re-capturing
+      // now would read the INCOMING session's virtualizer (CR-6).
+      prevSessionRef.current = sessionId;
+
+      // Restore incoming session scroll state in virtual coordinates.
+      const saved = sessionId ? scrollStateMap.get(sessionId) : undefined;
+      if (saved && !saved.nearBottom && saved.anchorRowId) {
+        // Scroll-locked: resolve the saved row id → current index, scroll it to
+        // the top, then re-apply the intra-row offset once the row measures.
+        stickToBottomRef.current = false;
+        setShowScrollButton(true);
+        const anchorId = saved.anchorRowId;
+        const idx = displayRows.findIndex((r, i) => virtualRowKey(r, i) === anchorId);
+        if (idx >= 0) {
+          virtualizer.scrollToIndex(idx, { align: "start" });
+          const off = saved.offset;
+          requestAnimationFrame(() => {
+            const el = scrollRef.current;
+            if (el) el.scrollTop += off;
+          });
+        } else {
+          scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
+        }
+      } else {
+        // Near bottom or first visit: scroll to end and follow new content.
+        stickToBottomRef.current = true;
+        setShowScrollButton(false);
+        scrollRef.current?.scrollTo(0, scrollRef.current!.scrollHeight);
+      }
+    }
+  }, [sessionId]);
+
+  // Auto-scroll on new content when the user has not escaped the bottom.
+  // Layout effect keeps the DOM and scroll position synchronized before paint,
+  // eliminating the per-line jumps caused by async scrollTo calls.
+  useLayoutEffect(() => {
+    if (stickToBottomRef.current) {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }, [state.messages.length, state.streamingText, state.pendingPrompt, state.streamingThinking, pendingSteering]);
+
   useImperativeHandle(ref, () => ({
     scrollToTurn(turnIndex: number) {
-      const container = scrollRef.current;
-      if (!container) return;
-      const el = container.querySelector(`[data-turn="${turnIndex}"]`) as HTMLElement | null;
-      if (!el) return;
-      // Escape sticky bottom so streaming does not pull the user away from the
-      // navigated turn.
+      // Map the turn to its first display-row index and scroll there. Unlike
+      // the old querySelector([data-turn]) path this works for OFF-SCREEN
+      // (unmounted) turns — scrollToIndex scrolls, THEN the row mounts.
+      const rowIndex = turnToFirstRowIndex.get(turnIndex);
+      if (rowIndex == null) return;
+      // Escape sticky bottom so streaming does not pull the user off the turn.
       stickToBottomRef.current = false;
       setShowScrollButton(true);
-      // Use getBoundingClientRect for reliable position calculation
-      const containerRect = container.getBoundingClientRect();
-      const elRect = el.getBoundingClientRect();
-      const targetTop = container.scrollTop + (elRect.top - containerRect.top);
-      container.scrollTo({ top: targetTop, behavior: "instant" });
+      virtualizer.scrollToIndex(rowIndex, { align: "start" });
     },
-  }), []);
+  }), [turnToFirstRowIndex, virtualizer]);
 
   return (
     // Key by sessionId so switching sessions (ChatView is reused, not remounted)
     // resets the hoisted preview — a preview open in session A never leaks into B.
     <FilePreviewProvider key={sessionId}>
     <div className="flex-1 relative overflow-hidden flex flex-col">
-    <div ref={scrollRef} onScroll={handleScroll} style={{ overflowAnchor: "auto" }} className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"} space-y-1`}>
-      {groupedMessages.map((item: BurstItem) => {
+    <div ref={scrollRef} onScroll={handleScroll} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`}>
+      {/* Windowed historical rows (TanStack Virtual): only viewport + overscan
+          are mounted. The spacer reserves getTotalSize(); each row is absolutely
+          positioned + re-measured on mount. chat-cv-skip keeps Step A's
+          content-visibility off the spacer (windowing supersedes it). Bottom-pin
+          + scroll-lock stay on the DOM scroll machine (CR-1). See change:
+          virtualize-chat-transcript-tanstack. */}
+      <div className="chat-cv-skip" style={{ position: "relative", width: "100%", height: totalSize }}>
+        {virtualItems.map((vi) => {
+          const item: BurstItem = displayRows[vi.index];
+          return (
+            <div
+              key={vi.key}
+              data-index={vi.index}
+              ref={virtualizer.measureElement}
+              style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${vi.start}px)` }}
+            >
+              {((): React.ReactNode => {
         // Temporal burst group of heterogeneous tool calls (carries collapse
         // state → key by first-member id, NOT positional idx, so event-trim
         // head churn cannot bleed one burst's state into another (finding 3).
@@ -573,7 +674,11 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
             />
           </div>
         );
-      })}
+              })()}
+            </div>
+          );
+        })}
+      </div>
 
       {/* Streaming thinking. `chat-cv-skip` opts the live tail out of the
           content-visibility optimization so it is never skipped. See change:

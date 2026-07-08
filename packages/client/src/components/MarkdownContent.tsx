@@ -295,6 +295,14 @@ function PiAssetImg(props: React.ImgHTMLAttributes<HTMLImageElement>) {
   const { src, alt, className: incomingClass, onClick: _drop, ...rest } = props;
   const altText = typeof alt === "string" ? alt : "";
   const baseClass = `${incomingClass ?? ""} cursor-pointer`.trim();
+  // Reserve height before decode (CR-7) so an above-viewport async image load
+  // does not shift the windowed scroll offset; release to natural height on
+  // load (accepts one reflow per image). See change:
+  // virtualize-chat-transcript-tanstack (task 8.1).
+  const reserveStyle = { minHeight: "6rem" } as const;
+  const releaseReserved = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    e.currentTarget.style.minHeight = "";
+  };
 
   const openLightbox = (e: React.MouseEvent, lbSrc: string) => {
     // Stop propagation so a wrapping markdown link `[![](...)](href)` does
@@ -318,6 +326,8 @@ function PiAssetImg(props: React.ImgHTMLAttributes<HTMLImageElement>) {
             src={dataUrl}
             alt={alt}
             className={baseClass}
+            style={reserveStyle}
+            onLoad={releaseReserved}
             onClick={(e) => openLightbox(e, dataUrl)}
           />
           {lightboxSrc && (
@@ -355,6 +365,8 @@ function PiAssetImg(props: React.ImgHTMLAttributes<HTMLImageElement>) {
         src={src}
         alt={alt}
         className={baseClass}
+        style={reserveStyle}
+        onLoad={releaseReserved}
         onClick={(e) => openLightbox(e, src)}
       />
       {lightboxSrc && (

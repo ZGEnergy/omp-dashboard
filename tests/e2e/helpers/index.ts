@@ -26,6 +26,17 @@ export const TESTIDS = {
   folderSpawnSessionBtn: "folder-spawn-session-btn", // sidebar "New Session"
   // Composer send button (faux round-trip specs drive a prompt through it).
   sendButton: "send-button",
+  // Chat transcript scroller + its scroll-to-bottom button. The scroller testid
+  // is a deliberate exception to "do NOT add app testids for E2E": the windowed
+  // transcript needs a stable getScrollElement node, and the virtualization
+  // specs must read scrollTop/scrollHeight off it. See change:
+  // virtualize-chat-transcript-tanstack (task 9.2).
+  chatScrollContainer: "chat-scroll-container",
+  scrollToBottom: "scroll-to-bottom",
+  // TokenStatsBar turn bar — clicking it fires scrollToTurn (jump-to-turn
+  // affordance the off-screen scrollToTurn e2e drives). data-turn-index carries
+  // the turnIndex. See change: virtualize-chat-transcript-tanstack.
+  turnBar: "turn-bar",
   // Optimistic idle-send bubble + mid-turn follow-up queue chip.
   // See change: optimistic-prompt-progress.
   pendingPromptCard: "pending-prompt-card",

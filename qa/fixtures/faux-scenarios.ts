@@ -173,6 +173,44 @@ function askScenario(method: string, extra: Record<string, unknown>): Scenario {
   };
 }
 
+/**
+ * Tail marker for the `long-transcript` scenario — the last plain-text message.
+ * The virtualization e2e (`tests/e2e/chat-transcript-virtualization.spec.ts`)
+ * waits for this text to know the long stream has settled, and asserts the
+ * streaming tail against it. See change: virtualize-chat-transcript-tanstack.
+ */
+export const LONG_TRANSCRIPT_TAIL = "long-transcript complete";
+
+/**
+ * Build a deliberately LONG, heterogeneous transcript (Step B e2e fixture).
+ *
+ * Each turn streams a thinking block + an assistant text reply + one DISTINCT
+ * bash tool call. The non-empty assistant text is a HARD burst boundary, so each
+ * tool call renders as its own single-member burst (thinking absorbed inside)
+ * yielding ~2 top-level rows per turn. `turns` turns therefore span several
+ * viewports — enough to force a >50px scroll-up AND to make windowing observable
+ * (mounted `[data-index]` rows bounded far below the total). The final plain-text
+ * step (`LONG_TRANSCRIPT_TAIL`) terminates the run. `burst-heterogeneous` is too
+ * short for any of this; this is the single fixture that unblocks the 6 e2e specs.
+ */
+function buildLongTranscript(turns = 120): FauxResponseStep[] {
+  const steps: FauxResponseStep[] = [];
+  for (let i = 0; i < turns; i++) {
+    steps.push(
+      fauxAssistantMessage(
+        [
+          fauxThinking(`step ${i}: weighing probe ${i}`),
+          fauxText(`Investigating item ${i} of the long transcript.`),
+          fauxToolCall("bash", { command: `echo long-${i}` }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+    );
+  }
+  steps.push(fauxAssistantMessage([fauxText(LONG_TRANSCRIPT_TAIL)]));
+  return steps;
+}
+
 export const SCENARIOS: Record<string, Scenario> = {
   // ── Server-side round-trip scenarios ────────────────────────────────────
   "plain-text": {
@@ -392,6 +430,16 @@ export const SCENARIOS: Record<string, Scenario> = {
       fauxAssistantMessage([fauxText("burst complete")]),
     ],
     expect: { text: "burst complete" },
+  },
+
+  // Long heterogeneous transcript spanning several viewports (Step B e2e gate).
+  // Streams ~120 turns of thinking + text + a distinct bash call, so the
+  // transcript is long enough to force a >50px scroll-up and to make TanStack
+  // windowing observable. Tail = LONG_TRANSCRIPT_TAIL. See change:
+  // virtualize-chat-transcript-tanstack (task 9.1).
+  "long-transcript": {
+    script: buildLongTranscript(),
+    expect: { text: LONG_TRANSCRIPT_TAIL },
   },
 
   // Composition flip (collapse-tool-calls-across-narration): a NARRATED poll

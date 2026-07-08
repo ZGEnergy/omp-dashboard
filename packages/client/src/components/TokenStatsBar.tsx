@@ -1,6 +1,6 @@
 import React from "react";
-import type { TurnStat } from "../lib/event-reducer.js";
 import { contextGradientColor } from "../lib/context-gradient.js";
+import type { TurnStat } from "../lib/event-reducer.js";
 
 interface Props {
   turnStats: TurnStat[];
@@ -82,6 +82,7 @@ export function TokenStatsBar({ turnStats, contextUsage, tokensIn, tokensOut, ca
                 return (
                   <div
                     key={i}
+                    {...(onTurnClick && turn.turnIndex >= 0 ? { "data-testid": "turn-bar", "data-turn-index": turn.turnIndex } : {})}
                     className={`flex flex-col flex-1 min-w-[2px]${onTurnClick && turn.turnIndex >= 0 ? " cursor-pointer" : ""}`}
                     style={{ height: "100%", maxWidth: barMaxWidth }}
                     title={`In: ${formatTokens(turn.input + turn.cacheRead)} Out: ${formatTokens(turn.output)}`}
