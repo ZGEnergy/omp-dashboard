@@ -20,6 +20,7 @@ import {
   type MinimalChatEntry,
   type MinimalChatStatus,
 } from "@blackbelt-technology/pi-dashboard-client-utils/minimal-chat";
+import { formatCost } from "./FlowAgentCard.js";
 
 function mapFlowStatus(status: FlowAgentStatus): MinimalChatStatus {
   switch (status) {
@@ -106,6 +107,7 @@ export function FlowAgentDetail({
       meta={{
         modelName: agent.model,
         tokens: agent.tokens,
+        cost: agent.cost != null && agent.cost > 0 ? formatCost(agent.cost) : undefined,
         durationMs: isComplete ? agent.duration : undefined,
       }}
       emptyMessage={emptyMessage}
