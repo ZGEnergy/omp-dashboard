@@ -52,6 +52,9 @@ export type MinimalChatEntry =
 export interface MinimalChatMeta {
   modelName?: string;
   tokens?: { input?: number; output?: number };
+  /** Pre-formatted USD cost string (e.g. "$0.0142"). Rendered verbatim between
+   *  tokens and duration; the producer formats + suppresses zero/absent. */
+  cost?: string;
   durationMs?: number;
 }
 
