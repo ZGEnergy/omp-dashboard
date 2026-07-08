@@ -40,12 +40,28 @@ describe("flipHasUI", () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  it("non-writable ctx.hasUI (getter): swallows error, logs warning exactly once", () => {
+  it("pi >=0.80 configurable getter: redefines descriptor, flips to true, no warn", () => {
+    // Real shape of pi's extension-context `get hasUI()` — an own accessor
+    // that is configurable, so it can be redefined via defineProperty.
+    const ctx: Record<string, unknown> = {};
+    Object.defineProperty(ctx, "hasUI", {
+      configurable: true,
+      enumerable: true,
+      get: () => false,
+      // No setter — assignment throws TypeError; defineProperty must be used.
+    });
+
+    expect(() => flipHasUI(ctx)).not.toThrow();
+    expect((ctx as { hasUI: boolean }).hasUI).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("non-configurable getter: swallows error, logs warning exactly once", () => {
     const ctx: Record<string, unknown> = {};
     Object.defineProperty(ctx, "hasUI", {
       configurable: false,
       get: () => false,
-      // No setter — assignment in strict mode throws TypeError.
+      // No setter and non-configurable — cannot assign or redefine.
     });
 
     expect(() => flipHasUI(ctx)).not.toThrow();
