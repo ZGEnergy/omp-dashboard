@@ -125,6 +125,15 @@ export interface SlotPropsMap {
     images?: ToolRendererImage[];
     context?: ToolRendererContext;
   };
+  "automation-action-editor": {
+    /** Current automation action payload; the editor mutates and returns it. */
+    payload: Record<string, unknown>;
+    /** Persist an updated payload. */
+    onChange: (payload: Record<string, unknown>) => void;
+    /** Run cwd, for scoping any read-only discovery (e.g. flow inputs). */
+    cwd?: string;
+    pluginContext: AnyPluginContext;
+  };
   // Descriptor-only slots don't have React props (consumed by extension-ui-system)
   "management-modal": Record<string, unknown>;
   "footer-segment": Record<string, unknown>;

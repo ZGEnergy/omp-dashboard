@@ -18,6 +18,7 @@
  */
 import type { DiscoveredAutomation } from "../shared/automation-types.js";
 import { automationKey } from "./scheduler.js";
+import type { FireContext } from "./trigger-registry.js";
 
 export interface StartedRun {
   runId: string;
@@ -28,21 +29,29 @@ export interface RunnerDeps {
    * Start a run: resolve model, write the `running` record, spawn the
    * session. Returns the started run id, or null when the start failed
    * (e.g. spawn error). The runner treats a null as "not active".
+   * `ctx` carries the per-fire value for `${{trigger}}` resolution.
    */
-  startRun: (automation: DiscoveredAutomation) => StartedRun | null;
+  startRun: (automation: DiscoveredAutomation, ctx?: FireContext) => StartedRun | null;
   log?: (msg: string) => void;
   warn?: (msg: string) => void;
 }
 
+/** A deferred fire kept in a key's queue — carries its OWN per-fire ctx so
+ *  distinct fires do not collapse to a single value (concurrency: queue). */
+interface QueuedFire {
+  automation: DiscoveredAutomation;
+  ctx?: FireContext;
+}
+
 interface ActiveState {
   runId: string;
-  /** FIFO of automations waiting on this key (concurrency: queue). */
-  queue: DiscoveredAutomation[];
+  /** FIFO of deferred fires waiting on this key (concurrency: queue). */
+  queue: QueuedFire[];
 }
 
 export interface Runner {
   /** Scheduler fire entrypoint. Applies the concurrency policy. */
-  fire(automation: DiscoveredAutomation): void;
+  fire(automation: DiscoveredAutomation, ctx?: FireContext): void;
   /** Mark a run finished; drains a queued fire (if any). */
   completeRun(key: string): void;
   /** Currently-active run id for a key, or null. */
@@ -56,9 +65,9 @@ export function createRunner(deps: RunnerDeps): Runner {
   const warn = deps.warn ?? (() => {});
   const active = new Map<string, ActiveState>();
 
-  function begin(automation: DiscoveredAutomation): void {
+  function begin(automation: DiscoveredAutomation, ctx?: FireContext): void {
     const key = automationKey(automation);
-    const started = deps.startRun(automation);
+    const started = deps.startRun(automation, ctx);
     if (!started) {
       warn(`[runner] startRun failed for ${key}`);
       return;
@@ -67,13 +76,13 @@ export function createRunner(deps: RunnerDeps): Runner {
   }
 
   return {
-    fire(automation: DiscoveredAutomation): void {
+    fire(automation: DiscoveredAutomation, ctx?: FireContext): void {
       const key = automationKey(automation);
       const state = active.get(key);
       const policy = automation.config?.concurrency ?? "skip";
 
       if (!state) {
-        begin(automation);
+        begin(automation, ctx);
         return;
       }
 
@@ -83,13 +92,13 @@ export function createRunner(deps: RunnerDeps): Runner {
           log(`[runner] skip: drop overlapping fire for ${key} (active run ${state.runId})`);
           return;
         case "queue":
-          state.queue.push(automation);
+          state.queue.push({ automation, ctx });
           log(`[runner] queue: deferred fire for ${key} (depth ${state.queue.length})`);
           return;
         case "parallel":
           // Parallel runs share the key but we only track the latest as
           // "active" for queue-drain purposes; both still run.
-          begin(automation);
+          begin(automation, ctx);
           return;
       }
     },
@@ -99,9 +108,9 @@ export function createRunner(deps: RunnerDeps): Runner {
       if (!state) return;
       const next = state.queue.shift();
       if (next) {
-        // Replace active with the dequeued run.
+        // Replace active with the dequeued run — with ITS own ctx.
         active.delete(key);
-        begin(next);
+        begin(next.automation, next.ctx);
         // Preserve any further queued items onto the new active state.
         const newState = active.get(key);
         if (newState) newState.queue = state.queue;

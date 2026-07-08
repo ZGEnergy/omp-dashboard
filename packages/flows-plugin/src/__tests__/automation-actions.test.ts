@@ -4,16 +4,17 @@
  * pure-publisher wiring (provide, no consume). See change:
  * decouple-automation-action-registry.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ACTION_CONTRIBUTION_KEY,
   discoverFlows,
   flowsActionContributions,
   provideFlowsActions,
   summarizeFlowResult,
-  ACTION_CONTRIBUTION_KEY,
 } from "../server/automation-actions.js";
 
 function mkFlow(root: string, ns: string, name: string): void {
@@ -69,6 +70,33 @@ describe("flowsActionContributions", () => {
     // task optional
     expect(run.buildEvent!({ payload: { flow: "test:capabilities" }, automation: {} }))
       .toMatchObject({ eventType: "flow:run", data: { flowName: "test:capabilities" } });
+  });
+
+  it("flows.run emits data.inputs (per-fire resolved, types preserved), task optional", () => {
+    const run = flowsActionContributions()[0]!;
+    // Every flows.run also declares its completion (merged from
+    // finalize-event-dispatched-automation-runs).
+    const completion = { eventType: "flow_complete", summarize: expect.any(Function) };
+    // payload arrives already interpolated by the engine: ${{trigger}} resolved.
+    expect(
+      run.buildEvent!({
+        payload: { flow: "invoicebot:process", inputs: { invoice: "/spool/inv-042.pdf", priority: 5, dry: true } },
+        automation: {},
+      }),
+    ).toEqual({
+      eventType: "flow:run",
+      data: { flowName: "invoicebot:process", inputs: { invoice: "/spool/inv-042.pdf", priority: 5, dry: true } },
+      completion,
+    });
+    // task + inputs coexist
+    expect(
+      run.buildEvent!({ payload: { flow: "a:b", task: "label", inputs: { x: 1 } }, automation: {} }),
+    ).toEqual({ eventType: "flow:run", data: { flowName: "a:b", task: "label", inputs: { x: 1 } }, completion });
+    // empty / non-object inputs omitted
+    expect(run.buildEvent!({ payload: { flow: "a:b", inputs: {} }, automation: {} }))
+      .toEqual({ eventType: "flow:run", data: { flowName: "a:b" }, completion });
+    expect(run.buildEvent!({ payload: { flow: "a:b", inputs: "nope" }, automation: {} }))
+      .toEqual({ eventType: "flow:run", data: { flowName: "a:b" }, completion });
   });
 
   it("flows.run rejects a malformed flow id (emits nothing)", () => {

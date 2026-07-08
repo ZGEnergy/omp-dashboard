@@ -16,28 +16,30 @@
  * unit-testable without a live server. See change: add-automation-plugin.
  */
 import fs from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import type {
-  DiscoveredAutomation,
   AutomationScope,
-  Visibility,
+  DiscoveredAutomation,
   RunMode,
   Sandbox,
+  Visibility,
 } from "../shared/automation-types.js";
-import { TriggerRegistry } from "./trigger-registry.js";
-import { scheduleTrigger } from "./schedule-trigger.js";
 import {
   ActionRegistry,
   type ActionCompletion,
   createActionRegistryWithBuiltins,
   normalizeActionKind,
 } from "./action-registry.js";
-import { createScheduler, automationKey, type Scheduler } from "./scheduler.js";
+import { fileTrigger } from "./file-trigger.js";
+import { interpolate } from "./interpolate.js";
+import { resolveModel } from "./model-resolver.js";
+import { finishRun as storeFinishRun, startRun as storeStartRun } from "./run-store.js";
 import { createRunner, type Runner } from "./runner.js";
 import { scanAutomations } from "./scanner.js";
-import { resolveModel } from "./model-resolver.js";
-import { startRun as storeStartRun, finishRun as storeFinishRun } from "./run-store.js";
+import { scheduleTrigger } from "./schedule-trigger.js";
+import { automationKey, createScheduler, type Scheduler } from "./scheduler.js";
+import { type FireContext, TriggerRegistry } from "./trigger-registry.js";
 
 /**
  * Build the prompt text delivered to a run session for an automation action.
@@ -51,11 +53,14 @@ import { startRun as storeStartRun, finishRun as storeFinishRun } from "./run-st
 export function buildRunPrompt(
   automation: DiscoveredAutomation,
   actionRegistry?: ActionRegistry,
+  /** Per-fire resolved payload (overrides the static `action.payload`). */
+  resolvedPayload?: Record<string, unknown>,
 ): string {
   const action = automation.config!.action;
+  const payload = resolvedPayload ?? action.payload ?? {};
   const reg = actionRegistry?.get(normalizeActionKind(action.kind));
   if (reg) {
-    return reg.buildPrompt ? reg.buildPrompt({ payload: action.payload ?? {}, automation }).trim() : "";
+    return reg.buildPrompt ? reg.buildPrompt({ payload, automation }).trim() : "";
   }
   // Legacy fallback (no registry / unregistered): inline prompt|skill.
   if (action.kind === "skill") {
@@ -87,11 +92,16 @@ export type RunDispatch =
 export function buildRunDispatch(
   automation: DiscoveredAutomation,
   actionRegistry?: ActionRegistry,
+  /** Per-fire context; its `value` resolves `${{trigger}}` in the payload. */
+  ctx?: FireContext,
 ): RunDispatch {
   const action = automation.config!.action;
+  // Central per-fire substitution: resolve `${{trigger}}` in the whole payload
+  // ONCE, so no action needs its own interpolation logic.
+  const payload = interpolate(action.payload ?? {}, ctx?.value) as Record<string, unknown>;
   const reg = actionRegistry?.get(normalizeActionKind(action.kind));
   if (reg?.buildEvent) {
-    const ev = reg.buildEvent({ payload: action.payload ?? {}, automation });
+    const ev = reg.buildEvent({ payload, automation });
     if (ev && typeof ev.eventType === "string" && ev.eventType.length > 0) {
       return {
         kind: "event",
@@ -102,7 +112,7 @@ export function buildRunDispatch(
     }
     return { kind: "prompt", text: "" };
   }
-  return { kind: "prompt", text: buildRunPrompt(automation, actionRegistry) };
+  return { kind: "prompt", text: buildRunPrompt(automation, actionRegistry, payload) };
 }
 
 /** Effective board visibility: per-automation field ?? settings default. */
@@ -203,8 +213,9 @@ export interface Engine {
   start(): void;
   /** Re-scan + re-arm (called by the watcher onChange). */
   refresh(): void;
-  /** Spawn-side of a fire — exposed for tests. Returns the run id or null. */
-  startRunFor(automation: DiscoveredAutomation): { runId: string } | null;
+  /** Spawn-side of a fire — exposed for tests. Returns the run id or null.
+   *  `ctx` carries the per-fire value for `${{trigger}}` resolution. */
+  startRunFor(automation: DiscoveredAutomation, ctx?: FireContext): { runId: string } | null;
   /**
    * Stop a `running` run: terminate its spawned process via the host hook
    * (hard-kill by sessionId, or by spawnToken during the spawn→register
@@ -247,6 +258,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   const registry = new TriggerRegistry();
   registry.register(scheduleTrigger);
+  registry.register(fileTrigger);
   const resolveRegistry = deps.resolveRegistry ?? (() => createActionRegistryWithBuiltins({ warn }));
 
   // cwd(normalized) → FIFO queue of RunContexts awaiting register/end
@@ -310,8 +322,8 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   const runner: Runner = createRunner({
-    startRun: (automation) => {
-      const r = startRunFor(automation);
+    startRun: (automation, ctx) => {
+      const r = startRunFor(automation, ctx);
       return r ? { runId: r.runId } : null;
     },
     log,
@@ -320,13 +332,13 @@ export function createEngine(deps: EngineDeps): Engine {
 
   const scheduler = createScheduler({
     registry,
-    onFire: (automation) => runner.fire(automation),
+    onFire: (automation, ctx) => runner.fire(automation, ctx),
     now: deps.now,
     log,
     warn,
   });
 
-  function startRunFor(automation: DiscoveredAutomation): { runId: string } | null {
+  function startRunFor(automation: DiscoveredAutomation, fireCtx?: FireContext): { runId: string } | null {
     if (!automation.valid || !automation.config) return null;
     const cfg = deps.config();
     const scopeBase = scopeBaseFor(automation);
@@ -339,7 +351,7 @@ export function createEngine(deps: EngineDeps): Engine {
     });
 
     const rec = storeStartRun(scopeBase, automation.name);
-    const dispatch = buildRunDispatch(automation, resolveRegistry());
+    const dispatch = buildRunDispatch(automation, resolveRegistry(), fireCtx);
     const promptText = dispatch.kind === "prompt" ? dispatch.text : "";
 
     const ctx: RunContext = {
