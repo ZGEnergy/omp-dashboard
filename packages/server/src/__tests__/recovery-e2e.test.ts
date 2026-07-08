@@ -132,7 +132,7 @@ describe("recovery end-to-end", () => {
     expect(ids).toContain(SID);
     expect(ids).not.toContain("manual11-2222-3333-4444-555555555555");
     expect(ids).not.toContain("clean111-2222-3333-4444-555555555555");
-  });
+  }, 15_000); // heavy e2e: two full server boots + WS round-trips; 5s default is too tight under CI parallel load.
 
   it("shown once per dirty boot: dismiss + full restart yields no offer", async () => {
     writeAskConfig();
@@ -191,5 +191,5 @@ describe("recovery end-to-end", () => {
     });
     browser2.close();
     expect(msgsC.filter((m) => m.type === "recovery_offer")).toHaveLength(0);
-  });
+  }, 15_000); // heavy e2e: two full server boots + WS round-trips; 5s default is too tight under CI parallel load.
 });

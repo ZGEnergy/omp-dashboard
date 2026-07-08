@@ -156,7 +156,7 @@ describe("cold-start recovery offer", () => {
     const second = await connectAndCollect(port2);
     expect(second.filter((m) => m.type === "recovery_offer")).toHaveLength(0);
     expect(server.sessionManager.get(id)?.recoveryCandidate).toBeFalsy();
-  });
+  }, 15_000); // two full server boots; 5s default is too tight under CI parallel load.
 
   it("ask mode: recovery_dismiss consumes the marker and stops replay", async () => {
     // Durable dismiss (Chrome sentinel model): the server consumes the on-disk
@@ -181,7 +181,7 @@ describe("cold-start recovery offer", () => {
     const third = await connectAndCollect(port2);
     expect(third.filter((m) => m.type === "recovery_offer")).toHaveLength(0);
     expect(server.sessionManager.get(id)?.recoveryCandidate).toBeFalsy();
-  });
+  }, 15_000); // two full server boots; 5s default is too tight under CI parallel load.
 
   it("zero candidates: no offer even in ask mode", async () => {
     writeConfig("ask");
