@@ -53,6 +53,7 @@ import { selectInflightBashTools } from "./hooks/useInflightBashTools.js";
 import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { useLaunchSource } from "./hooks/useLaunchSource.js";
 import { useMessageHandler } from "./hooks/useMessageHandler.js";
+import { useStaleToolReconcile } from "./hooks/useStaleToolReconcile.js";
 import { useMobile } from "./hooks/useMobile.js";
 import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
 import { usePiResourceFileFetch } from "./hooks/usePiResourceFileFetch.js";
@@ -680,6 +681,12 @@ export default function App() {
   useEffect(() => {
     return onMessage(handleMessage);
   }, [onMessage, handleMessage]);
+
+  // Stale running-tool reconcile: heal a tool card whose terminal
+  // `tool_execution_end` was dropped on the WS hop, via the independent HTTP
+  // tool-result route. Session-scoped (survives transcript virtualization).
+  // See change: fix-stuck-tool-card-on-dropped-event.
+  useStaleToolReconcile(sessionStates, setSessionStates, apiBase);
 
   // Detect code-server binary availability on mount
   useEffect(() => {

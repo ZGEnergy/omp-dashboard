@@ -93,6 +93,13 @@ export interface BrowserGateway {
   broadcastOpenSpecUpdate(cwd: string, dataSerialized: string): void;
   /** Get number of browser subscribers for a session */
   getSubscriberCount(sessionId: string): number;
+  /**
+   * Per-hop dropped-frame counters for the diagnostics/health surface. A
+   * server→browser frame is dropped when a browser socket's send buffer
+   * crosses MAX_WS_BUFFER under back-pressure. See change:
+   * fix-stuck-tool-card-on-dropped-event.
+   */
+  getDroppedFrameStats(): { total: number; bySession: Record<string, number> };
   /** Track a pending interactive UI request for replay on reconnect */
   trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void;
   /** Clear a pending interactive UI request (resolved or cancelled) */
@@ -291,10 +298,36 @@ export function createBrowserGateway(
   /** Max buffered bytes per browser WebSocket before dropping messages (0 = no limit) */
   const MAX_WS_BUFFER = maxWsBufferBytes ?? 4 * 1024 * 1024; // 4MB default
 
-  function sendTo(ws: WebSocket, msg: ServerToBrowserMessage) {
+  // ── Drop-site instrumentation (change: fix-stuck-tool-card-on-dropped-event) ──
+  // The server→browser hop silently drops a frame when the send buffer crosses
+  // MAX_WS_BUFFER (browser not draining under back-pressure / a stall). Count
+  // every drop and emit a rate-limited warning so the next stuck-card incident
+  // is attributable. Logging is rate-limited because drops cluster during a
+  // stall (a log-storm would itself add load).
+  let droppedFramesTotal = 0;
+  const droppedFramesBySession = new Map<string, number>();
+  const DROP_WARN_WINDOW_MS = 5_000;
+  let lastDropWarnAt = 0;
+
+  function recordDroppedFrame(sessionId: string | undefined, seq: number | undefined, bufferedAmount: number) {
+    droppedFramesTotal++;
+    if (sessionId) droppedFramesBySession.set(sessionId, (droppedFramesBySession.get(sessionId) ?? 0) + 1);
+    const now = Date.now();
+    if (now - lastDropWarnAt >= DROP_WARN_WINDOW_MS) {
+      lastDropWarnAt = now;
+      console.warn(
+        `[browser-gw] dropped frame (back-pressure) hop=server→browser sessionId=${sessionId ?? "n/a"} seq=${seq ?? "n/a"} bufferedAmount=${bufferedAmount} > MAX_WS_BUFFER=${MAX_WS_BUFFER} (total dropped=${droppedFramesTotal})`,
+      );
+    }
+  }
+
+  function sendTo(ws: WebSocket, msg: ServerToBrowserMessage, ctx?: { sessionId?: string; seq?: number }) {
     if (ws.readyState === WebSocket.OPEN) {
       // Drop messages if the send buffer is full (browser not consuming)
-      if (MAX_WS_BUFFER > 0 && ws.bufferedAmount > MAX_WS_BUFFER) return;
+      if (MAX_WS_BUFFER > 0 && ws.bufferedAmount > MAX_WS_BUFFER) {
+        recordDroppedFrame(ctx?.sessionId, ctx?.seq, ws.bufferedAmount);
+        return;
+      }
       ws.send(JSON.stringify(msg));
     }
   }
@@ -312,7 +345,10 @@ export function createBrowserGateway(
   function fanout(serialized: string) {
     for (const [ws] of subscriptions) {
       if (ws.readyState !== WebSocket.OPEN) continue;
-      if (MAX_WS_BUFFER > 0 && ws.bufferedAmount > MAX_WS_BUFFER) continue;
+      if (MAX_WS_BUFFER > 0 && ws.bufferedAmount > MAX_WS_BUFFER) {
+        recordDroppedFrame(undefined, undefined, ws.bufferedAmount);
+        continue;
+      }
       ws.send(serialized);
     }
   }
@@ -834,7 +870,10 @@ export function createBrowserGateway(
         // Skip WebSockets that are mid-replay for this session
         const replaying = replayingSessions.get(ws);
         if (replaying?.has(sessionId)) continue;
-        sendTo(ws, msg);
+        // Carry sessionId+seq so a back-pressure drop of a live event (the
+        // stuck-tool-card cause) is attributable in the warning + counter.
+        // See change: fix-stuck-tool-card-on-dropped-event.
+        sendTo(ws, msg, { sessionId, seq });
       }
     },
 
@@ -882,6 +921,13 @@ export function createBrowserGateway(
 
     getSubscriberCount(sessionId: string): number {
       return getSubscribers(sessionId).length;
+    },
+
+    getDroppedFrameStats() {
+      return {
+        total: droppedFramesTotal,
+        bySession: Object.fromEntries(droppedFramesBySession),
+      };
     },
 
     trackUiRequest,

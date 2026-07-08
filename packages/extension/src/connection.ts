@@ -89,10 +89,41 @@ export class ConnectionManager {
     }
   }
 
+  /**
+   * Count of outgoing messages evicted from the bounded send buffer while the
+   * WS was not OPEN (ring-buffer overflow). Silent before this change — an
+   * evicted event never reaches the server store, leaves no seq gap, and is
+   * only recovered by `replaySessionEntries()` on reconnect. Exposed for
+   * observability. See change: fix-stuck-tool-card-on-dropped-event.
+   */
+  private droppedBufferedCount = 0;
+  private static readonly DROP_WARN_WINDOW_MS = 5_000;
+  private lastDropWarnAt = 0;
+
+  /** Total messages evicted from the send buffer on overflow (for diagnostics). */
+  getDroppedBufferedCount(): number {
+    return this.droppedBufferedCount;
+  }
+
   private bufferMessage(data: string): void {
     this.buffer.push(data);
     if (this.buffer.length > this.maxBufferSize) {
-      this.buffer.shift();
+      const evicted = this.buffer.shift();
+      this.droppedBufferedCount++;
+      let droppedType = "unknown";
+      try {
+        const parsed = JSON.parse(evicted ?? "");
+        if (parsed && typeof parsed.type === "string") droppedType = parsed.type;
+      } catch {
+        // best-effort: leave "unknown"
+      }
+      const now = Date.now();
+      if (now - this.lastDropWarnAt >= ConnectionManager.DROP_WARN_WINDOW_MS) {
+        this.lastDropWarnAt = now;
+        console.warn(
+          `[bridge] dropped buffered message (ring overflow) hop=bridge→server droppedType=${droppedType} (total dropped=${this.droppedBufferedCount}, bufferSize=${this.maxBufferSize})`,
+        );
+      }
     }
   }
 

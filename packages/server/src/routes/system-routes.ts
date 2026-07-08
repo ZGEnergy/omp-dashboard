@@ -98,7 +98,12 @@ export function registerSystemRoutes(
     version?: string;
     directoryService?: DirectoryService;
     piGateway?: PiGateway;
-    browserGateway?: { broadcastToAll: (msg: ServerToBrowserMessage) => void };
+    browserGateway?: {
+      broadcastToAll: (msg: ServerToBrowserMessage) => void;
+      // Per-hop dropped-frame counters for the diagnostics surface.
+      // See change: fix-stuck-tool-card-on-dropped-event.
+      getDroppedFrameStats?: () => { total: number; bySession: Record<string, number> };
+    };
     // Shared hydration-timing recorder; `/api/health` reads its snapshot.
     // See change: instrument-session-hydration-timing.
     hydrationMetrics?: HydrationMetrics;
@@ -437,6 +442,18 @@ export function registerSystemRoutes(
       // unresolvable. Drives the Settings → General advisory. See change:
       // restore-pi-version-skew-surface.
       compatibility: readCompatibility(),
+      // Per-hop dropped-frame counters (observability for silently-dropped
+      // WS frames). `serverToBrowser` = frames the fanout skipped under
+      // back-pressure; `bridgeToServer` = the max bridge ring-buffer eviction
+      // count reported across active sessions' heartbeats. See change:
+      // fix-stuck-tool-card-on-dropped-event.
+      droppedFrames: {
+        serverToBrowser: browserGateway?.getDroppedFrameStats?.() ?? { total: 0, bySession: {} },
+        bridgeToServer: activeSessions.reduce(
+          (max, s) => Math.max(max, (s.processMetrics as { droppedBufferedFrames?: number } | undefined)?.droppedBufferedFrames ?? 0),
+          0,
+        ),
+      },
     };
   });
 

@@ -77,6 +77,24 @@ describe("GET /api/health — shape", () => {
     assertOwnershipShape(body);
   });
 
+  it("surfaces per-hop dropped-frame counters (fix-stuck-tool-card-on-dropped-event)", async () => {
+    delete process.env.DASHBOARD_STARTER;
+    handle = await createTestServer();
+    const res = await fetch(`http://localhost:${handle.httpPort}/api/health`);
+    const body = await res.json() as Record<string, unknown>;
+    const dropped = body.droppedFrames as {
+      serverToBrowser: { total: number; bySession: Record<string, number> };
+      bridgeToServer: number;
+    };
+    expect(dropped).toBeDefined();
+    expect(typeof dropped.serverToBrowser.total).toBe("number");
+    expect(typeof dropped.serverToBrowser.bySession).toBe("object");
+    expect(typeof dropped.bridgeToServer).toBe("number");
+    // Fresh server: no drops yet.
+    expect(dropped.serverToBrowser.total).toBe(0);
+    expect(dropped.bridgeToServer).toBe(0);
+  });
+
   it("launchSource is 'bridge' when DASHBOARD_STARTER=Bridge", async () => {
     process.env.DASHBOARD_STARTER = "Bridge";
     handle = await createTestServer();

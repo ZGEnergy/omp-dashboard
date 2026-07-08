@@ -2356,7 +2356,10 @@ function initBridge(pi: ExtensionAPI) {
       connection.send({
         type: "session_heartbeat",
         sessionId,
-        metrics: collectMetrics(),
+        // Fold the bridge→server ring-buffer eviction count into the heartbeat
+        // so it reaches `/api/health`. See change:
+        // fix-stuck-tool-card-on-dropped-event.
+        metrics: { ...collectMetrics(), droppedBufferedFrames: connection.getDroppedBufferedCount() },
       });
     }, HEARTBEAT_INTERVAL);
     getBridgeState().timers!.push(heartbeatTimer);

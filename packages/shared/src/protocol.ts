@@ -128,6 +128,13 @@ export interface ProcessMetrics {
   eventLoopMaxMs?: number;
   /** System load average (1 min) */
   loadAvg1m: number;
+  /**
+   * Cumulative count of outgoing messages the bridge evicted from its bounded
+   * send buffer on ring-buffer overflow (bridge→server hop drop). Surfaced on
+   * `/api/health` for observability. See change:
+   * fix-stuck-tool-card-on-dropped-event.
+   */
+  droppedBufferedFrames?: number;
 }
 
 export interface SessionHeartbeatMessage {
