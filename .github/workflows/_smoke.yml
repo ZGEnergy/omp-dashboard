@@ -118,3 +118,11 @@ jobs:
         # 'not recognized' leak to stderr. See change: replace-wmic-with-powershell.
         shell: pwsh
         run: npx tsx scripts/windows-introspection-smoke.ts
+      - name: Windows boot-parent-liveness smoke (koffi Tier-2 load)
+        # Proves boot-parent-liveness Tier-2 (koffi OpenProcess +
+        # WaitForSingleObject) loads on a REAL Windows host — unit tests cannot
+        # mock koffi/kernel32. Asserts computeBootParentAlive() is boolean and
+        # the ACTIVE tier is "tier2" (not the Tier-1 fallback). Guards a silent
+        # Windows-wide degrade. See change: electron-attach-ownership-fixes (1b.4).
+        shell: pwsh
+        run: npx tsx scripts/windows-liveness-smoke.ts

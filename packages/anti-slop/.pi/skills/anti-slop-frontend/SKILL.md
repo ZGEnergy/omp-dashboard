@@ -1,6 +1,6 @@
 ---
 name: anti-slop-frontend
-description: A mechanical, countable anti-slop checklist for AI-generated frontend. Catches the specific signatures an undirected model defaults to: AI-purple glows, Inter-everywhere, em-dashes, div-based fake screenshots, eyebrow-on-every-section, beige+brass "premium" palettes, generic Jane Doe / Acme data. Advisory layer that pairs with frontend-mockup-loop (which owns the cite-a-source loop plus WCAG gates) but works standalone in any React/Tailwind/HTML project. Triggers: "does this look AI-generated", "anti-slop pass", "remove the AI tells", "why does this look templated", "design review for slop".
+description: "A mechanical, countable anti-slop checklist for AI-generated frontend. Catches the specific signatures an undirected model defaults to: AI-purple glows, Inter-everywhere, em-dashes, div-based fake screenshots, eyebrow-on-every-section, beige+brass \"premium\" palettes, generic Jane Doe / Acme data. Advisory layer that pairs with frontend-mockup-loop (which owns the cite-a-source loop plus WCAG gates) but works standalone in any React/Tailwind/HTML project. Triggers: \"does this look AI-generated\", \"anti-slop pass\", \"remove the AI tells\", \"why does this look templated\", \"design review for slop\"."
 license: MIT
 metadata:
   author: blackbelt-technology

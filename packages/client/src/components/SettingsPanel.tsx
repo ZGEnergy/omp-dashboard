@@ -3,7 +3,7 @@ import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-
 import { VALID_SETTINGS_TABS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
 import { DISPLAY_PRESETS, type DisplayPrefs } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
 import type { NpmPackageResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
-import { mdiAlert, mdiArrowLeft, mdiCheckCircle, mdiClipboardText, mdiCloseCircle, mdiCog, mdiContentSave, mdiDelete, mdiFileDocumentEditOutline, mdiKey, mdiLoading, mdiLock, mdiPackageVariant, mdiPlay, mdiPlus, mdiPuzzle, mdiRestart, mdiServer, mdiUpdate, mdiViewDashboard, mdiWeb, mdiWrench } from "@mdi/js";
+import { mdiAlert, mdiArrowLeft, mdiBookOpenPageVariant, mdiCheckCircle, mdiClipboardText, mdiCloseCircle, mdiCog, mdiContentSave, mdiDelete, mdiFileDocumentEditOutline, mdiKey, mdiLoading, mdiLock, mdiPackageVariant, mdiPalette, mdiPlay, mdiPlus, mdiPuzzle, mdiPuzzleOutline, mdiRestart, mdiRobotOutline, mdiServer, mdiTextBoxOutline, mdiUpdate, mdiViewDashboard, mdiWeb, mdiWrench } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -11,12 +11,15 @@ import { useAsyncAction } from "../hooks/useAsyncAction.js";
 import { useDebugToolsVisible } from "../hooks/useDebugToolsVisible.js";
 import { useInstalledPackages } from "../hooks/useInstalledPackages.js";
 import { usePackageOperations } from "../hooks/usePackageOperations.js";
+import { usePiResources } from "../hooks/usePiResources.js";
+import { useResourceActivation } from "../hooks/useResourceActivation.js";
 import { getApiBase } from "../lib/api-context.js";
 import { useDisplayPrefsContext } from "../lib/DisplayPrefsContext.js";
 import { fetchAutoInitWorktreePref, setAutoInitWorktreePref } from "../lib/git-api.js";
 import { t as i18nT } from "../lib/i18n";
 import { LANGUAGE_OPTIONS, type Language, useI18n } from "../lib/i18n.js";
 import { type TestProviderResult, testProvider } from "../lib/providers-api.js";
+import { buildPiResourceFileUrl } from "../lib/route-builders.js";
 import { DiagnosticsSection } from "./DiagnosticsSection.js";
 import { DialogPortal } from "./DialogPortal.js";
 import { InstructionsPage } from "./DirectorySettings/InstructionsPage.js";
@@ -28,9 +31,13 @@ import { OpenSpecProfileSection } from "./OpenSpecProfileSection.js";
 import { PackageBrowser } from "./PackageBrowser.js";
 import { PackageInstallConfirmDialog } from "./PackageInstallConfirmDialog.js";
 import { PackageReadmeDialog } from "./PackageReadmeDialog.js";
+import { PairedDevicesSection } from "./PairedDevicesSection.js";
+import { PairingView } from "./PairingView.js";
 import { PiVersionAdvisory } from "./PiVersionAdvisory.js";
 import { PluginsSection } from "./PluginsSection.js";
 import { ProviderAuthSection } from "./ProviderAuthSection.js";
+import type { ResourceType } from "./ResourceCardGrid.js";
+import { ResourceGridPanel } from "./ResourceGridPanel.js";
 import { SpawnFailuresSection, ToolsSection } from "./ToolsSection.js";
 import { UnifiedPackagesSection } from "./UnifiedPackagesSection.js";
 
@@ -81,6 +88,7 @@ interface Config {
   spawnStrategy: string;
   /** Reattach placement policy. See change: reattach-move-to-front. */
   reattachPlacement?: "preserve" | "streaming-only" | "always";
+  reopenSessionsAfterShutdown?: "off" | "ask" | "auto";
   /** Move completed/ended sessions to front of their tier. See change: simplify-session-card-ordering. */
   completedFirst?: boolean;
   /** Move ask_user sessions to front of active tier. See change: simplify-session-card-ordering. */
@@ -151,7 +159,7 @@ const NEEDS_ISSUER = new Set(["keycloak", "oidc"]);
 const CONFIG_FIELD_PAGE: Record<string, string> = {
   port: "server", piPort: "server", bindHost: "server", autoShutdown: "server", shutdownIdleSeconds: "server",
   tunnel: "server", memoryLimits: "server",
-  spawnStrategy: "sessions", reattachPlacement: "sessions", completedFirst: "sessions",
+  spawnStrategy: "sessions", reattachPlacement: "sessions", reopenSessionsAfterShutdown: "sessions", completedFirst: "sessions",
   questionFirst: "sessions", askUserPromptTimeoutSeconds: "sessions", spawnRegisterTimeoutMs: "sessions",
   gitWorktreeEnabled: "sessions", dashboardName: "sessions", defaultModel: "sessions",
   windowsGitSource: "sessions", autoStart: "sessions",
@@ -180,6 +188,9 @@ function computeConfigPartial(config: Config, original: Config): Record<string, 
   if (config.spawnStrategy !== original.spawnStrategy) partial.spawnStrategy = config.spawnStrategy;
   if (config.reattachPlacement !== original.reattachPlacement) {
     partial.reattachPlacement = config.reattachPlacement ?? "always";
+  }
+  if ((config.reopenSessionsAfterShutdown ?? "ask") !== (original.reopenSessionsAfterShutdown ?? "ask")) {
+    partial.reopenSessionsAfterShutdown = config.reopenSessionsAfterShutdown ?? "ask";
   }
   if ((config.completedFirst ?? false) !== (original.completedFirst ?? false)) {
     partial.completedFirst = config.completedFirst ?? false;
@@ -250,6 +261,16 @@ const SETTINGS_PAGE_ALIASES: Record<string, string> = {
 // the shared VALID_SETTINGS_TABS (which gates the plugin slot contract).
 // See change: directory-settings-page-and-scoped-md-editing.
 const VALID_PAGES = new Set<string>([...VALID_SETTINGS_TABS, "instructions"]);
+
+// Global-scope resource card pages. Page id → the singular `PiResource.type` its
+// grid renders. See change: resources-card-tabs.
+const RESOURCE_TAB_TYPE: Record<string, ResourceType> = {
+  skills: "skill",
+  agents: "agent",
+  extensions: "extension",
+  prompts: "prompt",
+  themes: "theme",
+};
 
 /** Resolve a raw id (route param or ?tab=) to a canonical page id, or null if invalid. */
 function resolveSettingsPage(raw: string | undefined | null): string | null {
@@ -339,6 +360,30 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
   const routePage = routeParams?.page;
   const resolvedRoutePage = resolveSettingsPage(routePage);
   const activeTab = resolvedRoutePage ?? "general";
+
+  // Global-scope resource card pages (Resources nav group). One fetch backs the
+  // nav count pills + the active page grid. See change: resources-card-tabs.
+  const piResources = usePiResources(null, { globalOnly: true });
+  const resourceActivation = useResourceActivation();
+  const resourceCounts = useMemo(() => {
+    const empty: Record<string, number> = { skills: 0, agents: 0, extensions: 0, prompts: 0, themes: 0 };
+    const scope = piResources.data?.global;
+    if (scope) {
+      empty.skills = scope.skills.length;
+      empty.agents = scope.agents.length;
+      empty.extensions = scope.extensions.length;
+      empty.prompts = scope.prompts.length;
+      // themes are not scanned into PiResourceScope yet.
+    }
+    for (const pkg of piResources.data?.packages ?? []) {
+      if ((pkg.scope ?? "local") !== "global") continue;
+      empty.skills += pkg.resources.skills.length;
+      empty.agents += pkg.resources.agents.length;
+      empty.extensions += pkg.resources.extensions.length;
+      empty.prompts += pkg.resources.prompts.length;
+    }
+    return empty;
+  }, [piResources.data]);
 
   useEffect(() => {
     // 1) valid route param → nothing to do (already canonical).
@@ -681,6 +726,16 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
       ],
     },
     {
+      label: t("settings.groupResources", undefined, "Resources"),
+      items: [
+        { id: "skills", label: i18nT("auto.skills", undefined, "Skills"), icon: mdiBookOpenPageVariant },
+        { id: "agents", label: i18nT("auto.agents", undefined, "Agents"), icon: mdiRobotOutline },
+        { id: "extensions", label: i18nT("auto.extensions", undefined, "Extensions"), icon: mdiPuzzleOutline },
+        { id: "prompts", label: i18nT("auto.prompts", undefined, "Prompts"), icon: mdiTextBoxOutline },
+        { id: "themes", label: i18nT("auto.themes", undefined, "Themes"), icon: mdiPalette },
+      ],
+    },
+    {
       label: t("settings.groupAdvanced", undefined, "Advanced"),
       items: [
         { id: "developer", label: t("settings.developer", undefined, "Developer"), icon: mdiWrench },
@@ -774,6 +829,29 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
         <div data-testid="settings-content" className="flex-1 min-h-0 min-w-0 flex flex-col">
           {activeTab === "instructions" ? (
             <InstructionsPage />
+          ) : activeTab in RESOURCE_TAB_TYPE ? (
+            <div className="flex-1 overflow-y-auto min-w-0">
+              <ResourceGridPanel
+                data={piResources.data}
+                isLoading={piResources.isLoading}
+                error={piResources.error}
+                refresh={piResources.refresh}
+                activation={resourceActivation}
+                type={RESOURCE_TAB_TYPE[activeTab]}
+                scopes={["global"]}
+                showScopeFilter={false}
+                globalPill
+                onViewFile={(filePath, title) => navigate(buildPiResourceFileUrl(filePath, title))}
+              />
+              {/* Per-page plugin slot mounts (literal ids for the registry lint). */}
+              <div className="px-3">
+                {activeTab === "skills" && <SettingsSectionSlot tab="skills" />}
+                {activeTab === "agents" && <SettingsSectionSlot tab="agents" />}
+                {activeTab === "extensions" && <SettingsSectionSlot tab="extensions" />}
+                {activeTab === "prompts" && <SettingsSectionSlot tab="prompts" />}
+                {activeTab === "themes" && <SettingsSectionSlot tab="themes" />}
+              </div>
+            </div>
           ) : (
           <div className="p-4 space-y-6 max-w-3xl overflow-y-auto">
 
@@ -921,6 +999,21 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                     />
                     <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                       {i18nT("auto.when_the_dashboard_restarts_and_a", undefined, "When the dashboard restarts and a still-alive pi session reconnects, choose where its card goes in the folder list.")}
+                    </p>
+                  </div>
+                  <div>
+                    <SelectField
+                      label={i18nT("auto.reopen_sessions_after_shutdown", undefined, "Reopen sessions after shutdown")}
+                      value={config.reopenSessionsAfterShutdown ?? "ask"}
+                      options={[
+                        { value: "ask", label: "Ask (default)" },
+                        { value: "auto", label: "Reopen automatically" },
+                        { value: "off", label: "Never" },
+                      ]}
+                      onChange={(v) => update((c) => { c.reopenSessionsAfterShutdown = v as "off" | "ask" | "auto"; })}
+                    />
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      {i18nT("auto.when_sessions_were_running_at_shutdown", undefined, "When sessions were running when the machine shut down or crashed, offer to reopen them on next launch. Ask shows a prompt; Auto reopens them silently; Never ignores them.")}
                     </p>
                   </div>
                   <div>
@@ -1121,6 +1214,12 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                     c.auth.bypassHosts = nets;
                   })}
                 />
+                <Section title={t("settings.pairDevice", undefined, "Pair a device")}>
+                  <PairingView />
+                </Section>
+                <Section title={t("settings.pairedDevices", undefined, "Paired Devices")}>
+                  <PairedDevicesSection />
+                </Section>
                 <SettingsSectionSlot tab="security" />
               </>
             )}
@@ -1525,6 +1624,23 @@ function DisplayPrefsSection() {
       <ToggleField label={t("settings.tokenStatsBar", undefined, "Token stats bar")} value={prefs.tokenStatsBar} onChange={(v) => patch({ tokenStatsBar: v })} />
       <ToggleField label={t("settings.contextUsageBar", undefined, "Context usage bar")} value={prefs.contextUsageBar} onChange={(v) => patch({ contextUsageBar: v })} />
       <ToggleField label={t("settings.reasoningBlocks", undefined, "Reasoning blocks")} value={prefs.reasoning} onChange={(v) => patch({ reasoning: v })} />
+      <NumberField
+        label={t("settings.reasoningAutoCollapse", undefined, "Reasoning auto-collapse (seconds, 0 = never)")}
+        value={Math.round(prefs.reasoningAutoCollapseMs / 1000)}
+        onChange={(v) => patch({ reasoningAutoCollapseMs: Math.max(0, v) * 1000 })}
+        disabled={!prefs.reasoning}
+      />
+      <ToggleField
+        label={t("settings.keepReasoningOpenUntilTurnEnds", undefined, "Keep reasoning open until turn ends")}
+        value={prefs.keepReasoningOpenUntilTurnEnds}
+        onChange={(v) => patch({ keepReasoningOpenUntilTurnEnds: v })}
+        disabled={!prefs.reasoning}
+      />
+      <ToggleField
+        label={t("settings.toolGroupDefaultCollapsed", undefined, "Keep tool groups collapsed by default")}
+        value={prefs.toolGroupDefaultCollapsed}
+        onChange={(v) => patch({ toolGroupDefaultCollapsed: v })}
+      />
       <ToggleField label={t("settings.toolResultBodies", undefined, "Tool result bodies")} value={prefs.toolResults} onChange={(v) => patch({ toolResults: v })} />
       <ToggleField label={t("settings.turnMetadata", undefined, "Turn metadata separators")} value={prefs.turnMetadata} onChange={(v) => patch({ turnMetadata: v })} />
       <ToggleField label={t("settings.debugEvents", undefined, "Debug events")} value={prefs.debugTools} onChange={(v) => patch({ debugTools: v })} />

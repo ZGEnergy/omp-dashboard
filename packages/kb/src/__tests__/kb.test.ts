@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { KbStore } from "../types.js";
 import { resolveAll, classifyRef, sourceIdentity, filesystemResolver, npmResolver, httpsResolver } from "../sources.js";
 import { isTrusted, recordTrust, canonicalSource } from "../trust.js";
-import { agentsChain, doxInit, doxLint, AREA_FILE_THRESHOLD } from "../dox.js";
+import { agentsChain, doxInit, doxLint } from "../dox.js";
 import { createServer, type Server } from "node:http";
 
 describe("chunker", () => {
@@ -70,8 +70,8 @@ describe("indexer + store (integration)", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("indexes and searches", () => {
-    const s = indexSource(store, { root: "t", dir });
+  it("indexes and searches", async () => {
+    const s = await indexSource(store, { root: "t", dir });
     expect(s.changed).toBe(3);
     const hits = store.search("extract claims from token", { limit: 5 });
     expect(hits[0].path).toMatch(/auth\.md$/);
@@ -84,26 +84,26 @@ describe("indexer + store (integration)", () => {
     expect(top?.akaPaths?.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("incremental: re-index is a no-op when nothing changed", () => {
-    const s = indexSource(store, { root: "t", dir });
+  it("incremental: re-index is a no-op when nothing changed", async () => {
+    const s = await indexSource(store, { root: "t", dir });
     expect(s.changed).toBe(0);
     expect(s.deleted).toBe(0);
   });
 
-  it("incremental: editing one file reindexes only that file", () => {
+  it("incremental: editing one file reindexes only that file", async () => {
     writeFileSync(
       join(dir, "theme.md"),
       "# Theming\nThe theming system controls palette and typography across light and dark variants with enough descriptive text to exceed the tiny-chunk merge threshold here.\n" +
         "## Dark Mode\nUpdated: tweak the dark palette and add a high-contrast variant for accessibility; verbose enough to remain a distinct chunk after the edit reindex.",
     );
-    const s = indexSource(store, { root: "t", dir });
+    const s = await indexSource(store, { root: "t", dir });
     expect(s.changed).toBe(1);
     expect(store.search("high-contrast variant accessibility", { limit: 3 })[0].path).toMatch(/theme\.md$/);
   });
 
-  it("incremental: deleting a file purges its rows", () => {
+  it("incremental: deleting a file purges its rows", async () => {
     rmSync(join(dir, "theme.md"));
-    const s = indexSource(store, { root: "t", dir });
+    const s = await indexSource(store, { root: "t", dir });
     expect(s.deleted).toBe(1);
     const hits = store.search("dark palette night appearance", { limit: 5 });
     expect(hits.every((h) => !h.path.endsWith("theme.md"))).toBe(true);
@@ -114,7 +114,7 @@ describe("indexer + store (integration)", () => {
     expect(nbrs.some((n) => n.name.includes("Auth Guide"))).toBe(true);
   });
 
-  it("doc_type: AGENTS.md tagged 'agents', source-dir md tagged 'source-md'", () => {
+  it("doc_type: AGENTS.md tagged 'agents', source-dir md tagged 'source-md'", async () => {
     const sub = mkdtempSync(join(tmpdir(), "kb-dt-"));
     try {
       writeFileSync(join(sub, "AGENTS.md"), "# Agents\nRules for the agent working in this repo, padded to survive the merge threshold cleanly.\n");
@@ -123,7 +123,7 @@ describe("indexer + store (integration)", () => {
       writeFileSync(join(sub, "guide.md"), "# Guide\nA regular doc-root markdown guide long enough to remain its own chunk after merge thresholds apply here.\n");
       const db2 = join(sub, ".kb.db");
       const st2 = new SqliteFtsStore(db2); st2.init();
-      indexSource(st2, { root: "t", dir: sub }, { includeSourceMarkdown: true });
+      await indexSource(st2, { root: "t", dir: sub }, { includeSourceMarkdown: true });
       const agents = st2.search("rules", { limit: 5, docType: "agents" });
       expect(agents.every((h) => h.docType === "agents")).toBe(true);
       expect(agents.some((h) => h.path.endsWith("AGENTS.md"))).toBe(true);
@@ -230,7 +230,7 @@ describe("kb init", () => {
 
 describe("retrieval pipeline (Tier A/B/C)", () => {
   let dir: string, dbPath: string, store: SqliteFtsStore;
-  beforeAll(() => {
+  beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "kb-rank-"));
     writeFileSync(
       join(dir, "rank.md"),
@@ -244,7 +244,7 @@ describe("retrieval pipeline (Tier A/B/C)", () => {
     dbPath = join(dir, ".kb.db");
     store = new SqliteFtsStore(dbPath);
     store.init();
-    indexSource(store, { root: "t", dir });
+    await indexSource(store, { root: "t", dir });
   });
   afterAll(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
@@ -293,11 +293,11 @@ describe("doc-example integration", () => {
   // corpus lives at repo root `doc-example/` (gitignored; absent in worktrees)
   const docExample = join(fileDir, "../../../..", "doc-example");
   const hasCorpus = existsSync(docExample);
-  (hasCorpus ? it : it.skip)("indexes the real corpus and answers the golden queries", () => {
+  (hasCorpus ? it : it.skip)("indexes the real corpus and answers the golden queries", async () => {
     const db = join(tmpdir(), `kb-docex-${Date.now()}.db`);
     const store = new SqliteFtsStore(db);
     store.init();
-    const s = indexSource(store, { root: "doc-example", dir: docExample });
+    const s = await indexSource(store, { root: "doc-example", dir: docExample });
     expect(s.scanned).toBeGreaterThan(100);
     const hit = store.search("decoupled service creation CQRS pattern", { limit: 5, expandParent: true })[0];
     expect(hit?.path).toMatch(/interceptors\.md$/);
@@ -406,41 +406,86 @@ describe("dox: kb agents chain", () => {
   });
 });
 
-describe("dox: kb dox init", () => {
+describe("dox: source-aware kb dox init (migrate-file-index deltas)", () => {
   let dir: string;
+  const w = (rel: string, body = "export const x = 1;\n") => {
+    const abs = join(dir, rel);
+    mkdirSync(join(abs, ".."), { recursive: true });
+    writeFileSync(abs, body);
+  };
   beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), "kb-doxinit-"));
-    // root-level + an over-threshold area
-    writeFileSync(join(dir, "root1.md"), "# R1\nbody.\n");
-    mkdirSync(join(dir, "big"), { recursive: true });
-    for (let i = 0; i < AREA_FILE_THRESHOLD; i++) writeFileSync(join(dir, "big", `f${i}.md`), `# F${i}\nbody.\n`);
+    dir = mkdtempSync(join(tmpdir(), "kb-doxsrc-"));
+    // real source tree across nested dirs
+    w("src/client/App.tsx");
+    w("src/client/components/Foo.tsx");
+    w("src/client/components/Bar.tsx");
+    w("src/server/index.ts");
+    // delta ①: skipped source shapes
+    w("src/types.d.ts");
+    w("src/client/App.test.tsx");
+    w("src/__tests__/helper.ts");
+    // non-source ignored
+    w("src/notes.md", "# notes\n");
+    // delta ②: excluded noise trees
+    w(".worktrees/repo/src/z.ts");
+    w("openspec/changes/y.ts");
+    w("doc-example/e.ts");
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("scaffolds a root + area AGENTS.md with path-only rows", () => {
+  it("delta ③+A: every dir with ≥1 source file gets its own AGENTS.md (grouped by full parent dir)", () => {
     const plan = doxInit({ cwd: dir });
-    expect(plan.created).toContain(join(dir, "AGENTS.md"));
-    expect(plan.created).toContain(join(dir, "big", "AGENTS.md"));
-    const root = readFileSync(join(dir, "AGENTS.md"), "utf8");
-    expect(root).toContain("`root1.md`");
-    expect(root).toContain("`big/AGENTS.md`");
-    const big = readFileSync(join(dir, "big", "AGENTS.md"), "utf8");
-    expect(big).toContain("`big/f0.md`");
-    // purposes left empty
-    expect(root).toMatch(/`root1\.md`\s*\|\s*\|/);
+    expect(plan.created).toContain(join(dir, "src", "client", "AGENTS.md"));
+    expect(plan.created).toContain(join(dir, "src", "client", "components", "AGENTS.md"));
+    expect(plan.created).toContain(join(dir, "src", "server", "AGENTS.md"));
   });
 
-  it("is idempotent: rerun does not clobber existing files", () => {
-    const rootBefore = readFileSync(join(dir, "AGENTS.md"), "utf8");
+  it("delta ⑤: rows are relative to each AGENTS.md's own directory", () => {
+    const comp = readFileSync(join(dir, "src", "client", "components", "AGENTS.md"), "utf8");
+    expect(comp).toContain("`Foo.tsx`");
+    expect(comp).toContain("`Bar.tsx`");
+    expect(comp).not.toContain("src/client/components/Foo.tsx");
+    // purpose column left empty for the agent to author
+    expect(comp).toMatch(/`Foo\.tsx`\s*\|\s*\|/);
+  });
+
+  it("delta ①: skips .d.ts, *.test.*, __tests__ dirs, and non-source files", () => {
+    doxInit({ cwd: dir });
+    const client = readFileSync(join(dir, "src", "client", "AGENTS.md"), "utf8");
+    expect(client).toContain("`App.tsx`");
+    expect(client).not.toContain("App.test.tsx"); // *.test.* skipped
+    // skipped shapes never create their own AGENTS.md
+    expect(existsSync(join(dir, "src", "__tests__", "AGENTS.md"))).toBe(false); // __tests__ dir excluded
+    expect(existsSync(join(dir, "src", "AGENTS.md"))).toBe(false); // only types.d.ts + notes.md here, both skipped
+  });
+
+  it("delta ②: excludes .worktrees, openspec, doc-example", () => {
     const plan = doxInit({ cwd: dir });
-    expect(plan.created.length).toBe(0); // nothing new created
-    expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).toBe(rootBefore);
+    const paths = [...plan.created, ...plan.appended.map((a) => a.file)];
+    expect(paths.some((p) => p.includes(".worktrees"))).toBe(false);
+    expect(paths.some((p) => p.includes(join(dir, "openspec")))).toBe(false);
+    expect(paths.some((p) => p.includes("doc-example"))).toBe(false);
+  });
+
+  it("delta ④: no part-N pseudo-directories", () => {
+    const plan = doxInit({ cwd: dir });
+    expect(plan.created.some((p) => /part-\d+/.test(p))).toBe(false);
+  });
+
+  it("is idempotent: rerun creates nothing new", () => {
+    doxInit({ cwd: dir });
+    const before = readFileSync(join(dir, "src", "client", "components", "AGENTS.md"), "utf8");
+    const plan = doxInit({ cwd: dir });
+    expect(plan.created.length).toBe(0);
+    expect(readFileSync(join(dir, "src", "client", "components", "AGENTS.md"), "utf8")).toBe(before);
   });
 
   it("--dry-run writes nothing", () => {
     const sub = mkdtempSync(join(tmpdir(), "kb-doxdry-"));
+    mkdirSync(join(sub, "src"), { recursive: true });
+    writeFileSync(join(sub, "src", "a.ts"), "export const a = 1;\n");
     doxInit({ cwd: sub, dryRun: true });
-    expect(existsSync(join(sub, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(sub, "src", "AGENTS.md"))).toBe(false);
     rmSync(sub, { recursive: true, force: true });
   });
 });
@@ -484,5 +529,33 @@ describe("dox: kb dox lint", () => {
     const r = doxLint({ cwd: dir });
     expect(Array.isArray(r.issues)).toBe(true);
     for (const i of r.issues) expect(i).toHaveProperty("kind"), expect(i).toHaveProperty("agentsFile");
+  });
+
+  it("resolves row paths relative to the owning AGENTS.md dir (Defect A)", () => {
+    // sub-dir AGENTS.md with a BARE BASENAME row for a sibling file that exists
+    const sub = join(dir, "src", "nested");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, "AGENTS.md"), "# DOX \u2014 src/nested\n\n| `api.ts` |  |\n");
+    writeFileSync(join(sub, "api.ts"), "export const api = 1;\n");
+    const r = doxLint({ cwd: dir });
+    // api.ts exists next to its AGENTS.md → must NOT be an orphan
+    expect(r.issues.filter((i) => i.kind === "orphan" && i.path === "api.ts").length).toBe(0);
+  });
+
+  it("falls back to repo-root for root-config rows documented in a sub-dir AGENTS.md (Option B)", () => {
+    // docs/AGENTS.md documents root-level config that lives at the repo root
+    mkdirSync(join(dir, "docs"), { recursive: true });
+    writeFileSync(join(dir, "docs", "AGENTS.md"), "# DOX \u2014 docs\n\n| `biome.json` |  |\n");
+    writeFileSync(join(dir, "biome.json"), "{}\n"); // at repo root, not in docs/
+    const r = doxLint({ cwd: dir });
+    expect(r.issues.filter((i) => i.kind === "orphan" && i.path === "biome.json").length).toBe(0);
+  });
+
+  it("ignores backtick cells in non-DOX prose tables (Defect B)", () => {
+    writeFileSync(join(dir, "AGENTS.md"),
+      "# DOX\n\n| `src/a.md` |  |\n| `src/b.md` |  |\n\n## Subagent Routing\n\n| Agent | Use |\n| `Explore` | search |\n");
+    const r = doxLint({ cwd: dir });
+    // `Explore` lives under a non-DOX heading → not a file row, no orphan
+    expect(r.issues.filter((i) => i.path === "Explore").length).toBe(0);
   });
 });

@@ -380,9 +380,10 @@ Descriptor-only slots (existing in `extension-ui-system`): `management-modal`, `
 
 #### Health endpoint observability
 
-`/api/health` exposes two additive measurement fields (no behavior change). Existing clients ignore unknown fields. See change: instrument-session-hydration-timing.
+`/api/health` exposes three additive measurement fields (no behavior change). Existing clients ignore unknown fields. See change: instrument-session-hydration-timing.
 - `eventLoopDelay: { meanMs, p99Ms, maxMs }` — `perf_hooks.monitorEventLoopDelay` histogram, ns→ms. Resets window each read.
 - `hydration: HydrationSample[]` — ring buffer, ≤20 newest-first samples. Process-local, no persistence. Sample `{ sessionId, wallMs, fileBytes, entryCount, eventCount, at }` recorded by `loadSessionEvents`.
+- `eventLoopSpikes: { at, ms, turn }[]` — ring buffer, ≤50 newest-first, process-local, additive. Retains worst-case event-loop stalls. Two feeds: dedicated `monitorEventLoopDelay` sampler (own instance, never the boot histogram `/api/health` resets → no reset race; records `turn: null` for stalls no poll turn owns) + per-turn self-records from the openspec poll path (`turn: "tickOpen" \| "dirPollPre" \| "dirPollPost"`). Sub-threshold ~700 ms stall retained even when nobody polls `/api/health`. See change: attribute-openspec-poll-eventloop-stalls.
 
 **Bundled-by-default plugins:** The plugin loader treats all plugins identically (same manifest, same discovery, same `enabled` flag, same failure isolation). What distinguishes "bundled-by-default" plugins (initial set: `git-plugin`) is purely operational — the build pipeline always includes them in `packages/`. Their absence is a deliberate user opt-out, not a normal state. OpenSpec, Flows, and Subagents plugins are bundled in standard builds but their absence is a normal use case (e.g. a workspace without OpenSpec).
 
@@ -787,6 +788,10 @@ Live reconfiguration: `PUT /api/config` with an `openspec` block calls `director
 
 Observability: `DEBUG=pi-dashboard:openspec-poll` (or any `DEBUG=...pi-dashboard...`) emits one line per tick with dir count, queue size, and wall time. Any tick over 5 s logs a WARN hinting at `pollIntervalSeconds` / `maxConcurrentSpawns` as knobs.
 
+**Per-turn event-loop attribution.** Poll tick synchronous work spread across many event-loop turns, not one. `scheduleOpenSpecTick` times each instrumented turn with `performance.now()` and self-records `{at, ms, turn}` into the `eventLoopSpikes` buffer (`/api/health`) when a single turn's synchronous run ≥ floor (100 ms). Turns: `tickOpen` (the `setInterval` fire: folder-head reads + `reconcileWatchers` + `computeKnownDirectories`), `dirPollPre` (a dir's `setTimeout` fire prefix, incl. `pollOne` sync work before the worker `await`), `dirPollPost` (broadcast continuation after the worker resolves). Never summed across the `await` — pre/post timed as separate turns. Per-change TOCTOU stamp runs in the worker → not a main-thread turn. Retained wall `durationMs > 5 s` alarm stays (catches an overdue tick). Added per-turn alarm fires at 250 ms, names the turn — blind spot the wall alarm missed (jitter stagger keeps `durationMs` ≈ `jitterSeconds`, so wall alarm never saw sub-second single-turn stalls). Dedicated `monitorEventLoopDelay` sampler (own histogram, 1 s cadence) records `turn: null` for stalls no instrumented turn owns (GC, hydration deserialize, WS on-connect). See change: attribute-openspec-poll-eventloop-stalls.
+
+**Folder-head reads async (non-blocking).** Live attribution pinned the recurring ~700 ms stall to `tickOpen → tickFolderHeads`: 3 `execSync` git-HEAD spawns per folder × ~11 folders ≈ 33 blocking subprocesses on the `setInterval` turn, every tick. Fix: `readHeadDisplayAsync` (`git-operations.ts`) reads HEAD via async `execFile` (never blocks the loop; branch/sha only, skips the `.gitmodules` submodule probe the sync `readHead` keeps for the worktree dialog). `folder-head-poll.ts` `poll`/`refreshOne` now async; fan-out via `mapBounded` concurrency cap (default 4). `tickFolderHeads` kicked off without blocking, `await`ed before the openspec fan-out so per-cwd `git_head_update` still precedes `openspec_update`. Chosen over mtime-gating (which risks suppressing a same-mtime branch switch). Guard test `directory-service-folderhead-async.test.ts`: ordering + branch-switch-reflects. Post-fix live: 0 `tickOpen` spikes over ~3 ticks (was 100 % reliable). See change: attribute-openspec-poll-eventloop-stalls.
+
 **OpenSpec poll worker.** Heavy per-tick CPU work runs on a `worker_threads` pool. Main thread owns `openspec list` spawn, the FIFO semaphore, the `DirCache`, and the WebSocket broadcast. Worker owns: pre-call + post-call effective mtimes, `deriveArtifactStatus`, `buildOpenSpecData`, optional `groupId` join (`joinGroupIdsToOpenSpecData` shape, fed via `getOpenSpecGroupAssignments(cwd)`), and `JSON.stringify(data)`. Worker emits `{cwd, data, serialized, stampMtimes, racyNames}`; main thread copies `serialized` into `DirCache.serialized` and stamps per-change mtimes from `stampMtimes`, skipping entries in `racyNames` (TOCTOU racy → cache untouched, semantics unchanged from previous in-process gate). Pool sizing: fixed slots = `max(1, min(maxConcurrentSpawns, os.cpus().length))`. Lifecycle: lazy spawn per slot on first request via `new Worker(url, {execArgv: process.execArgv})` so the jiti hook propagates; `stopPolling()` calls `dispose()` (drains queue in-process then terminates workers); `reconfigurePolling()` disposes pool so it respawns lazily at the new `maxConcurrentSpawns`. Fallback: spawn fail / worker crash / non-zero exit / per-request timeout (default 10 s) terminates the slot and runs the request in-process; `pool.process()` never rejects, so the tick never drops a broadcast. `OpenSpecPollConfig.useWorker = false` (default `true`) takes the permanent in-process path — no `worker_threads` spawn ever. Serialize-once: worker stringifies `data` once; `onWatcherFired` + the periodic tick diff against `cache.serialized ?? JSON.stringify(...)`; `browserGateway.broadcastOpenSpecUpdate(cwd, serialized)` builds the envelope by string concat (`'{"type":"openspec_update","cwd":' + JSON.stringify(cwd) + ',"data":' + serialized + '}'`) — large `data` never re-stringifies per subscriber. Force-refresh path (user-clicked `refreshOpenSpec`) is unchanged: still spawns authoritative `openspec status` per change in main thread, clears `cache.serialized`, uses the legacy broadcast shape. `openspec_update` payload bytes are identical to the pre-worker shape; parity test enforces. See change: offload-openspec-poll-to-worker.
 
 **Session-load worker.** Session-event hydration (JSONL parse + replay) runs on a `worker_threads` pool, off main event loop. `packages/server/src/session-load-worker.ts` exports `loadAndReplay(req)`: runs `loadSessionEntries` (JSONL parse + tree-walk) and `replayEntriesAsEvents(...).map(m => m.event)` projection IN-WORKER; only final `events` array crosses thread boundary. `parentPort` bootstrap wires `loadAndReplay` onto a thread; tests + fallback import function directly. Worker output `{jobId, success, events, error, entryCount?}`. `packages/server/src/session-load-worker-pool.ts` runs fixed slots = `max(1, min(maxConcurrentSpawns, os.cpus().length))`; FIFO queue when slots busy; per-request timeout default `30000ms`; lazy spawn per slot via `new Worker(url, {execArgv: process.execArgv})` so jiti hook propagates. Main thread owns per-session `loadingSet` dedup, `eventStore.insertEvent`, and `session_updated` + `event_replay` broadcast (in `directory-service.ts::loadSessionEvents` + `browser-handlers/subscription-handler.ts`); worker never touches store or sockets. `cancel(jobId)`: queued job dropped from queue, resolves `"cancelled"`; in-flight job abandoned, its result discarded on arrival, worker NOT terminated for plain cancel (only timeout/crash terminates slot). `directory-service.ts` exposes `cancelLoad(sessionId)` via `inFlightLoadJobs` map; `subscription-handler.ts` unsubscribe case calls `cancelLoad` when `getSubscribers(sessionId).length === 0`; `subscription-handler.ts` treats `result.error === "cancelled"` as no-op (no `dataUnavailable`, no replay). Fallback: spawn fail / worker crash / non-zero exit / per-request timeout → in-process `loadAndReplay` for that request; `pool.load().result` never rejects. Config: `DashboardConfig.sessions.useLoadWorker` (default `true`) in `packages/shared/src/config.ts`; `false` → permanent in-process path, no `worker_threads` spawn. Plumbed `server.ts` `ServerConfig.sessions` → `cli.ts` → `createDirectoryService` `options.useLoadWorker`. `events` bytes identical to in-process projection; parity test enforces (`packages/server/src/__tests__/session-load-worker.test.ts`). Copies `openspec-poll-worker-pool` scaffold, not extracted (rule-of-three deferred to third consumer). See change: offload-session-events-load-to-worker.
@@ -1007,6 +1012,72 @@ Optional OAuth2 authentication protects the dashboard when accessed remotely.
 7. On success, a signed JWT cookie is set (7-day expiry) and user is redirected back
 8. WebSocket upgrade requests are also validated — external connections without valid cookie or trusted network get 401
 9. Supported providers: GitHub (hardcoded endpoints), Google/Keycloak/OIDC (via OIDC discovery)
+
+### Server-Keypair Device Pairing
+
+Second auth path beside OAuth. Pairs a device to a server via QR/copy-string. Mints long-lived bearer token. Change: `add-server-keypair-pairing`.
+
+#### Topology 3 — neutral static PWA shell
+
+Shell published to `pi-dashboard.dev/app/`. GitHub Pages subpath — `site/` owns apex; shell shares same web origin, so CORS default covers it. Shell holds keyring in IndexedDB. Not bound to any server origin. Built from `packages/shell` (Vite, `base:"./"`, hash routing, `404.html` fallback, CSP via meta). Deployed by `.github/workflows/deploy-site.yml` (builds shell into `site/dist/app/`).
+
+#### Server identity — Model 1, TOFU pinning
+
+Server ensures persistent Ed25519 keypair at `~/.pi/dashboard/identity.key` (0600). Reused across restarts. Fingerprint `sha256:<base64url>` over SPKI DER. Stable identity independent of URL. Module `packages/server/src/identity.ts`. Client pins fingerprint at first pairing. On connect client sends nonce; server signs with private key via `POST /api/pair/challenge`; client verifies vs pinned pubkey (WebCrypto Ed25519). Detects impostor on reused URL.
+
+#### QR / copy-string pairing
+
+Payload `{v,id,code,urls[]}` = protocol version, fingerprint, one-time ~60s code, secure reachable URLs. `urls[]` holds https/wss only (D14) — never self-signed LAN; tunnel plus operator-configured `pairing.publicBaseUrls`. Rendered as QR plus copyable base64url string. Module `packages/server/src/pairing.ts`.
+
+#### Compare-code approval — D12
+
+```mermaid
+sequenceDiagram
+    participant Dev as Device (shell)
+    participant Srv as Server
+    participant Op as Operator (dashboard)
+    Dev->>Srv: redeem one-time code
+    Srv->>Srv: create ONE pending device + 8-digit confirmation code
+    Srv-->>Dev: show 8-digit code
+    Srv-->>Op: show 8-digit code
+    Op->>Srv: type device confirmation code (authenticated session)
+    Srv->>Srv: match → consume code → mint bearer token
+    Srv-->>Dev: bearer token
+```
+
+Code consumed on approval, not redemption. Premature redemption cannot lock out legit device. Operator types device confirmation code into dashboard — active compare-and-match, not one-click. Approval requires authenticated browser session. Rate-limit plus lockout. At most one pending device per code — bounds memory and prompt flood.
+
+#### Bearer device auth — D5/D7
+
+Approval mints long-lived opaque bearer token. Registry `~/.pi/dashboard/paired-devices.json` (0600). Stores only SHA-256 hash. Revoke = row delete (Settings → Security → Paired Devices). Auth branch: `Authorization: Bearer` (REST) feeds existing `request.isAuthenticated` — one OR branch, registered before OAuth plugin. Modules `paired-devices.ts`, `bearer-auth.ts`.
+
+#### WS single-use ticket — D11/F4/F6
+
+Durable bearer never rides WS. Client mints short-lived ~15s single-use ticket via `POST /api/ws-ticket {scope}` (authenticated). Opens `wss://host/ws?ticket=`. Ticket deleted on first upgrade attempt. Bound to route scope (browser/terminal/editor/live). Mismatched-scope refused. Module `ws-ticket.ts`.
+
+#### Genuine-local trust — D10, narrowed
+
+Loopback auth-exemption replaced by `isGenuinelyLocal(ip, headers)` = loopback AND no proxy-forwarding header (`x-forwarded-*`, `x-real-ip`, `forwarded`). Closes zrok-tunnel-as-127.0.0.1 bypass at all 3 sites: auth-plugin `onRequest`, `createNetworkGuard`, WS upgrade. Marker-less `ssh -R` not caught by header heuristic — accepted narrowing. Affirmative local-IPC token `~/.pi/dashboard/local/token` (dir 0700, file 0600), header `X-Pi-Local-Token`, for same-host process callers. Module `local-token.ts`. Same-desktop browser keeps loopback trust (genuine-local, no forwarding header).
+
+#### CORS default
+
+`https://pi-dashboard.dev` built-in allowed origin, beside `*.share.zrok.io`. CORS (origin-keyed) distinct from auth (bearer). Config `cors.allowedOrigins` extends.
+
+#### Versioned protocol — D9
+
+Payload plus handshake carry `v`. Server keeps backward-compatible pairing routes. `PAIRING_PROTOCOL_VERSION`, `SUPPORTED_PAIRING_VERSIONS`.
+
+#### Operator pairing view — client
+
+Operator-side pairing view = `packages/client/src/components/PairingView.tsx`. Mounts Settings → Security ("Pair a device"). Client-only change: no new server route. `/api/pair/payload` + `/api/pair/approve` already shipped by `add-server-keypair-pairing`. Change: `wire-nonzrok-pairing-view`.
+
+On open calls `GET /api/pair/payload` → `{v,id,code,urls[]}`. Renders QR (`qrcode` dep, `QRCode.toCanvas` idiom) plus base64url copy-string. Device accepts raw JSON or base64url via `decodePayloadString`. Shows fingerprint `id`, one-time code TTL countdown (~60s, `CODE_TTL_MS`), advertised `urls[]`.
+
+Approval: operator types numeric confirm code shown on device → `POST /api/pair/approve` (D12 typed compare-and-match). Client lib `packages/client/src/lib/pairing-api.ts` `approvePairing(code, confirmCode, label?)`. Success → device joins paired list.
+
+`no_reachable_endpoint` → empty state. Pairing needs secure context. Empty state offers Start tunnel (`/tunnel-setup`) plus `http://localhost` same-machine note. Never implies plain-http LAN pairs in a browser.
+
+Gate: `reachableUrls()` (`packages/server/src/pairing.ts`) read-time filter (D4/D14) advertises only secure `wss`/`https` endpoints. Keeps `urls[]` secure. `createPayload()` returns null when no reachable url → route returns `{success:false,error:"no_reachable_endpoint"}` (HTTP 200).
 
 ### Settings Panel
 The web client includes a Settings panel (gear icon in sidebar header → `/settings` route) that lets users view and edit all dashboard configuration. The panel:

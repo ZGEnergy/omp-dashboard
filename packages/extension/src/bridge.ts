@@ -1652,7 +1652,11 @@ function initBridge(pi: ExtensionAPI) {
             readFile: inlinerReadFile,
             isAllowedPath: (p) => isUnderArtifactRoot(p, artifactRoots, fs.realpathSync),
           });
-          if (inlined.inlinedCount > 0) {
+          // Apply when a new image was inlined OR when the inliner rewrote the
+          // result (e.g. stripped a redundant path whose image the result
+          // already carried natively). The inliner returns the SAME reference
+          // when nothing changed, so an identity diff is a safe change signal.
+          if (inlined.result !== (event as any).result) {
             (event as any).result = inlined.result;
           }
         } catch (err) {

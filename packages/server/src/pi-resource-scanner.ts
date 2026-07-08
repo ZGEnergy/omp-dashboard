@@ -3,17 +3,23 @@
  * from local (.pi/), global (~/.pi/agent/), and installed packages.
  */
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 import * as npm from "@blackbelt-technology/pi-dashboard-shared/platform/npm.js";
-import type { PiResource, PiResourceScope, PiPackageInfo, PiResourcesResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+import type { PiPackageInfo, PiResource, PiResourceScope, PiResourcesResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+import {
+  buildEnabledMap,
+  resolveActivation as defaultResolveActivation,
+  lookupEnabled,
+  type ResolveActivationFn,
+} from "./pi-resource-activation.js";
 
 // ── Frontmatter Parsing ─────────────────────────────────────────────
 
 export function parseFrontmatter(
   content: string,
   fallbackFirstLine = false,
-): { name?: string; description?: string } {
+): { name?: string; description?: string; model?: string; tools?: string } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) {
     if (fallbackFirstLine) {
@@ -25,6 +31,8 @@ export function parseFrontmatter(
 
   const yaml = match[1];
   const name = yaml.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  const model = yaml.match(/^model:\s*(.+)$/m)?.[1]?.trim();
+  const tools = parseToolsSummary(yaml.match(/^tools:\s*(.+)$/m)?.[1]?.trim());
 
   // Handle both single-line and multi-line (>) description
   let description: string | undefined;
@@ -43,7 +51,23 @@ export function parseFrontmatter(
     }
   }
 
-  return { name, description };
+  return { name, description, model, tools };
+}
+
+/**
+ * Compress a frontmatter `tools` value into a compact card summary. Accepts a
+ * bracketed/comma list (`[edit, read]` → `edit,read`) or a scalar (`all`).
+ * Returns undefined when absent. See change: resources-card-tabs.
+ */
+function parseToolsSummary(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const inner = raw.replace(/^\[/, "").replace(/\]$/, "").trim();
+  if (!inner) return undefined;
+  return inner
+    .split(",")
+    .map((t) => t.trim().replace(/^['"]|['"]$/g, ""))
+    .filter(Boolean)
+    .join(",");
 }
 
 // ── Directory Scanning Helpers ──────────────────────────────────────
@@ -87,6 +111,7 @@ function discoverSkills(skillsDir: string): PiResource[] {
           description: fm.description,
           filePath: skillFile,
           type: "skill",
+          enabled: true,
         });
       }
     } else if (entry.endsWith(".md")) {
@@ -98,6 +123,7 @@ function discoverSkills(skillsDir: string): PiResource[] {
         description: fm.description,
         filePath: entryPath,
         type: "skill",
+        enabled: true,
       });
     }
   }
@@ -113,6 +139,7 @@ function discoverExtensions(extDir: string): PiResource[] {
         name: entry.replace(/\.(ts|js)$/, ""),
         filePath: entryPath,
         type: "extension",
+        enabled: true,
       });
     } else if (safeIsDirectory(entryPath)) {
       const indexTs = path.join(entryPath, "index.ts");
@@ -123,6 +150,7 @@ function discoverExtensions(extDir: string): PiResource[] {
           name: entry,
           filePath: indexFile,
           type: "extension",
+          enabled: true,
         });
       }
     }
@@ -143,13 +171,40 @@ function discoverPrompts(promptsDir: string): PiResource[] {
       description: fm.description,
       filePath: entryPath,
       type: "prompt",
+      enabled: true,
     });
   }
   return prompts;
 }
 
+/**
+ * Discover subagents from `agents/*.md`, parsing `model` + `tools` from
+ * frontmatter (in addition to `name` / `description`). Mirrors
+ * `discoverSkills` for root `.md` files. See change: resources-card-tabs.
+ */
+function discoverAgents(agentsDir: string): PiResource[] {
+  const agents: PiResource[] = [];
+  for (const entry of safeReaddir(agentsDir)) {
+    if (!entry.endsWith(".md")) continue;
+    const entryPath = path.join(agentsDir, entry);
+    if (safeIsDirectory(entryPath)) continue;
+    const content = safeReadFile(entryPath);
+    const fm = content ? parseFrontmatter(content) : {};
+    agents.push({
+      name: fm.name ?? entry.replace(/\.md$/, ""),
+      description: fm.description,
+      filePath: entryPath,
+      type: "agent",
+      enabled: true,
+      ...(fm.model ? { model: fm.model } : {}),
+      ...(fm.tools ? { tools: fm.tools } : {}),
+    });
+  }
+  return agents;
+}
+
 function emptyScope(): PiResourceScope {
-  return { extensions: [], skills: [], prompts: [] };
+  return { extensions: [], skills: [], prompts: [], agents: [] };
 }
 
 // ── Scope Scanners ──────────────────────────────────────────────────
@@ -161,6 +216,7 @@ export function scanLocalResources(cwd: string): PiResourceScope {
     extensions: discoverExtensions(path.join(piDir, "extensions")),
     skills: discoverSkills(path.join(piDir, "skills")),
     prompts: discoverPrompts(path.join(piDir, "prompts")),
+    agents: discoverAgents(path.join(piDir, "agents")),
   };
 }
 
@@ -170,6 +226,7 @@ export function scanGlobalResources(globalDir: string): PiResourceScope {
     extensions: discoverExtensions(path.join(globalDir, "extensions")),
     skills: discoverSkills(path.join(globalDir, "skills")),
     prompts: discoverPrompts(path.join(globalDir, "prompts")),
+    agents: discoverAgents(path.join(globalDir, "agents")),
   };
 }
 
@@ -245,7 +302,7 @@ function scanPackageDir(pkgDir: string): PiResourceScope {
                 scope.extensions.push(...discoverExtensions(resolved));
               } else {
                 const name = path.basename(resolved).replace(/\.(ts|js)$/, "");
-                scope.extensions.push({ name, filePath: resolved, type: "extension" });
+                scope.extensions.push({ name, filePath: resolved, type: "extension", enabled: true });
               }
             }
           }
@@ -266,6 +323,14 @@ function scanPackageDir(pkgDir: string): PiResourceScope {
             }
           }
         }
+        if (Array.isArray(pkgJson.pi.agents)) {
+          for (const agentPath of pkgJson.pi.agents) {
+            const resolved = path.resolve(pkgDir, agentPath);
+            if (safeIsDirectory(resolved)) {
+              scope.agents.push(...discoverAgents(resolved));
+            }
+          }
+        }
         return scope;
       }
     } catch {
@@ -278,6 +343,7 @@ function scanPackageDir(pkgDir: string): PiResourceScope {
     extensions: discoverExtensions(path.join(pkgDir, "extensions")),
     skills: discoverSkills(path.join(pkgDir, "skills")),
     prompts: discoverPrompts(path.join(pkgDir, "prompts")),
+    agents: discoverAgents(path.join(pkgDir, "agents")),
   };
 }
 
@@ -335,6 +401,16 @@ export function resolvePackages(
 
 export interface ScanOptions {
   globalDir?: string;
+  /** Injectable for tests. Defaults to pi's real `PackageManager.resolve()`. */
+  resolveActivation?: ResolveActivationFn;
+}
+
+/** Set `enabled` on every resource in a scope from pi's resolver output. */
+function applyActivationToScope(scope: PiResourceScope, map: Map<string, boolean>): void {
+  for (const r of scope.extensions) r.enabled = lookupEnabled(map, r.filePath);
+  for (const r of scope.skills) r.enabled = lookupEnabled(map, r.filePath);
+  for (const r of scope.prompts) r.enabled = lookupEnabled(map, r.filePath);
+  for (const r of scope.agents) r.enabled = lookupEnabled(map, r.filePath);
 }
 
 export async function scanPiResources(cwd: string, options?: ScanOptions): Promise<PiResourcesResult> {
@@ -358,9 +434,24 @@ export async function scanPiResources(cwd: string, options?: ScanOptions): Promi
   const localNames = new Set(localPackages.map((p) => p.name));
   const dedupedGlobal = globalPackages.filter((p) => !localNames.has(p.name));
 
+  const allPackages = [...localPackages, ...dedupedGlobal];
+
+  // Consume pi's own resolver to stamp `enabled` on every scanned resource.
+  // One `resolve()` for the cwd covers local, global, and package resources.
+  // On failure the map is empty → every resource keeps its `enabled: true`
+  // default. See change: folder-resource-activation-toggle.
+  const resolveFn = options?.resolveActivation ?? defaultResolveActivation;
+  const resolved = await resolveFn(cwd, globalDir);
+  if (resolved) {
+    const map = buildEnabledMap(resolved);
+    applyActivationToScope(local, map);
+    applyActivationToScope(global, map);
+    for (const pkg of allPackages) applyActivationToScope(pkg.resources, map);
+  }
+
   return {
     local,
     global,
-    packages: [...localPackages, ...dedupedGlobal],
+    packages: allPackages,
   };
 }

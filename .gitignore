@@ -33,6 +33,8 @@ site/.astro/
 .pi-test-harness.json
 # Playwright E2E outputs (tests/e2e). See change: add-playwright-e2e.
 playwright-report/
+# Electron-E2E outputs. See change: electron-attach-ownership-fixes.
+playwright-report-electron/
 test-results/
 .playwright/
 doc-example/

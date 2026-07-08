@@ -698,8 +698,30 @@ export interface ServerRestartingMessage {
   requestId?: string;
 }
 
+/**
+ * Server → browser: cold-start recovery offer. Broadcast once, to all
+ * connected clients, when ≥1 session was interrupted by an unclean host
+ * shutdown and the `reopenSessionsAfterShutdown` setting is `"ask"`. The
+ * client renders this as a sticky notification in the top-right toast stack
+ * (no auto-timeout); accepting routes each candidate through `resume_session`.
+ * See change: reopen-sessions-after-shutdown.
+ */
+export interface RecoveryCandidate {
+  sessionId: string;
+  name?: string;
+  cwd?: string;
+  model?: string;
+  /** Server boot id under which the session was last seen running. */
+  liveEpoch?: number;
+}
+export interface RecoveryOfferMessage {
+  type: "recovery_offer";
+  candidates: RecoveryCandidate[];
+}
+
 export type ServerToBrowserMessage =
   | ServerRestartingMessage
+  | RecoveryOfferMessage
   | PluginConfigUpdateMessage
   | SessionAddedMessage
   | SessionUpdatedMessage
@@ -1077,6 +1099,17 @@ export interface SpawnSessionBrowserMessage {
    * See change: add-worktree-spawn-dialog.
    */
   gitWorktreeBase?: string;
+  /**
+   * Optional first prompt dispatched into the spawned session once it
+   * registers. The server queues it in `pendingInitialPromptByCwd` and
+   * consumes it on the next matching `session_register` (mirrors
+   * `attachProposal`). Used by the no-hook Initialize button to pre-inject
+   * `/skill:project-init` so the interactive scaffolder starts on its own.
+   * Old servers ignore unknown fields — degraded fallback: the session
+   * spawns idle and the user invokes the skill manually.
+   * See change: project-init-skill-and-profiles.
+   */
+  initialPrompt?: string;
   /**
    * Client-minted UUIDv4 used to correlate `spawn_result` and the eventual
    * `session_added` (which echoes it as `spawnRequestId`). Optional for

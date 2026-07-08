@@ -37,6 +37,21 @@ const VALID_REATTACH_PLACEMENTS: ReattachPlacement[] = [
 export const DEFAULT_REATTACH_PLACEMENT: ReattachPlacement = "always";
 
 /**
+ * Cold-start behavior when sessions were interrupted by an unclean host
+ * shutdown. `off` — classify but never surface. `ask` — broadcast one
+ * recovery offer (default). `auto` — resume all candidates without prompting.
+ * See change: reopen-sessions-after-shutdown.
+ */
+export type ReopenSessionsAfterShutdown = "off" | "ask" | "auto";
+const VALID_REOPEN_MODES: ReopenSessionsAfterShutdown[] = ["off", "ask", "auto"];
+export const DEFAULT_REOPEN_SESSIONS_AFTER_SHUTDOWN: ReopenSessionsAfterShutdown = "ask";
+export function parseReopenSessionsAfterShutdown(raw: unknown): ReopenSessionsAfterShutdown {
+  return VALID_REOPEN_MODES.includes(raw as ReopenSessionsAfterShutdown)
+    ? (raw as ReopenSessionsAfterShutdown)
+    : DEFAULT_REOPEN_SESSIONS_AFTER_SHUTDOWN;
+}
+
+/**
  * Validate a raw value against the {@link ReattachPlacement} union.
  * Anything outside the union (including `undefined`, numbers, objects)
  * falls back to {@link DEFAULT_REATTACH_PLACEMENT}.
@@ -74,7 +89,10 @@ export interface MemoryLimitsConfig {
 }
 
 export const DEFAULT_MEMORY_LIMITS: MemoryLimitsConfig = {
-  maxEventsPerSession: 5000,
+  // 20000 (was 5000): subagent-heavy turns forward thousands of inner events
+  // into the parent buffer; the old cap trimmed the chat head.
+  // See change: preserve-chat-head-on-event-trim.
+  maxEventsPerSession: 20000,
   maxStringFieldSize: 0,
   maxWsBufferBytes: 4 * 1024 * 1024,
 };
@@ -281,6 +299,8 @@ export interface DashboardConfig {
   resolvedTrustedNetworks: string[];
   /** CORS allowed origins for cross-origin client hosting */
   cors: CorsConfig;
+  /** Device-pairing configuration (server keypair identity + QR pairing). */
+  pairing: PairingConfig;
   /** Last-used server address (host:port) for reconnection */
   lastServer?: string;
   /**
@@ -300,6 +320,12 @@ export interface DashboardConfig {
    * See change: reattach-move-to-front.
    */
   reattachPlacement: ReattachPlacement;
+  /**
+   * Cold-start recovery behavior for sessions interrupted by an unclean
+   * host shutdown. Gates the final offer step only. Default `"ask"`.
+   * See change: reopen-sessions-after-shutdown.
+   */
+  reopenSessionsAfterShutdown: ReopenSessionsAfterShutdown;
   /**
    * When true, a session whose turn completes (`agent_end` while still
    * alive) or which transitions alive→ended is moved to the front of its
@@ -361,6 +387,19 @@ export interface CorsConfig {
   allowedOrigins: string[];
 }
 
+/** Device-pairing configuration (server keypair identity + QR pairing). */
+export interface PairingConfig {
+  /**
+   * Operator-designated, publicly-trusted TLS base URLs (e.g.
+   * `https://pi.example.com`) advertised in the pairing payload's `urls[]`.
+   * D14: only publicly-trusted TLS is reachable from the neutral HTTPS shell;
+   * self-signed LAN addresses MUST NOT be listed here. The active zrok tunnel
+   * (publicly trusted by construction) is added automatically and need not be
+   * configured. Empty by default.
+   */
+  publicBaseUrls: string[];
+}
+
 const VALID_SPAWN_STRATEGIES: SpawnStrategy[] = ["tmux", "headless"];
 
 /** Default ask_user prompt timeout: 300 seconds (5 minutes). */
@@ -402,10 +441,12 @@ const DEFAULTS: DashboardConfig = {
   trustedNetworks: [],
   resolvedTrustedNetworks: [],
   cors: { allowedOrigins: [] },
+  pairing: { publicBaseUrls: [] },
   electronMode: false,
   knownServers: [],
   askUserPromptTimeoutSeconds: DEFAULT_ASK_USER_PROMPT_TIMEOUT_SECONDS,
   reattachPlacement: DEFAULT_REATTACH_PLACEMENT,
+  reopenSessionsAfterShutdown: DEFAULT_REOPEN_SESSIONS_AFTER_SHUTDOWN,
   completedFirst: false,
   questionFirst: false,
   spawnRegisterTimeoutMs: 30000,
@@ -712,6 +753,11 @@ export function loadConfig(): DashboardConfig {
           ? parsed.cors.allowedOrigins.filter((o: unknown) => typeof o === "string")
           : defaults.cors.allowedOrigins,
       },
+      pairing: {
+        publicBaseUrls: Array.isArray(parsed.pairing?.publicBaseUrls)
+          ? parsed.pairing.publicBaseUrls.filter((o: unknown) => typeof o === "string")
+          : defaults.pairing.publicBaseUrls,
+      },
       ...(typeof parsed.lastServer === "string" ? { lastServer: parsed.lastServer } : {}),
       ...(typeof parsed.dashboardName === "string" && parsed.dashboardName.trim()
         ? { dashboardName: parsed.dashboardName }
@@ -719,6 +765,7 @@ export function loadConfig(): DashboardConfig {
       electronMode: parsed.electronMode === true,
       knownServers: parseKnownServers(parsed.knownServers),
       reattachPlacement: parseReattachPlacement(parsed.reattachPlacement),
+      reopenSessionsAfterShutdown: parseReopenSessionsAfterShutdown(parsed.reopenSessionsAfterShutdown),
       completedFirst: typeof parsed.completedFirst === "boolean" ? parsed.completedFirst : defaults.completedFirst,
       questionFirst: typeof parsed.questionFirst === "boolean" ? parsed.questionFirst : defaults.questionFirst,
       plugins: parsePluginsConfig(parsed.plugins),

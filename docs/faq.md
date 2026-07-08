@@ -58,7 +58,7 @@ Cross-refs:
 - docs/release-process.md:155
 - docs/electron-session.md:288
 - docs/electron-session.md:553
-- docs/file-index-electron.md
+- packages/electron/src/AGENTS.md
 
 ## What are the three ways to install the dashboard?
 
@@ -264,6 +264,44 @@ Cross-refs:
 - packages/electron/src/lib/server-lifecycle.ts
 - packages/shared/src/server-launcher.ts
 
+## Electron shows "Server managed externally" in the tray — what does that mean?
+
+Tray menu ownership-aware. Shows "Server managed externally" (disabled row) when server on port not owned by this Electron. Happens when server started by `pi-dashboard start` terminal (standalone), by a pi session (bridge), or by another Electron instance.
+
+Ownership from `/api/health.launchSourceEffective` + local `storedSpawnedPid` via `decideOwnership(...)`.
+
+| Ownership | Tray item |
+|---|---|
+| "electron"-owned | "Restart server" |
+| No server | "Start server" |
+| Foreign | disabled "Server managed externally" |
+| Probe error | item omitted |
+
+Prevents tray Restart nuking a terminal/bridge server on port 8000.
+
+To manage that server: stop it from its owner (terminal `pi-dashboard stop`, or quit the pi session / other Electron), then Electron can start its own.
+
+## How are the Electron native-surface flows (tray, zombie modal, Doctor row) tested?
+
+Playwright-Electron suite in `tests/e2e-electron/` launches REAL packaged app via `_electron`.
+
+Covers surfaces unit tests + web-client Docker E2E cannot reach:
+- zombie-adoption modal (native `dialog`)
+- Doctor version-skew row (doctor window DOM)
+- tray "Server managed externally" row (native menu)
+
+Native modals/menus cannot be clicked or read back. Suite stubs `dialog.showMessageBox` / `Menu.buildFromTemplate` in main process. Asserts flow reaches them with correct args + each choice's outcome.
+
+Config `playwright.electron.config.ts`. Run local: `npm run test:e2e:electron`.
+
+CI workflow `.github/workflows/ci-e2e-electron.yml`. Matrix ubuntu-latest (xvfb) + windows-latest.
+
+Cadence: `workflow_dispatch` + `pull_request` path-filter on `packages/electron/**` + `tests/e2e-electron/**`. ADVISORY — not required check.
+
+`job-object-windows` job (`taskkill /F` Job Object cascade, task 7.4a) `continue-on-error`. Needs app full spawn path. Deep validation lives in qa VM smoke (`qa/tests`).
+
+See change: run-electron-e2e-native-surface.
+
 ## How do I configure the dashboard?
 
 Edit `~/.pi/dashboard/config.json` or click gear icon in sidebar header.
@@ -322,6 +360,22 @@ Selecting All interfaces with no auth providers and no trusted networks shows an
 Docker all-in-one already sets `PI_DASHBOARD_HOST=0.0.0.0` to stay reachable through published ports.
 
 See change: configurable-bind-host.
+
+## Pairing ≠ LAN access; how to get a secure road for LAN pairing
+
+Pairing not the plain-LAN path. Plain-LAN access = Network Guard / `bindHost` + trusted networks. See [How do I expose the dashboard on my LAN?](#how-do-i-expose-the-dashboard-on-my-lan).
+
+QR pairing needs a secure context. Client identity-verify uses `crypto.subtle` (Ed25519 verify). `crypto.subtle` undefined on plain-http non-localhost origin.
+
+Browser plus plain-http LAN (`http://192.168.x.x:8000`) cannot pair. Not fixable in-project.
+
+Get a secure road:
+- zrok tunnel (`/tunnel-setup`, `wss://…zrok.io`), or
+- publicly-trusted TLS via reverse proxy — Caddy + Let's Encrypt DNS-01, `tailscale cert` / `tailscale serve`, or mkcert local CA.
+
+HTTP-01 / TLS-ALPN-01 fail on a box with no public inbound → DNS-01 only. mkcert CA must install on each client device.
+
+Paired bearer token replaces trusted networks. No `trustedNetworks` / OAuth needed once paired over TLS'd LAN.
 
 ## Why do all my PWA installs of the dashboard have the same name on the launcher?
 
@@ -972,9 +1026,9 @@ Mirror MEMORY/FLOWS pattern. Five edits.
 See change: add-flows-subcard for worked example.
 
 Cross-refs:
-- docs/file-index-plugins.md
-- docs/file-index-shared.md
-- docs/file-index-client.md
+- packages/dashboard-plugin-runtime/src/AGENTS.md
+- packages/shared/src/AGENTS.md
+- packages/client/src/AGENTS.md
 - docs/plugin-claim-gates.md
 
 ## How does the dashboard detect and spawn different session types?
@@ -1634,7 +1688,7 @@ Two Electron installation modes with different tool resolution priorities.
 - pi, openspec: System PATH (nvm/volta) → Managed → Bundled
 - node: System PATH → Bundled
 
-User selects in wizard. Mode stored in `~/.pi-dashboard/mode.json`. Affects search order in `dependency-detector.ts::detectTool()`.
+User selects in wizard. Mode stored in `~/.pi-dashboard/dashboard-settings.json`. Affects search order in `dependency-detector.ts::detectTool()`.
 
 Use standalone when: Electron shipped with all dependencies, minimal setup.
 Use power-user when: Syncing with system nvm/volta, multiple Node versions, or custom pi builds.

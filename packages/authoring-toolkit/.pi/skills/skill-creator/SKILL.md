@@ -310,6 +310,7 @@ Write the YAML frontmatter with `name` and `description`:
   - Include both what the Skill does and specific triggers/contexts for when to use it.
   - Include all "when to use" information here - Not in the body. The body is only loaded after triggering, so "When to Use This Skill" sections in the body are not helpful to Claude.
   - Example description for a `docx` skill: "Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. Use when Claude needs to work with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying or editing content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks"
+  - **Quote the value if it contains a `colon-space` (e.g. `Triggers: "..."`).** An unquoted description with an inner `: ` parses as a nested YAML mapping and the loader silently drops the skill (`Nested mappings are not allowed in compact mappings`). Wrap the whole value in double quotes and escape inner `"`. Enforced by `scripts/__tests__/skill-frontmatter.test.mjs`. See change: fix-skill-frontmatter-yaml.
 
 Do not include any other fields in YAML frontmatter.
 

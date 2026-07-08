@@ -40,6 +40,7 @@ import { DashboardSpawnButtons } from "./DashboardSpawnButtons.js";
 import { FolderActionBar } from "./FolderActionBar.js";
 import { FolderNeedsYouPill } from "./FolderNeedsYouPill.js";
 import { FolderOpenSpecSection } from "./FolderOpenSpecSection.js";
+import { FolderStatusRollup } from "./FolderStatusRollup.js";
 import { FolderSpawnButtons } from "./FolderSpawnButtons.js";
 import { InstallButton } from "./InstallButton.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
@@ -103,7 +104,7 @@ interface Props {
   onResumeKeepPosition?: (sessionId: string) => void;
   onHideSession?: (sessionId: string) => void;
   onUnhideSession?: (sessionId: string) => void;
-  onSpawnSession?: (cwd: string, attachProposal?: string, opts?: { gitWorktreeBase?: string; placeholderCwd?: string }) => void;
+  onSpawnSession?: (cwd: string, attachProposal?: string, opts?: { gitWorktreeBase?: string; placeholderCwd?: string; initialPrompt?: string }) => void;
   spawningCwds?: Set<string>;
   /**
    * Add/remove a cwd from the spawning set (placeholder + disabled-button).
@@ -638,7 +639,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     const isCollapsed = isFolderCollapsed(group.cwd);
 
     return (
-      <div key={group.cwd} className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-[14px] p-1.5">
+      <div key={group.cwd} className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-[14px] p-1.5 shadow-[inset_0_1px_0_var(--elevation-rim),0_2px_4px_var(--shadow-card)]">
         <div className="flex gap-1.5 px-1 py-1 min-h-[44px] md:min-h-0 rounded">
           {/* Left gutter — chevron at top, drag-handle column extending below */}
           <FolderDragGutter
@@ -678,6 +679,11 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 });
               }}
             />
+            {/* Collapsed status rollup (variant B): working/idle dot-counts so a
+                collapsed folder still shows liveness at a glance. Needs-you is
+                covered by the pill above. See change:
+                condense-collapsed-folder-header. */}
+            {isCollapsed && <FolderStatusRollup sessions={group.sessions} />}
             {/* Opt-in per-folder urgency sort toggle (default off). Floats
                 blocked sessions to the top. See change:
                 improve-dashboard-attention-routing. */}
@@ -710,6 +716,13 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               </button>
             )}
           </div>
+          {/* Collapsed density (variant B): when collapsed, the heavy slots
+              (git · action bar · plugin sections · OpenSpec proposal state ·
+              spawn buttons) are hidden — the header keeps only name + status.
+              The drag gutter/head row live ABOVE this block, so drag-reorder
+              of a collapsed folder is unaffected.
+              See change: condense-collapsed-folder-header. */}
+          {!isCollapsed && (<>
           <div className="flex items-center gap-1">
             <GroupGitInfo
               sessions={group.sessions}
@@ -729,6 +742,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               onOpenEditor={() => onOpenEditor?.(group.cwd)}
               onOpenNativeEditor={(editorId) => handleOpenEditor(group.cwd, editorId)}
               onOpenPiResources={() => onOpenPiResources?.(group.cwd)}
+              onInitializeProject={onSpawnSession ? (cwd) => onSpawnSession(cwd, undefined, { initialPrompt: "/skill:project-init" }) : undefined}
               brokenSessionCount={group.sessions.filter((s) => s.cwdMissing === true && s.status === "ended" && !s.hidden).length}
               onCleanUpBroken={onHideSession ? () => {
                 for (const s of group.sessions) {
@@ -767,6 +781,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               }}
             />
           </div>
+          </>)}
 
           </div>{/* end content column */}
         </div>

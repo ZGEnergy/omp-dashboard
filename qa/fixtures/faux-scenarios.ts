@@ -261,6 +261,22 @@ export const SCENARIOS: Record<string, Scenario> = {
     expect: { text: "src/example.ts" },
   },
 
+  // Assistant text carrying a fenced mermaid diagram mixing default
+  // (un-authored) and authored nodes. Exercises MermaidBlock default-node
+  // colorization end-to-end: default nodes (A, C) get a soft accent wash;
+  // the `style B fill:#ff0000` node keeps its author color untouched.
+  // See change: colorize-mermaid-default-nodes.
+  "mermaid-colorize": {
+    script: [
+      fauxAssistantMessage([
+        fauxText(
+          "```mermaid\ngraph TD\n  A[Alpha] --> B[Bravo]\n  A --> C[Charlie]\n  style B fill:#ff0000\n```",
+        ),
+      ]),
+    ],
+    expect: { text: "Alpha" },
+  },
+
   "thinking-text": {
     script: [
       fauxAssistantMessage([
@@ -361,6 +377,86 @@ export const SCENARIOS: Record<string, Scenario> = {
     prompt: "Locate all faux provider references.",
   }),
   "tool-unknown": toolScenario("some_unknown_tool", { foo: "bar" }),
+
+  // Temporal burst: three DISTINCT bash calls in a row (heterogeneous, so the
+  // semantic ×N pass never merges them) with the LAST one slow, so a window
+  // exists where 2 are done and 1 runs. groupToolBursts wraps them into one
+  // burst group: auto-expanded + "Working · 2 done · $ sleep …" while running,
+  // auto-collapsed to "3 tool calls" once the final text lands. Four steps so
+  // the agent TERMINATES after the burst. See change: group-tool-call-bursts.
+  "burst-heterogeneous": {
+    script: [
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo burst-one" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo burst-two" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 2 && echo burst-three" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxText("burst complete")]),
+    ],
+    expect: { text: "burst complete" },
+  },
+
+  // Composition flip (collapse-tool-calls-across-narration): a NARRATED poll
+  // loop — four IDENTICAL bash calls each preceded by a line of narration prose
+  // in the same tool-use turn. The semantic pass runs first over the full
+  // stream and treats prose as transparent, so all four fold into ONE ×4
+  // CollapsedToolGroup with the narration absorbed into `rendered` (visible
+  // only when expanded). The trailing "poll complete" is NOT absorbed and
+  // renders at the top level. Five steps so the agent TERMINATES.
+  "poll-narrated": {
+    script: [
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo checking" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxText("still starting"), fauxToolCall("bash", { command: "echo checking" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxText("still starting"), fauxToolCall("bash", { command: "echo checking" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxText("still starting"), fauxToolCall("bash", { command: "echo checking" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxText("poll complete")]),
+    ],
+    expect: { text: "poll complete" },
+  },
+
+  // Composition flip — a heterogeneous investigation split by a MID-TURN reply.
+  // Three distinct bash calls, then a non-empty assistant reply (HARD boundary
+  // for burst formation), then three more distinct bash calls, then the final
+  // text. Renders as: burst, the reply at the TOP level, burst. Seven steps.
+  "burst-split-by-reply": {
+    script: [
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo probe-a1" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo probe-a2" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo probe-a3" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxText("found the cause"), fauxToolCall("bash", { command: "echo probe-b1" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo probe-b2" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo probe-b3" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxText("split complete")]),
+    ],
+    expect: { text: "split complete" },
+  },
+
+  // Universal grouping (enhance-tool-call-grouping): a SINGLE tool call now
+  // forms a framed group that renders its own one-line summary (NOT "1 tool
+  // calls"). Two steps so the agent terminates.
+  "grp-single": {
+    script: [
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo single-call" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxText("single done")]),
+    ],
+    expect: { text: "single done" },
+  },
+
+  // Turn-scoped reasoning folding (enhance-tool-call-grouping): a TRAILING
+  // `thinking` row after the last tool is absorbed INTO the group and renders
+  // as a real ThinkingBlock (labeled "Reasoning"), not demoted narration. The
+  // trailing `thinking`+`text` pattern replays reliably (matches thinking-text).
+  // Requires "Reasoning blocks" ON to see the folded reasoning.
+  "grp-reasoning": {
+    script: [
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo probe-one" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo probe-two" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo probe-three" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([
+        fauxThinking("all three probed; the cause is the stale cache"),
+        fauxText("reasoning burst complete"),
+      ]),
+    ],
+    expect: { text: "reasoning burst complete" },
+  },
 
   // ── Client interactive-renderer matrix (one per ask_user method) ────────
   "ask-confirm": askScenario("confirm", { title: "Proceed?" }),

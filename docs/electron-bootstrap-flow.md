@@ -4,15 +4,13 @@ Doc covers Electron startup state machine from `app.whenReady()` to dashboard wi
 
 Architecture: Electron is launcher only. Runtime install eliminated. Server resources read-only at `<resourcesPath>/server/node_modules/`. Updates ship via electron-updater whole-app replacement. See [electron-immutable-bundle.md](./electron-immutable-bundle.md).
 
-## State machine (6 states, 3 triggers, 3 end states)
+## State machine (5 states, 3 triggers, 3 end states)
 
 ```mermaid
 flowchart TD
     Start([app.whenReady]) --> Check[checking-server-health]
     Check -->|server up :8000| Attach((attach))
-    Check -->|server down, first run| Welcome[wizard-welcome]
-    Check -->|server down, not first run| Spawn[launch-server]
-    Welcome -->|user clicks Launch| Spawn
+    Check -->|server down| Spawn[launch-server]
     Spawn --> Wait[health-wait]
     Wait -->|health ok| Done((done))
     Wait -->|deadline / child exit| Err((loading-page-error))
@@ -23,7 +21,6 @@ flowchart TD
 | State | Purpose |
 |---|---|
 | `checking-server-health` | Probe `GET /api/health` on configured port. 3 s deadline. |
-| `wizard-welcome` | First-run only. Single welcome card + `[Launch dashboard]`. Marker `~/.pi/dashboard/first-run-done`. Invariant: splash and wizard mutually exclusive. `closeSplash()` runs before `showWelcomeStep()`; `showSplash()` re-opens after wizard closes, before `launch-server` status update. Wizard window uses `show: false` + `ready-to-show` focus to avoid occlusion by splash `alwaysOnTop`. See change: fix-wizard-occluded-by-splash. |
 | `launch-server` | `selectLaunchSource()` → `spawnFromSource()`. Stamps `DASHBOARD_STARTER=Electron`. `setSpawnedPid(pid)`. |
 | `health-wait` | Poll `/api/health` until 200. Deadline `SERVER_READY_DEADLINE_MS = 15000`. |
 | `attach` (end) | Server already running. Open main window, no spawn. |
@@ -65,6 +62,16 @@ Override: `DASHBOARD_PREFER_SOURCE=attach|bundled|devMonorepo`. Pre-R3 kinds (`p
 
 `/api/health` returns `launchSource: "electron" | "standalone" | "bridge"`. `decideShutdownOnQuit` stops server only when `health.launchSource === "electron" AND health.pid === storedSpawnedPid`.
 
+`/api/health` also returns derived `launchSourceEffective: "electron" | "standalone" | "bridge" | "bridge-orphaned"`. Computed per request by `computeEffectiveLaunchSource({raw, activeBridgeCount, uptimeMs})` in `packages/server/src/launch-source-effective.ts`. Rule: `raw === "bridge"` AND `activeBridgeCount === 0` AND `uptimeMs > 30_000` → `"bridge-orphaned"`; else `raw`. 30 s grace window absorbs restart→bridge-reconnect race (server up before bridge reconnects after `server_restarting`). Static `launchSource` unchanged (back-compat with `decideShutdownOnQuit`); only `launchSourceEffective` promotes bridge-orphan. Tray ownership probe + Doctor version-skew row read `launchSourceEffective`.
+
+| launchSource | activeBridgeCount | uptime | launchSourceEffective |
+|---|---|---|---|
+| bridge | 0 | >30s | bridge-orphaned |
+| bridge | 0 | <30s | bridge |
+| bridge | ≥1 | any | bridge |
+| electron | any | any | electron |
+| standalone | any | any | standalone |
+
 ## Invariants
 
 | Invariant | Source |
@@ -73,5 +80,42 @@ Override: `DASHBOARD_PREFER_SOURCE=attach|bundled|devMonorepo`. Pre-R3 kinds (`p
 | No `npm install` runs after build | `bundle-server.mjs` Phase 1 GO/NO-GO guard |
 | Legacy `~/.pi-dashboard/` untouched | `detectLegacyManagedDir()` surfaces Doctor advisory only |
 | Electron stops server only when it owns it | `decideShutdownOnQuit` pure helper |
-| First-run wizard skipped after marker write | `~/.pi/dashboard/first-run-done` |
+| first-run-done marker written on first `done` | `~/.pi/dashboard/first-run-done` |
 | Bundled-server missing → `BundledServerMissingError` | corrupted-install signal |
+
+## Zombie adoption
+
+Electron `attach` arm runs `maybePromptZombieAdoption()` (in `packages/electron/src/main.ts`) after BrowserWindow created. Detects leftover server from prior Electron lifetime via `decideIsZombie(...)` in `packages/electron/src/lib/server-lifecycle.ts`.
+
+Common gates (all platforms): `health.launchSourceEffective === "electron"` AND `storedSpawnedPid === null`.
+
+| Platform | Final gate |
+|---|---|
+| POSIX (macOS/Linux) | `health.ppid !== health.bootParentPid` AND `health.bootParentAlive === false` (reparented away AND boot parent gone). NOT `ppid === 1` (unreliable under Linux subreapers/containers). |
+| Windows | `health.bootParentAlive === false` alone (Windows never reparents). Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) kills server on common crash path; detection covers bypass cases (`CREATE_BREAKAWAY_FROM_JOB`, nested-job assignment failure, self-respawn). |
+
+`bootParentAlive` computed server-side, two tiers (in `packages/server/src/boot-parent-liveness.ts`):
+- Tier 1: `isProcessAlive(bootParentPid)` all platforms, PID-reuse-vulnerable.
+- Tier 2: win32-only optional `koffi` FFI holds `SYNCHRONIZE` `OpenProcess` handle + `WaitForSingleObject(h,0)`, PID-reuse-safe, falls back to Tier 1.
+
+Modal: `promptZombieAdoption({pid})` (`packages/electron/src/lib/zombie-adoption-dialog.ts`), 3 buttons, default "Leave running".
+
+| Button | Action |
+|---|---|
+| Take ownership | `setSpawnedPid(health.pid)`; subsequent quit stops server. |
+| Leave running | In-memory `zombieAskedThisSession` flag; no re-prompt this process lifetime; re-evaluated next launch. |
+| Stop now | `stopZombieServer` (SIGTERM → poll ≤5 s → SIGKILL), re-enter `selectLaunchSource()`, spawn fresh server, reload BrowserWindow after positive health probe. |
+
+`--no-zombie-prompt` switch suppresses modal (detection still runs for logging). Used by QA.
+
+```mermaid
+flowchart TD
+  A[attach arm: BrowserWindow created] --> B[maybePromptZombieAdoption]
+  B --> C{decideIsZombie}
+  C -->|common gates fail| Z[no prompt]
+  C -->|POSIX/Windows final gate fails| Z
+  C -->|zombie| M[promptZombieAdoption]
+  M -->|Take ownership| O[setSpawnedPid]
+  M -->|Leave running| L[zombieAskedThisSession]
+  M -->|Stop now| S[stopZombieServer → selectLaunchSource → spawn → reload]
+```

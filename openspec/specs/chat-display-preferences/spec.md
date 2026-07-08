@@ -10,63 +10,49 @@ opt-out so non-technical users can hide noise without learning what
 "thinking" or "tool result" means first. `ask_user` is non-hidable.
 
 See change: configurable-chat-display.
-
 ## Requirements
-
 ### Requirement: Global display preferences SHALL gate chat-view elements
+The dashboard MUST persist a `DisplayPrefs` object in `preferences.json` controlling which chat-view elements render. The schema SHALL include boolean flags for `tokenStatsBar`, `contextUsageBar`, `reasoning`, `toolResults`, `turnMetadata`, `debugTools`, plus a `toolCalls` sub-object with booleans `read`, `bash`, `edit`, `agent`, `generic`. The schema SHALL also include a numeric `reasoningAutoCollapseMs` controlling how long a live-streamed reasoning block stays expanded after it completes before auto-collapsing.
 
-The dashboard MUST persist a `DisplayPrefs` object in `preferences.json` controlling which chat-view elements render. The schema SHALL include boolean flags for `tokenStatsBar`, `contextUsageBar`, `reasoning`, `toolResults`, `turnMetadata`, `debugTools`, plus a `toolCalls` sub-object with booleans `read`, `bash`, `edit`, `agent`, `generic`.
+`reasoningAutoCollapseMs` SHALL default to `30000` (30 seconds). A value of `0` SHALL mean "never auto-collapse" — a live-streamed reasoning block stays expanded until the user collapses it. The value SHALL only affect live-streamed reasoning blocks; replayed blocks are unaffected.
 
-When a flag is `false`, the corresponding element MUST NOT render in any session view. Headers and status indicators on tool calls SHALL remain visible even when `toolResults: false` — only the result body is gated.
-
-The `ask_user` tool SHALL render unconditionally. No preference flag controls its visibility. Both inline ask-user dialogs and ask-user tool result blocks are non-hidable.
-
-#### Scenario: Reasoning toggle hides ThinkingBlock
+#### Scenario: Reasoning hidden when disabled
 - **GIVEN** global `displayPrefs.reasoning = false`
 - **WHEN** the chat view renders a turn containing reasoning content
-- **THEN** no `ThinkingBlock` component mounts for that turn
+- **THEN** no reasoning block SHALL render
+- **AND** `reasoningAutoCollapseMs` SHALL have no effect
 
-#### Scenario: Tool-result toggle preserves headers
-- **GIVEN** global `displayPrefs.toolResults = false`
-- **WHEN** a turn contains a `Bash` tool call with a result body
-- **THEN** the `ToolCallStep` renders with name + status visible but the result body section is omitted
+#### Scenario: Default auto-collapse delay
+- **GIVEN** a `DisplayPrefs` object with no explicit `reasoningAutoCollapseMs`
+- **WHEN** it is loaded or merged from a preset
+- **THEN** the effective value SHALL be `30000`
 
-#### Scenario: ask_user is non-hidable
-- **GIVEN** global `displayPrefs.toolCalls.generic = false` and `toolResults = false`
-- **WHEN** the assistant invokes the `ask_user` tool
-- **THEN** the ask-user UI renders in full regardless of preferences
+#### Scenario: Legacy preferences file is backfilled
+- **GIVEN** a persisted `preferences.json` whose `displayPrefs` predates the field and has no `reasoningAutoCollapseMs`
+- **WHEN** the preferences store loads it
+- **THEN** `reasoningAutoCollapseMs` SHALL be set to `30000` before it reaches any client
+- **AND** the client SHALL never observe `reasoningAutoCollapseMs` as `undefined`
 
-#### Scenario: Tool-type granularity
-- **GIVEN** global `displayPrefs.toolCalls.read = false` and `bash = true`
-- **WHEN** a turn contains one `Read` call and one `Bash` call
-- **THEN** only the `Bash` call renders; the `Read` call is omitted
+#### Scenario: Partial PATCH preserves the field
+- **GIVEN** a stored `reasoningAutoCollapseMs` value
+- **WHEN** a `PATCH /api/preferences/display` updates a different display field and omits `reasoningAutoCollapseMs`
+- **THEN** the stored and broadcast `reasoningAutoCollapseMs` SHALL retain its prior value
+- **AND** SHALL NOT be reset to `undefined`
 
 ### Requirement: Per-session overrides SHALL deep-merge over global prefs
+Per-session `displayPrefsOverride` SHALL deep-merge over the global `DisplayPrefs` via `mergeDisplayPrefs`. Scalar and numeric fields present in the override SHALL win over the global value; absent fields SHALL fall through to global. `reasoningAutoCollapseMs` SHALL follow the same rule, and an override value of `0` SHALL be preserved (not coerced to the default).
 
-Each session's `.meta.json` MAY contain a `displayPrefsOverride: Partial<DisplayPrefs>` field. The effective prefs for a session SHALL be computed as a shallow merge of global over override for top-level keys, and a shallow merge for the nested `toolCalls` sub-object.
-
-Clearing an override (setting it to `null` via the WS message) SHALL remove the field from `.meta.json` entirely so the session falls back to pure global prefs.
-
-The WS broadcast SHALL carry `displayPrefsOverride: null` (not `undefined`) so `JSON.stringify` preserves the field for all connected browsers. On the client, the `getSessionOverride` function SHALL map `null` to `undefined` before returning.
-
-#### Scenario: Sparse override inherits unset fields
+#### Scenario: Boolean override wins
 - **GIVEN** global `displayPrefs.reasoning = true`, `tokenStatsBar = true`
 - **AND** session override `{ reasoning: false }`
-- **WHEN** the effective prefs are computed for that session
+- **WHEN** effective prefs are computed
 - **THEN** the result has `reasoning: false` and `tokenStatsBar: true`
 
-#### Scenario: toolCalls deep-merges
-- **GIVEN** global `toolCalls = { read:true, bash:true, edit:true, agent:true, generic:true }`
-- **AND** session override `{ toolCalls: { bash: false } }`
-- **WHEN** the effective prefs are computed
-- **THEN** the result has `toolCalls.bash = false` and every other `toolCalls.*` field equals the global value
-
-#### Scenario: Clearing an override restores global behavior on all clients
-- **GIVEN** a session with `displayPrefsOverride = { reasoning: false }` while global `reasoning = true`
-- **AND** two browser tabs A and B both showing the same session
-- **WHEN** tab A sends `setSessionDisplayPrefs { sessionId, override: null }`
-- **THEN** the WS broadcast includes `displayPrefsOverride: null` (not omitted)
-- **AND** both tabs clear the override and render reasoning blocks again
+#### Scenario: Numeric override precedence
+- **GIVEN** global `reasoningAutoCollapseMs = 30000`
+- **AND** session override `{ reasoningAutoCollapseMs: 0 }`
+- **WHEN** effective prefs are computed
+- **THEN** the result has `reasoningAutoCollapseMs: 0`
 
 ### Requirement: Display prefs SHALL be controllable via REST and broadcast over WS
 
@@ -77,6 +63,8 @@ The server SHALL expose:
 
 On any successful PATCH, the server MUST broadcast `display_prefs_updated { prefs: DisplayPrefs }` to every connected browser socket. Connected clients MUST update their local store on receipt without page reload.
 
+The server MUST ALSO send a `display_prefs_updated { prefs }` snapshot to each browser socket on connect (within the `wss.on("connection")` handshake, alongside the `pinned_dirs_updated` / `favorite_models_updated` / `workspaces_updated` snapshots), **only when the stored prefs are defined**. This gives display-prefs the same reconnect self-healing as every sibling preference: a client that missed a live broadcast (socket not `OPEN` at broadcast time — the broadcast fan-out skips non-`OPEN` sockets and never replays) recovers the current prefs on its next connect without a full page reload. When prefs are undefined (seedless install), the server MUST NOT send the connect snapshot, so a genuine first launch still opens the first-launch modal exactly once.
+
 A browser-to-server WS message `setSessionDisplayPrefs { sessionId, override }` SHALL update the per-session override. `override: null` clears it.
 
 The server SHALL broadcast `session_updated` with `updates.displayPrefsOverride: null` (not `undefined`) so the field survives JSON serialization. The client's `getSessionOverride` SHALL normalize `null` to `undefined` before returning to consumers.
@@ -85,6 +73,18 @@ The server SHALL broadcast `session_updated` with `updates.displayPrefsOverride:
 - **GIVEN** two browser tabs A and B connected to the same server
 - **WHEN** tab A PATCHes `{ debugTools: true }`
 - **THEN** tab B receives `display_prefs_updated` and its store reflects `debugTools: true` without reload
+
+#### Scenario: Connect snapshot re-delivers seeded prefs on reconnect
+- **GIVEN** stored prefs are defined AND a browser missed a `display_prefs_updated` broadcast because its socket was not `OPEN`
+- **WHEN** the browser reconnects and completes the WS handshake
+- **THEN** the server SHALL send `display_prefs_updated { prefs }` as part of the connect snapshot
+- **AND** the client's local store SHALL reflect the current prefs without a page reload
+
+#### Scenario: Seedless install sends no connect snapshot
+- **GIVEN** the stored prefs are `undefined` (fresh install, never seeded)
+- **WHEN** a browser connects and completes the WS handshake
+- **THEN** the server SHALL NOT send a `display_prefs_updated` snapshot
+- **AND** the client's mount `GET /api/preferences/display` SHALL return `undefined` and open the first-launch modal exactly once
 
 #### Scenario: Clearing override broadcasts null, not empty
 - **GIVEN** a session with an active override
@@ -100,24 +100,49 @@ The server SHALL broadcast `session_updated` with `updates.displayPrefsOverride:
 
 ### Requirement: First-launch SHALL prompt the user to choose a preset
 
-When the client receives a `GET /api/preferences/display` response indicating prefs have never been seeded (`displayPrefs === undefined`), it MUST display a one-shot modal offering three presets: `simple`, `standard`, `everything`.
+When the client receives a `GET /api/preferences/display` response that is **successful (HTTP 200) AND indicates prefs have never been seeded** (`displayPrefs === undefined`), it MUST display a one-shot modal offering three presets: `simple`, `standard`, `everything`. A failed or denied GET (non-2xx, e.g. HTTP 403 `network_not_allowed`, or a network error) MUST NOT open the first-launch modal — a transport/authorization failure SHALL NOT be treated as a fresh install.
 
-On submit, the client SHALL PATCH the chosen preset. On dismiss (Esc or backdrop), the client SHALL PATCH the `standard` preset. Either action MUST cause the server's stored prefs to become defined so the modal does not re-open.
+On submit, the client SHALL PATCH the chosen preset. On dismiss (Esc or backdrop), the client SHALL PATCH the `standard` preset. Either action MUST close the modal **immediately and locally on every outcome path**, independent of any `display_prefs_updated` WS broadcast AND independent of whether the PATCH succeeds: the client SHALL set its local `displayPrefs` to the chosen preset (`DISPLAY_PRESETS[key]`), optionally refined by the PATCH response body `{ displayPrefs }` when it is readable, and SHALL run its close callback on success, on a non-2xx response, and on a thrown/rejected fetch alike. The modal's dismissal MUST NOT depend on a server-to-client round-trip completing, and a failed PATCH MUST NOT strand the modal open.
 
-#### Scenario: Undefined prefs trigger modal
+#### Scenario: Undefined prefs trigger modal only on a successful GET
 - **GIVEN** a fresh install with no `displayPrefs` in `preferences.json`
-- **WHEN** the client loads and fetches `/api/preferences/display`
+- **WHEN** the client loads and `GET /api/preferences/display` returns HTTP 200 with `displayPrefs: undefined`
 - **THEN** the first-launch modal mounts
 
-#### Scenario: Dismiss defaults to standard
+#### Scenario: Failed GET does not open the modal
+- **GIVEN** the mount `GET /api/preferences/display` returns a non-2xx response (e.g. 403) or fails at the transport layer
+- **WHEN** the client finishes its load sequence
+- **THEN** the first-launch modal SHALL NOT mount
+- **AND** the client SHALL NOT treat the failure as a seedless first launch
+
+#### Scenario: Continue closes the modal without any broadcast
+- **GIVEN** the first-launch modal is open AND the browser WebSocket is not `OPEN` (mid-reconnect or suspended)
+- **WHEN** the user selects a preset and clicks Continue and the PATCH returns HTTP 200
+- **THEN** the client SHALL set local `displayPrefs` (to the preset, refined by the response body) and the modal SHALL close
+- **AND** the close SHALL NOT wait for a `display_prefs_updated` broadcast
+
+#### Scenario: Failed PATCH still closes the modal
+- **GIVEN** the first-launch modal is open
+- **WHEN** the user clicks Continue or Skip and the `PATCH /api/preferences/display` fails (non-2xx or network error)
+- **THEN** the client SHALL still set local `displayPrefs` to the chosen preset and the modal SHALL close
+- **AND** the modal SHALL NOT remain open waiting on a retry or a broadcast
+
+#### Scenario: Dismiss defaults to standard and closes locally
 - **GIVEN** the first-launch modal is open
 - **WHEN** the user presses Esc
-- **THEN** the client PATCHes `DISPLAY_PRESETS.standard` and the modal closes permanently
+- **THEN** the client PATCHes `DISPLAY_PRESETS.standard`, sets local `displayPrefs` from the response (or the `standard` preset on fallback), and the modal closes permanently
+- **AND** the close SHALL NOT depend on the WS broadcast
 
 #### Scenario: Already-seeded prefs suppress modal
 - **GIVEN** `preferences.json` already contains a `displayPrefs` object
 - **WHEN** the client loads
 - **THEN** the first-launch modal does NOT mount
+
+#### Scenario: Modal renders on both mobile and desktop layouts
+- **GIVEN** a genuinely seedless first launch (200 GET with `displayPrefs: undefined`)
+- **WHEN** the client renders the desktop side-by-side layout OR the mobile layout
+- **THEN** the first-launch modal SHALL mount in either layout
+- **AND** the modal SHALL NOT be gated on viewport / `isMobile` — the seedless condition alone determines whether it opens
 
 ### Requirement: Legacy localStorage debug toggle SHALL migrate once
 
@@ -197,3 +222,4 @@ The per-session display-preferences popover (the "⚙ View" `ChatViewMenu`) SHAL
 - **WHEN** the user toggles a global display-preference axis in the Settings panel
 - **THEN** no `PATCH /api/preferences/display` SHALL be sent until the user saves
 - **AND** the global prefs SHALL persist via the unified Save fan-out
+

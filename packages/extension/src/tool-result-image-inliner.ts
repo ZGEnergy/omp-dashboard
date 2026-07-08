@@ -129,6 +129,20 @@ export function inlineToolResultImages(
   }
   if (candidates.length === 0) return { result, inlinedCount: 0 };
 
+  // Base64 payloads already present as image blocks in the ORIGINAL result.
+  // The MCP `browser` tool returns a text block (`Screenshot saved: /…png`)
+  // AND a native `type:"image"` block for that same screenshot. Inlining the
+  // path-referenced file would append a byte-identical second copy — rendered
+  // side-by-side in the chat ("on parallel"). We skip such duplicates below but
+  // still strip the now-redundant path from the text. Genuinely different
+  // images (native image + a path to a DIFFERENT file) are unaffected.
+  const existingImageData = new Set<string>();
+  if (result && typeof result === "object" && Array.isArray((result as Record<string, unknown>).content)) {
+    for (const c of (result as Record<string, unknown>).content as any[]) {
+      if (c?.type === "image" && typeof c.data === "string") existingImageData.add(c.data);
+    }
+  }
+
   const blocks: ImageContentBlock[] = [];
   const consumedPaths: string[] = [];
   let bytesInThisResult = 0;
@@ -142,6 +156,12 @@ export function inlineToolResultImages(
       maxPerImageBytes: opts.maxPerImageBytes,
     });
     if ("ok" in outcome) continue; // ReadFileError: missing / non-image / too-large → leave as text
+    // Already carried natively by the result (byte-identical): strip the path
+    // so it isn't linkified, but do NOT append a duplicate image block.
+    if (existingImageData.has(outcome.data)) {
+      consumedPaths.push(absPath);
+      continue;
+    }
     // Per-result cumulative budget (padding-aware decoded byte count).
     const size = base64DecodedBytes(outcome.data);
     if (bytesInThisResult + size > maxPerMessage) continue; // over budget → leave as text
@@ -150,7 +170,8 @@ export function inlineToolResultImages(
     consumedPaths.push(absPath);
   }
 
-  if (blocks.length === 0) return { result, inlinedCount: 0 };
+  // Nothing inlined AND nothing to strip → return the result untouched.
+  if (blocks.length === 0 && consumedPaths.length === 0) return { result, inlinedCount: 0 };
 
   // Strip each consumed path so it is NOT also linkified (D5).
   const stripPaths = (s: string): string => {

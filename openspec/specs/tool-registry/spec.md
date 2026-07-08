@@ -511,3 +511,61 @@ A `MissingToolError` chat payload SHALL render via a `MissingToolInlineError` co
 - **THEN** the payload SHALL include `kind: "missing-tool"` and `toolName: string` ONLY
 - **AND** the payload SHALL NOT embed `installHints` (the client reads live hints via `/api/tools`)
 
+### Requirement: Node-wrapped spawns to the Electron binary always run as Node
+
+When a spawn's `argv[0]` is the host `process.execPath` and that interpreter is the Electron binary (the triply-degraded `execpath-fallback` topology: server on the Electron binary, no managed runtime `node`, no PATH `node`), **every** spawn-env builder that produces the env for that spawn SHALL set `ELECTRON_RUN_AS_NODE=1` on the child env. This SHALL hold for both node-wrapped executor argv (`[<electron-binary>, cli.js]` from `resolveExecutor("pi")`) and the RPC keeper's own launch argv (`[<electron-binary>, keeper.cjs]`). No spawn-env builder SHALL strip `ELECTRON_RUN_AS_NODE` for such an argv. When a real `node` resolves (bundled, managed, or on PATH), `argv[0]` is that real `node`, the requirement is inert, and the spawn path SHALL NOT add `ELECTRON_RUN_AS_NODE`.
+
+Scope note: spawn sites that pass `pi` as a shell token (`spawnTmux`, `spawnWslTmux` via `buildTmuxCommand`) are NOT node-wrapped and are outside this requirement.
+
+#### Scenario: spawnWt pi argv spawned as Node
+
+- **WHEN** no real `node` is resolvable and `spawnWt` resolves the pi executor argv to `[<electron-binary>, cli.js]`, whose env is built by `process-manager.buildSpawnEnv`
+- **THEN** the built child env SHALL contain `ELECTRON_RUN_AS_NODE=1`, so pi runs as Node instead of re-launching the Electron GUI and exiting on the single-instance lock
+
+#### Scenario: spawnHeadless keeper and pi argv spawned as Node
+
+- **WHEN** no real `node` is resolvable and `spawnHeadless` routes through the RPC keeper, which spawns its own `[<electron-binary>, keeper.cjs]` (`nodeBinary = process.execPath`) and forwards the pi argv `[<electron-binary>, cli.js]` via `PI_KEEPER_PI_CMD`, all under the `process-manager.buildSpawnEnv`-stripped env
+- **THEN** the keeper's launch env AND the forwarded pi spawn env SHALL each contain `ELECTRON_RUN_AS_NODE=1`
+- **AND** neither the keeper process nor the pi child SHALL re-launch the Electron GUI
+
+#### Scenario: Env builders agree — no strip-without-readd divergence
+
+- **WHEN** the same Electron-binary `argv[0]` is passed to `process-manager.buildSpawnEnv` (with argv) and to `runner.buildSpawnEnvForArgv`
+- **THEN** both SHALL yield an env containing `ELECTRON_RUN_AS_NODE=1`, and neither SHALL leave it stripped for that argv
+
+#### Scenario: Healthy install adds no Electron flag via the spawn path
+
+- **WHEN** a real `node` (bundled, managed, or on PATH) resolves and the node-wrap yields `[<real node>, cli.js]`
+- **THEN** the spawn path SHALL NOT add `ELECTRON_RUN_AS_NODE`, and the non-Electron spawn env SHALL be byte-identical to current behavior
+
+### Requirement: Node-script executor argv assembly is fully injectable under test
+
+The Node-script `toArgv` transform (`nodeScriptToArgv`) and its JS-entry resolution (`resolveJsScript`) SHALL be drivable entirely from injected dependencies. When a test supplies interpreter (`execPath`) and filesystem (`exists`/`realpath`) seams, `resolveExecutor(...)` SHALL NOT read live machine state — no `process.execPath` fallback and no `realpathSync` against the real filesystem. The runtime defaults SHALL remain `process.execPath` and real `realpathSync`, so production resolution behavior is unchanged on every platform. Executor resolution SHALL therefore be deterministic regardless of the host machine's installed applications (`/Applications/PI-Dashboard.app`) or `PATH` (`~/.pi-dashboard/node`).
+
+#### Scenario: Executor argv under mocked packaged-Electron layout does not leak real paths
+
+- **WHEN** a test resolves `resolveExecutor("npm")` against a mocked packaged-Electron registry (injected `exists` for `BUNDLED_NPM`, injected `execPath`/`realpath` seams) on a developer machine that has the packaged app installed and a managed `node` on `PATH`
+- **THEN** the resolved `argv` SHALL equal `[BUNDLED_NPM]`
+- **AND** the resolved `argv` SHALL contain no real-filesystem path (`/Applications/PI-Dashboard.app`, `~/.pi-dashboard/node`) sourced from `process.execPath` or `realpathSync`
+
+#### Scenario: Runtime default interpreter and realpath preserved
+
+- **WHEN** no `execPath` or `realpath` seam is injected (normal runtime)
+- **THEN** `nodeScriptToArgv` SHALL fall back to `process.execPath` and `resolveJsScript` SHALL use real `realpathSync`, exactly as before this change
+- **AND** healthy packaged-Electron resolution SHALL short-circuit at `bundledNodeStrategy("node")` before reaching the interpreter fallback, so the Electron spawn path is unaffected
+
+### Requirement: Node-script executors spawn without shebang interpreter dependency
+
+Managed Node-script executors (`openspec`, `pi`) SHALL be spawnable without relying on a `#!/usr/bin/env node` shebang finding a `node` binary on the child process's PATH. The registry's `toArgv` for these executors SHALL supply the Node interpreter explicitly (resolving the `.js` entry point plus a resolved `node`), OR the spawn environment SHALL be guaranteed to contain a real `node` bin directory. This behavior SHALL hold on unix (macOS/Linux) with parity to the existing Windows node-wrap, so a GUI-launched (Electron) server with a stripped PATH can still execute the CLI.
+
+#### Scenario: Unix openspec spawn with a stripped child PATH
+
+- **WHEN** the dashboard server spawns `openspec` on unix from a process whose PATH contains no binary named `node` (e.g. an Electron-launched server under `ELECTRON_RUN_AS_NODE`)
+- **THEN** the resolved spawn argv SHALL invoke a real `node` interpreter against the resolved `bin/openspec.js` (not the bare `.bin/openspec` shebang symlink), OR the spawn env SHALL include a real `node` bin directory
+- **AND** the CLI SHALL execute successfully instead of failing with exit 127 / `env: node: No such file or directory`
+
+#### Scenario: Windows node-wrap parity preserved
+
+- **WHEN** the same executor is resolved on Windows to a `.js` entry point
+- **THEN** the existing `[node.exe, script.js]` node-wrap SHALL remain in effect with no regression
+

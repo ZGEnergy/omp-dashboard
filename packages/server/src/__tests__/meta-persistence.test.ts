@@ -155,6 +155,84 @@ describe("meta-persistence", () => {
     mp.dispose();
   });
 
+  it("setLiveness writes immediately without waiting for the debounce window", () => {
+    const mp = createMetaPersistence();
+    const sf = sessionFile("live");
+    mp.setLiveness(sf, { live: true, liveEpoch: 42 });
+    // No timer advance — must already be on disk.
+    const meta = readSessionMeta(sf);
+    expect(meta?.live).toBe(true);
+    expect(meta?.liveEpoch).toBe(42);
+    expect(fs.existsSync(metaPath(sf) + ".tmp")).toBe(false);
+    mp.dispose();
+  });
+
+  it("setLiveness folds in a pending debounced field (no lost stats)", () => {
+    const mp = createMetaPersistence();
+    const sf = sessionFile("live2");
+    mp.save(sf, { source: "dashboard", cost: 9 });
+    // Pending (not yet flushed) — eager liveness write must preserve it.
+    mp.setLiveness(sf, { live: true, liveEpoch: 7 });
+    const meta = readSessionMeta(sf);
+    expect(meta?.cost).toBe(9);
+    expect(meta?.live).toBe(true);
+    mp.dispose();
+  });
+
+  it("setLiveness clears live + stamps closedReason on manual close", () => {
+    const mp = createMetaPersistence();
+    const sf = sessionFile("live3");
+    mp.setLiveness(sf, { live: true, liveEpoch: 1 });
+    mp.setLiveness(sf, { live: false, closedReason: "manual" });
+    const meta = readSessionMeta(sf);
+    expect(meta?.live).toBe(false);
+    expect(meta?.closedReason).toBe("manual");
+    mp.dispose();
+  });
+
+  it("setLiveness clears a stale closedReason when omitted on re-activation", () => {
+    // Regression (CodeRabbit PR #210): a resumed-then-crashed session must not
+    // keep an earlier `closedReason:"manual"`, or cold start wrongly excludes it.
+    const mp = createMetaPersistence();
+    const sf = sessionFile("reactivate");
+    mp.setLiveness(sf, { live: false, closedReason: "manual" });
+    expect(readSessionMeta(sf)?.closedReason).toBe("manual");
+    // Re-activate without a closedReason — the stale reason must be dropped.
+    mp.setLiveness(sf, { live: true, liveEpoch: 99 });
+    const meta = readSessionMeta(sf);
+    expect(meta?.live).toBe(true);
+    expect(meta?.liveEpoch).toBe(99);
+    expect(meta?.closedReason).toBeUndefined();
+    mp.dispose();
+  });
+
+  it("setLiveness clears a stale liveEpoch when omitted", () => {
+    const mp = createMetaPersistence();
+    const sf = sessionFile("epoch-clear");
+    mp.setLiveness(sf, { live: true, liveEpoch: 12 });
+    mp.setLiveness(sf, { live: false });
+    const meta = readSessionMeta(sf);
+    expect(meta?.live).toBe(false);
+    expect(meta?.liveEpoch).toBeUndefined();
+    mp.dispose();
+  });
+
+  it("mid-write crash leaves the prior sidecar intact (atomic tmp+rename)", () => {
+    const mp = createMetaPersistence();
+    const sf = sessionFile("live4");
+    mp.setLiveness(sf, { live: true, liveEpoch: 5 });
+    const before = fs.readFileSync(metaPath(sf), "utf-8");
+    // Simulate a crash during the next write: rename throws after the temp
+    // file is created. The original sidecar must survive untouched.
+    const renameSpy = vi.spyOn(fs, "renameSync").mockImplementationOnce(() => {
+      throw new Error("simulated crash");
+    });
+    expect(() => mp.setLiveness(sf, { live: false })).toThrow("simulated crash");
+    renameSpy.mockRestore();
+    expect(fs.readFileSync(metaPath(sf), "utf-8")).toBe(before);
+    mp.dispose();
+  });
+
   it("should dispose without writing", () => {
     const mp = createMetaPersistence();
     const sf = sessionFile("a");

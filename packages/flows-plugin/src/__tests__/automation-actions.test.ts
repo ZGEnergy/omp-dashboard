@@ -14,6 +14,7 @@ import {
   discoverFlows,
   flowsActionContributions,
   provideFlowsActions,
+  summarizeFlowResult,
 } from "../server/automation-actions.js";
 
 function mkFlow(root: string, ns: string, name: string): void {
@@ -58,17 +59,24 @@ describe("flowsActionContributions", () => {
     expect(flowField.options!(tmp)).toEqual(["test:capabilities"]);
   });
 
-  it("flows.run emits a flow:run event (flowName+task)", () => {
+  it("flows.run emits a flow:run event (flowName+task) and declares its completion", () => {
     const run = flowsActionContributions()[0]!;
-    expect(run.buildEvent!({ payload: { flow: "test:capabilities", task: "do it" }, automation: {} }))
-      .toEqual({ eventType: "flow:run", data: { flowName: "test:capabilities", task: "do it" } });
+    const ev = run.buildEvent!({ payload: { flow: "test:capabilities", task: "do it" }, automation: {} });
+    expect(ev).toMatchObject({ eventType: "flow:run", data: { flowName: "test:capabilities", task: "do it" } });
+    // Event-dispatched flow runs emit no agent_end — the action declares how it
+    // finishes so the automation engine can finalize generically.
+    expect(ev!.completion!.eventType).toBe("flow_complete");
+    expect(typeof ev!.completion!.summarize).toBe("function");
     // task optional
     expect(run.buildEvent!({ payload: { flow: "test:capabilities" }, automation: {} }))
-      .toEqual({ eventType: "flow:run", data: { flowName: "test:capabilities" } });
+      .toMatchObject({ eventType: "flow:run", data: { flowName: "test:capabilities" } });
   });
 
   it("flows.run emits data.inputs (per-fire resolved, types preserved), task optional", () => {
     const run = flowsActionContributions()[0]!;
+    // Every flows.run also declares its completion (merged from
+    // finalize-event-dispatched-automation-runs).
+    const completion = { eventType: "flow_complete", summarize: expect.any(Function) };
     // payload arrives already interpolated by the engine: ${{trigger}} resolved.
     expect(
       run.buildEvent!({
@@ -78,16 +86,17 @@ describe("flowsActionContributions", () => {
     ).toEqual({
       eventType: "flow:run",
       data: { flowName: "invoicebot:process", inputs: { invoice: "/spool/inv-042.pdf", priority: 5, dry: true } },
+      completion,
     });
     // task + inputs coexist
     expect(
       run.buildEvent!({ payload: { flow: "a:b", task: "label", inputs: { x: 1 } }, automation: {} }),
-    ).toEqual({ eventType: "flow:run", data: { flowName: "a:b", task: "label", inputs: { x: 1 } } });
+    ).toEqual({ eventType: "flow:run", data: { flowName: "a:b", task: "label", inputs: { x: 1 } }, completion });
     // empty / non-object inputs omitted
     expect(run.buildEvent!({ payload: { flow: "a:b", inputs: {} }, automation: {} }))
-      .toEqual({ eventType: "flow:run", data: { flowName: "a:b" } });
+      .toEqual({ eventType: "flow:run", data: { flowName: "a:b" }, completion });
     expect(run.buildEvent!({ payload: { flow: "a:b", inputs: "nope" }, automation: {} }))
-      .toEqual({ eventType: "flow:run", data: { flowName: "a:b" } });
+      .toEqual({ eventType: "flow:run", data: { flowName: "a:b" }, completion });
   });
 
   it("flows.run rejects a malformed flow id (emits nothing)", () => {
@@ -95,6 +104,22 @@ describe("flowsActionContributions", () => {
     expect(run.buildEvent!({ payload: { flow: "test:cap x", task: "t" }, automation: {} })).toBeNull();
     expect(run.buildEvent!({ payload: { flow: "nocolon", task: "t" }, automation: {} })).toBeNull();
     expect(run.buildEvent!({ payload: { flow: "" }, automation: {} })).toBeNull();
+  });
+});
+
+describe("summarizeFlowResult (flows owns the FlowResult shape)", () => {
+  it("builds a line from status + flowName + summary", () => {
+    expect(
+      summarizeFlowResult({
+        status: "success",
+        flowName: "invoicebot:process",
+        lastResult: { result: { summary: "done: exported" } },
+      }),
+    ).toBe("flow invoicebot:process success: done: exported");
+  });
+  it("tolerates a missing summary and missing fields", () => {
+    expect(summarizeFlowResult({ status: "error", flowName: "x:y" })).toBe("flow x:y error");
+    expect(summarizeFlowResult(undefined)).toBe("flow finished");
   });
 });
 

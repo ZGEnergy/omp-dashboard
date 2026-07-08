@@ -12,8 +12,6 @@ import { ComposerSessionActions } from "./components/ComposerSessionActions.js";
 import { ConnectionStatusBanner } from "./components/ConnectionStatusBanner.js";
 import { DirectorySettings, type DirectorySettingsPage } from "./components/DirectorySettings/DirectorySettings.js";
 import { EditorView } from "./components/EditorView.js";
-import { SessionSplitView, SplitRouteSync } from "./components/SessionSplitView.js";
-import { SplitWorkspaceProvider } from "./components/SplitWorkspaceContext.js";
 import { FileDiffView } from "./components/FileDiffView.js";
 import { InstallBanner } from "./components/InstallBanner.js";
 import { LandingPage } from "./components/LandingPage.js";
@@ -35,9 +33,13 @@ import { ServerSelector } from "./components/ServerSelector.js";
 import { SessionBanner } from "./components/SessionBanner.js";
 import { SessionHeader } from "./components/SessionHeader.js";
 import { SessionList } from "./components/SessionList.js";
+import { SessionSplitView, SplitRouteSync } from "./components/SessionSplitView.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { SpawnErrorToastHost } from "./components/SpawnErrorToastHost.js";
+import { RecoveryOfferHost } from "./components/RecoveryOfferHost.js";
+import { clearRecoveryOffer } from "./lib/recovery-offer-bus.js";
 import { SpecsBrowserView } from "./components/SpecsBrowserView.js";
+import { SplitWorkspaceProvider } from "./components/SplitWorkspaceContext.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { TerminalsView } from "./components/TerminalsView.js";
 import { Toast, useToast } from "./components/Toast.js";
@@ -64,11 +66,7 @@ import { deleteDraft, readAllDrafts, writeDraft } from "./lib/draft-storage.js";
 import { createInitialState, deriveBannerState, findLastUserPrompt, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { decodeFolderPath, encodeFolderPath } from "./lib/folder-encoding.js";
 import { goBack as goBackAction } from "./lib/history-back.js";
-import { clearLoadingHistory } from "./lib/loading-history.js";
-// Strategy A (reduce-session-replay-traffic): durable replay cursor.
-import { replayCache } from "./lib/replay-cache.js";
-import { createReplayPersister } from "./lib/replay-persist.js";
-import { rehydrateSession } from "./lib/rehydrate-session.js";
+import { clearLoadingHistory, SUBSCRIBE_ACK_MS } from "./lib/loading-history.js";
 import { extractUserPromptHistory } from "./lib/message-history.js";
 import { getMobileDepth } from "./lib/mobile-depth.js";
 import {
@@ -80,6 +78,10 @@ import {
 } from "./lib/nav-tracker.js";
 import { useOpenSpecConfig } from "./lib/openspec-config-api.js";
 import { dispatchPluginMessage } from "./lib/plugins-api.js";
+import { rehydrateSession } from "./lib/rehydrate-session.js";
+// Strategy A (reduce-session-replay-traffic): durable replay cursor.
+import { replayCache } from "./lib/replay-cache.js";
+import { createReplayPersister } from "./lib/replay-persist.js";
 import {
   buildFolderSettingsUrl,
   buildOpenSpecArchiveUrl,
@@ -141,9 +143,9 @@ import {
   useShellOverlayRouteMatched
 } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { claimsToRouteDescriptors } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/route-descriptor.js";
-import { registerPluginRouteDescriptors } from "./lib/back-target.js";
 import { PLUGIN_REGISTRY } from "./generated/plugin-registry.js";
 import { usePluginEnabledSet } from "./hooks/usePluginEnabledSet.js";
+import { registerPluginRouteDescriptors } from "./lib/back-target.js";
 
 // Populate the slot registry from the build-time generated plugin manifest.
 // PLUGIN_REGISTRY is `[]` on a fresh checkout (committed stub) — slot consumers
@@ -376,7 +378,7 @@ export default function App() {
   const specsCwd = specsMatch && specsParams ? decodeFolderPath(specsParams.encodedCwd) : null;
   const piResourcesCwd = piResourcesMatch && piResourcesParams ? decodeFolderPath(piResourcesParams.encodedCwd) : null;
   const folderSettingsCwd = folderSettingsMatch && folderSettingsParams ? decodeFolderPath(folderSettingsParams.encodedCwd) : null;
-  const VALID_FOLDER_SETTINGS_PAGES = ["instructions", "packages", "resources"] as const;
+  const VALID_FOLDER_SETTINGS_PAGES = ["instructions", "packages", "skills", "agents", "extensions", "prompts", "themes"] as const;
   const folderSettingsPageRaw = folderSettingsMatch ? folderSettingsParams?.page : undefined;
   const folderSettingsPage: DirectorySettingsPage =
     folderSettingsPageRaw && (VALID_FOLDER_SETTINGS_PAGES as readonly string[]).includes(folderSettingsPageRaw)
@@ -503,6 +505,12 @@ export default function App() {
   // See change: configurable-chat-display.
   const [displayPrefs, setDisplayPrefs] = useState<import("@blackbelt-technology/pi-dashboard-shared/display-prefs.js").DisplayPrefs | undefined>(undefined);
   const [displayPrefsLoaded, setDisplayPrefsLoaded] = useState(false);
+  // Confirmed-seedless signal: true ONLY when the mount GET succeeds AND
+  // returns `displayPrefs === undefined`. Distinct from `loaded && undefined`
+  // because `setDisplayPrefsLoaded(true)` runs in the fetch `finally` even on
+  // a failed GET — a 403/flap must NOT open the first-launch modal.
+  // See change: fix-first-launch-display-modal-stuck-on-mobile.
+  const [displayPrefsSeedless, setDisplayPrefsSeedless] = useState(false);
   const subscribedRef = useRef(new Set<string>());
   const maxSeqMapRef = useRef(new Map<string, number>());
   // Strategy A (reduce-session-replay-traffic): durable replay-cache writer +
@@ -557,6 +565,10 @@ export default function App() {
           // with a stale maxSeq against the now-empty sessionStates map.
           maxSeqMapRef.current.clear();
           rehydratedRef.current.clear();
+          // A recovery offer is scoped to one server boot; drop it so a
+          // stale offer from server A can't reopen IDs on server B.
+          // See change: reopen-sessions-after-shutdown.
+          clearRecoveryOffer();
         },
         setWsUrl,
         persistLastServer: (h, p) => {
@@ -634,10 +646,13 @@ export default function App() {
     sessions: Array.from(sessions.values()).map((s) => ({ cwd: s.cwd })),
   };
 
-  // Enter LOADING for a session: set the flag and arm a 15s safety-net
-  // timer (clearing any prior timer). Called from every `subscribe` send
-  // site so cleared / refreshed chats show the spinner during replay, not
-  // the empty placeholder. See change: show-chat-history-loading-indicator.
+  // Enter LOADING for a session: set the flag and arm the short
+  // `SUBSCRIBE_ACK_MS` safety-net timer (clearing any prior timer). Called from
+  // every `subscribe` send site so cleared / refreshed chats show the spinner
+  // during replay, not the empty placeholder. On the cold path the server's
+  // hydration start marker re-arms this to the longer `HYDRATE_CEILING_MS`.
+  // See change: show-chat-history-loading-indicator,
+  // fix-history-loading-false-empty-flash.
   const beginLoadingHistory = useCallback((id: string) => {
     const existingTimer = loadingHistoryTimersRef.current.get(id);
     if (existingTimer) clearTimeout(existingTimer);
@@ -648,7 +663,7 @@ export default function App() {
     });
     loadingHistoryTimersRef.current.set(
       id,
-      setTimeout(() => clearLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, id), 15000),
+      setTimeout(() => clearLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, id), SUBSCRIBE_ACK_MS),
     );
   }, []);
 
@@ -702,6 +717,8 @@ export default function App() {
         const body = await r.json() as { displayPrefs?: import("@blackbelt-technology/pi-dashboard-shared/display-prefs.js").DisplayPrefs };
         if (cancelled) return;
         setDisplayPrefs(body.displayPrefs);
+        // Only a successful GET with no stored prefs is a genuine first launch.
+        if (body.displayPrefs === undefined) setDisplayPrefsSeedless(true);
       } catch { /* ignore */ }
       finally {
         if (!cancelled) setDisplayPrefsLoaded(true);
@@ -1525,7 +1542,13 @@ export default function App() {
             </div>
           }>
             <SessionAssetsProvider assets={selectedSession?.assets}>
-            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} onCloseInlineTerminal={selectedId ? (tid) => handleCloseInlineTerminal(selectedId, tid) : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? []} loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false} />
+            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} onCloseInlineTerminal={selectedId ? (tid) => handleCloseInlineTerminal(selectedId, tid) : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? []} loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false} onCollapseStreamingThinking={selectedId ? () => setSessionStates((prev) => {
+              const cur = prev.get(selectedId);
+              if (!cur || cur.streamingThinkingCollapsed) return prev;
+              const next = new Map(prev);
+              next.set(selectedId, { ...cur, streamingThinkingCollapsed: true });
+              return next;
+            }) : undefined} />
             </SessionAssetsProvider>
           </ErrorBoundary>
           {/* Unified status banner. Sticky above the command input — ONE
@@ -1781,6 +1804,20 @@ export default function App() {
       sessionId ? sessions.get(sessionId)?.displayPrefsOverride : undefined,
   }), [displayPrefs, sessions]);
 
+  // First-launch chat-display preset picker. Rendered once (single `onClose`
+  // wiring) in BOTH the mobile and desktop returns — not gated on `isMobile`.
+  // Gate is `displayPrefsSeedless && displayPrefs === undefined`: the seedless
+  // term stops spurious opens on a failed GET; the `displayPrefs === undefined`
+  // term is what lets `onClose`, a cross-tab broadcast, AND the connect
+  // snapshot each close the modal by defining `displayPrefs`.
+  // See change: fix-first-launch-display-modal-stuck-on-mobile.
+  const firstLaunchModal = displayPrefsSeedless && displayPrefs === undefined ? (
+    <FirstLaunchDisplayModal
+      apiBase={apiBase}
+      onClose={(prefs) => setDisplayPrefs(prefs)}
+    />
+  ) : null;
+
   const apiProvider = (children: React.ReactNode) => (
     <ApiContext.Provider value={apiBase}>
       <DisplayPrefsProvider value={displayPrefsContextValue}>
@@ -1868,15 +1905,8 @@ export default function App() {
         />
         <Toast messages={toastMessages} onDismiss={dismissToast} />
         <SpawnErrorToastHost />
-        {/* First-launch chat-display preset picker. Opens once when the
-            server reports `displayPrefs: undefined`. See change:
-            configurable-chat-display. */}
-        {displayPrefsLoaded && displayPrefs === undefined && (
-          <FirstLaunchDisplayModal
-            apiBase={apiBase}
-            onClose={() => { /* PATCH inside the modal triggers display_prefs_updated which seeds the store; no extra work needed. */ }}
-          />
-        )}
+        <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} />
+        {firstLaunchModal}
         <MobileShell
           depth={mobileDepth}
           onBack={() => {
@@ -1990,6 +2020,7 @@ export default function App() {
   // Desktop: side-by-side layout
   return apiProvider(
     <div className="flex h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">
+      {firstLaunchModal}
       <div className="hidden md:flex">
         <ResizableSidebar sidebar={sidebar}>
           {sessionList}
@@ -2003,6 +2034,7 @@ export default function App() {
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {connectionBanner}
+        <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} />
         {/* Folder views (TerminalsView or EditorView) — single owner of
             <TerminalView> mounting. The legacy keep-alive list above
             (mounted unconditionally for the /terminal/:id route) was

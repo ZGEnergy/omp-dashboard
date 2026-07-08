@@ -4,6 +4,9 @@
  * Asserts:
  *  - `pid` field is present (regression pin).
  *  - `launchSource` field is present and reflects DASHBOARD_STARTER.
+ *  - `bootParentPid`, `ppid`, `bootParentAlive`, `activeBridgeCount`,
+ *    `launchSourceEffective` are present with the right types on every case.
+ *    See change: electron-attach-ownership-fixes.
  *
  * `launchSource` replaces the legacy `starter` field per change:
  * eliminate-electron-runtime-install (task 3.2). It is the single source
@@ -30,6 +33,18 @@ describe("GET /api/health — shape", () => {
     else process.env.DASHBOARD_STARTER = savedStarter;
   });
 
+  // Shared shape assertions for the ownership/liveness fields. The ppid reader
+  // is platform-branched (POSIX syscall vs Windows `process.ppid`) but the
+  // response SHAPE is uniform across all three OSes — these type checks must
+  // hold in CI on every platform.
+  function assertOwnershipShape(body: Record<string, unknown>): void {
+    expect(typeof body.bootParentPid).toBe("number");
+    expect(typeof body.ppid).toBe("number");
+    expect(typeof body.bootParentAlive).toBe("boolean");
+    expect(typeof body.activeBridgeCount).toBe("number");
+    expect(typeof body.launchSourceEffective).toBe("string");
+  }
+
   it("includes pid field (regression pin)", async () => {
     delete process.env.DASHBOARD_STARTER;
     handle = await createTestServer();
@@ -38,6 +53,7 @@ describe("GET /api/health — shape", () => {
     const body = await res.json() as Record<string, unknown>;
     expect(typeof body.pid).toBe("number");
     expect(body.pid).toBe(process.pid);
+    assertOwnershipShape(body);
   });
 
   it("launchSource defaults to 'standalone' when DASHBOARD_STARTER unset", async () => {
@@ -46,6 +62,8 @@ describe("GET /api/health — shape", () => {
     const res = await fetch(`http://localhost:${handle.httpPort}/api/health`);
     const body = await res.json() as Record<string, unknown>;
     expect(body.launchSource).toBe("standalone");
+    expect(body.launchSourceEffective).toBe("standalone");
+    assertOwnershipShape(body);
   });
 
   it("launchSource is 'electron' when DASHBOARD_STARTER=Electron", async () => {
@@ -54,6 +72,9 @@ describe("GET /api/health — shape", () => {
     const res = await fetch(`http://localhost:${handle.httpPort}/api/health`);
     const body = await res.json() as Record<string, unknown>;
     expect(body.launchSource).toBe("electron");
+    // Electron is never promoted regardless of bridge count / uptime.
+    expect(body.launchSourceEffective).toBe("electron");
+    assertOwnershipShape(body);
   });
 
   it("launchSource is 'bridge' when DASHBOARD_STARTER=Bridge", async () => {
@@ -62,5 +83,9 @@ describe("GET /api/health — shape", () => {
     const res = await fetch(`http://localhost:${handle.httpPort}/api/health`);
     const body = await res.json() as Record<string, unknown>;
     expect(body.launchSource).toBe("bridge");
+    // Inside the 30 s grace window a freshly-booted test server stays "bridge"
+    // even with zero connected bridges.
+    expect(body.launchSourceEffective).toBe("bridge");
+    assertOwnershipShape(body);
   });
 });

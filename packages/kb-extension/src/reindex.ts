@@ -14,6 +14,18 @@ import { SqliteFtsStore } from "@blackbelt-technology/pi-dashboard-kb";
 import { indexSource } from "@blackbelt-technology/pi-dashboard-kb";
 import { agentsChain, parseRowPaths } from "@blackbelt-technology/pi-dashboard-kb";
 
+/** Resolve a DOX row path relative to its AGENTS.md dir, with a project-root
+ *  fallback (a nested AGENTS.md may document a file living at the root).
+ *  Local mirror of kb's `resolveRowPath` — kept inline so this package does not
+ *  depend on an unreleased kb export across the versioned package boundary. */
+function resolveRowPath(agentsDir: string, cwd: string, rp: string): string {
+  if (isAbsolute(rp)) return rp;
+  const dirRel = resolve(agentsDir, rp);
+  if (existsSync(dirRel)) return dirRel;
+  const rootRel = resolve(cwd, rp);
+  return existsSync(rootRel) ? rootRel : dirRel;
+}
+
 export const DEFAULT_DEBOUNCE_MS = 800;
 
 export interface ReindexState {
@@ -22,10 +34,15 @@ export interface ReindexState {
   // KB handles cached PER cwd — a dashboard session may switch project folders;
   // a single shared store would index the wrong DB after a switch.
   kb: Map<string, { store: SqliteFtsStore; cfg: ResolvedConfig }>;
+  // In-flight reindex per cwd. `indexSource` now yields mid-transaction, so two
+  // overlapping walks on the same cached store (debounce timer + kb_search
+  // freshness) would interleave BEGIN/COMMIT and corrupt the transaction.
+  // Coalesce them onto one walk. See change: fix-kb-index-feedback.
+  inflight: Map<string, Promise<{ changed: number; chunks: number }>>;
 }
 
 export function createReindexState(): ReindexState {
-  return { timers: new Map(), nudged: new Set(), kb: new Map() };
+  return { timers: new Map(), nudged: new Set(), kb: new Map(), inflight: new Map() };
 }
 
 function stalenessPath(cwd: string): string {
@@ -48,10 +65,12 @@ function fileSha(p: string): string {
 export function acknowledgeRows(cwd: string, agentsFile: string): void {
   const abs = isAbsolute(agentsFile) ? agentsFile : resolve(cwd, agentsFile);
   if (!existsSync(abs)) return;
+  const dir = dirname(abs);
   const map = loadStaleness(cwd);
   for (const rp of parseRowPaths(abs)) {
-    const ap = isAbsolute(rp) ? rp : resolve(cwd, rp);
-    if (existsSync(ap)) map[rp] = fileSha(ap);
+    // Rows are relative to their AGENTS.md dir; key staleness by cwd-relative path.
+    const ap = resolveRowPath(dir, cwd, rp);
+    if (existsSync(ap)) map[relative(cwd, ap)] = fileSha(ap);
   }
   saveStaleness(cwd, map);
 }
@@ -68,9 +87,11 @@ export function decideNudge(cwd: string, editedPath: string): NudgeDecision {
   const { chain } = agentsChain(cwd, abs, { claudeMd: true });
   if (chain.length === 0) return { kind: "treeless" };
   const nearest = chain[chain.length - 1];
-  const rows = parseRowPaths(nearest.path);
+  // Rows document paths relative to their own AGENTS.md dir — resolve before compare.
+  const nearestDir = dirname(nearest.path);
+  const rowAbs = new Set(parseRowPaths(nearest.path).map((rp) => resolveRowPath(nearestDir, cwd, rp)));
   const rel = relative(cwd, abs) || abs;
-  if (!rows.includes(rel)) return { kind: "missing", agentsFile: nearest.rel };
+  if (!rowAbs.has(abs)) return { kind: "missing", agentsFile: nearest.rel };
   const map = loadStaleness(cwd);
   const disk = fileSha(abs);
   if (map[rel] && disk && map[rel] !== disk) return { kind: "stale", agentsFile: nearest.rel };
@@ -99,14 +120,25 @@ export function getKb(state: ReindexState, cwd: string): { store: SqliteFtsStore
 
 /** Reindex filesystem sources now (called after debounce). Hash-gated via the
  *  indexer's mtime→sha256 incremental pass. */
-export function reindexNow(state: ReindexState, cwd: string): { changed: number; chunks: number } {
-  const { store, cfg } = getKb(state, cwd);
-  let changed = 0, chunks = 0;
-  for (const s of cfg.resolvedSources) {
-    const st = indexSource(store, { root: s.id, dir: s.dir }, { indexAgentsFiles: cfg.indexAgentsFiles, includeSourceMarkdown: cfg.includeSourceMarkdown, include: cfg.include, exclude: cfg.exclude, extensions: cfg.extensions });
-    changed += st.changed; chunks += st.chunks;
-  }
-  return { changed, chunks };
+export function reindexNow(state: ReindexState, cwd: string): Promise<{ changed: number; chunks: number }> {
+  // Coalesce concurrent reindexes for one cwd onto a single in-flight walk
+  // (they share a cached store; overlapping async walks would interleave the
+  // batched transaction). See change: fix-kb-index-feedback.
+  const existing = state.inflight.get(cwd);
+  if (existing) return existing;
+  const p = (async () => {
+    const { store, cfg } = getKb(state, cwd);
+    let changed = 0, chunks = 0;
+    for (const s of cfg.resolvedSources) {
+      const st = await indexSource(store, { root: s.id, dir: s.dir }, { indexAgentsFiles: cfg.indexAgentsFiles, includeSourceMarkdown: cfg.includeSourceMarkdown, include: cfg.include, exclude: cfg.exclude, extensions: cfg.extensions });
+      changed += st.changed; chunks += st.chunks;
+    }
+    return { changed, chunks };
+  })().finally(() => {
+    if (state.inflight.get(cwd) === p) state.inflight.delete(cwd);
+  });
+  state.inflight.set(cwd, p);
+  return p;
 }
 
 /** Schedule a debounced reindex for an edited .md path. */
@@ -116,7 +148,7 @@ export function scheduleReindex(state: ReindexState, cwd: string, _path: string,
   if (existing) clearTimeout(existing);
   state.timers.set(key, setTimeout(() => {
     state.timers.delete(key);
-    try { reindexNow(state, cwd); } catch (e) { console.warn(`[kb] reindex failed: ${(e as Error).message}`); }
+    reindexNow(state, cwd).catch((e) => console.warn(`[kb] reindex failed: ${(e as Error).message}`));
   }, debounceMs));
 }
 

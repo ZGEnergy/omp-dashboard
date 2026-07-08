@@ -2,22 +2,33 @@
  * System tray integration.
  * Minimizes to tray on window close, with Start/Restart server, Show, Quit menu.
  *
- * The first menu item is dynamic: shows "Start server" when no managed server
- * is running and "Restart server" when one is. The menu is rebuilt every 3 s
- * via a polled `getServerStatus()` callback so state changes (server started
- * by a `pi` session, or stopped externally) are reflected promptly.
+ * The first menu item is dynamic and ownership-aware: "Start server" when no
+ * server is running, "Restart server" when this Electron owns it, and a
+ * disabled "Server managed externally" row when a foreign server holds the
+ * port. The menu is rebuilt every 3 s via a polled `getServerOwnership()`
+ * callback so state changes are reflected promptly.
  *
- * See change: electron-server-launch-controls (D3, R4).
+ * See change: electron-server-launch-controls (D3, R4);
+ * electron-attach-ownership-fixes (ownership-aware menu).
  */
-import { app, Tray, Menu, nativeImage, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
+
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { app, type BrowserWindow, Menu, type MenuItemConstructorOptions, nativeImage, Tray } from "electron";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Server ownership as seen by the tray probe. Widens the old binary
+ * running/not-running model to a three-way ownership classification so the
+ * tray never offers a "Restart" action against a server this Electron doesn't
+ * own. See change: electron-attach-ownership-fixes.
+ */
+export type TrayOwnership = "electron" | "foreign" | "none" | "unknown";
+
 let tray: Tray | null = null;
 let pollInterval: NodeJS.Timeout | null = null;
-let lastIsRunning: boolean | null = null;
+let lastOwnership: TrayOwnership | null = null;
 
 /** Resolve path to a resource file (works in both dev and packaged modes). */
 function resourcePath(filename: string): string {
@@ -30,23 +41,28 @@ function resourcePath(filename: string): string {
 /**
  * Pure menu-template builder. Exported for unit testing.
  *
- * Behaviour:
- * - When `isRunning === true` → first item is "Restart server" (passes `force: true`).
- * - When `isRunning === false` → first item is "Start server" (passes `force: false`).
- * - When `isRunning === null` (status unknown, first poll pending) → omit the
+ * Behaviour (keyed on ownership):
+ * - `"electron"` → first item is "Restart server" (passes `force: true`).
+ * - `"none"`     → first item is "Start server" (passes `force: false`).
+ * - `"foreign"`  → first item is a disabled "Server managed externally" row
+ *   (no click handler) so the tray never offers a Restart that could nuke a
+ *   server this Electron doesn't own.
+ * - `"unknown"` (status unknown, first poll pending / probe error) → omit the
  *   server-launch item to avoid showing a misleading label.
  */
 export function buildTrayMenuTemplate(args: {
-  isRunning: boolean | null;
+  ownership: TrayOwnership;
   onLaunch: (force: boolean) => void;
   onShow: () => void;
   onQuit: () => void;
 }): MenuItemConstructorOptions[] {
   const items: MenuItemConstructorOptions[] = [];
-  if (args.isRunning === true) {
+  if (args.ownership === "electron") {
     items.push({ label: "Restart server", click: () => args.onLaunch(true) });
-  } else if (args.isRunning === false) {
+  } else if (args.ownership === "none") {
     items.push({ label: "Start server", click: () => args.onLaunch(false) });
+  } else if (args.ownership === "foreign") {
+    items.push({ label: "Server managed externally", enabled: false });
   }
   if (items.length > 0) items.push({ type: "separator" });
   items.push({ label: "Show", click: args.onShow });
@@ -61,7 +77,7 @@ export function buildTrayMenuTemplate(args: {
  * @param getWindow callback returning the main window (may be null while hidden)
  * @param onQuit callback invoked when the user explicitly quits
  * @param hooks optional callbacks for the dynamic server-launch item:
- *   - `getServerStatus()` returns the current `isRunning` boolean
+ *   - `getServerOwnership()` returns the current ownership classification
  *   - `onLaunch(force)` invoked when the user clicks Start/Restart
  *   When `hooks` is omitted the menu falls back to the legacy Show/Quit-only form.
  */
@@ -69,7 +85,7 @@ export function createTray(
   getWindow: () => BrowserWindow | null,
   onQuit: () => void,
   hooks?: {
-    getServerStatus: () => Promise<boolean>;
+    getServerOwnership: () => Promise<TrayOwnership>;
     onLaunch: (force: boolean) => void;
   },
 ): Tray {
@@ -93,10 +109,10 @@ export function createTray(
     }
   };
 
-  const rebuildMenu = (isRunning: boolean | null): void => {
+  const rebuildMenu = (ownership: TrayOwnership): void => {
     if (!tray) return;
     const template = buildTrayMenuTemplate({
-      isRunning,
+      ownership,
       onLaunch: hooks?.onLaunch ?? (() => { /* no hook configured */ }),
       onShow: showWindow,
       onQuit,
@@ -105,16 +121,17 @@ export function createTray(
   };
 
   // Initial render — if hooks are configured, hide the launch item until
-  // the first probe resolves; else render the legacy menu shape.
-  rebuildMenu(hooks ? null : false);
+  // the first probe resolves ("unknown"); else render the legacy menu shape
+  // ("none" → Start server).
+  rebuildMenu(hooks ? "unknown" : "none");
 
   if (hooks) {
     const probe = async (): Promise<void> => {
       try {
-        const isRunning = await hooks.getServerStatus();
-        if (isRunning !== lastIsRunning) {
-          lastIsRunning = isRunning;
-          rebuildMenu(isRunning);
+        const ownership = await hooks.getServerOwnership();
+        if (ownership !== lastOwnership) {
+          lastOwnership = ownership;
+          rebuildMenu(ownership);
         }
       } catch { /* ignore probe failures */ }
     };
@@ -131,7 +148,7 @@ export function destroyTray(): void {
     clearInterval(pollInterval);
     pollInterval = null;
   }
-  lastIsRunning = null;
+  lastOwnership = null;
   tray?.destroy();
   tray = null;
 }

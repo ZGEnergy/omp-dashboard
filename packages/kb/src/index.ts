@@ -21,5 +21,5 @@ export type { KbConfig, SourceConfig, RankingConfig, ResolvedConfig } from "./co
 export { resolveAll, classifyRef, sourceIdentity, resolverFor } from "./sources.js";
 export type { KbSourceKind, ResolvedSource, ResolveCtx, SourceResolver } from "./sources.js";
 export { isTrusted, recordTrust, canonicalSource, sourceHash } from "./trust.js";
-export { agentsChain, doxInit, doxLint, fallbackManifest, parseRowPaths } from "./dox.js";
+export { agentsChain, doxInit, doxLint, fallbackManifest, parseRowPaths, resolveRowPath } from "./dox.js";
 export type { AgentsEntry, DoxInitPlan, DoxIssue, DoxLintResult } from "./dox.js";

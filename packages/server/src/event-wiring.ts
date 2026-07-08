@@ -83,6 +83,13 @@ export interface EventWiringDeps {
    */
   pendingAttachRegistry?: import("./pending-attach-registry.js").PendingAttachRegistry;
   /**
+   * Optional pending-initial-prompt registry. When provided, the wiring
+   * consumes a pending prompt on each `session_register` and dispatches it as
+   * the session's first `send_prompt` (e.g. `/skill:project-init` from the
+   * no-hook Initialize button). See change: project-init-skill-and-profiles.
+   */
+  pendingInitialPromptRegistry?: import("./pending-initial-prompt-registry.js").PendingInitialPromptRegistry;
+  /**
    * Optional pending-worktree-base registry. When provided, the wiring
    * consumes a pending base ref on each `session_register` and persists
    * it to the session's `.meta.json` sidecar + stamps the in-memory
@@ -146,6 +153,15 @@ export interface EventWiringDeps {
    * See change: add-goal-continuation-plugin.
    */
   dispatchPluginRawEvent?: (sessionId: string, event: unknown) => void;
+  /**
+   * Optional eager liveness stamping. When both provided, the wiring stamps
+   * `{ live:true, liveEpoch }` into a session's `.meta.json` once per
+   * activation (first live activity event under the current epoch), via the
+   * eager (non-debounced) write path, so an unclean host shutdown leaves a
+   * recoverable marker on disk. See change: reopen-sessions-after-shutdown.
+   */
+  metaPersistence?: import("./meta-persistence.js").MetaPersistence;
+  liveEpoch?: number;
 }
 
 /**
@@ -167,6 +183,7 @@ export function wireEvents(deps: EventWiringDeps): void {
     knownSessionIds,
     pendingDashboardSpawns,
     pendingAttachRegistry,
+    pendingInitialPromptRegistry,
     pendingWorktreeBaseRegistry,
     pendingAutomationRunRegistry,
     pendingGoalLinkRegistry,
@@ -176,7 +193,14 @@ export function wireEvents(deps: EventWiringDeps): void {
     pendingClientCorrelations,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
+    metaPersistence,
+    liveEpoch,
   } = deps;
+
+  // Once-per-activation guard for the eager liveness marker: maps sessionId
+  // → epoch already stamped. Prevents a fresh atomic write on every event.
+  // See change: reopen-sessions-after-shutdown.
+  const stampedLiveEpoch = new Map<string, number>();
 
   /**
    * Deferred order-key re-resolution. A worktree session registers BEFORE
@@ -299,6 +323,17 @@ export function wireEvents(deps: EventWiringDeps): void {
       }
     }
 
+    // ── initial-prompt arm ────────────────────────────────────────────
+    // Consume any pending initial-prompt intent queued by the no-hook
+    // Initialize button's spawn and dispatch it as the session's first
+    // prompt (e.g. `/skill:project-init`). See change: project-init-skill-and-profiles.
+    if (pendingInitialPromptRegistry) {
+      const prompt = pendingInitialPromptRegistry.consume(cwd);
+      if (prompt) {
+        piGateway.sendToSession(sessionId, { type: "send_prompt", sessionId, text: prompt });
+      }
+    }
+
     // ── automation-run arm ────────────────────────────────────────────
     // Consume any pending automation-run stamp queued by the automation
     // plugin's spawn hook for this cwd. Stamps `kind="automation"` +
@@ -376,6 +411,16 @@ export function wireEvents(deps: EventWiringDeps): void {
   sessionManager.onUnregister = (sessionId) => {
     const session = sessionManager.get(sessionId);
     if (session) {
+      // Durably clear the liveness marker EAGERLY (atomic, not debounced).
+      // Every unregister path (TUI quit, heartbeat expiry, run termination)
+      // is a non-crash end: without this, `status:"ended"` rides the
+      // 1s-debounced save while `live:true` stays on disk — a host death
+      // inside that window makes the next cold start offer (or in `auto`
+      // mode, silently respawn) a session that ended cleanly.
+      // See change: reopen-sessions-after-shutdown.
+      if (metaPersistence && session.sessionFile) {
+        metaPersistence.setLiveness(session.sessionFile, { live: false });
+      }
       browserGateway.broadcastSessionUpdated(sessionId, {
         status: "ended",
         endedAt: session.endedAt,
@@ -531,6 +576,16 @@ export function wireEvents(deps: EventWiringDeps): void {
       if (!replayingSessions.has(sessionId) && isActivityEvent(msg.event.eventType)) {
         const now = Date.now();
         sessionManager.update(sessionId, { lastActivityAt: now });
+        // Stamp the eager liveness marker once per activation. Guarded so an
+        // unchanged `{ live:true, liveEpoch }` is not rewritten per event.
+        // See change: reopen-sessions-after-shutdown.
+        if (metaPersistence && liveEpoch !== undefined && stampedLiveEpoch.get(sessionId) !== liveEpoch) {
+          const sf = sessionManager.get(sessionId)?.sessionFile;
+          if (sf) {
+            metaPersistence.setLiveness(sf, { live: true, liveEpoch });
+            stampedLiveEpoch.set(sessionId, liveEpoch);
+          }
+        }
         const lastBroadcast = lastActivityBroadcastAt.get(sessionId) ?? 0;
         if (now - lastBroadcast >= LAST_ACTIVITY_BROADCAST_INTERVAL_MS) {
           lastActivityBroadcastAt.set(sessionId, now);
@@ -740,6 +795,15 @@ export function wireEvents(deps: EventWiringDeps): void {
     }
 
     if (msg.type === "session_register") {
+      // Reset the once-per-activation liveness guard on every (re)register so
+      // a resumed session re-stamps `{ live:true, liveEpoch }` on its next
+      // activity event. Without this, a session manually closed (sidecar
+      // `{ live:false, closedReason:"manual" }`) then resumed in the SAME
+      // server run (same epoch, same sessionId via `pi --continue`) keeps the
+      // guard entry, so `setLiveness` never re-fires — its `closedReason`
+      // clear is unreachable and a resumed-then-crashed session is wrongly
+      // excluded from recovery. See change: reopen-sessions-after-shutdown.
+      stampedLiveEpoch.delete(sessionId);
       replayingSessions.add(sessionId);
       // Safety timeout: clear replay flag after 5s if replay_complete never arrives
       setTimeout(() => {

@@ -26,6 +26,35 @@ export interface DisplayPrefs {
   turnMetadata: boolean;
   debugTools: boolean;
   toolCalls: ToolCallPrefs;
+  /**
+   * Milliseconds a live-streamed reasoning block stays open after it finishes
+   * before auto-collapsing. `0` = never auto-collapse (stay open until clicked).
+   * Only applies to reasoning streamed live in the current view; replayed /
+   * cold-loaded blocks are unaffected. Default `30000`.
+   * See change: reasoning-auto-collapse-timer.
+   */
+  reasoningAutoCollapseMs: number;
+  /**
+   * When true, a live-streamed reasoning block stays expanded for the whole
+   * duration of the active turn (the per-block `reasoningAutoCollapseMs` timer
+   * is suppressed while the turn runs) and collapses on the turn-end edge.
+   * When false (default), behavior is unchanged: live blocks mount expanded and
+   * the ms timer governs collapse per-block. Only affects live-streamed blocks;
+   * replayed / cold-loaded blocks are unaffected. Default `false`.
+   * See change: keep-reasoning-open-until-turn-ends.
+   */
+  keepReasoningOpenUntilTurnEnds: boolean;
+  /**
+   * When true, every tool-call GROUP defaults to COLLAPSED in all automatic
+   * states — including while a member is running (the live header/animation
+   * still renders; only the body starts closed). When false (default), a
+   * group's automatic open state follows run status (expanded while running,
+   * collapsed when done). A per-instance manual toggle always wins. Does NOT
+   * affect reasoning-block collapse nor the nested `×N` `CollapsedToolGroup`.
+   * Default `false`.
+   * See change: enhance-tool-call-grouping.
+   */
+  toolGroupDefaultCollapsed: boolean;
 }
 
 /**
@@ -47,6 +76,9 @@ export const DISPLAY_PRESETS: Record<"simple" | "standard" | "everything", Displ
     turnMetadata: false,
     debugTools: false,
     toolCalls: { read: false, bash: false, edit: true, agent: true, generic: false },
+    reasoningAutoCollapseMs: 30000,
+    keepReasoningOpenUntilTurnEnds: false,
+    toolGroupDefaultCollapsed: false,
   },
   standard: {
     tokenStatsBar: true,
@@ -56,6 +88,9 @@ export const DISPLAY_PRESETS: Record<"simple" | "standard" | "everything", Displ
     turnMetadata: true,
     debugTools: false,
     toolCalls: { read: true, bash: true, edit: true, agent: true, generic: true },
+    reasoningAutoCollapseMs: 30000,
+    keepReasoningOpenUntilTurnEnds: false,
+    toolGroupDefaultCollapsed: false,
   },
   everything: {
     tokenStatsBar: true,
@@ -65,6 +100,9 @@ export const DISPLAY_PRESETS: Record<"simple" | "standard" | "everything", Displ
     turnMetadata: true,
     debugTools: true,
     toolCalls: { read: true, bash: true, edit: true, agent: true, generic: true },
+    reasoningAutoCollapseMs: 30000,
+    keepReasoningOpenUntilTurnEnds: false,
+    toolGroupDefaultCollapsed: false,
   },
 };
 
@@ -90,6 +128,12 @@ export function mergeDisplayPrefs(
     turnMetadata: override.turnMetadata ?? global.turnMetadata,
     debugTools: override.debugTools ?? global.debugTools,
     toolCalls: { ...global.toolCalls, ...(override.toolCalls ?? {}) },
+    reasoningAutoCollapseMs:
+      override.reasoningAutoCollapseMs ?? global.reasoningAutoCollapseMs,
+    keepReasoningOpenUntilTurnEnds:
+      override.keepReasoningOpenUntilTurnEnds ?? global.keepReasoningOpenUntilTurnEnds,
+    toolGroupDefaultCollapsed:
+      override.toolGroupDefaultCollapsed ?? global.toolGroupDefaultCollapsed,
   };
 }
 

@@ -2,7 +2,8 @@
  * Event reducer: builds session UI state from a stream of events.
  * (state, event) → new state
  */
-import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+
+import { USAGE_LIMIT_PATTERN } from "@blackbelt-technology/pi-dashboard-shared/error-patterns.js";
 // Flow + architect state derivation moved into flows-plugin per change
 // pluginize-flows-via-registry. The shell carries no flow knowledge.
 // Plugins consume `useSessionEvents(sessionId)` from
@@ -10,8 +11,7 @@ import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/t
 // state; useMessageHandler.ts mirrors every msg.event into the
 // per-session-events store the plugin runtime owns.
 import { parseSkillBlock, type SkillBlock } from "@blackbelt-technology/pi-dashboard-shared/skill-block-parser.js";
-import type { ViewTarget } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { USAGE_LIMIT_PATTERN } from "@blackbelt-technology/pi-dashboard-shared/error-patterns.js";
+import type { DashboardEvent, ViewTarget } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
 export interface ChatImage {
   data: string;
@@ -85,6 +85,15 @@ export interface ChatMessage {
    * See change: surface-input-streaming-behavior.
    */
   streamingBehavior?: "steer" | "followUp";
+  /**
+   * True when this `thinking` message was produced by the live event path
+   * (`case "event"`), not the batch replay path. Drives the per-block
+   * auto-collapse timer: only live-streamed reasoning mounts expanded and
+   * arms a timer. Replayed / rehydrated / cold-loaded blocks leave this
+   * falsy and render collapsed with no timer.
+   * See change: reasoning-auto-collapse-timer.
+   */
+  streamedLive?: boolean;
 }
 
 export interface ToolCallState {
@@ -161,7 +170,8 @@ export interface InteractiveUiRequest {
 // consumers share a single canonical location. Re-exported here for shell-side
 // consumers that still reference them via `../lib/event-reducer.js`.
 // See change: add-subagent-inspector.
-export type { SubagentTimelineEntry, SubagentState } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
+export type { SubagentState, SubagentTimelineEntry } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
+
 import type { SubagentState, SubagentTimelineEntry } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
 
 export interface SessionState {
@@ -169,6 +179,14 @@ export interface SessionState {
   toolCalls: Map<string, ToolCallState>;
   streamingText: string;
   streamingThinking: string;
+  /**
+   * True when the user manually collapsed the LIVE streaming reasoning block.
+   * Lifts the collapse intent across the streaming→committed block swap so the
+   * committed message is created with `streamedLive:false` (no hold-open timer).
+   * Reset to `false` on `thinking_start` and after each `thinking_end` flush.
+   * See change: reasoning-auto-collapse-timer.
+   */
+  streamingThinkingCollapsed: boolean;
   /** Epoch ms when current thinking block started (for live counter) */
   thinkingStartedAt?: number;
   isStreaming: boolean;
@@ -258,6 +276,7 @@ export function createInitialState(): SessionState {
     toolCalls: new Map(),
     streamingText: "",
     streamingThinking: "",
+    streamingThinkingCollapsed: false,
     isStreaming: false,
     tokensIn: 0,
     tokensOut: 0,
@@ -922,7 +941,12 @@ export function deriveBannerState(state: SessionState): BannerState {
   return out;
 }
 
-export function reduceEvent(state: SessionState, event: DashboardEvent): SessionState {
+export function reduceEvent(
+  state: SessionState,
+  event: DashboardEvent,
+  opts?: { isLive?: boolean },
+): SessionState {
+  const isLive = opts?.isLive === true;
   const next = { ...state, toolCalls: new Map(state.toolCalls) };
   const data = event.data;
 
@@ -1120,6 +1144,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       if (assistantEvent) {
         if (assistantEvent.type === "thinking_start") {
           next.streamingThinking = "";
+          next.streamingThinkingCollapsed = false;
           next.thinkingStartedAt = event.timestamp;
           break;
         }
@@ -1139,10 +1164,12 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
                 timestamp: event.timestamp,
                 startedAt,
                 duration: startedAt ? event.timestamp - startedAt : undefined,
+                streamedLive: next.streamingThinkingCollapsed ? false : isLive,
               },
             ];
           }
           next.streamingThinking = "";
+          next.streamingThinkingCollapsed = false;
           next.thinkingStartedAt = undefined;
           break;
         }
@@ -1183,6 +1210,53 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
         // See change: unify-error-retry-lifecycle.
         if (CONFIRMED_GOOD_STOP_REASONS.has(msg.stopReason)) {
           next.lastError = undefined;
+        }
+        // Reasoning reconstruction on REPLAY. Live turns build `thinking` rows
+        // from thinking_start/delta/end events (see message_update), but the
+        // cold-load path (state-replay.ts) emits NO thinking_* events — the
+        // reasoning lives inline in the finalized message's content as
+        // `{ type: "thinking", thinking: "…" }` blocks. Rebuild the rows here so
+        // reopened sessions show reasoning. Appended before the assistant text
+        // row below → correct [thinking, text] order; for tool-bearing messages
+        // the reorder pass repositions by content order.
+        // See change: reconstruct-reasoning-on-replay.
+        //
+        // Dedupe guard: `!isLive` is the WRONG signal — a streamed turn can
+        // reach a message_end whose opts.isLive is not true (the default), so
+        // `!isLive` alone double-creates the row. The real condition is "does a
+        // thinking row for the current assistant turn already exist?". Walk
+        // back to the turn boundary and skip reconstruction when one does.
+        // Real cold replay has no streamed thinking_* rows → none exists →
+        // reconstruction still fires.
+        // See change: fix-double-thinking-row-on-replay-reconstruction.
+        let turnStart = 0;
+        for (let i = next.messages.length - 1; i >= 0; i--) {
+          if (TURN_BOUNDARY_ROLES.has(next.messages[i].role)) {
+            turnStart = i + 1;
+            break;
+          }
+        }
+        const turnHasThinkingRow = next.messages
+          .slice(turnStart)
+          .some((m) => m.role === "thinking");
+        if (!turnHasThinkingRow && Array.isArray(msg.content)) {
+          const thinkingRows: ChatMessage[] = [];
+          for (const block of msg.content as any[]) {
+            if (block?.type !== "thinking") continue;
+            const text = typeof block.thinking === "string" ? block.thinking
+              : typeof block.text === "string" ? block.text : "";
+            if (!text) continue;
+            thinkingRows.push({
+              id: `thinking-${next.messages.length + thinkingRows.length}`,
+              role: "thinking",
+              content: text,
+              timestamp: event.timestamp,
+              streamedLive: false,
+            });
+          }
+          if (thinkingRows.length > 0) {
+            next.messages = [...next.messages, ...thinkingRows];
+          }
         }
         // Pi 0.71+ message_end may REPLACE the finalized content. Compute the
         // effective text once and apply uniformly across branches.

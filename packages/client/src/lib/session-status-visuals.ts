@@ -174,6 +174,27 @@ export function countNeedsYou(
 }
 
 /**
+ * Collapsed-folder status rollup: count the folder's non-ended sessions by the
+ * two ambient states (`working`, `idle`). The `needs-you` state is deliberately
+ * excluded — it is surfaced separately by the clickable `FolderNeedsYouPill`
+ * (which owns the widget-bar probe). `ended` sessions are excluded too. Pure so
+ * the rollup is unit-testable without rendering.
+ * See change: condense-collapsed-folder-header.
+ */
+export function countStatusRollup(
+  sessions: DashboardSession[],
+): { working: number; idle: number } {
+  let working = 0;
+  let idle = 0;
+  for (const s of sessions) {
+    const shape = deriveStatusShape(s);
+    if (shape === "working") working++;
+    else if (shape === "idle") idle++;
+  }
+  return { working, idle };
+}
+
+/**
  * Opt-in urgency sort: float `ask_user` (blocked-on-you) sessions to the top
  * of a folder's active list. Stable — relative order within the blocked group
  * and within the rest group is preserved. Pure + unit-testable.

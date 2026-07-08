@@ -55,6 +55,9 @@
     "tsx": "^4.21.0",
     "ws": "^8.18.0"
   },
+  "optionalDependencies": {
+    "koffi": "^3.1.0"
+  },
   "devDependencies": {
     "@types/diff": "^7.0.0",
     "@types/jsonwebtoken": "^9.0.9",

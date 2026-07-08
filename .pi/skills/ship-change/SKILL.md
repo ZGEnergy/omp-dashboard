@@ -1,6 +1,6 @@
 ---
 name: ship-change
-description: Ship an OpenSpec change after openspec-apply completes. When only QA/manual tasks remain, marks them done (tested later), archives + syncs specs, commits, pushes, opens a PR against develop, watches CI, waits for CodeRabbit, auto-applies safe fixes and re-pushes, loops until CI green + no actionable review threads, then squash-merges with branch delete and removes the worktree. Use after implementation is done and the change is ready to land. Triggers: "ship this change", "ship it", "land the change", "merge and clean up", "post-apply ship".
+description: "Ship an OpenSpec change after openspec-apply completes. When only QA/manual tasks remain, marks them done (tested later), archives + syncs specs, commits, pushes, opens a PR against develop, watches CI, waits for CodeRabbit, auto-applies safe fixes and re-pushes, loops until CI green + no actionable review threads, then squash-merges with branch delete and removes the worktree. Use after implementation is done and the change is ready to land. Triggers: \"ship this change\", \"ship it\", \"land the change\", \"merge and clean up\", \"post-apply ship\"."
 metadata:
   version: "1.0"
   scope: project
@@ -158,7 +158,7 @@ Git/worktree/PR/CodeRabbit gotchas hit during ship. Each has a known fix.
 - **Worktree branch collision.** Git forbids the same branch checked out in two worktrees — ops that check out `develop` FAIL when the parent repo has `develop`. Merge from the parent repo, or `gh pr merge` without switching + `git push origin --delete <branch>`.
 - **`git worktree add <path> origin/<x>` → DETACHED HEAD.** Files written detached VANISH on next checkout. Pass the origin-stripped local branch name, not `origin/<x>`.
 - **Worktree PR misalignment** (local carries `develop` merges but MISSES the PR feature commit; push rejected non-ff). Feature commit lives only on `origin/<pr-branch>` → `git reset --hard origin/<pr-branch>` THEN `git merge origin/develop`. Never force-push a misaligned branch.
-- **Conflict: `docs/file-index-*.md`** → `git checkout origin/develop -- docs/file-index-*.md`, then re-apply only your rows (union-keep silently drops develop's edits).
+- **Conflict: a directory `AGENTS.md` (per-file tree; incl. `docs/AGENTS.md`)** → `git checkout origin/develop -- <path>/AGENTS.md`, then re-apply only your rows (union-keep silently drops develop's edits).
 - **Conflict: `package-lock.json`** → `git checkout --theirs package-lock.json && npm install --package-lock-only`. Never hand-merge.
 - **`mergeStateStatus=DIRTY` won't start CI** → merge `develop`, resolve, push → flips to MERGEABLE.
 - **CodeRabbit "pass" is an ACK, not a review.** Rate-limited it posts a green "pass" with 0 comments ("~11min"). Auto-review is INCREMENTAL; plain `@coderabbitai review` no-ops on already-reviewed commits → wait ~11 min then `@coderabbitai full review`.

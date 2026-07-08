@@ -14,10 +14,12 @@ import { findActiveInteractiveToolResultIds, findRetriedErrorIds, findSurfaceSup
 // unify-status-banner-and-terminal-limit-stop.
 import type { ChatImage, InteractiveUiRequest, SessionState } from "../lib/event-reducer.js";
 import { formatMessageTime } from "../lib/format.js";
-import { type ChatItem, groupConsecutiveToolCalls, type ToolCallGroup } from "../lib/group-tool-calls.js";
+import type { ToolCallGroup } from "../lib/group-tool-calls.js";
+import { type BurstItem, groupToolBursts, type ToolBurstGroup as ToolBurstGroupData } from "../lib/group-tool-bursts.js";
 import { t as i18nT } from "../lib/i18n";
 import { BashOutputCard } from "./BashOutputCard.js";
 import { CollapsedToolGroup } from "./CollapsedToolGroup.js";
+import { ToolBurstGroup } from "./ToolBurstGroup.js";
 import { CommandFeedbackCard } from "./CommandFeedbackCard.js";
 import { CopyButton } from "./CopyButton.js";
 import { MissingToolInlineError } from "./chat/MissingToolInlineError.js";
@@ -67,6 +69,14 @@ interface Props {
    * session. See change: show-chat-history-loading-indicator.
    */
   loadingHistory?: boolean;
+  /**
+   * Client-only signal: the user manually collapsed the LIVE streaming
+   * reasoning block. Sets `streamingThinkingCollapsed` on the session state so
+   * the collapse survives the streaming→committed swap (committed block stays
+   * collapsed, no hold-open timer). No server round-trip.
+   * See change: reasoning-auto-collapse-timer.
+   */
+  onCollapseStreamingThinking?: () => void;
   // onCancelSteering / onCancelPending omitted: pi exposes no queue-mutation
   // API. Steering bubbles render display-only; cancellation requires upstream
   // pi support (tracked separately). See change: honest-mid-turn-queue-surface.
@@ -189,7 +199,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, onCollapseStreamingThinking }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // True when the user wants the chat to chase new content. Flips to false on
   // any real scroll-up gesture, on explicit navigation (scrollToTurn), and on
@@ -282,7 +292,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
       : state.messages.filter((m) => m.role !== "toolResult" || !isDebugTool(m.toolName ?? ""));
     return base.filter((m) => !m.retriedFrom);
   }, [state.messages, showDebugTools]);
-  const groupedMessages = useMemo(() => groupConsecutiveToolCalls(filteredMessages), [filteredMessages]);
+  const groupedMessages = useMemo(() => groupToolBursts(filteredMessages), [filteredMessages]);
   const retriedErrorIds = useMemo(() => findRetriedErrorIds(filteredMessages), [filteredMessages]);
   const hiddenToolResultIds = useMemo(() => findActiveInteractiveToolResultIds(filteredMessages), [filteredMessages]);
   // Single-red-surface: while the error-lifecycle surface (SessionBanner) owns
@@ -318,11 +328,18 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     <FilePreviewProvider key={sessionId}>
     <div className="flex-1 relative overflow-hidden flex flex-col">
     <div ref={scrollRef} onScroll={handleScroll} style={{ overflowAnchor: "auto" }} className={`h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"} space-y-1`}>
-      {groupedMessages.map((item, idx) => {
-        // Collapsed group of repeated tool calls
+      {groupedMessages.map((item: BurstItem) => {
+        // Temporal burst group of heterogeneous tool calls (carries collapse
+        // state → key by first-member id, NOT positional idx, so event-trim
+        // head churn cannot bleed one burst's state into another (finding 3).
+        if ((item as ToolBurstGroupData).type === "burst") {
+          const burst = item as ToolBurstGroupData;
+          return <ToolBurstGroup key={burst.id} burst={burst} toolContext={toolContext} />;
+        }
+        // Bare semantic ×N group (sub-threshold burst that still folded a poll).
         if ((item as ToolCallGroup).type === "group") {
           const group = item as ToolCallGroup;
-          return <CollapsedToolGroup key={`group-${idx}`} group={group} toolContext={toolContext} />;
+          return <CollapsedToolGroup key={group.messages[0]?.id ?? group.toolName} group={group} toolContext={toolContext} />;
         }
 
         const msg = item as import("../lib/event-reducer.js").ChatMessage;
@@ -400,6 +417,10 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
               content={msg.content}
               startedAt={msg.startedAt}
               duration={msg.duration}
+              streamedLive={msg.streamedLive}
+              autoCollapseMs={prefs.reasoningAutoCollapseMs}
+              keepOpenUntilTurnEnds={prefs.keepReasoningOpenUntilTurnEnds}
+              turnActive={state.status === "streaming"}
             />
           );
         }
@@ -557,13 +578,16 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
           isStreaming
           defaultExpanded
           startedAt={state.thinkingStartedAt}
+          onUserCollapse={onCollapseStreamingThinking}
         />
       )}
 
-      {/* Streaming text */}
+      {/* Streaming text — carries the same liveness cue as a running group
+          (edge-pulse glow + shimmer sweep) while the turn is alive. Settles
+          static the instant streaming ends. See change: enhance-tool-call-grouping. */}
       {state.streamingText && (
         <div className="flex justify-start">
-          <div className={`bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl shadow-md px-4 py-2 ${hasMermaid(state.streamingText) ? bubbleWide : bubbleMax}`}>
+          <div className={`chat-stream-live bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl shadow-md px-4 py-2 ${hasMermaid(state.streamingText) ? bubbleWide : bubbleMax}`}>
             <MarkdownContent content={state.streamingText} context={toolContext} />
             <span className="inline-block w-1.5 h-4 bg-[var(--bg-surface)] animate-pulse ml-0.5" />
           </div>

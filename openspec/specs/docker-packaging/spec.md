@@ -22,6 +22,19 @@ The Dockerfile SHALL produce a single image containing Node.js 24 LTS, pi coding
 - **WHEN** `node --version` is run inside the built image
 - **THEN** it reports a `v24.x` release (current LTS line)
 
+### Requirement: Base image ships PDF text/image extraction tools
+
+The docker base image SHALL install `poppler-utils` so that `pdftotext` and
+`pdftoppm` are available on `PATH` for flows that parse PDF documents (e.g. the
+invoicebot document-parsing node). The tools SHALL persist into the final image
+(installed in the base stage, not purged with build tooling).
+
+#### Scenario: PDF parsing tools present in the running container
+
+- **WHEN** a flow in a spawned session shells out to `pdftotext` or `pdftoppm`
+- **THEN** the binaries resolve on `PATH` and the parse step succeeds instead of
+  holding the item for a missing-tool error.
+
 ### Requirement: Entrypoint seeds API keys on first run
 The entrypoint script SHALL run a `seed-auth.js` script that reads provider API keys from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) and writes them to `~/.pi/agent/auth.json` with `0600` permissions. The seeding SHALL only occur if `auth.json` does not already exist. The entrypoint SHALL then start a tmux server and exec `pi-dashboard` with port configuration from environment variables.
 

@@ -26,20 +26,44 @@ describe("reindex Job 1: edit .md → index reflects change", () => {
   beforeAll(() => (dir = setupProject()));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("reindexNow picks up an edited file without manual kb index", () => {
+  it("reindexNow picks up an edited file without manual kb index", async () => {
     const state = createReindexState();
-    reindexNow(state, dir); // cold index
+    await reindexNow(state, dir); // cold index
     const { store } = getKb(state, dir);
     expect(store.search("initial content padded", { limit: 3 }).length).toBeGreaterThan(0);
 
     // edit the file
     writeFileSync(join(dir, "docs", "guide.md"), "# Guide\nrewritten totally different zebras are exotic animals here.\n");
-    reindexNow(state, dir); // incremental
+    await reindexNow(state, dir); // incremental
     const hits = store.search("rewritten totally different zebras", { limit: 3 });
     expect(hits[0]?.path).toMatch(/guide\.md$/);
     // old content gone
     expect(store.search("initial content padded", { limit: 3 }).length).toBe(0);
     closeKb(state);
+  });
+
+  it("coalesces concurrent reindexes for one cwd (no interleaved transaction)", async () => {
+    // indexSource now yields mid-transaction; two overlapping walks on the same
+    // cached store would interleave BEGIN/COMMIT. Use a >YIELD_EVERY (100) fixture
+    // so the walk actually yields while holding a transaction — without the
+    // coalescing guard the second walk throws "transaction within a transaction".
+    // See change: fix-kb-index-feedback.
+    const big = mkdtempSync(join(tmpdir(), "kb-ext-conc-"));
+    mkdirSync(join(big, ".pi", "dashboard", "kb"), { recursive: true });
+    writeFileSync(join(big, ".pi", "dashboard", "knowledge_base.json"), JSON.stringify({
+      sources: [{ kind: "filesystem", ref: "docs" }], dbPath: ".pi/dashboard/kb/index.db",
+    }));
+    mkdirSync(join(big, "docs"), { recursive: true });
+    for (let i = 0; i < 150; i++) {
+      writeFileSync(join(big, "docs", `d${i}.md`), `# Doc ${i}\n\nBody ${i} padded enough to survive the tiny-chunk merge threshold here and there.\n`);
+    }
+    const state = createReindexState();
+    // Concurrent — must not throw, and both resolve to the same coalesced result.
+    const [a, b] = await Promise.all([reindexNow(state, big), reindexNow(state, big)]);
+    expect(a).toEqual(b);
+    expect(a.chunks).toBeGreaterThan(0);
+    closeKb(state);
+    rmSync(big, { recursive: true, force: true });
   });
 });
 
@@ -86,6 +110,18 @@ describe("DOX nudge Job 2: decideNudge + acknowledgeRows", () => {
     acknowledgeRows(dir, join(dir, "AGENTS.md"));
     const after = decideNudge(dir, join(dir, "src", "a.ts"));
     expect(after).toBeNull(); // acknowledged → current hash → not stale
+  });
+
+  it("resolves basename rows against the owning AGENTS.md dir (nested, Defect A)", () => {
+    const sub = mkdtempSync(join(tmpdir(), "kb-nested-"));
+    try {
+      mkdirSync(join(sub, "pkg", "src"), { recursive: true });
+      // AGENTS.md lives in pkg/src with a BARE BASENAME row
+      writeFileSync(join(sub, "pkg", "src", "AGENTS.md"), "# DOX \u2014 pkg/src\n\n| `api.ts` |  |\n");
+      writeFileSync(join(sub, "pkg", "src", "api.ts"), "export const api = 1;\n");
+      // row exists (resolved dir-relative) → not "missing"
+      expect(decideNudge(sub, join(sub, "pkg", "src", "api.ts"))).toBeNull();
+    } finally { rmSync(sub, { recursive: true, force: true }); }
   });
 
   it("dedup: a path nudged once is not nudged again (session state)", () => {

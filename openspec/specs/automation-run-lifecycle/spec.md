@@ -17,6 +17,50 @@ When a run session registers, the engine SHALL deliver the run's action dispatch
 - **WHEN** a run for a prompt action registers its session
 - **THEN** the engine SHALL seed the prompt text via `sendToSession` and finalize on `agent_end` as before.
 
+### Requirement: Event-dispatch actions declare their completion signal
+
+An event-dispatch action contribution (one providing `buildEvent`) MAY declare,
+in its `buildEvent` return, a `completion` object naming the forwarded event type
+that signals a run of that action has finished, plus an optional summarizer that
+derives the run result from that event's payload. The completion declaration
+travels across the action publish/collect bus with the rest of the contribution;
+the automation plugin SHALL NOT hardcode any action-specific completion event.
+
+#### Scenario: Action declares completion alongside its start event
+
+- **WHEN** an action's `buildEvent` returns `{ eventType, data, completion: { eventType, summarize } }`
+- **THEN** the collected registry carries the `completion` declaration for that run's dispatch.
+
+### Requirement: Event-dispatched runs finalize on their declared completion event
+
+An event-dispatched run produces no agent turn in the host session and therefore
+emits no `agent_end`. When such a run declared a `completion` event, the engine
+SHALL finalize the run the first time it observes that declared event for the
+run's session: it captures the run result (buffered assistant text if any, else
+the declared summarizer applied to the event payload) and calls `onSessionEnded`,
+which terminates the now-idle spawned session and frees the concurrency slot.
+Finalization SHALL occur exactly once; a later `agent_end` is a no-op. A run that
+did not declare a completion event (including every prompt-dispatch run) SHALL
+continue to finalize on `agent_end`.
+
+#### Scenario: Event-dispatched run finalizes on its declared completion event
+
+- **WHEN** a tracked run that declared `completion.eventType` observes that event
+- **THEN** the run finalizes once with the summarized result and its spawned
+  session is terminated so the next scheduled fire can start.
+
+#### Scenario: Prompt-dispatched run is unaffected by the completion event
+
+- **WHEN** a prompt-dispatch run (no declared completion) observes an unrelated
+  forwarded event
+- **THEN** it is not finalized by it and still finalizes on `agent_end`.
+
+#### Scenario: agent_end after completion is a no-op
+
+- **WHEN** an event-dispatched run already finalized on its declared completion
+  event later observes an `agent_end`
+- **THEN** no second finalization occurs.
+
 ### Requirement: Runs spawn automation sessions with configurable board visibility
 
 A fired trigger SHALL spawn a pi session stamped `kind="automation"` carrying `automationRun { name, runId }`, launched via a `ServerPluginContext` spawn hook with the resolved model, action, `mode`, and `sandbox`. The session SHALL ALWAYS appear in the Automation view. Whether it ALSO appears on the normal board SHALL be governed by an effective visibility = the automation's `visibility` field if present, else the settings-level default (default `hidden`). When effective visibility is `hidden` the run SHALL be excluded from the board; when `shown` it SHALL render as a normal board card.
@@ -110,22 +154,35 @@ A run whose session produces no assistant output SHALL flush an empty result and
 
 ### Requirement: A running run can be stopped by the user
 
-A user SHALL be able to stop a `running` automation run from the board. Stopping SHALL abort the run's spawned session via a host-provided `abortSession(sessionId)` capability exposed on `ServerPluginContext` (gated to trusted plugins like `spawnSession`) and SHALL finalize the run record. Finalization SHALL be idempotent with the normal `agent_end` capture path: a stopped run SHALL be finalized exactly once, and a subsequent end event for that session SHALL NOT re-finalize or duplicate the record.
+A user SHALL be able to stop a `running` automation run from the board. Stopping SHALL **terminate the run's spawned process** via a trusted host-provided capability on `ServerPluginContext` (gated to trusted plugins like `spawnSession`), and SHALL finalize the run record only after the termination has been attempted. Termination SHALL succeed regardless of run state, including the window after the run record is `running` but before its spawned session has registered — the host capability SHALL accept a `spawnToken` (captured at spawn time) so a not-yet-registered run can be killed by process handle, and SHALL accept a `sessionId` for a registered run. Finalization SHALL be idempotent with the normal `agent_end` capture path: a stopped run SHALL be finalized exactly once, and a subsequent end event for that session SHALL NOT re-finalize or duplicate the record.
 
-#### Scenario: Stop aborts the run session and finalizes the record
+#### Scenario: Stop terminates a registered run and finalizes the record
 
-- **WHEN** a user stops a `running` run
-- **THEN** the run's session SHALL be sent an abort via `abortSession(sessionId)` AND the run record SHALL transition out of `running`.
+- **WHEN** a user stops a `running` run whose session has registered
+- **THEN** the run's process SHALL be terminated via the host capability keyed by its `sessionId` AND the run record SHALL transition out of `running`.
+
+#### Scenario: Stop during the spawn→register window terminates by spawnToken
+
+- **GIVEN** a run whose record is `running` but whose spawned session has not yet registered (no `sessionId` bound)
+- **WHEN** a user stops the run
+- **THEN** the run's process SHALL be terminated via the host capability keyed by its `spawnToken`
+- **AND** the run record SHALL be finalized
+- **AND** no orphaned/never-signaled session SHALL remain after the spawned session finishes registering.
+
+#### Scenario: A no-op soft abort does not silently finalize a live run
+
+- **WHEN** stopping a run and the soft turn-abort cannot be delivered (e.g. the bridge WebSocket is not open)
+- **THEN** the stop SHALL still terminate the process via the host kill capability rather than finalizing the record while the process keeps running.
 
 #### Scenario: Stop is idempotent with agent_end
 
 - **WHEN** a stopped run's session later emits `agent_end`
 - **THEN** the run SHALL NOT be finalized a second time and no duplicate run record SHALL be produced.
 
-#### Scenario: Untrusted plugins cannot abort sessions
+#### Scenario: Untrusted plugins cannot terminate sessions
 
 - **WHEN** an untrusted plugin holds a `ServerPluginContext`
-- **THEN** its `abortSession` SHALL be a no-op returning `false`, mirroring the `spawnSession` trust gate.
+- **THEN** its run-termination capability SHALL be a no-op returning `false`, mirroring the `spawnSession` trust gate.
 
 ### Requirement: Run result records a findings count
 
@@ -140,4 +197,19 @@ When a run finishes, its record SHALL carry a `findings` count derived from `res
 
 - **WHEN** a run produces no assistant output and is auto-archived
 - **THEN** its run record SHALL report `findings: 0`.
+
+### Requirement: A completed run SHALL terminate its spawned session
+
+Automation runs are spawned as persistent `--mode rpc` pi sessions that do not self-exit when a turn ends. When a run completes normally (its session emits `agent_end`) and the result has been captured, the run's spawned session SHALL be terminated so no idle pi process is left running. Termination on completion SHALL send a graceful clean-exit hint (session shutdown) AND SHALL always escalate to a hard process kill, unconditionally — not gated on whether the hint succeeds, because the hint is undeliverable when the bridge WebSocket is not open. This SHALL reuse the same host-provided, trust-gated termination capability used by user-initiated Stop.
+
+#### Scenario: Completed run's session is ended
+
+- **WHEN** a run's session emits `agent_end` and its result is captured
+- **THEN** the run's spawned session SHALL be terminated
+- **AND** no idle pi process for that run SHALL remain after finalization.
+
+#### Scenario: Termination is idempotent with finalization
+
+- **WHEN** terminating a completed run's session causes a further session-end signal
+- **THEN** the run SHALL NOT be finalized a second time and no duplicate run record SHALL be produced.
 

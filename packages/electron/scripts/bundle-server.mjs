@@ -343,6 +343,33 @@ if (tail) console.log(tail);
   );
 }
 
+// ── GO/NO-GO: assert koffi prebuilt for win32 (Tier-2 zombie detection) ──
+// koffi delivers prebuilt koffi.node in its npm tarball (no node-gyp). It is
+// an optionalDependency used ONLY on win32 for the identity-safe boot-parent
+// liveness check (OpenProcess + WaitForSingleObject). macOS/Linux never load
+// it (POSIX uses the live-ppid signal), so the assert is win32-only. Mirrors
+// the node-pty GO/NO-GO above so a future koffi bump that drops the prebuild
+// fails the build here rather than silently regressing every Windows user to
+// Tier 1. See change: electron-attach-ownership-fixes.
+if (resolveTargetPlatformForGit() === "win32") {
+  const koffiNode = path.join(
+    SERVER_BUNDLE,
+    "node_modules", "koffi", "build", "koffi", "win32_x64", "koffi.node",
+  );
+  if (!existsSync(koffiNode)) {
+    console.error(`\u2717 koffi prebuild GO/NO-GO failed at ${koffiNode}`);
+    console.error(
+      "  koffi (optionalDependency) win32_x64 prebuild absent \u2014 Windows Tier-2",
+    );
+    console.error(
+      "  zombie detection would silently degrade to Tier 1. See change: " +
+        "electron-attach-ownership-fixes task 1b.2.",
+    );
+    process.exit(1);
+  }
+  console.log(`  koffi win32_x64 prebuild OK at ${koffiNode}`);
+}
+
 // ── Bundle Windows git+sh (dugite-native) — win32 targets only ───────────
 // Runs after the node-pty GO/NO-GO. download-git-windows.mjs is a no-op on
 // non-win32 hosts, so the spawn is cheap on mac/linux. Arch flows via

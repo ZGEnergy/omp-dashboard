@@ -160,6 +160,41 @@ describe("inlineToolResultImages", () => {
     expect(textBlock.text).not.toContain("/tmp/e.png");
   });
 
+  it("MCP `browser` shape: native image + path to that SAME file → no duplicate", () => {
+    // The MCP `browser` screenshot tool returns a text block referencing the
+    // saved path AND a native image block for that same screenshot. The inliner
+    // must not append a byte-identical second copy (rendered side-by-side).
+    const nativeImg = { type: "image", data: PNG.toString("base64"), mimeType: "image/png" };
+    const out = inlineToolResultImages(
+      {
+        content: [
+          { type: "text", text: "Screenshot saved: /tmp/shots/a.png" },
+          nativeImg,
+        ],
+      },
+      { readFile: fakeReader({ "/tmp/shots/a.png": PNG }) },
+    );
+    // No NEW image inlined …
+    expect(out.inlinedCount).toBe(0);
+    // … exactly one image block remains (the native one) — no side-by-side dup.
+    expect(imageBlocks(out.result)).toHaveLength(1);
+    expect(imageBlocks(out.result)[0]).toEqual(nativeImg);
+    // … and the redundant path is stripped so it isn't also linkified.
+    expect(textOf(out.result)).not.toContain("/tmp/shots/a.png");
+    expect(textOf(out.result)).toContain("Screenshot saved:");
+  });
+
+  it("native image + path to a DIFFERENT file → both images kept", () => {
+    // Distinct bytes must NOT be de-duped: the mixed case still yields 2 images.
+    const nativeImg = { type: "image", data: PNG_2.toString("base64"), mimeType: "image/jpeg" };
+    const out = inlineToolResultImages(
+      { content: [{ type: "text", text: "also /tmp/other.png" }, nativeImg] },
+      { readFile: fakeReader({ "/tmp/other.png": PNG }) },
+    );
+    expect(out.inlinedCount).toBe(1);
+    expect(imageBlocks(out.result)).toHaveLength(2);
+  });
+
   it("dedups a repeated path into a single image block", () => {
     const out = inlineToolResultImages("/tmp/d.png twice /tmp/d.png", {
       readFile: fakeReader({ "/tmp/d.png": PNG }),

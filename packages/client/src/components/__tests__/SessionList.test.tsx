@@ -105,8 +105,10 @@ describe("SessionList spawn button", () => {
 });
 
 describe("SessionList elevated spawn buttons", () => {
-  it("expands a collapsed folder then spawns when +New Session is clicked", () => {
-    // Seed the folder as collapsed.
+  it("hides the spawn button while collapsed; expanding reveals it and spawns", () => {
+    // Seed the folder as collapsed. Variant B (condense-collapsed-folder-header)
+    // hides the elevated spawn buttons (and all heavy slots) when collapsed —
+    // the header keeps only name + status. Expanding restores them.
     localStorage.setItem("dashboard:collapsedGroups", JSON.stringify(["/my/project"]));
     const onSpawn = vi.fn();
     const { container } = render(
@@ -120,11 +122,14 @@ describe("SessionList elevated spawn buttons", () => {
         </ThemeProvider>
       </TestRouter>,
     );
-    // Starts collapsed.
+    // Starts collapsed: spawn button hidden along with the other slots.
     expect(container.querySelector(".group-collapse.collapsed")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("folder-spawn-session-btn"));
-    // Folder expanded, then spawn fired.
+    expect(screen.queryByTestId("folder-spawn-session-btn")).toBeNull();
+    // Expand via the header toggle.
+    fireEvent.click(screen.getByTestId("folder-toggle-btn"));
     expect(container.querySelector(".group-collapse.expanded")).toBeTruthy();
+    // Now visible — clicking it spawns.
+    fireEvent.click(screen.getByTestId("folder-spawn-session-btn"));
     expect(onSpawn).toHaveBeenCalledWith("/my/project");
   });
 

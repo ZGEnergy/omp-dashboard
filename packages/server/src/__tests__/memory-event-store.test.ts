@@ -257,4 +257,69 @@ describe("memory-event-store", () => {
     expect(events[0].seq).toBe(2);
     expect(events[2].seq).toBe(4);
   });
+
+  // See change: preserve-chat-head-on-event-trim.
+  describe("essential chat events survive trimming (subagent flood)", () => {
+    it("preserves message_start/message_end and drops oldest non-essential", () => {
+      const store = createMemoryEventStore(neverPinned, 100, 3);
+      store.insertEvent("s1", makeEvent("message_start")); // seq 1 (chat head)
+      store.insertEvent("s1", makeEvent("message_end")); //   seq 2 (chat head)
+      store.insertEvent("s1", makeEvent("tool_execution_start")); // seq 3 noise
+      store.insertEvent("s1", makeEvent("subagent_started")); //     seq 4 noise
+
+      const events = store.getEvents("s1", 1);
+      expect(events).toHaveLength(3);
+      // The chat head (seq 1, 2) is retained; the OLDEST non-essential (seq 3)
+      // is dropped instead of the beginning of the chat.
+      expect(events.map((e) => e.seq)).toEqual([1, 2, 4]);
+      expect(events[0].event.eventType).toBe("message_start");
+      expect(events[1].event.eventType).toBe("message_end");
+    });
+
+    it("drops all noise before touching essentials, then oldest essential under extreme pressure", () => {
+      const store = createMemoryEventStore(neverPinned, 100, 3);
+      // Interleave 4 chat events with 4 subagent/tool events — 8 total, cap 3.
+      store.insertEvent("s1", makeEvent("message_start")); // 1
+      store.insertEvent("s1", makeEvent("tool_execution_start")); // 2
+      store.insertEvent("s1", makeEvent("subagent_started")); // 3
+      store.insertEvent("s1", makeEvent("message_end")); // 4
+      store.insertEvent("s1", makeEvent("tool_execution_end")); // 5
+      store.insertEvent("s1", makeEvent("message_start")); // 6
+      store.insertEvent("s1", makeEvent("subagent_completed")); // 7
+      store.insertEvent("s1", makeEvent("message_end")); // 8
+
+      const events = store.getEvents("s1", 1);
+      // All 4 noise events are dropped first. Then 4 essentials remain > cap 3,
+      // so the memory bound forces dropping the OLDEST essential (seq 1). In
+      // practice the cap is 20000, so essentials never reach it and the whole
+      // transcript is preserved; this only exercises the pathological fallback.
+      expect(events.map((e) => e.event.eventType)).toEqual([
+        "message_end",
+        "message_start",
+        "message_end",
+      ]);
+      expect(events.map((e) => e.seq)).toEqual([4, 6, 8]);
+    });
+
+    it("survives a subagent flood: chat head kept, buffer stays bounded", () => {
+      const cap = 500; // slack = floor(500*0.05) = 25
+      const store = createMemoryEventStore(neverPinned, 100, cap);
+      // Two opening chat events, then a flood of 10k subagent/tool events.
+      store.insertEvent("s1", makeEvent("message_start")); // seq 1 (chat head)
+      store.insertEvent("s1", makeEvent("message_end")); //   seq 2 (chat head)
+      for (let i = 0; i < 10_000; i++) {
+        store.insertEvent("s1", makeEvent("tool_execution_start"));
+      }
+
+      const events = store.getEvents("s1", 1);
+      // Buffer never exceeds cap + slack (hysteresis bound).
+      expect(events.length).toBeLessThanOrEqual(cap + 25);
+      // The opening chat events (seq 1, 2) are still present — the flood evicted
+      // only its own oldest noise, never the chat head.
+      expect(events[0].seq).toBe(1);
+      expect(events[0].event.eventType).toBe("message_start");
+      expect(events[1].seq).toBe(2);
+      expect(events[1].event.eventType).toBe("message_end");
+    });
+  });
 });
