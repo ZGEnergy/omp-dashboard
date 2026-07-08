@@ -280,17 +280,14 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   const scanResult = scanAllSessions();
   // Interrupted-session recovery candidates discovered on cold start. A
   // candidate (`live===true && status!=="ended"`, see isRecoveryCandidate)
-  // was running when the host died. Candidates are EXEMPT from the
-  // force-`ended` normalization
-  // below so the interrupted state survives long enough to offer a reopen.
-  // See change: reopen-sessions-after-shutdown.
-  //
-  // Read the recovery mode ONCE here: in `off` mode we must NOT exempt
-  // candidates from normalization, otherwise an interrupted session stays
-  // stuck in a non-`ended` "zombie" state forever (no offer resolves it, no
-  // self-clean) — regressing the pre-feature behavior. In `off`, candidates
-  // fall through to the force-`ended` branch like any other non-`ended`
-  // restored session.
+  // was running when the host died. Candidates are NORMALIZED to `ended` on
+  // cold start in ALL modes (`ask`, `auto`, `off`) exactly like any other
+  // non-`ended` restored session — nothing looks pre-reopened before the user
+  // clicks Reopen. In `ask`/`auto` the candidate is ALSO collected into
+  // `recoveryCandidates` (carrying `sessionFile`, `cwd`, `name`, `model`,
+  // `liveEpoch`) so the offer / auto-resume can re-hydrate it via the resume
+  // flow, which does not depend on the pre-reopen status.
+  // See change: fix-recovery-offer-dismiss-and-phantom-reopen.
   const recoveryMode = loadConfig().reopenSessionsAfterShutdown;
   const recoveryCandidates: DashboardSession[] = [];
   for (const session of scanResult.sessions) {
@@ -302,11 +299,15 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       kind: session.kind,
     });
     if (candidate) {
+      // Collect for the offer / auto-resume BEFORE normalization, so the
+      // candidate carries its resume metadata (sessionFile, cwd, name, model,
+      // liveEpoch). Push the same `restored` reference we normalize below.
       restored.recoveryCandidate = true;
       recoveryCandidates.push(restored);
-    } else if (restored.status !== "ended") {
-      // Non-candidate normalization unchanged: force any non-`ended`
-      // restored status to `ended`.
+    }
+    if (restored.status !== "ended") {
+      // Force any non-`ended` restored status to `ended` — candidates and
+      // non-candidates alike. Reopen re-hydrates independently of this status.
       restored.status = "ended";
       restored.endedAt = restored.endedAt ?? Date.now();
     }
@@ -705,9 +706,10 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
 
   // Pending cold-start recovery offer (ask mode). Held so it replays to every
   // client that connects after start() broadcast it once — broadcastToAll at
-  // cold start reaches nobody (clients attach later). Cleared is not required
-  // server-side; clients dedupe/dismiss locally ("once per dirty boot").
-  // See change: reopen-sessions-after-shutdown.
+  // cold start reaches nobody (clients attach later). Cleared server-side on
+  // any resolving action (reopen or dismiss) so onConnect replay stops after
+  // the first resolution ("shown once per dirty boot").
+  // See change: fix-recovery-offer-dismiss-and-phantom-reopen.
   let pendingRecoveryOffer: import("@blackbelt-technology/pi-dashboard-shared/browser-protocol.js").RecoveryOfferMessage | null = null;
 
   // Send this server + discovered peers to new browser connections
@@ -724,6 +726,21 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     const all = [selfServer, ...Array.from(peerServers.values())];
     browserGateway.sendToClient(ws, { type: "servers_discovered", servers: all });
     if (pendingRecoveryOffer) browserGateway.sendToClient(ws, pendingRecoveryOffer);
+  };
+
+  // Dismissing a recovery offer is a resolving action: null the held offer so
+  // onConnect stops replaying it. The gateway already consumed the on-disk
+  // liveness markers for the dismissed ids, so a full restart won't re-offer.
+  // See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+  browserGateway.onRecoveryDismiss = () => {
+    pendingRecoveryOffer = null;
+  };
+
+  // Reopen (resume_session) is likewise a resolving action: null the held
+  // offer so onConnect stops replaying it after the first resolution.
+  // See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+  browserGateway.onRecoveryResolve = () => {
+    pendingRecoveryOffer = null;
   };
 
   // Plugin pi-message dispatch registry + raw-event subscribers.
@@ -1960,6 +1977,21 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
           };
           // Reaches any already-connected clients; onConnect replays to the rest.
           browserGateway.broadcastToAll(pendingRecoveryOffer);
+          // Consume each offered candidate's on-disk liveness sentinel so the
+          // offer is shown ONCE per dirty boot: a later cold start (no NEW
+          // unclean shutdown) will NOT re-classify these sessions, regardless
+          // of whether the user reopens, dismisses (×), or just hides the
+          // session card. Without this, `restore()`'s in-memory-only
+          // normalization leaves `live:true` on disk, so every cold boot
+          // re-offers a session the user already dealt with (the phantom).
+          // The in-memory `pendingRecoveryOffer` still drives within-boot
+          // reconnect replay; Reopen re-stamps `{live:true,liveEpoch}` on the
+          // resumed session's next activity (event-wiring). Mirrors the
+          // marker clears in `recovery_dismiss` and clean `stop()`.
+          // See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+          for (const cand of recoveryCandidates) {
+            if (cand.sessionFile) metaPersistence.setLiveness(cand.sessionFile, { live: false });
+          }
         } else if (mode === "auto") {
           const resumeConfig = loadConfig();
           for (const cand of recoveryCandidates) {

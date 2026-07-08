@@ -719,6 +719,20 @@ export interface RecoveryOfferMessage {
   candidates: RecoveryCandidate[];
 }
 
+/**
+ * Browser → server: durable dismissal of a cold-start recovery offer. Sent
+ * when the user clicks the offer's dismiss (×) action. The server consumes
+ * the on-disk liveness marker (`setLiveness(file, {live:false})`) for each
+ * listed session so it is never re-classified as a recovery candidate, and
+ * clears its held pending offer so `onConnect` replay stops. Mirrors Chrome
+ * consuming its crash sentinel on dismiss.
+ * See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+ */
+export interface RecoveryDismissMessage {
+  type: "recovery_dismiss";
+  sessionIds: string[];
+}
+
 export type ServerToBrowserMessage =
   | ServerRestartingMessage
   | RecoveryOfferMessage
@@ -1495,6 +1509,7 @@ export type BrowserToServerMessage =
   | SetSessionDisplayPrefsBrowserMessage
   | SetSessionProcessDrawerBrowserMessage
   | InjectViewMessageBrowserMessage
+  | RecoveryDismissMessage
   | WatchFilesBrowserMessage;
 
 /**

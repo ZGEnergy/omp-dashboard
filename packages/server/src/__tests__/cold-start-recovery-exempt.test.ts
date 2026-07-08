@@ -1,7 +1,9 @@
 /**
- * Cold-start restore exempts recovery candidates from the force-`ended`
- * status normalization; non-candidates are still rewritten to `ended`.
- * See change: reopen-sessions-after-shutdown (tasks 4.1 / 4.2).
+ * Cold-start restore normalizes recovery candidates to `ended` in ALL modes
+ * (no exemption) while still flagging them `recoveryCandidate:true` so the
+ * offer/auto-resume can re-hydrate them; non-candidates are likewise rewritten
+ * to `ended`.
+ * See change: fix-recovery-offer-dismiss-and-phantom-reopen (task 4.1).
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -35,7 +37,7 @@ function seedSession(sessionsDir: string, cwdName: string, s: Seed): void {
   writeFileSync(jsonl.replace(/\.jsonl$/, ".meta.json"), JSON.stringify(meta, null, 2));
 }
 
-describe("cold-start recovery-candidate exemption", () => {
+describe("cold-start recovery-candidate normalization", () => {
   let sessionsDir: string;
   let server: { stop: () => Promise<void>; sessionManager: { get: (id: string) => any } };
 
@@ -50,7 +52,7 @@ describe("cold-start recovery-candidate exemption", () => {
     rmSync(sessionsDir, { recursive: true, force: true });
   });
 
-  it("preserves candidate status; forces non-candidate to ended", async () => {
+  it("normalizes candidate to ended (still flagged); forces non-candidate to ended", async () => {
     // crash: live:true + non-ended status → candidate
     seedSession(sessionsDir, "proj", { id: "cand-1111-2222-3333-444444444444", live: true });
     // idle/app-quit clean stop(): live:false, status non-ended → NOT candidate
@@ -71,8 +73,10 @@ describe("cold-start recovery-candidate exemption", () => {
     await (server as any).start();
     await wait(50);
 
+    // ask-mode candidate: normalized to `ended` (no exemption) yet still
+    // flagged so it appears in the offer for explicit reopen.
     const cand = server.sessionManager.get("cand-1111-2222-3333-444444444444");
-    expect(cand?.status).not.toBe("ended");
+    expect(cand?.status).toBe("ended");
     expect(cand?.recoveryCandidate).toBe(true);
 
     const clean = server.sessionManager.get("clean-1111-2222-3333-444444444444");

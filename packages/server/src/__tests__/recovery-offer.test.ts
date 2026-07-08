@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { WebSocket } from "ws";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
@@ -38,6 +38,28 @@ async function connectAndCollect(port: number): Promise<Record<string, unknown>[
     ws.on("open", () => {
       ws.on("message", (raw) => { try { msgs.push(JSON.parse(raw.toString())); } catch {} });
       setTimeout(resolve, 150);
+    });
+  });
+  ws.close();
+  return msgs;
+}
+
+/**
+ * Connect, collect any offer, then send `recovery_dismiss` for the given ids
+ * and hold the socket open long enough for the server to consume the markers
+ * and flush. Returns the messages seen before the dismiss.
+ * See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+ */
+async function connectAndDismiss(port: number, sessionIds: string[]): Promise<Record<string, unknown>[]> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const msgs: Record<string, unknown>[] = [];
+  await new Promise<void>((resolve) => {
+    ws.on("open", () => {
+      ws.on("message", (raw) => { try { msgs.push(JSON.parse(raw.toString())); } catch {} });
+      setTimeout(() => {
+        ws.send(JSON.stringify({ type: "recovery_dismiss", sessionIds }));
+        setTimeout(resolve, 150);
+      }, 150);
     });
   });
   ws.close();
@@ -107,6 +129,58 @@ describe("cold-start recovery offer", () => {
     const port = await boot();
     const msgs = await connectAndCollect(port);
     expect(msgs.filter((m) => m.type === "recovery_offer")).toHaveLength(0);
+  });
+
+  it("ask mode: offer shown once per dirty boot even WITHOUT dismiss", async () => {
+    // The offer's liveness sentinel is consumed when the offer is broadcast,
+    // so a session the user merely ignored (or hid, or reopened) is NOT
+    // re-offered on the next cold boot with no new unclean shutdown. This is
+    // the phantom-reopen fix: without it, restore()'s in-memory-only
+    // normalization leaves live:true on disk and every cold boot re-offers.
+    // See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+    writeConfig("ask");
+    const id = "ffff1111-2222-3333-4444-555555555555";
+    seedCandidate(sessionsDir, id, true);
+    const port = await boot();
+
+    // First boot offers the candidate.
+    const first = await connectAndCollect(port);
+    expect(first.filter((m) => m.type === "recovery_offer")).toHaveLength(1);
+    // Marker consumed at broadcast time — no dismiss, no reopen.
+    const metaFile = path.join(sessionsDir, "proj", `2026-06-30T10-00-00-000Z_${id}.meta.json`);
+    expect(JSON.parse(readFileSync(metaFile, "utf-8")).live).toBe(false);
+
+    // Full restart with no new unclean shutdown → no candidate, no offer.
+    await server.stop();
+    const port2 = await boot();
+    const second = await connectAndCollect(port2);
+    expect(second.filter((m) => m.type === "recovery_offer")).toHaveLength(0);
+    expect(server.sessionManager.get(id)?.recoveryCandidate).toBeFalsy();
+  });
+
+  it("ask mode: recovery_dismiss consumes the marker and stops replay", async () => {
+    // Durable dismiss (Chrome sentinel model): the server consumes the on-disk
+    // liveness marker so a full restart never re-offers, and nulls its held
+    // pending offer so a later-connecting client gets no replay.
+    writeConfig("ask");
+    const id = "eeee1111-2222-3333-4444-555555555555";
+    seedCandidate(sessionsDir, id, true);
+    const port = await boot();
+
+    // First client sees the offer, then dismisses it.
+    const first = await connectAndDismiss(port, [id]);
+    expect(first.filter((m) => m.type === "recovery_offer")).toHaveLength(1);
+
+    // A client connecting afterward gets NO replayed offer (pending offer nulled).
+    const second = await connectAndCollect(port);
+    expect(second.filter((m) => m.type === "recovery_offer")).toHaveLength(0);
+
+    // Full restart with no new unclean shutdown → marker consumed → no candidate.
+    await server.stop();
+    const port2 = await boot();
+    const third = await connectAndCollect(port2);
+    expect(third.filter((m) => m.type === "recovery_offer")).toHaveLength(0);
+    expect(server.sessionManager.get(id)?.recoveryCandidate).toBeFalsy();
   });
 
   it("zero candidates: no offer even in ask mode", async () => {

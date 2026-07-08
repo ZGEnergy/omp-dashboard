@@ -8,11 +8,13 @@
 import { describe, it, expect } from "vitest";
 import type {
   ServerToBrowserMessage,
+  BrowserToServerMessage,
   BrowserPromptRequestMessage,
   BrowserPromptDismissMessage,
   BrowserPromptCancelMessage,
   BrowserExtUiDecoratorMessage,
   BrowserAssetRegisterMessage,
+  RecoveryDismissMessage,
   BatchQuestion,
   BatchAnswer,
 } from "../browser-protocol.js";
@@ -38,6 +40,9 @@ type _ExtUiDecoratorInBrowserUnion   = AssertExtends<BrowserExtUiDecoratorMessag
 // the server→browser union (so the client's reducer arm survives esbuild).
 type _AssetRegisterInExtensionUnion = AssertExtends<AssetRegisterMessage, ExtensionToServerMessage>;
 type _AssetRegisterInBrowserUnion   = AssertExtends<BrowserAssetRegisterMessage, ServerToBrowserMessage>;
+// fix-recovery-offer-dismiss-and-phantom-reopen: recovery_dismiss must live in
+// the browser→server union so the server's switch arm survives esbuild.
+type _RecoveryDismissInBrowserToServerUnion = AssertExtends<RecoveryDismissMessage, BrowserToServerMessage>;
 
 // Runtime verification that the type discriminants are reachable in a switch
 function extractPromptType(msg: ServerToBrowserMessage): string | null {
@@ -157,6 +162,36 @@ describe("ext_ui_decorator is a member of both protocol unions", () => {
     };
     expect(msg.type).toBe("ext_ui_decorator");
     expect(msg.descriptor.kind).toBe("footer-segment");
+  });
+});
+
+// fix-recovery-offer-dismiss-and-phantom-reopen: recovery_dismiss round-trip.
+function extractDismissIds(msg: BrowserToServerMessage): string[] | null {
+  switch (msg.type) {
+    case "recovery_dismiss":
+      return msg.sessionIds;
+    default:
+      return null;
+  }
+}
+
+describe("recovery_dismiss is a member of the browser→server union", () => {
+  it("is a valid discriminant carrying sessionIds", () => {
+    const msg: RecoveryDismissMessage = {
+      type: "recovery_dismiss",
+      sessionIds: ["s1", "s2"],
+    };
+    expect(extractDismissIds(msg)).toEqual(["s1", "s2"]);
+  });
+
+  it("round-trips through JSON serialization", () => {
+    const msg: RecoveryDismissMessage = {
+      type: "recovery_dismiss",
+      sessionIds: ["abc", "def"],
+    };
+    const parsed = JSON.parse(JSON.stringify(msg)) as RecoveryDismissMessage;
+    expect(parsed.type).toBe("recovery_dismiss");
+    expect(parsed.sessionIds).toEqual(["abc", "def"]);
   });
 });
 

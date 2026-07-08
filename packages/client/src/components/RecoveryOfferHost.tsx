@@ -2,9 +2,12 @@
  * Sticky top-right notification for the cold-start recovery offer. Queues into
  * the same corner the dashboard uses for toasts, but never auto-times-out (a
  * recovery offer must not silently vanish). Reopen routes each candidate
- * through the normal resume flow; dismiss is non-destructive. Resuming any
- * session clears the offer upstream via the bus.
- * See change: reopen-sessions-after-shutdown.
+ * through the normal resume flow; dismiss is non-destructive but DURABLE — it
+ * sends `recovery_dismiss` to the server (which consumes the on-disk liveness
+ * marker) before clearing the local bus, so the offer never re-appears on
+ * reconnect, reload, or restart. Resuming any session clears the offer
+ * upstream via the bus.
+ * See change: fix-recovery-offer-dismiss-and-phantom-reopen.
  */
 import React, { useEffect, useState } from "react";
 import {
@@ -14,9 +17,15 @@ import {
 } from "../lib/recovery-offer-bus.js";
 import { t as i18nT } from "../lib/i18n";
 
-export function RecoveryOfferHost({ onReopen }: {
+export function RecoveryOfferHost({ onReopen, onDismiss }: {
   /** Route the given candidate session ids through the resume flow. */
   onReopen: (sessionIds: string[]) => void;
+  /**
+   * Send `recovery_dismiss` with the offered session ids so the server
+   * consumes the liveness markers (durable dismiss). Called BEFORE the local
+   * bus clear. See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+   */
+  onDismiss: (sessionIds: string[]) => void;
 }) {
   const [offer, setOffer] = useState<RecoveryOffer | null>(null);
 
@@ -27,6 +36,14 @@ export function RecoveryOfferHost({ onReopen }: {
 
   const handleReopen = () => {
     onReopen(offer.candidates.map((c) => c.sessionId));
+    clearRecoveryOffer();
+  };
+
+  const handleDismiss = () => {
+    // Durable dismiss: tell the server to consume the liveness markers for the
+    // offered sessions BEFORE clearing the local bus, so a reconnect/restart
+    // never re-offers them.
+    onDismiss(offer.candidates.map((c) => c.sessionId));
     clearRecoveryOffer();
   };
 
@@ -55,7 +72,7 @@ export function RecoveryOfferHost({ onReopen }: {
         </button>
         <button
           type="button"
-          onClick={clearRecoveryOffer}
+          onClick={handleDismiss}
           data-testid="recovery-offer-dismiss"
           className="flex-none leading-none text-[var(--text-muted)] hover:text-[var(--text-primary)]"
           aria-label={i18nT("auto.dismiss", undefined, "Dismiss")}

@@ -108,10 +108,12 @@ describe("recovery end-to-end", () => {
     await serverB.start();
     const browserPortB = serverB.httpPort();
 
-    // The crashed candidate is restored actionable (not force-ended).
+    // The crashed candidate is normalized to `ended` (no exemption) yet still
+    // flagged so it appears in the offer for explicit reopen.
+    // See change: fix-recovery-offer-dismiss-and-phantom-reopen.
     const restored = serverB.sessionManager.get(SID);
     expect(restored?.recoveryCandidate).toBe(true);
-    expect(restored?.status).not.toBe("ended");
+    expect(restored?.status).toBe("ended");
 
     // Connect a browser to B and capture the recovery offer.
     const browser = new WebSocket(`ws://127.0.0.1:${browserPortB}/ws`);
@@ -130,5 +132,64 @@ describe("recovery end-to-end", () => {
     expect(ids).toContain(SID);
     expect(ids).not.toContain("manual11-2222-3333-4444-555555555555");
     expect(ids).not.toContain("clean111-2222-3333-4444-555555555555");
+  });
+
+  it("shown once per dirty boot: dismiss + full restart yields no offer", async () => {
+    writeAskConfig();
+    vi.stubEnv("PI_CODING_AGENT_SESSION_DIR", sessionsDir);
+    vi.resetModules();
+    const { createServer } = await import("../server.js");
+
+    // Seed a crashed candidate directly (live:true + non-ended status).
+    const SID = "dirty111-2222-3333-4444-555555555555";
+    seedSidecar(sessionsDir, SID, { live: true, status: "streaming" });
+
+    // ── Server B: cold start, offer the candidate, then dismiss over WS. ──
+    serverB = await createServer({
+      port: 0, piPort: 0, host: "127.0.0.1", dev: true,
+      autoShutdown: false, shutdownIdleSeconds: 999, tunnel: false,
+      editor: { idleTimeoutMinutes: 10, maxInstances: 3 },
+    });
+    await serverB.start();
+    const portB = serverB.httpPort();
+
+    const browser = new WebSocket(`ws://127.0.0.1:${portB}/ws`);
+    const msgsB: Record<string, unknown>[] = [];
+    await new Promise<void>((resolve) => {
+      browser.on("open", () => {
+        browser.on("message", (raw) => { try { msgsB.push(JSON.parse(raw.toString())); } catch {} });
+        setTimeout(() => {
+          // Durable dismiss: consumes the on-disk liveness marker.
+          browser.send(JSON.stringify({ type: "recovery_dismiss", sessionIds: [SID] }));
+          setTimeout(resolve, 200);
+        }, 200);
+      });
+    });
+    browser.close();
+    expect(msgsB.filter((m) => m.type === "recovery_offer")).toHaveLength(1);
+    // Marker consumed on disk.
+    expect(readSessionMeta(path.join(sessionsDir, "proj", `2026-06-30T10-00-00-000Z_${SID}.jsonl`))?.live).toBe(false);
+
+    // ── Full restart (no new unclean shutdown) → no candidate, no offer. ──
+    await serverB.stop();
+    serverA = await createServer({
+      port: 0, piPort: 0, host: "127.0.0.1", dev: true,
+      autoShutdown: false, shutdownIdleSeconds: 999, tunnel: false,
+      editor: { idleTimeoutMinutes: 10, maxInstances: 3 },
+    });
+    await serverA.start();
+    const portC = serverA.httpPort();
+    expect(serverA.sessionManager.get(SID)?.recoveryCandidate).toBeFalsy();
+
+    const browser2 = new WebSocket(`ws://127.0.0.1:${portC}/ws`);
+    const msgsC: Record<string, unknown>[] = [];
+    await new Promise<void>((resolve) => {
+      browser2.on("open", () => {
+        browser2.on("message", (raw) => { try { msgsC.push(JSON.parse(raw.toString())); } catch {} });
+        setTimeout(resolve, 200);
+      });
+    });
+    browser2.close();
+    expect(msgsC.filter((m) => m.type === "recovery_offer")).toHaveLength(0);
   });
 });

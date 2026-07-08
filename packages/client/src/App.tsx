@@ -1905,7 +1905,7 @@ export default function App() {
         />
         <Toast messages={toastMessages} onDismiss={dismissToast} />
         <SpawnErrorToastHost />
-        <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} />
+        <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} onDismiss={(ids) => send({ type: "recovery_dismiss", sessionIds: ids })} />
         {firstLaunchModal}
         <MobileShell
           depth={mobileDepth}
@@ -2034,7 +2034,7 @@ export default function App() {
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {connectionBanner}
-        <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} />
+        <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} onDismiss={(ids) => send({ type: "recovery_dismiss", sessionIds: ids })} />
         {/* Folder views (TerminalsView or EditorView) — single owner of
             <TerminalView> mounting. The legacy keep-alive list above
             (mounted unconditionally for the /terminal/:id route) was

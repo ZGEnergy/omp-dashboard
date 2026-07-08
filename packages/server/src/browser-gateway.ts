@@ -119,6 +119,22 @@ export interface BrowserGateway {
   sendToClient(ws: WebSocket, msg: ServerToBrowserMessage): void;
   /** Callback invoked when a new browser client connects */
   onConnect?: (ws: WebSocket) => void;
+  /**
+   * Callback invoked when a browser dismisses a cold-start recovery offer
+   * (`recovery_dismiss`). The gateway already consumes the on-disk liveness
+   * markers; the server assigns this to null its held `pendingRecoveryOffer`
+   * so `onConnect` replay stops after the resolving action.
+   * See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+   */
+  onRecoveryDismiss?: (sessionIds: string[]) => void;
+  /**
+   * Callback invoked when a session is resumed via `resume_session` (the
+   * Reopen path). The server assigns this to null its held
+   * `pendingRecoveryOffer` so `onConnect` replay stops after the first
+   * resolving action, matching "shown once per dirty boot".
+   * See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+   */
+  onRecoveryResolve?: () => void;
   /** Broadcast a message to all connected clients */
   broadcast(msg: ServerToBrowserMessage): void;
   /**
@@ -531,6 +547,10 @@ export function createBrowserGateway(
             handleListSessions(msg, ctx);
             break;
           case "resume_session":
+            // Reopen is a resolving action for any pending recovery offer:
+            // null the server-held offer so onConnect stops replaying it.
+            // See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+            gateway.onRecoveryResolve?.();
             await handleResumeSession(msg, ctx);
             break;
           case "spawn_session":
@@ -598,6 +618,24 @@ export function createBrowserGateway(
                 viewMessages: snapshot,
               });
             }
+            break;
+          }
+          case "recovery_dismiss": {
+            // Durable dismissal of a cold-start recovery offer. Consume the
+            // on-disk liveness marker for each offered session so it is never
+            // re-classified as a recovery candidate (mirrors Chrome consuming
+            // its crash sentinel), then flush so the change hits disk before
+            // any restart. The server's onRecoveryDismiss callback nulls its
+            // held pendingRecoveryOffer so onConnect replay stops.
+            // See change: fix-recovery-offer-dismiss-and-phantom-reopen.
+            for (const id of msg.sessionIds) {
+              const session = sessionManager.get(id);
+              if (session?.sessionFile) {
+                metaPersistence?.setLiveness(session.sessionFile, { live: false });
+              }
+            }
+            metaPersistence?.flushAll();
+            gateway.onRecoveryDismiss?.(msg.sessionIds);
             break;
           }
           case "extension_ui_response": {
