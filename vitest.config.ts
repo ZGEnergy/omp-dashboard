@@ -24,6 +24,7 @@ export default defineConfig({
       "packages/shell",
       "packages/dashboard-plugin-runtime",
       "packages/automation-plugin",
+      "packages/invoicebot-plugin",
       "packages/flows-plugin",
       "packages/flows-anthropic-bridge-plugin",
       "packages/roles-plugin",

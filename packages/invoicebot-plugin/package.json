@@ -1,0 +1,38 @@
+{
+  "name": "@blackbelt-technology/pi-dashboard-invoicebot-plugin",
+  "version": "0.5.4",
+  "description": "InvoiceBot REST plugin for pi-dashboard — exposes the four ib_* selectors over /api/plugins/invoicebot/*, keyed by cwd, behind an InvoiceEngine port.",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard",
+    "directory": "packages/invoicebot-plugin"
+  },
+  "exports": {
+    "./server": {
+      "types": "./src/server/index.ts",
+      "default": "./src/server/index.ts"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "pi-dashboard-plugin": {
+    "id": "invoicebot",
+    "displayName": "InvoiceBot",
+    "priority": 100,
+    "server": "./src/server/index.ts"
+  },
+  "dependencies": {
+    "@blackbelt-technology/dashboard-plugin-runtime": "^0.5.4",
+    "@blackbelt-technology/pi-dashboard-shared": "^0.5.4"
+  },
+  "//optionalDependencies": "TODO(release): unpublished — replace file: link with a published npm range or a vendored in-monorepo package. @blackbelt-technology/invoicebot is private:true. optionalDependencies (not dependencies) so CI/release-cut installs cleanly without the sibling checkout and bind FakeInvoiceEngine. Tracked: tasks §8.",
+  "optionalDependencies": {
+    "@blackbelt-technology/invoicebot": "file:../../../pi-invoice-bot"
+  }
+}

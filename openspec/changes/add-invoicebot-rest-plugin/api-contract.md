@@ -62,12 +62,16 @@ plugin normalizes this to a flat JSON envelope:
   "ok": true,                 // false when the tool reported an error (details.ok === false)
   "text": "…human summary…",  // tool's content[0].text (Hungarian; UI may ignore)
   "data": { /* … */ },        // the tool's `details` payload — the machine-readable body
-  "sessionId": "…"            // present only on flow-triggering ops (§5)
+  "sessionId": "…",           // present only on flow-triggering ops (§5)
+  "consequential": true       // present (true) only on consequential ops (§10)
 }
 ```
 - **`data`** is the payload each variant below documents.
 - **`text`** is a Hungarian one-line summary meant for humans; clients should
   render from `data`, not parse `text`.
+- **`consequential`** is a server-set flag (present + `true` only for the ops in
+  §10). It mirrors the effect classification so the client gates behind an
+  explicit confirm; reads and pure writes omit it.
 
 ### HTTP status codes
 | Code | When |

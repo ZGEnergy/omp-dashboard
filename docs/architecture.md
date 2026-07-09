@@ -479,6 +479,21 @@ Automation plugin = `packages/automation-plugin/`. Schedule-triggered background
 - UI via shell slots: sidebar-folder-section, command-route `/automation`, shell-overlay-route, session-card-badge, settings-section general.
 - See change: add-automation-plugin.
 
+### InvoiceBot REST plane (`invoicebot-plugin`)
+
+Package `packages/invoicebot-plugin/` = server-only pi-dashboard plugin. See change: add-invoicebot-rest-plugin.
+
+- Exposes four POST endpoints under `/api/plugins/invoicebot/*`: `query` (ib_query, `view`), `review` (ib_review, `action`), `setup` (ib_setup, `action`), `rules` (ib_rules, `action`).
+- Keyed by `cwd` per request. One process serves every workspace; mirrors automation-plugin `?cwd=`. Missing/bad `cwd` or selector → 400.
+- Routes depend only on `InvoiceEngine` port (`src/server/engine/port.ts`). Two bindings: `RealInvoiceEngine` (imports invoice-bot facade `@blackbelt-technology/invoicebot/engine` over interim `file:` link) and `FakeInvoiceEngine` (fixtures; CI / release-cut / git worktree). `select.ts` picks Real when facade resolves, else Fake.
+- Two op classes. Pure ops serve straight through port. Five flow-triggering ops (review approve/repair/submit/partner-confirm, rules request) do port DB effect then dispatch `flow:run` into workspace pi session.
+- Flow dispatch (`session-link.ts`): reuse live cwd-matched invoicebot session via `emitEventToSession`, else `spawnSession({cwd, automationRun:{runId}})`. Correlate run by stamped `automationRun.runId`, never by cwd. Records `invoice_id ↔ sessionId`. Response returns `sessionId`.
+- REST = request/response only. No engine event streaming; client refetches after mutation. Live conversation rides WS plane (deferred).
+- Consequential ops flagged `consequential:true` in response envelope. Client gates behind confirm.
+- Upstream prerequisite (invoice-bot repo): `flows/invoicebot/process/_store.ts` `stateDir()` resolver + `ibContext` AsyncLocalStorage request-scoping; engine facade `extensions/invoicebot/engine.ts`.
+- Interim `file:` link release-blocking (`TODO(release)`): retire before release by publishing or vendoring. Tracked in openspec change tasks §8.
+- Client contract: `openspec/changes/add-invoicebot-rest-plugin/api-contract.md`.
+
 ### Bootstrap & First Run (R3, immutable bundle)
 
 pi/openspec/tsx are regular npm dependencies of `@blackbelt-technology/pi-dashboard-server`. There is no runtime install pyramid. All three arms (Electron, standalone `npm i -g`, bridge) start ready.
