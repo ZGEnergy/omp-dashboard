@@ -28,9 +28,25 @@ export async function rehydrateSession(
 ): Promise<RehydratedSession | null> {
   const entry = await cache.get(sessionId);
   if (!entry) return null;
-  let state = createInitialState();
-  for (const { event } of entry.payload) {
-    state = reduceEvent(state, event);
+  // Fault-isolation: this re-reduce runs at App level, ABOVE every React
+  // error boundary, so an uncaught throw on one malformed cached event would
+  // unmount the whole app (black screen). The cache is an optimization only:
+  // on any re-reduce failure, discard the poisoned entry (so it cannot
+  // re-poison a later load) and return a cache miss, degrading to a full
+  // replay (lastSeq: 0) exactly as a genuine miss does.
+  // See change: fix-reducer-crash-undefined-toolname.
+  try {
+    let state = createInitialState();
+    for (const { event } of entry.payload) {
+      state = reduceEvent(state, event);
+    }
+    return { lastSeq: entry.maxSeq, state, events: entry.payload };
+  } catch (err) {
+    console.warn(
+      `[rehydrate] re-reduce failed for session ${sessionId}; discarding replay-cache entry and falling back to full replay`,
+      err,
+    );
+    await cache.delete(sessionId).catch(() => {});
+    return null;
   }
-  return { lastSeq: entry.maxSeq, state, events: entry.payload };
 }

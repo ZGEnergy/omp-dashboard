@@ -1358,7 +1358,15 @@ export function reduceEvent(
 
     case "tool_execution_start": {
       const toolCallId = data.toolCallId as string;
-      const toolName = data.toolName as string;
+      // A live tool_execution_start can arrive with an absent/non-string
+      // toolName (pi core emits it that way for some tools; the bridge
+      // forwards it verbatim). Coalesce to a stable fallback so the card
+      // renders instead of throwing on `.toLowerCase()` below — the reducer
+      // also runs at App level (rehydrate re-reduce) above every error
+      // boundary, where a throw black-screens the whole app. Mirrors the
+      // tool_execution_end `toolName ?? "unknown"` default in state-replay.
+      // See change: fix-reducer-crash-undefined-toolname.
+      const toolName = typeof data.toolName === "string" ? data.toolName : "unknown";
 
       // Flush any pending streamingText into a permanent assistant row
       // BEFORE pushing the new toolResult, so the message's content-array
