@@ -40,7 +40,7 @@ import { isDashboardRunning } from "./server-identity.js";
 export class JitiNotFoundError extends Error {
   constructor(message =
     "Cannot find pi's TypeScript loader (jiti). " +
-    "Is @earendil-works/pi-coding-agent or @mariozechner/pi-coding-agent installed?",
+    "Is @oh-my-pi/pi-coding-agent or @oh-my-pi/pi-coding-agent installed?",
   ) {
     super(message);
     this.name = "JitiNotFoundError";

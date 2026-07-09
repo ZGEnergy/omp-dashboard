@@ -13,7 +13,7 @@
  * R §5.2). Retrieval is pull: the agent calls the tools; nothing is auto-injected
  * except the opt-in DOX nudge.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 /** Minimal structural shape of the extension context we use (cwd). */
 type Ctx = { cwd?: string };

@@ -27,7 +27,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ProviderInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { lookupRole, loadRoleConfig } from "./role-manager.js";
 
 // -- Types ----------------------------------------------------------------
@@ -203,7 +203,7 @@ const enrichmentSource = new Map<string, "catalog" | "fallback">();
 const EXTENDED_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 /**
- * Mirror of pi's `getSupportedThinkingLevels` (from @earendil-works/pi-ai) —
+ * Mirror of pi's `getSupportedThinkingLevels` (from @oh-my-pi/pi-ai) —
  * the same rule pi core uses to clamp thinking level. Inlined rather than
  * imported: pi-ai ships `.d.ts` files that re-export via explicit `.ts`
  * extensions (`export * from "./models.ts"`), which the base tsconfig (no
@@ -510,7 +510,7 @@ async function loadPiAi(): Promise<PiAiHelpers> {
   if (_piAiLoadAttempted) return {};
   _piAiLoadAttempted = true;
   try {
-    const mod: any = await import("@earendil-works/pi-ai");
+    const mod: any = await import("@oh-my-pi/pi-ai");
     _piAiModule = { findEnvKeys: mod.findEnvKeys, getEnvApiKey: mod.getEnvApiKey };
     return _piAiModule;
   } catch {

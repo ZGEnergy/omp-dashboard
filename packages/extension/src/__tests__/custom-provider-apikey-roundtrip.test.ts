@@ -8,7 +8,7 @@
  * upstream request to assert the real secret reaches the wire intact — and that
  * nothing is leaked into `process.env`.
  *
- * The resolver below mirrors @earendil-works/pi-coding-agent
+ * The resolver below mirrors @oh-my-pi/pi-coding-agent
  * `dist/core/resolve-config-value.js` (parseConfigValueTemplate / command
  * detection). Keep it in sync if pi's resolution semantics change.
  * See change: fix-custom-provider-save-and-auth.

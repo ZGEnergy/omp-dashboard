@@ -174,7 +174,7 @@ describe("4.6 pi system-prompt anchor still exists", () => {
     try {
       const require = createRequire(import.meta.url);
       const path = require.resolve(
-        "@earendil-works/pi-coding-agent/dist/core/system-prompt.js",
+        "@oh-my-pi/pi-coding-agent/dist/core/system-prompt.js",
       );
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       spSource = require("node:fs").readFileSync(path, "utf8");

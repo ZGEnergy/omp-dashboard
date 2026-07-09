@@ -5,7 +5,7 @@
  * defaults when the probe has no match.
  *
  * The helper takes an optional `probe` parameter so unit tests can supply a
- * fake catalog without needing `@earendil-works/pi-ai` installed — in
+ * fake catalog without needing `@oh-my-pi/pi-ai` installed — in
  * production, registerEntry() injects `modelRegistry.find` as the probe.
  *
  * Spec: openspec/changes/enrich-custom-provider-model-metadata/specs/provider-auth-bridge/spec.md

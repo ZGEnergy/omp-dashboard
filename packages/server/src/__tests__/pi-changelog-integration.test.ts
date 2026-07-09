@@ -16,7 +16,7 @@ import {
   _resetChangelogCache,
 } from "../changelog-parser.js";
 
-const FIXTURE_PKG = "@earendil-works/pi-coding-agent";
+const FIXTURE_PKG = "@oh-my-pi/pi-coding-agent";
 
 describe("pi-changelog integration", () => {
   let app: FastifyInstance;

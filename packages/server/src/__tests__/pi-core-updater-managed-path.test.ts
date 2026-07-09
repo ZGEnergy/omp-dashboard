@@ -20,7 +20,7 @@ import type { PiCorePackage } from "@blackbelt-technology/pi-dashboard-shared/re
 
 function makePkg(overrides: Partial<PiCorePackage> = {}): PiCorePackage {
 	return {
-		name: "@earendil-works/pi-coding-agent",
+		name: "@oh-my-pi/pi-coding-agent",
 		displayName: "pi",
 		currentVersion: "0.1.0",
 		latestVersion: "0.2.0",
@@ -94,7 +94,7 @@ describe("defaultRunNpmUpdate — registry resolution + managed PATH", () => {
 		]);
 		// Anchor the @latest suffix — the regression guard for
 		// fix-pi-core-update-cross-minor.
-		expect(capturedArgs).toContain("@earendil-works/pi-coding-agent@latest");
+		expect(capturedArgs).toContain("@oh-my-pi/pi-coding-agent@latest");
 	});
 
 	it("rejects with a clear 'npm' error when registry can't resolve", async () => {
@@ -174,7 +174,7 @@ describe("defaultRunNpmUpdate — registry resolution + managed PATH", () => {
 		fs.mkdirSync(managedDir, { recursive: true });
 
 		await defaultRunNpmUpdate(
-			makePkg({ name: "@mariozechner/pi-coding-agent", installSource: "managed" }),
+			makePkg({ name: "@oh-my-pi/pi-coding-agent", installSource: "managed" }),
 			() => {},
 			{
 				_resolveNpm: () => ({ ok: true, argv: ["/usr/bin/npm"] }),
@@ -187,7 +187,7 @@ describe("defaultRunNpmUpdate — registry resolution + managed PATH", () => {
 		// NOT "-g" for managed installs.
 		expect(capturedArgs).not.toContain("-g");
 		// The hot bit: @latest suffix.
-		expect(capturedArgs.some((a) => a === "@mariozechner/pi-coding-agent@latest")).toBe(true);
+		expect(capturedArgs.some((a) => a === "@oh-my-pi/pi-coding-agent@latest")).toBe(true);
 	});
 
 	it("spawns npm install -g with @latest suffix for global install (regression guard)", async () => {
@@ -200,7 +200,7 @@ describe("defaultRunNpmUpdate — registry resolution + managed PATH", () => {
 		});
 
 		await defaultRunNpmUpdate(
-			makePkg({ name: "@mariozechner/pi-coding-agent", installSource: "global" }),
+			makePkg({ name: "@oh-my-pi/pi-coding-agent", installSource: "global" }),
 			() => {},
 			{
 				_resolveNpm: () => ({ ok: true, argv: ["/usr/bin/npm"] }),

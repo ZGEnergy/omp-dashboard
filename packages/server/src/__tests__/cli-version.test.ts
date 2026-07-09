@@ -98,7 +98,7 @@ describe("bin/pi-dashboard.mjs --version short-circuit (Bug B)", () => {
       });
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("pi-dashboard: cannot find jiti");
-      expect(result.stderr).toContain("npm install -g @earendil-works/pi-coding-agent");
+      expect(result.stderr).toContain("npm install -g @oh-my-pi/pi-coding-agent");
       expect(result.stdout.trim()).not.toBe("9.9.9-isolated");
     } finally {
       cleanup();

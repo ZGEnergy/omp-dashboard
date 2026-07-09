@@ -449,7 +449,7 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
   "pi (CLI on PATH)": (status) =>
     status === "ok"
       ? undefined
-      : "`pi` is not on your shell `$PATH`. Dashboard-spawned sessions still work (the dashboard injects PATH for them), but you cannot run `pi` from a fresh terminal. Fix: `npm i -g @earendil-works/pi-coding-agent`, or add the dashboard's `server/node_modules/.bin` to your PATH.",
+      : "`pi` is not on your shell `$PATH`. Dashboard-spawned sessions still work (the dashboard injects PATH for them), but you cannot run `pi` from a fresh terminal. Fix: `npm i -g @oh-my-pi/pi-coding-agent`, or add the dashboard's `server/node_modules/.bin` to your PATH.",
   "openspec (library)": (status, _d, kind) =>
     status === "ok"
       ? undefined

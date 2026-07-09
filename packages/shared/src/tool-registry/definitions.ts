@@ -293,7 +293,7 @@ function bareImportPackageDirStrategy(
  * Helper: walks up from `fromUrl`'s directory looking for
  * `node_modules/<pkgName>/package.json` directly on the filesystem.
  *
- * Exports-map-immune: required because both `@earendil-works/pi-coding-agent`
+ * Exports-map-immune: required because both `@oh-my-pi/pi-coding-agent`
  * and `@fission-ai/openspec` declare `exports` blocks that omit
  * `./package.json`, so `createRequire(from).resolve("<pkg>/package.json")`
  * returns `ERR_PACKAGE_PATH_NOT_EXPORTED` in modern Node. This walk is
@@ -458,7 +458,7 @@ function makeNodeScriptToArgv(deps?: StrategyDeps): ToolDefinition["toArgv"] {
  * on PATH when the cli.js is nowhere to be found.
  *
  * On Unix, the chain first tries `bare-import` so a bundled
- * `<server>/node_modules/@earendil-works/pi-coding-agent/dist/cli.js`
+ * `<server>/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js`
  * wins over a system install. This is load-bearing for the Electron
  * immutable-bundle architecture (see openspec change
  * `eliminate-electron-runtime-install` finding F9). On a clean machine
@@ -470,7 +470,7 @@ function makeNodeScriptToArgv(deps?: StrategyDeps): ToolDefinition["toArgv"] {
  * exact failure mode the immutable-bundle architecture eliminates.
  */
 function piExecutorDef(deps?: StrategyDeps): ToolDefinition {
-  const piPkgAliases = ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"];
+  const piPkgAliases = ["@oh-my-pi/pi-coding-agent"];
   const cliEntry = path.join("dist", "cli.js");
 
   const winStrategies = [
@@ -729,19 +729,19 @@ export function registerDefaultTools(registry: ToolRegistry, deps?: StrategyDeps
   registry.register(
     moduleDefWithAliases(
       "pi-coding-agent",
-      ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"],
+      ["@oh-my-pi/pi-coding-agent"],
       path.join("dist", "index.js"),
       deps,
     ),
   );
 
   // pi-ai module — used by model-proxy to call upstream LLM providers.
-  // Aliases: @earendil-works/pi-ai (preferred) + @mariozechner/pi-ai (legacy fallback).
+  // Aliases: @oh-my-pi/pi-ai (preferred) + @oh-my-pi/pi-ai (legacy fallback).
   // See change: add-dashboard-model-proxy.
   registry.register(
     moduleDefWithAliases(
       "pi-ai",
-      ["@earendil-works/pi-ai", "@mariozechner/pi-ai"],
+      ["@oh-my-pi/pi-ai"],
       path.join("dist", "index.js"),
       deps,
     ),

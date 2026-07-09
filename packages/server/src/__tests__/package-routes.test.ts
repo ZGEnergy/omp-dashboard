@@ -13,7 +13,7 @@ import {
 } from "../package-manager-wrapper.js";
 
 // Mock pi dependency (pulled transitively by package-manager-wrapper)
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+vi.mock("@oh-my-pi/pi-coding-agent", () => ({
   DefaultPackageManager: function() { return {}; },
   SettingsManager: { create: () => ({}) },
 }));

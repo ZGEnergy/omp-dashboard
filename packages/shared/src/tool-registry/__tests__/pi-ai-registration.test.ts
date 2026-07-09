@@ -2,7 +2,7 @@
  * Registration and resolution tests for the `pi-ai` module-kind tool.
  *
  * Verifies:
- * - Registry resolves pi-ai when ~/.omp-dashboard/node_modules/@mariozechner/pi-ai/dist/index.js exists (managed)
+ * - Registry resolves pi-ai when ~/.omp-dashboard/node_modules/@oh-my-pi/pi-ai/dist/index.js exists (managed)
  * - Falls back to npmGlobalStrategy when only globally installed
  * - Returns failed resolution with diagnostic trail when none match
  * - Override takes precedence
@@ -64,7 +64,7 @@ function freshRegistry(opts: {
 }
 
 describe("pi-ai: module registration", () => {
-  it("resolves via managed path when ~/.omp-dashboard/node_modules/@mariozechner/pi-ai exists", () => {
+  it("resolves via managed path when ~/.omp-dashboard/node_modules/@oh-my-pi/pi-ai exists", () => {
     const r = freshRegistry({
       exists: (p) => p === MANAGED_PATH,
     });

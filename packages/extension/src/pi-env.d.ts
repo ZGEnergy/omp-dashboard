@@ -2,7 +2,7 @@
 // The actual types are provided by whichever host loads this extension.
 // tsconfig paths handles resolution when one of the packages is installed;
 // these declarations serve as fallback when neither is available (e.g. CI, dev without pi).
-declare module "@earendil-works/pi-coding-agent" {
+declare module "@oh-my-pi/pi-coding-agent" {
   export interface ModelRegistry {
     getAvailable(): Array<{ provider: string; id: string }>;
     refresh(): void;
@@ -28,17 +28,6 @@ declare module "@earendil-works/pi-coding-agent" {
     events: EventBus;
   }
 }
-
-// Legacy fork — re-exports the same ExtensionAPI shape so existing installs still type-check.
-declare module "@mariozechner/pi-coding-agent" {
-  export type ExtensionAPI = import("@earendil-works/pi-coding-agent").ExtensionAPI;
-  export type ModelRegistry = import("@earendil-works/pi-coding-agent").ModelRegistry;
-  export type EventBus = import("@earendil-works/pi-coding-agent").EventBus;
-}
-
-declare module "@earendil-works/pi-ai" {
-  export function StringEnum<T extends readonly string[]>(values: T, schema?: Record<string, unknown>): any;
-}
-declare module "@mariozechner/pi-ai" {
+declare module "@oh-my-pi/pi-ai" {
   export function StringEnum<T extends readonly string[]>(values: T, schema?: Record<string, unknown>): any;
 }

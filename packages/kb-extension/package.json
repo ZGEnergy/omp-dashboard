@@ -23,14 +23,14 @@
     "@blackbelt-technology/pi-dashboard-kb": "^0.5.4"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@mariozechner/pi-coding-agent": "*"
+    "@oh-my-pi/pi-coding-agent": "*",
+    "@oh-my-pi/pi-coding-agent": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-coding-agent": { "optional": true },
-    "@mariozechner/pi-coding-agent": { "optional": true }
+    "@oh-my-pi/pi-coding-agent": { "optional": true },
+    "@oh-my-pi/pi-coding-agent": { "optional": true }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@oh-my-pi/pi-coding-agent": "*"
   }
 }

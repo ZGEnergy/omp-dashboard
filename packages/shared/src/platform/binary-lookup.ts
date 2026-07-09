@@ -22,8 +22,8 @@ import { augmentEnvWithGitSource } from "./git-source.js";
  * `resolveJitiFromPi` wrapper that lived in two electron files.
  */
 export const MANAGED_PI_PACKAGES = [
-  "@earendil-works/pi-coding-agent",
-  "@mariozechner/pi-coding-agent",
+  "@oh-my-pi/pi-coding-agent",
+  "@oh-my-pi/pi-coding-agent",
 ] as const;
 
 /**

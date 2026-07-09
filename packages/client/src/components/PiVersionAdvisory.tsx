@@ -11,7 +11,7 @@
  */
 import { usePiCompatibility } from "../hooks/usePiCompatibility.js";
 
-const PKG = "@earendil-works/pi-coding-agent";
+const PKG = "@oh-my-pi/pi-coding-agent";
 
 export function PiVersionAdvisory() {
 	const compat = usePiCompatibility();

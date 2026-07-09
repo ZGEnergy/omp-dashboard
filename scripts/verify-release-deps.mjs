@@ -53,7 +53,7 @@ const RULES = [
   },
   {
     pkgPath: "packages/server/package.json",
-    dep: "@earendil-works/pi-coding-agent",
+    dep: "@oh-my-pi/pi-coding-agent",
     kind: "dependencies",
     evidence:
       "eliminate-electron-runtime-install task 1.1.a — pi lifted from " +

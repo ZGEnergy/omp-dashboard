@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 
 // Mock pi dependency (pulled transitively by package-manager-wrapper)
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+vi.mock("@oh-my-pi/pi-coding-agent", () => ({
 	DefaultPackageManager: function () {
 		return {};
 	},

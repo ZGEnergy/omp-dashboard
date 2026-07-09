@@ -517,10 +517,10 @@ export interface BootstrapStateSnapshot {
   };
   bridgeRegistrationError?: string;
   /**
-   * Legacy `@mariozechner/pi-coding-agent` installs detected on disk.
+   * Legacy `@oh-my-pi/pi-coding-agent` installs detected on disk.
    * Surfaced by the client as a one-click cleanup banner. Empty array
    * means no legacy installs found. Pi was renamed to
-   * `@earendil-works/pi-coding-agent` at v0.74 — the legacy scope can
+   * `@oh-my-pi/pi-coding-agent` at v0.74 — the legacy scope can
    * collide with the new scope's `bin/pi` symlink.
    */
   legacyPiInstalls?: Array<{

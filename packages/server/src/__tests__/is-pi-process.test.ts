@@ -7,7 +7,7 @@ import { isPiCommandLine } from "../browser-handlers/session-action-handler.js";
 
 describe("isPiCommandLine", () => {
   it("matches a typical pi cli invocation", () => {
-    expect(isPiCommandLine("/usr/bin/node /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js")).toBe(true);
+    expect(isPiCommandLine("/usr/bin/node /usr/local/lib/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js")).toBe(true);
   });
 
   it("matches when only 'pi' appears as a word", () => {

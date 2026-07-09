@@ -15,7 +15,7 @@
  *
  * See change: add-agent-role-model-tools.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { Type } from "typebox";
 import { getCustomProviderNames } from "./provider-register.js";
 import {

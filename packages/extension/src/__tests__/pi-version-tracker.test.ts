@@ -58,12 +58,12 @@ describe("sendPiVersionIfChanged", () => {
 });
 
 describe("readPkgVersionByWalkUp", () => {
-  const PKG = "@earendil-works/pi-coding-agent";
+  const PKG = "@oh-my-pi/pi-coding-agent";
 
   // Simulate a restrictive-exports install: resolve(".") lands on dist/index.js,
   // and package.json (omitting the ./package.json subpath) sits one level up.
   it("reads version by walking up when ./package.json subpath is not exported", () => {
-    const root = "/node_modules/@earendil-works/pi-coding-agent";
+    const root = "/node_modules/@oh-my-pi/pi-coding-agent";
     const entry = `${root}/dist/index.js`;
     const files: Record<string, string> = {
       [`${root}/package.json`]: JSON.stringify({ name: PKG, version: "0.80.2" }),
@@ -82,7 +82,7 @@ describe("readPkgVersionByWalkUp", () => {
   });
 
   it("skips a non-matching ancestor package.json (workspace root)", () => {
-    const root = "/repo/node_modules/@earendil-works/pi-coding-agent";
+    const root = "/repo/node_modules/@oh-my-pi/pi-coding-agent";
     const entry = `${root}/dist/index.js`;
     const files: Record<string, string> = {
       "/repo/package.json": JSON.stringify({ name: "the-workspace", version: "9.9.9" }),

@@ -23,7 +23,7 @@ interface Item {
 
 /**
  * Minimal shape of pi-tui's `Component` interface — we avoid importing from
- * `@earendil-works/pi-tui` directly so this module stays compile-friendly when
+ * `@oh-my-pi/pi-tui` directly so this module stays compile-friendly when
  * that peer dep isn't present (e.g. in unit tests running via vitest without
  * the full pi runtime).
  */

@@ -97,7 +97,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.1",
-    "@earendil-works/pi-ai": "^0.75.5",
+    "@oh-my-pi/pi-ai": "^0.75.5",
     "@playwright/test": "1.61.1",
     "jsdom": "^29.0.2",
     "patch-package": "^8.0.1",
@@ -106,31 +106,19 @@
     "vitest": "^4.0.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
+    "@oh-my-pi/pi-ai": "*",
+    "@oh-my-pi/pi-coding-agent": "*",
+    "@oh-my-pi/pi-tui": "*",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-coding-agent": {
+    "@oh-my-pi/pi-coding-agent": {
       "optional": true
     },
-    "@earendil-works/pi-ai": {
+    "@oh-my-pi/pi-ai": {
       "optional": true
     },
-    "@earendil-works/pi-tui": {
-      "optional": true
-    },
-    "@mariozechner/pi-coding-agent": {
-      "optional": true
-    },
-    "@mariozechner/pi-ai": {
-      "optional": true
-    },
-    "@mariozechner/pi-tui": {
+    "@oh-my-pi/pi-tui": {
       "optional": true
     },
     "typebox": {

@@ -24,7 +24,7 @@
 // that reason (cf. `pi-ai-shape.test.ts`, which loads it dynamically). So we
 // import the namespace and read the runtime helpers off an `any` view, and use
 // local minimal types for the shapes we touch. Runtime resolution is unaffected.
-import * as piAi from "@earendil-works/pi-ai";
+import * as piAi from "@oh-my-pi/pi-ai";
 
 const { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } =
   piAi as unknown as {

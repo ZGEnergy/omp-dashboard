@@ -26,8 +26,8 @@ function makeResolver(installed: Record<string, string>) {
 describe("MANAGED_PI_PACKAGES + JITI_PACKAGES contract", () => {
   it("upstream pi pkg first, legacy fork fallback", () => {
     expect(MANAGED_PI_PACKAGES).toEqual([
-      "@earendil-works/pi-coding-agent",
-      "@mariozechner/pi-coding-agent",
+      "@oh-my-pi/pi-coding-agent",
+      "@oh-my-pi/pi-coding-agent",
     ]);
   });
 
@@ -111,7 +111,7 @@ describe("ToolResolver.resolveJiti — managed pi", () => {
 describe("ToolResolver.resolveJiti — system pi", () => {
   it("uses which(\"pi\") when managed pi absent", () => {
     const piBin = "/usr/local/bin/pi";
-    const piReal = "/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
+    const piReal = "/usr/local/lib/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js";
     const jitiPkgJson = "/usr/local/lib/node_modules/jiti/package.json";
     const url = new ToolResolver().resolveJiti({
       _managedDir: MANAGED_DIR,

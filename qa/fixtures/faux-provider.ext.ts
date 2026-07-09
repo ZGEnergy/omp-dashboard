@@ -11,7 +11,7 @@
  * makes `faux/faux-1` appear in `--list-models` and selectable via
  * `--model faux/faux-1`, routing prompts to the faux stream.
  *
- * Imports `@earendil-works/pi-ai` with NO version pin of its own so it resolves
+ * Imports `@oh-my-pi/pi-ai` with NO version pin of its own so it resolves
  * against whatever pi-ai the running pi bundles.
  *
  * Per-session scenario routing: each prompt selects its scenario from a
@@ -32,13 +32,13 @@
  * See change: add-faux-model-integration-tests, add-e2e-faux-model-roundtrip.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 // pi-ai's published `index.d.ts` re-exports members with `.ts` extensions,
 // unresolvable under this repo's `moduleResolution: "bundler"`. Mirror
 // `faux-scenarios.ts`: import the namespace and read runtime helpers off an
 // `any` view (this file is now in tsc's graph via the faux-router unit test).
 // Runtime resolution is unaffected.
-import * as piAi from "@earendil-works/pi-ai";
+import * as piAi from "@oh-my-pi/pi-ai";
 import { type FauxContext, SCENARIOS } from "./faux-scenarios.js";
 
 export interface FauxRegistration {

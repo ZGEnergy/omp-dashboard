@@ -121,7 +121,7 @@ describe("findChangelogPath — exports-wall fallback (Strategy 3)", () => {
     fs.writeFileSync(
       path.join(pkgDir, "package.json"),
       JSON.stringify({
-        name: "@earendil-works/pi-coding-agent",
+        name: "@oh-my-pi/pi-coding-agent",
         exports: { ".": { import: "./dist/index.js" } },
       }),
     );
@@ -131,7 +131,7 @@ describe("findChangelogPath — exports-wall fallback (Strategy 3)", () => {
     const moduleFile = path.join(tmpRoot, "packages", "server", "src", "changelog-fs.ts");
     fs.mkdirSync(path.dirname(moduleFile), { recursive: true });
 
-    const out = findChangelogPath("@earendil-works/pi-coding-agent", {
+    const out = findChangelogPath("@oh-my-pi/pi-coding-agent", {
       managedDir: path.join(tmpRoot, "no-managed-dir"), // Strategy 1 fails
       resolveBareImport: exportsWallResolver, // Strategy 2 fails
       moduleUrl: pathToFileURL(moduleFile).href, // Strategy 3 start point

@@ -32,28 +32,28 @@
     "ws": "^8.18.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
+    "@oh-my-pi/pi-coding-agent": "*",
+    "@oh-my-pi/pi-tui": "*",
+    "@oh-my-pi/pi-coding-agent": "*",
+    "@oh-my-pi/pi-tui": "*",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-coding-agent": {
+    "@oh-my-pi/pi-coding-agent": {
       "optional": true
     },
-    "@earendil-works/pi-tui": {
+    "@oh-my-pi/pi-tui": {
       "optional": true
     },
-    "@mariozechner/pi-coding-agent": {
+    "@oh-my-pi/pi-coding-agent": {
       "optional": true
     },
-    "@mariozechner/pi-tui": {
+    "@oh-my-pi/pi-tui": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-tui": "*",
+    "@oh-my-pi/pi-tui": "*",
     "@types/ws": "^8.18.1",
     "typebox": "^1.1.33"
   }

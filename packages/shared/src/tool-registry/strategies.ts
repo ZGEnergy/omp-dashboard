@@ -72,7 +72,7 @@ export interface StrategyDeps {
  *      already used by `findPackageJsonByDirWalk` in `definitions.ts`.
  *
  * See change: fix-node-resolution-under-electron (follow-up: live
- * `/api/packages/installed` failure on `@earendil-works/pi-coding-agent`
+ * `/api/packages/installed` failure on `@oh-my-pi/pi-coding-agent`
  * exports-map regression).
  */
 function defaultResolveModule(id: string, from: string): string | null {

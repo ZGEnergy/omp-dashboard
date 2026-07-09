@@ -12,7 +12,7 @@ vi.mock("typebox", () => ({
   },
 }));
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("@oh-my-pi/pi-ai", () => ({
   StringEnum: vi.fn(() => ({})),
 }));
 

@@ -42,7 +42,7 @@ vi.mock("../session-file-reader.js", () => ({
 }));
 
 // Mock the pi-coding-agent SessionManager (legacy, kept for compatibility)
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+vi.mock("@oh-my-pi/pi-coding-agent", () => ({
   SessionManager: {
     list: vi.fn(async () => []),
     open: vi.fn(() => ({

@@ -2,7 +2,7 @@
  * Flow event wiring: registers listeners for pi-flows events
  * and forwards them as protocol messages to the dashboard server.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import type { BridgeContext } from "./bridge-context.js";
 import { filterHiddenCommands } from "./bridge-context.js";
 import type { FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";

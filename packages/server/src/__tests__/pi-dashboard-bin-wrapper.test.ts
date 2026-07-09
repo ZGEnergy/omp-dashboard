@@ -50,7 +50,7 @@ describe("bin/pi-dashboard.mjs wrapper", () => {
 
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("pi-dashboard: cannot find jiti");
-      expect(result.stderr).toContain("npm install -g @earendil-works/pi-coding-agent");
+      expect(result.stderr).toContain("npm install -g @oh-my-pi/pi-coding-agent");
       // No tsx mention — proposal mandates no-fallback wrapper.
       expect(result.stderr).not.toMatch(/tsx/i);
     } finally {

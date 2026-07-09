@@ -10,7 +10,7 @@ import type {
 } from "@blackbelt-technology/pi-dashboard-shared/protocol.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
 import type { FileEntry, MissingToolError, PiSessionInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { filterHiddenCommands } from "./bridge-context.js";
 import { killProcessByPgid } from "./process-scanner.js";
 import { expandPromptTemplateFromDisk, loadPromptTemplate } from "./prompt-expander.js";
@@ -777,7 +777,7 @@ export function createCommandHandler(
         case "list_sessions": {
           try {
             // Dynamic import to avoid hard dependency at module load
-            const { SessionManager } = await import("@earendil-works/pi-coding-agent") as any;
+            const { SessionManager } = await import("@oh-my-pi/pi-coding-agent") as any;
             const cwd = msg.cwd || options?.getCwd?.() || process.cwd();
             const sessionInfos = await SessionManager.list(cwd);
             const sessions: PiSessionInfo[] = (sessionInfos || []).map((s: any) => ({

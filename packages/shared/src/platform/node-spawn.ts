@@ -133,7 +133,7 @@ export function isJitiLoader(loader: string | null | undefined): boolean {
  * !! JITI VERSION CONTRACT !!
  * jiti — at every version verified on Windows so far, including the
  * current pin `jiti@^2.7.0` shipped under
- * `@earendil-works/pi-coding-agent@0.74.x` — MISHANDLES `file:///`
+ * `@oh-my-pi/pi-coding-agent@0.74.x` — MISHANDLES `file:///`
  * triple-slash URL entries on Windows. Symptom: the entry is rewritten
  * to single-slash `file:/C:/…` and then re-resolved relative to cwd,
  * yielding `Cannot find module 'file:///<cwd>/file:/C:/…/cli.ts'`.
@@ -145,7 +145,7 @@ export function isJitiLoader(loader: string | null | undefined): boolean {
  * wrap is unnecessary for the common standalone-install layout where
  * pi + the dashboard live under `C:\Users\<u>\.omp-dashboard\…`.
  *
- * Earlier baselines (`@mariozechner/pi-coding-agent@0.70.x`,
+ * Earlier baselines (`@oh-my-pi/pi-coding-agent@0.70.x`,
  * `jiti@2.6.5` in `pi-coding-agent@0.71.x`) exhibited the same or
  * worse breakage; we no longer attempt to special-case any single
  * jiti version. If a future jiti release fixes file:/// handling and

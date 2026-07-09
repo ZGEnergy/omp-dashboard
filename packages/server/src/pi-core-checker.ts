@@ -21,6 +21,7 @@ import { promisify } from "node:util";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { getManagedDir } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 import { fetchPackageMeta } from "./npm-search-proxy.js";
 import { invalidateChangelogCache } from "./changelog-parser.js";
 import { getLatestPiRelease, type PiDevReleaseInfo } from "./pi-dev-version-check.js";
@@ -30,22 +31,26 @@ const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const NPM_LIST_TIMEOUT_MS = 30_000;
 
-/** ~/.omp-dashboard/ — Electron managed install dir */
-const MANAGED_DIR = path.join(os.homedir(), ".omp-dashboard");
+/** ~/.omp-dashboard/ — managed install dir (distinct from ~/.omp/dashboard config dir) */
+const MANAGED_DIR = getManagedDir();
 const MANAGED_NODE_MODULES = path.join(MANAGED_DIR, "node_modules");
+/** ~/.omp/plugins/node_modules/ — OMP plugin install dir */
+const OMP_PLUGINS_NODE_MODULES = path.join(os.homedir(), ".omp", "plugins", "node_modules");
 
 /** Known core packages (not extensions). Order matters for display. */
 export const CORE_PACKAGE_NAMES: readonly string[] = [
-	"@earendil-works/pi-coding-agent",
-	"@mariozechner/pi-coding-agent",
+	"@oh-my-pi/pi-coding-agent",
+	"@oh-my-pi/pi-ai",
+	"@oh-my-pi/pi-tui",
 	"@blackbelt-technology/pi-agent-dashboard",
 	"@blackbelt-technology/pi-model-proxy",
 ];
 
 /** Display name mapping for known packages. Falls back to package name. */
 const DISPLAY_NAMES: Readonly<Record<string, string>> = {
-	"@earendil-works/pi-coding-agent": "pi (core agent)",
-	"@mariozechner/pi-coding-agent": "pi (core agent — legacy fork)",
+	"@oh-my-pi/pi-coding-agent": "pi (core agent)",
+	"@oh-my-pi/pi-ai": "pi-ai",
+	"@oh-my-pi/pi-tui": "pi-tui",
 	"@blackbelt-technology/pi-agent-dashboard": "pi-dashboard",
 	"@blackbelt-technology/pi-model-proxy": "pi-model-proxy",
 };
@@ -71,7 +76,7 @@ function resolveDisplayName(name: string): string {
 }
 
 /**
- * Dynamically-discovered package-name aliases for `@mariozechner/pi-coding-agent`.
+ * Dynamically-discovered package-name aliases for `@oh-my-pi/pi-coding-agent`.
  * Populated from pi.dev's `latest-version` response, which returns the
  * authoritative package name for fresh installs (used for the upcoming
  * `@mariozechner` → `@earendil-works` scope migration). The dashboard
@@ -102,7 +107,7 @@ function looksLikePiEcosystem(name: string): boolean {
 }
 
 /** Pi packages whose latestVersion comes from pi.dev (not npm registry). */
-const PI_DEV_PACKAGE = "@mariozechner/pi-coding-agent";
+const PI_DEV_PACKAGE = "@oh-my-pi/pi-coding-agent";
 
 export interface NpmListRunner {
 	/** Run `npm list -g --depth=0 --json` and return stdout. */
