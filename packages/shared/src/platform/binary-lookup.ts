@@ -23,7 +23,6 @@ import { augmentEnvWithGitSource } from "./git-source.js";
  */
 export const MANAGED_PI_PACKAGES = [
   "@oh-my-pi/pi-coding-agent",
-  "@oh-my-pi/pi-coding-agent",
 ] as const;
 
 /**

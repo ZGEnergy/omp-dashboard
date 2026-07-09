@@ -74,7 +74,7 @@ export function canonicalHomedir() {
  * Lock file path. This is what `proper-lockfile` locks.
  */
 export function getLockPath(homedir = canonicalHomedir()) {
-    return path.join(homedir, ".pi", "dashboard", "server.lock");
+    return path.join(homedir, ".omp", "dashboard", "server.lock");
 }
 /**
  * Metadata sidecar path (`<lockPath>.meta.json`).

@@ -24,9 +24,8 @@ function makeResolver(installed: Record<string, string>) {
 }
 
 describe("MANAGED_PI_PACKAGES + JITI_PACKAGES contract", () => {
-  it("upstream pi pkg first, legacy fork fallback", () => {
+  it("single canonical pi pkg name", () => {
     expect(MANAGED_PI_PACKAGES).toEqual([
-      "@oh-my-pi/pi-coding-agent",
       "@oh-my-pi/pi-coding-agent",
     ]);
   });
@@ -42,14 +41,14 @@ describe("MANAGED_PI_PACKAGES + JITI_PACKAGES contract", () => {
 });
 
 describe("ToolResolver.resolveJiti — managed pi", () => {
-  it("hits upstream managed pi (@earendil-works) when only it is present", () => {
-    const upstreamPkgJson = path.join(
-      MANAGED_DIR, "node_modules", "@earendil-works", "pi-coding-agent", "package.json",
+  it("hits managed pi (@oh-my-pi) when present", () => {
+    const piPkgJson = path.join(
+      MANAGED_DIR, "node_modules", "@oh-my-pi", "pi-coding-agent", "package.json",
     );
-    const jitiPkgJson = "/managed/upstream/node_modules/jiti/package.json";
+    const jitiPkgJson = "/managed/pi/node_modules/jiti/package.json";
     const url = new ToolResolver().resolveJiti({
       _managedDir: MANAGED_DIR,
-      _pathExists: (p) => p === upstreamPkgJson || p === path.join(path.dirname(jitiPkgJson), "lib", "jiti-register.mjs"),
+      _pathExists: (p) => p === piPkgJson || p === path.join(path.dirname(jitiPkgJson), "lib", "jiti-register.mjs"),
       _whichPi: () => null,
       _argv1: undefined,
       resolver: makeResolver({ "jiti/package.json": jitiPkgJson }),
@@ -57,54 +56,6 @@ describe("ToolResolver.resolveJiti — managed pi", () => {
     expect(url).not.toBeNull();
     expect(url!.startsWith("file://")).toBe(true);
     expect(url!).toMatch(/\/jiti\/lib\/jiti-register\.mjs$/);
-    expect(url!).not.toContain("@mariozechner");
-  });
-
-  it("falls through to legacy managed pi (@mariozechner) when upstream is absent", () => {
-    const legacyPkgJson = path.join(
-      MANAGED_DIR, "node_modules", "@mariozechner", "pi-coding-agent", "package.json",
-    );
-    const jitiPkgJson = "/managed/legacy/node_modules/@mariozechner/jiti/package.json";
-    const url = new ToolResolver().resolveJiti({
-      _managedDir: MANAGED_DIR,
-      _pathExists: (p) =>
-        p === legacyPkgJson ||
-        p === path.join(path.dirname(jitiPkgJson), "lib", "jiti-register.mjs"),
-      _whichPi: () => null,
-      _argv1: undefined,
-      resolver: makeResolver({
-        "@mariozechner/jiti/package.json": jitiPkgJson,
-      }),
-    });
-    expect(url).not.toBeNull();
-    expect(url!).toContain("@mariozechner/jiti");
-  });
-
-  it("prefers upstream pi over legacy when BOTH managed pkgs are present", () => {
-    const upstream = path.join(MANAGED_DIR, "node_modules", "@earendil-works", "pi-coding-agent", "package.json");
-    const legacy = path.join(MANAGED_DIR, "node_modules", "@mariozechner", "pi-coding-agent", "package.json");
-    const upstreamJiti = "/managed/upstream/jiti/package.json";
-    const legacyJiti = "/managed/legacy/@mariozechner/jiti/package.json";
-    const calls: string[] = [];
-    const resolver = (spec: string): string => {
-      calls.push(spec);
-      if (spec === "jiti/package.json") return upstreamJiti;
-      if (spec === "@mariozechner/jiti/package.json") return legacyJiti;
-      throw new Error(`nope ${spec}`);
-    };
-    const url = new ToolResolver().resolveJiti({
-      _managedDir: MANAGED_DIR,
-      _pathExists: (p) =>
-        p === upstream || p === legacy ||
-        p === path.join(path.dirname(upstreamJiti), "lib", "jiti-register.mjs"),
-      _whichPi: () => null,
-      _argv1: undefined,
-      resolver,
-    });
-    expect(url!).toMatch(/\/jiti\/lib\/jiti-register\.mjs$/);
-    expect(url!).not.toContain("@mariozechner");
-    // Upstream pi anchor produced upstream jiti — legacy pi anchor never tried.
-    expect(calls).toEqual(["jiti/package.json"]);
   });
 });
 
