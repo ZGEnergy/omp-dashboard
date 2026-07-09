@@ -32,6 +32,8 @@ const SURFACE_A = {
     issueDate: "2024-05-01",
     dueDate: "2024-05-15",
     currency: "HUF",
+    net: 15000,
+    vat: 4050,
     gross: 19050,
     lineCount: 3,
   },
@@ -40,7 +42,30 @@ const SURFACE_A = {
   decisions: [],
 };
 
-const ROW_A = { id: INV_A, state: "pending_approval", supplier: "Acme Kft.", partner: "acme", gross: 19050, settlement: null };
+// Zero-VAT surface fixture (returned for INV_B) — covers the client's vat: 0 branch.
+const SURFACE_B = {
+  invoice_id: INV_B,
+  reference: "AP-2024-0008",
+  state: "partner_pending",
+  awaiting: true,
+  summary: {
+    supplier: "New Vendor Zrt.",
+    invoiceNumber: "INV-2024-002",
+    issueDate: "2024-05-02",
+    dueDate: "2024-05-16",
+    currency: "HUF",
+    net: 42000,
+    vat: 0,
+    gross: 42000,
+    lineCount: 1,
+  },
+  original: { blob_handle: `blobs/${INV_B}_invoice.pdf`, path: undefined, available: false },
+  actions: ["approve", "reject"] as const,
+  decisions: [],
+};
+
+// ROW_A carries per-invoice processing cost; ROW_B omits it (not-recorded case).
+const ROW_A = { id: INV_A, state: "pending_approval", supplier: "Acme Kft.", partner: "acme", gross: 19050, settlement: null, cost: { total: 0.42, currency: "USD" } };
 const ROW_B = { id: INV_B, state: "partner_pending", supplier: "New Vendor Zrt.", partner: "new-vendor", gross: 42000, settlement: null };
 
 export class FakeInvoiceEngine implements InvoiceEngine {
@@ -77,6 +102,7 @@ export class FakeInvoiceEngine implements InvoiceEngine {
       case "surface":
       case "approval": {
         if (!args.invoice_id) return { content: [{ type: "text", text: "⛔ missing required: invoice_id" }], details: { ok: false } };
+        if (args.invoice_id === INV_B) return ok(`approval surface ${SURFACE_B.reference} (awaiting)`, { ...SURFACE_B, invoice_id: args.invoice_id });
         return ok(`approval surface ${SURFACE_A.reference} (awaiting)`, { ...SURFACE_A, invoice_id: args.invoice_id });
       }
       case "explain": {

@@ -54,6 +54,30 @@ describe("FakeInvoiceEngine — query views", () => {
     expect((r.details as any).actions).toEqual(["approve", "reject"]);
   });
 
+  it("surface summary exposes net and vat", async () => {
+    const r = await engine.query(CWD, { view: "surface", invoice_id: "a1b2c3d4" });
+    expect((r.details as any).summary).toMatchObject({ net: 15000, vat: 4050 });
+  });
+
+  it("surface summary carries a zero-VAT case", async () => {
+    const r = await engine.query(CWD, { view: "surface", invoice_id: "e5f6a7b8" });
+    expect((r.details as any).summary.vat).toBe(0);
+    expect((r.details as any).summary.net).toBe(42000);
+  });
+
+  it("list exposes cost on the fixtured row and omits it on the other", async () => {
+    const grouped = await engine.query(CWD, { view: "list" });
+    const withCost = (grouped.details as any).groups.pending_approval.items[0];
+    const noCost = (grouped.details as any).groups.partner_pending.items[0];
+    expect(withCost.cost).toEqual({ total: 0.42, currency: "USD" });
+    expect(noCost).not.toHaveProperty("cost");
+
+    const flat = await engine.query(CWD, { view: "list", state: "all" });
+    const items = (flat.details as any).items;
+    expect(items[0].cost).toEqual({ total: 0.42, currency: "USD" });
+    expect(items[1]).not.toHaveProperty("cost");
+  });
+
   it("status → SetupStatus w/ cadence", async () => {
     const r = await engine.query(CWD, { view: "status" });
     expect(r.details).toHaveProperty("setup_complete");

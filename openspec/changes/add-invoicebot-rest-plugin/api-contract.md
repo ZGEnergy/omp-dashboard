@@ -245,6 +245,7 @@ interface InvoiceRow {           // view:"list" items
   partner: string | null;        // partner_id
   gross: number | null;          // total_gross
   settlement: string | null;     // settlement_status ("settled" | …)
+  cost?: { total: number; currency: string }; // per-invoice processing cost (omitted when not recorded)
 }
 
 interface ApprovalSurface {      // view:"surface"
@@ -253,7 +254,7 @@ interface ApprovalSurface {      // view:"surface"
   summary: {
     supplier?: string; invoiceNumber?: string;
     issueDate?: string; dueDate?: string;
-    currency?: string; gross?: number; lineCount?: number;
+    currency?: string; net?: number; vat?: number; gross?: number; lineCount?: number;
   };
   original: { blob_handle?: string; path?: string; available: boolean }; // retained original doc
   actions: ["approve","reject"];
