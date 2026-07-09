@@ -5,8 +5,8 @@ import { expandPromptTemplateFromDisk, loadPromptTemplate } from "../prompt-expa
 import { parseSkillBlock } from "@blackbelt-technology/pi-dashboard-shared/skill-block-parser.js";
 
 const tmpDir = join(import.meta.dirname ?? __dirname, "__tmp_prompt_test__");
-const promptsDir = join(tmpDir, ".pi", "prompts");
-const skillsDir = join(tmpDir, ".pi", "skills");
+const promptsDir = join(tmpDir, ".omp", "prompts");
+const skillsDir = join(tmpDir, ".omp", "skills");
 
 beforeEach(() => {
   mkdirSync(promptsDir, { recursive: true });
@@ -356,7 +356,7 @@ describe("loadPromptTemplate (executable-mode frontmatter)", () => {
 
   it("resolves a bundled command via pi.getCommands() when cwd lacks the skill (real/Docker session)", () => {
     // Skill installed OUTSIDE cwd (mimics extension install dir). cwd = tmpDir
-    // has no .pi/skills/pi-dashboard. Registry surfaces the skill's SKILL.md.
+    // has no .omp/skills/pi-dashboard. Registry surfaces the skill's SKILL.md.
     const installDir = join(tmpDir, "installed", "pi-dashboard");
     const cmdDir = join(installDir, "commands");
     mkdirSync(cmdDir, { recursive: true });
@@ -394,5 +394,23 @@ describe("loadPromptTemplate (executable-mode frontmatter)", () => {
     // Multi-line passthrough path calls this then sendUserMessage; must NOT
     // return the raw bash body. See change: add-dashboard-slash-commands.
     expect(expandPromptTemplateFromDisk("/exec-legacy", tmpDir)).toBe("/exec-legacy");
+  });
+
+  it("discovers prompts from legacy .pi directory as fallback", () => {
+    // Create a .pi prompt that does not exist in .omp
+    const piPromptsDir = join(tmpDir, ".pi", "prompts");
+    mkdirSync(piPromptsDir, { recursive: true });
+    writeFileSync(join(piPromptsDir, "legacy-cmd.md"), "Legacy body");
+    const result = expandPromptTemplateFromDisk("/legacy-cmd", tmpDir);
+    expect(result).toBe("Legacy body");
+  });
+
+  it("prefers .omp over .pi when both have the same template", () => {
+    const piPromptsDir = join(tmpDir, ".pi", "prompts");
+    mkdirSync(piPromptsDir, { recursive: true });
+    writeFileSync(join(piPromptsDir, "shared-cmd.md"), "pi version");
+    writeFileSync(join(promptsDir, "shared-cmd.md"), "omp version");
+    const result = expandPromptTemplateFromDisk("/shared-cmd", tmpDir);
+    expect(result).toBe("omp version");
   });
 });

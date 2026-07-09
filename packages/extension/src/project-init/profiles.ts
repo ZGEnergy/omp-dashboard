@@ -5,15 +5,15 @@
  *   <profile>/
  *     profile.json      — { name, description?, dox? }  (dox defaults false)
  *     AGENTS.md.tmpl     — instructions template
- *     settings.json.tmpl — `.pi/settings.json` template (worktreeInit hook + toolset)
+ *     settings.json.tmpl — `.omp/settings.json` template (worktreeInit hook + toolset)
  *     prompts/*.md       — separate, individually-editable prompt files
  *
  * Resolution order (later wins on name collision):
  *   1. <skill>/profiles/*          shipped defaults (coding, docs)
- *   2. ~/.pi/project-profiles/*    user profiles / overrides
+ *   2. ~/.omp/project-profiles/*    user profiles / overrides
  *
  * A user profile fully shadows a shipped profile of the same name.
- * Project-local (`./.pi/`) is NOT a resolution source (the project is not
+ * Project-local (`./.omp/`) is NOT a resolution source (the project is not
  * configured yet — chicken/egg).
  *
  * See change: project-init-skill-and-profiles.
@@ -45,22 +45,22 @@ export interface Profile {
 export interface ResolveProfilesOptions {
   /** Override the shipped profiles dir (tests). Defaults to `<skill>/profiles`. */
   shippedDir?: string;
-  /** Override the user profiles dir (tests). Defaults to `~/.pi/project-profiles`. */
+  /** Override the user profiles dir (tests). Defaults to `~/.omp/project-profiles`. */
   userDir?: string;
 }
 
 /** Absolute path to the shipped `profiles/` directory next to the skill. */
 export function shippedProfilesDir(): string {
   // This module is bundled under `src/project-init/`; the shipped skill
-  // profiles live at `<pkg>/.pi/skills/project-init/profiles`.
+  // profiles live at `<pkg>/.omp/skills/project-init/profiles`.
   const here = path.dirname(fileURLToPath(import.meta.url));
   const pkgRoot = path.resolve(here, "..", "..");
-  return path.join(pkgRoot, ".pi", "skills", "project-init", "profiles");
+  return path.join(pkgRoot, ".omp", "skills", "project-init", "profiles");
 }
 
 /** Default user profiles directory. */
 export function userProfilesDir(): string {
-  return path.join(os.homedir(), ".pi", "project-profiles");
+  return path.join(os.homedir(), ".omp", "project-profiles");
 }
 
 /**

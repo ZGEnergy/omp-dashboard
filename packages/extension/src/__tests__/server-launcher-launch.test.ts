@@ -82,7 +82,7 @@ describe("Bridge launchServer → launchDashboardServer forwarding", () => {
 
   // fix-bridge-server-start-diagnostics: the EarlyExitError copy must point
   // at the path the bridge spawn actually writes (getDashboardServerLogPath),
-  // not a hardcoded "~/.pi/dashboard/server.log" string.
+  // not a hardcoded "~/.omp/dashboard/server.log" string.
   it("EarlyExitError message references getDashboardServerLogPath(), not a hardcoded path", async () => {
     const { EarlyExitError } = await import("@blackbelt-technology/pi-dashboard-shared/server-launcher.js");
     const err = new (EarlyExitError as unknown as new (...args: unknown[]) => Error & { code: number })();
@@ -91,6 +91,6 @@ describe("Bridge launchServer → launchDashboardServer forwarding", () => {
     const r = await launchServer(cfg);
     expect(r.success).toBe(false);
     expect(r.message).toContain(getDashboardServerLogPath());
-    expect(r.message).not.toContain("~/.pi/dashboard/server.log");
+    expect(r.message).not.toContain("~/.omp/dashboard/server.log");
   });
 });

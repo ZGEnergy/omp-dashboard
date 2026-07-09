@@ -1,7 +1,7 @@
 /**
  * Asserts the `/dashboard:*` slash-command templates ship inside the
  * extension-bundled pi-dashboard skill (the copy declared in package.json
- * `pi.skills` + `files`, baked into the npm tarball and Docker image) — NOT
+ * `omp.skills` + `files`, baked into the npm tarball and Docker image) — NOT
  * only the repo-root working copy.
  *
  * See change: add-dashboard-slash-commands.
@@ -13,10 +13,10 @@ import url from "node:url";
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(here, "..", "..");
-const commandsDir = path.join(pkgDir, ".pi", "skills", "pi-dashboard", "commands");
+const commandsDir = path.join(pkgDir, ".omp", "skills", "pi-dashboard", "commands");
 const pkgJson = JSON.parse(
   fs.readFileSync(path.join(pkgDir, "package.json"), "utf-8"),
-) as { pi?: { skills?: string[] }; files?: string[] };
+) as { omp?: { skills?: string[] }; files?: string[] };
 
 function dashboardCommandFiles(): string[] {
   return fs.readdirSync(commandsDir).filter((f) => f.startsWith("dashboard-") && f.endsWith(".md"));
@@ -38,15 +38,15 @@ describe("dashboard slash commands — shipped in extension skill", () => {
   });
 
   it("package.json declares the pi-dashboard skill and ships it", () => {
-    expect(pkgJson.pi?.skills ?? []).toContain(".pi/skills/pi-dashboard");
-    expect(pkgJson.files ?? []).toContain(".pi/skills/pi-dashboard/");
+    expect(pkgJson.omp?.skills ?? []).toContain(".omp/skills/pi-dashboard");
+    expect(pkgJson.files ?? []).toContain(".omp/skills/pi-dashboard/");
   });
 
   it("ships the slash-commands reference + commands README", () => {
     expect(fs.existsSync(path.join(commandsDir, "README.md"))).toBe(true);
     expect(
       fs.existsSync(
-        path.join(pkgDir, ".pi", "skills", "pi-dashboard", "references", "slash-commands.md"),
+        path.join(pkgDir, ".omp", "skills", "pi-dashboard", "references", "slash-commands.md"),
       ),
     ).toBe(true);
   });

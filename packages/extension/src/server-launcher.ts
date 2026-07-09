@@ -1,7 +1,7 @@
 /**
  * Server launcher — spawns the dashboard server as a detached process.
  * The spawned server runs in foreground mode (no subcommand) and writes
- * its own PID file at ~/.pi/dashboard/server.pid.
+ * its own PID file at ~/.omp/dashboard/server.pid.
  */
 
 import { createRequire } from "node:module";

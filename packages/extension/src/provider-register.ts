@@ -2,10 +2,10 @@
  * Provider Extension (Dashboard)
  *
  * Registers custom LLM providers with auto-discovered models.
- * Config: ~/.pi/agent/providers.json (providers section only — preserves other fields)
+ * Config: ~/.omp/agent/providers.json (providers section only — preserves other fields)
  *
  * Providers are configured via the dashboard settings UI or by editing
- * ~/.pi/agent/providers.json directly. No TUI commands.
+ * ~/.omp/agent/providers.json directly. No TUI commands.
  *
  * Event API:
  *   model:resolve            — primary universal resolver (capability
@@ -435,7 +435,7 @@ export function _buildProviderCatalogue(
   );
   // The catalogue is the complete picture of what pi knows about —
   // built-in providers, OAuth providers, AND custom providers registered
-  // by the dashboard via pi.registerProvider() from ~/.pi/agent/providers.json.
+  // by the dashboard via pi.registerProvider() from ~/.omp/agent/providers.json.
   // Custom providers carry `custom: true` so consumers can decide what
   // to surface where (e.g. the auth UI suppresses their API-key rows
   // because they're managed by the LLM Providers settings section).
@@ -502,7 +502,7 @@ export function _buildProviderCatalogue(
   });
 }
 
-// Lazy-cached pi-ai module (in scope inside pi's process).
+// Lazy-cached OMP pi-ai module (in scope inside OMP agent's process).
 let _piAiModule: PiAiHelpers | null = null;
 let _piAiLoadAttempted = false;
 async function loadPiAi(): Promise<PiAiHelpers> {
@@ -518,7 +518,7 @@ async function loadPiAi(): Promise<PiAiHelpers> {
   }
 }
 
-// Eagerly kick off pi-ai load at module import time so env-var hints
+// Eagerly kick off OMP pi-ai load at module import time so env-var hints
 // are populated by the time the first session_register fires. Failure
 // is silent; `buildProviderCatalogue` falls back to {} which still
 // produces a valid catalogue minus envVar/ambient hints.
@@ -762,7 +762,7 @@ async function resolveModelProbe(probe: any, ref: string): Promise<void> {
     // dashboard-roles-ownership + design D10.
     const { literal: mapped } = lookupRole(literal);
     if (!mapped) {
-      probe.error = `Role "${ref}" is not assigned in ~/.pi/agent/providers.json#roles.`;
+      probe.error = `Role "${ref}" is not assigned in ~/.omp/agent/providers.json#roles.`;
       probe.available = { ...(probe.available ?? {}), roles: loadRoleConfig().roles };
       return;
     }
@@ -948,7 +948,7 @@ export function activate(pi: ExtensionAPI) {
           ? `Set ${entry.apiKey}`
           : "Check API key";
         ctx.ui.notify(
-          `${name}: ${hint} or add "${name}" to ~/.pi/agent/auth.json`,
+          `${name}: ${hint} or add "${name}" to ~/.omp/agent/auth.json`,
           "warning",
         );
       }

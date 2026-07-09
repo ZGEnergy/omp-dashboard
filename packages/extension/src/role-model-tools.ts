@@ -138,7 +138,7 @@ export function registerRoleModelTools(pi: ExtensionAPI, deps: RoleModelToolsDep
     name: "update_roles",
     label: "Update Roles",
     description:
-      "Wire roles and presets. Actions: set_role {role, ref, preset?} (assigns a model ref to a role; creates the role if new; targets a named preset when `preset` given, else the active map), remove_role {role} (purges the role from the schema, the active map, and every preset), create_preset {name}, load_preset {name}, delete_preset {name}. EVERY action mutates the global ~/.pi/agent/providers.json shared by all sessions, so each requires user confirmation before writing.",
+      "Wire roles and presets. Actions: set_role {role, ref, preset?} (assigns a model ref to a role; creates the role if new; targets a named preset when `preset` given, else the active map), remove_role {role} (purges the role from the schema, the active map, and every preset), create_preset {name}, load_preset {name}, delete_preset {name}. EVERY action mutates the global ~/.omp/agent/providers.json shared by all sessions, so each requires user confirmation before writing.",
     parameters: Type.Object({
       action: Type.Union(
         [
@@ -178,7 +178,7 @@ export function registerRoleModelTools(pi: ExtensionAPI, deps: RoleModelToolsDep
       const confirmMsg = describeAction(params);
       const confirmed = await ctx?.ui?.confirm?.(
         "Update global roles?",
-        `${confirmMsg}\n\nThis edits ~/.pi/agent/providers.json, shared by all sessions on this machine.`,
+        `${confirmMsg}\n\nThis edits ~/.omp/agent/providers.json, shared by all sessions on this machine.`,
       );
       if (!confirmed) return { ...fail("User declined the change."), details: { success: false } };
 

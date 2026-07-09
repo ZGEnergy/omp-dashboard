@@ -52,9 +52,9 @@ describe("project-init scaffold", () => {
     const profile = makeProfileDir(profilesRoot, "coding");
     const res = scaffoldProfile({ profile, targetDir: target, projectName: "Demo" });
     expect(fs.readFileSync(path.join(target, "AGENTS.md"), "utf8")).toContain("# Demo");
-    const settings = JSON.parse(fs.readFileSync(path.join(target, ".pi", "settings.json"), "utf8"));
+    const settings = JSON.parse(fs.readFileSync(path.join(target, ".omp", "settings.json"), "utf8"));
     expect(settings.worktreeInit.run.command).toBe("npm ci");
-    expect(fs.existsSync(path.join(target, ".pi", "prompts", "a.md"))).toBe(true);
+    expect(fs.existsSync(path.join(target, ".omp", "prompts", "a.md"))).toBe(true);
     expect(res.hookValid).toBe(true);
     expect(res.doctrineSeeded).toBe(false);
   });
@@ -89,7 +89,7 @@ describe("project-init scaffold", () => {
     });
     expect(res.leftover).toEqual([]);
     expect(fs.readFileSync(path.join(target, "AGENTS.md"), "utf8")).toContain("cargo test");
-    const settings = JSON.parse(fs.readFileSync(path.join(target, ".pi", "settings.json"), "utf8"));
+    const settings = JSON.parse(fs.readFileSync(path.join(target, ".omp", "settings.json"), "utf8"));
     expect(settings.worktreeInit.gate).toBe("test ! -d target");
     expect(settings.worktreeInit.run.command).toBe("cargo fetch");
     expect(res.hookValid).toBe(true);
@@ -100,7 +100,7 @@ describe("project-init scaffold", () => {
     const subs = { ...stackSubstitutions(STACKS.npm!), INIT_COMMAND: 'echo "hi" && npm ci' };
     const res = scaffoldProfile({ profile, targetDir: target, substitutions: subs });
     // Must still be valid JSON on disk, with the value preserved verbatim.
-    const settings = JSON.parse(fs.readFileSync(path.join(target, ".pi", "settings.json"), "utf8"));
+    const settings = JSON.parse(fs.readFileSync(path.join(target, ".omp", "settings.json"), "utf8"));
     expect(settings.worktreeInit.run.command).toBe('echo "hi" && npm ci');
     expect(res.hookValid).toBe(true);
   });

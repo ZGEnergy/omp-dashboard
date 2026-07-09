@@ -25,8 +25,8 @@ const SKILL_PHASE_MAP: Record<string, OpenSpecPhase> = {
   "verify-change": "verify",
 };
 
-/** Regex to match openspec skill SKILL.md reads */
-const SKILL_PATH_RE = /\.pi\/skills\/openspec-([^/]+)\/SKILL\.md$/;
+/** Regex to match openspec skill SKILL.md reads (.omp primary, .pi legacy fallback) */
+const SKILL_PATH_RE = /\.(?:omp|pi)\/skills\/openspec-([^/]+)\/SKILL\.md$/;
 
 /** Regex to match openspec change file reads */
 const CHANGE_PATH_RE = /openspec\/changes\/([^/]+)\//;

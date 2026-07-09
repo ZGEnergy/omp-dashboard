@@ -1,8 +1,8 @@
 /**
- * PI Dashboard Bridge Extension
+ * OMP Dashboard Bridge Extension
  *
  * Global extension that connects to the dashboard server,
- * forwards all pi events, and relays commands back.
+ * forwards all OMP agent events, and relays commands back.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { Loader } from "@oh-my-pi/pi-tui";
@@ -72,7 +72,7 @@ const PROCESS_MIN_ELAPSED_MS = process.platform === "win32" ? 30_000 : 5_000; //
 
 // Use `process` (not `globalThis`) to survive jiti module cache invalidation
 // AND to share state across isolated extension contexts (vm sandboxes).
-const BRIDGE_KEY = "__pi_dashboard_bridge__";
+const BRIDGE_KEY = "__omp_dashboard_bridge__";
 interface BridgeState {
   cleanup?: () => void;
   sessionId?: string;
@@ -136,7 +136,7 @@ export default function (pi: ExtensionAPI) {
 
     initBridge(pi);
   } catch (err) {
-    // Never crash the host pi agent — dashboard is non-essential
+    // Never crash the host OMP agent — dashboard is non-essential
     console.error("[dashboard] Bridge init failed:", err);
   }
 }
@@ -641,7 +641,7 @@ function initBridge(pi: ExtensionAPI) {
     appendMessageWrapped = true;
   }
 
-  /** Wrap a callback so errors log instead of crashing the host pi agent. */
+  /** Wrap a callback so errors log instead of crashing the host OMP agent. */
   function safe<T extends (...args: any[]) => any>(fn: T): T {
     return ((...args: any[]) => {
       try {
@@ -661,7 +661,7 @@ function initBridge(pi: ExtensionAPI) {
   // Load config to determine WebSocket URL
   ensureConfig();
   const config = loadConfig();
-  const dashboardUrl = process.env.PI_DASHBOARD_URL ?? `ws://localhost:${config.piPort}`;
+  const dashboardUrl = process.env.OMP_DASHBOARD_URL ?? process.env.PI_DASHBOARD_URL ?? `ws://localhost:${config.piPort}`;
 
   // Long-lived ctx wrapper for the Extension UI System (Phase 1) — see
   // change: add-extension-ui-modal. `getSessionId` reads the closed-over

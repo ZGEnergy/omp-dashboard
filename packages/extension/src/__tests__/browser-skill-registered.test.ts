@@ -2,7 +2,7 @@
  * Asserts the universal `browser` skill is registered in the extension
  * package and ships in the published tarball.
  *
- * Spec: `default-browser-skill` — "Required files present" + "pi.skills[]
+ * Spec: `default-browser-skill` — "Required files present" + "omp.skills[]
  * declares the skill" + "Skill files ship in the published package".
  *
  * See change: ship-browser-skill-and-electron-cdp.
@@ -14,10 +14,10 @@ import url from "node:url";
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(here, "..", "..");
-const skillDir = path.join(pkgDir, ".pi", "skills", "browser");
+const skillDir = path.join(pkgDir, ".omp", "skills", "browser");
 const pkgJsonPath = path.join(pkgDir, "package.json");
 const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8")) as {
-  pi?: { skills?: string[] };
+  omp?: { skills?: string[] };
   files?: string[];
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
@@ -55,17 +55,17 @@ describe("browser skill — SKILL.md frontmatter", () => {
   });
 
   it("documents the Step-0 preflight halt message", () => {
-    expect(src).toMatch(/pi install npm:pi-agent-browser/);
+    expect(src).toMatch(/omp install npm:pi-agent-browser/);
   });
 });
 
 describe("browser skill — package.json registration", () => {
-  it("pi.skills[] includes .pi/skills/browser", () => {
-    expect(pkgJson.pi?.skills).toContain(".pi/skills/browser");
+  it("omp.skills[] includes .omp/skills/browser", () => {
+    expect(pkgJson.omp?.skills).toContain(".omp/skills/browser");
   });
 
-  it("files[] ships .pi/skills/browser/", () => {
-    expect(pkgJson.files).toContain(".pi/skills/browser/");
+  it("files[] ships .omp/skills/browser/", () => {
+    expect(pkgJson.files).toContain(".omp/skills/browser/");
   });
 });
 

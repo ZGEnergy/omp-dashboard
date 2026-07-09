@@ -33,7 +33,7 @@ const READ_MANUAL_END = "<!-- dox:read:manual:end -->";
 export function doctrinePath(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const pkgRoot = path.resolve(here, "..", "..");
-  return path.join(pkgRoot, ".pi", "skills", "project-init", "dox-doctrine.md");
+  return path.join(pkgRoot, ".omp", "skills", "project-init", "dox-doctrine.md");
 }
 
 /** Extract the text between two delimiter lines (exclusive), trimmed. */
