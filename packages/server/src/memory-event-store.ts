@@ -106,9 +106,35 @@ function isImageBlock(obj: object): boolean {
   );
 }
 
+/**
+ * Anchored match of a `/skill:<name>` invocation envelope
+ * (`<skill name=".." location="..">\nbody\n</skill>[\n\nargs]`) — the shape
+ * pi's `_expandSkillCommand` + the bridge's prompt-expander emit as the USER
+ * message content. Mirrors `skill-block-parser.ts` (`SKILL_BLOCK_RE`).
+ */
+const SKILL_ENVELOPE_RE =
+  /^(<skill name="[^"]+" location="[^"]+">\n)([\s\S]*?)(\n<\/skill>)((?:\n\n[\s\S]+)?)$/;
+
 /** Cap a string to `maxSize`, appending a truncation marker when trimmed. */
 function capString(s: string, maxSize: number): string {
-  return s.length > maxSize ? `${s.slice(0, maxSize)}\n…[truncated]` : s;
+  if (s.length <= maxSize) return s;
+  // Skill invocation envelope: naive mid-string truncation would sever the
+  // closing </skill> tag, making the client's parseSkillBlock return null —
+  // the message then renders as a wall of raw pseudo-HTML (or nothing).
+  // Truncate the BODY only, keeping header + closing tag + trailing args
+  // intact so the envelope stays well-formed and parseable.
+  // See change: bound-subagent-event-serialization (skill regression fix).
+  const skill = s.match(SKILL_ENVELOPE_RE);
+  if (skill) {
+    const [, header, body, closer, args] = skill;
+    const overhead = header.length + closer.length + args.length;
+    const budget = Math.max(0, maxSize - overhead);
+    if (body.length > budget) {
+      return `${header}${body.slice(0, budget)}\n…[truncated]${closer}${args}`;
+    }
+    return s; // over maxSize only due to envelope overhead — leave intact
+  }
+  return `${s.slice(0, maxSize)}\n…[truncated]`;
 }
 
 /**
@@ -197,12 +223,21 @@ function walkArraySize(arr: unknown[], w: SizeWalk): boolean {
 /** Accumulate an object's approximate JSON size; early-exit once over cap. */
 function walkObjectSize(obj: Record<string, unknown>, w: SizeWalk): boolean {
   w.total += 2; // {}
-  // Iterate keys and read each value lazily so we genuinely stop the moment the
-  // running total crosses the cap (Object.entries reads every value up front,
-  // defeating the early exit).
+  // Preserved base64 image blocks (`data` string + sibling `mimeType`) are
+  // deliberately exempt from string truncation, so their bytes must not count
+  // toward the per-event ceiling either — otherwise ANY user message with a
+  // pasted image (> cap base64) collapses to the {__truncated} placeholder and
+  // vanishes from chat. Count a small constant instead of the raw bytes.
+  // See change: bound-subagent-event-serialization (image regression fix).
+  const imageBlock = isImageBlock(obj);
   for (const k of Object.keys(obj)) {
     w.total += k.length + 3; // "k":
     if (w.total > w.cap) return true;
+    if (imageBlock && k === "data" && typeof obj[k] === "string") {
+      w.total += 8; // stand-in for the preserved base64 payload
+      if (w.total > w.cap) return true;
+      continue;
+    }
     if (walkSize(obj[k], w)) return true;
     w.total += 1; // comma
   }

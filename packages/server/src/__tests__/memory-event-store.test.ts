@@ -188,6 +188,62 @@ describe("memory-event-store", () => {
       expect(val).toContain("truncated");
     });
 
+    it("skill invocation envelope survives string truncation with closing tag intact", () => {
+      // Regression: /skill:<name> expands to a <skill ...>body</skill> envelope
+      // whose body routinely exceeds the 4KB string cap. Naive mid-string
+      // truncation destroyed the closing </skill> tag, so the client's
+      // parseSkillBlock returned null and the message rendered as raw
+      // pseudo-HTML (invisible). The truncator must cap the BODY but keep the
+      // envelope well-formed. See change: bound-subagent-event-serialization
+      // (skill regression fix).
+      const store = createMemoryEventStore(neverPinned); // production defaults
+      const bigBody = "Diagnose failed CI runs. ".repeat(2000); // ~50KB body
+      const envelope = `<skill name="ci-troubleshoot" location="/u/.pi/skills/ci-troubleshoot/SKILL.md">\n${bigBody}\n</skill>\n\nplease check run 42`;
+      const event: DashboardEvent = {
+        eventType: "message_start",
+        timestamp: Date.now(),
+        data: { message: { role: "user", content: envelope } },
+      };
+      store.insertEvent("s1", event);
+      const stored = store.getEvent("s1", 1) as any;
+      expect(stored.data.__truncated).toBeUndefined();
+      const content = stored.data.message.content as string;
+      // Envelope must stay parseable: header, closing tag, and args intact.
+      expect(content).toMatch(/^<skill name="ci-troubleshoot" location="[^"]+">\n/);
+      expect(content).toMatch(/\n<\/skill>\n\nplease check run 42$/);
+      // Body must actually be truncated (bounded).
+      expect(content.length).toBeLessThan(10_000);
+    });
+
+    it("user message with a large pasted image survives the per-event size ceiling", () => {
+      // Regression: the per-event total-size ceiling (DEFAULT_MAX_EVENT_DATA_SIZE)
+      // counted preserved base64 image bytes, so ANY user message with a pasted
+      // image (> 20KB base64) was replaced by the {__truncated} placeholder and
+      // vanished from chat. Image blocks are deliberately preserved by the
+      // string pass; the size walk must not count their bytes either.
+      // See change: bound-subagent-event-serialization (regression fix).
+      const store = createMemoryEventStore(neverPinned); // production defaults
+      const bigImage = "A".repeat(100_000); // realistic pasted screenshot
+      const event: DashboardEvent = {
+        eventType: "message_start",
+        timestamp: Date.now(),
+        data: {
+          message: {
+            role: "user",
+            content: [
+              { type: "text", text: "here is the screenshot" },
+              { type: "image", data: bigImage, mimeType: "image/png" },
+            ],
+          },
+        },
+      };
+      store.insertEvent("s1", event);
+      const stored = store.getEvent("s1", 1) as any;
+      expect(stored.data.__truncated).toBeUndefined();
+      expect(stored.data.message.role).toBe("user");
+      expect(stored.data.message.content[1].data).toBe(bigImage);
+    });
+
     it("truncates other fields alongside preserved image data", () => {
       const store = createMemoryEventStore(neverPinned, 100, 5000, 100);
       const longBase64 = "C".repeat(500);
