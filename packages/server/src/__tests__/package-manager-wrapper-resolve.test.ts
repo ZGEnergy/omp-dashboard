@@ -1,29 +1,17 @@
 /**
- * Tests for loadPiPackageManager() resolution chain in package-manager-wrapper.ts.
+ * Tests for OMP plugin directory resolution in package-manager-wrapper.ts.
  *
- * Separate from package-manager-wrapper.test.ts because that file mocks
- * "@oh-my-pi/pi-coding-agent" so direct-import succeeds and the
- * fallback paths never execute.
- *
- * These tests exercise the managed-install and global-npm fallbacks.
+ * Verifies that the wrapper correctly reads installed plugins from
+ * ~/.omp/plugins/package.json and node_modules, and handles edge cases
+ * like missing directories, empty dependencies, and corrupt lockfiles.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-// Force the direct import to fail so resolution falls through to the
-// managed-install / global-npm paths. vi.mock is hoisted; the factory
-// throws at import time which mimics pi not being an installed dependency.
-vi.mock("@oh-my-pi/pi-coding-agent", () => {
-  throw new Error("not installed as direct dependency");
-});
-vi.mock("@oh-my-pi/pi-coding-agent", () => {
-  throw new Error("not installed as direct dependency");
-});
-
 /** Override os.homedir() by setting the env vars libuv reads. */
-function withHome(tmpHome: string): () => void {
+function withFakeHome(tmpHome: string): () => void {
   const prev = {
     HOME: process.env.HOME,
     USERPROFILE: process.env.USERPROFILE,
@@ -31,106 +19,206 @@ function withHome(tmpHome: string): () => void {
   process.env.HOME = tmpHome;
   process.env.USERPROFILE = tmpHome;
   return () => {
-    if (prev.HOME === undefined) delete process.env.HOME; else process.env.HOME = prev.HOME;
-    if (prev.USERPROFILE === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = prev.USERPROFILE;
+    if (prev.HOME === undefined) delete process.env.HOME;
+    else process.env.HOME = prev.HOME;
+    if (prev.USERPROFILE === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prev.USERPROFILE;
   };
 }
 
-describe("loadPiPackageManager resolution chain", () => {
+describe("OMP plugin directory resolution", () => {
   const cleanupPaths: string[] = [];
   const restoreFns: Array<() => void> = [];
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
 
   afterEach(() => {
     for (const r of restoreFns) r();
     restoreFns.length = 0;
     vi.restoreAllMocks();
-    vi.resetModules();
     for (const p of cleanupPaths) {
       try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
     }
     cleanupPaths.length = 0;
   });
 
-  // SKIPPED: bareImportStrategy now ships a filesystem dir-walk fallback
-  // for packages whose exports map omits the `"require"` condition
-  // (@earendil-works/pi-* — live repro: /api/packages/installed broken).
-  // Consequence: from any test cwd inside this repo the walk finds the
-  // real `node_modules/@oh-my-pi/pi-coding-agent/package.json` and
-  // bare-import succeeds before the managed slot runs. Same condition as
-  // the sibling test below; proper fix requires an injectable registry
-  // entry-point in package-manager-wrapper.ts (tracked alongside the
-  // sibling's Phase 4 platform/ consolidation note).
-  // See change: fix-node-resolution-under-electron (follow-up).
-  it.skip("resolves pi from managed install at ~/.omp-dashboard/node_modules/ when direct import fails", async () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-dash-home-managed-"));
+  it("reads installed plugins from ~/.omp/plugins when it exists", async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omp-resolve-test-"));
     cleanupPaths.push(tmpHome);
 
-    // Create a fake managed pi install with a real ESM entry file
-    const fakeDistDir = path.join(
-      tmpHome,
-      ".omp-dashboard",
-      "node_modules",
-      "@earendil-works",
-      "pi-coding-agent",
-      "dist",
-    );
-    fs.mkdirSync(fakeDistDir, { recursive: true });
+    const pluginsDir = path.join(tmpHome, ".omp", "plugins");
+    fs.mkdirSync(pluginsDir, { recursive: true });
     fs.writeFileSync(
-      path.join(fakeDistDir, "index.js"),
-      [
-        "export function DefaultPackageManager() {",
-        "  return {",
-        "    listConfiguredPackages: () => [{ source: 'npm:from-managed', scope: 'user', filtered: false }],",
-        "  };",
-        "}",
-        "export const SettingsManager = { create: () => ({}) };",
-      ].join("\n"),
+      path.join(pluginsDir, "package.json"),
+      JSON.stringify({
+        name: "omp-plugins",
+        private: true,
+        dependencies: { "pi-flows": "^1.0.0", "pi-tools": "^2.0.0" },
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(pluginsDir, "omp-plugins.lock.json"),
+      JSON.stringify({ plugins: {} }, null, 2) + "\n",
+      "utf-8",
     );
 
-    restoreFns.push(withHome(tmpHome));
-    expect(os.homedir()).toBe(tmpHome);
-    vi.resetModules();
+    // Create fake node_modules entries
+    for (const [name, version] of [["pi-flows", "1.2.0"], ["pi-tools", "2.1.0"]] as const) {
+      const pkgDir = path.join(pluginsDir, "node_modules", name);
+      fs.mkdirSync(pkgDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pkgDir, "package.json"),
+        JSON.stringify({ name, version }, null, 2) + "\n",
+        "utf-8",
+      );
+    }
+
+    restoreFns.push(withFakeHome(tmpHome));
+
+    const mockAdapter = {
+      spawn() { throw new Error("not implemented"); },
+      spawnSync<T extends string | Buffer = Buffer>() {
+        return { pid: -1, output: [], stdout: "" as unknown as T, stderr: "" as unknown as T, status: 0, signal: null, error: undefined };
+      },
+    };
 
     const { PackageManagerWrapper } = await import("../package-manager-wrapper.js");
-    const wrapper = new PackageManagerWrapper();
+    const wrapper = new PackageManagerWrapper(mockAdapter);
     const result = await wrapper.listInstalled("global");
 
-    expect(result).toEqual([
-      { source: "npm:from-managed", scope: "user", filtered: false },
-    ]);
+    const sources = result.map((r) => r.source);
+    expect(sources).toContain("npm:pi-flows");
+    expect(sources).toContain("npm:pi-tools");
+
+    const flows = result.find((r) => r.source === "npm:pi-flows");
+    expect(flows?.version).toBe("1.2.0");
+    expect(flows?.scope).toBe("user");
   });
 
-  it.skip("falls through to global npm without crashing when managed install is absent", async () => {
-    // SKIPPED: post ToolRegistry refactor, bareImportStrategy resolves pi-coding-agent
-    // from the dev node_modules regardless of HOME override. Needs a more invasive
-    // test-registry injection to genuinely simulate 'all paths empty'. Tracked as
-    // part of the Phase 4 platform/ consolidation work.
-    // tmp home with NO ~/.omp-dashboard directory -> managed resolution must
-    // silently fail and continue to the global-npm path.
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-dash-home-empty-"));
+  it("returns empty list when ~/.omp/plugins/package.json is absent", async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omp-resolve-empty-"));
     cleanupPaths.push(tmpHome);
 
-    restoreFns.push(withHome(tmpHome));
-    expect(os.homedir()).toBe(tmpHome);
+    // No .omp/plugins directory at all
+    restoreFns.push(withFakeHome(tmpHome));
 
-    // Stub execSync so `npm root -g` returns a directory where pi is also
-    // absent. With direct-import + managed + global all missing, the
-    // function must surface the final "pi-coding-agent is not installed"
-    // error — proving the managed block didn't throw early.
-    vi.doMock("node:child_process", async (importOriginal) => {
-      const actual = await importOriginal<typeof import("node:child_process")>();
-      return {
-        ...actual,
-        execSync: vi.fn(() => tmpHome), // no pi inside tmpHome
-      };
-    });
+    const mockAdapter = {
+      spawn() { throw new Error("not implemented"); },
+      spawnSync<T extends string | Buffer = Buffer>() {
+        return { pid: -1, output: [], stdout: "" as unknown as T, stderr: "" as unknown as T, status: 0, signal: null, error: undefined };
+      },
+    };
 
-    vi.resetModules();
     const { PackageManagerWrapper } = await import("../package-manager-wrapper.js");
-    const wrapper = new PackageManagerWrapper();
+    const wrapper = new PackageManagerWrapper(mockAdapter);
+    const result = await wrapper.listInstalled("global");
 
-    await expect(wrapper.listInstalled("global")).rejects.toThrow(
-      /pi-coding-agent is not installed/,
+    expect(result).toEqual([]);
+  });
+
+  it("returns empty list for local scope regardless of installed plugins", async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omp-resolve-local-"));
+    cleanupPaths.push(tmpHome);
+
+    const pluginsDir = path.join(tmpHome, ".omp", "plugins");
+    fs.mkdirSync(pluginsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginsDir, "package.json"),
+      JSON.stringify({ name: "omp-plugins", private: true, dependencies: { "pi-flows": "^1.0.0" } }, null, 2) + "\n",
+      "utf-8",
     );
+    fs.writeFileSync(
+      path.join(pluginsDir, "omp-plugins.lock.json"),
+      JSON.stringify({ plugins: {} }, null, 2) + "\n",
+      "utf-8",
+    );
+
+    restoreFns.push(withFakeHome(tmpHome));
+
+    const mockAdapter = {
+      spawn() { throw new Error("not implemented"); },
+      spawnSync<T extends string | Buffer = Buffer>() {
+        return { pid: -1, output: [], stdout: "" as unknown as T, stderr: "" as unknown as T, status: 0, signal: null, error: undefined };
+      },
+    };
+
+    const { PackageManagerWrapper } = await import("../package-manager-wrapper.js");
+    const wrapper = new PackageManagerWrapper(mockAdapter);
+    const result = await wrapper.listInstalled("local");
+
+    expect(result).toEqual([]);
+  });
+
+  it("handles corrupt package.json gracefully", async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omp-resolve-corrupt-"));
+    cleanupPaths.push(tmpHome);
+
+    const pluginsDir = path.join(tmpHome, ".omp", "plugins");
+    fs.mkdirSync(pluginsDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginsDir, "package.json"), "NOT VALID JSON{{{", "utf-8");
+
+    restoreFns.push(withFakeHome(tmpHome));
+
+    const mockAdapter = {
+      spawn() { throw new Error("not implemented"); },
+      spawnSync<T extends string | Buffer = Buffer>() {
+        return { pid: -1, output: [], stdout: "" as unknown as T, stderr: "" as unknown as T, status: 0, signal: null, error: undefined };
+      },
+    };
+
+    const { PackageManagerWrapper } = await import("../package-manager-wrapper.js");
+    const wrapper = new PackageManagerWrapper(mockAdapter);
+    const result = await wrapper.listInstalled("global");
+
+    // Should not throw; returns empty since package.json is unreadable
+    expect(result).toEqual([]);
+  });
+
+  it("respects lockfile filtered state for disabled plugins", async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omp-resolve-filtered-"));
+    cleanupPaths.push(tmpHome);
+
+    const pluginsDir = path.join(tmpHome, ".omp", "plugins");
+    fs.mkdirSync(pluginsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginsDir, "package.json"),
+      JSON.stringify({
+        name: "omp-plugins",
+        private: true,
+        dependencies: { "pi-flows": "^1.0.0", "pi-tools": "^2.0.0" },
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(pluginsDir, "omp-plugins.lock.json"),
+      JSON.stringify({
+        plugins: {
+          "pi-flows": { enabled: false, version: "1.0.0" },
+          "pi-tools": { enabled: true, version: "2.0.0" },
+        },
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+
+    restoreFns.push(withFakeHome(tmpHome));
+
+    const mockAdapter = {
+      spawn() { throw new Error("not implemented"); },
+      spawnSync<T extends string | Buffer = Buffer>() {
+        return { pid: -1, output: [], stdout: "" as unknown as T, stderr: "" as unknown as T, status: 0, signal: null, error: undefined };
+      },
+    };
+
+    const { PackageManagerWrapper } = await import("../package-manager-wrapper.js");
+    const wrapper = new PackageManagerWrapper(mockAdapter);
+    const result = await wrapper.listInstalled("global");
+
+    const flows = result.find((r) => r.source === "npm:pi-flows");
+    const tools = result.find((r) => r.source === "npm:pi-tools");
+    expect(flows?.filtered).toBe(true);
+    expect(tools?.filtered).toBe(false);
   });
 });

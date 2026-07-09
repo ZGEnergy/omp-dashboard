@@ -1,126 +1,170 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { PackageManagerWrapper, PackageOperationBusyError } from "../package-manager-wrapper.js";
-import { ToolRegistry, OverridesStore } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
-import { registerDefaultTools } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/definitions.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { PackageManagerWrapper } from "../package-manager-wrapper.js";
+import type { SubprocessAdapter } from "@blackbelt-technology/pi-dashboard-shared/platform/subprocess-adapter.js";
+import type { OperationResult, ProgressEvent } from "../package-manager-wrapper.js";
 import os from "node:os";
 import path from "node:path";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-
-// Track mock functions
-const installAndPersist = vi.fn().mockResolvedValue(undefined);
-const removeAndPersist = vi.fn().mockResolvedValue(undefined);
-const update = vi.fn().mockResolvedValue(undefined);
-const listConfiguredPackages = vi.fn().mockReturnValue([
-  { source: "npm:pi-doom", scope: "user", filtered: false },
-  { source: "npm:pi-local", scope: "project", filtered: false },
-]);
-const checkForAvailableUpdates = vi.fn().mockResolvedValue([
-  { source: "npm:pi-doom", displayName: "pi-doom", type: "npm" },
-]);
-const setProgressCallback = vi.fn();
-
-// The PiModule returned by registry.resolveModule (bypasses vi.mock).
-const fakePiModule = {
-  DefaultPackageManager: function() {
-    return {
-      installAndPersist,
-      removeAndPersist,
-      update,
-      listConfiguredPackages,
-      checkForAvailableUpdates,
-      setProgressCallback,
-    };
-  },
-  SettingsManager: { create: () => ({}) },
-};
+import fs from "node:fs";
 
 /**
- * Build a ToolRegistry whose pi-coding-agent resolution is a no-op lookup
- * (any path) and whose importModule() returns the in-memory fake module.
- * This sidesteps the whole resolution chain so tests run without a
- * pi-coding-agent install.
+ * Helper: redirect os.homedir() by setting the env vars libuv reads.
+ * Returns a cleanup function that restores the original values.
  */
-function makeTestRegistry(): ToolRegistry {
-  // Per-test ephemeral overrides file so each test gets a fresh registry.
-  const tmpDir = mkdtempSync(path.join(os.tmpdir(), "pmw-test-"));
-  const overrides = new OverridesStore({
-    filePath: path.join(tmpDir, "tool-overrides.json"),
-  });
-  // overrideStrategy checks file existence — create a real stub under tmpDir
-  // rather than a phantom /stub path so CI (no pi-coding-agent installed)
-  // doesn't fall through every strategy and throw ModuleResolutionError.
-  const stubDir = path.join(tmpDir, "pi-coding-agent", "dist");
-  mkdirSync(stubDir, { recursive: true });
-  const stubPath = path.join(stubDir, "index.js");
-  writeFileSync(stubPath, "// test stub\n");
-  overrides.set("pi-coding-agent", stubPath);
+function withFakeHome(tmpHome: string): () => void {
+  const prev = {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+  };
+  process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome;
+  return () => {
+    if (prev.HOME === undefined) delete process.env.HOME;
+    else process.env.HOME = prev.HOME;
+    if (prev.USERPROFILE === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prev.USERPROFILE;
+  };
+}
 
-  // Inject importModule that always returns the fake pi module, bypassing
-  // any real dynamic import. The override above ensures the strategy chain's
-  // first step (overrideStrategy) returns the synthetic path, which
-  // importModule then maps to our fakePiModule.
-  const registry = new ToolRegistry({
-    overrides,
-    importModule: async () => fakePiModule,
-  });
-  registerDefaultTools(registry);
-  return registry;
+interface MockSubprocessAdapter extends SubprocessAdapter {
+  calls: Array<{ command: string; args: readonly string[] }>;
+}
+
+/**
+ * Create a mock SubprocessAdapter that records spawnSync calls and
+ * returns configurable results.
+ */
+function makeMockAdapter(): MockSubprocessAdapter {
+  const calls: MockSubprocessAdapter["calls"] = [];
+  return {
+    calls,
+    spawn(command: string, args?: readonly string[]) {
+      void command;
+      void args;
+      throw new Error("spawn not implemented in mock");
+    },
+    spawnSync<T extends string | Buffer = Buffer>(command: string, args: readonly string[] = []) {
+      calls.push({ command, args });
+      return {
+        pid: -1,
+        output: [],
+        stdout: "" as unknown as T,
+        stderr: "" as unknown as T,
+        status: 0,
+        signal: null,
+        error: undefined,
+      };
+    },
+  };
+}
+
+/**
+ * Set up a fake OMP plugins directory with the given dependencies.
+ */
+function setupPluginsDir(pluginsDir: string, deps: Record<string, string>): void {
+  fs.mkdirSync(pluginsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(pluginsDir, "package.json"),
+    JSON.stringify({ name: "omp-plugins", private: true, dependencies: deps }, null, 2) + "\n",
+    "utf-8",
+  );
+  // Create a minimal lockfile
+  fs.writeFileSync(
+    path.join(pluginsDir, "omp-plugins.lock.json"),
+    JSON.stringify({ plugins: {} }, null, 2) + "\n",
+    "utf-8",
+  );
+}
+
+/**
+ * Create a fake node_modules entry for a package.
+ */
+function createFakePackage(pluginsDir: string, name: string, version: string, description?: string): void {
+  const pkgDir = path.join(pluginsDir, "node_modules", name);
+  fs.mkdirSync(pkgDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(pkgDir, "package.json"),
+    JSON.stringify({ name, version, description: description ?? `Fake ${name}` }, null, 2) + "\n",
+    "utf-8",
+  );
 }
 
 describe("PackageManagerWrapper", () => {
   let wrapper: PackageManagerWrapper;
+  let mockAdapter: MockSubprocessAdapter;
+  let tmpHome: string;
+  let pluginsDir: string;
+  let cleanupHome: (() => void) | undefined;
 
   beforeEach(() => {
-    installAndPersist.mockReset().mockResolvedValue(undefined);
-    removeAndPersist.mockReset().mockResolvedValue(undefined);
-    update.mockReset().mockResolvedValue(undefined);
-    listConfiguredPackages.mockReset().mockReturnValue([
-      { source: "npm:pi-doom", scope: "user", filtered: false },
-      { source: "npm:pi-local", scope: "project", filtered: false },
-    ]);
-    checkForAvailableUpdates.mockReset().mockResolvedValue([
-      { source: "npm:pi-doom", displayName: "pi-doom", type: "npm" },
-    ]);
-    setProgressCallback.mockReset();
-    wrapper = new PackageManagerWrapper(makeTestRegistry());
+    // Create ephemeral temp home so the module-level OMP_PLUGINS_DIR
+    // resolves to our test directory.
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pmw-omp-test-"));
+    pluginsDir = path.join(tmpHome, ".omp", "plugins");
+    setupPluginsDir(pluginsDir, {
+      "pi-doom": "npm:pi-doom@1.0.0",
+      "pi-local": "npm:pi-local@2.0.0",
+    });
+    createFakePackage(pluginsDir, "pi-doom", "1.0.0", "Doom clone");
+    createFakePackage(pluginsDir, "pi-local", "2.0.0", "Local helper");
+
+    cleanupHome = withFakeHome(tmpHome);
+    // Re-evaluate module-level constants by resetting modules
+    vi.resetModules();
+    mockAdapter = makeMockAdapter();
   });
 
+  afterEach(() => {
+    cleanupHome?.();
+    cleanupHome = undefined;
+    try {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    } catch { /* ignore */ }
+    vi.restoreAllMocks();
+    vi.doUnmock("../npm-search-proxy.js");
+  });
+
+  /**
+   * Dynamically import the wrapper after HOME is set so module-level
+   * constants (OMP_PLUGINS_DIR) resolve to the temp directory.
+   */
+  async function createWrapper(adapter?: SubprocessAdapter): Promise<PackageManagerWrapper> {
+    const mod = await import("../package-manager-wrapper.js");
+    return new mod.PackageManagerWrapper(adapter ?? mockAdapter);
+  }
+
   it("returns operationId on run", async () => {
-    const id = await wrapper.run({ action: "install", source: "npm:test", scope: "global" });
+    wrapper = await createWrapper();
+    const id = await wrapper.run({ action: "install", source: "npm:test-pkg", scope: "global" });
     expect(id).toMatch(/^[0-9a-f-]+$/);
   });
 
   it("throws PackageOperationBusyError on concurrent operations", async () => {
-    let resolveInstall!: () => void;
-    installAndPersist.mockImplementation(() => new Promise<void>((r) => { resolveInstall = r; }));
+    wrapper = await createWrapper();
 
-    await wrapper.run({ action: "install", source: "npm:a", scope: "global" });
-    // Wait for the dynamic import + installAndPersist to be called
-    await vi.waitFor(() => expect(installAndPersist).toHaveBeenCalled());
+    // Start first operation — sets busy=true; do NOT await so the
+    // operation stays in flight when we test the second call.
+    const firstRun = wrapper.run({ action: "install", source: "npm:a", scope: "global" });
 
+    // The wrapper should now be busy (executeOperation is running async)
+    // Second run should throw
     await expect(
       wrapper.run({ action: "install", source: "npm:b", scope: "global" }),
-    ).rejects.toThrow(PackageOperationBusyError);
+    ).rejects.toThrow(expect.objectContaining({ name: "PackageOperationBusyError" }));
 
-    resolveInstall();
-    await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
+    // Cleanup: await the first operation
+    const opId = await firstRun;
+    expect(opId).toMatch(/^[0-9a-f-]+$/);
   });
 
   it("forwards progress events via listener", async () => {
-    const progressEvents: any[] = [];
+    wrapper = await createWrapper();
 
-    let capturedCallback: any;
-    setProgressCallback.mockImplementation((cb: any) => { capturedCallback = cb; });
-    installAndPersist.mockImplementation(async () => {
-      capturedCallback?.({ type: "start", action: "install", source: "npm:test" });
-      capturedCallback?.({ type: "complete", action: "install", source: "npm:test" });
-    });
-
+    const progressEvents: Array<{ opId: string; event: ProgressEvent }> = [];
     wrapper.setProgressListener((opId, event) => {
       progressEvents.push({ opId, event });
     });
 
-    const opId = await wrapper.run({ action: "install", source: "npm:test", scope: "global" });
+    const opId = await wrapper.run({ action: "install", source: "npm:test-pkg", scope: "global" });
     await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
 
     expect(progressEvents.length).toBe(2);
@@ -130,69 +174,159 @@ describe("PackageManagerWrapper", () => {
   });
 
   it("calls reloadSessions on success", async () => {
+    wrapper = await createWrapper();
+
     const reloadFn = vi.fn().mockResolvedValue(3);
     wrapper.setReloadSessions(reloadFn);
 
-    const completions: any[] = [];
+    const completions: OperationResult[] = [];
     wrapper.setCompleteListener((result) => completions.push(result));
 
-    await wrapper.run({ action: "install", source: "npm:test", scope: "global" });
+    await wrapper.run({ action: "install", source: "npm:test-pkg", scope: "global" });
     await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
 
     expect(reloadFn).toHaveBeenCalledOnce();
     expect(completions[0].success).toBe(true);
-    expect(completions[0].sessionsReloaded).toBe(3);
+    expect((completions[0] as OperationResult & { sessionsReloaded?: number }).sessionsReloaded).toBe(3);
   });
 
   it("does NOT call reloadSessions on failure", async () => {
-    installAndPersist.mockRejectedValue(new Error("npm exploded"));
+    // Make spawnSync fail
+    const failAdapter: SubprocessAdapter = {
+      spawn() { throw new Error("not implemented"); },
+      spawnSync<T extends string | Buffer = Buffer>() {
+        return {
+          pid: -1, output: [], stdout: "" as unknown as T, stderr: "bun exploded" as unknown as T,
+          status: 1, signal: null, error: undefined,
+        };
+      },
+    };
+    wrapper = await createWrapper(failAdapter);
 
     const reloadFn = vi.fn().mockResolvedValue(0);
     wrapper.setReloadSessions(reloadFn);
 
-    const completions: any[] = [];
+    const completions: OperationResult[] = [];
     wrapper.setCompleteListener((result) => completions.push(result));
 
-    await wrapper.run({ action: "install", source: "npm:test", scope: "global" });
+    await wrapper.run({ action: "install", source: "npm:test-pkg", scope: "global" });
     await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
 
     expect(reloadFn).not.toHaveBeenCalled();
     expect(completions[0].success).toBe(false);
-    expect(completions[0].error).toBe("npm exploded");
+    expect(completions[0].error).toMatch(/exited with code 1/);
   });
 
-  it("listInstalled filters by scope", async () => {
+  it("listInstalled returns OMP plugins for global scope", async () => {
+    wrapper = await createWrapper();
     const global = await wrapper.listInstalled("global");
-    expect(global).toEqual([{ source: "npm:pi-doom", scope: "user", filtered: false }]);
+    const sources = global.map((r) => r.source);
+    expect(sources).toContain("npm:pi-doom");
+    expect(sources).toContain("npm:pi-local");
+  });
 
+  it("listInstalled returns empty for local scope", async () => {
+    wrapper = await createWrapper();
     const local = await wrapper.listInstalled("local");
-    expect(local).toEqual([{ source: "npm:pi-local", scope: "project", filtered: false }]);
+    expect(local).toEqual([]);
   });
 
-  it("checkUpdates delegates to PackageManager", async () => {
+  it("checkUpdates returns packages with newer versions available", async () => {
+    // Mock fetchPackageMeta to return a newer version for pi-doom
+    vi.doMock("../npm-search-proxy.js", () => ({
+      fetchPackageMeta: vi.fn(async (pkgName: string) => {
+        if (pkgName === "pi-doom") return { version: "2.0.0", description: "Doom clone" };
+        return { version: "2.0.0", description: "Local helper" };
+      }),
+    }));
+
+    wrapper = await createWrapper();
     const updates = await wrapper.checkUpdates();
-    expect(updates).toEqual([{ source: "npm:pi-doom", displayName: "pi-doom", type: "npm" }]);
+
+    expect(updates.length).toBeGreaterThanOrEqual(1);
+    const doomUpdate = updates.find((u) => u.displayName === "pi-doom");
+    expect(doomUpdate).toBeDefined();
+    expect(doomUpdate?.latestVersion).toBe("2.0.0");
+    expect(doomUpdate?.installedVersion).toBe("1.0.0");
   });
 
-  it("calls remove for remove action", async () => {
-    const completions: any[] = [];
+  it("install runs bun install and updates lockfile", async () => {
+    wrapper = await createWrapper();
+
+    const completions: OperationResult[] = [];
     wrapper.setCompleteListener((result) => completions.push(result));
 
-    await wrapper.run({ action: "remove", source: "npm:test", scope: "local", cwd: "/tmp" });
+    await wrapper.run({ action: "install", source: "npm:new-plugin", scope: "global" });
     await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
 
-    expect(removeAndPersist).toHaveBeenCalledWith("npm:test", { local: true });
+    // Verify bun install was called
+    expect(mockAdapter.calls.some((c) => c.command === "bun" && c.args[0] === "install")).toBe(true);
+
+    // Verify package.json was updated
+    const pkgJson = JSON.parse(fs.readFileSync(path.join(pluginsDir, "package.json"), "utf-8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(pkgJson.dependencies["new-plugin"]).toBe("new-plugin");
+
+    // Verify lockfile was updated
+    const lock = JSON.parse(fs.readFileSync(path.join(pluginsDir, "omp-plugins.lock.json"), "utf-8")) as {
+      plugins: Record<string, { enabled: boolean; version: string }>;
+    };
+    expect(lock.plugins["new-plugin"]).toBeDefined();
+    expect(lock.plugins["new-plugin"].enabled).toBe(true);
+
     expect(completions[0].success).toBe(true);
   });
 
-  it("calls update for update action", async () => {
-    const completions: any[] = [];
+  it("remove runs bun uninstall and updates lockfile", async () => {
+    wrapper = await createWrapper();
+
+    const completions: OperationResult[] = [];
     wrapper.setCompleteListener((result) => completions.push(result));
 
-    await wrapper.run({ action: "update", source: "npm:test", scope: "global" });
+    await wrapper.run({ action: "remove", source: "npm:pi-doom", scope: "global" });
     await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
 
-    expect(update).toHaveBeenCalledWith("npm:test");
+    // Verify bun uninstall was called with the package name
+    expect(mockAdapter.calls.some(
+      (c) => c.command === "bun" && c.args[0] === "uninstall" && c.args[1] === "pi-doom",
+    )).toBe(true);
+
+    // Verify package.json no longer has pi-doom
+    const pkgJson = JSON.parse(fs.readFileSync(path.join(pluginsDir, "package.json"), "utf-8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(pkgJson.dependencies["pi-doom"]).toBeUndefined();
+
     expect(completions[0].success).toBe(true);
+  });
+
+  it("update runs bun update", async () => {
+    wrapper = await createWrapper();
+
+    const completions: OperationResult[] = [];
+    wrapper.setCompleteListener((result) => completions.push(result));
+
+    await wrapper.run({ action: "update", source: "npm:pi-doom", scope: "global" });
+    await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
+
+    // Verify bun update was called
+    expect(mockAdapter.calls.some(
+      (c) => c.command === "bun" && c.args[0] === "update" && c.args[1] === "pi-doom",
+    )).toBe(true);
+
+    expect(completions[0].success).toBe(true);
+  });
+
+  it("update with empty source runs bun update (all)", async () => {
+    wrapper = await createWrapper();
+
+    await wrapper.run({ action: "update", source: "", scope: "global" });
+    await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
+
+    // Should call `bun update` without a package name
+    expect(mockAdapter.calls.some(
+      (c) => c.command === "bun" && c.args[0] === "update" && c.args.length === 1,
+    )).toBe(true);
   });
 });

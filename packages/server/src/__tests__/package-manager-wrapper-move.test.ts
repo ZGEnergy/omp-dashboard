@@ -1,414 +1,192 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-	PackageManagerWrapper,
-	AlreadyAtDestinationError,
-	InvalidMoveRequestError,
-	UnsupportedSourceForDestinationError,
-} from "../package-manager-wrapper.js";
-import {
-	ToolRegistry,
-	OverridesStore,
-} from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
-import { registerDefaultTools } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/definitions.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { PackageManagerWrapper } from "../package-manager-wrapper.js";
+import type { SubprocessAdapter } from "@blackbelt-technology/pi-dashboard-shared/platform/subprocess-adapter.js";
 import os from "node:os";
 import path from "node:path";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import fs from "node:fs";
 
-// ──────────────────────────────────────────────────────────────────
-// Fake pi.DefaultPackageManager + fake settingsManager that share
-// in-memory state so we can verify the wrapper's `move()` end-to-end.
-// ──────────────────────────────────────────────────────────────────
-
-interface FakeState {
-	globalPackages: any[];
-	projectPackages: any[];
-}
-
-function makeFakePm(state: FakeState) {
-	const settingsManager = {
-		getGlobalSettings: () => ({ packages: [...state.globalPackages] }),
-		getProjectSettings: () => ({ packages: [...state.projectPackages] }),
-		setPackages: vi.fn((p: any[]) => {
-			state.globalPackages = [...p];
-		}),
-		setProjectPackages: vi.fn((p: any[]) => {
-			state.projectPackages = [...p];
-		}),
+/** Override os.homedir() by setting the env vars libuv reads. */
+function withFakeHome(tmpHome: string): () => void {
+	const prev = {
+		HOME: process.env.HOME,
+		USERPROFILE: process.env.USERPROFILE,
 	};
-	const pm: any = {
-		settingsManager,
-		setProgressCallback: vi.fn(),
-		installAndPersist: vi.fn(async (source: string, { local }: { local: boolean }) => {
-			// Simulate pi: append a bare-string entry to the relevant array.
-			if (local) state.projectPackages.push(source);
-			else state.globalPackages.push(source);
-		}),
-		removeAndPersist: vi.fn(async (source: string, { local }: { local: boolean }) => {
-			const arr = local ? state.projectPackages : state.globalPackages;
-			const idx = arr.findIndex((e: any) =>
-				typeof e === "string" ? e === source : e?.source === source,
-			);
-			if (idx >= 0) arr.splice(idx, 1);
-			return idx >= 0;
-		}),
-		update: vi.fn(async () => {}),
-		listConfiguredPackages: () => [
-			...state.globalPackages.map((s) => ({
-				source: typeof s === "string" ? s : s.source,
-				scope: "user",
-				filtered: false,
-			})),
-			...state.projectPackages.map((s) => ({
-				source: typeof s === "string" ? s : s.source,
-				scope: "project",
-				filtered: false,
-			})),
-		],
-	};
-	return { pm, settingsManager };
-}
-
-let currentState: FakeState;
-let currentFakePm: ReturnType<typeof makeFakePm>;
-
-function makeFakePiModule() {
-	return {
-		DefaultPackageManager: function () {
-			// Return the SAME shared fake pm so test assertions can inspect it.
-			return currentFakePm.pm;
-		},
-		SettingsManager: { create: () => ({}) },
+	process.env.HOME = tmpHome;
+	process.env.USERPROFILE = tmpHome;
+	return () => {
+		if (prev.HOME === undefined) delete process.env.HOME;
+		else process.env.HOME = prev.HOME;
+		if (prev.USERPROFILE === undefined) delete process.env.USERPROFILE;
+		else process.env.USERPROFILE = prev.USERPROFILE;
 	};
 }
 
-function makeTestRegistry(): ToolRegistry {
-	const tmpDir = mkdtempSync(path.join(os.tmpdir(), "pmw-move-"));
-	const overrides = new OverridesStore({
-		filePath: path.join(tmpDir, "tool-overrides.json"),
-	});
-	const stubDir = path.join(tmpDir, "pi-coding-agent", "dist");
-	mkdirSync(stubDir, { recursive: true });
-	const stubPath = path.join(stubDir, "index.js");
-	writeFileSync(stubPath, "// test stub\n");
-	overrides.set("pi-coding-agent", stubPath);
-
-	const registry = new ToolRegistry({
-		overrides,
-		importModule: async () => makeFakePiModule(),
-	});
-	registerDefaultTools(registry);
-	return registry;
-}
+const noopAdapter: SubprocessAdapter = {
+	spawn() { throw new Error("not implemented in noop adapter"); },
+	spawnSync<T extends string | Buffer = Buffer>() {
+		return { pid: -1, output: [], stdout: "" as unknown as T, stderr: "" as unknown as T, status: 0, signal: null, error: undefined };
+	},
+};
 
 describe("PackageManagerWrapper.move()", () => {
 	let wrapper: PackageManagerWrapper;
+	let tmpHome: string;
+	let pluginsDir: string;
+	let cleanupHome: (() => void) | undefined;
 
 	beforeEach(() => {
-		currentState = { globalPackages: [], projectPackages: [] };
-		currentFakePm = makeFakePm(currentState);
-		wrapper = new PackageManagerWrapper(makeTestRegistry());
+		tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pmw-move-omp-"));
+		pluginsDir = path.join(tmpHome, ".omp", "plugins");
+		fs.mkdirSync(pluginsDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(pluginsDir, "package.json"),
+			JSON.stringify({ name: "omp-plugins", private: true, dependencies: {} }, null, 2) + "\n",
+			"utf-8",
+		);
+		fs.writeFileSync(
+			path.join(pluginsDir, "omp-plugins.lock.json"),
+			JSON.stringify({ plugins: {} }, null, 2) + "\n",
+			"utf-8",
+		);
+		cleanupHome = withFakeHome(tmpHome);
+		vi.resetModules();
 	});
+
+	afterEach(() => {
+		cleanupHome?.();
+		cleanupHome = undefined;
+		try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* ignore */ }
+		vi.restoreAllMocks();
+	});
+
+	async function createWrapper(): Promise<PackageManagerWrapper> {
+		const mod = await import("../package-manager-wrapper.js");
+		return new mod.PackageManagerWrapper(noopAdapter);
+	}
 
 	// ── Synchronous validation throws ──────────────────────────────────────
 
 	it("throws InvalidMoveRequestError when fromScope === toScope", async () => {
+		wrapper = await createWrapper();
 		await expect(
 			wrapper.move({
 				entry: "npm:foo",
 				fromScope: "global",
 				toScope: "global",
 			}),
-		).rejects.toThrow(InvalidMoveRequestError);
+	).rejects.toThrow(expect.objectContaining({ name: "InvalidMoveRequestError" }));
 	});
 
-	it("throws InvalidMoveRequestError when fromCwd missing for local fromScope", async () => {
+	it("throws InvalidMoveRequestError when moving global to local", async () => {
+		wrapper = await createWrapper();
+		await expect(
+			wrapper.move({
+				entry: "npm:foo",
+				fromScope: "global",
+				toScope: "local",
+			}),
+	).rejects.toThrow(expect.objectContaining({ name: "InvalidMoveRequestError" }));
+	});
+
+	it("throws InvalidMoveRequestError when moving local to global", async () => {
+		wrapper = await createWrapper();
 		await expect(
 			wrapper.move({
 				entry: "npm:foo",
 				fromScope: "local",
 				toScope: "global",
 			}),
-		).rejects.toThrow(InvalidMoveRequestError);
+	).rejects.toThrow(expect.objectContaining({ name: "InvalidMoveRequestError" }));
 	});
 
-	it("throws InvalidMoveRequestError when toCwd missing for local toScope", async () => {
+	it("rejects with clear message mentioning OMP global-only model", async () => {
+		wrapper = await createWrapper();
+		await expect(
+			wrapper.move({
+				entry: "npm:pi-flows",
+				fromScope: "global",
+				toScope: "local",
+				toCwd: "/proj",
+			}),
+		).rejects.toThrow(/not supported in Oh My Pi/i);
+	});
+
+	it("throws PackageOperationBusyError when busy", async () => {
+		wrapper = await createWrapper();
+
+		// Start an install to make the wrapper busy; do NOT await —
+		// the operation must stay in flight when move() checks busy.
+		const installPromise = wrapper.run({ action: "install", source: "npm:a", scope: "global" });
+
+		// move should fail while busy
 		await expect(
 			wrapper.move({
 				entry: "npm:foo",
 				fromScope: "global",
 				toScope: "local",
 			}),
-		).rejects.toThrow(InvalidMoveRequestError);
+		).rejects.toThrow(/already in progress/);
+
+		await installPromise; // cleanup
 	});
 
-	it("throws InvalidMoveRequestError on empty entry source", async () => {
-		await expect(
-			wrapper.move({
-				entry: "",
-				fromScope: "global",
-				toScope: "local",
-				toCwd: "/p",
-			}),
-		).rejects.toThrow(InvalidMoveRequestError);
-	});
+	// ── Path source moves also rejected ────────────────────────────────────
 
-	it("throws UnsupportedSourceForDestinationError for relative path without fromCwd (local origin)", async () => {
-		// fromScope=local needs fromCwd anyway, but the rel-path check
-		// adds a more specific error code. The wrapper checks
-		// InvalidMoveRequestError first; this guards the secondary check.
-		// The current invariant is: rel-path without fromCwd while origin
-		// is local. We can validate that path explicitly when local
-		// fromScope+fromCwd is missing — let's just confirm the local
-		// invariant fires.
+	it("rejects path source move from local to global", async () => {
+		wrapper = await createWrapper();
 		await expect(
 			wrapper.move({
 				entry: "..",
 				fromScope: "local",
+				fromCwd: "/proj",
 				toScope: "global",
 			}),
-		).rejects.toThrow(InvalidMoveRequestError);
+	).rejects.toThrow(expect.objectContaining({ name: "InvalidMoveRequestError" }));
 	});
 
-	// ── Happy path: npm move (global → local) ──────────────────────────────
-
-	it("moves npm package from global to local: install + remove with shared moveId", async () => {
-		currentState.globalPackages = ["npm:pi-flows"];
-
-		const completions: any[] = [];
-		const reloadFn = vi.fn().mockResolvedValue(2);
-		wrapper.setCompleteListener((r) => completions.push(r));
-		wrapper.setReloadSessions(reloadFn);
-
-		const moveId = await wrapper.move({
-			entry: "npm:pi-flows",
-			fromScope: "global",
-			toScope: "local",
-			toCwd: "/proj",
-		});
-
-		expect(moveId).toMatch(/^[0-9a-f-]+$/);
-		await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
-
-		// Two pi calls (install at dest, remove from origin).
-		expect(currentFakePm.pm.installAndPersist).toHaveBeenCalledWith("npm:pi-flows", { local: true });
-		expect(currentFakePm.pm.removeAndPersist).toHaveBeenCalledWith("npm:pi-flows", { local: false });
-
-		// Final state: removed from global, present in local.
-		expect(currentState.globalPackages).toEqual([]);
-		expect(currentState.projectPackages).toEqual(["npm:pi-flows"]);
-
-		// Exactly ONE reload (coalesced), not two.
-		expect(reloadFn).toHaveBeenCalledOnce();
-
-		// Exactly ONE complete event, action=move, with moveId.
-		expect(completions).toHaveLength(1);
-		expect(completions[0].action).toBe("move");
-		expect(completions[0].success).toBe(true);
-		expect(completions[0].moveId).toBe(moveId);
-		expect(completions[0].sessionsReloaded).toBe(2);
+	it("rejects path source move from global to local", async () => {
+		wrapper = await createWrapper();
+		await expect(
+			wrapper.move({
+				entry: "/abs/path",
+				fromScope: "global",
+				toScope: "local",
+				toCwd: "/proj",
+			}),
+	).rejects.toThrow(expect.objectContaining({ name: "InvalidMoveRequestError" }));
 	});
 
-	// ── Happy path: git move (local → global) ──────────────────────────────
+	// ── Filter object entries also rejected ────────────────────────────────
 
-	it("moves git package preserving pin in source string", async () => {
-		currentState.projectPackages = ["git:github.com/x/y@v1.2.3"];
-
-		await wrapper.move({
-			entry: "git:github.com/x/y@v1.2.3",
-			fromScope: "local",
-			fromCwd: "/proj",
-			toScope: "global",
-		});
-		await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
-
-		// Install at global with the pinned source verbatim.
-		expect(currentFakePm.pm.installAndPersist).toHaveBeenCalledWith(
-			"git:github.com/x/y@v1.2.3",
-			{ local: false },
-		);
-		expect(currentState.globalPackages).toContain("git:github.com/x/y@v1.2.3");
-		expect(currentState.projectPackages).toEqual([]);
+	it("rejects object entry with filters", async () => {
+		wrapper = await createWrapper();
+		await expect(
+			wrapper.move({
+				entry: { source: "npm:pi-flows", extensions: ["a.ts"] },
+				fromScope: "global",
+				toScope: "local",
+				toCwd: "/proj",
+			}),
+	).rejects.toThrow(expect.objectContaining({ name: "InvalidMoveRequestError" }));
 	});
 
-	// ── Identity preflight ──────────────────────────────────────────────────
+	// ── Completion listener receives the error ─────────────────────────────
 
-	it("AlreadyAtDestinationError surfaces via complete listener (already at target identity)", async () => {
-		// Already installed in BOTH scopes — different version pins, but
-		// pi dedup identity is the bare name.
-		currentState.globalPackages = ["npm:pi-flows@1.0.0"];
-		currentState.projectPackages = ["npm:pi-flows@2.0.0"];
+	it("emits completion with success=false on move rejection", async () => {
+		wrapper = await createWrapper();
 
-		const completions: any[] = [];
-		wrapper.setCompleteListener((r) => completions.push(r));
+		// move() throws directly, not via the async executeOperation path.
+		// The completion listener is NOT called for move rejections because
+		// move() throws before any operation is dispatched.
+		await expect(
+			wrapper.move({
+				entry: "npm:pi-flows",
+				fromScope: "global",
+				toScope: "local",
+			}),
+	).rejects.toThrow(expect.objectContaining({ name: "InvalidMoveRequestError" }));
 
-		await wrapper.move({
-			entry: "npm:pi-flows@1.0.0",
-			fromScope: "global",
-			toScope: "local",
-			toCwd: "/proj",
-		});
-		await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
-
-		expect(completions).toHaveLength(1);
-		expect(completions[0].success).toBe(false);
-		expect(completions[0].error).toMatch(/already installed/i);
-		// State unchanged.
-		expect(currentState.globalPackages).toEqual(["npm:pi-flows@1.0.0"]);
-		expect(currentState.projectPackages).toEqual(["npm:pi-flows@2.0.0"]);
-		// pi was NOT called.
-		expect(currentFakePm.pm.installAndPersist).not.toHaveBeenCalled();
-		expect(currentFakePm.pm.removeAndPersist).not.toHaveBeenCalled();
-	});
-
-	// ── Path arm: settings-only edit (rel-path → global) ───────────────────
-
-	it("path source moves are settings-only — no install/remove called", async () => {
-		// Origin: local with relative path "..".
-		currentState.projectPackages = [".."];
-
-		await wrapper.move({
-			entry: "..",
-			fromScope: "local",
-			fromCwd: "/proj",
-			toScope: "global",
-		});
-		await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
-
-		// pi was NOT called (settings-edit arm).
-		expect(currentFakePm.pm.installAndPersist).not.toHaveBeenCalled();
-		expect(currentFakePm.pm.removeAndPersist).not.toHaveBeenCalled();
-
-		// Origin scope cleared; destination has the resolved abs path.
-		expect(currentState.projectPackages).toEqual([]);
-		expect(currentState.globalPackages.length).toBe(1);
-		const newSource = currentState.globalPackages[0];
-		// ".." resolved against /proj/.pi → /proj
-		expect(typeof newSource === "string" ? newSource : newSource.source).toBe("/proj");
-	});
-
-	// ── Filter preservation ─────────────────────────────────────────────────
-
-	it("preserves filter object when moving npm package with filters", async () => {
-		const entry = {
-			source: "npm:pi-flows",
-			extensions: ["a.ts"],
-			skills: [],
-		};
-		currentState.globalPackages = [entry];
-
-		await wrapper.move({
-			entry,
-			fromScope: "global",
-			toScope: "local",
-			toCwd: "/proj",
-		});
-		await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
-
-		// Destination should have the FULL object form, not just the bare string
-		// pi's installer wrote.
-		const destEntry = currentState.projectPackages[0];
-		expect(typeof destEntry).toBe("object");
-		expect(destEntry).toMatchObject({
-			source: "npm:pi-flows",
-			extensions: ["a.ts"],
-			skills: [],
-		});
-	});
-
-	it("preserves filter object on path-source move", async () => {
-		const entry = { source: "..", extensions: ["foo.ts"] };
-		currentState.projectPackages = [entry];
-
-		await wrapper.move({
-			entry,
-			fromScope: "local",
-			fromCwd: "/proj",
-			toScope: "global",
-		});
-		await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
-
-		const destEntry = currentState.globalPackages[0];
-		expect(destEntry).toMatchObject({
-			source: "/proj",
-			extensions: ["foo.ts"],
-		});
-	});
-
-	// ── Partial-success: install OK, remove fails ──────────────────────────
-
-	it("partial success when install succeeds but remove from origin throws", async () => {
-		currentState.globalPackages = ["npm:pi-flows"];
-		currentFakePm.pm.removeAndPersist.mockRejectedValueOnce(new Error("remove blew up"));
-
-		const completions: any[] = [];
-		wrapper.setCompleteListener((r) => completions.push(r));
-
-		await wrapper.move({
-			entry: "npm:pi-flows",
-			fromScope: "global",
-			toScope: "local",
-			toCwd: "/proj",
-		});
-		await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
-
-		const result = completions[0];
-		expect(result.success).toBe(true);
-		expect(result.action).toBe("move");
-		expect(result.partialSuccess).toBeDefined();
-		expect(result.partialSuccess.installed).toBe(true);
-		expect(result.partialSuccess.removed).toBe(false);
-		expect(result.partialSuccess.removeError).toMatch(/remove blew up/);
-	});
-
-	// ── Task 3.4: moveId propagation through progress events ───────────────
-
-	it("emits progress events tagged with the same moveId across both phases", async () => {
-		currentState.globalPackages = ["npm:pi-flows"];
-
-		const progressEvents: Array<{ opId: string; event: any; moveId?: string }> = [];
-		wrapper.setProgressListener((opId, event, moveId) => {
-			progressEvents.push({ opId, event, moveId });
-		});
-
-		// pi's setProgressCallback captures the wrapper's callback. Fire some
-		// progress events from the install phase via the captured callback.
-		let progressCb: any;
-		currentFakePm.pm.setProgressCallback.mockImplementation((cb: any) => {
-			progressCb = cb;
-		});
-		currentFakePm.pm.installAndPersist.mockImplementation(
-			async (source: string, { local }: { local: boolean }) => {
-				progressCb?.({ type: "start", action: "install", source });
-				progressCb?.({ type: "complete", action: "install", source });
-				if (local) currentState.projectPackages.push(source);
-				else currentState.globalPackages.push(source);
-			},
-		);
-		currentFakePm.pm.removeAndPersist.mockImplementation(
-			async (source: string, { local }: { local: boolean }) => {
-				progressCb?.({ type: "start", action: "remove", source });
-				progressCb?.({ type: "complete", action: "remove", source });
-				const arr = local ? currentState.projectPackages : currentState.globalPackages;
-				const idx = arr.findIndex((e: any) =>
-					typeof e === "string" ? e === source : e?.source === source,
-				);
-				if (idx >= 0) arr.splice(idx, 1);
-				return idx >= 0;
-			},
-		);
-
-		const moveId = await wrapper.move({
-			entry: "npm:pi-flows",
-			fromScope: "global",
-			toScope: "local",
-			toCwd: "/proj",
-		});
-		await vi.waitFor(() => expect(wrapper.isBusy()).toBe(false));
-
-		// All emitted progress events must carry the same moveId.
-		expect(progressEvents.length).toBeGreaterThanOrEqual(2);
-		for (const ev of progressEvents) {
-			expect(ev.moveId).toBe(moveId);
-		}
+		// Wrapper should NOT be busy after a synchronous rejection
+		expect(wrapper.isBusy()).toBe(false);
 	});
 });

@@ -1,119 +1,26 @@
 /**
- * Thin adapter around pi's DefaultPackageManager.
- * Serializes operations (one at a time), forwards progress events,
- * and triggers session reload on success.
+ * Oh My Pi plugin manager adapter.
  *
- * Pi module resolution is delegated to the shared `ToolRegistry`
- * (`resolveModule("pi-coding-agent")`). All strategy chains, caching,
- * and diagnostic trails live there — see change: consolidate-tool-resolution.
+ * Manages the OMP plugin directory at `~/.omp/plugins` using
+ * Node fs/path + `bun install`/`bun uninstall`/`bun update` subprocesses.
+ * Replaces the old pi DefaultPackageManager dynamic import approach.
+ *
+ * Plugin storage model:
+ *   - `~/.omp/plugins/package.json` — dependency manifest
+ *   - `~/.omp/plugins/node_modules/` — installed plugin packages
+ *   - `~/.omp/plugins/omp-plugins.lock.json` — runtime enabled state
+ *
+ * Preserves the public API surface (`listInstalled`, `run`, `move`,
+ * `checkUpdates`) so routes/UI keep working without changes.
  */
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
-import { computeIdentity, parseSourceKind } from "./package-source-helpers.js";
-import {
-  getDefaultRegistry,
-  ModuleResolutionError,
-  type ToolRegistry,
-  type Resolution,
-} from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
-import {
-  getDefaultSubprocessAdapter,
-  type SubprocessAdapter,
-} from "@blackbelt-technology/pi-dashboard-shared/platform/subprocess-adapter.js";
-
-/**
- * Resolve a command name through the tool registry's executor API.
- * If the name is registered (e.g. "npm", "openspec", "pi"), returns
- * the full executor argv — on Windows this is `[node.exe, <script>.js]`
- * bypassing .cmd shims. Otherwise returns `[command, ...args]` verbatim
- * so callers fall through to buildSafeArgv's generic handling.
- *
- * See change: consolidate-windows-spawn-and-platform-handlers.
- */
-function resolveViaRegistry(
-  registry: ToolRegistry,
-  command: string,
-  args: readonly string[],
-): string[] {
-  if (registry.has(command)) {
-    const exec = registry.resolveExecutor(command);
-    if (exec.ok && exec.argv.length > 0) {
-      return [...exec.argv, ...args];
-    }
-  }
-  return [command, ...args];
-}
-
-/**
- * Subclass of pi's `DefaultPackageManager` that routes every subprocess
- * through our OS-aware `SubprocessAdapter`. Pi's upstream implementation
- * spawns with `shell: process.platform === "win32"` and no `windowsHide`,
- * which on Windows triggers Node issue #21825 — flashing cmd console
- * every time pi shells out to npm / git / etc.
- *
- * This class overrides the three spawn methods pi exposes on its own
- * class (`spawnCommand`, `spawnCaptureCommand`, `runCommandSync`) and
- * delegates them to the adapter. Other methods inherit unchanged;
- * pi's internal `runCommand` / `runCommandCapture` call the overridden
- * methods via `this.spawnCommand(...)` so they pick up the safe
- * behaviour automatically.
- *
- * Constructor factory takes the base `DefaultPackageManager` class as
- * input so we can extend it dynamically at runtime (pi is loaded via
- * the tool registry's `resolveModule`, not a static import).
- *
- * See change: consolidate-windows-spawn-and-platform-handlers.
- */
-function createSafePackageManagerClass(
-  BaseClass: new (...args: any[]) => any,
-  adapter: SubprocessAdapter,
-  registry: ToolRegistry,
-): new (...args: any[]) => any {
-  return class SafePackageManager extends BaseClass {
-    // `spawnCommand` — used by pi for fire-and-forget installs where
-    // stdout/stderr are inherited (or piped for capture). Returns the
-    // live ChildProcess.
-    //
-    // Registry resolution: `command` arrives as "npm" / "git" etc.
-    // For registered executor tools this becomes `[node.exe, cli.js]`
-    // on Windows, bypassing .cmd entirely.
-    spawnCommand(command: string, args: readonly string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }) {
-      const [cmd, ...finalArgs] = resolveViaRegistry(registry, command, args);
-      return adapter.spawn(cmd, finalArgs, {
-        cwd: options?.cwd,
-        stdio: "inherit",
-      });
-    }
-
-    // `spawnCaptureCommand` — used by pi when it wants to read stdout /
-    // stderr programmatically (e.g. `npm root -g`, `npm view <pkg>`).
-    spawnCaptureCommand(command: string, args: readonly string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }) {
-      const [cmd, ...finalArgs] = resolveViaRegistry(registry, command, args);
-      return adapter.spawn(cmd, finalArgs, {
-        cwd: options?.cwd,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: options?.env ? { ...process.env, ...options.env } : process.env,
-      });
-    }
-
-    // `runCommandSync` — used for quick synchronous checks.
-    runCommandSync(command: string, args: readonly string[]) {
-      const [cmd, ...finalArgs] = resolveViaRegistry(registry, command, args);
-      const result = adapter.spawnSync<string>(cmd, finalArgs, {
-        stdio: ["ignore", "pipe", "pipe"],
-        encoding: "utf-8",
-      });
-      if (result.status !== 0) {
-        const stderr = typeof result.stderr === "string" ? result.stderr : String(result.stderr ?? "");
-        const stdout = typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "");
-        throw new Error(`Failed to run ${command} ${args.join(" ")}: ${stderr || stdout}`);
-      }
-      const stdout = typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "");
-      return stdout.trim();
-    }
-  };
-}
+import type { SubprocessAdapter } from "@blackbelt-technology/pi-dashboard-shared/platform/subprocess-adapter.js";
+import { getDefaultSubprocessAdapter } from "@blackbelt-technology/pi-dashboard-shared/platform/subprocess-adapter.js";
+import { fetchPackageMeta } from "./npm-search-proxy.js";
+import { compareVersions } from "./pi-version-skew.js";
 
 export interface ProgressEvent {
   type: "start" | "progress" | "complete" | "error";
@@ -121,35 +28,6 @@ export interface ProgressEvent {
   source: string;
   message?: string;
 }
-
-/** Pi-coding-agent's public surface, as consumed by this wrapper. */
-interface PiModule {
-  DefaultPackageManager: any;
-  SettingsManager: any;
-}
-
-/**
- * Resolve pi's package-manager API via the ToolRegistry. Surface the
- * diagnostic trail on failure so callers (routes) can show the real
- * reason instead of a generic "not installed" message.
- */
-async function loadPiPackageManager(registry: ToolRegistry = getDefaultRegistry()): Promise<PiModule> {
-  const { module } = await registry.resolveModule<PiModule>("pi-coding-agent");
-  if (!module.DefaultPackageManager) {
-    throw new Error(
-      "pi-coding-agent resolved but does not export DefaultPackageManager (unexpected package version)",
-    );
-  }
-  return module;
-}
-
-/** Debug helper: expose the raw Resolution for diagnostic surfaces. */
-export function diagnosePiPackageManager(registry: ToolRegistry = getDefaultRegistry()): Resolution {
-  return registry.resolve("pi-coding-agent");
-}
-
-/** Re-export so route handlers can `instanceof`-check for the rich error. */
-export { ModuleResolutionError };
 
 export type PackageScope = "global" | "local";
 export type PackageAction = "install" | "remove" | "update" | "move";
@@ -162,13 +40,12 @@ export interface OperationRequest {
 }
 
 /**
- * Pi `packages[]` entry. Either a bare source string or an object with
- * filter keys (`extensions`/`skills`/`prompts`/`themes`). See pi's
- * `docs/packages.md` “Package Filtering” section.
+ * OMP `extensions[]` entry. Either a bare source string or an object with
+ * filter keys. Legacy `packages[]` entries are also accepted.
  */
 export type PackageEntry = string | { source: string; [k: string]: unknown };
 
-/** Move operation request. See change: unify-package-management-ui. */
+/** Move operation request. */
 export interface MoveRequest {
   /** Full origin entry (string or filter object) — passed verbatim from the route. */
   entry: PackageEntry;
@@ -195,14 +72,176 @@ export interface OperationResult {
     removed: boolean;
     removeError?: string;
   };
-  /** On failure: full resolution trail if pi couldn't be loaded. */
-  diagnostics?: Resolution;
+  /** Resolution diagnostics forwarded to clients on package_operation_complete. */
+  diagnostics?: Record<string, unknown>;
 }
 
 export type ProgressListener = (operationId: string, event: ProgressEvent, moveId?: string) => void;
 export type CompleteListener = (result: OperationResult) => void;
 
-const AGENT_DIR = path.join(os.homedir(), ".omp", "agent");
+
+// ── OMP Plugin Directory ─────────────────────────────────────────────
+
+const OMP_PLUGINS_DIR = path.join(os.homedir(), ".omp", "plugins");
+
+function ensurePluginsDir(): void {
+  fs.mkdirSync(OMP_PLUGINS_DIR, { recursive: true });
+}
+
+function pluginsPackageJsonPath(): string {
+  return path.join(OMP_PLUGINS_DIR, "package.json");
+}
+
+function readPluginsPackageJson(): Record<string, unknown> {
+  const p = pluginsPackageJsonPath();
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function writePluginsPackageJson(data: Record<string, unknown>): void {
+  ensurePluginsDir();
+  fs.writeFileSync(pluginsPackageJsonPath(), JSON.stringify(data, null, 2) + "\n", "utf-8");
+}
+
+function ensurePluginsPackageJsonExists(): void {
+  ensurePluginsDir();
+  const p = pluginsPackageJsonPath();
+  if (!fs.existsSync(p)) {
+    fs.writeFileSync(p, JSON.stringify({ name: "omp-plugins", private: true, dependencies: {} }, null, 2) + "\n", "utf-8");
+  }
+}
+
+/** Run a bun command in the plugins directory with inherited stdio. */
+function runBun(adapter: SubprocessAdapter, args: string[]): void {
+  ensurePluginsPackageJsonExists();
+  const result = adapter.spawnSync("bun", args, {
+    cwd: OMP_PLUGINS_DIR,
+    stdio: "inherit",
+    timeout: 120_000,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`bun ${args[0]} exited with code ${result.status}`);
+  }
+}
+
+/** Extract bare package name from an npm:source spec. */
+function extractPackageName(source: string): string {
+  const spec = source.startsWith("npm:") ? source.slice(4) : source;
+  // Strip version suffix: @scope/name@1.0.0 → @scope/name
+  const atIdx = spec.lastIndexOf("@");
+  if (atIdx > 0) return spec.slice(0, atIdx);
+  return spec;
+}
+
+/** Read version from a package's package.json in node_modules. */
+function readInstalledVersion(pkgName: string): string | undefined {
+  const pkgDir = path.join(OMP_PLUGINS_DIR, "node_modules", pkgName, "package.json");
+  try {
+    const raw = fs.readFileSync(pkgDir, "utf-8");
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Read description from a package's package.json in node_modules. */
+function readInstalledDescription(pkgName: string): string | undefined {
+  const pkgDir = path.join(OMP_PLUGINS_DIR, "node_modules", pkgName, "package.json");
+  try {
+    const raw = fs.readFileSync(pkgDir, "utf-8");
+    const parsed = JSON.parse(raw) as { description?: unknown };
+    return typeof parsed.description === "string" ? parsed.description : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// ── Lockfile helpers ─────────────────────────────────────────────────
+
+interface PluginsLockfile {
+  plugins?: Record<string, { enabled?: boolean; version?: string; enabledFeatures?: string[] | null }>;
+  settings?: Record<string, unknown>;
+}
+
+function readLockfile(): PluginsLockfile {
+  const lockPath = path.join(OMP_PLUGINS_DIR, "omp-plugins.lock.json");
+  try {
+    return JSON.parse(fs.readFileSync(lockPath, "utf-8")) as PluginsLockfile;
+  } catch {
+    return {};
+  }
+}
+
+function writeLockfile(data: PluginsLockfile): void {
+  ensurePluginsDir();
+  const lockPath = path.join(OMP_PLUGINS_DIR, "omp-plugins.lock.json");
+  fs.writeFileSync(lockPath, JSON.stringify(data, null, 2) + "\n", "utf-8");
+}
+
+function upsertPluginLockEntry(pkgName: string, version: string, enabled: boolean): void {
+  const lock = readLockfile();
+  if (!lock.plugins) lock.plugins = {};
+  lock.plugins[pkgName] = {
+    ...(lock.plugins[pkgName] ?? {}),
+    version,
+    enabled,
+  };
+  writeLockfile(lock);
+}
+
+function removePluginLockEntry(pkgName: string): void {
+  const lock = readLockfile();
+  if (lock.plugins) {
+    delete lock.plugins[pkgName];
+  }
+  if (lock.settings) {
+    delete lock.settings[pkgName];
+  }
+  writeLockfile(lock);
+}
+
+// ── List installed ───────────────────────────────────────────────────
+
+interface InstalledRow {
+  source: string;
+  scope: "user" | "project";
+  filtered: boolean;
+  installedPath?: string;
+  version?: string;
+  description?: string;
+  displayName?: string;
+}
+
+function listPluginDependencies(): InstalledRow[] {
+  const pkgJson = readPluginsPackageJson();
+  const deps = (pkgJson.dependencies ?? {}) as Record<string, string>;
+  const lock = readLockfile();
+  const rows: InstalledRow[] = [];
+
+  for (const [name, versionSpec] of Object.entries(deps)) {
+    const isDisabled = lock.plugins?.[name]?.enabled === false;
+    const version = readInstalledVersion(name);
+    const description = readInstalledDescription(name);
+    rows.push({
+      source: `npm:${name}`,
+      scope: "user",
+      filtered: isDisabled,
+      installedPath: path.join(OMP_PLUGINS_DIR, "node_modules", name),
+      version: version ?? versionSpec,
+      description,
+      displayName: name,
+    });
+  }
+
+  return rows;
+}
+
+// ── Main Wrapper ─────────────────────────────────────────────────────
 
 export class PackageManagerWrapper {
   private busy = false;
@@ -210,10 +249,10 @@ export class PackageManagerWrapper {
   private onComplete: CompleteListener | undefined;
   /** Called after successful operation; returns number of sessions reloaded. */
   private reloadSessions: (() => Promise<number>) | undefined;
-  private readonly registry: ToolRegistry;
+  private subprocessAdapter: SubprocessAdapter;
 
-  constructor(registry: ToolRegistry = getDefaultRegistry()) {
-    this.registry = registry;
+  constructor(subprocessAdapter?: SubprocessAdapter) {
+    this.subprocessAdapter = subprocessAdapter ?? getDefaultSubprocessAdapter();
   }
 
   setProgressListener(listener: ProgressListener | undefined) {
@@ -272,18 +311,11 @@ export class PackageManagerWrapper {
   }
 
   /**
-   * Move a package between scopes (global ↔ local). Hybrid execution:
+   * Move a package between scopes (global ↔ local).
    *
-   *   - npm:/git:/https: → install at destination, then remove from origin.
-   *   - abs-path/rel-path → settings-only edit (pi never copies path sources).
-   *
-   * Returns moveId synchronously. Single-flight via `this.busy`.
-   * Throws synchronously: `PackageOperationBusyError`,
-   * `InvalidMoveRequestError`, `UnsupportedSourceForDestinationError`.
-   * Throws async (caught by executeMove): `AlreadyAtDestinationError`
-   * is delivered via the complete listener with success=false.
-   *
-   * See change: unify-package-management-ui.
+   * OMP plugin storage is global-only (~/.omp/plugins). Moving between
+   * global and local scope has no OMP plugin equivalent and is not
+   * supported. Throws InvalidMoveRequestError with a clear message.
    */
   async move(req: MoveRequest): Promise<string> {
     if (this.busy) {
@@ -293,107 +325,73 @@ export class PackageManagerWrapper {
     if (req.fromScope === req.toScope) {
       throw new InvalidMoveRequestError("fromScope and toScope must differ");
     }
-    if (req.fromScope === "local" && !req.fromCwd) {
-      throw new InvalidMoveRequestError("fromCwd required when fromScope is local");
-    }
-    if (req.toScope === "local" && !req.toCwd) {
-      throw new InvalidMoveRequestError("toCwd required when toScope is local");
+
+    // OMP plugins are global-only; local scope has no plugin storage equivalent.
+    if (req.toScope === "local" || req.fromScope === "local") {
+      throw new InvalidMoveRequestError(
+        "Moving packages between global and local scope is not supported in Oh My Pi. " +
+        "OMP plugins are managed globally at ~/.omp/plugins. " +
+        "Use project-level .omp/settings.json extensions array for local configuration.",
+      );
     }
 
-    const sourceStr = typeof req.entry === "string" ? req.entry : req.entry.source;
-    if (!sourceStr || typeof sourceStr !== "string") {
-      throw new InvalidMoveRequestError("entry.source must be a non-empty string");
-    }
-    if (parseSourceKind(sourceStr) === "rel-path" && req.fromScope === "local" && !req.fromCwd) {
-      throw new UnsupportedSourceForDestinationError("relative-path source requires fromCwd");
-    }
-
-    const moveId = crypto.randomUUID();
-    this.busy = true;
-    this.executeMove(moveId, req).catch(() => {
-      // errors handled inside executeMove
-    });
-    return moveId;
+    throw new InvalidMoveRequestError(
+      "Move between scopes is not supported in Oh My Pi plugin storage. " +
+      "Install or remove packages directly instead.",
+    );
   }
 
   /**
-   * List configured packages for a scope.
+   * List configured packages. For "global" scope, reads from OMP plugin
+   * storage (~/.omp/plugins). For "local" scope, returns an empty list
+   * since OMP does not have local-scope plugin installs.
    */
-  async listInstalled(scope: PackageScope, cwd?: string) {
-    const pm = await this.createPackageManager(cwd);
-    const all = pm.listConfiguredPackages();
-    const scopeFilter = scope === "global" ? "user" : "project";
-    return all.filter((p: any) => p.scope === scopeFilter);
+  async listInstalled(scope: PackageScope, _cwd?: string) {
+    if (scope === "local") {
+      return [];
+    }
+    return listPluginDependencies();
   }
 
   /**
-   * Check for available updates. Returns packages that have updates.
+   * Check for available updates. Compares installed versions against npm
+   * registry latest metadata. Fails loudly on malformed registry responses.
    */
-  async checkUpdates(cwd?: string) {
-    const pm = await this.createPackageManager(cwd);
-    return pm.checkForAvailableUpdates();
+  async checkUpdates(_cwd?: string) {
+    const installed = listPluginDependencies();
+    const updates: Array<{ source: string; displayName: string; type: string; installedVersion?: string; latestVersion?: string }> = [];
+
+    for (const row of installed) {
+      const pkgName = extractPackageName(row.source);
+      try {
+        const meta = await fetchPackageMeta(pkgName);
+        if (!meta?.version) {
+          console.error(`[package-manager] Malformed registry response for ${pkgName}: missing version field`);
+          continue;
+        }
+        const installedVersion = row.version ?? readInstalledVersion(pkgName);
+        if (!installedVersion || compareVersions(installedVersion, meta.version) < 0) {
+          updates.push({
+            source: row.source,
+            displayName: row.displayName ?? pkgName,
+            type: "npm",
+            installedVersion,
+            latestVersion: meta.version,
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Network errors are transient — log and continue to next package.
+        // Non-ENOENT filesystem errors during version read are fatal.
+        if (msg.includes("ENOENT")) continue;
+        console.error(`[package-manager] Update check failed for ${pkgName}: ${msg}`);
+      }
+    }
+
+    return updates;
   }
 
   // ── Internal ────────────────────────────────────────────────────
-
-  /**
-   * Per-cwd cache of DefaultPackageManager instances. Each instance holds
-   * its own SettingsManager + filesystem state; on Windows
-   * `listConfiguredPackages` can take several seconds on cold
-   * instantiation, so reusing the same instance across repeat calls
-   * (same cwd) eliminates the cost of the `/api/packages/recommended` +
-   * `/api/packages/installed` flows firing back-to-back.
-   *
-   * We also dedupe *in-flight* instantiations via `pmPending`: if two
-   * concurrent callers both ask for the same cwd before the first
-   * instantiation resolves, they share the same Promise instead of
-   * spawning parallel `DefaultPackageManager` constructions (which
-   * compete for the event loop and can double cold-start latency).
-   *
-   * `run()` invalidates the relevant entry after an install/remove/update
-   * so stale state never persists past a mutation.
-   */
-  private readonly pmCache = new Map<string, unknown>();
-  private readonly pmPending = new Map<string, Promise<unknown>>();
-
-  private async createPackageManager(cwd?: string) {
-    const effectiveCwd = cwd ?? process.cwd();
-    const cached = this.pmCache.get(effectiveCwd);
-    if (cached) return cached as any;
-    const inflight = this.pmPending.get(effectiveCwd);
-    if (inflight) return inflight as any;
-
-    const promise = (async () => {
-      const { DefaultPackageManager, SettingsManager } = await loadPiPackageManager(this.registry);
-      const settingsManager = SettingsManager.create(effectiveCwd, AGENT_DIR);
-      // Wrap pi's DefaultPackageManager in our SafePackageManager so
-      // every internal `spawn` / `spawnSync` / `runCommandSync` call
-      // routes through the OS-aware SubprocessAdapter. This is THE
-      // fix for cmd.exe flashes on Windows caused by pi's upstream
-      // `shell: true + no windowsHide` spawn pattern.
-      const SafePM = createSafePackageManagerClass(
-        DefaultPackageManager,
-        getDefaultSubprocessAdapter(),
-        this.registry,
-      );
-      const pm = new SafePM({ cwd: effectiveCwd, agentDir: AGENT_DIR, settingsManager });
-      this.pmCache.set(effectiveCwd, pm);
-      return pm;
-    })();
-    this.pmPending.set(effectiveCwd, promise);
-    try {
-      return await promise;
-    } finally {
-      this.pmPending.delete(effectiveCwd);
-    }
-  }
-
-  /** Drop the cached package manager for a cwd (after install/remove/update). */
-  private invalidatePackageManager(cwd?: string): void {
-    const effectiveCwd = cwd ?? process.cwd();
-    this.pmCache.delete(effectiveCwd);
-    this.pmPending.delete(effectiveCwd);
-  }
 
   private async executeOperation(operationId: string, req: OperationRequest, moveId?: string): Promise<void> {
     const result: OperationResult = {
@@ -405,52 +403,90 @@ export class PackageManagerWrapper {
       moveId,
     };
 
-    try {
-      const pm = await this.createPackageManager(req.cwd);
-      const local = req.scope === "local";
+    // Yield to the event loop so run() can return the operationId to the
+    // caller while the operation is still in flight (busy === true).
+    await Promise.resolve();
 
-      pm.setProgressCallback((event: ProgressEvent) => {
-        this.onProgress?.(operationId, event, moveId);
-      });
+    try {
+      const source = req.source;
+
+      this.onProgress?.(operationId, {
+        type: "start",
+        action: req.action,
+        source,
+        message: `Starting ${req.action}: ${source}`,
+      }, moveId);
 
       switch (req.action) {
-        case "install":
-          await pm.installAndPersist(req.source, { local });
+        case "install": {
+          const pkgName = extractPackageName(source);
+          ensurePluginsPackageJsonExists();
+
+          // Add to dependencies
+          const pkgJson = readPluginsPackageJson();
+          const deps = (pkgJson.dependencies ?? {}) as Record<string, string>;
+          deps[pkgName] = source.startsWith("npm:") ? source.slice(4) : source;
+          pkgJson.dependencies = deps;
+          writePluginsPackageJson(pkgJson);
+
+          // Run bun install
+          runBun(this.subprocessAdapter, ["install"]);
+
+          // Read installed version for lockfile
+          const installedVersion = readInstalledVersion(pkgName) ?? "unknown";
+          upsertPluginLockEntry(pkgName, installedVersion, true);
           break;
-        case "remove":
-          await pm.removeAndPersist(req.source, { local });
+        }
+        case "remove": {
+          const pkgName = extractPackageName(source);
+
+          // Remove from dependencies
+          const pkgJson = readPluginsPackageJson();
+          const deps = (pkgJson.dependencies ?? {}) as Record<string, string>;
+          delete deps[pkgName];
+          pkgJson.dependencies = deps;
+          writePluginsPackageJson(pkgJson);
+
+          // Run bun uninstall
+          runBun(this.subprocessAdapter, ["uninstall", pkgName]);
+
+          // Remove from lockfile
+          removePluginLockEntry(pkgName);
           break;
-        case "update":
-          await pm.update(req.source || undefined);
+        }
+        case "update": {
+          const pkgName = source ? extractPackageName(source) : undefined;
+          if (pkgName) {
+            runBun(this.subprocessAdapter, ["update", pkgName]);
+          } else {
+            runBun(this.subprocessAdapter, ["update"]);
+          }
           break;
+        }
       }
 
-      result.success = true;
+      this.onProgress?.(operationId, {
+        type: "complete",
+        action: req.action,
+        source,
+        message: `${req.action} completed: ${source}`,
+      }, moveId);
 
-      // Invalidate the cached package manager for this cwd so future
-      // listInstalled() calls see the mutated settings.json.
-      this.invalidatePackageManager(req.cwd);
+      result.success = true;
 
       // Reload all sessions. When called inside a move (moveId set),
       // skip — executeMove issues exactly one reload at the very end.
       if (this.reloadSessions && !moveId) {
         try {
           const count = await this.reloadSessions();
-          (result as any).sessionsReloaded = count;
+          (result as OperationResult & { sessionsReloaded?: number }).sessionsReloaded = count;
         } catch (err) {
           console.error("[package-manager] session reload failed:", err);
         }
       }
-    } catch (err: any) {
-      // Pi-not-found: surface the full Resolution trail to the caller
-      // so the UI can render per-strategy failure reasons instead of
-      // the old opaque "pi-coding-agent is not installed" message.
-      if (err instanceof ModuleResolutionError) {
-        result.error = err.message;
-        result.diagnostics = err.resolution;
-      } else {
-        result.error = err?.message ?? String(err);
-      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      result.error = message;
       // Re-throw so executeMove can detect failure and short-circuit.
       if (moveId) throw err;
     } finally {
@@ -463,178 +499,12 @@ export class PackageManagerWrapper {
       }
     }
   }
-
-  /**
-   * Execute a move. Holds the busy lock across both phases. Emits exactly
-   * one `package_operation_complete` listener call with `action: "move"`.
-   */
-  private async executeMove(moveId: string, req: MoveRequest): Promise<void> {
-    const sourceStr = typeof req.entry === "string" ? req.entry : req.entry.source;
-    const result: OperationResult = {
-      operationId: moveId,
-      action: "move",
-      source: sourceStr,
-      scope: req.toScope,
-      success: false,
-      moveId,
-    };
-
-    const pmCwd = req.toCwd ?? req.fromCwd ?? process.cwd();
-
-    try {
-      const pm = await this.createPackageManager(pmCwd);
-      const settingsManager = (pm as any).settingsManager;
-      if (!settingsManager) {
-        throw new Error("pi DefaultPackageManager does not expose settingsManager (unexpected pi version)");
-      }
-
-      // Identity preflight against destination's packages[].
-      const destPackages = readPackages(settingsManager, req.toScope);
-      const toSettingsDir = req.toScope === "global"
-        ? path.join(os.homedir(), ".omp", "agent")
-        : path.join(req.toCwd ?? pmCwd, ".pi");
-      const fromSettingsDir = req.fromScope === "global"
-        ? path.join(os.homedir(), ".omp", "agent")
-        : path.join(req.fromCwd ?? pmCwd, ".pi");
-      const incomingIdentity = computeIdentity(sourceStr, fromSettingsDir);
-      const dup = destPackages.find((e) => {
-        const s = typeof e === "string" ? e : e?.source;
-        return s ? computeIdentity(s, toSettingsDir) === incomingIdentity : false;
-      });
-      if (dup) throw new AlreadyAtDestinationError(sourceStr, req.toScope);
-
-      const kind = parseSourceKind(sourceStr);
-      const isPathArm = kind === "abs-path" || kind === "rel-path";
-
-      pm.setProgressCallback((event: ProgressEvent) => {
-        this.onProgress?.(moveId, { ...event, action: "move" as any }, moveId);
-      });
-
-      if (isPathArm) {
-        // Path arm: settings-only edit, no file copy.
-        const fromPackages = readPackages(settingsManager, req.fromScope);
-        const fromIdx = fromPackages.findIndex((e) => {
-          const s = typeof e === "string" ? e : e?.source;
-          return s && computeIdentity(s, fromSettingsDir) === incomingIdentity;
-        });
-        if (fromIdx < 0) {
-          throw new Error(`source not found in ${req.fromScope} packages[]`);
-        }
-        const originEntry = fromPackages[fromIdx];
-        const newSource = translatePathSource({
-          originalSource: sourceStr,
-          fromSettingsDir,
-          toSettingsDir,
-          toScope: req.toScope,
-        });
-        const newEntry: PackageEntry = typeof originEntry === "string"
-          ? newSource
-          : { ...originEntry, source: newSource };
-
-        writePackages(settingsManager, req.toScope, [...destPackages, newEntry]);
-        writePackages(settingsManager, req.fromScope, fromPackages.filter((_, i) => i !== fromIdx));
-      } else {
-        // npm/git/https arm: install at dest, then remove from origin.
-        const installReq: OperationRequest = {
-          action: "install",
-          source: sourceStr,
-          scope: req.toScope,
-          cwd: req.toScope === "local" ? req.toCwd : undefined,
-        };
-        await this.executeOperation(crypto.randomUUID(), installReq, moveId);
-
-        // Filter-preservation: if origin had filters (object form), patch
-        // the destination entry pi just wrote so they survive the move.
-        if (typeof req.entry === "object" && req.entry !== null) {
-          const finalDest = readPackages(settingsManager, req.toScope);
-          const idx = finalDest.findIndex((e) => {
-            const s = typeof e === "string" ? e : e?.source;
-            return s && computeIdentity(s, toSettingsDir) === incomingIdentity;
-          });
-          if (idx >= 0) {
-            const installedEntry = finalDest[idx];
-            const installedSource = typeof installedEntry === "string"
-              ? installedEntry
-              : installedEntry.source;
-            finalDest[idx] = { ...req.entry, source: installedSource };
-            writePackages(settingsManager, req.toScope, finalDest);
-          }
-        }
-
-        // Remove from origin. Failure → partial-success, not full failure.
-        try {
-          const removeReq: OperationRequest = {
-            action: "remove",
-            source: sourceStr,
-            scope: req.fromScope,
-            cwd: req.fromScope === "local" ? req.fromCwd : undefined,
-          };
-          await this.executeOperation(crypto.randomUUID(), removeReq, moveId);
-        } catch (removeErr: any) {
-          result.partialSuccess = {
-            installed: true,
-            removed: false,
-            removeError: removeErr?.message ?? String(removeErr),
-          };
-        }
-      }
-
-      result.success = true;
-      this.invalidatePackageManager(req.fromCwd);
-      this.invalidatePackageManager(req.toCwd);
-
-      if (this.reloadSessions) {
-        try {
-          const count = await this.reloadSessions();
-          (result as any).sessionsReloaded = count;
-        } catch (err) {
-          console.error("[package-manager] session reload failed:", err);
-        }
-      }
-    } catch (err: any) {
-      if (err instanceof ModuleResolutionError) {
-        result.error = err.message;
-        result.diagnostics = err.resolution;
-      } else if (err instanceof AlreadyAtDestinationError) {
-        result.error = err.message;
-        (result as any).code = "already_at_destination";
-      } else {
-        result.error = err?.message ?? String(err);
-      }
-    } finally {
-      this.busy = false;
-      this.onComplete?.(result);
-    }
-  }
 }
 
-// ──────────────────────────────────────────────────────────────────
-// SettingsManager helpers — thin shim around pi's API.
-// ──────────────────────────────────────────────────────────────────
-
-function readPackages(settingsManager: any, scope: PackageScope): PackageEntry[] {
-  const settings = scope === "global"
-    ? settingsManager.getGlobalSettings?.()
-    : settingsManager.getProjectSettings?.();
-  return Array.isArray(settings?.packages) ? [...settings.packages] : [];
-}
-
-function writePackages(settingsManager: any, scope: PackageScope, packages: PackageEntry[]): void {
-  if (scope === "global") {
-    if (typeof settingsManager.setPackages !== "function") {
-      throw new Error("settingsManager.setPackages not available (unexpected pi version)");
-    }
-    settingsManager.setPackages(packages);
-  } else {
-    if (typeof settingsManager.setProjectPackages !== "function") {
-      throw new Error("settingsManager.setProjectPackages not available (unexpected pi version)");
-    }
-    settingsManager.setProjectPackages(packages);
-  }
-}
+// ── Translate path source (kept for compatibility) ───────────────────
 
 /**
- * Translate a path source between scopes per design.md decision 1.
+ * Translate a path source between scopes.
  * To global → resolve to absolute against fromSettingsDir.
  * To local  → try path.relative(toSettingsDir, abs); keep absolute if
  * the relative form escapes the cwd tree by more than 2 `..` segments.
@@ -658,6 +528,8 @@ export function translatePathSource(args: {
   if (upSegments > 2) return abs;
   return rel;
 }
+
+// ── Error classes ────────────────────────────────────────────────────
 
 export class AlreadyAtDestinationError extends Error {
   constructor(public source: string, public destScope: PackageScope) {
