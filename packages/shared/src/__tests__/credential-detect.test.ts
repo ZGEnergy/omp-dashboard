@@ -1,6 +1,6 @@
 /**
  * Tests for credential-detect — Doctor's "API key" detector.
- * Covers settings.json + auth.json fallback matrix.
+ * Covers settings.json, agent.db, and auth.json fallback matrix.
  *
  * See change: fix-doctor-oauth-credential-detection.
  */
@@ -8,12 +8,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { DatabaseSync } from "node:sqlite";
 
 import { hasAnyProviderCredential, inspectedCredentialFiles } from "../credential-detect.js";
 
 describe("credential-detect", () => {
   let tmpDir: string;
   let settingsPath: string;
+  let agentDbPath: string;
   let authPath: string;
 
   beforeEach(() => {
@@ -22,6 +24,8 @@ describe("credential-detect", () => {
     fs.mkdirSync(agentDir, { recursive: true });
     settingsPath = path.join(agentDir, "settings.json");
     authPath = path.join(agentDir, "auth.json");
+
+    agentDbPath = path.join(agentDir, "agent.db");
   });
 
   afterEach(() => {
@@ -33,6 +37,35 @@ describe("credential-detect", () => {
   }
   function writeAuth(data: unknown) {
     fs.writeFileSync(authPath, JSON.stringify(data));
+  }
+
+  function writeAgentDb(rows: Array<{
+    provider: string;
+    credentialType: "api_key" | "oauth";
+    data: Record<string, unknown>;
+    disabledCause?: string | null;
+  }>) {
+    const db = new DatabaseSync(agentDbPath);
+    try {
+      db.exec(`
+        CREATE TABLE auth_credentials (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          provider TEXT NOT NULL,
+          credential_type TEXT NOT NULL,
+          data TEXT NOT NULL,
+          disabled_cause TEXT DEFAULT NULL
+        )
+      `);
+      const insert = db.prepare(`
+        INSERT INTO auth_credentials (provider, credential_type, data, disabled_cause)
+        VALUES (?, ?, ?, ?)
+      `);
+      for (const row of rows) {
+        insert.run(row.provider, row.credentialType, JSON.stringify(row.data), row.disabledCause ?? null);
+      }
+    } finally {
+      db.close();
+    }
   }
 
   describe("hasAnyProviderCredential", () => {
@@ -79,6 +112,40 @@ describe("credential-detect", () => {
       expect(hasAnyProviderCredential(tmpDir)).toBe(true);
     });
 
+    it("returns true for active agent.db api_key rows", () => {
+      writeAgentDb([
+        {
+          provider: "zai",
+          credentialType: "api_key",
+          data: { key: "zai-live-key-123" },
+        },
+      ]);
+      expect(hasAnyProviderCredential(tmpDir)).toBe(true);
+    });
+
+    it("returns true for active agent.db oauth rows", () => {
+      writeAgentDb([
+        {
+          provider: "openai-codex",
+          credentialType: "oauth",
+          data: { access: "tok", refresh: "ref" },
+        },
+      ]);
+      expect(hasAnyProviderCredential(tmpDir)).toBe(true);
+    });
+
+    it("ignores disabled agent.db rows", () => {
+      writeAgentDb([
+        {
+          provider: "zai",
+          credentialType: "api_key",
+          data: { key: "zai-live-key-123" },
+          disabledCause: "revoked",
+        },
+      ]);
+      expect(hasAnyProviderCredential(tmpDir)).toBe(false);
+    });
+
     it("returns false when auth.json credentials are all empty strings", () => {
       writeAuth({
         anthropic: { type: "oauth", access: "", refresh: "", expires: 0 },
@@ -111,6 +178,12 @@ describe("credential-detect", () => {
       expect(hasAnyProviderCredential(tmpDir)).toBe(true);
     });
 
+    it("malformed agent.db falls back to valid auth.json", () => {
+      fs.writeFileSync(agentDbPath, "not-a-sqlite-db");
+      writeAuth({ anthropic: { type: "oauth", access: "tok" } });
+      expect(hasAnyProviderCredential(tmpDir)).toBe(true);
+    });
+
     it("both files malformed → false (no throw)", () => {
       fs.writeFileSync(settingsPath, "garbage");
       fs.writeFileSync(authPath, "more garbage");
@@ -135,11 +208,12 @@ describe("credential-detect", () => {
   });
 
   describe("inspectedCredentialFiles", () => {
-    it("returns both file paths in stable order", () => {
+    it("returns settings.json, agent.db, auth.json in stable order", () => {
       const files = inspectedCredentialFiles(tmpDir);
-      expect(files).toHaveLength(2);
+      expect(files).toHaveLength(3);
       expect(files[0]).toBe(path.join(tmpDir, ".omp", "agent", "settings.json"));
-      expect(files[1]).toBe(path.join(tmpDir, ".omp", "agent", "auth.json"));
+      expect(files[1]).toBe(path.join(tmpDir, ".omp", "agent", "agent.db"));
+      expect(files[2]).toBe(path.join(tmpDir, ".omp", "agent", "auth.json"));
     });
   });
 });

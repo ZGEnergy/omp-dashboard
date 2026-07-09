@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import {
   setCatalogueForSession,
   _resetForTests as resetCatalogueCache,
@@ -21,7 +22,45 @@ const FIXTURE_CATALOGUE: ProviderInfo[] = [
 describe("provider-auth-storage", () => {
   const authDir = path.join(os.homedir(), ".omp", "agent");
   const authPath = path.join(authDir, "auth.json");
+  const agentDbPath = path.join(authDir, "agent.db");
   let originalContent: string | null = null;
+  let originalDbContent: Buffer | null = null;
+
+  function writeAgentDb(rows: Array<{
+    provider: string;
+    credentialType: "api_key" | "oauth";
+    data: Record<string, unknown>;
+    disabledCause?: string | null;
+  }>) {
+    fs.mkdirSync(authDir, { recursive: true });
+    fs.rmSync(agentDbPath, { force: true });
+    const db = new DatabaseSync(agentDbPath);
+    try {
+      db.exec(`
+        CREATE TABLE auth_credentials (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          provider TEXT NOT NULL,
+          credential_type TEXT NOT NULL,
+          data TEXT NOT NULL,
+          disabled_cause TEXT DEFAULT NULL
+        )
+      `);
+      const insert = db.prepare(`
+        INSERT INTO auth_credentials (provider, credential_type, data, disabled_cause)
+        VALUES (?, ?, ?, ?)
+      `);
+      for (const row of rows) {
+        insert.run(
+          row.provider,
+          row.credentialType,
+          JSON.stringify(row.data),
+          row.disabledCause ?? null,
+        );
+      }
+    } finally {
+      db.close();
+    }
+  }
 
   beforeEach(() => {
     try {
@@ -29,13 +68,31 @@ describe("provider-auth-storage", () => {
     } catch {
       originalContent = null;
     }
+    try {
+      originalDbContent = fs.readFileSync(agentDbPath);
+    } catch {
+      originalDbContent = null;
+    }
     setCatalogueForSession("test-session", FIXTURE_CATALOGUE);
   });
 
   afterEach(() => {
-    if (originalContent !== null) {
-      fs.writeFileSync(authPath, originalContent);
-    }
+    try {
+      if (originalContent !== null) {
+        fs.mkdirSync(authDir, { recursive: true });
+        fs.writeFileSync(authPath, originalContent);
+      } else {
+        fs.rmSync(authPath, { force: true });
+      }
+    } catch {}
+    try {
+      if (originalDbContent !== null) {
+        fs.mkdirSync(authDir, { recursive: true });
+        fs.writeFileSync(agentDbPath, originalDbContent);
+      } else {
+        fs.rmSync(agentDbPath, { force: true });
+      }
+    } catch {}
     resetCatalogueCache();
   });
 
@@ -130,6 +187,133 @@ describe("provider-auth-storage", () => {
     } finally {
       removeCredential("openai");
     }
+  });
+
+  it("getAuthStatus reads active zai API-key row from agent.db", async () => {
+    writeAgentDb([
+      {
+        provider: "zai",
+        credentialType: "api_key",
+        data: { key: "zai-live-key-123456" },
+      },
+    ]);
+    const { getAuthStatus } = await import("../provider-auth-storage.js");
+    const zai = getAuthStatus().find((s) => s.id === "zai");
+    expect(zai).toMatchObject({
+      id: "zai",
+      authenticated: true,
+      maskedKey: "zai-l...456",
+    });
+  });
+
+  it("readAuthJson prefers active agent.db row over legacy auth.json and ignores disabled rows", async () => {
+    fs.mkdirSync(authDir, { recursive: true });
+    fs.writeFileSync(
+      authPath,
+      JSON.stringify({
+        zai: { type: "api_key", key: "legacy-zai-key-999999" },
+      }) + "\n",
+    );
+    writeAgentDb([
+      {
+        provider: "zai",
+        credentialType: "api_key",
+        data: { key: "db-live-zai-key-123456" },
+      },
+      {
+        provider: "zai",
+        credentialType: "api_key",
+        data: { key: "db-disabled-zai-key-000000" },
+        disabledCause: "revoked",
+      },
+    ]);
+
+    const { readAuthJson, getAuthStatus } = await import("../provider-auth-storage.js");
+    expect(readAuthJson()["zai"]).toEqual({
+      type: "api_key",
+      key: "db-live-zai-key-123456",
+    });
+    expect(getAuthStatus().find((s) => s.id === "zai")?.maskedKey).toBe("db-li...456");
+  });
+
+  it("malformed agent.db falls back to legacy auth.json without a false positive", async () => {
+    fs.mkdirSync(authDir, { recursive: true });
+    fs.writeFileSync(agentDbPath, "not-a-sqlite-db");
+    fs.writeFileSync(
+      authPath,
+      JSON.stringify({
+        openai: { type: "api_key", key: "legacy-openai-key-123456" },
+      }) + "\n",
+    );
+
+    const { readAuthJson, getAuthStatus } = await import("../provider-auth-storage.js");
+    expect(readAuthJson()["openai"]).toEqual({
+      type: "api_key",
+      key: "legacy-openai-key-123456",
+    });
+    expect(getAuthStatus().find((s) => s.id === "openai")?.authenticated).toBe(true);
+  });
+
+  it("getAuthStatus synthesizes zAI from agent.db when bridge catalogue is empty", async () => {
+    resetCatalogueCache();
+    writeAgentDb([
+      {
+        provider: "zai",
+        credentialType: "api_key",
+        data: { key: "zai-live-key-123456" },
+      },
+    ]);
+
+    const { getAuthStatus } = await import("../provider-auth-storage.js");
+    expect(getAuthStatus()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "zai",
+        name: "zAI",
+        flowType: "api_key",
+        authenticated: true,
+        envVar: "ZAI_API_KEY",
+        source: "database",
+      }),
+    ]));
+  });
+
+  it("getAuthStatus uses known metadata for vLLM agent.db credentials", async () => {
+    resetCatalogueCache();
+    writeAgentDb([
+      {
+        provider: "vllm",
+        credentialType: "api_key",
+        data: { key: "vllm-live-key-123456" },
+      },
+    ]);
+
+    const { getAuthStatus } = await import("../provider-auth-storage.js");
+    expect(getAuthStatus()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "vllm",
+        name: "vLLM",
+        flowType: "api_key",
+        authenticated: true,
+        envVar: "VLLM_API_KEY",
+        source: "database",
+      }),
+    ]));
+  });
+
+  it("getAuthStatus marks legacy auth.json credentials with source metadata", async () => {
+    fs.mkdirSync(authDir, { recursive: true });
+    fs.writeFileSync(
+      authPath,
+      JSON.stringify({
+        openai: { type: "api_key", key: "legacy-openai-key-123456" },
+      }) + "\n",
+    );
+
+    const { getAuthStatus } = await import("../provider-auth-storage.js");
+    expect(getAuthStatus().find((s) => s.id === "openai")).toMatchObject({
+      authenticated: true,
+      source: "legacy-file",
+    });
   });
 
   it("empty catalogue + no OAuth credentials → only OAuth handler rows present", async () => {
