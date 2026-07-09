@@ -71,7 +71,7 @@
 
 - [ ] 9.1 WebSocket conversation plane (Surface 02/03), consuming the `sessionId` this change already surfaces: subscribe/event_replay → `adaptEventToEntry` → `MinimalChatEntry`; `send_prompt`/`abort`.
 
-- [ ] 9.3 **[G3]** Original-document delivery (`getOriginalDocUrl`) — blob proxy endpoint serving `stateDir()/blobs/<handle>` for the request `cwd`, path-traversal-guarded. bytes vs signed URL vs proxied path.
+- [x] 9.3 **[G3]** Original-document delivery (`getOriginalDocUrl`) — blob proxy endpoint serving `stateDir()/blobs/<handle>` for the request `cwd`, path-traversal-guarded. _Closed by change `serve-invoice-original-blob`: `GET /api/plugins/invoicebot/blob` streams bytes with range support + real-path containment (api-contract §13.1)._
 - [ ] 9.4 **[G4]** Ask-session provisioning (lazy vs pre-provisioned vs `/api/sessions` resolve).
 - [ ] 9.5 **[G1]** Richer invoice detail view upstream (buyer party, line items, VAT breakdown) — extend `surface` or add `view:"detail"`; plus other read views (`partners`, `notes`, `bank`, `decisions`) as needed; REST `/query` inherits each. (Current scope: the 9 existing views only — invoices covered, partners not.)
 - [ ] 9.6 **[G2, optional]** Structured `stages[]` on `explain` (else client derives from `state` via `stagesForState()`).

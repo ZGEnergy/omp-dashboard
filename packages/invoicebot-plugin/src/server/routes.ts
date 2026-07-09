@@ -8,6 +8,7 @@
  *   POST /api/plugins/invoicebot/review  → ib_review (action)
  *   POST /api/plugins/invoicebot/setup   → ib_setup  (action)
  *   POST /api/plugins/invoicebot/rules   → ib_rules  (action)
+ *   GET  /api/plugins/invoicebot/blob    → stream a retained original document
  *
  * The plugin forwards `{ selector, ...args }` to the matching `InvoiceEngine`
  * port method and normalizes the tool result to `{ ok, text, data, sessionId?,
@@ -15,9 +16,39 @@
  * `flow` spec) the route dispatches `flow:run` into the workspace session and
  * attaches the resulting `sessionId`. See change: add-invoicebot-rest-plugin.
  */
-import { existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { basename } from "node:path";
 import type { FastifyInstance } from "fastify";
+import { contentTypeFor, resolveBlobPath } from "./blob.js";
 import type { EngineResult, FlowRunSpec, InvoiceEngine } from "./engine/port.js";
+
+/** Parse a single-range `Range: bytes=start-end` header against a known size. */
+function parseRange(
+  header: string | undefined,
+  size: number,
+): { start: number; end: number } | "none" | "unsatisfiable" {
+  if (!header) return "none";
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m) return "unsatisfiable";
+  const [, startRaw, endRaw] = m;
+  let start: number;
+  let end: number;
+  if (startRaw === "") {
+    // suffix range: last N bytes
+    if (endRaw === "") return "unsatisfiable";
+    const n = Number(endRaw);
+    if (n === 0) return "unsatisfiable";
+    start = Math.max(0, size - n);
+    end = size - 1;
+  } else {
+    start = Number(startRaw);
+    end = endRaw === "" ? size - 1 : Number(endRaw);
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
+    return "unsatisfiable";
+  }
+  return { start, end: Math.min(end, size - 1) };
+}
 
 export interface InvoiceBotRouteDeps {
   engine: InvoiceEngine;
@@ -105,6 +136,49 @@ export function mountInvoiceBotRoutes(fastify: FastifyInstance, deps: InvoiceBot
     if (typeof body.action !== "string" || body.action.trim() === "") { reply.code(400); return { error: "action is required" }; }
     const result = await engine.setup(body.cwd as string, body as { action: string });
     return normalize(result, { consequential: isConsequential("setup", body) });
+  });
+
+  // ── /blob — GET byte delivery of a retained original (design D1) ───────────
+  // Breaks the POST-envelope convention deliberately: the browser's native
+  // PDF/image viewer needs a plain GET URL it can put in <iframe src>/<img src>
+  // and issue Range against. Path-traversal-guarded via resolveBlobPath.
+  fastify.get("/api/plugins/invoicebot/blob", async (req, reply) => {
+    const q = (req.query ?? {}) as Record<string, unknown>;
+    const resolved = resolveBlobPath(q.cwd, q.handle);
+    if (!resolved.ok) {
+      const code = resolved.reason === "invalid-input" ? 400 : resolved.reason === "traversal" ? 403 : 404;
+      req.log.info({ reason: resolved.reason, code }, "invoicebot blob rejected");
+      reply.code(code);
+      return { error: resolved.reason };
+    }
+
+    const { abs } = resolved;
+    const size = statSync(abs).size;
+    const name = basename(abs);
+    reply
+      .header("Content-Type", contentTypeFor(abs))
+      .header("Content-Disposition", `inline; filename="${name.replace(/"/g, "")}"`)
+      .header("Accept-Ranges", "bytes")
+      .header("X-Content-Type-Options", "nosniff");
+
+    const range = parseRange(req.headers.range, size);
+    if (range === "unsatisfiable") {
+      req.log.info({ handle: name, code: 416 }, "invoicebot blob range unsatisfiable");
+      reply.code(416).header("Content-Range", `bytes */${size}`);
+      return reply.send();
+    }
+    if (range === "none") {
+      req.log.info({ handle: name, code: 200 }, "invoicebot blob served");
+      reply.code(200).header("Content-Length", String(size));
+      return reply.send(createReadStream(abs));
+    }
+    const { start, end } = range;
+    req.log.info({ handle: name, code: 206, start, end }, "invoicebot blob partial");
+    reply
+      .code(206)
+      .header("Content-Range", `bytes ${start}-${end}/${size}`)
+      .header("Content-Length", String(end - start + 1));
+    return reply.send(createReadStream(abs, { start, end }));
   });
 
   // ── /rules — rule authoring (action); request is flow-triggering ───────────

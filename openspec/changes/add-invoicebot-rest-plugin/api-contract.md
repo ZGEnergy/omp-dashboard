@@ -488,9 +488,10 @@ flow-triggering REST responses (§5) bridge the two. To go from a human invoice
 **number** to the chat session, follow the three-hop recipe in **§5.1**.
 
 **Original document** (`surface.original`): `blob_handle` + `path` point at the
-retained file under `<cwd>/.pi/flows/invoicebot-state/blobs/`. Delivery of the
-bytes (proxy endpoint vs path) is not yet finalized — treat `available:false` as
-"no preview". (Gap **G3** — see §14 / tasks §9.3.)
+retained file under `<cwd>/.pi/flows/invoicebot-state/blobs/`. Bytes are streamed
+by **`GET /api/plugins/invoicebot/blob`** (see §13.1) — put its URL directly in an
+`<iframe src>`/`<img src>`. Treat `available:false` as "no preview" (no blob
+retained). (Gap **G3** closed by change `serve-invoice-original-blob`.)
 
 ---
 
@@ -525,6 +526,8 @@ startOAuth(kind)                          → NOT REST-backed: setConnector(need
 authorizeOAuth(cwd, {id,refresh_token})   → /setup  {action:"authorize", …}
 setCadence(cwd, which, cron)              → /setup  {action:"cadence", which, cron}
 setHandoffTarget(cwd, {id,format,dest})   → /setup  {action:"handoff_target", …}
+
+getOriginalDocUrl(cwd, handle)            → GET /api/plugins/invoicebot/blob?cwd=…&handle=…   (see §13.1)
 setConfig(cwd, name, value, consent?)     → /setup  {action:"config", name, value?, consent?}         [consequential]
 pauseIntake(cwd)/resumeIntake(cwd)/pollIntake(cwd) → /setup {action:"intake", op:…}
 
@@ -564,6 +567,44 @@ const approve = (cwd: string, invoice_id: string, sessionId?: string) =>
   ib("review", { cwd, action: "approve", invoice_id, ...(sessionId ? { sessionId } : {}) });
 ```
 
+### 13.1 Original-document blob route (`GET /api/plugins/invoicebot/blob`)
+
+The **only** GET route on the surface, and the **only** one that breaks the
+POST-envelope convention (design D1): the browser's native PDF/image viewer needs
+a plain URL for `<iframe src>`/`<img src>` and issues GET + `Range` against it — a
+POST envelope cannot back an `<iframe>`.
+
+```
+GET /api/plugins/invoicebot/blob?cwd=<workspace>&handle=<surface.original.blob_handle>
+```
+
+- **Params** (query): `cwd` (workspace dir), `handle` (the `surface.original.blob_handle`;
+  a full `blobs/<name>` handle or a bare basename both work).
+- **Success `200`**: full body with `Content-Length`. Headers: `Content-Type` by
+  extension (`.pdf→application/pdf`, `.png→image/png`, `.jpg/.jpeg→image/jpeg`,
+  else `application/octet-stream`), `Content-Disposition: inline; filename="…"`,
+  `Accept-Ranges: bytes`, `X-Content-Type-Options: nosniff`.
+- **`206 Partial Content`**: on a satisfiable `Range: bytes=start-end` — carries
+  `Content-Range` + the requested slice (large-PDF lazy paging).
+- **`416`**: unsatisfiable range (`Content-Range: bytes */<size>`).
+- **`400`**: missing/blank/invalid `cwd` or `handle`.
+- **`403`**: containment violation — `..` traversal, absolute-path handle, or a
+  symlink escaping `<cwd>/.pi/flows/invoicebot-state/blobs/` (real-path guarded).
+- **`404`**: contained + valid but the file does not exist.
+
+Usage — bind the URL directly, no fetch/JSON:
+
+```ts
+const blobUrl = (cwd: string, handle: string) =>
+  `${BASE}/api/plugins/invoicebot/blob?cwd=${encodeURIComponent(cwd)}&handle=${encodeURIComponent(handle)}`;
+// <iframe src={blobUrl(cwd, surface.original.blob_handle)} /> for PDF
+```
+
+> **Co-location assumption**: like the four POST routes (which read `cwd` disk
+> directly), this route serves bytes off the dashboard server's local filesystem.
+> It assumes server + workspace share a filesystem (local + Docker all-in-one).
+> Remote-bridge topologies are out of scope here.
+
 ---
 
 ## 14. Known gaps & limitations (client-facing)
@@ -576,7 +617,6 @@ error state. Full tracking in [`gaps.md`](./gaps.md).
 |---|---|---|---|
 | **G1** | `query:surface` (02) | `summary` is summary-only — **no buyer party, no line-item array, no VAT breakdown**. The full „Számla adatok” table cannot be fully populated. | Render from `summary` (supplier, invoiceNumber, dates, currency, gross, lineCount). Full line/VAT detail awaits a richer upstream view (tasks §9.5). |
 | **G2** | `query:explain` (02) | Returns **narrative `text`**, not per-stage statuses. The header progress track (read→classify→extract→supplier→approve→reconcile→handoff) is not machine-readable. | **Derive stages from `state`** via a client `stagesForState()` map. Show `text` as the reason line. |
-| **G3** | `surface.original` (02) | A **pointer** (`blob_handle`/`path`), not bytes. No endpoint streams the file. | PDF/PNG lightbox: treat `available:false` (or any absent-bytes case) as **“no preview”**. Byte delivery awaits a blob proxy endpoint (tasks §9.3). |
 | **G4** | Ask session (03) | **No endpoint** returns the persistent “Ask” session over the whole invoice DB. | `getAskSessionId()` has no REST source yet — resolve via `/api/sessions` or spawn (open; tasks §9.4). |
 
 **Not a gap (intended design):**

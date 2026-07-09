@@ -25,7 +25,8 @@
     "id": "invoicebot",
     "displayName": "InvoiceBot",
     "priority": 100,
-    "server": "./src/server/index.ts"
+    "server": "./src/server/index.ts",
+    "claims": []
   },
   "dependencies": {
     "@blackbelt-technology/dashboard-plugin-runtime": "^0.5.4",

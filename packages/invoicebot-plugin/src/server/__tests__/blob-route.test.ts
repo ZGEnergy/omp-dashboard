@@ -1,0 +1,130 @@
+/**
+ * Route tests for `GET /api/plugins/invoicebot/blob`: content-type + inline +
+ * nosniff (3.1), range/206 (3.2), and security status codes 403/404/400 (3.3).
+ * See change: serve-invoice-original-blob.
+ */
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import Fastify, { type FastifyInstance } from "fastify";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { EngineResult, InvoiceEngine } from "../engine/port.js";
+import { mountInvoiceBotRoutes } from "../routes.js";
+
+const noop = async (): Promise<EngineResult> => ({ content: [{ type: "text", text: "" }], details: {} });
+const engine: InvoiceEngine = { query: noop, review: noop, setup: noop, rules: noop };
+
+let app: FastifyInstance;
+let cwd: string;
+let outside: string;
+let blobsDir: string;
+const PDF_BYTES = "%PDF-1.4\n".padEnd(300, "x");
+
+beforeEach(async () => {
+  app = Fastify();
+  mountInvoiceBotRoutes(app, { engine, dispatchFlow: async () => undefined });
+  await app.ready();
+  cwd = mkdtempSync(join(tmpdir(), "ib-route-"));
+  outside = mkdtempSync(join(tmpdir(), "ib-rout-out-"));
+  blobsDir = resolve(cwd, ".pi/flows/invoicebot-state/blobs");
+  mkdirSync(blobsDir, { recursive: true });
+  writeFileSync(join(blobsDir, "h_invoice.pdf"), PDF_BYTES);
+  writeFileSync(join(blobsDir, "h_scan.png"), "PNGDATA");
+  writeFileSync(join(blobsDir, "h_notes.bin"), "RAWBYTES");
+  writeFileSync(join(outside, "secret.txt"), "top secret");
+});
+afterEach(async () => {
+  await app.close();
+  for (const d of [cwd, outside]) rmSync(d, { recursive: true, force: true });
+});
+
+function get(handle: string, headers: Record<string, string> = {}, c: string = cwd) {
+  const url = `/api/plugins/invoicebot/blob?cwd=${encodeURIComponent(c)}&handle=${encodeURIComponent(handle)}`;
+  return app.inject({ method: "GET", url, headers });
+}
+
+describe("blob route — content types + headers (3.1)", () => {
+  it("serves a PDF inline with nosniff + Accept-Ranges", async () => {
+    const res = await get("h_invoice.pdf");
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/pdf");
+    expect(res.headers["content-disposition"]).toBe('inline; filename="h_invoice.pdf"');
+    expect(res.headers["accept-ranges"]).toBe("bytes");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    expect(res.headers["content-length"]).toBe(String(PDF_BYTES.length));
+    expect(res.body).toBe(PDF_BYTES);
+  });
+
+  it("serves a PNG image inline", async () => {
+    const res = await get("h_scan.png");
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toBe("image/png");
+  });
+
+  it("unknown extension → octet-stream", async () => {
+    const res = await get("h_notes.bin");
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/octet-stream");
+  });
+
+  it("accepts a full `blobs/<name>` handle", async () => {
+    const res = await get("blobs/h_invoice.pdf");
+    expect(res.statusCode).toBe(200);
+  });
+});
+
+describe("blob route — range (3.2)", () => {
+  it("Range: bytes=0-99 → 206 + Content-Range + 100 bytes", async () => {
+    const res = await get("h_invoice.pdf", { range: "bytes=0-99" });
+    expect(res.statusCode).toBe(206);
+    expect(res.headers["content-range"]).toBe(`bytes 0-99/${PDF_BYTES.length}`);
+    expect(res.headers["content-length"]).toBe("100");
+    expect(res.rawPayload.length).toBe(100);
+    expect(res.body).toBe(PDF_BYTES.slice(0, 100));
+  });
+
+  it("unsatisfiable range → 416 + Content-Range */size", async () => {
+    const res = await get("h_invoice.pdf", { range: `bytes=${PDF_BYTES.length + 10}-` });
+    expect(res.statusCode).toBe(416);
+    expect(res.headers["content-range"]).toBe(`bytes */${PDF_BYTES.length}`);
+  });
+});
+
+describe("blob route — security (3.3)", () => {
+  it("`..` traversal handle → 403", async () => {
+    const res = await get("../../../../../../etc/passwd");
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("absolute-path handle → 403", async () => {
+    const res = await get(join(outside, "secret.txt"));
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("symlink escape → 403", async () => {
+    symlinkSync(join(outside, "secret.txt"), join(blobsDir, "escape.pdf"));
+    const res = await get("escape.pdf");
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("absent file → 404", async () => {
+    const res = await get("nope.pdf");
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("missing handle → 400", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/plugins/invoicebot/blob?cwd=${encodeURIComponent(cwd)}`,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("missing cwd → 400", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/plugins/invoicebot/blob?handle=h_invoice.pdf",
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
