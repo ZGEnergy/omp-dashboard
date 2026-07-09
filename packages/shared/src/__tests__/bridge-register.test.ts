@@ -248,5 +248,149 @@ describe("shared bridge-register", () => {
       expect(packages).toContain(npmEntry);
       expect(packages).toContain(localExt);
     });
+
+    it("registers package dirs as declared entry files (omp.extensions)", () => {
+      const extDir = path.join(tmpDir, "app", "packages", "extension");
+      const entryPath = path.join(extDir, "src", "bridge.ts");
+      fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+      fs.writeFileSync(
+        path.join(extDir, "package.json"),
+        JSON.stringify({
+          name: "@blackbelt-technology/pi-dashboard-extension",
+          omp: { extensions: ["src/bridge.ts"] },
+        }),
+      );
+      fs.writeFileSync(entryPath, "export default function() {}\n");
+
+      registerBridgeExtension(extDir);
+
+      const settings = readSettings();
+      expect(settings.packages).toEqual([entryPath]);
+    });
+
+    it("registers package dirs as declared entry files (legacy pi.extensions)", () => {
+      const extDir = path.join(tmpDir, "legacy", "packages", "extension");
+      const entryPath = path.join(extDir, "src", "bridge.ts");
+      fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+      fs.writeFileSync(
+        path.join(extDir, "package.json"),
+        JSON.stringify({
+          name: "@blackbelt-technology/pi-dashboard-extension",
+          pi: { extensions: ["src/bridge.ts"] },
+        }),
+      );
+      fs.writeFileSync(entryPath, "export default function() {}\n");
+
+      registerBridgeExtension(extDir);
+
+      const settings = readSettings();
+      expect(settings.packages).toEqual([entryPath]);
+    });
+
+    it("resolves via exports['.'] when no omp/pi extensions field", () => {
+      const extDir = path.join(tmpDir, "exports-pkg");
+      const entryPath = path.join(extDir, "dist", "index.js");
+      fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+      fs.writeFileSync(
+        path.join(extDir, "package.json"),
+        JSON.stringify({
+          name: "exports-based-ext",
+          exports: { ".": "./dist/index.js" },
+        }),
+      );
+      fs.writeFileSync(entryPath, "module.exports = () => {};\n");
+
+      registerBridgeExtension(extDir);
+
+      const settings = readSettings();
+      expect(settings.packages).toEqual([entryPath]);
+    });
+
+    it("resolves via main when no omp/pi/extensions field", () => {
+      const extDir = path.join(tmpDir, "main-pkg");
+      const entryPath = path.join(extDir, "lib", "entry.js");
+      fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+      fs.writeFileSync(
+        path.join(extDir, "package.json"),
+        JSON.stringify({ name: "main-based-ext", main: "./lib/entry.js" }),
+      );
+      fs.writeFileSync(entryPath, "module.exports = () => {};\n");
+
+      registerBridgeExtension(extDir);
+
+      const settings = readSettings();
+      expect(settings.packages).toEqual([entryPath]);
+    });
+
+    it("falls back to index.js when no manifest entry declared", () => {
+      const extDir = path.join(tmpDir, "index-pkg");
+      fs.mkdirSync(extDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(extDir, "package.json"),
+        JSON.stringify({ name: "index-based-ext" }),
+      );
+      fs.writeFileSync(path.join(extDir, "index.js"), "module.exports = () => {};\n");
+
+      registerBridgeExtension(extDir);
+
+      const settings = readSettings();
+      expect(settings.packages).toEqual([path.join(extDir, "index.js")]);
+    });
+
+    it("prefers omp.extensions over pi.extensions", () => {
+      const extDir = path.join(tmpDir, "pref-pkg");
+      const ompEntry = path.join(extDir, "src", "omp-entry.ts");
+      const piEntry = path.join(extDir, "src", "pi-entry.ts");
+      fs.mkdirSync(path.dirname(ompEntry), { recursive: true });
+      fs.writeFileSync(
+        path.join(extDir, "package.json"),
+        JSON.stringify({
+          name: "pref-ext",
+          omp: { extensions: ["src/omp-entry.ts"] },
+          pi: { extensions: ["src/pi-entry.ts"] },
+        }),
+      );
+      fs.writeFileSync(ompEntry, "export default function() {}\n");
+      fs.writeFileSync(piEntry, "export default function() {}\n");
+
+      registerBridgeExtension(extDir);
+
+      const settings = readSettings();
+      expect(settings.packages).toEqual([ompEntry]);
+    });
+
+    it("passes through file paths unchanged (already an entry file)", () => {
+      const entryPath = path.join(tmpDir, "direct", "bridge.ts");
+      fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+      fs.writeFileSync(entryPath, "export default function() {}\n");
+
+      registerBridgeExtension(entryPath);
+
+      const settings = readSettings();
+      expect(settings.packages).toEqual([entryPath]);
+    });
+
+    it("readPackageName dedups by identity when entry file is passed", () => {
+      const extDir = path.join(tmpDir, "dedup", "packages", "extension");
+      const entryPath = path.join(extDir, "src", "bridge.ts");
+      fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+      fs.writeFileSync(
+        path.join(extDir, "package.json"),
+        JSON.stringify({
+          name: "@blackbelt-technology/pi-dashboard-extension",
+          omp: { extensions: ["src/bridge.ts"] },
+        }),
+      );
+      fs.writeFileSync(entryPath, "export default function() {}\n");
+
+      // Register the directory first — resolves to entryPath
+      registerBridgeExtension(extDir);
+      // Register the entry file directly — should dedup (same identity)
+      registerBridgeExtension(entryPath);
+
+      const settings = readSettings();
+      const packages = settings.packages as string[];
+      expect(packages).toEqual([entryPath]);
+    });
   });
 });

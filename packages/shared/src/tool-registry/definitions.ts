@@ -8,7 +8,7 @@
  *
  * See change: consolidate-tool-resolution.
  */
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -219,6 +219,26 @@ function npxBinaryDef(deps?: StrategyDeps): ToolDefinition {
   return { name: "npx", kind: "binary", strategies, classify };
 }
 
+
+/**
+ * Read a package.json and resolve the extension entry path.
+ *
+ * OMP packages declare their entry at `omp.extensions[0]`; legacy
+ * packages use `pi.extensions[0]`. Returns the first entry as a
+ * relative path, or `null` when neither field exists.
+ */
+function readManifestEntry(pkgJsonPath: string): string | null {
+  try {
+    if (!existsSync(pkgJsonPath)) return null;
+    const raw = readFileSync(pkgJsonPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed?.omp?.extensions?.[0]) return parsed.omp.extensions[0];
+    if (parsed?.pi?.extensions?.[0]) return parsed.pi.extensions[0];
+    return null;
+  } catch {
+    return null;
+  }
+}
 // ── Module definitions ──────────────────────────────────────────────────────
 
 /** Sibling probe for an aliased package name (pi: `@earendil-works/*` + `@mariozechner/*`). */
@@ -773,4 +793,5 @@ export function registerDefaultTools(registry: ToolRegistry, deps?: StrategyDeps
 export const _internals = {
   binaryDef,
   moduleDefWithAliases,
+  readManifestEntry,
 };

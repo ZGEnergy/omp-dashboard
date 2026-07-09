@@ -6,6 +6,7 @@
  * real filesystem or PATH.
  */
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import {
@@ -13,6 +14,7 @@ import {
   registerDefaultTools,
   OverridesStore,
 } from "../tool-registry/index.js";
+import { _internals } from "../tool-registry/definitions.js";
 
 function freshRegistry(opts: {
   exists?: (p: string) => boolean;
@@ -442,5 +444,79 @@ describe("installHints do not affect resolution (regression guard)", () => {
     expect(git.ok).toBe(true);
     expect(git.source).toBe("system");
     expect(git.tried.map((t) => t.strategy)).toEqual(["override", "managed", "where"]);
+  });
+});
+
+describe("readManifestEntry", () => {
+  const { readManifestEntry } = _internals;
+
+  it("returns omp.extensions[0] when present", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-"));
+    const pkgPath = path.join(dir, "package.json");
+    fs.writeFileSync(
+      pkgPath,
+      JSON.stringify({ omp: { extensions: ["src/bridge.ts"] } }),
+    );
+    expect(readManifestEntry(pkgPath)).toBe("src/bridge.ts");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("falls back to pi.extensions[0] when omp not present", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-"));
+    const pkgPath = path.join(dir, "package.json");
+    fs.writeFileSync(
+      pkgPath,
+      JSON.stringify({ pi: { extensions: ["src/legacy.ts"] } }),
+    );
+    expect(readManifestEntry(pkgPath)).toBe("src/legacy.ts");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("prefers omp.extensions over pi.extensions", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-"));
+    const pkgPath = path.join(dir, "package.json");
+    fs.writeFileSync(
+      pkgPath,
+      JSON.stringify({
+        omp: { extensions: ["src/omp.ts"] },
+        pi: { extensions: ["src/pi.ts"] },
+      }),
+    );
+    expect(readManifestEntry(pkgPath)).toBe("src/omp.ts");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns null when neither omp nor pi extensions field exists", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-"));
+    const pkgPath = path.join(dir, "package.json");
+    fs.writeFileSync(
+      pkgPath,
+      JSON.stringify({ name: "no-extensions", main: "index.js" }),
+    );
+    expect(readManifestEntry(pkgPath)).toBeNull();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns null for missing package.json", () => {
+    expect(readManifestEntry("/nonexistent/path/package.json")).toBeNull();
+  });
+
+  it("returns null for invalid JSON", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-"));
+    const pkgPath = path.join(dir, "package.json");
+    fs.writeFileSync(pkgPath, "{ not valid json }");
+    expect(readManifestEntry(pkgPath)).toBeNull();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns null when extensions array is empty", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-"));
+    const pkgPath = path.join(dir, "package.json");
+    fs.writeFileSync(
+      pkgPath,
+      JSON.stringify({ omp: { extensions: [] } }),
+    );
+    expect(readManifestEntry(pkgPath)).toBeNull();
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
