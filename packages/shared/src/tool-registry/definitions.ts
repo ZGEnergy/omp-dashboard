@@ -470,7 +470,14 @@ function makeNodeScriptToArgv(deps?: StrategyDeps): ToolDefinition["toArgv"] {
  * exact failure mode the immutable-bundle architecture eliminates.
  */
 function piExecutorDef(deps?: StrategyDeps): ToolDefinition {
-  const piPkgAliases = ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"];
+  // omp-dashboard fork: resolve the Oh My Pi agent. Keep the tool name "pi"
+  // (all callers `resolve("pi")` unchanged); only the underlying package +
+  // binary point at omp. Legacy pi packages kept as fallbacks.
+  const piPkgAliases = [
+    "@oh-my-pi/pi-coding-agent",
+    "@earendil-works/pi-coding-agent",
+    "@mariozechner/pi-coding-agent",
+  ];
   const cliEntry = path.join("dist", "cli.js");
 
   const winStrategies = [
@@ -478,15 +485,15 @@ function piExecutorDef(deps?: StrategyDeps): ToolDefinition {
     ...piPkgAliases.map((pkg) => bareImportCliStrategy(pkg, cliEntry, deps)),
     ...piPkgAliases.map((pkg) => managedModuleStrategy(pkg, cliEntry, deps)),
     ...piPkgAliases.map((pkg) => npmGlobalStrategy(pkg, cliEntry, deps)),
-    managedBinStrategy("pi", deps),
-    whereStrategy("pi", deps),
+    managedBinStrategy("omp", deps),
+    whereStrategy("omp", deps),
   ];
 
   const unixStrategies = [
     overrideStrategy("pi", deps),
     ...piPkgAliases.map((pkg) => bareImportCliStrategy(pkg, cliEntry, deps)),
-    managedBinStrategy("pi", deps),
-    whereStrategy("pi", deps),
+    managedBinStrategy("omp", deps),
+    whereStrategy("omp", deps),
   ];
 
   return {
