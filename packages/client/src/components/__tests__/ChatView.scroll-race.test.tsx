@@ -130,4 +130,67 @@ describe("ChatView sticky scroll", () => {
 
     expect(scrollEl.scrollTop).toBe(1500);
   });
+
+  it("one click on scroll-to-bottom survives mid-flight height growth (virtualized rows measuring in)", async () => {
+    // Regression: under TanStack virtualization the rows below the viewport
+    // are ESTIMATED; while the smooth scroll descends they mount + measure and
+    // scrollHeight grows past the click-time target. The in-flight scroll
+    // events see nearBottom=false and used to clear stickToBottomRef, so the
+    // descent stalled short of the bottom and the button had to be clicked
+    // repeatedly. One click must latch "descend to bottom" until arrival.
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView state={stateWith(50)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const scrollEl = getScrollContainer(container);
+    // User is far up the transcript — button visible.
+    setScrollPosition(scrollEl, 0, 2000, 400);
+    fireEvent.scroll(scrollEl);
+    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+
+    // Click the button (scrollTo is stubbed in jsdom — the descent is
+    // represented by the scroll events we fire below).
+    fireEvent.click(container.querySelector('[data-testid="scroll-to-bottom"]')!);
+
+    // Mid-flight: not yet at the bottom AND scrollHeight grew (rows measured).
+    setScrollPosition(scrollEl, 900, 2600, 400);
+    fireEvent.scroll(scrollEl);
+
+    // The single click must keep the descent latched: button stays hidden…
+    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+
+    // …and the sticky pin must still chase the (grown) bottom on next content.
+    setScrollPosition(scrollEl, 900, 3000, 400);
+    rerender(
+      <ThemeProvider>
+        <ChatView state={stateWith(51)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    expect(scrollEl.scrollTop).toBe(3000);
+  });
+
+  it("user wheel input cancels an in-flight scroll-to-bottom descent", async () => {
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView state={stateWith(50)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 0, 2000, 400);
+    fireEvent.scroll(scrollEl);
+    fireEvent.click(container.querySelector('[data-testid="scroll-to-bottom"]')!);
+
+    // The user grabs the wheel mid-descent — that must cancel the latch.
+    fireEvent.wheel(scrollEl, { deltaY: -100 });
+    setScrollPosition(scrollEl, 700, 2600, 400);
+    fireEvent.scroll(scrollEl);
+
+    // Escape respected: button re-appears, no forced pin.
+    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+  });
 });

@@ -212,6 +212,15 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // Last observed scroll height, used to distinguish content growth (legit
   // re-pin) from a user scroll (must NOT re-pin) in the virtualizer onChange.
   const lastScrollHeightRef = useRef(0);
+  // True while a scroll-to-bottom descent is in flight. Under virtualization
+  // the below-viewport rows are ESTIMATED; as the smooth scroll descends they
+  // mount + measure and scrollHeight grows past the click-time target, so the
+  // intermediate scroll events see nearBottom=false. Without this latch those
+  // events cleared stickToBottomRef and the descent stalled short — the button
+  // had to be clicked repeatedly. The latch holds the pin until arrival and is
+  // cancelled by real user input (wheel / touch). See change:
+  // virtualize-chat-transcript-tanstack (scroll-to-bottom regression fix).
+  const descendingRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   // Effective display prefs for this session (configurable-chat-display).
   const prefs = useDisplayPrefs(sessionId);
@@ -312,12 +321,26 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   const virtualItems = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
 
+  // Real user input (wheel / touch) cancels an in-flight descent so the user
+  // can always escape mid-flight.
+  const cancelDescent = useCallback(() => {
+    descendingRef.current = false;
+  }, []);
+
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
-    stickToBottomRef.current = nearBottom;
-    setShowScrollButton(!nearBottom);
+    if (descendingRef.current) {
+      // In-flight descent: hold the pin through intermediate (not-yet-bottom)
+      // scroll events; clear the latch on arrival.
+      if (nearBottom) descendingRef.current = false;
+      stickToBottomRef.current = true;
+      setShowScrollButton(false);
+    } else {
+      stickToBottomRef.current = nearBottom;
+      setShowScrollButton(!nearBottom);
+    }
     // Persist scroll position for this session in VIRTUAL coordinates (CR-6):
     // the first below-the-fold row's stable id + its intra-row offset. Raw
     // scrollTop is meaningless once total size is an estimate across a remount.
@@ -338,6 +361,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     // Smooth when quiet, instant when streaming/tool output is active so the
     // animation cannot race with incoming chunks and re-introduce jumps.
     const isStreaming = Boolean(state.streamingText || state.streamingThinking || pendingSteering?.length);
+    descendingRef.current = true;
     el.scrollTo({ top: el.scrollHeight, behavior: isStreaming ? "instant" : "smooth" });
     stickToBottomRef.current = true;
     setShowScrollButton(false);
@@ -364,6 +388,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       if (saved && !saved.nearBottom && saved.anchorRowId) {
         // Scroll-locked: resolve the saved row id → current index, scroll it to
         // the top, then re-apply the intra-row offset once the row measures.
+        descendingRef.current = false;
         stickToBottomRef.current = false;
         setShowScrollButton(true);
         const anchorId = saved.anchorRowId;
@@ -405,6 +430,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       const rowIndex = turnToFirstRowIndex.get(turnIndex);
       if (rowIndex == null) return;
       // Escape sticky bottom so streaming does not pull the user off the turn.
+      descendingRef.current = false;
       stickToBottomRef.current = false;
       setShowScrollButton(true);
       virtualizer.scrollToIndex(rowIndex, { align: "start" });
@@ -416,7 +442,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     // resets the hoisted preview — a preview open in session A never leaks into B.
     <FilePreviewProvider key={sessionId}>
     <div className="flex-1 relative overflow-hidden flex flex-col">
-    <div ref={scrollRef} onScroll={handleScroll} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`}>
+    <div ref={scrollRef} onScroll={handleScroll} onWheel={cancelDescent} onTouchMove={cancelDescent} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`}>
       {/* Windowed historical rows (TanStack Virtual): only viewport + overscan
           are mounted. The spacer reserves getTotalSize(); each row is absolutely
           positioned + re-measured on mount. chat-cv-skip keeps Step A's
