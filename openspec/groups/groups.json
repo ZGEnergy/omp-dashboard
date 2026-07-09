@@ -96,15 +96,28 @@
     "wire-nonzrok-pairing-view": "ui",
     "finalize-event-dispatched-automation-runs": "ui",
     "enhance-tool-call-grouping": "ui",
-    "fix-first-launch-display-modal-stuck-on-mobile": "ui"
+    "fix-first-launch-display-modal-stuck-on-mobile": "ui",
+    "add-embeddable-chat-view": "ui",
+    "lag-dashboard-transcript-rendering": "ui",
+    "virtualize-chat-transcript-tanstack": "ui",
+    "reduce-chat-render-cpu-umbrella": "ui"
   },
   "changeOrder": {
-    "__ungrouped__": [],
+    "__ungrouped__": [
+      "add-agent-role-model-tools",
+      "add-automatic-session-kb-index",
+      "add-kb-semantic-annotation-plane",
+      "add-lora-dataset-export-skill",
+      "bound-subagent-event-serialization",
+      "gate-session-worktree-button-on-git",
+      "simplify-error-retry-single-card",
+      "support-non-git-init-hook"
+    ],
     "ui": [
-      "fix-first-launch-display-modal-stuck-on-mobile",
-      "enhance-tool-call-grouping",
-      "wire-nonzrok-pairing-view",
+      "add-embeddable-chat-view",
       "add-tunnel-providers",
+      "virtualize-chat-transcript-tanstack",
+      "reduce-chat-render-cpu-umbrella",
       "fix-local-electron-dmg-build"
     ],
     "next-phase": [],
