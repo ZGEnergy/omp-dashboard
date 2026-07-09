@@ -32,9 +32,9 @@ function makeRepoRootWithPlugin(id: string, displayName: string, opts: { enabled
   );
 
   if (opts.enabledInConfig !== undefined) {
-    fs.mkdirSync(path.join(HOME_OVERRIDE, ".pi", "dashboard"), { recursive: true });
+    fs.mkdirSync(path.join(HOME_OVERRIDE, ".omp", "dashboard"), { recursive: true });
     fs.writeFileSync(
-      path.join(HOME_OVERRIDE, ".pi", "dashboard", "config.json"),
+      path.join(HOME_OVERRIDE, ".omp", "dashboard", "config.json"),
       JSON.stringify({ plugins: { [id]: { enabled: opts.enabledInConfig } } }, null, 2),
     );
   }
@@ -65,9 +65,9 @@ function makeRepoRootWithPluginPair(
   if (a.enabledInConfig !== undefined) cfgPlugins[a.id] = { enabled: a.enabledInConfig };
   if (b.enabledInConfig !== undefined) cfgPlugins[b.id] = { enabled: b.enabledInConfig };
   if (Object.keys(cfgPlugins).length > 0) {
-    fs.mkdirSync(path.join(HOME_OVERRIDE, ".pi", "dashboard"), { recursive: true });
+    fs.mkdirSync(path.join(HOME_OVERRIDE, ".omp", "dashboard"), { recursive: true });
     fs.writeFileSync(
-      path.join(HOME_OVERRIDE, ".pi", "dashboard", "config.json"),
+      path.join(HOME_OVERRIDE, ".omp", "dashboard", "config.json"),
       JSON.stringify({ plugins: cfgPlugins }, null, 2),
     );
   }
@@ -156,7 +156,7 @@ describe("POST /api/plugins/:id/toggle", () => {
     const body = res.json() as { success: boolean; restartRequired: boolean };
     expect(body.restartRequired).toBe(true);
 
-    const cfgPath = path.join(HOME_OVERRIDE, ".pi", "dashboard", "config.json");
+    const cfgPath = path.join(HOME_OVERRIDE, ".omp", "dashboard", "config.json");
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
     expect(cfg.plugins["act-b"].enabled).toBe(false);
 
@@ -176,7 +176,7 @@ describe("POST /api/plugins/:id/toggle", () => {
     });
     expect(res.statusCode).toBe(404);
     // config.json should not have been created
-    const cfgPath = path.join(HOME_OVERRIDE, ".pi", "dashboard", "config.json");
+    const cfgPath = path.join(HOME_OVERRIDE, ".omp", "dashboard", "config.json");
     expect(fs.existsSync(cfgPath)).toBe(false);
   });
 
@@ -231,7 +231,7 @@ describe("POST /api/plugins/:id/toggle", () => {
     expect(body.cascade.enable).toEqual(["cas-a"]);
 
     const cfg = JSON.parse(
-      fs.readFileSync(path.join(HOME_OVERRIDE, ".pi", "dashboard", "config.json"), "utf-8"),
+      fs.readFileSync(path.join(HOME_OVERRIDE, ".omp", "dashboard", "config.json"), "utf-8"),
     );
     expect(cfg.plugins["cas-a"].enabled).toBe(true);
     expect(cfg.plugins["cas-b"].enabled).toBe(true);
@@ -259,7 +259,7 @@ describe("POST /api/plugins/:id/toggle", () => {
     expect(body.cascade.disable).toEqual(["dis-b"]);
 
     const cfg = JSON.parse(
-      fs.readFileSync(path.join(HOME_OVERRIDE, ".pi", "dashboard", "config.json"), "utf-8"),
+      fs.readFileSync(path.join(HOME_OVERRIDE, ".omp", "dashboard", "config.json"), "utf-8"),
     );
     expect(cfg.plugins["dis-a"].enabled).toBe(false);
     expect(cfg.plugins["dis-b"].enabled).toBe(false);

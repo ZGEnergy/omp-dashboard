@@ -17,7 +17,7 @@
  *
  * Does NOT own the log-file PATH — that's caller policy. Conventions:
  *   - extension: `stdio: "ignore"`
- *   - cli (`cmdStart`): `~/.pi/dashboard/server.log`
+ *   - cli (`cmdStart`): `~/.omp/dashboard/server.log`
  *   - electron: existing electron log path
  *
  * See change: unify-server-launch-ts-loader.

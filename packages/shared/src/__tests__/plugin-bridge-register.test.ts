@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 function settingsPath() {
-  return path.join(homedir, ".pi", "agent", "settings.json");
+  return path.join(homedir, ".omp", "agent", "settings.json");
 }
 
 function readSettings(): Record<string, unknown> {
@@ -67,7 +67,7 @@ describe("registerPluginBridge", () => {
     // is required (pi-coding-agent reads packages[], not dashboardPluginBridges).
     // User entries MUST be preserved in original order; the managed bridge
     // path MUST be appended and recorded in the ownership map.
-    fs.mkdirSync(path.join(homedir, ".pi", "agent"), { recursive: true });
+    fs.mkdirSync(path.join(homedir, ".omp", "agent"), { recursive: true });
     fs.writeFileSync(
       settingsPath(),
       JSON.stringify({ packages: ["/user/extension1", "/user/extension2"] }),

@@ -68,7 +68,7 @@ export function checkOutdated(starter?: string | null): OutdatedPackage[] {
 }
 
 function checkManagedOutdated(pkg: string): OutdatedPackage | null {
-  const managedDir = path.join(os.homedir(), ".pi-dashboard");
+  const managedDir = path.join(os.homedir(), ".omp-dashboard");
   const data = npm.outdatedOr({ cwd: managedDir, pkg }) as Record<string, any> | null;
   return parseOutdatedEntry(pkg, data);
 }
@@ -95,7 +95,7 @@ export function updatePackage(pkg: string, starter: string | null): void {
     const r = npm.installGlobal({ pkg, version: "latest" });
     if (!r.ok) throw new Error(`npm install -g failed: ${JSON.stringify(r.error)}`);
   } else {
-    const managedDir = path.join(os.homedir(), ".pi-dashboard");
+    const managedDir = path.join(os.homedir(), ".omp-dashboard");
     const r = npm.install({ cwd: managedDir, pkg, version: "latest" });
     if (!r.ok) throw new Error(`npm install failed: ${JSON.stringify(r.error)}`);
   }

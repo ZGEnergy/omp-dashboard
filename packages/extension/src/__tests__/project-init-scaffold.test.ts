@@ -64,7 +64,7 @@ describe("project-init scaffold", () => {
     const res = scaffoldProfile({ profile, targetDir: target });
     expect(res.doctrineSeeded).toBe(true);
     expect(fs.readFileSync(path.join(target, "AGENTS.md"), "utf8")).toContain(DOX_MARKER);
-    expect(fs.existsSync(path.join(target, ".pi", "dashboard", "knowledge_base.json"))).toBe(true);
+    expect(fs.existsSync(path.join(target, ".omp", "dashboard", "knowledge_base.json"))).toBe(true);
   });
 
   it("planScaffold reports existing files as conflicts", () => {
@@ -107,7 +107,7 @@ describe("project-init scaffold", () => {
 
   it("overwrite:true rewrites a pre-existing knowledge_base.json (DOX)", () => {
     const profile = makeProfileDir(profilesRoot, "coding", { dox: true });
-    const kbPath = path.join(target, ".pi", "dashboard", "knowledge_base.json");
+    const kbPath = path.join(target, ".omp", "dashboard", "knowledge_base.json");
     fs.mkdirSync(path.dirname(kbPath), { recursive: true });
     fs.writeFileSync(kbPath, '{"sources":[]}\n');
     scaffoldProfile({ profile, targetDir: target, overwrite: true });

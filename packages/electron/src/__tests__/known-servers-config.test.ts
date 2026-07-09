@@ -14,8 +14,8 @@ describe("Electron knownServers config parsing", () => {
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-electron-config-${Date.now()}`);
-    fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
-    configFile = path.join(testDir, ".pi", "dashboard", "config.json");
+    fs.mkdirSync(path.join(testDir, ".omp", "dashboard"), { recursive: true });
+    configFile = path.join(testDir, ".omp", "dashboard", "config.json");
     origHome = process.env.HOME!;
     process.env.HOME = testDir;
   });

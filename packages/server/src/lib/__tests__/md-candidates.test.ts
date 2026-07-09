@@ -22,7 +22,7 @@ beforeAll(async () => {
   home = path.join(root, "home");
   await fs.mkdir(path.join(cwd, ".pi", "skills", "impl"), { recursive: true });
   await fs.mkdir(path.join(cwd, "node_modules", "pkg"), { recursive: true });
-  await fs.mkdir(path.join(home, ".pi", "agent", "sub"), { recursive: true });
+  await fs.mkdir(path.join(home, ".omp", "agent", "sub"), { recursive: true });
   await fs.mkdir(path.join(root, "sibling"), { recursive: true });
 
   await fs.writeFile(path.join(cwd, "AGENTS.md"), "# a");
@@ -33,8 +33,8 @@ beforeAll(async () => {
   await fs.writeFile(path.join(root, "sibling", "evil.md"), "# e");
   await fs.symlink(path.join(root, "sibling", "evil.md"), path.join(cwd, "escape.md")); // pruned
 
-  await fs.writeFile(path.join(home, ".pi", "agent", "MEMORY.md"), "# m");
-  await fs.writeFile(path.join(home, ".pi", "agent", "sub", "deep.md"), "# d");
+  await fs.writeFile(path.join(home, ".omp", "agent", "MEMORY.md"), "# m");
+  await fs.writeFile(path.join(home, ".omp", "agent", "sub", "deep.md"), "# d");
 });
 
 afterAll(async () => {

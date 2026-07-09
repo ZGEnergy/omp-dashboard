@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 function writeConfig(data: Record<string, unknown>) {
-  const dir = path.join(tmpDir, ".pi", "dashboard");
+  const dir = path.join(tmpDir, ".omp", "dashboard");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify(data));
 }

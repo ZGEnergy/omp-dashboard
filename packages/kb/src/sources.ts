@@ -112,7 +112,7 @@ export const npmResolver: SourceResolver = {
     await ensureTrusted(spec, ctx);
     const bare = npmBareName(spec.ref);
     const candidates = [
-      join(homedir(), ".pi", "agent", "npm", "node_modules", bare),
+      join(homedir(), ".omp", "agent", "npm", "node_modules", bare),
       join(ctx.cwd, ".pi", "npm", "node_modules", bare),
       join(ctx.cwd, "node_modules", bare),
     ];

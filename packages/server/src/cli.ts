@@ -192,7 +192,7 @@ async function runForeground(config: ServerConfig): Promise<void> {
     }
   }
 
-  // One-time advisory: legacy `~/.pi-dashboard/` directory left behind
+  // One-time advisory: legacy `~/.omp-dashboard/` directory left behind
   // from pre-R3 versions. Nothing reads or writes it now — surface a
   // single log line so the user knows it's safe to delete. Doctor UI
   // shows the same advisory more visibly.
@@ -245,7 +245,7 @@ async function cmdStart(config: ServerConfig): Promise<void> {
   if (config.dev) args.push("--dev");
   if (!config.tunnel) args.push("--no-tunnel");
 
-  const logDir = path.join(os.homedir(), ".pi", "dashboard");
+  const logDir = path.join(os.homedir(), ".omp", "dashboard");
   const logPath = path.join(logDir, "server.log");
 
   try {

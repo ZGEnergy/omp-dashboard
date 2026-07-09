@@ -95,13 +95,13 @@ function readLocalSources(cwd: string): string[] {
 }
 
 /** Collect active package sources from both the user's global
- * `~/.pi/agent/settings.json` and the project's `<cwd>/.pi/settings.json`.
+ * `~/.omp/agent/settings.json` and the project's `<cwd>/.pi/settings.json`.
  * Mirrors pi's SettingsManager behavior: a package is "active" in pi if
  * it appears in EITHER scope's packages[] list. */
 function readActiveSources(cwd?: string): string[] {
 	const sources: string[] = [];
 
-	const globalPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
+	const globalPath = path.join(os.homedir(), ".omp", "agent", "settings.json");
 	try {
 		if (fs.existsSync(globalPath)) {
 			const raw = fs.readFileSync(globalPath, "utf-8").trim();

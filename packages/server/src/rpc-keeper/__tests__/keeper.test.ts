@@ -31,7 +31,7 @@ const SHIM_DIR = FIXTURES_DIR;
 // runner itself. We still create the per-test HOME under /tmp (not the npm-test
 // HOME) because /tmp is short, AND we keep the test isolated from production paths.
 function sessionsDirIn(home: string): string {
-  return path.join(home, ".pi", "dashboard", "sessions");
+  return path.join(home, ".omp", "dashboard", "sessions");
 }
 function sockPathIn(home: string, sid: string): string {
   return process.platform === "win32"

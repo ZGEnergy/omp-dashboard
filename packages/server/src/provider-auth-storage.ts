@@ -20,7 +20,7 @@ import { getLatestCatalogue } from "./provider-catalogue-cache.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const AUTH_DIR = path.join(os.homedir(), ".pi", "agent");
+const AUTH_DIR = path.join(os.homedir(), ".omp", "agent");
 const AUTH_PATH = path.join(AUTH_DIR, "auth.json");
 
 export type ApiKeyCredential = { type: "api_key"; key: string };

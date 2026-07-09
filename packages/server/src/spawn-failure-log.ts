@@ -43,7 +43,7 @@ export function _setLogDirForTests(dir: string | null): void {
 }
 
 function logDir(): string {
-  return _logDirOverride ?? path.join(os.homedir(), ".pi", "dashboard", "sessions");
+  return _logDirOverride ?? path.join(os.homedir(), ".omp", "dashboard", "sessions");
 }
 
 function logPath(): string {

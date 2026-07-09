@@ -2,7 +2,7 @@
  * Pi core package updater.
  *
  * Runs `npm install -g <pkg>@latest` for globally-installed packages or
- * `npm install <pkg>@latest` in `~/.pi-dashboard/` for managed installs.
+ * `npm install <pkg>@latest` in `~/.omp-dashboard/` for managed installs.
  * The `@latest` suffix is required because the consuming `package.json`
  * dependency range (e.g. `^0.70.0`) would otherwise pin updates to the
  * same minor — breaking cross-minor upgrades that pi now ships routinely
@@ -23,7 +23,7 @@ import type { PackageManagerWrapper } from "./package-manager-wrapper.js";
 
 const UPDATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 min per package
 
-const MANAGED_DIR = path.join(os.homedir(), ".pi-dashboard");
+const MANAGED_DIR = path.join(os.homedir(), ".omp-dashboard");
 
 export interface UpdateProgressEvent {
 	name: string;

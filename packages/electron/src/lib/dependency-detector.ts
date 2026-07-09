@@ -202,7 +202,7 @@ export function detectDashboardPackage(): DetectionResult {
  * 2. npm package locations (managed + global) as fallback
  */
 export function detectBridgeExtension(): DetectionResult {
-  const settingsPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
+  const settingsPath = path.join(os.homedir(), ".omp", "agent", "settings.json");
   try {
     if (existsSync(settingsPath)) {
       const raw = readFileSync(settingsPath, "utf-8").trim();

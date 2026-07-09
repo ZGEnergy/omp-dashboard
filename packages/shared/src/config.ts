@@ -9,7 +9,7 @@ import type { WindowsGitSourceSetting } from "./platform/select-git-source.js";
 
 export type { WindowsGitSourceSetting } from "./platform/select-git-source.js";
 
-export const CONFIG_DIR = path.join(os.homedir(), ".pi", "dashboard");
+export const CONFIG_DIR = path.join(os.homedir(), ".omp", "dashboard");
 export const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
 export type SpawnStrategy = "tmux" | "headless";
@@ -698,7 +698,7 @@ function parseTrustedNetworks(raw: any): string[] {
  * Returns defaults for missing fields, malformed JSON, or missing file.
  */
 export function loadConfig(): DashboardConfig {
-  const configDir = path.join(os.homedir(), ".pi", "dashboard");
+  const configDir = path.join(os.homedir(), ".omp", "dashboard");
   const configFile = path.join(configDir, "config.json");
   const defaults: DashboardConfig = { ...DEFAULTS };
 
@@ -806,7 +806,7 @@ export function loadConfig(): DashboardConfig {
  * Creates the directory recursively if needed.
  */
 export function ensureConfig(): void {
-  const configDir = path.join(os.homedir(), ".pi", "dashboard");
+  const configDir = path.join(os.homedir(), ".omp", "dashboard");
   const configFile = path.join(configDir, "config.json");
 
   if (fs.existsSync(configFile)) return;

@@ -1,7 +1,7 @@
 /**
  * Folder-scoped goal record store.
  *
- * On-disk shape: `~/.pi/dashboard/goals/<folderHash(cwd)>.json` containing
+ * On-disk shape: `~/.omp/dashboard/goals/<folderHash(cwd)>.json` containing
  * `{ schemaVersion, goals }`. Dashboard-owned (single-writer, never
  * hand-edited in the repo), so this store is simpler than
  * `openspec-group-store.ts`: no concurrent-edit detection, no group/order
@@ -58,7 +58,7 @@ export interface GoalUpdateBody {
 }
 
 export interface GoalStoreOptions {
-  /** Root dir for goal files. Default `~/.pi/dashboard/goals`. */
+  /** Root dir for goal files. Default `~/.omp/dashboard/goals`. */
   dataDir?: string;
   /** Trailing-debounce window for subscriber callbacks in ms. Default 100. */
   debounceMs?: number;
@@ -93,7 +93,7 @@ function emptyFile(): GoalsFile {
 // ── Factory ──────────────────────────────────────────────────────
 
 export function createGoalStore(opts: GoalStoreOptions = {}): GoalStore {
-  const dataDir = opts.dataDir ?? path.join(os.homedir(), ".pi", "dashboard", "goals");
+  const dataDir = opts.dataDir ?? path.join(os.homedir(), ".omp", "dashboard", "goals");
   const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
 
   const cache = new Map<string, GoalsFile>();

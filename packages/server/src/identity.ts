@@ -2,7 +2,7 @@
  * Persistent Ed25519 server identity (D2 — Model 1, TOFU/SSH-style pinning).
  *
  * On startup the server ensures a persistent Ed25519 keypair at
- * `~/.pi/dashboard/identity.key` (0600) and reuses it across restarts. The
+ * `~/.omp/dashboard/identity.key` (0600) and reuses it across restarts. The
  * public-key fingerprint is the server's stable identity, independent of the
  * URL(s) by which it is reached. A client pins the fingerprint at first pairing
  * and, on each connect, sends a nonce the server signs with its private key so
@@ -26,9 +26,9 @@ export interface ServerIdentity {
   fingerprint: string;
 }
 
-/** Default identity file path: `~/.pi/dashboard/identity.key`. */
+/** Default identity file path: `~/.omp/dashboard/identity.key`. */
 export function defaultIdentityPath(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", IDENTITY_FILENAME);
+  return path.join(os.homedir(), ".omp", "dashboard", IDENTITY_FILENAME);
 }
 
 /** Base64url of the SPKI DER public key. */

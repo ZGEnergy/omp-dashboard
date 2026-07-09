@@ -19,7 +19,7 @@ import path from "node:path";
 import os from "node:os";
 import { writeCredential, readAuthJson } from "../../provider-auth-storage.js";
 
-const AUTH_DIR = path.join(os.homedir(), ".pi", "agent");
+const AUTH_DIR = path.join(os.homedir(), ".omp", "agent");
 const AUTH_PATH = path.join(AUTH_DIR, "auth.json");
 
 let backup: string | null = null;

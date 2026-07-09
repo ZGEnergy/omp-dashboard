@@ -288,7 +288,7 @@ interface MinimalConfig {
 export function loadMinimalConfig(): MinimalConfig {
   const defaults: MinimalConfig = { port: 8000, piPort: 9999, knownServers: [] };
   try {
-    const configFile = path.join(os.homedir(), ".pi", "dashboard", "config.json");
+    const configFile = path.join(os.homedir(), ".omp", "dashboard", "config.json");
     if (!existsSync(configFile)) return defaults;
     const raw = readFileSync(configFile, "utf-8").trim();
     if (!raw) return defaults;
@@ -419,7 +419,7 @@ export async function isManagedServerRunning(): Promise<boolean> {
 }
 
 /**
- * Read the trailing `lines` lines (default 20) of `~/.pi/dashboard/server.log`.
+ * Read the trailing `lines` lines (default 20) of `~/.omp/dashboard/server.log`.
  * Returns an empty string if the log is missing or unreadable. Reads at most
  * 8 KiB from the end of the file to bound memory.
  */

@@ -310,7 +310,7 @@ export function registerOpenSpecRoutes(
       }
 
       const homeDir = process.env.HOME || process.env.USERPROFILE || "";
-      const globalPiDir = path.join(homeDir, ".pi", "agent");
+      const globalPiDir = path.join(homeDir, ".omp", "agent");
       const allSessions = sessionManager.listAll();
       const knownCwds = new Set(allSessions.map((s) => s.cwd));
       for (const dir of preferencesStore.getPinnedDirectories()) knownCwds.add(dir);

@@ -66,7 +66,7 @@ describe("session-scanner resolves scan dir via config", () => {
     const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-sessions-fixture-"));
     writeFixtureSession(fixtureRoot, "--fix-cwd--", "fixture-id");
 
-    const configDir = path.join(os.homedir(), ".pi", "dashboard");
+    const configDir = path.join(os.homedir(), ".omp", "dashboard");
     fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(
       path.join(configDir, "config.json"),
@@ -83,7 +83,7 @@ describe("session-scanner resolves scan dir via config", () => {
   });
 
   it("all unset → scanAllSessions() targets $HOME/.pi/agent/sessions", () => {
-    const defaultRoot = path.join(os.homedir(), ".pi", "agent", "sessions");
+    const defaultRoot = path.join(os.homedir(), ".omp", "agent", "sessions");
     writeFixtureSession(defaultRoot, "--default-cwd--", "default-id");
 
     try {

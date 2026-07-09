@@ -25,7 +25,7 @@
  * plugin bridges (`packages/shared/`-only imports allowed) on every
  * probe without amortization.
  *
- * Scope only: walks `packages[]` from `~/.pi/agent/settings.json` and
+ * Scope only: walks `packages[]` from `~/.omp/agent/settings.json` and
  * `<cwd>/.pi/settings.json`. Does NOT walk `extensions[]`/`skills[]`/
  * `prompts[]` top-level arrays — those hold file paths to individual
  * extension entry files, not package roots, so `package.json#name`
@@ -42,7 +42,7 @@ import { rootGlobalOr } from "./platform/npm.js";
 // ── Public surface ──────────────────────────────────────────────────
 
 export interface ResolvePiPackageOptions {
-  /** Override `~/.pi/agent`. Default: `path.join(os.homedir(), ".pi", "agent")`. */
+  /** Override `~/.omp/agent`. Default: `path.join(os.homedir(), ".omp", "agent")`. */
   agentDir?: string;
   /** Project-scope cwd (enables reading `<cwd>/.pi/settings.json`). */
   cwd?: string;
@@ -77,7 +77,7 @@ export function resolvePiPackage(
   spec: string,
   opts: ResolvePiPackageOptions = {},
 ): ResolvedPiPackage | null {
-  const agentDir = opts.agentDir ?? path.join(os.homedir(), ".pi", "agent");
+  const agentDir = opts.agentDir ?? path.join(os.homedir(), ".omp", "agent");
   const scope = opts.scope ?? "any";
   const cwd = opts.cwd;
   const npmRoot = opts.npmRoot ?? rootGlobalOr("");
@@ -119,7 +119,7 @@ export function resolvePiPackageEntry(
  * `packages[]` schema instead of the non-existent `extensions[]`.
  */
 export function listPiPackages(opts: ResolvePiPackageOptions = {}): ResolvedPiPackage[] {
-  const agentDir = opts.agentDir ?? path.join(os.homedir(), ".pi", "agent");
+  const agentDir = opts.agentDir ?? path.join(os.homedir(), ".omp", "agent");
   const scope = opts.scope ?? "any";
   const cwd = opts.cwd;
   const npmRoot = opts.npmRoot ?? rootGlobalOr("");

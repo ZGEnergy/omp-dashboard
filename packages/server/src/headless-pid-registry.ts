@@ -24,7 +24,7 @@ export interface KeeperWriter {
 }
 
 /** Default PID file path */
-const DEFAULT_PID_FILE = path.join(os.homedir(), ".pi", "dashboard", "headless-pids.json");
+const DEFAULT_PID_FILE = path.join(os.homedir(), ".omp", "dashboard", "headless-pids.json");
 
 /** Max age before an orphan is killed (7 days) */
 const MAX_ORPHAN_AGE_MS = 7 * 24 * 60 * 60 * 1000;

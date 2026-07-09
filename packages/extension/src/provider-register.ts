@@ -185,7 +185,7 @@ export function enrichModelMetadata(
 
 // Resolved lazily so HOME can be changed in tests.
 function configPath(): string {
-  return join(homedir(), ".pi", "agent", "providers.json");
+  return join(homedir(), ".omp", "agent", "providers.json");
 }
 const CONFIG_PATH = configPath();
 
@@ -527,7 +527,7 @@ void loadPiAi();
 /**
  * Public wrapper: returns the current provider catalogue, or [] when
  * the model registry has not been captured yet. Marks providers the
- * bridge itself registered (from `~/.pi/agent/providers.json` via
+ * bridge itself registered (from `~/.omp/agent/providers.json` via
  * `pi.registerProvider()`) with `custom: true` so consumers can
  * suppress their API-key auth rows (those are managed by the LLM
  * Providers settings section). The catalogue itself is complete —
@@ -613,7 +613,7 @@ async function registerEntry(pi: ExtensionAPI, name: string, entry: ProviderEntr
   // shortly after `activate()` kicked off async registerEntry calls) carries
   // the correct `custom: true` flags. Otherwise a slow / unreachable
   // /v1/models endpoint causes custom providers from
-  // `~/.pi/agent/providers.json` to leak into Settings → Provider
+  // `~/.omp/agent/providers.json` to leak into Settings → Provider
   // Authentication → API Keys until the discovery probe resolves.
   // See change: fix-custom-provider-flag-race.
   lastRegistered.set(name, {

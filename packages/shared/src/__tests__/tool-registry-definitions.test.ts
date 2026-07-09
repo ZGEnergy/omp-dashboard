@@ -91,7 +91,7 @@ describe("pi binary definition", () => {
     // server's own node_modules. With no PATH, no managed dir,
     // bare-import must resolve the bundled cli.js — otherwise the
     // server falls into bootstrapInstall() and writes to
-    // ~/.pi-dashboard/ (the failure mode F9 documents).
+    // ~/.omp-dashboard/ (the failure mode F9 documents).
     const bundledPkgJson =
       "/Volumes/PI Dashboard/PI-Dashboard.app/Contents/Resources/server/node_modules/@earendil-works/pi-coding-agent/package.json";
     const bundledCli =
@@ -121,7 +121,7 @@ describe("pi binary definition", () => {
   });
 
   it("managed wins over system when MANAGED_BIN/pi exists", () => {
-    const managed = path.join(os.homedir(), ".pi-dashboard", "node_modules", ".bin", "pi");
+    const managed = path.join(os.homedir(), ".omp-dashboard", "node_modules", ".bin", "pi");
     const r = freshRegistry({
       exists: (p) => p === managed,
       which: () => "/usr/bin/pi",
@@ -134,7 +134,7 @@ describe("pi binary definition", () => {
   });
 
   it("picks .cmd extension on Windows", () => {
-    const managed = path.join(os.homedir(), ".pi-dashboard", "node_modules", ".bin", "pi.cmd");
+    const managed = path.join(os.homedir(), ".omp-dashboard", "node_modules", ".bin", "pi.cmd");
     const r = freshRegistry({
       exists: (p) => p === managed,
       platform: "win32",
@@ -183,9 +183,9 @@ describe("pi-coding-agent module definition", () => {
     expect(names.filter((n) => n === "npm-global").length).toBe(2);
   });
 
-  it("managed strategy hits ~/.pi-dashboard/node_modules/<pkg>/dist/index.js", () => {
+  it("managed strategy hits ~/.omp-dashboard/node_modules/<pkg>/dist/index.js", () => {
     const managed = path.join(
-      os.homedir(), ".pi-dashboard", "node_modules",
+      os.homedir(), ".omp-dashboard", "node_modules",
       "@mariozechner", "pi-coding-agent", "dist", "index.js",
     );
     const r = freshRegistry({ exists: (p) => p === managed });
@@ -225,7 +225,7 @@ describe("pi-coding-agent module definition", () => {
 
 describe("openspec binary definition", () => {
   it("finds openspec.cmd under managed bin on Windows", () => {
-    const managed = path.join(os.homedir(), ".pi-dashboard", "node_modules", ".bin", "openspec.cmd");
+    const managed = path.join(os.homedir(), ".omp-dashboard", "node_modules", ".bin", "openspec.cmd");
     const r = freshRegistry({ exists: (p) => p === managed, platform: "win32" });
     const res = r.resolve("openspec");
     expect(res.ok).toBe(true);

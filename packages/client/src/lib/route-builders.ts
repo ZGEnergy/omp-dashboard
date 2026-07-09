@@ -13,7 +13,7 @@
  *     through the URL safely.
  *   - `/pi-resource` uses a query string because the resource path is an
  *     absolute filesystem path that may live outside any pinned folder (e.g.
- *     `~/.pi/agent/.../skill.md`). Encoding it as a path segment would be
+ *     `~/.omp/agent/.../skill.md`). Encoding it as a path segment would be
  *     awkward.
  *
  * See change: overlay-url-routing.

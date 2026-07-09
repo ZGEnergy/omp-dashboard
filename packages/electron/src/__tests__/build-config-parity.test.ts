@@ -22,7 +22,7 @@ const eb = parseYaml(readFileSync(path.join(electronRoot, "electron-builder.yml"
 const nsis = JSON.parse(readFileSync(path.join(electronRoot, "electron-builder-nsis.json"), "utf8"));
 const pkg = forgeConfig.packagerConfig ?? {};
 
-const CANONICAL_APP_ID = "com.blackbelt-technology.pi-dashboard";
+const CANONICAL_APP_ID = "com.blackbelt-technology.omp-dashboard";
 const CANONICAL_EXECUTABLE = "pi-dashboard";
 const CANONICAL_PRODUCT = "PI Dashboard";
 

@@ -2,14 +2,14 @@
  * Role Manager Extension (Dashboard)
  *
  * Owns the `roles`, `rolePresets`, and `activePreset` keys of
- * `~/.pi/agent/providers.json`. Registers the `roles:*` event handlers
+ * `~/.omp/agent/providers.json`. Registers the `roles:*` event handlers
  * that back the dashboard's Settings → Roles UI. Previously hosted in
  * pi-flows; ownership relocated here per OpenSpec change
  * `adopt-model-resolve-handler-and-roles-ownership` (capabilities
  * `dashboard-roles-ownership` and `dashboard-model-resolution`).
  *
  * Contract (spec: dashboard-roles-ownership):
- *   - Single source of truth on disk is `~/.pi/agent/providers.json`.
+ *   - Single source of truth on disk is `~/.omp/agent/providers.json`.
  *   - Reads tolerate missing file / malformed JSON (return empty config).
  *   - Writes use atomic tmp+rename, preserve unrelated keys (notably
  *     `providers` and pi-flows-owned `autonomousMode`).
@@ -60,7 +60,7 @@ export interface RoleConfig {
 
 // Resolved lazily so HOME can be changed in tests.
 function configPath(): string {
-  return join(homedir(), ".pi", "agent", "providers.json");
+  return join(homedir(), ".omp", "agent", "providers.json");
 }
 
 // -- Config I/O -----------------------------------------------------------
@@ -115,7 +115,7 @@ export function loadRoleConfig(): RoleConfig {
  */
 export function saveRoleConfig(roleConfig: RoleConfig): void {
   const path = configPath();
-  mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
+  mkdirSync(join(homedir(), ".omp", "agent"), { recursive: true });
   const full = loadFullConfig();
   full.roles = roleConfig.roles;
   full.rolePresets = roleConfig.rolePresets;

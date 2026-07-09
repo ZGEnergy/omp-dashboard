@@ -258,7 +258,7 @@ export function doxLint(opts: DoxLintOptions): DoxLintResult {
 
   // staleness sidecar
   let staleness: Record<string, string> = {};
-  const sf = opts.stalenessFile ?? join(cwd, ".pi", "dashboard", "kb", "dox-staleness.json");
+  const sf = opts.stalenessFile ?? join(cwd, ".omp", "dashboard", "kb", "dox-staleness.json");
   if (existsSync(sf)) { try { staleness = JSON.parse(readFileSync(sf, "utf8")); } catch { /* */ } }
 
   const allMd = new Set(walkMd(cwd).map((f) => relative(cwd, f)));

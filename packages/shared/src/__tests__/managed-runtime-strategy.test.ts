@@ -21,7 +21,7 @@ function ctx(opts: Partial<StrategyCtx> = {}): StrategyCtx {
 
 describe("managedRuntimeStrategy", () => {
   it("Unix node: returns <managedDir>/node/bin/node when present", () => {
-    const expected = path.join("/fake/home", ".pi-dashboard", "node", "bin", "node");
+    const expected = path.join("/fake/home", ".omp-dashboard", "node", "bin", "node");
     const s = managedRuntimeStrategy("node", { exists: (p) => p === expected });
     const r = s.run(ctx({ platform: "linux" }));
     expect(r.ok).toBe(true);
@@ -29,7 +29,7 @@ describe("managedRuntimeStrategy", () => {
   });
 
   it("Unix npm: returns <managedDir>/node/bin/npm when present", () => {
-    const expected = path.join("/fake/home", ".pi-dashboard", "node", "bin", "npm");
+    const expected = path.join("/fake/home", ".omp-dashboard", "node", "bin", "npm");
     const s = managedRuntimeStrategy("npm", { exists: (p) => p === expected });
     const r = s.run(ctx({ platform: "linux" }));
     expect(r.ok).toBe(true);
@@ -37,7 +37,7 @@ describe("managedRuntimeStrategy", () => {
   });
 
   it("Windows node: returns <managedDir>/node/node.exe when present", () => {
-    const expected = path.join("/fake/home", ".pi-dashboard", "node", "node.exe");
+    const expected = path.join("/fake/home", ".omp-dashboard", "node", "node.exe");
     const s = managedRuntimeStrategy("node", { exists: (p) => p === expected });
     const r = s.run(ctx({ platform: "win32" }));
     expect(r.ok).toBe(true);
@@ -45,7 +45,7 @@ describe("managedRuntimeStrategy", () => {
   });
 
   it("Windows npm: returns <managedDir>/node/npm.cmd when present", () => {
-    const expected = path.join("/fake/home", ".pi-dashboard", "node", "npm.cmd");
+    const expected = path.join("/fake/home", ".omp-dashboard", "node", "npm.cmd");
     const s = managedRuntimeStrategy("npm", { exists: (p) => p === expected });
     const r = s.run(ctx({ platform: "win32" }));
     expect(r.ok).toBe(true);
@@ -53,7 +53,7 @@ describe("managedRuntimeStrategy", () => {
   });
 
   it("Windows npx: returns <managedDir>/node/npx.cmd when present", () => {
-    const expected = path.join("/fake/home", ".pi-dashboard", "node", "npx.cmd");
+    const expected = path.join("/fake/home", ".omp-dashboard", "node", "npx.cmd");
     const s = managedRuntimeStrategy("npx", { exists: (p) => p === expected });
     const r = s.run(ctx({ platform: "win32" }));
     expect(r.ok).toBe(true);

@@ -136,7 +136,7 @@ describe("PiCoreChecker.getStatus", () => {
 	});
 
 	it("managed scan ignores non-whitelisted packages", async () => {
-		// Even if a pi-* prefixed package sits in ~/.pi-dashboard/node_modules,
+		// Even if a pi-* prefixed package sits in ~/.omp-dashboard/node_modules,
 		// it must not appear in core discovery.
 		writeManagedPackage(tmpManagedDir, "pi-web-access", "0.10.6");
 

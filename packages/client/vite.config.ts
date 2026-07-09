@@ -45,7 +45,7 @@ function resolveDashboardPort(): number {
   }
   // 3. Config file
   try {
-    const configPath = path.join(os.homedir(), ".pi", "dashboard", "config.json");
+    const configPath = path.join(os.homedir(), ".omp", "dashboard", "config.json");
     const raw = fs.readFileSync(configPath, "utf-8");
     const cfg = JSON.parse(raw);
     if (typeof cfg.port === "number" && Number.isFinite(cfg.port) && cfg.port >= 1 && cfg.port <= 65535) {

@@ -26,7 +26,7 @@ export const DOX_KB_CONFIG = {
 
 /** Absolute path to a project's kb config file. */
 export function kbConfigPath(dir: string): string {
-  return path.join(dir, ".pi", "dashboard", "knowledge_base.json");
+  return path.join(dir, ".omp", "dashboard", "knowledge_base.json");
 }
 
 /**

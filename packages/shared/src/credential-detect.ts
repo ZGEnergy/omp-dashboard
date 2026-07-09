@@ -2,10 +2,10 @@
  * Detect whether any LLM-provider credential is configured for pi.
  *
  * Two sources are inspected and OR-merged:
- *  - `~/.pi/agent/settings.json` — legacy API-key fields written by the
+ *  - `~/.omp/agent/settings.json` — legacy API-key fields written by the
  *    first-run wizard or user-edited config: `anthropicApiKey`,
  *    `openaiApiKey`, `apiKey`, `providers[*].apiKey`.
- *  - `~/.pi/agent/auth.json` — pi-side credential store written by
+ *  - `~/.omp/agent/auth.json` — pi-side credential store written by
  *    Settings → Providers. Two entry shapes coexist there:
  *      * API-key:  `{ type, key }`
  *      * OAuth:    `{ type, access, refresh, expires, ... }`
@@ -72,7 +72,7 @@ function authHasCredential(data: unknown): boolean {
 
 /**
  * Returns true if at least one provider credential is configured in
- * either `~/.pi/agent/settings.json` or `~/.pi/agent/auth.json`.
+ * either `~/.omp/agent/settings.json` or `~/.omp/agent/auth.json`.
  *
  * @param homeDir Override for the user's home directory. Defaults to
  *   `os.homedir()`. Pass a tmp dir in tests; never pass user-provided
@@ -91,6 +91,6 @@ export function hasAnyProviderCredential(homeDir: string = os.homedir()): boolea
  * duplicating the path logic.
  */
 export function inspectedCredentialFiles(homeDir: string = os.homedir()): [string, string] {
-  const agentDir = path.join(homeDir, ".pi", "agent");
+  const agentDir = path.join(homeDir, ".omp", "agent");
   return [path.join(agentDir, "settings.json"), path.join(agentDir, "auth.json")];
 }

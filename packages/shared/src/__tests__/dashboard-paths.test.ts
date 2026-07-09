@@ -22,11 +22,11 @@ import {
 describe("dashboard-paths getters", () => {
   describe("getDashboardConfigDir", () => {
     it("no-arg resolves to ~/.pi/dashboard", () => {
-      expect(getDashboardConfigDir()).toBe(path.join(os.homedir(), ".pi", "dashboard"));
+      expect(getDashboardConfigDir()).toBe(path.join(os.homedir(), ".omp", "dashboard"));
     });
     it("honours { homedir } override", () => {
       expect(getDashboardConfigDir({ homedir: "/fake/home" })).toBe(
-        path.join("/fake/home", ".pi", "dashboard"),
+        path.join("/fake/home", ".omp", "dashboard"),
       );
     });
   });
@@ -34,36 +34,36 @@ describe("dashboard-paths getters", () => {
   describe("getDashboardServerLogPath", () => {
     it("no-arg resolves to ~/.pi/dashboard/server.log", () => {
       expect(getDashboardServerLogPath()).toBe(
-        path.join(os.homedir(), ".pi", "dashboard", "server.log"),
+        path.join(os.homedir(), ".omp", "dashboard", "server.log"),
       );
     });
     it("honours { homedir } override", () => {
       expect(getDashboardServerLogPath({ homedir: "/fake/home" })).toBe(
-        path.join("/fake/home", ".pi", "dashboard", "server.log"),
+        path.join("/fake/home", ".omp", "dashboard", "server.log"),
       );
     });
   });
 
   describe("getManagedDir (re-export)", () => {
-    it("no-arg resolves to ~/.pi-dashboard", () => {
-      expect(getManagedDir()).toBe(path.join(os.homedir(), ".pi-dashboard"));
+    it("no-arg resolves to ~/.omp-dashboard", () => {
+      expect(getManagedDir()).toBe(path.join(os.homedir(), ".omp-dashboard"));
     });
     it("honours { homedir } override", () => {
       expect(getManagedDir({ homedir: "/fake/home" })).toBe(
-        path.join("/fake/home", ".pi-dashboard"),
+        path.join("/fake/home", ".omp-dashboard"),
       );
     });
   });
 
   describe("getInstallerLogPath", () => {
-    it("no-arg resolves to ~/.pi-dashboard/server.log", () => {
+    it("no-arg resolves to ~/.omp-dashboard/server.log", () => {
       expect(getInstallerLogPath()).toBe(
-        path.join(os.homedir(), ".pi-dashboard", "server.log"),
+        path.join(os.homedir(), ".omp-dashboard", "server.log"),
       );
     });
     it("honours { homedir } override", () => {
       expect(getInstallerLogPath({ homedir: "/fake/home" })).toBe(
-        path.join("/fake/home", ".pi-dashboard", "server.log"),
+        path.join("/fake/home", ".omp-dashboard", "server.log"),
       );
     });
   });
@@ -83,7 +83,7 @@ describe("dashboard-paths getters", () => {
       });
 
     it("all unset → literal ~/.pi/agent/sessions", () => {
-      expect(resolve({})).toBe(path.join(HOME, ".pi", "agent", "sessions"));
+      expect(resolve({})).toBe(path.join(HOME, ".omp", "agent", "sessions"));
     });
     it("PI_CODING_AGENT_DIR + /sessions when nothing higher set", () => {
       expect(resolve({ agentDirEnv: "/custom/agent" })).toBe(
@@ -110,7 +110,7 @@ describe("dashboard-paths getters", () => {
       );
     });
     it("blank agentDirEnv ignored, falls to literal default", () => {
-      expect(resolve({ agentDirEnv: "  " })).toBe(path.join(HOME, ".pi", "agent", "sessions"));
+      expect(resolve({ agentDirEnv: "  " })).toBe(path.join(HOME, ".omp", "agent", "sessions"));
     });
     it("tilde config expands against homedir", () => {
       expect(resolve({ piSessionsDir: "~/mine" })).toBe(path.join(HOME, "mine"));

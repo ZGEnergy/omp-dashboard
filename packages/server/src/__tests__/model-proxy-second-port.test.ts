@@ -35,8 +35,8 @@ describe("model proxy second port (task 9.3)", () => {
     const secondPort = await findFreePort();
 
     // Write a minimal config with secondPort enabled
-    const configPath = join(homedir(), ".pi", "dashboard", "config.json");
-    const dashDir = join(homedir(), ".pi", "dashboard");
+    const configPath = join(homedir(), ".omp", "dashboard", "config.json");
+    const dashDir = join(homedir(), ".omp", "dashboard");
     const { mkdirSync } = await import("node:fs");
     mkdirSync(dashDir, { recursive: true });
 

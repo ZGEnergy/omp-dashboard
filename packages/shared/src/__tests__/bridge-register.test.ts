@@ -16,7 +16,7 @@ describe("shared bridge-register", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "shared-bridge-test-"));
-    settingsPath = path.join(tmpDir, ".pi", "agent", "settings.json");
+    settingsPath = path.join(tmpDir, ".omp", "agent", "settings.json");
     origHome = process.env.HOME;
     process.env.HOME = tmpDir;
   });

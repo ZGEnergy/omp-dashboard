@@ -143,7 +143,7 @@ export function isJitiLoader(loader: string | null | undefined): boolean {
  * this function now returns `false` for jiti loaders. Node's own
  * drive-letter heuristic accepts raw `C:\…` argv entries, so the URL
  * wrap is unnecessary for the common standalone-install layout where
- * pi + the dashboard live under `C:\Users\<u>\.pi-dashboard\…`.
+ * pi + the dashboard live under `C:\Users\<u>\.omp-dashboard\…`.
  *
  * Earlier baselines (`@mariozechner/pi-coding-agent@0.70.x`,
  * `jiti@2.6.5` in `pi-coding-agent@0.71.x`) exhibited the same or

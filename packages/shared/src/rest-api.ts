@@ -80,7 +80,7 @@ export interface FileContentResult {
  * - `cwd` present → directory scope; `path` resolves against `cwd` via
  *   `path.resolve(cwd, path)`, so it accepts BOTH an absolute path (as returned
  *   by `MdCandidate.path`) and a cwd-relative path — absolute wins.
- * - `cwd` absent  → global scope; `path` MUST be absolute under `~/.pi/agent`.
+ * - `cwd` absent  → global scope; `path` MUST be absolute under `~/.omp/agent`.
  * Authorization is gated server-side by `isWritableMdTarget`.
  * See change: directory-settings-page-and-scoped-md-editing.
  */
@@ -121,7 +121,7 @@ export type MdCandidatesResponse = ApiResponse<MdCandidatesResult>;
 /**
  * `GET /api/file/md-read?cwd=<cwd?>&path=<path>` — scoped markdown read for the
  * Instructions editor, gated by the same `isWritableMdTarget` guard as write +
- * candidates. Serves global scope (`~/.pi/agent`) which `/api/file` cannot.
+ * candidates. Serves global scope (`~/.omp/agent`) which `/api/file` cannot.
  * See change: directory-settings-page-and-scoped-md-editing.
  */
 export interface MdReadResult {

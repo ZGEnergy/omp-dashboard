@@ -31,7 +31,7 @@ import {
 import { getTunnelWatchdogStatus } from "../tunnel-watchdog.js";
 
 function getManagedDir(): string {
-  return process.env.MANAGED_DIR || path.join(os.homedir(), ".pi-dashboard");
+  return process.env.MANAGED_DIR || path.join(os.homedir(), ".omp-dashboard");
 }
 
 function detectSystemNode(): { found: boolean; path?: string } {
@@ -175,7 +175,7 @@ export function registerDoctorRoutes(fastify: FastifyInstance, deps: DoctorRoute
         message: "Unexpected internal failure",
         detail: `${e.message}\n${(e.stack || "").split("\n").slice(0, 4).join("\n")}`,
         suggestion:
-          "Check `~/.pi-dashboard/doctor.log` on the server, then file an issue with the captured error.",
+          "Check `~/.omp-dashboard/doctor.log` on the server, then file an issue with the captured error.",
       };
       return {
         checks: [fallback],

@@ -62,7 +62,7 @@ function freshRegistry(opts: {
     //     installed `/Applications/PI-Dashboard.app/.../npm` symlink to
     //     a real `npm-cli.js`, firing the node-wrap branch.
     //   leak B — `nodeScriptToArgv`'s `process.execPath` fallback yields
-    //     the host's managed node (`~/.pi-dashboard/node/bin/node`).
+    //     the host's managed node (`~/.omp-dashboard/node/bin/node`).
     ...(opts.execPath ? { execPath: opts.execPath } : {}),
     ...(opts.realpath ? { realpath: opts.realpath } : {}),
   });
@@ -109,11 +109,11 @@ describe("packaged Electron — bundled-node wins", () => {
     expect(res.source).toBe("bundled");
     expect(res.argv).toEqual([BUNDLED_NPM]);
     // No-leak guard: the resolved argv must not carry any real-fs path
-    // sourced from `process.execPath` (managed node `~/.pi-dashboard`)
+    // sourced from `process.execPath` (managed node `~/.omp-dashboard`)
     // or a `realpathSync` deref. Fails pre-fix (argv leaked
-    // `~/.pi-dashboard/node/bin/node` + a real `npm-cli.js`), passes post-fix.
+    // `~/.omp-dashboard/node/bin/node` + a real `npm-cli.js`), passes post-fix.
     expect(res.argv).not.toContain(process.execPath);
-    expect(res.argv.some((a) => a.includes(".pi-dashboard"))).toBe(false);
+    expect(res.argv.some((a) => a.includes(".omp-dashboard"))).toBe(false);
     expect(res.argv.some((a) => a.includes("npm-cli.js"))).toBe(false);
   });
 

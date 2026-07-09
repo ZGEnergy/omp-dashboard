@@ -35,7 +35,7 @@ function canonicalHomedir(): string {
 }
 
 export function getLockMetaPath(): string {
-  return path.join(canonicalHomedir(), ".pi", "dashboard", "server.lock.meta.json");
+  return path.join(canonicalHomedir(), ".omp", "dashboard", "server.lock.meta.json");
 }
 
 /**

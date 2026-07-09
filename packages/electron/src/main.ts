@@ -10,7 +10,7 @@
  *                                        └─→ loading-page-error (on timeout)
  *
  * There is no first-run wizard: launch is unconditional. The
- * `~/.pi/dashboard/first-run-done` marker is still written on the first
+ * `~/.omp/dashboard/first-run-done` marker is still written on the first
  * `done` for backwards compatibility (Doctor / support tooling read it).
  */
 
@@ -213,7 +213,7 @@ async function maybePromptZombieAdoption(): Promise<void> {
       const spawnResult = await spawnFromSource(
         source as Exclude<typeof source, { kind: "attach" }>,
         { port: config.port, piPort: config.piPort },
-        { logFile: path.join(os.homedir(), ".pi", "dashboard", "server.log") },
+        { logFile: path.join(os.homedir(), ".omp", "dashboard", "server.log") },
       );
       setSpawnedPid(spawnResult.pid);
       log(`[zombie] respawned server pid=${spawnResult.pid}`);
@@ -565,7 +565,7 @@ async function main(): Promise<void> {
 
     // ── State: launch-server ─────────────────────────────────────────────────
     updateSplashStatus("Launching dashboard server…");
-    const logFile = path.join(os.homedir(), ".pi", "dashboard", "server.log");
+    const logFile = path.join(os.homedir(), ".omp", "dashboard", "server.log");
     const spawnResult = await spawnFromSource(
       source as Exclude<typeof source, { kind: "attach" }>,
       { port: config.port, piPort: config.piPort },

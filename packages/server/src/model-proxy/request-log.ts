@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const LOG_DIR = path.join(os.homedir(), ".pi", "dashboard");
+const LOG_DIR = path.join(os.homedir(), ".omp", "dashboard");
 const LOG_FILE = path.join(LOG_DIR, "model-proxy.jsonl");
 const MAX_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 

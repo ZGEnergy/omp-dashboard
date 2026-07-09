@@ -21,24 +21,24 @@ describe("legacy-managed-dir", () => {
   });
 
   it("returns present:false when path is a file, not a directory", () => {
-    fs.writeFileSync(path.join(tmpHome, ".pi-dashboard"), "garbage");
+    fs.writeFileSync(path.join(tmpHome, ".omp-dashboard"), "garbage");
     const res = detectLegacyManagedDir({ homedir: tmpHome });
     expect(res).toEqual({ present: false });
   });
 
   it("returns present:true with zero pkgCount when dir exists but has no node_modules", () => {
-    fs.mkdirSync(path.join(tmpHome, ".pi-dashboard"), { recursive: true });
+    fs.mkdirSync(path.join(tmpHome, ".omp-dashboard"), { recursive: true });
     const res = detectLegacyManagedDir({ homedir: tmpHome });
     expect(res.present).toBe(true);
     if (res.present) {
       expect(res.pkgCount).toBe(0);
-      expect(res.path).toContain(".pi-dashboard");
+      expect(res.path).toContain(".omp-dashboard");
       expect(res.sizeMb).toBeGreaterThanOrEqual(0);
     }
   });
 
   it("counts direct children under node_modules/ as pkgCount", () => {
-    const nm = path.join(tmpHome, ".pi-dashboard", "node_modules");
+    const nm = path.join(tmpHome, ".omp-dashboard", "node_modules");
     fs.mkdirSync(path.join(nm, "foo"), { recursive: true });
     fs.mkdirSync(path.join(nm, "bar"), { recursive: true });
     fs.mkdirSync(path.join(nm, "@scope"), { recursive: true });
@@ -48,7 +48,7 @@ describe("legacy-managed-dir", () => {
   });
 
   it("computes a non-zero sizeMb when content exists", () => {
-    const dir = path.join(tmpHome, ".pi-dashboard");
+    const dir = path.join(tmpHome, ".omp-dashboard");
     fs.mkdirSync(dir, { recursive: true });
     // Write 2 MB of bytes
     fs.writeFileSync(path.join(dir, "blob.bin"), Buffer.alloc(2 * 1024 * 1024));

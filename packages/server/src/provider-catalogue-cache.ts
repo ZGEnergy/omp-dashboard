@@ -7,8 +7,8 @@
  *
  * The catalogue is a property of the machine's auth + provider config,
  * not of individual sessions: every bridge in the same process tree
- * derives an identical catalogue from `~/.pi/agent/auth.json` +
- * `~/.pi/agent/providers.json` + pi-ai's MODELS table. We therefore
+ * derives an identical catalogue from `~/.omp/agent/auth.json` +
+ * `~/.omp/agent/providers.json` + pi-ai's MODELS table. We therefore
  * keep ONE global snapshot — the last push wins. A previous version
  * kept a per-session Map plus a `changed` deep-equality gate to avoid
  * spurious `models_refreshed` broadcasts; that broadcast is gone

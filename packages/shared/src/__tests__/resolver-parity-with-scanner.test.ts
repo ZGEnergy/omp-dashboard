@@ -55,7 +55,7 @@ describe("pi-package-resolver / pi-resource-scanner parity (structural)", () => 
     for (const [label, src] of [["scanner", scannerSrc], ["resolver", resolverSrc]] as const) {
       const hasGitMarker =
         src.includes('"agent", "git"') ||
-        src.includes('".pi", "agent", "git"') ||
+        src.includes('".omp", "agent", "git"') ||
         src.includes('"git"');
       expect(hasGitMarker, `${label} must reference a "git" subdir marker`).toBe(true);
     }

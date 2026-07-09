@@ -506,7 +506,7 @@ export function useMessageHandler(
       }
 
       case "roles_list": {
-        // Roles are GLOBAL in pi-flows (single `~/.pi/agent/providers.json`).
+        // Roles are GLOBAL in pi-flows (single `~/.omp/agent/providers.json`).
         // The `sessionId` on this WS message only identifies the session that
         // *initiated* the change — the data itself has no session dimension.
         // We mirror the global storage by routing the payload through the

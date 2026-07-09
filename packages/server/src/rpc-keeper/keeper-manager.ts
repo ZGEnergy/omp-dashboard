@@ -38,7 +38,7 @@ import { electronAsNodeRequired } from "@blackbelt-technology/pi-dashboard-share
 // ── Path conventions ─────────────────────────────────────────────────────────
 
 function defaultSessionsDir(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "sessions");
+  return path.join(os.homedir(), ".omp", "dashboard", "sessions");
 }
 
 function defaultKeeperPath(): string {
@@ -132,7 +132,7 @@ export interface KeeperManager {
 // ── Dependency-injection options ─────────────────────────────────────────────
 
 export interface KeeperManagerOptions {
-  /** Override the sessions dir (default `~/.pi/dashboard/sessions`). */
+  /** Override the sessions dir (default `~/.omp/dashboard/sessions`). */
   sessionsDir?: string;
   /** Override the absolute path to `keeper.cjs`. */
   keeperPath?: string;

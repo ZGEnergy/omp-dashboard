@@ -25,7 +25,7 @@ export function watermarkPath(cwd: string, root = defaultRoot()): string {
 }
 
 export function defaultRoot(): string {
-  return join(homedir(), ".pi", "agent", "distill-session-knowledge");
+  return join(homedir(), ".omp", "agent", "distill-session-knowledge");
 }
 
 export function readWatermark(cwd: string, root = defaultRoot()): Watermark {
@@ -52,7 +52,7 @@ export function sessionDirName(cwd: string): string {
 }
 
 export function sessionsRoot(cwd: string): string {
-  return join(homedir(), ".pi", "agent", "sessions", sessionDirName(cwd));
+  return join(homedir(), ".omp", "agent", "sessions", sessionDirName(cwd));
 }
 
 export interface SessionFileRef {

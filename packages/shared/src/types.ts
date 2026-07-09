@@ -502,7 +502,7 @@ export interface ProviderInfo {
   expires?: number;
   /**
    * True when this provider was registered by the dashboard itself via
-   * `pi.registerProvider()` from `~/.pi/agent/providers.json` (a "custom"
+   * `pi.registerProvider()` from `~/.omp/agent/providers.json` (a "custom"
    * provider managed by the LLM Providers settings section). Consumers
    * use this to suppress API-key auth rows for custom providers — their
    * keys are managed elsewhere. OAuth rows are still emitted because a
@@ -552,7 +552,7 @@ export interface OpenSpecChange {
 export const OPENSPEC_GROUPS_SCHEMA_VERSION = 1 as const;
 
 /** Schema version for the per-folder goals file under the dashboard data dir
- *  (`~/.pi/dashboard/goals/<folderHash>.json`). Bumped only on incompatible
+ *  (`~/.omp/dashboard/goals/<folderHash>.json`). Bumped only on incompatible
  *  shape changes. See change: add-goals-folder-page. */
 export const GOALS_SCHEMA_VERSION = 1 as const;
 

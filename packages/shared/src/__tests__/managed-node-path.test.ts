@@ -25,17 +25,17 @@ describe("getManagedNodeBinDir", () => {
   it("returns <managedDir>/node on Windows", () => {
     const env = { homedir: "/fake/home" };
     expect(getManagedNodeBinDir(env, "win32")).toBe(
-      path.join("/fake/home", ".pi-dashboard", "node"),
+      path.join("/fake/home", ".omp-dashboard", "node"),
     );
   });
 
   it("returns <managedDir>/node/bin on Unix", () => {
     const env = { homedir: "/fake/home" };
     expect(getManagedNodeBinDir(env, "linux")).toBe(
-      path.join("/fake/home", ".pi-dashboard", "node", "bin"),
+      path.join("/fake/home", ".omp-dashboard", "node", "bin"),
     );
     expect(getManagedNodeBinDir(env, "darwin")).toBe(
-      path.join("/fake/home", ".pi-dashboard", "node", "bin"),
+      path.join("/fake/home", ".omp-dashboard", "node", "bin"),
     );
   });
 });
@@ -43,13 +43,13 @@ describe("getManagedNodeBinDir", () => {
 describe("getManagedNodeBinary", () => {
   it("uses node.exe on Windows", () => {
     expect(getManagedNodeBinary({ homedir: "/h" }, "win32")).toBe(
-      path.join("/h", ".pi-dashboard", "node", "node.exe"),
+      path.join("/h", ".omp-dashboard", "node", "node.exe"),
     );
   });
 
   it("uses bin/node on Unix", () => {
     expect(getManagedNodeBinary({ homedir: "/h" }, "linux")).toBe(
-      path.join("/h", ".pi-dashboard", "node", "bin", "node"),
+      path.join("/h", ".omp-dashboard", "node", "bin", "node"),
     );
   });
 });

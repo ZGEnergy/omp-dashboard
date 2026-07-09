@@ -149,12 +149,12 @@ describe("Process Manager", () => {
   describe("buildSpawnEnv", () => {
     it("should prepend managed bin to PATH", () => {
       const env = buildSpawnEnv({ PATH: "/usr/bin" });
-      expect(env.PATH).toMatch(/\.pi-dashboard.*node_modules.*\.bin/);
+      expect(env.PATH).toMatch(/\.omp-dashboard.*node_modules.*\.bin/);
       expect(env.PATH).toContain("/usr/bin");
     });
 
     it("should not duplicate managed bin if already present", () => {
-      const managedBin = require("path").join(require("os").homedir(), ".pi-dashboard", "node_modules", ".bin");
+      const managedBin = require("path").join(require("os").homedir(), ".omp-dashboard", "node_modules", ".bin");
       const env = buildSpawnEnv({ PATH: `${managedBin}:/usr/bin` });
       // Managed bin should appear exactly once
       const parts = env.PATH!.split(":");

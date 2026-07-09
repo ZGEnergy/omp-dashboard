@@ -26,9 +26,9 @@ function makeFolder(opts: { withConfig?: boolean; extraConfig?: Record<string, u
   writeFileSync(join(root, "docs", "a.md"), "# Alpha\n\nSome alpha content about widgets.\n");
   writeFileSync(join(root, "docs", "b.md"), "# Beta\n\nSome beta content about gadgets.\n");
   if (opts.withConfig !== false) {
-    mkdirSync(join(root, ".pi", "dashboard"), { recursive: true });
+    mkdirSync(join(root, ".omp", "dashboard"), { recursive: true });
     writeFileSync(
-      join(root, ".pi", "dashboard", "knowledge_base.json"),
+      join(root, ".omp", "dashboard", "knowledge_base.json"),
       JSON.stringify({ sources: [{ kind: "filesystem", ref: "docs" }], ...opts.extraConfig }, null, 2),
     );
   }
@@ -101,7 +101,7 @@ describe("GET /api/kb/stats", () => {
     const cwd = makeFolder();
     // A tracked source file whose acked sha will not match its current content.
     writeFileSync(join(cwd, "src.ts"), "export const x = 1;\n");
-    const staleDir = join(cwd, ".pi", "dashboard", "kb");
+    const staleDir = join(cwd, ".omp", "dashboard", "kb");
     mkdirSync(staleDir, { recursive: true });
     writeFileSync(join(staleDir, "dox-staleness.json"), JSON.stringify({ "src.ts": "deadbeef-not-the-real-sha" }));
     const { app } = buildApp([cwd]);
@@ -114,7 +114,7 @@ describe("GET /api/kb/stats", () => {
     const cwd = makeFolder();
     writeFileSync(join(cwd, "src.ts"), "export const x = 1;\n");
     const sha = createHash("sha256").update(readFileSync(join(cwd, "src.ts"))).digest("hex");
-    const staleDir = join(cwd, ".pi", "dashboard", "kb");
+    const staleDir = join(cwd, ".omp", "dashboard", "kb");
     mkdirSync(staleDir, { recursive: true });
     writeFileSync(join(staleDir, "dox-staleness.json"), JSON.stringify({ "src.ts": sha }));
     const { app } = buildApp([cwd]);
@@ -154,9 +154,9 @@ describe("POST /api/kb/reindex", () => {
     // task 1.2: a source ref pointing at a FILE makes indexSource's walk throw.
     const cwd = makeFolder({ withConfig: false });
     writeFileSync(join(cwd, "notadir.md"), "# x\n");
-    mkdirSync(join(cwd, ".pi", "dashboard"), { recursive: true });
+    mkdirSync(join(cwd, ".omp", "dashboard"), { recursive: true });
     writeFileSync(
-      join(cwd, ".pi", "dashboard", "knowledge_base.json"),
+      join(cwd, ".omp", "dashboard", "knowledge_base.json"),
       JSON.stringify({ sources: [{ kind: "filesystem", ref: "notadir.md" }] }),
     );
     const { app } = buildApp([cwd]);
@@ -186,9 +186,9 @@ describe("POST /api/kb/reindex", () => {
     for (let i = 0; i < 300; i++) {
       writeFileSync(join(cwd, "big", `f${i}.md`), `# Doc ${i}\n\nBody text number ${i} with enough words to survive the tiny-chunk merge threshold here and there.\n`);
     }
-    mkdirSync(join(cwd, ".pi", "dashboard"), { recursive: true });
+    mkdirSync(join(cwd, ".omp", "dashboard"), { recursive: true });
     writeFileSync(
-      join(cwd, ".pi", "dashboard", "knowledge_base.json"),
+      join(cwd, ".omp", "dashboard", "knowledge_base.json"),
       JSON.stringify({ sources: [{ kind: "filesystem", ref: "big" }] }),
     );
     const { app } = buildApp([cwd]);
@@ -245,14 +245,14 @@ describe("PUT /api/kb/config", () => {
       payload: { sources: [{ kind: "filesystem", ref: "openspec" }] },
     });
     expect(res.statusCode).toBe(200);
-    const onDisk = JSON.parse(readFileSync(join(cwd, ".pi", "dashboard", "knowledge_base.json"), "utf8"));
+    const onDisk = JSON.parse(readFileSync(join(cwd, ".omp", "dashboard", "knowledge_base.json"), "utf8"));
     expect(onDisk.sources[0].ref).toBe("openspec");
     await app.close();
   });
 
   it("rejects an invalid source with 400 and writes nothing new", async () => {
     const cwd = makeFolder();
-    const before = readFileSync(join(cwd, ".pi", "dashboard", "knowledge_base.json"), "utf8");
+    const before = readFileSync(join(cwd, ".omp", "dashboard", "knowledge_base.json"), "utf8");
     const { app } = buildApp([cwd]);
     const res = await app.inject({
       method: "PUT",
@@ -260,7 +260,7 @@ describe("PUT /api/kb/config", () => {
       payload: { sources: [{ kind: "wormhole", ref: "x" }] },
     });
     expect(res.statusCode).toBe(400);
-    expect(readFileSync(join(cwd, ".pi", "dashboard", "knowledge_base.json"), "utf8")).toBe(before);
+    expect(readFileSync(join(cwd, ".omp", "dashboard", "knowledge_base.json"), "utf8")).toBe(before);
     await app.close();
   });
 
@@ -272,14 +272,14 @@ describe("PUT /api/kb/config", () => {
       url: `/api/kb/config?cwd=${encodeURIComponent(cwd)}`,
       payload: { sources: [{ kind: "filesystem", ref: "docs" }] },
     });
-    const onDisk = JSON.parse(readFileSync(join(cwd, ".pi", "dashboard", "knowledge_base.json"), "utf8"));
+    const onDisk = JSON.parse(readFileSync(join(cwd, ".omp", "dashboard", "knowledge_base.json"), "utf8"));
     expect(onDisk.ranking.fieldWeights.headingPath).toBe(99);
     await app.close();
   });
 
   it("bootstraps a missing project file (origin !== project)", async () => {
     const cwd = makeFolder({ withConfig: false });
-    const path = join(cwd, ".pi", "dashboard", "knowledge_base.json");
+    const path = join(cwd, ".omp", "dashboard", "knowledge_base.json");
     expect(existsSync(path)).toBe(false);
     const { app } = buildApp([cwd]);
     const res = await app.inject({

@@ -863,7 +863,7 @@ function sendUserMessageWithImages(
  *      and inherited by spawned sessions (the only reliable source when the
  *      server runs on a non-default port, e.g. the Docker test harness, whose
  *      `config.json` carries no `port` field).
- *   2. `~/.pi/dashboard/config.json` `port` — normal local installs write it.
+ *   2. `~/.omp/dashboard/config.json` `port` — normal local installs write it.
  *   3. 8000 (default).
  * Note: `PI_DASHBOARD_URL` is the gateway (ws) port, NOT the HTTP port, so it is
  * deliberately not consulted here. See change: add-dashboard-slash-commands.
@@ -874,7 +874,7 @@ function resolveDashboardPort(): number {
     if (v && Number.isFinite(n) && n > 0) return n;
   }
   try {
-    const raw = readFileSync(join(homedir(), ".pi", "dashboard", "config.json"), "utf-8");
+    const raw = readFileSync(join(homedir(), ".omp", "dashboard", "config.json"), "utf-8");
     const parsed = JSON.parse(raw);
     if (typeof parsed?.port === "number" && Number.isFinite(parsed.port)) return parsed.port;
   } catch { /* missing / unparseable config */ }

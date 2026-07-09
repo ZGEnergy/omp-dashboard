@@ -1,7 +1,7 @@
 /**
  * flows-plugin · bridge entry.
  *
- * Auto-registered at `~/.pi/agent/settings.json#dashboardPluginBridges`
+ * Auto-registered at `~/.omp/agent/settings.json#dashboardPluginBridges`
  * (key: `dashboard-flows`) when the dashboard server discovers the plugin
  * manifest and runs `registerAllPluginBridges`. The path is mirrored into
  * the top-level `packages[]` array so pi-coding-agent loads it as a pi

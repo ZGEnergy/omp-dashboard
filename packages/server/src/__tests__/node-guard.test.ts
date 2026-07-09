@@ -169,6 +169,6 @@ describe("buildEnginesRangeMessage", () => {
 
   it("suggests bundled-node escape hatch", () => {
     const msg = buildEnginesRangeMessage("v26.0.0");
-    expect(msg).toMatch(/\.pi-dashboard\/node\/bin/);
+    expect(msg).toMatch(/\.omp-dashboard\/node\/bin/);
   });
 });

@@ -112,7 +112,7 @@ describe("POST /api/file/write — global scope", () => {
 
   beforeEach(async () => {
     home = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), "fw-home-")));
-    agentDir = path.join(home, ".pi", "agent");
+    agentDir = path.join(home, ".omp", "agent");
     await fsp.mkdir(agentDir, { recursive: true });
     await fsp.writeFile(path.join(agentDir, "MEMORY.md"), "# mem\n", "utf-8");
     await fsp.mkdir(path.join(home, "Documents"), { recursive: true });
@@ -163,7 +163,7 @@ describe("GET /api/file/md-read", () => {
     await fsp.writeFile(path.join(cwd, "AGENTS.md"), "# agents\n", "utf-8");
     await fsp.writeFile(path.join(cwd, "notes.txt"), "x\n", "utf-8");
     home = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), "mr-home-")));
-    agentDir = path.join(home, ".pi", "agent");
+    agentDir = path.join(home, ".omp", "agent");
     await fsp.mkdir(agentDir, { recursive: true });
     await fsp.writeFile(path.join(agentDir, "MEMORY.md"), "# mem\n", "utf-8");
     realHome = process.env.HOME;

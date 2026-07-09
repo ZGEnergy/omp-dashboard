@@ -301,7 +301,7 @@ describe("GET /api/packages/recommended", () => {
 		vi.mocked(fetchGithubPackageJson).mockResolvedValue(null);
 
 		// Write settings.json with pi-web-access as an active package
-		const settingsDir = path.join(tmpHome, ".pi", "agent");
+		const settingsDir = path.join(tmpHome, ".omp", "agent");
 		fs.mkdirSync(settingsDir, { recursive: true });
 		fs.writeFileSync(
 			path.join(settingsDir, "settings.json"),
@@ -328,7 +328,7 @@ describe("GET /api/packages/recommended", () => {
 		vi.mocked(fetchPackageMeta).mockResolvedValue(null);
 		vi.mocked(fetchGithubPackageJson).mockResolvedValue(null);
 
-		const settingsDir = path.join(tmpHome, ".pi", "agent");
+		const settingsDir = path.join(tmpHome, ".omp", "agent");
 		fs.mkdirSync(settingsDir, { recursive: true });
 		// User wrote HTTPS in settings; manifest has SSH. They should match.
 		fs.writeFileSync(

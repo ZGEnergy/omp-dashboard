@@ -442,7 +442,7 @@ export function sourceBadgeStyle(source: NonNullable<Resolution["source"]>): { c
     case "override":
       return { className: "text-purple-500", tooltip: "User-pinned override." };
     case "managed":
-      return { className: "text-emerald-500", tooltip: "Installed under ~/.pi-dashboard/." };
+      return { className: "text-emerald-500", tooltip: "Installed under ~/.omp-dashboard/." };
     case "npm-global":
       return { className: "text-amber-500", tooltip: "Found in the global npm prefix." };
     case "bare-import":

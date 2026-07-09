@@ -41,7 +41,7 @@ import {
 // ── Path conventions ─────────────────────────────────────────────────────────
 
 function defaultEditorsDir(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "editors");
+  return path.join(os.homedir(), ".omp", "dashboard", "editors");
 }
 
 function defaultKeeperPath(): string {

@@ -14,8 +14,8 @@ import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { registerProviderRoutes } from "../routes/provider-routes.js";
 
-const PROVIDERS_PATH = join(homedir(), ".pi", "agent", "providers.json");
-const PROVIDERS_DIR = join(homedir(), ".pi", "agent");
+const PROVIDERS_PATH = join(homedir(), ".omp", "agent", "providers.json");
+const PROVIDERS_DIR = join(homedir(), ".omp", "agent");
 
 let backup: string | null = null;
 beforeEach(() => {

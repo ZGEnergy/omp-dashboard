@@ -133,7 +133,7 @@ export function registerBridgeExtension(
     ?? process.env.HOME
     ?? process.env.USERPROFILE
     ?? os.homedir();
-  const settingsPath = path.join(home, ".pi", "agent", "settings.json");
+  const settingsPath = path.join(home, ".omp", "agent", "settings.json");
   const settingsDir = path.dirname(settingsPath);
   fs.mkdirSync(settingsDir, { recursive: true });
 

@@ -109,7 +109,7 @@ export function planScaffold(opts: ScaffoldOptions): ScaffoldPlan {
     ...listPrompts(profile.dir).map((f) => path.join(targetDir, ".pi", "prompts", f)),
   ];
   if (profile.dox) {
-    writes.push(path.join(targetDir, ".pi", "dashboard", "knowledge_base.json"));
+    writes.push(path.join(targetDir, ".omp", "dashboard", "knowledge_base.json"));
   }
   const conflicts = writes.filter((p) => fs.existsSync(p));
   return { writes, conflicts, dox: profile.dox };

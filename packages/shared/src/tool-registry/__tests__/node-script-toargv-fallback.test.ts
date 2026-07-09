@@ -50,7 +50,7 @@ describe("nodeScriptToArgv — Windows fallback (Bug 3)", () => {
     // the pi executor resolves successfully. The `node` chain has no
     // sources (no managed runtime, no PATH hit) so it must fail —
     // forcing nodeScriptToArgv into the process.execPath fallback.
-    const fakePiCli = "C:\\Users\\u\\.pi-dashboard\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\cli.js";
+    const fakePiCli = "C:\\Users\\u\\.omp-dashboard\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\cli.js";
     const r = freshRegistry({
       platform: "win32",
       // Only the pi override path exists; node has no candidates.
@@ -68,7 +68,7 @@ describe("nodeScriptToArgv — Windows fallback (Bug 3)", () => {
   });
 
   it("uses the registry node.path when registry.resolve('node') succeeds", () => {
-    const fakePiCli = "C:\\Users\\u\\.pi-dashboard\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\cli.js";
+    const fakePiCli = "C:\\Users\\u\\.omp-dashboard\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\cli.js";
     const fakeNode = "C:\\Program Files\\nodejs\\node.exe";
     const r = freshRegistry({
       platform: "win32",

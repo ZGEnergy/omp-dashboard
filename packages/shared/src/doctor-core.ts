@@ -300,7 +300,7 @@ export function assumedMandatory<T>(
         message: "An assumed-safe operation failed",
         detail: `${e.message}\n${(e.stack || "").split("\n").slice(0, 4).join("\n")}`,
         suggestion:
-          "Open `~/.pi-dashboard/doctor.log` for full context, then file an issue with the Markdown export attached.",
+          "Open `~/.omp-dashboard/doctor.log` for full context, then file an issue with the Markdown export attached.",
       },
     };
   }
@@ -379,7 +379,7 @@ export const SECTION_OF: Record<string, DoctorSection> = {
   "Dashboard server": "server",
   "Server starter": "server",
   "Installable list": "server",
-  "Server log (~/.pi-dashboard/server.log)": "server",
+  "Server log (~/.omp-dashboard/server.log)": "server",
   "Server launch test": "server",
   // setup
   "Setup wizard": "setup",
@@ -439,7 +439,7 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
   "Managed Node runtime": (status) =>
     status === "ok"
       ? undefined
-      : "Managed Node runtime missing under `~/.pi-dashboard/node`. Re-run the setup wizard (Help → Setup).",
+      : "Managed Node runtime missing under `~/.omp-dashboard/node`. Re-run the setup wizard (Help → Setup).",
   "pi (library)": (status, _d, kind) =>
     status === "ok"
       ? undefined
@@ -462,7 +462,7 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
       : "`openspec` is not on your shell `$PATH`. Dashboard-spawned sessions still work; manual terminal use does not. Fix: `npm i -g @fission-ai/openspec`, or add the dashboard's `server/node_modules/.bin` to your PATH.",
   // Legacy aliases (kept so older renderers don't lose suggestions).
   "pi CLI": (status) =>
-    status === "ok" ? undefined : "`pi` not found. Run the setup wizard (Help → Setup) to install it under `~/.pi-dashboard`.",
+    status === "ok" ? undefined : "`pi` not found. Run the setup wizard (Help → Setup) to install it under `~/.omp-dashboard`.",
   "openspec CLI": (status) =>
     status === "ok" ? undefined : "`openspec` not found. Optional, but required for OpenSpec workflows. Run the setup wizard.",
   "Dashboard server code": (status) =>
@@ -488,8 +488,8 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
   "Installable list": (status) =>
     status === "ok"
       ? undefined
-      : "Some installable packages failed to install. Check `~/.pi-dashboard/server.log` for details.",
-  "Server log (~/.pi-dashboard/server.log)": (status) =>
+      : "Some installable packages failed to install. Check `~/.omp-dashboard/server.log` for details.",
+  "Server log (~/.omp-dashboard/server.log)": (status) =>
     status === "ok"
       ? undefined
       : "Recent server log entries shown — the server may have failed to start. Open the log for full context.",
@@ -531,7 +531,7 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
   "tunnel runtime": (status) =>
     status === "ok"
       ? undefined
-      : "Active tunnel is failing its periodic health probe. Click the 🌐 Tunnel button in the sidebar to recycle it, or check `~/.pi-dashboard/server.log` for the underlying error.",
+      : "Active tunnel is failing its periodic health probe. Click the 🌐 Tunnel button in the sidebar to recycle it, or check `~/.omp-dashboard/server.log` for the underlying error.",
   // Defensive fallback only — the live emission path in `runSharedChecks`
   // sets `suggestion` inline, so the stamping `!c.suggestion` guard means
   // this factory never runs in production. Kept to satisfy the Decision-8
@@ -540,7 +540,7 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
   "Legacy install directory": (status) =>
     status === "ok"
       ? undefined
-      : "Left over from a previous version. Nothing reads or writes `~/.pi-dashboard/` under the immutable-bundle architecture. Delete the directory manually to reclaim disk space.",
+      : "Left over from a previous version. Nothing reads or writes `~/.omp-dashboard/` under the immutable-bundle architecture. Delete the directory manually to reclaim disk space.",
   // darwin-only DMG-maker prerequisite. The predicate (`checkMacosAliasVolume`)
   // sets `suggestion` inline; this factory backs the Decision-8 lint and any
   // stamping path. See change: fix-darwin-dmg-maker-macos-alias.
@@ -777,7 +777,7 @@ export interface SharedChecksDeps {
    */
   inspectedCredentialFiles?: () => string[];
   /**
-   * Test seam for the legacy `~/.pi-dashboard/` advisory. Defaults to
+   * Test seam for the legacy `~/.omp-dashboard/` advisory. Defaults to
    * the real shared detector. Tests inject a mock to exercise both
    * present / absent branches hermetically.
    * See change: fix-doctor-stale-managed-install-check.
@@ -1063,7 +1063,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
       checks.push(result.row);
     } else if (result.value) {
       checks.push({
-        name: "Server log (~/.pi-dashboard/server.log)",
+        name: "Server log (~/.omp-dashboard/server.log)",
         section: "server",
         status: "warning",
         message: "Last entries:",
@@ -1226,7 +1226,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
     }),
   );
 
-  // Legacy ~/.pi-dashboard advisory — emit ONLY when the directory
+  // Legacy ~/.omp-dashboard advisory — emit ONLY when the directory
   // exists. Under R3 (change: eliminate-electron-runtime-install)
   // nothing reads or writes this directory. This row tells the user
   // it is safe to delete. Clean installs see nothing.

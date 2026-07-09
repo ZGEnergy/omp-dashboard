@@ -32,7 +32,7 @@ export function buildEnginesRangeMessage(version: string): string {
     ``,
     `    Fix:`,
     `      nvm:    nvm install 24 && nvm use 24`,
-    `      bundled: PATH="$HOME/.pi-dashboard/node/bin:$PATH" pi-dashboard start`,
+    `      bundled: PATH="$HOME/.omp-dashboard/node/bin:$PATH" pi-dashboard start`,
     `      brew:   brew install node@24`,
     ``,
   ].join("\n");

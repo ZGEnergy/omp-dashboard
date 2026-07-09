@@ -4,7 +4,7 @@
  * Runtime-resolves pi-ai via the ToolRegistry and asserts every symbol
  * the model-proxy change depends on exists in the resolved module.
  *
- * - `it.skip` when pi-ai cannot be resolved (clean CI without ~/.pi-dashboard/).
+ * - `it.skip` when pi-ai cannot be resolved (clean CI without ~/.omp-dashboard/).
  * - Full run when pi-ai is installed locally.
  * - Set `MODEL_PROXY_REQUIRE_PI_AI=1` to force hard-fail (for release-cut runs).
  *

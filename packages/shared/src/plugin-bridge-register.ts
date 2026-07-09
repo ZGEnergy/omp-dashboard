@@ -45,7 +45,7 @@ const ENV_SKIP = "PI_DASHBOARD_DISABLE_PLUGIN_BRIDGE_PACKAGES_WRITE";
 
 function getSettingsPath(homedir?: string): string {
   const home = homedir ?? process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
-  return path.join(home, ".pi", "agent", "settings.json");
+  return path.join(home, ".omp", "agent", "settings.json");
 }
 
 function readSettings(settingsPath: string): Record<string, unknown> {

@@ -173,7 +173,7 @@ export function writeDir(cwd: string, plan: DirPlan, authoredMiss: Map<string, s
 }
 
 // --- checkpoint / gaps persistence (resumability) ---
-const stateDir = (cwd: string) => join(cwd, ".pi", "dashboard", "kb");
+const stateDir = (cwd: string) => join(cwd, ".omp", "dashboard", "kb");
 export interface MigrationState {
   authored: Record<string, Record<string, string>>; // dir → base → purpose
   doneDirs: string[];

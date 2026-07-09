@@ -170,7 +170,7 @@ describe("defaultRunNpmUpdate — registry resolution + managed PATH", () => {
 			},
 		});
 		// Pre-create the managed dir so the existence check passes.
-		const managedDir = path.join(os.homedir(), ".pi-dashboard");
+		const managedDir = path.join(os.homedir(), ".omp-dashboard");
 		fs.mkdirSync(managedDir, { recursive: true });
 
 		await defaultRunNpmUpdate(
@@ -216,10 +216,10 @@ describe("defaultRunNpmUpdate — registry resolution + managed PATH", () => {
 
 	it("rejects up front when managed install dir does not exist", async () => {
 		// Use a non-existent managed dir by spying via the path-existence
-		// branch. defaultRunNpmUpdate hard-codes MANAGED_DIR (~/.pi-dashboard),
+		// branch. defaultRunNpmUpdate hard-codes MANAGED_DIR (~/.omp-dashboard),
 		// which the setup-home tripwire pre-creates as an empty tmp dir,
 		// so we use a 'managed' source pointing at a fresh tmp HOME with
-		// no .pi-dashboard. To keep this test hermetic we instead exercise
+		// no .omp-dashboard. To keep this test hermetic we instead exercise
 		// the global path with a working spawn — separately.
 		// (This scenario is covered indirectly by the existing
 		// pi-core-updater.test.ts via the runNpmUpdate seam.)

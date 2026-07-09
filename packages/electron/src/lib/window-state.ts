@@ -13,7 +13,7 @@ import os from "node:os";
 import { screen } from "electron";
 import type { BrowserWindow, Rectangle } from "electron";
 
-const STATE_FILE = path.join(os.homedir(), ".pi", "dashboard", "window-state.json");
+const STATE_FILE = path.join(os.homedir(), ".omp", "dashboard", "window-state.json");
 
 /** One-shot migration: if a window-state.json exists at the legacy path
  * but not the new one, move it. Failure is silent (the file is non-critical). */

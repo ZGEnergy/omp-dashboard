@@ -1,6 +1,6 @@
 /**
  * Paired-devices registry (D5) — long-lived opaque bearer tokens in a
- * revocable, on-disk registry at `~/.pi/dashboard/paired-devices.json` (0600).
+ * revocable, on-disk registry at `~/.omp/dashboard/paired-devices.json` (0600).
  *
  * The bearer token is opaque (random, not a JWT): revocation is a row delete,
  * no denylist. Only a SHA-256 hash of the token is persisted; the plaintext is
@@ -41,7 +41,7 @@ export interface PairedDeviceView {
 }
 
 export function defaultRegistryPath(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", REGISTRY_FILENAME);
+  return path.join(os.homedir(), ".omp", "dashboard", REGISTRY_FILENAME);
 }
 
 function hashToken(token: string): string {

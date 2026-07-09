@@ -20,7 +20,7 @@ beforeAll(async () => {
   cwd = path.join(root, "proj");
   home = path.join(root, "home");
   await fs.mkdir(path.join(cwd, ".pi", "skills"), { recursive: true });
-  await fs.mkdir(path.join(home, ".pi", "agent", "sub"), { recursive: true });
+  await fs.mkdir(path.join(home, ".omp", "agent", "sub"), { recursive: true });
   await fs.mkdir(path.join(root, "sibling"), { recursive: true });
   await fs.mkdir(path.join(home, "Documents"), { recursive: true });
 
@@ -29,8 +29,8 @@ beforeAll(async () => {
   await fs.writeFile(path.join(cwd, ".pi", "skills", "SKILL.md"), "# s");
   await fs.writeFile(path.join(cwd, "notes.txt"), "x");
   await fs.writeFile(path.join(root, "sibling", "evil.md"), "# e");
-  await fs.writeFile(path.join(home, ".pi", "agent", "MEMORY.md"), "# m");
-  await fs.writeFile(path.join(home, ".pi", "agent", "sub", "deep.md"), "# d");
+  await fs.writeFile(path.join(home, ".omp", "agent", "MEMORY.md"), "# m");
+  await fs.writeFile(path.join(home, ".omp", "agent", "sub", "deep.md"), "# d");
   await fs.writeFile(path.join(home, "Documents", "secret.md"), "# x");
 
   // Symlink inside cwd that escapes to a sibling outside the allowlist.
@@ -85,11 +85,11 @@ describe("isWritableMdTarget — directory scope", () => {
 
 describe("isWritableMdTarget — global scope", () => {
   it("allows a .md directly under ~/.pi/agent", async () => {
-    expect(await isWritableMdTarget(path.join(home, ".pi", "agent", "MEMORY.md"), { home })).toBe(true);
+    expect(await isWritableMdTarget(path.join(home, ".omp", "agent", "MEMORY.md"), { home })).toBe(true);
   });
 
   it("allows a nested .md under ~/.pi/agent/**", async () => {
-    expect(await isWritableMdTarget(path.join(home, ".pi", "agent", "sub", "deep.md"), { home })).toBe(true);
+    expect(await isWritableMdTarget(path.join(home, ".omp", "agent", "sub", "deep.md"), { home })).toBe(true);
   });
 
   it("rejects a path outside ~/.pi/agent", async () => {
@@ -101,12 +101,12 @@ describe("isWritableMdTarget — global scope", () => {
   });
 
   it("rejects a non-markdown file under ~/.pi/agent", async () => {
-    const p = path.join(home, ".pi", "agent", "config.json");
+    const p = path.join(home, ".omp", "agent", "config.json");
     await fs.writeFile(p, "{}");
     expect(await isWritableMdTarget(p, { home })).toBe(false);
   });
 
   it("fails closed when home cannot be resolved", async () => {
-    expect(await isWritableMdTarget(path.join(home, ".pi", "agent", "MEMORY.md"), { home: "" })).toBe(false);
+    expect(await isWritableMdTarget(path.join(home, ".omp", "agent", "MEMORY.md"), { home: "" })).toBe(false);
   });
 });

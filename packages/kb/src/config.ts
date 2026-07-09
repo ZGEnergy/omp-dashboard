@@ -1,5 +1,5 @@
 // Config layering (design §7): project `.pi/dashboard/knowledge_base.json`
-// → global `~/.pi/dashboard/knowledge_base.json` → built-in defaults.
+// → global `~/.omp/dashboard/knowledge_base.json` → built-in defaults.
 // Project file is used whole; absent fields fall back to global, then defaults.
 // No file-count cap by default (requirement #1).
 import { existsSync, readFileSync } from "node:fs";
@@ -146,10 +146,10 @@ export function validateConfig(c: Partial<KbConfig>, origin = "config"): KbConfi
 }
 
 export function projectConfigPath(cwd: string): string {
-  return join(cwd, ".pi", "dashboard", "knowledge_base.json");
+  return join(cwd, ".omp", "dashboard", "knowledge_base.json");
 }
 export function globalConfigPath(): string {
-  return join(homedir(), ".pi", "dashboard", "knowledge_base.json");
+  return join(homedir(), ".omp", "dashboard", "knowledge_base.json");
 }
 
 function readJson(path: string): Partial<KbConfig> | null {

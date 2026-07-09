@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 function settingsPath() {
-  return path.join(homedir, ".pi", "agent", "settings.json");
+  return path.join(homedir, ".omp", "agent", "settings.json");
 }
 
 function readSettings(): Record<string, unknown> {
@@ -52,7 +52,7 @@ describe("bridge auto-register boot + disable lifecycle", () => {
     // Per change fix-pi-flows-end-to-end Group 1: dual-write appends the
     // managed bridge to packages[] (with ownership marker) while leaving
     // user entries untouched in original order.
-    fs.mkdirSync(path.join(homedir, ".pi", "agent"), { recursive: true });
+    fs.mkdirSync(path.join(homedir, ".omp", "agent"), { recursive: true });
     fs.writeFileSync(
       settingsPath(),
       JSON.stringify({

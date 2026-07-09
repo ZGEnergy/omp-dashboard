@@ -89,7 +89,7 @@ export interface PiModule {
   };
 }
 
-export const AGENT_DIR = path.join(os.homedir(), ".pi", "agent");
+export const AGENT_DIR = path.join(os.homedir(), ".omp", "agent");
 
 async function loadPi(registry: ToolRegistry): Promise<PiModule> {
   const { module } = await registry.resolveModule<PiModule>("pi-coding-agent");

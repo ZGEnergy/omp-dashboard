@@ -274,7 +274,7 @@ function resolvePackagePath(entry: string, settingsDir: string, scope: "local" |
 
     const baseDir = scope === "local" && cwd
       ? path.join(cwd, ".pi", "git")
-      : path.join(os.homedir(), ".pi", "agent", "git");
+      : path.join(os.homedir(), ".omp", "agent", "git");
     return { resolved: path.join(baseDir, url), source: entry };
   }
 
@@ -414,7 +414,7 @@ function applyActivationToScope(scope: PiResourceScope, map: Map<string, boolean
 }
 
 export async function scanPiResources(cwd: string, options?: ScanOptions): Promise<PiResourcesResult> {
-  const globalDir = options?.globalDir ?? path.join(os.homedir(), ".pi", "agent");
+  const globalDir = options?.globalDir ?? path.join(os.homedir(), ".omp", "agent");
 
   const local = scanLocalResources(cwd);
   const global = scanGlobalResources(globalDir);

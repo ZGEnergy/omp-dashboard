@@ -18,7 +18,7 @@ describe("credential-detect", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cred-detect-test-"));
-    const agentDir = path.join(tmpDir, ".pi", "agent");
+    const agentDir = path.join(tmpDir, ".omp", "agent");
     fs.mkdirSync(agentDir, { recursive: true });
     settingsPath = path.join(agentDir, "settings.json");
     authPath = path.join(agentDir, "auth.json");
@@ -138,8 +138,8 @@ describe("credential-detect", () => {
     it("returns both file paths in stable order", () => {
       const files = inspectedCredentialFiles(tmpDir);
       expect(files).toHaveLength(2);
-      expect(files[0]).toBe(path.join(tmpDir, ".pi", "agent", "settings.json"));
-      expect(files[1]).toBe(path.join(tmpDir, ".pi", "agent", "auth.json"));
+      expect(files[0]).toBe(path.join(tmpDir, ".omp", "agent", "settings.json"));
+      expect(files[1]).toBe(path.join(tmpDir, ".omp", "agent", "auth.json"));
     });
   });
 });

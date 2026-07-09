@@ -67,7 +67,7 @@ describe("applyResourceToggle — loose resource", () => {
     // Point HOME at an isolated dir so AGENT_DIR resolves under it. The
     // test-support setup already sets HOME to a tmp dir; place the global
     // pi agent dir there and confirm the write lands in ~/.pi/agent.
-    const agentDir = path.join(os.homedir(), ".pi", "agent");
+    const agentDir = path.join(os.homedir(), ".omp", "agent");
     const filePath = writeLooseExtension(agentDir, "global-ext");
 
     const off = await applyResourceToggle({

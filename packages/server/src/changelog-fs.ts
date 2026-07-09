@@ -4,7 +4,7 @@
  * URL from the `repository` field.
  *
  * Search order matches the ToolRegistry resolution chain for `pi`:
- *   1. Managed install (`~/.pi-dashboard/node_modules/<pkg>/`)
+ *   1. Managed install (`~/.omp-dashboard/node_modules/<pkg>/`)
  *   2. Bare-import via `createRequire` (process resolves the package
  *      through its own node_modules — covers npm-global on Unix when
  *      the symlink lands inside this Node prefix, and dev-checkout
@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 
 /** Default managed install root. Test seam: caller may override. */
 function defaultManagedDir(): string {
-  return path.join(os.homedir(), ".pi-dashboard");
+  return path.join(os.homedir(), ".omp-dashboard");
 }
 
 /**

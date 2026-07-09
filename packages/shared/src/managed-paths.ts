@@ -1,11 +1,11 @@
 /**
- * Shared constants + getters for the managed install directory (~/.pi-dashboard/).
+ * Shared constants + getters for the managed install directory (~/.omp-dashboard/).
  * Single source of truth — all packages import from here.
  *
- * Constants (MANAGED_DIR, MANAGED_BIN, PI_SETTINGS_PATH) reflect the live
+ * Constants (MANAGED_DIR, MANAGED_BIN, OMP_SETTINGS_PATH) reflect the live
  * environment at module-load time. Production code continues to use them.
  *
- * Getters (getManagedDir, getManagedBin, getPiSettingsPath) accept an
+ * Getters (getManagedDir, getManagedBin, getOmpSettingsPath) accept an
  * optional `{ homedir }` override so tests (and the bootstrap harness)
  * can reason about alternate HOME directories without mutating globals.
  */
@@ -19,7 +19,7 @@ export interface ManagedPathsEnv {
 
 /** Root directory for managed installs (pi, openspec, tsx). */
 export function getManagedDir(env?: ManagedPathsEnv): string {
-  return path.join(env?.homedir ?? os.homedir(), ".pi-dashboard");
+  return path.join(env?.homedir ?? os.homedir(), ".omp-dashboard");
 }
 
 /** Bin directory for managed install executables. */
@@ -28,8 +28,8 @@ export function getManagedBin(env?: ManagedPathsEnv): string {
 }
 
 /** Path to pi's global settings file. */
-export function getPiSettingsPath(env?: ManagedPathsEnv): string {
-  return path.join(env?.homedir ?? os.homedir(), ".pi", "agent", "settings.json");
+export function getOmpSettingsPath(env?: ManagedPathsEnv): string {
+  return path.join(env?.homedir ?? os.homedir(), ".omp", "agent", "settings.json");
 }
 
 /** Root directory for managed installs (pi, openspec, tsx). */
@@ -39,4 +39,4 @@ export const MANAGED_DIR = getManagedDir();
 export const MANAGED_BIN = getManagedBin();
 
 /** Path to pi's global settings file. */
-export const PI_SETTINGS_PATH = getPiSettingsPath();
+export const OMP_SETTINGS_PATH = getOmpSettingsPath();

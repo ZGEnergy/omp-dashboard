@@ -11,8 +11,8 @@ import {
 // Build a temp project with a KB config so reindex logic can open a real store.
 function setupProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "kb-ext-"));
-  mkdirSync(join(dir, ".pi", "dashboard", "kb"), { recursive: true });
-  writeFileSync(join(dir, ".pi", "dashboard", "knowledge_base.json"), JSON.stringify({
+  mkdirSync(join(dir, ".omp", "dashboard", "kb"), { recursive: true });
+  writeFileSync(join(dir, ".omp", "dashboard", "knowledge_base.json"), JSON.stringify({
     sources: [{ kind: "filesystem", ref: "docs", priority: 5 }],
     dbPath: ".pi/dashboard/kb/index.db",
   }));
@@ -49,8 +49,8 @@ describe("reindex Job 1: edit .md → index reflects change", () => {
     // coalescing guard the second walk throws "transaction within a transaction".
     // See change: fix-kb-index-feedback.
     const big = mkdtempSync(join(tmpdir(), "kb-ext-conc-"));
-    mkdirSync(join(big, ".pi", "dashboard", "kb"), { recursive: true });
-    writeFileSync(join(big, ".pi", "dashboard", "knowledge_base.json"), JSON.stringify({
+    mkdirSync(join(big, ".omp", "dashboard", "kb"), { recursive: true });
+    writeFileSync(join(big, ".omp", "dashboard", "knowledge_base.json"), JSON.stringify({
       sources: [{ kind: "filesystem", ref: "docs" }], dbPath: ".pi/dashboard/kb/index.db",
     }));
     mkdirSync(join(big, "docs"), { recursive: true });
@@ -102,8 +102,8 @@ describe("DOX nudge Job 2: decideNudge + acknowledgeRows", () => {
 
   it("acknowledgeRows clears stale flags after AGENTS.md edit", () => {
     // seed staleness: a.ts acknowledged at an old hash
-    const sidecar = join(dir, ".pi", "dashboard", "kb", "dox-staleness.json");
-    mkdirSync(join(dir, ".pi", "dashboard", "kb"), { recursive: true });
+    const sidecar = join(dir, ".omp", "dashboard", "kb", "dox-staleness.json");
+    mkdirSync(join(dir, ".omp", "dashboard", "kb"), { recursive: true });
     writeFileSync(sidecar, JSON.stringify({ "src/a.ts": "olddhash000" }));
     const before = decideNudge(dir, join(dir, "src", "a.ts"));
     expect(before?.kind).toBe("stale");

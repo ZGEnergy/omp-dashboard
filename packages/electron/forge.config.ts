@@ -64,7 +64,7 @@ const config: ForgeConfig = {
     appCopyright: "Copyright © 2026 BlackBelt Technology",
     executableName: "pi-dashboard",
     icon: path.resolve(__dirname, "resources/icon"),
-    appBundleId: "com.blackbelt-technology.pi-dashboard",
+    appBundleId: "com.blackbelt-technology.omp-dashboard",
     // macOS: support Catalina (10.15) and newer.
     //
     // The 10.15 floor is enforced at THREE points so a future runner-image

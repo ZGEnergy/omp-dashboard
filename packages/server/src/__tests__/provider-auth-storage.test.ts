@@ -19,7 +19,7 @@ const FIXTURE_CATALOGUE: ProviderInfo[] = [
 ];
 
 describe("provider-auth-storage", () => {
-  const authDir = path.join(os.homedir(), ".pi", "agent");
+  const authDir = path.join(os.homedir(), ".omp", "agent");
   const authPath = path.join(authDir, "auth.json");
   let originalContent: string | null = null;
 

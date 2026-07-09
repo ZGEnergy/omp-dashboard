@@ -27,7 +27,7 @@ let metaPath: string;
 
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-home-lock-test-"));
-  lockPath = path.join(tmpHome, ".pi", "dashboard", "server.lock");
+  lockPath = path.join(tmpHome, ".omp", "dashboard", "server.lock");
   metaPath = `${lockPath}.meta.json`;
 });
 
@@ -59,7 +59,7 @@ function baseConfig(overrides: Partial<Parameters<typeof acquireOrAttach>[0]> = 
 describe("canonicalHomedir + paths", () => {
   it("returns a path containing .pi/dashboard/server.lock", () => {
     const p = getLockPath();
-    expect(p.endsWith(path.join(".pi", "dashboard", "server.lock"))).toBe(true);
+    expect(p.endsWith(path.join(".omp", "dashboard", "server.lock"))).toBe(true);
   });
 
   it("getMetaPath appends .meta.json", () => {

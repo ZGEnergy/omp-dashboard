@@ -15,7 +15,7 @@ describe("bridge extension registration (server context)", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ext-reg-test-"));
-    settingsPath = path.join(tmpDir, ".pi", "agent", "settings.json");
+    settingsPath = path.join(tmpDir, ".omp", "agent", "settings.json");
     origHome = process.env.HOME;
     process.env.HOME = tmpDir;
   });

@@ -11,7 +11,7 @@
  *
  * Discovery sources:
  *   1. Global npm (`npm list -g --depth=0 --json`)
- *   2. Managed install (`~/.pi-dashboard/node_modules/`) — Electron path
+ *   2. Managed install (`~/.omp-dashboard/node_modules/`) — Electron path
  *
  * Version fetch reuses `fetchPackageMeta()` from the npm-search proxy.
  * Results are cached for 5 minutes.
@@ -30,8 +30,8 @@ const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const NPM_LIST_TIMEOUT_MS = 30_000;
 
-/** ~/.pi-dashboard/ — Electron managed install dir */
-const MANAGED_DIR = path.join(os.homedir(), ".pi-dashboard");
+/** ~/.omp-dashboard/ — Electron managed install dir */
+const MANAGED_DIR = path.join(os.homedir(), ".omp-dashboard");
 const MANAGED_NODE_MODULES = path.join(MANAGED_DIR, "node_modules");
 
 /** Known core packages (not extensions). Order matters for display. */
@@ -287,7 +287,7 @@ export class PiCoreChecker {
 		return out;
 	}
 
-	/** Discover pi-ecosystem packages in ~/.pi-dashboard/node_modules/. */
+	/** Discover pi-ecosystem packages in ~/.omp-dashboard/node_modules/. */
 	private discoverManaged(): Array<{ name: string; version: string }> {
 		if (!existsSync(this.managedNodeModules)) return [];
 		const out: Array<{ name: string; version: string }> = [];

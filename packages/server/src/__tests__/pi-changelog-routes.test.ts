@@ -15,13 +15,13 @@ import { registerPiChangelogRoutes } from "../routes/pi-changelog-routes.js";
 import { _resetChangelogCache } from "../changelog-parser.js";
 
 // We can't easily patch findChangelogPath at import-time (vitest module
-// mocks vary), so we set up a fake managed install at HOME/.pi-dashboard
+// mocks vary), so we set up a fake managed install at HOME/.omp-dashboard
 // and rely on findChangelogPath's defaultManagedDir() reading $HOME.
 let tmpHome: string;
 let originalHome: string | undefined;
 
 function makeManagedPkg(pkg: string, files: Record<string, string>): string {
-  const dir = path.join(tmpHome, ".pi-dashboard", "node_modules", pkg);
+  const dir = path.join(tmpHome, ".omp-dashboard", "node_modules", pkg);
   fs.mkdirSync(dir, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, name), content);
@@ -263,7 +263,7 @@ describe("pi-changelog-routes remote source", () => {
 `;
 
   function makePkg(home: string, pkg: string, files: Record<string, string>): string {
-    const dir = path.join(home, ".pi-dashboard", "node_modules", pkg);
+    const dir = path.join(home, ".omp-dashboard", "node_modules", pkg);
     fs.mkdirSync(dir, { recursive: true });
     for (const [name, content] of Object.entries(files)) {
       fs.writeFileSync(path.join(dir, name), content);

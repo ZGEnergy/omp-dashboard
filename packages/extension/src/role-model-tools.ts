@@ -7,7 +7,7 @@
  *                      `cachedModelRegistry.getAvailable()`), roles-independent.
  *   - `list_roles`   — READ. `{ roles(bound-only), presets, activePreset }`.
  *   - `update_roles` — WRITE, action-dispatched, `ask_user`-confirmed. Mutates
- *                      the global `~/.pi/agent/providers.json` role slice.
+ *                      the global `~/.omp/agent/providers.json` role slice.
  *
  * Model listing and role reading are DECOUPLED: `list_models` never touches the
  * role slice, so a missing/malformed `providers.json#roles` cannot break model

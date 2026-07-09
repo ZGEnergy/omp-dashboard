@@ -182,7 +182,7 @@ export interface BrowserOpenSpecGroupsUpdateMessage {
 
 /**
  * Folder-scoped goals update. Broadcast after every successful mutation of
- * the per-folder goals file (`~/.pi/dashboard/goals/<folderHash>.json`),
+ * the per-folder goals file (`~/.omp/dashboard/goals/<folderHash>.json`),
  * debounced 100 ms per cwd. Full payload (no incremental delta).
  * See change: add-goals-folder-page.
  */

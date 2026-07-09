@@ -1,7 +1,7 @@
 /**
  * Unit tests for `managed-paths.ts` getters.
  *
- * The constants (MANAGED_DIR, MANAGED_BIN, PI_SETTINGS_PATH) reflect
+ * The constants (MANAGED_DIR, MANAGED_BIN, OMP_SETTINGS_PATH) reflect
  * the live environment at module-load time — those are covered by
  * implicit use throughout the codebase. These tests pin the
  * getter-with-override path used by the bootstrap harness and by
@@ -13,41 +13,41 @@ import { describe, expect, it } from "vitest";
 import {
   MANAGED_BIN,
   MANAGED_DIR,
-  PI_SETTINGS_PATH,
+  OMP_SETTINGS_PATH,
   getManagedBin,
   getManagedDir,
-  getPiSettingsPath,
+  getOmpSettingsPath,
 } from "../managed-paths.js";
 
 describe("managed-paths getters", () => {
   it("getManagedDir() with no arg matches live MANAGED_DIR", () => {
     expect(getManagedDir()).toBe(MANAGED_DIR);
-    expect(getManagedDir()).toBe(path.join(os.homedir(), ".pi-dashboard"));
+    expect(getManagedDir()).toBe(path.join(os.homedir(), ".omp-dashboard"));
   });
 
   it("getManagedBin() with no arg matches live MANAGED_BIN", () => {
     expect(getManagedBin()).toBe(MANAGED_BIN);
   });
 
-  it("getPiSettingsPath() with no arg matches live PI_SETTINGS_PATH", () => {
-    expect(getPiSettingsPath()).toBe(PI_SETTINGS_PATH);
+  it("getOmpSettingsPath() with no arg matches live OMP_SETTINGS_PATH", () => {
+    expect(getOmpSettingsPath()).toBe(OMP_SETTINGS_PATH);
   });
 
   it("getManagedDir({ homedir }) uses the override", () => {
     expect(getManagedDir({ homedir: "/fake/home" })).toBe(
-      path.join("/fake/home", ".pi-dashboard"),
+      path.join("/fake/home", ".omp-dashboard"),
     );
   });
 
   it("getManagedBin({ homedir }) composes from override", () => {
     expect(getManagedBin({ homedir: "/fake/home" })).toBe(
-      path.join("/fake/home", ".pi-dashboard", "node_modules", ".bin"),
+      path.join("/fake/home", ".omp-dashboard", "node_modules", ".bin"),
     );
   });
 
-  it("getPiSettingsPath({ homedir }) uses the override", () => {
-    expect(getPiSettingsPath({ homedir: "/fake/home" })).toBe(
-      path.join("/fake/home", ".pi", "agent", "settings.json"),
+  it("getOmpSettingsPath({ homedir }) uses the override", () => {
+    expect(getOmpSettingsPath({ homedir: "/fake/home" })).toBe(
+      path.join("/fake/home", ".omp", "agent", "settings.json"),
     );
   });
 

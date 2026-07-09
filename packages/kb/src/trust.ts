@@ -2,7 +2,7 @@
 // `packages/server/src/worktree-init-trust.ts`). Filesystem sources skip trust;
 // npm/git/https require confirmation on first fetch. Keyed by
 // `sha256(canonical(SourceSpec))` so editing the spec re-prompts.
-// Persisted at `~/.pi/dashboard/kb-source-trust.json`.
+// Persisted at `~/.omp/dashboard/kb-source-trust.json`.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import type { SourceConfig } from "./config.js";
 
 function storePath(): string {
-  return process.env.KB_SOURCE_TRUST_PATH ?? join(homedir(), ".pi", "dashboard", "kb-source-trust.json");
+  return process.env.KB_SOURCE_TRUST_PATH ?? join(homedir(), ".omp", "dashboard", "kb-source-trust.json");
 }
 
 /** Canonical string for a source spec → stable hash key. */

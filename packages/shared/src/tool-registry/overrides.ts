@@ -1,5 +1,5 @@
 /**
- * Persistent per-tool path overrides at `~/.pi/dashboard/tool-overrides.json`.
+ * Persistent per-tool path overrides at `~/.omp/dashboard/tool-overrides.json`.
  *
  * Schema:
  *   { "version": 1, "overrides": { "<toolName>": { "path": "<abs>" } } }
@@ -18,7 +18,7 @@ import os from "node:os";
 
 /** Path to the overrides file. Exposed for tests and the settings UI. */
 export function defaultOverridesPath(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "tool-overrides.json");
+  return path.join(os.homedir(), ".omp", "dashboard", "tool-overrides.json");
 }
 
 /** Internal shape persisted to disk. `version` lets us evolve later. */

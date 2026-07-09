@@ -22,7 +22,7 @@ const MOCK_BINARY = path.resolve(__dirname, "fixtures", "mock-code-server.cjs");
 const IS_POSIX = process.platform !== "win32";
 
 function editorsDirIn(home: string): string {
-  return path.join(home, ".pi", "dashboard", "editors");
+  return path.join(home, ".omp", "dashboard", "editors");
 }
 function sockPathIn(home: string, id: string): string {
   return path.join(editorsDirIn(home), `${id}.sock`);

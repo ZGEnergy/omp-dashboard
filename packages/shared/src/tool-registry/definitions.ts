@@ -199,7 +199,7 @@ function binaryDef(binaryName: string, deps?: StrategyDeps): ToolDefinition {
  *
  * The bundled-node strategy hits the Electron-packaged npx at
  * `<resourcesPath>/node/bin/npx` (Unix) or `<resourcesPath>\node\npx.cmd`
- * (Windows). Managed-bin probes `~/.pi-dashboard/node_modules/.bin/npx`
+ * (Windows). Managed-bin probes `~/.omp-dashboard/node_modules/.bin/npx`
  * (a no-op post-`eliminate-electron-runtime-install` for clean Electron
  * installs, but kept for standalone-CLI callers that may have one).
  *
@@ -462,11 +462,11 @@ function makeNodeScriptToArgv(deps?: StrategyDeps): ToolDefinition["toArgv"] {
  * wins over a system install. This is load-bearing for the Electron
  * immutable-bundle architecture (see openspec change
  * `eliminate-electron-runtime-install` finding F9). On a clean machine
- * with no system `pi` and no managed `~/.pi-dashboard/node/bin/`,
+ * with no system `pi` and no managed `~/.omp-dashboard/node/bin/`,
  * bare-import resolves the bundled cli.js (`#!/usr/bin/env node`
  * shebang, executable) and `nodeScriptToArgv` returns `[cli.js]`
  * directly. Without this strategy, the server falls into
- * `bootstrapInstall(...)` and writes to `~/.pi-dashboard/` — the
+ * `bootstrapInstall(...)` and writes to `~/.omp-dashboard/` — the
  * exact failure mode the immutable-bundle architecture eliminates.
  */
 function piExecutorDef(deps?: StrategyDeps): ToolDefinition {

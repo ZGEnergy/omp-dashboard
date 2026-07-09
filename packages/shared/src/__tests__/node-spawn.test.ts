@@ -203,17 +203,17 @@ describe("buildNodeImportArgvParts", () => {
     // raw `C:\…` argv entries so the wrap is no longer needed.
     const { buildNodeImportArgvParts } = await import("../platform/node-spawn.js");
     const parts = buildNodeImportArgvParts({
-      loader: "C:\\Users\\u\\.pi-dashboard\\node_modules\\jiti\\lib\\jiti-register.mjs",
-      entry: "C:\\Users\\u\\.pi-dashboard\\node_modules\\@earendil-works\\pi-agent-dashboard\\packages\\server\\src\\cli.ts",
+      loader: "C:\\Users\\u\\.omp-dashboard\\node_modules\\jiti\\lib\\jiti-register.mjs",
+      entry: "C:\\Users\\u\\.omp-dashboard\\node_modules\\@earendil-works\\pi-agent-dashboard\\packages\\server\\src\\cli.ts",
       args: ["start"],
       platform: "win32",
     });
     expect(parts[1]).toBe(
-      "file:///C:/Users/u/.pi-dashboard/node_modules/jiti/lib/jiti-register.mjs",
+      "file:///C:/Users/u/.omp-dashboard/node_modules/jiti/lib/jiti-register.mjs",
     );
     // Entry is RAW — NOT URL-wrapped — because the loader is jiti.
     expect(parts[2]).toBe(
-      "C:\\Users\\u\\.pi-dashboard\\node_modules\\@earendil-works\\pi-agent-dashboard\\packages\\server\\src\\cli.ts",
+      "C:\\Users\\u\\.omp-dashboard\\node_modules\\@earendil-works\\pi-agent-dashboard\\packages\\server\\src\\cli.ts",
     );
   });
 

@@ -18,7 +18,7 @@
  * the loader is jiti, on every OS. Node's drive-letter heuristic
  * accepts raw `C:\…` argv entries directly, which covers the common
  * standalone-install layout where pi + the dashboard sit under
- * `C:\Users\<u>\.pi-dashboard\…`.
+ * `C:\Users\<u>\.omp-dashboard\…`.
  *
  * This test ensures:
  *   1. `shouldUrlWrapEntry` returns `false` for jiti loaders on every
@@ -49,7 +49,7 @@ const NODE_SPAWN_PATH = path.join(
 describe("jiti behavioural contract for shouldUrlWrapEntry", () => {
   it("jiti loader → entry passed RAW on every platform", () => {
     const jitiLoader =
-      "file:///C:/Users/x/.pi-dashboard/node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/lib/jiti-register.mjs";
+      "file:///C:/Users/x/.omp-dashboard/node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/lib/jiti-register.mjs";
     expect(isJitiLoader(jitiLoader)).toBe(true);
     expect(shouldUrlWrapEntry(jitiLoader, "win32")).toBe(false);
     expect(shouldUrlWrapEntry(jitiLoader, "linux")).toBe(false);

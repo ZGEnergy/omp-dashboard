@@ -1,7 +1,7 @@
 /**
  * pi-package-resolver tests — real-fs tmp dirs, no mocking.
  *
- * Each test builds a virtual `~/.pi/agent/` (via `agentDir` injection)
+ * Each test builds a virtual `~/.omp/agent/` (via `agentDir` injection)
  * and optionally a virtual `<cwd>/.pi/` for project-scope cases. The
  * resolver's three deps (`agentDir`, `cwd`, `npmRoot`) are all injected
  * so tests are hermetic and never read the developer's real settings.
@@ -20,7 +20,7 @@ let npmRoot: string;
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-resolver-test-"));
-  agentDir = path.join(root, ".pi", "agent");
+  agentDir = path.join(root, ".omp", "agent");
   cwd = path.join(root, "project");
   npmRoot = path.join(root, "global-npm", "node_modules");
   fs.mkdirSync(agentDir, { recursive: true });

@@ -412,7 +412,7 @@ export function registerFileRoutes(
   // Scoped markdown read for the Instructions editor. Gated by the SAME
   // `isWritableMdTarget` guard as the write + candidate endpoints, so read /
   // write / list stay in lockstep (picker ⊆ guard). Unlike `/api/file`, this
-  // serves the global scope (no session cwd) for `~/.pi/agent/**/*.md`.
+  // serves the global scope (no session cwd) for `~/.omp/agent/**/*.md`.
   //   - `cwd` present → directory scope (must be a known session path).
   //   - `cwd` absent  → global scope; `path` must be absolute.
   // Returns `{ content, mtime }`. See change: directory-settings-page-and-scoped-md-editing.
