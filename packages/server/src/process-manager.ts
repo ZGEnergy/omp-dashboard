@@ -194,6 +194,14 @@ export function buildSpawnEnv(
   // inherited PI_DASHBOARD_URL. See setSpawnDashboardPiPort above.
   if (spawnDashboardPiPort != null) {
     env.PI_DASHBOARD_URL = `ws://localhost:${spawnDashboardPiPort}`;
+    // Pin the spawned bridge to THIS server: disable mDNS discovery so a
+    // co-located dashboard (e.g. the user's real pi-dashboard advertising
+    // _pi-dashboard._tcp on a different piPort) can't hijack the bridge off
+    // our gateway via the post-register updateUrl() discovery override. Without
+    // this the bridge registers here, then reconnects to whichever dashboard
+    // mDNS surfaces — turn events then stream to THAT dashboard, and the
+    // session created from our UI looks dead. See change: fix-keeper-mdns-hijack.
+    env.PI_DASHBOARD_NO_MDNS = "1";
   }
   if (opts?.spawnToken) {
     // Inject the correlation token so the bridge inside the spawned pi
