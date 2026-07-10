@@ -11,7 +11,7 @@
  *
  * Discovery sources:
  *   1. Global npm (`npm list -g --depth=0 --json`)
- *   2. Managed install (`~/.pi-dashboard/node_modules/`) — Electron path
+ *   2. Managed install (`~/.omp-dashboard/node_modules/`) — Electron path
  *
  * Version fetch reuses `fetchPackageMeta()` from the npm-search proxy.
  * Results are cached for 5 minutes.
@@ -30,22 +30,22 @@ const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const NPM_LIST_TIMEOUT_MS = 30_000;
 
-/** ~/.pi-dashboard/ — Electron managed install dir */
-const MANAGED_DIR = path.join(os.homedir(), ".pi-dashboard");
+/** ~/.omp-dashboard/ — Electron managed install dir */
+const MANAGED_DIR = path.join(os.homedir(), ".omp-dashboard");
 const MANAGED_NODE_MODULES = path.join(MANAGED_DIR, "node_modules");
 
 /** Known core packages (not extensions). Order matters for display. */
 export const CORE_PACKAGE_NAMES: readonly string[] = [
-	"@earendil-works/pi-coding-agent",
-	"@mariozechner/pi-coding-agent",
+	"@oh-my-pi/pi-coding-agent",
+	"@oh-my-pi/pi-coding-agent",
 	"@blackbelt-technology/pi-agent-dashboard",
 	"@blackbelt-technology/pi-model-proxy",
 ];
 
 /** Display name mapping for known packages. Falls back to package name. */
 const DISPLAY_NAMES: Readonly<Record<string, string>> = {
-	"@earendil-works/pi-coding-agent": "pi (core agent)",
-	"@mariozechner/pi-coding-agent": "pi (core agent — legacy fork)",
+	"@oh-my-pi/pi-coding-agent": "pi (core agent)",
+	"@oh-my-pi/pi-coding-agent": "pi (core agent — legacy fork)",
 	"@blackbelt-technology/pi-agent-dashboard": "pi-dashboard",
 	"@blackbelt-technology/pi-model-proxy": "pi-model-proxy",
 };
@@ -71,7 +71,7 @@ function resolveDisplayName(name: string): string {
 }
 
 /**
- * Dynamically-discovered package-name aliases for `@mariozechner/pi-coding-agent`.
+ * Dynamically-discovered package-name aliases for `@oh-my-pi/pi-coding-agent`.
  * Populated from pi.dev's `latest-version` response, which returns the
  * authoritative package name for fresh installs (used for the upcoming
  * `@mariozechner` → `@earendil-works` scope migration). The dashboard
@@ -102,7 +102,7 @@ function looksLikePiEcosystem(name: string): boolean {
 }
 
 /** Pi packages whose latestVersion comes from pi.dev (not npm registry). */
-const PI_DEV_PACKAGE = "@mariozechner/pi-coding-agent";
+const PI_DEV_PACKAGE = "@oh-my-pi/pi-coding-agent";
 
 export interface NpmListRunner {
 	/** Run `npm list -g --depth=0 --json` and return stdout. */
@@ -287,7 +287,7 @@ export class PiCoreChecker {
 		return out;
 	}
 
-	/** Discover pi-ecosystem packages in ~/.pi-dashboard/node_modules/. */
+	/** Discover pi-ecosystem packages in ~/.omp-dashboard/node_modules/. */
 	private discoverManaged(): Array<{ name: string; version: string }> {
 		if (!existsSync(this.managedNodeModules)) return [];
 		const out: Array<{ name: string; version: string }> = [];

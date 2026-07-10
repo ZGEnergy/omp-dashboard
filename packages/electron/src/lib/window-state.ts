@@ -1,6 +1,6 @@
 /**
  * Persists BrowserWindow size and position across restarts.
- * Stores in ~/.pi/dashboard/window-state.json (config dir, NOT the
+ * Stores in ~/.omp/dashboard/window-state.json (config dir, NOT the
  * legacy managed-install dir which is described in legacy-managed-dir.ts).
  *
  * Migrated from the legacy managed dir under change:
@@ -13,14 +13,14 @@ import os from "node:os";
 import { screen } from "electron";
 import type { BrowserWindow, Rectangle } from "electron";
 
-const STATE_FILE = path.join(os.homedir(), ".pi", "dashboard", "window-state.json");
+const STATE_FILE = path.join(os.homedir(), ".omp", "dashboard", "window-state.json");
 
 /** One-shot migration: if a window-state.json exists at the legacy path
  * but not the new one, move it. Failure is silent (the file is non-critical). */
 function migrateLegacyStateFile(): void {
   try {
     if (existsSync(STATE_FILE)) return;
-    const legacy = path.join(os.homedir(), ".pi" + "-dashboard", "window-state.json");
+    const legacy = path.join(os.homedir(), ".omp" + "-dashboard", "window-state.json");
     if (!existsSync(legacy)) return;
     mkdirSync(path.dirname(STATE_FILE), { recursive: true });
     renameSync(legacy, STATE_FILE);

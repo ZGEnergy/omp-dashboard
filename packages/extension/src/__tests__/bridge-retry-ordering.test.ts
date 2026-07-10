@@ -100,7 +100,7 @@ describe("Bridge retry-event wire ordering", () => {
   it("Gemini monthly-spending-cap error orders auto_retry_end before agent_end", () => {
     const sim = new BridgeSim();
     const sessionId = "s2";
-    // Real fixture from ~/.pi/agent/sessions/...BME-szakdoga.../*.jsonl line 363
+    // Real fixture from ~/.omp/agent/sessions/...BME-szakdoga.../*.jsonl line 363
     const errorMsg = JSON.stringify({
       error: {
         message:

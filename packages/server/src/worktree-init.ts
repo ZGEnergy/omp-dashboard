@@ -1,11 +1,11 @@
 /**
  * Worktree-init hook engine (generalized from the old worktree-bootstrap step).
  *
- * A project declares ONE init hook in `.pi/settings.json#worktreeInit`:
+ * A project declares ONE init hook in `.omp/settings.json#worktreeInit`:
  *   { gate: "<bash test>", run: { type: "script", command } | { type: "agent", prompt, model?, settings? } }
  *
  * Four concerns:
- *   1. `readInitHook(repoRoot)`      — parse `.pi/settings.json#worktreeInit`,
+ *   1. `readInitHook(repoRoot)`      — parse `.omp/settings.json#worktreeInit`,
  *      fail-open to `null` on any read/parse/shape error.
  *   2. `evaluateGate(cwd, hook)`     — spawn the bash `gate` in `cwd`;
  *      `needsInit: true` iff exit code === 0. Spawn errors / timeouts
@@ -49,12 +49,12 @@ export interface WorktreeInitHook {
 // ── 1. readInitHook ─────────────────────────────────────────────────────────
 
 /**
- * Reads `<repoRoot>/.pi/settings.json` and returns the parsed `worktreeInit`
+ * Reads `<repoRoot>/.omp/settings.json` and returns the parsed `worktreeInit`
  * hook, or `null` on any read error, parse error, missing key, or
  * unrecognized shape (fail-open).
  */
 export function readInitHook(repoRoot: string): WorktreeInitHook | null {
-  const settingsPath = path.join(repoRoot, ".pi", "settings.json");
+  const settingsPath = path.join(repoRoot, ".omp", "settings.json");
   let raw: string;
   try {
     raw = fs.readFileSync(settingsPath, "utf8");
@@ -194,7 +194,7 @@ const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 /**
  * Runs the declared hook in `cwd`. `script` flavor streams throttled
  * progress and resolves on exit. `agent` flavor spawns a DETACHED headless
- * pi (output → `<cwd>/.pi/worktree-init.log`), awaits exit, then
+ * pi (output → `<cwd>/.omp/worktree-init.log`), awaits exit, then
  * re-evaluates the gate: still-needs-init ⇒ failed (with log tail).
  */
 export async function runInitHook(
@@ -309,7 +309,7 @@ function resolvePiBinDefault(): string | null {
 }
 
 /**
- * Agent flavor: spawn a DETACHED headless pi (output → `.pi/worktree-init.log`),
+ * Agent flavor: spawn a DETACHED headless pi (output → `.omp/worktree-init.log`),
  * await exit, then re-evaluate the gate. Still-needs-init ⇒ failed.
  */
 async function runAgent(
@@ -333,7 +333,7 @@ async function runAgent(
   }
 
   // Combined output log for failure surfacing.
-  const logPath = path.join(cwd, ".pi", "worktree-init.log");
+  const logPath = path.join(cwd, ".omp", "worktree-init.log");
   try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); } catch { /* noop */ }
   let logFd: number | undefined;
   try { logFd = fs.openSync(logPath, "w"); } catch { /* fall back to ignore */ }

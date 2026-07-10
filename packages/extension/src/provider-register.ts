@@ -2,10 +2,10 @@
  * Provider Extension (Dashboard)
  *
  * Registers custom LLM providers with auto-discovered models.
- * Config: ~/.pi/agent/providers.json (providers section only — preserves other fields)
+ * Config: ~/.omp/agent/providers.json (providers section only — preserves other fields)
  *
  * Providers are configured via the dashboard settings UI or by editing
- * ~/.pi/agent/providers.json directly. No TUI commands.
+ * ~/.omp/agent/providers.json directly. No TUI commands.
  *
  * Event API:
  *   model:resolve            — primary universal resolver (capability
@@ -27,7 +27,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ProviderInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { lookupRole, loadRoleConfig } from "./role-manager.js";
 
 // -- Types ----------------------------------------------------------------
@@ -185,7 +185,7 @@ export function enrichModelMetadata(
 
 // Resolved lazily so HOME can be changed in tests.
 function configPath(): string {
-  return join(homedir(), ".pi", "agent", "providers.json");
+  return join(homedir(), ".omp", "agent", "providers.json");
 }
 const CONFIG_PATH = configPath();
 
@@ -203,7 +203,7 @@ const enrichmentSource = new Map<string, "catalog" | "fallback">();
 const EXTENDED_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 /**
- * Mirror of pi's `getSupportedThinkingLevels` (from @earendil-works/pi-ai) —
+ * Mirror of pi's `getSupportedThinkingLevels` (from @oh-my-pi/pi-ai) —
  * the same rule pi core uses to clamp thinking level. Inlined rather than
  * imported: pi-ai ships `.d.ts` files that re-export via explicit `.ts`
  * extensions (`export * from "./models.ts"`), which the base tsconfig (no
@@ -435,7 +435,7 @@ export function _buildProviderCatalogue(
   );
   // The catalogue is the complete picture of what pi knows about —
   // built-in providers, OAuth providers, AND custom providers registered
-  // by the dashboard via pi.registerProvider() from ~/.pi/agent/providers.json.
+  // by the dashboard via pi.registerProvider() from ~/.omp/agent/providers.json.
   // Custom providers carry `custom: true` so consumers can decide what
   // to surface where (e.g. the auth UI suppresses their API-key rows
   // because they're managed by the LLM Providers settings section).
@@ -510,7 +510,7 @@ async function loadPiAi(): Promise<PiAiHelpers> {
   if (_piAiLoadAttempted) return {};
   _piAiLoadAttempted = true;
   try {
-    const mod: any = await import("@earendil-works/pi-ai");
+    const mod: any = await import("@oh-my-pi/pi-ai");
     _piAiModule = { findEnvKeys: mod.findEnvKeys, getEnvApiKey: mod.getEnvApiKey };
     return _piAiModule;
   } catch {
@@ -527,7 +527,7 @@ void loadPiAi();
 /**
  * Public wrapper: returns the current provider catalogue, or [] when
  * the model registry has not been captured yet. Marks providers the
- * bridge itself registered (from `~/.pi/agent/providers.json` via
+ * bridge itself registered (from `~/.omp/agent/providers.json` via
  * `pi.registerProvider()`) with `custom: true` so consumers can
  * suppress their API-key auth rows (those are managed by the LLM
  * Providers settings section). The catalogue itself is complete —
@@ -613,7 +613,7 @@ async function registerEntry(pi: ExtensionAPI, name: string, entry: ProviderEntr
   // shortly after `activate()` kicked off async registerEntry calls) carries
   // the correct `custom: true` flags. Otherwise a slow / unreachable
   // /v1/models endpoint causes custom providers from
-  // `~/.pi/agent/providers.json` to leak into Settings → Provider
+  // `~/.omp/agent/providers.json` to leak into Settings → Provider
   // Authentication → API Keys until the discovery probe resolves.
   // See change: fix-custom-provider-flag-race.
   lastRegistered.set(name, {
@@ -762,7 +762,7 @@ async function resolveModelProbe(probe: any, ref: string): Promise<void> {
     // dashboard-roles-ownership + design D10.
     const { literal: mapped } = lookupRole(literal);
     if (!mapped) {
-      probe.error = `Role "${ref}" is not assigned in ~/.pi/agent/providers.json#roles.`;
+      probe.error = `Role "${ref}" is not assigned in ~/.omp/agent/providers.json#roles.`;
       probe.available = { ...(probe.available ?? {}), roles: loadRoleConfig().roles };
       return;
     }
@@ -948,7 +948,7 @@ export function activate(pi: ExtensionAPI) {
           ? `Set ${entry.apiKey}`
           : "Check API key";
         ctx.ui.notify(
-          `${name}: ${hint} or add "${name}" to ~/.pi/agent/auth.json`,
+          `${name}: ${hint} or add "${name}" to ~/.omp/agent/auth.json`,
           "warning",
         );
       }

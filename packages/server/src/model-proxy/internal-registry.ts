@@ -1,8 +1,8 @@
 /**
  * Server-resident model registry built on pi-ai primitives.
  *
- * Composes pi-ai's built-in providers with custom providers (~/.pi/agent/providers.json),
- * custom models (~/.pi/agent/models.json), and auth state (~/.pi/agent/auth.json).
+ * Composes pi-ai's built-in providers with custom providers (~/.omp/agent/providers.json),
+ * custom models (~/.omp/agent/models.json), and auth state (~/.omp/agent/auth.json).
  * Only models whose provider has valid auth are exposed.
  *
  * See change: add-dashboard-model-proxy, design §1.

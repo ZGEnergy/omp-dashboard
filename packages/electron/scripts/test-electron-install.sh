@@ -10,7 +10,7 @@
 # Bundle-only flow (post-`eliminate-electron-runtime-install`):
 #   - `bundle-server.mjs` produces `resources/server/` with pi/openspec/tsx
 #     pre-installed under `node_modules/`.
-#   - No `~/.pi-dashboard/` writes for install, no offline cacache.
+#   - No `~/.omp-dashboard/` writes for install, no offline cacache.
 #   - Container runs `npm install --omit=dev` once to relink node-pty
 #     against this Ubuntu's glibc.
 #

@@ -1,5 +1,5 @@
 /**
- * Per-scope filesystem watcher on `<scopeBase>/.pi/automation/` (recursive).
+ * Per-scope filesystem watcher on `<scopeBase>/.omp/automation/` (recursive).
  *
  * Trigger-only: invokes `onChange(scopeBase)` (debounced 300 ms) so the
  * caller re-scans both scopes and re-arms the scheduler. Cloned from
@@ -28,7 +28,7 @@ export function matchesAutomationArtifact(relPath: string | null | undefined): b
 
 export interface AutomationWatcher {
   /**
-   * Attach watcher to `<scopeBase>/.pi/automation/`. Returns `true` iff newly
+   * Attach watcher to `<scopeBase>/.omp/automation/`. Returns `true` iff newly
    * attached; `false` when already attached OR when `fs.watch` failed.
    */
   attach(scopeBase: string): boolean;
@@ -72,7 +72,7 @@ export function createAutomationWatcher(deps: AutomationWatcherDeps): Automation
 
   function attach(scopeBase: string): boolean {
     if (attached.has(scopeBase)) return false;
-    const watchRoot = path.join(scopeBase, ".pi", "automation");
+    const watchRoot = path.join(scopeBase, ".omp", "automation");
     let watcher: fs.FSWatcher;
     try {
       watcher = fs.watch(watchRoot, { recursive: true, persistent: false });

@@ -22,7 +22,7 @@
  * React/Tailwind/shadcn (or plain HTML) project.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { Type } from "typebox";
 import * as http from "node:http";
 import * as fs from "node:fs";

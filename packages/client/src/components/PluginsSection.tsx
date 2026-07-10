@@ -504,7 +504,7 @@ export function PluginsSection() {
             {i18nT("auto.no_plugins_installed", undefined, "No plugins installed.")}
             <span className="block mt-1 text-[11px] text-[var(--text-tertiary)]">
               {i18nT("auto.plugins_are_discovered_from_the_monorepo", undefined, "Plugins are discovered from the monorepo,")}{" "}
-              <code>~/.pi/dashboard/plugins/</code>{i18nT("auto.or_the_bundled_set", undefined, ", or the bundled set.")}
+              <code>~/.omp/dashboard/plugins/</code>{i18nT("auto.or_the_bundled_set", undefined, ", or the bundled set.")}
             </span>
           </div>
         )}

@@ -1,8 +1,8 @@
 /**
  * pi-package-resolver tests — real-fs tmp dirs, no mocking.
  *
- * Each test builds a virtual `~/.pi/agent/` (via `agentDir` injection)
- * and optionally a virtual `<cwd>/.pi/` for project-scope cases. The
+ * Each test builds a virtual `~/.omp/agent/` (via `agentDir` injection)
+ * and optionally a virtual `<cwd>/.omp/` for project-scope cases. The
  * resolver's three deps (`agentDir`, `cwd`, `npmRoot`) are all injected
  * so tests are hermetic and never read the developer's real settings.
  */
@@ -20,7 +20,7 @@ let npmRoot: string;
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-resolver-test-"));
-  agentDir = path.join(root, ".pi", "agent");
+  agentDir = path.join(root, ".omp", "agent");
   cwd = path.join(root, "project");
   npmRoot = path.join(root, "global-npm", "node_modules");
   fs.mkdirSync(agentDir, { recursive: true });
@@ -38,7 +38,7 @@ function writeSettings(scope: "user" | "project", body: Record<string, unknown>)
   const settingsPath =
     scope === "user"
       ? path.join(agentDir, "settings.json")
-      : path.join(cwd, ".pi", "settings.json");
+      : path.join(cwd, ".omp", "settings.json");
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   fs.writeFileSync(settingsPath, JSON.stringify(body, null, 2));
 }
@@ -89,7 +89,7 @@ describe("npm: install resolution", () => {
 // ── 2.3: git scope ──────────────────────────────────────────────────
 
 describe("git: install resolution", () => {
-  it("resolves https github URL to ~/.pi/agent/git/<host>/<path>", () => {
+  it("resolves https github URL to ~/.omp/agent/git/<host>/<path>", () => {
     writeSettings("user", {
       packages: ["https://github.com/BlackBeltTechnology/pi-anthropic-messages.git"],
     });
@@ -133,10 +133,10 @@ describe("absolute path resolution", () => {
 // ── 2.5: relative path in project-scope ─────────────────────────────
 
 describe("relative path resolution under project scope", () => {
-  it("resolves a relative entry against <cwd>/.pi/", () => {
+  it("resolves a relative entry against <cwd>/.omp/", () => {
     const pkgDir = path.join(cwd, "..", "sibling");
     writePackage(pkgDir, { name: "sibling-pkg", main: "ok.ts" }, { "ok.ts": "" });
-    writeSettings("project", { packages: ["../../sibling"] }); // relative to <cwd>/.pi/
+    writeSettings("project", { packages: ["../../sibling"] }); // relative to <cwd>/.omp/
 
     const result = resolvePiPackage("sibling-pkg", { agentDir, cwd, npmRoot });
     expect(result?.scope).toBe("project");
@@ -280,7 +280,7 @@ describe("graceful degradation", () => {
 // ── 2.10: missing settings.json → null ──────────────────────────────
 
 describe("missing settings.json", () => {
-  it("returns null without throwing when ~/.pi/agent/settings.json is absent", () => {
+  it("returns null without throwing when ~/.omp/agent/settings.json is absent", () => {
     // beforeEach creates the agentDir but no settings.json inside it.
     expect(resolvePiPackage("anything", { agentDir, npmRoot })).toBeNull();
   });

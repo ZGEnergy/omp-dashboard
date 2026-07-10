@@ -1,6 +1,6 @@
 /**
  * pi.dev version-check client. Mirrors the implementation pi itself
- * uses for self-update checks (see `@earendil-works/pi-coding-agent/dist/
+ * uses for self-update checks (see `@oh-my-pi/pi-coding-agent/dist/
  * utils/version-check.js`). Returns `{ version, packageName? }` so the
  * dashboard can:
  *   1. Detect the genuinely-newest pi without npm-registry lag.

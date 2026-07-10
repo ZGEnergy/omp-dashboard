@@ -40,8 +40,8 @@ describe("buildSpawnEnv: managed Node prepend", () => {
 
 	function installFakeManagedNode(): string {
 		const binDir = isWin
-			? path.join(tmpHome, ".pi-dashboard", "node")
-			: path.join(tmpHome, ".pi-dashboard", "node", "bin");
+			? path.join(tmpHome, ".omp-dashboard", "node")
+			: path.join(tmpHome, ".omp-dashboard", "node", "bin");
 		fs.mkdirSync(binDir, { recursive: true });
 		fs.writeFileSync(path.join(binDir, isWin ? "node.exe" : "node"), "fake");
 		return binDir;
@@ -50,8 +50,8 @@ describe("buildSpawnEnv: managed Node prepend", () => {
 	it("PATH does NOT contain managed Node dir when binary is absent", () => {
 		const env = buildSpawnEnv({ PATH: "/usr/bin:/bin" });
 		const expectedDir = isWin
-			? path.join(tmpHome, ".pi-dashboard", "node")
-			: path.join(tmpHome, ".pi-dashboard", "node", "bin");
+			? path.join(tmpHome, ".omp-dashboard", "node")
+			: path.join(tmpHome, ".omp-dashboard", "node", "bin");
 		expect((env.PATH ?? "").split(path.delimiter)).not.toContain(expectedDir);
 	});
 

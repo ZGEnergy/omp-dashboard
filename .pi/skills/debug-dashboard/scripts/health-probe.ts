@@ -15,7 +15,7 @@ import { join } from 'node:path';
 function getDashboardPort(): number {
   try {
     const cfg = JSON.parse(
-      readFileSync(join(homedir(), '.pi', 'dashboard', 'config.json'), 'utf8')
+      readFileSync(join(homedir(), '.omp', 'dashboard', 'config.json'), 'utf8')
     ) as { port?: number };
     if (typeof cfg.port === 'number') return cfg.port;
   } catch {
@@ -45,7 +45,7 @@ try {
   data = (await resp.json()) as Record<string, unknown>;
 } catch {
   console.log(`not-running (no response on port ${port})`);
-  const logPath = join(homedir(), '.pi', 'dashboard', 'server.log');
+  const logPath = join(homedir(), '.omp', 'dashboard', 'server.log');
   const tail = tailLog(logPath, 10);
   if (tail.length) {
     console.log('  tail of server.log:');

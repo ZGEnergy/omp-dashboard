@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import { isTrusted, recordTrust } from "../worktree-init-trust.js";
 
 // HOME is re-rooted to an ephemeral tmp dir by the test-support setup, so
-// the JSON store lives under that throwaway ~/.pi/dashboard.
+// the JSON store lives under that throwaway ~/.omp/dashboard.
 
 describe("worktree-init-trust", () => {
   it("is untrusted by default", () => {

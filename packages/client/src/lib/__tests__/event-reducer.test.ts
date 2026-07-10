@@ -2018,7 +2018,7 @@ describe("command_feedback events", () => {
               durationMs: 4200,
               tokensUsage: { input: 500, output: 200, total: 700 },
               toolUses: 7,
-              agentMdPath: "/home/u/.pi/agent/agents/Explore.md",
+              agentMdPath: "/home/u/.omp/agent/agents/Explore.md",
             },
           },
         },
@@ -2033,7 +2033,7 @@ describe("command_feedback events", () => {
       expect(sub!.tokens).toEqual({ input: 500, output: 200, total: 700 });
       expect(sub!.toolUses).toBe(7);
       expect(sub!.displayName).toBe("explorer");
-      expect(sub!.agentMdPath).toBe("/home/u/.pi/agent/agents/Explore.md");
+      expect(sub!.agentMdPath).toBe("/home/u/.omp/agent/agents/Explore.md");
     });
 
     it("replayed failed Agent run populates with status=failed and error from data.result", () => {

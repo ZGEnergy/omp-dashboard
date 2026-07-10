@@ -6,7 +6,7 @@
  * Earlier versions of this contract attempted to pin a "verified-good"
  * jiti version that correctly normalised `file:///` triple-slash URL
  * entries on Windows. Live testing on Windows 11 + Node 22.18.0 + jiti
- * 2.7.0 (shipped under `@earendil-works/pi-coding-agent@0.74.x`) showed
+ * 2.7.0 (shipped under `@oh-my-pi/pi-coding-agent@0.74.x`) showed
  * that jiti still misnormalises those URLs:
  *
  *     Error: Cannot find module
@@ -49,7 +49,7 @@ const NODE_SPAWN_PATH = path.join(
 describe("jiti behavioural contract for shouldUrlWrapEntry", () => {
   it("jiti loader → entry passed RAW on every platform", () => {
     const jitiLoader =
-      "file:///C:/Users/x/.pi-dashboard/node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/lib/jiti-register.mjs";
+      "file:///C:/Users/x/.omp-dashboard/node_modules/@oh-my-pi/pi-coding-agent/node_modules/jiti/lib/jiti-register.mjs";
     expect(isJitiLoader(jitiLoader)).toBe(true);
     expect(shouldUrlWrapEntry(jitiLoader, "win32")).toBe(false);
     expect(shouldUrlWrapEntry(jitiLoader, "linux")).toBe(false);

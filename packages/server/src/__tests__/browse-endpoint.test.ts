@@ -46,7 +46,7 @@ describe("listDirectories", () => {
   });
 
   // Hermetic, no host-coupling: build a tmpdir with three siblings (one
-  // with `.git`, one with `.pi`, one plain) and assert the flag fields
+  // with `.git`, one with `.omp`, one plain) and assert the flag fields
   // on each. Detection is opt-in via `{ detect: true }` per
   // change: split-browse-flags.
   it("should detect isGit flag for git repos when detect=true", async () => {
@@ -75,7 +75,7 @@ describe("listDirectories", () => {
     const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), "browse-flags-"));
     try {
       await fsp.mkdir(path.join(tmp, "pi-project"));
-      await fsp.mkdir(path.join(tmp, "pi-project", ".pi"));
+      await fsp.mkdir(path.join(tmp, "pi-project", ".omp"));
       await fsp.mkdir(path.join(tmp, "plain-dir"));
 
       const result = await listDirectories(tmp, undefined, { detect: true });
@@ -99,7 +99,7 @@ describe("listDirectories", () => {
       await fsp.mkdir(path.join(tmp, "git-repo"));
       await fsp.mkdir(path.join(tmp, "git-repo", ".git"));
       await fsp.mkdir(path.join(tmp, "pi-project"));
-      await fsp.mkdir(path.join(tmp, "pi-project", ".pi"));
+      await fsp.mkdir(path.join(tmp, "pi-project", ".omp"));
 
       const result = await listDirectories(tmp);
 
@@ -409,7 +409,7 @@ describe("classifyPaths", () => {
     await fsp.mkdir(gitDir);
     await fsp.mkdir(path.join(gitDir, ".git"));
     await fsp.mkdir(piDir);
-    await fsp.mkdir(path.join(piDir, ".pi"));
+    await fsp.mkdir(path.join(piDir, ".omp"));
     await fsp.mkdir(plain);
 
     const flags = await classifyPaths([gitDir, piDir, plain]);
@@ -514,7 +514,7 @@ describe("GET /api/browse/flags route", () => {
     await fsp.mkdir(gitDir);
     await fsp.mkdir(path.join(gitDir, ".git"));
     await fsp.mkdir(piDir);
-    await fsp.mkdir(path.join(piDir, ".pi"));
+    await fsp.mkdir(path.join(piDir, ".omp"));
 
     const paths = encodeURIComponent(JSON.stringify([gitDir, piDir]));
     const res = await app.inject({ method: "GET", url: `/api/browse/flags?paths=${paths}` });

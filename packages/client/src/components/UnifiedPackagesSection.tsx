@@ -41,9 +41,9 @@ import { usePiChangelog } from "../hooks/usePiChangelog.js";
 import { useI18n } from "../lib/i18n.js";
 
 /** Single core package the breaking-change icon is wired for. v1 scope. */
-const PI_CORE_PKG = "@earendil-works/pi-coding-agent";
+const PI_CORE_PKG = "@oh-my-pi/pi-coding-agent";
 /** Legacy pre-rename scope, still accepted so installs on the old name keep the icon. */
-const PI_CORE_PKG_LEGACY = "@mariozechner/pi-coding-agent";
+const PI_CORE_PKG_LEGACY = "@oh-my-pi/pi-coding-agent";
 const isPiCorePkg = (name: string): boolean =>
 	name === PI_CORE_PKG || name === PI_CORE_PKG_LEGACY;
 

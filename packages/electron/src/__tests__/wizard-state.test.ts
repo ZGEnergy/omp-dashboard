@@ -19,8 +19,8 @@ describe("wizard-state", () => {
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-wizard-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    fs.mkdirSync(path.join(testDir, ".pi-dashboard"), { recursive: true });
-    fs.mkdirSync(path.join(testDir, ".pi", "agent"), { recursive: true });
+    fs.mkdirSync(path.join(testDir, ".omp-dashboard"), { recursive: true });
+    fs.mkdirSync(path.join(testDir, ".omp", "agent"), { recursive: true });
     origHome = process.env.HOME!;
     process.env.HOME = testDir;
   });
@@ -61,7 +61,7 @@ describe("wizard-state", () => {
 
   // See change: fix-doctor-oauth-credential-detection.
   it("isApiKeyConfigured returns true for OAuth-only auth.json", () => {
-    const authFile = path.join(testDir, ".pi", "agent", "auth.json");
+    const authFile = path.join(testDir, ".omp", "agent", "auth.json");
     fs.writeFileSync(
       authFile,
       JSON.stringify({
@@ -72,7 +72,7 @@ describe("wizard-state", () => {
   });
 
   it("writeApiKey creates settings file if missing", () => {
-    const settingsFile = path.join(testDir, ".pi", "agent", "settings.json");
+    const settingsFile = path.join(testDir, ".omp", "agent", "settings.json");
     expect(fs.existsSync(settingsFile)).toBe(false);
     writeApiKey("openai", "sk-openai-123");
     expect(fs.existsSync(settingsFile)).toBe(true);
@@ -82,8 +82,8 @@ describe("wizard-state", () => {
 
   // ── mode.json → dashboard-settings.json migration (2B.4) ────────────
   describe("legacy mode.json migration", () => {
-    const settingsFile = () => path.join(testDir, ".pi-dashboard", "dashboard-settings.json");
-    const legacyFile = () => path.join(testDir, ".pi-dashboard", "mode.json");
+    const settingsFile = () => path.join(testDir, ".omp-dashboard", "dashboard-settings.json");
+    const legacyFile = () => path.join(testDir, ".omp-dashboard", "mode.json");
 
     it("readModeFile migrates a legacy mode.json to dashboard-settings.json", () => {
       fs.writeFileSync(legacyFile(), JSON.stringify({ mode: "remote", completedAt: "x", remoteUrl: "http://h:8000" }));

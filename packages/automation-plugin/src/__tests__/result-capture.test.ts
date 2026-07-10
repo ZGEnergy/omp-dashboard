@@ -60,7 +60,7 @@ const agentEnd = { eventType: "agent_end", data: {} };
 it("result.md == assistant reply and excludes the injected prompt", () => {
   const rec = captureAndFinish("2026-06-23-pong", PROMPT, [inputEvent, promptEcho, assistantReply, agentEnd]);
   expect(rec?.archived).toBeUndefined();
-  const md = fs.readFileSync(path.join(base, ".pi", "automation", "runs", "2026-06-23-pong", "result.md"), "utf-8");
+  const md = fs.readFileSync(path.join(base, ".omp", "automation", "runs", "2026-06-23-pong", "result.md"), "utf-8");
   expect(md.trim()).toBe("PONG");
   expect(md).not.toContain("Reply with exactly");
 });
@@ -69,7 +69,7 @@ it("no assistant output -> empty result.md -> auto-archived", () => {
   const rec = captureAndFinish("2026-06-23-pong", PROMPT, [inputEvent, promptEcho, agentEnd]);
   expect(rec?.archived).toBe(true);
   const md = fs.readFileSync(
-    path.join(base, ".pi", "automation", "runs", "2026-06-23-pong", "result.md"),
+    path.join(base, ".omp", "automation", "runs", "2026-06-23-pong", "result.md"),
     "utf-8",
   );
   expect(md).toBe("");

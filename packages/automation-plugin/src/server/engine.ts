@@ -386,9 +386,9 @@ export function createEngine(deps: EngineDeps): Engine {
 
   function scopeBaseFor(a: DiscoveredAutomation): string {
     // The run store lives under the same scope base the automation was found
-    // in. Folder automations carry their repo root via `dir` (…/.pi/automation
-    // /<name>); strip the trailing `.pi/automation/<name>` to recover the base.
-    const marker = path.join(".pi", "automation");
+    // in. Folder automations carry their repo root via `dir` (…/.omp/automation
+    // /<name>); strip the trailing `.omp/automation/<name>` to recover the base.
+    const marker = path.join(".omp", "automation");
     const idx = a.dir.indexOf(marker);
     if (idx >= 0) return a.dir.slice(0, idx).replace(/[/\\]+$/, "");
     return a.scope === "global" ? homeDir : a.dir;

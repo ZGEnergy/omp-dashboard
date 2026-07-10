@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { flowYamlPath, readFlowInputs } from "../server/flow-inputs.js";
 
 function writeFlow(cwd: string, ns: string, name: string, yaml: string): void {
-  const dir = path.join(cwd, ".pi", "flows", "flows", ns, name);
+  const dir = path.join(cwd, ".omp", "flows", "flows", ns, name);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "flow.yaml"), yaml);
 }

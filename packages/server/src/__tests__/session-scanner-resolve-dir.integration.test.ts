@@ -4,7 +4,7 @@
  *
  * Asserts the config override (`config.json#piSessionsDir`) redirects the
  * scan to a fixture tree, and that with everything unset the scan defaults to
- * `$HOME/.pi/agent/sessions`. HOME is the ephemeral tmp dir the test harness
+ * `$HOME/.omp/agent/sessions`. HOME is the ephemeral tmp dir the test harness
  * sets, so writing under it is safe.
  *
  * See change: configurable-pi-sessions-dir.
@@ -66,7 +66,7 @@ describe("session-scanner resolves scan dir via config", () => {
     const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-sessions-fixture-"));
     writeFixtureSession(fixtureRoot, "--fix-cwd--", "fixture-id");
 
-    const configDir = path.join(os.homedir(), ".pi", "dashboard");
+    const configDir = path.join(os.homedir(), ".omp", "dashboard");
     fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(
       path.join(configDir, "config.json"),
@@ -82,8 +82,8 @@ describe("session-scanner resolves scan dir via config", () => {
     }
   });
 
-  it("all unset → scanAllSessions() targets $HOME/.pi/agent/sessions", () => {
-    const defaultRoot = path.join(os.homedir(), ".pi", "agent", "sessions");
+  it("all unset → scanAllSessions() targets $HOME/.omp/agent/sessions", () => {
+    const defaultRoot = path.join(os.homedir(), ".omp", "agent", "sessions");
     writeFixtureSession(defaultRoot, "--default-cwd--", "default-id");
 
     try {

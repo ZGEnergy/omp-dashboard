@@ -13,7 +13,7 @@ import { join } from 'node:path';
 function getDashboardPort(): number {
   try {
     const cfg = JSON.parse(
-      readFileSync(join(homedir(), '.pi', 'dashboard', 'config.json'), 'utf8')
+      readFileSync(join(homedir(), '.omp', 'dashboard', 'config.json'), 'utf8')
     ) as { port?: number };
     if (typeof cfg.port === 'number') return cfg.port;
   } catch {

@@ -209,7 +209,7 @@ export function createEditorManager(options: EditorManagerOptions): EditorManage
   }
 
   function setTheme(cwd: string, theme: "dark" | "light"): void {
-    const dataDir = path.join(os.homedir(), ".pi", "dashboard", "editors", folderHash(cwd));
+    const dataDir = path.join(os.homedir(), ".omp", "dashboard", "editors", folderHash(cwd));
     writeVscodeUserSettings(dataDir, theme);
   }
 
@@ -322,7 +322,7 @@ export function createEditorManager(options: EditorManagerOptions): EditorManage
     }
 
     const editorId = editorIdFromCwd(cwd);
-    const dataDir = path.join(os.homedir(), ".pi", "dashboard", "editors", editorId);
+    const dataDir = path.join(os.homedir(), ".omp", "dashboard", "editors", editorId);
 
     // 2. Reattach via keeper probe.
     const probed = await keeperManager.probe(editorId).catch(() => ({ alive: false } as const));

@@ -251,10 +251,10 @@ export async function startRecoveryServer(info: RecoveryInfo): Promise<number> {
   console.error("══════════════════════════════════════════════════════════════");
   console.error("");
 
-  // Persist a snapshot of the failure under ~/.pi/dashboard/last-recovery.json
+  // Persist a snapshot of the failure under ~/.omp/dashboard/last-recovery.json
   // so tooling/diagnostics can see why the server is in recovery mode.
   try {
-    const dir = path.join(os.homedir(), ".pi", "dashboard");
+    const dir = path.join(os.homedir(), ".omp", "dashboard");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "last-recovery.json"),

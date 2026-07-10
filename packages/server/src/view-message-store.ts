@@ -1,7 +1,7 @@
 /**
  * Per-session store for dashboard-local `/view` preview rows. Separate from
  * pi's events.jsonl so the agent NEVER observes these rows. Persisted as
- * one JSON file per session under `~/.pi/dashboard/view-messages/<sid>.json`
+ * one JSON file per session under `~/.omp/dashboard/view-messages/<sid>.json`
  * so previews survive server restarts. See change: render-file-previews.
  */
 import fs from "node:fs";
@@ -18,7 +18,7 @@ export interface ViewMessage {
   view: ViewTarget;
 }
 
-const DEFAULT_DIR = path.join(os.homedir(), ".pi", "dashboard", "view-messages");
+const DEFAULT_DIR = path.join(os.homedir(), ".omp", "dashboard", "view-messages");
 
 function fileFor(dir: string, sessionId: string): string {
   // sessionId is server-issued (uuid-ish); still strip dangerous chars.

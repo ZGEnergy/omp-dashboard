@@ -13,8 +13,8 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { registerProviderRoutes } from "../routes/provider-routes.js";
 
-const PROVIDERS_PATH = join(homedir(), ".pi", "agent", "providers.json");
-const PROVIDERS_DIR = join(homedir(), ".pi", "agent");
+const PROVIDERS_PATH = join(homedir(), ".omp", "agent", "providers.json");
+const PROVIDERS_DIR = join(homedir(), ".omp", "agent");
 
 // Back up / restore providers.json around each test
 let backup: string | null = null;

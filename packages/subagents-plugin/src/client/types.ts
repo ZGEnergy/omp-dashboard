@@ -42,7 +42,7 @@ export interface SubagentState {
   startedAt?: number;
   /**
    * Absolute filesystem path to the agent's `.md` definition file
-   * (e.g. `~/.pi/agent/agents/Explore.md`). Producer sets it when the
+   * (e.g. `~/.omp/agent/agents/Explore.md`). Producer sets it when the
    * subagent was sourced from a file. Rendered read-only in the inspector
    * header. See change: add-subagent-inspector §15.
    */

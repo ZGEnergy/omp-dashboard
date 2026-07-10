@@ -16,7 +16,7 @@ import {
   _resetChangelogCache,
 } from "../changelog-parser.js";
 
-const FIXTURE_PKG = "@earendil-works/pi-coding-agent";
+const FIXTURE_PKG = "@oh-my-pi/pi-coding-agent";
 
 describe("pi-changelog integration", () => {
   let app: FastifyInstance;
@@ -36,7 +36,7 @@ describe("pi-changelog integration", () => {
     process.env.PI_OFFLINE = "1";
 
     // Plant a managed install with a small but realistic CHANGELOG.
-    const dir = path.join(tmpHome, ".pi-dashboard", "node_modules", FIXTURE_PKG);
+    const dir = path.join(tmpHome, ".omp-dashboard", "node_modules", FIXTURE_PKG);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "CHANGELOG.md"),
@@ -125,7 +125,7 @@ describe("pi-changelog integration", () => {
 
     // Mutate the on-disk CHANGELOG to remove all releases. If the cache
     // is honoured, the second response still has the original releases.
-    const dir = path.join(tmpHome, ".pi-dashboard", "node_modules", FIXTURE_PKG);
+    const dir = path.join(tmpHome, ".omp-dashboard", "node_modules", FIXTURE_PKG);
     fs.writeFileSync(path.join(dir, "CHANGELOG.md"), "# Empty\n");
     // Restore mtime explicitly so the cache key (mtimeMs) is unchanged.
     const origStat = JSON.parse(r1.body);
@@ -151,7 +151,7 @@ describe("pi-changelog integration", () => {
     expect(r1.json().releases).toHaveLength(2);
 
     // Mutate the file to a brand-new mtime AND wipe content.
-    const dir = path.join(tmpHome, ".pi-dashboard", "node_modules", FIXTURE_PKG);
+    const dir = path.join(tmpHome, ".omp-dashboard", "node_modules", FIXTURE_PKG);
     fs.writeFileSync(path.join(dir, "CHANGELOG.md"), "# Empty\n");
 
     invalidateChangelogCache();

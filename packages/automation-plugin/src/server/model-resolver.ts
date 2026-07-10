@@ -2,7 +2,7 @@
  * Model resolution at spawn time.
  *
  * `model` may be a bare provider/model id (passthrough) or an `@role` alias.
- * `@role` is resolved against `~/.pi/agent/providers.json#roles` (the same
+ * `@role` is resolved against `~/.omp/agent/providers.json#roles` (the same
  * map the roles plugin writes). An unresolvable role falls back to the
  * configured default model AND surfaces a run error — never a silent pick.
  *
@@ -19,9 +19,9 @@ export interface ResolveResult {
   error?: string;
 }
 
-/** Read `roles` from `~/.pi/agent/providers.json`. Returns `{}` on any failure. */
+/** Read `roles` from `~/.omp/agent/providers.json`. Returns `{}` on any failure. */
 export function readRolesFromDisk(homeDir: string = os.homedir()): Record<string, string> {
-  const p = path.join(homeDir, ".pi", "agent", "providers.json");
+  const p = path.join(homeDir, ".omp", "agent", "providers.json");
   try {
     const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as { roles?: Record<string, string> };
     return raw.roles ?? {};

@@ -5,7 +5,7 @@
  * static tool-name conflicts with other extensions (e.g. pi-flows) that also
  * register ask_user. Runtime registration bypasses detectExtensionConflicts.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { Type } from "typebox";
 import { polyfillMultiselect } from "./multiselect-polyfill.js";
 

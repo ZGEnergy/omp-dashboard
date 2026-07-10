@@ -3,9 +3,9 @@ import path from "node:path";
 import { translatePathSource } from "../package-manager-wrapper.js";
 
 describe("translatePathSource", () => {
-	const fromLocal = "/abs/project/.pi";
-	const toGlobal = "/Users/u/.pi/agent";
-	const toLocal = "/abs/other/.pi";
+	const fromLocal = "/abs/project/.omp";
+	const toGlobal = "/Users/u/.omp/agent";
+	const toLocal = "/abs/other/.omp";
 
 	it("rel-path → global resolves to absolute against fromSettingsDir", () => {
 		expect(
@@ -15,7 +15,7 @@ describe("translatePathSource", () => {
 				toSettingsDir: toGlobal,
 				toScope: "global",
 			}),
-		).toBe(path.resolve("/abs/project/.pi/.."));
+		).toBe(path.resolve("/abs/project/.omp/.."));
 	});
 
 	it("./foo → global resolves to absolute", () => {
@@ -26,7 +26,7 @@ describe("translatePathSource", () => {
 				toSettingsDir: toGlobal,
 				toScope: "global",
 			}),
-		).toBe(path.resolve("/abs/project/.pi/foo"));
+		).toBe(path.resolve("/abs/project/.omp/foo"));
 	});
 
 	it("abs-path → local stays absolute when relative form escapes >2 levels", () => {
@@ -56,7 +56,7 @@ describe("translatePathSource", () => {
 	it("abs-path equal to toSettingsDir collapses to '.'", () => {
 		expect(
 			translatePathSource({
-				originalSource: "/abs/other/.pi",
+				originalSource: "/abs/other/.omp",
 				fromSettingsDir: fromLocal,
 				toSettingsDir: toLocal,
 				toScope: "local",

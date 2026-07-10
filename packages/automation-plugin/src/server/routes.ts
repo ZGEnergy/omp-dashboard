@@ -185,7 +185,7 @@ export function mountAutomationRoutes(
     const fs = await import("node:fs");
     const path = await import("node:path");
     const base = scopeBaseFor(q.scope ?? "folder", q.cwd);
-    const file = path.join(base, ".pi", "automation", "runs", q.runId, "result.md");
+    const file = path.join(base, ".omp", "automation", "runs", q.runId, "result.md");
     try {
       return { result: fs.readFileSync(file, "utf-8") };
     } catch {
@@ -286,7 +286,7 @@ export function mountAutomationRoutes(
     const path = await import("node:path");
     const { parseAutomationYaml } = await import("./automation-schema.js");
     const base = scopeBaseFor(q.scope ?? "folder", q.cwd);
-    const dir = path.join(base, ".pi", "automation", q.name);
+    const dir = path.join(base, ".omp", "automation", q.name);
     let rawText: string;
     try {
       rawText = fs.readFileSync(path.join(dir, "automation.yaml"), "utf-8");

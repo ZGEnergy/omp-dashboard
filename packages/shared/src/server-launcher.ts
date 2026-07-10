@@ -17,7 +17,7 @@
  *
  * Does NOT own the log-file PATH — that's caller policy. Conventions:
  *   - extension: `stdio: "ignore"`
- *   - cli (`cmdStart`): `~/.pi/dashboard/server.log`
+ *   - cli (`cmdStart`): `~/.omp/dashboard/server.log`
  *   - electron: existing electron log path
  *
  * See change: unify-server-launch-ts-loader.
@@ -40,7 +40,7 @@ import { isDashboardRunning } from "./server-identity.js";
 export class JitiNotFoundError extends Error {
   constructor(message =
     "Cannot find pi's TypeScript loader (jiti). " +
-    "Is @earendil-works/pi-coding-agent or @mariozechner/pi-coding-agent installed?",
+    "Is @oh-my-pi/pi-coding-agent or @oh-my-pi/pi-coding-agent installed?",
   ) {
     super(message);
     this.name = "JitiNotFoundError";

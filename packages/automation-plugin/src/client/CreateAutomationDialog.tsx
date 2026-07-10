@@ -385,7 +385,7 @@ export function CreateAutomationDialog({
           <div className="flex flex-col">
             <h2 className="text-base font-semibold">{editing ? "Edit Automation" : "Create Automation"}</h2>
             <p className="text-[10px] text-[var(--text-muted)] font-mono" data-testid="editor-subtitle">
-              {scope === "global" ? "global · ~/.pi/automation" : `folder · ${cwd ?? "(this repo)"}`}
+              {scope === "global" ? "global · ~/.omp/automation" : `folder · ${cwd ?? "(this repo)"}`}
             </p>
           </div>
           {!submitDisabled && (
@@ -425,7 +425,7 @@ export function CreateAutomationDialog({
               onChange={(v) => setScope(v as AutomationScope)}
               options={[
                 { value: "folder", label: "folder (this repo)" },
-                { value: "global", label: "global (~/.pi/automation)" },
+                { value: "global", label: "global (~/.omp/automation)" },
               ]}
             />
           </Field>

@@ -46,7 +46,7 @@ export function createReindexState(): ReindexState {
 }
 
 function stalenessPath(cwd: string): string {
-  return join(cwd, ".pi", "dashboard", "kb", "dox-staleness.json");
+  return join(cwd, ".omp", "dashboard", "kb", "dox-staleness.json");
 }
 function loadStaleness(cwd: string): Record<string, string> {
   const p = stalenessPath(cwd);

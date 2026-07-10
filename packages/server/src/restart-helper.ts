@@ -7,7 +7,7 @@
  *   1. Polls the port via net.createConnection until free
  *   2. Spawns the new server with the same loader + args as the current run
  *   3. Polls /api/health via http.get until it returns ok
- *   4. On failure, appends a line to ~/.pi/dashboard/restart.log
+ *   4. On failure, appends a line to ~/.omp/dashboard/restart.log
  *
  * See change: fix-windows-server-parity.
  */
@@ -34,7 +34,7 @@ export interface RestartParams {
    * - dev:  60s (cold jiti boot of ~400 TS files can reach 25–60s)
    * Mismatching this against the actual mode is harmless but defeats the
    * point — a too-short deadline writes a spurious failure line to
-   * ~/.pi/dashboard/restart.log even though the new server is fine.
+   * ~/.omp/dashboard/restart.log even though the new server is fine.
    * See change: fix-mode-aware-server-ready-deadlines.
    */
   dev?: boolean;
@@ -50,7 +50,7 @@ export const RESTART_HEALTH_DEADLINE_DEV_MS = 60_000;
  */
 export function buildOrchestratorScript(params: RestartParams): string {
   const execPath = params.execPath ?? process.execPath;
-  const logPath = path.join(os.homedir(), ".pi", "dashboard", "restart.log");
+  const logPath = path.join(os.homedir(), ".omp", "dashboard", "restart.log");
   const healthDeadlineMs = params.dev
     ? RESTART_HEALTH_DEADLINE_DEV_MS
     : RESTART_HEALTH_DEADLINE_PROD_MS;
@@ -58,7 +58,7 @@ export function buildOrchestratorScript(params: RestartParams): string {
   // Same convention as `server-pid.ts`. Embedded as a JSON-stringified literal
   // so quoting/path-separator handling is correct on Windows.
   // See change: fix-restart-bridge-auto-start-race.
-  const pidPath = path.join(os.homedir(), ".pi", "dashboard", "dashboard.pid");
+  const pidPath = path.join(os.homedir(), ".omp", "dashboard", "dashboard.pid");
   // Argv shape (loader URL-wrapping + entry URL-wrapping rule) is
   // owned by `buildNodeImportArgvParts` in `node-spawn.ts` — the same
   // helper `spawnNodeScript` calls. Keeps the `--import` argv shape

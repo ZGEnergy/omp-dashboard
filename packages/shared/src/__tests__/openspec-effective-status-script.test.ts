@@ -1,6 +1,6 @@
 /**
  * Parity test: the bash wrapper at
- * `.pi/skills/openspec-shared/scripts/effective-status.sh` must apply the
+ * `.omp/skills/openspec-shared/scripts/effective-status.sh` must apply the
  * SAME R1/R2/R3 promotion as the TS `evaluateLocalDesignSatisfaction`,
  * so skill-driven prompts and dashboard buttons cannot disagree.
  *
@@ -22,7 +22,7 @@ import { execFileSync } from "node:child_process";
 
 const SCRIPT_PATH = path.resolve(
   __dirname,
-  "../../../../.pi/skills/openspec-shared/scripts/effective-status.sh",
+  "../../../../.omp/skills/openspec-shared/scripts/effective-status.sh",
 );
 
 function setupHarness(): { root: string; changeName: string; changeDir: string; binDir: string } {

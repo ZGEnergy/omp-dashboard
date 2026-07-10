@@ -1065,7 +1065,7 @@ describe("CommandHandler delivery routing (pi-native queues)", () => {
 
 describe("tryExecSlashTemplate (executable: bash slash pipeline)", () => {
   const tmpDir = join(import.meta.dirname ?? __dirname, "__tmp_exec_slash__");
-  const promptsDir = join(tmpDir, ".pi", "prompts");
+  const promptsDir = join(tmpDir, ".omp", "prompts");
 
   function mockPi() {
     return {
@@ -1174,7 +1174,7 @@ describe("buildDashboardExecEnv port resolution", () => {
   it("falls back to 8000 when no env and no config port", () => {
     delete process.env.PI_DASHBOARD_PORT;
     delete process.env.DASHBOARD_PORT;
-    // Ephemeral HOME in tests has no ~/.pi/dashboard/config.json with a port.
+    // Ephemeral HOME in tests has no ~/.omp/dashboard/config.json with a port.
     expect(buildDashboardExecEnv().PI_DASHBOARD_PORT).toBe("8000");
   });
 });

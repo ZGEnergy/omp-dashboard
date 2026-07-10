@@ -6,12 +6,12 @@
  *   1. `adoptOrphans()` — consult `editor-keeper.keeperManager.discoverExistingKeepers()`
  *      and register live keepers in `editor-manager` so the dashboard
  *      reattaches without spawning. Keepers own their per-editor sidecars
- *      under `~/.pi/dashboard/editors/<editorId>.sock.pid` (POSIX) or
+ *      under `~/.omp/dashboard/editors/<editorId>.sock.pid` (POSIX) or
  *      `pi-editor-<editorId>.pid` (Windows).
  *
  *   2. `cleanupOrphans()` — defensive cmdline sweep for pre-keeper installs
  *      being upgraded: SIGTERM/SIGKILL any `code-server` process whose
- *      `--user-data-dir` matches `~/.pi/dashboard/editors/` but for which
+ *      `--user-data-dir` matches `~/.omp/dashboard/editors/` but for which
  *      no sidecar exists. Runs AFTER adoption.
  *
  * See: openspec/changes/add-editor-keeper-sidecar (specs/editor-manager/spec.md)
@@ -32,9 +32,9 @@ import type { EditorKeeperManager } from "./editor-keeper/keeper-manager.js";
 const SIGKILL_GRACE_MS = 1000;
 
 /** Marker that uniquely identifies a dashboard-spawned code-server cmdline. */
-const DASHBOARD_DATA_DIR_MARKER = path.join(os.homedir(), ".pi", "dashboard", "editors") + path.sep;
+const DASHBOARD_DATA_DIR_MARKER = path.join(os.homedir(), ".omp", "dashboard", "editors") + path.sep;
 
-const EDITORS_DIR = path.join(os.homedir(), ".pi", "dashboard", "editors");
+const EDITORS_DIR = path.join(os.homedir(), ".omp", "dashboard", "editors");
 
 export interface EditorPidRegistry {
   /** Number of in-memory tracked entries (testing aid; always 0 in keeper mode). */

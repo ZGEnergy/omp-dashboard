@@ -112,7 +112,7 @@ describe("POST /api/file/write — global scope", () => {
 
   beforeEach(async () => {
     home = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), "fw-home-")));
-    agentDir = path.join(home, ".pi", "agent");
+    agentDir = path.join(home, ".omp", "agent");
     await fsp.mkdir(agentDir, { recursive: true });
     await fsp.writeFile(path.join(agentDir, "MEMORY.md"), "# mem\n", "utf-8");
     await fsp.mkdir(path.join(home, "Documents"), { recursive: true });
@@ -130,7 +130,7 @@ describe("POST /api/file/write — global scope", () => {
     await fsp.rm(home, { recursive: true, force: true });
   });
 
-  it("writes a global-scope .md under ~/.pi/agent (no cwd)", async () => {
+  it("writes a global-scope .md under ~/.omp/agent (no cwd)", async () => {
     const target = path.join(agentDir, "MEMORY.md");
     const mtime = await readMtime(target);
     const res = await write(app, { path: target, content: "# updated\n", mtime });
@@ -138,7 +138,7 @@ describe("POST /api/file/write — global scope", () => {
     expect(await fsp.readFile(target, "utf-8")).toBe("# updated\n");
   });
 
-  it("rejects a global-scope path outside ~/.pi/agent with 403", async () => {
+  it("rejects a global-scope path outside ~/.omp/agent with 403", async () => {
     const target = path.join(home, "Documents", "secret.md");
     const res = await write(app, { path: target, content: "# x\n", mtime: await readMtime(target) });
     expect(res.statusCode).toBe(403);
@@ -163,7 +163,7 @@ describe("GET /api/file/md-read", () => {
     await fsp.writeFile(path.join(cwd, "AGENTS.md"), "# agents\n", "utf-8");
     await fsp.writeFile(path.join(cwd, "notes.txt"), "x\n", "utf-8");
     home = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), "mr-home-")));
-    agentDir = path.join(home, ".pi", "agent");
+    agentDir = path.join(home, ".omp", "agent");
     await fsp.mkdir(agentDir, { recursive: true });
     await fsp.writeFile(path.join(agentDir, "MEMORY.md"), "# mem\n", "utf-8");
     realHome = process.env.HOME;
@@ -191,7 +191,7 @@ describe("GET /api/file/md-read", () => {
     expect(body.data.mtime).toBe(await readMtime(target));
   });
 
-  it("reads a global-scope .md under ~/.pi/agent (no cwd)", async () => {
+  it("reads a global-scope .md under ~/.omp/agent (no cwd)", async () => {
     const target = path.join(agentDir, "MEMORY.md");
     const res = await app.inject({
       method: "GET",
@@ -210,7 +210,7 @@ describe("GET /api/file/md-read", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("rejects a global path outside ~/.pi/agent with 403", async () => {
+  it("rejects a global path outside ~/.omp/agent with 403", async () => {
     const outside = path.join(home, "secret.md");
     await fsp.writeFile(outside, "# s\n");
     const res = await app.inject({

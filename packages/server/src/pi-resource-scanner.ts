@@ -1,6 +1,6 @@
 /**
  * Pi Resource Scanner — discovers extensions, skills, and prompts
- * from local (.pi/), global (~/.pi/agent/), and installed packages.
+ * from local (.pi/), global (~/.omp/agent/), and installed packages.
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -210,7 +210,7 @@ function emptyScope(): PiResourceScope {
 // ── Scope Scanners ──────────────────────────────────────────────────
 
 export function scanLocalResources(cwd: string): PiResourceScope {
-  const piDir = path.join(cwd, ".pi");
+  const piDir = path.join(cwd, ".omp");
   if (!fs.existsSync(piDir)) return emptyScope();
   return {
     extensions: discoverExtensions(path.join(piDir, "extensions")),
@@ -273,8 +273,8 @@ function resolvePackagePath(entry: string, settingsDir: string, scope: "local" |
     url = url.replace(/\.git$/, "").replace(/@[^/]*$/, "");
 
     const baseDir = scope === "local" && cwd
-      ? path.join(cwd, ".pi", "git")
-      : path.join(os.homedir(), ".pi", "agent", "git");
+      ? path.join(cwd, ".omp", "git")
+      : path.join(os.homedir(), ".omp", "agent", "git");
     return { resolved: path.join(baseDir, url), source: entry };
   }
 
@@ -414,13 +414,13 @@ function applyActivationToScope(scope: PiResourceScope, map: Map<string, boolean
 }
 
 export async function scanPiResources(cwd: string, options?: ScanOptions): Promise<PiResourcesResult> {
-  const globalDir = options?.globalDir ?? path.join(os.homedir(), ".pi", "agent");
+  const globalDir = options?.globalDir ?? path.join(os.homedir(), ".omp", "agent");
 
   const local = scanLocalResources(cwd);
   const global = scanGlobalResources(globalDir);
 
   // Collect package entries from both settings files
-  const localSettingsPath = path.join(cwd, ".pi", "settings.json");
+  const localSettingsPath = path.join(cwd, ".omp", "settings.json");
   const globalSettingsPath = path.join(globalDir, "settings.json");
 
   const localPackageEntries = readSettingsPackages(localSettingsPath);

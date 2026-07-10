@@ -570,9 +570,9 @@ describe("SettingsPanel Resources group", () => {
     local: { extensions: [], skills: [], prompts: [], agents: [] },
     global: {
       extensions: [],
-      skills: [{ name: "a11y", description: "Accessibility.", filePath: "/g/.pi/agent/skills/a11y.md", type: "skill", enabled: true }],
+      skills: [{ name: "a11y", description: "Accessibility.", filePath: "/g/.omp/agent/skills/a11y.md", type: "skill", enabled: true }],
       prompts: [],
-      agents: [{ name: "doc-writer", description: "Docs.", filePath: "/g/.pi/agent/agents/doc-writer.md", type: "agent", enabled: true, model: "haiku", tools: "write" }],
+      agents: [{ name: "doc-writer", description: "Docs.", filePath: "/g/.omp/agent/agents/doc-writer.md", type: "agent", enabled: true, model: "haiku", tools: "write" }],
     },
     packages: [],
   };

@@ -80,7 +80,7 @@ export interface FileContentResult {
  * - `cwd` present → directory scope; `path` resolves against `cwd` via
  *   `path.resolve(cwd, path)`, so it accepts BOTH an absolute path (as returned
  *   by `MdCandidate.path`) and a cwd-relative path — absolute wins.
- * - `cwd` absent  → global scope; `path` MUST be absolute under `~/.pi/agent`.
+ * - `cwd` absent  → global scope; `path` MUST be absolute under `~/.omp/agent`.
  * Authorization is gated server-side by `isWritableMdTarget`.
  * See change: directory-settings-page-and-scoped-md-editing.
  */
@@ -121,7 +121,7 @@ export type MdCandidatesResponse = ApiResponse<MdCandidatesResult>;
 /**
  * `GET /api/file/md-read?cwd=<cwd?>&path=<path>` — scoped markdown read for the
  * Instructions editor, gated by the same `isWritableMdTarget` guard as write +
- * candidates. Serves global scope (`~/.pi/agent`) which `/api/file` cannot.
+ * candidates. Serves global scope (`~/.omp/agent`) which `/api/file` cannot.
  * See change: directory-settings-page-and-scoped-md-editing.
  */
 export interface MdReadResult {
@@ -180,7 +180,7 @@ export interface BrowseEntry {
  * When omitted or whitespace-only, entries are sorted alphabetically.
  *
  * The optional `detect` query parameter (only the literal string `"1"` is
- * truthy) opts into eager `.git` / `.pi` classification on every entry. When
+ * truthy) opts into eager `.git` / `.omp` classification on every entry. When
  * absent (the default), per-entry `isGit` / `isPi` are omitted and no
  * filesystem probes run — use the bulk `GET /api/browse/flags` endpoint to
  * classify entries lazily.

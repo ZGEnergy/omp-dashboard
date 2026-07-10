@@ -6,7 +6,7 @@
 # and boots the server without a system Node.
 #
 # Rewrite scope: this script previously simulated a wizard runtime-install
-# (npm install tsx + @mariozechner/pi-coding-agent) and a manual server
+# (npm install tsx + @oh-my-pi/pi-coding-agent) and a manual server
 # launch through tsx. Both flows were deleted under change
 # `eliminate-electron-runtime-install` — the DEB now ships pi/openspec/tsx
 # pre-installed in the bundle, and the only launch path is the Electron
@@ -35,7 +35,7 @@ DEB_ROOT="/usr/lib/pi-dashboard"
 RESOURCES="$DEB_ROOT/resources"
 SERVER_BUNDLE="$RESOURCES/server"
 BUNDLED_NODE="$RESOURCES/node/bin/node"
-PI_PKG_JSON="$SERVER_BUNDLE/node_modules/@earendil-works/pi-coding-agent/package.json"
+PI_PKG_JSON="$SERVER_BUNDLE/node_modules/@oh-my-pi/pi-coding-agent/package.json"
 SERVER_PKG_JSON="$SERVER_BUNDLE/node_modules/@blackbelt-technology/pi-dashboard-server/package.json"
 
 hr; echo "  Test 0: Verify environment is minimal (no node)"; hr
@@ -126,7 +126,7 @@ if [ "$ELECTRON_SERVER_UP" = true ]; then
     else
       fail "pi process (Electron)" "not found"
       echo "    Server log:"
-      cat "$HOME/.pi-dashboard/server.log" 2>/dev/null | tail -10 || true
+      cat "$HOME/.omp-dashboard/server.log" 2>/dev/null | tail -10 || true
     fi
   else
     fail "Session spawn (Electron)" "response: $SPAWN_RESP"
@@ -137,7 +137,7 @@ else
   echo "  Electron log:"
   tail -20 /tmp/electron.log 2>/dev/null || true
   echo "  Server log:"
-  cat "$HOME/.pi-dashboard/server.log" 2>/dev/null | tail -20 || true
+  cat "$HOME/.omp-dashboard/server.log" 2>/dev/null | tail -20 || true
 fi
 
 # Cleanup

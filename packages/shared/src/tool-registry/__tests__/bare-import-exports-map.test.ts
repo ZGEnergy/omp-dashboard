@@ -2,7 +2,7 @@
  * Regression tests for `bareImportStrategy` against packages whose
  * `exports` map declares ONLY the `"import"` condition (no `"require"`).
  *
- * Background: `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai`
+ * Background: `@oh-my-pi/pi-coding-agent` and `@oh-my-pi/pi-ai`
  * ship exports maps like:
  *   { ".": { "types": "...", "import": "./dist/index.js" } }
  *
@@ -13,7 +13,7 @@
  * registry can still resolve them.
  *
  * Live repro before the fix: `/api/packages/installed` returned
- * `ModuleResolutionError` even though `await import("@earendil-works/pi-coding-agent")`
+ * `ModuleResolutionError` even though `await import("@oh-my-pi/pi-coding-agent")`
  * worked. See change: fix-node-resolution-under-electron (follow-up).
  */
 import path from "node:path";
@@ -24,11 +24,11 @@ import type { StrategyCtx } from "../types.js";
 const CTX: StrategyCtx = { overrides: {}, platform: "linux", env: {} };
 
 describe("bareImportStrategy — production default resolver", () => {
-  it("resolves @earendil-works/pi-coding-agent against the repo's node_modules", () => {
+  it("resolves @oh-my-pi/pi-coding-agent against the repo's node_modules", () => {
     // No injected resolveModule → defaults run, including the
     // import.meta.resolve / dir-walk fallback for exports-map-only-import
     // packages.
-    const strat = bareImportStrategy("@earendil-works/pi-coding-agent");
+    const strat = bareImportStrategy("@oh-my-pi/pi-coding-agent");
     const r = strat.run(CTX);
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -36,8 +36,8 @@ describe("bareImportStrategy — production default resolver", () => {
     }
   });
 
-  it("resolves @earendil-works/pi-ai against the repo's node_modules", () => {
-    const strat = bareImportStrategy("@earendil-works/pi-ai");
+  it("resolves @oh-my-pi/pi-ai against the repo's node_modules", () => {
+    const strat = bareImportStrategy("@oh-my-pi/pi-ai");
     const r = strat.run(CTX);
     expect(r.ok).toBe(true);
     if (r.ok) {

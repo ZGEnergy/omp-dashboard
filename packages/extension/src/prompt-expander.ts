@@ -14,9 +14,9 @@ import { buildSkillBlock } from "@blackbelt-technology/pi-dashboard-shared/skill
  * Scan directories for .md prompt template files.
  *
  * Resolution path (in precedence order, consumed by resolveTemplate):
- *   1. `<cwd>/.pi/prompts/*.md`        — flat prompt templates, keyed by basename.
- *   2. `<cwd>/.pi/skills/<skill>/SKILL.md` — keyed `skill:<skill>`.
- *   3. `<cwd>/.pi/skills/<skill>/commands/*.md` — skill-bundled slash commands,
+ *   1. `<cwd>/.omp/prompts/*.md`        — flat prompt templates, keyed by basename.
+ *   2. `<cwd>/.omp/skills/<skill>/SKILL.md` — keyed `skill:<skill>`.
+ *   3. `<cwd>/.omp/skills/<skill>/commands/*.md` — skill-bundled slash commands,
  *      keyed by basename (e.g. `dashboard-server-health`). Scanned directly
  *      because pi.getCommands() does not reliably surface nested skill command
  *      files across pi versions. See change: add-dashboard-slash-commands.
@@ -29,8 +29,8 @@ import { buildSkillBlock } from "@blackbelt-technology/pi-dashboard-shared/skill
 function findPromptTemplates(cwd: string): Map<string, string> {
   const templates = new Map<string, string>();
   const dirs = [
-    join(cwd, ".pi", "prompts"),
-    join(cwd, ".pi", "skills"),
+    join(cwd, ".omp", "prompts"),
+    join(cwd, ".omp", "skills"),
   ];
 
   for (const dir of dirs) {
@@ -307,7 +307,7 @@ export type LoadedPromptTemplate =
  * `kind: "exec"`; everything else (including unsupported `executable:` values)
  * resolves to `kind: "llm"`. Returns `null` when no template matched.
  *
- * Resolution path: local `.pi/prompts` + `.pi/skills` scan first, then
+ * Resolution path: local `.omp/prompts` + `.omp/skills` scan first, then
  * `pi.getCommands()` (which already carries skill/prompt template paths under
  * `sourceInfo.path`). See change: add-dashboard-slash-commands.
  *

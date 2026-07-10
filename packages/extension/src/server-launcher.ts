@@ -1,7 +1,7 @@
 /**
  * Server launcher — spawns the dashboard server as a detached process.
  * The spawned server runs in foreground mode (no subcommand) and writes
- * its own PID file at ~/.pi/dashboard/server.pid.
+ * its own PID file at ~/.omp/dashboard/server.pid.
  */
 
 import { createRequire } from "node:module";
@@ -31,7 +31,7 @@ export interface LaunchResult {
   childPid?: number;
   /**
    * Whether the spawn reached the log-owning path (i.e. `launchDashboardServer`
-   * opened `~/.pi/dashboard/server.log` before failing). `false` only for
+   * opened `~/.omp/dashboard/server.log` before failing). `false` only for
    * failures that abort BEFORE the log fd is opened (currently just
    * `JitiNotFoundError` — loader resolution precedes log creation). Callers use
    * this to avoid pointing users at a `server.log` that was never written.
@@ -113,7 +113,7 @@ export function buildSpawnArgs(config: DashboardConfig): string[] {
  *
  * Bridge-specific contract: `DASHBOARD_STARTER=Bridge`,
  * `stdio: { logFile: getDashboardServerLogPath() }` (Bridge auto-spawn
- * now owns the shared `~/.pi/dashboard/server.log` so a slow/crashed
+ * now owns the shared `~/.omp/dashboard/server.log` so a slow/crashed
  * cold start leaves an inspectable log), and a 10 s cold-start health
  * timeout (slow hosts reach `writePid()` but are not health-OK within
  * 2 s; `EarlyExitError` still surfaces a real crash instantly).

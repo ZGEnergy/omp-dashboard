@@ -73,7 +73,7 @@ function renderCard(agent: FlowAgentState) {
   );
 }
 
-const HANDLER_PATH = "/home/u/proj/.pi/flows/flows/custom/test-flow/verify.ts";
+const HANDLER_PATH = "/home/u/proj/.omp/flows/flows/custom/test-flow/verify.ts";
 
 afterEach(() => {
   cleanup();

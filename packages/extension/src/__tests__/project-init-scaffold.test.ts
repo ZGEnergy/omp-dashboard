@@ -52,9 +52,9 @@ describe("project-init scaffold", () => {
     const profile = makeProfileDir(profilesRoot, "coding");
     const res = scaffoldProfile({ profile, targetDir: target, projectName: "Demo" });
     expect(fs.readFileSync(path.join(target, "AGENTS.md"), "utf8")).toContain("# Demo");
-    const settings = JSON.parse(fs.readFileSync(path.join(target, ".pi", "settings.json"), "utf8"));
+    const settings = JSON.parse(fs.readFileSync(path.join(target, ".omp", "settings.json"), "utf8"));
     expect(settings.worktreeInit.run.command).toBe("npm ci");
-    expect(fs.existsSync(path.join(target, ".pi", "prompts", "a.md"))).toBe(true);
+    expect(fs.existsSync(path.join(target, ".omp", "prompts", "a.md"))).toBe(true);
     expect(res.hookValid).toBe(true);
     expect(res.doctrineSeeded).toBe(false);
   });
@@ -64,7 +64,7 @@ describe("project-init scaffold", () => {
     const res = scaffoldProfile({ profile, targetDir: target });
     expect(res.doctrineSeeded).toBe(true);
     expect(fs.readFileSync(path.join(target, "AGENTS.md"), "utf8")).toContain(DOX_MARKER);
-    expect(fs.existsSync(path.join(target, ".pi", "dashboard", "knowledge_base.json"))).toBe(true);
+    expect(fs.existsSync(path.join(target, ".omp", "dashboard", "knowledge_base.json"))).toBe(true);
   });
 
   it("planScaffold reports existing files as conflicts", () => {
@@ -89,7 +89,7 @@ describe("project-init scaffold", () => {
     });
     expect(res.leftover).toEqual([]);
     expect(fs.readFileSync(path.join(target, "AGENTS.md"), "utf8")).toContain("cargo test");
-    const settings = JSON.parse(fs.readFileSync(path.join(target, ".pi", "settings.json"), "utf8"));
+    const settings = JSON.parse(fs.readFileSync(path.join(target, ".omp", "settings.json"), "utf8"));
     expect(settings.worktreeInit.gate).toBe("test ! -d target");
     expect(settings.worktreeInit.run.command).toBe("cargo fetch");
     expect(res.hookValid).toBe(true);
@@ -100,14 +100,14 @@ describe("project-init scaffold", () => {
     const subs = { ...stackSubstitutions(STACKS.npm!), INIT_COMMAND: 'echo "hi" && npm ci' };
     const res = scaffoldProfile({ profile, targetDir: target, substitutions: subs });
     // Must still be valid JSON on disk, with the value preserved verbatim.
-    const settings = JSON.parse(fs.readFileSync(path.join(target, ".pi", "settings.json"), "utf8"));
+    const settings = JSON.parse(fs.readFileSync(path.join(target, ".omp", "settings.json"), "utf8"));
     expect(settings.worktreeInit.run.command).toBe('echo "hi" && npm ci');
     expect(res.hookValid).toBe(true);
   });
 
   it("overwrite:true rewrites a pre-existing knowledge_base.json (DOX)", () => {
     const profile = makeProfileDir(profilesRoot, "coding", { dox: true });
-    const kbPath = path.join(target, ".pi", "dashboard", "knowledge_base.json");
+    const kbPath = path.join(target, ".omp", "dashboard", "knowledge_base.json");
     fs.mkdirSync(path.dirname(kbPath), { recursive: true });
     fs.writeFileSync(kbPath, '{"sources":[]}\n');
     scaffoldProfile({ profile, targetDir: target, overwrite: true });

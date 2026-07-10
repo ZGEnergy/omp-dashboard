@@ -10,7 +10,7 @@ import type {
 } from "@blackbelt-technology/pi-dashboard-shared/protocol.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
 import type { FileEntry, MissingToolError, PiSessionInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { filterHiddenCommands } from "./bridge-context.js";
 import { killProcessByPgid } from "./process-scanner.js";
 import { expandPromptTemplateFromDisk, loadPromptTemplate } from "./prompt-expander.js";
@@ -777,7 +777,7 @@ export function createCommandHandler(
         case "list_sessions": {
           try {
             // Dynamic import to avoid hard dependency at module load
-            const { SessionManager } = await import("@earendil-works/pi-coding-agent") as any;
+            const { SessionManager } = await import("@oh-my-pi/pi-coding-agent") as any;
             const cwd = msg.cwd || options?.getCwd?.() || process.cwd();
             const sessionInfos = await SessionManager.list(cwd);
             const sessions: PiSessionInfo[] = (sessionInfos || []).map((s: any) => ({
@@ -863,7 +863,7 @@ function sendUserMessageWithImages(
  *      and inherited by spawned sessions (the only reliable source when the
  *      server runs on a non-default port, e.g. the Docker test harness, whose
  *      `config.json` carries no `port` field).
- *   2. `~/.pi/dashboard/config.json` `port` — normal local installs write it.
+ *   2. `~/.omp/dashboard/config.json` `port` — normal local installs write it.
  *   3. 8000 (default).
  * Note: `PI_DASHBOARD_URL` is the gateway (ws) port, NOT the HTTP port, so it is
  * deliberately not consulted here. See change: add-dashboard-slash-commands.
@@ -874,7 +874,7 @@ function resolveDashboardPort(): number {
     if (v && Number.isFinite(n) && n > 0) return n;
   }
   try {
-    const raw = readFileSync(join(homedir(), ".pi", "dashboard", "config.json"), "utf-8");
+    const raw = readFileSync(join(homedir(), ".omp", "dashboard", "config.json"), "utf-8");
     const parsed = JSON.parse(raw);
     if (typeof parsed?.port === "number" && Number.isFinite(parsed.port)) return parsed.port;
   } catch { /* missing / unparseable config */ }

@@ -1,5 +1,5 @@
-// Config layering (design §7): project `.pi/dashboard/knowledge_base.json`
-// → global `~/.pi/dashboard/knowledge_base.json` → built-in defaults.
+// Config layering (design §7): project `.omp/dashboard/knowledge_base.json`
+// → global `~/.omp/dashboard/knowledge_base.json` → built-in defaults.
 // Project file is used whole; absent fields fall back to global, then defaults.
 // No file-count cap by default (requirement #1).
 import { existsSync, readFileSync } from "node:fs";
@@ -83,7 +83,7 @@ export interface ResolvedConfig extends KbConfig {
 
 export const DEFAULTS: KbConfig = {
   sources: [],
-  sourceCacheDir: "~/.pi/dashboard/kb/sources",
+  sourceCacheDir: "~/.omp/dashboard/kb/sources",
   include: ["**/*.md"],
   exclude: ["**/node_modules/**", "**/archive/**"],
   extensions: [".md"],
@@ -106,7 +106,7 @@ export const DEFAULTS: KbConfig = {
   expand: { parent: true, graph: false },
   rerank: { enabled: false, model: "ms-marco-MiniLM-L-6-v2", candidateK: 50 },
   queryExpansion: { mode: "off" },
-  dbPath: ".pi/dashboard/kb/index.db",
+  dbPath: ".omp/dashboard/kb/index.db",
 };
 
 // Nested object keys that need one-level field fill-in (not wholesale replace),
@@ -146,10 +146,10 @@ export function validateConfig(c: Partial<KbConfig>, origin = "config"): KbConfi
 }
 
 export function projectConfigPath(cwd: string): string {
-  return join(cwd, ".pi", "dashboard", "knowledge_base.json");
+  return join(cwd, ".omp", "dashboard", "knowledge_base.json");
 }
 export function globalConfigPath(): string {
-  return join(homedir(), ".pi", "dashboard", "knowledge_base.json");
+  return join(homedir(), ".omp", "dashboard", "knowledge_base.json");
 }
 
 function readJson(path: string): Partial<KbConfig> | null {

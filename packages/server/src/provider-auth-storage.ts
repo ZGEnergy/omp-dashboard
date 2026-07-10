@@ -1,5 +1,5 @@
 /**
- * Read/write ~/.pi/agent/auth.json for pi provider credentials.
+ * Read/write ~/.omp/agent/auth.json for pi provider credentials.
  * Uses lockfile + atomic write to avoid race conditions with running pi sessions.
  *
  * The OAuth provider list derives from the local handler registry
@@ -20,7 +20,7 @@ import { getLatestCatalogue } from "./provider-catalogue-cache.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const AUTH_DIR = path.join(os.homedir(), ".pi", "agent");
+const AUTH_DIR = path.join(os.homedir(), ".omp", "agent");
 const AUTH_PATH = path.join(AUTH_DIR, "auth.json");
 
 export type ApiKeyCredential = { type: "api_key"; key: string };
@@ -145,7 +145,7 @@ export function _buildAuthStatus(
 
   // API-key rows from bridge-pushed catalogue.
   // Skip custom providers (registered via pi.registerProvider() from
-  // ~/.pi/agent/providers.json) — those are managed by the dedicated
+  // ~/.omp/agent/providers.json) — those are managed by the dedicated
   // LLM Providers settings section. OAuth rows for custom providers
   // were already emitted above when the OAuth handler registry has
   // a matching id.

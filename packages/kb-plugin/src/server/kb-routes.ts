@@ -38,7 +38,7 @@ export interface KbRouteDeps {
 
 /** Absolute project config path for a folder (mirrors kb `projectConfigPath`). */
 function projectConfigPath(cwd: string): string {
-  return join(cwd, ".pi", "dashboard", "knowledge_base.json");
+  return join(cwd, ".omp", "dashboard", "knowledge_base.json");
 }
 
 /** Reject a cwd that is missing or not a known folder. Returns true when handled. */
@@ -68,7 +68,7 @@ function openStore(cwd: string): { store: SqliteFtsStore; cfg: ReturnType<typeof
  *  Reads the extension-written `dox-staleness.json` (`{ rowPath: acknowledgedSha }`).
  *  Source-file drift ONLY — markdown drift is out of scope (design §6). */
 function countStale(cwd: string): number {
-  const sf = join(cwd, ".pi", "dashboard", "kb", "dox-staleness.json");
+  const sf = join(cwd, ".omp", "dashboard", "kb", "dox-staleness.json");
   if (!existsSync(sf)) return 0;
   let map: Record<string, string>;
   try {

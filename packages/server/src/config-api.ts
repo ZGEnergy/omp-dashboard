@@ -14,7 +14,7 @@ const REDACTED = "***";
  * Return the current config with secrets redacted.
  */
 function getConfigPaths() {
-  const dir = path.join(os.homedir(), ".pi", "dashboard");
+  const dir = path.join(os.homedir(), ".omp", "dashboard");
   return { dir, file: path.join(dir, "config.json") };
 }
 

@@ -96,11 +96,11 @@ for (const pkg of BUNDLED_WORKSPACE_PKGS) {
 // ── copy first-party plugins ───────────────────────────────────────────────────────
 // Monorepo plugin packages ship inside `resources/plugins/<id>/` so the
 // runtime `findBundledPluginsDir()` walk-up locates them after extraction
-// (lands at `~/.pi-dashboard/resources/plugins/`). Without this, every
+// (lands at `~/.omp-dashboard/resources/plugins/`). Without this, every
 // fresh Electron install sees zero plugins because:
 //   1. `findMonorepoRoot()` can't find pnpm-workspace.yaml under the
 //      managed dir,
-//   2. `findInstalledPluginsDir()` looks at `~/.pi/dashboard/plugins/` which
+//   2. `findInstalledPluginsDir()` looks at `~/.omp/dashboard/plugins/` which
 //      only third-party installs populate,
 //   3. `findBundledPluginsDir()` walks up from loader.ts for
 //      `resources/plugins/` — the path we feed here.
@@ -174,7 +174,7 @@ if (clientSrc) {
 // here so the `npm install --omit=dev` step below materializes them under
 // `resources/server/node_modules/`. The .app then ships a complete
 // pre-installed runtime — no offline cacache, no runtime install into
-// `~/.pi-dashboard/`. Versions come from `offline-packages.json` until
+// `~/.omp-dashboard/`. Versions come from `offline-packages.json` until
 // Phase 5 of change: eliminate-electron-runtime-install collapses the pin
 // source into a constant in this file.
 //
@@ -483,7 +483,7 @@ if (existsSync(BB_DIR)) {
 // server.ts resolves the client via:
 //   createRequire(...).resolve("@blackbelt-technology/pi-dashboard-web/package.json")
 // then joins "dist" off that package dir. To make this canonical lookup
-// succeed in the extracted layout (~/.pi-dashboard/node_modules/...), copy
+// succeed in the extracted layout (~/.omp-dashboard/node_modules/...), copy
 // the built client into node_modules/@blackbelt-technology/pi-dashboard-web/.
 // packages/server/package.json doesn't declare pi-dashboard-web as a dep, so
 // `npm install` above did NOT pull it from the registry; we must place it

@@ -86,10 +86,10 @@ describe("computeIdentity", () => {
 	});
 
 	it("relative-path identity = path resolved against settingsDir", () => {
-		const cwd = "/proj/.pi";
-		expect(computeIdentity("..", cwd)).toBe(path.resolve("/proj/.pi/.."));
+		const cwd = "/proj/.omp";
+		expect(computeIdentity("..", cwd)).toBe(path.resolve("/proj/.omp/.."));
 		expect(computeIdentity("./foo", cwd)).toBe(
-			path.resolve("/proj/.pi/foo"),
+			path.resolve("/proj/.omp/foo"),
 		);
 	});
 

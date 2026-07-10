@@ -221,7 +221,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   } else {
     console.warn(`[dashboard] Bridge extension NOT found (searched from ${__serverDir}). ` +
       `Sessions will spawn but never connect to the gateway. ` +
-      `Manually add the extension path to ~/.pi/agent/settings.json packages[] as a workaround.`);
+      `Manually add the extension path to ~/.omp/agent/settings.json packages[] as a workaround.`);
   }
 
   // Seed Windows git/bash source from config so spawn-env augmentation
@@ -276,7 +276,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // initiated the run. See change: generalize-worktree-init-hook.
   const worktreeInitRegistry = createWorktreeInitRegistry();
 
-  // Restore sessions from per-session .meta.json files (scans ~/.pi/agent/sessions/)
+  // Restore sessions from per-session .meta.json files (scans ~/.omp/agent/sessions/)
   const scanResult = scanAllSessions();
   // Interrupted-session recovery candidates discovered on cold start. A
   // candidate (`live===true && status!=="ended"`, see isRecoveryCandidate)

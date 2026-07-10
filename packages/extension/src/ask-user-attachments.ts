@@ -3,7 +3,7 @@
  *
  * Persists images pasted into `ask_user{method:"input"}` (standalone and the
  * batch `input` step) to disk so the LLM's `Read` tool can open them. Files
- * live under `~/.pi/dashboard/attachments/<sessionId>/<hash>.<ext>`,
+ * live under `~/.omp/dashboard/attachments/<sessionId>/<hash>.<ext>`,
  * content-addressable (sha256 truncated to 16 hex chars), so re-pastes dedup.
  *
  * Pure I/O helper — no bridge/promptBus coupling. The bridge owns sessionId +
@@ -40,7 +40,7 @@ export function attachmentDirForSession(sessionId: string): string {
   if (sessionId.includes("/") || sessionId.includes(path.sep) || sessionId.includes("..")) {
     throw new Error(`[ask-user-attachments] invalid sessionId: ${sessionId}`);
   }
-  return path.join(os.homedir(), ".pi", "dashboard", "attachments", sessionId);
+  return path.join(os.homedir(), ".omp", "dashboard", "attachments", sessionId);
 }
 
 /** File extension for a MIME type, or null if not in the allowlist. */

@@ -133,7 +133,7 @@ export function registerBridgeExtension(
     ?? process.env.HOME
     ?? process.env.USERPROFILE
     ?? os.homedir();
-  const settingsPath = path.join(home, ".pi", "agent", "settings.json");
+  const settingsPath = path.join(home, ".omp", "agent", "settings.json");
   const settingsDir = path.dirname(settingsPath);
   fs.mkdirSync(settingsDir, { recursive: true });
 
@@ -145,10 +145,10 @@ export function registerBridgeExtension(
     }
   } catch { /* start fresh */ }
 
-  const packages = Array.isArray(settings.packages) ? settings.packages as string[] : [];
+  const extensions = Array.isArray(settings.extensions) ? settings.extensions as string[] : [];
 
   // Already registered?
-  if (packages.includes(extensionPath)) return;
+  if (extensions.includes(extensionPath)) return;
 
   // Compute the identity (package.json#name) of the new entry. We use it
   // to dedupe across install layouts (dev / .app / npm-global / legacy
@@ -160,7 +160,7 @@ export function registerBridgeExtension(
   // local entry with the same package.json#name as the new one
   // (most-recently-asserted path wins). npm:-scheme entries pass through
   // untouched.
-  const cleaned = packages.filter((p) => {
+  const cleaned = extensions.filter((p) => {
     if (typeof p !== "string") return true;
     const isLocalPath = p.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(p);
     if (!isLocalPath) return true;
@@ -184,13 +184,13 @@ export function registerBridgeExtension(
   });
 
   cleaned.push(extensionPath);
-  settings.packages = cleaned;
+  settings.extensions = cleaned;
 
   try {
     const tmp = settingsPath + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n");
     fs.renameSync(tmp, settingsPath);
-    console.log(`[dashboard] Registered bridge extension in pi settings: ${extensionPath}`);
+    console.log(`[dashboard] Registered bridge extension in OMP settings: ${extensionPath}`);
   } catch (err) {
     console.error("[dashboard] Failed to register bridge extension:", err);
   }

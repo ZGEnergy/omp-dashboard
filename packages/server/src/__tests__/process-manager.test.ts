@@ -154,7 +154,7 @@ describe("Process Manager", () => {
     });
 
     it("should not duplicate managed bin if already present", () => {
-      const managedBin = require("path").join(require("os").homedir(), ".pi-dashboard", "node_modules", ".bin");
+      const managedBin = require("path").join(require("os").homedir(), ".omp-dashboard", "node_modules", ".bin");
       const env = buildSpawnEnv({ PATH: `${managedBin}:/usr/bin` });
       // Managed bin should appear exactly once
       const parts = env.PATH!.split(":");

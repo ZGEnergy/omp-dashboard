@@ -14,7 +14,7 @@
  *
  * See change: inject-session-context-into-agent.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import type { BridgeContext } from "./bridge-context.js";
 
 /** Literal anchor pi appends to every system prompt (dist/core/system-prompt.js). */

@@ -1,4 +1,4 @@
-// AUTO-CAPTURED fixtures — real ctx_* result texts harvested from ~/.pi/agent/sessions/**.jsonl
+// AUTO-CAPTURED fixtures — real ctx_* result texts harvested from ~/.omp/agent/sessions/**.jsonl
 // (one representative result per tool + each error variant). Source of truth for
 // parse-ctx-result.test.ts. See change: add-ctx-tool-renderer (task 0 / fixtures).
 // Do not hand-edit casually — re-capture from real sessions if context-mode output drifts.

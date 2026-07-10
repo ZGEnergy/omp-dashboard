@@ -8,8 +8,8 @@
  *   1. Tripwire — throws if `process.env.HOME` still points at the developer's
  *      real user home (meaning the root `npm test` script wasn't used and HOME
  *      wasn't overridden). Aborts the entire run before any destructive code
- *      can touch real ~/.pi/.
- *   2. Pre-create `<HOME>/.pi/agent/sessions/` and `<HOME>/.pi/dashboard/` so
+ *      can touch real ~/.omp/.
+ *   2. Pre-create `<HOME>/.omp/agent/sessions/` and `<HOME>/.omp/dashboard/` so
  *      production code that reads those paths finds empty but well-formed
  *      directories.
  *
@@ -42,7 +42,7 @@ export default function setup() {
   if (currentHome === realHome) {
     throw new Error(
       `[test-isolation] process.env.HOME (${currentHome}) equals the real user home ` +
-        `(${realHome}). This would let tests read and mutate ~/.pi/, potentially killing ` +
+        `(${realHome}). This would let tests read and mutate ~/.omp/, potentially killing ` +
         `live pi sessions. Run tests via \`npm test\` — it sets HOME to an ephemeral tmp dir. ` +
         `If you invoked vitest directly, prefix with \`HOME=$(mktemp -d)\`.`,
     );
@@ -59,8 +59,8 @@ export default function setup() {
   }
 
   // Pre-create expected .pi subdirectories so code that reads them finds empty dirs.
-  mkdirSync(join(currentHome, ".pi", "agent", "sessions"), { recursive: true });
-  mkdirSync(join(currentHome, ".pi", "dashboard"), { recursive: true });
+  mkdirSync(join(currentHome, ".omp", "agent", "sessions"), { recursive: true });
+  mkdirSync(join(currentHome, ".omp", "dashboard"), { recursive: true });
 
   // eslint-disable-next-line no-console
   console.log(`[test-isolation] HOME=${currentHome} (real=${realHome})`);

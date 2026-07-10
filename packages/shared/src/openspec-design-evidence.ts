@@ -19,7 +19,7 @@
  *      `artifacts[design].status` from "ready" to "done" when the rules fire.
  *      Promote-only; design-only; never demotes; never touches other artifacts.
  *
- *   2. `.pi/skills/openspec-shared/scripts/effective-status.sh` — the
+ *   2. `.omp/skills/openspec-shared/scripts/effective-status.sh` — the
  *      OpenSpec workflow skills invoke this wrapper instead of
  *      `openspec status --json` so skill-driven prompts and dashboard buttons
  *      cannot disagree.

@@ -1,7 +1,7 @@
 /**
  * Server-resident auth storage for the model proxy.
  *
- * Reads credentials from ~/.pi/agent/auth.json via provider-auth-storage.ts.
+ * Reads credentials from ~/.omp/agent/auth.json via provider-auth-storage.ts.
  * For OAuth providers, handles token refresh when expired and persists
  * the new token via the existing writeCredential writer (single-writer contract).
  *

@@ -3,7 +3,7 @@ import { byTestId, ensureGitSession } from "./helpers/index.js";
 
 // Level-1 E2E for the polymorphic Initialize button (change: project-init-skill-and-profiles).
 //
-// The baked `sample-git` fixture ships NO `.pi/settings.json#worktreeInit` hook,
+// The baked `sample-git` fixture ships NO `.omp/settings.json#worktreeInit` hook,
 // so the worktree-init-status endpoint reports `hasHook: false` for its folder
 // group. In that state the folder-action-bar renders the `project-init-btn`
 // Initialize button (NOT the change-A hook-run button), and clicking it spawns

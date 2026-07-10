@@ -1,5 +1,5 @@
 /**
- * Provider REST API routes: read/write custom LLM providers (~/.pi/agent/providers.json).
+ * Provider REST API routes: read/write custom LLM providers (~/.omp/agent/providers.json).
  */
 import type { FastifyInstance } from "fastify";
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
@@ -14,7 +14,7 @@ import { isSelfPointing, collectDashboardOrigins } from "../model-proxy/recursio
 import { getTunnelUrl } from "../tunnel.js";
 
 const REDACTED = "***";
-const CONFIG_PATH = join(homedir(), ".pi", "agent", "providers.json");
+const CONFIG_PATH = join(homedir(), ".omp", "agent", "providers.json");
 
 interface ProviderEntry {
   baseUrl: string;

@@ -43,7 +43,7 @@ export function writeAutomation(input: WriteAutomationInput): WriteAutomationRes
   if (!isValidAutomationName(input.name)) {
     throw new Error(`invalid automation name: "${input.name}"`);
   }
-  const dir = path.join(input.scopeBase, ".pi", "automation", input.name);
+  const dir = path.join(input.scopeBase, ".omp", "automation", input.name);
   const intent = input.intent ?? "create";
   const existed = fs.existsSync(path.join(dir, "automation.yaml"));
   if (intent === "create" && existed) {
@@ -75,7 +75,7 @@ export function writeAutomation(input: WriteAutomationInput): WriteAutomationRes
 /** Delete an automation directory (best-effort). */
 export function deleteAutomation(scopeBase: string, name: string): boolean {
   if (!isValidAutomationName(name)) return false;
-  const dir = path.join(scopeBase, ".pi", "automation", name);
+  const dir = path.join(scopeBase, ".omp", "automation", name);
   try {
     fs.rmSync(dir, { recursive: true, force: true });
     return true;

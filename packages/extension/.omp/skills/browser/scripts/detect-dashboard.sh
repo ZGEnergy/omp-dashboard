@@ -16,7 +16,7 @@ set -euo pipefail
 
 # ── Read port from config ──────────────────────────────────────────
 
-CONFIG_FILE="$HOME/.pi/dashboard/config.json"
+CONFIG_FILE="$HOME/.omp/dashboard/config.json"
 
 if [ -f "$CONFIG_FILE" ]; then
   PORT=$(grep '"port"' "$CONFIG_FILE" 2>/dev/null | grep -o '[0-9]*' || echo 8000)

@@ -54,7 +54,7 @@ function sendToolEvent(ws: WebSocket, sessionId: string, opts: { phase?: string;
         timestamp: Date.now(),
         data: {
           toolName: "Read",
-          args: { path: `.pi/skills/openspec-${suffix}/SKILL.md` },
+          args: { path: `.omp/skills/openspec-${suffix}/SKILL.md` },
         },
       },
     }));

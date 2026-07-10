@@ -63,7 +63,7 @@ fi
 # test-up.sh QA stays UI-only. Disposable, RAM-backed, localhost-published
 # container only — trust scoped to RFC1918 (docker SNAT gateway source IP).
 if [ "${PI_E2E_SEED:-}" = "1" ]; then
-  PI_DIR="${HOME:-/home/pi}/.pi"
+  PI_DIR="${HOME:-/home/pi}/.omp"
   mkdir -p "${PI_DIR}/agent" "${PI_DIR}/dashboard"
   if [ ! -f "${PI_DIR}/agent/auth.json" ]; then
     # Fake OAuth credential for a provider with a local OAuth handler
@@ -116,7 +116,7 @@ if [ "${PI_E2E_SEED:-}" = "1" ]; then
   fi
 
   # --- Faux model: stage the fixture as a global auto-discovered extension ---
-  # pi auto-discovers ~/.pi/agent/extensions/*/index.ts (no -e, no trust gate).
+  # pi auto-discovers ~/.omp/agent/extensions/*/index.ts (no -e, no trust gate).
   # Subdir form is required because the extension imports ./faux-scenarios.js.
   # The Dockerfile COPYs qa/fixtures to /app/qa/fixtures. No-op when present.
   FAUX_SRC="/app/qa/fixtures"
@@ -125,8 +125,8 @@ if [ "${PI_E2E_SEED:-}" = "1" ]; then
     mkdir -p "${FAUX_EXT_DIR}"
     cp "${FAUX_SRC}/faux-provider.ext.ts" "${FAUX_EXT_DIR}/index.ts"
     cp "${FAUX_SRC}/faux-scenarios.ts" "${FAUX_EXT_DIR}/faux-scenarios.ts"
-    # The fixture imports `@earendil-works/pi-ai`, unresolvable from
-    # ~/.pi/agent/extensions/. Symlink /app/node_modules (where the repo dep
+    # The fixture imports `@oh-my-pi/pi-ai`, unresolvable from
+    # ~/.omp/agent/extensions/. Symlink /app/node_modules (where the repo dep
     # lives) into the extension dir so node/jiti resolves pi-ai from here.
     ln -sfn /app/node_modules "${FAUX_EXT_DIR}/node_modules"
     echo "[test-entrypoint] PI_E2E_SEED: staged faux extension → ${FAUX_EXT_DIR}"
@@ -155,7 +155,7 @@ fi
 # `pi-dashboard start` — which spawns a DETACHED server daemon (pidfile below)
 # and returns once it polls healthy. We keep PID 1 alive afterward (step 4).
 PORT="${DASHBOARD_PORT:-18000}"
-PIDFILE="${HOME:-/home/pi}/.pi/dashboard/server.pid"
+PIDFILE="${HOME:-/home/pi}/.omp/dashboard/server.pid"
 echo "[test-entrypoint] launching dashboard daemon via base entrypoint..."
 # The base launcher waits up to 30s for readiness then exits non-zero, but the
 # server is spawned DETACHED (unref'd) and SURVIVES that timeout — cold-start

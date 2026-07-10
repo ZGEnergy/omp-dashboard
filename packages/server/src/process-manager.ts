@@ -567,7 +567,7 @@ async function spawnHeadlessViaKeeper(
       code: "PI_CRASHED",
       message:
         `RPC keeper exited within crash window (code ${gate.exitCode}). ` +
-        `Check ~/.pi/dashboard/sessions/keeper-${transportId}.log for details.`,
+        `Check ~/.omp/dashboard/sessions/keeper-${transportId}.log for details.`,
     };
   }
 

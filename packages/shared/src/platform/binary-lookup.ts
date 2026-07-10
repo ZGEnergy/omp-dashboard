@@ -22,8 +22,8 @@ import { augmentEnvWithGitSource } from "./git-source.js";
  * `resolveJitiFromPi` wrapper that lived in two electron files.
  */
 export const MANAGED_PI_PACKAGES = [
-  "@earendil-works/pi-coding-agent",
-  "@mariozechner/pi-coding-agent",
+  "@oh-my-pi/pi-coding-agent",
+  "@oh-my-pi/pi-coding-agent",
 ] as const;
 
 /**
@@ -115,7 +115,7 @@ export interface ResolveJitiOpts {
   _whichPi?: () => string | null;
   /** Test seam: replaces `process.argv[1]`. */
   _argv1?: string | undefined;
-  /** Test seam: replaces `~/.pi-dashboard` root used to probe managed-pi. */
+  /** Test seam: replaces `~/.omp-dashboard` root used to probe managed-pi. */
   _managedDir?: string;
 }
 
@@ -349,7 +349,7 @@ export class ToolResolver {
    * Resolve pi's jiti register hook as a `file://` URL.
    *
    * Resolution order (first hit wins):
-   *   1. Managed pi install — `~/.pi-dashboard/node_modules/<pkg>` for
+   *   1. Managed pi install — `~/.omp-dashboard/node_modules/<pkg>` for
    *      every entry of `MANAGED_PI_PACKAGES` (upstream first, legacy
    *      fallback). Each candidate's pkg.json is the createRequire
    *      anchor; walk `JITI_PACKAGES` from there.

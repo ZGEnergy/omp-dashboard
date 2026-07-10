@@ -6,10 +6,10 @@
  * Pi-coding-agent installs packages into three different filesystem
  * layouts depending on how the user added them to `settings.json#packages[]`:
  *
- *   npm:<name>[@version]   → ~/.pi/agent/node_modules/<name>/  (user scope)
- *                            <cwd>/.pi/npm/node_modules/<name>/ (project)
- *   git+https://… / git@…/ → ~/.pi/agent/git/<host>/<owner>/<repo>/ (user)
- *                            <cwd>/.pi/git/<host>/<owner>/<repo>/  (project)
+ *   npm:<name>[@version]   → ~/.omp/agent/node_modules/<name>/  (user scope)
+ *                            <cwd>/.omp/npm/node_modules/<name>/ (project)
+ *   git+https://… / git@…/ → ~/.omp/agent/git/<host>/<owner>/<repo>/ (user)
+ *                            <cwd>/.omp/git/<host>/<owner>/<repo>/  (project)
  *   /abs/path              → the path itself
  *   ./rel/path             → resolved against settings dir
  *
@@ -25,8 +25,8 @@
  * plugin bridges (`packages/shared/`-only imports allowed) on every
  * probe without amortization.
  *
- * Scope only: walks `packages[]` from `~/.pi/agent/settings.json` and
- * `<cwd>/.pi/settings.json`. Does NOT walk `extensions[]`/`skills[]`/
+ * Scope only: walks `packages[]` from `~/.omp/agent/settings.json` and
+ * `<cwd>/.omp/settings.json`. Does NOT walk `extensions[]`/`skills[]`/
  * `prompts[]` top-level arrays — those hold file paths to individual
  * extension entry files, not package roots, so `package.json#name`
  * lookup doesn't apply.
@@ -42,9 +42,9 @@ import { rootGlobalOr } from "./platform/npm.js";
 // ── Public surface ──────────────────────────────────────────────────
 
 export interface ResolvePiPackageOptions {
-  /** Override `~/.pi/agent`. Default: `path.join(os.homedir(), ".pi", "agent")`. */
+  /** Override `~/.omp/agent`. Default: `path.join(os.homedir(), ".omp", "agent")`. */
   agentDir?: string;
-  /** Project-scope cwd (enables reading `<cwd>/.pi/settings.json`). */
+  /** Project-scope cwd (enables reading `<cwd>/.omp/settings.json`). */
   cwd?: string;
   /** "user" | "project" | "any" (default). "any" reads project first, then user. */
   scope?: "user" | "project" | "any";
@@ -77,7 +77,7 @@ export function resolvePiPackage(
   spec: string,
   opts: ResolvePiPackageOptions = {},
 ): ResolvedPiPackage | null {
-  const agentDir = opts.agentDir ?? path.join(os.homedir(), ".pi", "agent");
+  const agentDir = opts.agentDir ?? path.join(os.homedir(), ".omp", "agent");
   const scope = opts.scope ?? "any";
   const cwd = opts.cwd;
   const npmRoot = opts.npmRoot ?? rootGlobalOr("");
@@ -119,7 +119,7 @@ export function resolvePiPackageEntry(
  * `packages[]` schema instead of the non-existent `extensions[]`.
  */
 export function listPiPackages(opts: ResolvePiPackageOptions = {}): ResolvedPiPackage[] {
-  const agentDir = opts.agentDir ?? path.join(os.homedir(), ".pi", "agent");
+  const agentDir = opts.agentDir ?? path.join(os.homedir(), ".omp", "agent");
   const scope = opts.scope ?? "any";
   const cwd = opts.cwd;
   const npmRoot = opts.npmRoot ?? rootGlobalOr("");
@@ -178,7 +178,7 @@ function* iterateInScope(
     scope === "user"
       ? path.join(ctx.agentDir, "settings.json")
       : ctx.cwd
-      ? path.join(ctx.cwd, ".pi", "settings.json")
+      ? path.join(ctx.cwd, ".omp", "settings.json")
       : null;
   if (!settingsPath) return;
 
@@ -261,7 +261,7 @@ function computeInstallPath(
     case "npm": {
       if (scope === "project") {
         if (!ctx.cwd) return null;
-        return path.join(ctx.cwd, ".pi", "npm", "node_modules", parsed.value);
+        return path.join(ctx.cwd, ".omp", "npm", "node_modules", parsed.value);
       }
       if (!ctx.npmRoot) return null;
       return path.join(ctx.npmRoot, parsed.value);
@@ -269,7 +269,7 @@ function computeInstallPath(
     case "git": {
       if (scope === "project") {
         if (!ctx.cwd) return null;
-        return path.join(ctx.cwd, ".pi", "git", parsed.value);
+        return path.join(ctx.cwd, ".omp", "git", parsed.value);
       }
       return path.join(ctx.agentDir, "git", parsed.value);
     }

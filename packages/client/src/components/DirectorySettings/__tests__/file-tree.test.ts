@@ -5,20 +5,20 @@ const cand = (relPath: string) => ({ path: `/repo/${relPath}`, relPath });
 
 describe("buildTree", () => {
   it("nests flat relPaths into directory nodes", () => {
-    const tree = buildTree([cand(".pi/agents/Explore.md"), cand(".pi/agents/react-expert.md")]);
+    const tree = buildTree([cand(".omp/agents/Explore.md"), cand(".omp/agents/react-expert.md")]);
     expect(tree.dirs).toHaveLength(1);
     const pi = tree.dirs[0];
-    expect(pi.name).toBe(".pi");
-    expect(pi.path).toBe(".pi");
+    expect(pi.name).toBe(".omp");
+    expect(pi.path).toBe(".omp");
     expect(pi.dirs).toHaveLength(1);
     const agents = pi.dirs[0];
     expect(agents.name).toBe("agents");
-    expect(agents.path).toBe(".pi/agents");
+    expect(agents.path).toBe(".omp/agents");
     expect(agents.files.map((f) => f.name)).toEqual(["Explore.md", "react-expert.md"]);
   });
 
   it("keeps single-child directories separate (no merge)", () => {
-    const tree = buildTree([cand(".pi/skills/autofix/SKILL.md")]);
+    const tree = buildTree([cand(".omp/skills/autofix/SKILL.md")]);
     const skills = tree.dirs[0].dirs[0];
     expect(skills.name).toBe("skills");
     expect(skills.dirs).toHaveLength(1);
@@ -48,13 +48,13 @@ describe("buildTree", () => {
 
 describe("subtreeMatches", () => {
   it("matches a descendant file's relPath", () => {
-    const tree = buildTree([cand(".pi/agents/Explore.md")]);
+    const tree = buildTree([cand(".omp/agents/Explore.md")]);
     expect(subtreeMatches(tree.dirs[0], "explore")).toBe(true);
     expect(subtreeMatches(tree.dirs[0], "nomatch")).toBe(false);
   });
 
   it("matches a directory by its own name", () => {
-    const tree = buildTree([cand(".pi/agents/Explore.md")]);
+    const tree = buildTree([cand(".omp/agents/Explore.md")]);
     expect(subtreeMatches(tree.dirs[0], "agents")).toBe(true);
   });
 });

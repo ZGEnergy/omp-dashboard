@@ -124,7 +124,7 @@ export function readCurrentPiVersion(registry: ToolRegistry = getDefaultRegistry
   try {
     const req = createRequire(import.meta.url);
     let pkgJson: string | undefined;
-    for (const name of ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"]) {
+    for (const name of ["@oh-my-pi/pi-coding-agent", "@oh-my-pi/pi-coding-agent"]) {
       try {
         pkgJson = req.resolve(`${name}/package.json`);
         break;

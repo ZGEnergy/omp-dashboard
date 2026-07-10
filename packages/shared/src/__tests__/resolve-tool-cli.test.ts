@@ -30,7 +30,7 @@ function run(args: string[]) {
     // Isolate from any user override file so tests are deterministic.
     env: {
       ...process.env,
-      // Point HOME at /tmp so ~/.pi/dashboard/tool-overrides.json is
+      // Point HOME at /tmp so ~/.omp/dashboard/tool-overrides.json is
       // (almost certainly) absent, keeping the resolver in the
       // bare-import branch.
       HOME: "/tmp/pi-dashboard-resolve-tool-test",

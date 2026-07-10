@@ -8,7 +8,7 @@
  *
  * This test is a structural pin: it asserts the scanner source still
  * contains the same source-kind prefixes the shared resolver handles
- * AND the same install-path layout strings (`.pi/git`, `.pi/agent/git`,
+ * AND the same install-path layout strings (`.omp/git`, `.omp/agent/git`,
  * `node_modules`). The cross-package file is read via fs only — no
  * import statement so the shared package's tsconfig rootDir is
  * respected.
@@ -49,19 +49,19 @@ describe("pi-package-resolver / pi-resource-scanner parity (structural)", () => 
     const scannerSrc = fs.readFileSync(scannerPath, "utf-8");
     const resolverSrc = fs.readFileSync(resolverPath, "utf-8");
     // Both helpers must layer git installs under a "git" subdir of either
-    // the agentDir (user scope) or `<cwd>/.pi/` (project scope). If one
+    // the agentDir (user scope) or `<cwd>/.omp/` (project scope). If one
     // ever switches to e.g. `"repos"` while the other stays on `"git"`,
     // resolutions diverge silently. Marker assertion accepts both spellings.
     for (const [label, src] of [["scanner", scannerSrc], ["resolver", resolverSrc]] as const) {
       const hasGitMarker =
         src.includes('"agent", "git"') ||
-        src.includes('".pi", "agent", "git"') ||
+        src.includes('".omp", "agent", "git"') ||
         src.includes('"git"');
       expect(hasGitMarker, `${label} must reference a "git" subdir marker`).toBe(true);
     }
-    // project-scope <cwd>/.pi/<arm> marker is identical in both.
+    // project-scope <cwd>/.omp/<arm> marker is identical in both.
     for (const [label, src] of [["scanner", scannerSrc], ["resolver", resolverSrc]] as const) {
-      expect(src.includes('".pi"'), `${label} must reference the ".pi" config dir`).toBe(true);
+      expect(src.includes('".omp"'), `${label} must reference the ".omp" config dir`).toBe(true);
     }
   });
 

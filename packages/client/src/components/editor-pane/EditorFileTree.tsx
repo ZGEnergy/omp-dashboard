@@ -5,7 +5,7 @@
  * Entries come from a single `GET /api/file/tree` call
  * (`readdir(withFileTypes)`, hidden INCLUDED) — the single source of truth for
  * `{ name, isDir }`. Replaces the old `/api/file`(names)+`/api/browse`(dirs,
- * hidden-stripped) merge that mislabelled `.git`/`.pi` as files (#1).
+ * hidden-stripped) merge that mislabelled `.git`/`.omp` as files (#1).
  *
  * See change: add-internal-monaco-editor-pane.
  * See change: improve-content-editor (tree correctness #1, mime icons #2).

@@ -1,7 +1,7 @@
 /**
  * Read-only reader for a flow's declared `inputs:` schema.
  *
- * Parses `<cwd>/.pi/flows/flows/<ns>/<name>/flow.yaml` and returns the
+ * Parses `<cwd>/.omp/flows/flows/<ns>/<name>/flow.yaml` and returns the
  * declared flow-level inputs (name + type + required). This is the source of
  * truth the automation input-wiring UI renders from. It NEVER writes a flow
  * file — the automation side only reads the flow's input contract.
@@ -28,7 +28,7 @@ export interface FlowInputField {
 export function flowYamlPath(cwd: string, flowId: string): string | null {
   const m = /^([\w.-]+):([\w.-]+)$/.exec(flowId);
   if (!m) return null;
-  return path.join(cwd, ".pi", "flows", "flows", m[1], m[2], "flow.yaml");
+  return path.join(cwd, ".omp", "flows", "flows", m[1], m[2], "flow.yaml");
 }
 
 /**

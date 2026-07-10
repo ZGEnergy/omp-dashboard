@@ -2,7 +2,7 @@
 # ---------------------------------------------------------------------------
 # pi-dashboard container entrypoint.
 #
-#   1. Seed ~/.pi/agent/auth.json from *_API_KEY env vars (first run only).
+#   1. Seed ~/.omp/agent/auth.json from *_API_KEY env vars (first run only).
 #   2. Seed spawn strategy into config.json (first run only).
 #   3. Start a tmux server (for the tmux spawn strategy).
 #   4. exec pi-dashboard with env-driven port/tunnel flags.
@@ -25,7 +25,7 @@ node "${SEED_AUTH}"
 
 # 2. Seed spawn strategy on first run only. loadConfig() deep-merges partials,
 #    so a single-key file is safe. Never overwrites an existing config.
-CONFIG_FILE="${HOME}/.pi/dashboard/config.json"
+CONFIG_FILE="${HOME}/.omp/dashboard/config.json"
 if [ -n "${PI_SPAWN_STRATEGY:-}" ] && [ ! -f "${CONFIG_FILE}" ]; then
   mkdir -p "$(dirname "${CONFIG_FILE}")"
   # Build JSON with jq so a malformed strategy value can't break config parsing.

@@ -1,12 +1,12 @@
 /**
- * Legacy `~/.pi-dashboard/` advisory — exercises the row emitted by
+ * Legacy `~/.omp-dashboard/` advisory — exercises the row emitted by
  * `runSharedChecks(...)` via the `detectLegacyManagedDir` test seam.
  *
  * Contract:
  *   - absent  → no row with name "Legacy install directory"
  *   - present → exactly one row, status "warning", with path / pkgCount / sizeMb
  *
- * Also asserts the obsolete "Managed install (~/.pi-dashboard)" row
+ * Also asserts the obsolete "Managed install (~/.omp-dashboard)" row
  * (deleted under change: fix-doctor-stale-managed-install-check) does
  * not reappear in either branch.
  *
@@ -32,13 +32,13 @@ function baseDeps(overrides: Partial<SharedChecksDeps> = {}): SharedChecksDeps {
 }
 
 const ROW = "Legacy install directory";
-const STALE_ROW = "Managed install (~/.pi-dashboard)";
+const STALE_ROW = "Managed install (~/.omp-dashboard)";
 
 function rows(checks: DoctorCheck[], name: string): DoctorCheck[] {
   return checks.filter((c) => c.name === name);
 }
 
-describe("legacy ~/.pi-dashboard advisory", () => {
+describe("legacy ~/.omp-dashboard advisory", () => {
   it("emits no row when the directory is absent", async () => {
     const checks = await runSharedChecks(
       baseDeps({ detectLegacyManagedDir: () => ({ present: false }) }),
@@ -53,7 +53,7 @@ describe("legacy ~/.pi-dashboard advisory", () => {
       baseDeps({
         detectLegacyManagedDir: () => ({
           present: true,
-          path: "/fake/home/.pi-dashboard",
+          path: "/fake/home/.omp-dashboard",
           pkgCount: 4,
           sizeMb: 42,
         }),
@@ -64,11 +64,11 @@ describe("legacy ~/.pi-dashboard advisory", () => {
     const row = found[0]!;
     expect(row.status).toBe("warning");
     expect(row.section).toBe("diagnostics");
-    expect(row.message).toContain("/fake/home/.pi-dashboard");
+    expect(row.message).toContain("/fake/home/.omp-dashboard");
     expect(row.message).toContain("Safe to delete");
     expect(row.detail).toContain("4 packages");
     expect(row.detail).toContain("42 MB");
-    expect(row.suggestion).toContain("rm -rf /fake/home/.pi-dashboard");
+    expect(row.suggestion).toContain("rm -rf /fake/home/.omp-dashboard");
     // Stale row never appears even in the present branch.
     expect(rows(checks, STALE_ROW)).toHaveLength(0);
   });

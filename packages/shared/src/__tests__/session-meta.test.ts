@@ -17,9 +17,9 @@ describe("session-meta", () => {
 
   describe("metaPath", () => {
     it("should derive .meta.json from .jsonl path", () => {
-      const sessionFile = "/home/user/.pi/sessions/cwd/2026-01-01T00-00-00-000Z_abc123.jsonl";
+      const sessionFile = "/home/user/.omp/sessions/cwd/2026-01-01T00-00-00-000Z_abc123.jsonl";
       expect(metaPath(sessionFile)).toBe(
-        "/home/user/.pi/sessions/cwd/2026-01-01T00-00-00-000Z_abc123.meta.json"
+        "/home/user/.omp/sessions/cwd/2026-01-01T00-00-00-000Z_abc123.meta.json"
       );
     });
   });

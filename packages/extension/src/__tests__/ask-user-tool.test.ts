@@ -12,7 +12,7 @@ vi.mock("typebox", () => ({
   },
 }));
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("@oh-my-pi/pi-ai", () => ({
   StringEnum: vi.fn(() => ({})),
 }));
 
@@ -195,7 +195,7 @@ describe("registerAskUserTool", () => {
       const tool = getTool();
       const inputWithImages = vi.fn().mockResolvedValue({
         value: "see attached",
-        attachments: [{ path: "/home/u/.pi/dashboard/attachments/s/abc.png", mimeType: "image/png", bytes: 42 }],
+        attachments: [{ path: "/home/u/.omp/dashboard/attachments/s/abc.png", mimeType: "image/png", bytes: 42 }],
       });
       const ctx = { ui: { inputWithImages, input: vi.fn().mockResolvedValue("unused") } };
       const res = await tool.execute("id", { method: "input", title: "Paste" }, undefined, undefined, ctx);
@@ -205,7 +205,7 @@ describe("registerAskUserTool", () => {
       expect(res.content[0].text).toContain("abc.png");
       expect(res.details.result).toEqual({
         value: "see attached",
-        attachments: [{ path: "/home/u/.pi/dashboard/attachments/s/abc.png", mimeType: "image/png", bytes: 42 }],
+        attachments: [{ path: "/home/u/.omp/dashboard/attachments/s/abc.png", mimeType: "image/png", bytes: 42 }],
       });
     });
 

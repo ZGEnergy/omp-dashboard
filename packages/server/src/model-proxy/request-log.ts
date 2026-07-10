@@ -1,7 +1,7 @@
 /**
  * Optional JSONL request log for the model proxy.
  *
- * Appends one line per completed request to ~/.pi/dashboard/model-proxy.jsonl.
+ * Appends one line per completed request to ~/.omp/dashboard/model-proxy.jsonl.
  * Never logs request/response body or API keys — only metadata.
  * Daily rotation when file exceeds 50MB.
  *
@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const LOG_DIR = path.join(os.homedir(), ".pi", "dashboard");
+const LOG_DIR = path.join(os.homedir(), ".omp", "dashboard");
 const LOG_FILE = path.join(LOG_DIR, "model-proxy.jsonl");
 const MAX_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 

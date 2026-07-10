@@ -14,7 +14,7 @@ import url from "node:url";
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(here, "..", "..");
-const skillDir = path.join(pkgDir, ".pi", "skills", "browser");
+const skillDir = path.join(pkgDir, ".omp", "skills", "browser");
 const pkgJsonPath = path.join(pkgDir, "package.json");
 const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8")) as {
   pi?: { skills?: string[] };
@@ -61,11 +61,11 @@ describe("browser skill — SKILL.md frontmatter", () => {
 
 describe("browser skill — package.json registration", () => {
   it("pi.skills[] includes .pi/skills/browser", () => {
-    expect(pkgJson.pi?.skills).toContain(".pi/skills/browser");
+    expect(pkgJson.pi?.skills).toContain(".omp/skills/browser");
   });
 
   it("files[] ships .pi/skills/browser/", () => {
-    expect(pkgJson.files).toContain(".pi/skills/browser/");
+    expect(pkgJson.files).toContain(".omp/skills/browser/");
   });
 });
 

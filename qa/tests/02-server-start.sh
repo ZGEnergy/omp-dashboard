@@ -30,8 +30,8 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
     # See change: expand-electron-qa-coverage.
     # Catches v0.4.6 spawnDetached stdio[1]='ignore' regression where
     # successful spawns produced 0-byte log files. Server log lives at
-    # ~/.pi/dashboard/server.log (written by cli.ts daemonize path).
-    LOG_PATH="$HOME/.pi/dashboard/server.log"
+    # ~/.omp/dashboard/server.log (written by cli.ts daemonize path).
+    LOG_PATH="$HOME/.omp/dashboard/server.log"
     if [ ! -f "$LOG_PATH" ]; then
       echo "FAIL: $LOG_PATH does not exist after successful spawn"
       exit 1

@@ -5,7 +5,7 @@
  * `GET /api/file/md-candidates` into a nested directory tree: each `relPath` is
  * split on `/`, intermediate segments become directory nodes, and the final
  * segment becomes a leaf file. Plain tree — single-child directories are NOT
- * merged (`.pi/skills/autofix/SKILL.md` stays `skills › autofix › SKILL.md`).
+ * merged (`.omp/skills/autofix/SKILL.md` stays `skills › autofix › SKILL.md`).
  * Directories and files are each sorted alphabetically for stable rendering.
  *
  * See change: directory-settings-tree-and-resize.
@@ -21,7 +21,7 @@ export interface FileLeaf {
 /** A directory node (root has `name === "" && path === ""`). */
 export interface TreeNode {
   name: string;
-  /** Full directory path from the root, e.g. `.pi/agents`. Empty for the root. */
+  /** Full directory path from the root, e.g. `.omp/agents`. Empty for the root. */
   path: string;
   dirs: TreeNode[];
   files: FileLeaf[];

@@ -42,6 +42,6 @@ describe("PiVersionAdvisory", () => {
     render(<PiVersionAdvisory />);
     const el = screen.getByRole("alert");
     expect(el.textContent).toContain("below minimum");
-    expect(el.textContent).toContain("npm install -g @earendil-works/pi-coding-agent@0.80.0");
+    expect(el.textContent).toContain("npm install -g @oh-my-pi/pi-coding-agent@0.80.0");
   });
 });

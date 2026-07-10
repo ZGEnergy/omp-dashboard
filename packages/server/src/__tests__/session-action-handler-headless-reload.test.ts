@@ -124,7 +124,7 @@ describe("handleHeadlessReload — happy path", () => {
         S1: {
           id: "S1",
           cwd: "/home/u/proj",
-          sessionFile: "/home/u/proj/.pi/sessions/abc.jsonl",
+          sessionFile: "/home/u/proj/.omp/sessions/abc.jsonl",
           status: "active",
         },
       },
@@ -141,7 +141,7 @@ describe("handleHeadlessReload — happy path", () => {
     expect(spawnPiSession).toHaveBeenCalledWith(
       "/home/u/proj",
       expect.objectContaining({
-        sessionFile: "/home/u/proj/.pi/sessions/abc.jsonl",
+        sessionFile: "/home/u/proj/.omp/sessions/abc.jsonl",
         mode: "continue",
         strategy: "headless",
       }),

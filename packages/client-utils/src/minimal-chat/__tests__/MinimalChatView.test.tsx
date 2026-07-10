@@ -142,15 +142,15 @@ describe("MinimalChatView", () => {
     renderView(
       <MinimalChatView
         title="explorer"
-        subtitle="~/.pi/agent/agents/Explore.md"
+        subtitle="~/.omp/agent/agents/Explore.md"
         status="complete"
         entries={[]}
       />,
     );
-    const sub = screen.getByText("~/.pi/agent/agents/Explore.md");
+    const sub = screen.getByText("~/.omp/agent/agents/Explore.md");
     expect(sub).toBeTruthy();
     expect(sub.className).toContain("font-mono");
-    expect(sub.getAttribute("title")).toBe("~/.pi/agent/agents/Explore.md");
+    expect(sub.getAttribute("title")).toBe("~/.omp/agent/agents/Explore.md");
   });
 
   it("tool entry without output shows no expand toggle", () => {

@@ -77,7 +77,7 @@ describe("resource-activation-routes", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/resources/toggle",
-      payload: { scope: "local", cwd: "/proj/x", type: "extension", filePath: "/proj/x/.pi/e.ts", enabled: false },
+      payload: { scope: "local", cwd: "/proj/x", type: "extension", filePath: "/proj/x/.omp/e.ts", enabled: false },
     });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);

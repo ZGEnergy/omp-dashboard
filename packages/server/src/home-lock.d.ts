@@ -106,7 +106,7 @@ export declare function isLockHolderResponsive(meta: LockMetadata, hooks?: Pick<
  * dashboard already holds it.
  *
  * Flow:
- *   1. Ensure `~/.pi/dashboard/` exists (proper-lockfile requires parent).
+ *   1. Ensure `~/.omp/dashboard/` exists (proper-lockfile requires parent).
  *   2. `proper-lockfile.lock(path, { stale, retries: 0 })`
  *      ↪ on success: write metadata, return { mode: "acquired", release }
  *      ↪ on ELOCKED: read metadata, check liveness

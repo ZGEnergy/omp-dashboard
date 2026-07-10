@@ -1,5 +1,5 @@
 /**
- * Dashboard settings persistence: `~/.pi-dashboard/dashboard-settings.json`
+ * Dashboard settings persistence: `~/.omp-dashboard/dashboard-settings.json`
  * (mode + remoteUrl + recentRemotes) and API key detection.
  *
  * The settings file was named `mode.json` prior to
@@ -13,10 +13,10 @@ import os from "node:os";
 import path from "node:path";
 import { hasAnyProviderCredential } from "@blackbelt-technology/pi-dashboard-shared/credential-detect.js";
 
-function getManagedDir() { return path.join(os.homedir(), ".pi-dashboard"); }
+function getManagedDir() { return path.join(os.homedir(), ".omp-dashboard"); }
 function getSettingsFile() { return path.join(getManagedDir(), "dashboard-settings.json"); }
 function getLegacyModeFile() { return path.join(getManagedDir(), "mode.json"); }
-function getPiSettings() { return path.join(os.homedir(), ".pi", "agent", "settings.json"); }
+function getPiSettings() { return path.join(os.homedir(), ".omp", "agent", "settings.json"); }
 function getRecommendedStateFile() { return path.join(getManagedDir(), "recommended.json"); }
 
 /** MRU cap for the recent-servers list. */
@@ -98,7 +98,7 @@ export function readModeFile(): DashboardSettings | null {
 }
 
 /**
- * Persist the chosen mode to ~/.pi-dashboard/dashboard-settings.json.
+ * Persist the chosen mode to ~/.omp-dashboard/dashboard-settings.json.
  * `remoteUrl` is required when `mode === "remote"` and ignored otherwise.
  * The recent-servers list is preserved across mode writes.
  */
@@ -142,8 +142,8 @@ export function removeRecentRemote(url: string): RecentRemote[] {
  * Check if any provider credential is configured for pi.
  *
  * Delegates to the shared detector, which inspects BOTH
- * `~/.pi/agent/settings.json` (legacy API-key fields) and
- * `~/.pi/agent/auth.json` (OAuth subscriptions + provider-stored API
+ * `~/.omp/agent/settings.json` (legacy API-key fields) and
+ * `~/.omp/agent/auth.json` (OAuth subscriptions + provider-stored API
  * keys written by Settings → Providers). See change:
  * fix-doctor-oauth-credential-detection.
  */

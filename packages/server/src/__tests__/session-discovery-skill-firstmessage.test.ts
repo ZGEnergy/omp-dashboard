@@ -78,7 +78,7 @@ describe("session-scanner readJsonlHeaderSync (firstMessage condensation end-to-
     // against the same string the scanner extracts. This is what the scanner
     // does post-extraction (see prior tests in this file).
     // Heavier integration: call discoverSessionsFromCwd, but that requires the
-    // full ~/.pi/agent/sessions tree layout. The shared helper test above
+    // full ~/.omp/agent/sessions tree layout. The shared helper test above
     // exercises the actual condensation logic; this test pins the assumption
     // that scanners DO call condenseForFirstMessage by file inspection.
     const { readFileSync } = await import("node:fs");

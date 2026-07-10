@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 function readLocalSettings() {
-  const p = path.join(tmpDir, ".pi", "settings.json");
+  const p = path.join(tmpDir, ".omp", "settings.json");
   return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf-8")) : {};
 }
 
@@ -38,7 +38,7 @@ function writeLooseExtension(baseDir: string, name: string) {
 
 describe("applyResourceToggle — loose resource", () => {
   it("toggles a local loose extension off then on", async () => {
-    const filePath = writeLooseExtension(path.join(tmpDir, ".pi"), "my-ext");
+    const filePath = writeLooseExtension(path.join(tmpDir, ".omp"), "my-ext");
 
     const off = await applyResourceToggle({
       scope: "local",
@@ -66,8 +66,8 @@ describe("applyResourceToggle — loose resource", () => {
   it("toggles a global loose extension off, writing the global settings file", async () => {
     // Point HOME at an isolated dir so AGENT_DIR resolves under it. The
     // test-support setup already sets HOME to a tmp dir; place the global
-    // pi agent dir there and confirm the write lands in ~/.pi/agent.
-    const agentDir = path.join(os.homedir(), ".pi", "agent");
+    // pi agent dir there and confirm the write lands in ~/.omp/agent.
+    const agentDir = path.join(os.homedir(), ".omp", "agent");
     const filePath = writeLooseExtension(agentDir, "global-ext");
 
     const off = await applyResourceToggle({
@@ -80,7 +80,7 @@ describe("applyResourceToggle — loose resource", () => {
     const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf-8"));
     expect(settings.extensions).toContain("-extensions/global-ext.ts");
     // No folder settings written for a global toggle.
-    expect(fs.existsSync(path.join(tmpDir, ".pi", "settings.json"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, ".omp", "settings.json"))).toBe(false);
 
     fs.rmSync(path.join(agentDir, "extensions", "global-ext.ts"), { force: true });
   });
@@ -106,8 +106,8 @@ describe("applyResourceToggle — package resource", () => {
     fs.mkdirSync(path.join(pkgDir, "skills", "brave-search"), { recursive: true });
     fs.writeFileSync(path.join(pkgDir, "skills", "brave-search", "SKILL.md"), "---\nname: brave-search\n---\nb");
     fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name: "pi-skills", pi: { skills: ["skills"] } }));
-    fs.mkdirSync(path.join(tmpDir, ".pi"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, ".pi", "settings.json"), JSON.stringify({ packages: [pkgDir] }));
+    fs.mkdirSync(path.join(tmpDir, ".omp"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, ".omp", "settings.json"), JSON.stringify({ packages: [pkgDir] }));
     const skillPath = path.join(pkgDir, "skills", "brave-search", "SKILL.md");
 
     const res = await applyResourceToggle({
@@ -136,8 +136,8 @@ describe("applyResourceToggle — package resource", () => {
     fs.mkdirSync(path.join(pkgDir, "skills", "brave-search"), { recursive: true });
     fs.writeFileSync(path.join(pkgDir, "skills", "brave-search", "SKILL.md"), "---\nname: brave-search\n---\nb");
     fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name: "pi-skills", pi: { skills: ["skills"] } }));
-    fs.mkdirSync(path.join(tmpDir, ".pi"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, ".pi", "settings.json"), JSON.stringify({ packages: [pkgDir] }));
+    fs.mkdirSync(path.join(tmpDir, ".omp"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, ".omp", "settings.json"), JSON.stringify({ packages: [pkgDir] }));
 
     const res = await applyResourceToggle({
       scope: "local",

@@ -63,7 +63,7 @@ function enrichWithBridgeSource(statuses: PluginStatus[]): PluginStatus[] {
   let settings: unknown = null;
   try {
     const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
-    const p = path.join(home, ".pi", "agent", "settings.json");
+    const p = path.join(home, ".omp", "agent", "settings.json");
     if (fs.existsSync(p)) {
       const raw = fs.readFileSync(p, "utf-8").trim();
       if (raw) settings = JSON.parse(raw);

@@ -31,7 +31,7 @@ import type { Strategy, StrategyCtx, StrategyResult } from "./types.js";
  * - `execPath` — interpreter path used by `makeNodeScriptToArgv`'s fallback
  *   when `registry.resolve("node")` misses. Default `process.execPath`;
  *   tests inject a fake so executor argv assembly stays deterministic
- *   and never leaks the host's managed node (`~/.pi-dashboard/node`).
+ *   and never leaks the host's managed node (`~/.omp-dashboard/node`).
  * - `realpath` — JS-entry symlink deref used by `resolveJsScript`.
  *   Default real `realpathSync`; tests inject a fake so a mocked
  *   `BUNDLED_*` path cannot dereference to a real on-disk script
@@ -72,7 +72,7 @@ export interface StrategyDeps {
  *      already used by `findPackageJsonByDirWalk` in `definitions.ts`.
  *
  * See change: fix-node-resolution-under-electron (follow-up: live
- * `/api/packages/installed` failure on `@earendil-works/pi-coding-agent`
+ * `/api/packages/installed` failure on `@oh-my-pi/pi-coding-agent`
  * exports-map regression).
  */
 function defaultResolveModule(id: string, from: string): string | null {
@@ -235,7 +235,7 @@ export function overrideStrategy(toolName: string, deps?: StrategyDeps): Strateg
  * on Windows or `<managedDir>/node/bin/{node,npm,npx}` on Unix.
  *
  * Lets `ToolRegistry.resolve("node")` and `resolve("npm")` prefer the
- * persistent runtime under `~/.pi-dashboard/node/` (installed by
+ * persistent runtime under `~/.omp-dashboard/node/` (installed by
  * `installManagedNode`) over the system PATH lookup, while still
  * deferring to `tool-overrides.json`.
  *
@@ -355,7 +355,7 @@ export function bundledGitBashStrategy(deps?: StrategyDeps): Strategy {
 }
 
 /**
- * Managed install: `~/.pi-dashboard/node_modules/.bin/<name>(.cmd)` for
+ * Managed install: `~/.omp-dashboard/node_modules/.bin/<name>(.cmd)` for
  * binaries, or any explicit relative path under `MANAGED_DIR` for
  * modules/directories.
  */
@@ -376,7 +376,7 @@ export function managedBinStrategy(
 }
 
 /**
- * Managed module entry: `~/.pi-dashboard/node_modules/<pkg>/dist/index.js`
+ * Managed module entry: `~/.omp-dashboard/node_modules/<pkg>/dist/index.js`
  * (or a caller-specified relative entry).
  */
 export function managedModuleStrategy(

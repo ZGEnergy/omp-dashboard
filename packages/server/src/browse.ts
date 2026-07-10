@@ -3,7 +3,7 @@
  *
  * Two responsibilities, kept deliberately separate:
  *   1. `listDirectories` — enumerate directory entries (cheap; one
- *      readdir call). Only probes `.git` / `.pi` when the caller
+ *      readdir call). Only probes `.git` / `.omp` when the caller
  *      explicitly opts in via `{ detect: true }`.
  *   2. `classifyPaths` — bulk-classify a list of absolute paths,
  *      returning `{ [path]: { isGit, isPi } }`. Used by the bulk
@@ -28,7 +28,7 @@ export const MAX_FLAG_PATHS = 100;
 const FLAG_PROBE_CONCURRENCY = 32;
 
 /**
- * Probe a single absolute path for `.git` and `.pi` siblings using
+ * Probe a single absolute path for `.git` and `.omp` siblings using
  * `fs.access`. Any error — ENOENT, EACCES, ELOOP, race-on-deletion,
  * target removed mid-probe, anything — maps to `false` for that flag.
  * Worktree-safe: `.git` is a regular file in worktrees, and `fs.access`
@@ -37,7 +37,7 @@ const FLAG_PROBE_CONCURRENCY = 32;
 async function probeFlags(absolutePath: string): Promise<BrowseFlagEntry> {
   const [isGit, isPi] = await Promise.all([
     fs.access(path.join(absolutePath, ".git")).then(() => true, () => false),
-    fs.access(path.join(absolutePath, ".pi")).then(() => true, () => false),
+    fs.access(path.join(absolutePath, ".omp")).then(() => true, () => false),
   ]);
   return { isGit, isPi };
 }
@@ -112,7 +112,7 @@ export async function listDirectories(
   // Cap at MAX_ENTRIES (AFTER filtering/ranking)
   const capped = dirs.slice(0, MAX_ENTRIES);
 
-  // Build entries. When `detect` is opt-in, probe `.git` / `.pi` for each
+  // Build entries. When `detect` is opt-in, probe `.git` / `.omp` for each
   // surviving entry; otherwise omit the flag fields entirely so the
   // single-syscall fast path stays a single syscall.
   const entries: BrowseEntry[] = detect

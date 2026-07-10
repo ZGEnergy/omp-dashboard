@@ -1,7 +1,7 @@
 /**
  * Display preferences for the chat / stream view.
  *
- * Global prefs live in `~/.pi/dashboard/preferences.json#displayPrefs`.
+ * Global prefs live in `~/.omp/dashboard/preferences.json#displayPrefs`.
  * Per-session sparse overrides live in `<session>.meta.json#displayPrefsOverride`.
  * Effective prefs = `mergeDisplayPrefs(global, override)`.
  *

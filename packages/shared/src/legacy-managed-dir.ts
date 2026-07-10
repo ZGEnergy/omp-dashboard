@@ -1,5 +1,5 @@
 /**
- * Detect the legacy `~/.pi-dashboard/` install directory left behind from
+ * Detect the legacy `~/.omp-dashboard/` install directory left behind from
  * pre-R3 versions where the Electron app (and the standalone bootstrap
  * orchestrator) installed pi/openspec/tsx at runtime into a user-writable
  * directory.
@@ -11,7 +11,7 @@
  * one-time hint, telling the user the directory is safe to delete.
  *
  * NEVER move runtime install logic back into this directory. If you find
- * yourself reaching for `~/.pi-dashboard/`, you are working against R3.
+ * yourself reaching for `~/.omp-dashboard/`, you are working against R3.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -72,7 +72,7 @@ function countDirectChildren(dir: string): number {
 }
 
 /**
- * Detect whether the legacy `~/.pi-dashboard/` directory is present.
+ * Detect whether the legacy `~/.omp-dashboard/` directory is present.
  * Returns `{ present: false }` when missing. When present, returns a
  * `pkgCount` (entries directly under `node_modules/`, 0 if missing) and
  * `sizeMb` (recursive byte sum, capped at 500 MB).

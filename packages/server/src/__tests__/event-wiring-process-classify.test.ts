@@ -76,7 +76,7 @@ describe("process_list classification — server wiring", () => {
       sessionId: "parent",
       processes: [
         { pid: 4242, pgid: 4242, command: "pi", elapsedMs: 60000 },
-        { pid: 51, pgid: 51, command: "bun /Users/x/.pi/agent/npm/node_modules/context-mode/server.bundle.mjs", elapsedMs: 60000 },
+        { pid: 51, pgid: 51, command: "bun /Users/x/.omp/agent/npm/node_modules/context-mode/server.bundle.mjs", elapsedMs: 60000 },
         { pid: 60, pgid: 60, command: "node vite --watch", elapsedMs: 60000 },
       ],
     }));

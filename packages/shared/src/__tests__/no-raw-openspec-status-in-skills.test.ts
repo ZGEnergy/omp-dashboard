@@ -1,6 +1,6 @@
 /**
  * Repo-level invariant: OpenSpec workflow skills (.pi/skills/openspec-*)
- * MUST invoke `.pi/skills/openspec-shared/scripts/effective-status.sh`
+ * MUST invoke `.omp/skills/openspec-shared/scripts/effective-status.sh`
  * instead of calling `openspec status --json` directly. The wrapper
  * applies the dashboard's local-design-evidence override (R1/R2/R3) so
  * skill-driven prompts and dashboard session-card buttons cannot
@@ -46,7 +46,7 @@ describe("OpenSpec workflow skills must use effective-status.sh", () => {
   it.skip("no raw `openspec status --json` outside the wrapper script", async () => {
     const here = path.dirname(url.fileURLToPath(import.meta.url));
     const repoRoot = path.resolve(here, "..", "..", "..", "..");
-    const skillsRoot = path.resolve(repoRoot, ".pi", "skills");
+    const skillsRoot = path.resolve(repoRoot, ".omp", "skills");
 
     const violations: Array<{ file: string; line: number; text: string }> = [];
 

@@ -8,12 +8,12 @@
  *
  * Scope:
  *   - Directory (`cwd` present): bounded walk of `<cwd>` for `.md`/`.mdx`,
- *     including the `.pi/` tree. Heavy / irrelevant dirs are skipped.
- *   - Global (`cwd` absent): bounded walk of `~/.pi/agent` for `.md`/`.mdx`.
+ *     including the `.omp/` tree. Heavy / irrelevant dirs are skipped.
+ *   - Global (`cwd` absent): bounded walk of `~/.omp/agent` for `.md`/`.mdx`.
  *
  * Not the `pi-resource-scanner` (which enumerates skills/extensions/prompts, not
  * arbitrary instruction markdown). A dedicated walk matches the spec's "markdown
- * files under the folder cwd and its `.pi/` tree".
+ * files under the folder cwd and its `.omp/` tree".
  *
  * See change: directory-settings-page-and-scoped-md-editing.
  */
@@ -49,7 +49,7 @@ function scopeRoot(opts: MdCandidateOptions): string | null {
   if (opts.cwd) return path.resolve(opts.cwd);
   const home = opts.home ?? os.homedir();
   if (!home) return null;
-  return path.join(home, ".pi", "agent");
+  return path.join(home, ".omp", "agent");
 }
 
 function extOf(p: string): string {

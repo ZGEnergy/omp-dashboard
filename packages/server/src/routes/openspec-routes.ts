@@ -310,7 +310,7 @@ export function registerOpenSpecRoutes(
       }
 
       const homeDir = process.env.HOME || process.env.USERPROFILE || "";
-      const globalPiDir = path.join(homeDir, ".pi", "agent");
+      const globalPiDir = path.join(homeDir, ".omp", "agent");
       const allSessions = sessionManager.listAll();
       const knownCwds = new Set(allSessions.map((s) => s.cwd));
       for (const dir of preferencesStore.getPinnedDirectories()) knownCwds.add(dir);
@@ -319,9 +319,9 @@ export function registerOpenSpecRoutes(
       const isAllowed =
         normalizedPath.startsWith(globalPiDir + path.sep) ||
         [...knownCwds].some(
-          (cwd) => normalizedPath.startsWith(path.join(cwd, ".pi") + path.sep),
+          (cwd) => normalizedPath.startsWith(path.join(cwd, ".omp") + path.sep),
         ) ||
-        normalizedPath.includes(path.join(".pi", "git") + path.sep) ||
+        normalizedPath.includes(path.join(".omp", "git") + path.sep) ||
         normalizedPath.includes("node_modules" + path.sep);
 
       if (!isAllowed) {

@@ -132,7 +132,7 @@ export interface DiscoveredAutomation {
 /** Run status surfaced in the Triage list. */
 export type RunStatus = "running" | "done" | "error";
 
-/** A run record persisted under `<scope>/.pi/automation/runs/<runId>/`. */
+/** A run record persisted under `<scope>/.omp/automation/runs/<runId>/`. */
 export interface RunRecord {
   /** `<date>-<name>` store key, unique per occurrence. */
   runId: string;

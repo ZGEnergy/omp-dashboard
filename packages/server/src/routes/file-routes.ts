@@ -156,7 +156,7 @@ export function registerFileRoutes(
   const { sessionManager, preferencesStore, networkGuard } = deps;
 
   // Directory browse endpoint.
-  // `detect=1` opts into eager `.git` / `.pi` classification on every entry
+  // `detect=1` opts into eager `.git` / `.omp` classification on every entry
   // (anything other than the literal string `"1"` is treated as falsy).
   // Without `detect`, this is a single-readdir enumeration with no filesystem
   // probes — use `GET /api/browse/flags` to classify lazily.
@@ -297,7 +297,7 @@ export function registerFileRoutes(
   // `readdir(withFileTypes)`, hidden entries INCLUDED, behind the same gate as
   // `/api/file` (known-cwd + containment). Replaces the old
   // `/api/file`(names)+`/api/browse`(dirs, hidden-stripped) merge that
-  // mislabelled hidden directories (`.git`, `.pi`) as files.
+  // mislabelled hidden directories (`.git`, `.omp`) as files.
   // See change: improve-content-editor.
   fastify.get<{ Querystring: { cwd?: string; path?: string } }>(
     "/api/file/tree",
@@ -356,7 +356,7 @@ export function registerFileRoutes(
   // Body: { cwd?, path, content, mtime }.
   //   - cwd present  → directory scope: `path` resolves against cwd; the cwd
   //     must be a known session path (mirrors the read gate).
-  //   - cwd absent   → global scope: `path` must be absolute under ~/.pi/agent.
+  //   - cwd absent   → global scope: `path` must be absolute under ~/.omp/agent.
   //
   // Authorization is delegated entirely to `isWritableMdTarget` (the security
   // boundary): realpath-normalized, markdown-only, scope-bounded. Failure → 403.
@@ -388,7 +388,7 @@ export function registerFileRoutes(
 
   // Scoped markdown candidate list for the Instructions file picker.
   //   - `cwd` present → directory scope (must be a known session path).
-  //   - `cwd` absent  → global scope (~/.pi/agent).
+  //   - `cwd` absent  → global scope (~/.omp/agent).
   // Every candidate passes `isWritableMdTarget`, so the picker is a strict
   // subset of what the write guard authorizes (picker ⊆ guard).
   // See change: directory-settings-page-and-scoped-md-editing.
@@ -412,7 +412,7 @@ export function registerFileRoutes(
   // Scoped markdown read for the Instructions editor. Gated by the SAME
   // `isWritableMdTarget` guard as the write + candidate endpoints, so read /
   // write / list stay in lockstep (picker ⊆ guard). Unlike `/api/file`, this
-  // serves the global scope (no session cwd) for `~/.pi/agent/**/*.md`.
+  // serves the global scope (no session cwd) for `~/.omp/agent/**/*.md`.
   //   - `cwd` present → directory scope (must be a known session path).
   //   - `cwd` absent  → global scope; `path` must be absolute.
   // Returns `{ content, mtime }`. See change: directory-settings-page-and-scoped-md-editing.

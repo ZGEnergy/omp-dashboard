@@ -1,5 +1,5 @@
 /**
- * Shared constants + getters for the managed install directory (~/.pi-dashboard/).
+ * Shared constants + getters for the managed install directory (~/.omp-dashboard/).
  * Single source of truth — all packages import from here.
  *
  * Constants (MANAGED_DIR, MANAGED_BIN, PI_SETTINGS_PATH) reflect the live
@@ -19,7 +19,7 @@ export interface ManagedPathsEnv {
 
 /** Root directory for managed installs (pi, openspec, tsx). */
 export function getManagedDir(env?: ManagedPathsEnv): string {
-  return path.join(env?.homedir ?? os.homedir(), ".pi-dashboard");
+  return path.join(env?.homedir ?? os.homedir(), ".omp-dashboard");
 }
 
 /** Bin directory for managed install executables. */
@@ -29,7 +29,7 @@ export function getManagedBin(env?: ManagedPathsEnv): string {
 
 /** Path to pi's global settings file. */
 export function getPiSettingsPath(env?: ManagedPathsEnv): string {
-  return path.join(env?.homedir ?? os.homedir(), ".pi", "agent", "settings.json");
+  return path.join(env?.homedir ?? os.homedir(), ".omp", "agent", "settings.json");
 }
 
 /** Root directory for managed installs (pi, openspec, tsx). */

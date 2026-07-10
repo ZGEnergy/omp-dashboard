@@ -29,15 +29,15 @@ function makeHookRepo(hook: WorktreeInitHook): string {
   git("-c init.defaultBranch=main init", dir);
   git("config user.email test@test.com", dir);
   git("config user.name Test", dir);
-  mkdirSync(join(dir, ".pi"), { recursive: true });
-  writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ worktreeInit: hook }));
+  mkdirSync(join(dir, ".omp"), { recursive: true });
+  writeFileSync(join(dir, ".omp", "settings.json"), JSON.stringify({ worktreeInit: hook }));
   writeFileSync(join(dir, "README.md"), "init");
   git("add .", dir);
   git("commit -m init", dir);
   return dir;
 }
 
-/** Plain repo: no `.pi/settings.json`. */
+/** Plain repo: no `.omp/settings.json`. */
 function makePlainRepo(): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "git-wt-plain-")));
   git("-c init.defaultBranch=main init", dir);

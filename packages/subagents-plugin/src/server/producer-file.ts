@@ -1,6 +1,6 @@
 /**
  * Pure helpers for reading / writing the producer's settings file at
- *   ~/.pi/agent/extensions/pi-dashboard-subagents/config.json
+ *   ~/.omp/agent/extensions/pi-dashboard-subagents/config.json
  *
  * The producer extension (`pi-dashboard-subagents`) owns this file. The
  * dashboard plugin server mirrors `inheritContext` through it so producer
@@ -30,7 +30,7 @@ export interface ProducerSettings {
 export function producerFilePath(): string {
 	return path.join(
 		os.homedir(),
-		".pi",
+		".omp",
 		"agent",
 		"extensions",
 		"pi-dashboard-subagents",

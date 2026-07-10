@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
 import path from "node:path";
 import { ToolResolver, MANAGED_PI_PACKAGES, JITI_PACKAGES } from "../platform/binary-lookup.js";
 
-const MANAGED_DIR = "/fake/.pi-dashboard";
+const MANAGED_DIR = "/fake/.omp-dashboard";
 
 function makeResolver(installed: Record<string, string>) {
   return (spec: string): string => {
@@ -26,8 +26,8 @@ function makeResolver(installed: Record<string, string>) {
 describe("MANAGED_PI_PACKAGES + JITI_PACKAGES contract", () => {
   it("upstream pi pkg first, legacy fork fallback", () => {
     expect(MANAGED_PI_PACKAGES).toEqual([
-      "@earendil-works/pi-coding-agent",
-      "@mariozechner/pi-coding-agent",
+      "@oh-my-pi/pi-coding-agent",
+      "@oh-my-pi/pi-coding-agent",
     ]);
   });
 
@@ -111,7 +111,7 @@ describe("ToolResolver.resolveJiti — managed pi", () => {
 describe("ToolResolver.resolveJiti — system pi", () => {
   it("uses which(\"pi\") when managed pi absent", () => {
     const piBin = "/usr/local/bin/pi";
-    const piReal = "/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
+    const piReal = "/usr/local/lib/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js";
     const jitiPkgJson = "/usr/local/lib/node_modules/jiti/package.json";
     const url = new ToolResolver().resolveJiti({
       _managedDir: MANAGED_DIR,
@@ -188,7 +188,7 @@ describe("ToolResolver.resolveJiti — anchor walk-up + argv fallback", () => {
 
   it("resolves jiti shipped as a direct dep of pi-dashboard-server (own-tree, no pi anywhere)", () => {
     // Simulates the npm-install path post enable-standalone-npm-install:
-    // - no managed pi at ~/.pi-dashboard/
+    // - no managed pi at ~/.omp-dashboard/
     // - no system pi on PATH
     // - no caller-supplied anchor
     // - jiti lives in pi-dashboard-server's own node_modules, reachable

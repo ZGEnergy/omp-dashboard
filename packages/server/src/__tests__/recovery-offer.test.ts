@@ -26,7 +26,7 @@ function seedCandidate(sessionsDir: string, id: string, live: boolean): void {
 }
 
 function writeConfig(mode: string): void {
-  const dir = path.join(os.homedir(), ".pi", "dashboard");
+  const dir = path.join(os.homedir(), ".omp", "dashboard");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "config.json"), JSON.stringify({ reopenSessionsAfterShutdown: mode }));
 }

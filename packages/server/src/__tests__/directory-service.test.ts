@@ -42,7 +42,7 @@ vi.mock("../session-file-reader.js", () => ({
 }));
 
 // Mock the pi-coding-agent SessionManager (legacy, kept for compatibility)
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+vi.mock("@oh-my-pi/pi-coding-agent", () => ({
   SessionManager: {
     list: vi.fn(async () => []),
     open: vi.fn(() => ({
@@ -153,8 +153,8 @@ describe("DirectoryService", () => {
           startedAt: Date.now(),
           modifiedAt: Date.now(),
           firstMessage: "hello",
-          sessionFile: "/project/.pi/sessions/hist-1.jsonl",
-          sessionDir: "/project/.pi/sessions",
+          sessionFile: "/project/.omp/sessions/hist-1.jsonl",
+          sessionDir: "/project/.omp/sessions",
         },
       ]);
 
@@ -166,7 +166,7 @@ describe("DirectoryService", () => {
       expect(sessions).toHaveLength(1);
       expect(sessions[0].id).toBe("hist-1");
       expect(sessions[0].cwd).toBe("/project");
-      expect(sessions[0].sessionFile).toBe("/project/.pi/sessions/hist-1.jsonl");
+      expect(sessions[0].sessionFile).toBe("/project/.omp/sessions/hist-1.jsonl");
     });
 
     it("returns empty array when no sessions found", async () => {

@@ -30,7 +30,7 @@ function makeMockPi() {
 }
 
 function writeProvidersJson(home: string, providers: Record<string, any>) {
-  const dir = join(home, ".pi", "agent");
+  const dir = join(home, ".omp", "agent");
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, "providers.json"),
@@ -173,7 +173,7 @@ describe("reloadProviders", () => {
     const mod = await importFresh();
     const { pi } = makeMockPi();
 
-    const dir = join(tmpHome, ".pi", "agent");
+    const dir = join(tmpHome, ".omp", "agent");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "providers.json"), "not valid json {", "utf-8");
 
@@ -402,7 +402,7 @@ describe("reloadProviders", () => {
   // shortly after `activate()` kicked off async `registerEntry()` calls.
   // The catalogue's `custom: true` flag MUST be set on that first push,
   // even when each provider's `/v1/models` endpoint hasn't responded yet —
-  // otherwise custom providers from `~/.pi/agent/providers.json` leak into
+  // otherwise custom providers from `~/.omp/agent/providers.json` leak into
   // Settings → Provider Authentication → API Keys (where they don't belong;
   // the LLM Providers section already manages them).
 

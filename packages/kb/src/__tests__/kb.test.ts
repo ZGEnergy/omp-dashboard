@@ -153,7 +153,7 @@ describe("config layering", () => {
     const cfg = loadConfig(dir, { configPath: join(dir, "missing.json") });
     expect(cfg.maxFileCount).toBeNull();
     expect(cfg.include).toContain("**/*.md");
-    expect(cfg.dbPath).toContain(".pi/dashboard/kb/index.db");
+    expect(cfg.dbPath).toContain(".omp/dashboard/kb/index.db");
   });
 
   it("project config fills absent fields from defaults; legacy roots[] → sources", () => {
@@ -218,13 +218,13 @@ describe("kb init", () => {
     const sub = join(dir, "dry");
     mkdirSync(sub, { recursive: true });
     kbInit({ cwd: sub, dryRun: true, sources: ["x"] });
-    expect(existsSync(join(sub, ".pi", "dashboard", "knowledge_base.json"))).toBe(false);
+    expect(existsSync(join(sub, ".omp", "dashboard", "knowledge_base.json"))).toBe(false);
   });
 
   it("--global targets the global path", () => {
     const r = kbInit({ global: true, dryRun: true });
-    expect(r.configPath).toContain(".pi/dashboard/knowledge_base.json");
-    expect(r.configPath).not.toBe(join(dir, ".pi", "dashboard", "knowledge_base.json"));
+    expect(r.configPath).toContain(".omp/dashboard/knowledge_base.json");
+    expect(r.configPath).not.toBe(join(dir, ".omp", "dashboard", "knowledge_base.json"));
   });
 });
 

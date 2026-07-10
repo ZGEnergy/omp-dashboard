@@ -58,8 +58,8 @@ function commandBasename(command: string): string {
 
 /**
  * Extract a plugin name from a pi-agent plugin path of the form
- * `…/.pi/agent/**\/<name>/<file>` (e.g.
- * `bun /Users/x/.pi/agent/npm/node_modules/context-mode/server.bundle.mjs`
+ * `…/.omp/agent/**\/<name>/<file>` (e.g.
+ * `bun /Users/x/.omp/agent/npm/node_modules/context-mode/server.bundle.mjs`
  * → `context-mode`). Returns `undefined` when the command is not a plugin
  * path.
  */

@@ -198,7 +198,7 @@ describe("memory-event-store", () => {
       // (skill regression fix).
       const store = createMemoryEventStore(neverPinned); // production defaults
       const bigBody = "Diagnose failed CI runs. ".repeat(2000); // ~50KB body
-      const envelope = `<skill name="ci-troubleshoot" location="/u/.pi/skills/ci-troubleshoot/SKILL.md">\n${bigBody}\n</skill>\n\nplease check run 42`;
+      const envelope = `<skill name="ci-troubleshoot" location="/u/.omp/skills/ci-troubleshoot/SKILL.md">\n${bigBody}\n</skill>\n\nplease check run 42`;
       const event: DashboardEvent = {
         eventType: "message_start",
         timestamp: Date.now(),

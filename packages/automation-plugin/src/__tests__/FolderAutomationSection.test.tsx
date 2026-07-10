@@ -33,8 +33,8 @@ afterEach(() => {
 describe("FolderAutomationSection", () => {
   it("renders OpenSpec-parity markup: uppercase title, refresh, + New chip", async () => {
     listAutomations.mockResolvedValueOnce([
-      { name: "a", scope: "folder", dir: "/r/.pi/automation/a", valid: true },
-      { name: "b", scope: "global", dir: "~/.pi/automation/b", valid: true },
+      { name: "a", scope: "folder", dir: "/r/.omp/automation/a", valid: true },
+      { name: "b", scope: "global", dir: "~/.omp/automation/b", valid: true },
     ]);
     const { getByTestId } = render(<FolderAutomationSection folder={{ cwd: "/r" }} />);
     const board = await waitFor(() => getByTestId("folder-automation-open-board"));

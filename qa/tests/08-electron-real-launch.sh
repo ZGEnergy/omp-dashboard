@@ -4,7 +4,7 @@
 # Asserts:
 #   1. Main process reaches a healthy /api/health within 90 s.
 #   2. /api/health.starter == "Electron".
-#   3. ~/.pi/dashboard/server.log is non-empty (catches spawnDetached
+#   3. ~/.omp/dashboard/server.log is non-empty (catches spawnDetached
 #      stdio[1]='ignore' regression).
 #   4. Electron parent stdout/stderr does not contain "FATAL"
 #      (catches the v0.4.6 jiti FATAL bug from a degraded managed dir).
@@ -50,7 +50,7 @@ echo "=== Test: Electron real launch (headless, xvfb) ==="
 echo "AppImage: $APPIMAGE"
 
 ELECTRON_LOG="/tmp/electron-stdout-$$.log"
-SERVER_LOG="$HOME/.pi/dashboard/server.log"
+SERVER_LOG="$HOME/.omp/dashboard/server.log"
 PORT=8000
 
 # Wipe any stale server log so size assertion reflects this run only.
@@ -65,7 +65,7 @@ rm -f "$SERVER_LOG"
 # config the CLI reads (~/.config/openspec/config.json). Strong-assert when the
 # seed lands; SKIP the openspec assertion only if it cannot be created.
 seed_openspec() {
-  local managed="$HOME/.pi-dashboard/node_modules"
+  local managed="$HOME/.omp-dashboard/node_modules"
   local pkgdir="$managed/@fission-ai/openspec/bin"
   local bindir="$managed/.bin"
   OS_CONFIG="$HOME/.config/openspec/config.json"
@@ -161,7 +161,7 @@ if [ "$STARTER" != "Electron" ]; then
 fi
 echo "  ✓ starter == Electron"
 
-# Assert ~/.pi/dashboard/server.log non-empty (Bug 2 regression guard).
+# Assert ~/.omp/dashboard/server.log non-empty (Bug 2 regression guard).
 if [ ! -f "$SERVER_LOG" ]; then
   echo "FAIL: $SERVER_LOG missing after successful spawn"
   exit 1

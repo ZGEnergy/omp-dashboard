@@ -109,7 +109,7 @@ export function FlowAgentCard({
 
   // Fetch the code node's handler .ts when its popover opens. `codeTarget` is
   // emitted absolute by the upstream flow runtime, so it is passed verbatim to
-  // the resource-file endpoint (allow-list accepts `<cwd>/.pi/...`).
+  // the resource-file endpoint (allow-list accepts `<cwd>/.omp/...`).
   // See change: open-code-handler-from-flow-card.
   useEffect(() => {
     if (!codeSourceOpen) return;

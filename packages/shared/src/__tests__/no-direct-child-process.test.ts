@@ -27,7 +27,7 @@ const ALLOWLIST: readonly string[] = [
   // Legacy-pi cleanup needs a synchronous npm-root probe at server
   // startup; predates the platform/exec wrapper. See origin commit
   // ab711621 (feat(bootstrap): detect + one-click cleanup of legacy
-  // @mariozechner/pi-coding-agent).
+  // @oh-my-pi/pi-coding-agent).
   "packages/server/src/legacy-pi-cleanup.ts",
   // The startup recovery HTTP server runs precisely when top-level
   // dependencies are missing (corrupted node_modules) — importing the

@@ -14,8 +14,8 @@ const data: PiResourcesResult = {
   local: {
     extensions: [],
     skills: [
-      { name: "code-review", description: "Review code.", filePath: "/p/.pi/skills/code-review.md", type: "skill", enabled: true },
-      { name: "faq-mine", description: "Mine the FAQ.", filePath: "/p/.pi/skills/faq-mine.md", type: "skill", enabled: true },
+      { name: "code-review", description: "Review code.", filePath: "/p/.omp/skills/code-review.md", type: "skill", enabled: true },
+      { name: "faq-mine", description: "Mine the FAQ.", filePath: "/p/.omp/skills/faq-mine.md", type: "skill", enabled: true },
     ],
     prompts: [],
     agents: [],
@@ -23,7 +23,7 @@ const data: PiResourcesResult = {
   global: {
     extensions: [],
     skills: [
-      { name: "a11y", description: "Accessibility.", filePath: "/g/.pi/agent/skills/a11y.md", type: "skill", enabled: true },
+      { name: "a11y", description: "Accessibility.", filePath: "/g/.omp/agent/skills/a11y.md", type: "skill", enabled: true },
     ],
     prompts: [],
     agents: [],
@@ -35,7 +35,7 @@ const data: PiResourcesResult = {
       scope: "local",
       resources: {
         extensions: [],
-        skills: [{ name: "openspec-explore", description: "Explore.", filePath: "/p/.pi/skills/openspec-explore.md", type: "skill", enabled: true }],
+        skills: [{ name: "openspec-explore", description: "Explore.", filePath: "/p/.omp/skills/openspec-explore.md", type: "skill", enabled: true }],
         prompts: [],
         agents: [],
       },

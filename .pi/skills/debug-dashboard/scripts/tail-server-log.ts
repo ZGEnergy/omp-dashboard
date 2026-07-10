@@ -15,7 +15,7 @@ import { createReadStream, readFileSync, statSync, existsSync, watchFile } from 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const LOG = join(homedir(), '.pi', 'dashboard', 'server.log');
+const LOG = join(homedir(), '.omp', 'dashboard', 'server.log');
 const BANNER = /^=== \[/;
 const ERROR_RX = /error|fail|warn|throw|crash|fatal/i;
 

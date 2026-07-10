@@ -1,6 +1,6 @@
 /**
  * Session scanner — discovers all sessions by scanning
- * `~/.pi/agent/sessions/` and reading `.meta.json` sidecars.
+ * `~/.omp/agent/sessions/` and reading `.meta.json` sidecars.
  * Falls back to `.jsonl` parsing for sessions without cached meta.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";

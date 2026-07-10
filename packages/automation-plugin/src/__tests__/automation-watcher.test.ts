@@ -30,7 +30,7 @@ describe("createAutomationWatcher (fs integration)", () => {
   let base: string;
   beforeEach(() => {
     base = fs.mkdtempSync(path.join(os.tmpdir(), "auto-watch-"));
-    fs.mkdirSync(path.join(base, ".pi", "automation", "nightly"), { recursive: true });
+    fs.mkdirSync(path.join(base, ".omp", "automation", "nightly"), { recursive: true });
   });
   afterEach(() => {
     fs.rmSync(base, { recursive: true, force: true });
@@ -44,7 +44,7 @@ describe("createAutomationWatcher (fs integration)", () => {
     });
     expect(watcher.attach(base)).toBe(true);
 
-    const yamlPath = path.join(base, ".pi", "automation", "nightly", "automation.yaml");
+    const yamlPath = path.join(base, ".omp", "automation", "nightly", "automation.yaml");
     // Burst of writes within the debounce window.
     for (let i = 0; i < 3; i++) {
       fs.writeFileSync(yamlPath, `# edit ${i}\non: { kind: schedule, cron: "* * * * *" }\n`);

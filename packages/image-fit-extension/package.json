@@ -32,18 +32,14 @@
     "jimp": "^1.6.1"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@mariozechner/pi-coding-agent": "*"
+    "@oh-my-pi/pi-coding-agent": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-coding-agent": {
-      "optional": true
-    },
-    "@mariozechner/pi-coding-agent": {
+    "@oh-my-pi/pi-coding-agent": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@oh-my-pi/pi-coding-agent": "*"
   }
 }

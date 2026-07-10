@@ -98,7 +98,7 @@ describe("SubagentPopoutPage", () => {
     const session = sessionWithAgent("abc123", {
       displayName: "code-reviewer",
       status: "completed",
-      agentMdPath: "/home/u/.pi/agent/agents/CodeReviewer.md",
+      agentMdPath: "/home/u/.omp/agent/agents/CodeReviewer.md",
       result: "LGTM",
     });
     renderWithPrimitives(
@@ -113,7 +113,7 @@ describe("SubagentPopoutPage", () => {
     // The path renders as monospace text under the displayName.
     // It appears in both the chrome header and the SubagentDetailView header,
     // so we just check at least one occurrence.
-    const matches = screen.getAllByText("/home/u/.pi/agent/agents/CodeReviewer.md");
+    const matches = screen.getAllByText("/home/u/.omp/agent/agents/CodeReviewer.md");
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 });

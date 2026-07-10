@@ -15,13 +15,13 @@ import { registerPiChangelogRoutes } from "../routes/pi-changelog-routes.js";
 import { _resetChangelogCache } from "../changelog-parser.js";
 
 // We can't easily patch findChangelogPath at import-time (vitest module
-// mocks vary), so we set up a fake managed install at HOME/.pi-dashboard
+// mocks vary), so we set up a fake managed install at HOME/.omp-dashboard
 // and rely on findChangelogPath's defaultManagedDir() reading $HOME.
 let tmpHome: string;
 let originalHome: string | undefined;
 
 function makeManagedPkg(pkg: string, files: Record<string, string>): string {
-  const dir = path.join(tmpHome, ".pi-dashboard", "node_modules", pkg);
+  const dir = path.join(tmpHome, ".omp-dashboard", "node_modules", pkg);
   fs.mkdirSync(dir, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, name), content);
@@ -87,21 +87,21 @@ describe("pi-changelog-routes", () => {
   });
 
   it("returns 200 with filtered releases for a valid range", async () => {
-    makeManagedPkg("@mariozechner/pi-coding-agent", {
+    makeManagedPkg("@oh-my-pi/pi-coding-agent", {
       "CHANGELOG.md": SAMPLE_CHANGELOG,
       "package.json": JSON.stringify({
-        name: "@mariozechner/pi-coding-agent",
+        name: "@oh-my-pi/pi-coding-agent",
         version: "0.70.0",
         repository: "https://github.com/badlogic/pi-mono.git",
       }),
     });
     const res = await app.inject({
       method: "GET",
-      url: "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=0.68.0&to=0.70.0",
+      url: "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=0.68.0&to=0.70.0",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.pkg).toBe("@mariozechner/pi-coding-agent");
+    expect(body.pkg).toBe("@oh-my-pi/pi-coding-agent");
     expect(body.from).toBe("0.68.0");
     expect(body.to).toBe("0.70.0");
     // (0.68.0, 0.70.0] → 0.69.0 + 0.70.0
@@ -114,16 +114,16 @@ describe("pi-changelog-routes", () => {
   });
 
   it("hasBreaking is false when no release in range has breaking changes", async () => {
-    makeManagedPkg("@mariozechner/pi-coding-agent", {
+    makeManagedPkg("@oh-my-pi/pi-coding-agent", {
       "CHANGELOG.md": SAMPLE_CHANGELOG,
       "package.json": JSON.stringify({
-        name: "@mariozechner/pi-coding-agent",
+        name: "@oh-my-pi/pi-coding-agent",
         version: "0.68.0",
       }),
     });
     const res = await app.inject({
       method: "GET",
-      url: "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=0.67.0&to=0.68.0",
+      url: "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=0.67.0&to=0.68.0",
     });
     const body = res.json();
     expect(body.releases.map((r: any) => r.version)).toEqual(["0.68.0"]);
@@ -155,7 +155,7 @@ describe("pi-changelog-routes", () => {
     // Whitelisted package but nothing on disk.
     const res = await app.inject({
       method: "GET",
-      url: "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=0.68.0&to=0.70.0",
+      url: "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=0.68.0&to=0.70.0",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -167,7 +167,7 @@ describe("pi-changelog-routes", () => {
   it("rejects missing from/to with 400", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=0.68.0",
+      url: "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=0.68.0",
     });
     expect(res.statusCode).toBe(400);
   });
@@ -175,7 +175,7 @@ describe("pi-changelog-routes", () => {
   it("rejects unparseable versions with 400", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=junk&to=0.70.0",
+      url: "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=junk&to=0.70.0",
     });
     expect(res.statusCode).toBe(400);
   });
@@ -192,13 +192,13 @@ describe("pi-changelog-routes", () => {
   // sweep.
 
   it("returns no releases when from === to", async () => {
-    makeManagedPkg("@mariozechner/pi-coding-agent", {
+    makeManagedPkg("@oh-my-pi/pi-coding-agent", {
       "CHANGELOG.md": SAMPLE_CHANGELOG,
       "package.json": "{}",
     });
     const res = await app.inject({
       method: "GET",
-      url: "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=0.70.0&to=0.70.0",
+      url: "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=0.70.0&to=0.70.0",
     });
     const body = res.json();
     // Half-open (from, to] — equal endpoints means range is empty.
@@ -207,13 +207,13 @@ describe("pi-changelog-routes", () => {
   });
 
   it("derives null changelogUrl when repository is missing or non-GitHub", async () => {
-    makeManagedPkg("@mariozechner/pi-coding-agent", {
+    makeManagedPkg("@oh-my-pi/pi-coding-agent", {
       "CHANGELOG.md": SAMPLE_CHANGELOG,
       "package.json": JSON.stringify({ name: "x", version: "0.70.0" }),
     });
     const res = await app.inject({
       method: "GET",
-      url: "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=0.68.0&to=0.70.0",
+      url: "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=0.68.0&to=0.70.0",
     });
     expect(res.json().changelogUrl).toBeNull();
   });
@@ -263,7 +263,7 @@ describe("pi-changelog-routes remote source", () => {
 `;
 
   function makePkg(home: string, pkg: string, files: Record<string, string>): string {
-    const dir = path.join(home, ".pi-dashboard", "node_modules", pkg);
+    const dir = path.join(home, ".omp-dashboard", "node_modules", pkg);
     fs.mkdirSync(dir, { recursive: true });
     for (const [name, content] of Object.entries(files)) {
       fs.writeFileSync(path.join(dir, name), content);
@@ -297,10 +297,10 @@ describe("pi-changelog-routes remote source", () => {
   });
 
   it("prefers remote CHANGELOG over local when both are available", async () => {
-    makePkg(tmpHomeRemote, "@mariozechner/pi-coding-agent", {
+    makePkg(tmpHomeRemote, "@oh-my-pi/pi-coding-agent", {
       "CHANGELOG.md": SAMPLE_CHANGELOG_LOCAL,
       "package.json": JSON.stringify({
-        name: "@mariozechner/pi-coding-agent",
+        name: "@oh-my-pi/pi-coding-agent",
         version: "0.70.0",
         repository: { type: "git", url: "git+https://github.com/badlogic/pi-mono.git", directory: "packages/coding-agent" },
       }),
@@ -314,7 +314,7 @@ describe("pi-changelog-routes remote source", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=0.70.0&to=0.99.0",
+      url: "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=0.70.0&to=0.99.0",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -330,10 +330,10 @@ describe("pi-changelog-routes remote source", () => {
   });
 
   it("falls back to local CHANGELOG when remote fails", async () => {
-    makePkg(tmpHomeRemote, "@mariozechner/pi-coding-agent", {
+    makePkg(tmpHomeRemote, "@oh-my-pi/pi-coding-agent", {
       "CHANGELOG.md": SAMPLE_CHANGELOG_LOCAL,
       "package.json": JSON.stringify({
-        name: "@mariozechner/pi-coding-agent",
+        name: "@oh-my-pi/pi-coding-agent",
         version: "0.70.0",
         repository: { type: "git", url: "git+https://github.com/badlogic/pi-mono.git" },
       }),
@@ -349,7 +349,7 @@ describe("pi-changelog-routes remote source", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=0.69.0&to=0.70.0",
+      url: "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=0.69.0&to=0.70.0",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -359,10 +359,10 @@ describe("pi-changelog-routes remote source", () => {
 
   it("PI_OFFLINE=1 skips remote and reads local directly", async () => {
     process.env.PI_OFFLINE = "1";
-    makePkg(tmpHomeRemote, "@mariozechner/pi-coding-agent", {
+    makePkg(tmpHomeRemote, "@oh-my-pi/pi-coding-agent", {
       "CHANGELOG.md": SAMPLE_CHANGELOG_LOCAL,
       "package.json": JSON.stringify({
-        name: "@mariozechner/pi-coding-agent",
+        name: "@oh-my-pi/pi-coding-agent",
         version: "0.70.0",
         repository: "https://github.com/badlogic/pi-mono.git",
       }),
@@ -380,7 +380,7 @@ describe("pi-changelog-routes remote source", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=0.69.0&to=0.99.0",
+      url: "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=0.69.0&to=0.99.0",
     });
     expect(res.statusCode).toBe(200);
     expect(fetchCalled).toBe(false);
@@ -390,10 +390,10 @@ describe("pi-changelog-routes remote source", () => {
   });
 
   it("second request within TTL serves cached remote without re-fetching", async () => {
-    makePkg(tmpHomeRemote, "@mariozechner/pi-coding-agent", {
+    makePkg(tmpHomeRemote, "@oh-my-pi/pi-coding-agent", {
       "CHANGELOG.md": SAMPLE_CHANGELOG_LOCAL,
       "package.json": JSON.stringify({
-        name: "@mariozechner/pi-coding-agent",
+        name: "@oh-my-pi/pi-coding-agent",
         version: "0.70.0",
         repository: "https://github.com/badlogic/pi-mono.git",
       }),
@@ -410,7 +410,7 @@ describe("pi-changelog-routes remote source", () => {
     }) as any;
 
     const url =
-      "/api/pi-core/changelog?pkg=@mariozechner/pi-coding-agent&from=0.70.0&to=0.99.0";
+      "/api/pi-core/changelog?pkg=@oh-my-pi/pi-coding-agent&from=0.70.0&to=0.99.0";
     await app.inject({ method: "GET", url });
     await app.inject({ method: "GET", url });
     expect(fetchCalls).toBe(1);

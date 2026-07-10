@@ -114,10 +114,10 @@ describe("getLatestPiRelease", () => {
   it("returns parsed { version, packageName } on success", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ version: "0.74.0", packageName: "@earendil-works/pi-coding-agent" }),
+      json: async () => ({ version: "0.74.0", packageName: "@oh-my-pi/pi-coding-agent" }),
     });
     const out = await getLatestPiRelease("0.70.6", { fetchImpl });
-    expect(out).toEqual({ version: "0.74.0", packageName: "@earendil-works/pi-coding-agent" });
+    expect(out).toEqual({ version: "0.74.0", packageName: "@oh-my-pi/pi-coding-agent" });
   });
 
   it("returns undefined when packageName is absent", async () => {

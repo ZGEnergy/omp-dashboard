@@ -20,7 +20,7 @@ import {
 import type { NetworkGuard } from "./route-deps.js";
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 
-const CONFIG_DIR = path.join(os.homedir(), ".pi", "dashboard");
+const CONFIG_DIR = path.join(os.homedir(), ".omp", "dashboard");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
 function readRawConfig(): Record<string, unknown> {

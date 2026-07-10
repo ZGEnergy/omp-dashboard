@@ -23,7 +23,7 @@ export type TestProviderResult =
  *   - a literal string
  *   - a `$ENV_VAR` reference (resolved server-side)
  *   - `"***"` for an already-saved provider (the server resolves the real
- *     value from `~/.pi/agent/providers.json` using `name`).
+ *     value from `~/.omp/agent/providers.json` using `name`).
  */
 export async function testProvider(
   input: TestProviderInput,

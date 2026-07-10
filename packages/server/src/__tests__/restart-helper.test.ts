@@ -97,7 +97,7 @@ describe("buildOrchestratorScript", () => {
     expect(script).not.toContain(JSON.stringify(urlForm));
   });
 
-  it("references ~/.pi/dashboard/restart.log for failure logging", () => {
+  it("references ~/.omp/dashboard/restart.log for failure logging", () => {
     const script = buildOrchestratorScript(baseParams);
     expect(script).toMatch(/restart\.log/);
     expect(script).toMatch(/fs\.appendFileSync/);

@@ -1,6 +1,6 @@
 /**
  * Top-of-page banner rendered when any `required` recommended extension
- * is not active in pi (not present in ~/.pi/agent/settings.json packages[]).
+ * is not active in pi (not present in ~/.omp/agent/settings.json packages[]).
  *
  * - Consumes useRecommendedExtensions and filters to required + !activeInPi.
  * - If the missing required entries are already on disk (just not active),

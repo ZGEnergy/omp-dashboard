@@ -151,7 +151,7 @@ function defaultHealthProbe(port: number): Promise<HealthProbeResult> {
 
 /**
  * Append a single `[<ISO-ts>] [launch-source] ...` line to the dashboard
- * log file (`~/.pi/dashboard/server.log`). Mirrors the header-line pattern
+ * log file (`~/.omp/dashboard/server.log`). Mirrors the header-line pattern
  * used by `launchDashboardServer`.
  *
  * Best-effort: if mkdir/open/write fails, swallow — log-routing must
@@ -160,7 +160,7 @@ function defaultHealthProbe(port: number): Promise<HealthProbeResult> {
 function appendDashboardLog(message: string, logFile?: string): void {
   try {
     const file =
-      logFile ?? path.join(os.homedir(), ".pi", "dashboard", "server.log");
+      logFile ?? path.join(os.homedir(), ".omp", "dashboard", "server.log");
     fsMkdirSync(path.dirname(file), { recursive: true });
     const fd = fsOpenSync(file, "a");
     try {
@@ -184,7 +184,7 @@ function logLaunchSource(level: "warn" | "error", message: string, logFile?: str
 }
 
 // Re-exported for tests so they can assert log-file content without
-// touching the real `~/.pi/dashboard/server.log`.
+// touching the real `~/.omp/dashboard/server.log`.
 export const _testing = { appendDashboardLog, logLaunchSource };
 
 function buildProbes(partial?: Partial<LaunchSourceProbes>): LaunchSourceProbes {
@@ -311,7 +311,7 @@ export async function spawnFromSource(
     onChildExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
   },
 ): Promise<SpawnResult> {
-  const logFile = opts?.logFile ?? path.join(os.homedir(), ".pi", "dashboard", "server.log");
+  const logFile = opts?.logFile ?? path.join(os.homedir(), ".omp", "dashboard", "server.log");
 
   // Use getBundledNodeDir() — never path.dirname(path.dirname(getBundledNodePath())).
   // The dirname-chain pattern is POSIX-only (<res>/node/bin/node → <res>/node)

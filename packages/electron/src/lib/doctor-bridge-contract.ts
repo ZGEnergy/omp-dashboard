@@ -15,13 +15,13 @@ import type { DoctorReport } from "@blackbelt-technology/pi-dashboard-shared/doc
 export interface DoctorBridge {
   /** Run all doctor checks and return the full report. Concurrent calls are serialized. */
   run(): Promise<DoctorReport>;
-  /** Open ~/.pi-dashboard/server.log in the platform default viewer. */
+  /** Open ~/.omp-dashboard/server.log in the platform default viewer. */
   openLog(): Promise<{ ok: boolean; path?: string }>;
-  /** Open ~/.pi-dashboard/doctor.log; resolves with `{exists:false}` when absent. */
+  /** Open ~/.omp-dashboard/doctor.log; resolves with `{exists:false}` when absent. */
   openDoctorLog(): Promise<{ ok: boolean; exists: boolean; path?: string }>;
   /** Copy text to the system clipboard (used by [Copy as Markdown] / [Copy as Plain]). */
   copy(text: string): Promise<{ ok: boolean }>;
-  /** Open ~/.pi-dashboard/ in the OS file manager. */
+  /** Open ~/.omp-dashboard/ in the OS file manager. */
   openManagedDir(): Promise<{ ok: boolean; path: string }>;
 }
 

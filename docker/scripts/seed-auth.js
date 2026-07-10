@@ -19,7 +19,7 @@ const PROVIDER_ENV = {
   GEMINI_API_KEY: "google",
 };
 
-const authPath = process.env.PI_AUTH_PATH || join(homedir(), ".pi", "agent", "auth.json");
+const authPath = process.env.PI_AUTH_PATH || join(homedir(), ".omp", "agent", "auth.json");
 
 if (existsSync(authPath)) {
   console.log(`[seed-auth] ${authPath} already exists — leaving untouched.`);

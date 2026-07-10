@@ -24,7 +24,7 @@ BODY="${3:-}"
 
 # ── Discover port ──────────────────────────────────────────────────
 
-CONFIG_FILE="$HOME/.pi/dashboard/config.json"
+CONFIG_FILE="$HOME/.omp/dashboard/config.json"
 
 if [ -n "${DASHBOARD_PORT:-}" ]; then
   PORT="$DASHBOARD_PORT"

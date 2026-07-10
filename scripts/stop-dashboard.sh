@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-CONFIG_FILE="$HOME/.pi/dashboard/config.json"
+CONFIG_FILE="$HOME/.omp/dashboard/config.json"
 DEFAULT_PORT=8000
 
 # Read port from config if available

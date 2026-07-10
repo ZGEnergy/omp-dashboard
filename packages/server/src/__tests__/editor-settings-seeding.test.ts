@@ -14,7 +14,7 @@ const CWD = "/tmp/project-under-test";
 
 function settingsPathFor(home: string, cwd: string): string {
   const hash = createHash("sha256").update(cwd).digest("hex").slice(0, 12);
-  return path.join(home, ".pi", "dashboard", "editors", hash, "User", "settings.json");
+  return path.join(home, ".omp", "dashboard", "editors", hash, "User", "settings.json");
 }
 
 function readSettings(home: string, cwd: string): Record<string, unknown> {

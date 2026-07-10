@@ -199,7 +199,7 @@ function binaryDef(binaryName: string, deps?: StrategyDeps): ToolDefinition {
  *
  * The bundled-node strategy hits the Electron-packaged npx at
  * `<resourcesPath>/node/bin/npx` (Unix) or `<resourcesPath>\node\npx.cmd`
- * (Windows). Managed-bin probes `~/.pi-dashboard/node_modules/.bin/npx`
+ * (Windows). Managed-bin probes `~/.omp-dashboard/node_modules/.bin/npx`
  * (a no-op post-`eliminate-electron-runtime-install` for clean Electron
  * installs, but kept for standalone-CLI callers that may have one).
  *
@@ -293,7 +293,7 @@ function bareImportPackageDirStrategy(
  * Helper: walks up from `fromUrl`'s directory looking for
  * `node_modules/<pkgName>/package.json` directly on the filesystem.
  *
- * Exports-map-immune: required because both `@earendil-works/pi-coding-agent`
+ * Exports-map-immune: required because both `@oh-my-pi/pi-coding-agent`
  * and `@fission-ai/openspec` declare `exports` blocks that omit
  * `./package.json`, so `createRequire(from).resolve("<pkg>/package.json")`
  * returns `ERR_PACKAGE_PATH_NOT_EXPORTED` in modern Node. This walk is
@@ -450,51 +450,26 @@ function makeNodeScriptToArgv(deps?: StrategyDeps): ToolDefinition["toArgv"] {
 }
 
 /**
- * Executor definition for `pi` — ONE tool, OS dispatch inside.
+ * Executor for the OMP agent. OMP ships as a single Bun binary (`omp`), so we
+ * resolve it on PATH (or via an explicit override) and spawn it directly — its
+ * `#!/usr/bin/env bun` shebang runs it under Bun. We deliberately do NOT wrap a
+ * resolved `cli.js` with `node` (the pi-mono path): omp's CLI uses Bun-only
+ * APIs (bun:sqlite, native Bun imports) and would crash under Node.
  *
- * On Windows, the strategy chain finds pi-coding-agent's `dist/cli.js`
- * (managed → bare-import → npm-global), and `toArgv` wraps it with
- * `node.exe` to produce `[node.exe, cli.js]`. Falls back to `pi.cmd`
- * on PATH when the cli.js is nowhere to be found.
- *
- * On Unix, the chain first tries `bare-import` so a bundled
- * `<server>/node_modules/@earendil-works/pi-coding-agent/dist/cli.js`
- * wins over a system install. This is load-bearing for the Electron
- * immutable-bundle architecture (see openspec change
- * `eliminate-electron-runtime-install` finding F9). On a clean machine
- * with no system `pi` and no managed `~/.pi-dashboard/node/bin/`,
- * bare-import resolves the bundled cli.js (`#!/usr/bin/env node`
- * shebang, executable) and `nodeScriptToArgv` returns `[cli.js]`
- * directly. Without this strategy, the server falls into
- * `bootstrapInstall(...)` and writes to `~/.pi-dashboard/` — the
- * exact failure mode the immutable-bundle architecture eliminates.
+ * Registered under the id `pi` so existing `registry.resolve("pi")` call sites
+ * are unchanged; only the resolved binary + argv shape differ.
  */
 function piExecutorDef(deps?: StrategyDeps): ToolDefinition {
-  const piPkgAliases = ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"];
-  const cliEntry = path.join("dist", "cli.js");
-
-  const winStrategies = [
-    overrideStrategy("pi", deps),
-    ...piPkgAliases.map((pkg) => bareImportCliStrategy(pkg, cliEntry, deps)),
-    ...piPkgAliases.map((pkg) => managedModuleStrategy(pkg, cliEntry, deps)),
-    ...piPkgAliases.map((pkg) => npmGlobalStrategy(pkg, cliEntry, deps)),
-    managedBinStrategy("pi", deps),
-    whereStrategy("pi", deps),
+  const strategies = [
+    overrideStrategy("omp", deps),
+    whereStrategy("omp", deps),
   ];
-
-  const unixStrategies = [
-    overrideStrategy("pi", deps),
-    ...piPkgAliases.map((pkg) => bareImportCliStrategy(pkg, cliEntry, deps)),
-    managedBinStrategy("pi", deps),
-    whereStrategy("pi", deps),
-  ];
-
   return {
     name: "pi",
     kind: "executor",
-    strategies: unixStrategies,
-    platformStrategies: { win32: winStrategies },
-    toArgv: makeNodeScriptToArgv(deps),
+    strategies,
+    platformStrategies: { win32: strategies },
+    toArgv: (resolved) => [resolved],
     classify,
   };
 }
@@ -729,19 +704,19 @@ export function registerDefaultTools(registry: ToolRegistry, deps?: StrategyDeps
   registry.register(
     moduleDefWithAliases(
       "pi-coding-agent",
-      ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"],
+      ["@oh-my-pi/pi-coding-agent", "@oh-my-pi/pi-coding-agent"],
       path.join("dist", "index.js"),
       deps,
     ),
   );
 
   // pi-ai module — used by model-proxy to call upstream LLM providers.
-  // Aliases: @earendil-works/pi-ai (preferred) + @mariozechner/pi-ai (legacy fallback).
+  // Aliases: @oh-my-pi/pi-ai (preferred) + @oh-my-pi/pi-ai (legacy fallback).
   // See change: add-dashboard-model-proxy.
   registry.register(
     moduleDefWithAliases(
       "pi-ai",
-      ["@earendil-works/pi-ai", "@mariozechner/pi-ai"],
+      ["@oh-my-pi/pi-ai", "@oh-my-pi/pi-ai"],
       path.join("dist", "index.js"),
       deps,
     ),

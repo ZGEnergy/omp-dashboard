@@ -24,14 +24,14 @@ const SHIM_DIR = FIXTURES_DIR;
 
 // macOS UDS sun_path is 104 bytes. The root `npm test` HOME under
 // /var/folders/.../pi-test-XXXXXX is ~73 chars before any further nesting,
-// which exceeds the limit once we append `.pi/dashboard/sessions/<uuid>.rpc.sock`.
+// which exceeds the limit once we append `.omp/dashboard/sessions/<uuid>.rpc.sock`.
 // Each test mints its OWN short HOME under /tmp/p... (≤ 12 chars), passed to
 // the keeper subprocess via env. The npm-test HOME isolation tripwire is
 // unaffected — we only override HOME for the spawned child, not the test
 // runner itself. We still create the per-test HOME under /tmp (not the npm-test
 // HOME) because /tmp is short, AND we keep the test isolated from production paths.
 function sessionsDirIn(home: string): string {
-  return path.join(home, ".pi", "dashboard", "sessions");
+  return path.join(home, ".omp", "dashboard", "sessions");
 }
 function sockPathIn(home: string, sid: string): string {
   return process.platform === "win32"

@@ -1,7 +1,7 @@
 /**
  * Rolling NDJSON log of failed pi session spawn attempts.
  *
- * Location: ~/.pi/dashboard/sessions/spawn-failures.log
+ * Location: ~/.omp/dashboard/sessions/spawn-failures.log
  * Rotation: single-shot at 10 MB (renames to .log.1, overwrites any prior .log.1).
  * Format:   one JSON object per line, terminated by \n.
  *
@@ -43,7 +43,7 @@ export function _setLogDirForTests(dir: string | null): void {
 }
 
 function logDir(): string {
-  return _logDirOverride ?? path.join(os.homedir(), ".pi", "dashboard", "sessions");
+  return _logDirOverride ?? path.join(os.homedir(), ".omp", "dashboard", "sessions");
 }
 
 function logPath(): string {

@@ -46,16 +46,16 @@
     "@blackbelt-technology/pi-dashboard-shared": "^0.5.4"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
+    "@oh-my-pi/pi-coding-agent": "*",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-coding-agent": {
+    "@oh-my-pi/pi-coding-agent": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
+    "@oh-my-pi/pi-coding-agent": "*",
     "typebox": "*",
     "vitest": "^2.1.8"
   }

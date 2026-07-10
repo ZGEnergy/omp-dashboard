@@ -11,7 +11,7 @@
  *  - A `FakeHealthServer` stands in for the dashboard server. Electron's
  *    bootstrap health-probes it, takes the `attach` arm, and reads a CRAFTED
  *    `/api/health` payload (zombie-shaped or version-mismatched).
- *  - A throwaway HOME dir carries `~/.pi/dashboard/config.json` (port pinned to
+ *  - A throwaway HOME dir carries `~/.omp/dashboard/config.json` (port pinned to
  *    the fake server) + the first-run marker (skips the wizard).
  *  - Native `dialog.showMessageBox` is stubbed in the main process via
  *    `electronApp.evaluate` (native modals cannot be clicked by automation).
@@ -123,19 +123,19 @@ export async function isPortInUse(port: number): Promise<boolean> {
 }
 
 /**
- * Create a throwaway HOME with `~/.pi/dashboard/config.json` (port pinned) and
+ * Create a throwaway HOME with `~/.omp/dashboard/config.json` (port pinned) and
  * the first-run marker (skips the wizard so the app takes the attach arm).
  * Returns the HOME path (caller removes it after).
  */
 export function makeThrowawayHome(port: number): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-elec-e2e-"));
-  const dashDir = path.join(home, ".pi", "dashboard");
+  const dashDir = path.join(home, ".omp", "dashboard");
   fs.mkdirSync(dashDir, { recursive: true });
   fs.writeFileSync(
     path.join(dashDir, "config.json"),
     JSON.stringify({ port, piPort: port + 999, knownServers: [] }),
   );
-  // First-run marker: getFirstRunMarkerPath() → ~/.pi/dashboard/first-run-done.
+  // First-run marker: getFirstRunMarkerPath() → ~/.omp/dashboard/first-run-done.
   fs.writeFileSync(path.join(dashDir, "first-run-done"), new Date().toISOString());
   return home;
 }

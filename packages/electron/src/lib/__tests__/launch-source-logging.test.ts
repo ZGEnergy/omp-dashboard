@@ -1,6 +1,6 @@
 /**
  * Bug C regression tests: `[launch-source]` diagnostics SHALL land in the
- * dashboard log file (~/.pi/dashboard/server.log) in addition to stderr.
+ * dashboard log file (~/.omp/dashboard/server.log) in addition to stderr.
  *
  * Why: packaged-Electron `.desktop` launches discard stderr on every host
  * OS shell, hiding every silent self-heal failure. The log-file write is
@@ -27,8 +27,8 @@ afterEach(() => {
 });
 
 describe("appendDashboardLog (Bug C)", () => {
-  it("creates ~/.pi/dashboard/server.log on first write", () => {
-    const logFile = path.join(tmpHome, ".pi", "dashboard", "server.log");
+  it("creates ~/.omp/dashboard/server.log on first write", () => {
+    const logFile = path.join(tmpHome, ".omp", "dashboard", "server.log");
     expect(fs.existsSync(logFile)).toBe(false);
 
     _testing.appendDashboardLog("first line", logFile);
@@ -40,7 +40,7 @@ describe("appendDashboardLog (Bug C)", () => {
   });
 
   it("appends multiple lines without truncating", () => {
-    const logFile = path.join(tmpHome, ".pi", "dashboard", "server.log");
+    const logFile = path.join(tmpHome, ".omp", "dashboard", "server.log");
     _testing.appendDashboardLog("first", logFile);
     _testing.appendDashboardLog("second", logFile);
     _testing.appendDashboardLog("third", logFile);
@@ -63,7 +63,7 @@ describe("appendDashboardLog (Bug C)", () => {
 
 describe("logLaunchSource (Bug C)", () => {
   it("writes to BOTH stderr (warn) and log file", () => {
-    const logFile = path.join(tmpHome, ".pi", "dashboard", "server.log");
+    const logFile = path.join(tmpHome, ".omp", "dashboard", "server.log");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       _testing.logLaunchSource("warn", "[launch-source] hello warn", logFile);
@@ -75,7 +75,7 @@ describe("logLaunchSource (Bug C)", () => {
   });
 
   it("writes to BOTH stderr (error) and log file", () => {
-    const logFile = path.join(tmpHome, ".pi", "dashboard", "server.log");
+    const logFile = path.join(tmpHome, ".omp", "dashboard", "server.log");
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       _testing.logLaunchSource("error", "[launch-source] hello error", logFile);
@@ -87,7 +87,7 @@ describe("logLaunchSource (Bug C)", () => {
   });
 
   it("strips the [launch-source] prefix in the log body so it doesn't double-prefix", () => {
-    const logFile = path.join(tmpHome, ".pi", "dashboard", "server.log");
+    const logFile = path.join(tmpHome, ".omp", "dashboard", "server.log");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       _testing.logLaunchSource("warn", "[launch-source] some detail", logFile);
@@ -101,7 +101,7 @@ describe("logLaunchSource (Bug C)", () => {
 });
 
 describe("integration: parsePreferOverride writes to log on bad value", () => {
-  it("logs to ~/.pi/dashboard/server.log when DASHBOARD_PREFER_SOURCE is invalid", () => {
+  it("logs to ~/.omp/dashboard/server.log when DASHBOARD_PREFER_SOURCE is invalid", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const result = parsePreferOverride({ DASHBOARD_PREFER_SOURCE: "bogusValue" });
@@ -110,7 +110,7 @@ describe("integration: parsePreferOverride writes to log on bad value", () => {
     } finally {
       warnSpy.mockRestore();
     }
-    const logFile = path.join(tmpHome, ".pi", "dashboard", "server.log");
+    const logFile = path.join(tmpHome, ".omp", "dashboard", "server.log");
     expect(fs.existsSync(logFile)).toBe(true);
     expect(fs.readFileSync(logFile, "utf-8")).toContain("bogusValue");
   });

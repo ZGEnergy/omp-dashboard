@@ -6,16 +6,16 @@
  * Two distinct directories were historically conflated by `~/`-anchored
  * `path.join` calls scattered across packages:
  *
- *   ~/.pi/dashboard/   — config + the *server* log (`server.log`)
- *   ~/.pi-dashboard/   — the *managed* install dir (npm packages, etc.)
+ *   ~/.omp/dashboard/   — config + the *server* log (`server.log`)
+ *   ~/.omp-dashboard/   — the *managed* install dir (npm packages, etc.)
  *                        Older bootstrap code also wrote an *installer*
- *                        log to `~/.pi-dashboard/server.log` (note: same
+ *                        log to `~/.omp-dashboard/server.log` (note: same
  *                        filename, different dir). That file is now
  *                        legacy/dead in the V2 launch path.
  *
  * Loading-page recovery surfaced this on 2026-05-17: the IPC handler
- * read `~/.pi-dashboard/server.log` (stale installer log from May 8)
- * while the live server wrote to `~/.pi/dashboard/server.log`.
+ * read `~/.omp-dashboard/server.log` (stale installer log from May 8)
+ * while the live server wrote to `~/.omp/dashboard/server.log`.
  *
  * All path math lives here. Every $HOME override goes through `env.homedir`
  * so tests can re-root without mutating `os.homedir()`.
@@ -55,7 +55,7 @@ function expandTilde(p: string, env?: DashboardPathsEnv): string {
  *   1. `config.json#piSessionsDir`            (highest)
  *   2. `process.env.PI_CODING_AGENT_SESSION_DIR`
  *   3. `process.env.PI_CODING_AGENT_DIR` + `/sessions`
- *   4. literal `~/.pi/agent/sessions`         (last-ditch)
+ *   4. literal `~/.omp/agent/sessions`         (last-ditch)
  * Each string layer is trimmed; whitespace-only is treated as unset and
  * falls through. Leading `~/` expands against `homedir`; absolute paths pass
  * through untouched.
@@ -76,26 +76,26 @@ export function resolvePiSessionsDir(env?: DashboardPathsEnv): string {
     pick(env?.piSessionsDir) ??
     pick(env?.sessionDirEnv ?? process.env.PI_CODING_AGENT_SESSION_DIR) ??
     (agentDir ? path.join(agentDir, "sessions") : undefined) ??
-    path.join(env?.homedir ?? os.homedir(), ".pi", "agent", "sessions")
+    path.join(env?.homedir ?? os.homedir(), ".omp", "agent", "sessions")
   );
 }
 
-/** `~/.pi/dashboard/` — config dir for `config.json`, `server.log`, etc. */
+/** `~/.omp/dashboard/` — config dir for `config.json`, `server.log`, etc. */
 export function getDashboardConfigDir(env?: DashboardPathsEnv): string {
-  return path.join(env?.homedir ?? os.homedir(), ".pi", "dashboard");
+  return path.join(env?.homedir ?? os.homedir(), ".omp", "dashboard");
 }
 
-/** `~/.pi/dashboard/server.log` — the live dashboard server's stdout/stderr log. */
+/** `~/.omp/dashboard/server.log` — the live dashboard server's stdout/stderr log. */
 export function getDashboardServerLogPath(env?: DashboardPathsEnv): string {
   return path.join(getDashboardConfigDir(env), "server.log");
 }
 
 /**
- * `~/.pi/dashboard/first-run-done` — sentinel file written by the Electron
+ * `~/.omp/dashboard/first-run-done` — sentinel file written by the Electron
  * wizard on completion. Presence means the one-step welcome was shown and
  * acknowledged; subsequent launches skip the wizard.
  *
- * Lives under `~/.pi/dashboard/` (not the legacy `~/.pi-dashboard/`) so it
+ * Lives under `~/.omp/dashboard/` (not the legacy `~/.omp-dashboard/`) so it
  * survives Electron whole-app updates and remains the same path across
  * all install layouts.
  *
@@ -105,13 +105,13 @@ export function getFirstRunMarkerPath(env?: DashboardPathsEnv): string {
   return path.join(getDashboardConfigDir(env), "first-run-done");
 }
 
-/** `~/.pi-dashboard/` — managed-install root (npm packages, etc.). Re-export. */
+/** `~/.omp-dashboard/` — managed-install root (npm packages, etc.). Re-export. */
 export function getManagedDir(env?: DashboardPathsEnv): string {
   return getManagedDirInternal(env);
 }
 
 /**
- * `~/.pi-dashboard/server.log` — the legacy *installer* log. Distinct from
+ * `~/.omp-dashboard/server.log` — the legacy *installer* log. Distinct from
  * the server log; left here so callers can be explicit about which file
  * they want and the grep tooling has a single canonical reference.
  */

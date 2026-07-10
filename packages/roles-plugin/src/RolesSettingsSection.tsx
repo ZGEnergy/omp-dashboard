@@ -3,7 +3,7 @@
  * `settings-section` slot under General tab.
  *
  * Roles AND models are GLOBAL in pi-flows / pi-coding-agent (single
- * `~/.pi/agent/providers.json`, single ModelRegistry per pi process). The
+ * `~/.omp/agent/providers.json`, single ModelRegistry per pi process). The
  * dashboard piggybacks on the existing `usePluginConfig` plumbing — every
  * other plugin's settings UI uses it — by having `useMessageHandler` route
  * incoming `roles_list` and `models_list` payloads through
@@ -43,7 +43,7 @@ interface ModelInfo {
  * Read-time migration helper for legacy bare-id role values.
  *
  * Before `add-ui-model-selector-primitive`, the inline picker stripped
- * the provider prefix on save, so older `~/.pi/agent/providers.json#roles`
+ * the provider prefix on save, so older `~/.omp/agent/providers.json#roles`
  * entries store bare ids like `"deepseek-v4-flash"`. This helper resolves
  * those for display only — it does NOT mutate the file. On the user's
  * next role pick, the canonical `"provider/id"` form is written.

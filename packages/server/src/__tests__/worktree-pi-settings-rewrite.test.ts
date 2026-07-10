@@ -1,7 +1,7 @@
 /**
  * Tests for `rewriteWorktreePiSettings` — the post-`git worktree add`
  * fixup that makes relative `packages[].source` in a worktree's
- * `.pi/settings.json` resolve against the MAIN repo's `.pi/` instead of
+ * `.omp/settings.json` resolve against the MAIN repo's `.omp/` instead of
  * the worktree's own.
  *
  * Pins the contract:
@@ -28,12 +28,12 @@ beforeEach(() => { workDir = realpathSync(mkdtempSync(join(tmpdir(), "wt-pi-sett
 afterEach(() => rmSync(workDir, { recursive: true, force: true }));
 
 function writeSettings(at: string, json: unknown): void {
-  mkdirSync(join(at, ".pi"), { recursive: true });
-  writeFileSync(join(at, ".pi", "settings.json"), JSON.stringify(json, null, 2));
+  mkdirSync(join(at, ".omp"), { recursive: true });
+  writeFileSync(join(at, ".omp", "settings.json"), JSON.stringify(json, null, 2));
 }
 
 function readSettings(at: string): any {
-  return JSON.parse(readFileSync(join(at, ".pi", "settings.json"), "utf-8"));
+  return JSON.parse(readFileSync(join(at, ".omp", "settings.json"), "utf-8"));
 }
 
 describe("rewriteWorktreePiSettings — unit", () => {
@@ -41,7 +41,7 @@ describe("rewriteWorktreePiSettings — unit", () => {
     const worktree = join(workDir, "wt");
     mkdirSync(worktree);
     rewriteWorktreePiSettings(worktree, workDir);
-    expect(existsSync(join(worktree, ".pi", "settings.json"))).toBe(false);
+    expect(existsSync(join(worktree, ".omp", "settings.json"))).toBe(false);
   });
 
   it("rewrites '..' source to absolute against main root", () => {
@@ -59,7 +59,7 @@ describe("rewriteWorktreePiSettings — unit", () => {
     mkdirSync(main, { recursive: true });
     writeSettings(worktree, { packages: [{ source: "../packages/extension" }] });
     rewriteWorktreePiSettings(worktree, main);
-    // resolves: <main>/.pi/../packages/extension = <main>/packages/extension
+    // resolves: <main>/.omp/../packages/extension = <main>/packages/extension
     expect(readSettings(worktree).packages[0].source).toBe(join(main, "packages", "extension"));
   });
 
@@ -69,7 +69,7 @@ describe("rewriteWorktreePiSettings — unit", () => {
     mkdirSync(main, { recursive: true });
     writeSettings(worktree, { packages: [{ source: "./local" }] });
     rewriteWorktreePiSettings(worktree, main);
-    expect(readSettings(worktree).packages[0].source).toBe(join(main, ".pi", "local"));
+    expect(readSettings(worktree).packages[0].source).toBe(join(main, ".omp", "local"));
   });
 
   it("rewrites bare relative 'a/b' source", () => {
@@ -78,7 +78,7 @@ describe("rewriteWorktreePiSettings — unit", () => {
     mkdirSync(main, { recursive: true });
     writeSettings(worktree, { packages: [{ source: "a/b" }] });
     rewriteWorktreePiSettings(worktree, main);
-    expect(readSettings(worktree).packages[0].source).toBe(join(main, ".pi", "a", "b"));
+    expect(readSettings(worktree).packages[0].source).toBe(join(main, ".omp", "a", "b"));
   });
 
   it("leaves absolute source untouched", () => {
@@ -170,11 +170,11 @@ describe("rewriteWorktreePiSettings — unit", () => {
 
   it("malformed JSON → no-op (preserves the broken file as-is)", () => {
     const worktree = join(workDir, "wt");
-    mkdirSync(join(worktree, ".pi"), { recursive: true });
+    mkdirSync(join(worktree, ".omp"), { recursive: true });
     const broken = "{ this is not json }";
-    writeFileSync(join(worktree, ".pi", "settings.json"), broken);
+    writeFileSync(join(worktree, ".omp", "settings.json"), broken);
     rewriteWorktreePiSettings(worktree, workDir);
-    expect(readFileSync(join(worktree, ".pi", "settings.json"), "utf-8")).toBe(broken);
+    expect(readFileSync(join(worktree, ".omp", "settings.json"), "utf-8")).toBe(broken);
   });
 });
 
@@ -199,7 +199,7 @@ describe("rewriteWorktreePiSettings — end-to-end via addWorktree", () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     const settings = readSettings(res.path);
-    // Before rewrite, source `..` from the worktree's `.pi/` would resolve
+    // Before rewrite, source `..` from the worktree's `.omp/` would resolve
     // to `<worktreePath>`. After rewrite, it should be the MAIN repo path.
     expect(settings.packages[0].source).toBe(repo);
     expect(settings.packages[0].extensions).toEqual(["+x.ts"]);

@@ -35,7 +35,7 @@ if (!sessionId || typeof sessionId !== "string") {
   process.exit(2);
 }
 
-const SESSIONS_DIR = path.join(os.homedir(), ".pi", "dashboard", "sessions");
+const SESSIONS_DIR = path.join(os.homedir(), ".omp", "dashboard", "sessions");
 try {
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 } catch (_e) { /* ignore — fs.openSync below will fail with a clearer error */ }

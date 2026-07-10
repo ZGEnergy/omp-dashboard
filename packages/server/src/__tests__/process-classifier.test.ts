@@ -74,7 +74,7 @@ describe("classifyProcesses", () => {
   });
 
   it("classifies a plugin sidecar from its path", () => {
-    const cmd = "bun /Users/x/.pi/agent/npm/node_modules/context-mode/server.bundle.mjs";
+    const cmd = "bun /Users/x/.omp/agent/npm/node_modules/context-mode/server.bundle.mjs";
     const [out] = classifyProcesses([raw({ pid: 41431, command: cmd })], empty);
     expect(out.kind).toBe("plugin");
     expect(out.label).toBe("context-mode");

@@ -36,7 +36,7 @@ PATTERNS = [
 ]
 
 EXTENSIONS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".cts", ".mts"}
-SKIP_DIRS = {"node_modules", "dist", ".git", "build", "out", "coverage", ".next", ".turbo", ".pi"}
+SKIP_DIRS = {"node_modules", "dist", ".git", "build", "out", "coverage", ".next", ".turbo", ".omp"}
 
 def walk(root):
     for dirpath, dirnames, filenames in os.walk(root):

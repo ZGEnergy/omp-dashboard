@@ -8,10 +8,10 @@
  *
  * Two branches:
  *   - Directory scope (`cwd` present): allow markdown files contained under
- *     `<cwd>` (covers `<cwd>/**` including the `<cwd>/.pi/**` tree). Reuses the
+ *     `<cwd>` (covers `<cwd>/**` including the `<cwd>/.omp/**` tree). Reuses the
  *     `within()` containment compare from `path-containment`.
  *   - Global scope (`cwd` absent): allow markdown files only under
- *     `~/.pi/agent`. An explicit allowlist root, NOT cwd containment.
+ *     `~/.omp/agent`. An explicit allowlist root, NOT cwd containment.
  *
  * Every target is realpath-normalized first (via `safeRealpath`), so symlink
  * and `..` traversal that escapes the allowed subtree is collapsed and rejected
@@ -37,10 +37,10 @@ function extOf(p: string): string {
 }
 
 export interface WritableMdTargetOptions {
-  /** Directory scope anchor. When omitted, the global `~/.pi/agent` allowlist applies. */
+  /** Directory scope anchor. When omitted, the global `~/.omp/agent` allowlist applies. */
   cwd?: string;
   /**
-   * Override the home dir used to derive the global `~/.pi/agent` root. Defaults
+   * Override the home dir used to derive the global `~/.omp/agent` root. Defaults
    * to `os.homedir()`. Injectable so tests need not touch the real home.
    */
   home?: string;
@@ -52,7 +52,7 @@ export interface WritableMdTargetOptions {
  *
  * Uses STRICT `fs.realpath` (not `safeRealpath`): the scope root MUST exist on
  * disk. `safeRealpath` falls back to the nearest existing ancestor for a missing
- * path, which would silently WIDEN an absent `~/.pi/agent` to `~/.pi` (or `~`)
+ * path, which would silently WIDEN an absent `~/.omp/agent` to `~/.omp` (or `~`)
  * and authorize writes under the parent. A missing root therefore fails closed.
  */
 async function allowedRoot(opts: WritableMdTargetOptions): Promise<string | null> {
@@ -60,7 +60,7 @@ async function allowedRoot(opts: WritableMdTargetOptions): Promise<string | null
     ? path.resolve(opts.cwd)
     : (() => {
         const home = opts.home ?? os.homedir();
-        return home ? path.join(home, ".pi", "agent") : null;
+        return home ? path.join(home, ".omp", "agent") : null;
       })();
   if (!raw) return null; // missing-home → fail closed
   try {

@@ -5,8 +5,8 @@ import { expandPromptTemplateFromDisk, loadPromptTemplate } from "../prompt-expa
 import { parseSkillBlock } from "@blackbelt-technology/pi-dashboard-shared/skill-block-parser.js";
 
 const tmpDir = join(import.meta.dirname ?? __dirname, "__tmp_prompt_test__");
-const promptsDir = join(tmpDir, ".pi", "prompts");
-const skillsDir = join(tmpDir, ".pi", "skills");
+const promptsDir = join(tmpDir, ".omp", "prompts");
+const skillsDir = join(tmpDir, ".omp", "skills");
 
 beforeEach(() => {
   mkdirSync(promptsDir, { recursive: true });

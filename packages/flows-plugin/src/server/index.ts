@@ -20,7 +20,7 @@ const PLUGIN_ID = "flows";
  * (`stateStore`, populated by the bridge-forwarded `flows_list`), by mapping
  * the cwd to its running session(s) and unioning their reported `<ns>:<name>`
  * ids. Reflects package-bundled and event-registered flows that a static
- * `.pi/flows/flows` scan would miss; empty when no running session matches the
+ * `.omp/flows/flows` scan would miss; empty when no running session matches the
  * cwd. See change: fix-automation-flow-detection.
  */
 export function makeFlowsForCwd(

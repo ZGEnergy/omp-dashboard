@@ -26,7 +26,7 @@ vi.mock("@blackbelt-technology/pi-dashboard-shared/platform/process.js", async (
 const { cleanupStaleZrok, writeZrokPid, readZrokPid } = await import("../tunnel.js");
 
 function pidFile(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "zrok.pid");
+  return path.join(os.homedir(), ".omp", "dashboard", "zrok.pid");
 }
 
 describe("cleanupStaleZrok uses platform helpers", () => {

@@ -21,7 +21,7 @@ describe("toggleResource", () => {
       scope: "local",
       cwd: "/proj",
       type: "extension",
-      filePath: "/proj/.pi/e.ts",
+      filePath: "/proj/.omp/e.ts",
       enabled: false,
     });
     expect(res.ok).toBe(true);
@@ -33,7 +33,7 @@ describe("toggleResource", () => {
       scope: "local",
       cwd: "/proj",
       type: "extension",
-      filePath: "/proj/.pi/e.ts",
+      filePath: "/proj/.omp/e.ts",
       enabled: false,
     });
   });

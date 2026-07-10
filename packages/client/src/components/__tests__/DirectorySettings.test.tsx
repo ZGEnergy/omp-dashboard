@@ -34,9 +34,9 @@ beforeEach(() => {
       data: {
         local: {
           extensions: [],
-          skills: [{ name: "local-skill", description: "A local skill.", filePath: "/path/to/project/.pi/skills/local-skill.md", type: "skill", enabled: true }],
+          skills: [{ name: "local-skill", description: "A local skill.", filePath: "/path/to/project/.omp/skills/local-skill.md", type: "skill", enabled: true }],
           prompts: [],
-          agents: [{ name: "react-expert", description: "React.", filePath: "/path/to/project/.pi/agents/react-expert.md", type: "agent", enabled: true, model: "sonnet", tools: "edit,read" }],
+          agents: [{ name: "react-expert", description: "React.", filePath: "/path/to/project/.omp/agents/react-expert.md", type: "agent", enabled: true, model: "sonnet", tools: "edit,read" }],
         },
         global: { extensions: [], skills: [], prompts: [], agents: [] },
         packages: [],

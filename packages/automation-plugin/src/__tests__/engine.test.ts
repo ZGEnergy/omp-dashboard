@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 function promptAutomation(name: string, promptBody: string): DiscoveredAutomation {
-  const dir = path.join(repo, ".pi", "automation", name);
+  const dir = path.join(repo, ".omp", "automation", name);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "prompt.md"), promptBody);
   fs.writeFileSync(
@@ -47,7 +47,7 @@ function promptAutomation(name: string, promptBody: string): DiscoveredAutomatio
 }
 
 function skillAutomation(name: string): DiscoveredAutomation {
-  const dir = path.join(repo, ".pi", "automation", name);
+  const dir = path.join(repo, ".omp", "automation", name);
   fs.mkdirSync(dir, { recursive: true });
   return {
     name,
@@ -105,7 +105,7 @@ describe("buildRunPrompt", () => {
     const a: DiscoveredAutomation = {
       name: "f",
       scope: "folder",
-      dir: "/tmp/x/.pi/automation/f",
+      dir: "/tmp/x/.omp/automation/f",
       valid: true,
       config: {
         on: { kind: "schedule", cron: "* * * * *" },
@@ -123,7 +123,7 @@ describe("buildRunPrompt", () => {
 describe("buildRunDispatch", () => {
   function flowAutomation(): DiscoveredAutomation {
     return {
-      name: "f", scope: "folder", dir: "/tmp/x/.pi/automation/f", valid: true,
+      name: "f", scope: "folder", dir: "/tmp/x/.omp/automation/f", valid: true,
       config: {
         on: { kind: "schedule", cron: "* * * * *" },
         action: { kind: "flows.run", payload: { flow: "test:x", task: "go" } },

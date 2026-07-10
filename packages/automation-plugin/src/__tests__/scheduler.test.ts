@@ -47,7 +47,7 @@ function scheduleAutomation(name: string, cron: string): DiscoveredAutomation {
   return {
     name,
     scope: "folder",
-    dir: `/repo/.pi/automation/${name}`,
+    dir: `/repo/.omp/automation/${name}`,
     valid: true,
     config: {
       on: { kind: "schedule", cron },

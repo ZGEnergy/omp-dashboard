@@ -1,8 +1,8 @@
 /**
  * Dual-scope automation scanner.
  *
- * Scans per-folder (`<repo>/.pi/automation/`) and global
- * (`~/.pi/automation/`) scopes, parsing each `<name>/automation.yaml`.
+ * Scans per-folder (`<repo>/.omp/automation/`) and global
+ * (`~/.omp/automation/`) scopes, parsing each `<name>/automation.yaml`.
  * Each discovered automation is tagged with its scope. Invalid files are
  * surfaced as `valid:false` entries (isolated failure) so siblings keep
  * loading. Name collisions across scopes are kept as distinct entries.
@@ -14,9 +14,9 @@ import path from "node:path";
 import { parseAutomationYaml } from "./automation-schema.js";
 import type { AutomationScope, DiscoveredAutomation } from "../shared/automation-types.js";
 
-/** The `.pi/automation/` subdir holding `<name>/automation.yaml` dirs. */
+/** The `.omp/automation/` subdir holding `<name>/automation.yaml` dirs. */
 export function automationRootFor(scopeBase: string): string {
-  return path.join(scopeBase, ".pi", "automation");
+  return path.join(scopeBase, ".omp", "automation");
 }
 
 /** Scan a single scope base directory (`<repo>` or `~`). */

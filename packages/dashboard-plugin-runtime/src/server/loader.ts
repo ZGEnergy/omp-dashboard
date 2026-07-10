@@ -73,11 +73,11 @@ export function findMonorepoRoot(startDir?: string): string | null {
 }
 
 /**
- * Return `~/.pi/dashboard/plugins/` if it exists; null otherwise.
+ * Return `~/.omp/dashboard/plugins/` if it exists; null otherwise.
  * This is where user-installed plugins live (per `add-plugin-activation-ui`).
  */
 export function findInstalledPluginsDir(): string | null {
-  const dir = path.join(os.homedir(), ".pi", "dashboard", "plugins");
+  const dir = path.join(os.homedir(), ".omp", "dashboard", "plugins");
   return fs.existsSync(dir) ? dir : null;
 }
 

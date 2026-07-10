@@ -42,7 +42,7 @@ function findBundledExtension(): string | null {
 }
 
 /**
- * Register the bundled bridge extension in ~/.pi/agent/settings.json.
+ * Register the bundled bridge extension in ~/.omp/agent/settings.json.
  * Throws if no bundled extension is found.
  */
 export function registerBundledBridgeExtension(): void {

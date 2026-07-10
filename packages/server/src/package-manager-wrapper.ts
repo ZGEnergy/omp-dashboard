@@ -202,7 +202,7 @@ export interface OperationResult {
 export type ProgressListener = (operationId: string, event: ProgressEvent, moveId?: string) => void;
 export type CompleteListener = (result: OperationResult) => void;
 
-const AGENT_DIR = path.join(os.homedir(), ".pi", "agent");
+const AGENT_DIR = path.join(os.homedir(), ".omp", "agent");
 
 export class PackageManagerWrapper {
   private busy = false;
@@ -491,11 +491,11 @@ export class PackageManagerWrapper {
       // Identity preflight against destination's packages[].
       const destPackages = readPackages(settingsManager, req.toScope);
       const toSettingsDir = req.toScope === "global"
-        ? path.join(os.homedir(), ".pi", "agent")
-        : path.join(req.toCwd ?? pmCwd, ".pi");
+        ? path.join(os.homedir(), ".omp", "agent")
+        : path.join(req.toCwd ?? pmCwd, ".omp");
       const fromSettingsDir = req.fromScope === "global"
-        ? path.join(os.homedir(), ".pi", "agent")
-        : path.join(req.fromCwd ?? pmCwd, ".pi");
+        ? path.join(os.homedir(), ".omp", "agent")
+        : path.join(req.fromCwd ?? pmCwd, ".omp");
       const incomingIdentity = computeIdentity(sourceStr, fromSettingsDir);
       const dup = destPackages.find((e) => {
         const s = typeof e === "string" ? e : e?.source;

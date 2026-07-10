@@ -7,7 +7,7 @@
  *   - live description + version from npm or GitHub (falls back to
  *     fallbackDescription on network failure)
  *   - installed.scope cross-reference via packageManagerWrapper
- *   - activeInPi flag from ~/.pi/agent/settings.json packages[]
+ *   - activeInPi flag from ~/.omp/agent/settings.json packages[]
  *   - updateAvailable flag
  *
  * Results are cached for 60 seconds. The cache is busted when any package
@@ -79,9 +79,9 @@ export function invalidateRecommendedCache(): void {
  * imports from this module keep working.
  */
 
-/** Read pi's project-local `.pi/settings.json` (if any) for the given cwd. */
+/** Read pi's project-local `.omp/settings.json` (if any) for the given cwd. */
 function readLocalSources(cwd: string): string[] {
-	const settingsPath = path.join(cwd, ".pi", "settings.json");
+	const settingsPath = path.join(cwd, ".omp", "settings.json");
 	try {
 		if (!fs.existsSync(settingsPath)) return [];
 		const raw = fs.readFileSync(settingsPath, "utf-8").trim();
@@ -95,13 +95,13 @@ function readLocalSources(cwd: string): string[] {
 }
 
 /** Collect active package sources from both the user's global
- * `~/.pi/agent/settings.json` and the project's `<cwd>/.pi/settings.json`.
+ * `~/.omp/agent/settings.json` and the project's `<cwd>/.omp/settings.json`.
  * Mirrors pi's SettingsManager behavior: a package is "active" in pi if
  * it appears in EITHER scope's packages[] list. */
 function readActiveSources(cwd?: string): string[] {
 	const sources: string[] = [];
 
-	const globalPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
+	const globalPath = path.join(os.homedir(), ".omp", "agent", "settings.json");
 	try {
 		if (fs.existsSync(globalPath)) {
 			const raw = fs.readFileSync(globalPath, "utf-8").trim();

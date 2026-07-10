@@ -97,7 +97,7 @@ if (!loader) {
       "Your install may be corrupted. Try:\n" +
       "  npm install -g @blackbelt-technology/pi-agent-dashboard\n" +
       "Workaround: install pi globally (provides a fallback jiti):\n" +
-      "  npm install -g @earendil-works/pi-coding-agent\n" +
+      "  npm install -g @oh-my-pi/pi-coding-agent\n" +
       "Please report at https://github.com/BlackBeltTechnology/pi-agent-dashboard/issues\n",
   );
   process.exit(1);

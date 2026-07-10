@@ -9,7 +9,7 @@
  *
  * Scope:
  *   - `cwd` present → directory scope. Reads + writes resolve against `cwd`.
- *   - `cwd` absent  → global scope (~/.pi/agent). Reads via `/api/file/md-read`
+ *   - `cwd` absent  → global scope (~/.omp/agent). Reads via `/api/file/md-read`
  *     (gated by the same `isWritableMdTarget` guard as write + candidates), so
  *     global scope works through one symmetric security model.
  *

@@ -12,10 +12,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { activate as activateProviderRegister } from "../provider-register.js";
 import { buildModelRows, registerRoleModelTools } from "../role-model-tools.js";
 
-const CONFIG = () => join(homedir(), ".pi", "agent", "providers.json");
+const CONFIG = () => join(homedir(), ".omp", "agent", "providers.json");
 
 function resetConfig() {
-  mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
+  mkdirSync(join(homedir(), ".omp", "agent"), { recursive: true });
   if (existsSync(CONFIG())) rmSync(CONFIG());
 }
 function readFile() {

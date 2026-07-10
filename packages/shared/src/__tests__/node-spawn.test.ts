@@ -209,7 +209,7 @@ describe("buildNodeImportArgvParts", () => {
       platform: "win32",
     });
     expect(parts[1]).toBe(
-      "file:///C:/Users/u/.pi-dashboard/node_modules/jiti/lib/jiti-register.mjs",
+      "file:///C:/Users/u/.omp-dashboard/node_modules/jiti/lib/jiti-register.mjs",
     );
     // Entry is RAW — NOT URL-wrapped — because the loader is jiti.
     expect(parts[2]).toBe(

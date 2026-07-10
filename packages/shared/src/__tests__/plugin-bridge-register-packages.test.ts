@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 function settingsPath() {
-  return path.join(homedir, ".pi", "agent", "settings.json");
+  return path.join(homedir, ".omp", "agent", "settings.json");
 }
 
 function readSettings(): Record<string, unknown> {

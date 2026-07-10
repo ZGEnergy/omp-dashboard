@@ -25,7 +25,7 @@ function makeActivation(overrides?: Partial<ResourceActivationController>): Reso
 const skill: PiResource = {
   name: "code-review",
   description: "Review code before commit.",
-  filePath: "/p/.pi/skills/code-review/SKILL.md",
+  filePath: "/p/.omp/skills/code-review/SKILL.md",
   type: "skill",
   enabled: true,
 };
@@ -37,7 +37,7 @@ describe("ResourceCard — base", () => {
     const card = screen.getByTestId("resource-card");
     expect(within(card).getByText("code-review")).toBeTruthy();
     expect(within(card).getByText("Review code before commit.")).toBeTruthy();
-    expect(within(card).getByText("/p/.pi/skills/code-review/SKILL.md")).toBeTruthy();
+    expect(within(card).getByText("/p/.omp/skills/code-review/SKILL.md")).toBeTruthy();
     expect(within(card).getByTestId("badge-scope").textContent).toContain("local");
     expect(within(card).getByTestId("badge-source").textContent).toContain("loose");
     fireEvent.click(card);
@@ -73,7 +73,7 @@ describe("ResourceCard — agent variant", () => {
   const agent: PiResource = {
     name: "react-expert",
     description: "React refactors.",
-    filePath: "/p/.pi/agents/react-expert.md",
+    filePath: "/p/.omp/agents/react-expert.md",
     type: "agent",
     enabled: true,
     model: "sonnet",
@@ -97,7 +97,7 @@ describe("ResourceCard — theme variant", () => {
   const theme: PiResource = {
     name: "midnight",
     description: "Dark theme.",
-    filePath: "/g/.pi/agent/themes/midnight.json",
+    filePath: "/g/.omp/agent/themes/midnight.json",
     type: "theme",
     enabled: true,
     colors: ["#0a0a0a", "#141414", "#3b82f6", "#e5e5e5"],

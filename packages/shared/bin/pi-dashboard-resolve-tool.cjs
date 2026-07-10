@@ -69,7 +69,7 @@ const TOOLS = {
 // ─── Strategies ──────────────────────────────────────────────────────────────
 
 function overridesPath() {
-  return path.join(os.homedir(), ".pi", "dashboard", "tool-overrides.json");
+  return path.join(os.homedir(), ".omp", "dashboard", "tool-overrides.json");
 }
 
 function tryOverride(toolName) {

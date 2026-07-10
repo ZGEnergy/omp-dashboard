@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 
 // Mock pi dependency (pulled transitively by package-manager-wrapper)
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+vi.mock("@oh-my-pi/pi-coding-agent", () => ({
 	DefaultPackageManager: function () {
 		return {};
 	},
@@ -301,7 +301,7 @@ describe("GET /api/packages/recommended", () => {
 		vi.mocked(fetchGithubPackageJson).mockResolvedValue(null);
 
 		// Write settings.json with pi-web-access as an active package
-		const settingsDir = path.join(tmpHome, ".pi", "agent");
+		const settingsDir = path.join(tmpHome, ".omp", "agent");
 		fs.mkdirSync(settingsDir, { recursive: true });
 		fs.writeFileSync(
 			path.join(settingsDir, "settings.json"),
@@ -328,7 +328,7 @@ describe("GET /api/packages/recommended", () => {
 		vi.mocked(fetchPackageMeta).mockResolvedValue(null);
 		vi.mocked(fetchGithubPackageJson).mockResolvedValue(null);
 
-		const settingsDir = path.join(tmpHome, ".pi", "agent");
+		const settingsDir = path.join(tmpHome, ".omp", "agent");
 		fs.mkdirSync(settingsDir, { recursive: true });
 		// User wrote HTTPS in settings; manifest has SSH. They should match.
 		fs.writeFileSync(
@@ -353,9 +353,9 @@ describe("GET /api/packages/recommended", () => {
 		// which records the local path in .pi/settings.json. The manifest has the
 		// git SSH URL. The two should still match via basename.
 		const projectDir = path.join(tmpHome, "workspace");
-		fs.mkdirSync(path.join(projectDir, ".pi"), { recursive: true });
+		fs.mkdirSync(path.join(projectDir, ".omp"), { recursive: true });
 		fs.writeFileSync(
-			path.join(projectDir, ".pi", "settings.json"),
+			path.join(projectDir, ".omp", "settings.json"),
 			JSON.stringify({ packages: ["../pi-flows", "../pi-anthropic-messages"] }),
 		);
 
@@ -381,9 +381,9 @@ describe("GET /api/packages/recommended", () => {
 		vi.mocked(fetchGithubPackageJson).mockResolvedValue(null);
 
 		const projectDir = path.join(tmpHome, "workspace");
-		fs.mkdirSync(path.join(projectDir, ".pi"), { recursive: true });
+		fs.mkdirSync(path.join(projectDir, ".omp"), { recursive: true });
 		fs.writeFileSync(
-			path.join(projectDir, ".pi", "settings.json"),
+			path.join(projectDir, ".omp", "settings.json"),
 			JSON.stringify({ packages: ["npm:pi-web-access"] }),
 		);
 

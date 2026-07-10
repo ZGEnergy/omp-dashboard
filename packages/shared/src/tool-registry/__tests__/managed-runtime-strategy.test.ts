@@ -48,10 +48,10 @@ function freshRegistry(opts: {
 }
 
 const HOME = os.homedir();
-const MANAGED_NODE_UNIX = path.join(HOME, ".pi-dashboard", "node", "bin", "node");
-const MANAGED_NPM_UNIX = path.join(HOME, ".pi-dashboard", "node", "bin", "npm");
-const MANAGED_NODE_WIN = path.join(HOME, ".pi-dashboard", "node", "node.exe");
-const MANAGED_NPM_WIN = path.join(HOME, ".pi-dashboard", "node", "npm.cmd");
+const MANAGED_NODE_UNIX = path.join(HOME, ".omp-dashboard", "node", "bin", "node");
+const MANAGED_NPM_UNIX = path.join(HOME, ".omp-dashboard", "node", "bin", "npm");
+const MANAGED_NODE_WIN = path.join(HOME, ".omp-dashboard", "node", "node.exe");
+const MANAGED_NPM_WIN = path.join(HOME, ".omp-dashboard", "node", "npm.cmd");
 
 describe("node: managed-runtime strategy precedence", () => {
   it("managed runtime present → returned over PATH (Unix)", () => {

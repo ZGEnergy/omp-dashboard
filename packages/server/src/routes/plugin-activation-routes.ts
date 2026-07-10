@@ -25,7 +25,7 @@ import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-
 
 // Resolved lazily so tests that override $HOME after import still work.
 function configPaths() {
-  const dir = path.join(os.homedir(), ".pi", "dashboard");
+  const dir = path.join(os.homedir(), ".omp", "dashboard");
   return { dir, file: path.join(dir, "config.json") };
 }
 

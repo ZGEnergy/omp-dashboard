@@ -20,21 +20,21 @@ beforeAll(async () => {
   root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "mdc-")));
   cwd = path.join(root, "proj");
   home = path.join(root, "home");
-  await fs.mkdir(path.join(cwd, ".pi", "skills", "impl"), { recursive: true });
+  await fs.mkdir(path.join(cwd, ".omp", "skills", "impl"), { recursive: true });
   await fs.mkdir(path.join(cwd, "node_modules", "pkg"), { recursive: true });
-  await fs.mkdir(path.join(home, ".pi", "agent", "sub"), { recursive: true });
+  await fs.mkdir(path.join(home, ".omp", "agent", "sub"), { recursive: true });
   await fs.mkdir(path.join(root, "sibling"), { recursive: true });
 
   await fs.writeFile(path.join(cwd, "AGENTS.md"), "# a");
   await fs.writeFile(path.join(cwd, "README.md"), "# r");
   await fs.writeFile(path.join(cwd, "notes.txt"), "x"); // non-md excluded
-  await fs.writeFile(path.join(cwd, ".pi", "skills", "impl", "SKILL.md"), "# s");
+  await fs.writeFile(path.join(cwd, ".omp", "skills", "impl", "SKILL.md"), "# s");
   await fs.writeFile(path.join(cwd, "node_modules", "pkg", "DOC.md"), "# skip"); // heavy dir skipped
   await fs.writeFile(path.join(root, "sibling", "evil.md"), "# e");
   await fs.symlink(path.join(root, "sibling", "evil.md"), path.join(cwd, "escape.md")); // pruned
 
-  await fs.writeFile(path.join(home, ".pi", "agent", "MEMORY.md"), "# m");
-  await fs.writeFile(path.join(home, ".pi", "agent", "sub", "deep.md"), "# d");
+  await fs.writeFile(path.join(home, ".omp", "agent", "MEMORY.md"), "# m");
+  await fs.writeFile(path.join(home, ".omp", "agent", "sub", "deep.md"), "# d");
 });
 
 afterAll(async () => {
@@ -46,7 +46,7 @@ describe("enumerateMdCandidates — directory scope", () => {
     const got = (await enumerateMdCandidates({ cwd })).map((c) => c.relPath);
     expect(got).toContain("AGENTS.md");
     expect(got).toContain("README.md");
-    expect(got).toContain(path.join(".pi", "skills", "impl", "SKILL.md"));
+    expect(got).toContain(path.join(".omp", "skills", "impl", "SKILL.md"));
   });
 
   it("excludes non-markdown, heavy dirs, and symlink escapes (picker ⊆ guard)", async () => {
@@ -68,7 +68,7 @@ describe("enumerateMdCandidates — directory scope", () => {
 });
 
 describe("enumerateMdCandidates — global scope", () => {
-  it("lists ~/.pi/agent markdown and nothing from the project", async () => {
+  it("lists ~/.omp/agent markdown and nothing from the project", async () => {
     const got = (await enumerateMdCandidates({ home })).map((c) => c.relPath);
     expect(got).toContain("MEMORY.md");
     expect(got).toContain(path.join("sub", "deep.md"));

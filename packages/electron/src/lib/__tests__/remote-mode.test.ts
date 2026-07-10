@@ -23,8 +23,8 @@ import { didWeStartServer, ensureServer } from "../server-lifecycle.js";
 import { readModeFile, writeModeFile } from "../wizard-state.js";
 
 const mockHealth = isDashboardRunning as unknown as ReturnType<typeof vi.fn>;
-const modeFile = path.join(os.homedir(), ".pi-dashboard", "dashboard-settings.json");
-const legacyModeFile = path.join(os.homedir(), ".pi-dashboard", "mode.json");
+const modeFile = path.join(os.homedir(), ".omp-dashboard", "dashboard-settings.json");
+const legacyModeFile = path.join(os.homedir(), ".omp-dashboard", "mode.json");
 
 describe("remote wizard mode", () => {
   beforeEach(() => {

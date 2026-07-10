@@ -45,16 +45,16 @@
     "eslint-plugin-tailwindcss": "^3.17.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
+    "@oh-my-pi/pi-coding-agent": "*",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-coding-agent": {
+    "@oh-my-pi/pi-coding-agent": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
+    "@oh-my-pi/pi-coding-agent": "*",
     "typebox": "*"
   }
 }

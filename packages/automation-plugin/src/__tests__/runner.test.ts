@@ -11,7 +11,7 @@ function automation(concurrency: Concurrency, name = "nightly"): DiscoveredAutom
   return {
     name,
     scope: "folder",
-    dir: `/repo/.pi/automation/${name}`,
+    dir: `/repo/.omp/automation/${name}`,
     valid: true,
     config: {
       on: { kind: "schedule", cron: "* * * * *" },

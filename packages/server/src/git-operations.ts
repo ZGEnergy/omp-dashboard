@@ -478,7 +478,7 @@ export function addWorktree(opts: AddWorktreeOptions): AddWorktreeSuccess | AddW
     }
   }
 
-  // Rewrite the new worktree's `.pi/settings.json` so any relative
+  // Rewrite the new worktree's `.omp/settings.json` so any relative
   // `packages[].source` paths resolve against the MAIN repo root instead
   // of the worktree's own root. Without this, a worktree of an older
   // branch loads pi packages (e.g. the dashboard bridge) from its own
@@ -491,7 +491,7 @@ export function addWorktree(opts: AddWorktreeOptions): AddWorktreeSuccess | AddW
 }
 
 /**
- * Rewrite `<worktreePath>/.pi/settings.json` so any relative
+ * Rewrite `<worktreePath>/.omp/settings.json` so any relative
  * `packages[].source` becomes an absolute path against `mainRoot`.
  *
  * Idempotent and conservative:
@@ -505,7 +505,7 @@ export function addWorktree(opts: AddWorktreeOptions): AddWorktreeSuccess | AddW
  * Atomic write (write-to-tmp + rename).
  */
 export function rewriteWorktreePiSettings(worktreePath: string, mainRoot: string): void {
-  const settingsPath = path.join(worktreePath, ".pi", "settings.json");
+  const settingsPath = path.join(worktreePath, ".omp", "settings.json");
   let raw: string;
   try {
     raw = fs.readFileSync(settingsPath, "utf-8");
@@ -527,9 +527,9 @@ export function rewriteWorktreePiSettings(worktreePath: string, mainRoot: string
     if (typeof pkg.source !== "string") continue;
     if (!isRelativePathSource(pkg.source)) continue;
     // Source resolves relative to the .pi directory by pi's convention
-    // (i.e. `..` from `.pi/` is the project root). We want it to resolve
-    // against the MAIN repo's `.pi/`, so we anchor against `<mainRoot>/.pi`.
-    const anchorDir = path.join(mainRoot, ".pi");
+    // (i.e. `..` from `.omp/` is the project root). We want it to resolve
+    // against the MAIN repo's `.omp/`, so we anchor against `<mainRoot>/.omp`.
+    const anchorDir = path.join(mainRoot, ".omp");
     const absolute = path.resolve(anchorDir, pkg.source);
     pkg.source = absolute;
     changed = true;

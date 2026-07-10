@@ -109,12 +109,12 @@ describe("SubagentDetailView", () => {
       description: "search",
       status: "completed",
       displayName: "explorer",
-      agentMdPath: "/home/u/.pi/agent/agents/Explore.md",
+      agentMdPath: "/home/u/.omp/agent/agents/Explore.md",
       result: "done",
     });
     renderWithPrimitives(<SubagentDetailView session={session} agentId="a1" />);
     expect(screen.getByText("explorer")).toBeTruthy();
-    expect(screen.getByText("/home/u/.pi/agent/agents/Explore.md")).toBeTruthy();
+    expect(screen.getByText("/home/u/.omp/agent/agents/Explore.md")).toBeTruthy();
   });
 
   it("omits the path line when agentMdPath is undefined", () => {

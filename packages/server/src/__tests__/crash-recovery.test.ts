@@ -21,7 +21,7 @@ let metaPath: string;
 
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crash-"));
-  lockPath = path.join(tmpHome, ".pi", "dashboard", "server.lock");
+  lockPath = path.join(tmpHome, ".omp", "dashboard", "server.lock");
   metaPath = `${lockPath}.meta.json`;
 });
 

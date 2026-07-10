@@ -35,7 +35,7 @@ export function usePluginEnabledSet(registry: SlotRegistry): PluginEnabledSetSta
         // Default-allow semantics: the enabled set is
         //   (every build-time-known plugin id) MINUS (explicitly disabled ids).
         // This prevents a misconfigured / incomplete server-side discovery
-        // (e.g. plugins not bundled into ~/.pi-dashboard/) from hiding every
+        // (e.g. plugins not bundled into ~/.omp-dashboard/) from hiding every
         // claim the build-time PLUGIN_REGISTRY embedded into the client.
         // Plugins server explicitly reports as `enabled: false` are still
         // filtered. See change: add-plugin-activation-ui.

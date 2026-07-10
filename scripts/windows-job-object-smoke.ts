@@ -76,7 +76,7 @@ function resolveWinBinary(): string {
 
 function makeHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-jobobj-"));
-  const dashDir = path.join(home, ".pi", "dashboard");
+  const dashDir = path.join(home, ".omp", "dashboard");
   fs.mkdirSync(dashDir, { recursive: true });
   fs.writeFileSync(path.join(dashDir, "config.json"), JSON.stringify({ port: PORT, piPort: PORT + 999, knownServers: [] }));
   fs.writeFileSync(path.join(dashDir, "first-run-done"), new Date().toISOString());

@@ -13,7 +13,7 @@
  * Flow availability + the `flow` enum options come from the LIVE per-session
  * flows list the server already holds (`stateStore`, populated by the
  * bridge-forwarded `flows_list`), resolved by mapping a cwd to its running
- * session(s). NOT a static `.pi/flows/flows/` scan — so package-bundled and
+ * session(s). NOT a static `.omp/flows/flows/` scan — so package-bundled and
  * event-registered flows (which pi-flows discovers at runtime) are reflected.
  * See change: fix-automation-flow-detection.
  */

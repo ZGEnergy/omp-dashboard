@@ -143,7 +143,7 @@ async function main() {
     console.error("repair-meta-source: cannot determine HOME directory");
     process.exit(1);
   }
-  const root = args.root ?? path.join(home, ".pi", "agent", "sessions");
+  const root = args.root ?? path.join(home, ".omp", "agent", "sessions");
 
   if (!existsSync(root)) {
     console.log(`repair-meta-source: sessions root not found at ${root}`);

@@ -31,7 +31,7 @@ SERVER_BUNDLE="$APP_RESOURCES/server"
 START_SH="$SERVER_BUNDLE/start-server.sh"
 CLI_REL="node_modules/@blackbelt-technology/pi-dashboard-server/src/cli.ts"
 JITI_REGISTER="$SERVER_BUNDLE/node_modules/jiti/lib/jiti-register.mjs"
-PI_PKG_JSON="$SERVER_BUNDLE/node_modules/@earendil-works/pi-coding-agent/package.json"
+PI_PKG_JSON="$SERVER_BUNDLE/node_modules/@oh-my-pi/pi-coding-agent/package.json"
 SERVER_PKG_JSON="$SERVER_BUNDLE/node_modules/@blackbelt-technology/pi-dashboard-server/package.json"
 
 PASS=0
@@ -160,7 +160,7 @@ if [ "$SERVER_UP" = "true" ]; then
   if echo "$SPAWN_RESP" | grep -q '"success":true'; then
     pass "Spawn API returned success"
     # Informational only: in this bare bundled-server smoke (no Electron
-    # shell, no `~/.pi/agent/settings.json` bridge registration), pi may
+    # shell, no `~/.omp/agent/settings.json` bridge registration), pi may
     # exit immediately after spawn for lack of a bridge to connect back
     # to. The HTTP-level spawn pipeline is what this layer asserts;
     # live pi process verification is owned by test-deb-install (full

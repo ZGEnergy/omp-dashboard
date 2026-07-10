@@ -18,7 +18,7 @@ import { viteDashboardPluginsPlugin } from "../dashboard-plugin-runtime/src/vite
  * Resolution order:
  *   1. PI_DASHBOARD_PORT env var (if set and parseable as 1–65535)
  *   2. /tmp/dash-dev-port marker file (dash-dev.sh writes this)
- *   3. port field from ~/.pi/dashboard/config.json
+ *   3. port field from ~/.omp/dashboard/config.json
  *   4. Fallback: 8000
  *
  * Errors (missing config, bad JSON, invalid env) are silently swallowed;
@@ -45,7 +45,7 @@ function resolveDashboardPort(): number {
   }
   // 3. Config file
   try {
-    const configPath = path.join(os.homedir(), ".pi", "dashboard", "config.json");
+    const configPath = path.join(os.homedir(), ".omp", "dashboard", "config.json");
     const raw = fs.readFileSync(configPath, "utf-8");
     const cfg = JSON.parse(raw);
     if (typeof cfg.port === "number" && Number.isFinite(cfg.port) && cfg.port >= 1 && cfg.port <= 65535) {

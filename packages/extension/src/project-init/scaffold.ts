@@ -3,11 +3,11 @@
  *
  * Writes, from the profile bundle:
  *   <dir>/AGENTS.md            ← AGENTS.md.tmpl  ({{PROJECT_NAME}} substituted)
- *   <dir>/.pi/settings.json    ← settings.json.tmpl  (worktreeInit hook + toolset)
- *   <dir>/.pi/prompts/*.md     ← prompts/*.md
+ *   <dir>/.omp/settings.json    ← settings.json.tmpl  (worktreeInit hook + toolset)
+ *   <dir>/.omp/prompts/*.md     ← prompts/*.md
  * and, when the profile opts into DOX:
  *   appends the doctrine block to <dir>/AGENTS.md (marker-gated, idempotent)
- *   writes <dir>/.pi/dashboard/knowledge_base.json (directory-level AGENTS.md toolset)
+ *   writes <dir>/.omp/dashboard/knowledge_base.json (directory-level AGENTS.md toolset)
  *
  * Writing `worktreeInit` flips the directory to "configured": the next
  * Initialize click hits change-A's `hasHook: true` path.
@@ -105,11 +105,11 @@ export function planScaffold(opts: ScaffoldOptions): ScaffoldPlan {
   const { profile, targetDir } = opts;
   const writes = [
     path.join(targetDir, "AGENTS.md"),
-    path.join(targetDir, ".pi", "settings.json"),
-    ...listPrompts(profile.dir).map((f) => path.join(targetDir, ".pi", "prompts", f)),
+    path.join(targetDir, ".omp", "settings.json"),
+    ...listPrompts(profile.dir).map((f) => path.join(targetDir, ".omp", "prompts", f)),
   ];
   if (profile.dox) {
-    writes.push(path.join(targetDir, ".pi", "dashboard", "knowledge_base.json"));
+    writes.push(path.join(targetDir, ".omp", "dashboard", "knowledge_base.json"));
   }
   const conflicts = writes.filter((p) => fs.existsSync(p));
   return { writes, conflicts, dox: profile.dox };
@@ -164,7 +164,7 @@ export function scaffoldProfile(opts: ScaffoldOptions): ScaffoldResult {
       `rendered .pi/settings.json is not valid JSON (check the profile template + substitutions): ${(err as Error).message}`,
     );
   }
-  const settingsDir = path.join(targetDir, ".pi");
+  const settingsDir = path.join(targetDir, ".omp");
   fs.mkdirSync(settingsDir, { recursive: true });
   fs.writeFileSync(path.join(settingsDir, "settings.json"), settingsText, "utf8");
   const hookValid = isValidWorktreeInit(parsedSettings.worktreeInit);
@@ -172,7 +172,7 @@ export function scaffoldProfile(opts: ScaffoldOptions): ScaffoldResult {
   // prompts/*.md
   const prompts = listPrompts(profile.dir);
   if (prompts.length > 0) {
-    const promptsDir = path.join(targetDir, ".pi", "prompts");
+    const promptsDir = path.join(targetDir, ".omp", "prompts");
     fs.mkdirSync(promptsDir, { recursive: true });
     for (const f of prompts) {
       fs.copyFileSync(path.join(profile.dir, "prompts", f), path.join(promptsDir, f));

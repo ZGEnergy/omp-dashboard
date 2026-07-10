@@ -8,7 +8,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-CONFIG_FILE="$HOME/.pi/dashboard/config.json"
+CONFIG_FILE="$HOME/.omp/dashboard/config.json"
 DEFAULT_PORT=8000
 
 CHECK=false

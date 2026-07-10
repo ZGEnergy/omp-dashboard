@@ -4,7 +4,7 @@
  * An affirmative genuine-local credential for same-host process callers (CLI
  * tools, the model proxy) that grants the auth exemption WITHOUT relying on the
  * TCP loopback address alone (which a tunnel can forge). The token is a
- * high-entropy secret written to `~/.pi/dashboard/local/token` with the parent
+ * high-entropy secret written to `~/.omp/dashboard/local/token` with the parent
  * dir `0700` and the file `0600`, so only the same OS user can read it. A caller
  * presents it via the `X-Pi-Local-Token` header; a remote attacker over a
  * tunnel cannot read the file, so cannot forge the header.
@@ -18,7 +18,7 @@ export const LOCAL_TOKEN_HEADER = "x-pi-local-token";
 const TOKEN_BYTES = 32;
 
 export function defaultLocalTokenDir(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "local");
+  return path.join(os.homedir(), ".omp", "dashboard", "local");
 }
 
 /**

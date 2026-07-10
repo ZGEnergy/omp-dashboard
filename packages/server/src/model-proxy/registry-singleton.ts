@@ -23,8 +23,8 @@ let lastError: string | null = null;
 
 // ── Disk readers ──────────────────────────────────────────────────────────────
 
-const PROVIDERS_PATH = join(homedir(), ".pi", "agent", "providers.json");
-const MODELS_PATH = join(homedir(), ".pi", "agent", "models.json");
+const PROVIDERS_PATH = join(homedir(), ".omp", "agent", "providers.json");
+const MODELS_PATH = join(homedir(), ".omp", "agent", "models.json");
 
 function readProviders(): Record<string, CustomProviderEntry> {
   if (!existsSync(PROVIDERS_PATH)) return {};

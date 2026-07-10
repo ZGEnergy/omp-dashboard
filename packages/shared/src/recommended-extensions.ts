@@ -102,7 +102,7 @@ export interface EnrichedRecommendedExtension extends RecommendedExtension {
 	 * Install status by scope. `null` means not present on disk in any scope.
 	 */
 	installed: { scope: "global" | "local" | null };
-	/** True iff the source is currently listed in `~/.pi/agent/settings.json` `packages[]`. */
+	/** True iff the source is currently listed in `~/.omp/agent/settings.json` `packages[]`. */
 	activeInPi: boolean;
 	/** True iff a newer version is available upstream. */
 	updateAvailable: boolean;

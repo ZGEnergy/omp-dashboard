@@ -13,7 +13,7 @@
  * Design: design.md.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { readConfigFromEnv, type ImageFitConfig } from "./policy.js";

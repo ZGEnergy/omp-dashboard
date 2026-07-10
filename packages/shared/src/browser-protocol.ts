@@ -182,7 +182,7 @@ export interface BrowserOpenSpecGroupsUpdateMessage {
 
 /**
  * Folder-scoped goals update. Broadcast after every successful mutation of
- * the per-folder goals file (`~/.pi/dashboard/goals/<folderHash>.json`),
+ * the per-folder goals file (`~/.omp/dashboard/goals/<folderHash>.json`),
  * debounced 100 ms per cwd. Full payload (no incremental delta).
  * See change: add-goals-folder-page.
  */
@@ -517,10 +517,10 @@ export interface BootstrapStateSnapshot {
   };
   bridgeRegistrationError?: string;
   /**
-   * Legacy `@mariozechner/pi-coding-agent` installs detected on disk.
+   * Legacy `@oh-my-pi/pi-coding-agent` installs detected on disk.
    * Surfaced by the client as a one-click cleanup banner. Empty array
    * means no legacy installs found. Pi was renamed to
-   * `@earendil-works/pi-coding-agent` at v0.74 — the legacy scope can
+   * `@oh-my-pi/pi-coding-agent` at v0.74 — the legacy scope can
    * collide with the new scope's `bin/pi` symlink.
    */
   legacyPiInstalls?: Array<{

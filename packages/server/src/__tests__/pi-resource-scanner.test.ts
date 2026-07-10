@@ -89,7 +89,7 @@ Body`;
 
 describe("scanLocalResources", () => {
   it("discovers skills from SKILL.md directories", () => {
-    writeFile(".pi/skills/code-review/SKILL.md", `---
+    writeFile(".omp/skills/code-review/SKILL.md", `---
 name: code-review
 description: Review code.
 ---
@@ -102,7 +102,7 @@ Instructions`);
   });
 
   it("discovers skills from root .md files", () => {
-    writeFile(".pi/skills/quick-review.md", `---
+    writeFile(".omp/skills/quick-review.md", `---
 name: quick-review
 description: Quick review.
 ---
@@ -113,7 +113,7 @@ Body`);
   });
 
   it("discovers extensions from .ts files", () => {
-    writeFile(".pi/extensions/my-ext.ts", "export default function() {}");
+    writeFile(".omp/extensions/my-ext.ts", "export default function() {}");
     const result = scanLocalResources(tmpDir);
     expect(result.extensions).toHaveLength(1);
     expect(result.extensions[0].name).toBe("my-ext");
@@ -121,14 +121,14 @@ Body`);
   });
 
   it("discovers extensions from subdirectory index.ts", () => {
-    writeFile(".pi/extensions/my-ext/index.ts", "export default function() {}");
+    writeFile(".omp/extensions/my-ext/index.ts", "export default function() {}");
     const result = scanLocalResources(tmpDir);
     expect(result.extensions).toHaveLength(1);
     expect(result.extensions[0].name).toBe("my-ext");
   });
 
   it("discovers prompts from .md files", () => {
-    writeFile(".pi/prompts/review.md", `---
+    writeFile(".omp/prompts/review.md", `---
 description: Review staged changes
 ---
 Review the staged changes.`);
@@ -140,8 +140,8 @@ Review the staged changes.`);
   });
 
   it("discovers agents from agents/*.md with model and tools", () => {
-    writeFile(".pi/agents/Explore.md", "---\nname: Explore\ndescription: Read-only search.\nmodel: '@fast'\ntools: read-only\n---\nBody");
-    writeFile(".pi/agents/react-expert.md", "---\nname: react-expert\ndescription: React work.\nmodel: sonnet\ntools: [edit, read]\n---\nBody");
+    writeFile(".omp/agents/Explore.md", "---\nname: Explore\ndescription: Read-only search.\nmodel: '@fast'\ntools: read-only\n---\nBody");
+    writeFile(".omp/agents/react-expert.md", "---\nname: react-expert\ndescription: React work.\nmodel: sonnet\ntools: [edit, read]\n---\nBody");
     const result = scanLocalResources(tmpDir);
     expect(result.agents).toHaveLength(2);
     const names = result.agents.map((a) => a.name).sort();
@@ -153,7 +153,7 @@ Review the staged changes.`);
   });
 
   it("omits model and tools on an agent that lacks them", () => {
-    writeFile(".pi/agents/plain.md", "---\nname: plain\ndescription: No meta.\n---\nBody");
+    writeFile(".omp/agents/plain.md", "---\nname: plain\ndescription: No meta.\n---\nBody");
     const result = scanLocalResources(tmpDir);
     expect(result.agents).toHaveLength(1);
     expect(result.agents[0].model).toBeUndefined();
@@ -170,7 +170,7 @@ Review the staged changes.`);
   });
 
   it("yields an empty agents array when agents/ is missing but .pi/ exists", () => {
-    writeFile(".pi/skills/s.md", "---\nname: s\n---\nBody");
+    writeFile(".omp/skills/s.md", "---\nname: s\n---\nBody");
     const result = scanLocalResources(tmpDir);
     expect(result.agents).toEqual([]);
   });
@@ -281,7 +281,7 @@ Body`);
   });
 
   it("resolves relative path packages from settings dir", () => {
-    const settingsDir = path.join(tmpDir, "project", ".pi");
+    const settingsDir = path.join(tmpDir, "project", ".omp");
     const pkgDir = path.join(tmpDir, "sibling-pkg");
     fs.mkdirSync(pkgDir, { recursive: true });
     fs.writeFileSync(
@@ -297,14 +297,14 @@ Body`);
 
 describe("scanPiResources (integration)", () => {
   it("combines local, global, and returns a full result", async () => {
-    writeFile(".pi/skills/local-skill/SKILL.md", `---
+    writeFile(".omp/skills/local-skill/SKILL.md", `---
 name: local-skill
 description: A local skill.
 ---
 Body`);
-    writeFile(".pi/prompts/my-prompt.md", "Do something.");
+    writeFile(".omp/prompts/my-prompt.md", "Do something.");
 
-    // We pass a custom globalDir to avoid depending on ~/.pi/agent
+    // We pass a custom globalDir to avoid depending on ~/.omp/agent
     const result = await scanPiResources(tmpDir, { globalDir: path.join(tmpDir, "nonexistent-global") });
     expect(result.local.skills).toHaveLength(1);
     expect(result.local.prompts).toHaveLength(1);
@@ -315,9 +315,9 @@ Body`);
 
 describe("scanPiResources activation state", () => {
   it("marks a resolver-disabled resource enabled:false and an unmatched one enabled:true", async () => {
-    writeFile(".pi/skills/notes.md", "---\nname: notes\n---\nBody");
-    writeFile(".pi/skills/keep.md", "---\nname: keep\n---\nBody");
-    const notesPath = path.join(tmpDir, ".pi", "skills", "notes.md");
+    writeFile(".omp/skills/notes.md", "---\nname: notes\n---\nBody");
+    writeFile(".omp/skills/keep.md", "---\nname: keep\n---\nBody");
+    const notesPath = path.join(tmpDir, ".omp", "skills", "notes.md");
 
     // Fake resolver reports only `notes` (disabled). `keep` is unreported.
     const resolveActivation = async () => ({
@@ -342,7 +342,7 @@ describe("scanPiResources activation state", () => {
   it("applies activation to both local and global scopes", async () => {
     const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-res-global-"));
     try {
-      writeFile(".pi/skills/local-skill.md", "---\nname: local-skill\n---\nBody");
+      writeFile(".omp/skills/local-skill.md", "---\nname: local-skill\n---\nBody");
       fs.mkdirSync(path.join(globalDir, "skills"), { recursive: true });
       fs.writeFileSync(path.join(globalDir, "skills", "global-skill.md"), "---\nname: global-skill\n---\nBody");
       const globalSkillPath = path.join(globalDir, "skills", "global-skill.md");

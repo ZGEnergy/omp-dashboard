@@ -29,7 +29,7 @@ function seedSidecar(sessionsDir: string, id: string, meta: Record<string, unkno
 // setup-home tripwire), so this never touches a real ~/.pi. The snapshot/
 // restore below additionally makes the suite self-cleaning within that HOME
 // so sibling tests see the config they expect.
-const CONFIG_PATH = path.join(os.homedir(), ".pi", "dashboard", "config.json");
+const CONFIG_PATH = path.join(os.homedir(), ".omp", "dashboard", "config.json");
 let configSnapshot: string | null = null;
 
 function writeAskConfig(): void {

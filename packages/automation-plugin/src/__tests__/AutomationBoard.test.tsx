@@ -24,8 +24,8 @@ const nightlyConfig: AutomationConfig = {
 };
 
 const automations: DiscoveredAutomation[] = [
-  { name: "nightly", scope: "folder", dir: "/r/.pi/automation/nightly", valid: true, config: nightlyConfig },
-  { name: "broken", scope: "folder", dir: "/r/.pi/automation/broken", valid: false, error: "bad kind" },
+  { name: "nightly", scope: "folder", dir: "/r/.omp/automation/nightly", valid: true, config: nightlyConfig },
+  { name: "broken", scope: "folder", dir: "/r/.omp/automation/broken", valid: false, error: "bad kind" },
 ];
 const runs: RunRecord[] = [
   { runId: "2026-06-19-nightly", name: "nightly", status: "done", dir: "/d1", startedAt: 2, findings: 3 },

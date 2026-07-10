@@ -154,7 +154,7 @@ describe("npm-search-proxy", () => {
   describe("deriveSkillIds", () => {
     it("derives skill ids as the basename of each pi.skills path", () => {
       expect(
-        deriveSkillIds([".pi/skills/document-converter", ".pi/skills/frontend-mockup-loop"]),
+        deriveSkillIds([".omp/skills/document-converter", ".omp/skills/frontend-mockup-loop"]),
       ).toEqual(["document-converter", "frontend-mockup-loop"]);
     });
 
@@ -173,7 +173,7 @@ describe("npm-search-proxy", () => {
       expect(deriveSkillIds(["skills"])).toBeUndefined();
       expect(deriveSkillIds(["./skill"])).toBeUndefined();
       // A container mixed with a specific skill dir keeps only the resolvable one.
-      expect(deriveSkillIds(["skills", ".pi/skills/document-converter"])).toEqual([
+      expect(deriveSkillIds(["skills", ".omp/skills/document-converter"])).toEqual([
         "document-converter",
       ]);
     });

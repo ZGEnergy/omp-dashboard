@@ -177,7 +177,7 @@ echo "[smoke]   version: $VERSION_OUT"
 echo "[smoke] step 7/8: pi-dashboard start, poll /api/health"
 indocker "PI_DASHBOARD_PORT=18000 /test/node_modules/.bin/pi-dashboard start" >/dev/null 2>&1 || {
   echo "[smoke] FAIL: pi-dashboard start exited non-zero" >&2
-  indocker "tail -100 ~/.pi/dashboard/server.log 2>/dev/null || true" >&2
+  indocker "tail -100 ~/.omp/dashboard/server.log 2>/dev/null || true" >&2
   exit 1
 }
 
@@ -213,7 +213,7 @@ done
 
 if [[ "$SUCCESS" -ne 1 ]]; then
   echo "[smoke] FAIL: /api/health did not report ok:true within 180s (last: $LAST_STATE)" >&2
-  indocker "tail -100 ~/.pi/dashboard/server.log" >&2
+  indocker "tail -100 ~/.omp/dashboard/server.log" >&2
   exit 1
 fi
 
@@ -245,7 +245,7 @@ else
   echo "[smoke] FAIL: spawn helper exited non-zero" >&2
   cat "$SESSION_OUT" >&2
   rm -f "$SESSION_OUT"
-  indocker "tail -60 ~/.pi/dashboard/server.log" >&2 || true
+  indocker "tail -60 ~/.omp/dashboard/server.log" >&2 || true
   exit 1
 fi
 
@@ -295,7 +295,7 @@ EOF
 ARCHIVE_JSON=$(indocker 'curl -fsS "http://localhost:18000/api/openspec-archive?cwd=/tmp/smoke-cwd"' 2>/dev/null || true)
 if [[ -z "$ARCHIVE_JSON" ]]; then
   echo "[smoke] FAIL: /api/openspec-archive returned empty / non-2xx" >&2
-  indocker 'tail -30 ~/.pi/dashboard/server.log' >&2 || true
+  indocker 'tail -30 ~/.omp/dashboard/server.log' >&2 || true
   exit 1
 fi
 

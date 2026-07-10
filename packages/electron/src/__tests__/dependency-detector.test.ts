@@ -105,7 +105,7 @@ describe("dependency-detector", () => {
       mockResolve.mockReturnValue({
         name: "pi",
         ok: true,
-        path: "/Users/test/.pi-dashboard/node_modules/.bin/pi",
+        path: "/Users/test/.omp-dashboard/node_modules/.bin/pi",
         source: "managed",
         tried: [],
         resolvedAt: Date.now(),
@@ -164,7 +164,7 @@ describe("dependency-detector", () => {
   describe("detectDashboardPackage", () => {
     it("finds in managed install", () => {
       mockExistsSync.mockImplementation((p: string) =>
-        String(p).includes(".pi-dashboard") && String(p).includes("pi-agent-dashboard/package.json")
+        String(p).includes(".omp-dashboard") && String(p).includes("pi-agent-dashboard/package.json")
       );
       const result = detectDashboardPackage();
       expect(result.found).toBe(true);
@@ -215,7 +215,7 @@ describe("dependency-detector", () => {
       mockExistsSync.mockImplementation((p: string) => {
         if (String(p).includes("settings.json")) return true;
         // Global npm package exists
-        if (String(p).includes("pi-agent-dashboard/package.json") && !String(p).includes(".pi-dashboard")) return true;
+        if (String(p).includes("pi-agent-dashboard/package.json") && !String(p).includes(".omp-dashboard")) return true;
         return false;
       });
       mockReadFileSync.mockReturnValue(JSON.stringify({ packages: ["npm:other-pkg"] }));
@@ -234,7 +234,7 @@ describe("dependency-detector", () => {
     it("falls back to managed install when not in settings.json", () => {
       mockExistsSync.mockImplementation((p: string) => {
         if (String(p).includes("settings.json")) return true;
-        if (String(p).includes(".pi-dashboard") && String(p).includes("pi-agent-dashboard/package.json")) return true;
+        if (String(p).includes(".omp-dashboard") && String(p).includes("pi-agent-dashboard/package.json")) return true;
         return false;
       });
       mockReadFileSync.mockReturnValue(JSON.stringify({ packages: [] }));

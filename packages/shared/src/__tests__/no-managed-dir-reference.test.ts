@@ -3,8 +3,8 @@
  * eliminate-electron-runtime-install (Phase 7.4).
  *
  * Under R3, the Electron arm MUST NOT install, materialize, or otherwise
- * write into `~/.pi-dashboard/`. The only places that may still reference
- * the literal `.pi-dashboard` string are:
+ * write into `~/.omp-dashboard/`. The only places that may still reference
+ * the literal `.omp-dashboard` string are:
  *
  *   1. `packages/shared/src/legacy-managed-dir.ts` — the dedicated
  *      detection helper used by Doctor + server CLI to surface an
@@ -18,7 +18,7 @@
  *   3. `packages/shared/src/platform/binary-lookup.ts`,
  *      `packages/shared/src/platform/managed-node-path.ts`,
  *      `packages/shared/src/tool-registry/strategies.ts` — fallback
- *      probes that READ `~/.pi-dashboard/node_modules/` for a managed pi
+ *      probes that READ `~/.omp-dashboard/node_modules/` for a managed pi
  *      install. Read-only.
  *   4. `packages/server/src/pi-core-updater.ts`,
  *      `packages/server/src/pi-core-checker.ts` — the `/api/pi-core/`
@@ -31,7 +31,7 @@
  * means runtime install is creeping back into the Electron arm.
  *
  * The lint walks `packages/electron/src/lib/`, `packages/server/src/`,
- * and `packages/shared/src/` looking for the literal `.pi-dashboard`,
+ * and `packages/shared/src/` looking for the literal `.omp-dashboard`,
  * then asserts every match maps to an allowlisted file.
  */
 import { describe, it, expect } from "vitest";
@@ -76,7 +76,7 @@ const ALLOWLIST: ReadonlySet<string> = new Set([
   // pi-core update checker — standalone arm only; Electron UI hidden.
   "packages/electron/src/lib/update-checker.ts",
   // Wizard mode marker — collapsed under Phase 6.1 (one-step welcome).
-  // Allowlisted pending the 6.1 collapse which migrates to ~/.pi/dashboard/.
+  // Allowlisted pending the 6.1 collapse which migrates to ~/.omp/dashboard/.
   "packages/electron/src/lib/wizard-state.ts",
 ]);
 
@@ -106,7 +106,7 @@ function* walk(dir: string): Generator<string> {
 }
 
 describe("no-managed-dir-reference lint", () => {
-  it("only allowlisted files reference `.pi-dashboard`", () => {
+  it("only allowlisted files reference `.omp-dashboard`", () => {
     const offenders: string[] = [];
 
     for (const root of SCAN_ROOTS) {
@@ -122,7 +122,7 @@ describe("no-managed-dir-reference lint", () => {
         } catch {
           continue;
         }
-        // Match the bare literal `.pi-dashboard`. The legacy-managed-dir
+        // Match the bare literal `.omp-dashboard`. The legacy-managed-dir
         // module splits the literal across a `+` so this regex won't hit
         // legitimate code there — but legacy-managed-dir is allowlisted
         // anyway.
@@ -132,6 +132,6 @@ describe("no-managed-dir-reference lint", () => {
       }
     }
 
-    expect(offenders, `Non-allowlisted files reference ".pi-dashboard":\n  ${offenders.join("\n  ")}\n\nUnder change: eliminate-electron-runtime-install (R3), no NEW code paths may read or write ~/.pi-dashboard/. If this reference is legitimate (e.g. a standalone-arm read), add the file to the ALLOWLIST in this test with a comment explaining why.`).toEqual([]);
+    expect(offenders, `Non-allowlisted files reference ".omp-dashboard":\n  ${offenders.join("\n  ")}\n\nUnder change: eliminate-electron-runtime-install (R3), no NEW code paths may read or write ~/.omp-dashboard/. If this reference is legitimate (e.g. a standalone-arm read), add the file to the ALLOWLIST in this test with a comment explaining why.`).toEqual([]);
   });
 });

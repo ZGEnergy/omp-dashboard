@@ -102,7 +102,7 @@ let sessionsDir: string;
 
 beforeEach(() => {
   tmpRoot = mkdtempSync(path.join("/tmp", "km-"));
-  sessionsDir = path.join(tmpRoot, ".pi", "dashboard", "sessions");
+  sessionsDir = path.join(tmpRoot, ".omp", "dashboard", "sessions");
 });
 afterEach(() => {
   rmSync(tmpRoot, { recursive: true, force: true });

@@ -78,7 +78,7 @@ export function sendGitInfoIfChanged(bc: BridgeContext, cwd: string): void {
  */
 let lastPiVersion: string | undefined;
 
-const PI_PKG = "@earendil-works/pi-coding-agent";
+const PI_PKG = "@oh-my-pi/pi-coding-agent";
 
 /**
  * Read a package's `version` without resolving its `./package.json` subpath.

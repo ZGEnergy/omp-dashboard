@@ -4,7 +4,7 @@
  * Claims slot `settings-section` (tab: "general"). Surfaces ONE producer
  * setting: `inheritContext`. The other producer settings
  * (`exposeInheritanceInTool`, `inheritance.*`) remain editable only via
- * the producer's `~/.pi/agent/extensions/pi-dashboard-subagents/config.json`
+ * the producer's `~/.omp/agent/extensions/pi-dashboard-subagents/config.json`
  * file for power users.
  *
  * Uses the canonical plugin-settings flow:

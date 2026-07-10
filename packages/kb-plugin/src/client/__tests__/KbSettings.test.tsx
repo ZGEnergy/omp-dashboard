@@ -15,9 +15,9 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 function configResponse(over: Partial<KbConfigResponse> = {}): KbConfigResponse {
   return {
     origin: "project",
-    projectPath: "/repo/.pi/dashboard/knowledge_base.json",
+    projectPath: "/repo/.omp/dashboard/knowledge_base.json",
     // Only the fields the panel reads are needed for the smoke test.
-    config: { sources: [{ kind: "filesystem", ref: "docs" }], include: ["**/*.md"], exclude: ["**/node_modules/**"], dbPath: ".pi/dashboard/kb/index.db" } as KbConfigResponse["config"],
+    config: { sources: [{ kind: "filesystem", ref: "docs" }], include: ["**/*.md"], exclude: ["**/node_modules/**"], dbPath: ".omp/dashboard/kb/index.db" } as KbConfigResponse["config"],
     ...over,
   };
 }

@@ -16,7 +16,7 @@ vi.mock("node:fs", () => ({ existsSync: mockExistsSync }));
 
 import { ToolResolver } from "../platform/binary-lookup.js";
 
-const MANAGED_BIN = path.join(os.homedir(), ".pi-dashboard", "node_modules", ".bin");
+const MANAGED_BIN = path.join(os.homedir(), ".omp-dashboard", "node_modules", ".bin");
 
 // On Windows, ToolResolver.which() appends ".cmd" to the binary name when
 // probing managed bin / extra dirs (shim convention for npm-installed bins).

@@ -25,7 +25,7 @@ function makeShortHome(): string {
 }
 
 function sessionsDirIn(home: string): string {
-  return path.join(home, ".pi", "dashboard", "sessions");
+  return path.join(home, ".omp", "dashboard", "sessions");
 }
 
 function makeSessionId(): string {

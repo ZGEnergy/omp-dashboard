@@ -6,7 +6,7 @@
  *   - source → `loose` / `📦 <package-name>` (orange)
  *   - path   → monospace line at the card bottom
  *   - toggle → activation switch, top-right (omitted for agents — pi has no
- *              activation dimension for `.pi/agents/*.md`)
+ *              activation dimension for `.omp/agents/*.md`)
  *
  * Type-specific treatments:
  *   - agent → `◆ model` + `🔧 tools` badges

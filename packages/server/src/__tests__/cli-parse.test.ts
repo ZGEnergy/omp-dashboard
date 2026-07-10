@@ -91,8 +91,8 @@ describe("buildConfig host resolution", () => {
 
   beforeEach(() => {
     testDir = fs.mkdtempSync(path.join(os.tmpdir(), "test-bindhost-"));
-    fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
-    configFile = path.join(testDir, ".pi", "dashboard", "config.json");
+    fs.mkdirSync(path.join(testDir, ".omp", "dashboard"), { recursive: true });
+    configFile = path.join(testDir, ".omp", "dashboard", "config.json");
     origHome = process.env.HOME!;
     origEnvHost = process.env.PI_DASHBOARD_HOST;
     process.env.HOME = testDir;

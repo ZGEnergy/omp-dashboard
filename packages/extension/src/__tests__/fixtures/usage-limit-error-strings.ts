@@ -1,6 +1,6 @@
 /**
  * Real-world usage-limit / quota / billing error strings extracted from
- * production session logs (~/.pi/agent/sessions/**\/*.jsonl) plus
+ * production session logs (~/.omp/agent/sessions/**\/*.jsonl) plus
  * representative samples from provider docs. Used as fixtures for the
  * USAGE_LIMIT_PATTERN regex coverage tests.
  *

@@ -26,7 +26,7 @@ export function useProvidersReady(): ProvidersReadyState {
     const base = getApiBase();
     // Providers come from TWO sources:
     //   1. `/api/providers` — OpenAI-style baseUrl+apiKey entries in dashboard config
-    //   2. `/api/provider-auth/status` — pi OAuth / API-key credentials (~/.pi/agent/auth.json)
+    //   2. `/api/provider-auth/status` — pi OAuth / API-key credentials (~/.omp/agent/auth.json)
     // A user is "ready" if ANY source has at least one authenticated/keyed entry.
     const providersP = fetch(`${base}/api/providers`)
       .then((res) => (res.ok ? res.json() : null))

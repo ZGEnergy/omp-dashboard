@@ -18,7 +18,7 @@ describe("non-destructive bridge registration", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-reg-test-"));
-    settingsPath = path.join(tmpDir, ".pi", "agent", "settings.json");
+    settingsPath = path.join(tmpDir, ".omp", "agent", "settings.json");
     origHome = process.env.HOME;
     process.env.HOME = tmpDir;
 

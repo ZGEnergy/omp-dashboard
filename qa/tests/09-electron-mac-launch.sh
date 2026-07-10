@@ -7,7 +7,7 @@
 #   1. Main process reaches a healthy /api/health within 120 s.
 #   2. /api/health.launchSource == "electron" (the server's launch-source
 #      field; there is no `starter` key in the health response).
-#   3. ~/.pi/dashboard/server.log is non-empty (catches spawnDetached
+#   3. ~/.omp/dashboard/server.log is non-empty (catches spawnDetached
 #      stdio[1]='ignore' regression).
 #   4. Electron parent stdout/stderr does not contain "FATAL".
 #
@@ -18,7 +18,7 @@
 #   - No --no-sandbox: the runner user session is a real GUI session.
 #   - Defensively strips com.apple.quarantine when the bundle is copied
 #     from a mounted DMG.
-#   - Seeds the first-run marker (~/.pi/dashboard/first-run-done) BEFORE
+#   - Seeds the first-run marker (~/.omp/dashboard/first-run-done) BEFORE
 #     launch. On a fresh runner main.ts's isFirstRun() opens the welcome
 #     wizard window and AWAITS its close before spawning the server; with
 #     no interactive user that blocks the server spawn indefinitely. The
@@ -117,7 +117,7 @@ if [ "$COPIED_FROM_DMG" = true ]; then
 fi
 
 ELECTRON_LOG="/tmp/electron-stdout-$$.log"
-SERVER_LOG="$HOME/.pi/dashboard/server.log"
+SERVER_LOG="$HOME/.omp/dashboard/server.log"
 PORT=8000
 
 # Wipe any stale server log so the size assertion reflects this run only.
@@ -126,7 +126,7 @@ rm -f "$SERVER_LOG"
 
 # Seed the first-run marker so main.ts's isFirstRun() is false and the
 # blocking welcome-wizard window is skipped (no interactive user on CI).
-touch "$HOME/.pi/dashboard/first-run-done"
+touch "$HOME/.omp/dashboard/first-run-done"
 
 # ── OpenSpec config-read regression seed (fix-openspec-config-read-bundled-node) ─
 # Reproduce the affected managed-bin topology: a `.bin/openspec` symlink → a real
@@ -137,7 +137,7 @@ touch "$HOME/.pi/dashboard/first-run-done"
 # config the CLI reads (~/.config/openspec/config.json). Strong-assert when the
 # seed lands; SKIP the openspec assertion only if it cannot be created.
 seed_openspec() {
-  local managed="$HOME/.pi-dashboard/node_modules"
+  local managed="$HOME/.omp-dashboard/node_modules"
   local pkgdir="$managed/@fission-ai/openspec/bin"
   local bindir="$managed/.bin"
   OS_CONFIG="$HOME/.config/openspec/config.json"
@@ -236,7 +236,7 @@ if [ "$LAUNCH_SOURCE" != "electron" ]; then
 fi
 echo "  ✓ launchSource == electron"
 
-# Assert ~/.pi/dashboard/server.log non-empty (stdio-routing regression guard).
+# Assert ~/.omp/dashboard/server.log non-empty (stdio-routing regression guard).
 if [ ! -f "$SERVER_LOG" ]; then
   echo "FAIL: $SERVER_LOG missing after successful spawn"
   exit 1

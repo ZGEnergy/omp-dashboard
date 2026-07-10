@@ -48,7 +48,7 @@ if (!Number.isFinite(port) || port <= 0) {
   process.exit(2);
 }
 
-const EDITORS_DIR = path.join(os.homedir(), ".pi", "dashboard", "editors");
+const EDITORS_DIR = path.join(os.homedir(), ".omp", "dashboard", "editors");
 try { fs.mkdirSync(EDITORS_DIR, { recursive: true }); } catch (_e) { /* mkdir failure surfaced by log open below */ }
 
 const isWindows = process.platform === "win32";

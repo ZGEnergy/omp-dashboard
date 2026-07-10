@@ -11,7 +11,7 @@ import { scanAutomations } from "../server/scanner.js";
 const KNOWN = new Set(["schedule"]);
 
 function writeAutomation(base: string, name: string, yaml: string): void {
-  const dir = path.join(base, ".pi", "automation", name);
+  const dir = path.join(base, ".omp", "automation", name);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "automation.yaml"), yaml);
 }
@@ -70,7 +70,7 @@ describe("scanAutomations", () => {
   });
 
   it("ignores the runs/ store dir", () => {
-    fs.mkdirSync(path.join(repoRoot, ".pi", "automation", "runs"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, ".omp", "automation", "runs"), { recursive: true });
     const out = scanAutomations({ repoRoot, homeDir }, KNOWN);
     expect(out.find((a) => a.name === "runs")).toBeUndefined();
   });

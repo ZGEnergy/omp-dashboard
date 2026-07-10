@@ -3,10 +3,10 @@
  * and its LOCAL working-tree source, guaranteeing exactly one source per package.
  *
  * Two config layers are reconciled:
- *   - GLOBAL  ~/.pi/agent/settings.json   "packages": [...]
+ *   - GLOBAL  ~/.omp/agent/settings.json   "packages": [...]
  *       npm  form  -> "npm:<npmName>"
  *       local form -> "<repoRoot>/packages/<dir>"        (dir path; pi resolves package.json "pi")
- *   - PROJECT <repo>/.pi/settings.json     "packages":[{ source, extensions:["+packages/<dir>/<entry>"] }]
+ *   - PROJECT <repo>/.omp/settings.json     "packages":[{ source, extensions:["+packages/<dir>/<entry>"] }]
  *       local overlay form (only when --overlay given, package must have pi.extensions)
  *
  * Every switch:
@@ -32,8 +32,8 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(__dirname, "../../../..");
-const GLOBAL = join(homedir(), ".pi", "agent", "settings.json");
-const PROJECT = join(REPO, ".pi", "settings.json");
+const GLOBAL = join(homedir(), ".omp", "agent", "settings.json");
+const PROJECT = join(REPO, ".omp", "settings.json");
 const PKGS = join(REPO, "packages");
 
 type PkgInfo = { dir: string; npmName: string; hasExt: boolean; entry: string | null };

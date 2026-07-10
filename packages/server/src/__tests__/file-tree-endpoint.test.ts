@@ -2,7 +2,7 @@
  * Tests for `GET /api/file/tree` — the single-source-of-truth tree listing.
  *
  * Fixes editor-pane defect #1: the old `/api/file`(names)+`/api/browse`(dirs,
- * hidden-stripped) merge labelled hidden directories (`.git`, `.pi`) as files.
+ * hidden-stripped) merge labelled hidden directories (`.git`, `.omp`) as files.
  * The new endpoint returns `{ entries: {name,isDir}[] }` from a single
  * `readdir(withFileTypes)`, hidden entries INCLUDED, behind the `/api/file`
  * security gate (known-cwd + containment).

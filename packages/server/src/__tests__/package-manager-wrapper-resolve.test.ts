@@ -2,7 +2,7 @@
  * Tests for loadPiPackageManager() resolution chain in package-manager-wrapper.ts.
  *
  * Separate from package-manager-wrapper.test.ts because that file mocks
- * "@earendil-works/pi-coding-agent" so direct-import succeeds and the
+ * "@oh-my-pi/pi-coding-agent" so direct-import succeeds and the
  * fallback paths never execute.
  *
  * These tests exercise the managed-install and global-npm fallbacks.
@@ -15,10 +15,10 @@ import * as path from "node:path";
 // Force the direct import to fail so resolution falls through to the
 // managed-install / global-npm paths. vi.mock is hoisted; the factory
 // throws at import time which mimics pi not being an installed dependency.
-vi.mock("@earendil-works/pi-coding-agent", () => {
+vi.mock("@oh-my-pi/pi-coding-agent", () => {
   throw new Error("not installed as direct dependency");
 });
-vi.mock("@mariozechner/pi-coding-agent", () => {
+vi.mock("@oh-my-pi/pi-coding-agent", () => {
   throw new Error("not installed as direct dependency");
 });
 
@@ -53,22 +53,22 @@ describe("loadPiPackageManager resolution chain", () => {
 
   // SKIPPED: bareImportStrategy now ships a filesystem dir-walk fallback
   // for packages whose exports map omits the `"require"` condition
-  // (@earendil-works/pi-* — live repro: /api/packages/installed broken).
+  // (@oh-my-pi/pi-* — live repro: /api/packages/installed broken).
   // Consequence: from any test cwd inside this repo the walk finds the
-  // real `node_modules/@earendil-works/pi-coding-agent/package.json` and
+  // real `node_modules/@oh-my-pi/pi-coding-agent/package.json` and
   // bare-import succeeds before the managed slot runs. Same condition as
   // the sibling test below; proper fix requires an injectable registry
   // entry-point in package-manager-wrapper.ts (tracked alongside the
   // sibling's Phase 4 platform/ consolidation note).
   // See change: fix-node-resolution-under-electron (follow-up).
-  it.skip("resolves pi from managed install at ~/.pi-dashboard/node_modules/ when direct import fails", async () => {
+  it.skip("resolves pi from managed install at ~/.omp-dashboard/node_modules/ when direct import fails", async () => {
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-dash-home-managed-"));
     cleanupPaths.push(tmpHome);
 
     // Create a fake managed pi install with a real ESM entry file
     const fakeDistDir = path.join(
       tmpHome,
-      ".pi-dashboard",
+      ".omp-dashboard",
       "node_modules",
       "@earendil-works",
       "pi-coding-agent",
@@ -105,7 +105,7 @@ describe("loadPiPackageManager resolution chain", () => {
     // from the dev node_modules regardless of HOME override. Needs a more invasive
     // test-registry injection to genuinely simulate 'all paths empty'. Tracked as
     // part of the Phase 4 platform/ consolidation work.
-    // tmp home with NO ~/.pi-dashboard directory -> managed resolution must
+    // tmp home with NO ~/.omp-dashboard directory -> managed resolution must
     // silently fail and continue to the global-npm path.
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-dash-home-empty-"));
     cleanupPaths.push(tmpHome);

@@ -11,8 +11,8 @@ describe("loadConfig", () => {
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-config-${Date.now()}`);
-    fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
-    configFile = path.join(testDir, ".pi", "dashboard", "config.json");
+    fs.mkdirSync(path.join(testDir, ".omp", "dashboard"), { recursive: true });
+    configFile = path.join(testDir, ".omp", "dashboard", "config.json");
     origHome = process.env.HOME!;
     process.env.HOME = testDir;
   });
@@ -396,7 +396,7 @@ describe("ensureConfig", () => {
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-ensure-${Date.now()}`);
-    configDir = path.join(testDir, ".pi", "dashboard");
+    configDir = path.join(testDir, ".omp", "dashboard");
     configFile = path.join(configDir, "config.json");
     origHome = process.env.HOME!;
     process.env.HOME = testDir;
@@ -446,8 +446,8 @@ describe("loadConfig reattachPlacement", () => {
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-reattach-${Date.now()}-${Math.random()}`);
-    fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
-    configFile = path.join(testDir, ".pi", "dashboard", "config.json");
+    fs.mkdirSync(path.join(testDir, ".omp", "dashboard"), { recursive: true });
+    configFile = path.join(testDir, ".omp", "dashboard", "config.json");
     origHome = process.env.HOME!;
     process.env.HOME = testDir;
   });
@@ -506,8 +506,8 @@ describe("loadConfig completedFirst / questionFirst", () => {
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-config-cfqf-${Date.now()}-${Math.random()}`);
-    fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
-    configFile = path.join(testDir, ".pi", "dashboard", "config.json");
+    fs.mkdirSync(path.join(testDir, ".omp", "dashboard"), { recursive: true });
+    configFile = path.join(testDir, ".omp", "dashboard", "config.json");
     origHome = process.env.HOME!;
     process.env.HOME = testDir;
   });
@@ -552,8 +552,8 @@ describe("loadConfig spawnRegisterTimeoutMs", () => {
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-config-srt-${Date.now()}`);
-    fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
-    configFile = path.join(testDir, ".pi", "dashboard", "config.json");
+    fs.mkdirSync(path.join(testDir, ".omp", "dashboard"), { recursive: true });
+    configFile = path.join(testDir, ".omp", "dashboard", "config.json");
     origHome = process.env.HOME!;
     process.env.HOME = testDir;
   });
@@ -601,8 +601,8 @@ describe("dashboardName", () => {
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-config-${Date.now()}`);
-    fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
-    configFile = path.join(testDir, ".pi", "dashboard", "config.json");
+    fs.mkdirSync(path.join(testDir, ".omp", "dashboard"), { recursive: true });
+    configFile = path.join(testDir, ".omp", "dashboard", "config.json");
     origHome = process.env.HOME!;
     process.env.HOME = testDir;
   });
@@ -640,8 +640,8 @@ describe("loadConfig gitWorktreeEnabled", () => {
 
   beforeEach(() => {
     testDir = path.join(os.tmpdir(), `test-gwe-${Date.now()}-${Math.random()}`);
-    fs.mkdirSync(path.join(testDir, ".pi", "dashboard"), { recursive: true });
-    configFile = path.join(testDir, ".pi", "dashboard", "config.json");
+    fs.mkdirSync(path.join(testDir, ".omp", "dashboard"), { recursive: true });
+    configFile = path.join(testDir, ".omp", "dashboard", "config.json");
     origHome = process.env.HOME!;
     process.env.HOME = testDir;
   });

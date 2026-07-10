@@ -16,7 +16,7 @@ node --version
 npm --version
 which pi 2>&1 || echo "(no pi)"
 which pi-dashboard 2>&1 || echo "(no pi-dashboard)"
-ls -la /root/.pi-dashboard 2>&1 | head -1 || echo "(no ~/.pi-dashboard)"
+ls -la /root/.omp-dashboard 2>&1 | head -1 || echo "(no ~/.omp-dashboard)"
 
 banner "STEP 1 — published v0.5.3 default install (Finding B expected)"
 npm install -g @blackbelt-technology/pi-agent-dashboard@0.5.3

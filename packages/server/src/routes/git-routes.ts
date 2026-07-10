@@ -175,7 +175,7 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
   // ── Worktree init-status probe (change: generalize-worktree-init-hook) ──
   //
   // Reports whether a checkout needs initialization per its declared
-  // `.pi/settings.json#worktreeInit` hook. Gate eval is cached per checkout.
+  // `.omp/settings.json#worktreeInit` hook. Gate eval is cached per checkout.
   fastify.get<{ Querystring: { cwd?: string } }>(
     "/api/git/worktree/init-status",
     { preHandler: networkGuard },
@@ -408,7 +408,7 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
       }
       const result = removeWorktree({ cwd: validated.cwd, force });
       // Trace every call so failed clicks leave a breadcrumb in
-      // ~/.pi/dashboard/server.log (the request itself is not
+      // ~/.omp/dashboard/server.log (the request itself is not
       // otherwise logged by fastify in default config).
       // eslint-disable-next-line no-console
       console.log(

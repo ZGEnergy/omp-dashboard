@@ -41,7 +41,7 @@ describe("isValidAutomationName", () => {
 describe("writeAutomation", () => {
   it("writes automation.yaml that round-trips through the parser", () => {
     writeAutomation({ scopeBase: base, name: "weekly-brief", config: promptConfig, promptBody: "Summarize the week." });
-    const yamlPath = path.join(base, ".pi", "automation", "weekly-brief", "automation.yaml");
+    const yamlPath = path.join(base, ".omp", "automation", "weekly-brief", "automation.yaml");
     const parsed = parseAutomationYaml(fs.readFileSync(yamlPath, "utf-8"), KNOWN);
     expect(parsed.error).toBeUndefined();
     expect(parsed.config?.model).toBe("@fast");
@@ -50,7 +50,7 @@ describe("writeAutomation", () => {
 
   it("writes prompt.md and normalizes action.prompt to ./prompt.md", () => {
     writeAutomation({ scopeBase: base, name: "p", config: promptConfig, promptBody: "Find regressions." });
-    const dir = path.join(base, ".pi", "automation", "p");
+    const dir = path.join(base, ".omp", "automation", "p");
     expect(fs.readFileSync(path.join(dir, "prompt.md"), "utf-8")).toContain("Find regressions.");
     const parsed = parseAutomationYaml(fs.readFileSync(path.join(dir, "automation.yaml"), "utf-8"), KNOWN);
     expect(parsed.config?.action).toEqual({ kind: "prompt", prompt: "./prompt.md" });
@@ -59,7 +59,7 @@ describe("writeAutomation", () => {
   it("does not write prompt.md for skill actions", () => {
     const skillConfig: AutomationConfig = { ...promptConfig, action: { kind: "skill", skill: "$recent-code-bugfix" } };
     writeAutomation({ scopeBase: base, name: "s", config: skillConfig });
-    const dir = path.join(base, ".pi", "automation", "s");
+    const dir = path.join(base, ".omp", "automation", "s");
     expect(fs.existsSync(path.join(dir, "prompt.md"))).toBe(false);
   });
 
@@ -74,7 +74,7 @@ describe("writeAutomation", () => {
     writeAutomation({ scopeBase: base, name: "edit-me", config: promptConfig, promptBody: "old body" });
     const updated: AutomationConfig = { ...promptConfig, model: "@coding" };
     writeAutomation({ scopeBase: base, name: "edit-me", config: updated, promptBody: "new body", intent: "update" });
-    const dir = path.join(base, ".pi", "automation", "edit-me");
+    const dir = path.join(base, ".omp", "automation", "edit-me");
     expect(fs.readFileSync(path.join(dir, "prompt.md"), "utf-8")).toContain("new body");
     const parsed = parseAutomationYaml(fs.readFileSync(path.join(dir, "automation.yaml"), "utf-8"), KNOWN);
     expect(parsed.config?.model).toBe("@coding");
@@ -89,6 +89,6 @@ describe("writeAutomation", () => {
   it("deleteAutomation removes the dir", () => {
     writeAutomation({ scopeBase: base, name: "gone", config: promptConfig, promptBody: "x" });
     expect(deleteAutomation(base, "gone")).toBe(true);
-    expect(fs.existsSync(path.join(base, ".pi", "automation", "gone"))).toBe(false);
+    expect(fs.existsSync(path.join(base, ".omp", "automation", "gone"))).toBe(false);
   });
 });

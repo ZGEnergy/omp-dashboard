@@ -34,7 +34,7 @@ export type { TunnelStatus };
 export type ZrokEnv = ZrokEnvData;
 
 function getZrokPidPath(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "zrok.pid");
+  return path.join(os.homedir(), ".omp", "dashboard", "zrok.pid");
 }
 const SPAWN_TIMEOUT_MS = 30_000;
 

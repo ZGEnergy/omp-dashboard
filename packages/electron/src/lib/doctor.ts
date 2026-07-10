@@ -69,7 +69,7 @@ function getPkgVersion(pkgJsonPath: string): string | null {
  * Under the immutable-bundle architecture (see change:
  * eliminate-electron-runtime-install), the bundled Node lives at
  * `<resourcesPath>/node/` and is the only runtime. The legacy
- * `~/.pi-dashboard/node/` install path is gone.
+ * `~/.omp-dashboard/node/` install path is gone.
  */
 export async function checkManagedNodeRuntime(opts?: {
   bundledNodeBinary?: string | null;
@@ -155,7 +155,7 @@ export async function runDoctor(): Promise<DoctorReport> {
       message: "Unexpected internal failure",
       detail: `${e.message}\n${(e.stack || "").split("\n").slice(0, 4).join("\n")}`,
       suggestion:
-        "Open `~/.pi-dashboard/doctor.log` for full context, then file an issue with the captured error attached.",
+        "Open `~/.omp-dashboard/doctor.log` for full context, then file an issue with the captured error attached.",
     };
     return {
       checks: [fallback],
@@ -364,7 +364,7 @@ async function runDoctorInner(): Promise<DoctorReport> {
     await runServerLaunchTest(checks, { hasBundledServer, bundledServerCli, bundledNode });
   }
 
-  // Legacy `~/.pi-dashboard/` advisory moved into shared
+  // Legacy `~/.omp-dashboard/` advisory moved into shared
   // `runSharedChecks(...)` so both Electron Doctor and the server-side
   // `/api/doctor` route emit the same single row. See change:
   // fix-doctor-stale-managed-install-check.

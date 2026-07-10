@@ -128,7 +128,7 @@ export function AutomationSettings(): React.ReactElement {
           onChange={(e) => setScanFolder(e.target.checked)}
           data-testid="automation-scan-folder"
         />
-        Scan per-folder automations (<code>&lt;repo&gt;/.pi/automation/</code>)
+        Scan per-folder automations (<code>&lt;repo&gt;/.omp/automation/</code>)
       </label>
 
       <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
@@ -138,7 +138,7 @@ export function AutomationSettings(): React.ReactElement {
           onChange={(e) => setScanGlobal(e.target.checked)}
           data-testid="automation-scan-global"
         />
-        Scan global automations (<code>~/.pi/automation/</code>)
+        Scan global automations (<code>~/.omp/automation/</code>)
       </label>
 
       <label className="block text-xs text-[var(--text-secondary)]">

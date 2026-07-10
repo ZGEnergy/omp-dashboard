@@ -12,7 +12,7 @@
 # 6. Kill the app and check clean exit.
 #
 # Rewrite scope: this script previously simulated a wizard runtime-install
-# (npm install tsx + @mariozechner/pi-coding-agent into ~/.pi-dashboard/).
+# (npm install tsx + @oh-my-pi/pi-coding-agent into ~/.omp-dashboard/).
 # That flow was deleted under change `eliminate-electron-runtime-install` —
 # the .deb now ships pi/openspec/tsx pre-installed in the bundle. The
 # wizard-simulation stage is gone; everything else is identical.
@@ -35,7 +35,7 @@ SERVER_BUNDLE="$RESOURCES/server"
 BUNDLED_NODE="$RESOURCES/node/bin/node"
 SERVER_CLI="$SERVER_BUNDLE/packages/server/src/cli.ts"
 START_SH="$SERVER_BUNDLE/start-server.sh"
-PI_PKG_JSON="$SERVER_BUNDLE/node_modules/@earendil-works/pi-coding-agent/package.json"
+PI_PKG_JSON="$SERVER_BUNDLE/node_modules/@oh-my-pi/pi-coding-agent/package.json"
 SERVER_PKG_JSON="$SERVER_BUNDLE/node_modules/@blackbelt-technology/pi-dashboard-server/package.json"
 
 hr; echo "  Test 1: Verify DEB installation"; hr
@@ -159,7 +159,7 @@ else
   tail -30 /tmp/electron.log 2>/dev/null || echo "  (no log)"
   echo ""
   echo "  Server log:"
-  cat "$HOME/.pi-dashboard/server.log" 2>/dev/null | tail -30 || echo "  (no server log)"
+  cat "$HOME/.omp-dashboard/server.log" 2>/dev/null | tail -30 || echo "  (no server log)"
 fi
 
 echo ""; hr; echo "  Test 4: Clean shutdown"; hr

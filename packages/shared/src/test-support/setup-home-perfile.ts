@@ -9,7 +9,7 @@
  *
  * Why per-file (not the single per-run HOME the npm script sets):
  *   With `pool: "forks"` + `maxWorkers > 1`, multiple files run in parallel
- *   forks. Sharing one HOME means they contend on `$HOME/.pi/dashboard/*.json`
+ *   forks. Sharing one HOME means they contend on `$HOME/.omp/dashboard/*.json`
  *   and `server.lock`. A fresh HOME per file removes that contention so the
  *   server suite can run in parallel.
  *
@@ -39,5 +39,5 @@ if (process.platform === "win32") { // platform-branch-ok: test HOME isolation; 
 
 // Pre-create expected .pi subdirectories (mirrors globalSetup bootstrap) so
 // production code that reads those paths finds empty but well-formed dirs.
-mkdirSync(join(home, ".pi", "agent", "sessions"), { recursive: true });
-mkdirSync(join(home, ".pi", "dashboard"), { recursive: true });
+mkdirSync(join(home, ".omp", "agent", "sessions"), { recursive: true });
+mkdirSync(join(home, ".omp", "dashboard"), { recursive: true });

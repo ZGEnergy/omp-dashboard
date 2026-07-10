@@ -22,7 +22,7 @@ import {
 describe("managed-paths getters", () => {
   it("getManagedDir() with no arg matches live MANAGED_DIR", () => {
     expect(getManagedDir()).toBe(MANAGED_DIR);
-    expect(getManagedDir()).toBe(path.join(os.homedir(), ".pi-dashboard"));
+    expect(getManagedDir()).toBe(path.join(os.homedir(), ".omp-dashboard"));
   });
 
   it("getManagedBin() with no arg matches live MANAGED_BIN", () => {
@@ -35,19 +35,19 @@ describe("managed-paths getters", () => {
 
   it("getManagedDir({ homedir }) uses the override", () => {
     expect(getManagedDir({ homedir: "/fake/home" })).toBe(
-      path.join("/fake/home", ".pi-dashboard"),
+      path.join("/fake/home", ".omp-dashboard"),
     );
   });
 
   it("getManagedBin({ homedir }) composes from override", () => {
     expect(getManagedBin({ homedir: "/fake/home" })).toBe(
-      path.join("/fake/home", ".pi-dashboard", "node_modules", ".bin"),
+      path.join("/fake/home", ".omp-dashboard", "node_modules", ".bin"),
     );
   });
 
   it("getPiSettingsPath({ homedir }) uses the override", () => {
     expect(getPiSettingsPath({ homedir: "/fake/home" })).toBe(
-      path.join("/fake/home", ".pi", "agent", "settings.json"),
+      path.join("/fake/home", ".omp", "agent", "settings.json"),
     );
   });
 

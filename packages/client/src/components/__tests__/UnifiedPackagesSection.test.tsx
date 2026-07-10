@@ -62,7 +62,7 @@ beforeEach(() => {
 		status: {
 			packages: [
 				{
-					name: "@mariozechner/pi-coding-agent",
+					name: "@oh-my-pi/pi-coding-agent",
 					displayName: "pi (core agent)",
 					currentVersion: "0.70.2",
 					latestVersion: "0.70.2",
@@ -176,11 +176,11 @@ describe("UnifiedPackagesSection", () => {
 		mockUseInstalledPackages.mockReturnValue({
 			packages: [
 				{
-					source: "npm:@mariozechner/pi-coding-agent",
+					source: "npm:@oh-my-pi/pi-coding-agent",
 					scope: "user",
 					filtered: false,
 					version: "0.70.2",
-					displayName: "@mariozechner/pi-coding-agent",
+					displayName: "@oh-my-pi/pi-coding-agent",
 					isRecommended: false,
 					isBundled: false,
 				},
@@ -195,6 +195,6 @@ describe("UnifiedPackagesSection", () => {
 		// The npm: source string must NOT appear anywhere — that string only
 		// surfaces if the row leaks into the Other group. The Core row uses
 		// the bare npm name as its source caption (without `npm:` prefix).
-		expect(screen.queryByText("npm:@mariozechner/pi-coding-agent")).toBeNull();
+		expect(screen.queryByText("npm:@oh-my-pi/pi-coding-agent")).toBeNull();
 	});
 });

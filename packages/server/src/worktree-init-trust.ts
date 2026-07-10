@@ -7,7 +7,7 @@
  * (the hash component is `hookDefHash`), so editing the gate/command/prompt/
  * model re-prompts.
  *
- * Persisted as JSON under `~/.pi/dashboard/worktree-init-trust.json`.
+ * Persisted as JSON under `~/.omp/dashboard/worktree-init-trust.json`.
  *
  * See change: generalize-worktree-init-hook.
  */

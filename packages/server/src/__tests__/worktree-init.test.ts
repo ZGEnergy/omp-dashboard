@@ -26,8 +26,8 @@ afterEach(() => {
 });
 
 function writeSettings(obj: unknown) {
-  fs.mkdirSync(path.join(tmp, ".pi"), { recursive: true });
-  fs.writeFileSync(path.join(tmp, ".pi", "settings.json"), JSON.stringify(obj), "utf8");
+  fs.mkdirSync(path.join(tmp, ".omp"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".omp", "settings.json"), JSON.stringify(obj), "utf8");
 }
 
 // ── readInitHook ────────────────────────────────────────────────────────────
@@ -59,8 +59,8 @@ describe("readInitHook", () => {
   });
 
   it("returns null on malformed JSON", () => {
-    fs.mkdirSync(path.join(tmp, ".pi"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, ".pi", "settings.json"), "{ not json", "utf8");
+    fs.mkdirSync(path.join(tmp, ".omp"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, ".omp", "settings.json"), "{ not json", "utf8");
     expect(readInitHook(tmp)).toBeNull();
   });
 
@@ -143,7 +143,7 @@ describe("runInitHook agent flavor", () => {
   });
 
   it("failed with log tail when the gate still needs init", async () => {
-    fs.mkdirSync(path.join(tmp, ".pi"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, ".omp"), { recursive: true });
     const res = await runInitHook(tmp, agentHook, () => {}, {
       resolvePiBin: () => "/fake/pi",
       spawnFn: () => fakeChild(0),

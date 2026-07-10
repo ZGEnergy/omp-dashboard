@@ -31,7 +31,7 @@ import { join, basename } from "node:path";
 import { homedir } from "node:os";
 
 const HOME = homedir();
-const SESS_ROOT = join(HOME, ".pi", "agent", "sessions");
+const SESS_ROOT = join(HOME, ".omp", "agent", "sessions");
 
 // ---------- tiny arg parser ----------
 

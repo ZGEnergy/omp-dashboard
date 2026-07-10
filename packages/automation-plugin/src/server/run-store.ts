@@ -1,6 +1,6 @@
 /**
  * Run/triage store: persists run results under
- * `<scope>/.pi/automation/runs/<runId>/result.md`, auto-archives empty
+ * `<scope>/.omp/automation/runs/<runId>/result.md`, auto-archives empty
  * runs, and prunes to keep the last N runs per automation (oldest-first).
  *
  * A run record is a directory `runs/<date>-<name>/` containing:
@@ -29,7 +29,7 @@ export function countFindings(result: string): number {
 }
 
 export function runsRootFor(scopeBase: string): string {
-  return path.join(scopeBase, ".pi", "automation", "runs");
+  return path.join(scopeBase, ".omp", "automation", "runs");
 }
 
 // Process-lifetime monotonic counter guaranteeing run-id uniqueness even for

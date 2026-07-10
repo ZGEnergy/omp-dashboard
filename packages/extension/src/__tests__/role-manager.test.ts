@@ -1,13 +1,13 @@
 /**
  * Tests for role-manager.ts — the dashboard-owned `roles:*` event handlers
- * that own `~/.pi/agent/providers.json#roles`, `#rolePresets`, `#activePreset`.
+ * that own `~/.omp/agent/providers.json#roles`, `#rolePresets`, `#activePreset`.
  *
  * Spec: openspec/changes/adopt-model-resolve-handler-and-roles-ownership/
  *       specs/dashboard-roles-ownership/spec.md
  *
  * HOME is overridden by the vitest globalSetup to a tmp dir, so each test
- * file gets its own ephemeral `~/.pi/agent/`. We reset per-test via the
- * pre-existing `~/.pi/agent/providers.json` path.
+ * file gets its own ephemeral `~/.omp/agent/`. We reset per-test via the
+ * pre-existing `~/.omp/agent/providers.json` path.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -37,7 +37,7 @@ function withDefaults(assigned: Record<string, string> = {}): Record<string, str
   return { ...out, ...assigned };
 }
 
-const CONFIG = () => join(homedir(), ".pi", "agent", "providers.json");
+const CONFIG = () => join(homedir(), ".omp", "agent", "providers.json");
 
 // Minimal ExtensionAPI stub: capture event handlers so tests can fire them.
 function makeFakePi() {
@@ -58,7 +58,7 @@ function makeFakePi() {
 
 function resetConfig() {
   if (existsSync(CONFIG())) rmSync(CONFIG());
-  mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
+  mkdirSync(join(homedir(), ".omp", "agent"), { recursive: true });
 }
 
 function readFile() {
@@ -116,7 +116,7 @@ describe("saveRoleConfig", () => {
   it("writes atomically (no .tmp- file left behind)", () => {
     saveRoleConfig({ roles: { fast: "x/y" }, rolePresets: [], activePreset: null });
     const { readdirSync } = require("node:fs") as typeof import("node:fs");
-    const dir = join(homedir(), ".pi", "agent");
+    const dir = join(homedir(), ".omp", "agent");
     const leftovers = readdirSync(dir).filter((n) => n.includes(".tmp-"));
     expect(leftovers).toEqual([]);
   });

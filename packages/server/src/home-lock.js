@@ -1,7 +1,7 @@
 /**
  * Per-HOME advisory lock for the dashboard server.
  *
- * Ensures one dashboard instance per HOME (`<realpath(os.homedir())>/.pi/`).
+ * Ensures one dashboard instance per HOME (`<realpath(os.homedir())>/.omp/`).
  * See change: single-dashboard-per-home.
  *
  * Responsibilities:
@@ -74,7 +74,7 @@ export function canonicalHomedir() {
  * Lock file path. This is what `proper-lockfile` locks.
  */
 export function getLockPath(homedir = canonicalHomedir()) {
-    return path.join(homedir, ".pi", "dashboard", "server.lock");
+    return path.join(homedir, ".omp", "dashboard", "server.lock");
 }
 /**
  * Metadata sidecar path (`<lockPath>.meta.json`).
@@ -192,7 +192,7 @@ async function defaultProbeHealth(port) {
  * dashboard already holds it.
  *
  * Flow:
- *   1. Ensure `~/.pi/dashboard/` exists (proper-lockfile requires parent).
+ *   1. Ensure `~/.omp/dashboard/` exists (proper-lockfile requires parent).
  *   2. `proper-lockfile.lock(path, { stale, retries: 0 })`
  *      ↪ on success: write metadata, return { mode: "acquired", release }
  *      ↪ on ELOCKED: read metadata, check liveness

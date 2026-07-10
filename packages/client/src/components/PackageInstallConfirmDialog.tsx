@@ -89,8 +89,8 @@ export function PackageInstallConfirmDialog({
                       </div>
                       <div className="text-[10px] text-[var(--text-muted)]">
                         {opt === "global"
-                          ? "~/.pi/agent/settings.json — available to every pi session."
-                          : "<cwd>/.pi/settings.json — available only when running in this folder."}
+                          ? "~/.omp/agent/settings.json — available to every pi session."
+                          : "<cwd>/.omp/settings.json — available only when running in this folder."}
                       </div>
                     </div>
                   </label>

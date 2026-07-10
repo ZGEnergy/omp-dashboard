@@ -26,12 +26,12 @@ export const MAX_LINKS = 5000;
 const EXT = "[A-Za-z][A-Za-z0-9]{0,15}";
 
 // Relative path segment — word-start (prose guard) then word, dot, dash. A
-// leading dot is admitted (`.pi`, `.github`, `.config`) so dot-directories
+// leading dot is admitted (`.omp`, `.github`, `.config`) so dot-directories
 // linkify; a bare first segment still needs a separator (enforced at the
 // branch level) so `1.2.3` / `Node.js` stay non-pathy.
 const RDIR = "\\.?[\\w][\\w.-]*";
 // Absolute-context segment — may start with `.` (dot-directories like
-// `.config`, `.git`, `.pi`, `.worktrees`). Safe because a leading `/`, drive
+// `.config`, `.git`, `.omp`, `.worktrees`). Safe because a leading `/`, drive
 // letter, or `file://` scheme already disambiguates from prose, so the bare
 // `1.2.3` guard that constrains SEG is unnecessary here.
 const ASEG = "[\\w.][\\w.-]*";

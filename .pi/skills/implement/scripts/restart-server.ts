@@ -17,7 +17,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 function getDashboardPort(): number {
   try {
     const cfg = JSON.parse(
-      readFileSync(join(homedir(), '.pi', 'dashboard', 'config.json'), 'utf8')
+      readFileSync(join(homedir(), '.omp', 'dashboard', 'config.json'), 'utf8')
     ) as { port?: number };
     if (typeof cfg.port === 'number') return cfg.port;
   } catch {
@@ -77,5 +77,5 @@ for (let i = 1; i <= 10; i++) {
   }
 }
 
-console.error('⚠ server did not become healthy within 10s — check ~/.pi/dashboard/server.log');
+console.error('⚠ server did not become healthy within 10s — check ~/.omp/dashboard/server.log');
 process.exit(1);

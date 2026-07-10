@@ -208,12 +208,12 @@ describe("tokenize — generic extensions and dot-directories", () => {
   type FileTok = Extract<Token, { kind: "file" }>;
 
   it("detects leading dot-directory and does not truncate .json to .js", () => {
-    const input = ".pi/settings.json";
+    const input = ".omp/settings.json";
     const toks = tokenize(input);
     const files = ofKind(toks, "file");
     expect(files).toHaveLength(1);
     const f = files[0] as FileTok;
-    expect(f.path).toBe(".pi/settings.json");
+    expect(f.path).toBe(".omp/settings.json");
     expect(f.absolute).toBeFalsy();
     expect(concat(toks)).toBe(input);
     // no stray `on` text token

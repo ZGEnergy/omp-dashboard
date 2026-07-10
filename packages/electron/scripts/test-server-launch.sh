@@ -42,8 +42,8 @@ COPY resources/server/package.json /app/resources/server/package.json
 COPY resources/dirname-shim.js /app/resources/ 
 
 # Create managed dir (simulates wizard install)
-RUN mkdir -p /root/.pi-dashboard && \
-    echo '{"name":"pi-dashboard-managed","private":true,"type":"module"}' > /root/.pi-dashboard/package.json
+RUN mkdir -p /root/.omp-dashboard && \
+    echo '{"name":"pi-dashboard-managed","private":true,"type":"module"}' > /root/.omp-dashboard/package.json
 
 # Install deps and build native modules for Linux
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
@@ -53,10 +53,10 @@ RUN cd /app/resources/server && npm install --omit=dev --no-audit --no-fund 2>&1
     rm -rf node_modules/node-pty/prebuilds/darwin-* node_modules/node-pty/prebuilds/win32-*
 
 # Install tsx (what the wizard does)
-RUN cd /root/.pi-dashboard && npm install tsx 2>&1 | tail -3
+RUN cd /root/.omp-dashboard && npm install tsx 2>&1 | tail -3
 
 # Show what we have
-RUN echo "=== tsx ===" && ls /root/.pi-dashboard/node_modules/tsx/dist/ && \
+RUN echo "=== tsx ===" && ls /root/.omp-dashboard/node_modules/tsx/dist/ && \
     echo "=== server ===" && ls /app/resources/server/packages/server/src/cli.ts && \
     echo "=== node_modules ===" && ls /app/resources/server/node_modules/ | head -20
 
@@ -76,22 +76,22 @@ if [ -t 0 ] && [ -t 1 ]; then DOCKER_TTY_FLAGS="-it"; fi
 # shellcheck disable=SC2086
 docker run --rm $DOCKER_TTY_FLAGS pi-dashboard-server-test -c '
 echo "=== Test 1: Check tsx loader paths ==="
-ls /root/.pi-dashboard/node_modules/tsx/dist/register.js 2>/dev/null && echo "register.js: YES" || echo "register.js: NO"
-ls /root/.pi-dashboard/node_modules/tsx/dist/esm/index.mjs 2>/dev/null && echo "esm/index.mjs: YES" || echo "esm/index.mjs: NO"
-ls /root/.pi-dashboard/node_modules/tsx/dist/cjs/index.js 2>/dev/null && echo "cjs/index.js: YES" || echo "cjs/index.js: NO"
+ls /root/.omp-dashboard/node_modules/tsx/dist/register.js 2>/dev/null && echo "register.js: YES" || echo "register.js: NO"
+ls /root/.omp-dashboard/node_modules/tsx/dist/esm/index.mjs 2>/dev/null && echo "esm/index.mjs: YES" || echo "esm/index.mjs: NO"
+ls /root/.omp-dashboard/node_modules/tsx/dist/cjs/index.js 2>/dev/null && echo "cjs/index.js: YES" || echo "cjs/index.js: NO"
 
 echo ""
 echo "=== Test 2: Launch with dirname shim + tsx ESM ==="
 timeout 5 node \
   --import /app/resources/dirname-shim.js \
-  --import /root/.pi-dashboard/node_modules/tsx/dist/esm/index.mjs \
+  --import /root/.omp-dashboard/node_modules/tsx/dist/esm/index.mjs \
   /app/resources/server/packages/server/src/cli.ts --port 8000 2>&1 || true
 
 echo ""
 echo "=== Test 3: Launch with tsx register (if exists) ==="
-if [ -f /root/.pi-dashboard/node_modules/tsx/dist/register.js ]; then
+if [ -f /root/.omp-dashboard/node_modules/tsx/dist/register.js ]; then
   timeout 5 node \
-    --import /root/.pi-dashboard/node_modules/tsx/dist/register.js \
+    --import /root/.omp-dashboard/node_modules/tsx/dist/register.js \
     /app/resources/server/packages/server/src/cli.ts --port 8000 2>&1 || true
 else
   echo "register.js not available, skipping"
@@ -99,7 +99,7 @@ fi
 
 echo ""
 echo "=== Test 4: Launch with tsx binary ==="
-timeout 5 /root/.pi-dashboard/node_modules/.bin/tsx \
+timeout 5 /root/.omp-dashboard/node_modules/.bin/tsx \
   /app/resources/server/packages/server/src/cli.ts --port 8000 2>&1 || true
 
 echo ""

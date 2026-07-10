@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseFindings,
   splitFindings,
-} from '../../.pi/skills/implement/scripts/parse-findings.ts';
+} from '../../.omp/skills/implement/scripts/parse-findings.ts';
 
 const line = (o) => JSON.stringify(o);
 

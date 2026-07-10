@@ -148,7 +148,7 @@ export interface PackageMeta {
 /**
  * Derive skill ids from a package.json `pi.skills` array. The skill id is
  * the final path segment (the SKILL.md directory name, e.g.
- * `.pi/skills/document-converter` -> `document-converter`).
+ * `.omp/skills/document-converter` -> `document-converter`).
  *
  * Convention container dirs (`skills` / `skill`) are skipped: they hold
  * multiple SKILL.md subfolders whose individual ids cannot be resolved from

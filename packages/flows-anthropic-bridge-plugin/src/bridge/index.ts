@@ -1,7 +1,7 @@
 /**
  * pi-flows · Anthropic Messages Bridge — pi extension bridge entry.
  *
- * Auto-registered at ~/.pi/agent/settings.json#dashboardPluginBridges
+ * Auto-registered at ~/.omp/agent/settings.json#dashboardPluginBridges
  * (key: dashboard-flows-anthropic-bridge) when the dashboard plugin is
  * enabled; auto-deregistered on disable.
  *
@@ -73,8 +73,8 @@ export default async function activate(ctx: any): Promise<void> {
     return probeAll({
       // Tier 1: standard Node resolver anchored at cwd.
       resolve: (spec) => requireFromCwd.resolve(spec),
-      // Tier 2: pi-packages fallback. Reads ~/.pi/agent/settings.json +
-      // <cwd>/.pi/settings.json and returns an absolute entry path for
+      // Tier 2: pi-packages fallback. Reads ~/.omp/agent/settings.json +
+      // <cwd>/.omp/settings.json and returns an absolute entry path for
       // peers installed via pi (npm/git/local) but not in any
       // node_modules ancestor of cwd. See change:
       // add-shared-pi-package-resolver.

@@ -23,7 +23,7 @@ import { join } from "node:path";
 // check. Tests reset modules in beforeEach so each test gets a fresh import
 // and can inject its own registry.
 
-const CONFIG = () => join(homedir(), ".pi", "agent", "providers.json");
+const CONFIG = () => join(homedir(), ".omp", "agent", "providers.json");
 
 type AnyModel = { id: string; provider?: string };
 
@@ -99,7 +99,7 @@ async function bootstrap(registry: any) {
 }
 
 function resetConfig() {
-  mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
+  mkdirSync(join(homedir(), ".omp", "agent"), { recursive: true });
   if (existsSync(CONFIG())) rmSync(CONFIG());
 }
 

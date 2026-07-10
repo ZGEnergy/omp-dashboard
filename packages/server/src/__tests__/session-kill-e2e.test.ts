@@ -74,7 +74,7 @@ interface HungSession {
 async function spawnHungSession(): Promise<HungSession> {
   const sessionId = `e2e${Math.floor(Math.random() * 1e9).toString(36)}`;
   const home = makeShortHome();
-  const sessionsDir = path.join(home, ".pi", "dashboard", "sessions");
+  const sessionsDir = path.join(home, ".omp", "dashboard", "sessions");
   mkdirSync(sessionsDir, { recursive: true });
 
   // PATH shim so the keeper's bare `spawn("pi", …)` falls through to mock-pi.

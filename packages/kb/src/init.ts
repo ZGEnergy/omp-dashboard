@@ -1,5 +1,5 @@
 // `kb init` — scaffold + validate knowledge_base.json (design §7, §8.1).
-// Project file by default; --global writes ~/.pi/dashboard/knowledge_base.json.
+// Project file by default; --global writes ~/.omp/dashboard/knowledge_base.json.
 // Seeds documented defaults + sources[]; gitignores dbPath; never clobbers
 // without --force; --dry-run prints and writes nothing.
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from "node:fs";
