@@ -14,6 +14,7 @@ import type { DirectoryService } from "./directory-service.js";
 import { extractSessionUpdates, isActivityEvent, isUnreadTrigger } from "./event-status-extraction.js";
 import { composeWorktreePayload } from "./git-worktree-compose.js";
 import type { ViewedSessionTracker } from "./viewed-session-tracker.js";
+import type { PushDispatcher } from "./push/push-dispatcher.js";
 import { setCatalogueForSession } from "./provider-catalogue-cache.js";
 import { spawnPiSession } from "./process-manager.js";
 import { classifyProcesses, buildPidIndex } from "./process-classifier.js";
@@ -131,6 +132,14 @@ export interface EventWiringDeps {
    */
   viewedSessionTracker?: ViewedSessionTracker;
   /**
+   * Optional push dispatcher. When provided (production, `config.push.enabled`),
+   * the same unread-trigger site fans a notable event out to registered
+   * devices via `fanout(sessionId, event)`. Fire-and-forget — NEVER awaited.
+   * Mirrors how `viewedSessionTracker?` is threaded so push-free tests stay
+   * lean. See change: add-server-push-notifications.
+   */
+  pushDispatcher?: PushDispatcher;
+  /**
    * Optional client-correlation registry. When provided, the wiring
    * consumes the requestId for the resolved spawnToken after a successful
    * three-tier link and surfaces it on `session_added` as `spawnRequestId`,
@@ -198,6 +207,7 @@ export function wireEvents(deps: EventWiringDeps): void {
     goalStore,
     primeGoalSession,
     viewedSessionTracker,
+    pushDispatcher,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
@@ -541,6 +551,11 @@ export function wireEvents(deps: EventWiringDeps): void {
             sessionManager.update(sessionId, { unread: true });
             browserGateway.broadcastSessionUpdated(sessionId, { unread: true });
           }
+          // Fan the same notable event out to registered push devices.
+          // Fire-and-forget (void, never awaited) so transport latency cannot
+          // block the WS fan-out. Same gating as unread (no replay, not viewed).
+          // See change: add-server-push-notifications.
+          pushDispatcher?.fanout(sessionId, msg.event);
         }
       }
 
