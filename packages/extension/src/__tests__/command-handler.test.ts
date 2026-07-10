@@ -894,10 +894,10 @@ describe("parseSendPrompt", () => {
 
 describe("CommandHandler delivery routing (pi-native queues)", () => {
   // After rework-mid-turn-prompt-queue + OMP idle semantics: streaming follow-ups
-  // are bridge-buffered; idle sends omit deliverAs (fresh turn); steer keeps
-  // deliverAs:"steer". clear*Queue stubs remain on the mock so we can assert
-  // they are NEVER called (negative assertion locking in the absence). Pi's
-  // real ExtensionAPI exposes no clear*Queue method; the stubs model policy.
+  // are bridge-buffered; idle sends omit deliverAs (fresh turn) even when the
+  // browser sent delivery:"steer" (dashboard Enter default); only streaming
+  // steer keeps deliverAs:"steer". clear*Queue stubs remain so we can assert
+  // they are NEVER called. Pi's ExtensionAPI has no clear*Queue surface.
   function createMockPi() {
     return {
       sendUserMessage: vi.fn(),
