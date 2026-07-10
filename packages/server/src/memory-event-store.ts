@@ -279,10 +279,36 @@ export function exceedsSerializedSize(value: unknown, cap: number): boolean {
 }
 
 /**
+ * Max length of a string field preserved into the over-ceiling placeholder.
+ * Identity/status fields (toolCallId, toolName, type) are short; a small cap
+ * keeps the placeholder tightly bounded so it can never re-trip the ceiling it
+ * exists to enforce. See change: fix-truncated-tool-end-loses-id.
+ */
+const PLACEHOLDER_SCALAR_MAX = 512;
+
+/**
+ * Copy only the small scalar (string ≤ maxLen / number / boolean) top-level
+ * fields of `data`. Used to keep identity/status fields (toolCallId, toolName,
+ * isError, type) in the over-ceiling placeholder without reintroducing the
+ * heavy fields (result, details, message) that tripped the ceiling — so the
+ * placeholder stays bounded. See change: fix-truncated-tool-end-loses-id.
+ */
+function pickSmallScalars(data: unknown, maxLen: number): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!data || typeof data !== "object" || Array.isArray(data)) return out;
+  for (const [k, v] of Object.entries(data)) {
+    if (typeof v === "number" || typeof v === "boolean") out[k] = v;
+    else if (typeof v === "string" && v.length <= maxLen) out[k] = v;
+  }
+  return out;
+}
+
+/**
  * Truncate large event data to bound memory usage per event. Applies a
  * per-field string cap (`maxStringSize`) and then a hard per-event total-size
  * ceiling (`maxEventDataSize`); an over-ceiling event's data is replaced with a
- * bounded placeholder so it can never OOM the persist/broadcast path.
+ * bounded placeholder (small scalar identity fields + markers) so it can never
+ * OOM the persist/broadcast path.
  */
 function createTruncator(maxStringSize: number, maxEventDataSize: number) {
   const stringPass = maxStringSize > 0;
@@ -298,6 +324,13 @@ function createTruncator(maxStringSize: number, maxEventDataSize: number) {
       return {
         ...event,
         data: {
+          // Preserve the cheap scalar identity/status fields (toolCallId,
+          // toolName, isError, type, …) so a truncated tool_execution_end still
+          // pairs with its start: findToolEndEvent matches on toolCallId, and
+          // the client reducer needs it to clear the running-tool row. Without
+          // this, a large read/edit result stranded the row "running" forever
+          // (404 flood via useStaleToolReconcile). See change: fix-truncated-tool-end-loses-id.
+          ...pickSmallScalars(truncated, PLACEHOLDER_SCALAR_MAX),
           __truncated: true,
           reason: "event data exceeded MAX_EVENT_DATA_SIZE",
           thresholdBytes: maxEventDataSize,

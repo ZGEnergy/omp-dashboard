@@ -271,6 +271,43 @@ describe("memory-event-store", () => {
     });
   });
 
+  describe("over-ceiling truncation preserves tool-call identity", () => {
+    // Regression (Bug C): a tool_execution_end whose data exceeds
+    // MAX_EVENT_DATA_SIZE was replaced by a placeholder that DROPPED toolCallId,
+    // so findToolEndEvent 404'd and the client's running-tool row never cleared
+    // (useStaleToolReconcile then polled it forever). A large `read`/`edit`
+    // result routinely trips the ceiling. The placeholder must keep the small
+    // scalar identity fields (toolCallId, toolName, isError) so the end still
+    // pairs with its start.
+    it("keeps toolCallId on an over-ceiling tool_execution_end so findToolEndEvent still matches", () => {
+      // maxEventDataSize=100 → any real tool result trips the ceiling.
+      const store = createMemoryEventStore(neverPinned, 100, 5000, 5000, 100);
+      const toolCallId = "call-abc-2|fc_tmp_xyz";
+      const event: DashboardEvent = {
+        eventType: "tool_execution_end",
+        timestamp: Date.now(),
+        data: {
+          type: "tool_execution_end",
+          toolCallId,
+          toolName: "read",
+          isError: false,
+          result: "R".repeat(2000), // large file read → over the ceiling
+          details: { entries: Array.from({ length: 30 }, (_, i) => `line ${i}`) },
+        },
+      };
+      store.insertEvent("s1", event);
+      const stored = store.getEvent("s1", 1) as any;
+      // Data WAS truncated (bounded) but identity survives.
+      expect(stored.data.__truncated).toBe(true);
+      expect(stored.data.toolCallId).toBe(toolCallId);
+      expect(stored.data.isError).toBe(false);
+      // The endpoint's lookup must now find it.
+      const found = store.findToolEndEvent("s1", toolCallId);
+      expect(found).toBeDefined();
+      expect((found?.data as any).toolCallId).toBe(toolCallId);
+    });
+  });
+
   describe("getMaxSeq", () => {
     it("returns 0 for unknown session", () => {
       const store = createMemoryEventStore(neverPinned);
