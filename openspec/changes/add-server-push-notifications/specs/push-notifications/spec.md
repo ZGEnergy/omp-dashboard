@@ -119,7 +119,7 @@ All endpoints SHALL participate in the existing auth-plugin chain (loopback, tru
 
 #### Scenario: Unauthenticated register is rejected
 - **WHEN** a request to `POST /api/push/register` arrives without a valid auth header from a non-loopback, non-trusted host
-- **THEN** the response SHALL be `401`
+- **THEN** the response SHALL be `403` (the shared `networkGuard` denies non-local, non-trusted, unauthenticated requests with `403 network_not_allowed`)
 
 #### Scenario: Test endpoint with no tokens
 - **WHEN** the caller has no registered tokens and POSTs to `/api/push/test` with no body
