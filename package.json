@@ -64,14 +64,6 @@
     "reload:check": "./scripts/reload-all.sh --check",
     "link:local": "npm link --workspace=@blackbelt-technology/pi-dashboard-server",
     "unlink:local": "npm rm -g @blackbelt-technology/pi-dashboard-server",
-    "electron:dev": "npm run start:dev --workspace=@blackbelt-technology/pi-dashboard-electron",
-    "electron:start": "npm run start --workspace=@blackbelt-technology/pi-dashboard-electron",
-    "electron:make": "npm run make --workspace=@blackbelt-technology/pi-dashboard-electron",
-    "electron:build": "bash packages/electron/scripts/build-installer.sh",
-    "electron:zip-windows": "bash packages/electron/scripts/build-windows-zip.sh",
-    "electron:zip-windows-docker": "bash packages/electron/scripts/build-installer.sh --windows-zip",
-    "electron:bundle-server": "node packages/electron/scripts/bundle-server.mjs",
-    "electron:bundle-server:source-only": "node packages/electron/scripts/bundle-server.mjs --source-only",
     "site:dev": "npm --prefix site run dev",
     "site:build": "npm --prefix site run build",
     "site:preview": "npm --prefix site run preview",
@@ -80,9 +72,7 @@
     "test:e2e": "playwright test",
     "pretest:e2e:ui": "node -e \"process.env.PW_CHANNEL||require('child_process').execSync('playwright install chromium',{stdio:'inherit'})\"",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:chrome": "PW_CHANNEL=chrome playwright test",
-    "pretest:e2e:electron": "node -e \"const fs=require('fs');if(process.env.PW_ELECTRON_BINARY||fs.existsSync('packages/electron/out')){process.exit(0)}require('child_process').execSync('npm run -w packages/electron package',{stdio:'inherit'})\"",
-    "test:e2e:electron": "playwright test --config playwright.electron.config.ts"
+    "test:e2e:chrome": "PW_CHANNEL=chrome playwright test"
   },
   "engines": {
     "node": ">=22.19.0 <26"
@@ -91,9 +81,6 @@
     "@blackbelt-technology/pi-dashboard-extension": "^0.5.4",
     "@blackbelt-technology/pi-dashboard-server": "^0.5.4",
     "@blackbelt-technology/pi-dashboard-web": "^0.5.4"
-  },
-  "optionalDependencies": {
-    "appdmg": "^0.6.6"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.1",

@@ -1,4 +1,4 @@
-# PI Dashboard
+# OMP Dashboard
 
 <p align="center">
   <a href="https://github.com/BlackBeltTechnology/pi-agent-dashboard">
@@ -15,7 +15,7 @@
 🌐 **Website & demo:** [blackbelttechnology.github.io/pi-agent-dashboard](https://blackbelttechnology.github.io/pi-agent-dashboard) — animated tour, screenshots, and install guide.
 📝 **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
 
-> **Note:** This dashboard only works with [pi](https://github.com/badlogic/pi-mono). Oh My Pi is **not** supported.
+> **This is the [Oh My Pi](https://github.com/oh-my-pi) fork of [PI Dashboard](https://github.com/BlackBeltTechnology/pi-agent-dashboard).** It targets the `omp` agent (Bun runtime, `~/.omp/` paths, `@oh-my-pi/*` packages) instead of `pi`. For the original pi build, use upstream. See [`OMP-PORT-ASSESSMENT.md`](OMP-PORT-ASSESSMENT.md) for the port surface and the upstream-merge model.
 
 ---
 
