@@ -1029,7 +1029,14 @@ function initBridge(pi: ExtensionAPI) {
       const s = getBridgeState();
       s.attachedChange = next;
     },
-    setThinkingLevel: (level: string) => (pi as any).setThinkingLevel?.(level),
+    setThinkingLevel: (level: string) => {
+      (pi as any).setThinkingLevel?.(level);
+      // omp APPLIES the level (getThinkingLevel() reflects it) but emits NO
+      // thinking_level_select event, so the dashboard never learns of the
+      // change and the UI reverts. Push it explicitly, mirroring setModel
+      // below. See change: fix-omp-thinking-level-not-pushed.
+      setTimeout(() => sendModelUpdateIfChanged(), 50);
+    },
     getThinkingLevel: () => (pi as any).getThinkingLevel?.(),
     setModel: async (provider: string, modelId: string) => {
       const registry = cachedModelRegistry;
