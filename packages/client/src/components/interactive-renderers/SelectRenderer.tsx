@@ -5,13 +5,13 @@ import type { InteractiveRendererProps } from "./types.js";
 import { InlineMarkdown } from "./InlineMarkdown.js";
 import { MarkdownContent } from "../MarkdownContent.js";
 import { AnsweredOption } from "./AnsweredOption.js";
-import { parseOption, isCancelOption } from "./parseOption.js";
+import { parseOption, isCancelOption, optionValue } from "./parseOption.js";
 import { t as i18nT } from "../../lib/i18n";
 
 export function SelectRenderer({ params, status, result, onRespond, onCancel }: InteractiveRendererProps) {
   const title = params.title as string;
   const message = params.message as string | undefined;
-  const options = (params.options as string[]) ?? [];
+  const options = (params.options as unknown[]) ?? [];
   const selectedValue = (result as any)?.value as string | undefined;
 
   if (status === "cancelled" || status === "dismissed") {
@@ -36,12 +36,13 @@ export function SelectRenderer({ params, status, result, onRespond, onCancel }: 
         <div className="flex flex-col gap-1 ml-6">
           {options.map((option) => {
             const { title: oTitle, description } = parseOption(option);
+            const value = optionValue(option);
             return (
               <AnsweredOption
-                key={option}
+                key={value}
                 title={oTitle}
                 description={description}
-                picked={option === selectedValue}
+                picked={value === selectedValue}
               />
             );
           })}
@@ -65,13 +66,14 @@ export function SelectRenderer({ params, status, result, onRespond, onCancel }: 
         {options.map((option) => {
           const cancel = isCancelOption(option);
           const { title: oTitle, description } = parseOption(option);
+          const value = optionValue(option);
           return (
             <OptionRow
-              key={option}
+              key={value}
               title={oTitle}
               description={cancel ? undefined : description}
               cancel={cancel}
-              onClick={() => (cancel ? onCancel() : onRespond({ value: option }))}
+              onClick={() => (cancel ? onCancel() : onRespond({ value }))}
             />
           );
         })}
