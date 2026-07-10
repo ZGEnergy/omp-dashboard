@@ -471,29 +471,31 @@ function makeNodeScriptToArgv(deps?: StrategyDeps): ToolDefinition["toArgv"] {
  */
 function piExecutorDef(deps?: StrategyDeps): ToolDefinition {
   // omp-dashboard fork: resolve the Oh My Pi agent. Keep the tool name "pi"
-  // (all callers `resolve("pi")` unchanged); only the underlying package +
-  // binary point at omp. Legacy pi packages kept as fallbacks.
-  const piPkgAliases = [
-    "@oh-my-pi/pi-coding-agent",
-    "@earendil-works/pi-coding-agent",
-    "@mariozechner/pi-coding-agent",
-  ];
+  // (all callers `resolve("pi")` unchanged); only the underlying binary points
+  // at omp. Resolve the `omp` binary (managed-bin / PATH) FIRST, then fall back
+  // to the legacy pi packages. omp's binary (~/.bun/bin/omp) is a bun-shebang
+  // launcher, so it is run DIRECTLY (see toArgv). We intentionally do NOT
+  // resolve omp's node_modules cli.js: it is a bun-only bundle (`using`,
+  // `Bun.spawn`) that node cannot execute (`SyntaxError`, exit 1). The `omp`
+  // binary on PATH is the supported install for this fork.
+  const legacyPkgs = ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"];
   const cliEntry = path.join("dist", "cli.js");
+  const execPath = deps?.execPath ?? process.execPath;
 
   const winStrategies = [
     overrideStrategy("pi", deps),
-    ...piPkgAliases.map((pkg) => bareImportCliStrategy(pkg, cliEntry, deps)),
-    ...piPkgAliases.map((pkg) => managedModuleStrategy(pkg, cliEntry, deps)),
-    ...piPkgAliases.map((pkg) => npmGlobalStrategy(pkg, cliEntry, deps)),
     managedBinStrategy("omp", deps),
     whereStrategy("omp", deps),
+    ...legacyPkgs.map((pkg) => bareImportCliStrategy(pkg, cliEntry, deps)),
+    ...legacyPkgs.map((pkg) => managedModuleStrategy(pkg, cliEntry, deps)),
+    ...legacyPkgs.map((pkg) => npmGlobalStrategy(pkg, cliEntry, deps)),
   ];
 
   const unixStrategies = [
     overrideStrategy("pi", deps),
-    ...piPkgAliases.map((pkg) => bareImportCliStrategy(pkg, cliEntry, deps)),
     managedBinStrategy("omp", deps),
     whereStrategy("omp", deps),
+    ...legacyPkgs.map((pkg) => bareImportCliStrategy(pkg, cliEntry, deps)),
   ];
 
   return {
@@ -501,7 +503,17 @@ function piExecutorDef(deps?: StrategyDeps): ToolDefinition {
     kind: "executor",
     strategies: unixStrategies,
     platformStrategies: { win32: winStrategies },
-    toArgv: makeNodeScriptToArgv(deps),
+    // omp's binary is a bun-shebang launcher — run it directly so the shebang
+    // selects bun (node crashes on omp's bun-only cli.js). Only a resolved *.js
+    // (legacy pi cli.js) gets node-wrapped. Do NOT realpath the binary to its
+    // cli.js — that would node-wrap omp → SyntaxError, exit 1.
+    toArgv: (resolvedPath, { registry }) => {
+      if (/\.(?:js|cjs|mjs)$/i.test(resolvedPath)) {
+        const node = registry.resolve("node");
+        return node.ok && node.path ? [node.path, resolvedPath] : [execPath, resolvedPath];
+      }
+      return [resolvedPath];
+    },
     classify,
   };
 }
