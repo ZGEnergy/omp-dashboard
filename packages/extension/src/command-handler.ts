@@ -554,10 +554,13 @@ export function createCommandHandler(
                 // sendUserMessage exempt from gating: only typed single-line
                 // slashes that are NOT extension commands reach this — i.e.
                 // skills, prompt templates, unrecognized slashes.
-                // Forward delivery so steering on slash fallback honors the
-                // dashboard's keyboard contract. See change: add-steering-message.
-                const deliverAs = msg.delivery ?? ("followUp" as const);
-                (pi.sendUserMessage as any)(parsed.text, { deliverAs });
+                // Forward the steer only WHILE STREAMING; on an idle session
+                // send bare — omp drops a deliverAs on an idle agent (queued
+                // for a turn that never comes → no response). pi tolerated it.
+                // See change: fix-omp-idle-steer-dropped (was add-steering-message).
+                const wasStreaming = options?.isStreaming?.() ?? false;
+                const sendOptions = wasStreaming ? { deliverAs: msg.delivery ?? "followUp" } : undefined;
+                (pi.sendUserMessage as any)(parsed.text, sendOptions);
               }
             }
             return undefined;
@@ -614,8 +617,14 @@ export function createCommandHandler(
             // Bridge-owned buffer path — do NOT call pi.sendUserMessage.
             options?.onFollowupSent?.(outgoing);
           } else {
-            // Idle or steer — forward to pi directly.
-            sendUserMessageWithImages(pi, outgoing, msg.images, msg.delivery);
+            // Idle or steer — forward to pi directly. On an IDLE session, send
+            // WITHOUT a delivery mode: omp does NOT start a fresh turn for
+            // deliverAs:"steer" on an idle agent — it queues the steer for a
+            // turn that never comes, so the prompt is silently dropped (no
+            // response). pi tolerated steer-on-idle; omp does not. Pass the
+            // delivery mode only while actually streaming (a genuine steer).
+            // See change: fix-omp-idle-steer-dropped.
+            sendUserMessageWithImages(pi, outgoing, msg.images, wasStreaming ? msg.delivery : undefined);
             if (wasStreaming && da === "steer") options?.onSteerSent?.(outgoing);
           }
           return undefined;
@@ -805,17 +814,23 @@ export function createCommandHandler(
 }
 
 /** Send a user message with optional image validation.
- * Uses deliverAs: "followUp" by default so messages queue properly when the agent is streaming.
- * Pass deliverAs: "steer" for steering messages (delivered after current turn).
- * See change: add-steering-message. */
+ * `delivery` is passed to omp ONLY while streaming (a genuine steer). On an
+ * IDLE session `delivery` is undefined and NO deliverAs is sent — omp drops a
+ * deliverAs:"steer"/"followUp" message on an idle agent (queued for a turn
+ * that never comes), so a bare send is required to start the turn. pi tolerated
+ * an idle deliverAs; omp does not. See change: fix-omp-idle-steer-dropped
+ * (originally add-steering-message). */
 function sendUserMessageWithImages(
   pi: ExtensionAPI,
   text: string,
   images?: Array<{ type: string; data: string; mimeType: string }>,
   delivery?: "steer" | "followUp",
 ): void {
-  const deliverAs = delivery ?? ("followUp" as const);
-  const sendOptions = { deliverAs };
+  // No delivery (idle send) → omit sendOptions entirely so omp starts a fresh
+  // turn. deliverAs:"steer"/"followUp" on an IDLE omp agent is queued for a
+  // turn that never comes (dropped); a bare send starts the turn. `delivery`
+  // is set only for a genuine steer while streaming. See change: fix-omp-idle-steer-dropped.
+  const sendOptions = delivery ? { deliverAs: delivery } : undefined;
   // POST-rework-mid-turn-prompt-queue: this helper is called for STEER and
   // for IDLE sends only — followUp-while-streaming is intercepted upstream
   // (bridge buffer path; never calls this helper). The deliverAs parameter
