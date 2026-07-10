@@ -65,6 +65,9 @@ describe("buildSpawnEnv: PI_DASHBOARD_URL injection", () => {
 		setSpawnDashboardPiPort(9234);
 		const env = buildSpawnEnv({ HOME: "/tmp" });
 		expect(env.PI_DASHBOARD_URL).toBe("ws://localhost:9234");
+		// Pin spawn bridges against mDNS re-targeting onto a co-located
+		// dashboard (register then immediate connection closed).
+		expect(env.PI_DASHBOARD_NO_MDNS).toBe("1");
 	});
 
 	it("overrides any inherited PI_DASHBOARD_URL so spawns register with this server", () => {
@@ -84,5 +87,11 @@ describe("buildSpawnEnv: PI_DASHBOARD_URL injection", () => {
 		const base = { HOME: "/tmp" } as NodeJS.ProcessEnv;
 		buildSpawnEnv(base);
 		expect(base.PI_DASHBOARD_URL).toBeUndefined();
+	});
+
+	it("does not set PI_DASHBOARD_NO_MDNS when no server piPort is set", () => {
+		setSpawnDashboardPiPort(null);
+		const env = buildSpawnEnv({ HOME: "/tmp" });
+		expect(env.PI_DASHBOARD_NO_MDNS).toBeUndefined();
 	});
 });

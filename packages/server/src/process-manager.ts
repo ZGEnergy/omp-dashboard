@@ -192,8 +192,16 @@ export function buildSpawnEnv(
   // Point spawned bridges at THIS server's gateway so they register with the
   // server that spawned them, not the config-default piPort. Overrides any
   // inherited PI_DASHBOARD_URL. See setSpawnDashboardPiPort above.
+  //
+  // Also set PI_DASHBOARD_NO_MDNS=1: without it, the extension's autoStart
+  // mDNS browse can discover another co-located dashboard (e.g. :8000/:9999
+  // or :8088/:9098) and connection.updateUrl() wrecks the bridge off THIS
+  // server — register then immediate gateway "connection closed", UI spinner
+  // with no prompt delivery. Matches server-auto-start.mdnsDisabled() and the
+  // server's identical gate. See change: resolve-global-prompt-templates-from-dashboard.
   if (spawnDashboardPiPort != null) {
     env.PI_DASHBOARD_URL = `ws://localhost:${spawnDashboardPiPort}`;
+    env.PI_DASHBOARD_NO_MDNS = "1";
   }
   if (opts?.spawnToken) {
     // Inject the correlation token so the bridge inside the spawned pi

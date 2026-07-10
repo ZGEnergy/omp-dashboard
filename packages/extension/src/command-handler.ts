@@ -554,10 +554,15 @@ export function createCommandHandler(
                 // sendUserMessage exempt from gating: only typed single-line
                 // slashes that are NOT extension commands reach this — i.e.
                 // skills, prompt templates, unrecognized slashes.
-                // Forward delivery so steering on slash fallback honors the
-                // dashboard's keyboard contract. See change: add-steering-message.
-                const deliverAs = msg.delivery ?? ("followUp" as const);
-                (pi.sendUserMessage as any)(parsed.text, { deliverAs });
+                // Idle ⇒ omit deliverAs so OMP starts a fresh turn (explicit
+                // followUp only queues; empty transcripts cannot auto-drain).
+                // Steer keeps deliverAs:"steer". See agent-session sendUserMessage.
+                // See change: add-steering-message.
+                if (msg.delivery === "steer") {
+                  pi.sendUserMessage(parsed.text, { deliverAs: "steer" });
+                } else {
+                  pi.sendUserMessage(parsed.text);
+                }
               }
             }
             return undefined;
@@ -805,22 +810,24 @@ export function createCommandHandler(
 }
 
 /** Send a user message with optional image validation.
- * Uses deliverAs: "followUp" by default so messages queue properly when the agent is streaming.
- * Pass deliverAs: "steer" for steering messages (delivered after current turn).
- * See change: add-steering-message. */
+ * Idle sends omit `deliverAs` so OMP starts a fresh turn via `prompt()`.
+ * OMP's `sendUserMessage` with explicit `deliverAs:"followUp"|"steer"` only
+ * queues — and follow-up auto-drain requires an assistant/toolResult tail, so
+ * a brand-new empty session would hang forever if we defaulted to followUp.
+ * Pass `delivery: "steer"` for mid-stream steering.
+ * See change: add-steering-message + OMP agent-session `#canAutoContinueForFollowUp`. */
 function sendUserMessageWithImages(
   pi: ExtensionAPI,
   text: string,
   images?: Array<{ type: string; data: string; mimeType: string }>,
   delivery?: "steer" | "followUp",
 ): void {
-  const deliverAs = delivery ?? ("followUp" as const);
-  const sendOptions = { deliverAs };
   // POST-rework-mid-turn-prompt-queue: this helper is called for STEER and
   // for IDLE sends only — followUp-while-streaming is intercepted upstream
-  // (bridge buffer path; never calls this helper). The deliverAs parameter
-  // is preserved for steer routing.
+  // (bridge buffer path; never calls this helper). Idle ⇒ no deliverAs
+  // (fresh turn). Steer ⇒ deliverAs:"steer".
   // See change: rework-mid-turn-prompt-queue (design.md D1).
+  const sendOptions = delivery === "steer" ? ({ deliverAs: "steer" } as const) : undefined;
   if (images && images.length > 0) {
     const validMimeTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
     const validImages = images.filter((img) => {
@@ -848,12 +855,17 @@ function sendUserMessageWithImages(
         })),
       ];
       console.error(`[dashboard] Sending message with ${validImages.length} image(s), mimeTypes: ${validImages.map(i => i.mimeType).join(", ")}`);
-      (pi.sendUserMessage as any)(content, sendOptions);
+      if (sendOptions) pi.sendUserMessage(content, sendOptions);
+      else pi.sendUserMessage(content);
+    } else if (sendOptions) {
+      pi.sendUserMessage(text, sendOptions);
     } else {
-      (pi.sendUserMessage as any)(text, sendOptions);
+      pi.sendUserMessage(text);
     }
+  } else if (sendOptions) {
+    pi.sendUserMessage(text, sendOptions);
   } else {
-    (pi.sendUserMessage as any)(text, sendOptions);
+    pi.sendUserMessage(text);
   }
 }
 

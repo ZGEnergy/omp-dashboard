@@ -1205,10 +1205,14 @@ function initBridge(pi: ExtensionAPI) {
         // Bridge-owned buffer path — do NOT call pi.sendUserMessage. The
         // drain loop on agent_end will ship the entry as a fresh turn.
         bufferFollowupSend(expanded);
+      } else if (wasStreaming && deliverAs === "steer") {
+        pi.sendUserMessage(expanded, { deliverAs: "steer" });
+        recordSteerSent(expanded);
       } else {
-        // Idle send or steer send — forward to pi directly.
-        (pi.sendUserMessage as any)(expanded, { deliverAs });
-        if (wasStreaming && deliverAs === "steer") recordSteerSent(expanded);
+        // Idle — omit deliverAs so OMP starts a fresh turn. Explicit
+        // followUp/steer options only queue in OMP and will not drain on an
+        // empty transcript. Matches drainFollowupQueue (no deliverAs).
+        pi.sendUserMessage(expanded);
       }
     },
     onSteerSent: recordSteerSent,

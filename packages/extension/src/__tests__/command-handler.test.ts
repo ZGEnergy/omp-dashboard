@@ -52,7 +52,7 @@ describe("CommandHandler", () => {
 
     await handler.handle(msg);
 
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("Hello agent", { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("Hello agent");
   });
 
   // Non-turn commands never produce a user message_start, so the bridge settles
@@ -101,7 +101,7 @@ describe("CommandHandler", () => {
     expect(pi.sendUserMessage).toHaveBeenCalledWith([
       { type: "text", text: "check this" },
       { type: "image", data: "abc123", mimeType: "image/png" },
-    ], { deliverAs: "followUp" });
+    ]);
   });
 
   it("should drop images with invalid mimeType and send text only", async () => {
@@ -118,7 +118,7 @@ describe("CommandHandler", () => {
     });
 
     // Invalid mimeType → dropped, sends text only
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("check this", { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("check this");
   });
 
   it("should drop images with undefined or null mimeType", async () => {
@@ -135,7 +135,7 @@ describe("CommandHandler", () => {
       ],
     });
 
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("check this", { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("check this");
   });
 
   it("should drop images with empty or non-string data", async () => {
@@ -151,7 +151,7 @@ describe("CommandHandler", () => {
       ],
     });
 
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("check this", { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("check this");
   });
 
   it("should drop non-object image entries", async () => {
@@ -165,7 +165,7 @@ describe("CommandHandler", () => {
       images: [null as any, "bad" as any],
     });
 
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("check this", { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("check this");
   });
 
   it("should keep valid images and drop invalid ones", async () => {
@@ -187,7 +187,7 @@ describe("CommandHandler", () => {
       { type: "text", text: "check this" },
       { type: "image", data: "good", mimeType: "image/jpeg" },
       { type: "image", data: "also-good", mimeType: "image/webp" },
-    ], { deliverAs: "followUp" });
+    ]);
   });
 
   it("should handle rename_session by calling setSessionName and returning confirmation", async () => {
@@ -442,7 +442,7 @@ describe("CommandHandler", () => {
 
     // Message for s1 should work
     await handler.handle({ type: "send_prompt", sessionId: "s1", text: "hello" });
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("hello", { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("hello");
 
     pi.sendUserMessage.mockClear();
 
@@ -455,7 +455,7 @@ describe("CommandHandler", () => {
 
     // And message for s2 should work
     await handler.handle({ type: "send_prompt", sessionId: "s2", text: "accepted" });
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("accepted", { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("accepted");
   });
 
   describe("command routing", () => {
@@ -530,11 +530,11 @@ describe("CommandHandler", () => {
       const handler = createCommandHandler(pi as any, "s1");
 
       await handler.handle({ type: "send_prompt", sessionId: "s1", text: "!" });
-      expect(pi.sendUserMessage).toHaveBeenCalledWith("!", { deliverAs: "followUp" });
+      expect(pi.sendUserMessage).toHaveBeenCalledWith("!");
 
       pi.sendUserMessage.mockClear();
       await handler.handle({ type: "send_prompt", sessionId: "s1", text: "!!" });
-      expect(pi.sendUserMessage).toHaveBeenCalledWith("!!", { deliverAs: "followUp" });
+      expect(pi.sendUserMessage).toHaveBeenCalledWith("!!");
     });
 
     it("should route /compact to ctx.compact()", async () => {
@@ -623,8 +623,8 @@ describe("CommandHandler", () => {
 
       await handler.handle({ type: "send_prompt", sessionId: "s1", text: "/some-command" });
 
-      // Slash fallback forwards delivery (default 'followUp'). See change: add-steering-message.
-      expect(pi.sendUserMessage).toHaveBeenCalledWith("/some-command", { deliverAs: "followUp" });
+      // Slash fallback on idle omits deliverAs so OMP starts a fresh turn.
+      expect(pi.sendUserMessage).toHaveBeenCalledWith("/some-command");
       const feedbackCalls = eventSink.mock.calls.filter(
         (c) => (c[0] as any)?.event?.eventType === "command_feedback",
       );
@@ -637,7 +637,7 @@ describe("CommandHandler", () => {
 
       await handler.handle({ type: "send_prompt", sessionId: "s1", text: "/some-command args" });
 
-      expect(pi.sendUserMessage).toHaveBeenCalledWith("/some-command args", { deliverAs: "followUp" });
+      expect(pi.sendUserMessage).toHaveBeenCalledWith("/some-command args");
     });
 
     it("should route /quit to shutdown", async () => {
@@ -714,7 +714,7 @@ describe("CommandHandler", () => {
 
       await handler.handle({ type: "send_prompt", sessionId: "s1", text: "explain this code" });
 
-      expect(pi.sendUserMessage).toHaveBeenCalledWith("explain this code", { deliverAs: "followUp" });
+      expect(pi.sendUserMessage).toHaveBeenCalledWith("explain this code");
     });
 
     it("should handle bash execution with non-zero exit code", async () => {
@@ -893,11 +893,11 @@ describe("parseSendPrompt", () => {
 });
 
 describe("CommandHandler delivery routing (pi-native queues)", () => {
-  // After change: honest-mid-turn-queue-surface, the bridge appends to pi's
-  // queues via pi.sendUserMessage{deliverAs} only. clear*Queue stubs remain
-  // on the mock so we can assert they are NEVER called (negative assertion
-  // locking in the absence). Pi's real ExtensionAPI exposes no clear*Queue
-  // method; the stubs here model the policy, not the surface.
+  // After rework-mid-turn-prompt-queue + OMP idle semantics: streaming follow-ups
+  // are bridge-buffered; idle sends omit deliverAs (fresh turn); steer keeps
+  // deliverAs:"steer". clear*Queue stubs remain on the mock so we can assert
+  // they are NEVER called (negative assertion locking in the absence). Pi's
+  // real ExtensionAPI exposes no clear*Queue method; the stubs model policy.
   function createMockPi() {
     return {
       sendUserMessage: vi.fn(),
@@ -911,9 +911,9 @@ describe("CommandHandler delivery routing (pi-native queues)", () => {
     };
   }
 
-  it("passthrough followUp on IDLE session forwards to pi (no buffer)", async () => {
+  it("passthrough followUp on IDLE session forwards to pi without deliverAs (no buffer)", async () => {
     // Idle path (default when isStreaming option absent): pi sees the
-    // message; the bridge buffer is bypassed entirely.
+    // message as a fresh turn (no deliverAs); the bridge buffer is bypassed entirely.
     // See change: rework-mid-turn-prompt-queue (design.md D1).
     const pi = createMockPi();
     const onFollowupSent = vi.fn();
@@ -922,7 +922,7 @@ describe("CommandHandler delivery routing (pi-native queues)", () => {
     await handler.handle({ type: "send_prompt", sessionId: "s1", text: "after done", delivery: "followUp" });
 
     expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("after done", { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("after done");
     expect(onFollowupSent).not.toHaveBeenCalled(); // buffer untouched on idle path
   });
 
@@ -949,14 +949,14 @@ describe("CommandHandler delivery routing (pi-native queues)", () => {
     expect(onFollowupSent).toHaveBeenCalledWith("buffered");
   });
 
-  it("passthrough delivery absent defaults to followUp (idle path forwards to pi)", async () => {
+  it("passthrough delivery absent on idle forwards to pi without deliverAs", async () => {
     const pi = createMockPi();
     const handler = createCommandHandler(pi as any, "s1");
 
     await handler.handle({ type: "send_prompt", sessionId: "s1", text: "plain" });
 
     expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("plain", { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("plain");
   });
 
   it("passthrough delivery steer does NOT call clearFollowUpQueue or clearSteeringQueue", async () => {
@@ -970,7 +970,7 @@ describe("CommandHandler delivery routing (pi-native queues)", () => {
     expect(pi.sendUserMessage).toHaveBeenCalledWith("focus on X", { deliverAs: "steer" });
   });
 
-  it("passthrough with images preserves image content (v2: no pre-clear)", async () => {
+  it("passthrough with images preserves image content without deliverAs on idle", async () => {
     const pi = createMockPi();
     const images = [{ type: "image" as const, data: "AAA", mimeType: "image/png" }];
     const handler = createCommandHandler(pi as any, "s1");
@@ -980,7 +980,7 @@ describe("CommandHandler delivery routing (pi-native queues)", () => {
     expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
     expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
     const [content, opts] = pi.sendUserMessage.mock.calls[0];
-    expect(opts).toEqual({ deliverAs: "followUp" });
+    expect(opts).toBeUndefined();
     expect(Array.isArray(content)).toBe(true);
   });
 

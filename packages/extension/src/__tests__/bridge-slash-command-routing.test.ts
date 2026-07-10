@@ -374,7 +374,7 @@ describe("tryDispatchExtensionCommand: Path B/C/D mutual exclusion", () => {
 
 // See change: add-steering-message (task 4.4).
 // Verify the slash-routing fallback paths that call sendUserMessage honor the
-// delivery field — `"steer"` → deliverAs:"steer"; absent/"followUp" → deliverAs:"followUp".
+// delivery field — `"steer"` → deliverAs:"steer"; idle absent/"followUp" → omit deliverAs (fresh turn).
 describe("bridge slash routing: delivery field → sendUserMessage deliverAs", () => {
   function lastDeliverAs(sendUserMessage: ReturnType<typeof vi.fn>): string | undefined {
     const lastCall = sendUserMessage.mock.calls.at(-1);
@@ -390,18 +390,18 @@ describe("bridge slash routing: delivery field → sendUserMessage deliverAs", (
     expect(lastDeliverAs(stub.sendUserMessage)).toBe("steer");
   });
 
-  it("skill command + delivery:'followUp' → sendUserMessage called with deliverAs:'followUp'", async () => {
+  it("skill command + delivery:'followUp' on idle → sendUserMessage omits deliverAs (fresh turn)", async () => {
     const stub = makeStubPi({ withDispatch: true });
     await drive("/skill:foo", stub, "followUp");
     expect(stub.sendUserMessage).toHaveBeenCalledTimes(1);
-    expect(lastDeliverAs(stub.sendUserMessage)).toBe("followUp");
+    expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 
-  it("skill command + delivery omitted → sendUserMessage defaults to deliverAs:'followUp'", async () => {
+  it("skill command + delivery omitted → sendUserMessage omits deliverAs (fresh turn)", async () => {
     const stub = makeStubPi({ withDispatch: true });
     await drive("/skill:foo", stub);
     expect(stub.sendUserMessage).toHaveBeenCalledTimes(1);
-    expect(lastDeliverAs(stub.sendUserMessage)).toBe("followUp");
+    expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 
   it("prompt template + delivery:'steer' → deliverAs:'steer'", async () => {
@@ -416,10 +416,10 @@ describe("bridge slash routing: delivery field → sendUserMessage deliverAs", (
     expect(lastDeliverAs(stub.sendUserMessage)).toBe("steer");
   });
 
-  it("passthrough text + delivery omitted → deliverAs:'followUp'", async () => {
+  it("passthrough text + delivery omitted → omit deliverAs (fresh turn)", async () => {
     const stub = makeStubPi({ withDispatch: true });
     await drive("hello world", stub);
-    expect(lastDeliverAs(stub.sendUserMessage)).toBe("followUp");
+    expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 
   it("unrecognized slash + delivery:'steer' → deliverAs:'steer'", async () => {

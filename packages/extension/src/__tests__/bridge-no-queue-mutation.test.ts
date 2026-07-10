@@ -39,7 +39,7 @@ function routeMessage(msg: any, opts: {
   // the six removed types and asserting no side effects.
   if (msg.type === "send_prompt") {
     // legitimate path — not under test here
-    opts.pi.sendUserMessage(msg.text, { deliverAs: msg.delivery ?? "followUp" });
+    if (msg.delivery === "steer") opts.pi.sendUserMessage(msg.text, { deliverAs: "steer" }); else opts.pi.sendUserMessage(msg.text);
     if (msg.delivery === "steer") opts.bridgeSteering.push(msg.text);
     else opts.bridgeFollowUp.push(msg.text);
     opts.emitQueueUpdate();
@@ -104,7 +104,7 @@ describe("bridge: stale queue-mutation messages produce zero side effects", () =
       { pi, bridgeSteering, bridgeFollowUp, emitQueueUpdate },
     );
 
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("hello", { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("hello");
     expect(pi.clearFollowUpQueue).not.toHaveBeenCalled(); // honest append, no pretense
     expect(bridgeFollowUp).toEqual(["hello"]);
     expect(emitQueueUpdate).toHaveBeenCalledTimes(1);
