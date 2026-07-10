@@ -7,11 +7,21 @@
  * exactly once with (sessionId, event). Also asserts NO fanout when a browser
  * is viewing the session (same gating as unread) and NO fanout during replay.
  *
+ * The final test locks the fire-and-forget latency guarantee end-to-end: a REAL
+ * dispatcher wired to a transport whose `send` NEVER resolves must not block the
+ * event handler — `onEvent` returns synchronously and promptly.
+ *
  * Spec: push-notifications `Requirement: Push trigger predicate`.
  * See change: add-server-push-notifications.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type EventWiringDeps, wireEvents } from "../event-wiring.js";
+import { createPushDispatcher } from "../push/push-dispatcher.js";
+import { createPushTokenRegistry } from "../push/push-token-registry.js";
+import type { PushTransport } from "../push/push-transports/types.js";
 
 const SID = "sess-1";
 
@@ -123,5 +133,69 @@ describe("event-wiring push dispatch", () => {
     const { deps, piGateway } = makeDeps({ isViewed: false, pushDispatcher: undefined });
     wireEvents(deps);
     expect(() => fireAgentEndError(piGateway)).not.toThrow();
+  });
+
+  // Latency guarantee (tasks.md 7.5): a hanging transport must not block the
+  // event pipeline. Uses a REAL dispatcher + a transport whose `send` never
+  // resolves; the event handler must return synchronously regardless.
+  describe("does not block the event handler when the transport hangs", () => {
+    let dir: string;
+    afterEach(() => {
+      if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("onEvent returns synchronously while a never-resolving send is in flight", () => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), "event-wiring-push-"));
+      const registry = createPushTokenRegistry({ path: path.join(dir, "push-tokens.json") });
+      registry.add({ deviceToken: "dev-hang", transport: "web-push" });
+
+      let sendStarted = false;
+      let sendResolved = false;
+      // Never resolves — models a transport (network) that hangs indefinitely.
+      const hangingTransport: PushTransport = {
+        kind: "web-push",
+        send: () => {
+          sendStarted = true;
+          return new Promise(() => {
+            /* intentionally never settles */
+          }).then(() => {
+            sendResolved = true;
+            return { ok: true };
+          });
+        },
+      };
+
+      const realDispatcher = createPushDispatcher({
+        registry,
+        transports: { "web-push": hangingTransport },
+        coalesceWindowMs: 30_000,
+        getSession: () =>
+          ({
+            id: SID,
+            cwd: "/tmp",
+            source: "cli",
+            status: "idle",
+            startedAt: 0,
+            name: "worker",
+          }) as any,
+      });
+
+      const { deps, piGateway } = makeDeps({ isViewed: false, pushDispatcher: realDispatcher });
+      wireEvents(deps);
+
+      // The handler must complete promptly (void, no throw) even though the
+      // transport send it kicked off will never resolve.
+      const before = Date.now();
+      expect(() => fireAgentEndError(piGateway)).not.toThrow();
+      const elapsed = Date.now() - before;
+
+      // Handler returned without awaiting the transport: send was dispatched
+      // but has NOT resolved, and the synchronous handler took negligible time.
+      expect(sendStarted).toBe(true);
+      expect(sendResolved).toBe(false);
+      expect(elapsed).toBeLessThan(50);
+
+      realDispatcher.shutdown();
+    });
   });
 });

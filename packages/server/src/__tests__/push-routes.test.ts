@@ -3,9 +3,11 @@
  *
  * Covers: register→200 {tokenId}, delete→204, test with no tokens→200
  * {results:[]}, test with a token→200 {results:[{tokenId, ok}]},
- * vapid-public-key→200 {publicKey}, and 401 auth-gating via a rejecting guard.
- * Mirrors the goal-routes.test.ts harness (Fastify + inject + pass-through /
- * deny guard). See change: add-server-push-notifications.
+ * vapid-public-key→200 {publicKey}, and 403 auth-gating via a rejecting guard.
+ * The deny stub mirrors the real `networkGuard` deny status (403
+ * network_not_allowed, see localhost-guard.ts) so the assertion reflects
+ * production behavior. Mirrors the goal-routes.test.ts harness (Fastify +
+ * inject + pass-through / deny guard). See change: add-server-push-notifications.
  */
 
 import fs from "node:fs";
@@ -19,8 +21,10 @@ import { registerPushRoutes } from "../routes/push-routes.js";
 import type { NetworkGuard } from "../routes/route-deps.js";
 
 const PASSTHRU: NetworkGuard = async () => {};
+// Matches the real networkGuard deny status (403 network_not_allowed) so the
+// auth-gating assertion reflects production behavior — see localhost-guard.ts.
 const DENY: NetworkGuard = async (_req, reply) => {
-  reply.code(401).send({ error: "Authentication required" });
+  reply.code(403).send({ success: false, error: "network_not_allowed" });
 };
 
 function fakeWebPush(): PushTransport & { send: any } {
@@ -111,7 +115,7 @@ describe("push REST routes", () => {
     expect(webPush.send).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects with 401 when the guard denies (auth-gating)", async () => {
+  it("rejects with 403 when the guard denies (auth-gating)", async () => {
     await setup(DENY);
     for (const [method, url] of [
       ["GET", "/api/push/vapid-public-key"],
@@ -120,7 +124,7 @@ describe("push REST routes", () => {
       ["POST", "/api/push/test"],
     ] as const) {
       const res = await fastify.inject({ method, url, payload: {} });
-      expect(res.statusCode).toBe(401);
+      expect(res.statusCode).toBe(403);
     }
   });
 });
