@@ -99,6 +99,13 @@ import { registerPackageRoutes } from "./routes/package-routes.js";
 import { registerPairingRoutes } from "./routes/pairing-routes.js";
 import { registerPiChangelogRoutes } from "./routes/pi-changelog-routes.js";
 import { registerPiCoreRoutes } from "./routes/pi-core-routes.js";
+import { registerPushRoutes } from "./routes/push-routes.js";
+import { createPushTokenRegistry } from "./push/push-token-registry.js";
+import { createPushDispatcher, type PushDispatcher } from "./push/push-dispatcher.js";
+import { loadOrGenerateVapidKeys } from "./push/push-vapid.js";
+import { createWebPushTransport } from "./push/push-transports/web-push.js";
+import { createFcmTransport } from "./push/push-transports/fcm.js";
+import type { PushTransport, PushTransportKind } from "./push/push-transports/types.js";
 import { registerPluginActivationRoutes } from "./routes/plugin-activation-routes.js";
 import { registerPluginConfigRoutes } from "./routes/plugin-config-routes.js";
 import { registerPreferencesDisplayRoutes } from "./routes/preferences-display-routes.js";
@@ -154,6 +161,9 @@ export interface ServerConfig {
   editor: import("@blackbelt-technology/pi-dashboard-shared/config.js").EditorConfig;
   /** OpenSpec polling config (interval, concurrency, change detection, jitter) */
   openspec?: import("@blackbelt-technology/pi-dashboard-shared/config.js").OpenSpecPollConfig;
+  /** Server push-notification config. Dispatcher/routes/VAPID gated on `enabled`.
+   *  See change: add-server-push-notifications. */
+  push?: import("@blackbelt-technology/pi-dashboard-shared/config.js").PushConfig;
   /** Session behavior — hydration worker offload toggle.
    *  See change: offload-session-events-load-to-worker. */
   sessions?: import("@blackbelt-technology/pi-dashboard-shared/config.js").SessionsConfig;
@@ -874,6 +884,40 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     );
   };
 
+  // ── Push notifications (opt-in) ──────────────────────────────
+  // Constructed BEFORE wireEvents so the same dispatcher instance is shared
+  // with the REST routes registered further down. When disabled, nothing is
+  // built, no routes mount, and no VAPID keys are generated (spec: opt-in).
+  // See change: add-server-push-notifications.
+  let pushDispatcher: PushDispatcher | undefined;
+  let pushRegistry: ReturnType<typeof createPushTokenRegistry> | undefined;
+  const pushTransports: Partial<Record<PushTransportKind, PushTransport>> = {};
+  let pushVapidPublicKey = "";
+  if (config.push?.enabled === true) {
+    const pushDir = path.join(os.homedir(), ".pi", "dashboard");
+    pushRegistry = createPushTokenRegistry({ path: path.join(pushDir, "push-tokens.json") });
+    const contactEmail = config.push.webPush?.contactEmail;
+    if (contactEmail) {
+      const vapidKeys = loadOrGenerateVapidKeys(path.join(pushDir, "push-vapid.json"));
+      pushVapidPublicKey = vapidKeys.publicKey;
+      pushTransports["web-push"] = createWebPushTransport({ vapidKeys, contactEmail });
+    } else {
+      console.warn(
+        "[push] push.enabled=true but push.webPush.contactEmail is unset — Web Push disabled. Set push.webPush.contactEmail in config.json.",
+      );
+    }
+    if (config.push.fcm?.serviceAccountPath) {
+      // Typed stub in v1 (throws on send) — see add-capacitor-mobile-shell.
+      pushTransports["fcm"] = createFcmTransport({ serviceAccountPath: config.push.fcm.serviceAccountPath });
+    }
+    pushDispatcher = createPushDispatcher({
+      registry: pushRegistry,
+      transports: pushTransports,
+      coalesceWindowMs: config.push.coalesceWindowMs,
+      getSession: (id) => sessionManager.get(id),
+    });
+  }
+
   // Wire up event forwarding from pi gateway to browser gateway
   wireEvents({
     sessionManager,
@@ -896,6 +940,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     primeGoalSession: primeGoalSessionImpl,
     pendingInitialPromptRegistry,
     viewedSessionTracker: browserGateway.viewedSessionTracker,
+    pushDispatcher,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
@@ -1129,6 +1174,20 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       }
     },
   });
+  // Push routes — mounted only when push is enabled. When disabled, the routes
+  // are never registered and Fastify returns 404 (spec: opt-in by default).
+  // Reuses the registry/transports/VAPID built above the wireEvents call.
+  // See change: add-server-push-notifications.
+  if (config.push?.enabled === true && pushRegistry) {
+    const registry = pushRegistry;
+    registerPushRoutes(fastify, {
+      networkGuard,
+      registry,
+      transports: pushTransports,
+      getVapidPublicKey: () => pushVapidPublicKey,
+      getSession: (id) => sessionManager.get(id),
+    });
+  }
   registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService, piGateway, browserGateway, hydrationMetrics, readEventLoopDelay, eventLoopSpikes });
   // GET /api/doctor — see change: doctor-rich-output (task 4.2). Auth-gated identically to /api/config.
   registerDoctorRoutes(fastify);
