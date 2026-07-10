@@ -28,9 +28,9 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("push", (event) => {
   const data = event.data ? (() => { try { return event.data.json(); } catch { return {}; } })() : {};
   event.waitUntil(
-    self.registration.showNotification(data.title || "Pi Dashboard", {
-      body: data.body || "",
-      data: { url: data.url || "/", sessionId: data.sessionId },
+    self.registration.showNotification(data.title ?? "Pi Dashboard", {
+      body: data.body ?? "",
+      data: { url: data.url ?? "/", ...(data.sessionId ? { sessionId: data.sessionId } : {}) },
       icon: "/icon-192.png",
       badge: "/icon-192.png",
     })
