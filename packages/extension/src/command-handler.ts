@@ -554,11 +554,13 @@ export function createCommandHandler(
                 // sendUserMessage exempt from gating: only typed single-line
                 // slashes that are NOT extension commands reach this — i.e.
                 // skills, prompt templates, unrecognized slashes.
-                // Idle ⇒ omit deliverAs so OMP starts a fresh turn (explicit
-                // followUp only queues; empty transcripts cannot auto-drain).
-                // Steer keeps deliverAs:"steer". See agent-session sendUserMessage.
-                // See change: add-steering-message.
-                if (msg.delivery === "steer") {
+                // OMP queues any explicit deliverAs. Idle / empty transcripts
+                // never auto-drain → omit deliverAs for a fresh turn. Mid-stream
+                // steer keeps deliverAs:"steer". Dashboard Enter defaults to
+                // delivery:"steer", so idle+steer was the UI hang path.
+                // See agent-session sendUserMessage + #canAutoContinueForFollowUp.
+                const streaming = options?.isStreaming?.() ?? false;
+                if (streaming && msg.delivery === "steer") {
                   pi.sendUserMessage(parsed.text, { deliverAs: "steer" });
                 } else {
                   pi.sendUserMessage(parsed.text);
@@ -619,8 +621,11 @@ export function createCommandHandler(
             // Bridge-owned buffer path — do NOT call pi.sendUserMessage.
             options?.onFollowupSent?.(outgoing);
           } else {
-            // Idle or steer — forward to pi directly.
-            sendUserMessageWithImages(pi, outgoing, msg.images, msg.delivery);
+            // Idle → omit deliverAs (fresh turn). Streaming steer → deliverAs
+            // "steer". OMP queues explicit deliverAs on idle empty transcripts,
+            // and dashboard Enter always sends delivery:"steer".
+            const deliveryForPi = wasStreaming && da === "steer" ? ("steer" as const) : undefined;
+            sendUserMessageWithImages(pi, outgoing, msg.images, deliveryForPi);
             if (wasStreaming && da === "steer") options?.onSteerSent?.(outgoing);
           }
           return undefined;
@@ -810,12 +815,13 @@ export function createCommandHandler(
 }
 
 /** Send a user message with optional image validation.
- * Idle sends omit `deliverAs` so OMP starts a fresh turn via `prompt()`.
+ * Idle sends MUST omit `deliverAs` so OMP starts a fresh turn via `prompt()`.
  * OMP's `sendUserMessage` with explicit `deliverAs:"followUp"|"steer"` only
- * queues — and follow-up auto-drain requires an assistant/toolResult tail, so
- * a brand-new empty session would hang forever if we defaulted to followUp.
- * Pass `delivery: "steer"` for mid-stream steering.
- * See change: add-steering-message + OMP agent-session `#canAutoContinueForFollowUp`. */
+ * queues. Follow-up auto-drain needs an assistant/toolResult tail; steer can
+ * drain from any tail but still does not start a first turn on an empty
+ * session.
+ * Pass `delivery: "steer"` only for mid-stream steering (caller decides).
+ * See change: add-steering-message + OMP agent-session sendUserMessage. */
 function sendUserMessageWithImages(
   pi: ExtensionAPI,
   text: string,
@@ -824,8 +830,9 @@ function sendUserMessageWithImages(
 ): void {
   // POST-rework-mid-turn-prompt-queue: this helper is called for STEER and
   // for IDLE sends only — followUp-while-streaming is intercepted upstream
-  // (bridge buffer path; never calls this helper). Idle ⇒ no deliverAs
-  // (fresh turn). Steer ⇒ deliverAs:"steer".
+  // (bridge buffer path; never calls this helper). Callers must pass
+  // delivery:"steer" only when streaming; idle always passes undefined so
+  // deliverAs is omitted (fresh turn). Dashboard Enter uses delivery:"steer".
   // See change: rework-mid-turn-prompt-queue (design.md D1).
   const sendOptions = delivery === "steer" ? ({ deliverAs: "steer" } as const) : undefined;
   if (images && images.length > 0) {

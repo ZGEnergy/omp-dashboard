@@ -959,7 +959,7 @@ describe("CommandHandler delivery routing (pi-native queues)", () => {
     expect(pi.sendUserMessage).toHaveBeenCalledWith("plain");
   });
 
-  it("passthrough delivery steer does NOT call clearFollowUpQueue or clearSteeringQueue", async () => {
+  it("passthrough delivery steer on IDLE omits deliverAs (fresh turn; dashboard Enter default)", async () => {
     const pi = createMockPi();
     const handler = createCommandHandler(pi as any, "s1");
 
@@ -967,7 +967,23 @@ describe("CommandHandler delivery routing (pi-native queues)", () => {
 
     expect(pi.clearFollowUpQueue).not.toHaveBeenCalled();
     expect(pi.clearSteeringQueue).not.toHaveBeenCalled();
+    // OMP queues explicit deliverAs:"steer" without starting a first turn on an
+    // empty transcript; dashboard Enter always sends delivery:"steer".
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("focus on X");
+  });
+
+  it("passthrough delivery steer while STREAMING keeps deliverAs:steer", async () => {
+    const pi = createMockPi();
+    const onSteerSent = vi.fn();
+    const handler = createCommandHandler(pi as any, "s1", {
+      isStreaming: () => true,
+      onSteerSent,
+    });
+
+    await handler.handle({ type: "send_prompt", sessionId: "s1", text: "focus on X", delivery: "steer" });
+
     expect(pi.sendUserMessage).toHaveBeenCalledWith("focus on X", { deliverAs: "steer" });
+    expect(onSteerSent).toHaveBeenCalledWith("focus on X");
   });
 
   it("passthrough with images preserves image content without deliverAs on idle", async () => {

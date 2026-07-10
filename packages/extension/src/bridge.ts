@@ -1206,12 +1206,15 @@ function initBridge(pi: ExtensionAPI) {
         // drain loop on agent_end will ship the entry as a fresh turn.
         bufferFollowupSend(expanded);
       } else if (wasStreaming && deliverAs === "steer") {
+        // Mid-stream steer only — idle must omit deliverAs even when the
+        // browser sent delivery:"steer" (dashboard Enter default).
         pi.sendUserMessage(expanded, { deliverAs: "steer" });
         recordSteerSent(expanded);
       } else {
         // Idle — omit deliverAs so OMP starts a fresh turn. Explicit
-        // followUp/steer options only queue in OMP and will not drain on an
-        // empty transcript. Matches drainFollowupQueue (no deliverAs).
+        // followUp/steer options only queue in OMP on empty transcripts.
+        // Matches drainFollowupQueue (no deliverAs). Dashboard Enter uses
+        // delivery:"steer", which would otherwise hang forever cold.
         pi.sendUserMessage(expanded);
       }
     },

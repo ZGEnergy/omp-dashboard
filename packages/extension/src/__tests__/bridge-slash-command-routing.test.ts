@@ -374,7 +374,7 @@ describe("tryDispatchExtensionCommand: Path B/C/D mutual exclusion", () => {
 
 // See change: add-steering-message (task 4.4).
 // Verify the slash-routing fallback paths that call sendUserMessage honor the
-// delivery field — `"steer"` → deliverAs:"steer"; idle absent/"followUp" → omit deliverAs (fresh turn).
+// delivery field — streaming+steer → deliverAs:"steer"; idle (incl. Enter default steer) → omit deliverAs.
 describe("bridge slash routing: delivery field → sendUserMessage deliverAs", () => {
   function lastDeliverAs(sendUserMessage: ReturnType<typeof vi.fn>): string | undefined {
     const lastCall = sendUserMessage.mock.calls.at(-1);
@@ -383,11 +383,11 @@ describe("bridge slash routing: delivery field → sendUserMessage deliverAs", (
     return opts?.deliverAs;
   }
 
-  it("skill command + delivery:'steer' → sendUserMessage called with deliverAs:'steer'", async () => {
+  it("skill command + delivery:'steer' on idle → omit deliverAs (fresh turn)", async () => {
     const stub = makeStubPi({ withDispatch: true });
     await drive("/skill:foo", stub, "steer");
     expect(stub.sendUserMessage).toHaveBeenCalledTimes(1);
-    expect(lastDeliverAs(stub.sendUserMessage)).toBe("steer");
+    expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 
   it("skill command + delivery:'followUp' on idle → sendUserMessage omits deliverAs (fresh turn)", async () => {
@@ -404,16 +404,16 @@ describe("bridge slash routing: delivery field → sendUserMessage deliverAs", (
     expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 
-  it("prompt template + delivery:'steer' → deliverAs:'steer'", async () => {
+  it("prompt template + delivery:'steer' on idle → omit deliverAs", async () => {
     const stub = makeStubPi({ withDispatch: true });
     await drive("/review", stub, "steer");
-    expect(lastDeliverAs(stub.sendUserMessage)).toBe("steer");
+    expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 
-  it("passthrough text + delivery:'steer' → deliverAs:'steer'", async () => {
+  it("passthrough text + delivery:'steer' on idle → omit deliverAs (Enter default)", async () => {
     const stub = makeStubPi({ withDispatch: true });
     await drive("hello world", stub, "steer");
-    expect(lastDeliverAs(stub.sendUserMessage)).toBe("steer");
+    expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 
   it("passthrough text + delivery omitted → omit deliverAs (fresh turn)", async () => {
@@ -422,22 +422,22 @@ describe("bridge slash routing: delivery field → sendUserMessage deliverAs", (
     expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 
-  it("unrecognized slash + delivery:'steer' → deliverAs:'steer'", async () => {
+  it("unrecognized slash + delivery:'steer' on idle → omit deliverAs", async () => {
     const stub = makeStubPi({ withDispatch: true });
     await drive("/totally-unknown-command", stub, "steer");
-    expect(lastDeliverAs(stub.sendUserMessage)).toBe("steer");
+    expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 
-  it("bridge-native /__dashboard_reload fallback + delivery:'steer' → deliverAs:'steer'", async () => {
+  it("bridge-native /__dashboard_reload + delivery:'steer' on idle → omit deliverAs", async () => {
     const stub = makeStubPi({ withDispatch: true });
     await drive("/__dashboard_reload", stub, "steer");
-    expect(lastDeliverAs(stub.sendUserMessage)).toBe("steer");
+    expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 
-  it("getCommands throws fallback + delivery:'steer' → deliverAs:'steer'", async () => {
+  it("getCommands throws + delivery:'steer' on idle → omit deliverAs", async () => {
     const stub = makeStubPi({ withDispatch: true, getCommandsThrows: true });
     await drive("/ctx-stats", stub, "steer");
-    expect(lastDeliverAs(stub.sendUserMessage)).toBe("steer");
+    expect(lastDeliverAs(stub.sendUserMessage)).toBeUndefined();
   });
 });
 
