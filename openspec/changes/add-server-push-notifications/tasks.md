@@ -54,7 +54,7 @@
 - [x] 7.2 At the existing `isUnreadTrigger` site (`event-wiring.ts:188-201`), add ONE line: `pushDispatcher?.fanout(sessionId, msg.event);` immediately after the unread broadcast block. Same gating (no replay, not viewed) — the line is INSIDE the existing `if (...)` block.
 - [x] 7.3 Update `packages/server/src/server.ts` to construct `pushDispatcher` from config and pass it into `wireEvents(...)`. Skip construction when `config.push?.enabled !== true`.
 - [x] 7.4 Add repo-level lint test `packages/server/src/__tests__/push-dispatcher-fire-and-forget.test.ts` that AST-scans `event-wiring.ts` for `await pushDispatcher` or `await deps.pushDispatcher` and fails the build if found.
-- [x] 7.5 Integration test in `packages/server/src/__tests__/event-wiring-push.test.ts`: simulate an `agent_end` event with error, assert dispatcher is called once with correct args, assert event-pipeline latency unchanged when transport hangs.
+- [x] 7.5 Integration test in `packages/server/src/__tests__/event-wiring-push.test.ts`: simulate an `agent_end` event with error, assert dispatcher is called once with correct args, and assert event-pipeline latency is unchanged when the transport hangs — a REAL dispatcher wired to a transport whose `send` never resolves; the `onEvent` handler returns synchronously (`< 50ms`, no throw) while the send is still in flight (started, not resolved).
 
 ## 8. REST routes
 
