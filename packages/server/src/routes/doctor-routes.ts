@@ -29,11 +29,7 @@ import {
   inspectedCredentialFiles,
 } from "@blackbelt-technology/pi-dashboard-shared/credential-detect.js";
 import { getTunnelWatchdogStatus } from "../tunnel-watchdog.js";
-import { getManagedDir } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
-
-function getManagedDir(): string {
-  return process.env.MANAGED_DIR || getManagedDir();
-}
+import { getManagedDir as getHostManagedInstallDir } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 
 function detectSystemNode(): { found: boolean; path?: string } {
   const cmd = process.platform === "win32" ? "where node" : "which node"; // platform-branch-ok: localised PATH-lookup primitive
@@ -84,7 +80,7 @@ function isApiKeyConfigured(): boolean {
 
 function buildDefaultDeps(): SharedChecksDeps {
   return {
-    managedDir: getManagedDir(),
+    managedDir: process.env.MANAGED_DIR || getHostManagedInstallDir(),
     detectSystemNode,
     detectPi: () => detectViaRegistry("pi"),
     detectOpenSpec: () => detectViaRegistry("openspec"),
