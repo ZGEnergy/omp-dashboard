@@ -34,6 +34,7 @@ import { PackageBrowser } from "./PackageBrowser.js";
 import { PackageInstallConfirmDialog } from "./PackageInstallConfirmDialog.js";
 import { PackageReadmeDialog } from "./PackageReadmeDialog.js";
 import { PairedDevicesSection } from "./PairedDevicesSection.js";
+import { PushNotificationsSection } from "./PushNotificationsSection.js";
 import { PairingView } from "./PairingView.js";
 import { PiVersionAdvisory } from "./PiVersionAdvisory.js";
 import { PluginsSection } from "./PluginsSection.js";
@@ -871,6 +872,9 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                   />
                 </Section>
                 <DisplayPrefsSection />
+                <Section title={t("settings.pushNotifications", undefined, "Push Notifications")}>
+                  <PushNotificationsSection />
+                </Section>
                 <SettingsSectionSlot tab="general" />
               </>
             )}
