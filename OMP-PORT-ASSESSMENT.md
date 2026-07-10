@@ -338,3 +338,60 @@ Concrete, file-level. Each phase is independently verifiable.
   O2 stubbed avoiding all Bun-only exposure; the register-via-legacy-`settings.json`
   approach; the codemod-based merge loop; the exact drop list. Phase 7 is the
   end-to-end acceptance gate.
+
+---
+
+## 11. Execution status (implemented on `omp-opus48`)
+
+The minimal core port from §8 was **implemented and verified** on this branch.
+
+### Changes (small human-authored surface + one mechanical codemod)
+
+- **`scripts/omp-codemod.mjs` [new]** — re-runnable mechanical rewrites, the
+  merge-parity mechanism (§7). Rewrites the pi SDK scope
+  (`earendil-works`/`mariozechner` → `oh-my-pi`), collapses duplicate deps,
+  normalizes pi-scope dep versions to `*` (host-provided), and repoints on-disk
+  dir segments (`.pi` → `.omp`, `.pi-dashboard` → `.omp-dashboard`) bounded by
+  quote/slash so it never hits identifiers. Guard: `--check`.
+- **Semantic (hand-authored), the only non-mechanical edits:**
+  - `packages/shared/src/dashboard-paths.ts` — sessions-root fallback +
+    dashboard config dir → `~/.omp/...` (honors `PI_CODING_AGENT_DIR`).
+  - `packages/shared/src/bridge-register.ts` — register into
+    `~/.omp/agent/settings.json#**extensions**` (omp's documented loader key)
+    instead of pi's `packages[]`.
+  - `packages/shared/src/tool-registry/definitions.ts` — the agent executor
+    resolves the **`omp`** binary and spawns it directly (its
+    `#!/usr/bin/env bun` shebang runs it under Bun); never node-wraps a
+    `cli.js` (which would crash on Bun-only APIs). Registry id stays `pi` so
+    `resolve("pi")` call sites are unchanged.
+  - `packages/server/src/session-discovery.ts` — `encodeCwd` rewritten to
+    omp's dir-encoding scheme (home-relative `-repos`, `-tmp-…`, legacy
+    `--…--`); pi's legacy-absolute-only form missed home-relative dirs.
+  - `package.json` + `packages/extension/package.json` — manifest key
+    `pi` → `omp`; bundled skills dir `git mv .pi → .omp`.
+- **Kept on Node** (server) / **Bun** (bridge, via omp) per §6. **Not yet
+  done** (deliberate, low-risk follow-ups): delete `packages/electron` +
+  standalone/version-check modules (footprint trim, E1–E3), branding sweep,
+  provider-auth `agent.db` adapter (O1). Core runs without them.
+
+### Verification (all green, against the real omp on this machine)
+
+- **Core data smoke** (`bun`, real `~/.omp/agent/sessions`): `resolvePiSessionsDir`
+  → `~/.omp/agent/sessions`; cold-start scan found **22 real omp sessions**;
+  per-cwd discovery via the fixed `encodeCwd` found them; `registerBridgeExtension`
+  wrote `~/.omp/agent/settings.json#extensions`.
+- **Bridge** imports cleanly under **Bun** (default export = extension factory).
+- **Server** loads under **Node + jiti**: `pi-dashboard --version` → `0.5.4`;
+  `pi-dashboard status` loads the full CLI graph (config, mDNS, tool-registry).
+- **Client** builds (`npm run build`, Vite) — dist emitted + precompressed.
+- Deps install from public npm (`@oh-my-pi/pi-coding-agent@16.4.1`,
+  `@oh-my-pi/pi-tui@16.4.1`), proving the scope swap resolves.
+
+### Maintenance loop (unchanged from §7)
+
+```
+git fetch upstream && git merge upstream/develop
+node scripts/omp-codemod.mjs        # re-apply scope + path rewrites
+# reconcile only the ~5 semantic files above if upstream reworked them
+bun install && npm run build        # verify
+```

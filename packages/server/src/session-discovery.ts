@@ -5,6 +5,7 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { resolvePiSessionsDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 import { condenseForFirstMessage } from "@blackbelt-technology/pi-dashboard-shared/skill-block-parser.js";
@@ -20,9 +21,21 @@ export interface DiscoveredSession {
   sessionDir: string;
 }
 
-/** Encode cwd to the safe directory name pi uses */
+/** Encode cwd to the on-disk sessions subdir name, matching omp's scheme:
+ *  inside $HOME -> `-<rel>` (bare `-` for home), inside tmp -> `-tmp-<rel>`,
+ *  else legacy absolute `--<cwd>--`; `/`,`\`,`:` all collapse to `-`. */
 function encodeCwd(cwd: string): string {
-  return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+  const norm = (s: string): string => s.replace(/[/\\:]/g, "-");
+  const relTo = (base: string): string | null => {
+    if (cwd === base) return "";
+    const b = base.endsWith("/") ? base : base + "/";
+    return cwd.startsWith(b) ? cwd.slice(b.length) : null;
+  };
+  const inHome = relTo(homedir());
+  if (inHome !== null) return inHome === "" ? "-" : `-${norm(inHome)}`;
+  const inTmp = relTo(tmpdir());
+  if (inTmp !== null) return inTmp === "" ? "-tmp" : `-tmp-${norm(inTmp)}`;
+  return `--${norm(cwd.replace(/^[/\\]/, ""))}--`;
 }
 
 function getSessionsDir(): string {
