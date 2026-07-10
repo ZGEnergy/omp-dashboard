@@ -24,6 +24,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { safeRealpath, within } from "./path-containment.js";
+import { getAgentHome } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 
 /** Writable markdown extensions. Mirrors `WRITABLE_MARKDOWN_EXTENSIONS` in shared `file-kind`. */
 const WRITABLE_MD_EXTENSIONS = new Set([".md", ".mdx"]);
@@ -60,7 +61,7 @@ async function allowedRoot(opts: WritableMdTargetOptions): Promise<string | null
     ? path.resolve(opts.cwd)
     : (() => {
         const home = opts.home ?? os.homedir();
-        return home ? path.join(home, ".pi", "agent") : null;
+        return home ? getAgentHome({ homedir: home }) : null;
       })();
   if (!raw) return null; // missing-home → fail closed
   try {

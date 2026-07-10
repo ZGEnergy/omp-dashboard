@@ -26,6 +26,7 @@
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
+import { getDefaultSessionsDir, getHostDashboardConfigDir } from "../host-profile.js";
 
 const home = mkdtempSync(join(os.tmpdir(), "pi-test-"));
 process.env.HOME = home;
@@ -39,5 +40,5 @@ if (process.platform === "win32") { // platform-branch-ok: test HOME isolation; 
 
 // Pre-create expected .pi subdirectories (mirrors globalSetup bootstrap) so
 // production code that reads those paths finds empty but well-formed dirs.
-mkdirSync(join(home, ".pi", "agent", "sessions"), { recursive: true });
-mkdirSync(join(home, ".pi", "dashboard"), { recursive: true });
+mkdirSync(getDefaultSessionsDir({ homedir: home }), { recursive: true });
+mkdirSync(getHostDashboardConfigDir({ homedir: home }), { recursive: true });

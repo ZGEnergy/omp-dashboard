@@ -28,6 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { BridgeLoadSource } from "./dashboard-plugin/plugin-status.js";
+import { getAgentHome } from "./host-profile.js";
 
 export interface PluginBridgeRegisterOptions {
   homedir?: string;
@@ -45,7 +46,7 @@ const ENV_SKIP = "PI_DASHBOARD_DISABLE_PLUGIN_BRIDGE_PACKAGES_WRITE";
 
 function getSettingsPath(homedir?: string): string {
   const home = homedir ?? process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
-  return path.join(home, ".pi", "agent", "settings.json");
+  return path.join(getAgentHome({ homedir: home }), "settings.json");
 }
 
 function readSettings(settingsPath: string): Record<string, unknown> {

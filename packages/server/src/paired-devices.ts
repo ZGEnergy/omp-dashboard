@@ -12,6 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { readJsonFile, writeJsonFile } from "./json-store.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 const REGISTRY_FILENAME = "paired-devices.json";
 const TOKEN_BYTES = 32; // 256-bit opaque bearer.
@@ -41,7 +42,7 @@ export interface PairedDeviceView {
 }
 
 export function defaultRegistryPath(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", REGISTRY_FILENAME);
+  return path.join(getDashboardConfigDir(), REGISTRY_FILENAME);
 }
 
 function hashToken(token: string): string {

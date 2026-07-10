@@ -22,6 +22,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { getProjectLocalDir } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 import {
   AGENT_DIR,
   getPiCore,
@@ -56,7 +57,7 @@ export type ToggleResult = { ok: true } | { ok: false; status: number; error: st
 /** Absolute settings.json path a toggle for this scope will write. */
 export function settingsPathForScope(scope: ToggleScope, cwd?: string): string {
   return scope === "local"
-    ? path.join(cwd ?? process.cwd(), ".pi", "settings.json")
+    ? path.join(getProjectLocalDir(cwd ?? process.cwd()), "settings.json")
     : path.join(AGENT_DIR, "settings.json");
 }
 
@@ -191,7 +192,7 @@ function toggleLoose(
   cwd: string,
   agentDir: string,
 ): ToggleResult | null {
-  const baseDir = item.metadata?.baseDir ?? (isProject ? path.join(cwd, ".pi") : agentDir);
+  const baseDir = item.metadata?.baseDir ?? (isProject ? getProjectLocalDir(cwd) : agentDir);
   // Scope-bounded guard: the resource must live under the scope's base dir.
   // A global toggle can therefore never write a folder file, and a `../` escape
   // is rejected. (The 404 above already rejects out-of-scan paths.)

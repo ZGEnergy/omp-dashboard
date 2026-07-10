@@ -27,6 +27,7 @@ import type { TunnelStatus } from "@blackbelt-technology/pi-dashboard-shared/res
 import { getTunnelWatchdogStatus } from "./tunnel-watchdog.js";
 import { CONFIG_FILE } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { readZrokEnvironment, type ZrokEnvData } from "@blackbelt-technology/pi-dashboard-shared/zrok-env.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 export type { TunnelStatus };
 
@@ -34,7 +35,7 @@ export type { TunnelStatus };
 export type ZrokEnv = ZrokEnvData;
 
 function getZrokPidPath(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "zrok.pid");
+  return path.join(getDashboardConfigDir(), "zrok.pid");
 }
 const SPAWN_TIMEOUT_MS = 30_000;
 

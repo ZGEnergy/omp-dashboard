@@ -505,7 +505,7 @@ export function addWorktree(opts: AddWorktreeOptions): AddWorktreeSuccess | AddW
  * Atomic write (write-to-tmp + rename).
  */
 export function rewriteWorktreePiSettings(worktreePath: string, mainRoot: string): void {
-  const settingsPath = path.join(worktreePath, ".pi", "settings.json");
+  const settingsPath = path.join(getProjectLocalDir(worktreePath), "settings.json");
   let raw: string;
   try {
     raw = fs.readFileSync(settingsPath, "utf-8");
@@ -529,7 +529,7 @@ export function rewriteWorktreePiSettings(worktreePath: string, mainRoot: string
     // Source resolves relative to the .pi directory by pi's convention
     // (i.e. `..` from `.pi/` is the project root). We want it to resolve
     // against the MAIN repo's `.pi/`, so we anchor against `<mainRoot>/.pi`.
-    const anchorDir = path.join(mainRoot, ".pi");
+    const anchorDir = getProjectLocalDir(mainRoot);
     const absolute = path.resolve(anchorDir, pkg.source);
     pkg.source = absolute;
     changed = true;
@@ -1137,6 +1137,7 @@ export function orphanCleanup(
 // ── Pull request helpers (change: add-worktree-from-pull-request) ──────────
 
 import type { PullRequestInfo } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+import { getProjectLocalDir } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 
 export type ListPrCode = "gh_not_authed" | "no_remote" | "git_failed";
 

@@ -25,6 +25,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
+import { getAgentHome, getHostDashboardConfigDir, getDefaultSessionsDir } from "../host-profile.js";
 
 /** Vitest globalSetup default export. Returns a teardown function. */
 export default function setup() {
@@ -59,8 +60,8 @@ export default function setup() {
   }
 
   // Pre-create expected .pi subdirectories so code that reads them finds empty dirs.
-  mkdirSync(join(currentHome, ".pi", "agent", "sessions"), { recursive: true });
-  mkdirSync(join(currentHome, ".pi", "dashboard"), { recursive: true });
+  mkdirSync(getDefaultSessionsDir({ homedir: currentHome }), { recursive: true });
+  mkdirSync(getHostDashboardConfigDir({ homedir: currentHome }), { recursive: true });
 
   // eslint-disable-next-line no-console
   console.log(`[test-isolation] HOME=${currentHome} (real=${realHome})`);

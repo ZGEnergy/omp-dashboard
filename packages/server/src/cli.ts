@@ -61,6 +61,7 @@ import {
   registerBridgeExtension,
 } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
 import { parseDashboardStarter } from "@blackbelt-technology/pi-dashboard-shared/dashboard-starter.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 const SUBCOMMANDS = ["start", "stop", "restart", "status"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
@@ -245,7 +246,7 @@ async function cmdStart(config: ServerConfig): Promise<void> {
   if (config.dev) args.push("--dev");
   if (!config.tunnel) args.push("--no-tunnel");
 
-  const logDir = path.join(os.homedir(), ".pi", "dashboard");
+  const logDir = getDashboardConfigDir();
   const logPath = path.join(logDir, "server.log");
 
   try {

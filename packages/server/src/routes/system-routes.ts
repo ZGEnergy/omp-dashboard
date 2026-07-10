@@ -49,6 +49,7 @@ import { readSpawnFailures } from "../spawn-failure-log.js";
 import { createTunnel, deleteTunnel, getTunnelStatus, getTunnelUrl } from "../tunnel.js";
 import { startTunnelWatchdog, stopTunnelWatchdog } from "../tunnel-watchdog.js";
 import type { NetworkGuard } from "./route-deps.js";
+import { getAgentHome } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 
 /**
  * Enrich each plugin status with `bridgeLoadedFrom` by classifying the
@@ -63,7 +64,7 @@ function enrichWithBridgeSource(statuses: PluginStatus[]): PluginStatus[] {
   let settings: unknown = null;
   try {
     const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
-    const p = path.join(home, ".pi", "agent", "settings.json");
+    const p = path.join(getAgentHome({ homedir: home }), "settings.json");
     if (fs.existsSync(p)) {
       const raw = fs.readFileSync(p, "utf-8").trim();
       if (raw) settings = JSON.parse(raw);

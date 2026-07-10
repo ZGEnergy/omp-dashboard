@@ -28,6 +28,7 @@ import {
 } from "../openspec-tasks.js";
 import type { PreferencesStore } from "../preferences-store.js";
 import type { NetworkGuard } from "./route-deps.js";
+import { getAgentHome, getProjectLocalDir } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 
 /** Callback to broadcast an openspec_update after a successful toggle. */
 export type OpenSpecBroadcaster = (cwd: string) => void;
@@ -310,7 +311,7 @@ export function registerOpenSpecRoutes(
       }
 
       const homeDir = process.env.HOME || process.env.USERPROFILE || "";
-      const globalPiDir = path.join(homeDir, ".pi", "agent");
+      const globalPiDir = getAgentHome({ homedir: homeDir });
       const allSessions = sessionManager.listAll();
       const knownCwds = new Set(allSessions.map((s) => s.cwd));
       for (const dir of preferencesStore.getPinnedDirectories()) knownCwds.add(dir);
@@ -319,9 +320,9 @@ export function registerOpenSpecRoutes(
       const isAllowed =
         normalizedPath.startsWith(globalPiDir + path.sep) ||
         [...knownCwds].some(
-          (cwd) => normalizedPath.startsWith(path.join(cwd, ".pi") + path.sep),
+          (cwd) => normalizedPath.startsWith(getProjectLocalDir(cwd) + path.sep),
         ) ||
-        normalizedPath.includes(path.join(".pi", "git") + path.sep) ||
+        normalizedPath.includes(path.join(".omp", "git") + path.sep) ||
         normalizedPath.includes("node_modules" + path.sep);
 
       if (!isAllowed) {

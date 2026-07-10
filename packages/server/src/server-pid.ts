@@ -7,8 +7,9 @@ import path from "node:path";
 import os from "node:os";
 import { isDashboardRunning } from "@blackbelt-technology/pi-dashboard-shared/server-identity.js";
 import { isProcessAlive } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
-const DEFAULT_PID_PATH = path.join(os.homedir(), ".pi", "dashboard", "server.pid");
+const DEFAULT_PID_PATH = path.join(getDashboardConfigDir(), "server.pid");
 
 export interface ServerPidOptions {
   pidPath?: string;

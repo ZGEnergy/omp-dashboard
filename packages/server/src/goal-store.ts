@@ -15,7 +15,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { createHash, randomUUID } from "node:crypto";
 import {
   GOALS_SCHEMA_VERSION,
   GOAL_VERDICTS_CAP,
@@ -27,6 +26,7 @@ import {
   type GoalVerdict,
   type GoalsFile,
 } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 // ── Errors ───────────────────────────────────────────────────────
 
@@ -93,7 +93,7 @@ function emptyFile(): GoalsFile {
 // ── Factory ──────────────────────────────────────────────────────
 
 export function createGoalStore(opts: GoalStoreOptions = {}): GoalStore {
-  const dataDir = opts.dataDir ?? path.join(os.homedir(), ".pi", "dashboard", "goals");
+  const dataDir = opts.dataDir ?? path.join(getDashboardConfigDir(), "goals");
   const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
 
   const cache = new Map<string, GoalsFile>();

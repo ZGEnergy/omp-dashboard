@@ -10,8 +10,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
-const LOG_DIR = path.join(os.homedir(), ".pi", "dashboard");
+const LOG_DIR = getDashboardConfigDir();
 const LOG_FILE = path.join(LOG_DIR, "model-proxy.jsonl");
 const MAX_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 

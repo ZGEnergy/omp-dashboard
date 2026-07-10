@@ -19,8 +19,9 @@ import {
 } from "@blackbelt-technology/dashboard-plugin-runtime/server";
 import type { NetworkGuard } from "./route-deps.js";
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
-const CONFIG_DIR = path.join(os.homedir(), ".pi", "dashboard");
+const CONFIG_DIR = getDashboardConfigDir();
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
 function readRawConfig(): Record<string, unknown> {

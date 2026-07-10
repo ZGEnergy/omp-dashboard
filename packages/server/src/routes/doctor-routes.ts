@@ -29,9 +29,10 @@ import {
   inspectedCredentialFiles,
 } from "@blackbelt-technology/pi-dashboard-shared/credential-detect.js";
 import { getTunnelWatchdogStatus } from "../tunnel-watchdog.js";
+import { getManagedDir } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 
 function getManagedDir(): string {
-  return process.env.MANAGED_DIR || path.join(os.homedir(), ".pi-dashboard");
+  return process.env.MANAGED_DIR || getManagedDir();
 }
 
 function detectSystemNode(): { found: boolean; path?: string } {

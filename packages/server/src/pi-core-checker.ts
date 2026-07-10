@@ -24,6 +24,8 @@ import os from "node:os";
 import { fetchPackageMeta } from "./npm-search-proxy.js";
 import { invalidateChangelogCache } from "./changelog-parser.js";
 import { getLatestPiRelease, type PiDevReleaseInfo } from "./pi-dev-version-check.js";
+import { getManagedDir } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
+import { getHostProfile } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,22 +33,22 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const NPM_LIST_TIMEOUT_MS = 30_000;
 
 /** ~/.pi-dashboard/ — Electron managed install dir */
-const MANAGED_DIR = path.join(os.homedir(), ".pi-dashboard");
+const MANAGED_DIR = getManagedDir();
 const MANAGED_NODE_MODULES = path.join(MANAGED_DIR, "node_modules");
 
 /** Known core packages (not extensions). Order matters for display. */
 export const CORE_PACKAGE_NAMES: readonly string[] = [
-	"@earendil-works/pi-coding-agent",
-	"@mariozechner/pi-coding-agent",
+	...getHostProfile().codingAgentPackageScopes,
 	"@blackbelt-technology/pi-agent-dashboard",
 	"@blackbelt-technology/pi-model-proxy",
 ];
 
 /** Display name mapping for known packages. Falls back to package name. */
 const DISPLAY_NAMES: Readonly<Record<string, string>> = {
-	"@earendil-works/pi-coding-agent": "pi (core agent)",
-	"@mariozechner/pi-coding-agent": "pi (core agent — legacy fork)",
-	"@blackbelt-technology/pi-agent-dashboard": "pi-dashboard",
+	...Object.fromEntries(
+		getHostProfile().codingAgentPackageScopes.map((name) => [name, "omp (core agent)"]),
+	),
+	"@blackbelt-technology/pi-agent-dashboard": "omp-dashboard",
 	"@blackbelt-technology/pi-model-proxy": "pi-model-proxy",
 };
 
@@ -102,7 +104,7 @@ function looksLikePiEcosystem(name: string): boolean {
 }
 
 /** Pi packages whose latestVersion comes from pi.dev (not npm registry). */
-const PI_DEV_PACKAGE = "@mariozechner/pi-coding-agent";
+const PI_DEV_PACKAGE = getHostProfile().codingAgentPackageScopes[0]!;
 
 export interface NpmListRunner {
 	/** Run `npm list -g --depth=0 --json` and return stdout. */

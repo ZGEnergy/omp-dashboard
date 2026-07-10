@@ -20,10 +20,11 @@ import type { PiCorePackage, PiCoreUpdateResult } from "@blackbelt-technology/pi
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
 import { prependManagedNodeToPath } from "@blackbelt-technology/pi-dashboard-shared/platform/managed-node-path.js";
 import type { PackageManagerWrapper } from "./package-manager-wrapper.js";
+import { getManagedDir } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 
 const UPDATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 min per package
 
-const MANAGED_DIR = path.join(os.homedir(), ".pi-dashboard");
+const MANAGED_DIR = getManagedDir();
 
 export interface UpdateProgressEvent {
 	name: string;

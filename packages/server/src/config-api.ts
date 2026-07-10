@@ -7,6 +7,7 @@ import os from "node:os";
 import { loadConfig, type DashboardConfig, type AuthConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { refreshModelRegistry } from "./model-proxy/registry-singleton.js";
 import { setWindowsGitSourceSetting } from "@blackbelt-technology/pi-dashboard-shared/platform/git-source.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 const REDACTED = "***";
 
@@ -14,7 +15,7 @@ const REDACTED = "***";
  * Return the current config with secrets redacted.
  */
 function getConfigPaths() {
-  const dir = path.join(os.homedir(), ".pi", "dashboard");
+  const dir = getDashboardConfigDir();
   return { dir, file: path.join(dir, "config.json") };
 }
 

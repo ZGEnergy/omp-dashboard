@@ -408,11 +408,26 @@ export function npmGlobalStrategy(
   return {
     name: "npm-global",
     run(): StrategyResult {
-      const root = npmRootGlobal();
-      if (!root) return { ok: false, reason: "npm root -g failed" };
-      const candidate = path.join(root, pkgName, entryRelative);
-      if (exists(candidate)) return { ok: true, path: candidate };
-      return { ok: false, reason: `missing: ${candidate}` };
+      // npm root -g first, then common Bun global node_modules (OMP installs via bun).
+      const roots: string[] = [];
+      const npmRoot = npmRootGlobal();
+      if (npmRoot) roots.push(npmRoot);
+      const bunGlobal = path.join(
+        process.env.HOME ?? "",
+        ".bun",
+        "install",
+        "global",
+        "node_modules",
+      );
+      if (bunGlobal && !roots.includes(bunGlobal)) roots.push(bunGlobal);
+      if (roots.length === 0) return { ok: false, reason: "npm root -g failed" };
+      const tried: string[] = [];
+      for (const root of roots) {
+        const candidate = path.join(root, pkgName, entryRelative);
+        tried.push(candidate);
+        if (exists(candidate)) return { ok: true, path: candidate };
+      }
+      return { ok: false, reason: `missing: ${tried.join(" | ")}` };
     },
   };
 }

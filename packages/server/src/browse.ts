@@ -18,6 +18,7 @@ import os from "node:os";
 import type { BrowseEntry, BrowseFlagEntry, BrowseResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
 import { isFilesystemRoot } from "@blackbelt-technology/pi-dashboard-shared/platform/paths.js";
 import { createSemaphore } from "@blackbelt-technology/pi-dashboard-shared/semaphore.js";
+import { getProjectLocalDir } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 
 const MAX_ENTRIES = 200;
 
@@ -37,7 +38,7 @@ const FLAG_PROBE_CONCURRENCY = 32;
 async function probeFlags(absolutePath: string): Promise<BrowseFlagEntry> {
   const [isGit, isPi] = await Promise.all([
     fs.access(path.join(absolutePath, ".git")).then(() => true, () => false),
-    fs.access(path.join(absolutePath, ".pi")).then(() => true, () => false),
+    fs.access(getProjectLocalDir(absolutePath)).then(() => true, () => false),
   ]);
   return { isGit, isPi };
 }

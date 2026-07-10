@@ -15,10 +15,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { getDashboardConfigDir } from "../dashboard-paths.js";
 
 /** Path to the overrides file. Exposed for tests and the settings UI. */
 export function defaultOverridesPath(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "tool-overrides.json");
+  return path.join(getDashboardConfigDir(), "tool-overrides.json");
 }
 
 /** Internal shape persisted to disk. `version` lets us evolve later. */

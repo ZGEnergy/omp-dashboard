@@ -18,6 +18,7 @@ import {
 import path from "node:path";
 import os from "node:os";
 import type { PreflightReason } from "./spawn-preflight.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 export interface SpawnFailureEntry {
   /** ISO 8601 UTC timestamp. */
@@ -43,7 +44,7 @@ export function _setLogDirForTests(dir: string | null): void {
 }
 
 function logDir(): string {
-  return _logDirOverride ?? path.join(os.homedir(), ".pi", "dashboard", "sessions");
+  return _logDirOverride ?? path.join(getDashboardConfigDir(), "sessions");
 }
 
 function logPath(): string {

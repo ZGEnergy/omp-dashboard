@@ -7,6 +7,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as npm from "@blackbelt-technology/pi-dashboard-shared/platform/npm.js";
 import type { PiPackageInfo, PiResource, PiResourceScope, PiResourcesResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
+import { getAgentHome, getProjectLocalDir } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 import {
   buildEnabledMap,
   resolveActivation as defaultResolveActivation,
@@ -210,7 +211,7 @@ function emptyScope(): PiResourceScope {
 // ── Scope Scanners ──────────────────────────────────────────────────
 
 export function scanLocalResources(cwd: string): PiResourceScope {
-  const piDir = path.join(cwd, ".pi");
+  const piDir = getProjectLocalDir(cwd);
   if (!fs.existsSync(piDir)) return emptyScope();
   return {
     extensions: discoverExtensions(path.join(piDir, "extensions")),
@@ -273,8 +274,8 @@ function resolvePackagePath(entry: string, settingsDir: string, scope: "local" |
     url = url.replace(/\.git$/, "").replace(/@[^/]*$/, "");
 
     const baseDir = scope === "local" && cwd
-      ? path.join(cwd, ".pi", "git")
-      : path.join(os.homedir(), ".pi", "agent", "git");
+      ? path.join(getProjectLocalDir(cwd), "git")
+      : path.join(getAgentHome(), "git");
     return { resolved: path.join(baseDir, url), source: entry };
   }
 
@@ -414,13 +415,13 @@ function applyActivationToScope(scope: PiResourceScope, map: Map<string, boolean
 }
 
 export async function scanPiResources(cwd: string, options?: ScanOptions): Promise<PiResourcesResult> {
-  const globalDir = options?.globalDir ?? path.join(os.homedir(), ".pi", "agent");
+  const globalDir = options?.globalDir ?? getAgentHome();
 
   const local = scanLocalResources(cwd);
   const global = scanGlobalResources(globalDir);
 
   // Collect package entries from both settings files
-  const localSettingsPath = path.join(cwd, ".pi", "settings.json");
+  const localSettingsPath = path.join(getProjectLocalDir(cwd), "settings.json");
   const globalSettingsPath = path.join(globalDir, "settings.json");
 
   const localPackageEntries = readSettingsPackages(localSettingsPath);

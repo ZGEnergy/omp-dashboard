@@ -15,6 +15,7 @@ import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.j
 import { buildNodeImportArgvParts, toFileUrl, shouldUrlWrapEntry } from "@blackbelt-technology/pi-dashboard-shared/platform/node-spawn.js";
 import os from "node:os";
 import path from "node:path";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 export interface RestartParams {
   /** Absolute path to the server CLI (typically process.argv[1]) */
@@ -50,7 +51,7 @@ export const RESTART_HEALTH_DEADLINE_DEV_MS = 60_000;
  */
 export function buildOrchestratorScript(params: RestartParams): string {
   const execPath = params.execPath ?? process.execPath;
-  const logPath = path.join(os.homedir(), ".pi", "dashboard", "restart.log");
+  const logPath = path.join(getDashboardConfigDir(), "restart.log");
   const healthDeadlineMs = params.dev
     ? RESTART_HEALTH_DEADLINE_DEV_MS
     : RESTART_HEALTH_DEADLINE_PROD_MS;
@@ -58,7 +59,7 @@ export function buildOrchestratorScript(params: RestartParams): string {
   // Same convention as `server-pid.ts`. Embedded as a JSON-stringified literal
   // so quoting/path-separator handling is correct on Windows.
   // See change: fix-restart-bridge-auto-start-race.
-  const pidPath = path.join(os.homedir(), ".pi", "dashboard", "dashboard.pid");
+  const pidPath = path.join(getDashboardConfigDir(), "dashboard.pid");
   // Argv shape (loader URL-wrapping + entry URL-wrapping rule) is
   // owned by `buildNodeImportArgvParts` in `node-spawn.ts` — the same
   // helper `spawnNodeScript` calls. Keeps the `--import` argv shape

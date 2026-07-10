@@ -1,32 +1,25 @@
 /**
- * Detect whether any LLM-provider credential is configured for pi.
+ * Detect whether any LLM-provider credential is configured for Oh My Pi.
  *
- * Two sources are inspected and OR-merged:
- *  - `~/.pi/agent/settings.json` — legacy API-key fields written by the
- *    first-run wizard or user-edited config: `anthropicApiKey`,
+ * Sources inspected and OR-merged:
+ *  - agent `settings.json` — legacy API-key fields: `anthropicApiKey`,
  *    `openaiApiKey`, `apiKey`, `providers[*].apiKey`.
- *  - `~/.pi/agent/auth.json` — pi-side credential store written by
- *    Settings → Providers. Two entry shapes coexist there:
+ *  - agent `auth.json` — legacy credential store shapes
  *      * API-key:  `{ type, key }`
  *      * OAuth:    `{ type, access, refresh, expires, ... }`
+ *  - agent `agent.db` — OMP primary store (`auth_credentials` table)
  *
- * "Non-empty" = `typeof v === "string" && v.trim().length > 0`.
- * Empty strings, whitespace, null, undefined, and non-string values do
- * NOT count as configured.
+ * "Non-empty" string checks for JSON sources. The detector NEVER throws
+ * and never returns/logs credential values.
  *
- * The detector NEVER throws; per-file parse failure is treated as "no
- * credential from that file" and falls through to the other file.
- *
- * The detector NEVER returns, logs, or hashes credential values — only
- * the boolean result and (via `inspectedCredentialFiles`) the file
- * paths it looked at.
- *
- * See change: fix-doctor-oauth-credential-detection.
+ * See change: fix-doctor-oauth-credential-detection + OMP host contract.
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { DatabaseSync } from "node:sqlite";
+import { getAgentDbPath, getAgentHome } from "./host-profile.js";
 
 function isNonEmptyString(v: unknown): boolean {
   return typeof v === "string" && v.trim().length > 0;
@@ -50,7 +43,11 @@ function settingsHasCredential(data: unknown): boolean {
   const providers = d.providers;
   if (providers && typeof providers === "object") {
     for (const v of Object.values(providers as Record<string, unknown>)) {
-      if (v && typeof v === "object" && isNonEmptyString((v as Record<string, unknown>).apiKey)) {
+      if (
+        v &&
+        typeof v === "object" &&
+        isNonEmptyString((v as Record<string, unknown>).apiKey)
+      ) {
         return true;
       }
     }
@@ -70,9 +67,34 @@ function authHasCredential(data: unknown): boolean {
   return false;
 }
 
+function agentDbHasCredential(homeDir: string): boolean {
+  const dbPath = getAgentDbPath({ homedir: homeDir });
+  if (!existsSync(dbPath)) return false;
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const row = db
+      .prepare(
+        `SELECT 1 AS ok FROM auth_credentials
+         WHERE disabled_cause IS NULL
+         LIMIT 1`,
+      )
+      .get();
+    return !!(row && typeof row === "object");
+  } catch {
+    return false;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 /**
  * Returns true if at least one provider credential is configured in
- * either `~/.pi/agent/settings.json` or `~/.pi/agent/auth.json`.
+ * agent settings, auth.json, or agent.db.
  *
  * @param homeDir Override for the user's home directory. Defaults to
  *   `os.homedir()`. Pass a tmp dir in tests; never pass user-provided
@@ -82,15 +104,16 @@ export function hasAnyProviderCredential(homeDir: string = os.homedir()): boolea
   const [settingsPath, authPath] = inspectedCredentialFiles(homeDir);
   if (settingsHasCredential(safeReadJson(settingsPath))) return true;
   if (authHasCredential(safeReadJson(authPath))) return true;
+  if (agentDbHasCredential(homeDir)) return true;
   return false;
 }
 
 /**
- * Absolute paths inspected by `hasAnyProviderCredential`, in inspection
- * order. Surfaced so Doctor's `detail` field can name the files without
- * duplicating the path logic.
+ * Absolute JSON paths inspected by `hasAnyProviderCredential`.
+ * Surfaced so Doctor's `detail` field can name the files without
+ * duplicating the path logic. agent.db is inspected separately.
  */
 export function inspectedCredentialFiles(homeDir: string = os.homedir()): [string, string] {
-  const agentDir = path.join(homeDir, ".pi", "agent");
+  const agentDir = getAgentHome({ homedir: homeDir });
   return [path.join(agentDir, "settings.json"), path.join(agentDir, "auth.json")];
 }

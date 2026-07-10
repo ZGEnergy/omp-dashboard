@@ -21,10 +21,11 @@ import path from "node:path";
 import os from "node:os";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { getManagedDir } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 
 /** Default managed install root. Test seam: caller may override. */
 function defaultManagedDir(): string {
-  return path.join(os.homedir(), ".pi-dashboard");
+  return getManagedDir();
 }
 
 /**

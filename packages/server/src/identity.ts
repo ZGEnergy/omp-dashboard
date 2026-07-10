@@ -12,6 +12,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 const IDENTITY_FILENAME = "identity.key";
 
@@ -28,7 +29,7 @@ export interface ServerIdentity {
 
 /** Default identity file path: `~/.pi/dashboard/identity.key`. */
 export function defaultIdentityPath(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", IDENTITY_FILENAME);
+  return path.join(getDashboardConfigDir(), IDENTITY_FILENAME);
 }
 
 /** Base64url of the SPKI DER public key. */

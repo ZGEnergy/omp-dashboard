@@ -21,6 +21,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isWritableMdTarget } from "./writable-md-target.js";
+import { getAgentHome } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 
 const MD_EXTENSIONS = new Set([".md", ".mdx"]);
 /** Dirs never worth walking for instruction markdown. */
@@ -49,7 +50,7 @@ function scopeRoot(opts: MdCandidateOptions): string | null {
   if (opts.cwd) return path.resolve(opts.cwd);
   const home = opts.home ?? os.homedir();
   if (!home) return null;
-  return path.join(home, ".pi", "agent");
+  return getAgentHome({ homedir: home });
 }
 
 function extOf(p: string): string {

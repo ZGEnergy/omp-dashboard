@@ -21,6 +21,7 @@ import { randomUUID } from "node:crypto";
 import properLockfile from "proper-lockfile";
 import { isDashboardRunning } from "@blackbelt-technology/pi-dashboard-shared/server-identity.js";
 import { isProcessAlive } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 // ──────────────────────────────────────────────────────────
 // Types
@@ -126,7 +127,7 @@ export function canonicalHomedir(): string {
  * Lock file path. This is what `proper-lockfile` locks.
  */
 export function getLockPath(homedir: string = canonicalHomedir()): string {
-  return path.join(homedir, ".pi", "dashboard", "server.lock");
+  return path.join(getDashboardConfigDir({ homedir: homedir }), "server.lock");
 }
 
 /**

@@ -11,6 +11,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { getHostProfile } from "../host-profile.js";
 import { fileURLToPath } from "node:url";
 import type { ToolRegistry } from "./registry.js";
 import {
@@ -470,23 +471,25 @@ function makeNodeScriptToArgv(deps?: StrategyDeps): ToolDefinition["toArgv"] {
  * exact failure mode the immutable-bundle architecture eliminates.
  */
 function piExecutorDef(deps?: StrategyDeps): ToolDefinition {
-  const piPkgAliases = ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"];
-  const cliEntry = path.join("dist", "cli.js");
+  const profile = getHostProfile();
+  const piPkgAliases = profile.codingAgentPackageScopes;
+  const cliName = profile.cliBinaryName;
+  const cliEntry = profile.codingAgentCliEntry;
 
   const winStrategies = [
     overrideStrategy("pi", deps),
     ...piPkgAliases.map((pkg) => bareImportCliStrategy(pkg, cliEntry, deps)),
     ...piPkgAliases.map((pkg) => managedModuleStrategy(pkg, cliEntry, deps)),
     ...piPkgAliases.map((pkg) => npmGlobalStrategy(pkg, cliEntry, deps)),
-    managedBinStrategy("pi", deps),
-    whereStrategy("pi", deps),
+    managedBinStrategy(cliName, deps),
+    whereStrategy(cliName, deps),
   ];
 
   const unixStrategies = [
     overrideStrategy("pi", deps),
     ...piPkgAliases.map((pkg) => bareImportCliStrategy(pkg, cliEntry, deps)),
-    managedBinStrategy("pi", deps),
-    whereStrategy("pi", deps),
+    managedBinStrategy(cliName, deps),
+    whereStrategy(cliName, deps),
   ];
 
   return {
@@ -727,10 +730,13 @@ export function registerDefaultTools(registry: ToolRegistry, deps?: StrategyDeps
   // to IMPORT pi as a library (not spawn it as a process). Distinct from
   // the `pi` executor above.
   registry.register(
+    // OMP packages expose TypeScript sources (`main: ./src/index.ts`) and
+    // do not ship `dist/index.js`. Resolve the package root via package.json
+    // so library import sites can load turned-over entry points themselves.
     moduleDefWithAliases(
       "pi-coding-agent",
-      ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"],
-      path.join("dist", "index.js"),
+      getHostProfile().codingAgentPackageScopes,
+      "package.json",
       deps,
     ),
   );
@@ -741,8 +747,8 @@ export function registerDefaultTools(registry: ToolRegistry, deps?: StrategyDeps
   registry.register(
     moduleDefWithAliases(
       "pi-ai",
-      ["@earendil-works/pi-ai", "@mariozechner/pi-ai"],
-      path.join("dist", "index.js"),
+      getHostProfile().aiPackageScopes,
+      "package.json",
       deps,
     ),
   );

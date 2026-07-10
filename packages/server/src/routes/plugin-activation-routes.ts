@@ -22,10 +22,11 @@ import {
 } from "@blackbelt-technology/dashboard-plugin-runtime/server";
 import type { NetworkGuard } from "./route-deps.js";
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 // Resolved lazily so tests that override $HOME after import still work.
 function configPaths() {
-  const dir = path.join(os.homedir(), ".pi", "dashboard");
+  const dir = getDashboardConfigDir();
   return { dir, file: path.join(dir, "config.json") };
 }
 

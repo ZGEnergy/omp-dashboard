@@ -12,8 +12,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getAgentHome } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 
-const CONFIG_PATH = join(homedir(), ".pi", "agent", "providers.json");
+const CONFIG_PATH = join(getAgentHome(), "providers.json");
 const REDACTED = "***";
 const DEFAULT_TIMEOUT_MS = 8000;
 const MAX_ERROR_BODY_CHARS = 500;

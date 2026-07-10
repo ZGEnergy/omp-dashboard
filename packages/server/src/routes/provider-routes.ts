@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { getAgentHome } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 import type { NetworkGuard } from "./route-deps.js";
 import type { PiGateway } from "../pi-gateway.js";
 import type { BrowserGateway } from "../browser-gateway.js";
@@ -14,7 +15,7 @@ import { isSelfPointing, collectDashboardOrigins } from "../model-proxy/recursio
 import { getTunnelUrl } from "../tunnel.js";
 
 const REDACTED = "***";
-const CONFIG_PATH = join(homedir(), ".pi", "agent", "providers.json");
+const CONFIG_PATH = join(getAgentHome(), "providers.json");
 
 interface ProviderEntry {
   baseUrl: string;

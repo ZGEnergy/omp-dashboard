@@ -9,6 +9,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import type { ViewTarget } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 export interface ViewMessage {
   id: string;
@@ -18,7 +19,7 @@ export interface ViewMessage {
   view: ViewTarget;
 }
 
-const DEFAULT_DIR = path.join(os.homedir(), ".pi", "dashboard", "view-messages");
+const DEFAULT_DIR = path.join(getDashboardConfigDir(), "view-messages");
 
 function fileFor(dir: string, sessionId: string): string {
   // sessionId is server-issued (uuid-ish); still strip dangerous chars.

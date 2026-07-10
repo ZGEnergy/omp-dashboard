@@ -14,6 +14,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { getAgentHome } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 import {
   getDefaultRegistry,
   type ToolRegistry,
@@ -89,7 +90,7 @@ export interface PiModule {
   };
 }
 
-export const AGENT_DIR = path.join(os.homedir(), ".pi", "agent");
+export const AGENT_DIR = getAgentHome();
 
 async function loadPi(registry: ToolRegistry): Promise<PiModule> {
   const { module } = await registry.resolveModule<PiModule>("pi-coding-agent");

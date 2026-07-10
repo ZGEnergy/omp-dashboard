@@ -34,11 +34,12 @@ import {
   killPidWithGroup,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 import { electronAsNodeRequired } from "@blackbelt-technology/pi-dashboard-shared/platform/runner.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 // ── Path conventions ─────────────────────────────────────────────────────────
 
 function defaultSessionsDir(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "sessions");
+  return path.join(getDashboardConfigDir(), "sessions");
 }
 
 function defaultKeeperPath(): string {

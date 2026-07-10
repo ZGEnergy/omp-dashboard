@@ -38,11 +38,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { rootGlobalOr } from "./platform/npm.js";
+import { getAgentHome, getProjectLocalDir } from "./host-profile.js";
 
 // ── Public surface ──────────────────────────────────────────────────
 
 export interface ResolvePiPackageOptions {
-  /** Override `~/.pi/agent`. Default: `path.join(os.homedir(), ".pi", "agent")`. */
+  /** Override `~/.pi/agent`. Default: `getAgentHome()`. */
   agentDir?: string;
   /** Project-scope cwd (enables reading `<cwd>/.pi/settings.json`). */
   cwd?: string;
@@ -77,7 +78,7 @@ export function resolvePiPackage(
   spec: string,
   opts: ResolvePiPackageOptions = {},
 ): ResolvedPiPackage | null {
-  const agentDir = opts.agentDir ?? path.join(os.homedir(), ".pi", "agent");
+  const agentDir = opts.agentDir ?? getAgentHome();
   const scope = opts.scope ?? "any";
   const cwd = opts.cwd;
   const npmRoot = opts.npmRoot ?? rootGlobalOr("");
@@ -119,7 +120,7 @@ export function resolvePiPackageEntry(
  * `packages[]` schema instead of the non-existent `extensions[]`.
  */
 export function listPiPackages(opts: ResolvePiPackageOptions = {}): ResolvedPiPackage[] {
-  const agentDir = opts.agentDir ?? path.join(os.homedir(), ".pi", "agent");
+  const agentDir = opts.agentDir ?? getAgentHome();
   const scope = opts.scope ?? "any";
   const cwd = opts.cwd;
   const npmRoot = opts.npmRoot ?? rootGlobalOr("");
@@ -178,7 +179,7 @@ function* iterateInScope(
     scope === "user"
       ? path.join(ctx.agentDir, "settings.json")
       : ctx.cwd
-      ? path.join(ctx.cwd, ".pi", "settings.json")
+      ? path.join(getProjectLocalDir(ctx.cwd), "settings.json")
       : null;
   if (!settingsPath) return;
 
@@ -261,7 +262,7 @@ function computeInstallPath(
     case "npm": {
       if (scope === "project") {
         if (!ctx.cwd) return null;
-        return path.join(ctx.cwd, ".pi", "npm", "node_modules", parsed.value);
+        return path.join(getProjectLocalDir(ctx.cwd), "npm", "node_modules", parsed.value);
       }
       if (!ctx.npmRoot) return null;
       return path.join(ctx.npmRoot, parsed.value);
@@ -269,7 +270,7 @@ function computeInstallPath(
     case "git": {
       if (scope === "project") {
         if (!ctx.cwd) return null;
-        return path.join(ctx.cwd, ".pi", "git", parsed.value);
+        return path.join(getProjectLocalDir(ctx.cwd), "git", parsed.value);
       }
       return path.join(ctx.agentDir, "git", parsed.value);
     }

@@ -10,6 +10,7 @@ import { killPidWithGroup, isProcessAlive, killProcess } from "@blackbelt-techno
 import path from "node:path";
 import os from "node:os";
 import { isUnsafeTestHomeScan } from "./test-env-guard.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 /**
  * Minimal interface the registry depends on for keeper-mediated writes
@@ -24,7 +25,7 @@ export interface KeeperWriter {
 }
 
 /** Default PID file path */
-const DEFAULT_PID_FILE = path.join(os.homedir(), ".pi", "dashboard", "headless-pids.json");
+const DEFAULT_PID_FILE = path.join(getDashboardConfigDir(), "headless-pids.json");
 
 /** Max age before an orphan is killed (7 days) */
 const MAX_ORPHAN_AGE_MS = 7 * 24 * 60 * 60 * 1000;

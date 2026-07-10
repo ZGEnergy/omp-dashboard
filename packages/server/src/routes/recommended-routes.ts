@@ -36,12 +36,12 @@ import {
 	type PackageMeta,
 } from "../npm-search-proxy.js";
 import type { PackageManagerWrapper } from "../package-manager-wrapper.js";
-import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
 import {
 	runRequirementProbesFor,
 	missingFromReport,
 	type RequirementProbeDeps,
 } from "@blackbelt-technology/dashboard-plugin-runtime/server";
+import { getAgentHome, getProjectLocalDir } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 
 const CACHE_TTL_MS = 60 * 1000;
 
@@ -81,7 +81,7 @@ export function invalidateRecommendedCache(): void {
 
 /** Read pi's project-local `.pi/settings.json` (if any) for the given cwd. */
 function readLocalSources(cwd: string): string[] {
-	const settingsPath = path.join(cwd, ".pi", "settings.json");
+	const settingsPath = path.join(getProjectLocalDir(cwd), "settings.json");
 	try {
 		if (!fs.existsSync(settingsPath)) return [];
 		const raw = fs.readFileSync(settingsPath, "utf-8").trim();
@@ -101,7 +101,7 @@ function readLocalSources(cwd: string): string[] {
 function readActiveSources(cwd?: string): string[] {
 	const sources: string[] = [];
 
-	const globalPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
+	const globalPath = path.join(getAgentHome(), "settings.json");
 	try {
 		if (fs.existsSync(globalPath)) {
 			const raw = fs.readFileSync(globalPath, "utf-8").trim();

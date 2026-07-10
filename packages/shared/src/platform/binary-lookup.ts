@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { MANAGED_BIN, MANAGED_DIR } from "../managed-paths.js";
+import { getHostProfile } from "../host-profile.js";
 import { ensureWindowsSystemPath } from "./ensure-windows-path.js";
 import { buildSafeArgv, execSync, spawnSync } from "./exec.js";
 import { augmentEnvWithGitSource } from "./git-source.js";
@@ -21,10 +22,7 @@ import { augmentEnvWithGitSource } from "./git-source.js";
  * Upstream first, legacy fork second. Mirrors the prior
  * `resolveJitiFromPi` wrapper that lived in two electron files.
  */
-export const MANAGED_PI_PACKAGES = [
-  "@earendil-works/pi-coding-agent",
-  "@mariozechner/pi-coding-agent",
-] as const;
+export const MANAGED_PI_PACKAGES = getHostProfile().codingAgentPackageScopes;
 
 /**
  * jiti provider package names tried inside every anchor's resolution

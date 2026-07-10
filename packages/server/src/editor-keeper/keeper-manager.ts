@@ -33,6 +33,7 @@ import {
   type SpawnDetachedOptions,
   type SpawnDetachedResult,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/detached-spawn.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 import {
   isProcessAlive,
   killPidWithGroup,
@@ -41,7 +42,7 @@ import {
 // ── Path conventions ─────────────────────────────────────────────────────────
 
 function defaultEditorsDir(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "editors");
+  return path.join(getDashboardConfigDir(), "editors");
 }
 
 function defaultKeeperPath(): string {

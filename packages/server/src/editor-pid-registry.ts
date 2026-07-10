@@ -27,14 +27,15 @@ import {
 } from "@blackbelt-technology/pi-dashboard-shared/platform/process.js";
 import type { EditorManager } from "./editor-manager.js";
 import type { EditorKeeperManager } from "./editor-keeper/keeper-manager.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 /** Grace period between SIGTERM and SIGKILL escalation. */
 const SIGKILL_GRACE_MS = 1000;
 
 /** Marker that uniquely identifies a dashboard-spawned code-server cmdline. */
-const DASHBOARD_DATA_DIR_MARKER = path.join(os.homedir(), ".pi", "dashboard", "editors") + path.sep;
+const DASHBOARD_DATA_DIR_MARKER = path.join(getDashboardConfigDir(), "editors") + path.sep;
 
-const EDITORS_DIR = path.join(os.homedir(), ".pi", "dashboard", "editors");
+const EDITORS_DIR = path.join(getDashboardConfigDir(), "editors");
 
 export interface EditorPidRegistry {
   /** Number of in-memory tracked entries (testing aid; always 0 in keeper mode). */

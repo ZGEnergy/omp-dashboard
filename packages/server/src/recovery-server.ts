@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 export interface RecoveryInfo {
   /** Port to bind. */
@@ -254,7 +255,7 @@ export async function startRecoveryServer(info: RecoveryInfo): Promise<number> {
   // Persist a snapshot of the failure under ~/.pi/dashboard/last-recovery.json
   // so tooling/diagnostics can see why the server is in recovery mode.
   try {
-    const dir = path.join(os.homedir(), ".pi", "dashboard");
+    const dir = getDashboardConfigDir();
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "last-recovery.json"),

@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createRequire } from "node:module";
+import { getAgentHome } from "./host-profile.js";
 
 /**
  * Check that a candidate path is a valid, stable extension directory.
@@ -133,7 +134,7 @@ export function registerBridgeExtension(
     ?? process.env.HOME
     ?? process.env.USERPROFILE
     ?? os.homedir();
-  const settingsPath = path.join(home, ".pi", "agent", "settings.json");
+  const settingsPath = path.join(getAgentHome({ homedir: home }), "settings.json");
   const settingsDir = path.dirname(settingsPath);
   fs.mkdirSync(settingsDir, { recursive: true });
 

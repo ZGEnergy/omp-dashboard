@@ -12,16 +12,8 @@
  *
  * See: openspec/changes/add-editor-keeper-sidecar
  */
-import { Socket as NetSocket, createServer as createNetServer } from "node:net";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import type { EditorInstanceStatus, EditorDetectionResult } from "@blackbelt-technology/pi-dashboard-shared/editor-types.js";
-import type { EditorConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { detectCodeServerBinary, resetDetectionCache } from "./editor-detection.js";
-import { buildSpawnEnv } from "./process-manager.js";
-import type { EditorPidRegistry } from "./editor-pid-registry.js";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 import {
   createEditorKeeperManager,
   editorIdFromCwd,
@@ -209,7 +201,7 @@ export function createEditorManager(options: EditorManagerOptions): EditorManage
   }
 
   function setTheme(cwd: string, theme: "dark" | "light"): void {
-    const dataDir = path.join(os.homedir(), ".pi", "dashboard", "editors", folderHash(cwd));
+    const dataDir = path.join(getDashboardConfigDir(), "editors", folderHash(cwd));
     writeVscodeUserSettings(dataDir, theme);
   }
 
@@ -322,7 +314,7 @@ export function createEditorManager(options: EditorManagerOptions): EditorManage
     }
 
     const editorId = editorIdFromCwd(cwd);
-    const dataDir = path.join(os.homedir(), ".pi", "dashboard", "editors", editorId);
+    const dataDir = path.join(getDashboardConfigDir(), "editors", editorId);
 
     // 2. Reattach via keeper probe.
     const probed = await keeperManager.probe(editorId).catch(() => ({ alive: false } as const));

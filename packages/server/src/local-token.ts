@@ -13,12 +13,13 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getDashboardConfigDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 
 export const LOCAL_TOKEN_HEADER = "x-pi-local-token";
 const TOKEN_BYTES = 32;
 
 export function defaultLocalTokenDir(): string {
-  return path.join(os.homedir(), ".pi", "dashboard", "local");
+  return path.join(getDashboardConfigDir(), "local");
 }
 
 /**

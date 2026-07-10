@@ -24,6 +24,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import type { ChildProcess, SpawnOptions } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
+import { getProjectLocalDir } from "@blackbelt-technology/pi-dashboard-shared/host-profile.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -54,7 +55,7 @@ export interface WorktreeInitHook {
  * unrecognized shape (fail-open).
  */
 export function readInitHook(repoRoot: string): WorktreeInitHook | null {
-  const settingsPath = path.join(repoRoot, ".pi", "settings.json");
+  const settingsPath = path.join(getProjectLocalDir(repoRoot), "settings.json");
   let raw: string;
   try {
     raw = fs.readFileSync(settingsPath, "utf8");
@@ -333,7 +334,7 @@ async function runAgent(
   }
 
   // Combined output log for failure surfacing.
-  const logPath = path.join(cwd, ".pi", "worktree-init.log");
+  const logPath = path.join(getProjectLocalDir(cwd), "worktree-init.log");
   try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); } catch { /* noop */ }
   let logFd: number | undefined;
   try { logFd = fs.openSync(logPath, "w"); } catch { /* fall back to ignore */ }
