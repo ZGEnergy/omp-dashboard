@@ -89,6 +89,10 @@ export function createPushDispatcher(opts: PushDispatcherOptions): PushDispatche
           const key = `${sessionId}::${token.id}`;
           const last = lastSent.get(key);
           if (last !== undefined && current - last < coalesceWindowMs) continue; // coalesced
+          // Stamp on ATTEMPT (before the async `deliver` resolves), not on
+          // success. A failed send therefore still suppresses the next trigger
+          // for the whole coalesceWindowMs. Intentional: v1 has no retry, so a
+          // missing post-failure push is expected — not a bug.
           lastSent.set(key, current);
           targets.push(token);
         }
