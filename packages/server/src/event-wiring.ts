@@ -554,6 +554,9 @@ export function wireEvents(deps: EventWiringDeps): void {
           // Fan the same notable event out to registered push devices.
           // Fire-and-forget (void, never awaited) so transport latency cannot
           // block the WS fan-out. Same gating as unread (no replay, not viewed).
+          // ASYMMETRY (intentional): the unread-stripe broadcast above fires only
+          // on the false→true edge, but push fires on EVERY unviewed trigger and
+          // relies entirely on the dispatcher's coalescing window for dedup.
           // See change: add-server-push-notifications.
           pushDispatcher?.fanout(sessionId, msg.event);
         }
