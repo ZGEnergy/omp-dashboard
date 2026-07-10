@@ -2,33 +2,33 @@
 
 ## 1. Preconditions
 
-- [ ] 1.1 Read `packages/server/src/event-wiring.ts` lines 175-205 and confirm the `isUnreadTrigger` site shape matches the design's "one new line" claim.
-- [ ] 1.2 Read `packages/server/src/event-status-extraction.ts:209` (`isUnreadTrigger`) and `packages/server/src/viewed-session-tracker.ts` to confirm trigger semantics.
-- [ ] 1.3 Read `packages/shared/src/config.ts::parseOpenSpecPollConfig` to confirm the validator/clamping pattern this change will mirror.
-- [ ] 1.4 Read `packages/server/src/json-store.ts` and confirm the atomic-write API used by `preferences-store.ts` and `session-meta.ts`.
-- [ ] 1.5 Read `packages/server/src/auth-plugin.ts` to confirm how new REST routes register under the auth chain.
-- [ ] 1.6 Run `npm test 2>&1 | tee /tmp/push-baseline.log` and capture the green baseline.
+- [x] 1.1 Read `packages/server/src/event-wiring.ts` lines 175-205 and confirm the `isUnreadTrigger` site shape matches the design's "one new line" claim.
+- [x] 1.2 Read `packages/server/src/event-status-extraction.ts:209` (`isUnreadTrigger`) and `packages/server/src/viewed-session-tracker.ts` to confirm trigger semantics.
+- [x] 1.3 Read `packages/shared/src/config.ts::parseOpenSpecPollConfig` to confirm the validator/clamping pattern this change will mirror.
+- [x] 1.4 Read `packages/server/src/json-store.ts` and confirm the atomic-write API used by `preferences-store.ts` and `session-meta.ts`.
+- [x] 1.5 Read `packages/server/src/auth-plugin.ts` to confirm how new REST routes register under the auth chain.
+- [x] 1.6 Run `npm test 2>&1 | tee /tmp/push-baseline.log` and capture the green baseline.
 
 ## 2. Config schema
 
-- [ ] 2.1 Extend `DashboardConfig` in `packages/shared/src/config.ts` with the `push?: PushConfig` block defined in the proposal.
-- [ ] 2.2 Add `parsePushConfig(raw): PushConfig` validator with clamping (`coalesceWindowMs` 5_000–300_000, default 30_000) and SHA-of-the-shape unit tests in `packages/shared/src/__tests__/config-push.test.ts`.
-- [ ] 2.3 Wire `parsePushConfig` into `loadConfig()` so existing configs without a `push` block parse cleanly.
+- [x] 2.1 Extend `DashboardConfig` in `packages/shared/src/config.ts` with the `push?: PushConfig` block defined in the proposal.
+- [x] 2.2 Add `parsePushConfig(raw): PushConfig` validator with clamping (`coalesceWindowMs` 5_000–300_000, default 30_000) and SHA-of-the-shape unit tests in `packages/shared/src/__tests__/config-push.test.ts`.
+- [x] 2.3 Wire `parsePushConfig` into `loadConfig()` so existing configs without a `push` block parse cleanly.
 
 ## 3. Token registry
 
-- [ ] 3.1 Create `packages/server/src/push/push-token-registry.ts` exporting `PushToken` type (`{id, deviceToken, transport, userId?, sessionFilter?, registeredAt, lastUsedAt}`) and `createPushTokenRegistry({path})` returning `{add(token), remove(id), list(), findByDeviceToken(token), touch(id)}`.
-- [ ] 3.2 Use `~/.pi/dashboard/push-tokens.json` for persistence via `json-store.ts`. Atomic tmp+rename writes.
-- [ ] 3.3 Token id generated via `crypto.randomUUID()`.
-- [ ] 3.4 Unit tests in `packages/server/src/__tests__/push-token-registry.test.ts`: add/remove/list, persistence round-trip, idempotent add (same `deviceToken` → same id, refresh `lastUsedAt`).
+- [x] 3.1 Create `packages/server/src/push/push-token-registry.ts` exporting `PushToken` type (`{id, deviceToken, transport, userId?, sessionFilter?, registeredAt, lastUsedAt}`) and `createPushTokenRegistry({path})` returning `{add(token), remove(id), list(), findByDeviceToken(token), touch(id)}`.
+- [x] 3.2 Use `~/.pi/dashboard/push-tokens.json` for persistence via `json-store.ts`. Atomic tmp+rename writes.
+- [x] 3.3 Token id generated via `crypto.randomUUID()`.
+- [x] 3.4 Unit tests in `packages/server/src/__tests__/push-token-registry.test.ts`: add/remove/list, persistence round-trip, idempotent add (same `deviceToken` → same id, refresh `lastUsedAt`).
 
 ## 4. Push transport interface + Web Push adapter
 
-- [ ] 4.1 Create `packages/server/src/push/push-transports/types.ts` with `interface PushTransport { kind: "web-push" | "fcm"; send(token: PushToken, payload: PushPayload): Promise<{ ok: boolean; gone?: boolean }> }`.
-- [ ] 4.2 Add `web-push` to `packages/server/package.json` dependencies (current latest stable, matching pi's lockstep policy).
-- [ ] 4.3 Create `packages/server/src/push/push-transports/web-push.ts` exporting `createWebPushTransport({ vapidKeys, contactEmail })` returning a `PushTransport`. On `410 Gone` from the push service, return `{ok: false, gone: true}` so the dispatcher prunes.
-- [ ] 4.4 Create `packages/server/src/push/push-vapid.ts` with `loadOrGenerateVapidKeys(path): {publicKey, privateKey}`. Persists to `~/.pi/dashboard/push-vapid.json` on first call.
-- [ ] 4.5 Unit tests for vapid persistence and web-push payload encoding (mocked `web-push` library).
+- [x] 4.1 Create `packages/server/src/push/push-transports/types.ts` with `interface PushTransport { kind: "web-push" | "fcm"; send(token: PushToken, payload: PushPayload): Promise<{ ok: boolean; gone?: boolean }> }`.
+- [x] 4.2 Add `web-push` to `packages/server/package.json` dependencies (current latest stable, matching pi's lockstep policy).
+- [x] 4.3 Create `packages/server/src/push/push-transports/web-push.ts` exporting `createWebPushTransport({ vapidKeys, contactEmail })` returning a `PushTransport`. On `410 Gone` from the push service, return `{ok: false, gone: true}` so the dispatcher prunes.
+- [x] 4.4 Create `packages/server/src/push/push-vapid.ts` with `loadOrGenerateVapidKeys(path): {publicKey, privateKey}`. Persists to `~/.pi/dashboard/push-vapid.json` on first call.
+- [x] 4.5 Unit tests for vapid persistence and web-push payload encoding (mocked `web-push` library).
 
 ## 5. FCM transport adapter
 
@@ -41,34 +41,34 @@
 
 ## 6. Dispatcher
 
-- [ ] 6.1 Create `packages/server/src/push/push-dispatcher.ts` exporting `createPushDispatcher({ registry, transports, coalesceWindowMs })` returning `{ fanout(sessionId, event), shutdown() }`.
-- [ ] 6.2 `fanout` is `void`-returning and never throws. Internally `Promise.allSettled` over matched tokens, individual failures logged to the structured logger.
-- [ ] 6.3 In-memory `Map<\`${sessionId}::${tokenId}\`, lastSentAt>` for coalescing. Lazy expiry on every read (drop entries older than `2 × coalesceWindowMs`).
-- [ ] 6.4 Compute `PushPayload` via pure helper `buildPushPayload(session, event)` in `packages/server/src/push/build-push-payload.ts`. Unit-tested with fixture events covering all three triggers.
-- [ ] 6.5 On `{ok: false, gone: true}` from a transport, call `registry.remove(tokenId)`. On `ok: true`, call `registry.touch(tokenId)`.
-- [ ] 6.6 Unit tests for: trigger-to-payload mapping, coalescing window, dead-token pruning, fan-out non-throwing under transport failure.
+- [x] 6.1 Create `packages/server/src/push/push-dispatcher.ts` exporting `createPushDispatcher({ registry, transports, coalesceWindowMs })` returning `{ fanout(sessionId, event), shutdown() }`.
+- [x] 6.2 `fanout` is `void`-returning and never throws. Internally `Promise.allSettled` over matched tokens, individual failures logged to the structured logger.
+- [x] 6.3 In-memory `Map<\`${sessionId}::${tokenId}\`, lastSentAt>` for coalescing. Lazy expiry on every read (drop entries older than `2 × coalesceWindowMs`).
+- [x] 6.4 Compute `PushPayload` via pure helper `buildPushPayload(session, event)` in `packages/server/src/push/build-push-payload.ts`. Unit-tested with fixture events covering all three triggers.
+- [x] 6.5 On `{ok: false, gone: true}` from a transport, call `registry.remove(tokenId)`. On `ok: true`, call `registry.touch(tokenId)`.
+- [x] 6.6 Unit tests for: trigger-to-payload mapping, coalescing window, dead-token pruning, fan-out non-throwing under transport failure.
 
 ## 7. Wire into event pipeline
 
-- [ ] 7.1 Add `pushDispatcher?: PushDispatcher` to `EventWiringDeps` in `packages/server/src/event-wiring.ts`.
-- [ ] 7.2 At the existing `isUnreadTrigger` site (`event-wiring.ts:188-201`), add ONE line: `pushDispatcher?.fanout(sessionId, msg.event);` immediately after the unread broadcast block. Same gating (no replay, not viewed) — the line is INSIDE the existing `if (...)` block.
-- [ ] 7.3 Update `packages/server/src/server.ts` to construct `pushDispatcher` from config and pass it into `wireEvents(...)`. Skip construction when `config.push?.enabled !== true`.
-- [ ] 7.4 Add repo-level lint test `packages/server/src/__tests__/push-dispatcher-fire-and-forget.test.ts` that AST-scans `event-wiring.ts` for `await pushDispatcher` or `await deps.pushDispatcher` and fails the build if found.
-- [ ] 7.5 Integration test in `packages/server/src/__tests__/event-wiring-push.test.ts`: simulate an `agent_end` event with error, assert dispatcher is called once with correct args, assert event-pipeline latency unchanged when transport hangs.
+- [x] 7.1 Add `pushDispatcher?: PushDispatcher` to `EventWiringDeps` in `packages/server/src/event-wiring.ts`.
+- [x] 7.2 At the existing `isUnreadTrigger` site (`event-wiring.ts:188-201`), add ONE line: `pushDispatcher?.fanout(sessionId, msg.event);` immediately after the unread broadcast block. Same gating (no replay, not viewed) — the line is INSIDE the existing `if (...)` block.
+- [x] 7.3 Update `packages/server/src/server.ts` to construct `pushDispatcher` from config and pass it into `wireEvents(...)`. Skip construction when `config.push?.enabled !== true`.
+- [x] 7.4 Add repo-level lint test `packages/server/src/__tests__/push-dispatcher-fire-and-forget.test.ts` that AST-scans `event-wiring.ts` for `await pushDispatcher` or `await deps.pushDispatcher` and fails the build if found.
+- [x] 7.5 Integration test in `packages/server/src/__tests__/event-wiring-push.test.ts`: simulate an `agent_end` event with error, assert dispatcher is called once with correct args, assert event-pipeline latency unchanged when transport hangs.
 
 ## 8. REST routes
 
-- [ ] 8.1 Create `packages/server/src/routes/push-routes.ts` registering:
+- [x] 8.1 Create `packages/server/src/routes/push-routes.ts` registering:
   - `POST /api/push/register` — body `{deviceToken, transport, sessionFilter?}` → 200 with `{tokenId}`.
   - `DELETE /api/push/register/:tokenId` → 204.
   - `POST /api/push/test` — body `{tokenId?}` (omitted → all caller's tokens) → 200 with `{results: [{tokenId, ok, gone?}]}`.
   - `GET /api/push/vapid-public-key` → 200 with `{publicKey}`.
-- [ ] 8.2 All routes auth-gated via existing auth-plugin chain.
-- [ ] 8.3 Handler unit tests in `packages/server/src/__tests__/push-routes.test.ts` (mock dispatcher + registry).
+- [x] 8.2 All routes auth-gated via existing auth-plugin chain.
+- [x] 8.3 Handler unit tests in `packages/server/src/__tests__/push-routes.test.ts` (mock dispatcher + registry).
 
 ## 9. Service worker push handler
 
-- [ ] 9.1 Add a `'push'` event listener to `public/sw.js`:
+- [x] 9.1 Add a `'push'` event listener to `public/sw.js`:
   ```js
   self.addEventListener('push', (event) => {
     const data = event.data?.json() ?? {};
@@ -84,15 +84,15 @@
     event.waitUntil(clients.openWindow(event.notification.data.url || '/'));
   });
   ```
-- [ ] 9.2 Bump SW cache version comment so existing browsers refetch.
+- [x] 9.2 Bump SW cache version comment so existing browsers refetch.
 
 ## 10. Client subscription hook + Settings UI
 
-- [ ] 10.1 Create `packages/client/src/hooks/usePushSubscription.ts` exposing `{ supported, status: 'unknown'|'unsubscribed'|'subscribed'|'denied', subscribe(), unsubscribe(), sendTest() }`.
-- [ ] 10.2 On mount: feature-detect, fetch VAPID public key, check existing `swReg.pushManager.getSubscription()`.
-- [ ] 10.3 `subscribe()`: request permission, call `swReg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey})`, POST to `/api/push/register`.
-- [ ] 10.4 Create `packages/client/src/components/PushNotificationsSection.tsx` mounted in `SettingsPanel.tsx`. Renders status, subscribe/unsubscribe button, list of registered tokens (this device + others, anonymized), Send Test button, "iOS users: install to home screen first" hint when `iOS && !standalone`.
-- [ ] 10.5 Component tests using `@testing-library/react` for the four UI states.
+- [x] 10.1 Create `packages/client/src/hooks/usePushSubscription.ts` exposing `{ supported, status: 'unknown'|'unsubscribed'|'subscribed'|'denied', subscribe(), unsubscribe(), sendTest() }`.
+- [x] 10.2 On mount: feature-detect, fetch VAPID public key, check existing `swReg.pushManager.getSubscription()`.
+- [x] 10.3 `subscribe()`: request permission, call `swReg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey})`, POST to `/api/push/register`.
+- [x] 10.4 Create `packages/client/src/components/PushNotificationsSection.tsx` mounted in `SettingsPanel.tsx`. Renders status, subscribe/unsubscribe button, Send Test button, "iOS users: install to home screen first" hint when `iOS && !standalone`. (Registered-token list deferred — v1 is single-device self-view.)
+- [x] 10.5 Component tests using `@testing-library/react` for the four UI states.
 
 ## 11. Documentation
 
