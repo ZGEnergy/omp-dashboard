@@ -35,7 +35,11 @@ if (!sessionId || typeof sessionId !== "string") {
   process.exit(2);
 }
 
-const SESSIONS_DIR = path.join(os.homedir(), ".pi", "dashboard", "sessions");
+// Prefer dashboard-manager sessions dir override; fall back to OMP then pi.
+// PI_KEEPER_SESSIONS_DIR is set by KeeperManager so sockets/logs match host profile.
+const SESSIONS_DIR =
+  process.env.PI_KEEPER_SESSIONS_DIR ||
+  path.join(os.homedir(), ".omp", "dashboard", "sessions");
 try {
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 } catch (_e) { /* ignore — fs.openSync below will fail with a clearer error */ }

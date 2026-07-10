@@ -8,7 +8,7 @@
  *
  * See change: consolidate-tool-resolution.
  */
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { getHostProfile } from "../host-profile.js";
@@ -450,6 +450,78 @@ function makeNodeScriptToArgv(deps?: StrategyDeps): ToolDefinition["toArgv"] {
   };
 }
 
+/** Read the shebang interpreter basename from a file, if present. */
+function readShebangInterpreter(filePath: string): string | null {
+  try {
+    if (!existsSync(filePath)) return null;
+    const head = readFileSync(filePath, { encoding: "utf8" }).slice(0, 120);
+    if (!head.startsWith("#!")) return null;
+    const line = head.split(/\r?\n/, 1)[0] ?? "";
+    // e.g. "#!/usr/bin/env bun" or "#!/usr/bin/bun"
+    const parts = line.slice(2).trim().split(/\s+/);
+    if (parts[0]?.endsWith("env") && parts[1]) return path.basename(parts[1]);
+    if (parts[0]) return path.basename(parts[0]);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Locate a usable `bun` binary without going through the tool registry. */
+function locateBunBinary(): string | null {
+  const pathEnv = process.env.PATH ?? "";
+  for (const dir of pathEnv.split(path.delimiter)) {
+    if (!dir) continue;
+    for (const name of ["bun", "bun.exe"]) {
+      const cand = path.join(dir, name);
+      if (existsSync(cand)) return cand;
+    }
+  }
+  for (const cand of [
+    process.env.BUN_INSTALL ? path.join(process.env.BUN_INSTALL, "bin", "bun") : "",
+    path.join(process.env.HOME ?? "", ".bun", "bin", "bun"),
+    "/usr/local/bin/bun",
+  ]) {
+    if (cand && existsSync(cand)) return cand;
+  }
+  return null;
+}
+
+/**
+ * Coding-agent executor argv.
+ *
+ * Oh My Pi ships `dist/cli.js` with a `#!/usr/bin/env bun` shebang. The generic
+ * node-script toArgv would regime PATH/`omp` hits into `[node, dist/cli.js]`,
+ * which SyntaxError-dies on the bun-only bundle. Prefer:
+ *   1. bare resolved path when not a `.js` entry (e.g. `…/bin/omp` shebang)
+ *   2. `[bun, dist/cli.js]` when strategy lands on the package script
+ *   3. node-script wrapping only for true node shebangs / non-bun scripts
+ */
+function makeCodingAgentToArgv(deps?: StrategyDeps): ToolDefinition["toArgv"] {
+  const nodeToArgv = makeNodeScriptToArgv(deps);
+  const realpath = deps?.realpath ?? realpathSync;
+  return (resolvedPath, ctx) => {
+    let target = resolvedPath;
+    try {
+      target = realpath(resolvedPath);
+    } catch {
+      /* keep resolvedPath */
+    }
+    const shebang =
+      readShebangInterpreter(target) ?? readShebangInterpreter(resolvedPath);
+    if (shebang === "bun") {
+      // PATH hit on the `omp` shim/binary — run it and let the shebang pick bun.
+      if (!/\.js$/i.test(resolvedPath)) {
+        return [resolvedPath];
+      }
+      // Landed on dist/cli.js — wrap with an explicit bun interpreter.
+      const bun = locateBunBinary();
+      return bun ? [bun, target] : ["bun", target];
+    }
+    return nodeToArgv(resolvedPath, ctx);
+  };
+}
+
 /**
  * Executor definition for `pi` — ONE tool, OS dispatch inside.
  *
@@ -497,7 +569,7 @@ function piExecutorDef(deps?: StrategyDeps): ToolDefinition {
     kind: "executor",
     strategies: unixStrategies,
     platformStrategies: { win32: winStrategies },
-    toArgv: makeNodeScriptToArgv(deps),
+    toArgv: makeCodingAgentToArgv(deps),
     classify,
   };
 }

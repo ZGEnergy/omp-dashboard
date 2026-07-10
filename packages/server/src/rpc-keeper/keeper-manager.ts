@@ -216,7 +216,13 @@ export function createKeeperManager(opts: KeeperManagerOptions = {}): KeeperMana
     // argv for the pi binary; keeper spawns pi via that path instead of bare
     // PATH lookup. Both env vars are stripped by the keeper before spawning
     // pi. See change: fix-rpc-keeper-pi-resolution.
-    let keeperEnv: NodeJS.ProcessEnv = env;
+    // Sessions dir path is shared with keeper.cjs (which is CJS-pure and
+    // cannot import host-profile). Always stamp PI_KEEPER_SESSIONS_DIR so
+    // sock/log layout matches defaultSessionsDir() (OMP or override).
+    let keeperEnv: NodeJS.ProcessEnv = {
+      ...env,
+      PI_KEEPER_SESSIONS_DIR: sessionsDir,
+    };
     if (piArgs && piArgs.length > 0) {
       keeperEnv = { ...keeperEnv, PI_KEEPER_PI_ARGS: JSON.stringify(piArgs) };
     }
