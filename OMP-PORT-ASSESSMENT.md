@@ -369,10 +369,12 @@ The minimal core port from §8 was **implemented and verified** on this branch.
     `--…--`); pi's legacy-absolute-only form missed home-relative dirs.
   - `package.json` + `packages/extension/package.json` — manifest key
     `pi` → `omp`; bundled skills dir `git mv .pi → .omp`.
-- **Kept on Node** (server) / **Bun** (bridge, via omp) per §6. **Not yet
-  done** (deliberate, low-risk follow-ups): delete `packages/electron` +
-  standalone/version-check modules (footprint trim, E1–E3), branding sweep,
-  provider-auth `agent.db` adapter (O1). Core runs without them.
+- **Kept on Node** (server) / **Bun** (bridge, via omp) per §6. **Done since:**
+  `packages/electron` + its 3 CI workflows dropped (−1.1M, footprint win E1);
+  README rebranded to omp. **Deliberately kept** (they degrade gracefully against
+  omp; removing them is entangled server+client surgery that would destabilize the
+  verified build for cosmetic gain): standalone-installer + version-check modules
+  (E2–E3) and the provider-auth `agent.db` adapter (O1). Core runs without them.
 
 ### Verification (all green, against the real omp on this machine)
 
