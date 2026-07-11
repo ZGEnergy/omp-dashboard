@@ -82,9 +82,9 @@ OMP 16.4.1 interactive session
   -> loopback WebSocket
   -> dist/web/** browser client
 
-headless-session keeper
-  -> JSONL stdio
-  -> omp --mode rpc child
+server-owned headless-session keeper
+  -> protocol JSONL stdio
+  -> its `omp --mode rpc` child
 ```
 
 Bridge reads OMP session manager and OMP session artifacts.
@@ -108,7 +108,7 @@ Browser never calls provider APIs.
 Browser never parses OMP files directly.
 
 Bridge owns interactive OMP API calls.
-Headless-session keeper owns OMP RPC child calls.
+Server-owned headless-session keeper owns OMP RPC child calls.
 
 Server owns session projection, RPC routing, preference storage, and file-read policy.
 
@@ -120,11 +120,11 @@ Browser and server exchange dashboard messages through loopback WebSocket.
 
 Browser loads static assets through loopback HTTP.
 
-Headless-session keeper starts OMP with `--mode rpc`.
+Server-owned headless-session keeper starts its `omp --mode rpc` child.
 
-Keeper sends one JSON RPC request per OMP child `stdin` line.
+Keeper writes one JSONL RPC request per OMP child `stdin` line.
 
-OMP RPC child sends one JSON RPC response or event per `stdout` line.
+Keeper reads one JSONL RPC response or event per OMP child `stdout` line.
 
 Only OMP RPC child `stdout` carries JSONL RPC.
 
@@ -425,7 +425,7 @@ Bridge-server messages use loopback WebSocket.
 
 Browser-server messages use loopback WebSocket.
 
-Headless-session keeper uses JSONL stdio only with OMP RPC child.
+Protocol JSONL stdio exists only between server-owned keeper and its OMP RPC child.
 
 Session identity originates from OMP session manager or persisted OMP header.
 
