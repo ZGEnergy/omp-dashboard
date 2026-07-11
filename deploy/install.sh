@@ -90,9 +90,10 @@ zrok_enable() {
 
 zrok_reserve() {
   local name email
+  log "Your dashboard gets a public URL like https://joebob.share.zrok.io — pick the name part."
   while :; do
-    read -rp "Choose a share name (a-z0-9-, 3-31 chars): " name
-    validate_share_name "$name" && break || warn "Invalid name."
+    read -rp "Public URL name (lowercase letters/numbers/hyphens, e.g. joebob): " name
+    validate_share_name "$name" && break || warn "Use lowercase letters, numbers, hyphens (3-31 chars, must start with a letter or number)."
   done
   while :; do
     read -rp "Your @zerogcapital.com email (the ONLY account allowed in): " email
