@@ -112,6 +112,58 @@ zrok_reserve() {
   fi
 }
 
+DASH_HOME="$HOME/.omp-dash-home"
+UNIT_DIR="$HOME/.config/systemd/user"
+
+write_config() {
+  mkdir -p "$DASH_HOME/.pi/dashboard"
+  sed 's#__BIND_HOST__#0.0.0.0#g' "$DEPLOY_DIR/config.template.json" \
+    > "$DASH_HOME/.pi/dashboard/config.json"
+  log "Wrote $DASH_HOME/.pi/dashboard/config.json"
+}
+
+install_services() {
+  mkdir -p "$UNIT_DIR"
+  sed -e "s#__PREFIX__#$PREFIX#g" -e "s#__OMP_DIR__#$OMP_DIR#g" -e "s#__NODE_DIR__#$NODE_DIR#g" \
+    "$DEPLOY_DIR/omp-dashboard.service.template" > "$UNIT_DIR/omp-dashboard.service"
+  sed -e "s#__LOCAL_BIN__#$LOCAL_BIN#g" -e "s#__SHARE_NAME__#$SHARE_NAME#g" \
+    "$DEPLOY_DIR/omp-dashboard-zrok.service.template" > "$UNIT_DIR/omp-dashboard-zrok.service"
+  systemctl --user daemon-reload
+  systemctl --user enable --now omp-dashboard.service omp-dashboard-zrok.service
+  loginctl enable-linger "$USER" || warn "enable-linger failed; services may not start before login."
+  log "Services enabled (start on boot via linger)."
+}
+
+write_launcher() {
+  mkdir -p "$LOCAL_BIN"
+  cat > "$LOCAL_BIN/omp-dashboard" <<EOF
+#!/usr/bin/env bash
+# Foreground run of the omp-dashboard fork (for debugging). Services run it persistently.
+exec env HOME="$DASH_HOME" PATH="$OMP_DIR:$NODE_DIR:\$PATH" \\
+  PI_CODING_AGENT_DIR="$HOME/.omp/agent" \\
+  PI_CODING_AGENT_SESSION_DIR="$HOME/.omp/agent/sessions" \\
+  PI_DASHBOARD_NO_MDNS=1 \\
+  "$PREFIX/node_modules/.bin/tsx" "$PREFIX/packages/server/src/cli.ts" \\
+  --host 0.0.0.0 --port 8088 --pi-port 9098 "\$@"
+EOF
+  chmod +x "$LOCAL_BIN/omp-dashboard"
+  log "Wrote launcher $LOCAL_BIN/omp-dashboard"
+}
+
+report() {
+  cat <<EOF
+
+$(log "Install complete.")
+  Local URL : http://localhost:8088
+  Public URL: $SHARE_URL   (Google OAuth, only $SHARE_EMAIL)
+  Logs      : journalctl --user -u omp-dashboard -f
+              journalctl --user -u omp-dashboard-zrok -f
+  Update    : re-run this installer (or: cd $PREFIX && git pull && npm run build && systemctl --user restart omp-dashboard)
+  Uninstall : $PREFIX/deploy/uninstall.sh
+  NOTE: $LOCAL_BIN must be on your PATH to use the 'omp-dashboard' launcher.
+EOF
+}
+
 main() {
   if [[ "${1:-}" == "--check-only" ]]; then check_prereqs; log "check-only: OK"; exit 0; fi
   check_prereqs
@@ -119,7 +171,10 @@ main() {
   ensure_zrok
   zrok_enable
   zrok_reserve
-  log "TODO: config + services in Task 5"
+  write_config
+  install_services
+  write_launcher
+  report
 }
 
 main "$@"
