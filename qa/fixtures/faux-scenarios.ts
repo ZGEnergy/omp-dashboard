@@ -218,6 +218,17 @@ function buildLongTranscript(turns = 120): FauxResponseStep[] {
  */
 export const SUPERSEDE_HEAL_MARKER = "supersede-heal follow-up landed";
 
+/**
+ * Completion marker for the `oversized-turn` scenario. The scenario drives a
+ * bash tool call that emits a large multi-KB output — the kind of oversized,
+ * forwarded event that used to OOM-crash the server inside a single
+ * `JSON.stringify` on the broadcast path. The liveness e2e
+ * (`tests/e2e/oversized-event-liveness.spec.ts`) waits for this text to know the
+ * heavy turn settled, then proves the server stayed up and responsive.
+ * See change: bound-subagent-event-serialization.
+ */
+export const OVERSIZED_TURN_MARKER = "oversized-turn complete";
+
 export const SCENARIOS: Record<string, Scenario> = {
   // ── Server-side round-trip scenarios ────────────────────────────────────
   "plain-text": {
@@ -387,6 +398,28 @@ export const SCENARIOS: Record<string, Scenario> = {
       fauxAssistantMessage([fauxText("large output done")]),
     ],
     expect: { toolName: "bash" },
+  },
+  // Oversized-event liveness driver (change: bound-subagent-event-serialization).
+  // A bash call emits ~8000 numbered lines (~90 KB raw) — a genuinely large
+  // tool-result event that flows through the real ingest → persist → broadcast
+  // (`JSON.stringify`) path. Before the per-event size ceiling, a payload like a
+  // subagent's full timeline crashed the whole server here with a V8 OOM. The
+  // e2e drives this then asserts /api/health stays 200 and a follow-up turn
+  // round-trips (server alive + responsive). Two-step so the agent TERMINATES
+  // after the tool result.
+  "oversized-turn": {
+    script: [
+      fauxAssistantMessage(
+        [
+          fauxToolCall("bash", {
+            command: "seq 1 8000 | sed 's/^/OVERSIZED-/'",
+          }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage([fauxText(OVERSIZED_TURN_MARKER)]),
+    ],
+    expect: { text: OVERSIZED_TURN_MARKER },
   },
   // Fix B end-to-end: bash writes a real PNG + echoes its absolute path; the
   // bridge inlines it as a type:"image" block. Two-step so the agent TERMINATES

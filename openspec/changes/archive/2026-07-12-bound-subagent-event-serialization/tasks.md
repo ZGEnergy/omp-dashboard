@@ -46,9 +46,12 @@
   green, including existing in-memory-event-buffer tests (count trim, chat-head,
   image preservation).
 - [x] 5.2 `npm run quality:changed` → clean.
-- [ ] 5.3 Manual: run a subagent-heavy turn against a dev server; confirm
-  `/api/health` stays up and heap does not spike toward the cap
-  (`curl -s localhost:8000/api/health | jq .server.heapUsed`).
+- [x] 5.3 Automated (was manual): `tests/e2e/oversized-event-liveness.spec.ts`
+  drives `[[faux:oversized-turn]]` (bash emits ~90 KB → oversized event through
+  the real ingest→persist→broadcast `JSON.stringify` path) in the Docker harness,
+  asserts `/api/health` stays 200 (no OOM crash) and a follow-up turn round-trips
+  in the same session (server alive + responsive). Faux scenario +
+  `OVERSIZED_TURN_MARKER` added to `qa/fixtures/faux-scenarios.ts`.
 
 ## 6. Docs / index
 
