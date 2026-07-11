@@ -67,7 +67,29 @@ export function byTestId(page: Page, key: keyof typeof TESTIDS): Locator {
 }
 
 /** Navigate to the dashboard root and wait for the shell to mount. */
+// Track pages that already have the first-launch auto-dismiss handler wired, so
+// repeated gotoDashboard calls don't stack duplicate handlers.
+const firstLaunchHandled = new WeakSet<Page>();
+
+/**
+ * On a fresh/wiped container the first-launch display-preset modal renders
+ * ASYNCHRONOUSLY (once display prefs arrive over /ws), and its backdrop then
+ * intercepts every onboarding/sidebar click. A one-shot check races that
+ * render, so register a Playwright locator handler that auto-clicks the modal's
+ * own scoped "Skip" the moment it appears, before any action. Idempotent and
+ * scoped to the first-launch backdrop testid so no unrelated "Skip" is hit.
+ */
+async function armFirstLaunchDismiss(page: Page): Promise<void> {
+  if (firstLaunchHandled.has(page)) return;
+  firstLaunchHandled.add(page);
+  const backdrop = page.getByTestId("first-launch-display-backdrop");
+  await page.addLocatorHandler(backdrop, async () => {
+    await backdrop.getByRole("button", { name: /^skip$/i }).click();
+  });
+}
+
 export async function gotoDashboard(page: Page): Promise<void> {
+  await armFirstLaunchDismiss(page);
   await page.goto("/");
   await byTestId(page, "headerAppBar").waitFor({ state: "visible" });
 }

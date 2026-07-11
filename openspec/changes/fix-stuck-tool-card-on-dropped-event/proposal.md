@@ -70,6 +70,18 @@ memory), per-event acks.
 - `incremental-event-sync` (ADDED) — stale running-tool reconcile; per-hop dropped-frame
   delivery instrumentation.
 
+## Follow-up
+
+- The `Scenario: Evicted result cannot reconcile` limitation below (reconcile 404s, card
+  left running) is removed by the follow-up change `fix-stuck-tool-card-superseded-heal`,
+  which finalizes such a card once a later assistant inference proves the tool finished.
+- **Archive order:** this base change MUST archive **together with, or immediately before**,
+  `fix-stuck-tool-card-superseded-heal`. That change `MODIFIED`s this change's `Stale
+  running-tool reconcile` requirement, so this change's ADD must land in `openspec/specs/`
+  first. Archiving this change alone (with superseded-heal already shipped in code) would
+  leave the spec asserting "leave the row running" while the running code heals it —
+  a transient spec-vs-code contradiction. Do not archive this change in isolation.
+
 ## Discipline Skills
 
 - `systematic-debugging` — reproduce the drop (server recorded, browser stuck) before fixing.

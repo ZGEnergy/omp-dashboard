@@ -37,9 +37,16 @@
   work is uncommitted on `develop` — harness artifact, re-runs against develop on a
   feature branch at ship time).
 
-## 5. E2E scenario (tests/e2e/, deferred if harness-gated)
-- [ ] 5.1 Playwright: throttle/withhold a live `tool_execution_end` (server keeps it),
+## 5. E2E scenario (tests/e2e/)
+- [x] 5.1 Playwright: throttle/withhold a live `tool_execution_end` (server keeps it),
   assert the stuck card self-heals via the REST reconcile without a page refresh.
+  DONE: `tests/e2e/reconcile-heal.spec.ts` — RECOVERABLE counterpart to
+  `superseded-heal.spec.ts`. Reuses the `stuck-tool-superseded` fixture; `routeWebSocket`
+  drops the `tool_execution_end` frame (server→browser) but leaves the reconcile route
+  UNSTUBBED, so `GET .../tool-result/*` hits the real server (store still holds it) → 200.
+  Asserts the burst flips `data-running` true→false (~25s STALE_TOOL_MS), body renders the
+  real `supersede-probe` echo output, and `tool-superseded-badge` count 0 (real result
+  wins; the supersede fallback never fires).
 
 ## 6. Deferred follow-up (do NOT implement here — evidence-gated)
 - [ ] 6.1 Only if §3 telemetry shows the `STALE_TOOL_MS` reconcile latency is a real

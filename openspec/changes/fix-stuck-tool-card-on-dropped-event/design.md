@@ -75,7 +75,9 @@ it MODIFIES `incremental-event-sync` "Client-side sequence tracking" and ADDs a
   overflow), the REST route 404s and the card stays stuck until an in-app Refresh
   (`lastSeq:0` full replay) or bridge reconnect re-sync (a browser *reload* alone
   delta-subscribes from the durable replay cache and does NOT recover it). Rare;
-  documented, not silently handled.
+  documented, not silently handled. **Removed by follow-up**
+  `fix-stuck-tool-card-superseded-heal`, which finalizes the card once a later assistant
+  inference proves the tool completed — see "Interaction with other changes" below.
 - **Reconcile poll cost.** One-shot per stale row (re-armed only on "in flight"); bounded.
 
 ## Interaction with other changes
@@ -85,6 +87,12 @@ timer (D1) MUST be session/state-scoped — scan `sessionState` for `toolStatus:
 rows — and NEVER a per-row `useEffect`, or scrolling a stuck card off-screen would unmount
 its component and cancel the heal. As written D1 is already session-scoped; keep it so.
 (The streaming tail stays always-mounted there, so the common in-flight case is unaffected.)
+
+`fix-stuck-tool-card-superseded-heal` (follow-up) `MODIFIED`s this change's `Stale
+running-tool reconcile` requirement to delegate the evicted-result case to a supersede
+heal. Because that is a `MODIFIED` of a requirement this change `ADD`s, this change MUST
+archive together with, or immediately before, the follow-up — never in isolation (see
+proposal.md "Follow-up").
 
 ## Migration
 
