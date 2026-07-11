@@ -72,7 +72,9 @@ ensure_zrok() {
 }
 
 zrok_enable() {
-  if zrok status 2>/dev/null | grep -qi 'enabled'; then log "zrok already enabled."; return; fi
+  # An enabled environment writes ~/.zrok/environment.json (robust marker;
+  # `zrok status` prints a colored table without the word "enabled").
+  if [[ -f "$HOME/.zrok/environment.json" ]]; then log "zrok already enabled."; return; fi
   echo
   log "Create a FREE account at https://zrok.io then copy your account token (Enable your environment)."
   local token
