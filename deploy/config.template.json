@@ -1,0 +1,7 @@
+{
+  "bindHost": "__BIND_HOST__",
+  "trustedNetworks": ["127.0.0.1/32"],
+  "tunnel": { "enabled": false },
+  "autoStart": false,
+  "autoShutdown": false
+}
