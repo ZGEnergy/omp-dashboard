@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=__PREFIX__
-Environment=HOME=%h/.omp-dash-home
+Environment=HOME=%h
 Environment=PI_CODING_AGENT_DIR=%h/.omp/agent
 Environment=PI_CODING_AGENT_SESSION_DIR=%h/.omp/agent/sessions
 Environment=PI_DASHBOARD_NO_MDNS=1

@@ -120,14 +120,16 @@ zrok_reserve() {
   fi
 }
 
-DASH_HOME="$HOME/.omp-dash-home"
+# De-isolated: the service runs under the real HOME so the dashboard sees omp's
+# real ~/.omp credentials + sessions. Config lives at the standard ~/.pi/dashboard.
+CONFIG_DIR="$HOME/.pi/dashboard"
 UNIT_DIR="$HOME/.config/systemd/user"
 
 write_config() {
-  mkdir -p "$DASH_HOME/.pi/dashboard"
+  mkdir -p "$CONFIG_DIR"
   sed 's#__BIND_HOST__#0.0.0.0#g' "$DEPLOY_DIR/config.template.json" \
-    > "$DASH_HOME/.pi/dashboard/config.json"
-  log "Wrote $DASH_HOME/.pi/dashboard/config.json"
+    > "$CONFIG_DIR/config.json"
+  log "Wrote $CONFIG_DIR/config.json"
 }
 
 install_services() {
@@ -147,7 +149,7 @@ write_launcher() {
   cat > "$LOCAL_BIN/omp-dashboard" <<EOF
 #!/usr/bin/env bash
 # Foreground run of the omp-dashboard fork (for debugging). Services run it persistently.
-exec env HOME="$DASH_HOME" PATH="$OMP_DIR:$NODE_DIR:\$PATH" \\
+exec env PATH="$OMP_DIR:$NODE_DIR:\$PATH" \\
   PI_CODING_AGENT_DIR="$HOME/.omp/agent" \\
   PI_CODING_AGENT_SESSION_DIR="$HOME/.omp/agent/sessions" \\
   PI_DASHBOARD_NO_MDNS=1 \\
@@ -158,12 +160,38 @@ EOF
   log "Wrote launcher $LOCAL_BIN/omp-dashboard"
 }
 
+configure_omp_autoattach() {
+  # Make manual `omp` sessions auto-attach to THIS dashboard — otherwise they
+  # never show up in the UI. Points omp's global extensions[] at the installed
+  # bridge and pins each session's bridge to this dashboard's pi-port.
+  local bridge="$PREFIX/packages/extension/src/bridge.ts"
+  local settings="$HOME/.omp/agent/settings.json"
+  local env_file="$HOME/.omp/agent/.env"
+  [[ -f "$bridge" ]] || { warn "Bridge missing at $bridge — skipping omp auto-attach."; return; }
+  # Merge the bridge into omp's extensions[] without clobbering other settings.
+  node -e '
+    const fs=require("node:fs"), path=require("node:path");
+    const [p,bridge]=process.argv.slice(1);
+    let j={}; try { j=JSON.parse(fs.readFileSync(p,"utf8")||"{}"); } catch {}
+    const ext=Array.isArray(j.extensions)?j.extensions:[];
+    if(!ext.includes(bridge)) ext.push(bridge);
+    j.extensions=ext;
+    fs.mkdirSync(path.dirname(p),{recursive:true});
+    fs.writeFileSync(p, JSON.stringify(j,null,2)+"\n");
+  ' "$settings" "$bridge"
+  touch "$env_file"
+  grep -q '^PI_DASHBOARD_URL=' "$env_file" || printf 'PI_DASHBOARD_URL=ws://localhost:9098\n' >> "$env_file"
+  grep -q '^PI_DASHBOARD_NO_MDNS=' "$env_file" || printf 'PI_DASHBOARD_NO_MDNS=1\n' >> "$env_file"
+  log "omp auto-attach configured — new omp sessions appear in the dashboard."
+}
+
 report() {
   cat <<EOF
 
 $(log "Install complete.")
   Local URL : http://localhost:8088
   Public URL: $SHARE_URL   (Google OAuth, only $SHARE_EMAIL)
+  Sessions  : new 'omp' sessions auto-attach; restart any already-running omp to see it.
   Logs      : journalctl --user -u omp-dashboard -f
               journalctl --user -u omp-dashboard-zrok -f
   Update    : re-run this installer (or: cd $PREFIX && git pull && npm run build && systemctl --user restart omp-dashboard)
@@ -182,6 +210,7 @@ main() {
   write_config
   install_services
   write_launcher
+  configure_omp_autoattach
   report
 }
 
