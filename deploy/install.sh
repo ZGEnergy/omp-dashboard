@@ -49,8 +49,13 @@ fetch_and_build() {
     log "Cloning $REPO_URL ($REF) into $PREFIX"
     git clone --depth 1 --branch "$REF" "$REPO_URL" "$PREFIX"
   fi
-  log "Installing deps + building client (this takes a few minutes)"
-  ( cd "$PREFIX" && { npm ci || npm install --force; } && npm run build )
+  log "Installing deps + building client (a few minutes)"
+  # Headless self-host never runs the Electron desktop app → skip its ~150 MB binary
+  # download; also skip npm audit/fund network calls. Nothing depends on the electron ws.
+  ( cd "$PREFIX" \
+    && export ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm_config_audit=false npm_config_fund=false \
+    && { npm ci || npm install --force; } \
+    && npm run build )
 }
 
 ensure_zrok() {
@@ -78,7 +83,7 @@ zrok_enable() {
   echo
   log "Create a FREE account at https://zrok.io then copy your account token (Enable your environment)."
   local token
-  read -rsp "Paste your zrok account token: " token; echo
+  read -rp "Paste your zrok account token: " token
   [[ -n "$token" ]] || die "No token provided."
   zrok enable "$token"
 }
