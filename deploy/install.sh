@@ -1,14 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=/dev/null
-source "$DEPLOY_DIR/lib.sh"
-
 PREFIX="${PREFIX:-$HOME/.omp-dashboard}"
 LOCAL_BIN="$HOME/.local/bin"
 REPO_URL="https://github.com/ZGEnergy/omp-dashboard.git"
 REF="${OMP_DASH_REF:-omp-minimal}"
+
+# ── Bootstrap for `curl … | bash` ────────────────────────────────────────────
+# When piped over stdin there is no sibling lib.sh/templates, and stdin is the
+# script itself (so interactive prompts can't reach the terminal). Detect that,
+# clone the repo, then re-exec the checked-out installer with stdin on the tty
+# so the prompts work.
+_self="${BASH_SOURCE[0]:-}"
+if [[ -z "$_self" || ! -f "$(dirname "$_self")/lib.sh" ]]; then
+  command -v git >/dev/null 2>&1 || { echo "git is required to install." >&2; exit 1; }
+  echo "==> Fetching the installer ($REF -> $PREFIX)"
+  if [[ -d "$PREFIX/.git" ]]; then
+    git -C "$PREFIX" fetch --depth 1 origin "$REF" && git -C "$PREFIX" checkout -q FETCH_HEAD
+  else
+    git clone --depth 1 --branch "$REF" "$REPO_URL" "$PREFIX"
+  fi
+  exec bash "$PREFIX/deploy/install.sh" "$@" < /dev/tty
+fi
+
+DEPLOY_DIR="$(cd "$(dirname "$_self")" && pwd)"
+# shellcheck source=/dev/null
+source "$DEPLOY_DIR/lib.sh"
 
 check_prereqs() {
   [[ "$(uname -s)" == "Linux" ]] || die "This installer supports Linux+systemd only. See deploy/README.md for the manual route."
