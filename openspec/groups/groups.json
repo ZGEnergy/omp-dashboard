@@ -100,25 +100,34 @@
     "add-embeddable-chat-view": "ui",
     "lag-dashboard-transcript-rendering": "ui",
     "virtualize-chat-transcript-tanstack": "ui",
-    "reduce-chat-render-cpu-umbrella": "ui"
+    "reduce-chat-render-cpu-umbrella": "ui",
+    "fix-chat-scroll-to-top-estimate-drift": "ui",
+    "fix-reducer-crash-undefined-toolname": "ui",
+    "add-flow-plugin-e2e-tests": "ui"
   },
   "changeOrder": {
     "__ungrouped__": [
-      "add-agent-role-model-tools",
       "add-automatic-session-kb-index",
+      "add-goal-session-supervisor",
       "add-kb-semantic-annotation-plane",
       "add-lora-dataset-export-skill",
-      "bound-subagent-event-serialization",
+      "add-modular-doctor-skill",
+      "fix-remote-connect-cors-gates",
       "gate-session-worktree-button-on-git",
+      "memory-retrieval-injection",
+      "persist-goal-status-and-progress",
       "simplify-error-retry-single-card",
-      "support-non-git-init-hook"
+      "support-non-git-init-hook",
+      "add-custom-roles-ui",
+      "instrument-event-store-trim"
     ],
     "ui": [
-      "add-embeddable-chat-view",
-      "add-tunnel-providers",
-      "virtualize-chat-transcript-tanstack",
+      "fix-local-electron-dmg-build",
       "reduce-chat-render-cpu-umbrella",
-      "fix-local-electron-dmg-build"
+      "fix-chat-scroll-to-top-estimate-drift",
+      "add-flow-plugin-e2e-tests",
+      "fix-reducer-crash-undefined-toolname",
+      "virtualize-chat-transcript-tanstack"
     ],
     "next-phase": [],
     "sdasdasd": [
