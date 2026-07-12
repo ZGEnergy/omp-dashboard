@@ -778,6 +778,7 @@ function initBridge(pi: ExtensionAPI) {
             roles: rolesData.roles ?? {},
             presets: rolesData.presets ?? [],
             activePreset: rolesData.activePreset ?? null,
+            builtinRoleNames: rolesData.builtinRoleNames ?? [],
           });
         }
         return;
@@ -794,6 +795,7 @@ function initBridge(pi: ExtensionAPI) {
             roles: rolesData.roles ?? {},
             presets: rolesData.presets ?? [],
             activePreset: rolesData.activePreset ?? null,
+            builtinRoleNames: rolesData.builtinRoleNames ?? [],
           });
         }
         return;
@@ -810,6 +812,7 @@ function initBridge(pi: ExtensionAPI) {
             roles: rolesData.roles ?? {},
             presets: rolesData.presets ?? [],
             activePreset: rolesData.activePreset ?? null,
+            builtinRoleNames: rolesData.builtinRoleNames ?? [],
           });
         }
         return;
@@ -826,6 +829,27 @@ function initBridge(pi: ExtensionAPI) {
             roles: rolesData.roles ?? {},
             presets: rolesData.presets ?? [],
             activePreset: rolesData.activePreset ?? null,
+            builtinRoleNames: rolesData.builtinRoleNames ?? [],
+          });
+        }
+        return;
+      }
+      // Remove a CUSTOM role: purge from schema + active map + every preset.
+      // Built-ins are rejected server-side in the roles:remove handler.
+      // Mirrors the role_set routing block. See change: add-custom-roles-ui.
+      if (msg.type === "role_remove" && pi.events) {
+        const data: any = { role: (msg as any).role };
+        pi.events.emit("roles:remove", data);
+        if (data.success) {
+          const rolesData: any = {};
+          pi.events.emit("roles:get-all", rolesData);
+          connection.send({
+            type: "roles_list",
+            sessionId,
+            roles: rolesData.roles ?? {},
+            presets: rolesData.presets ?? [],
+            activePreset: rolesData.activePreset ?? null,
+            builtinRoleNames: rolesData.builtinRoleNames ?? [],
           });
         }
         return;
@@ -839,6 +863,7 @@ function initBridge(pi: ExtensionAPI) {
           roles: rolesData.roles ?? {},
           presets: rolesData.presets ?? [],
           activePreset: rolesData.activePreset ?? null,
+          builtinRoleNames: rolesData.builtinRoleNames ?? [],
         });
         return;
       }
@@ -2330,6 +2355,7 @@ function initBridge(pi: ExtensionAPI) {
           roles: rolesData.roles ?? {},
           presets: rolesData.presets ?? [],
           activePreset: rolesData.activePreset ?? null,
+          builtinRoleNames: rolesData.builtinRoleNames ?? [],
         });
       }
     }
