@@ -20,7 +20,13 @@ if [[ -z "$_self" || ! -f "$(dirname "$_self")/lib.sh" ]]; then
   else
     git clone --depth 1 --branch "$REF" "$REPO_URL" "$PREFIX"
   fi
-  exec bash "$PREFIX/deploy/install.sh" "$@" < /dev/tty
+  # Reconnect stdin to the terminal for the prompts (stdin is the piped script).
+  # Fall back to inherited stdin when /dev/tty can't be opened (headless / CI).
+  if { : < /dev/tty; } 2>/dev/null; then
+    exec bash "$PREFIX/deploy/install.sh" "$@" < /dev/tty
+  else
+    exec bash "$PREFIX/deploy/install.sh" "$@"
+  fi
 fi
 
 DEPLOY_DIR="$(cd "$(dirname "$_self")" && pwd)"
