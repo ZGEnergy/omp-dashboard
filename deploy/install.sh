@@ -66,19 +66,26 @@ ZROK_VERSION="${ZROK_VERSION:-1.1.11}"
 fetch_and_build() {
   if [[ -d "$PREFIX/.git" ]]; then
     log "Updating $PREFIX to $REF"
-    git -C "$PREFIX" fetch --depth 1 origin "$REF"
+    git -C "$PREFIX" fetch -q --depth 1 origin "$REF"
     git -C "$PREFIX" checkout -q FETCH_HEAD
   else
     log "Cloning $REPO_URL ($REF) into $PREFIX"
-    git clone --depth 1 --branch "$REF" "$REPO_URL" "$PREFIX"
+    git clone -q --depth 1 --branch "$REF" "$REPO_URL" "$PREFIX"
   fi
-  log "Installing deps + building client (a few minutes)"
-  # Headless self-host never runs the Electron desktop app → skip its ~150 MB binary
-  # download; also skip npm audit/fund network calls. Nothing depends on the electron ws.
-  ( cd "$PREFIX" \
-    && export ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm_config_audit=false npm_config_fund=false \
-    && { npm ci || npm install --force; } \
-    && npm run build )
+  local buildlog="$PREFIX/.install-build.log"
+  log "Installing dependencies + building the web client (a few minutes)…"
+  # Quiet on success: full output → $buildlog, shown only if the build fails.
+  # Headless self-host never runs the Electron desktop app → skip its ~150 MB
+  # binary download; also skip npm audit/fund/progress noise.
+  if ! ( cd "$PREFIX" \
+      && export ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm_config_audit=false \
+               npm_config_fund=false npm_config_progress=false npm_config_loglevel=error \
+      && { npm ci || npm install --force; } \
+      && npm run build ) > "$buildlog" 2>&1; then
+    warn "Build failed — last 40 lines of $buildlog:"
+    tail -40 "$buildlog" >&2
+    die "Install aborted (full log: $buildlog)."
+  fi
 }
 
 ensure_zrok() {
@@ -226,10 +233,13 @@ EOF
 main() {
   if [[ "${1:-}" == "--check-only" ]]; then check_prereqs; log "check-only: OK"; exit 0; fi
   check_prereqs
-  fetch_and_build
   ensure_zrok
+  # Ask the interactive questions UP FRONT, before the long/noisy build, so the
+  # prompts aren't buried in build output (and the build then runs unattended).
+  banner "Set up your public tunnel — a couple of quick questions:"
   zrok_enable
   zrok_reserve
+  fetch_and_build
   write_config
   install_services
   write_launcher
