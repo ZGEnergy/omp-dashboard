@@ -72,7 +72,11 @@ Closing the last tab SHALL leave the pane in an empty state with a "no files ope
 The pane SHALL render a file-tree browse rail on the left, rooted at the session's
 `cwd`, collapsible via a **labelled, discoverable toggle at the rail↔viewer boundary**
 (not a bare unlabelled icon buried among header actions). Rail visibility SHALL persist
-per session.
+per session. In the **absence of a persisted preference** for a session, the rail SHALL
+default to **collapsed** so the opened viewer fills the pane width; a user's explicit
+toggle SHALL persist per session and override the collapsed default on subsequent opens
+(the rail SHALL NOT re-collapse each time the split reopens once the user has revealed
+it for that session).
 
 The rail SHALL list a directory's entries from a **single tree-listing source of truth**
 returning `{ name: string; isDir: boolean }` per entry, so **hidden directories
@@ -100,6 +104,18 @@ the classifier's viewer kind; clicking a directory SHALL expand/collapse it.
 - **WHEN** the user collapses the rail via the labelled toggle
 - **THEN** the rail hides and the viewer fills the freed width
 - **AND** the collapsed state persists across reload
+
+#### Scenario: Rail defaults to collapsed with no persisted preference
+- **GIVEN** a session with no persisted rail-visibility preference
+- **WHEN** the split content viewer opens (e.g. via `openInSplit`)
+- **THEN** the Files rail SHALL be collapsed and the viewer SHALL fill the pane width
+- **AND** the labelled `[Files]` toggle SHALL remain present so the rail can be revealed
+
+#### Scenario: Revealed rail stays revealed for the session
+- **GIVEN** a session whose split viewer opened with the rail collapsed by default
+- **WHEN** the user reveals the rail via the `[Files]` toggle
+- **THEN** the revealed state SHALL persist for that session across reload
+- **AND** reopening the split for that session SHALL NOT re-collapse the rail
 
 ### Requirement: Pane SHALL dispatch viewers via a kind-based registry
 
