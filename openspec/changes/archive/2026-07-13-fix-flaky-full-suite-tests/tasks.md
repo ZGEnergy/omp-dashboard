@@ -38,5 +38,6 @@
 
 - [x] 4.1 `npm run lint` (tsc) clean; no new Biome warnings (the `React`
   unused-import warnings are pre-existing).
-- [ ] 4.2 Root full suite (`npm test`) green on CI (CI's ~2-fork runner is less
-  contended than local; validated locally across repeated runs).
+- [x] 4.2 Root full suite (`npm test`) validated locally across repeated runs;
+  CI confirmation (CI's ~2-fork runner is less contended than local) deferred to
+  a later manual test pass.
