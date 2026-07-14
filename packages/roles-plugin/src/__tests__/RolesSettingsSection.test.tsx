@@ -10,6 +10,7 @@ import {
 } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import {
   SettingsDraftProvider,
+  createSlotRegistry,
   type RegisteredSource,
 } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { withUiPrimitiveProvider } from "@blackbelt-technology/dashboard-plugin-runtime/test-support";
