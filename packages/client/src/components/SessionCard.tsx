@@ -54,8 +54,8 @@ import { SessionActivityBar } from "./SessionActivityBar.js";
 import type { ContextUsageInfo } from "./SessionList.js";
 import { SessionOpenSpecActions } from "./SessionOpenSpecActions.js";
 import { SessionSubcard } from "./SessionSubcard.js";
-import { TagStrip } from "./tags/TagStrip.js";
 import { useSessionCardDragHandle } from "./SortableSessionCard.js";
+import { TagStrip } from "./tags/TagStrip.js";
 import { WorktreeActionsMenu } from "./WorktreeActionsMenu.js";
 
 export function ActivityIndicator({ session }: { session: DashboardSession }) {
@@ -65,7 +65,7 @@ export function ActivityIndicator({ session }: { session: DashboardSession }) {
   const hasWidgetBarPrompt = useHasWidgetBarPrompt(session.id);
 
   if (session.resuming) {
-    return <span className="text-yellow-400">{i18nT("auto.resuming", undefined, "Resuming…")}</span>;
+    return <span className="text-yellow-400">{i18nT("common.resuming", undefined, "Resuming…")}</span>;
   }
 
   if (session.status === "ended") return null;
@@ -73,7 +73,7 @@ export function ActivityIndicator({ session }: { session: DashboardSession }) {
   if (session.currentTool === "ask_user" && !hasWidgetBarPrompt) {
     // Blocked-on-you: distinct "Needs you" label + needs-you color + icon.
     // See change: improve-dashboard-attention-routing.
-    return <span className="text-[var(--status-needs-you)] truncate inline-flex items-center gap-0.5"><Icon path={mdiCommentQuestion} size={0.5} /> {i18nT("auto.needs_you", undefined, "Needs you")}</span>;
+    return <span className="text-[var(--status-needs-you)] truncate inline-flex items-center gap-0.5"><Icon path={mdiCommentQuestion} size={0.5} /> {i18nT("common.needsYou", undefined, "Needs you")}</span>;
   }
 
   if (session.currentTool) {
@@ -81,13 +81,13 @@ export function ActivityIndicator({ session }: { session: DashboardSession }) {
   }
 
   if (session.status === "streaming") {
-    return <span className="text-[var(--status-working)]">{i18nT("auto.thinking", undefined, "Thinking…")}</span>;
+    return <span className="text-[var(--status-working)]">{i18nT("session.thinking", undefined, "Thinking…")}</span>;
   }
 
   if (session.status === "idle" || session.status === "active") {
     // Turn-finished passive state: distinct "Idle" label, never "Waiting for
     // input". See change: improve-dashboard-attention-routing.
-    return <span className="text-[var(--text-tertiary)]">{i18nT("auto.idle", undefined, "Idle")}</span>;
+    return <span className="text-[var(--text-tertiary)]">{i18nT("status.idle", undefined, "Idle")}</span>;
   }
 
   return null;
@@ -189,7 +189,7 @@ export function GitInfo({ session }: { session: DashboardSession }) {
 export function WorktreePill({ session }: { session: DashboardSession }) {
   const wt = session.gitWorktree;
   if (!wt) return null;
-  const title = wt.base ? `created from ${wt.base}` : "git worktree";
+  const title = wt.base ? i18nT("worktree.createdFrom", { base: wt.base }, "created from {base}") : i18nT("worktree.gitWorktree", undefined, "git worktree");
   return (
     <span
       data-testid="worktree-pill"
@@ -313,11 +313,11 @@ export function GroupGitInfo({ sessions, cwd, folderBranch, onBranchClick, folde
         <button
           onClick={(e) => { e.stopPropagation(); onBranchClick?.(); }}
           className="flex items-center gap-1 hover:text-[var(--text-secondary)] transition-colors"
-          title={showInitGit ? "Initialize git repository" : "Git branches"}
+          title={showInitGit ? i18nT("git.initializeRepo", undefined, "Initialize git repository") : i18nT("git.gitBranches", undefined, "Git branches")}
           data-testid="git-init-btn"
         >
           <Icon path={mdiSourceBranch} size={0.5} />
-          {showInitGit && <span className="text-[10px]">{i18nT("auto.init_git", undefined, "Init git")}</span>}
+          {showInitGit && <span className="text-[10px]">{i18nT("git.initGit", undefined, "Init git")}</span>}
         </button>
       </div>
     );
@@ -328,7 +328,7 @@ export function GroupGitInfo({ sessions, cwd, folderBranch, onBranchClick, folde
       <button
         onClick={(e) => { e.stopPropagation(); onBranchClick?.(); }}
         className="flex items-center gap-1 hover:text-blue-400 transition-colors"
-        title={i18nT("auto.switch_branch", undefined, "Switch branch")}
+        title={i18nT("git.switchBranch", undefined, "Switch branch")}
         data-testid="git-branch-btn"
       >
         <Icon path={mdiSourceBranch} size={0.5} />
@@ -361,9 +361,9 @@ export function GroupGitInfo({ sessions, cwd, folderBranch, onBranchClick, folde
           data-testid="group-commit-btn"
           onClick={(e) => { e.stopPropagation(); openCommitDialog(cwd, anySessionId); }}
           className="text-[10px] text-blue-400 hover:underline"
-          title={i18nT("auto.commit_changes", undefined, "Commit changes")}
+          title={i18nT("common.commitChanges", undefined, "Commit changes")}
         >
-          {i18nT("auto.commit", undefined, "Commit")}
+          {i18nT("git.commit", undefined, "Commit")}
         </button>
       )}
     </div>
@@ -395,7 +395,7 @@ export function EditorButtons({
             onOpen(editor.id);
           }}
           className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-blue-400 hover:border-blue-500/50"
-          title={`Open in ${editor.name}`}
+          title={i18nT("session.openInEditor", { editor: editor.name }, "Open in {editor}")}
         >
           <span className="inline-flex items-center gap-0.5">{editorIcons[editor.id] ?? <Icon path={mdiOpenInNew} size={0.5} />} {editor.name}</span>
         </button>
@@ -618,7 +618,7 @@ export function SessionCard({
           </span>
           <span
             className="text-[11px] text-[var(--text-muted)] flex-shrink-0"
-            title={`Started ${new Date(session.startedAt).toLocaleString()}`}
+            title={i18nT("session.startedAtTime", { time: new Date(session.startedAt).toLocaleString() }, "Started {time}")}
           >
             {formatRelativeTime(now - selectBadgeTimestamp(session))}
           </span>
@@ -641,7 +641,7 @@ export function SessionCard({
               <span
                 data-testid="queue-count-badge"
                 className="flex-shrink-0 inline-flex items-center px-1.5 py-0 text-[10px] rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30"
-                title={`${totalQueued} queued message${totalQueued === 1 ? "" : "s"}`}
+                title={i18nT("session.queuedMessages", { count: totalQueued }, `${totalQueued} queued message${totalQueued === 1 ? "" : "s"}`)}
               >
                 {totalQueued}
               </span>
@@ -668,7 +668,7 @@ export function SessionCard({
           <div
             className="mt-1 flex items-center gap-1 text-[11px] text-blue-400"
             data-testid="mobile-card-attached-chip"
-            title={`Attached: ${session.attachedProposal}`}
+            title={i18nT("session.attachedProposal", { proposal: session.attachedProposal }, "Attached: {proposal}")}
           >
             <Icon path={mdiPaperclip} size={0.4} />
             <span className="truncate">{session.attachedProposal}</span>
@@ -789,14 +789,14 @@ export function SessionCard({
           <button
             onClick={(e) => { e.stopPropagation(); setIsRenaming(true); }}
             className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] p-0.5 flex-shrink-0"
-            title={i18nT("auto.rename_session", undefined, "Rename session")}
+            title={i18nT("session.renameSession", undefined, "Rename session")}
           >
             <Icon path={mdiPencilOutline} size={0.45} />
           </button>
         )}
         <span
           className="text-[10px] text-[var(--text-muted)]"
-          title={`Started ${new Date(session.startedAt).toLocaleString()}`}
+          title={i18nT("session.startedAtTime", { time: new Date(session.startedAt).toLocaleString() }, "Started {time}")}
         >
           {formatRelativeTime(now - selectBadgeTimestamp(session))}
         </span>
@@ -805,7 +805,7 @@ export function SessionCard({
           <button
             onClick={(e) => { e.stopPropagation(); onUnhide(session.id); }}
             className="text-[var(--text-tertiary)] hover:text-green-400 p-0.5 flex-shrink-0"
-            title={i18nT("auto.show_session", undefined, "Show session")}
+            title={i18nT("session.showSession", undefined, "Show session")}
             data-testid="session-unhide-btn"
           >
             <Icon path={mdiEyeOutline} size={0.45} />
@@ -814,7 +814,7 @@ export function SessionCard({
           <button
             onClick={(e) => { e.stopPropagation(); onHide(session.id); }}
             className="text-[var(--text-tertiary)] hover:text-[var(--text-muted)] p-0.5 flex-shrink-0"
-            title={i18nT("auto.hide_session", undefined, "Hide session")}
+            title={i18nT("session.hideSession", undefined, "Hide session")}
             data-testid="session-hide-btn"
           >
             <Icon path={mdiEyeOffOutline} size={0.45} />
@@ -826,13 +826,13 @@ export function SessionCard({
               e.stopPropagation();
               if (session.closing) return;
               if (session.status === "streaming") {
-                if (!window.confirm("Session is currently running. Exit anyway?")) return;
+                if (!window.confirm(i18nT("session.exitWhileRunningConfirm", undefined, "Session is currently running. Exit anyway?"))) return;
               }
               onShutdown(session.id);
             }}
             disabled={session.closing}
             className="text-[var(--text-muted)] hover:text-red-400 p-0.5 flex-shrink-0 disabled:cursor-default disabled:hover:text-[var(--text-muted)]"
-            title={session.closing ? "Closing…" : "Exit pi session"}
+            title={session.closing ? i18nT("session.closing", undefined, "Closing…") : i18nT("session.exitPiSession", undefined, "Exit pi session")}
             data-testid="session-close-btn"
           >
             <Icon path={session.closing ? mdiLoading : mdiClose} size={0.5} className={session.closing ? "animate-spin" : undefined} />
@@ -855,18 +855,18 @@ export function SessionCard({
                 onClick={(e) => { e.stopPropagation(); onResume("continue"); }}
                 disabled={session.resuming || session.cwdMissing === true}
                 className="text-[9px] px-1 py-px rounded border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                title={session.cwdMissing ? "session's directory no longer exists" : "Resume session (continue same session)"}
+                title={session.cwdMissing ? i18nT("session.cwdMissing", undefined, "session's directory no longer exists") : i18nT("session.resumeTitle", undefined, "Resume session (continue same session)")}
               >
-                <Icon path={mdiPlayCircleOutline} size={0.35} className="inline mr-px" />{i18nT("auto.resume", undefined, "Resume")}
+                <Icon path={mdiPlayCircleOutline} size={0.35} className="inline mr-px" />{i18nT("session.resume", undefined, "Resume")}
               </button>
             )}
             <button
               onClick={(e) => { e.stopPropagation(); onResume("fork"); }}
               disabled={session.resuming || session.cwdMissing === true}
               className="text-[9px] px-1 py-px rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={session.cwdMissing ? "session's directory no longer exists" : "Fork session (new session from this point)"}
+              title={session.cwdMissing ? i18nT("session.cwdMissing", undefined, "session's directory no longer exists") : i18nT("session.forkTitle", undefined, "Fork session (new session from this point)")}
             >
-              <Icon path={mdiSourceFork} size={0.35} className="inline mr-px" />{i18nT("auto.fork", undefined, "Fork")}
+              <Icon path={mdiSourceFork} size={0.35} className="inline mr-px" />{i18nT("session.fork", undefined, "Fork")}
             </button>
           </>
         )}
@@ -878,10 +878,10 @@ export function SessionCard({
             onClick={(e) => { e.stopPropagation(); onSpawnSibling(session); }}
             disabled={!!session.cwdMissing}
             className="text-[9px] px-1 py-px rounded border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-            title={session.cwdMissing ? "session's directory no longer exists" : "+Session clean sibling in same folder"}
+            title={session.cwdMissing ? i18nT("session.cwdMissing", undefined, "session's directory no longer exists") : i18nT("session.spawnSiblingTitle", undefined, "+Session clean sibling in same folder")}
             data-testid="session-card-spawn-sibling"
           >
-            <Icon path={mdiPlus} size={0.35} className="inline mr-px" />{i18nT("auto.session", undefined, "Session")}
+            <Icon path={mdiPlus} size={0.35} className="inline mr-px" />{i18nT("session.session", undefined, "Session")}
           </button>
         )}
         {/* +Worktree — create git worktree (if needed) + spawn session inside
@@ -901,10 +901,10 @@ export function SessionCard({
             onClick={(e) => { e.stopPropagation(); onSpawnWorktree(session); }}
             disabled={!!session.cwdMissing}
             className="text-[9px] px-1 py-px rounded border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-            title={session.cwdMissing ? "session's directory no longer exists" : "Create git worktree + spawn session inside it"}
+            title={session.cwdMissing ? i18nT("session.cwdMissing", undefined, "session's directory no longer exists") : i18nT("session.spawnWorktreeTitle", undefined, "Create git worktree + spawn session inside it")}
             data-testid="session-card-spawn-worktree"
           >
-            <Icon path={mdiSourceBranchPlus} size={0.35} className="inline mr-px" />{i18nT("auto.worktree", undefined, "Worktree")}
+            <Icon path={mdiSourceBranchPlus} size={0.35} className="inline mr-px" />{i18nT("worktree.worktree", undefined, "Worktree")}
           </button>
         )}
       </div>
@@ -973,7 +973,7 @@ export function SessionCard({
             ? true
             : Boolean(openspecInitialized) || Boolean(openspecPending)
       ) && (
-        <SessionSubcard title="OPENSPEC">
+        <SessionSubcard title={i18nT("session.subcardOpenspec", undefined, "OPENSPEC")}>
           <SessionOpenSpecActions
             session={session}
             changes={openspecChanges}
@@ -1102,7 +1102,7 @@ function ProcessSubcard({ activity, processes, onKill, onAbortTool, now, collaps
   const { expanded, onToggle } = useDrawerExpansion(collapsed, onSetCollapsed);
   if (!hasActivity && !hasProcesses) return null;
   return (
-    <SessionSubcard title="PROCESS">
+    <SessionSubcard title={i18nT("session.subcardProcess", undefined, "PROCESS")}>
       {hasActivity && onAbortTool ? (
         <SessionActivityBar tools={[...activity]} onAbort={onAbortTool} now={now} />
       ) : null}
@@ -1142,7 +1142,7 @@ function MobileProcessSubcard({ activity, processes, onKill, onAbortTool, now, o
           onClick={(e) => { e.stopPropagation(); setSheetOpen(true); }}
           className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] border border-[var(--border-subtle)] text-[var(--text-muted)] bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]"
           data-testid="background-drawer-chip"
-          aria-label={`${processes.length} background processes — tap to view`}
+          aria-label={i18nT("session.backgroundProcessesTapToView", { count: processes.length }, "{count} background processes — tap to view")}
         >
           ⚠ {processes.length}
         </button>
@@ -1157,7 +1157,7 @@ function MobileProcessSubcard({ activity, processes, onKill, onAbortTool, now, o
             className="bg-[var(--bg-secondary)] rounded-t-lg p-4 w-full max-w-lg border-t border-[var(--border-secondary)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-semibold mb-2 text-[var(--text-secondary)]">{i18nT("auto.background_processes", undefined, "Background processes")}</h3>
+            <h3 className="text-sm font-semibold mb-2 text-[var(--text-secondary)]">{i18nT("common.backgroundProcesses", undefined, "Background processes")}</h3>
             <ProcessList
               processes={[...processes]}
               onKill={onKill}
@@ -1185,7 +1185,7 @@ function GitSubcard({ session, showGitInfo, allSessions, onShutdownSession }: { 
   const hasWorktreeActions = !!session.gitWorktree;
   if (!renderGitInfo && !hasWorktreeActions) return null;
   return (
-    <SessionSubcard title="GIT">
+    <SessionSubcard title={i18nT("session.subcardGit", undefined, "GIT")}>
       {renderGitInfo ? <GitInfo session={session} /> : null}
       {hasWorktreeActions ? <WorktreeActionsMenu session={session} allSessions={allSessions} onShutdownSession={onShutdownSession} /> : null}
     </SessionSubcard>
@@ -1201,7 +1201,7 @@ function BadgeSubcard({ session }: { session: DashboardSession }) {
   const hasBadge = useSlotHasClaimsForSession("session-card-badge", session);
   if (!hasBadge) return null;
   return (
-    <SessionSubcard title="STATUS">
+    <SessionSubcard title={i18nT("session.subcardStatus", undefined, "STATUS")}>
       <SessionCardBadgeSlot session={session} />
     </SessionSubcard>
   );
@@ -1215,7 +1215,7 @@ function MemorySubcard({ session }: { session: DashboardSession }) {
   const hasMemory = useSlotHasClaimsForSession("session-card-memory", session);
   if (!hasMemory) return null;
   return (
-    <SessionSubcard title="MEMORY">
+    <SessionSubcard title={i18nT("session.subcardMemory", undefined, "MEMORY")}>
       <SessionCardMemorySlot session={session} />
     </SessionSubcard>
   );
@@ -1230,7 +1230,7 @@ function FlowsSubcard({ session }: { session: DashboardSession }) {
   const hasFlows = useSlotHasClaimsForSession("session-card-flows", session);
   if (!hasFlows) return null;
   return (
-    <SessionSubcard title="FLOWS">
+    <SessionSubcard title={i18nT("session.subcardFlows", undefined, "FLOWS")}>
       <SessionCardFlowsSlot session={session} />
     </SessionSubcard>
   );

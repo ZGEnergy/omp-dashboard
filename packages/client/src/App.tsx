@@ -33,19 +33,19 @@ import { RecoveryOfferHost } from "./components/RecoveryOfferHost.js";
 import { ResizableSidebar } from "./components/ResizableSidebar.js";
 import { ServerSelector } from "./components/ServerSelector.js";
 import { SessionBanner } from "./components/SessionBanner.js";
+import { SessionDiffProvider } from "./components/SessionDiffContext.js";
 import { SessionHeader } from "./components/SessionHeader.js";
 import { SessionList } from "./components/SessionList.js";
-import { allTagsInUse } from "./components/tags/all-tags.js";
 import { SessionSplitView, SplitRouteSync } from "./components/SessionSplitView.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { SpawnErrorToastHost } from "./components/SpawnErrorToastHost.js";
 import { SpecsBrowserView } from "./components/SpecsBrowserView.js";
 import { SplitWorkspaceProvider } from "./components/SplitWorkspaceContext.js";
-import { SessionDiffProvider } from "./components/SessionDiffContext.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { TerminalsView } from "./components/TerminalsView.js";
 import { Toast, useToast } from "./components/Toast.js";
 import { TokenStatsBar } from "./components/TokenStatsBar.js";
+import { allTagsInUse } from "./components/tags/all-tags.js";
 import { WorktreeInitStack } from "./components/WorktreeInitStack.js";
 import { WorktreeSpawnDialog } from "./components/WorktreeSpawnDialog.js";
 import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
@@ -128,7 +128,7 @@ import { useViewDispatcher } from "./hooks/useViewDispatcher.js";
 import { ApiContext, deriveApiBase, setGlobalApiBase, VITE_API_URL } from "./lib/api-context.js";
 import { buildContextUsageMap } from "./lib/context-usage.js";
 import { DisplayPrefsProvider } from "./lib/DisplayPrefsContext.js";
-import { useI18n } from "./lib/i18n.js";
+import { registerPluginCatalog, useI18n } from "./lib/i18n.js";
 import { SessionAssetsProvider } from "./lib/SessionAssetsContext.js";
 import { deriveSelectedSessionId } from "./lib/selectedSessionId.js";
 import { selectViewedSessionId } from "./lib/selectViewedSessionId.js";
@@ -164,6 +164,10 @@ for (const entry of PLUGIN_REGISTRY) {
   for (const claim of entry.claims) {
     _pluginRegistry.addClaim(claim);
   }
+  // Merge each plugin's i18n catalog under plugin.<id>.* so plugin surfaces
+  // resolve via the plugin-context `t`. Idempotent; language-partitioned.
+  // See change: make-all-ui-text-i18n.
+  registerPluginCatalog(entry.manifest.id, entry.catalog);
 }
 
 // Feed plugin `shell-overlay-route` claims into the back-target classifier so
@@ -303,7 +307,7 @@ function PiResourceFileRoute({
 const EMPTY_STEERING: string[] = [];
 
 export default function App() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   // Pause all CSS animations while the window is hidden to the tray /
   // backgrounded, so the renderer + GPU stop continuous compositing.
   // See change: throttle-idle-ui-animations.
@@ -1058,7 +1062,7 @@ export default function App() {
             ...current,
             pendingPrompt: undefined,
             lastError: {
-              message: "No response from session — the prompt may not have been received.",
+              message: t("session.noResponse", undefined, "No response from session — the prompt may not have been received."),
               timestamp: Date.now(),
             },
           });
@@ -1931,6 +1935,8 @@ export default function App() {
         connectionStatus={
           status === "connected" || status === "connecting" ? status : "disconnected"
         }
+        t={t}
+        language={language}
       >
       <ShellSessionsProvider value={sessions}>
         <ErrorBoundary fallback={

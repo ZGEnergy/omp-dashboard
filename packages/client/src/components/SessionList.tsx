@@ -33,8 +33,6 @@ import { selectedCardScrollFingerprint } from "../lib/session-list-scroll.js";
 import { floatAskUserFirst } from "../lib/session-status-visuals.js";
 import { resolveWorkspaceFolderReorder, resolveWorkspaceReorder, sameTypeClosestCenter } from "../lib/sidebar-dnd.js";
 import { truncatePathMiddle } from "../lib/truncate-path.js";
-import { allTagsInUse } from "./tags/all-tags.js";
-import { TagFilterGroup } from "./tags/TagFilterGroup.js";
 import { useEditors } from "../lib/use-editors.js";
 import { AddToWorkspaceMenu } from "./AddToWorkspaceMenu.js";
 import { BranchSwitchDialog } from "./BranchSwitchDialog.js";
@@ -42,8 +40,8 @@ import { DashboardSpawnButtons } from "./DashboardSpawnButtons.js";
 import { FolderActionBar } from "./FolderActionBar.js";
 import { FolderNeedsYouPill } from "./FolderNeedsYouPill.js";
 import { FolderOpenSpecSection } from "./FolderOpenSpecSection.js";
-import { FolderStatusRollup } from "./FolderStatusRollup.js";
 import { FolderSpawnButtons } from "./FolderSpawnButtons.js";
+import { FolderStatusRollup } from "./FolderStatusRollup.js";
 import { InstallButton } from "./InstallButton.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { PiLogo } from "./PiLogo.js";
@@ -59,6 +57,8 @@ import { ThemePicker } from "./ThemePicker.js";
 import { ThemeToggle } from "./ThemeToggle.js";
 import { Toast, useToast } from "./Toast.js";
 import { TunnelButton } from "./TunnelButton.js";
+import { allTagsInUse } from "./tags/all-tags.js";
+import { TagFilterGroup } from "./tags/TagFilterGroup.js";
 import { WorkspaceHeader } from "./WorkspaceHeader.js";
 import { WorktreeSpawnDialog } from "./WorktreeSpawnDialog.js";
 
@@ -1032,7 +1032,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                       />
                       {resumeErrors?.get(session.id) && (
                         <div data-testid="resume-error-banner" className="mt-1 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-1.5 flex items-center gap-2 text-xs text-red-300">
-                          <span className="flex-1">{i18nT("auto.resume_failed", undefined, "Resume failed:")} {resumeErrors.get(session.id)}</span>
+                          <span className="flex-1">{i18nT("session.resumeFailed", undefined, "Resume failed:")} {resumeErrors.get(session.id)}</span>
                           {onDismissResumeError && (
                             <button
                               data-testid="resume-error-dismiss"
