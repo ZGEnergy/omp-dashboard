@@ -1,6 +1,10 @@
 /**
- * Minimal same-origin client for `/api/omp-config` used by the roles plugin.
+ * Minimal REST client for `/api/omp-config` used by the roles plugin.
  * Kept local so the plugin does not depend on the dashboard client package.
+ *
+ * API base: prefer `globalThis.__PI_DASHBOARD_API_BASE__` (set by App via
+ * setGlobalApiBase) so remote/tunnel dashboards hit the correct origin;
+ * fall back to same-origin relative paths (empty base).
  */
 
 export type OmpConfigEntry = {
@@ -15,6 +19,15 @@ export type OmpConfigSnapshot = {
   settings: Record<string, OmpConfigEntry>;
 };
 
+function apiBase(): string {
+  const g = globalThis as { __PI_DASHBOARD_API_BASE__?: string };
+  return typeof g.__PI_DASHBOARD_API_BASE__ === "string" ? g.__PI_DASHBOARD_API_BASE__ : "";
+}
+
+function url(path: string): string {
+  return `${apiBase()}${path}`;
+}
+
 async function parseBody(res: Response): Promise<Record<string, unknown>> {
   try {
     const body: unknown = await res.json();
@@ -26,7 +39,7 @@ async function parseBody(res: Response): Promise<Record<string, unknown>> {
 }
 
 export async function fetchOmpConfig(signal?: AbortSignal): Promise<OmpConfigSnapshot> {
-  const res = await fetch("/api/omp-config", { signal });
+  const res = await fetch(url("/api/omp-config"), { signal });
   const body = await parseBody(res);
   if (!res.ok || body.success !== true) {
     const error =
@@ -54,7 +67,7 @@ export async function setOmpConfig(
   value: unknown,
   signal?: AbortSignal,
 ): Promise<OmpConfigEntry> {
-  const res = await fetch("/api/omp-config", {
+  const res = await fetch(url("/api/omp-config"), {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ key, value }),

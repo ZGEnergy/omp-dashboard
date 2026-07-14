@@ -5,10 +5,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, fireEvent, act, cleanup, waitFor } from "@testing-library/react";
 import React from "react";
 import {
-  PluginContextProvider,
-} from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import {
-  createSlotRegistry,
+  PluginContextProvider,
+  CurrentPluginLayer,
+} from "@blackbelt-technology/dashboard-plugin-runtime/context";
   SettingsDraftProvider,
   type RegisteredSource,
 } from "@blackbelt-technology/dashboard-plugin-runtime";
@@ -66,7 +66,9 @@ function wrap(
       sessions={[{ id: "sess-live", cwd: "/x", status: "idle" } as never]}
       send={() => {}}
     >
-      <SettingsDraftProvider registry={draft}>{children}</SettingsDraftProvider>
+      <CurrentPluginLayer pluginId="roles">
+        <SettingsDraftProvider registry={draft}>{children}</SettingsDraftProvider>
+      </CurrentPluginLayer>
     </PluginContextProvider>,
   );
 }
