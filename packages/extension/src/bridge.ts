@@ -33,6 +33,7 @@ import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
 import { PromptBus } from "./prompt-bus.js";
 import { DashboardDefaultAdapter } from "./dashboard-default-adapter.js";
 import { registerAskUserTool } from "./ask-user-tool.js";
+import { registerAskTool } from "./ask-tool.js";
 import { registerRoleModelTools } from "./role-model-tools.js";
 import { decodeMultiselectAnswer } from "./multiselect-decode.js";
 import { activate as activateProviderRegister, onProviderChanged, reloadProviders, buildProviderCatalogue, toModelInfo } from "./provider-register.js";
@@ -133,6 +134,14 @@ export default function (pi: ExtensionAPI) {
     // Anthropic-messages payload transforms (system prompt rewrite + tool
     // filter/remap) are handled by the installed @benvargas/pi-claude-code-use
     // package when present. No local duplication here.
+
+    // Register core-named `ask` at factory load (before createAgentSession
+    // snapshots extensionRunner.getAllRegisteredTools into toolRegistry).
+    // session_start registration is too late — only mutates ext.tools.
+    // Routes execute through PromptBus-patched ctx.ui (same as ask_user).
+    // Overwrites core AskTool when present; TUI sessions still work via the
+    // PromptBus TUI adapter registered when original hasUI is true.
+    registerAskTool(pi);
 
     initBridge(pi);
   } catch (err) {
