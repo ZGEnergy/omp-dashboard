@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it, vi } from "vitest";
 import {
   createOmpConfigCli,
   OmpConfigCliError,
@@ -33,7 +33,32 @@ function makeExec(handler: (file: string, args: readonly string[]) => unknown): 
   };
 }
 
+
 describe("createOmpConfigCli", () => {
+  it("accepts successful CLI output without stderr", async () => {
+    const cli = createOmpConfigCli({
+      resolveOmpBin: () => "/usr/bin/omp",
+      execFile: async () => ({ stdout: JSON.stringify(FIXTURE), stderr: undefined }),
+    });
+
+    await expect(cli.list()).resolves.toMatchObject({
+      autoResume: { type: "boolean", value: false },
+    });
+  });
+  it("uses OMP_BIN from the injected environment", async () => {
+    const cli = createOmpConfigCli({
+      env: { OMP_BIN: "/custom/omp" },
+      execFile: makeExec((file, args) => {
+        expect(file).toBe("/custom/omp");
+        expect(args).toEqual(["config", "list", "--json"]);
+        return FIXTURE;
+      }),
+    });
+
+    await expect(cli.list()).resolves.toHaveProperty("autoResume");
+  });
+
+
   it("list normalizes fixture map into keyed entries", async () => {
     const cli = createOmpConfigCli({
       resolveOmpBin: () => "/usr/bin/omp",

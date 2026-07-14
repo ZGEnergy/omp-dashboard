@@ -60,7 +60,7 @@ export type OmpConfigExecFile = (
     maxBuffer: number;
     env: NodeJS.ProcessEnv;
   },
-) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
+  ) => Promise<{ stdout: string | Buffer; stderr?: string | Buffer }>;
 
 export interface OmpConfigCliOptions {
   resolveOmpBin?: ResolveOmpBin;
@@ -81,8 +81,8 @@ export interface OmpConfigCli {
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_BUFFER = 20 * 1024 * 1024;
 
-function defaultResolveOmpBin(): string | null {
-  const override = process.env.OMP_BIN?.trim();
+function defaultResolveOmpBin(env: NodeJS.ProcessEnv = process.env): string | null {
+  const override = env.OMP_BIN?.trim();
   if (override) return override;
 
   try {
@@ -113,7 +113,8 @@ function encodeSetValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function toText(buf: string | Buffer): string {
+function toText(buf: string | Buffer | undefined): string {
+  if (buf == null) return "";
   return typeof buf === "string" ? buf : buf.toString("utf-8");
 }
 
@@ -217,9 +218,9 @@ function normalizeEntry(raw: unknown, fallbackKey: string): OmpConfigEntry {
 }
 
 export function createOmpConfigCli(options: OmpConfigCliOptions = {}): OmpConfigCli {
-  const resolveBin = options.resolveOmpBin ?? defaultResolveOmpBin;
-  const execFile = options.execFile ?? execFileAsync;
   const env = options.env ?? process.env;
+  const resolveBin = options.resolveOmpBin ?? (() => defaultResolveOmpBin(env));
+  const execFile = options.execFile ?? execFileAsync;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   async function run(args: string[]): Promise<string> {
