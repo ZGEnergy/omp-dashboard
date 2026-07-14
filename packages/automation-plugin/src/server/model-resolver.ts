@@ -2,15 +2,16 @@
  * Model resolution at spawn time.
  *
  * `model` may be a bare provider/model id (passthrough) or an `@role` alias.
- * `@role` is resolved against `~/.pi/agent/providers.json#roles` (the same
- * map the roles plugin writes). An unresolvable role falls back to the
- * configured default model AND surfaces a run error — never a silent pick.
+ * `@role` is resolved against OMP `config.yml#modelRoles` (the same map the
+ * roles plugin writes). An unresolvable role falls back to the configured
+ * default model AND surfaces a run error — never a silent pick.
  *
- * See change: add-automation-plugin.
+ * See change: add-automation-plugin; OMP settings mirror cutover.
  */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parse as parseYaml } from "yaml";
 
 export interface ResolveResult {
   /** Concrete provider/model id to spawn with (empty → shell default). */
@@ -19,19 +20,38 @@ export interface ResolveResult {
   error?: string;
 }
 
-/** Read `roles` from `~/.pi/agent/providers.json`. Returns `{}` on any failure. */
+function asRolesMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === "string" && v.trim() !== "") out[k] = v.trim();
+  }
+  return out;
+}
+
+/**
+ * Read `modelRoles` from OMP agent config.yml.
+ * Precedence: PI_CODING_AGENT_DIR, else `~/.omp/agent/config.yml`.
+ * Returns `{}` on any failure.
+ */
 export function readRolesFromDisk(homeDir: string = os.homedir()): Record<string, string> {
-  const p = path.join(homeDir, ".pi", "agent", "providers.json");
+  const agentDirEnv = process.env.PI_CODING_AGENT_DIR?.trim();
+  const agentDir = agentDirEnv
+    ? agentDirEnv
+    : path.join(homeDir, ".omp", "agent");
+  const p = path.join(agentDir, "config.yml");
   try {
-    const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as { roles?: Record<string, string> };
-    return raw.roles ?? {};
+    const raw = fs.readFileSync(p, "utf-8");
+    const doc: unknown = parseYaml(raw);
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) return {};
+    return asRolesMap((doc as Record<string, unknown>).modelRoles);
   } catch {
     return {};
   }
 }
 
 export interface ResolveOptions {
-  /** Role map (injectable for tests). Defaults to on-disk providers.json. */
+  /** Role map (injectable for tests). Defaults to on-disk OMP modelRoles. */
   readRoles?: () => Record<string, string>;
   /** Configured fallback model id when an `@role` is unresolved. */
   defaultModel?: string;

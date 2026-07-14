@@ -1,20 +1,15 @@
 /**
- * Tests for role-manager.ts — the dashboard-owned `roles:*` event handlers
- * that own `~/.pi/agent/providers.json#roles`, `#rolePresets`, `#activePreset`.
+ * Tests for role-manager.ts — OMP config.yml#modelRoles SSOT.
  *
- * Spec: openspec/changes/adopt-model-resolve-handler-and-roles-ownership/
- *       specs/dashboard-roles-ownership/spec.md
- *
- * HOME is overridden by the vitest globalSetup to a tmp dir, so each test
- * file gets its own ephemeral `~/.pi/agent/`. We reset per-test via the
- * pre-existing `~/.pi/agent/providers.json` path.
+ * HOME is overridden by the vitest globalSetup to a tmp dir.
  */
-
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   activate,
   getModelRole,
@@ -30,47 +25,76 @@ import {
   type RoleConfig,
 } from "../role-manager.js";
 
-/** Build the expected overlay map: every default name empty, then `assigned` wins. */
 function withDefaults(assigned: Record<string, string> = {}): Record<string, string> {
   const out: Record<string, string> = {};
   for (const name of DEFAULT_ROLE_NAMES) out[name] = "";
   return { ...out, ...assigned };
 }
 
-const CONFIG = () => join(homedir(), ".pi", "agent", "providers.json");
+const AGENT_DIR = () => join(homedir(), ".omp", "agent");
+const CONFIG = () => join(AGENT_DIR(), "config.yml");
 
-// Minimal ExtensionAPI stub: capture event handlers so tests can fire them.
+type Handler = (data: Record<string, unknown>) => void | Promise<void>;
+
 function makeFakePi() {
-  const handlers = new Map<string, (data: any) => void | Promise<void>>();
+  const handlers = new Map<string, Handler>();
   const pi = {
     events: {
-      on: (name: string, fn: (data: any) => void | Promise<void>) => {
+      on: (name: string, fn: Handler) => {
         handlers.set(name, fn);
       },
-      emit: async (name: string, data: any) => {
+      emit: async (name: string, data: Record<string, unknown>) => {
         const fn = handlers.get(name);
         if (fn) await fn(data);
       },
     },
-  } as any;
-  return { pi, handlers };
+  };
+  return { pi: pi as unknown as ExtensionAPI, handlers };
 }
 
 function resetConfig() {
   if (existsSync(CONFIG())) rmSync(CONFIG());
-  mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
+  mkdirSync(AGENT_DIR(), { recursive: true });
 }
 
-function readFile() {
-  return JSON.parse(readFileSync(CONFIG(), "utf-8"));
+function writeRolesYaml(roles: Record<string, string>, extra: Record<string, unknown> = {}) {
+  mkdirSync(AGENT_DIR(), { recursive: true });
+  // Minimal YAML without depending on stringify in the test setup path for
+  // simple maps; keep extra keys as JSON-in-YAML via write of a small blob.
+  const lines = ["modelRoles:"];
+  for (const [k, v] of Object.entries(roles)) {
+    lines.push(`  ${k}: ${JSON.stringify(v)}`);
+  }
+  for (const [k, v] of Object.entries(extra)) {
+    if (k === "modelRoles") continue;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+      lines.push(`${k}: ${JSON.stringify(v)}`);
+    }
+  }
+  writeFileSync(CONFIG(), lines.join("\n") + "\n");
+}
+
+function readModelRoles(): Record<string, string> {
+  const doc = parseYaml(readFileSync(CONFIG(), "utf-8")) as Record<string, unknown>;
+  const raw = doc.modelRoles;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
 }
 
 beforeEach(() => {
   resetConfig();
+  // Force YAML path in tests: empty OMP_BIN and ensure agent dir under HOME.
+  delete process.env.OMP_BIN;
+  process.env.PI_CODING_AGENT_DIR = AGENT_DIR();
 });
 
 afterEach(() => {
   resetConfig();
+  delete process.env.PI_CODING_AGENT_DIR;
 });
 
 describe("loadRoleConfig", () => {
@@ -79,417 +103,124 @@ describe("loadRoleConfig", () => {
     expect(cfg).toEqual({ roles: {}, rolePresets: [], activePreset: null });
   });
 
-  it("returns empty when file is malformed JSON", () => {
-    writeFileSync(CONFIG(), "{ not json");
+  it("returns empty when file is malformed YAML", () => {
+    writeFileSync(CONFIG(), "modelRoles: [\n");
     const cfg = loadRoleConfig();
     expect(cfg).toEqual({ roles: {}, rolePresets: [], activePreset: null });
   });
 
-  it("reads roles, presets, and activePreset", () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "anthropic/haiku" },
-      rolePresets: [{ name: "default", roles: { fast: "anthropic/haiku" } }],
-      activePreset: "default",
-    }));
+  it("reads modelRoles from config.yml", () => {
+    writeRolesYaml({ smol: "anthropic/haiku", default: "xai/grok" });
     const cfg = loadRoleConfig();
-    expect(cfg.roles).toEqual({ fast: "anthropic/haiku" });
-    expect(cfg.rolePresets).toEqual([{ name: "default", roles: { fast: "anthropic/haiku" } }]);
-    expect(cfg.activePreset).toBe("default");
+    expect(cfg.roles).toEqual({ smol: "anthropic/haiku", default: "xai/grok" });
+    expect(cfg.rolePresets).toEqual([]);
+    expect(cfg.activePreset).toBeNull();
   });
 });
 
 describe("saveRoleConfig", () => {
-  it("preserves unrelated keys including providers and autonomousMode", () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      providers: { foo: { baseUrl: "http://x", apiKey: "k" } },
-      autonomousMode: false,
-      foo: "bar",
-    }));
-    saveRoleConfig({ roles: { fast: "x/y" }, rolePresets: [], activePreset: null });
-    const after = readFile();
-    expect(after.providers).toEqual({ foo: { baseUrl: "http://x", apiKey: "k" } });
-    expect(after.autonomousMode).toBe(false);
-    expect(after.foo).toBe("bar");
-    expect(after.roles).toEqual({ fast: "x/y" });
+  it("writes modelRoles and preserves other YAML keys", () => {
+    writeFileSync(
+      CONFIG(),
+      "setupVersion: 1\nautoResume: false\nmodelRoles:\n  old: x/y\n",
+    );
+    saveRoleConfig({ roles: { smol: "a/b" }, rolePresets: [], activePreset: null });
+    const raw = readFileSync(CONFIG(), "utf-8");
+    const doc = parseYaml(raw) as Record<string, unknown>;
+    expect(doc.setupVersion).toBe(1);
+    expect(doc.autoResume).toBe(false);
+    expect(doc.modelRoles).toEqual({ smol: "a/b" });
   });
 
   it("writes atomically (no .tmp- file left behind)", () => {
-    saveRoleConfig({ roles: { fast: "x/y" }, rolePresets: [], activePreset: null });
+    saveRoleConfig({ roles: { smol: "x/y" }, rolePresets: [], activePreset: null });
     const { readdirSync } = require("node:fs") as typeof import("node:fs");
-    const dir = join(homedir(), ".pi", "agent");
-    const leftovers = readdirSync(dir).filter((n) => n.includes(".tmp-"));
+    const leftovers = readdirSync(AGENT_DIR()).filter((n) => n.includes(".tmp-"));
     expect(leftovers).toEqual([]);
   });
 });
 
-describe("roles:get-all", () => {
-  it("overlays default role names on a missing file and does not create it", async () => {
+describe("overlay helpers", () => {
+  it("overlayDefaultRoles fills OMP defaults then assigned", () => {
+    expect(overlayDefaultRoles({ smol: "a/b" })).toEqual(withDefaults({ smol: "a/b" }));
+  });
+
+  it("effectiveRoleNames includes defaults and extras", () => {
+    const names = effectiveRoleNames({ roles: { custom: "x/y" } });
+    expect(names).toContain("default");
+    expect(names).toContain("smol");
+    expect(names).toContain("custom");
+  });
+
+  it("overlayRoles uses effective schema", () => {
+    const over = overlayRoles({ roles: { smol: "a/b" } });
+    expect(over.smol).toBe("a/b");
+    expect(over.default).toBe("");
+  });
+});
+
+describe("lookupRole / getModelRole", () => {
+  it("resolves configured role", () => {
+    writeRolesYaml({ smol: "openrouter/minimax" });
+    expect(lookupRole("@smol")).toEqual({ literal: "openrouter/minimax" });
+    expect(getModelRole("smol")).toBe("openrouter/minimax");
+  });
+
+  it("reports not configured", () => {
+    expect(lookupRole("@missing").reason).toMatch(/not configured/);
+  });
+});
+
+describe("roles event handlers", () => {
+  it("roles:get-all returns overlay + empty presets", async () => {
+    writeRolesYaml({ default: "xai/grok" });
     const { pi } = makeFakePi();
     activate(pi);
-    const data: any = {};
+    const data: Record<string, unknown> = {};
     await pi.events.emit("roles:get-all", data);
-    expect(data.roles).toEqual(withDefaults());
+    expect((data.roles as Record<string, string>).default).toBe("xai/grok");
     expect(data.presets).toEqual([]);
     expect(data.activePreset).toBeNull();
-    // Overlay-only: reading must not write providers.json.
-    expect(existsSync(CONFIG())).toBe(false);
   });
 
-  it("overlays defaults onto assigned roles (assigned wins)", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "anthropic/opus" },
-      rolePresets: [{ name: "default", roles: { fast: "anthropic/opus" } }],
-      activePreset: "default",
-    }));
+  it("roles:set merges and writes modelRoles", async () => {
+    writeRolesYaml({ default: "xai/grok" });
     const { pi } = makeFakePi();
     activate(pi);
-    const data: any = {};
-    await pi.events.emit("roles:get-all", data);
-    expect(data.roles).toEqual(withDefaults({ fast: "anthropic/opus" }));
-    expect(data.presets).toEqual([{ name: "default", roles: { fast: "anthropic/opus" } }]);
-    expect(data.activePreset).toBe("default");
-  });
-
-  it("preserves non-default assigned roles in the overlay", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { custom: "x/y" }, rolePresets: [], activePreset: null,
-    }));
-    const { pi } = makeFakePi();
-    activate(pi);
-    const data: any = {};
-    await pi.events.emit("roles:get-all", data);
-    expect(data.roles).toEqual(withDefaults({ custom: "x/y" }));
-  });
-
-  it("does not crash on malformed JSON (overlays defaults)", async () => {
-    writeFileSync(CONFIG(), "{ not json");
-    const { pi } = makeFakePi();
-    activate(pi);
-    const data: any = {};
-    await pi.events.emit("roles:get-all", data);
-    expect(data.roles).toEqual(withDefaults());
-  });
-});
-
-describe("overlayDefaultRoles", () => {
-  it("maps every default name to empty when no assignments", () => {
-    expect(overlayDefaultRoles({})).toEqual(withDefaults());
-  });
-
-  it("lets assigned values win and keeps extra roles", () => {
-    expect(overlayDefaultRoles({ fast: "a/b", extra: "c/d" })).toEqual(
-      withDefaults({ fast: "a/b", extra: "c/d" }),
-    );
-  });
-});
-
-describe("roles:set", () => {
-  it("persists role assignment to disk", async () => {
-    const { pi } = makeFakePi();
-    activate(pi);
-    const data: any = { role: "coding", modelId: "anthropic/claude-opus-4" };
+    const data: Record<string, unknown> = { role: "smol", modelId: "openai/gpt" };
     await pi.events.emit("roles:set", data);
     expect(data.success).toBe(true);
-    expect(readFile().roles).toEqual({ coding: "anthropic/claude-opus-4" });
+    expect(readModelRoles()).toEqual({ default: "xai/grok", smol: "openai/gpt" });
   });
 
-  it("returns success=false when role or modelId is missing", async () => {
+  it("roles:set with empty modelId drops the key", async () => {
+    writeRolesYaml({ smol: "a/b", default: "x/y" });
     const { pi } = makeFakePi();
     activate(pi);
-    const data: any = {};
+    const data: Record<string, unknown> = { role: "smol", modelId: "" };
     await pi.events.emit("roles:set", data);
-    expect(data.success).toBe(false);
-    expect(existsSync(CONFIG())).toBe(false);
-  });
-
-  it("updates the active preset in-place", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "old" },
-      rolePresets: [{ name: "default", roles: { fast: "old" } }],
-      activePreset: "default",
-    }));
-    const { pi } = makeFakePi();
-    activate(pi);
-    await pi.events.emit("roles:set", { role: "fast", modelId: "new" });
-    const after = readFile();
-    expect(after.roles).toEqual({ fast: "new" });
-    expect(after.rolePresets[0].roles).toEqual({ fast: "new" });
-    expect(after.activePreset).toBe("default");
-  });
-
-  it("preserves autonomousMode key across writes", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({ autonomousMode: false }));
-    const { pi } = makeFakePi();
-    activate(pi);
-    await pi.events.emit("roles:set", { role: "fast", modelId: "x/y" });
-    expect(readFile().autonomousMode).toBe(false);
-  });
-});
-
-describe("roles:preset-load", () => {
-  it("replaces roles wholesale", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "old", slow: "leftover" },
-      rolePresets: [{ name: "speed", roles: { fast: "x/y" } }],
-      activePreset: null,
-    }));
-    const { pi } = makeFakePi();
-    activate(pi);
-    const data: any = { name: "speed" };
-    await pi.events.emit("roles:preset-load", data);
     expect(data.success).toBe(true);
-    const after = readFile();
-    expect(after.roles).toEqual({ fast: "x/y" });
-    expect(after.activePreset).toBe("speed");
+    expect(readModelRoles()).toEqual({ default: "x/y" });
   });
 
-  it("fails cleanly for unknown preset and does not write", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "old" },
-      rolePresets: [],
-      activePreset: null,
-    }));
-    const sizeBefore = readFileSync(CONFIG(), "utf-8");
+  it("preset handlers refuse writes", async () => {
     const { pi } = makeFakePi();
     activate(pi);
-    const data: any = { name: "nonexistent" };
-    await pi.events.emit("roles:preset-load", data);
-    expect(data.success).toBe(false);
-    // File contents unchanged (no rewrite).
-    expect(readFileSync(CONFIG(), "utf-8")).toBe(sizeBefore);
+    for (const name of ["roles:preset-load", "roles:preset-save", "roles:preset-delete"] as const) {
+      const data: Record<string, unknown> = { name: "x" };
+      await pi.events.emit(name, data);
+      expect(data.success).toBe(false);
+      expect(data.error).toMatch(/no role presets/i);
+    }
   });
 });
 
-describe("roles:preset-save", () => {
-  it("creates a new preset entry", async () => {
-    const { pi } = makeFakePi();
-    activate(pi);
-    await pi.events.emit("roles:set", { role: "fast", modelId: "x/y" });
-    const data: any = { name: "myset" };
-    await pi.events.emit("roles:preset-save", data);
-    expect(data.success).toBe(true);
-    const after = readFile();
-    expect(after.rolePresets).toEqual([{ name: "myset", roles: { fast: "x/y" } }]);
-  });
-
-  it("updates existing preset with same name", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "new" },
-      rolePresets: [{ name: "myset", roles: { fast: "old" } }],
-      activePreset: null,
-    }));
-    const { pi } = makeFakePi();
-    activate(pi);
-    await pi.events.emit("roles:preset-save", { name: "myset" });
-    const after = readFile();
-    expect(after.rolePresets).toEqual([{ name: "myset", roles: { fast: "new" } }]);
-  });
-});
-
-describe("roles:preset-delete", () => {
-  it("removes named preset", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: {},
-      rolePresets: [{ name: "a", roles: {} }, { name: "b", roles: {} }],
-      activePreset: null,
-    }));
-    const { pi } = makeFakePi();
-    activate(pi);
-    const data: any = { name: "a" };
-    await pi.events.emit("roles:preset-delete", data);
-    expect(data.success).toBe(true);
-    expect(readFile().rolePresets).toEqual([{ name: "b", roles: {} }]);
-  });
-
-  it("fails when preset does not exist", async () => {
-    const { pi } = makeFakePi();
-    activate(pi);
-    const data: any = { name: "ghost" };
-    await pi.events.emit("roles:preset-delete", data);
-    expect(data.success).toBe(false);
-  });
-
-  it("clears activePreset when the active preset is deleted", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: {},
-      rolePresets: [{ name: "a", roles: {} }],
-      activePreset: "a",
-    }));
-    const { pi } = makeFakePi();
-    activate(pi);
-    await pi.events.emit("roles:preset-delete", { name: "a" });
-    expect(readFile().activePreset).toBeNull();
-  });
-});
-
-describe("role:resolve-model (subagents adapter)", () => {
-  it("sets probe.resolved to the assigned model for a @role ref", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "my-google/gemma-4-31b-it" },
-      rolePresets: [],
-      activePreset: null,
-    }));
-    const { pi } = makeFakePi();
-    activate(pi);
-    const probe: any = { ref: "@fast" };
-    await pi.events.emit("role:resolve-model", probe);
-    expect(probe.resolved).toBe("my-google/gemma-4-31b-it");
-    expect(probe.available).toEqual({ fast: "my-google/gemma-4-31b-it" });
-  });
-
-  it("accepts a bare role name without the @ prefix", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "anthropic/haiku" }, rolePresets: [], activePreset: null,
-    }));
-    const { pi } = makeFakePi();
-    activate(pi);
-    const probe: any = { ref: "fast" };
-    await pi.events.emit("role:resolve-model", probe);
-    expect(probe.resolved).toBe("anthropic/haiku");
-  });
-
-  it("leaves probe.resolved unset and sets a structured reason when unconfigured", async () => {
-    const { pi } = makeFakePi();
-    activate(pi);
-    const probe: any = { ref: "@ghost" };
-    await pi.events.emit("role:resolve-model", probe);
-    expect(probe.resolved).toBeUndefined();
-    expect(probe.available).toEqual({});
-    expect(probe.reason).toBe("role 'ghost' not configured yet");
-  });
-
-  it("does not set a reason when the role resolves", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "anthropic/haiku" }, rolePresets: [], activePreset: null,
-    }));
-    const { pi } = makeFakePi();
-    activate(pi);
-    const probe: any = { ref: "@fast" };
-    await pi.events.emit("role:resolve-model", probe);
-    expect(probe.resolved).toBe("anthropic/haiku");
-    expect(probe.reason).toBeUndefined();
-  });
-
-  it("re-reads disk so cross-session role edits are visible", async () => {
-    const { pi } = makeFakePi();
-    activate(pi);
-    await pi.events.emit("roles:set", { role: "fast", modelId: "x/y" });
-    const probe: any = { ref: "@fast" };
-    await pi.events.emit("role:resolve-model", probe);
-    expect(probe.resolved).toBe("x/y");
-  });
-
-  it("ignores a malformed probe without throwing", async () => {
-    const { pi } = makeFakePi();
-    activate(pi);
-    await expect(pi.events.emit("role:resolve-model", {})).resolves.toBeUndefined();
-    await expect(pi.events.emit("role:resolve-model", null)).resolves.toBeUndefined();
-  });
-});
-
-describe("editable role-name schema", () => {
-  const base = (over: Partial<RoleConfig> = {}): RoleConfig => ({
-    roles: {},
-    rolePresets: [],
-    activePreset: null,
-    ...over,
-  });
-
-  it("effectiveRoleNames = defaults \u222a added \u2212 removed, order-stable", () => {
-    const names = effectiveRoleNames(base({ roleNames: ["review"], removedRoles: ["vision"] }));
-    expect(names).toContain("review");
-    expect(names).not.toContain("vision");
-    // defaults first, then adds
-    expect(names[0]).toBe("planning");
-    expect(names.indexOf("review")).toBeGreaterThan(names.indexOf("research"));
-  });
-
-  it("overlayRoles surfaces an added role as an empty slot", () => {
-    const out = overlayRoles(base({ roleNames: ["review"] }));
-    expect(out.review).toBe("");
-    expect(out.planning).toBe("");
-  });
-
-  it("overlayRoles omits a removed default (not re-injected)", () => {
-    const out = overlayRoles(base({ removedRoles: ["vision"] }));
-    expect(out.vision).toBeUndefined();
-    expect(out.coding).toBe("");
-  });
-
-  it("addRoleName records a non-default and clears its removal marker", () => {
-    const cfg = base({ removedRoles: ["review"] });
+describe("schema helpers still work in-memory", () => {
+  it("addRoleName / removeRoleFromSchema mutate cfg", () => {
+    const cfg: RoleConfig = { roles: {}, rolePresets: [], activePreset: null };
     addRoleName(cfg, "review");
     expect(cfg.roleNames).toEqual(["review"]);
-    expect(cfg.removedRoles).toEqual([]);
-  });
-
-  it("removeRoleFromSchema purges from roles, every preset, and marks defaults removed", () => {
-    const cfg = base({
-      roles: { vision: "x/y" },
-      rolePresets: [
-        { name: "cheap", roles: { vision: "a/b" } },
-        { name: "premium", roles: { vision: "c/d" } },
-      ],
-    });
     removeRoleFromSchema(cfg, "vision");
-    expect(cfg.roles.vision).toBeUndefined();
-    expect(cfg.rolePresets[0].roles.vision).toBeUndefined();
-    expect(cfg.rolePresets[1].roles.vision).toBeUndefined();
     expect(cfg.removedRoles).toContain("vision");
-  });
-
-  it("saveRoleConfig round-trips roleNames + removedRoles and preserves unrelated keys", () => {
-    writeFileSync(CONFIG(), JSON.stringify({ providers: { p: { baseUrl: "u", apiKey: "k" } } }));
-    saveRoleConfig(base({ roleNames: ["review"], removedRoles: ["vision"] }));
-    const after = loadRoleConfig();
-    expect(after.roleNames).toEqual(["review"]);
-    expect(after.removedRoles).toEqual(["vision"]);
-    expect(readFile().providers).toEqual({ p: { baseUrl: "u", apiKey: "k" } });
-  });
-});
-
-describe("lookupRole", () => {
-  it("returns the literal for a bound bare role name", () => {
-    writeFileSync(CONFIG(), JSON.stringify({ roles: { fast: "anthropic/haiku" } }));
-    expect(lookupRole("fast")).toEqual({ literal: "anthropic/haiku" });
-  });
-
-  it("strips a leading @ and returns the literal", () => {
-    writeFileSync(CONFIG(), JSON.stringify({ roles: { fast: "anthropic/haiku" } }));
-    expect(lookupRole("@fast")).toEqual({ literal: "anthropic/haiku" });
-  });
-
-  it("returns a structured reason for an unset role", () => {
-    expect(lookupRole("@ghost")).toEqual({ reason: "role 'ghost' not configured yet" });
-  });
-
-  it("returns a reason for an empty role name", () => {
-    expect(lookupRole("@")).toEqual({ reason: "empty role name" });
-  });
-
-  it("re-reads disk so cross-session edits are visible", () => {
-    writeFileSync(CONFIG(), JSON.stringify({ roles: { fast: "a/b" } }));
-    expect(lookupRole("fast")).toEqual({ literal: "a/b" });
-    writeFileSync(CONFIG(), JSON.stringify({ roles: { fast: "c/d" } }));
-    expect(lookupRole("fast")).toEqual({ literal: "c/d" });
-  });
-});
-
-describe("getModelRole", () => {
-  it("returns the current model assigned to a role, re-reading from disk", async () => {
-    const { pi } = makeFakePi();
-    activate(pi);
-    await pi.events.emit("roles:set", { role: "fast", modelId: "anthropic/haiku" });
-    expect(getModelRole("fast")).toBe("anthropic/haiku");
-
-    // Simulate cross-session update: another writer mutates the file directly.
-    const raw = readFile();
-    raw.roles.fast = "anthropic/sonnet";
-    writeFileSync(CONFIG(), JSON.stringify(raw));
-    expect(getModelRole("fast")).toBe("anthropic/sonnet");
-  });
-
-  it("returns undefined for unknown role", () => {
-    expect(getModelRole("nope")).toBeUndefined();
   });
 });

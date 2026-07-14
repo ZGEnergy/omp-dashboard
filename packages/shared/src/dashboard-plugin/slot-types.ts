@@ -177,6 +177,7 @@ export type SettingsTab =
   | "general"
   | "server"
   | "sessions"
+  | "omp"
   | "remote"
   | "security"
   | "providers"
@@ -195,6 +196,7 @@ export const VALID_SETTINGS_TABS: SettingsTab[] = [
   "general",
   "server",
   "sessions",
+  "omp",
   "remote",
   "security",
   "providers",

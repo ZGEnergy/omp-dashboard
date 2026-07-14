@@ -36,7 +36,7 @@ import { registerAskUserTool } from "./ask-user-tool.js";
 import { registerRoleModelTools } from "./role-model-tools.js";
 import { decodeMultiselectAnswer } from "./multiselect-decode.js";
 import { activate as activateProviderRegister, onProviderChanged, reloadProviders, buildProviderCatalogue, toModelInfo } from "./provider-register.js";
-import { activate as activateRoleManager } from "./role-manager.js";
+import { activate as activateRoleManager, getModelRole } from "./role-manager.js";
 import type { FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { startMetricsMonitor, stopMetricsMonitor, collectMetrics } from "./process-metrics.js";
 import { scanChildProcesses, getOwnPgid } from "./process-scanner.js";
@@ -195,24 +195,39 @@ function initBridge(pi: ExtensionAPI) {
   let cachedCwd: string | undefined;
   let pendingDefaultModel: string | null = null; // non-null if default model not yet applied (custom provider not ready)
 
-  /** Try to apply the default model from config. Returns the model string if not found (pending), null if applied or no default. */
+  /** Try to apply the default model. Prefer OMP modelRoles.default, then dashboard config.defaultModel. */
   function applyDefaultModel(): string | null {
-    const freshConfig = loadConfig();
-    if (!freshConfig.defaultModel || !cachedModelRegistry) return null;
-    const slashIdx = freshConfig.defaultModel.indexOf("/");
+    if (!cachedModelRegistry) return null;
+    let modelRef = "";
+    try {
+      modelRef = getModelRole("default") ?? "";
+    } catch {
+      modelRef = "";
+    }
+    if (!modelRef) {
+      const freshConfig = loadConfig();
+      modelRef = freshConfig.defaultModel ?? "";
+    }
+    if (!modelRef) return null;
+    const slashIdx = modelRef.indexOf("/");
     if (slashIdx <= 0) return null;
-    const provider = freshConfig.defaultModel.slice(0, slashIdx);
-    const modelId = freshConfig.defaultModel.slice(slashIdx + 1);
+    const provider = modelRef.slice(0, slashIdx);
+    const modelId = modelRef.slice(slashIdx + 1);
     try {
       const found = cachedModelRegistry.find(provider, modelId);
       if (found) {
-        (pi as any).setModel(found).then(() => {
-          setTimeout(() => sendModelUpdateIfChanged(), 50);
-        }).catch(() => {});
+        const setModel = (pi as { setModel?: (m: unknown) => Promise<unknown> }).setModel;
+        if (setModel) {
+          void setModel(found)
+            .then(() => {
+              setTimeout(() => sendModelUpdateIfChanged(), 50);
+            })
+            .catch(() => {});
+        }
         return null; // applied
       }
     } catch { /* ignore */ }
-    return freshConfig.defaultModel; // not found yet — pending
+    return modelRef; // not found yet — pending
   }
 
   /** Query pi-flows for available flows via synchronous event RPC */
@@ -2247,11 +2262,17 @@ function initBridge(pi: ExtensionAPI) {
     // See changes: fix-resume-keeps-session-model, fix-default-model-new-session-entry-count.
     const entryCount = ctx.sessionManager.buildSessionContext?.()?.messages?.length ?? 0;
     const freshConfig = loadConfig();
+    let ompDefault = "";
+    try {
+      ompDefault = getModelRole("default") ?? "";
+    } catch {
+      ompDefault = "";
+    }
     if (shouldApplyDefaultModel({
       reason: _event?.reason,
       entryCount,
       hasModelRegistry: Boolean(cachedModelRegistry),
-      hasDefaultModel: Boolean(freshConfig.defaultModel),
+      hasDefaultModel: Boolean(ompDefault || freshConfig.defaultModel),
     })) {
       pendingDefaultModel = applyDefaultModel();
     }

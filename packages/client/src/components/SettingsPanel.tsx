@@ -3,7 +3,7 @@ import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-
 import { VALID_SETTINGS_TABS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
 import { DISPLAY_PRESETS, type DisplayPrefs } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
 import type { NpmPackageResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
-import { mdiAlert, mdiArrowLeft, mdiBookOpenPageVariant, mdiCheckCircle, mdiClipboardText, mdiCloseCircle, mdiCog, mdiContentSave, mdiDelete, mdiFileDocumentEditOutline, mdiKey, mdiLoading, mdiLock, mdiPackageVariant, mdiPalette, mdiPlay, mdiPlus, mdiPuzzle, mdiPuzzleOutline, mdiRestart, mdiRobotOutline, mdiServer, mdiTextBoxOutline, mdiUpdate, mdiViewDashboard, mdiWeb, mdiWrench } from "@mdi/js";
+import { mdiAlert, mdiArrowLeft, mdiBookOpenPageVariant, mdiCheckCircle, mdiClipboardText, mdiCloseCircle, mdiCog, mdiContentSave, mdiDelete, mdiFileDocumentEditOutline, mdiKey, mdiLoading, mdiLock, mdiPackageVariant, mdiPalette, mdiPlay, mdiPlus, mdiPuzzle, mdiPuzzleOutline, mdiRestart, mdiRobotOutline, mdiServer, mdiTextBoxOutline, mdiUpdate, mdiViewDashboard, mdiWeb, mdiWrench, mdiChip } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -28,6 +28,8 @@ import { ModelProxySection } from "./ModelProxySection.js";
 import { ModelSelector } from "./ModelSelector.js";
 import { NetworkDiscoverySection } from "./NetworkDiscoverySection.js";
 import { OpenSpecProfileSection } from "./OpenSpecProfileSection.js";
+import { OmpSettingsPage } from "./OmpSettingsPage.js";
+import { fetchOmpConfig, mergeOmpModelRoles } from "../lib/omp-config-api.js";
 import { PackageBrowser } from "./PackageBrowser.js";
 import { PackageInstallConfirmDialog } from "./PackageInstallConfirmDialog.js";
 import { PackageReadmeDialog } from "./PackageReadmeDialog.js";
@@ -161,7 +163,6 @@ const CONFIG_FIELD_PAGE: Record<string, string> = {
   tunnel: "server", memoryLimits: "server",
   spawnStrategy: "sessions", reattachPlacement: "sessions", reopenSessionsAfterShutdown: "sessions", completedFirst: "sessions",
   questionFirst: "sessions", askUserPromptTimeoutSeconds: "sessions", spawnRegisterTimeoutMs: "sessions",
-  gitWorktreeEnabled: "sessions", dashboardName: "sessions", defaultModel: "sessions",
   windowsGitSource: "sessions", autoStart: "sessions",
   trustedNetworks: "security", auth: "security",
   modelProxy: "providers",
@@ -221,7 +222,6 @@ function computeConfigPartial(config: Config, original: Config): Record<string, 
     if (Object.keys(tunnelPartial).length > 0) partial.tunnel = tunnelPartial;
   }
   if (config.devBuildOnReload !== original.devBuildOnReload) partial.devBuildOnReload = config.devBuildOnReload;
-  if (config.defaultModel !== original.defaultModel) partial.defaultModel = config.defaultModel;
   if ((config.dashboardName ?? "") !== (original.dashboardName ?? "")) {
     const trimmed = (config.dashboardName ?? "").trim();
     partial.dashboardName = trimmed.length > 0 ? trimmed : "";
@@ -707,6 +707,7 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
         { id: "general", label: t("settings.general", undefined, "General"), icon: mdiCog },
         { id: "server", label: i18nT("auto.server", undefined, "Server"), icon: mdiServer },
         { id: "sessions", label: t("settings.sessions", undefined, "Sessions"), icon: mdiViewDashboard },
+        { id: "omp", label: "Agent (OMP)", icon: mdiChip },
       ],
     },
     {
@@ -1113,14 +1114,10 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                       </p>
                     </div>
                   )}
-                  <div className="flex items-center justify-between">
-                      <label className="text-sm text-[var(--text-secondary)]">{t("settings.defaultModel", undefined, "Default Model")}</label>
-                    <ModelSelector
-                      current={config.defaultModel || undefined}
-                      models={availableModels}
-                      onSelect={(v) => update((c) => { c.defaultModel = v; })}
-                    />
-                  </div>
+                  <OmpDefaultModelField
+                    availableModels={availableModels}
+                    fallbackDefaultModel={config.defaultModel}
+                  />
                   <div>
                     <div className="flex items-center justify-between">
                       <label className="text-sm text-[var(--text-secondary)]">{i18nT("auto.pwa_display_name", undefined, "PWA Display Name")}</label>
@@ -1138,6 +1135,13 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                   </div>
                 </Section>
                 <SettingsSectionSlot tab="sessions" />
+              </>
+            )}
+
+            {activeTab === "omp" && (
+              <>
+                <OmpSettingsPage />
+                <SettingsSectionSlot tab="omp" />
               </>
             )}
 
@@ -1543,6 +1547,70 @@ function DebugToolsToggle() {
   );
 }
 
+
+/** Sessions → Default Model backed by OMP modelRoles.default. */
+function OmpDefaultModelField({
+  availableModels,
+  fallbackDefaultModel,
+}: {
+  availableModels?: Array<{ provider: string; id: string }>;
+  fallbackDefaultModel?: string;
+}) {
+  const { t } = useI18n();
+  const [value, setValue] = useState("");
+  const [baseline, setBaseline] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    void fetchOmpConfig(ac.signal)
+      .then((snap) => {
+        const roles = snap.settings.modelRoles?.value;
+        let def = "";
+        if (roles && typeof roles === "object" && !Array.isArray(roles)) {
+          const v = (roles as Record<string, unknown>).default;
+          if (typeof v === "string") def = v;
+        }
+        setValue(def);
+        setBaseline(def);
+        setLoaded(true);
+      })
+      .catch(() => {
+        const fb = fallbackDefaultModel ?? "";
+        setValue(fb);
+        setBaseline(fb);
+        setLoaded(true);
+      });
+    return () => ac.abort();
+  }, [fallbackDefaultModel]);
+
+  const isDirty = loaded && value !== baseline;
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const baselineRef = useRef(baseline);
+  baselineRef.current = baseline;
+
+  const commit = useCallback(async () => {
+    const next = valueRef.current;
+    await mergeOmpModelRoles({ default: next || null });
+    setBaseline(next);
+  }, []);
+  const reset = useCallback(() => setValue(baselineRef.current), []);
+  useSettingsDraftSource({ id: "omp-default-model", page: "sessions", isDirty, commit, reset });
+
+  return (
+    <div className="flex items-center justify-between">
+      <label className="text-sm text-[var(--text-secondary)]">
+        {t("settings.defaultModel", undefined, "Default Model")}
+      </label>
+      <ModelSelector
+        current={(loaded ? value : fallbackDefaultModel) || undefined}
+        models={availableModels}
+        onSelect={(v) => setValue(v)}
+      />
+    </div>
+  );
+}
 // ── Worktree auto-init toggle (auto-init-worktree-on-spawn) ───────────────
 // Self-contained: reads the preference on mount, PATCHes immediately on
 // toggle (decoupled from the config Save button). Fail-safe to OFF.
