@@ -3,15 +3,16 @@
  *
  * Auth posture matches `/api/config` — dashboard session via networkGuard.
  */
+
+import { resolveOmpAgentDir } from "@blackbelt-technology/pi-dashboard-shared/omp-agent-paths.js";
 import type { FastifyInstance } from "fastify";
-import type { NetworkGuard } from "./route-deps.js";
 import {
   createOmpConfigCli,
-  OmpConfigCliError,
   type OmpConfigCli,
+  OmpConfigCliError,
   type OmpConfigEntry,
 } from "../omp-config-cli.js";
-import { resolveOmpAgentDir } from "@blackbelt-technology/pi-dashboard-shared/omp-agent-paths.js";
+import type { NetworkGuard } from "./route-deps.js";
 
 export interface OmpConfigRouteDeps {
   networkGuard: NetworkGuard;
@@ -45,12 +46,60 @@ function sendCliError(
   return reply.status(502).send({ success: false, error: message, code: "OMP_CLI_FAILED" });
 }
 
+function asModelRoles(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [role, model] of Object.entries(value)) {
+    if (typeof model === "string" && model.trim()) out[role] = model.trim();
+  }
+  return out;
+}
+
+function asRolePatch(value: unknown): Record<string, string | null> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out: Record<string, string | null> = {};
+  for (const [role, model] of Object.entries(value)) {
+    if (typeof model === "string") out[role] = model;
+    else if (model === null) out[role] = null;
+    else return null;
+  }
+  return out;
+}
+
 export function registerOmpConfigRoutes(
   fastify: FastifyInstance,
   deps: OmpConfigRouteDeps,
 ): void {
   const { networkGuard } = deps;
   const cli = deps.cli ?? createOmpConfigCli();
+  // `modelRoles` is a whole-record OMP setting. Serialize read-merge-write
+  // patches so simultaneous Roles and Sessions default-model saves cannot
+  // clobber one another.
+  let modelRolesTail: Promise<void> = Promise.resolve();
+
+  const patchModelRoles = async (patch: Record<string, string | null>): Promise<OmpConfigEntry> => {
+    let resolveResult: (entry: OmpConfigEntry) => void = () => {};
+    let rejectResult: (reason: unknown) => void = () => {};
+    const result = new Promise<OmpConfigEntry>((resolve, reject) => {
+      resolveResult = resolve;
+      rejectResult = reject;
+    });
+    modelRolesTail = modelRolesTail
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          const current = asModelRoles((await cli.get("modelRoles")).value);
+          for (const [role, model] of Object.entries(patch)) {
+            if (model == null || model.trim() === "") delete current[role];
+            else current[role] = model.trim();
+          }
+          resolveResult(await cli.set("modelRoles", current));
+        } catch (err) {
+          rejectResult(err);
+        }
+      });
+    return result;
+  };
 
   fastify.get(
     "/api/omp-config",
@@ -131,6 +180,26 @@ export function registerOmpConfigRoutes(
       try {
         const entry: OmpConfigEntry = await cli.set(key, body.value);
         return { success: true, data: entry };
+      } catch (err) {
+        return sendCliError(reply, err);
+      }
+    },
+  );
+
+  fastify.patch<{ Body: { patch?: unknown } }>(
+    "/api/omp-config/model-roles",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const patch = asRolePatch(request.body?.patch);
+      if (!patch) {
+        return reply.status(400).send({
+          success: false,
+          error: "Body must include a modelRoles patch of string or null values",
+          code: "OMP_INVALID_KEY",
+        });
+      }
+      try {
+        return { success: true, data: await patchModelRoles(patch) };
       } catch (err) {
         return sendCliError(reply, err);
       }

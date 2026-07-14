@@ -84,23 +84,28 @@ export async function setOmpConfig(
   return body.data as OmpConfigEntry;
 }
 
-/** Re-read modelRoles then merge patch and write full record. */
+/** Patch `modelRoles` through the server's serialized read-merge-write route. */
 export async function mergeOmpModelRoles(
   patch: Record<string, string | null | undefined>,
   signal?: AbortSignal,
 ): Promise<OmpConfigEntry> {
-  const snap = await fetchOmpConfig(signal);
-  const currentRaw = snap.settings.modelRoles?.value;
-  const current: Record<string, string> = {};
-  if (currentRaw && typeof currentRaw === "object" && !Array.isArray(currentRaw)) {
-    for (const [k, v] of Object.entries(currentRaw as Record<string, unknown>)) {
-      if (typeof v === "string" && v.trim()) current[k] = v.trim();
-    }
-  }
-  const next = { ...current };
+  const normalized: Record<string, string | null> = {};
   for (const [role, modelId] of Object.entries(patch)) {
-    if (modelId == null || modelId.trim() === "") delete next[role];
-    else next[role] = modelId.trim();
+    normalized[role] = modelId == null || modelId.trim() === "" ? null : modelId.trim();
   }
-  return setOmpConfig("modelRoles", next, signal);
+  const res = await fetch(url("/api/omp-config/model-roles"), {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ patch: normalized }),
+    signal,
+  });
+  const body = await parseBody(res);
+  if (!res.ok || body.success !== true) {
+    const error =
+      typeof body.error === "string" && body.error.trim()
+        ? body.error
+        : `HTTP ${res.status}`;
+    throw new Error(error);
+  }
+  return body.data as OmpConfigEntry;
 }

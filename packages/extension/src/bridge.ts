@@ -4,60 +4,59 @@
  * Global extension that connects to the dashboard server,
  * forwards all pi events, and relays commands back.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Loader } from "@earendil-works/pi-tui";
-import { ConnectionManager } from "./connection.js";
-import { detectSessionSource } from "./source-detector.js";
-import { buildVisibilityRegisterFields } from "./visibility-intent.js";
-import { mapEventToProtocol } from "./event-forwarder.js";
-import { createCommandHandler, tryExecSlashTemplate } from "./command-handler.js";
-import { registerDashboardContextInjector } from "./dashboard-context-injector.js";
-import { shouldApplyDefaultModel } from "./bridge-default-model-gate.js";
-import { RetryTracker } from "./retry-tracker.js";
-import { AbortLatch } from "./abort-latch.js";
-import { UsageLimitOrderer } from "./usage-limit-orderer.js";
-import { USAGE_LIMIT_PATTERN } from "@blackbelt-technology/pi-dashboard-shared/error-patterns.js";
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig, ensureConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { runDevBuild } from "./dev-build.js";
-import { isDashboardRunning } from "@blackbelt-technology/pi-dashboard-shared/server-identity.js";
+import { ensureConfig, loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { USAGE_LIMIT_PATTERN } from "@blackbelt-technology/pi-dashboard-shared/error-patterns.js";
 import { discoverDashboard } from "@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js";
-import { launchServer } from "./server-launcher.js";
-import { autoStartServer } from "./server-auto-start.js";
 import type { ServerToExtensionMessage } from "@blackbelt-technology/pi-dashboard-shared/protocol.js";
-import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
-
-import { PromptBus } from "./prompt-bus.js";
-import { DashboardDefaultAdapter } from "./dashboard-default-adapter.js";
-import { registerAskUserTool } from "./ask-user-tool.js";
-import { registerRoleModelTools } from "./role-model-tools.js";
-import { decodeMultiselectAnswer } from "./multiselect-decode.js";
-import { activate as activateProviderRegister, onProviderChanged, reloadProviders, buildProviderCatalogue, toModelInfo } from "./provider-register.js";
-import { activate as activateRoleManager, getModelRole } from "./role-manager.js";
-import type { FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { startMetricsMonitor, stopMetricsMonitor, collectMetrics } from "./process-metrics.js";
-import { scanChildProcesses, getOwnPgid } from "./process-scanner.js";
-import type { BridgeContext } from "./bridge-context.js";
-import { filterHiddenCommands, extractFirstMessage, getCurrentModelString } from "./bridge-context.js";
-import { tryDispatchExtensionCommand } from "./slash-dispatch.js";
-import { flipHasUI } from "./hasui-flip.js";
-import { runGitPollTick } from "./git-poll.js";
-import { sendStateSync as _sendStateSync, replaySessionEntries as _replaySessionEntries, handleSessionChange as _handleSessionChange } from "./session-sync.js";
-import { sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged, sendCwdMissingIfChanged as _sendCwdMissingIfChanged, sendPiVersionIfChanged as _sendPiVersionIfChanged, resetReconnectCaches as _resetReconnectCaches } from "./model-tracker.js";
-import { registerFlowEventListeners, FLOW_EVENT_MAP, SUBAGENT_EVENT_MAP } from "./flow-event-wiring.js";
-import { refreshUiModules, subscribeUiInvalidate, handleUiManagement, type UiModulesBridgeCtx } from "./ui-modules.js";
-import { inlineMessageText, type ReadFileOutcome } from "./markdown-image-inliner.js";
-import { inlineToolResultImages } from "./tool-result-image-inliner.js";
-import { resolveArtifactRoots, isUnderArtifactRoot } from "./artifact-roots.js";
-import type { ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { isDashboardRunning } from "@blackbelt-technology/pi-dashboard-shared/server-identity.js";
+import type { FlowInfo, ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Loader } from "@earendil-works/pi-tui";
+import { AbortLatch } from "./abort-latch.js";
+import { isUnderArtifactRoot, resolveArtifactRoots } from "./artifact-roots.js";
 import {
-  persistAttachment,
-  cleanupAttachmentsForSession,
   MAX_PER_MESSAGE_BYTES as ATTACH_MAX_PER_MESSAGE_BYTES,
+  cleanupAttachmentsForSession,
+  persistAttachment,
 } from "./ask-user-attachments.js";
+import { registerAskUserTool } from "./ask-user-tool.js";
+import type { BridgeContext } from "./bridge-context.js";
+import { extractFirstMessage, filterHiddenCommands, getCurrentModelString } from "./bridge-context.js";
+import { shouldApplyDefaultModel } from "./bridge-default-model-gate.js";
+import { createCommandHandler, tryExecSlashTemplate } from "./command-handler.js";
+import { ConnectionManager } from "./connection.js";
+import { registerDashboardContextInjector } from "./dashboard-context-injector.js";
+import { DashboardDefaultAdapter } from "./dashboard-default-adapter.js";
+import { runDevBuild } from "./dev-build.js";
+import { mapEventToProtocol } from "./event-forwarder.js";
+import { FLOW_EVENT_MAP, registerFlowEventListeners, SUBAGENT_EVENT_MAP } from "./flow-event-wiring.js";
+import { runGitPollTick } from "./git-poll.js";
+import { flipHasUI } from "./hasui-flip.js";
+import { inlineMessageText, type ReadFileOutcome } from "./markdown-image-inliner.js";
+import { resetReconnectCaches as _resetReconnectCaches, sendCwdMissingIfChanged as _sendCwdMissingIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged, sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendPiVersionIfChanged as _sendPiVersionIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged } from "./model-tracker.js";
+import { decodeMultiselectAnswer } from "./multiselect-decode.js";
+import { collectMetrics, startMetricsMonitor, stopMetricsMonitor } from "./process-metrics.js";
+import { getOwnPgid, scanChildProcesses } from "./process-scanner.js";
+import { PromptBus } from "./prompt-bus.js";
+import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
+import { activate as activateProviderRegister, buildProviderCatalogue, onProviderChanged, reloadProviders, toModelInfo } from "./provider-register.js";
+import { RetryTracker } from "./retry-tracker.js";
+import { activate as activateRoleManager, getModelRole } from "./role-manager.js";
+import { registerRoleModelTools } from "./role-model-tools.js";
+import { autoStartServer } from "./server-auto-start.js";
+import { launchServer } from "./server-launcher.js";
+import { handleSessionChange as _handleSessionChange, replaySessionEntries as _replaySessionEntries, sendStateSync as _sendStateSync } from "./session-sync.js";
+import { tryDispatchExtensionCommand } from "./slash-dispatch.js";
+import { detectSessionSource } from "./source-detector.js";
+import { inlineToolResultImages } from "./tool-result-image-inliner.js";
+import { handleUiManagement, refreshUiModules, subscribeUiInvalidate, type UiModulesBridgeCtx } from "./ui-modules.js";
+import { UsageLimitOrderer } from "./usage-limit-orderer.js";
+import { buildVisibilityRegisterFields } from "./visibility-intent.js";
 
 const HEARTBEAT_INTERVAL = 15_000;
 const GIT_POLL_INTERVAL = 30_000;
@@ -209,28 +208,32 @@ function initBridge(pi: ExtensionAPI) {
       modelRef = freshConfig.defaultModel ?? "";
     }
     if (!modelRef) return null;
-    const slashIdx = modelRef.indexOf("/");
+
+    const thinkingMatch = modelRef.match(/:(off|minimal|low|medium|high|xhigh)$/);
+    const thinkingLevel = thinkingMatch?.[1];
+    const modelWithProvider = thinkingMatch ? modelRef.slice(0, -thinkingMatch[0].length) : modelRef;
+    const slashIdx = modelWithProvider.indexOf("/");
     if (slashIdx <= 0) return null;
-    const provider = modelRef.slice(0, slashIdx);
-    const modelId = modelRef.slice(slashIdx + 1);
+    const provider = modelWithProvider.slice(0, slashIdx);
+    const modelId = modelWithProvider.slice(slashIdx + 1);
     try {
       const found = cachedModelRegistry.find(provider, modelId);
       if (found) {
         const setModel = (pi as { setModel?: (m: unknown) => Promise<unknown> }).setModel;
+        const setThinkingLevel = (pi as { setThinkingLevel?: (level: string) => void }).setThinkingLevel;
         if (setModel) {
           void setModel(found)
             .then(() => {
+              if (thinkingLevel) setThinkingLevel?.(thinkingLevel);
               setTimeout(() => sendModelUpdateIfChanged(), 50);
             })
             .catch(() => {});
         }
-        return null; // applied
+        return null;
       }
     } catch { /* ignore */ }
-    return modelRef; // not found yet — pending
+    return modelRef;
   }
-
-  /** Query pi-flows for available flows via synchronous event RPC */
   function getFlowsList(): FlowInfo[] {
     const probe: any = {};
     try {

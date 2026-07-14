@@ -4,15 +4,17 @@
  * `modelRoles` is intentionally hidden — Roles UI is the only writer.
  * `cycleOrder` remains editable as a JSON array field.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+
 import { useSettingsDraftSource } from "@blackbelt-technology/dashboard-plugin-runtime";
+import type React from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchOmpConfig,
-  resetOmpConfig,
-  setOmpConfig,
+  OmpConfigApiError,
   type OmpConfigEntry,
   type OmpConfigSnapshot,
-  OmpConfigApiError,
+  resetOmpConfig,
+  setOmpConfig,
 } from "../lib/omp-config-api.js";
 
 const PRIORITY_KEYS = ["defaultThinkingLevel", "cycleOrder"] as const;
@@ -164,8 +166,31 @@ export function OmpSettingsPage(): React.ReactElement {
   const onResetKey = async (key: string) => {
     setRowBusy(key);
     try {
-      await resetOmpConfig(key);
-      await reload();
+      const entry = await resetOmpConfig(key);
+      setSnapshot((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          settings: { ...prev.settings, [key]: entry },
+        };
+      });
+      // Reset affects only this row. Retain every other pending edit instead
+      // of calling reload(), which would silently discard the whole draft.
+      setDraft((prev) => {
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
+      setJsonDraft((prev) => {
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
+      setJsonErrors((prev) => {
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err));
     } finally {

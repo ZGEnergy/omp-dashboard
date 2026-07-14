@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import Fastify, { type FastifyInstance } from "fastify";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { registerOmpConfigRoutes } from "../routes/omp-config-routes.js";
+import Fastify, { type FastifyInstance } from "fastify";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  OmpConfigCliError,
   type OmpConfigCli,
+  OmpConfigCliError,
   type OmpConfigEntry,
 } from "../omp-config-cli.js";
+import { registerOmpConfigRoutes } from "../routes/omp-config-routes.js";
 
 const FIXTURE = JSON.parse(
   readFileSync(
@@ -130,6 +130,89 @@ describe("omp-config routes", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().data.key).toBe("autoResume");
   });
+  it("PATCH /api/omp-config/model-roles serializes concurrent merges", async () => {
+    await app.close();
+    const entries = fixtureAsEntries();
+    let releaseFirstRead: (() => void) | undefined;
+    const firstReadBlocked = new Promise<void>((resolve) => {
+      releaseFirstRead = resolve;
+    });
+    let signalFirstRead: (() => void) | undefined;
+    const firstReadStarted = new Promise<void>((resolve) => {
+      signalFirstRead = resolve;
+    });
+    let signalSecondRequest: (() => void) | undefined;
+    const secondRequestStarted = new Promise<void>((resolve) => {
+      signalSecondRequest = resolve;
+    });
+    let networkChecks = 0;
+    let reads = 0;
+    const cli: OmpConfigCli = {
+      path: async () => "/home/joe/.omp/agent",
+      list: async () => entries,
+      get: async (key) => {
+        const entry = entries[key];
+        if (!entry) throw new OmpConfigCliError("OMP_INVALID_KEY", `Unknown setting: ${key}`);
+        reads += 1;
+        if (key === "modelRoles" && reads === 1) {
+          signalFirstRead?.();
+          await firstReadBlocked;
+        }
+        return entry;
+      },
+      set: async (key, value) => {
+        const entry = entries[key];
+        if (!entry) throw new OmpConfigCliError("OMP_INVALID_KEY", `Unknown setting: ${key}`);
+        const next = { ...entry, value };
+        entries[key] = next;
+        return next;
+      },
+      reset: async (key) => {
+        const entry = entries[key];
+        if (!entry) throw new OmpConfigCliError("OMP_INVALID_KEY", `Unknown setting: ${key}`);
+        const next = { ...entry, value: undefined };
+        entries[key] = next;
+        return next;
+      },
+    };
+    app = Fastify({ logger: false });
+    registerOmpConfigRoutes(app, {
+      networkGuard: async () => {
+        networkChecks += 1;
+        if (networkChecks === 2) signalSecondRequest?.();
+      },
+      cli,
+    });
+    await app.ready();
+
+    const first = app.inject({
+      method: "PATCH",
+      url: "/api/omp-config/model-roles",
+      payload: { patch: { default: "first/default" } },
+    });
+    await firstReadStarted;
+    const second = app.inject({
+      method: "PATCH",
+      url: "/api/omp-config/model-roles",
+      payload: { patch: { smol: "second/smol" } },
+    });
+    try {
+      await secondRequestStarted;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(reads).toBe(1);
+    } finally {
+      releaseFirstRead?.();
+    }
+
+    const [firstResponse, secondResponse] = await Promise.all([first, second]);
+    expect(firstResponse.statusCode).toBe(200);
+    expect(secondResponse.statusCode).toBe(200);
+    expect(entries.modelRoles.value).toMatchObject({
+      default: "first/default",
+      smol: "second/smol",
+    });
+  });
+
 
   it("maps OMP_NOT_FOUND to 503", async () => {
     await app.close();

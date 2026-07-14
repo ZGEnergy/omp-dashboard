@@ -3,26 +3,26 @@
  *
  * HOME is overridden by the vitest globalSetup to a tmp dir.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 import {
   activate,
-  getModelRole,
-  lookupRole,
-  loadRoleConfig,
-  saveRoleConfig,
+  addRoleName,
   DEFAULT_ROLE_NAMES,
+  effectiveRoleNames,
+  getModelRole,
+  loadRoleConfig,
+  lookupRole,
   overlayDefaultRoles,
   overlayRoles,
-  effectiveRoleNames,
-  addRoleName,
-  removeRoleFromSchema,
   type RoleConfig,
+  removeRoleFromSchema,
+  saveRoleConfig,
 } from "../role-manager.js";
 
 function withDefaults(assigned: Record<string, string> = {}): Record<string, string> {
@@ -138,6 +138,22 @@ describe("saveRoleConfig", () => {
     const leftovers = readdirSync(AGENT_DIR()).filter((n) => n.includes(".tmp-"));
     expect(leftovers).toEqual([]);
   });
+  it("refuses malformed YAML fallback without modifying the config", () => {
+    const originalBin = process.env.OMP_BIN;
+    const raw = "setupVersion: 1\nmodelRoles: [\n";
+    writeFileSync(CONFIG(), raw);
+    process.env.OMP_BIN = "/nonexistent/omp";
+    try {
+      expect(() =>
+        saveRoleConfig({ roles: { smol: "a/b" }, rolePresets: [], activePreset: null }),
+      ).toThrow(/Refusing to rewrite malformed OMP config\.yml/);
+      expect(readFileSync(CONFIG(), "utf-8")).toBe(raw);
+    } finally {
+      if (originalBin === undefined) delete process.env.OMP_BIN;
+      else process.env.OMP_BIN = originalBin;
+    }
+  });
+
 });
 
 describe("overlay helpers", () => {

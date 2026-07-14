@@ -105,29 +105,28 @@ export async function resetOmpConfig(
 }
 
 /**
- * Read-merge-write helper for `modelRoles` so concurrent editors (Roles UI
- * and Sessions default model) re-read immediately before merge and do not
- * clobber each other.
+ * Atomically patch OMP `modelRoles` on the server. The server serializes its
+ * read-merge-write so concurrent Roles and Sessions default-model editors do
+ * not lose one another's changes.
  */
-export async function mergeOmpModelRoles(
+export async function patchOmpModelRoles(
   patch: Record<string, string | null | undefined>,
   signal?: AbortSignal,
 ): Promise<OmpConfigEntry> {
-  const snap = await fetchOmpConfig(signal);
-  const currentRaw = snap.settings.modelRoles?.value;
-  const current: Record<string, string> = {};
-  if (currentRaw && typeof currentRaw === "object" && !Array.isArray(currentRaw)) {
-    for (const [k, v] of Object.entries(currentRaw as Record<string, unknown>)) {
-      if (typeof v === "string" && v.trim()) current[k] = v.trim();
-    }
-  }
-  const next = { ...current };
+  const normalized: Record<string, string | null> = {};
   for (const [role, modelId] of Object.entries(patch)) {
-    if (modelId == null || modelId.trim() === "") {
-      delete next[role];
-    } else {
-      next[role] = modelId.trim();
-    }
+    normalized[role] = modelId == null || modelId.trim() === "" ? null : modelId.trim();
   }
-  return setOmpConfig("modelRoles", next, signal);
+  const res = await fetch(`${getApiBase()}/api/omp-config/model-roles`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ patch: normalized }),
+    signal,
+  });
+  const body = await parseJson(res);
+  if (!res.ok || body.success !== true) throwFromResponse(res, body);
+  return body.data as OmpConfigEntry;
 }
+
+/** Backward-compatible local name for callers; uses the atomic patch route. */
+export const mergeOmpModelRoles = patchOmpModelRoles;

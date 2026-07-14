@@ -10,7 +10,7 @@
  */
 import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
+import { resolveOmpConfigYml } from "@blackbelt-technology/pi-dashboard-shared/omp-agent-paths.js";
 import { parse as parseYaml } from "yaml";
 
 export interface ResolveResult {
@@ -35,11 +35,10 @@ function asRolesMap(value: unknown): Record<string, string> {
  * Returns `{}` on any failure.
  */
 export function readRolesFromDisk(homeDir: string = os.homedir()): Record<string, string> {
-  const agentDirEnv = process.env.PI_CODING_AGENT_DIR?.trim();
-  const agentDir = agentDirEnv
-    ? agentDirEnv
-    : path.join(homeDir, ".omp", "agent");
-  const p = path.join(agentDir, "config.yml");
+  const p = resolveOmpConfigYml({
+    homedir: homeDir,
+    agentDirEnv: process.env.PI_CODING_AGENT_DIR,
+  });
   try {
     const raw = fs.readFileSync(p, "utf-8");
     const doc: unknown = parseYaml(raw);

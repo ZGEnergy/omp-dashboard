@@ -6,9 +6,10 @@
  * primary write path. Spawns the omp binary directly (bun shebang); never
  * node-wraps omp's cli.js.
  */
+
+import { resolveOmpAgentDir } from "@blackbelt-technology/pi-dashboard-shared/omp-agent-paths.js";
 import { execFileAsync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
-import { resolveOmpAgentDir } from "@blackbelt-technology/pi-dashboard-shared/omp-agent-paths.js";
 
 export type OmpConfigValueType =
   | "boolean"
@@ -198,20 +199,19 @@ function normalizeEntry(raw: unknown, fallbackKey: string): OmpConfigEntry {
     );
   }
   const obj = raw as Record<string, unknown>;
-  // get --json returns { key, value, type, description }
-  if ("key" in obj || "type" in obj) {
-    return {
-      key: typeof obj.key === "string" ? obj.key : fallbackKey,
-      value: obj.value,
-      type: (obj.type as OmpConfigValueType) ?? "string",
-      description: typeof obj.description === "string" ? obj.description : "",
-    };
+  // An entry is usable only when CLI supplies schema metadata. Live `set` /
+  // `reset --json` commonly return `{ key, value }`, so callers deliberately
+  // fall back to `get` rather than fabricate type:string and lose metadata.
+  if (typeof obj.type !== "string") {
+    throw new OmpConfigCliError(
+      "OMP_CLI_FAILED",
+      `omp config response for ${fallbackKey} omitted type metadata`,
+    );
   }
-  // set/reset may return the list-entry shape without key
   return {
-    key: fallbackKey,
+    key: typeof obj.key === "string" ? obj.key : fallbackKey,
     value: obj.value,
-    type: (obj.type as OmpConfigValueType) ?? "string",
+    type: obj.type as OmpConfigValueType,
     description: typeof obj.description === "string" ? obj.description : "",
   };
 }

@@ -3,7 +3,7 @@ import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-
 import { VALID_SETTINGS_TABS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/slot-types.js";
 import { DISPLAY_PRESETS, type DisplayPrefs } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
 import type { NpmPackageResult } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
-import { mdiAlert, mdiArrowLeft, mdiBookOpenPageVariant, mdiCheckCircle, mdiClipboardText, mdiCloseCircle, mdiCog, mdiContentSave, mdiDelete, mdiFileDocumentEditOutline, mdiKey, mdiLoading, mdiLock, mdiPackageVariant, mdiPalette, mdiPlay, mdiPlus, mdiPuzzle, mdiPuzzleOutline, mdiRestart, mdiRobotOutline, mdiServer, mdiTextBoxOutline, mdiUpdate, mdiViewDashboard, mdiWeb, mdiWrench, mdiChip } from "@mdi/js";
+import { mdiAlert, mdiArrowLeft, mdiBookOpenPageVariant, mdiCheckCircle, mdiChip, mdiClipboardText, mdiCloseCircle, mdiCog, mdiContentSave, mdiDelete, mdiFileDocumentEditOutline, mdiKey, mdiLoading, mdiLock, mdiPackageVariant, mdiPalette, mdiPlay, mdiPlus, mdiPuzzle, mdiPuzzleOutline, mdiRestart, mdiRobotOutline, mdiServer, mdiTextBoxOutline, mdiUpdate, mdiViewDashboard, mdiWeb, mdiWrench } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -18,6 +18,7 @@ import { useDisplayPrefsContext } from "../lib/DisplayPrefsContext.js";
 import { fetchAutoInitWorktreePref, setAutoInitWorktreePref } from "../lib/git-api.js";
 import { t as i18nT } from "../lib/i18n";
 import { LANGUAGE_OPTIONS, type Language, useI18n } from "../lib/i18n.js";
+import { fetchOmpConfig, mergeOmpModelRoles } from "../lib/omp-config-api.js";
 import { type TestProviderResult, testProvider } from "../lib/providers-api.js";
 import { buildPiResourceFileUrl } from "../lib/route-builders.js";
 import { DiagnosticsSection } from "./DiagnosticsSection.js";
@@ -27,9 +28,8 @@ import { KnownServersSection } from "./KnownServersSection.js";
 import { ModelProxySection } from "./ModelProxySection.js";
 import { ModelSelector } from "./ModelSelector.js";
 import { NetworkDiscoverySection } from "./NetworkDiscoverySection.js";
-import { OpenSpecProfileSection } from "./OpenSpecProfileSection.js";
 import { OmpSettingsPage } from "./OmpSettingsPage.js";
-import { fetchOmpConfig, mergeOmpModelRoles } from "../lib/omp-config-api.js";
+import { OpenSpecProfileSection } from "./OpenSpecProfileSection.js";
 import { PackageBrowser } from "./PackageBrowser.js";
 import { PackageInstallConfirmDialog } from "./PackageInstallConfirmDialog.js";
 import { PackageReadmeDialog } from "./PackageReadmeDialog.js";
@@ -979,8 +979,7 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
               </>
             )}
 
-            {activeTab === "sessions" && (
-              <>
+            <div className={activeTab === "sessions" ? "" : "hidden"}>
                 <Section title={t("settings.sessions", undefined, "Sessions")}>
                   <SelectField
                     label={t("settings.spawnStrategy", undefined, "+Session Strategy")}
@@ -1135,15 +1134,12 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                   </div>
                 </Section>
                 <SettingsSectionSlot tab="sessions" />
-              </>
-            )}
+            </div>
 
-            {activeTab === "omp" && (
-              <>
-                <OmpSettingsPage />
-                <SettingsSectionSlot tab="omp" />
-              </>
-            )}
+            <div className={activeTab === "omp" ? "" : "hidden"}>
+              <OmpSettingsPage />
+              <SettingsSectionSlot tab="omp" />
+            </div>
 
             {activeTab === "remote" && (
               <>

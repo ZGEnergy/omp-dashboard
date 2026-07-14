@@ -6,14 +6,15 @@
  * rolePresets). Writes prefer `omp config set modelRoles … --json`; fall
  * back to atomic YAML merge of only the `modelRoles` key.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { resolveOmpAgentDir, resolveOmpConfigYml } from "@blackbelt-technology/pi-dashboard-shared/omp-agent-paths.js";
 import { execFileSync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
-import { resolveOmpAgentDir, resolveOmpConfigYml } from "@blackbelt-technology/pi-dashboard-shared/omp-agent-paths.js";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 // -- Types ----------------------------------------------------------------
 
@@ -126,13 +127,21 @@ function writeModelRolesViaYaml(roles: Record<string, string>): void {
   mkdirSync(dir, { recursive: true });
   let doc: Record<string, unknown> = {};
   if (existsSync(path)) {
+    const raw = readFileSync(path, "utf-8");
     try {
-      const parsed: unknown = parseYaml(readFileSync(path, "utf-8"));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const parsed: unknown = parseYaml(raw);
+      if (parsed == null && raw.trim() === "") {
+        doc = {};
+      } else if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         doc = { ...(parsed as Record<string, unknown>) };
+      } else {
+        throw new Error("OMP config.yml must contain a mapping");
       }
-    } catch {
-      doc = {};
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Refuse destructive fallback writes. Existing config may contain every
+      // OMP setting; writing `{modelRoles}` after a parse failure would erase it.
+      throw new Error(`Refusing to rewrite malformed OMP config.yml at ${path}: ${message}`);
     }
   }
   doc.modelRoles = roles;
@@ -292,7 +301,15 @@ export function activate(pi: ExtensionAPI): void {
     } else {
       next[role] = String(modelId).trim();
     }
-    writeModelRoles(next);
+    try {
+      writeModelRoles(next);
+    } catch (err: unknown) {
+      if (data) {
+        data.success = false;
+        data.error = err instanceof Error ? err.message : String(err);
+      }
+      return;
+    }
     currentRoles = next;
     if (data) {
       data.success = true;

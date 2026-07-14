@@ -1,25 +1,26 @@
 /**
  * Tests for BuiltInRolesSettings — OMP modelRoles via /api/omp-config.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, fireEvent, act, cleanup, waitFor } from "@testing-library/react";
-import React from "react";
+
 import {
-  PluginContextProvider,
-  CurrentPluginLayer,
-} from "@blackbelt-technology/dashboard-plugin-runtime/context";
-import {
-  SettingsDraftProvider,
   createSlotRegistry,
   type RegisteredSource,
+  SettingsDraftProvider,
 } from "@blackbelt-technology/dashboard-plugin-runtime";
+import {
+  CurrentPluginLayer,
+  PluginContextProvider,
+} from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import { withUiPrimitiveProvider } from "@blackbelt-technology/dashboard-plugin-runtime/test-support";
 import type { UiModelSelectorProps } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import type React from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BuiltInRolesSettings,
-  inferProviderForBareId,
-  computeEffectiveRoles,
   computeDirtyRoles,
+  computeEffectiveRoles,
+  inferProviderForBareId,
   OMP_BUILTIN_ROLES,
 } from "../RolesSettingsSection.js";
 
@@ -96,19 +97,18 @@ function mockFetchRoles(roles: Record<string, string>) {
         }),
       } as Response;
     }
-    if (url.includes("/api/omp-config") && init?.method === "PUT") {
+    if (url.includes("/api/omp-config/model-roles") && init?.method === "PATCH") {
       const body = JSON.parse(String(init.body ?? "{}")) as {
-        key?: string;
-        value?: Record<string, string>;
+        patch?: Record<string, string | null>;
       };
       return {
         ok: true,
         json: async () => ({
           success: true,
           data: {
-            key: body.key ?? "modelRoles",
+            key: "modelRoles",
             type: "record",
-            value: body.value ?? {},
+            value: { ...roles, ...body.patch },
             description: "",
           },
         }),
@@ -156,7 +156,7 @@ describe("BuiltInRolesSettings", () => {
     });
   });
 
-  it("stages a pick and commits via setOmpConfig modelRoles", async () => {
+  it("stages a pick and commits via the serialized modelRoles patch", async () => {
     const fetchMock = mockFetchRoles({ default: "xai/grok" });
     vi.stubGlobal("fetch", fetchMock);
     const { getByTestId } = render(wrap(<BuiltInRolesSettings />, sources));
@@ -175,17 +175,14 @@ describe("BuiltInRolesSettings", () => {
       await src?.commit();
     });
 
-    const putCall = fetchMock.mock.calls.find(
-      (c) => String(c[0]).includes("/api/omp-config") && c[1]?.method === "PUT",
+    const patchCall = fetchMock.mock.calls.find(
+      (c) => String(c[0]).includes("/api/omp-config/model-roles") && c[1]?.method === "PATCH",
     );
-    expect(putCall).toBeTruthy();
-    const body = JSON.parse(String(putCall?.[1]?.body ?? "{}")) as {
-      key: string;
-      value: Record<string, string>;
+    expect(patchCall).toBeTruthy();
+    const body = JSON.parse(String(patchCall?.[1]?.body ?? "{}")) as {
+      patch: Record<string, string | null>;
     };
-    expect(body.key).toBe("modelRoles");
-    expect(body.value.smol).toBe("xai/grok-test");
-    expect(body.value.default).toBe("xai/grok");
+    expect(body.patch).toEqual({ smol: "xai/grok-test" });
   });
 
   it("has no preset UI", async () => {
