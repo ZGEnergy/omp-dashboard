@@ -1,0 +1,3 @@
+# cli.ts — index
+
+`pi-dashboard` CLI entry. Exports `parseArgs` (subcommand + flags), `buildConfig` (CLI+env+file merge → `ServerConfig`), `cmdRestart` (delegates to `/api/restart` when dashboard running, else local stop/start), `parseNetstatListeners`, `findPortHolders` (back-compat re-exports). Subcommands `start`/`stop`/`restart`/`status`; default = foreground. `runForeground` does dynamic `./server.js` import → `startRecoveryServer` on `ERR_MODULE_NOT_FOUND`; asserts Node version + pi tool-registry resolution; legacy `~/.pi-dashboard` advisory. `installCrashSafetyNet` suppresses async faults.

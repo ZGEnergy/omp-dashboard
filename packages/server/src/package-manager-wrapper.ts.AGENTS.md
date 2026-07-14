@@ -1,0 +1,3 @@
+# package-manager-wrapper.ts — index
+
+Thin serialized adapter around pi's `DefaultPackageManager`. Exports `PackageManagerWrapper`, `OperationRequest`, `OperationResult`, `MoveRequest`, `ProgressEvent`, `translatePathSource`, `diagnosePiPackageManager`, `ModuleResolutionError`, `AlreadyAtDestinationError`, `InvalidMoveRequestError`, `UnsupportedSourceForDestinationError`, `PackageOperationBusyError`, `PackageEntry`. Wraps spawns in `SafePackageManager` (OS-aware adapter, registry-resolved executors) to fix Windows cmd flashes. Busy-lock single-flight; `run`/`move`/`listInstalled`/`checkUpdates`/`runExclusive`; per-cwd cached PM; session reload on success.

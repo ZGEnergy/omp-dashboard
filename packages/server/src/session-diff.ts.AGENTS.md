@@ -1,0 +1,3 @@
+# session-diff.ts — index
+
+`extractFileChanges(events, cwd)` scans `tool_execution_start` write/edit events, groups by path, attaches preceding assistant message as context → `FileDiffEntry[]`. `enrichWithGitDiff(cwd, files)` computes Changed Files diff via git → adds `isGitRepo`. `gitNumstat(cwd)` parses `git diff --numstat` (tab-separated adds/dels/path; binary `-` omitted) → per-path count map; `enrichWithGitDiff` attaches per-file `additions`/`deletions` + `totalAdditions`/`totalDeletions`. `enrichWithVcsDiff(cwd, files)` → `VcsEnrichmentResult` dispatcher wraps `enrichWithGitDiff`, annotates `vcsKind`/`diffBase`/`baseLabel` (optional fields older clients ignore). See change: add-change-summary-table.

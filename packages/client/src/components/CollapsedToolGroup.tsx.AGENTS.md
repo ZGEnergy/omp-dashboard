@@ -1,3 +1,3 @@
 # CollapsedToolGroup.tsx — index
 
-Renders collapsed group of repeated tool calls. Exports `CollapsedToolGroup`. Shows count badge + summary, expands to list `ToolCallStep` members. Filters members by `useDisplayPrefs` `toolCalls` toggles via `toolCallPrefKey`; hides group when all members gated off.
+Renders collapsed group of repeated tool calls. Exports `CollapsedToolGroup`. Expanded view iterates `group.rendered` — `toolResult`→`ToolCallStep`; `thinking`/non-empty `assistant`→inline text (`data-testid=collapsed-group-narration`); empty/separator skipped. Count badge = `group.messages` (toolResult-only). See change: collapse-tool-calls-across-narration. → see `CollapsedToolGroup.tsx.AGENTS.md`
