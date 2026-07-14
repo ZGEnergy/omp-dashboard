@@ -24,6 +24,6 @@ export function loadOrGenerateVapidKeys(filePath: string): VapidKeys {
   }
   const keys = webpush.generateVAPIDKeys();
   const vapid: VapidKeys = { publicKey: keys.publicKey, privateKey: keys.privateKey };
-  writeJsonFile(filePath, vapid);
+  writeJsonFile(filePath, vapid, { mode: 0o600 });
   return vapid;
 }

@@ -14,6 +14,7 @@
  */
 
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import {
   mdiApplicationOutline,
   mdiCircle,
@@ -33,8 +34,8 @@ export const statusColors: Record<string, string> = {
 };
 
 /**
- * True when the session is blocked on the chat-routed `ask_user` tool — i.e.
- * `currentTool === "ask_user"` and the pending prompt is NOT owned by a
+ * True when the session is blocked on a user-input tool — dashboard
+ * `ask_user` or OMP/pi core `ask` — and the pending prompt is NOT owned by a
  * widget-bar slot. Drives the dedicated `--status-needs-you` color. Mirrors
  * the suppression rule in `getCardPulseClass`.
  * See change: improve-dashboard-attention-routing.
@@ -43,10 +44,10 @@ export function isChatRoutedAskUser(
   session: DashboardSession,
   hasWidgetBarPrompt = false,
 ): boolean {
-  // Ended sessions never "need you" even if currentTool lingers as ask_user.
+  // Ended sessions never "need you" even if currentTool lingers as ask*.
   return (
     session.status !== "ended" &&
-    session.currentTool === "ask_user" &&
+    isInputNeededTool(session.currentTool) &&
     !hasWidgetBarPrompt
   );
 }
@@ -293,7 +294,7 @@ export function deriveRailBgColor(
  *   See change: fix-flows-plugin-polish (B1).
  */
 export function getCardPulseClass(session: DashboardSession, hasWidgetBarPrompt = false): string {
-  if (session.currentTool === "ask_user" && !hasWidgetBarPrompt) return "card-input-stripes";
+  if (isInputNeededTool(session.currentTool) && !hasWidgetBarPrompt) return "card-input-stripes";
   if (session.status === "streaming" || session.resuming) return "card-working-pulse";
   // Unread state — cyan scrolling stripes. Lower priority than the two above
   // so streaming/ask_user keep their stronger colors.
@@ -330,7 +331,7 @@ export function deriveProposalCardState(sessions: DashboardSession[]): string {
   let hasRunning = false;
   let hasUnread = false;
   for (const s of sessions) {
-    if (s.currentTool === "ask_user") return "card-stripes-input";
+    if (isInputNeededTool(s.currentTool)) return "card-stripes-input";
     if (s.status === "streaming" || s.resuming) hasRunning = true;
     else if (s.unread) hasUnread = true;
   }

@@ -22,11 +22,23 @@ export function readJsonFile<T>(filePath: string, fallback: T): T {
 /**
  * Atomically write a JSON file (write to .tmp, then rename).
  * Creates parent directories if needed.
+ *
+ * Optional `mode` (e.g. `0o600` for secrets) is applied to the tmp write and
+ * re-asserted via `chmod` after rename so existing group-readable files are
+ * tightened on the next write.
  */
-export function writeJsonFile<T>(filePath: string, data: T): void {
+export function writeJsonFile<T>(filePath: string, data: T, opts?: { mode?: number }): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
   const tmpPath = filePath + ".tmp";
-  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n");
+  const writeOpts = opts?.mode !== undefined ? { mode: opts.mode } : undefined;
+  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n", writeOpts);
   fs.renameSync(tmpPath, filePath);
+  if (opts?.mode !== undefined) {
+    try {
+      fs.chmodSync(filePath, opts.mode);
+    } catch {
+      // Best-effort on platforms that ignore mode (or lack chmod).
+    }
+  }
 }

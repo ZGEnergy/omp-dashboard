@@ -27,9 +27,13 @@ function isStandalone(): boolean {
 export function PushNotificationsSection() {
   const { supported, status, subscribe, unsubscribe, sendTest } = usePushSubscription();
   const [busy, setBusy] = useState(false);
-  const showIosHint = isIOS() && !isStandalone();
+  const ios = isIOS();
+  const showIosHint = ios && !isStandalone();
 
   const handleToggle = useCallback(async () => {
+    // Enable is a no-op while status is still "unknown" (VAPID key not loaded
+    // / server push disabled) — keep the button disabled in that state.
+    if (status === "unknown") return;
     setBusy(true);
     try {
       if (status === "subscribed") await unsubscribe();
@@ -41,11 +45,27 @@ export function PushNotificationsSection() {
 
   if (!supported) {
     return (
-      <div className="text-xs text-[var(--text-muted)]" data-testid="push-unsupported">
-        Push notifications are not supported in this browser.
+      <div className="space-y-2" data-testid="push-unsupported">
+        <div className="text-xs text-[var(--text-muted)]">
+          Push notifications are not supported in this browser.
+        </div>
+        {ios && (
+          <div className="text-xs text-[var(--text-muted)]" data-testid="push-ios-hint">
+            iOS users: install this app to your home screen (Share → Add to Home Screen), open the
+            installed app, then enable notifications. Safari tabs cannot receive Web Push.
+          </div>
+        )}
       </div>
     );
   }
+
+  const toggleDisabled = busy || status === "unknown";
+  const toggleLabel =
+    status === "subscribed"
+      ? "Disable on this device"
+      : status === "unknown"
+        ? "Checking push support…"
+        : "Enable on this device";
 
   return (
     <div className="space-y-2" data-testid="push-section">
@@ -62,11 +82,11 @@ export function PushNotificationsSection() {
         <button
           type="button"
           onClick={handleToggle}
-          disabled={busy}
+          disabled={toggleDisabled}
           data-testid="push-toggle"
           className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50 cursor-pointer"
         >
-          {status === "subscribed" ? "Disable on this device" : "Enable on this device"}
+          {toggleLabel}
         </button>
       )}
 

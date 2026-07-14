@@ -191,7 +191,7 @@ export function OpenSpecBoardView(props: OpenSpecBoardViewProps) {
   const firstMountRef = useRef(true);
   const prevSelectedIdRef = useRef<string | undefined>(selectedId);
   const askUserFingerprint = useMemo(
-    () => sessions.filter((s) => s.currentTool === "ask_user").map((s) => s.id).sort().join(","),
+    () => sessions.filter((s) => s.currentTool === "ask_user" || s.currentTool === "ask").map((s) => s.id).sort().join(","),
     [sessions],
   );
   useEffect(() => {

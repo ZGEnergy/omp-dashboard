@@ -66,4 +66,14 @@ describe("PushNotificationsSection", () => {
     expect(screen.getByTestId("push-denied")).toBeTruthy();
     expect(screen.queryByTestId("push-toggle")).toBeNull();
   });
+
+  it("disables the toggle while status is unknown (no-op enable)", () => {
+    hookState.status = "unknown";
+    render(<PushNotificationsSection />);
+    const toggle = screen.getByTestId("push-toggle") as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.textContent).toContain("Checking");
+    fireEvent.click(toggle);
+    expect(hookState.subscribe).not.toHaveBeenCalled();
+  });
 });

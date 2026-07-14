@@ -3,6 +3,7 @@
  * Returns partial DashboardSession updates, or null if the event is not relevant.
  */
 import type { DashboardEvent, DashboardSession, SessionStatus } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 
 // Use null (not undefined) for fields that must be cleared — undefined is
 // dropped during JSON serialisation so the browser would keep the stale value.
@@ -147,7 +148,7 @@ export interface UnreadTriggerSnapshot {
  * Triggers (per change: session-card-unread-stripes):
  *   1. status transition `streaming` -> `idle` or `streaming` -> `active`
  *      (turn finished)
- *   2. `currentTool` becomes `"ask_user"` (input requested)
+ *   2. `currentTool` becomes an input-needed tool (`ask_user` / core `ask`)
  *   3. `agent_end` event whose payload's `error` field is truthy
  *
  * Anything else (assistant message_end, tool_execution_*, model_select,
@@ -172,8 +173,9 @@ export function isUnreadTrigger(
     return true;
   }
 
-  // Trigger 2: currentTool flips to "ask_user"
-  if (after.currentTool === "ask_user" && before.currentTool !== "ask_user") {
+  // Trigger 2: currentTool flips to an input-needed tool (dashboard ask_user
+  // or OMP/pi core `ask` — Claude Code AskUserQuestion analogue).
+  if (isInputNeededTool(after.currentTool) && !isInputNeededTool(before.currentTool)) {
     return true;
   }
 

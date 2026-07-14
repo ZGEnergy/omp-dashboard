@@ -86,4 +86,10 @@ describe("push token registry", () => {
     const reloaded = createPushTokenRegistry({ path: file }).list()[0];
     expect(reloaded.lastUsedAt).toBeGreaterThanOrEqual(token.lastUsedAt);
   });
+
+  it("writes the registry file with mode 0o600", () => {
+    const reg = createPushTokenRegistry({ path: file });
+    reg.add({ deviceToken: "dev-A", transport: "web-push" });
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
 });

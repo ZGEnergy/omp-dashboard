@@ -3,12 +3,13 @@
  *
  * Computes a small, link-only `PushPayload` from the session + the event that
  * fired `isUnreadTrigger`. Title/body are chosen for the three trigger kinds
- * (turn-done, ask_user, crash). Body content is truncated to stay well under
+ * (turn-done, ask_user/ask, crash). Body content is truncated to stay well under
  * the 4 KB push-payload ceiling and to avoid leaking full event content
  * (design Decision 5). No I/O — trivially unit-testable.
  * See change: add-server-push-notifications.
  */
 import type { DashboardEvent, DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import type { PushPayload } from "./push-transports/types.js";
 
 const MAX_ERROR_LEN = 160;
@@ -42,8 +43,8 @@ export function buildPushPayload(session: DashboardSession, event: DashboardEven
     };
   }
 
-  // Trigger 2: waiting for user input.
-  if (session.currentTool === "ask_user") {
+  // Trigger 2: waiting for user input (dashboard ask_user or core OMP `ask`).
+  if (isInputNeededTool(session.currentTool)) {
     return {
       type: "session_attention",
       sessionId: session.id,

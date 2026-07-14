@@ -2,11 +2,12 @@
  * Web Push subscription lifecycle for the PWA.
  *
  * Feature-detects Service Worker + Push support. On mount, when supported,
- * fetches the VAPID public key and reflects any existing subscription
- * (idempotent — an already-subscribed device does NOT re-register). `subscribe`
- * requests permission, subscribes via `pushManager`, and POSTs the subscription
- * to `/api/push/register`. `unsubscribe` tears it down; `sendTest` pings
- * `/api/push/test`.
+ * fetches the VAPID public key and reflects any existing subscription. An
+ * already-subscribed browser still POSTs `/api/push/register` so `tokenId`
+ * is recovered after refresh (idempotent server-side by deviceToken).
+ * `subscribe` requests permission, subscribes via `pushManager`, and POSTs
+ * the subscription. `unsubscribe` tears it down; `sendTest` pings
+ * `/api/push/test` for this device's tokenId when known.
  * See change: add-server-push-notifications.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -36,6 +37,22 @@ function detectSupported(): boolean {
   return typeof navigator !== "undefined" && "serviceWorker" in navigator && "PushManager" in window;
 }
 
+function currentNotificationPermission(): NotificationPermission | "default" {
+  if (typeof Notification === "undefined") return "default";
+  return Notification.permission;
+}
+
+async function registerDeviceToken(deviceToken: string): Promise<string | null> {
+  const res = await fetch(`${getApiBase()}/api/push/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceToken, transport: "web-push" }),
+  });
+  if (!res.ok) return null;
+  const body = await res.json().catch(() => ({}));
+  return typeof body.tokenId === "string" ? body.tokenId : null;
+}
+
 export function usePushSubscription(): PushSubscriptionState {
   const supported = detectSupported();
   const [status, setStatus] = useState<PushStatus>("unknown");
@@ -43,6 +60,8 @@ export function usePushSubscription(): PushSubscriptionState {
   const tokenId = useRef<string | null>(null);
 
   // On mount: fetch the VAPID key + reflect any existing subscription.
+  // When a browser subscription already exists, re-POST register so tokenId
+  // is recovered after a page refresh (server is idempotent on deviceToken).
   useEffect(() => {
     if (!supported) return;
     let cancelled = false;
@@ -53,10 +72,23 @@ export function usePushSubscription(): PushSubscriptionState {
         const { publicKey } = await res.json();
         if (cancelled) return;
         vapidKey.current = publicKey;
+
+        if (currentNotificationPermission() === "denied") {
+          setStatus("denied");
+          return;
+        }
+
         const reg = await navigator.serviceWorker.ready;
         const existing = await reg.pushManager.getSubscription();
         if (cancelled) return;
-        setStatus(existing ? "subscribed" : "unsubscribed");
+        if (existing) {
+          const id = await registerDeviceToken(JSON.stringify(existing));
+          if (cancelled) return;
+          if (id) tokenId.current = id;
+          setStatus("subscribed");
+        } else {
+          setStatus("unsubscribed");
+        }
       } catch {
         // Push not enabled on this server (404) or transient — stay unknown.
       }
@@ -67,10 +99,18 @@ export function usePushSubscription(): PushSubscriptionState {
   }, [supported]);
 
   const subscribe = useCallback(async () => {
+    // No-op while VAPID key is still loading (status stays "unknown") or
+    // push is unsupported — avoids a silent enable click.
     if (!supported || !vapidKey.current) return;
     const permission = await Notification.requestPermission();
-    if (permission !== "granted") {
+    if (permission === "denied") {
       setStatus("denied");
+      return;
+    }
+    // Dismissed prompt leaves permission at "default" — keep unsubscribed so
+    // the user can try Enable again without a permanent denied state.
+    if (permission !== "granted") {
+      setStatus("unsubscribed");
       return;
     }
     const reg = await navigator.serviceWorker.ready;
@@ -79,14 +119,9 @@ export function usePushSubscription(): PushSubscriptionState {
       // `Uint8Array` is a valid BufferSource; cast satisfies stricter DOM lib types.
       applicationServerKey: urlBase64ToUint8Array(vapidKey.current) as BufferSource,
     });
-    const res = await fetch(`${getApiBase()}/api/push/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceToken: JSON.stringify(sub), transport: "web-push" }),
-    });
-    if (res.ok) {
-      const body = await res.json().catch(() => ({}));
-      if (typeof body.tokenId === "string") tokenId.current = body.tokenId;
+    const id = await registerDeviceToken(JSON.stringify(sub));
+    if (id) {
+      tokenId.current = id;
       setStatus("subscribed");
     }
   }, [supported]);

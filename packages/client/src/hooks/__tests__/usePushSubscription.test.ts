@@ -2,8 +2,9 @@
  * Tests for usePushSubscription.
  *   1. unsupported → supported=false, no fetch.
  *   2. subscribe path → POSTs the subscription to /api/push/register.
- *   3. idempotent → an existing getSubscription() → status 'subscribed',
- *      no register POST issued on mount.
+ *   3. existing getSubscription() on mount → status 'subscribed' AND
+ *      re-POSTs register so tokenId is recovered after refresh.
+ *   4. dismissed permission prompt stays unsubscribed (not denied).
  * See change: add-server-push-notifications.
  */
 
@@ -13,15 +14,21 @@ import { usePushSubscription } from "../usePushSubscription.js";
 
 const VAPID = "BLc4xRzKlKORKWlbdgFaBrrPK3ydWAHo4M0gs0i1oEKgPpWC5cW8OCzVrOQRv-1npXRWtGb-lTFm4RRBEeQPQ8"; // base64url-ish
 
-function mockServiceWorker(existingSub: unknown) {
-  const subscribe = vi.fn(async () => ({ endpoint: "https://push.example/x", toJSON: () => ({}) }));
+function mockServiceWorker(existingSub: PushSubscription | null) {
+  const subscribe = vi.fn(async () => ({
+    endpoint: "https://push.example/x",
+    toJSON: () => ({ endpoint: "https://push.example/x" }),
+  }));
   const getSubscription = vi.fn(async () => existingSub);
   const ready = Promise.resolve({ pushManager: { subscribe, getSubscription } });
   Object.defineProperty(navigator, "serviceWorker", {
     configurable: true,
     value: { ready },
   });
-  (window as any).PushManager = function () {};
+  Object.defineProperty(window, "PushManager", {
+    configurable: true,
+    value: function PushManager() {},
+  });
   return { subscribe, getSubscription };
 }
 
@@ -39,24 +46,35 @@ function mockFetchOk() {
 
 describe("usePushSubscription", () => {
   const origSW = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
+  const origPushManager = Object.getOwnPropertyDescriptor(window, "PushManager");
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    (window as any).Notification = { requestPermission: vi.fn(async () => "granted") };
-    (global as any).atob = (s: string) => Buffer.from(s, "base64").toString("binary");
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: {
+        permission: "default" as NotificationPermission,
+        requestPermission: vi.fn(async () => "granted" as NotificationPermission),
+      },
+    });
+    // atob polyfill for Node vitest
+    if (typeof globalThis.atob !== "function") {
+      globalThis.atob = (s: string) => Buffer.from(s, "base64").toString("binary");
+    }
   });
 
   afterEach(() => {
     if (origSW) Object.defineProperty(navigator, "serviceWorker", origSW);
-    else delete (navigator as any).serviceWorker;
-    delete (window as any).PushManager;
+    else Reflect.deleteProperty(navigator, "serviceWorker");
+    if (origPushManager) Object.defineProperty(window, "PushManager", origPushManager);
+    else Reflect.deleteProperty(window, "PushManager");
   });
 
   it("reports unsupported and issues no fetch when SW/PushManager are absent", () => {
-    delete (navigator as any).serviceWorker;
-    delete (window as any).PushManager;
+    Reflect.deleteProperty(navigator, "serviceWorker");
+    Reflect.deleteProperty(window, "PushManager");
     const fetchSpy = vi.fn();
-    global.fetch = fetchSpy as any;
+    globalThis.fetch = fetchSpy as typeof fetch;
     const { result } = renderHook(() => usePushSubscription());
     expect(result.current.supported).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -65,7 +83,7 @@ describe("usePushSubscription", () => {
   it("subscribe() POSTs the subscription to /api/push/register", async () => {
     mockServiceWorker(null);
     const fetchSpy = mockFetchOk();
-    global.fetch = fetchSpy as any;
+    globalThis.fetch = fetchSpy as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     expect(result.current.supported).toBe(true);
@@ -78,21 +96,63 @@ describe("usePushSubscription", () => {
     const registerCall = fetchSpy.mock.calls.find((c) => String(c[0]).includes("/api/push/register"));
     expect(registerCall).toBeDefined();
     expect(registerCall?.[1]?.method).toBe("POST");
-    const body = JSON.parse(registerCall?.[1]?.body as string);
+    const body = JSON.parse(String(registerCall?.[1]?.body));
     expect(body.transport).toBe("web-push");
     expect(typeof body.deviceToken).toBe("string");
     await waitFor(() => expect(result.current.status).toBe("subscribed"));
   });
 
-  it("reflects an existing subscription as 'subscribed' without registering on mount", async () => {
-    mockServiceWorker({ endpoint: "https://push.example/existing" });
+  it("re-registers an existing subscription on mount to recover tokenId", async () => {
+    const existing = {
+      endpoint: "https://push.example/existing",
+      toJSON: () => ({ endpoint: "https://push.example/existing" }),
+    } as PushSubscription;
+    mockServiceWorker(existing);
     const fetchSpy = mockFetchOk();
-    global.fetch = fetchSpy as any;
+    globalThis.fetch = fetchSpy as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("subscribed"));
 
     const registerCalls = fetchSpy.mock.calls.filter((c) => String(c[0]).includes("/api/push/register"));
-    expect(registerCalls).toHaveLength(0);
+    expect(registerCalls.length).toBeGreaterThanOrEqual(1);
+    expect(registerCalls[0]?.[1]?.method).toBe("POST");
+  });
+
+  it("maps denied Notification.permission on mount to denied status", async () => {
+    mockServiceWorker(null);
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: {
+        permission: "denied" as NotificationPermission,
+        requestPermission: vi.fn(async () => "denied" as NotificationPermission),
+      },
+    });
+    const fetchSpy = mockFetchOk();
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { result } = renderHook(() => usePushSubscription());
+    await waitFor(() => expect(result.current.status).toBe("denied"));
+  });
+
+  it("dismissed permission prompt stays unsubscribed (not denied)", async () => {
+    mockServiceWorker(null);
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: {
+        permission: "default" as NotificationPermission,
+        requestPermission: vi.fn(async () => "default" as NotificationPermission),
+      },
+    });
+    const fetchSpy = mockFetchOk();
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { result } = renderHook(() => usePushSubscription());
+    await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
+
+    await act(async () => {
+      await result.current.subscribe();
+    });
+    await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
   });
 });

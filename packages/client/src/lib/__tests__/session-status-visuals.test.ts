@@ -92,6 +92,9 @@ describe("isChatRoutedAskUser", () => {
   it("ask_user + not widget-bar → true", () => {
     expect(isChatRoutedAskUser(makeSession({ currentTool: "ask_user" }), false)).toBe(true);
   });
+  it("ask + not widget-bar → true", () => {
+    expect(isChatRoutedAskUser(makeSession({ currentTool: "ask" }), false)).toBe(true);
+  });
   it("ask_user + widget-bar → false (suppressed)", () => {
     expect(isChatRoutedAskUser(makeSession({ currentTool: "ask_user" }), true)).toBe(false);
   });

@@ -47,6 +47,12 @@ describe("VAPID key lifecycle", () => {
     });
   });
 
+  it("writes the key file with mode 0o600", () => {
+    generateVAPIDKeys.mockReturnValue({ publicKey: "PUB1", privateKey: "PRIV1" });
+    loadOrGenerateVapidKeys(file);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
   it("reuses the persisted keypair on a second call (no regen)", () => {
     generateVAPIDKeys.mockReturnValue({ publicKey: "PUB1", privateKey: "PRIV1" });
     loadOrGenerateVapidKeys(file);

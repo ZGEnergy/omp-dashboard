@@ -44,7 +44,8 @@ export function createPushTokenRegistry(opts: { path: string }): PushTokenRegist
   }
 
   function save(tokens: PushToken[]): void {
-    writeJsonFile(filePath, tokens);
+    // Device tokens + endpoints are secrets — owner-only.
+    writeJsonFile(filePath, tokens, { mode: 0o600 });
   }
 
   return {

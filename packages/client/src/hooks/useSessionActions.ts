@@ -170,7 +170,7 @@ export function useSessionActions(deps: SessionActionDeps) {
       setSessions((prev) => {
         const next = new Map(prev);
         const session = next.get(selectedId);
-        if (session?.currentTool === "ask_user") {
+        if (session?.currentTool === "ask_user" || session?.currentTool === "ask") {
           next.set(selectedId, { ...session, currentTool: undefined });
         }
         return next;

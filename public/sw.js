@@ -1,6 +1,6 @@
 // Minimal service worker for PWA installability + Web Push.
-// Cache version: v2 (bumped for push/notificationclick — see change:
-// add-server-push-notifications). Bumping forces existing browsers to refetch.
+// Cache version: v3 (skipWaiting + clients.claim so push handlers activate
+// without a second visit — see change: add-server-push-notifications).
 //
 // Passes all requests through to the network — no caching.
 //
@@ -8,6 +8,17 @@
 // real fetch rejection so callers can distinguish it from a server response.
 // Only navigation/asset requests get the synthetic "Offline" fallback.
 // See change: fix-openspec-profile-load-race.
+
+self.addEventListener("install", () => {
+  // Activate the new SW immediately so push/notificationclick handlers land
+  // without waiting for every tab to close.
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.pathname.startsWith("/api/")) {

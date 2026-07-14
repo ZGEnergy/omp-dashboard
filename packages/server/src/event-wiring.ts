@@ -12,6 +12,7 @@ import { resolveOrderKey } from "./resolve-order-key.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { DirectoryService } from "./directory-service.js";
 import { extractSessionUpdates, isActivityEvent, isUnreadTrigger } from "./event-status-extraction.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { composeWorktreePayload } from "./git-worktree-compose.js";
 import type { ViewedSessionTracker } from "./viewed-session-tracker.js";
 import type { PushDispatcher } from "./push/push-dispatcher.js";
@@ -563,8 +564,8 @@ export function wireEvents(deps: EventWiringDeps): void {
       }
 
       // Gated status-transition placement for session-card ordering.
-      //   questionFirst: alive session whose currentTool flips to
-      //     "ask_user" → move to top of active tier.
+      //   questionFirst: alive session whose currentTool flips to an
+      //     input-needed tool (`ask_user` / core `ask`) → top of active tier.
       //   completedFirst: alive session emitting `agent_end` (turn done,
       //     still idle) → move to top of active tier.
       // Both gated by the live config flags, idempotent (moveToFront is a
@@ -577,8 +578,8 @@ export function wireEvents(deps: EventWiringDeps): void {
         if (placed && placed.status !== "ended") {
           const askTrigger =
             !!isQuestionFirst?.() &&
-            placed.currentTool === "ask_user" &&
-            beforeSnapshot.currentTool !== "ask_user";
+            isInputNeededTool(placed.currentTool) &&
+            !isInputNeededTool(beforeSnapshot.currentTool);
           const endTrigger =
             !!isCompletedFirst?.() && msg.event.eventType === "agent_end";
           if (askTrigger || endTrigger) {
