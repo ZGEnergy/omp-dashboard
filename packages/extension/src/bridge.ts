@@ -19,6 +19,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Loader } from "@earendil-works/pi-tui";
 import { AbortLatch } from "./abort-latch.js";
 import { isUnderArtifactRoot, resolveArtifactRoots } from "./artifact-roots.js";
+import { registerAskTool } from "./ask-tool.js";
 import {
   MAX_PER_MESSAGE_BYTES as ATTACH_MAX_PER_MESSAGE_BYTES,
   cleanupAttachmentsForSession,
@@ -132,6 +133,14 @@ export default function (pi: ExtensionAPI) {
     // Anthropic-messages payload transforms (system prompt rewrite + tool
     // filter/remap) are handled by the installed @benvargas/pi-claude-code-use
     // package when present. No local duplication here.
+
+    // Register core-named `ask` at factory load (before createAgentSession
+    // snapshots extensionRunner.getAllRegisteredTools into toolRegistry).
+    // session_start registration is too late — only mutates ext.tools.
+    // Routes execute through PromptBus-patched ctx.ui (same as ask_user).
+    // Overwrites core AskTool when present; TUI sessions still work via the
+    // PromptBus TUI adapter registered when original hasUI is true.
+    registerAskTool(pi);
 
     initBridge(pi);
   } catch (err) {
