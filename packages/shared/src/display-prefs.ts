@@ -152,7 +152,7 @@ export function mergeDisplayPrefs(
  *   *         → generic
  */
 export function toolCallPrefKey(toolName: string): keyof ToolCallPrefs | null {
-  if (toolName === "ask_user") return null;
+  if (toolName === "ask_user" || toolName === "ask") return null;
   if (toolName === "read") return "read";
   if (toolName === "bash") return "bash";
   if (toolName === "edit" || toolName === "write") return "edit";

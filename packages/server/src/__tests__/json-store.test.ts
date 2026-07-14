@@ -66,5 +66,18 @@ describe("json-store", () => {
       writeJsonFile(fp, {});
       expect(fs.existsSync(fp + ".tmp")).toBe(false);
     });
+
+    it("applies mode 0o600 when requested", () => {
+      const fp = path.join(tmpDir, "secret.json");
+      writeJsonFile(fp, { secret: true }, { mode: 0o600 });
+      expect(fs.statSync(fp).mode & 0o777).toBe(0o600);
+    });
+
+    it("tightens existing file mode on rewrite", () => {
+      const fp = path.join(tmpDir, "tighten.json");
+      fs.writeFileSync(fp, "{}\n", { mode: 0o664 });
+      writeJsonFile(fp, { v: 1 }, { mode: 0o600 });
+      expect(fs.statSync(fp).mode & 0o777).toBe(0o600);
+    });
   });
 });

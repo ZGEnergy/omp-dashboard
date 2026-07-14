@@ -48,6 +48,12 @@ describe("buildPushPayload", () => {
     expect(p.title.toLowerCase()).toContain("input");
   });
 
+  it("core ask: title indicates input is needed", () => {
+    const s = session({ currentTool: "ask", status: "idle", name: "worker" });
+    const p = buildPushPayload(s, event("tool_execution_start", { toolName: "ask" }));
+    expect(p.title.toLowerCase()).toContain("input");
+  });
+
   it("agent_end with error: body includes the truncated error text", () => {
     const s = session({ name: "worker" });
     const p = buildPushPayload(s, event("agent_end", { error: "boom: something failed" }));

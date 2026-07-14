@@ -43,7 +43,9 @@ export function FolderNeedsYouPill({
   /** Invoked with the first chat-routed (non-widget-bar) blocked session id. */
   onActivate: (sessionId: string) => void;
 }) {
-  const candidates = sessions.filter((s) => s.currentTool === "ask_user" && s.status !== "ended");
+  const candidates = sessions.filter(
+    (s) => (s.currentTool === "ask_user" || s.currentTool === "ask") && s.status !== "ended",
+  );
   // Per-candidate widget-bar classification once its probe reports. Absent =
   // not yet classified (excluded from the count until known) so the pill never
   // flashes an over-count before the probes resolve.
