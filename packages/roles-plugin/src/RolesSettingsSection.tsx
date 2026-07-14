@@ -6,6 +6,7 @@
  * re-read merge so concurrent editors do not clobber each other.
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { usePluginConfig } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import {
   useUiPrimitive,
   useSettingsDraftSource,
@@ -87,9 +88,9 @@ export function BuiltInRolesSettings() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Models list is optional for the primitive; empty still allows free-form
-  // provider/id values via the primitive's existing behavior.
-  const models: ModelInfo[] = [];
+  // Models arrive via WS models_list → applyPluginConfigUpdate({ id: "roles", models }).
+  const pluginCfg = usePluginConfig<{ models?: ModelInfo[] }>();
+  const models: ModelInfo[] = Array.isArray(pluginCfg?.models) ? pluginCfg.models : [];
 
   const reload = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
