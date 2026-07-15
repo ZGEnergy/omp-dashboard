@@ -3,78 +3,76 @@
 ## Why
 
 File links in tool output are resolved **entirely on the client** by a strict
-regex tokenizer. Two structural problems follow, both measured against 12 recent
-chatlogs (4,521 file-mentions, 41,842 repo files):
+regex tokenizer with zero filesystem knowledge. Measured against 12 recent
+chatlogs (1,713 links, 41,842 repo files):
 
-1. **Broken links ship to the UI.** The client marks a token as a link with no
-   filesystem check. `~/…` home paths split the tilde and root at `/` (19/19
-   mislinked; several point at real home files). Doc-example and ESM-`.js`
-   paths render as clickable dead links. The client cannot validate — it has no
-   filesystem.
-2. **The strict grammar misses real files.** Bare basenames the LLM drops
-   without a path prefix (`monaco-setup.ts`, `BinaryWarn.tsx`) are never linked
-   — 182 such mentions in the sample resolve to exactly one real file, but the
-   client can't know that.
+1. **Broken links ship to the UI.** 774/1,713 links resolve to no file. `~/…`
+   home paths split the tilde and root at `/` (19/19 mislinked; several point at
+   real home files). The client cannot validate — it has no filesystem.
+2. **The strict grammar misses real files** — bare basenames the LLM drops
+   without a path prefix. Up to 182 in the sample map to exactly one tracked
+   file (an upper bound; untracked just-written files are invisible to search).
 
 The filesystem lives on the **server**, which already owns the resolution
-primitives (`isAllowed` containment, git-root widening, `realpath`). The fix is
-to invert responsibility: **client detects loosely, server resolves and
-validates against the real filesystem, only confirmed mentions render as
-openable links.**
-
-Measured resolver outcomes on the 4,521 candidates justify a two-phase scope:
-
-```
-resolved deterministically (abs/tilde/rel-to-cwd exists)  35.9%   Phase 1
-resolved by unique basename/suffix search                  7.2%   Phase 2
-ambiguous basename collision (MUST NOT auto-pick)          8.1%   guardrail
-not found (render as plain text, never a dead link)       48.7%   Phase 1
-```
+primitives (`isAllowed` containment, git-root widening, `realpath`). Invert
+responsibility: **client detects, server resolves against the real filesystem
+lazily on open.**
 
 ## What Changes
 
-### Phase 1 — existence-gated server resolution (owns the broken-link + tilde fix)
+### Phase 1 — lazy server resolution + tilde (fixes the broken/tilde links)
 
-- Add a server endpoint `POST /api/file/resolve-mentions` that takes `{ cwd,
-  mentions: string[] }` and returns, per mention, `{ resolved: string | null,
-  kind: "abs" | "tilde" | "relative" }`. Resolution: expand a leading `~/` to
-  `os.homedir()`, then try absolute / relative-to-cwd, each passed through the
-  existing anti-traversal containment gate BEFORE any filesystem stat.
-- Client tokenizer LOOSENS detection to mark more candidates, but a candidate
-  renders as an **openable link only after the server confirms `resolved !==
-  null`**; unconfirmed candidates render as plain text (no dead links).
-- The client batch-validates the mentions visible in a message in one round
-  trip; resolution result is cached per `(cwd, mention)`.
+- Add `POST /api/file/resolve-mention` (`{ cwd, mention }` → `{ resolved:
+  string | null, kind }`). Resolution: expand a leading `~/` to `os.homedir()`,
+  then try absolute / relative-to-cwd, each through the existing containment gate
+  BEFORE `fs.stat`.
+- **Security precondition (load-bearing):** `cwd` is untrusted request input.
+  The endpoint runs behind `networkGuard` and rejects any `cwd` not in the
+  known-session set BEFORE resolving — the same cwd-validation every other file
+  route enforces (session cwd + git-root anchors, NOT the wider exists-only
+  pinned set). Containment anchored on an attacker-chosen `cwd` is otherwise a
+  tautology.
+- Client detection is **unchanged** (strict, synchronous, offline-safe). On
+  **click**, `FileLink` calls the endpoint and opens the server-resolved path
+  (matches the original "check on open" concept). The server owns worktree
+  re-rooting; the client stops double-resolving server-resolved paths. A fetch
+  failure (not a null result) falls back to today's client-side open — no
+  render-time server dependency, no async render flash.
 
-### Phase 2 — unique-only fuzzy fallback
+### Phase 2 (opt-in) — loose detection + unique-only fuzzy, cost owned
 
-- When Phase-1 resolution misses, the server MAY search for the mention's
-  basename (and path-suffix) among tracked files (`git ls-files`, bounded).
-- A fuzzy hit resolves the link **only when exactly one file matches**. On a
-  basename collision (`spec.md`, `tasks.md`, `AGENTS.md`, `index.ts`, …) the
-  server returns `resolved: null` — it MUST NEVER auto-pick one of many.
+- Loosen client detection to mark bare `basename.ext` candidates; these render as
+  plain text until a batched pre-confirm returns a real file (server-confirmation
+  gates prose false positives like `Node.js` / `math.PI`).
+- On a Phase-1 miss the server MAY search the session tree's tracked files
+  (`git ls-files`, scoped to the session's own worktree, bounded) and resolve a
+  link ONLY when exactly one tracked file matches AND it `fs.stat`-confirms on
+  disk. Basename collisions (`spec.md`, `tasks.md`, `AGENTS.md`) return null —
+  never auto-picked. Suffix matching is dropped (0.2% yield).
 
 ## Impact
 
-- Supersedes the retired `fix-tilde-home-linkify` (its tilde behavior is folded
-  into Phase 1).
-- Affected spec: `tool-output-linkification` — new server-resolution
-  requirements + a loosened client-detection requirement + the
-  never-auto-pick-on-collision guardrail.
-- Affected code: `packages/server/src/routes/file-routes.ts` (new resolve
-  endpoint + `resolveFileMention()` lib), `packages/client/src/lib/
-  linkify-tool-output.ts` (loosen grammar), `FileLink` / a new validation hook
-  (async confirm before styling as link), `resolveLinkOrigin` interaction.
+- Supersedes the retired `fix-tilde-home-linkify` (tilde folds into Phase 1).
+- Affected spec: `tool-output-linkification` — Phase-1 requirements (server
+  resolution with the untrusted-`cwd` gate; lazy-open behavior) are ADDED now;
+  the Phase-2 fuzzy + loosened-detection requirement (which also MODIFIES the
+  existing "bare `README.md` MUST NOT link" rule) lands when Phase 2 is
+  scheduled. Spec rows are phase-labeled so `openspec-apply` does not treat
+  fuzzy as Phase-1 scope.
+- Affected code: `packages/server/src/routes/file-routes.ts` (endpoint +
+  `resolveFileMention()` lib reusing the `/api/file/exists` cwd gate),
+  `packages/client/src/components/tool-renderers/FileLink.tsx` +
+  `useFileOpenRouting.ts` (resolve-on-click, drop double re-root),
+  `linkify-tool-output.ts` (Phase 2 only).
 - Affected tests: `resolveFileMention()` unit tests (unique→resolve,
-  collision→refuse, tilde→home, `../` traversal→reject); client tests for
-  render-as-plain-text-until-confirmed.
-- Performance: resolution is lazy/batched, not an eager 41k-file index. Phase 2
-  scopes search to `git ls-files` (tracked files) with a hard result cap.
+  collision→refuse, tilde→home, `../` traversal→reject, untrusted-cwd→403,
+  index-only-not-on-disk→null); FileLink click-resolves + offline-fallback test.
+- Performance: Phase 1 is one stat-scoped resolve per click. Phase 2 owns the
+  batch/`git ls-files` cost (debounce, request cap, TTL cache, non-repo skip).
 
 ## Discipline Skills
 
-- `security-hardening` — server expands `~` and searches the filesystem on
-  behalf of an authenticated browser; every path MUST pass the existing
-  containment gate BEFORE stat, and fuzzy search MUST stay inside cwd/git-root.
-- `performance-optimization` — batched/lazy resolution and a bounded
-  `git ls-files` search; measure the round-trip cost per message before shipping.
+- `security-hardening` — the untrusted-`cwd` gate, containment-before-stat, and
+  fuzzy search scoped inside the session tree are all security boundaries.
+- `performance-optimization` — Phase-2 batched pre-confirm + bounded
+  `git ls-files`; measure per-click and per-batch cost before shipping Phase 2.
