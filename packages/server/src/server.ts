@@ -24,7 +24,7 @@ import compress from "@fastify/compress";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
-import { registerAuthPlugin, validateWsUpgrade } from "./auth-plugin.js";
+import { registerAuthPlugin, validateWsUpgrade, validateWsUpgradeWithoutAuth } from "./auth-plugin.js";
 import { registerBearerAuth } from "./bearer-auth.js";
 import { type BrowserGateway, createBrowserGateway } from "./browser-gateway.js";
 import { writeConfigPartial } from "./config-api.js";
@@ -1845,14 +1845,17 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
             return;
           }
         } else if (
-          !isGenuinelyLocal(remoteAddress, wsHeaders) &&
-          !verifyLocalToken(wsHeaders, localToken) &&
-          (trusted.length === 0 || !isBypassedHost(remoteAddress, trusted)) &&
-          !(scope && ticket && consumeTicket(ticket, scope))
+          !validateWsUpgradeWithoutAuth(remoteAddress, trusted, {
+            ticket,
+            scope,
+            consumeTicket,
+            headers: wsHeaders,
+            localToken,
+          })
         ) {
           // No auth configured — allow genuine-local, local-IPC token, trusted
           // networks, or a valid single-use ticket. A tunnel presenting as
-          // 127.0.0.1 (forwarding header) is NOT trusted (D10, narrowed).
+          // 127.0.0.1 (forwarding header) is not trusted (D10, narrowed).
           socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
           socket.destroy();
           return;

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { COOKIE_NAME, signToken } from "../auth.js";
-import { validateWsUpgrade } from "../auth-plugin.js";
+import { validateWsUpgrade, validateWsUpgradeWithoutAuth } from "../auth-plugin.js";
 import { parseBearerHeader } from "../bearer-auth.js";
 import { PairedDeviceRegistry } from "../paired-devices.js";
 import { WsTicketStore } from "../ws-ticket.js";
@@ -46,6 +46,23 @@ describe("validateWsUpgrade — ticket branch is additive (Task 3.3/3.5)", () =>
     // The ticket was consumed before the bypass returned, so the same ticket
     // cannot authorize a later external upgrade.
     expect(validateWsUpgrade(undefined, "1.2.3.4", SECRET, [], { ticket, scope: "browser", consumeTicket })).toBe(false);
+  });
+  it("consumes a ticket before an auth-disabled local bypass", () => {
+    const store = new WsTicketStore();
+    const consumeTicket = (t: string, s: any) => store.consume(t, s);
+    const ticket = store.mint("browser");
+
+    expect(validateWsUpgradeWithoutAuth("127.0.0.1", [], {
+      ticket,
+      scope: "browser",
+      consumeTicket,
+    })).toBe(true);
+    // A later non-local attempt cannot reuse the ticket consumed above.
+    expect(validateWsUpgradeWithoutAuth("1.2.3.4", [], {
+      ticket,
+      scope: "browser",
+      consumeTicket,
+    })).toBe(false);
   });
 
   it("valid cookie still authorizes external requests (unchanged)", () => {
