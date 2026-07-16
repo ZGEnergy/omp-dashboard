@@ -10,7 +10,7 @@ We track upstream **`develop`** while shipping ZGE-only product on protected **`
 | `main` | Default, **protected**. Production promote target. |
 | `develop` | Fast-forward **mirror** of `main` (legacy clients / install refs). |
 | `upstream/develop` | BlackBelt integration branch we merge from. |
-| `sync/upstream-develop-YYYYMMDD` | Ephemeral merge branch → PR into `main`. |
+| `sync/upstream-develop` | **Stable** sync branch (force-updated). Only **one** open sync PR is kept; older ones are closed as superseded. |
 
 ## Commands
 
@@ -19,13 +19,13 @@ We track upstream **`develop`** while shipping ZGE-only product on protected **`
 scripts/upstream-sync.sh status
 scripts/upstream-sync.sh merge          # branch + merge; auto --ours on protected paths
 scripts/upstream-sync.sh verify         # Gate 0 structure + focused vitest + build
-scripts/upstream-sync.sh pr             # push + open PR labeled upstream-sync
+scripts/upstream-sync.sh pr             # force-with-lease push + upsert **one** PR; close older sync PRs
 scripts/upstream-sync.sh ff-develop     # point origin/develop at origin/main
 ```
 
 Env knobs: `UPSTREAM_REF`, `TARGET_BRANCH`, `SYNC_BRANCH`, `DRY_RUN=1`, `SKIP_BUILD=1`, `SYNC_ADOPT_UPSTREAM=1`.
 
-Weekly automation: [`.github/workflows/upstream-sync.yml`](../.github/workflows/upstream-sync.yml)  
+Weekly automation: [`.github/workflows/upstream-sync.yml`](../.github/workflows/upstream-sync.yml) — always leaves **at most one** open `upstream-sync` PR (latest).  
 ZGE CI gates: [`.github/workflows/ci-zge.yml`](../.github/workflows/ci-zge.yml)
 
 ## Protected paths (ZGE wins on conflict by default)
