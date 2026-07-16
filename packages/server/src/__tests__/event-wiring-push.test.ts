@@ -75,6 +75,7 @@ function makeDeps(overrides: {
     sendToSubscribers: noop,
     broadcastSessionStateReset: noop,
     broadcastSessionRemoved: noop,
+    clearPendingPromptResponses: vi.fn(),
     headlessPidRegistry: {
       linkByToken: () => false,
       linkByPid: () => false,
@@ -160,6 +161,15 @@ describe("event-wiring push dispatch", () => {
   beforeEach(() => {
     fanout = vi.fn();
     dispatcher = { fanout, shutdown: vi.fn() } as unknown as EventWiringDeps["pushDispatcher"];
+  });
+
+  it("clears queued prompt responses when a session unregisters", () => {
+    const { deps, sm } = makeDeps({});
+    wireEvents(deps);
+
+    (sm.onUnregister as (sessionId: string) => void)(SID);
+
+    expect((deps.browserGateway as any).clearPendingPromptResponses).toHaveBeenCalledWith(SID);
   });
 
   it("calls fanout once with (sessionId, event) on agent_end-with-error while not viewed and both buckets enabled", () => {

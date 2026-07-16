@@ -37,6 +37,16 @@ describe("validateWsUpgrade — ticket branch is additive (Task 3.3/3.5)", () =>
     expect(validateWsUpgrade(undefined, "127.0.0.1", SECRET)).toBe(true);
     expect(validateWsUpgrade(undefined, "::1", SECRET)).toBe(true);
   });
+  it("consumes a ticket even when loopback bypass authorizes the first upgrade", () => {
+    const store = new WsTicketStore();
+    const consumeTicket = (t: string, s: any) => store.consume(t, s);
+    const ticket = store.mint("browser");
+
+    expect(validateWsUpgrade(undefined, "127.0.0.1", SECRET, [], { ticket, scope: "browser", consumeTicket })).toBe(true);
+    // The ticket was consumed before the bypass returned, so the same ticket
+    // cannot authorize a later external upgrade.
+    expect(validateWsUpgrade(undefined, "1.2.3.4", SECRET, [], { ticket, scope: "browser", consumeTicket })).toBe(false);
+  });
 
   it("valid cookie still authorizes external requests (unchanged)", () => {
     const cookie = `${COOKIE_NAME}=${signToken({ sub: "u@e.com", name: "U", username: "u", provider: "github" }, SECRET)}`;

@@ -326,6 +326,16 @@ export function validateWsUpgrade(
     localToken?: string;
   },
 ): boolean {
+  // Consume every presented ticket before any local/trusted bypass can return.
+  // WsTicketStore deletes on the first attempt, preserving single-use semantics
+  // even when this request is authorized by another credential.
+  const ticketValid =
+    opts?.ticket !== undefined &&
+    opts.ticket !== null &&
+    opts.consumeTicket &&
+    opts.scope
+      ? opts.consumeTicket(opts.ticket, opts.scope)
+      : false;
   // Genuine same-host origin, or a valid local-IPC token. A tunnel presenting
   // as loopback (with a forwarding header) is NOT trusted here (D10, narrowed).
   if (isGenuinelyLocal(remoteAddress, opts?.headers)) return true;
@@ -335,9 +345,7 @@ export function validateWsUpgrade(
   // authenticated REST call. The upgrade is refused unless it validates, so no
   // authenticated socket exists before auth (no TOCTOU). F6: only the ephemeral
   // ticket — never the durable bearer — may ride the WS.
-  if (opts?.consumeTicket && opts.scope) {
-    if (opts.ticket && opts.consumeTicket(opts.ticket, opts.scope)) return true;
-  }
+  if (ticketValid) return true;
   const token = parseAuthCookie(cookieHeader);
   if (!token) return false;
   return verifyToken(token, secret) !== null;
