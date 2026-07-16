@@ -102,7 +102,7 @@ import { registerPiCoreRoutes } from "./routes/pi-core-routes.js";
 import { registerPushRoutes } from "./routes/push-routes.js";
 import { createPushTokenRegistry } from "./push/push-token-registry.js";
 import { createPushDispatcher, type PushDispatcher } from "./push/push-dispatcher.js";
-import { loadOrGenerateVapidKeys } from "./push/push-vapid.js";
+import { loadOrGenerateVapidKeys, publicKeyForLivePush } from "./push/push-vapid.js";
 import { createWebPushTransport } from "./push/push-transports/web-push.js";
 import { createFcmTransport } from "./push/push-transports/fcm.js";
 import type { PushTransport, PushTransportKind } from "./push/push-transports/types.js";
@@ -907,14 +907,18 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     // state stay shared with event-wiring and push REST routes.
     delete pushTransports["web-push"];
     delete pushTransports.fcm;
-    if (!next.enabled) return;
-
     const contactEmail = next.webPush?.contactEmail;
+    if (!next.enabled) {
+      pushVapidPublicKey = publicKeyForLivePush(false, contactEmail, pushVapidKeys);
+      return;
+    }
+
     if (contactEmail) {
       pushVapidKeys ??= loadOrGenerateVapidKeys(path.join(pushDir, "push-vapid.json"));
-      pushVapidPublicKey = pushVapidKeys.publicKey;
+      pushVapidPublicKey = publicKeyForLivePush(true, contactEmail, pushVapidKeys);
       pushTransports["web-push"] = createWebPushTransport({ vapidKeys: pushVapidKeys, contactEmail });
     } else {
+      pushVapidPublicKey = publicKeyForLivePush(true, undefined, pushVapidKeys);
       console.warn(
         "[push] push.enabled=true but push.webPush.contactEmail is unset — Web Push disabled. Set push.webPush.contactEmail in config.json.",
       );
