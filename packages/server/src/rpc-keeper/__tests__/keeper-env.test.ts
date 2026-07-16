@@ -44,4 +44,23 @@ describe("buildPiEnv", () => {
     expect(base.PI_DASHBOARD_SPAWN_TOKEN).toBe("tok_abc");
     expect(base.PI_KEEPER_PI_ARGS).toBe('["--foo"]');
   });
+
+  it("strips Zellij client identity from every launch", () => {
+    const base = {
+      ...BASE,
+      ZELLIJ: "0",
+      ZELLIJ_PANE_ID: "5",
+      ZELLIJ_SESSION_NAME: "work2",
+    };
+    for (const first of [true, false]) {
+      const env = buildPiEnv(base, first);
+      expect(env.ZELLIJ).toBeUndefined();
+      expect(env.ZELLIJ_PANE_ID).toBeUndefined();
+      expect(env.ZELLIJ_SESSION_NAME).toBeUndefined();
+      expect(env.PI_DASHBOARD_SPAWNED).toBe("1");
+    }
+    // source untouched
+    expect(base.ZELLIJ).toBe("0");
+    expect(base.ZELLIJ_PANE_ID).toBe("5");
+  });
 });

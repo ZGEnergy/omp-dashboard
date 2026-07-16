@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { buildTmuxCommand, buildHeadlessArgs, shellEscape, spawnPiSession, buildSpawnEnv, type SessionOptions } from "../process-manager.js";
+import { buildTmuxCommand, buildHeadlessArgs, shellEscape, spawnPiSession, buildSpawnEnv, stripZellijClientEnv, zellijEnvUnsetPrefix, type SessionOptions } from "../process-manager.js";
 
 // Note: platform-dispatch tests live in packages/shared/src/__tests__/
 // spawn-mechanism.test.ts. `detectPlatform` was removed in change:
@@ -12,6 +12,20 @@ describe("Process Manager", () => {
       const cmd = buildTmuxCommand("/home/user/project", false);
       expect(cmd).toContain("new-session");
       expect(cmd).toContain("pi-dashboard");
+    });
+
+    it("scrubs ZELLIJ* inside the pane command (tmux session env re-injects)", () => {
+      const cmd = buildTmuxCommand("/home/user/project", true);
+      expect(cmd).toContain(zellijEnvUnsetPrefix());
+      expect(cmd).toMatch(/env -u ZELLIJ -u ZELLIJ_PANE_ID.*pi/);
+      // prefix must wrap pi, not only the outer tmux client
+      expect(cmd.indexOf("env -u ZELLIJ")).toBeLessThan(cmd.lastIndexOf(" pi"));
+    });
+
+    it("scrubs ZELLIJ* for new-session path as well", () => {
+      const cmd = buildTmuxCommand("/home/user/project", false);
+      expect(cmd).toContain(zellijEnvUnsetPrefix());
+      expect(cmd).toContain("new-session");
     });
 
     it("should create new window when pi-dashboard session exists", () => {
@@ -161,6 +175,33 @@ describe("Process Manager", () => {
       const managedCount = parts.filter(p => p === managedBin).length;
       expect(managedCount).toBe(1);
     });
+
+    it("strips Zellij client identity so headless sessions cannot hijack tabs", () => {
+      const env = buildSpawnEnv({
+        PATH: "/usr/bin",
+        ZELLIJ: "0",
+        ZELLIJ_PANE_ID: "5",
+        ZELLIJ_SESSION_NAME: "work2",
+        ZELLIJ_LAYOUT: "default",
+        KEEP_ME: "yes",
+      });
+      expect(env.ZELLIJ).toBeUndefined();
+      expect(env.ZELLIJ_PANE_ID).toBeUndefined();
+      expect(env.ZELLIJ_SESSION_NAME).toBeUndefined();
+      expect(env.ZELLIJ_LAYOUT).toBeUndefined();
+      expect(env.KEEP_ME).toBe("yes");
+    });
+
+    it("stripZellijClientEnv only removes ZELLIJ* keys", () => {
+      const env = stripZellijClientEnv({
+        ZELLIJ: "0",
+        ZELLIJ_PANE_ID: "1",
+        PATH: "/bin",
+        FOO: "bar",
+      });
+      expect(env).toEqual({ PATH: "/bin", FOO: "bar" });
+    });
+
   });
 
   describe("electronMode", () => {

@@ -174,6 +174,28 @@ export interface SpawnResult {
  * lands at the very head of `PATH` — spawned children invoking plain
  * `node` / `npm` resolve to the managed runtime first.
  */
+/**
+ * Strip Zellij client identity from dashboard-spawned session envs.
+ *
+ * Headless `omp --mode rpc` sessions inherit the dashboard server's process
+ * env. When the server itself was started inside a Zellij pane (dev dogfood),
+ * that includes `ZELLIJ` / `ZELLIJ_PANE_ID` / `ZELLIJ_SESSION_NAME` for the
+ * *server's* pane. The tab-namer extension then treats the headless session as
+ * owning that pane and renames the interactive tab — hijacking focus and
+ * fighting Ctrl+T+R / `/rename`.
+ *
+ * Headless sessions are not attached to a Zellij pane; they must not carry
+ * client identity.
+ */
+export function stripZellijClientEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  for (const key of Object.keys(env)) {
+    if (key === "ZELLIJ" || key.startsWith("ZELLIJ_")) {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
 export function buildSpawnEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
   opts?: {
@@ -192,6 +214,9 @@ export function buildSpawnEnv(
 ): NodeJS.ProcessEnv {
   // Defensive copy: never mutate the caller's env (often `process.env`).
   const env = { ...prependManagedNodeToPath(resolver.buildSpawnEnv(baseEnv)) };
+  // Headless/dashboard children must not inherit the server's Zellij pane identity.
+  // See stripZellijClientEnv — prevents tab-namer hijack of interactive tabs.
+  stripZellijClientEnv(env);
   // Re-add the Electron-as-node flag that `resolver.buildSpawnEnv` strips,
   // but ONLY when the argv[0] we are about to spawn is the Electron binary.
   // The argv-aware chokepoint that keeps this builder in agreement with
@@ -251,12 +276,32 @@ export function buildInteractivePiArgs(options?: SessionOptions): string[] {
  * Build a tmux shell command string to run pi in a new tmux window/session.
  * Kept as a string (not argv) because tmux is invoked via `execSync(cmd)`.
  */
+/**
+ * Shell prefix that drops every `ZELLIJ*` variable from the pane environment.
+ *
+ * `buildSpawnEnv` strips these from the env passed to the *tmux client*, but
+ * an already-running tmux server still injects its stored global/session env
+ * into new windows. Unsetting inside the pane command is the reliable scrub
+ * for that boundary (same attack: tab-namer hijack via inherited pane id).
+ *
+ * Uses POSIX `env -u` so we don't need bash-specific `unset`.
+ */
+export function zellijEnvUnsetPrefix(): string {
+  // Explicit known keys + a small shell loop for any other ZELLIJ_* variants
+  // the server may have cached (layout, socket, etc.).
+  return "env -u ZELLIJ -u ZELLIJ_PANE_ID -u ZELLIJ_SESSION_NAME -u ZELLIJ_LAYOUT -u ZELLIJ_PANE_CONTENT -u ZELLIJ_SESSION";
+}
+
 export function buildTmuxCommand(cwd: string, sessionExists: boolean, options?: SessionOptions): string {
   const safeCwd = shellEscape(cwd);
   const flags = sessionFlagsToArgv(options ?? {})
     .map(shellEscape)
     .join(" ");
-  const piCmd = flags ? `cd ${safeCwd} && pi ${flags}` : `cd ${safeCwd} && pi`;
+  // Scrub Zellij client identity inside the pane (tmux session env may re-inject it).
+  const scrub = zellijEnvUnsetPrefix();
+  const piCmd = flags
+    ? `cd ${safeCwd} && ${scrub} pi ${flags}`
+    : `cd ${safeCwd} && ${scrub} pi`;
   if (sessionExists) {
     return `tmux new-window -t pi-dashboard -c ${safeCwd} "${piCmd}"`;
   }
