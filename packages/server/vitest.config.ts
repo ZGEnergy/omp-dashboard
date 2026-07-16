@@ -28,7 +28,7 @@ export default defineConfig({
   resolve: {
     // Worktree-local shared source wins over the hoisted-workspace symlink
     // (which escapes to the main checkout), so tests see the same code the
-    // build does. Mirrors packages/client/vitest.config.ts resolve.alias.
+    // build does — including new modules (e.g. event-window). Mirrors client.
     alias: {
       "@blackbelt-technology/pi-dashboard-shared": path.resolve(__dirname, "../shared/src"),
     },

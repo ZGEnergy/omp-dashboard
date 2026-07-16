@@ -55,12 +55,21 @@ describe("replay-cache", () => {
     expect(await writer.get("sess-a")).toBeNull();
   });
 
-  it("skips persisting a session whose payload exceeds the per-session byte cap", async () => {
+  it("trims over-budget payload to newest events and persists the tail", async () => {
+    // Tiny budget so a handful of events overflow; put must keep newest, not drop.
     const cache = createReplayCache({ factory, maxBytesPerSession: 200 });
     const big = Array.from({ length: 50 }, (_, i) => evt(i + 1));
     await cache.put("huge", { maxSeq: 50, payload: big });
-    // Over-cap payload is not persisted → next load full-replays.
-    expect(await cache.get("huge")).toBeNull();
+    const hit = await cache.get("huge");
+    expect(hit).not.toBeNull();
+    expect(hit!.payload.length).toBeGreaterThan(0);
+    expect(hit!.payload.length).toBeLessThan(50);
+    // Newest seqs only, ascending
+    expect(hit!.payload[hit!.payload.length - 1]!.seq).toBe(50);
+    expect(hit!.maxSeq).toBe(50);
+    for (let i = 1; i < hit!.payload.length; i++) {
+      expect(hit!.payload[i]!.seq).toBeGreaterThan(hit!.payload[i - 1]!.seq);
+    }
   });
 
   it("evicts the least-recently-accessed entry past the cap", async () => {
