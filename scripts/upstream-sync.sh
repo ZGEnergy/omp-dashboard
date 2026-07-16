@@ -12,7 +12,9 @@ ORIGIN_REMOTE="${ORIGIN_REMOTE:-origin}"
 UPSTREAM_REF="${UPSTREAM_REF:-develop}"
 TARGET_BRANCH="${TARGET_BRANCH:-main}"
 DATE_TAG="${DATE_TAG:-$(date -u +%Y%m%d)}"
-SYNC_BRANCH="${SYNC_BRANCH:-sync/upstream-${UPSTREAM_REF}-${DATE_TAG}}"
+# Stable branch so each automated run supersedes the previous open PR.
+SYNC_BRANCH="${SYNC_BRANCH:-sync/upstream-${UPSTREAM_REF}}"
+GH_REPO="${GH_REPO:-ZGEnergy/omp-dashboard}"
 
 # Paths where ZGE wins on conflict unless SYNC_ADOPT_UPSTREAM=1
 PROTECTED_PATHS=(
@@ -48,7 +50,7 @@ Commands:
 Env:
   UPSTREAM_REF   upstream branch (default: develop)
   TARGET_BRANCH  integration branch (default: main)
-  SYNC_BRANCH    override sync branch name
+  SYNC_BRANCH    override sync branch (default: sync/upstream-<ref>, stable/single PR)
   DRY_RUN=1      print actions only for merge/pr
   SKIP_BUILD=1   verify skips npm run build
   SYNC_ADOPT_UPSTREAM=1  do not auto-checkout --ours for protected paths
@@ -258,6 +260,44 @@ cmd_verify() {
   log "Gate 2 OK"
 }
 
+
+close_stale_sync_prs() {
+  local keep_head="$1"
+  command -v gh >/dev/null 2>&1 || { warn "gh not available; skip closing stale sync PRs"; return 0; }
+  log "closing other open upstream-sync PRs (keep head=$keep_head)"
+  local json
+  json=$(gh pr list -R "$GH_REPO" --state open --limit 100 \
+    --json number,headRefName,title,labels,url 2>/dev/null || echo '[]')
+  KEEP_HEAD="$keep_head" GH_REPO_VAL="$GH_REPO" python3 -c '
+import json, os, subprocess, sys
+prs = json.loads(sys.stdin.read() or "[]")
+keep = os.environ["KEEP_HEAD"]
+repo = os.environ["GH_REPO_VAL"]
+for pr in prs:
+    head = pr.get("headRefName") or ""
+    labels = set()
+    for l in (pr.get("labels") or []):
+        labels.add(l.get("name") if isinstance(l, dict) else str(l))
+    is_sync = ("upstream-sync" in labels) or head.startswith("sync/upstream")
+    if not is_sync or head == keep:
+        continue
+    n = pr["number"]
+    body = (
+        "Superseded by the latest automated upstream sync on `" + keep + "`. "
+        "Only the newest sync PR is kept open for review."
+    )
+    subprocess.run(["gh", "pr", "comment", str(n), "-R", repo, "--body", body], check=False)
+    subprocess.run(["gh", "pr", "close", str(n), "-R", repo, "--comment", body], check=False)
+    print(f"closed #{n} head={head}", flush=True)
+' <<<"$json"
+}
+
+push_sync_branch() {
+  local branch="$1"
+  log "pushing $branch (force-with-lease; supersedes previous sync tip)"
+  git push --force-with-lease -u "$ORIGIN_REMOTE" "$branch"
+}
+
 cmd_pr() {
   fetch_all
   local branch
@@ -269,50 +309,55 @@ cmd_pr() {
   behind=$(git rev-list --count "${ORIGIN_REMOTE}/${TARGET_BRANCH}..${tip}" || echo "?")
   ahead=$(git rev-list --count "${tip}..${ORIGIN_REMOTE}/${TARGET_BRANCH}" || echo "?")
   if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    log "DRY_RUN: would push $branch and open PR into $TARGET_BRANCH"
+    log "DRY_RUN: would force-with-lease push $branch, close stale sync PRs, upsert single PR into $TARGET_BRANCH"
     return 0
   fi
-  log "pushing $branch"
-  git push -u "$ORIGIN_REMOTE" "$branch"
-  local body
+  push_sync_branch "$branch"
+  close_stale_sync_prs "$branch"
+  local body title existing
+  title="chore(sync): upstream ${UPSTREAM_REF} @ ${usha}"
   body=$(cat <<BODY
-## Upstream sync
+## Upstream sync (latest only)
 
-- **Upstream:** \`BlackBeltTechnology/pi-agent-dashboard\` \`${UPSTREAM_REF}\` @ \`${usha}\`
-- **Into:** \`${TARGET_BRANCH}\`
+Automation **replaces** any previous open sync PR. Review this one when ready; older sync PRs are closed as superseded.
+
+- **Upstream:** `BlackBeltTechnology/pi-agent-dashboard` `${UPSTREAM_REF}` @ `${usha}`
+- **Into:** `${TARGET_BRANCH}`
+- **Branch:** `${branch}` (stable; force-updated each run)
 - **Approx behind/ahead at open:** behind=${behind} ahead=${ahead}
 
 ## Protected ZGE surfaces (must remain green)
-- \`deploy/**\` self-host installer + systemd/zrok
-- Web Push (\`packages/server/src/push/**\`, push routes, SW)
-- OMP runtime paths (\`omp-agent-paths\`, tool registry, spawn env)
+- `deploy/**` self-host installer + systemd/zrok
+- Web Push (`packages/server/src/push/**`, push routes, SW)
+- OMP runtime paths (`omp-agent-paths`, tool registry, spawn env)
 - OMP config mirror routes
 
 ## Policy
-- Conflict default: **ours** on protected paths (see \`scripts/upstream-sync.sh\`)
-- Shared hubs (\`server.ts\`, \`bridge.ts\`, \`config.ts\`): combined manually
-- Never force-push \`main\`
+- Conflict default: **ours** on protected paths (see `scripts/upstream-sync.sh`)
+- Shared hubs (`server.ts`, `bridge.ts`, `config.ts`): combined manually
+- Never force-push `main` (sync branch may force-with-lease)
 
 ## Gates
-- [ ] \`scripts/upstream-sync.sh verify\` (Gate 0–2)
-- [ ] CI \`ci-zge\` green
+- [ ] `scripts/upstream-sync.sh verify` (Gate 0–2)
+- [ ] CI `ci-zge` green
 - [ ] Manual/prod promote **not** done by this PR
 
-Docs: \`docs/upstream-sync.md\`
+Docs: `docs/upstream-sync.md`
 BODY
 )
-  if gh pr view --head "$branch" >/dev/null 2>&1; then
-    log "PR already exists for $branch"
-    gh pr view --head "$branch" --json url,number,title --jq '{url,number,title}'
+  existing=$(gh pr list -R "$GH_REPO" --state open --head "$branch" --json number --jq '.[0].number // empty' 2>/dev/null || true)
+  if [[ -n "$existing" ]]; then
+    log "updating existing PR #$existing on $branch"
+    gh pr edit "$existing" -R "$GH_REPO" --title "$title" --body "$body" || true
+    gh pr ready "$existing" -R "$GH_REPO" 2>/dev/null || true
+    gh pr view "$existing" -R "$GH_REPO" --json url,number,title --jq '{url,number,title}'
   else
-    gh pr create --base "$TARGET_BRANCH" --head "$branch" \
-      --title "chore(sync): upstream ${UPSTREAM_REF} @ ${usha}" \
-      --label "upstream-sync" \
-      --body "$body" || gh pr create --base "$TARGET_BRANCH" --head "$branch" \
-      --title "chore(sync): upstream ${UPSTREAM_REF} @ ${usha}" \
-      --body "$body"
+    log "creating single open sync PR for $branch"
+    gh pr create -R "$GH_REPO" --base "$TARGET_BRANCH" --head "$branch" \
+      --title "$title" --label "upstream-sync" --body "$body"
   fi
 }
+
 
 cmd_ff_develop() {
   fetch_all
