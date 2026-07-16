@@ -121,4 +121,16 @@ describe("PushNotificationsSection", () => {
     expect(onClaudeDecidesChange).toHaveBeenCalledWith(false);
     expect(onActionsRequiredChange).toHaveBeenCalledTimes(1);
   });
+  it("shows an error when disabling push fails", async () => {
+    hookState.status = "subscribed";
+    hookState.unsubscribe = vi.fn(async () => {
+      throw new Error("unregister failed");
+    });
+    render(<PushNotificationsSection />);
+
+    fireEvent.click(screen.getByTestId("push-toggle"));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/could not update push notifications/i);
+    expect(screen.getByTestId("push-toggle").textContent).toContain("Disable");
+  });
 });

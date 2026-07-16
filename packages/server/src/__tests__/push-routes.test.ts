@@ -1,9 +1,9 @@
 /**
  * HTTP-level tests for the push device-management routes.
  *
- * Covers: register→200 {tokenId}, delete→204, test with no tokens→200
- * {results:[]}, test with a token→200 {results:[{tokenId, ok}]},
- * vapid-public-key→200 {publicKey}, and 403 auth-gating via a rejecting guard.
+ * Covers: register→200 {tokenId}, delete→204, test without a tokenId→400,
+ * test with an explicit token→200 {results:[{tokenId, ok}]}, vapid-public-key
+ * →200 {publicKey}, and 403 auth-gating via a rejecting guard.
  * The deny stub mirrors the real `networkGuard` deny status (403
  * network_not_allowed, see localhost-guard.ts) so the assertion reflects
  * production behavior. Mirrors the goal-routes.test.ts harness (Fastify +
@@ -99,17 +99,30 @@ describe("push REST routes", () => {
     expect(registry.list()).toHaveLength(0);
   });
 
-  it("POST /api/push/test with no tokens → 200 { results: [] }", async () => {
+  it("rejects POST /api/push/test without a tokenId", async () => {
     await setup();
     const res = await fastify.inject({ method: "POST", url: "/api/push/test", payload: {} });
-    expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.payload)).toEqual({ results: [] });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.payload)).toEqual({ error: "tokenId is required" });
   });
 
-  it("POST /api/push/test with a registered token → 200 { results: [{tokenId, ok}] }", async () => {
+  it("does not fan out when POST /api/push/test omits tokenId", async () => {
+    await setup();
+    registry.add({ deviceToken: "dev-A", transport: "web-push" });
+    const res = await fastify.inject({ method: "POST", url: "/api/push/test", payload: {} });
+    expect(res.statusCode).toBe(400);
+    expect(webPush.send).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/push/test sends only to the requested registered token", async () => {
     await setup();
     const token = registry.add({ deviceToken: "dev-A", transport: "web-push" });
-    const res = await fastify.inject({ method: "POST", url: "/api/push/test", payload: {} });
+    registry.add({ deviceToken: "dev-B", transport: "web-push" });
+    const res = await fastify.inject({
+      method: "POST",
+      url: "/api/push/test",
+      payload: { tokenId: token.id },
+    });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.payload);
     expect(body.results).toEqual([{ tokenId: token.id, ok: true }]);
