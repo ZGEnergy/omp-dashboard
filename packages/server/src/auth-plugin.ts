@@ -350,3 +350,15 @@ export function validateWsUpgrade(
   if (!token) return false;
   return verifyToken(token, secret) !== null;
 }
+
+/**
+ * Validate an upgrade when OAuth auth is disabled. Tickets still need to be
+ * consumed before local/trusted bypasses so they remain single-use.
+ */
+export function validateWsUpgradeWithoutAuth(
+  remoteAddress: string,
+  trustedNetworks: string[] = [],
+  opts?: Parameters<typeof validateWsUpgrade>[4],
+): boolean {
+  return validateWsUpgrade(undefined, remoteAddress, "", trustedNetworks, opts);
+}
