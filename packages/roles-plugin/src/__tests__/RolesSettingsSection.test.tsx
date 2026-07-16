@@ -185,6 +185,95 @@ describe("BuiltInRolesSettings", () => {
     expect(body.patch).toEqual({ smol: "xai/grok-test" });
   });
 
+  it("keeps a role edit made while commit reload is in flight", async () => {
+    let releaseGet: (() => void) | undefined;
+    const getGate = new Promise<void>((resolve) => {
+      releaseGet = resolve;
+    });
+    let getCount = 0;
+    const roles: Record<string, string> = { default: "xai/grok" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/omp-config/model-roles") && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body ?? "{}")) as {
+          patch?: Record<string, string | null>;
+        };
+        Object.assign(roles, body.patch ?? {});
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: {
+              key: "modelRoles",
+              type: "record",
+              value: { ...roles },
+              description: "",
+            },
+          }),
+        } as Response;
+      }
+      if (url.includes("/api/omp-config") && (!init || !init.method || init.method === "GET")) {
+        getCount += 1;
+        // Second GET is post-commit reload — delay so we can stage another edit.
+        if (getCount >= 2) await getGate;
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: {
+              agentDir: "/tmp/agent",
+              settings: {
+                modelRoles: {
+                  key: "modelRoles",
+                  type: "record",
+                  value: { ...roles },
+                  description: "",
+                },
+              },
+            },
+          }),
+        } as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getByTestId } = render(wrap(<BuiltInRolesSettings />, sources));
+    await waitFor(() => expect(getByTestId("roles-row-smol")).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.click(getByTestId("roles-row-smol"));
+    });
+    await act(async () => {
+      fireEvent.click(getByTestId("roles-model-option-xai/grok-test"));
+    });
+
+    const src = sources.get("plugin:roles");
+    expect(src?.isDirty).toBe(true);
+
+    let commitDone = false;
+    const commitPromise = act(async () => {
+      await src?.commit();
+      commitDone = true;
+    });
+
+    // Wait until reload GET is blocked, then stage another role edit.
+    await waitFor(() => expect(getCount).toBeGreaterThanOrEqual(2));
+    await act(async () => {
+      fireEvent.click(getByTestId("roles-row-default"));
+    });
+    await act(async () => {
+      fireEvent.click(getByTestId("roles-model-option-xai/grok-test"));
+    });
+
+    releaseGet?.();
+    await commitPromise;
+    expect(commitDone).toBe(true);
+
+    // Concurrent default edit should still be dirty after reload.
+    await waitFor(() => expect(sources.get("plugin:roles")?.isDirty).toBe(true));
+  });
+
   it("has no preset UI", async () => {
     const { queryByTestId } = render(wrap(<BuiltInRolesSettings />, sources));
     await waitFor(() => expect(queryByTestId("roles-settings")).toBeTruthy());

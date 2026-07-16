@@ -250,6 +250,139 @@ describe("omp-config routes", () => {
     expect(res.json().code).toBe("OMP_INVALID_KEY");
   });
 
+
+  it("GET /api/omp-config redacts secret values", async () => {
+    await app.close();
+    const secretKey = "auth.broker.token";
+    const entries = fixtureAsEntries();
+    entries[secretKey] = {
+      key: secretKey,
+      value: "super-secret-token",
+      type: "string",
+      description: "broker token",
+    };
+    entries["compaction.reserveTokens"] = {
+      key: "compaction.reserveTokens",
+      value: 1200,
+      type: "number",
+      description: "not a secret",
+    };
+    app = Fastify({ logger: false });
+    registerOmpConfigRoutes(app, {
+      networkGuard: async () => undefined,
+      cli: makeCli({
+        list: async () => entries,
+        get: async (key) => {
+          const e = entries[key];
+          if (!e) throw new OmpConfigCliError("OMP_INVALID_KEY", `Unknown setting: ${key}`);
+          return e;
+        },
+        set: async (key, value) => {
+          const e = entries[key];
+          if (!e) throw new OmpConfigCliError("OMP_INVALID_KEY", `Unknown setting: ${key}`);
+          const next = { ...e, value };
+          entries[key] = next;
+          return next;
+        },
+      }),
+    });
+    await app.ready();
+
+    const res = await app.inject({ method: "GET", url: "/api/omp-config" });
+    expect(res.statusCode).toBe(200);
+    const settings = res.json().data.settings;
+    expect(settings[secretKey].value).toBeNull();
+    expect(settings[secretKey].redacted).toBe(true);
+    expect(JSON.stringify(settings)).not.toContain("super-secret-token");
+    expect(settings["compaction.reserveTokens"].value).toBe(1200);
+  });
+
+  it("PUT secret unchanged sentinel does not wipe storage", async () => {
+    await app.close();
+    const secretKey = "mnemopi.embeddingApiKey";
+    const entries = fixtureAsEntries();
+    entries[secretKey] = {
+      key: secretKey,
+      value: "stored-key",
+      type: "string",
+      description: "embedding key",
+    };
+    let setCalls = 0;
+    app = Fastify({ logger: false });
+    registerOmpConfigRoutes(app, {
+      networkGuard: async () => undefined,
+      cli: makeCli({
+        list: async () => entries,
+        get: async (key) => {
+          const e = entries[key];
+          if (!e) throw new OmpConfigCliError("OMP_INVALID_KEY", `Unknown setting: ${key}`);
+          return e;
+        },
+        set: async (key, value) => {
+          setCalls += 1;
+          const e = entries[key];
+          if (!e) throw new OmpConfigCliError("OMP_INVALID_KEY", `Unknown setting: ${key}`);
+          const next = { ...e, value };
+          entries[key] = next;
+          return next;
+        },
+      }),
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/omp-config",
+      payload: { key: secretKey, value: "__omp_secret_unchanged__" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(setCalls).toBe(0);
+    expect(entries[secretKey].value).toBe("stored-key");
+    expect(res.json().data.value).toBeNull();
+    expect(res.json().data.redacted).toBe(true);
+  });
+
+  it("PUT secret with a new value writes and redacts the response", async () => {
+    await app.close();
+    const secretKey = "searxng.basicPassword";
+    const entries = fixtureAsEntries();
+    entries[secretKey] = {
+      key: secretKey,
+      value: "old-pass",
+      type: "string",
+      description: "password",
+    };
+    app = Fastify({ logger: false });
+    registerOmpConfigRoutes(app, {
+      networkGuard: async () => undefined,
+      cli: makeCli({
+        list: async () => entries,
+        get: async (key) => {
+          const e = entries[key];
+          if (!e) throw new OmpConfigCliError("OMP_INVALID_KEY", `Unknown setting: ${key}`);
+          return e;
+        },
+        set: async (key, value) => {
+          const e = entries[key];
+          if (!e) throw new OmpConfigCliError("OMP_INVALID_KEY", `Unknown setting: ${key}`);
+          const next = { ...e, value };
+          entries[key] = next;
+          return next;
+        },
+      }),
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/omp-config",
+      payload: { key: secretKey, value: "new-pass" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(entries[secretKey].value).toBe("new-pass");
+    expect(res.json().data.value).toBeNull();
+    expect(JSON.stringify(res.json())).not.toContain("new-pass");
+  });
   it("GET /api/omp-config/path returns agentDir", async () => {
     const res = await app.inject({ method: "GET", url: "/api/omp-config/path" });
     expect(res.statusCode).toBe(200);

@@ -161,4 +161,64 @@ describe("OmpSettingsPage", () => {
     expect(sources.get("omp-config")?.isDirty).toBe(true);
     expect((screen.getByTestId("omp-setting-control-enabled") as HTMLInputElement).checked).toBe(true);
   });
+
+  it("rejects commit when any of several dirty keys fails", async () => {
+    const sources = renderWithDraft();
+    await waitFor(() => expect(screen.getByTestId("omp-setting-control-enabled")).toBeTruthy());
+
+    api.setOmpConfig.mockImplementation(async (key: string, value: unknown) => {
+      if (key === "theme") throw new Error("theme blocked");
+      return {
+        ...snapshot().settings[key as keyof ReturnType<typeof snapshot>["settings"]],
+        key,
+        value,
+      };
+    });
+
+    fireEvent.click(screen.getByTestId("omp-setting-control-enabled"));
+    fireEvent.change(screen.getByTestId("omp-setting-control-theme"), { target: { value: "light" } });
+    await waitFor(() => expect(sources.get("omp-config")?.isDirty).toBe(true));
+
+    await expect(sources.get("omp-config")!.commit()).rejects.toThrow(/Failed to save/);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("omp-setting-error-theme").textContent).toContain("theme blocked"),
+    );
+    expect(sources.get("omp-config")?.isDirty).toBe(true);
+    expect((screen.getByTestId("omp-setting-control-theme") as HTMLInputElement).value).toBe("light");
+  });
+
+  it("preserves a draft edit made while a save is in flight", async () => {
+    const sources = renderWithDraft();
+    await waitFor(() => expect(screen.getByTestId("omp-setting-control-theme")).toBeTruthy());
+
+    let releaseSave: (() => void) | undefined;
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    api.setOmpConfig.mockImplementation(async (key: string, value: unknown) => {
+      await saveGate;
+      return {
+        ...snapshot().settings[key as keyof ReturnType<typeof snapshot>["settings"]],
+        key,
+        value,
+      };
+    });
+
+    fireEvent.change(screen.getByTestId("omp-setting-control-theme"), { target: { value: "light" } });
+    await waitFor(() => expect(sources.get("omp-config")?.isDirty).toBe(true));
+
+    const commitPromise = sources.get("omp-config")!.commit();
+    // Concurrent edit while first value is still writing.
+    fireEvent.change(screen.getByTestId("omp-setting-control-theme"), { target: { value: "solarized" } });
+    releaseSave?.();
+    await commitPromise;
+
+    await waitFor(() =>
+      expect((screen.getByTestId("omp-setting-control-theme") as HTMLInputElement).value).toBe(
+        "solarized",
+      ),
+    );
+    expect(sources.get("omp-config")?.isDirty).toBe(true);
+  });
 });

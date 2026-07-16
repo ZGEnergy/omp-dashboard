@@ -5,7 +5,7 @@
  * No pi-flows presets. Save writes one full `modelRoles` record after a
  * re-read merge so concurrent editors do not clobber each other.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePluginConfig } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import {
   useUiPrimitive,
@@ -84,6 +84,8 @@ export function BuiltInRolesSettings() {
 
   const [rolesMap, setRolesMap] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<Record<string, string>>({});
+  const pendingRef = useRef<Record<string, string>>({});
+  pendingRef.current = pending;
   const [editingRole, setEditingRole] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,19 +94,45 @@ export function BuiltInRolesSettings() {
   const pluginCfg = usePluginConfig<{ models?: ModelInfo[] }>();
   const models: ModelInfo[] = Array.isArray(pluginCfg?.models) ? pluginCfg.models : [];
 
-  const reload = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const snap = await fetchOmpConfig(signal);
-      setRolesMap(asRolesMap(snap.settings.modelRoles?.value));
-      setPending({});
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const reload = useCallback(
+    async (
+      signal?: AbortSignal,
+      preserve?: { submitted: Record<string, string>; baseline: Record<string, string> },
+    ) => {
+      if (!preserve) setLoading(true);
+      setLoadError(null);
+      try {
+        const snap = await fetchOmpConfig(signal);
+        const nextMap = asRolesMap(snap.settings.modelRoles?.value);
+        setRolesMap(nextMap);
+        if (preserve) {
+          const current = pendingRef.current;
+          const next: Record<string, string> = {};
+          // Cleared pending during flight = keep pre-submit baseline intent.
+          for (const role of Object.keys(preserve.submitted)) {
+            if (role in current) continue;
+            const want = preserve.baseline[role] ?? "";
+            if (want !== (nextMap[role] ?? "")) next[role] = want;
+          }
+          for (const [role, model] of Object.entries(current)) {
+            if (preserve.submitted[role] === model) continue;
+            if (model === (nextMap[role] ?? "")) continue;
+            next[role] = model;
+          }
+          pendingRef.current = next;
+          setPending(next);
+        } else {
+          pendingRef.current = {};
+          setPending({});
+        }
+      } catch (err) {
+        setLoadError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const ac = new AbortController();
@@ -128,23 +156,33 @@ export function BuiltInRolesSettings() {
 
   function setRole(role: string, modelLabel: string) {
     setPending((prev) => {
+      let next: Record<string, string>;
       if (modelLabel === (rolesMap[role] ?? "")) {
         const { [role]: _, ...rest } = prev;
-        return rest;
+        next = rest;
+      } else {
+        next = { ...prev, [role]: modelLabel };
       }
-      return { ...prev, [role]: modelLabel };
+      pendingRef.current = next;
+      return next;
     });
     setEditingRole(null);
   }
 
   const commit = useCallback(async () => {
-    // Re-read-merge-write via mergeOmpModelRoles so Sessions defaultModel
-    // edits landing between load and save are preserved.
-    await mergeOmpModelRoles(pending);
-    await reload();
-  }, [pending, reload]);
+    const submitted = { ...pendingRef.current };
+    const baseline: Record<string, string> = {};
+    for (const role of Object.keys(submitted)) {
+      baseline[role] = rolesMap[role] ?? "";
+    }
+    await mergeOmpModelRoles(submitted);
+    await reload(undefined, { submitted, baseline });
+  }, [reload, rolesMap]);
 
-  const reset = useCallback(() => setPending({}), []);
+  const reset = useCallback(() => {
+    pendingRef.current = {};
+    setPending({});
+  }, []);
 
   useSettingsDraftSource({ id: "plugin:roles", page: "general", isDirty, commit, reset });
 

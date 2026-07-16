@@ -25,6 +25,8 @@ export type OmpConfigEntry = {
   type: OmpConfigValueType;
   description: string;
   values?: string[];
+  /** True when value was stripped because the setting is secret. */
+  redacted?: boolean;
 };
 
 export type OmpConfigCliErrorCode =

@@ -12,6 +12,12 @@ import {
   OmpConfigCliError,
   type OmpConfigEntry,
 } from "../omp-config-cli.js";
+import {
+  isOmpSecretKey,
+  isSecretUnchangedSentinel,
+  redactOmpConfigEntry,
+  redactOmpConfigMap,
+} from "../omp-config-secrets.js";
 import type { NetworkGuard } from "./route-deps.js";
 
 export interface OmpConfigRouteDeps {
@@ -116,7 +122,7 @@ export function registerOmpConfigRoutes(
           success: true,
           data: {
             agentDir,
-            settings,
+            settings: redactOmpConfigMap(settings),
             ompBin,
             ompVersion,
           },
@@ -154,7 +160,7 @@ export function registerOmpConfigRoutes(
       }
       try {
         const entry = await cli.get(key);
-        return { success: true, data: entry };
+        return { success: true, data: redactOmpConfigEntry(entry) };
       } catch (err) {
         return sendCliError(reply, err);
       }
@@ -182,8 +188,12 @@ export function registerOmpConfigRoutes(
         });
       }
       try {
+        if (isOmpSecretKey(key) && isSecretUnchangedSentinel(body.value)) {
+          const entry = await cli.get(key);
+          return { success: true, data: redactOmpConfigEntry(entry) };
+        }
         const entry: OmpConfigEntry = await cli.set(key, body.value);
-        return { success: true, data: entry };
+        return { success: true, data: redactOmpConfigEntry(entry) };
       } catch (err) {
         return sendCliError(reply, err);
       }
@@ -224,7 +234,7 @@ export function registerOmpConfigRoutes(
       }
       try {
         const entry = await cli.reset(key);
-        return { success: true, data: entry };
+        return { success: true, data: redactOmpConfigEntry(entry) };
       } catch (err) {
         return sendCliError(reply, err);
       }

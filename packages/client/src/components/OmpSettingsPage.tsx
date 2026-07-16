@@ -177,11 +177,24 @@ export function OmpSettingsPage(): React.ReactElement {
     );
     if (dirtyKeys.length === 0) return;
 
+    // Snapshot submitted values so concurrent edits after await can be preserved.
+    const submitted = new Map(dirtyKeys);
+    const baselineAtSubmit = new Map(
+      [...submitted.keys()].map((key) => [key, settings[key]?.value] as const),
+    );
     const successful = new Set<string>();
     const failed = new Map<string, string>();
-    for (const [key, value] of dirtyKeys) {
+    for (const [key, value] of submitted) {
       try {
-        await setOmpConfig(key, value);
+        let writeValue = value;
+        if (
+          isSecretKey(key) &&
+          (value === "" || value == null) &&
+          settings[key]?.redacted
+        ) {
+          writeValue = OMP_SECRET_UNCHANGED;
+        }
+        await setOmpConfig(key, writeValue);
         successful.add(key);
       } catch (error) {
         failed.set(key, errorMessage(error));
@@ -190,7 +203,16 @@ export function OmpSettingsPage(): React.ReactElement {
 
     setDraft((previous) => {
       const next = new Map(previous);
-      for (const key of successful) next.delete(key);
+      for (const key of successful) {
+        const submittedValue = submitted.get(key);
+        // No draft entry means the user cleared to the pre-save baseline during flight.
+        const currentIntent = next.has(key) ? next.get(key) : baselineAtSubmit.get(key);
+        if (deepEqual(currentIntent, submittedValue)) {
+          next.delete(key);
+        } else {
+          next.set(key, currentIntent);
+        }
+      }
       for (const [key, value] of nextDraft) {
         if (!successful.has(key)) next.set(key, value);
       }
@@ -198,7 +220,16 @@ export function OmpSettingsPage(): React.ReactElement {
     });
     setJsonDraft((previous) => {
       const next = new Map(previous);
-      for (const key of successful) next.delete(key);
+      for (const key of successful) {
+        if (!next.has(key)) continue;
+        try {
+          const text = next.get(key) ?? "";
+          const parsed: unknown = text.trim() === "" ? null : JSON.parse(text);
+          if (deepEqual(parsed, submitted.get(key))) next.delete(key);
+        } catch {
+          /* keep invalid concurrent edit */
+        }
+      }
       return next;
     });
     setSaveErrors((previous) => {
@@ -208,11 +239,13 @@ export function OmpSettingsPage(): React.ReactElement {
       return next;
     });
 
-    // Preserve failed drafts/errors while refreshing the authoritative values for
-    // every successful write. A failed write must remain visible and editable.
     await reload(undefined, true);
-    if (successful.size === 0) {
-      throw new Error("Failed to save OMP settings");
+    if (failed.size > 0) {
+      throw new Error(
+        failed.size === 1
+          ? "Failed to save OMP settings"
+          : `Failed to save ${failed.size} OMP settings`,
+      );
     }
   }, [draft, jsonDraft, reload, settings, snapshot]);
 

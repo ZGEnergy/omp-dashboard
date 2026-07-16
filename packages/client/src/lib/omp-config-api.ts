@@ -19,6 +19,8 @@ export type OmpConfigEntry = {
   type: OmpConfigValueType;
   description: string;
   values?: string[];
+  /** Present when server stripped a secret value. */
+  redacted?: boolean;
 };
 
 export type OmpConfigSnapshot = {

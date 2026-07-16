@@ -334,6 +334,73 @@ export const OMP_ENUM_OPTIONS: Record<string, readonly string[]> = {
     "unset",
     "granted",
     "denied"
+  ],
+  "tier.openai": [
+    "none",
+    "auto",
+    "default",
+    "flex",
+    "scale",
+    "priority"
+  ],
+  "tier.anthropic": [
+    "none",
+    "priority"
+  ],
+  "tier.google": [
+    "none",
+    "flex",
+    "priority"
+  ],
+  "tier.subagent": [
+    "inherit",
+    "none",
+    "auto",
+    "default",
+    "flex",
+    "scale",
+    "priority"
+  ],
+  "tier.advisor": [
+    "inherit",
+    "none",
+    "auto",
+    "default",
+    "flex",
+    "scale",
+    "priority"
+  ],
+  "edit.mode": [
+    "apply_patch",
+    "hashline",
+    "patch",
+    "replace"
+  ],
+  "providers.webSearch": [
+    "auto",
+    "perplexity",
+    "gemini",
+    "anthropic",
+    "codex",
+    "xai",
+    "zai",
+    "exa",
+    "tinyfish",
+    "jina",
+    "kagi",
+    "tavily",
+    "firecrawl",
+    "brave",
+    "kimi",
+    "parallel",
+    "synthetic",
+    "searxng",
+    "startpage",
+    "duckduckgo",
+    "ecosia",
+    "google",
+    "mojeek",
+    "public"
   ]
 } as const;
 

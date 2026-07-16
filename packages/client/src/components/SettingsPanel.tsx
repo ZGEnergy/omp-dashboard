@@ -1567,8 +1567,20 @@ function OmpDefaultModelField({
           const v = (roles as Record<string, unknown>).default;
           if (typeof v === "string") def = v;
         }
+        // OMP has no default but legacy dashboard defaultModel still drives
+        // new sessions — surface it so the user can edit/clear/migrate.
+        if (!def && fallbackDefaultModel) {
+          def = fallbackDefaultModel;
+        }
         setValue(def);
-        setBaseline(def);
+        // Baseline empty when only legacy is present so Save migrates into OMP.
+        const ompDefault =
+          roles && typeof roles === "object" && !Array.isArray(roles)
+            ? typeof (roles as Record<string, unknown>).default === "string"
+              ? String((roles as Record<string, unknown>).default)
+              : ""
+            : "";
+        setBaseline(ompDefault);
         setLoaded(true);
       })
       .catch(() => {
