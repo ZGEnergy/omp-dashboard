@@ -91,7 +91,26 @@ jobs:
 
           # Conflicts remain: publish help on the same stable branch (still one PR),
           # close any other sync PRs, leave draft for human/agent resolution.
-          REPORT=$(ls docs/upstream-sync-conflicts-*.md 2>/dev/null | head -1 || true)
+          # Persist the just-written inventory outside the worktree before merge --abort
+          # (abort drops newly staged/uncommitted conflict report files).
+          DATE_TAG=$(date -u +%Y%m%d)
+          REPORT_REL="docs/upstream-sync-conflicts-${DATE_TAG}.md"
+          REPORT_TMP="/tmp/upstream-sync-conflicts-${DATE_TAG}.md"
+          if [[ -f "$REPORT_REL" ]]; then
+            cp -f "$REPORT_REL" "$REPORT_TMP"
+          elif [[ -f "$(git rev-parse --git-path MERGE_HEAD 2>/dev/null || true)" ]] || git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+            # Fallback: rebuild inventory from remaining unmerged paths before abort
+            {
+              echo "# Upstream sync conflicts (${DATE_TAG})"
+              echo
+              echo "- upstream: ${UPSTREAM_REF}@${{ steps.status.outputs.usha }}"
+              echo "- branch: ${SYNC_BRANCH}"
+              echo
+              echo "## Remaining unmerged paths"
+              echo
+              git diff --name-only --diff-filter=U | sed 's/^/- /'
+            } >"$REPORT_TMP"
+          fi
           git merge --abort || true
           git checkout -B "$SYNC_BRANCH" origin/main
           mkdir -p docs
@@ -110,14 +129,17 @@ jobs:
             echo "scripts/upstream-sync.sh verify && scripts/upstream-sync.sh pr"
             echo '```'
             echo
-            if [[ -n "$REPORT" && -f "$REPORT" ]]; then
+            if [[ -f "$REPORT_TMP" ]]; then
               echo "## Conflict inventory"
               echo
-              cat "$REPORT"
+              cat "$REPORT_TMP"
             fi
           } > docs/upstream-sync-help.md
           git add docs/upstream-sync-help.md
-          if [[ -n "$REPORT" && -f "$REPORT" ]]; then git add "$REPORT" || true; fi
+          if [[ -f "$REPORT_TMP" ]]; then
+            cp -f "$REPORT_TMP" "$REPORT_REL"
+            git add "$REPORT_REL"
+          fi
           git commit -m "chore(sync): conflict help for ${UPSTREAM_REF}@${{ steps.status.outputs.usha }}"
           git push --force-with-lease -u origin "$SYNC_BRANCH"
 
