@@ -198,14 +198,30 @@ cmd_verify() {
   local failed=0
   run_vitest() {
     local dir="$1"; shift
-    if [[ ! -x "$dir/node_modules/.bin/vitest" && ! -x node_modules/.bin/vitest ]]; then
-      warn "vitest not installed in $dir — run npm ci first; skipping tests in $dir"
+    local bin=""
+    if [[ -x "${REPO_ROOT}/node_modules/.bin/vitest" ]]; then
+      bin="${REPO_ROOT}/node_modules/.bin/vitest"
+    elif [[ -x "${dir}/node_modules/.bin/vitest" ]]; then
+      bin="${dir}/node_modules/.bin/vitest"
+    else
+      warn "vitest not installed — run npm ci at repo root; skipping tests in $dir"
       return 0
     fi
-    local bin="$dir/node_modules/.bin/vitest"
-    [[ -x "$bin" ]] || bin="node_modules/.bin/vitest"
-    log "vitest in $dir -- $*"
-    if ! ( cd "$dir" && "$bin" run --reporter=dot "$@" ); then
+    # Only run files that exist (sync branches may lack some suites temporarily).
+    local args=() f
+    for f in "$@"; do
+      if [[ -f "${dir}/${f}" || -f "$f" ]]; then
+        args+=("$f")
+      else
+        warn "skip missing test file: ${dir}/${f}"
+      fi
+    done
+    if [[ ${#args[@]} -eq 0 ]]; then
+      warn "no test files to run in $dir"
+      return 0
+    fi
+    log "vitest in $dir -- ${args[*]}"
+    if ! ( cd "$dir" && "$bin" run --reporter=dot "${args[@]}" ); then
       failed=1
       warn "vitest failed in $dir"
     fi
