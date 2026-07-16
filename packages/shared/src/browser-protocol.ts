@@ -105,6 +105,15 @@ export interface EventReplayMessage {
   sessionId: string;
   events: Array<{ seq: number; event: DashboardEvent }>;
   isLast: boolean;
+  /**
+   * True when older history exists below the delivered window.
+   * See change: session-tail-rehydrate.
+   */
+  hasMoreOlder?: boolean;
+  /** Lowest seq in the retained/delivered window (tail or older page). */
+  windowMinSeq?: number;
+  /** Highest seq in this delivery. */
+  windowMaxSeq?: number;
 }
 
 export interface BrowserCommandsListMessage {
@@ -817,6 +826,19 @@ export interface SubscribeMessage {
   type: "subscribe";
   sessionId: string;
   lastSeq?: number;
+  /**
+   * `"tail"` = newest events under a byte budget (cold open).
+   * `"full"` or omitted = legacy full/delta behavior.
+   * See change: session-tail-rehydrate.
+   */
+  mode?: "full" | "tail";
+  /** Soft budget hint for tail/older pages; server clamps. */
+  windowBytes?: number;
+  /**
+   * Load-older: exclusive upper bound — return newest events with seq < fromSeq.
+   * See change: session-tail-rehydrate.
+   */
+  fromSeq?: number;
 }
 
 export interface UnsubscribeMessage {

@@ -5,25 +5,30 @@
  * so a page reload can resubscribe with `lastSeq = maxSeq` (delta replay)
  * instead of `lastSeq: 0` (full replay). The cache is an OPTIMIZATION ONLY:
  * any miss, schemaVersion mismatch, eviction, or IndexedDB error degrades to a
- * full replay with no error surfaced to the user.
+ * full (or server tail) replay with no error surfaced to the user.
  *
  * Decision (design.md 1.1): persist RAW events (`{ seq, event }[]`), not reduced
  * `ChatMessage[]`. The reducer is pure, so re-reducing on load is cheap and the
  * cache binds only to the stable event wire schema — keeping `schemaVersion`
  * bumps rare.
  *
- * See change: reduce-session-replay-traffic.
+ * Over-budget put trims to newest-by-byte-budget (session-tail-rehydrate)
+ * rather than deleting the entry (which forced cold full replay).
+ *
+ * See change: reduce-session-replay-traffic, session-tail-rehydrate.
  */
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { selectNewestEventsByBudget } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
 
-/** Bump on any persisted-shape change → all entries invalidate (full replay). */
-export const REPLAY_CACHE_SCHEMA_VERSION = 1;
+/** Bump on any persisted-shape change → all entries invalidate (full replay).
+ *  v2: over-budget put trims to newest-by-byte-budget instead of drop-all. */
+export const REPLAY_CACHE_SCHEMA_VERSION = 2;
 
 const DB_NAME = "pi-dashboard-replay-cache";
 const STORE = "sessions";
 const DEFAULT_MAX_ENTRIES = 50;
-/** Per-session payload byte cap (~5 MB). Over-cap → skip persist, full replay. */
-const DEFAULT_MAX_BYTES_PER_SESSION = 5 * 1024 * 1024;
+/** Per-session payload byte budget (~4 MB newest events). Over → trim-on-put. */
+const DEFAULT_MAX_BYTES_PER_SESSION = 4 * 1024 * 1024;
 
 export interface CachedEvent {
   seq: number;
@@ -161,8 +166,16 @@ export function createReplayCache(opts: ReplayCacheOptions = {}): ReplayCache {
 
   async function put(sessionId: string, value: ReplayCachePut): Promise<void> {
     await safe(async () => {
-      // Over-cap payload: skip persist and drop any stale entry → full replay.
-      if (JSON.stringify(value.payload).length > maxBytesPerSession) {
+      // Over-budget: keep newest events that fit instead of dropping the entry.
+      // See change: session-tail-rehydrate.
+      let payload = value.payload;
+      let maxSeq = value.maxSeq;
+      if (JSON.stringify(payload).length > maxBytesPerSession) {
+        const windowed = selectNewestEventsByBudget(payload, maxBytesPerSession);
+        payload = windowed.events;
+        maxSeq = windowed.windowMaxSeq || maxSeqOf(payload) || maxSeq;
+      }
+      if (payload.length === 0) {
         await del(sessionId);
         return;
       }
@@ -170,8 +183,8 @@ export function createReplayCache(opts: ReplayCacheOptions = {}): ReplayCache {
       const entry: ReplayCacheEntry = {
         sessionId,
         schemaVersion,
-        maxSeq: value.maxSeq,
-        payload: value.payload,
+        maxSeq,
+        payload,
         lastAccess: nextStamp(),
       };
       const tx = db.transaction(STORE, "readwrite");
@@ -179,6 +192,12 @@ export function createReplayCache(opts: ReplayCacheOptions = {}): ReplayCache {
       await txDone(tx);
       await evictIfNeeded();
     }, undefined);
+  }
+
+  function maxSeqOf(buf: CachedEvent[]): number {
+    let m = 0;
+    for (const e of buf) if (e.seq > m) m = e.seq;
+    return m;
   }
 
   async function del(sessionId: string): Promise<void> {

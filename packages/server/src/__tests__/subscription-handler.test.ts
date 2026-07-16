@@ -394,3 +394,93 @@ describe("handleSubscribe — asset replay precedes events", () => {
     expect(firstAssetIdx).toBeLessThan(firstEventIdx);
   });
 });
+
+describe("handleSubscribe — tail window + load-older (session-tail-rehydrate)", () => {
+  function fatEvent(label: string): DashboardEvent {
+    // ~80 KB each so MIN clamp (256 KiB) still only fits a few newest events.
+    return { eventType: "test", timestamp: Date.now(), data: { label, pad: "p".repeat(80_000) } };
+  }
+
+  it("mode:tail cold open delivers only newest events under budget with hasMoreOlder", async () => {
+    const ctx = createMockContext();
+    // Store truncates strings to 4 KB; ~4100 B/event → need >64 events to exceed
+    // the 256 KiB MIN clamp.
+    for (let i = 0; i < 100; i++) ctx.eventStore.insertEvent("s1", fatEvent(`e${i}`));
+
+    handleSubscribe(
+      { type: "subscribe", sessionId: "s1", lastSeq: 0, mode: "tail", windowBytes: 8_000 },
+      new Set(),
+      ctx,
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    const calls = (ctx.sendTo as any).mock.calls as Array<[any, ServerToBrowserMessage]>;
+    const replays = calls.filter(([, m]) => m.type === "event_replay") as Array<
+      [any, Extract<ServerToBrowserMessage, { type: "event_replay" }>]
+    >;
+    expect(replays.length).toBeGreaterThanOrEqual(1);
+    const allEvents = replays.flatMap(([, m]) => m.events);
+    expect(allEvents.length).toBeGreaterThan(0);
+    expect(allEvents.length).toBeLessThan(100);
+    expect(allEvents[allEvents.length - 1]!.seq).toBe(100);
+    const last = replays[replays.length - 1]![1];
+    expect(last.hasMoreOlder).toBe(true);
+    expect(last.windowMaxSeq).toBe(100);
+    expect(last.windowMinSeq).toBe(allEvents[0]!.seq);
+  });
+  it("legacy omit mode still delivers full buffer", async () => {
+    const ctx = createMockContext();
+    for (let i = 0; i < 8; i++) ctx.eventStore.insertEvent("s1", fatEvent(`e${i}`));
+
+    handleSubscribe({ type: "subscribe", sessionId: "s1", lastSeq: 0 }, new Set(), ctx);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const calls = (ctx.sendTo as any).mock.calls as Array<[any, ServerToBrowserMessage]>;
+    const replays = calls.filter(([, m]) => m.type === "event_replay") as Array<
+      [any, Extract<ServerToBrowserMessage, { type: "event_replay" }>]
+    >;
+    const allEvents = replays.flatMap(([, m]) => m.events);
+    expect(allEvents).toHaveLength(8);
+    expect(replays[replays.length - 1]![1].hasMoreOlder).toBeUndefined();
+  });
+
+  it("delta lastSeq>0 is unchanged under mode:tail", async () => {
+    const ctx = createMockContext();
+    for (let i = 0; i < 10; i++) ctx.eventStore.insertEvent("s1", fatEvent(`e${i}`));
+
+    handleSubscribe(
+      { type: "subscribe", sessionId: "s1", lastSeq: 7, mode: "tail", windowBytes: 8_000 },
+      new Set(),
+      ctx,
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    const calls = (ctx.sendTo as any).mock.calls as Array<[any, ServerToBrowserMessage]>;
+    const replays = calls.filter(([, m]) => m.type === "event_replay") as Array<
+      [any, Extract<ServerToBrowserMessage, { type: "event_replay" }>]
+    >;
+    const allEvents = replays.flatMap(([, m]) => m.events);
+    expect(allEvents.map((e) => e.seq)).toEqual([8, 9, 10]);
+  });
+
+  it("fromSeq returns older page strictly below the cursor", async () => {
+    const ctx = createMockContext();
+    for (let i = 0; i < 15; i++) ctx.eventStore.insertEvent("s1", fatEvent(`e${i}`));
+
+    handleSubscribe(
+      { type: "subscribe", sessionId: "s1", fromSeq: 12, windowBytes: 1_000_000 },
+      new Set(),
+      ctx,
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    const calls = (ctx.sendTo as any).mock.calls as Array<[any, ServerToBrowserMessage]>;
+    const replays = calls.filter(([, m]) => m.type === "event_replay") as Array<
+      [any, Extract<ServerToBrowserMessage, { type: "event_replay" }>]
+    >;
+    const allEvents = replays.flatMap(([, m]) => m.events);
+    expect(allEvents.every((e) => e.seq < 12)).toBe(true);
+    expect(allEvents[allEvents.length - 1]!.seq).toBe(11);
+    expect(replays[replays.length - 1]![1].windowMaxSeq).toBe(11);
+  });
+});

@@ -154,7 +154,23 @@ export function useMessageHandler(
     setDiscoveredServers, setSpawnErrors, setResumeErrors,
     setDisplayPrefs, setViewMessagesMap, setLoadingHistory,
   } = setters;
-  const { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, loadingHistoryTimersRef, replayPersister } = deps;
+  const {
+    send,
+    navigate,
+    clearSpawningCwd,
+    spawningCwdsRef,
+    subscribedRef,
+    pendingTerminalCwdRef,
+    lastCreatedTerminalIdRef,
+    maxSeqMapRef,
+    selectedSessionIdRef,
+    pendingSpawnsRef,
+    loadingHistoryTimersRef,
+    replayPersister,
+    historyWindowRef,
+    setHistoryWindowMap,
+    setLoadingOlderMap,
+  } = deps;
 
   // Phase 3 (change: reduce-chat-render-cpu-umbrella): live `event` bursts
   // arrive one-per-WS-frame in separate macrotasks, so React 18 automatic
@@ -574,69 +590,115 @@ export function useMessageHandler(
 
       case "event_replay": {
         const firstSeq = msg.events.length > 0 ? msg.events[0].seq : null;
-        // Reset on every full replay sweep: firstSeq===1 (cold start) OR
-        // firstSeq <= maxSeq for this session (server is re-replaying events
-        // the client has already accounted for, e.g. paginated reconnect
-        // re-replay where the first batch may not start at seq=1).
-        // See change: fix-replay-duplicates-tool-and-flushed-rows.
         const maxSeq = maxSeqMapRef.current.get(msg.sessionId) ?? 0;
-        const shouldReset = firstSeq != null && (firstSeq === 1 || firstSeq <= maxSeq);
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          // Same rationale as session_state_reset: preserve optimistic
-          // pendingPrompt across the full-replay reset branch.
-          // See change: preserve-pending-prompt-across-replay.
-          const carry = shouldReset ? next.get(msg.sessionId)?.pendingPrompt : undefined;
-          let current = shouldReset ? createInitialState() : (next.get(msg.sessionId) ?? createInitialState());
-          if (carry) current.pendingPrompt = carry;
-          for (const { event } of msg.events) {
-            current = reduceEvent(current, event);
+        // Older page: every delivered seq is below the client's current max.
+        // Must merge+re-reduce, never wipe to only the older page.
+        // See change: session-tail-rehydrate.
+        const isOlderPage =
+          msg.events.length > 0 &&
+          maxSeq > 0 &&
+          (msg.windowMaxSeq != null
+            ? msg.windowMaxSeq < maxSeq
+            : msg.events.every((e) => e.seq < maxSeq));
+
+        // Reset on full replay sweep (cold start / re-replay of known seqs),
+        // but never for older pages.
+        // See change: fix-replay-duplicates-tool-and-flushed-rows.
+        const shouldReset =
+          !isOlderPage && firstSeq != null && (firstSeq === 1 || firstSeq <= maxSeq);
+
+        if (isOlderPage && replayPersister) {
+          const merged = replayPersister.merge(msg.sessionId, msg.events);
+          setSessionStates((prev) => {
+            const next = new Map(prev);
+            const carry = next.get(msg.sessionId)?.pendingPrompt;
+            let current = createInitialState();
+            if (carry) current.pendingPrompt = carry;
+            for (const { event } of merged) {
+              current = reduceEvent(current, event);
+            }
+            next.set(msg.sessionId, current);
+            return next;
+          });
+          clearSessionEvents(msg.sessionId);
+          publishSessionEvents(
+            msg.sessionId,
+            merged.map((e) => e.event),
+          );
+          if (merged.length > 0) {
+            const lastEvt = merged[merged.length - 1]!;
+            if (lastEvt.seq > (maxSeqMapRef.current.get(msg.sessionId) ?? 0)) {
+              maxSeqMapRef.current.set(msg.sessionId, lastEvt.seq);
+            }
           }
-          next.set(msg.sessionId, current);
-          return next;
-        });
-        // Mirror the replayed batch into the plugin-runtime per-session event
-        // store so plugin slot consumers (flows card, goal chip) reading
-        // `useSessionEvents` rehydrate on cold load — the live `event` path
-        // publishes per event, so the replay path must too. Reuse `shouldReset`
-        // (full-sweep) to clear before republishing so a re-replay does not
-        // duplicate; continuation batches append.
-        // See change: replay-persisted-flow-runs.
-        if (shouldReset) clearSessionEvents(msg.sessionId);
-        publishSessionEvents(msg.sessionId, msg.events.map((e) => e.event));
-        // If we reset, also reset maxSeq tracking so a subsequent batch isn't
-        // misclassified. We rebuild it below from this batch's events.
-        if (shouldReset) {
-          maxSeqMapRef.current.set(msg.sessionId, 0);
-        }
-        // Track highest seq from replay batch
-        if (msg.events.length > 0) {
-          const lastEvt = msg.events[msg.events.length - 1];
-          if (lastEvt.seq > (maxSeqMapRef.current.get(msg.sessionId) ?? 0)) {
-            maxSeqMapRef.current.set(msg.sessionId, lastEvt.seq);
+        } else {
+          setSessionStates((prev) => {
+            const next = new Map(prev);
+            // Same rationale as session_state_reset: preserve optimistic
+            // pendingPrompt across the full-replay reset branch.
+            // See change: preserve-pending-prompt-across-replay.
+            const carry = shouldReset ? next.get(msg.sessionId)?.pendingPrompt : undefined;
+            let current = shouldReset ? createInitialState() : (next.get(msg.sessionId) ?? createInitialState());
+            if (carry) current.pendingPrompt = carry;
+            for (const { event } of msg.events) {
+              current = reduceEvent(current, event);
+            }
+            next.set(msg.sessionId, current);
+            return next;
+          });
+          // Mirror the replayed batch into the plugin-runtime per-session event
+          // store so plugin slot consumers rehydrate on cold load.
+          // See change: replay-persisted-flow-runs.
+          if (shouldReset) clearSessionEvents(msg.sessionId);
+          publishSessionEvents(msg.sessionId, msg.events.map((e) => e.event));
+          if (shouldReset) {
+            maxSeqMapRef.current.set(msg.sessionId, 0);
+          }
+          if (msg.events.length > 0) {
+            const lastEvt = msg.events[msg.events.length - 1]!;
+            if (lastEvt.seq > (maxSeqMapRef.current.get(msg.sessionId) ?? 0)) {
+              maxSeqMapRef.current.set(msg.sessionId, lastEvt.seq);
+            }
+          }
+          // Strategy A: mirror into durable buffer.
+          if (msg.events.length > 0) {
+            if (shouldReset) replayPersister?.seed(msg.sessionId, msg.events);
+            else replayPersister?.record(msg.sessionId, msg.events);
           }
         }
-        // Strategy A: mirror the reducer into the durable replay buffer. A
-        // full-sweep reset (shouldReset) replaces the buffer; a delta appends.
-        // This is also the reconciliation path: an offline-drift replay whose
-        // firstSeq <= maxSeq resets and rebuilds the persisted tail too.
-        // See change: reduce-session-replay-traffic.
-        if (msg.events.length > 0) {
-          if (shouldReset) replayPersister?.seed(msg.sessionId, msg.events);
-          else replayPersister?.record(msg.sessionId, msg.events);
+
+        // Track window meta for load-older UI.
+        if (msg.windowMinSeq != null || msg.hasMoreOlder != null) {
+          const prev = historyWindowRef?.current.get(msg.sessionId);
+          const minSeq =
+            msg.windowMinSeq != null
+              ? prev
+                ? Math.min(prev.minSeq, msg.windowMinSeq)
+                : msg.windowMinSeq
+              : (prev?.minSeq ?? firstSeq ?? 0);
+          const hasMoreOlder =
+            msg.hasMoreOlder != null
+              ? msg.hasMoreOlder
+              : (prev?.hasMoreOlder ?? false);
+          historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder });
+          setHistoryWindowMap?.((m) => {
+            const next = new Map(m);
+            next.set(msg.sessionId, { minSeq, hasMoreOlder });
+            return next;
+          });
         }
-        // Exit LOADING: first content (clear immediately so partial history
-        // paints) OR terminal marker for a genuinely-empty session
-        // (`events:[], isLast:true` → falls through to "No messages yet").
-        // Else — the empty non-terminal marker (`events:[], isLast:false`) is the
-        // cold-hydration start marker AND every server heartbeat: re-arm the
-        // short subscribe window to the longer hydration ceiling so a slow disk
-        // parse never flashes "No messages yet". `rearmLoadingHistory` no-ops
-        // unless a timer is armed (flag set), so warm/painted sessions are
-        // unaffected. See change: show-chat-history-loading-indicator,
+
+        // Exit LOADING: first content or terminal empty session.
+        // See change: show-chat-history-loading-indicator,
         // fix-history-loading-false-empty-flash.
         if (msg.events.length > 0 || msg.isLast === true) {
           clearLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, msg.sessionId);
+          setLoadingOlderMap?.((m) => {
+            if (!m.get(msg.sessionId)) return m;
+            const next = new Map(m);
+            next.set(msg.sessionId, false);
+            return next;
+          });
         } else {
           rearmLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, msg.sessionId, HYDRATE_CEILING_MS);
         }

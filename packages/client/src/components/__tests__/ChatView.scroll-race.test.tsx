@@ -193,4 +193,99 @@ describe("ChatView sticky scroll", () => {
     // Escape respected: button re-appears, no forced pin.
     expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
   });
+
+  /**
+   * Cold return / full replay often wipes then rebuilds messages without
+   * changing `sessionId`. Restore only runs on sessionId change, so a prior
+   * scroll-lock would leave stickToBottom=false while history floods in.
+   * loadingHistory true→false re-pins bottom unless the user escapes mid-hydrate.
+   * See change: session-tail-rehydrate.
+   */
+  describe("hydrate land after same-session wipe/rebuild", () => {
+    it("re-pins to bottom after empty wipe + full history even if stick was escaped before hydrate", async () => {
+      const { container, rerender } = render(
+        <ThemeProvider>
+          <ChatView sessionId="s-hydrate" state={stateWith(40)} toolContext={defaultToolContext} />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      const scrollEl = getScrollContainer(container);
+      // User (or estimate-correction scroll event) leaves the bottom.
+      setScrollPosition(scrollEl, 200, 4000, 400);
+      fireEvent.scroll(scrollEl);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+
+      // Full wipe: same sessionId, empty transcript + loadingHistory.
+      rerender(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-hydrate"
+            state={createInitialState()}
+            toolContext={defaultToolContext}
+            loadingHistory={true}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      const rebuilt = stateWith(80);
+      rebuilt.messages[rebuilt.messages.length - 1] = {
+        id: "asst-last",
+        role: "assistant",
+        content: "final agent reply",
+        timestamp: Date.now(),
+      };
+      rebuilt.messages[40] = {
+        id: "asst-mid",
+        role: "assistant",
+        content: "mid-history agent reply that looks like a resume target",
+        timestamp: Date.now(),
+      };
+
+      // Layout lag: content taller than viewport, scrollTop still mid.
+      setScrollPosition(scrollEl, 200, 8000, 400);
+      rerender(
+        <ThemeProvider>
+          <ChatView sessionId="s-hydrate" state={rebuilt} toolContext={defaultToolContext} loadingHistory={false} />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      expect(scrollEl.scrollTop).toBe(8000);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+    });
+
+    it("first visit with empty then hydrate still chases bottom while stick is armed", async () => {
+      const { container, rerender } = render(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-cold"
+            state={createInitialState()}
+            toolContext={defaultToolContext}
+            loadingHistory={true}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      const scrollEl = getScrollContainer(container);
+      setScrollPosition(scrollEl, 0, 400, 400);
+      fireEvent.scroll(scrollEl);
+
+      setScrollPosition(scrollEl, 0, 5000, 400);
+      rerender(
+        <ThemeProvider>
+          <ChatView sessionId="s-cold" state={stateWith(60)} toolContext={defaultToolContext} loadingHistory={false} />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      expect(scrollEl.scrollTop).toBe(5000);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+    });
+
+    // Session-switch + cold return is covered by the wipe/rebuild case above
+    // (same-session loadingHistory true→false re-pin) plus cold-open stick arming.
+  });
 });

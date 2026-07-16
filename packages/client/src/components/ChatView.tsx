@@ -203,7 +203,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, onCollapseStreamingThinking }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, onLoadOlder, onCollapseStreamingThinking }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // True when the user wants the chat to chase new content. Flips to false on
   // any real scroll-up gesture, on explicit navigation (scrollToTurn), and on
@@ -222,6 +222,11 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // cancelled by real user input (wheel / touch). See change:
   // virtualize-chat-transcript-tanstack (scroll-to-bottom regression fix).
   const descendingRef = useRef(false);
+  // loadingHistory true→false re-pins bottom unless the user scrolled away
+  // during THIS hydrate cycle. Prior escape (before hydrate) is intentionally
+  // ignored — wipe/rebuild is a cold land. See change: session-tail-rehydrate.
+  const loadingHistoryRef = useRef(!!loadingHistory);
+  const escapedDuringHydrateRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   // Effective display prefs for this session (configurable-chat-display).
   const prefs = useDisplayPrefs(sessionId);
@@ -341,6 +346,19 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     } else {
       stickToBottomRef.current = nearBottom;
       setShowScrollButton(!nearBottom);
+      if (loadingHistory && !nearBottom) {
+        escapedDuringHydrateRef.current = true;
+      }
+    }
+    // Near top + more history available → request older page. Parent de-dupes
+    // in-flight requests. See change: session-tail-rehydrate.
+    if (
+      hasMoreOlder &&
+      !loadingOlder &&
+      onLoadOlder &&
+      el.scrollTop < SCROLL_THRESHOLD
+    ) {
+      onLoadOlder();
     }
     // Persist scroll position for this session in VIRTUAL coordinates (CR-6):
     // the first below-the-fold row's stable id + its intra-row offset. Raw
@@ -354,7 +372,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         nearBottom,
       });
     }
-  }, [sessionId, virtualizer]);
+  }, [sessionId, virtualizer, loadingHistory, hasMoreOlder, loadingOlder, onLoadOlder]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -378,40 +396,73 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // change (CR-6), so the dep list is intentionally [sessionId] only.
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional session-switch-only restore; see comment above.
   useLayoutEffect(() => {
-    if (sessionId !== prevSessionRef.current) {
-      // Outgoing scroll state is kept fresh by handleScroll (persists the
-      // virtual anchor on every scroll), so no re-capture here — re-capturing
-      // now would read the INCOMING session's virtualizer (CR-6).
-      prevSessionRef.current = sessionId;
+    if (sessionId === prevSessionRef.current) return;
+    // Outgoing scroll state is kept fresh by handleScroll (persists the
+    // virtual anchor on every scroll), so no re-capture here — re-capturing
+    // now would read the INCOMING session's virtualizer (CR-6).
+    prevSessionRef.current = sessionId;
+    escapedDuringHydrateRef.current = false;
+    loadingHistoryRef.current = !!loadingHistory;
 
-      // Restore incoming session scroll state in virtual coordinates.
-      const saved = sessionId ? scrollStateMap.get(sessionId) : undefined;
-      if (saved && !saved.nearBottom && saved.anchorRowId) {
-        // Scroll-locked: resolve the saved row id → current index, scroll it to
-        // the top, then re-apply the intra-row offset once the row measures.
-        descendingRef.current = false;
-        stickToBottomRef.current = false;
-        setShowScrollButton(true);
-        const anchorId = saved.anchorRowId;
-        const idx = displayRows.findIndex((r, i) => virtualRowKey(r, i) === anchorId);
-        if (idx >= 0) {
-          virtualizer.scrollToIndex(idx, { align: "start" });
-          const off = saved.offset;
-          requestAnimationFrame(() => {
-            const el = scrollRef.current;
-            if (el) el.scrollTop += off;
-          });
-        } else {
-          scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
-        }
+    // Restore incoming session scroll state in virtual coordinates.
+    // Cold hydrate (empty + loadingHistory): ignore a prior mid-list lock and
+    // land at bottom after history arrives (session-tail-rehydrate).
+    const saved = sessionId ? scrollStateMap.get(sessionId) : undefined;
+    const coldHydrate = !!(loadingHistory && state.messages.length === 0);
+    if (saved && !saved.nearBottom && saved.anchorRowId && !coldHydrate) {
+      // Scroll-locked: resolve the saved row id → current index, scroll it to
+      // the top, then re-apply the intra-row offset once the row measures.
+      descendingRef.current = false;
+      stickToBottomRef.current = false;
+      setShowScrollButton(true);
+      const anchorId = saved.anchorRowId;
+      const idx = displayRows.findIndex((r, i) => virtualRowKey(r, i) === anchorId);
+      if (idx >= 0) {
+        virtualizer.scrollToIndex(idx, { align: "start" });
+        const off = saved.offset;
+        requestAnimationFrame(() => {
+          const el = scrollRef.current;
+          if (el) el.scrollTop += off;
+        });
       } else {
-        // Near bottom or first visit: scroll to end and follow new content.
-        stickToBottomRef.current = true;
-        setShowScrollButton(false);
-        scrollRef.current?.scrollTo(0, scrollRef.current!.scrollHeight);
+        scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
       }
+    } else {
+      // Near bottom, first visit, or cold hydrate: scroll to end and follow.
+      stickToBottomRef.current = true;
+      setShowScrollButton(false);
+      scrollRef.current?.scrollTo(0, scrollRef.current!.scrollHeight);
     }
   }, [sessionId]);
+
+  // After a same-session wipe→rebuild (`loadingHistory` true→false), re-pin
+  // to the true bottom unless the user scrolled away mid-hydrate. Restore only
+  // runs on sessionId change, so cold return / multi-batch replay would
+  // otherwise land mid-transcript. See change: session-tail-rehydrate.
+  useLayoutEffect(() => {
+    const wasLoading = loadingHistoryRef.current;
+    const nowLoading = !!loadingHistory;
+    loadingHistoryRef.current = nowLoading;
+    if (!wasLoading && nowLoading) {
+      // Hydrate started: treat as cold land — arm stick unless user escapes mid-hydrate.
+      escapedDuringHydrateRef.current = false;
+      stickToBottomRef.current = true;
+      setShowScrollButton(false);
+      return;
+    }
+    if (wasLoading && !nowLoading) {
+      if (!escapedDuringHydrateRef.current) {
+        stickToBottomRef.current = true;
+        setShowScrollButton(false);
+        const el = scrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+        if (sessionId) {
+          scrollStateMap.set(sessionId, { anchorRowId: null, offset: 0, nearBottom: true });
+        }
+      }
+      escapedDuringHydrateRef.current = false;
+    }
+  }, [loadingHistory, sessionId]);
 
   // Auto-scroll on new content when the user has not escaped the bottom.
   // Layout effect keeps the DOM and scroll position synchronized before paint,
@@ -422,6 +473,20 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       if (el) el.scrollTop = el.scrollHeight;
     }
   }, [state.messages.length, state.streamingText, state.pendingPrompt, state.streamingThinking, pendingSteering]);
+
+  // When older rows prepend (or any growth while not sticking), keep the
+  // viewport on the same content by compensating scrollTop for height delta.
+  // See change: session-tail-rehydrate (D5 load-older anchor).
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const prevH = lastScrollHeightRef.current;
+    const nextH = el.scrollHeight;
+    if (!stickToBottomRef.current && prevH > 0 && nextH > prevH) {
+      el.scrollTop += nextH - prevH;
+    }
+    lastScrollHeightRef.current = nextH;
+  }, [state.messages.length]);
 
   useImperativeHandle(ref, () => ({
     scrollToTurn(turnIndex: number) {
@@ -443,6 +508,17 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     // resets the hoisted preview — a preview open in session A never leaks into B.
     <FilePreviewProvider key={sessionId}>
     <div className="flex-1 relative overflow-hidden flex flex-col">
+      {(loadingOlder || (hasMoreOlder && state.messages.length > 0)) && (
+        <div
+          className="flex justify-center py-2 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]"
+          data-testid="load-older-status"
+          role="status"
+        >
+          {loadingOlder
+            ? i18nT("auto.loading_older", undefined, "Loading older messages…")
+            : i18nT("auto.scroll_for_older", undefined, "Scroll up for older messages")}
+        </div>
+      )}
     <div ref={scrollRef} onScroll={handleScroll} onWheel={cancelDescent} onTouchMove={cancelDescent} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`}>
       {/* Windowed historical rows (TanStack Virtual): only viewport + overscan
           are mounted. The spacer reserves getTotalSize(); each row is absolutely
