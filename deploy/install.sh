@@ -4,7 +4,7 @@ set -euo pipefail
 PREFIX="${PREFIX:-$HOME/.omp-dashboard}"
 LOCAL_BIN="$HOME/.local/bin"
 REPO_URL="https://github.com/ZGEnergy/omp-dashboard.git"
-REF="${OMP_DASH_REF:-omp-minimal}"
+REF="${OMP_DASH_REF:-main}"
 
 # ── Bootstrap for `curl … | bash` ────────────────────────────────────────────
 # When piped over stdin there is no sibling lib.sh/templates, and stdin is the
