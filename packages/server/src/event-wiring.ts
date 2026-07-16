@@ -573,7 +573,8 @@ export function wireEvents(deps: EventWiringDeps): void {
                 : pushPreferences.claudeDecides !== false));
           if (pushEnabled) {
             // Fire-and-forget (void, never awaited) so transport latency cannot
-            // block the WS fan-out. PushDispatcher remains transport/coalescing-only.
+            // block the WS fan-out. Dispatcher owns the live master gate and
+            // coalescing state.
             pushDispatcher?.fanout(sessionId, msg.event);
           }
         }

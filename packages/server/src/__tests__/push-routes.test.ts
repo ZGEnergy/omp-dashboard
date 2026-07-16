@@ -48,7 +48,7 @@ describe("push REST routes", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  async function setup(guard: NetworkGuard = PASSTHRU) {
+  async function setup(guard: NetworkGuard = PASSTHRU, isEnabled: () => boolean = () => true) {
     fastify = Fastify();
     registerPushRoutes(fastify, {
       networkGuard: guard,
@@ -56,6 +56,7 @@ describe("push REST routes", () => {
       transports: { "web-push": webPush },
       getVapidPublicKey: () => "VAPID_PUB",
       getSession: () => undefined,
+      isEnabled,
     });
     await fastify.ready();
   }
@@ -125,6 +126,19 @@ describe("push REST routes", () => {
     ] as const) {
       const res = await fastify.inject({ method, url, payload: {} });
       expect(res.statusCode).toBe(403);
+    }
+  });
+
+  it("returns 404 for every push route while disabled", async () => {
+    await setup(PASSTHRU, () => false);
+    for (const [method, url] of [
+      ["GET", "/api/push/vapid-public-key"],
+      ["POST", "/api/push/register"],
+      ["DELETE", "/api/push/register/x"],
+      ["POST", "/api/push/test"],
+    ] as const) {
+      const res = await fastify.inject({ method, url, payload: {} });
+      expect(res.statusCode).toBe(404);
     }
   });
 });

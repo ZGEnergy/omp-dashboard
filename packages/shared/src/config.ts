@@ -144,9 +144,9 @@ export const DEFAULT_OPENSPEC_POLL: OpenSpecPollConfig = {
 /**
  * Server push-notification configuration.
  *
- * Opt-in (`enabled` defaults to `false`). When disabled the server neither
- * constructs the dispatcher, mounts the `/api/push/*` routes, nor generates
- * VAPID keys — a user who never touches this block sees zero behavior change.
+ * Opt-in (`enabled` defaults to `false`). When disabled the dispatcher does not
+ * deliver, push routes return 404, and VAPID keys are generated only when
+ * enabling Web Push — a user who never touches this block sees zero behavior change.
  *
  * `transport` union (`"web-push" | "fcm"`) is intentionally kept intact across
  * types/registry/config so the later Capacitor/FCM change drops in without

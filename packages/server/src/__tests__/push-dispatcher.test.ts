@@ -60,6 +60,49 @@ describe("push dispatcher", () => {
     clock = 1_000_000;
   });
 
+  it("stops fanout while disabled and resumes after re-enable", () => {
+    const web = mkTransport("web-push");
+    const d = createPushDispatcher({
+      registry: mkRegistry([mkToken()]),
+      transports: { "web-push": web },
+      coalesceWindowMs: 30_000,
+      enabled: false,
+      getSession,
+      now,
+    });
+
+    d.fanout("s1", event);
+    expect(web.send).not.toHaveBeenCalled();
+
+    d.setEnabled(true);
+    d.fanout("s1", event);
+    expect(web.send).toHaveBeenCalledTimes(1);
+
+    d.setEnabled(false);
+    d.fanout("s1", event);
+    expect(web.send).toHaveBeenCalledTimes(1);
+    d.setEnabled(true);
+    d.fanout("s1", event);
+    expect(web.send).toHaveBeenCalledTimes(2);
+  });
+
+  it("applies a new coalescing window to the next fanout", () => {
+    const web = mkTransport("web-push");
+    const d = createPushDispatcher({
+      registry: mkRegistry([mkToken()]),
+      transports: { "web-push": web },
+      coalesceWindowMs: 30_000,
+      getSession,
+      now,
+    });
+
+    d.fanout("s1", event);
+    d.setCoalesceWindowMs(5_000);
+    clock += 6_000;
+    d.fanout("s1", event);
+    expect(web.send).toHaveBeenCalledTimes(2);
+  });
+
   it("fans out to a single matching token", () => {
     const tokens = [mkToken()];
     const registry = mkRegistry(tokens);
