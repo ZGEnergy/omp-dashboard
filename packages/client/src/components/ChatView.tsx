@@ -5,13 +5,15 @@ import { toolCallPrefKey } from "@blackbelt-technology/pi-dashboard-shared/displ
 import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { mdiCheck, mdiChevronDown, mdiClose, mdiContentCopy, mdiLoading, mdiSourceFork, mdiTextBox } from "@mdi/js";
 import { Icon } from "@mdi/react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useActiveChatSelection } from "../hooks/useActiveChatSelection.js";
 import { isDebugTool } from "../hooks/useDebugToolsVisible.js";
 import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
 import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import { useMobile } from "../hooks/useMobile.js";
-import { buildTurnToFirstRowIndex, estimateVirtualRowSize, isBurst, isGroup, virtualRowKey } from "../lib/chat-virtual-rows.js";
+import { buildSelectionClipboardText } from "../lib/chat-selection-copy.js";
+import { buildTurnToFirstRowIndex, computeRowTextChars, estimateVirtualRowSize, extendRangeWithSelection, isBurst, isGroup, rangeToRowIndexSpan, type SelectionRowSpan, virtualRowKey } from "../lib/chat-virtual-rows.js";
 import { findActiveInteractiveToolResultIds, findRetriedErrorIds, findSurfaceSuppressedErrorIds } from "../lib/collapse-retried-errors.js";
 // RetryBanner + ErrorBanner replaced by the unified SessionBanner mounted
 // in App.tsx (sticky above the command input). See change:
@@ -21,7 +23,10 @@ import { formatMessageTime } from "../lib/format.js";
 import { type BurstItem, groupToolBursts, type ToolBurstGroup as ToolBurstGroupData } from "../lib/group-tool-bursts.js";
 import type { ToolCallGroup } from "../lib/group-tool-calls.js";
 import { t as i18nT } from "../lib/i18n";
+import { buildTurnSummaries, type TurnSummary } from "../lib/lineDelta.js";
+import { isOutOfCwd, normalizeUnderCwd } from "../lib/normalize-path.js";
 import { BashOutputCard } from "./BashOutputCard.js";
+import { ChangeSummaryBlock } from "./ChangeSummaryBlock.js";
 import { CollapsedToolGroup } from "./CollapsedToolGroup.js";
 import { CommandFeedbackCard } from "./CommandFeedbackCard.js";
 import { CopyButton } from "./CopyButton.js";
@@ -35,6 +40,7 @@ import { PreviewCard } from "./PreviewCard.js";
 import { RawEventCard } from "./RawEventCard.js";
 import { RetriedErrorBadge } from "./RetriedErrorBadge.js";
 import { SkillInvocationCard } from "./SkillInvocationCard.js";
+import { useOptionalSplitWorkspace } from "./SplitWorkspaceContext.js";
 import { ThinkingBlock } from "./ThinkingBlock.js";
 import { ToolBurstGroup } from "./ToolBurstGroup.js";
 import { ToolCallStep } from "./ToolCallStep.js";
@@ -92,19 +98,40 @@ interface Props {
   /** Current sparse override for the session, or `undefined`. */
 }
 
-function ImageAttachments({ images }: { images: ChatImage[] }) {
+function ImageAttachments({
+  images,
+  onImageLoad,
+}: {
+  images: ChatImage[];
+  /**
+   * Fired when an attached `<img>` finishes decoding. In the virtualized
+   * transcript the owning row is first measured pre-decode (img ~0px); this
+   * signal lets ChatView re-measure the row at its true post-decode height so
+   * the message cannot stay collapsed and overlap its neighbour (issue #267).
+   */
+  onImageLoad?: (e: React.SyntheticEvent<HTMLImageElement>) => void;
+}) {
   const [lightboxSrc, setLightboxSrc] = useState<{ src: string; alt: string } | null>(null);
+  // Track decoded images so the reserved loading box is dropped once the real
+  // intrinsic size is known (a bounded box avoids the near-zero pre-decode
+  // measurement without distorting small decoded images).
+  const [loaded, setLoaded] = useState<Set<number>>(() => new Set());
   return (
     <>
       <div className="flex gap-2 flex-wrap mb-2">
         {images.map((img, i) => {
           const src = `data:${img.mimeType};base64,${img.data}`;
+          const reserve = !loaded.has(i) ? "min-w-[80px] min-h-[80px]" : "";
           return (
             <img
               key={i}
               src={src}
               alt={`Attachment ${i + 1}`}
-              className="max-w-[300px] max-h-[300px] rounded border border-white/20 object-contain cursor-pointer"
+              className={`max-w-[300px] max-h-[300px] ${reserve} rounded border border-white/20 object-contain cursor-pointer`}
+              onLoad={(e) => {
+                setLoaded((prev) => (prev.has(i) ? prev : new Set(prev).add(i)));
+                onImageLoad?.(e);
+              }}
               onClick={() => setLightboxSrc({ src, alt: `Attachment ${i + 1}` })}
             />
           );
@@ -155,12 +182,12 @@ function MessageBubble({ content, className, timestamp, entryId, onFork, context
         {timestamp != null && (
           <span className="text-[10px] text-[var(--text-tertiary)] mr-auto">{formatMessageTime(timestamp)}</span>
         )}
-        <CopyButton text={content} icon={<Icon path={mdiContentCopy} size={0.6} />} title={i18nT("auto.copy_as_markdown", undefined, "Copy as Markdown")} />
-        <CopyButton text={getPlainText()} icon={<Icon path={mdiTextBox} size={0.6} />} title={i18nT("auto.copy_as_plain_text", undefined, "Copy as plain text")} />
+        <CopyButton getText={() => content} icon={<Icon path={mdiContentCopy} size={0.6} />} title={i18nT("common.copyAsMarkdown", undefined, "Copy as Markdown")} />
+        <CopyButton getText={getPlainText} icon={<Icon path={mdiTextBox} size={0.6} />} title={i18nT("common.copyAsPlainText", undefined, "Copy as plain text")} />
         {entryId && onFork && (
           <button
             onClick={() => onFork(entryId)}
-            title={i18nT("auto.fork_from_here", undefined, "Fork from here")}
+            title={i18nT("session.forkFromHere", undefined, "Fork from here")}
             className="p-0.5 rounded hover:bg-[var(--bg-secondary)] text-[var(--text-secondary)]"
           >
             <Icon path={mdiSourceFork} size={0.6} />
@@ -196,6 +223,16 @@ function hasMermaid(content: string): boolean {
 
 const SCROLL_THRESHOLD = 50;
 
+// Retained-row ceiling for an active selection (change:
+// preserve-chat-selection-during-churn, D3). The `rangeExtractor` keeps up to
+// this many selection-intersecting rows mounted; past it the view actively
+// clears the selection rather than force-mounting the span. Device-aware: rows
+// carry heavy subtrees (Prism/xterm/mermaid/SubagentDetailView) + one
+// ResizeObserver each, so mobile drag stays bounded lower. Coarse interim
+// units pending a measured pixel/node budget.
+const SELECTION_RETAIN_CAP_DESKTOP = 100;
+const SELECTION_RETAIN_CAP_MOBILE = 40;
+
 // Per-session scroll state, persisted across session switches
 const scrollStateMap = new Map<string, { anchorRowId: string | null; offset: number; nearBottom: boolean }>();
 
@@ -222,10 +259,75 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // cancelled by real user input (wheel / touch). See change:
   // virtualize-chat-transcript-tanstack (scroll-to-bottom regression fix).
   const descendingRef = useRef(false);
+  // True while a scroll-to-TOP ascent is in flight (Decision 3, change:
+  // fix-chat-scroll-to-top-estimate-drift). `scrollToIndex(0)` is BOUNDED
+  // (maxAttempts=10) and a late async image-load remeasure can bump the view
+  // off index 0 after the retries exhaust; this latch (a) re-issues
+  // scrollToIndex(0) from `onChange` when a measurement grows the total size,
+  // and (b) stops `handleScroll` re-arming the bottom-pin mid-flight (the
+  // re-arm race: starting the ascent from the bottom would otherwise flip
+  // stickToBottomRef back to true and yank the view down). Cleared on arrival
+  // at the top or on real user input (wheel / touch), mirroring descendingRef.
+  const ascendingRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [showScrollTopButton, setShowScrollTopButton] = useState(false);
+  // Streaming-tail selection preservation (change: preserve-streaming-tail-selection).
+  // While a selection is anchored inside the live tail, the tail renders from
+  // this frozen snapshot instead of the growing `state.streamingText`, so
+  // MarkdownContent's memo skips re-rendering and the committed Text nodes under
+  // the selection are never replaced on a chunk append. The snapshot is held
+  // across `message_end` too (the committed twin is hidden — see displayRows)
+  // so the anchored node is not detached at turn completion. Cleared on the
+  // selection's collapse → the tail flushes to the latest streamed text.
+  const tailContainerRef = useRef<HTMLDivElement>(null);
+  const [frozenTailText, setFrozenTailText] = useState<string | null>(null);
+  const frozenTailTextRef = useRef<string | null>(null);
+  // Mirror of the live streamingText read by the freeze effect (keyed on
+  // isSelecting only) so per-chunk changes do not re-run the snapshot.
+  const streamingTextRef = useRef("");
+  streamingTextRef.current = state.streamingText;
   // Effective display prefs for this session (configurable-chat-display).
   const prefs = useDisplayPrefs(sessionId);
   const showDebugTools = prefs.debugTools;
+
+  // Per-turn change-summary blocks (change: add-change-summary-table). Derived
+  // client-side from the raw (unfiltered) Edit/Write events so counts are
+  // independent of tool-call display filters; gated on the `changeSummaryTable`
+  // display pref. Memoized on message identity (performance-optimization).
+  const splitWs = useOptionalSplitWorkspace();
+  const cwd = splitWs?.cwd;
+  // Normalize an absolute-under-cwd path to the relative-posix key the
+  // server's session-diff endpoint uses, so the diff tab resolves the file
+  // instead of blanking. See change: fix-session-diff-open-nongit-and-preview.
+  const openDiffFile = useCallback(
+    (path: string) => splitWs?.openDiffTab(normalizeUnderCwd(path, cwd)),
+    [splitWs, cwd],
+  );
+  const turnSummaries = useMemo(() => {
+    if (!prefs.changeSummaryTable) return [];
+    const raw = buildTurnSummaries(state.messages);
+    // Normalize file paths at the source so the displayed row and the
+    // diff-open lookup share the relative key and can never diverge. Files this
+    // session wrote OUTSIDE cwd are suppressed unless the opt-in pref is on
+    // (opt-in-out-of-cwd-session-diffs); totals recompute over the kept files.
+    return raw.map((s) => {
+      const files = s.files
+        .filter((f) => prefs.showOutOfCwdSessionDiffs || !isOutOfCwd(f.path, cwd))
+        .map((f) => ({ ...f, path: normalizeUnderCwd(f.path, cwd) }));
+      const totalAdditions = files.reduce((n, f) => n + f.additions, 0);
+      const totalDeletions = files.reduce((n, f) => n + f.deletions, 0);
+      return { ...s, files, totalAdditions, totalDeletions };
+    });
+  }, [state.messages, prefs.changeSummaryTable, prefs.showOutOfCwdSessionDiffs, cwd]);
+  const { anchoredSummaries, tailSummary } = useMemo(() => {
+    const anchored = new Map<string, TurnSummary>();
+    let tail: TurnSummary | null = null;
+    for (const s of turnSummaries) {
+      if (s.boundaryUserMessageId) anchored.set(s.boundaryUserMessageId, s);
+      else tail = s;
+    }
+    return { anchoredSummaries: anchored, tailSummary: tail };
+  }, [turnSummaries]);
   const prevSessionRef = useRef(sessionId);
   const isMobile = useMobile();
   // Pause the streaming bubble's glow/shimmer when it scrolls off-screen.
@@ -245,9 +347,38 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       : state.messages.filter((m) => m.role !== "toolResult" || !isDebugTool(m.toolName ?? ""));
     return base.filter((m) => !m.retriedFrom);
   }, [state.messages, showDebugTools]);
-  const groupedMessages = useMemo(() => groupToolBursts(filteredMessages), [filteredMessages]);
   const retriedErrorIds = useMemo(() => findRetriedErrorIds(filteredMessages), [filteredMessages]);
   const hiddenToolResultIds = useMemo(() => findActiveInteractiveToolResultIds(filteredMessages), [filteredMessages]);
+  // toolCallIds owned by live `interactiveUi` messages still in the list. The
+  // paired `ask_user` tool card is redundant with the interactive card (both
+  // render title + message), so it is suppressed while the interactive card
+  // lives — regardless of pending/resolved status or adjacency (unlike
+  // hiddenToolResultIds, which is pending + adjacency only). On history reload
+  // an answered prompt has NO interactiveUi row, so the set misses and the tool
+  // card renders as the sole record. The reducer stamps `toolCallId` top-level
+  // on the interactiveUi row (event-reducer addInteractiveRequest); `requestId`
+  // (in args) is the defensive fallback. See change: fix-ask-user-card-duplication.
+  const interactiveToolCallIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of filteredMessages) {
+      if (m.role !== "interactiveUi") continue;
+      const key = m.toolCallId ?? (m.args as { requestId?: string } | undefined)?.requestId;
+      if (key) ids.add(key);
+    }
+    return ids;
+  }, [filteredMessages]);
+  // Drop the redundant `ask_user` tool card BEFORE tool-burst grouping (every
+  // toolResult is wrapped in a burst — threshold 1 — so post-group row filtering
+  // never reaches it). The interactive card is the single render while its
+  // interactiveUi row lives; on history reload (no pair) the tool card stays.
+  // See change: fix-ask-user-card-duplication.
+  const groupedMessages = useMemo(() => {
+    const forGrouping = filteredMessages.filter(
+      (m) =>
+        !(m.role === "toolResult" && m.toolName === "ask_user" && interactiveToolCallIds.has(m.toolCallId ?? m.id)),
+    );
+    return groupToolBursts(forGrouping);
+  }, [filteredMessages, interactiveToolCallIds]);
   // Single-red-surface: while the error-lifecycle surface (SessionBanner) owns
   // a failure, collapse the trailing inline failed-tool card so red isn't
   // shown twice. See change: unify-error-retry-lifecycle.
@@ -293,15 +424,126 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     },
     [prefs, showDebugTools, hiddenToolResultIds],
   );
-  const displayRows = useMemo(() => groupedMessages.filter(isRowVisible), [groupedMessages, isRowVisible]);
+  const displayRows = useMemo(() => {
+    const rows = groupedMessages.filter(isRowVisible);
+    // While a tail selection is frozen ACROSS turn completion, the committed
+    // assistant twin has appeared as the last row while the frozen tail still
+    // shows the same text. Hide the twin (view-only; it is never dropped from
+    // state.messages) so the text is not shown twice, until the selection
+    // collapses. See change: preserve-streaming-tail-selection.
+    if (frozenTailText && !state.streamingText && rows.length > 0) {
+      const last = rows[rows.length - 1];
+      if (!isBurst(last) && !isGroup(last)) {
+        const lastMsg = last as import("../lib/event-reducer.js").ChatMessage;
+        if (lastMsg.role === "assistant" && lastMsg.content.startsWith(frozenTailText)) {
+          return rows.slice(0, -1);
+        }
+      }
+    }
+    return rows;
+  }, [groupedMessages, isRowVisible, frozenTailText, state.streamingText]);
+  // Precompute each row's aggregate rendered text length ONCE per displayRows
+  // rebuild (task 2.1), so `estimateSize` stays O(1) per scroll pass and never
+  // walks content blocks. Feeds the content-aware estimate (Decision 1).
+  const rowTextChars = useMemo(() => displayRows.map(computeRowTextChars), [displayRows]);
   const turnToFirstRowIndex = useMemo(() => buildTurnToFirstRowIndex(displayRows), [displayRows]);
+
+  // --- Active-selection preservation (change: preserve-chat-selection-during-churn) ---
+  // Row count + device-aware retained-row ceiling read as refs so the stable
+  // `mapChatRange` closure and the virtualizer `rangeExtractor` always see the
+  // latest values without re-subscribing.
+  const rowCountRef = useRef(0);
+  rowCountRef.current = displayRows.length;
+  const selectionCapRef = useRef(SELECTION_RETAIN_CAP_DESKTOP);
+  selectionCapRef.current = isMobile ? SELECTION_RETAIN_CAP_MOBILE : SELECTION_RETAIN_CAP_DESKTOP;
+
+  const mapChatRange = useCallback((range: Range): SelectionRowSpan | null => {
+    const el = scrollRef.current;
+    if (!el) return null;
+    const span = rangeToRowIndexSpan(range, el, rowCountRef.current);
+    if (span && span.max - span.min + 1 > selectionCapRef.current) {
+      // Past the retained-row ceiling (notably Select-All): ACTIVELY clear the
+      // selection so the outcome is visible, NOT a silently-truncated copy.
+      // Passive non-extension does not collapse a Range whose endpoints sit in
+      // two different removed rows — it persists with garbage offsets. See D3.
+      window.getSelection()?.removeAllRanges();
+      return null;
+    }
+    return span;
+  }, []);
+
+  const { isSelecting, selectionSpanRef } = useActiveChatSelection(scrollRef, mapChatRange);
+  // Freeze/flush the streaming tail around an anchored selection (change:
+  // preserve-streaming-tail-selection). On the isSelecting false→true edge, if
+  // the selection sits inside the live tail, snapshot streamingText so the tail
+  // stops re-rendering per chunk (buffer). On the true→false edge, clear the
+  // snapshot to flush the latest text. Keyed on isSelecting only — the snapshot
+  // value comes from a ref so per-chunk streamingText changes do not re-run it.
+  useLayoutEffect(() => {
+    if (isSelecting) {
+      if (frozenTailTextRef.current == null && streamingTextRef.current) {
+        const sel = typeof window !== "undefined" ? window.getSelection() : null;
+        const tailEl = tailContainerRef.current;
+        const inTail = !!(
+          sel &&
+          tailEl &&
+          ((sel.anchorNode && tailEl.contains(sel.anchorNode)) ||
+            (sel.focusNode && tailEl.contains(sel.focusNode)))
+        );
+        if (inTail) {
+          frozenTailTextRef.current = streamingTextRef.current;
+          setFrozenTailText(streamingTextRef.current);
+        }
+      }
+    } else if (frozenTailTextRef.current != null) {
+      frozenTailTextRef.current = null;
+      setFrozenTailText(null);
+    }
+  }, [isSelecting]);
+
+  // Rebuild clipboard text from the active selection (change:
+  // chat-copy-fidelity-intercept). Intercept the container `copy` so partial
+  // rows copy exactly the selected characters and capping renderers that opt in
+  // via `data-copy-text` copy their full text — never what happens to be
+  // mounted. Skip selections that don't touch the transcript so the browser's
+  // native copy still owns cross-boundary drags.
+  const handleCopy = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
+    const container = scrollRef.current;
+    const sel = window.getSelection();
+    if (!container || !sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    if (!container.contains(range.commonAncestorContainer)) return;
+    const text = buildSelectionClipboardText(range, container);
+    if (!text) return;
+    e.clipboardData.setData("text/plain", text);
+    e.preventDefault();
+  }, []);
+  // Mirror into a ref so the virtualizer `onChange` (created once, invoked
+  // outside render during scroll) reads the latest value.
+  const isSelectingRef = useRef(false);
+  isSelectingRef.current = isSelecting;
 
   const virtualizer = useVirtualizer({
     count: displayRows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (i) => estimateVirtualRowSize(displayRows[i]),
+    estimateSize: (i) => estimateVirtualRowSize(displayRows[i], rowTextChars[i]),
     getItemKey: (i) => virtualRowKey(displayRows[i], i),
     overscan: 6,
+    // Union any active selection's row span into the mounted range (D3), so
+    // rows the selection intersects stay mounted, positioned, and measured by
+    // the virtualizer itself. Runs on EVERY recompute before the unmount
+    // decision; reading the proactively-tracked span ref here keeps selected
+    // rows from ever unmounting (avoids the synchronous Range-mutation race).
+    // `getTotalSize()` may change as a retained row measures — accepted normal
+    // virtualizer behavior. Past the device-aware ceiling the span ref is null
+    // (mapChatRange cleared the selection) so the default range is returned.
+    rangeExtractor: (range) =>
+      extendRangeWithSelection(
+        defaultRangeExtractor(range),
+        selectionSpanRef.current,
+        selectionCapRef.current,
+        range.count,
+      ),
     // Re-pin the bottom on measurement-driven size changes while following.
     // Bottom-pin stays DOM-measured (CR-1): getTotalSize() excludes the live
     // tail siblings, so pin to the real scrollHeight, not the virtual total.
@@ -316,32 +558,90 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       if (!el) return;
       const grew = el.scrollHeight !== lastScrollHeightRef.current;
       lastScrollHeightRef.current = el.scrollHeight;
-      if (grew && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+      // Suspend the bottom-pin while a transcript selection is held (D2) so the
+      // selected row is not scrolled out of its overscan band. stickToBottomRef
+      // is NOT cleared — follow resumes on collapse.
+      if (grew && stickToBottomRef.current && !isSelectingRef.current) el.scrollTop = el.scrollHeight;
+      // Ascending: re-target index 0 whenever a measurement grows the total
+      // size (an above-viewport row mounting/measuring, INCLUDING the async
+      // image-load remeasure). scrollToIndex is bounded to maxAttempts frames,
+      // so without this a late remeasure would leave the view off index 0.
+      if (ascendingRef.current) {
+        if (el.scrollTop <= 0) ascendingRef.current = false;
+        else if (grew) virtualizer.scrollToIndex(0, { align: "start" });
+      }
     },
   });
   const virtualItems = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
 
+  // Streaming-tail content: the frozen snapshot while a tail selection is held
+  // (buffers chunks; survives the message_end unmount), else the live text.
+  // See change: preserve-streaming-tail-selection.
+  const streamingTailText = frozenTailText ?? state.streamingText;
+
+  // Async image-decode re-measure (issue #267). A base64 data-URL decodes after
+  // mount, so an image-bearing row is first measured near-zero. The reused
+  // (not remounted) ChatView + no-op ResizeObserver paths can leave that stale
+  // collapsed height cached, overlapping the next row. Each `<img onLoad>` asks
+  // us to re-measure its owning virtual row (the `[data-index]` ancestor that
+  // already carries `ref={virtualizer.measureElement}`). Coalesce to one
+  // measure per row per animation frame so a many-image message can't storm.
+  const pendingRowMeasure = useRef<Map<number, HTMLElement>>(new Map());
+  const rowMeasureRaf = useRef<number | null>(null);
+  const requestRowMeasure = useCallback(
+    (from: HTMLElement | null) => {
+      const row = from?.closest?.("[data-index]") as HTMLElement | null;
+      if (!row) return;
+      pendingRowMeasure.current.set(Number(row.getAttribute("data-index")), row);
+      if (rowMeasureRaf.current != null) return;
+      rowMeasureRaf.current = requestAnimationFrame(() => {
+        rowMeasureRaf.current = null;
+        for (const node of pendingRowMeasure.current.values()) virtualizer.measureElement(node);
+        pendingRowMeasure.current.clear();
+      });
+    },
+    [virtualizer],
+  );
+  useLayoutEffect(
+    () => () => {
+      if (rowMeasureRaf.current != null) cancelAnimationFrame(rowMeasureRaf.current);
+    },
+    [],
+  );
+
   // Real user input (wheel / touch) cancels an in-flight descent so the user
   // can always escape mid-flight.
   const cancelDescent = useCallback(() => {
     descendingRef.current = false;
+    // Real user input also escapes an in-flight scroll-to-top ascent so the
+    // onChange re-issue cannot fight the user scrolling back down.
+    ascendingRef.current = false;
   }, []);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+    const nearTop = el.scrollTop <= SCROLL_THRESHOLD;
     if (descendingRef.current) {
       // In-flight descent: hold the pin through intermediate (not-yet-bottom)
       // scroll events; clear the latch on arrival.
       if (nearBottom) descendingRef.current = false;
       stickToBottomRef.current = true;
       setShowScrollButton(false);
+    } else if (ascendingRef.current) {
+      // In-flight ascent: hold scroll-lock and NEVER re-arm the bottom-pin,
+      // even if an early frame reads nearBottom (starting from the bottom).
+      // Clear the latch on arrival at the top.
+      if (nearTop) ascendingRef.current = false;
+      stickToBottomRef.current = false;
+      setShowScrollButton(true);
     } else {
       stickToBottomRef.current = nearBottom;
       setShowScrollButton(!nearBottom);
     }
+    setShowScrollTopButton(!nearTop);
     // Persist scroll position for this session in VIRTUAL coordinates (CR-6):
     // the first below-the-fold row's stable id + its intra-row offset. Raw
     // scrollTop is meaningless once total size is an estimate across a remount.
@@ -370,6 +670,21 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       scrollStateMap.set(sessionId, { anchorRowId: null, offset: 0, nearBottom: true });
     }
   }, [sessionId, state.streamingText, state.streamingThinking, pendingSteering]);
+
+  // Scroll-to-top (Decision 3). Latch suppression FIRST, then scroll: escape
+  // sticky-bottom so streaming can't pull the view back down, mark the ascent
+  // so handleScroll won't re-arm the pin and onChange re-issues on remeasure,
+  // then target index 0 top-aligned. `scrollToIndex` mounts the first row if
+  // unmounted and (for index 0) self-corrects toward offset 0.
+  const scrollToTop = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    descendingRef.current = false;
+    ascendingRef.current = true;
+    stickToBottomRef.current = false;
+    setShowScrollButton(true);
+    virtualizer.scrollToIndex(0, { align: "start" });
+  }, [virtualizer]);
 
   // Save scroll state when leaving, restore when arriving. Layout effect keeps
   // the restored position synchronized with the first paint so there is no flash.
@@ -416,12 +731,28 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // Auto-scroll on new content when the user has not escaped the bottom.
   // Layout effect keeps the DOM and scroll position synchronized before paint,
   // eliminating the per-line jumps caused by async scrollTo calls.
+  //
+  // Suspended while a transcript selection is held (D2) WITHOUT clearing
+  // stickToBottomRef, so the selected row is not scrolled out of its overscan
+  // band. `isSelecting` is in the dep array so the `→ false` edge re-fires the
+  // pin even when no content arrived after collapse (else the user is stranded
+  // at a stale position). On that edge lastScrollHeightRef is resynced so the
+  // next onChange does not read a stale height and fire a spurious pin.
+  const wasSelectingRef = useRef(false);
   useLayoutEffect(() => {
-    if (stickToBottomRef.current) {
-      const el = scrollRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+    const el = scrollRef.current;
+    if (isSelecting) {
+      wasSelectingRef.current = true;
+      return;
     }
-  }, [state.messages.length, state.streamingText, state.pendingPrompt, state.streamingThinking, pendingSteering]);
+    const resumedFromSelection = wasSelectingRef.current;
+    wasSelectingRef.current = false;
+    if (resumedFromSelection && el) lastScrollHeightRef.current = el.scrollHeight;
+    if (stickToBottomRef.current && el) {
+      el.scrollTop = el.scrollHeight;
+      lastScrollHeightRef.current = el.scrollHeight;
+    }
+  }, [state.messages.length, state.streamingText, state.pendingPrompt, state.streamingThinking, pendingSteering, isSelecting]);
 
   useImperativeHandle(ref, () => ({
     scrollToTurn(turnIndex: number) {
@@ -443,7 +774,13 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     // resets the hoisted preview — a preview open in session A never leaks into B.
     <FilePreviewProvider key={sessionId}>
     <div className="flex-1 relative overflow-hidden flex flex-col">
-    <div ref={scrollRef} onScroll={handleScroll} onWheel={cancelDescent} onTouchMove={cancelDescent} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`}>
+    {/* overflowAnchor:"none" is load-bearing: TanStack's built-in above-viewport
+        correction (resizeItem) drives scroll compensation itself, so browser
+        scroll-anchoring must stay OFF (it would double-move). Do NOT add
+        `scroll-behavior: smooth` here or on an ancestor — smooth would animate
+        each synchronous measurement correction and race the next, reintroducing
+        the scroll-to-top drift. See change: fix-chat-scroll-to-top-estimate-drift. */}
+    <div ref={scrollRef} onScroll={handleScroll} onCopy={handleCopy} onWheel={cancelDescent} onTouchMove={cancelDescent} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`}>
       {/* Windowed historical rows (TanStack Virtual): only viewport + overscan
           are mounted. The spacer reserves getTotalSize(); each row is absolutely
           positioned + re-measured on mount. chat-cv-skip keeps Step A's
@@ -495,18 +832,26 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         }
 
         if (msg.role === "user") {
+          // Per-turn change block for the turn that ENDS at this user message
+          // (change: add-change-summary-table). Renders above the bubble that
+          // starts the next turn; the in-progress turn renders at the tail.
+          const changeBlock = anchoredSummaries.get(msg.id) ? (
+            <ChangeSummaryBlock summary={anchoredSummaries.get(msg.id)!} onOpenFile={openDiffFile} />
+          ) : null;
           // Skill invocations render as a distinct collapsible card so chat
           // doesn't show walls of expanded skill body. Plain user messages
           // continue to render as the existing blue bubble.
           // See change: render-skill-invocations-collapsibly.
           if (msg.skill) {
             return (
-              <div key={msg.id} className="mt-4 mb-4 flex flex-col items-end" {...(msg.turnIndex != null ? { "data-turn": msg.turnIndex } : {})}>
+              <React.Fragment key={msg.id}>
+              {changeBlock}
+              <div className="mt-4 mb-4 flex flex-col items-end" {...(msg.turnIndex != null ? { "data-turn": msg.turnIndex } : {})}>
                 {msg.streamingBehavior && <StreamingBehaviorBadge behavior={msg.streamingBehavior} />}
                 <div className={bubbleMax}>
                   {msg.images && msg.images.length > 0 && (
                     <div className="mb-2">
-                      <ImageAttachments images={msg.images} />
+                      <ImageAttachments images={msg.images} onImageLoad={(e) => requestRowMeasure(e.currentTarget)} />
                     </div>
                   )}
                   <SkillInvocationCard
@@ -518,14 +863,17 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
                   />
                 </div>
               </div>
+              </React.Fragment>
             );
           }
           return (
-            <div key={msg.id} className="mt-4 mb-4 flex flex-col items-end" {...(msg.turnIndex != null ? { "data-turn": msg.turnIndex } : {})}>
+            <React.Fragment key={msg.id}>
+            {changeBlock}
+            <div className="mt-4 mb-4 flex flex-col items-end" {...(msg.turnIndex != null ? { "data-turn": msg.turnIndex } : {})}>
               {msg.streamingBehavior && <StreamingBehaviorBadge behavior={msg.streamingBehavior} />}
               <div className={`bg-blue-500/10 border border-blue-500/20 border-l-2 border-l-blue-400 rounded-xl shadow-md px-4 py-2 ${bubbleMax}`}>
                 {msg.images && msg.images.length > 0 && (
-                  <ImageAttachments images={msg.images} />
+                  <ImageAttachments images={msg.images} onImageLoad={(e) => requestRowMeasure(e.currentTarget)} />
                 )}
                 {msg.content && (
                   <MessageBubble
@@ -538,6 +886,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
                 )}
               </div>
             </div>
+            </React.Fragment>
           );
         }
 
@@ -724,12 +1073,17 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
 
       {/* Streaming text — carries the same liveness cue as a running group
           (edge-pulse glow + shimmer sweep) while the turn is alive. Settles
-          static the instant streaming ends. See change: enhance-tool-call-grouping. */}
-      {state.streamingText && (
-        <div className="flex justify-start chat-cv-skip">
-          <div ref={streamFxRef} className={`chat-stream-live bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl shadow-md px-4 py-2 ${hasMermaid(state.streamingText) ? bubbleWide : bubbleMax}`}>
-            <MarkdownContent content={state.streamingText} context={toolContext} />
-            <span className="inline-block w-1.5 h-4 bg-[var(--bg-surface)] animate-pulse ml-0.5" />
+          static the instant streaming ends. See change: enhance-tool-call-grouping.
+          `streamingTailText` is the frozen snapshot while a tail selection is
+          held (buffering chunks + surviving the message_end unmount), else the
+          live streamingText. See change: preserve-streaming-tail-selection. */}
+      {streamingTailText && (
+        <div ref={tailContainerRef} className="flex justify-start chat-cv-skip">
+          <div ref={streamFxRef} className={`chat-stream-live bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl shadow-md px-4 py-2 ${hasMermaid(streamingTailText) ? bubbleWide : bubbleMax}`}>
+            <MarkdownContent content={streamingTailText} context={toolContext} />
+            {state.streamingText && (
+              <span className="inline-block w-1.5 h-4 bg-[var(--bg-surface)] animate-pulse ml-0.5" />
+            )}
           </div>
         </div>
       )}
@@ -739,6 +1093,15 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
           between yellow + red is impossible by construction — the selector
           picks exactly one variant. See change:
           unify-status-banner-and-terminal-limit-stop. */}
+
+      {/* In-progress turn change summary (change: add-change-summary-table):
+          the final turn has no following user message to anchor above, so its
+          block renders at the stream tail. */}
+      {tailSummary && (
+        <div className="mx-4">
+          <ChangeSummaryBlock summary={tailSummary} onOpenFile={openDiffFile} />
+        </div>
+      )}
 
       {/* Inline-chat steering: pending steer entries render here as user-style
           bubbles, positioned at the bottom of the chat list. Once pi drains
@@ -752,7 +1115,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
           <div className={`relative bg-blue-500/10 border border-blue-500/20 border-l-2 border-l-blue-400 rounded-xl shadow-md px-4 py-2 ${bubbleMax}`}>
             <div className="flex items-center gap-1.5 mb-1 text-[10px] uppercase tracking-wider text-blue-400/80 font-medium">
               <Icon path={mdiLoading} size={0.45} className="animate-spin" />
-              {i18nT("auto.steering", undefined, "Steering")}
+              {i18nT("session.steering", undefined, "Steering")}
             </div>
             <MarkdownContent content={steerText} />
           </div>
@@ -805,7 +1168,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
             className="flex flex-col gap-3 px-4 py-3"
             aria-busy="true"
             role="status"
-            aria-label={i18nT("auto.loading_conversation", undefined, "Loading conversation…")}
+            aria-label={i18nT("status.loadingConversation", undefined, "Loading conversation…")}
             data-testid="chat-history-skeleton"
           >
             <Skeleton variant="bubble" count={3} />
@@ -813,9 +1176,9 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         ) : (
           <div className="flex items-center justify-center h-full">
             <EmptyState
-              title={i18nT("auto.no_messages_yet", undefined, "No messages yet")}
+              title={i18nT("session.noMessagesYet", undefined, "No messages yet")}
               body={i18nT(
-                "auto.no_messages_yet_body",
+                "session.noMessagesYetBody",
                 undefined,
                 "Send a prompt below to start the conversation.",
               )}
@@ -824,12 +1187,22 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         )
       )}
     </div>
+    {showScrollTopButton && (
+      <button
+        data-testid="scroll-to-top"
+        onClick={scrollToTop}
+        className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-full p-2 shadow-lg hover:bg-[var(--bg-surface)] transition-colors"
+        title={i18nT("common.scrollToTop", undefined, "Scroll to top")}
+      >
+        <Icon path={mdiChevronUp} size={0.8} className="text-[var(--text-secondary)]" />
+      </button>
+    )}
     {showScrollButton && (
       <button
         data-testid="scroll-to-bottom"
         onClick={scrollToBottom}
         className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-full p-2 shadow-lg hover:bg-[var(--bg-surface)] transition-colors"
-        title={i18nT("auto.scroll_to_bottom", undefined, "Scroll to bottom")}
+        title={i18nT("common.scrollToBottom", undefined, "Scroll to bottom")}
       >
         <Icon path={mdiChevronDown} size={0.8} className="text-[var(--text-secondary)]" />
       </button>

@@ -51,6 +51,54 @@ describe("ChatViewMenu viewport flip", () => {
     expect(popover.className).toContain("overflow-y-auto");
   });
 
+  it("flips to left-anchor in a slim panel so row labels stay on-screen", () => {
+    setViewportWidth(300);
+    // Trigger hugs the left edge of a slim panel → right-anchored 256px popover
+    // would clip off the left of the viewport. Must flip to left-0.
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      bottom: 130,
+      left: 20,
+      right: 80,
+      width: 60,
+      height: 30,
+      x: 20,
+      y: 100,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    render(<ChatViewMenu sessionId="s1" send={() => {}} currentOverride={undefined} />);
+    fireEvent.click(screen.getByText("View"));
+
+    const popover = screen.getByTestId("chat-view-popover");
+    expect(popover.className).toContain("left-0");
+    expect(popover.className).not.toContain("right-0");
+    // maxWidth clamped to the left-anchor space: innerWidth - left - gap = 300 - 20 - 8 = 272.
+    expect(popover.style.maxWidth).toBe("272px");
+  });
+
+  it("stays right-anchored in a wide panel", () => {
+    setViewportWidth(1400);
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      bottom: 130,
+      left: 600,
+      right: 700,
+      width: 100,
+      height: 30,
+      x: 600,
+      y: 100,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    render(<ChatViewMenu sessionId="s1" send={() => {}} currentOverride={undefined} />);
+    fireEvent.click(screen.getByText("View"));
+
+    const popover = screen.getByTestId("chat-view-popover");
+    expect(popover.className).toContain("right-0");
+    expect(popover.className).not.toContain("left-0");
+  });
+
   it("opens downward by default when there is room below", () => {
     mockTriggerRect({ top: 100, bottom: 130, left: 0, right: 0, x: 0, y: 100 });
 
