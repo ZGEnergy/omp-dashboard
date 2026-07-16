@@ -450,3 +450,125 @@ describe("ChatView scroll-to-top", () => {
     expect(scrollEl.scrollTop).toBe(before); // not yanked to scrollHeight (2000)
   });
 });
+
+describe("ChatView load-older + prepend scroll anchor (session-tail-rehydrate)", () => {
+  it("calls onLoadOlder once when scrolled near the top with hasMoreOlder; silent while scrollTop is high", async () => {
+    const onLoadOlder = vi.fn();
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView
+          state={stateWith(50)}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          loadingOlder={false}
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const scrollEl = getScrollContainer(container);
+
+    // Park well below the near-top band: onLoadOlder must NOT fire here.
+    // (SCROLL_THRESHOLD gates both the bottom-pin and the load-older trigger;
+    // 500 is comfortably above it.) Two scrolls mirror the escape tests so the
+    // virtualizer's measurement onChange settles stick=false without a pin.
+    setScrollPosition(scrollEl, 500, 2000, 400);
+    fireEvent.scroll(scrollEl);
+    setScrollPosition(scrollEl, 500, 2000, 400);
+    fireEvent.scroll(scrollEl);
+    expect(onLoadOlder).not.toHaveBeenCalled();
+
+    // Cross into the near-top band. scrollHeight is unchanged so the virtual
+    // range does not grow — the only handleScroll that crosses the threshold
+    // fires onLoadOlder exactly once.
+    setScrollPosition(scrollEl, 0, 2000, 400);
+    fireEvent.scroll(scrollEl);
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicking data-testid=load-older-button fires onLoadOlder", async () => {
+    const onLoadOlder = vi.fn();
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView
+          state={stateWith(5)}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          loadingOlder={false}
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const button = container.querySelector('[data-testid="load-older-button"]');
+    expect(button).not.toBeNull();
+    fireEvent.click(button!);
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("prepend growth while not sticking compensates scrollTop by height delta", async () => {
+    // See change: session-tail-rehydrate (D5 load-older anchor).
+    // Product path: virtualizer onChange (or messages.length layout fallback)
+    // adds height delta to scrollTop when stick is false so prepended older
+    // rows keep the same content under the viewport.
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView state={stateWith(50)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const scrollEl = getScrollContainer(container);
+    let top = 400;
+    Object.defineProperty(scrollEl, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = Number(v);
+      },
+    });
+    Object.defineProperty(scrollEl, "clientHeight", {
+      configurable: true,
+      value: 400,
+      writable: true,
+    });
+    Object.defineProperty(scrollEl, "scrollHeight", {
+      configurable: true,
+      value: 2000,
+      writable: true,
+    });
+
+    // Escape sticky bottom (mid-list).
+    fireEvent.scroll(scrollEl);
+    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+
+    // Seed lastScrollHeightRef at 2000 (mount often sees jsdom height 0).
+    rerender(
+      <ThemeProvider>
+        <ChatView state={stateWith(51)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    top = 400;
+    fireEvent.scroll(scrollEl);
+
+    // Grow height before message-count update so onChange/layout see the delta.
+    Object.defineProperty(scrollEl, "scrollHeight", {
+      configurable: true,
+      value: 3000,
+      writable: true,
+    });
+    rerender(
+      <ThemeProvider>
+        <ChatView state={stateWith(80)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    // 400 + (3000 - 2000) = 1400; stick path would pin to 3000.
+    expect(top).toBe(1400);
+    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+  });
+});

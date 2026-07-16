@@ -582,19 +582,25 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     onChange: () => {
       const el = scrollRef.current;
       if (!el) return;
-      const grew = el.scrollHeight !== lastScrollHeightRef.current;
-      lastScrollHeightRef.current = el.scrollHeight;
-      // Suspend the bottom-pin while a transcript selection is held (D2) so the
-      // selected row is not scrolled out of its overscan band. stickToBottomRef
-      // is NOT cleared — follow resumes on collapse.
-      if (grew && stickToBottomRef.current && !isSelectingRef.current) el.scrollTop = el.scrollHeight;
+      const prevH = lastScrollHeightRef.current;
+      const nextH = el.scrollHeight;
+      if (nextH === prevH) return;
+      // Stick: pin to bottom (unless a transcript selection is held — D2).
+      // Unstuck: compensate so prepended older rows do not shove the viewport
+      // content down. Must live here because this onChange also updates
+      // lastScrollHeightRef and would otherwise win the race and skip D5.
+      // See change: session-tail-rehydrate (D5 load-older anchor).
+      if (stickToBottomRef.current) {
+        if (!isSelectingRef.current) el.scrollTop = nextH;
+      } else if (prevH > 0) {
+        el.scrollTop += nextH - prevH;
+      }
+      lastScrollHeightRef.current = nextH;
       // Ascending: re-target index 0 whenever a measurement grows the total
-      // size (an above-viewport row mounting/measuring, INCLUDING the async
-      // image-load remeasure). scrollToIndex is bounded to maxAttempts frames,
-      // so without this a late remeasure would leave the view off index 0.
+      // size (above-viewport row mount/measure, incl. async image remeasure).
       if (ascendingRef.current) {
         if (el.scrollTop <= 0) ascendingRef.current = false;
-        else if (grew) virtualizer.scrollToIndex(0, { align: "start" });
+        else virtualizer.scrollToIndex(0, { align: "start" });
       }
     },
   });
@@ -841,14 +847,17 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     }
   }, [state.messages.length, state.streamingText, state.pendingPrompt, state.streamingThinking, pendingSteering, isSelecting]);
 
-  // When older rows prepend (or any growth while not sticking), keep the
-  // viewport on the same content by compensating scrollTop for height delta.
+  // Fallback when message count changes but virtualizer onChange did not
+  // observe a height delta (common in jsdom). If onChange already synced
+  // lastScrollHeightRef to the new height, nextH === prevH and this is a no-op
+  // (avoids double-compensation after the onChange path above).
   // See change: session-tail-rehydrate (D5 load-older anchor).
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const prevH = lastScrollHeightRef.current;
     const nextH = el.scrollHeight;
+    if (nextH === prevH) return;
     if (!stickToBottomRef.current && prevH > 0 && nextH > prevH) {
       el.scrollTop += nextH - prevH;
     }
