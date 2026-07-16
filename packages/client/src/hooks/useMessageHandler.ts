@@ -708,6 +708,19 @@ export function useMessageHandler(
         break;
       }
 
+      case "plugin_action_error": {
+        // Unknown pluginId on plugin_action — gateway never silent-drops.
+        // See change: fix-plugin-action-fanout-and-handlers.
+        const detail = msg.action
+          ? `${msg.pluginId}/${msg.action}: ${msg.error}`
+          : `${msg.pluginId}: ${msg.error}`;
+        showToast?.(
+          t("plugin.actionError", { detail }, `Plugin action failed: ${detail}`),
+          "error",
+        );
+        break;
+      }
+
       case "recovery_offer":
         // Cold-start interrupted-session offer. Sticky top-right notification
         // (no auto-timeout). See change: reopen-sessions-after-shutdown.
