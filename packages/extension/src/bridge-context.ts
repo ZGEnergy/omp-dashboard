@@ -23,6 +23,8 @@ export interface BridgeContext {
   cachedHasUI: boolean | undefined;
   lastModel: string | undefined;
   lastThinkingLevel: string | undefined;
+  /** Last pi version emitted for this bridge/session; reset on reconnect. */
+  lastPiVersion: string | undefined;
   lastSessionFile: string | undefined;
   lastSessionDir: string | undefined;
   lastFirstMessage: string | undefined;
