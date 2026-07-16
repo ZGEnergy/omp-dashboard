@@ -2,7 +2,7 @@ import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { describe, expect, it, vi } from "vitest";
 import type { BrowserHandlerContext } from "../browser-handlers/handler-context.js";
-import { handleSubscribe, replaySessionAssets } from "../browser-handlers/subscription-handler.js";
+import { handleSubscribe, replaySessionAssets, windowEventsForSubscribe } from "../browser-handlers/subscription-handler.js";
 import { createMemoryEventStore } from "../memory-event-store.js";
 import { createMemorySessionManager } from "../memory-session-manager.js";
 
@@ -482,5 +482,74 @@ describe("handleSubscribe — tail window + load-older (session-tail-rehydrate)"
     expect(allEvents.every((e) => e.seq < 12)).toBe(true);
     expect(allEvents[allEvents.length - 1]!.seq).toBe(11);
     expect(replays[replays.length - 1]![1].windowMaxSeq).toBe(11);
+  });
+
+  it("fromSeq does not mark replaying or clearReplaying catch-up", async () => {
+    // Load-older must not suppress live events or re-send the live tail via
+    // clearReplaying(lastSent=windowMax). That catch-up wiped client state.
+    // See change: session-tail-rehydrate (live-follow after hydrate).
+    const markReplaying = vi.fn();
+    const clearReplaying = vi.fn();
+    const ctx = createMockContext({ markReplaying, clearReplaying });
+    for (let i = 0; i < 15; i++) ctx.eventStore.insertEvent("s1", fatEvent(`e${i}`));
+
+    handleSubscribe(
+      { type: "subscribe", sessionId: "s1", fromSeq: 12, windowBytes: 1_000_000 },
+      new Set(),
+      ctx,
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(markReplaying).not.toHaveBeenCalled();
+    expect(clearReplaying).not.toHaveBeenCalled();
+  });
+});
+
+describe("windowEventsForSubscribe — lastSeq delta vs cold tail", () => {
+  function stored(n: number, pad = 200) {
+    return Array.from({ length: n }, (_, i) => ({
+      seq: i + 1,
+      event: { eventType: `e${i}`, timestamp: i, data: { pad: "x".repeat(pad) } },
+    }));
+  }
+
+  it("lastSeq>0 returns only events after the cursor even when buffer starts at seq 1", () => {
+    // Disk-load path hands a full buffer into windowEvents; must not re-send
+    // the whole history (or strip hasMoreOlder via a fake cold-tail).
+    const { events, meta } = windowEventsForSubscribe(stored(10) as any, {
+      type: "subscribe",
+      sessionId: "s1",
+      lastSeq: 7,
+    });
+    expect(events.map((e) => e.seq)).toEqual([8, 9, 10]);
+    expect(meta.hasMoreOlder).toBeUndefined();
+  });
+
+  it("mode:tail lastSeq 0 windows newest with hasMoreOlder", () => {
+    // clampTailWindowBytes floors at 256KiB — use fat events so the budget trims.
+    const { events, meta } = windowEventsForSubscribe(stored(40, 20_000) as any, {
+      type: "subscribe",
+      sessionId: "s1",
+      lastSeq: 0,
+      mode: "tail",
+      windowBytes: 256 * 1024,
+    });
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.length).toBeLessThan(40);
+    expect(meta.hasMoreOlder).toBe(true);
+    expect(meta.windowMinSeq).toBe(events[0]!.seq);
+    expect(meta.windowMaxSeq).toBe(40);
+  });
+
+  it("fromSeq page is strictly older than the cursor", () => {
+    const { events, meta } = windowEventsForSubscribe(stored(20) as any, {
+      type: "subscribe",
+      sessionId: "s1",
+      fromSeq: 12,
+      windowBytes: 1_000_000,
+    });
+    expect(events.every((e) => e.seq < 12)).toBe(true);
+    expect(events[events.length - 1]!.seq).toBe(11);
+    expect(meta.windowMaxSeq).toBe(11);
   });
 });

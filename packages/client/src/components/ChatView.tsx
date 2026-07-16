@@ -280,6 +280,11 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // ignored — wipe/rebuild is a cold land. See change: session-tail-rehydrate.
   const loadingHistoryRef = useRef(!!loadingHistory);
   const escapedDuringHydrateRef = useRef(false);
+  // Programmatic scroll (virtualizer pin / hydrate re-pin) fires `scroll` events
+  // that look like "left the bottom". Only real wheel/touch may clear stick —
+  // otherwise live follow dies right after a large tail lands.
+  // See change: session-tail-rehydrate (live-follow after hydrate).
+  const userGestureRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   // Streaming-tail selection preservation (change: preserve-streaming-tail-selection).
@@ -622,12 +627,14 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   );
 
   // Real user input (wheel / touch) cancels an in-flight descent so the user
-  // can always escape mid-flight.
-  const cancelDescent = useCallback(() => {
+  // can always escape mid-flight. Also marks a gesture so handleScroll can
+  // distinguish user intent from programmatic pin scrolls.
+  const onUserScrollGesture = useCallback(() => {
     descendingRef.current = false;
     // Real user input also escapes an in-flight scroll-to-top ascent so the
     // onChange re-issue cannot fight the user scrolling back down.
     ascendingRef.current = false;
+    userGestureRef.current = true;
   }, []);
 
   const handleScroll = useCallback(() => {
@@ -648,12 +655,25 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       if (nearTop) ascendingRef.current = false;
       stickToBottomRef.current = false;
       setShowScrollButton(true);
+    } else if (loadingHistory) {
+      // During hydrate, virtualizer pin/measurement fires synthetic scroll that
+      // is not a user escape. Only wheel/touch may clear stick mid-hydrate;
+      // otherwise live follow dies after the tail lands.
+      // See change: session-tail-rehydrate (live-follow after hydrate).
+      if (userGestureRef.current) {
+        stickToBottomRef.current = nearBottom;
+        setShowScrollButton(!nearBottom);
+        if (!nearBottom) escapedDuringHydrateRef.current = true;
+        if (nearBottom) userGestureRef.current = false;
+      } else if (nearBottom) {
+        stickToBottomRef.current = true;
+        setShowScrollButton(false);
+      }
     } else {
+      // Steady-state: any scroll (incl. scrollbar drag) updates stick.
       stickToBottomRef.current = nearBottom;
       setShowScrollButton(!nearBottom);
-      if (loadingHistory && !nearBottom) {
-        escapedDuringHydrateRef.current = true;
-      }
+      if (nearBottom) userGestureRef.current = false;
     }
     // Near top + more history available → request older page. Parent de-dupes
     // in-flight requests. See change: session-tail-rehydrate.
@@ -857,12 +877,21 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
           data-testid="load-older-status"
           role="status"
         >
-          {loadingOlder
-            ? i18nT("auto.loading_older", undefined, "Loading older messages…")
-            : i18nT("auto.scroll_for_older", undefined, "Scroll up for older messages")}
+          {loadingOlder ? (
+            i18nT("auto.loading_older", undefined, "Loading older messages…")
+          ) : (
+            <button
+              type="button"
+              data-testid="load-older-button"
+              className="underline-offset-2 hover:underline text-[var(--text-secondary)]"
+              onClick={() => onLoadOlder?.()}
+            >
+              {i18nT("auto.load_older_messages", undefined, "Load older messages")}
+            </button>
+          )}
         </div>
       )}
-    <div ref={scrollRef} onScroll={handleScroll} onCopy={handleCopy} onWheel={cancelDescent} onTouchMove={cancelDescent} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`} >
+    <div ref={scrollRef} onScroll={handleScroll} onCopy={handleCopy} onWheel={onUserScrollGesture} onTouchMove={onUserScrollGesture} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`}>
       {/* Windowed historical rows (TanStack Virtual): only viewport + overscan
           are mounted. The spacer reserves getTotalSize(); each row is absolutely
           positioned + re-measured on mount. chat-cv-skip keeps Step A's

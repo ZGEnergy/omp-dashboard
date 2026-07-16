@@ -737,7 +737,8 @@ export default function App() {
     if (!selectedId) return;
     if (loadingOlderMap.get(selectedId)) return;
     const win = historyWindowRef.current.get(selectedId);
-    if (!win?.hasMoreOlder || !win.minSeq) return;
+    // minSeq must be a positive cursor; `!win.minSeq` also rejected valid... no, 0 is invalid.
+    if (!win?.hasMoreOlder || !(win.minSeq > 0)) return;
     setLoadingOlderMap((prev) => {
       const next = new Map(prev);
       next.set(selectedId, true);
@@ -935,16 +936,17 @@ export default function App() {
               });
               if (!maxSeqMapRef.current.has(sid)) maxSeqMapRef.current.set(sid, r.lastSeq);
               replayPersisterRef.current.seed(sid, r.events);
-              // A cached payload may already be a trimmed tail. Seed the
-              // older-page affordance before the delta replay arrives so the
-              // user can request history immediately after reload.
+              // IDB holds only a newest-byte tail. Delta subscribe will not re-send
+              // window meta, so seed load-older from the cached min seq: any gap
+              // below seq 1 means older history exists server-side.
+              // See change: session-tail-rehydrate.
               if (r.events.length > 0) {
                 const minSeq = r.events[0]!.seq;
-                const window = { minSeq, hasMoreOlder: minSeq > 1 };
-                historyWindowRef.current.set(sid, window);
-                setHistoryWindowMap((prev) => {
-                  const next = new Map(prev);
-                  next.set(sid, window);
+                const hasMoreOlder = minSeq > 1;
+                historyWindowRef.current.set(sid, { minSeq, hasMoreOlder });
+                setHistoryWindowMap((m) => {
+                  const next = new Map(m);
+                  next.set(sid, { minSeq, hasMoreOlder });
                   return next;
                 });
               }

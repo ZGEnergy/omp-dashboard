@@ -128,9 +128,13 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // zrok / tunnel hostnames must be allowlisted or Vite returns
+    // "Blocked request. This host is not allowed."
+    allowedHosts: true,
     hmr: {
-      // HMR WebSocket must connect directly to Vite's port, not the dashboard's.
-      clientPort: 3000,
+      // Prefer the actual listen port (CLI --port overrides server.port).
+      // For public zrok shares HMR often fails anyway; page load still works.
+      clientPort: Number(process.env.VITE_HMR_CLIENT_PORT) || undefined,
     },
     proxy: {
       "/api": `http://localhost:${DASHBOARD_PORT}`,
