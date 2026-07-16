@@ -92,12 +92,14 @@ export class WsTicketStore {
    * on the FIRST attempt regardless of outcome (single-use). Returns true only
    * when the ticket exists, is unexpired, and matches the requested scope.
    */
-  consume(ticket: string | null | undefined, scope: WsRouteScope): boolean {
+  consume(ticket: string | null | undefined, scope: WsRouteScope | null): boolean {
     if (!ticket) return false;
     const entry = this.tickets.get(ticket);
-    // Delete synchronously on first attempt — no reuse.
+    // Delete synchronously on first attempt — no reuse (including unknown routes
+    // where scope is null so a probe cannot preserve the ticket for later).
     this.tickets.delete(ticket);
     if (!entry) return false;
+    if (scope === null) return false;
     if (entry.expiresAt < this.now()) return false;
     return entry.scope === scope;
   }

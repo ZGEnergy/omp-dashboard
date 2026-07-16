@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { describe, expect, it, vi } from "vitest";
 import { createBrowserGateway } from "../browser-gateway.js";
-import { createMemorySessionManager } from "../memory-session-manager.js";
 import { createMemoryEventStore } from "../memory-event-store.js";
+import { createMemorySessionManager } from "../memory-session-manager.js";
 import type { PiGateway } from "../pi-gateway.js";
 
 function makeFakeWs() {
@@ -28,6 +28,30 @@ function makeStubPiGateway(): PiGateway {
     hasSession: vi.fn(() => false),
     onEvent: vi.fn(),
   } as unknown as PiGateway;
+}
+
+function makePromptGateway(piGateway: PiGateway, maxAgeMs?: number) {
+  return createBrowserGateway(
+    createMemorySessionManager(),
+    createMemoryEventStore(() => false),
+    piGateway,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    maxAgeMs,
+  );
 }
 
 function sentMessages(ws: ReturnType<typeof makeFakeWs>) {
@@ -119,16 +143,10 @@ describe("browser gateway PromptBus replay and response routing", () => {
     expect(sentMessages(afterResponse).find((m) => m.type === "prompt_request")?.promptId).toBe("prompt-2");
   });
 
-  it("keeps one response queued until the bridge confirms dismissal, even after a long disconnect", async () => {
+  it("stops retrying after the response max age", async () => {
     const piGateway = makeStubPiGateway();
     (piGateway.sendToSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const gateway = createBrowserGateway(
-      createMemorySessionManager(),
-      createMemoryEventStore(() => false),
-      piGateway,
-    );
-    gateway.trackPromptRequest("s1", promptRequest);
-    gateway.trackPromptRequest("s1", secondPromptRequest);
+    const gateway = makePromptGateway(piGateway);
     const ws = makeFakeWs();
     connectAndSubscribe(gateway, ws, "s1");
     await flush();
@@ -139,19 +157,57 @@ describe("browser gateway PromptBus replay and response routing", () => {
       ws.emit("message", Buffer.from(JSON.stringify({
         type: "prompt_response", sessionId: "s1", promptId: "prompt-1", answer: "A", source: "dashboard-default",
       })));
-      await vi.advanceTimersByTimeAsync(185_000);
-      const attemptsAtThreeMinutes = (piGateway.sendToSession as ReturnType<typeof vi.fn>).mock.calls.length;
-      await vi.advanceTimersByTimeAsync(80_000);
-      expect((piGateway.sendToSession as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(attemptsAtThreeMinutes);
-
-      const replay = makeFakeWs();
-      connectAndSubscribe(gateway, replay, "s1");
-      expect(sentMessages(replay).filter((m) => m.type === "prompt_request").map((m) => m.promptId)).toEqual(["prompt-2"]);
-
-      const attemptsBeforeDismiss = (piGateway.sendToSession as ReturnType<typeof vi.fn>).mock.calls.length;
-      gateway.clearPromptRequest("s1", "prompt-1");
+      await vi.advanceTimersByTimeAsync(60_001);
+      const attemptsAtExpiry = (piGateway.sendToSession as ReturnType<typeof vi.fn>).mock.calls.length;
       await vi.advanceTimersByTimeAsync(60_000);
-      expect((piGateway.sendToSession as ReturnType<typeof vi.fn>).mock.calls.length).toBe(attemptsBeforeDismiss);
+      expect((piGateway.sendToSession as ReturnType<typeof vi.fn>).mock.calls.length).toBe(attemptsAtExpiry);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops retrying after ten retries even before the max age", async () => {
+    const piGateway = makeStubPiGateway();
+    (piGateway.sendToSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    const gateway = makePromptGateway(piGateway, 1_000_000);
+    const ws = makeFakeWs();
+    connectAndSubscribe(gateway, ws, "s1");
+    await flush();
+    (piGateway.sendToSession as ReturnType<typeof vi.fn>).mockClear();
+
+    vi.useFakeTimers();
+    try {
+      ws.emit("message", Buffer.from(JSON.stringify({
+        type: "prompt_response", sessionId: "s1", promptId: "prompt-1", answer: "A", source: "dashboard-default",
+      })));
+      await vi.advanceTimersByTimeAsync(200_000);
+      const attemptsAfterRetryCap = (piGateway.sendToSession as ReturnType<typeof vi.fn>).mock.calls.length;
+      expect(attemptsAfterRetryCap).toBe(11);
+      await vi.advanceTimersByTimeAsync(1_000_000);
+      expect((piGateway.sendToSession as ReturnType<typeof vi.fn>).mock.calls.length).toBe(attemptsAfterRetryCap);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears queued responses when a session is unregistered", async () => {
+    const piGateway = makeStubPiGateway();
+    (piGateway.sendToSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    const gateway = makePromptGateway(piGateway);
+    const ws = makeFakeWs();
+    connectAndSubscribe(gateway, ws, "s1");
+    await flush();
+    (piGateway.sendToSession as ReturnType<typeof vi.fn>).mockClear();
+
+    vi.useFakeTimers();
+    try {
+      ws.emit("message", Buffer.from(JSON.stringify({
+        type: "prompt_response", sessionId: "s1", promptId: "prompt-1", answer: "A", source: "dashboard-default",
+      })));
+      const attemptsBeforeClear = (piGateway.sendToSession as ReturnType<typeof vi.fn>).mock.calls.length;
+      gateway.clearPendingPromptResponses("s1");
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect((piGateway.sendToSession as ReturnType<typeof vi.fn>).mock.calls.length).toBe(attemptsBeforeClear);
     } finally {
       vi.useRealTimers();
     }
