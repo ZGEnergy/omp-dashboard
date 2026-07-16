@@ -174,6 +174,28 @@ export interface SpawnResult {
  * lands at the very head of `PATH` — spawned children invoking plain
  * `node` / `npm` resolve to the managed runtime first.
  */
+/**
+ * Strip Zellij client identity from dashboard-spawned session envs.
+ *
+ * Headless `omp --mode rpc` sessions inherit the dashboard server's process
+ * env. When the server itself was started inside a Zellij pane (dev dogfood),
+ * that includes `ZELLIJ` / `ZELLIJ_PANE_ID` / `ZELLIJ_SESSION_NAME` for the
+ * *server's* pane. The tab-namer extension then treats the headless session as
+ * owning that pane and renames the interactive tab — hijacking focus and
+ * fighting Ctrl+T+R / `/rename`.
+ *
+ * Headless sessions are not attached to a Zellij pane; they must not carry
+ * client identity.
+ */
+export function stripZellijClientEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  for (const key of Object.keys(env)) {
+    if (key === "ZELLIJ" || key.startsWith("ZELLIJ_")) {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
 export function buildSpawnEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
   opts?: {
@@ -192,6 +214,9 @@ export function buildSpawnEnv(
 ): NodeJS.ProcessEnv {
   // Defensive copy: never mutate the caller's env (often `process.env`).
   const env = { ...prependManagedNodeToPath(resolver.buildSpawnEnv(baseEnv)) };
+  // Headless/dashboard children must not inherit the server's Zellij pane identity.
+  // See stripZellijClientEnv — prevents tab-namer hijack of interactive tabs.
+  stripZellijClientEnv(env);
   // Re-add the Electron-as-node flag that `resolver.buildSpawnEnv` strips,
   // but ONLY when the argv[0] we are about to spawn is the Electron binary.
   // The argv-aware chokepoint that keeps this builder in agreement with
