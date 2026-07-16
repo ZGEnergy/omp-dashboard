@@ -18,7 +18,7 @@ zrok tunnel running as systemd **user** services that survive reboot.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ZGEnergy/omp-dashboard/omp-minimal/deploy/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ZGEnergy/omp-dashboard/main/deploy/install.sh | bash
 ```
 
 Run it in a real terminal — it prompts for your zrok token, a share name, and your
@@ -26,7 +26,7 @@ Run it in a real terminal — it prompts for your zrok token, a share name, and 
 can't read), download and run it directly instead:
 
 ```bash
-curl -fsSLo install.sh https://raw.githubusercontent.com/ZGEnergy/omp-dashboard/omp-minimal/deploy/install.sh
+curl -fsSLo install.sh https://raw.githubusercontent.com/ZGEnergy/omp-dashboard/main/deploy/install.sh
 bash install.sh
 ```
 

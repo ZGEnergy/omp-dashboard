@@ -1,0 +1,155 @@
+# Open a PR that merges BlackBelt upstream/develop into main (never pushes main).
+name: upstream-sync
+
+on:
+  schedule:
+    # Mondays 15:00 UTC
+    - cron: "0 15 * * 1"
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream branch to merge
+        required: false
+        default: develop
+      dry_run:
+        description: If true, only print status
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/BlackBeltTechnology/pi-agent-dashboard.git \
+            || git remote set-url upstream https://github.com/BlackBeltTechnology/pi-agent-dashboard.git
+          git fetch upstream "${{ github.event.inputs.upstream_ref || 'develop' }}" --prune
+          git fetch origin main --prune
+
+      - name: Status
+        id: status
+        env:
+          UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'develop' }}
+        run: |
+          chmod +x scripts/upstream-sync.sh
+          scripts/upstream-sync.sh status | tee /tmp/upstream-status.txt
+          BEHIND=$(git rev-list --count "origin/main..upstream/${UPSTREAM_REF}")
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          SHA=$(git rev-parse --short "upstream/${UPSTREAM_REF}")
+          echo "usha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Upstream ${UPSTREAM_REF}@$SHA behind=$BEHIND"
+
+      - name: Skip if up to date
+        if: steps.status.outputs.behind == '0'
+        run: echo "Already up to date with upstream."
+
+      - name: Dry run only
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
+        run: echo "dry_run=true; stopping before merge"
+
+      - name: Merge upstream into sync branch
+        if: steps.status.outputs.behind != '0' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+        id: merge
+        env:
+          UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'develop' }}
+        run: |
+          set +e
+          scripts/upstream-sync.sh merge
+          rc=$?
+          set -e
+          echo "merge_rc=$rc" >> "$GITHUB_OUTPUT"
+          branch=$(git branch --show-current)
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          if [[ $rc -eq 2 ]]; then
+            echo "conflicts=true" >> "$GITHUB_OUTPUT"
+            # commit conflict report state if unmerged left — leave worktree dirty for artifact
+            git status -sb | head -50
+          elif [[ $rc -ne 0 ]]; then
+            exit $rc
+          else
+            echo "conflicts=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push sync branch (clean merge)
+        if: steps.merge.outcome == 'success' && steps.merge.outputs.conflicts == 'false' && steps.status.outputs.behind != '0' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+        run: |
+          git push -u origin HEAD
+
+      - name: Open PR (clean merge)
+        if: steps.merge.outcome == 'success' && steps.merge.outputs.conflicts == 'false' && steps.status.outputs.behind != '0' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'develop' }}
+        run: |
+          scripts/upstream-sync.sh pr || true
+
+      - name: Upload conflict workspace
+        if: steps.merge.outputs.conflicts == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-sync-conflicts
+          path: |
+            docs/upstream-sync-conflicts-*.md
+            packages
+            deploy
+          retention-days: 14
+
+      - name: Open draft PR note on conflicts
+        if: steps.merge.outputs.conflicts == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'develop' }}
+        run: |
+          # Abort incomplete merge index for a clean conflicts branch carrying only the report
+          REPORT=$(ls docs/upstream-sync-conflicts-*.md | head -1 || true)
+          BRANCH="sync/upstream-${UPSTREAM_REF}-$(date -u +%Y%m%d)-conflicts"
+          git merge --abort || true
+          git checkout -B "$BRANCH" origin/main
+          if [[ -n "$REPORT" && -f "$REPORT" ]]; then
+            # report may only exist in previous index; recreate status file
+            scripts/upstream-sync.sh status > /tmp/st.txt || true
+          fi
+          mkdir -p docs
+          {
+            echo "# Upstream sync needs human/agent merge"
+            echo
+            echo "Upstream \\\`${UPSTREAM_REF}\\` @ \\\`${{ steps.status.outputs.usha }}\\` is **${{ steps.status.outputs.behind }}** commits ahead of main."
+            echo
+            echo "Automated merge hit non-protected conflicts. Use:"
+            echo
+            echo '```bash'
+            echo "git fetch upstream && scripts/upstream-sync.sh merge"
+            echo "# resolve remaining paths, then:"
+            echo "scripts/upstream-sync.sh verify && scripts/upstream-sync.sh pr"
+            echo '```'
+            echo
+            echo "See docs/upstream-sync.md and the workflow artifact \`upstream-sync-conflicts\`."
+          } > docs/upstream-sync-help.md
+          git add docs/upstream-sync-help.md
+          git commit -m "chore(sync): note upstream conflicts for ${UPSTREAM_REF}@${{ steps.status.outputs.usha }}"
+          git push -u origin HEAD
+          gh pr create --base main --head "$BRANCH" --draft \
+            --title "chore(sync): CONFLICTS upstream ${UPSTREAM_REF} @ ${{ steps.status.outputs.usha }}" \
+            --body-file docs/upstream-sync-help.md || true
