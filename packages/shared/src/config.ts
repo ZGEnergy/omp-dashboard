@@ -161,6 +161,10 @@ export interface PushConfig {
    * Clamped to [5 000, 300 000].
    */
   coalesceWindowMs: number;
+  /** Whether push notifications for input-needed/crash actions are enabled. Defaults to `true`. */
+  actionsRequired: boolean;
+  /** Whether push notifications for turn-done events are enabled. Defaults to `true`. */
+  claudeDecides: boolean;
   /** Web Push (VAPID) settings. `contactEmail` is required by the VAPID spec. */
   webPush?: { contactEmail: string };
   /**
@@ -173,6 +177,8 @@ export interface PushConfig {
 export const DEFAULT_PUSH_CONFIG: PushConfig = {
   enabled: false,
   coalesceWindowMs: 30_000,
+  actionsRequired: true,
+  claudeDecides: true,
 };
 
 export interface SessionsConfig {
@@ -600,22 +606,27 @@ function parseOpenSpecPollConfig(raw: any): OpenSpecPollConfig {
   };
 }
 
-export function parsePushConfig(raw: any): PushConfig {
-  if (!raw || typeof raw !== "object") return { ...DEFAULT_PUSH_CONFIG };
+export function parsePushConfig(raw: unknown): PushConfig {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...DEFAULT_PUSH_CONFIG };
+  const source = raw as Record<string, any>;
   const config: PushConfig = {
-    enabled: typeof raw.enabled === "boolean" ? raw.enabled : DEFAULT_PUSH_CONFIG.enabled,
+    enabled: typeof source.enabled === "boolean" ? source.enabled : DEFAULT_PUSH_CONFIG.enabled,
     coalesceWindowMs: clampNumber(
-      raw.coalesceWindowMs,
+      source.coalesceWindowMs,
       DEFAULT_PUSH_CONFIG.coalesceWindowMs,
       5_000,
       300_000,
     ),
+    actionsRequired:
+      typeof source.actionsRequired === "boolean" ? source.actionsRequired : DEFAULT_PUSH_CONFIG.actionsRequired,
+    claudeDecides:
+      typeof source.claudeDecides === "boolean" ? source.claudeDecides : DEFAULT_PUSH_CONFIG.claudeDecides,
   };
-  if (raw.webPush && typeof raw.webPush === "object" && typeof raw.webPush.contactEmail === "string") {
-    config.webPush = { contactEmail: raw.webPush.contactEmail };
+  if (source.webPush && typeof source.webPush === "object" && typeof source.webPush.contactEmail === "string") {
+    config.webPush = { contactEmail: source.webPush.contactEmail };
   }
-  if (raw.fcm && typeof raw.fcm === "object" && typeof raw.fcm.serviceAccountPath === "string") {
-    config.fcm = { serviceAccountPath: raw.fcm.serviceAccountPath };
+  if (source.fcm && typeof source.fcm === "object" && typeof source.fcm.serviceAccountPath === "string") {
+    config.fcm = { serviceAccountPath: source.fcm.serviceAccountPath };
   }
   return config;
 }

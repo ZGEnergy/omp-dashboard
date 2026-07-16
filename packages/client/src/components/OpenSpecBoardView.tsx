@@ -14,6 +14,7 @@ import {
   type StatusKind,
   statusPresentation,
 } from "@blackbelt-technology/pi-dashboard-client-utils/statusPresentation";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import type {
   DashboardSession,
   OpenSpecChange,
@@ -184,14 +185,14 @@ export function OpenSpecBoardView(props: OpenSpecBoardViewProps) {
   // Auto-scroll the active board item into view, mirroring SessionList. The
   // board gets its own small effect (its trigger set differs from the
   // sidebar's re-sort fingerprint): scroll on external selection change or
-  // when a session transitions into ask_user, but NOT on a user row click.
+  // when a session transitions into an input-needed tool, but NOT on a user row click.
   // See change: port-session-card-state-visuals-to-openspec-board.
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
   const lastClickedRef = useRef<string | null>(null);
   const firstMountRef = useRef(true);
   const prevSelectedIdRef = useRef<string | undefined>(selectedId);
   const askUserFingerprint = useMemo(
-    () => sessions.filter((s) => s.currentTool === "ask_user" || s.currentTool === "ask").map((s) => s.id).sort().join(","),
+    () => sessions.filter((s) => isInputNeededTool(s.currentTool)).map((s) => s.id).sort().join(","),
     [sessions],
   );
   useEffect(() => {

@@ -139,12 +139,17 @@ export function usePushSubscription(): PushSubscriptionState {
   }, [supported]);
 
   const sendTest = useCallback(async () => {
-    if (!supported) return;
-    await fetch(`${getApiBase()}/api/push/test`, {
+    if (!supported) throw new Error("Push notifications are not supported in this browser.");
+    const res = await fetch(`${getApiBase()}/api/push/test`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(tokenId.current ? { tokenId: tokenId.current } : {}),
-    }).catch(() => {});
+    });
+    if (!res.ok) throw new Error("Could not send a test notification.");
+    const body = await res.json().catch(() => null) as { results?: Array<{ ok?: unknown }> } | null;
+    if (!Array.isArray(body?.results) || body.results.length === 0 || body.results.some((result) => result.ok !== true)) {
+      throw new Error("Could not send a test notification.");
+    }
   }, [supported]);
 
   return { supported, status, subscribe, unsubscribe, sendTest };

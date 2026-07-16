@@ -17,11 +17,13 @@
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import os from "node:os";
 import type { ChildProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import { loadConfig, type SpawnStrategy } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { MANAGED_BIN } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
+import { findBundledExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
 import { prependManagedNodeToPath } from "@blackbelt-technology/pi-dashboard-shared/platform/managed-node-path.js";
 import { electronAsNodeRequired } from "@blackbelt-technology/pi-dashboard-shared/platform/runner.js";
 import { mintSpawnToken } from "./spawn-token.js";
@@ -43,6 +45,14 @@ import {
   type UserSpawnStrategy,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/spawn-mechanism.js";
 import type { SpawnFailureCode } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+
+const SERVER_REPO_BASE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+
+function ompBridgeArgs(piCmd: string[]): string[] {
+  if (!piCmd.some((arg) => path.basename(arg) === "omp")) return [];
+  const extensionDir = findBundledExtension(SERVER_REPO_BASE);
+  return extensionDir ? ["--extension", path.join(extensionDir, "src", "bridge.ts")] : [];
+}
 
 // ── Resolver seam (injectable for tests) ────────────────────────────────────
 
@@ -496,8 +506,8 @@ async function spawnHeadless(cwd: string, options?: SessionOptions): Promise<Spa
   // like `/ctx-stats` dispatch in headless sessions).
   // See change: add-rpc-stdin-dispatch-with-keeper-sidecar (introduced keeper),
   //             enable-rpc-keeper-by-default (made keeper the only path).
-  const args = buildHeadlessArgs(options);
   const piCmd = resolvePiCommand();
+  const args = piCmd ? [...buildHeadlessArgs(options), ...ompBridgeArgs(piCmd)] : [];
   if (!piCmd) {
     return { success: false, code: "PI_NOT_FOUND", message: `pi binary not found. Checked: ${MANAGED_BIN} and system PATH.` };
   }

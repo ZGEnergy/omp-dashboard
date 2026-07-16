@@ -941,6 +941,9 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     pendingInitialPromptRegistry,
     viewedSessionTracker: browserGateway.viewedSessionTracker,
     pushDispatcher,
+    // Bucket preferences stay on the live config object; system-routes mutates
+    // these fields after a successful save without rebuilding the dispatcher.
+    getPushPreferences: () => config.push,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
@@ -1855,15 +1858,17 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
           return;
         }
 
-        if (request.url === "/ws") {
+        // Route by scope so `/ws?ticket=…` still reaches the browser gateway.
+        // `routeScopeForUrl` already strips the query; exact `=== "/ws"` does not.
+        if (scope === "browser") {
           browserGateway.wss.handleUpgrade(request, socket, head, (ws) => {
             browserGateway.wss.emit("connection", ws, request);
           });
-        } else if (request.url?.startsWith("/ws/terminal/")) {
+        } else if (scope === "terminal") {
           terminalGateway.handleUpgrade(request, socket, head);
-        } else if (request.url?.startsWith("/editor/")) {
+        } else if (scope === "editor") {
           handleEditorUpgrade(editorManager, request, socket, head);
-        } else if (request.url?.startsWith("/live/")) {
+        } else if (scope === "live") {
           handleLiveServerUpgrade(liveServerManager, request, socket, head);
         } else {
           socket.destroy();

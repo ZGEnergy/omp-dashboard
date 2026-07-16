@@ -266,6 +266,13 @@ export function registerSystemRoutes(
           await (fastify as any)._reloadAuth(reloaded.auth);
         }
       }
+      // Push transports and dispatcher are boot-time state. Only refresh the
+      // mutable bucket preferences so an enabled dispatcher observes saves
+      // without rebuilding transports or changing the master gate.
+      if (partial.push !== undefined && config.push && reloaded.push) {
+        config.push.actionsRequired = reloaded.push.actionsRequired;
+        config.push.claudeDecides = reloaded.push.claudeDecides;
+      }
       if (partial.openspec !== undefined && directoryService) {
         directoryService.reconfigurePolling(reloaded.openspec);
       }

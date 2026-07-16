@@ -294,11 +294,10 @@ export function deriveRailBgColor(
  *   See change: fix-flows-plugin-polish (B1).
  */
 export function getCardPulseClass(session: DashboardSession, hasWidgetBarPrompt = false): string {
-  if (isInputNeededTool(session.currentTool) && !hasWidgetBarPrompt) return "card-input-stripes";
+  if (isChatRoutedAskUser(session, hasWidgetBarPrompt)) return "card-input-stripes";
   if (session.status === "streaming" || session.resuming) return "card-working-pulse";
-  // Unread state — cyan scrolling stripes. Lower priority than the two above
-  // so streaming/ask_user keep their stronger colors.
-  // See change: session-card-unread-stripes.
+  // Unread state — cyan scrolling stripes. Lower priority than input-needed
+  // and streaming so active asks keep their stronger colors.
   if (session.unread) return "card-unread-pulse";
   return "";
 }
@@ -321,7 +320,7 @@ export function getCardStripeFxClass(pulseClass: string): string {
 /**
  * Aggregate stripe class for a proposal card from its child sessions. Returns
  * the single most-urgent `card-stripes-*` class via precedence:
- *   any ask_user → card-stripes-input (purple, highest)
+ *   any active input-needed tool → card-stripes-input (purple, highest)
  *   else any streaming/resuming → card-stripes-running (yellow)
  *   else any unread → card-stripes-unread (cyan)
  *   else "" (no overlay — completion signalled elsewhere)
@@ -331,7 +330,7 @@ export function deriveProposalCardState(sessions: DashboardSession[]): string {
   let hasRunning = false;
   let hasUnread = false;
   for (const s of sessions) {
-    if (isInputNeededTool(s.currentTool)) return "card-stripes-input";
+    if (isChatRoutedAskUser(s)) return "card-stripes-input";
     if (s.status === "streaming" || s.resuming) hasRunning = true;
     else if (s.unread) hasUnread = true;
   }

@@ -70,6 +70,7 @@ interface FauxSession {
   /** Stringified buffer — handy for substring assertions on streamed text. */
   dump: () => string;
   stop: () => void;
+  reconnect: () => Promise<void>;
 }
 
 /**
@@ -82,7 +83,7 @@ async function startFauxSession(
   opts: { scenario: string; tps?: number },
 ): Promise<FauxSession> {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "faux-home-"));
-  const browser = new WebSocket(`ws://localhost:${handle.httpPort}/ws`);
+  let browser = new WebSocket(`ws://localhost:${handle.httpPort}/ws`);
   await waitForOpen(browser);
 
   const messages: any[] = [];
@@ -90,13 +91,16 @@ async function startFauxSession(
   // The newly-spawned pi's id is whichever `session_added` is NOT in this set.
   const preExisting = new Set<string>();
   let sessionId: string | undefined;
-  browser.on("message", (raw) => {
-    const msg = JSON.parse(raw.toString());
-    messages.push(msg);
-    if (msg.type === "session_added" && msg.session?.id && !preExisting.has(msg.session.id)) {
-      sessionId ??= msg.session.id;
-    }
-  });
+  const listen = (ws: WebSocket) => {
+    ws.on("message", (raw) => {
+      const msg = JSON.parse(raw.toString());
+      messages.push(msg);
+      if (msg.type === "session_added" && msg.session?.id && !preExisting.has(msg.session.id)) {
+        sessionId ??= msg.session.id;
+      }
+    });
+  };
+  listen(browser);
   // Drain the connect-time snapshot of pre-existing sessions before spawning.
   await delay(300);
   for (const m of messages) {
@@ -138,7 +142,9 @@ async function startFauxSession(
   const events = () => messages.filter((m) => m.type === "event");
   return {
     child,
-    browser,
+    get browser() {
+      return browser;
+    },
     sessionId,
     messages,
     events,
@@ -149,6 +155,25 @@ async function startFauxSession(
         .map((m) => (m.updates?.status ?? m.session?.status) as string | undefined)
         .filter((s): s is string => typeof s === "string"),
     dump: () => JSON.stringify(messages),
+    reconnect: async () => {
+      const prior = browser;
+      await new Promise<void>((resolve) => {
+        if (prior.readyState === WebSocket.CLOSED) {
+          resolve();
+          return;
+        }
+        const timer = setTimeout(resolve, 1000);
+        prior.once("close", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        prior.close();
+      });
+      browser = new WebSocket(`ws://localhost:${handle.httpPort}/ws`);
+      await waitForOpen(browser);
+      listen(browser);
+      browser.send(JSON.stringify({ type: "subscribe", sessionId, lastSeq: 0 }));
+    },
     stop: () => {
       try {
         browser.close();
@@ -266,11 +291,17 @@ suite("faux-session integration (real pi subprocess)", () => {
     // Faux emits ask_user → bridge surfaces a prompt_request to the browser.
     await waitFor(() =>
       session.messages.some(
-        (m) => m.type === "prompt_request" && m.sessionId === session.sessionId,
+        (m) =>
+          m.type === "prompt_request" &&
+          m.sessionId === session.sessionId &&
+          m.prompt?.question === "Pick one",
       ),
     );
     const req = session.messages.find(
-      (m) => m.type === "prompt_request" && m.sessionId === session.sessionId,
+      (m) =>
+        m.type === "prompt_request" &&
+        m.sessionId === session.sessionId &&
+        m.prompt?.question === "Pick one",
     );
     expect(req?.promptId).toBeTruthy();
 
@@ -293,6 +324,275 @@ suite("faux-session integration (real pi subprocess)", () => {
       20000,
     );
     expect(echoed).toBe(true);
+  }, 45000);
+
+  it("core ask factory tool round-trips through PromptBus and returns details", async () => {
+    const session = await startFauxSession(handle, { scenario: "ask-core-roundtrip" });
+    open.push(session);
+
+    await postPrompt(handle, session.sessionId, "ask through core tool");
+    const requested = await waitFor(() =>
+      session.messages.some(
+        (m) =>
+          m.type === "prompt_request" &&
+          m.sessionId === session.sessionId &&
+          m.prompt?.question === "Pick one",
+      ),
+    );
+    expect(requested).toBe(true);
+    const req = session.messages.find(
+      (m) =>
+        m.type === "prompt_request" &&
+        m.sessionId === session.sessionId &&
+        m.prompt?.question === "Pick one",
+    );
+    expect(req?.promptId).toBeTruthy();
+    expect(req?.prompt).toMatchObject({
+      question: "Pick one",
+      type: "select",
+      options: ["a", "b"],
+    });
+
+    // The core-named tool uses PromptBus's browser channel only; the legacy
+    // extension_ui_request/response channel must not race this request.
+    expect(
+      session.messages.filter(
+        (m) => m.type === "extension_ui_request" || m.type === "extension_ui_response",
+      ),
+    ).toHaveLength(0);
+
+    session.browser.send(
+      JSON.stringify({
+        type: "prompt_response",
+        sessionId: session.sessionId,
+        promptId: req.promptId,
+        answer: "a",
+        source: "test",
+      }),
+    );
+
+    const resumed = await waitFor(() => session.dump().includes("core ask resumed: User answered ask"));
+    expect(resumed).toBe(true);
+    const completed = await waitFor(() =>
+      session.events().some(
+        (m) => m.event?.eventType === "tool_execution_end" && m.event?.data?.toolName === "ask",
+      ),
+    );
+    expect(completed).toBe(true);
+    const end = session.events().find(
+      (m) => m.event?.eventType === "tool_execution_end" && m.event?.data?.toolName === "ask",
+    );
+    expect(end?.event?.data?.details).toMatchObject({
+      question: "Pick one",
+      options: ["a", "b"],
+      multi: false,
+      selectedOptions: ["a"],
+      cancelled: false,
+    });
+    expect(end?.event?.data?.details?.results?.[0]).toMatchObject({
+      id: "choice",
+      selectedOptions: ["a"],
+      customInput: "a",
+    });
+    expect(
+      session.messages.filter(
+        (m) => m.type === "extension_ui_request" || m.type === "extension_ui_response",
+      ),
+    ).toHaveLength(0);
+  }, 45000);
+
+  it("core ask multiselect prompt carries message and toolCallId metadata", async () => {
+    const session = await startFauxSession(handle, { scenario: "ask-core-multiselect-metadata" });
+    open.push(session);
+
+    await postPrompt(handle, session.sessionId, "ask through core multiselect");
+    const requested = await waitFor(() =>
+      session.messages.some(
+        (m) =>
+          m.type === "prompt_request" &&
+          m.sessionId === session.sessionId &&
+          m.prompt?.question === "Pick many",
+      ),
+    );
+    expect(requested).toBe(true);
+    const req = session.messages.find(
+      (m) =>
+        m.type === "prompt_request" &&
+        m.sessionId === session.sessionId &&
+        m.prompt?.question === "Pick many",
+    );
+    expect(req?.prompt).toMatchObject({
+      question: "Pick many",
+      type: "multiselect",
+      options: ["a", "b"],
+    });
+
+    const started = await waitFor(() =>
+      session.events().some(
+        (m) =>
+          m.event?.eventType === "tool_execution_start" &&
+          m.event?.data?.toolName === "ask" &&
+          typeof m.event?.data?.toolCallId === "string",
+      ),
+    );
+    expect(started).toBe(true);
+    const start = session.events().find(
+      (m) =>
+        m.event?.eventType === "tool_execution_start" &&
+        m.event?.data?.toolName === "ask" &&
+        typeof m.event?.data?.toolCallId === "string",
+    );
+    const toolCallId = start?.event?.data?.toolCallId;
+    expect(toolCallId).toEqual(expect.any(String));
+    // This must include both fields: the former bridge regression forwarded
+    // only message and dropped the originating core ask toolCallId.
+    expect(req?.prompt?.metadata).toMatchObject({
+      message: "Pick many",
+      toolCallId,
+    });
+
+    session.browser.send(
+      JSON.stringify({
+        type: "prompt_response",
+        sessionId: session.sessionId,
+        promptId: req?.promptId,
+        answer: JSON.stringify(["a", "b"]),
+        source: "test",
+      }),
+    );
+    const resumed = await waitFor(() =>
+      session.dump().includes("core ask multiselect resumed: User answered ask"),
+    );
+    expect(resumed).toBe(true);
+    const completed = await waitFor(() =>
+      session.events().some(
+        (m) =>
+          m.event?.eventType === "tool_execution_end" &&
+          m.event?.data?.toolName === "ask" &&
+          m.event?.data?.details?.selectedOptions?.join(",") === "a,b",
+      ),
+    );
+    expect(completed).toBe(true);
+  }, 45000);
+
+  it("core ask cancellation resolves the tool with cancelled details", async () => {
+    const session = await startFauxSession(handle, { scenario: "ask-core-cancel" });
+    open.push(session);
+
+    await postPrompt(handle, session.sessionId, "cancel core ask");
+    const requested = await waitFor(() =>
+      session.messages.some(
+        (m) =>
+          m.type === "prompt_request" &&
+          m.sessionId === session.sessionId &&
+          m.prompt?.question === "Cancel this question",
+      ),
+    );
+    expect(requested).toBe(true);
+    const req = session.messages.find(
+      (m) =>
+        m.type === "prompt_request" &&
+        m.sessionId === session.sessionId &&
+        m.prompt?.question === "Cancel this question",
+    );
+    expect(req?.promptId).toBeTruthy();
+
+    session.browser.send(
+      JSON.stringify({
+        type: "prompt_response",
+        sessionId: session.sessionId,
+        promptId: req.promptId,
+        cancelled: true,
+        source: "test",
+      }),
+    );
+
+    const resumed = await waitFor(() => session.dump().includes("core ask cancelled: User cancelled ask"));
+    expect(resumed).toBe(true);
+    const completed = await waitFor(() =>
+      session.events().some(
+        (m) => m.event?.eventType === "tool_execution_end" && m.event?.data?.toolName === "ask",
+      ),
+    );
+    expect(completed).toBe(true);
+    const end = session.events().find(
+      (m) => m.event?.eventType === "tool_execution_end" && m.event?.data?.toolName === "ask",
+    );
+    expect(end?.event?.data?.details).toMatchObject({
+      question: "Cancel this question",
+      selectedOptions: [],
+      cancelled: true,
+    });
+    expect(end?.event?.data?.details?.results?.[0]).toMatchObject({
+      id: "choice",
+      selectedOptions: [],
+      cancelled: true,
+    });
+  }, 45000);
+
+  it("core ask reconnect replays the same pending prompt identity", async () => {
+    const session = await startFauxSession(handle, { scenario: "ask-core-roundtrip" });
+    open.push(session);
+
+    await postPrompt(handle, session.sessionId, "reconnect core ask");
+    const requested = await waitFor(() =>
+      session.messages.some(
+        (m) =>
+          m.type === "prompt_request" &&
+          m.sessionId === session.sessionId &&
+          m.prompt?.question === "Pick one",
+      ),
+    );
+    expect(requested).toBe(true);
+    const first = session.messages.find(
+      (m) =>
+        m.type === "prompt_request" &&
+        m.sessionId === session.sessionId &&
+        m.prompt?.question === "Pick one",
+    );
+    expect(first?.promptId).toBeTruthy();
+
+    await session.reconnect();
+    const replayed = await waitFor(
+      () =>
+        session.messages.filter(
+          (m) =>
+            m.type === "prompt_request" &&
+            m.sessionId === session.sessionId &&
+            m.prompt?.question === "Pick one",
+        ).length >= 2,
+      20000,
+    );
+    expect(replayed).toBe(true);
+    const promptIds = session.messages
+      .filter(
+        (m) =>
+          m.type === "prompt_request" &&
+          m.sessionId === session.sessionId &&
+          m.prompt?.question === "Pick one",
+      )
+      .map((m) => m.promptId);
+    expect(new Set(promptIds)).toEqual(new Set([first.promptId]));
+
+    session.browser.send(
+      JSON.stringify({
+        type: "prompt_response",
+        sessionId: session.sessionId,
+        promptId: first.promptId,
+        answer: "b",
+        source: "test",
+      }),
+    );
+    const completed = await waitFor(() =>
+      session.events().some(
+        (m) => m.event?.eventType === "tool_execution_end" && m.event?.data?.toolName === "ask",
+      ),
+    );
+    expect(completed).toBe(true);
+    const end = session.events().find(
+      (m) => m.event?.eventType === "tool_execution_end" && m.event?.data?.toolName === "ask",
+    );
+    expect(end?.event?.data?.details?.selectedOptions).toEqual(["b"]);
   }, 45000);
 
   it("2.7 concurrent faux sessions stay isolated", async () => {

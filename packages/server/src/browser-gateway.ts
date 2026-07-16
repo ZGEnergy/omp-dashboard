@@ -104,8 +104,8 @@ export interface BrowserGateway {
   trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void;
   /** Clear a pending interactive UI request (resolved or cancelled) */
   clearUiRequest(sessionId: string, requestId: string): void;
-  /** Track a pending PromptBus request for replay on browser refresh */
-  trackPromptRequest(sessionId: string, msg: Record<string, unknown>): void;
+  /** Track a pending PromptBus request for replay on browser refresh. Returns false when answered. */
+  trackPromptRequest(sessionId: string, msg: Record<string, unknown>): boolean;
   /** Clear a pending PromptBus request (dismissed or cancelled) */
   clearPromptRequest(sessionId: string, promptId: string): void;
   /** Tell browser subscribers to reset accumulated state for a session (bridge reconnected) */
@@ -214,6 +214,44 @@ export function createBrowserGateway(
 
   // Track pending PromptBus requests per session for replay on browser refresh
   const pendingPromptRequests = new Map<string, Map<string, Record<string, unknown>>>();
+  // Browser answers remain queued until the bridge acknowledges receipt. This
+  // makes retries idempotent across a bridge reconnect without re-showing the
+  // answered card after a browser refresh.
+  const pendingPromptResponses = new Map<string, Map<string, {
+    message: Record<string, unknown>;
+    retryDelayMs: number;
+    timer?: ReturnType<typeof setTimeout>;
+  }>>();
+
+  function clearQueuedPromptResponse(sessionId: string, promptId: string): void {
+    const sessionMap = pendingPromptResponses.get(sessionId);
+    const queued = sessionMap?.get(promptId);
+    if (!queued) return;
+    if (queued.timer) clearTimeout(queued.timer);
+    sessionMap!.delete(promptId);
+    if (sessionMap!.size === 0) pendingPromptResponses.delete(sessionId);
+  }
+
+  function queuePromptResponse(sessionId: string, promptId: string, message: Record<string, unknown>): void {
+    let sessionMap = pendingPromptResponses.get(sessionId);
+    if (!sessionMap) {
+      sessionMap = new Map();
+      pendingPromptResponses.set(sessionId, sessionMap);
+    }
+    if (sessionMap.has(promptId)) return;
+
+    const queued: { message: Record<string, unknown>; retryDelayMs: number; timer?: ReturnType<typeof setTimeout> } = { message, retryDelayMs: 250 };
+    sessionMap.set(promptId, queued);
+    const forward = (): void => {
+      if (pendingPromptResponses.get(sessionId)?.get(promptId) !== queued) return;
+      piGateway.sendToSession(sessionId, queued.message as any);
+      const delay = queued.retryDelayMs;
+      queued.retryDelayMs = Math.min(delay * 2, 30_000);
+      queued.timer = setTimeout(forward, delay);
+      queued.timer.unref?.();
+    };
+    forward();
+  }
 
   // Track pending auto-resume prompts for ended sessions
   const pendingResumeRegistry = createPendingResumeRegistry({
@@ -242,6 +280,7 @@ export function createBrowserGateway(
     const sessionPrompts = pendingPromptRequests.get(sessionId);
     if (sessionPrompts) {
       for (const msg of sessionPrompts.values()) {
+        if (pendingPromptResponses.get(sessionId)?.has(msg.promptId as string)) continue;
         sendTo(ws, msg as any);
       }
     }
@@ -265,19 +304,20 @@ export function createBrowserGateway(
     return true;
   }
 
-  function trackPromptRequest(sessionId: string, msg: Record<string, unknown>): void {
+  function trackPromptRequest(sessionId: string, msg: Record<string, unknown>): boolean {
+    const promptId = msg.promptId as string;
+    if (!promptId || pendingPromptResponses.get(sessionId)?.has(promptId)) return false;
     let sessionMap = pendingPromptRequests.get(sessionId);
     if (!sessionMap) {
       sessionMap = new Map();
       pendingPromptRequests.set(sessionId, sessionMap);
     }
-    const promptId = msg.promptId as string;
-    if (promptId) {
-      sessionMap.set(promptId, msg);
-    }
+    sessionMap.set(promptId, msg);
+    return true;
   }
 
   function clearPromptRequest(sessionId: string, promptId: string): void {
+    clearQueuedPromptResponse(sessionId, promptId);
     const sessionMap = pendingPromptRequests.get(sessionId);
     if (sessionMap) {
       sessionMap.delete(promptId);
@@ -686,8 +726,11 @@ export function createBrowserGateway(
           }
 
           case "prompt_response": {
-            // Route PromptBus response from browser to extension
-            ctx.piGateway.sendToSession((msg as any).sessionId, msg as any);
+            const sessionId = (msg as any).sessionId;
+            const promptId = (msg as any).promptId;
+            if (typeof sessionId === "string" && sessionId && typeof promptId === "string" && promptId) {
+              queuePromptResponse(sessionId, promptId, msg as any);
+            }
             break;
           }
 

@@ -45,6 +45,24 @@ describe("FolderNeedsYouPill", () => {
     const pill = screen.getByTestId("folder-needs-you-pill");
     expect(pill.getAttribute("data-needs-you-count")).toBe("2");
   });
+  it("counts core ask sessions and excludes ended core asks", () => {
+    render(
+      <FolderNeedsYouPill
+        sessions={[
+          makeSession({ id: "ask", currentTool: "ask" }),
+          makeSession({ id: "ended", status: "ended", currentTool: "ask" }),
+        ]}
+        onActivate={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("folder-needs-you-pill").getAttribute("data-needs-you-count")).toBe("1");
+  });
+
+  it("excludes widget-bar core ask from the count", () => {
+    widgetBarIds.add("ask");
+    render(<FolderNeedsYouPill sessions={[makeSession({ id: "ask", currentTool: "ask" })]} onActivate={() => {}} />);
+    expect(screen.queryByTestId("folder-needs-you-pill")).toBeNull();
+  });
 
   it("excludes widget-bar-placed ask_user from the count", () => {
     widgetBarIds.add("c");

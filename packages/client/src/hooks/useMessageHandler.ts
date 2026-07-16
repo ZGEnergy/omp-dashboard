@@ -824,7 +824,7 @@ export function useMessageHandler(
         setSessionStates((prev) => {
           const next = new Map(prev);
           const current = next.get(msg.sessionId) ?? createInitialState();
-          const updated = addInteractiveRequest(current, msg.requestId, msg.method, msg.params);
+          const updated = addInteractiveRequest(current, msg.requestId, msg.method, msg.params, true);
           if (updated === current) return prev;
           next.set(msg.sessionId, updated);
           return next;
@@ -883,6 +883,7 @@ export function useMessageHandler(
               _promptBusComponent: msg.component,
               _promptBusPlacement: msg.placement,
             },
+            false,
             toolCallId,
           );
           if (updated === current) return prev;

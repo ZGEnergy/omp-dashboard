@@ -739,6 +739,8 @@ export function truncateOutputForDisplay(
  * `role:"interactiveUi"` ChatMessage so the assistant `message_end` reorder
  * helper can pair it with its parent `toolResult` row. Free-floating prompts
  * (architect mode, slash commands) leave it undefined.
+ * `dedupeByContent` is true only for legacy `extension_ui_request`; PromptBus
+ * requests use their stable `promptId` identity and pass false.
  *
  * See change: fix-interactive-ui-reorder.
  */
@@ -747,17 +749,19 @@ export function addInteractiveRequest(
   requestId: string,
   method: string,
   params: Record<string, unknown>,
+  dedupeByContent: boolean,
   toolCallId?: string,
 ): SessionState {
   // Architect suppression logic REMOVED — the PromptBus now ensures each prompt
   // is sent to the dashboard exactly once, with the correct component.
   // No more client-side guessing about which prompts to suppress.
 
-  // Deduplicate by requestId (re-sent on reconnect) or by content
-  // (recursive proxy generates multiple requestIds for the same dialog)
+  // Request ids are stable across reconnects for both protocols. Legacy
+  // extension_ui_request additionally opts into content deduplication because
+  // recursive proxy requests can use different ids for the same dialog.
   if (state.interactiveRequests.some((r) =>
     r.requestId === requestId ||
-    (r.status === "pending" && r.method === method && r.params.title === params.title),
+    (dedupeByContent && r.status === "pending" && r.method === method && r.params.title === params.title),
   )) {
     return state;
   }

@@ -7,4 +7,4 @@ Files in this directory. One row per file. Non-source area (migrated from `docs/
 | `icon-192.png` | PWA app icon 192x192. Referenced by manifest.json. |
 | `icon-512.png` | PWA app icon 512x512. Referenced by manifest.json. |
 | `manifest.json` | PWA web app manifest for installability |
-| `sw.js` | Minimal service worker for PWA installability. Passes `/api/*` requests through to network (returns without `respondWith`); only non-`/api/` requests get synthetic `503 "Offline"` fallback. See change: fix-openspec-profile-load-race. |
+| `sw.js` | Dependency-free PWA service worker: passes `/api/*` requests through to network and returns synthetic `503 "Offline"` only for non-API requests; handles Web Push `push` notifications and `notificationclick` deep-linking back to the dashboard. Keep its payload mapping aligned with `packages/client/src/lib/push-notification-payload.ts`. See change: add-server-push-notifications. |

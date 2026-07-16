@@ -16,6 +16,7 @@ import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/inp
 import { composeWorktreePayload } from "./git-worktree-compose.js";
 import type { ViewedSessionTracker } from "./viewed-session-tracker.js";
 import type { PushDispatcher } from "./push/push-dispatcher.js";
+import { classifyPushTrigger, type PushTriggerPreferences } from "./push/push-trigger-classifier.js";
 import { setCatalogueForSession } from "./provider-catalogue-cache.js";
 import { spawnPiSession } from "./process-manager.js";
 import { classifyProcesses, buildPidIndex } from "./process-classifier.js";
@@ -141,6 +142,12 @@ export interface EventWiringDeps {
    */
   pushDispatcher?: PushDispatcher;
   /**
+   * Live push bucket preferences. The server passes a getter over its existing
+   * config object so Settings saves apply without rebuilding transports. These
+   * toggles gate push attempts only; unread stamping/broadcast stays unchanged.
+   */
+  getPushPreferences?: () => PushTriggerPreferences | undefined;
+  /**
    * Optional client-correlation registry. When provided, the wiring
    * consumes the requestId for the resolved spawnToken after a successful
    * three-tier link and surfaces it on `session_added` as `spawnRequestId`,
@@ -209,6 +216,7 @@ export function wireEvents(deps: EventWiringDeps): void {
     primeGoalSession,
     viewedSessionTracker,
     pushDispatcher,
+    getPushPreferences,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
@@ -552,14 +560,22 @@ export function wireEvents(deps: EventWiringDeps): void {
             sessionManager.update(sessionId, { unread: true });
             browserGateway.broadcastSessionUpdated(sessionId, { unread: true });
           }
-          // Fan the same notable event out to registered push devices.
-          // Fire-and-forget (void, never awaited) so transport latency cannot
-          // block the WS fan-out. Same gating as unread (no replay, not viewed).
-          // ASYMMETRY (intentional): the unread-stripe broadcast above fires only
-          // on the false→true edge, but push fires on EVERY unviewed trigger and
-          // relies entirely on the dispatcher's coalescing window for dedup.
-          // See change: add-server-push-notifications.
-          pushDispatcher?.fanout(sessionId, msg.event);
+          // Classify only after the existing live, not-viewed unread gate.
+          // Preference toggles suppress this push attempt only; unread state
+          // mutation and broadcast above always retain their current behavior.
+          const pushClassification = classifyPushTrigger(msg.event, beforeSnapshot, afterSnapshot);
+          const pushPreferences = getPushPreferences?.();
+          const pushEnabled =
+            pushClassification !== null &&
+            (pushPreferences === undefined ||
+              (pushClassification.bucket === "actions-required"
+                ? pushPreferences.actionsRequired !== false
+                : pushPreferences.claudeDecides !== false));
+          if (pushEnabled) {
+            // Fire-and-forget (void, never awaited) so transport latency cannot
+            // block the WS fan-out. PushDispatcher remains transport/coalescing-only.
+            pushDispatcher?.fanout(sessionId, msg.event);
+          }
         }
       }
 
@@ -1272,18 +1288,16 @@ export function wireEvents(deps: EventWiringDeps): void {
 
     // ── PromptBus protocol messages (extension → browser) ──
     if (msg.type === "prompt_request") {
-      browserGateway.trackPromptRequest(sessionId, msg as any);
-      browserGateway.sendToSubscribers(sessionId, msg as any);
+      if (browserGateway.trackPromptRequest(sessionId, msg as any)) {
+        browserGateway.sendToSubscribers(sessionId, msg as any);
+      }
     }
 
-    if (msg.type === "prompt_dismiss") {
+    if (msg.type === "prompt_dismiss" || msg.type === "prompt_cancel" || msg.type === "prompt_response_ack") {
       browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
-      browserGateway.sendToSubscribers(sessionId, msg as any);
-    }
-
-    if (msg.type === "prompt_cancel") {
-      browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
-      browserGateway.sendToSubscribers(sessionId, msg as any);
+      if (msg.type !== "prompt_response_ack") {
+        browserGateway.sendToSubscribers(sessionId, msg as any);
+      }
     }
 
     // ── Extension UI System (Phase 1): cache + broadcast ──

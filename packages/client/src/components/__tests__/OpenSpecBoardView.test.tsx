@@ -192,6 +192,10 @@ describe("OpenSpecBoardView status stripes", () => {
     render(<OpenSpecBoardView {...props({ sessions: [makeSession({ status: "streaming", currentTool: "ask_user" })] })} />);
     expect(rowStripe()?.className).toContain("card-stripes-input");
   });
+  it("core ask session row carries card-stripes-input", () => {
+    render(<OpenSpecBoardView {...props({ sessions: [makeSession({ status: "idle", currentTool: "ask" })] })} />);
+    expect(rowStripe()?.className).toContain("card-stripes-input");
+  });
 
   it("idle session row renders no stripe overlay", () => {
     render(<OpenSpecBoardView {...props({ sessions: [makeSession({ status: "idle" })] })} />);

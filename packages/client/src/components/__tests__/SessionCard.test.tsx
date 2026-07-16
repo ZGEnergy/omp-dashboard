@@ -262,6 +262,21 @@ describe("SessionCard", () => {
     expect(card.className).toContain("card-input-stripes");
     expect(card.className).not.toContain("card-working-pulse");
   });
+  it("applies input stripes and Needs you to core ask", () => {
+    const session = makeSession({ status: "streaming", currentTool: "ask" });
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).toContain("card-input-stripes");
+    expect(screen.getByText("Needs you")).toBeTruthy();
+  });
+
+  it("does not show Needs you or input stripes for an ended core ask", () => {
+    const session = makeSession({ status: "ended", currentTool: "ask" });
+    const { container } = render(<SessionCard session={session} {...defaultProps} />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).not.toContain("card-input-stripes");
+    expect(screen.queryByText("Needs you")).toBeNull();
+  });
 
   it("should apply card-working-pulse when streaming with a non-ask_user tool", () => {
     const session = makeSession({ status: "streaming", currentTool: "Read" });

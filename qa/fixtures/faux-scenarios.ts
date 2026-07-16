@@ -129,10 +129,10 @@ const SLOW_TEXT = Array.from(
 ).join(" ");
 
 /**
- * Pull the most recent `ask_user` answer out of the agent context.
+ * Pull the most recent interactive-tool answer out of the agent context.
  *
- * The factory step for `ask-select-roundtrip` reads the toolResult the dashboard
- * posts back after the user submits, so the follow-up text reflects the choice.
+ * Factory steps for the ask_user and core-named `ask` round trips read the
+ * toolResult the dashboard posts back after the user submits or cancels.
  */
 function lastToolResultText(context: FauxContext): string {
   for (let index = context.messages.length - 1; index >= 0; index--) {
@@ -342,6 +342,76 @@ export const SCENARIOS: Record<string, Scenario> = {
         fauxAssistantMessage([fauxText(`you picked ${lastToolResultText(context)}`)]),
     ],
     expect: { text: "you picked" },
+  },
+
+  // ── Core-named `ask` PromptBus answer round-trips ───────────────────────
+  "ask-core-roundtrip": {
+    script: [
+      fauxAssistantMessage(
+        [
+          fauxToolCall("ask", {
+            questions: [
+              {
+                id: "choice",
+                question: "Pick one",
+                options: [{ label: "a" }, { label: "b" }],
+              },
+            ],
+          }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      (context: FauxContext) =>
+        fauxAssistantMessage([fauxText(`core ask resumed: ${lastToolResultText(context)}`)]),
+    ],
+    expect: { text: "core ask resumed" },
+  },
+
+  "ask-core-multiselect-metadata": {
+    script: [
+      fauxAssistantMessage(
+        [
+          fauxToolCall("ask", {
+            questions: [
+              {
+                id: "many",
+                question: "Pick many",
+                options: [{ label: "a" }, { label: "b" }],
+                multi: true,
+              },
+            ],
+          }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      (context: FauxContext) =>
+        fauxAssistantMessage([
+          fauxText(`core ask multiselect resumed: ${lastToolResultText(context)}`),
+        ]),
+    ],
+    expect: { text: "core ask multiselect resumed" },
+  },
+
+  "ask-core-cancel": {
+    script: [
+      fauxAssistantMessage(
+        [
+          fauxToolCall("ask", {
+            questions: [
+              {
+                id: "choice",
+                question: "Cancel this question",
+                options: [{ label: "a" }, { label: "b" }],
+              },
+            ],
+          }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      (context: FauxContext) =>
+        fauxAssistantMessage([fauxText(`core ask cancelled: ${lastToolResultText(context)}`)]),
+    ],
+    expect: { text: "core ask cancelled" },
   },
 
   // ── Client tool-renderer matrix (one per registry entry + unknown) ──────

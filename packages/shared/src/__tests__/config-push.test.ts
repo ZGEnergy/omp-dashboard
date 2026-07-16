@@ -74,4 +74,26 @@ describe("parsePushConfig", () => {
     expect(parsePushConfig({ fcm: {} }).fcm).toBeUndefined();
     expect(parsePushConfig({ fcm: { serviceAccountPath: 7 } }).fcm).toBeUndefined();
   });
+  it("defaults new bucket preferences on for legacy and malformed values", () => {
+    expect(parsePushConfig({ enabled: true, coalesceWindowMs: 45_000 })).toMatchObject({
+      enabled: true,
+      coalesceWindowMs: 45_000,
+      actionsRequired: true,
+      claudeDecides: true,
+    });
+    for (const value of ["yes", 1, null, {}, []]) {
+      expect(parsePushConfig({ actionsRequired: value, claudeDecides: value })).toMatchObject({
+        actionsRequired: true,
+        claudeDecides: true,
+      });
+    }
+    expect(parsePushConfig([])).toEqual({ ...DEFAULT_PUSH_CONFIG });
+  });
+
+  it("preserves explicit false for each bucket preference", () => {
+    expect(parsePushConfig({ actionsRequired: false, claudeDecides: false })).toMatchObject({
+      actionsRequired: false,
+      claudeDecides: false,
+    });
+  });
 });

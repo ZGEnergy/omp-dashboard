@@ -107,7 +107,7 @@ export function applySessionMessage(
       return settle(acc, applyPromptReceived(acc.state, msg.fresh));
 
     case "extension_ui_request":
-      return settle(acc, addInteractiveRequest(acc.state, msg.requestId, msg.method, msg.params));
+      return settle(acc, addInteractiveRequest(acc.state, msg.requestId, msg.method, msg.params, true));
 
     case "prompt_request":
       return settle(acc, addPromptBusRequest(acc.state, msg));
@@ -146,6 +146,7 @@ function addPromptBusRequest(
       _promptBusComponent: msg.component,
       _promptBusPlacement: msg.placement,
     },
+    false,
     toolCallId,
   );
 }

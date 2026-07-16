@@ -78,6 +78,24 @@ interface NetworkInterfaceInfo {
   cidr: string;
 }
 
+
+interface PushConfigDraft {
+  enabled?: boolean;
+  coalesceWindowMs?: number;
+  actionsRequired?: boolean;
+  claudeDecides?: boolean;
+  webPush?: { contactEmail?: string };
+  fcm?: { serviceAccountPath?: string };
+  [key: string]: unknown;
+}
+
+type PushPreference = "actionsRequired" | "claudeDecides";
+
+function pushPreferenceValue(push: PushConfigDraft | null | undefined, preference: PushPreference): boolean {
+  if (!push || typeof push !== "object" || Array.isArray(push)) return true;
+  return typeof push[preference] === "boolean" ? push[preference] as boolean : true;
+}
+
 interface Config {
   port: number;
   piPort: number;
@@ -136,6 +154,13 @@ interface Config {
   windowsGitSource?: "auto" | "host" | "bundled";
   /** Keeper log behavior — gates capture of pi stdout/stderr into keeper-<id>.log. Default off. See change: add-keeper-output-capture-toggle. */
   keeperLog?: { capturePiOutput?: boolean };
+  /** Push delivery preferences; absent or malformed values default on in the UI. */
+  push?: PushConfigDraft | null;
+}
+
+function setPushPreference(config: Config, preference: PushPreference, value: boolean): void {
+  const current = config.push && typeof config.push === "object" && !Array.isArray(config.push) ? config.push : {};
+  config.push = { ...current, [preference]: value };
 }
 
 const DEFAULT_OPENSPEC_UI = {
@@ -168,6 +193,7 @@ const CONFIG_FIELD_PAGE: Record<string, string> = {
   modelProxy: "providers",
   openspec: "openspec",
   devBuildOnReload: "developer", keeperLog: "developer", editor: "developer",
+  push: "general",
 };
 
 /**
@@ -248,6 +274,13 @@ function computeConfigPartial(config: Config, original: Config): Record<string, 
   if (JSON.stringify(config.modelProxy) !== JSON.stringify(original.modelProxy)) {
     partial.modelProxy = config.modelProxy;
   }
+  const pushPartial: Record<string, boolean> = {};
+  for (const preference of ["actionsRequired", "claudeDecides"] as const) {
+    if (pushPreferenceValue(config.push, preference) !== pushPreferenceValue(original.push, preference)) {
+      pushPartial[preference] = pushPreferenceValue(config.push, preference);
+    }
+  }
+  if (Object.keys(pushPartial).length > 0) partial.push = pushPartial;
   return partial;
 }
 
@@ -691,6 +724,9 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
     });
   };
 
+  const actionsRequired = pushPreferenceValue(config.push, "actionsRequired");
+  const claudeDecides = pushPreferenceValue(config.push, "claudeDecides");
+
   const ensureAuth = (): AuthConfig => {
     if (!config.auth) {
       const auth: AuthConfig = { secret: "", providers: {}, allowedUsers: [] };
@@ -872,7 +908,12 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                 </Section>
                 <DisplayPrefsSection />
                 <Section title={t("settings.pushNotifications", undefined, "Push Notifications")}>
-                  <PushNotificationsSection />
+                  <PushNotificationsSection
+                    actionsRequired={actionsRequired}
+                    claudeDecides={claudeDecides}
+                    onActionsRequiredChange={(value) => update((c) => setPushPreference(c, "actionsRequired", value))}
+                    onClaudeDecidesChange={(value) => update((c) => setPushPreference(c, "claudeDecides", value))}
+                  />
                 </Section>
                 <SettingsSectionSlot tab="general" />
               </>

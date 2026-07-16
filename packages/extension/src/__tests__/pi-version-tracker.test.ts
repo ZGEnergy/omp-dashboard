@@ -7,6 +7,7 @@ import {
   sendPiVersionIfChanged,
   _resetPiVersionCache,
   readPkgVersionByWalkUp,
+  readPiVersionFromFilesystem,
 } from "../model-tracker.js";
 import type { BridgeContext } from "../bridge-context.js";
 
@@ -103,6 +104,48 @@ describe("readPkgVersionByWalkUp", () => {
       () => "/nowhere/dist/index.js",
       () => { throw new Error("should not read"); },
       () => false,
+    );
+    expect(v).toBeUndefined();
+  });
+});
+
+describe("readPiVersionFromFilesystem", () => {
+  const PKG = "@earendil-works/pi-coding-agent";
+
+  it("finds a hoisted workspace install by walking ancestors", () => {
+    const files: Record<string, string> = {
+      "/repo/node_modules/@earendil-works/pi-coding-agent/package.json":
+        JSON.stringify({ name: PKG, version: "0.80.2" }),
+    };
+    const v = readPiVersionFromFilesystem(
+      "/repo/packages/extension/src",
+      (p) => files[p] ?? (() => { throw new Error(`ENOENT ${p}`); })(),
+      (p) => p in files,
+      "/home/nobody",
+    );
+    expect(v).toBe("0.80.2");
+  });
+
+  it("falls back to the managed dashboard install", () => {
+    const files: Record<string, string> = {
+      "/home/joe/.omp-dashboard/node_modules/@earendil-works/pi-coding-agent/package.json":
+        JSON.stringify({ name: PKG, version: "0.79.0" }),
+    };
+    const v = readPiVersionFromFilesystem(
+      "/home/joe/.omp-dashboard/packages/extension/src",
+      (p) => files[p] ?? (() => { throw new Error(`ENOENT ${p}`); })(),
+      (p) => p in files,
+      "/home/joe",
+    );
+    expect(v).toBe("0.79.0");
+  });
+
+  it("returns undefined when nothing is installed", () => {
+    const v = readPiVersionFromFilesystem(
+      "/tmp/empty/src",
+      () => { throw new Error("should not read"); },
+      () => false,
+      "/tmp/empty-home",
     );
     expect(v).toBeUndefined();
   });

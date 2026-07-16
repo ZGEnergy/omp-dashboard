@@ -94,3 +94,39 @@ describe("useSessionActions — idle-scoped optimistic pendingPrompt", () => {
     expect(getStates().get("s2")!.pendingPrompt).toBeUndefined();
   });
 });
+
+describe("useSessionActions — PromptBus response action", () => {
+  it("sends one typed prompt_response with encoded normal answer", () => {
+    const { actions, send } = setup("s1", new Map([["s1", idle()]]));
+
+    actions.handleRespondToUi("prompt-1", { values: ["A", "B"] });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({
+      type: "prompt_response",
+      sessionId: "s1",
+      promptId: "prompt-1",
+      answer: '["A","B"]',
+      cancelled: undefined,
+      source: "dashboard-default",
+      images: undefined,
+    });
+  });
+
+  it("sends a typed cancellation without an answer", () => {
+    const { actions, send } = setup("s1", new Map([["s1", idle()]]));
+
+    actions.handleRespondToUi("prompt-1", undefined, true);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({
+      type: "prompt_response",
+      sessionId: "s1",
+      promptId: "prompt-1",
+      answer: undefined,
+      cancelled: true,
+      source: "dashboard-default",
+      images: undefined,
+    });
+  });
+});

@@ -13,8 +13,8 @@
  * shape models already emit for core `ask`: `{ questions: [{ id, question,
  * options[{label}], multi?, recommended? }] }`.
  *
- * Called at session_start (runtime) alongside `registerAskUserTool` so static
- * extension conflict detection does not fire.
+ * Registered by `bridge.ts` at extension factory load, before `createAgentSession` snapshots the tool registry. Headless sessions (`hasUI=false`) omit stock core creation, so this is the sole bridge registration; it is not deferred to `session_start`.
+ * Execution uses the PromptBus-patched `ctx.ui.*` methods. TUI sessions retain the PromptBus TUI adapter while dashboard sessions use the default dashboard adapter.
  * See change: add-server-push-notifications (CC ask parity path).
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

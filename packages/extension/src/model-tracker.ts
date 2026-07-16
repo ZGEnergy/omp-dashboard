@@ -3,6 +3,7 @@
  * Sends model_update only when values actually change.
  */
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BridgeContext } from "./bridge-context.js";
@@ -77,8 +78,14 @@ export function sendGitInfoIfChanged(bc: BridgeContext, cwd: string): void {
  * restore-pi-version-skew-surface.
  */
 let lastPiVersion: string | undefined;
+/** Rate-limit failed-read warnings so Bun poll ticks don't flood the session log. */
+let lastPiVersionWarnAt = 0;
 
-const PI_PKG = "@earendil-works/pi-coding-agent";
+const PI_PKG_CANDIDATES = [
+  "@earendil-works/pi-coding-agent",
+  "@mariozechner/pi-coding-agent",
+] as const;
+const PI_PKG = PI_PKG_CANDIDATES[0];
 
 /**
  * Read a package's `version` without resolving its `./package.json` subpath.
@@ -117,6 +124,52 @@ export function readPkgVersionByWalkUp(
 }
 
 /**
+ * Filesystem fallback for runtimes (Bun/jiti under OMP) where
+ * `import.meta.resolve(pkg)` cannot see workspace/hoisted deps from an
+ * externally-loaded extension path. Walks ancestors of `startDir` for
+ * `node_modules/<pkg>/package.json`, then checks known managed installs.
+ */
+export function readPiVersionFromFilesystem(
+  startDir: string,
+  readFile: (p: string) => string = (p) => readFileSync(p, "utf8"),
+  fileExists: (p: string) => boolean = existsSync,
+  home: string = homedir(),
+): string | undefined {
+  let dir = startDir;
+  for (let i = 0; i < 12; i++) {
+    for (const pkgName of PI_PKG_CANDIDATES) {
+      const candidate = join(dir, "node_modules", pkgName, "package.json");
+      if (!fileExists(candidate)) continue;
+      try {
+        const parsed = JSON.parse(readFile(candidate)) as { name?: string; version?: string };
+        if (PI_PKG_CANDIDATES.includes(parsed.name as (typeof PI_PKG_CANDIDATES)[number]) && typeof parsed.version === "string") {
+          return parsed.version;
+        }
+      } catch {
+        // ignore malformed manifests
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  for (const root of [join(home, ".omp-dashboard"), join(home, ".omp", "plugins")]) {
+    for (const pkgName of PI_PKG_CANDIDATES) {
+      const candidate = join(root, "node_modules", pkgName, "package.json");
+      if (!fileExists(candidate)) continue;
+      try {
+        const parsed = JSON.parse(readFile(candidate)) as { name?: string; version?: string };
+        if (typeof parsed.version === "string") return parsed.version;
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
  * Default reader: pi-coding-agent version from inside the bridge's own tree.
  *
  * Uses `import.meta.resolve` (the ESM resolver, `import` condition) rather than
@@ -126,7 +179,24 @@ export function readPkgVersionByWalkUp(
  * returns a `file://` URL, converted to a path for the walk-up.
  */
 function defaultReadPiVersion(): string | undefined {
-  return readPkgVersionByWalkUp(PI_PKG, (spec) => fileURLToPath(import.meta.resolve(spec)));
+  // 1) Node ESM resolver (works when the package is visible from this module).
+  try {
+    const version = readPkgVersionByWalkUp(PI_PKG, (spec) => fileURLToPath(import.meta.resolve(spec)));
+    if (version) return version;
+  } catch {
+    // Bun/jiti often throws "Cannot find module … from <extension path>" here.
+  }
+  for (const alt of PI_PKG_CANDIDATES.slice(1)) {
+    try {
+      const version = readPkgVersionByWalkUp(alt, (spec) => fileURLToPath(import.meta.resolve(spec)));
+      if (version) return version;
+    } catch {
+      // continue
+    }
+  }
+  // 2) Direct filesystem probe — does not depend on package exports or Bun's
+  // module graph for external --extension loads.
+  return readPiVersionFromFilesystem(dirname(fileURLToPath(import.meta.url)));
 }
 
 /**
@@ -144,7 +214,11 @@ export function sendPiVersionIfChanged(
   try {
     version = readVersion();
   } catch (e) {
-    console.warn("[dashboard] pi version read failed:", e);
+    const now = Date.now();
+    if (now - lastPiVersionWarnAt > 60_000) {
+      lastPiVersionWarnAt = now;
+      console.warn("[dashboard] pi version read failed:", e);
+    }
     return;
   }
   if (!version || version === lastPiVersion) return;
@@ -159,6 +233,7 @@ export function sendPiVersionIfChanged(
 /** Test-only: clear the module-scoped pi-version cache. */
 export function _resetPiVersionCache(): void {
   lastPiVersion = undefined;
+  lastPiVersionWarnAt = 0;
 }
 
 /**
