@@ -4,14 +4,20 @@
  */
 import { describe, it, expect, vi } from "vitest";
 
+function schema(type: string, options: Record<string, unknown> = {}) {
+  return { type, ...options };
+}
+
 vi.mock("typebox", () => ({
   Type: {
-    Object: vi.fn(() => ({})),
-    String: vi.fn(() => ({})),
-    Optional: vi.fn((x: unknown) => x),
-    Array: vi.fn(() => ({})),
-    Boolean: vi.fn(() => ({})),
-    Number: vi.fn(() => ({})),
+    Object: vi.fn((properties: Record<string, unknown>, options: Record<string, unknown> = {}) =>
+      schema("object", { properties, ...options })),
+    String: vi.fn((options: Record<string, unknown> = {}) => schema("string", options)),
+    Optional: vi.fn((value: unknown) => value),
+    Array: vi.fn((items: unknown, options: Record<string, unknown> = {}) =>
+      schema("array", { items, ...options })),
+    Boolean: vi.fn((options: Record<string, unknown> = {}) => schema("boolean", options)),
+    Number: vi.fn((options: Record<string, unknown> = {}) => schema("number", options)),
   },
 }));
 
@@ -28,6 +34,13 @@ function createMockPi() {
 
 type RegisteredTool = {
   name: string;
+  parameters: {
+    type: string;
+    properties: Record<string, {
+      type: string;
+      items?: { type: string; properties: Record<string, unknown> };
+    }>;
+  };
   execute: (
     toolCallId: string,
     params: unknown,
@@ -50,6 +63,23 @@ describe("registerAskTool", () => {
     registerAskTool(pi as never);
     expect(pi.registerTool).toHaveBeenCalledTimes(1);
     expect(pi.registerTool.mock.calls[0][0].name).toBe("ask");
+  });
+  it("registers a flat core-compatible question schema", () => {
+    const tool = getTool();
+    expect(tool.parameters.type).toBe("object");
+    expect(Object.keys(tool.parameters.properties)).toEqual(["questions"]);
+
+    const questions = tool.parameters.properties.questions;
+    expect(questions.type).toBe("array");
+    expect(questions.items?.type).toBe("object");
+    expect(Object.keys(questions.items?.properties ?? {})).toEqual([
+      "id",
+      "question",
+      "header",
+      "options",
+      "multi",
+      "recommended",
+    ]);
   });
 
   it("single select routes through ctx.ui.select and returns selectedOptions", async () => {

@@ -140,6 +140,18 @@ export function writeConfigPartial(partial: Record<string, any>): WriteConfigRes
       partial.openspec = { ...existing.openspec, ...partial.openspec };
     }
 
+    // Merge push preferences so a bucket-only save preserves transport and
+    // coalescing siblings (and the other bucket) in the existing block.
+    if (partial.push !== undefined) {
+      const existingPush = existing.push && typeof existing.push === "object" && !Array.isArray(existing.push)
+        ? existing.push
+        : {};
+      const incomingPush = partial.push && typeof partial.push === "object" && !Array.isArray(partial.push)
+        ? partial.push
+        : {};
+      partial.push = { ...existingPush, ...incomingPush };
+    }
+
     const merged = { ...existing, ...partial };
 
     // Remove computed fields that shouldn't be persisted

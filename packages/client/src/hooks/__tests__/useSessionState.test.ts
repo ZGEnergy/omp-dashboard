@@ -113,6 +113,58 @@ describe("applySessionMessage (pure reducer)", () => {
     );
   });
 
+  it("keeps distinct live PromptBus requests with the same method and title", () => {
+    const acc0 = createSessionAccumulator();
+    const prompt = (promptId: string) => ({
+      type: "prompt_request" as const,
+      sessionId: SID,
+      promptId,
+      prompt: { question: "Same question", type: "select", options: ["a", "b"] },
+      component: { type: "select", props: {} },
+      placement: "inline",
+    });
+
+    const withFirst = applySessionMessage(acc0, prompt("p1") as ServerToBrowserMessage);
+    const withBoth = applySessionMessage(withFirst, prompt("p2") as ServerToBrowserMessage);
+
+    expect(withBoth.state.interactiveRequests.map((r) => r.requestId)).toEqual(["p1", "p2"]);
+    expect(withBoth.state.interactiveRequests.every((r) => r.status === "pending")).toBe(true);
+    expect(withBoth.state.messages.filter((m) => m.role === "interactiveUi")).toHaveLength(2);
+  });
+
+  it("dedupes replay by promptId and dismisses only the matching request", () => {
+    const acc0 = createSessionAccumulator();
+    const prompt = (promptId: string, question: string) => ({
+      type: "prompt_request" as const,
+      sessionId: SID,
+      promptId,
+      prompt: {
+        question,
+        type: "select",
+        options: ["a", "b"],
+        pipeline: "command",
+        metadata: { toolCallId: `tool-${promptId}` },
+      },
+      component: { type: "generic-dialog", props: {} },
+      placement: "inline",
+    });
+
+    const withFirst = applySessionMessage(acc0, prompt("p1", "First") as ServerToBrowserMessage);
+    const withBoth = applySessionMessage(withFirst, prompt("p2", "Second") as ServerToBrowserMessage);
+    const replayed = applySessionMessage(withBoth, prompt("p1", "First") as ServerToBrowserMessage);
+    expect(replayed).toBe(withBoth);
+    expect(replayed.state.interactiveRequests).toHaveLength(2);
+    expect(replayed.state.messages.find((m) => m.id === "ui-p1")?.toolCallId).toBe("tool-p1");
+
+    const dismissed = applySessionMessage(replayed, {
+      type: "prompt_cancel",
+      sessionId: SID,
+      promptId: "p1",
+    } as ServerToBrowserMessage);
+    expect(dismissed.state.interactiveRequests.find((r) => r.requestId === "p1")?.status).toBe("dismissed");
+    expect(dismissed.state.interactiveRequests.find((r) => r.requestId === "p2")?.status).toBe("pending");
+  });
+
   it("prompt_received routes to applyPromptReceived (fresh=false drops pendingPrompt)", () => {
     const acc = {
       state: { ...createInitialState(), pendingPrompt: { text: "q", status: "sending" as const } },

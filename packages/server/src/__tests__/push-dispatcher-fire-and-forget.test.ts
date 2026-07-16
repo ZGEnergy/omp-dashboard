@@ -1,29 +1,60 @@
-/**
- * Repo-level lint test: the push dispatcher MUST NOT be awaited in
- * `event-wiring.ts`. Awaiting it would make transport latency/failure block the
- * WebSocket fan-out to connected browsers.
- * Spec: `Requirement: Fire-and-forget dispatch` → Scenario: Lint enforcement.
- * See change: add-server-push-notifications.
- */
-
+/** Behavioral regression test for non-blocking push dispatch. */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { createPushDispatcher } from "../push/push-dispatcher.js";
+import { createPushTokenRegistry } from "../push/push-token-registry.js";
+import type { PushTransport } from "../push/push-transports/types.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const eventWiringPath = path.join(here, "..", "event-wiring.ts");
+describe("push dispatcher fire-and-forget behavior", () => {
+  let tempDir: string | undefined;
 
-describe("push dispatcher fire-and-forget lint", () => {
-  it("event-wiring.ts does not await the push dispatcher", () => {
-    const source = fs.readFileSync(eventWiringPath, "utf-8");
-    expect(source).not.toMatch(/await\s+pushDispatcher/);
-    expect(source).not.toMatch(/await\s+deps\.pushDispatcher/);
-    expect(source).not.toMatch(/await\s+pushDispatcher\?\.fanout/);
+  afterEach(() => {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+    tempDir = undefined;
   });
 
-  it("event-wiring.ts calls pushDispatcher?.fanout (wired in)", () => {
-    const source = fs.readFileSync(eventWiringPath, "utf-8");
-    expect(source).toMatch(/pushDispatcher\?\.fanout\(/);
+  it("returns immediately while a transport send remains pending", () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "push-dispatcher-faf-"));
+    const registry = createPushTokenRegistry({ path: path.join(tempDir, "push-tokens.json") });
+    registry.add({ deviceToken: "dev-hang", transport: "web-push" });
+
+    let sendStarted = false;
+    let sendResolved = false;
+    const hangingTransport: PushTransport = {
+      kind: "web-push",
+      send: () => {
+        sendStarted = true;
+        return new Promise(() => {
+          /* intentionally never settles */
+        }).then(() => {
+          sendResolved = true;
+          return { ok: true };
+        });
+      },
+    };
+
+    const dispatcher = createPushDispatcher({
+      registry,
+      transports: { "web-push": hangingTransport },
+      coalesceWindowMs: 30_000,
+      getSession: () =>
+        ({
+          id: "session-1",
+          cwd: "/tmp",
+          source: "cli",
+          status: "idle",
+          startedAt: 0,
+          name: "worker",
+        }) as any,
+    });
+
+    const startedAt = Date.now();
+    expect(dispatcher.fanout("session-1", { eventType: "agent_end", timestamp: 0, data: {} })).toBeUndefined();
+    expect(Date.now() - startedAt).toBeLessThan(50);
+    expect(sendStarted).toBe(true);
+    expect(sendResolved).toBe(false);
+    dispatcher.shutdown();
   });
 });

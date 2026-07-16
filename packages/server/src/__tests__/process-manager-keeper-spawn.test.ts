@@ -144,6 +144,22 @@ describe("spawnHeadless (headless via keeper)", () => {
     expect(state.spawnCalls[0].piCmd).toEqual(["/usr/bin/pi"]);
   });
 
+  it("passes the dashboard bridge explicitly to OMP headless sessions", async () => {
+    const fakeChild = new FakeKeeperChild(44444);
+    const { km, state } = makeFakeKeeperManager({
+      spawnResult: { success: true, pid: 44444, sockPath: "/fake/x.sock", process: fakeChild as unknown as import("node:child_process").ChildProcess },
+    });
+    setResolver(makeFakeResolver(["/usr/bin/omp"]));
+    setKeeperManager(km);
+
+    await spawnPiSession(tmpCwd, { strategy: "headless" });
+
+    const args = state.spawnCalls[0]?.piArgs ?? [];
+    const extensionIndex = args.indexOf("--extension");
+    expect(extensionIndex).toBeGreaterThanOrEqual(0);
+    expect(args[extensionIndex + 1]).toMatch(/packages\/extension\/src\/bridge\.ts$/);
+  });
+
   it("forwards resume flags (sessionFile / mode) to the keeper as piArgs", async () => {
     const fakeChild = new FakeKeeperChild(33333);
     const { km, state } = makeFakeKeeperManager({

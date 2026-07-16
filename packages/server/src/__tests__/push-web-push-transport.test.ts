@@ -89,4 +89,20 @@ describe("web push transport", () => {
     const res = await transport.send(token(), payload);
     expect(res).toEqual({ ok: false });
   });
+
+  it("logs failed deliveries without exposing the subscription endpoint", async () => {
+    const error = Object.assign(new Error(`delivery failed for ${subscription.endpoint}`), { statusCode: 500 });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    sendNotification.mockRejectedValue(error);
+    const transport = createWebPushTransport({
+      vapidKeys: { publicKey: "PUB", privateKey: "PRIV" },
+      contactEmail: "ops@example.com",
+    });
+
+    await transport.send(token(), payload);
+
+    expect(errorSpy).toHaveBeenCalledWith("[web-push] send failed for token t1 (status 500)");
+    expect(errorSpy.mock.calls.flat().join(" ")).not.toContain(subscription.endpoint);
+    errorSpy.mockRestore();
+  });
 });

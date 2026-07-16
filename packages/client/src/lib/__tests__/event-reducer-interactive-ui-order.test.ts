@@ -87,13 +87,14 @@ function asstEnd(t: number, content: unknown[]): DashboardEvent {
 
 /** Push an interactiveUi row with `toolCallId` set so the reorder helper
  *  can pair it with the parent toolResult. Mirrors the live path's
- *  `addInteractiveRequest(state, requestId, method, params, toolCallId)`. */
+ *  `addInteractiveRequest(state, requestId, method, params, false, toolCallId)`. */
 function pushPromptRequest(state: SessionState, requestId: string, toolCallId: string): SessionState {
   return addInteractiveRequest(
     state,
     requestId,
     "select",
     { title: "Pick one", options: ["a", "b"] },
+    false,
     toolCallId,
   );
 }
@@ -215,6 +216,7 @@ describe("fix-interactive-ui-reorder: ask_user ordering", () => {
       "p-free",
       "select",
       { title: "free question", options: ["x", "y"] },
+      false,
       // no toolCallId
     );
     state = reduceEvent(

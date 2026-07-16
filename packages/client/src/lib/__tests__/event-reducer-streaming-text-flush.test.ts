@@ -251,6 +251,7 @@ describe("Task 5.1: ask_user blocking flow flushes before tool/ui rows land", ()
       "p1",
       "select",
       { title: "pick", options: ["a", "b"] },
+      false,
       "t1",
     );
     expect(state.messages.map((m) => m.role)).toEqual([
@@ -369,6 +370,7 @@ describe("Task 5.1c: flush + findActiveInteractiveToolResultIds interaction", ()
       "p1",
       "select",
       { title: "pick", options: ["a", "b"] },
+      false,
       "t1",
     );
 
@@ -745,6 +747,7 @@ describe("Task 4.1 / 4.1a: reorder helper compatibility — [thinking, text, too
       "p1",
       "select",
       { title: "pick", options: ["a"] },
+      false,
       "t1",
     );
 
@@ -803,6 +806,7 @@ describe("Task 4.1c: R6 — interleaved free-floating row does not break orderin
       "p-free",
       "select",
       { title: "free q", options: ["a"] },
+      false,
       // no toolCallId
     );
     state = reduceEvent(

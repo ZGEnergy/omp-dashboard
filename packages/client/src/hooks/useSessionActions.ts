@@ -145,10 +145,9 @@ export function useSessionActions(deps: SessionActionDeps) {
 
   const handleRespondToUi = useCallback((requestId: string, result?: unknown, cancelled?: boolean) => {
     if (selectedId) {
-      send({ type: "extension_ui_response", sessionId: selectedId, requestId, result, cancelled });
-      // Also send via PromptBus protocol for new-style prompts.
-      // Encoding precedence (multiselect-aware): see prompt-answer-encoder.ts.
-      // Fix: change fix-multiselect-auto-cancel-on-dashboard.
+      // All interactive prompts now use the PromptBus browser protocol. Keep
+      // one typed response channel so legacy extension_ui_response cannot race
+      // or double-deliver a core ask/ask_user answer.
       const answer = encodePromptAnswer(result, cancelled);
       // Standalone method:"input" carries pasted images that cannot fit in
       // the string `answer`; lift them onto the message. Batch images ride

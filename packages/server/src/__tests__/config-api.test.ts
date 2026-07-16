@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readConfigRedacted, writeConfigPartial } from "../config-api.js";
+import { parsePushConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -184,5 +185,65 @@ describe("config-api", () => {
       expect(written.reattachPlacement).toBe("preserve");
       expect(written.port).toBe(8000); // existing fields preserved
     });
+    it("preserves every push sibling when saving one bucket preference", () => {
+      fs.writeFileSync(configFile, JSON.stringify({
+        push: {
+          enabled: true,
+          coalesceWindowMs: 45_000,
+          actionsRequired: true,
+          claudeDecides: false,
+          webPush: { contactEmail: "ops@example.com" },
+          fcm: { serviceAccountPath: "/etc/pi/fcm.json" },
+        },
+      }));
+      const result = writeConfigPartial({ push: { actionsRequired: false } });
+      expect(result.success).toBe(true);
+      const written = JSON.parse(fs.readFileSync(configFile, "utf-8"));
+      expect(written.push).toEqual({
+        enabled: true,
+        coalesceWindowMs: 45_000,
+        actionsRequired: false,
+        claudeDecides: false,
+        webPush: { contactEmail: "ops@example.com" },
+        fcm: { serviceAccountPath: "/etc/pi/fcm.json" },
+      });
+    });
+
+    it("migrates a legacy push block while preserving transport siblings", () => {
+      const legacyPush = {
+        enabled: true,
+        coalesceWindowMs: 45_000,
+        webPush: { contactEmail: "ops@example.com" },
+        fcm: { serviceAccountPath: "/etc/pi/fcm.json" },
+      };
+      fs.writeFileSync(configFile, JSON.stringify({ push: legacyPush }));
+
+      const result = writeConfigPartial({ push: { actionsRequired: false } });
+      expect(result.success).toBe(true);
+      const written = JSON.parse(fs.readFileSync(configFile, "utf-8"));
+      expect(written.push).toEqual({ ...legacyPush, actionsRequired: false });
+
+      // Missing legacy bucket fields are defaults at runtime; an explicit
+      // false survives the write/load boundary without changing siblings.
+      expect(parsePushConfig(written.push)).toMatchObject({
+        enabled: true,
+        coalesceWindowMs: 45_000,
+        actionsRequired: false,
+        claudeDecides: true,
+        webPush: legacyPush.webPush,
+        fcm: legacyPush.fcm,
+      });
+    });
+
+    it("round-trips an explicit false bucket preference", () => {
+      fs.writeFileSync(configFile, JSON.stringify({
+        push: { enabled: true, actionsRequired: true, claudeDecides: true },
+      }));
+      const result = writeConfigPartial({ push: { actionsRequired: false } });
+      expect(result.success).toBe(true);
+      const written = JSON.parse(fs.readFileSync(configFile, "utf-8"));
+      expect(written.push.actionsRequired).toBe(false);
+    });
+
   });
 });

@@ -306,6 +306,22 @@ describe("PromptBus", () => {
 
       expect(adapter.onCancel).not.toHaveBeenCalled();
     });
+    it("ignores late and unknown responses after cancellation", async () => {
+      const adapter = createMockAdapter("a");
+      bus.registerAdapter(adapter);
+
+      const promise = bus.request({ pipeline: "command", type: "select", question: "Q", options: [] });
+      const id = (adapter.onRequest.mock.calls[0][0] as PromptRequest).id;
+      bus.cancel(id);
+
+      const result = await promise;
+      expect(result).toMatchObject({ id, cancelled: true, source: "__bus__" });
+
+      bus.respond({ id, answer: "late", source: "dashboard" });
+      bus.respond({ id: "unknown", answer: "wrong", source: "dashboard" });
+      expect(adapter.onResponse).not.toHaveBeenCalled();
+      expect(bus.pendingCount).toBe(0);
+    });
   });
 
   describe("timeout", () => {
@@ -399,16 +415,13 @@ describe("PromptBus", () => {
       const id1 = (adapter.onRequest.mock.calls[0][0] as PromptRequest).id;
       const id2 = (adapter.onRequest.mock.calls[1][0] as PromptRequest).id;
 
+      // Responses may arrive out of order; ids must keep each promise isolated.
+      bus.respond({ id: id2, answer: "guidance", source: "dashboard" });
       bus.respond({ id: id1, answer: "A", source: "tui" });
 
-      const result1 = await promise1;
-      expect(result1.answer).toBe("A");
-      expect(bus.pendingCount).toBe(1);
-
-      bus.respond({ id: id2, answer: "guidance", source: "dashboard" });
-
-      const result2 = await promise2;
-      expect(result2.answer).toBe("guidance");
+      const [result1, result2] = await Promise.all([promise1, promise2]);
+      expect(result1).toMatchObject({ id: id1, answer: "A", source: "tui" });
+      expect(result2).toMatchObject({ id: id2, answer: "guidance", source: "dashboard" });
       expect(bus.pendingCount).toBe(0);
     });
 

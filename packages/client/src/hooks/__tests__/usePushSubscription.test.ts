@@ -155,4 +155,22 @@ describe("usePushSubscription", () => {
     });
     await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
   });
+
+  it("rejects sendTest when the server rejects delivery", async () => {
+    mockServiceWorker(null);
+    const fetchSpy = mockFetchOk();
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes("/api/push/vapid-public-key")) {
+        return Promise.resolve({ ok: true, json: async () => ({ publicKey: VAPID }) });
+      }
+      if (url.includes("/api/push/test")) return Promise.resolve({ ok: true, json: async () => ({ results: [{ ok: false }] }) });
+      return Promise.resolve({ ok: true, json: async () => ({ tokenId: "tok-1" }) });
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { result } = renderHook(() => usePushSubscription());
+    await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
+
+    await expect(result.current.sendTest()).rejects.toThrow(/test notification/i);
+  });
 });

@@ -15,6 +15,7 @@ const renderers = new Map<string, ToolRenderer>([
   ["bash", BashToolRenderer],
   ["Agent", AgentToolRenderer],
   ["ask_user", AskUserToolRenderer],
+  ["ask", AskUserToolRenderer],
   ["ctx_execute", CtxToolRenderer],
   ["ctx_execute_file", CtxToolRenderer],
   ["ctx_batch_execute", CtxToolRenderer],

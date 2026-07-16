@@ -51,47 +51,78 @@ const noop = () => {};
 function makeDeps(overrides: {
   isViewed?: boolean;
   pushDispatcher?: EventWiringDeps["pushDispatcher"];
-}): { deps: EventWiringDeps; piGateway: any; sm: ReturnType<typeof makeSessionManager> } {
+  pushPreferences?: { actionsRequired?: boolean; claudeDecides?: boolean };
+}): {
+  deps: EventWiringDeps;
+  piGateway: any;
+  sm: ReturnType<typeof makeSessionManager>;
+  broadcastSessionUpdated: ReturnType<typeof vi.fn>;
+} {
   const sm = makeSessionManager();
+  const broadcastSessionUpdated = vi.fn();
   const piGateway: any = {
     onEvent: undefined,
     onSessionCreated: undefined,
     onSessionRegistered: undefined,
     sendToSession: noop,
+    isSessionConnected: () => false,
   };
   const browserGateway: any = {
     broadcastEvent: noop,
-    broadcastSessionUpdated: noop,
+    broadcastSessionUpdated,
     broadcastSessionAdded: noop,
     broadcastToAll: noop,
     sendToSubscribers: noop,
+    broadcastSessionStateReset: noop,
+    broadcastSessionRemoved: noop,
+    headlessPidRegistry: {
+      linkByToken: () => false,
+      linkByPid: () => false,
+      linkSession: noop,
+    },
+    pendingResumeRegistry: { consume: () => undefined },
   };
   const eventStore: any = {
     insertEvent: () => 1,
     getEvent: () => undefined,
     getEvents: () => [],
+    hasEvents: () => false,
+    deleteEventsForSession: noop,
   };
   const sessionOrderManager: any = {
     getOrder: () => [],
     moveToFront: noop,
     rekey: noop,
+    insert: noop,
   };
   const preferencesStore: any = { getPinnedDirectories: () => [] };
+  const pendingForkRegistry: any = { consumeFork: () => undefined };
+  const directoryService: any = {
+    onDirectoryAdded: async () => ({ sessions: [], openspecData: null }),
+  };
 
   const deps = {
     sessionManager: sm as any,
     eventStore,
     piGateway,
     browserGateway,
+    pendingForkRegistry,
+    directoryService,
+    knownSessionIds: new Set<string>(),
+    pendingDashboardSpawns: new Map<string, number>(),
     sessionOrderManager,
     preferencesStore,
     isCompletedFirst: () => false,
     isQuestionFirst: () => false,
     viewedSessionTracker: { isViewedByAnyone: () => overrides.isViewed ?? false } as any,
+    getPushPreferences: () => ({
+      actionsRequired: overrides.pushPreferences?.actionsRequired ?? true,
+      claudeDecides: overrides.pushPreferences?.claudeDecides ?? true,
+    }),
     pushDispatcher: overrides.pushDispatcher,
   } as unknown as EventWiringDeps;
 
-  return { deps, piGateway, sm };
+  return { deps, piGateway, sm, broadcastSessionUpdated };
 }
 
 function fireAgentEndError(piGateway: any) {
@@ -99,6 +130,26 @@ function fireAgentEndError(piGateway: any) {
     type: "event_forward",
     sessionId: SID,
     event: { eventType: "agent_end", timestamp: Date.now(), data: { error: "boom" } },
+  });
+}
+
+function fireTurnDone(piGateway: any) {
+  piGateway.onEvent(SID, {
+    type: "event_forward",
+    sessionId: SID,
+    event: { eventType: "agent_end", timestamp: Date.now(), data: {} },
+  });
+}
+
+function fireInputNeeded(piGateway: any, toolName: "ask_user" | "ask") {
+  piGateway.onEvent(SID, {
+    type: "event_forward",
+    sessionId: SID,
+    event: {
+      eventType: "tool_execution_start",
+      timestamp: Date.now(),
+      data: { toolName },
+    },
   });
 }
 
@@ -111,8 +162,12 @@ describe("event-wiring push dispatch", () => {
     dispatcher = { fanout, shutdown: vi.fn() } as unknown as EventWiringDeps["pushDispatcher"];
   });
 
-  it("calls fanout once with (sessionId, event) on agent_end-with-error while not viewed", () => {
-    const { deps, piGateway } = makeDeps({ isViewed: false, pushDispatcher: dispatcher });
+  it("calls fanout once with (sessionId, event) on agent_end-with-error while not viewed and both buckets enabled", () => {
+    const { deps, piGateway } = makeDeps({
+      isViewed: false,
+      pushDispatcher: dispatcher,
+      pushPreferences: { actionsRequired: true, claudeDecides: true },
+    });
     wireEvents(deps);
     fireAgentEndError(piGateway);
     expect(fanout).toHaveBeenCalledTimes(1);
@@ -120,6 +175,96 @@ describe("event-wiring push dispatch", () => {
     expect(sid).toBe(SID);
     expect(event.eventType).toBe("agent_end");
     expect(event.data.error).toBe("boom");
+  });
+
+  it("fans out a turn-done trigger when claude-decides is enabled", () => {
+    const { deps, piGateway } = makeDeps({
+      isViewed: false,
+      pushDispatcher: dispatcher,
+      pushPreferences: { actionsRequired: true, claudeDecides: true },
+    });
+    wireEvents(deps);
+    fireTurnDone(piGateway);
+    expect(fanout).toHaveBeenCalledTimes(1);
+  });
+
+  const preferenceMatrix = [
+    ["both buckets enabled", true, true, 1],
+    ["actions-required only", true, false, 1],
+    ["claude-decides only", false, true, 0],
+    ["both buckets disabled", false, false, 0],
+  ] as const;
+
+  it.each(preferenceMatrix)(
+    "%s applies the actions-required bucket to crash fanout",
+    (_label, actionsRequired, claudeDecides, expectedFanout) => {
+      const { deps, piGateway, sm, broadcastSessionUpdated } = makeDeps({
+        isViewed: false,
+        pushDispatcher: dispatcher,
+        pushPreferences: { actionsRequired, claudeDecides },
+      });
+      wireEvents(deps);
+      fireAgentEndError(piGateway);
+      expect(fanout).toHaveBeenCalledTimes(expectedFanout);
+      expect(sm.session.unread).toBe(true);
+      expect(broadcastSessionUpdated).toHaveBeenCalledWith(SID, { unread: true });
+    },
+  );
+
+  it.each(preferenceMatrix)(
+    "%s applies the claude-decides bucket to turn-done fanout",
+    (_label, actionsRequired, claudeDecides) => {
+      const { deps, piGateway, sm, broadcastSessionUpdated } = makeDeps({
+        isViewed: false,
+        pushDispatcher: dispatcher,
+        pushPreferences: { actionsRequired, claudeDecides },
+      });
+      wireEvents(deps);
+      fireTurnDone(piGateway);
+      expect(fanout).toHaveBeenCalledTimes(claudeDecides ? 1 : 0);
+      expect(sm.session.unread).toBe(true);
+      expect(broadcastSessionUpdated).toHaveBeenCalledWith(SID, { unread: true });
+    },
+  );
+
+  it.each(["ask_user", "ask"] as const)(
+    "fans out the %s input-needed trigger in the actions-required bucket",
+    (toolName) => {
+      const { deps, piGateway, sm, broadcastSessionUpdated } = makeDeps({
+        isViewed: false,
+        pushDispatcher: dispatcher,
+        pushPreferences: { actionsRequired: true, claudeDecides: true },
+      });
+      wireEvents(deps);
+      fireInputNeeded(piGateway, toolName);
+      expect(fanout).toHaveBeenCalledTimes(1);
+      expect(fanout.mock.calls[0][1]).toMatchObject({
+        eventType: "tool_execution_start",
+        data: { toolName },
+      });
+      expect(sm.session.unread).toBe(true);
+      expect(broadcastSessionUpdated).toHaveBeenCalledWith(SID, { unread: true });
+    },
+  );
+
+  it("does not fan out unknown events", () => {
+    const { deps, piGateway } = makeDeps({ isViewed: false, pushDispatcher: dispatcher });
+    wireEvents(deps);
+    piGateway.onEvent(SID, {
+      type: "event_forward",
+      sessionId: SID,
+      event: { eventType: "message_end", timestamp: Date.now(), data: {} },
+    });
+    expect(fanout).not.toHaveBeenCalled();
+  });
+
+  it("does not fan out trigger events during replay", () => {
+    const { deps, piGateway } = makeDeps({ isViewed: false, pushDispatcher: dispatcher });
+    wireEvents(deps);
+    piGateway.onEvent(SID, { type: "session_register", sessionId: SID, cwd: "/tmp" });
+    fireAgentEndError(piGateway);
+    expect(fanout).not.toHaveBeenCalled();
+    piGateway.onEvent(SID, { type: "replay_complete", sessionId: SID });
   });
 
   it("does NOT call fanout when the session is being viewed", () => {
@@ -133,6 +278,29 @@ describe("event-wiring push dispatch", () => {
     const { deps, piGateway } = makeDeps({ isViewed: false, pushDispatcher: undefined });
     wireEvents(deps);
     expect(() => fireAgentEndError(piGateway)).not.toThrow();
+  });
+
+  it("keeps the both-on baseline when the live push config is absent", () => {
+    const { deps, piGateway } = makeDeps({ isViewed: false, pushDispatcher: dispatcher });
+    deps.getPushPreferences = () => undefined;
+    wireEvents(deps);
+    fireAgentEndError(piGateway);
+    expect(fanout).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears a queued prompt response when the bridge acknowledges receipt", () => {
+    const { deps, piGateway } = makeDeps({ isViewed: false, pushDispatcher: dispatcher });
+    const clearPromptRequest = vi.fn();
+    (deps.browserGateway as any).clearPromptRequest = clearPromptRequest;
+    wireEvents(deps);
+
+    piGateway.onEvent(SID, {
+      type: "prompt_response_ack",
+      sessionId: SID,
+      promptId: "prompt-1",
+    });
+
+    expect(clearPromptRequest).toHaveBeenCalledWith(SID, "prompt-1");
   });
 
   // Latency guarantee (tasks.md 7.5): a hanging transport must not block the

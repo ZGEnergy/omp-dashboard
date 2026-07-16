@@ -315,5 +315,10 @@ export function handleSubscribe(
     }
   } else {
     sendTo(ws, { type: "event_replay", sessionId: msg.sessionId, events: [], isLast: true });
+    // PromptBus requests are independent of persisted session events. Replay
+    // them even for a newly registered/empty session so a browser reconnect
+    // cannot lose a live core ask dialog.
+    replayPendingUiRequests(ws, msg.sessionId);
+    replayUiState(ws, msg.sessionId, ctx);
   }
 }

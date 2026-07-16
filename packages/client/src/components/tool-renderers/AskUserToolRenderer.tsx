@@ -18,6 +18,91 @@ const methodLabels: Record<string, string> = {
   multiselect: "Multi-select",
   input: "Text input",
 };
+export interface AskToolQuestionViewModel {
+  id: string;
+  question: string;
+  title?: string;
+  options: Array<{ label: string; description?: string }>;
+  multi: boolean;
+  recommended?: number;
+}
+
+export interface AskToolViewModel {
+  toolName: "ask" | "ask_user";
+  questions: AskToolQuestionViewModel[];
+  status: "running" | "complete" | "error";
+  cancelled: boolean;
+}
+
+function stringValue(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function normalizeOption(value: unknown): { label: string; description?: string } | null {
+  if (typeof value === "string") {
+    return value.trim().length > 0 ? { label: value } : null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const option = value as Record<string, unknown>;
+  const label = typeof option.label === "string" ? option.label : "";
+  if (label.trim().length === 0) return null;
+  return {
+    label,
+    ...(typeof option.description === "string" ? { description: option.description } : {}),
+  };
+}
+
+function normalizeOptions(value: unknown): Array<{ label: string; description?: string }> {
+  let raw = value;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      raw = [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw.map(normalizeOption).filter((option): option is { label: string; description?: string } => option !== null);
+}
+
+/** Normalize core `ask` and legacy `ask_user` question shapes for safe display. */
+export function normalizeAskToolView(
+  toolName: string,
+  args?: Record<string, unknown>,
+  details?: Record<string, unknown>,
+  status: "running" | "complete" | "error" = "complete",
+): AskToolViewModel {
+  const normalizedToolName: "ask" | "ask_user" = toolName === "ask" ? "ask" : "ask_user";
+  const rawQuestions = normalizedToolName === "ask"
+    ? (Array.isArray(args?.questions) ? args.questions : [])
+    : [{
+        id: "q1",
+        question: args?.message ?? args?.question ?? args?.title,
+        title: args?.title,
+        options: args?.options,
+        multi: args?.method === "multiselect",
+      }];
+  const questions = rawQuestions.flatMap((raw, index) => {
+    if (!raw || typeof raw !== "object") return [];
+    const question = raw as Record<string, unknown>;
+    const text = stringValue(question.question ?? question.message ?? question.title, "Question");
+    const title = stringValue(question.title ?? question.header);
+    return [{
+      id: stringValue(question.id, `q${index + 1}`) || `q${index + 1}`,
+      question: text,
+      ...(title ? { title } : {}),
+      options: normalizeOptions(question.options),
+      multi: question.multi === true,
+      ...(typeof question.recommended === "number" ? { recommended: question.recommended } : {}),
+    }];
+  });
+  return {
+    toolName: normalizedToolName,
+    questions,
+    status,
+    cancelled: details?.cancelled === true,
+  };
+}
 
 interface BatchSubQuestion {
   title?: string;
@@ -116,8 +201,106 @@ function AskUserBatchRenderer({ args, result, toolDetails }: ToolRendererProps) 
   );
 }
 
+function coreQuestionAnswer(
+  question: AskToolQuestionViewModel,
+  index: number,
+  details: Record<string, unknown> | undefined,
+  result: string | undefined,
+): string[] {
+  const results = Array.isArray(details?.results) ? details.results : [];
+  const entry = results.find((value) => value && typeof value === "object" && (value as Record<string, unknown>).id === question.id)
+    ?? results[index];
+  if (entry && typeof entry === "object") {
+    const record = entry as Record<string, unknown>;
+    if (Array.isArray(record.selectedOptions)) return record.selectedOptions.filter((value): value is string => typeof value === "string");
+    if (typeof record.customInput === "string") return [record.customInput];
+  }
+  if (Array.isArray(details?.selectedOptions)) return details.selectedOptions.filter((value): value is string => typeof value === "string");
+  if (typeof details?.customInput === "string") return [details.customInput];
+  if (result) {
+    const escapedId = question.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = result.match(new RegExp(`(?:^|\\n)\\s*${escapedId}\\s*:\\s*(\\[[^\\n]*\\])`));
+    if (match) {
+      try {
+        const parsed: unknown = JSON.parse(match[1]!);
+        return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+      } catch {
+        return [];
+      }
+    }
+  }
+  return [];
+}
+
+function AskCoreRenderer({ args, status, result, toolDetails }: ToolRendererProps) {
+  const view = normalizeAskToolView("ask", args, toolDetails, status);
+  const cancelled = view.cancelled || /cancelled ask/i.test(result ?? "");
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5">
+        <Icon path={mdiCommentQuestion} size={0.5} className="text-blue-400 shrink-0" />
+        <span className="text-xs font-medium text-blue-400">Ask</span>
+        {cancelled ? (
+          <span className="text-[11px] text-[var(--text-tertiary)]">cancelled</span>
+        ) : status === "complete" ? (
+          <span className="text-[11px] text-green-400">answered</span>
+        ) : null}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {view.questions.map((question, index) => {
+          const selected = coreQuestionAnswer(question, index, toolDetails, result);
+          return (
+            <div key={question.id} className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2.5 py-1.5">
+              {question.title && question.title !== question.question && (
+                <div className="text-[10px] uppercase tracking-wide text-[var(--text-tertiary)] truncate">{question.title}</div>
+              )}
+              <div className="text-xs text-[var(--text-primary)]"><MarkdownContent content={question.question} /></div>
+              {question.options.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {question.options.map((option) => {
+                    const isSelected = selected.includes(option.label);
+                    return (
+                      <span
+                        key={option.label}
+                        title={option.description}
+                        className={isSelected
+                          ? "px-1.5 py-0.5 text-xs rounded bg-green-600/20 border border-green-500/40 text-green-400 font-medium"
+                          : "px-1.5 py-0.5 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border-secondary)] text-[var(--text-tertiary)]"}
+                      >
+                        {isSelected && <Icon path={mdiCheckCircle} size={0.4} className="inline mr-0.5 -mt-0.5" />}
+                        {option.label}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {question.options.length === 0 && selected.length > 0 && (
+                <div className="mt-1 flex items-center gap-1.5 text-xs">
+                  <Icon path={mdiCheckCircle} size={0.45} className="text-green-400 shrink-0" />
+                  <span className="text-green-400 font-medium">{i18nT("auto.response", undefined, "Response:")}</span>
+                  <span className="text-[var(--text-primary)]">{selected.join(", ")}</span>
+                </div>
+              )}
+              {cancelled && selected.length === 0 && (
+                <div className="mt-1 text-xs text-[var(--text-tertiary)] italic">{i18nT("auto.not_answered", undefined, "(not answered)")}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {status === "error" && result && (
+        <div className="flex items-start gap-1.5 text-xs">
+          <Icon path={mdiAlertCircle} size={0.45} className="text-red-400 shrink-0 mt-0.5" />
+          <pre className="whitespace-pre-wrap text-red-400/80">{result}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Rich renderer for ask_user tool calls — shows question, method, options, and response */
 export function AskUserToolRenderer(props: ToolRendererProps) {
+  if (props.toolName === "ask") return <AskCoreRenderer {...props} />;
   const { args, status, result } = props;
   const method = (args?.method as string) ?? "input";
 
@@ -128,12 +311,7 @@ export function AskUserToolRenderer(props: ToolRendererProps) {
 
   const title = (args?.title as string) ?? (args?.question as string) ?? "";
   const message = (args?.message as string) ?? (args?.question as string) ?? "";
-  const rawOptions = args?.options;
-  const options = Array.isArray(rawOptions)
-    ? rawOptions as string[]
-    : typeof rawOptions === "string"
-      ? (() => { try { const p = JSON.parse(rawOptions); return Array.isArray(p) ? p : undefined; } catch { return undefined; } })()
-      : undefined;
+  const options = normalizeOptions(args?.options).map((option) => option.label);
   const icon = methodIcons[method] ?? mdiCommentQuestion;
   const label = methodLabels[method] ?? method;
 

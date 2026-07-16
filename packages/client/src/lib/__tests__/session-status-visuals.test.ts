@@ -105,6 +105,31 @@ describe("isChatRoutedAskUser", () => {
     expect(isChatRoutedAskUser(makeSession({ currentTool: "Read" }), false)).toBe(false);
   });
 });
+describe("core ask attention parity", () => {
+  it("uses Needs-you, input stripes, rollup, and stable urgency ordering", () => {
+    const list = [
+      makeSession({ id: "x", status: "streaming" }),
+      makeSession({ id: "ask", status: "idle", currentTool: "ask" }),
+      makeSession({ id: "y", status: "idle" }),
+    ];
+    expect(isChatRoutedAskUser(list[1]!, false)).toBe(true);
+    expect(deriveStatusShape(list[1]!, {})).toBe("needs-you");
+    expect(getCardPulseClass(list[1]!)).toBe("card-input-stripes");
+    expect(countNeedsYou(list)).toBe(1);
+    expect(floatAskUserFirst(list).map((s) => s.id)).toEqual(["ask", "x", "y"]);
+  });
+
+  it("excludes ended and widget-bar core asks from attention surfaces", () => {
+    const ended = makeSession({ id: "ended", status: "ended", currentTool: "ask" });
+    const widget = makeSession({ id: "widget", status: "idle", currentTool: "ask" });
+    expect(isChatRoutedAskUser(ended, false)).toBe(false);
+    expect(getCardPulseClass(ended)).not.toBe("card-input-stripes");
+    expect(deriveProposalCardState([ended])).not.toBe("card-stripes-input");
+    expect(countNeedsYou([widget], () => true)).toBe(0);
+    expect(getCardPulseClass(widget, true)).not.toBe("card-input-stripes");
+    expect(floatAskUserFirst([widget], () => true).map((s) => s.id)).toEqual(["widget"]);
+  });
+});
 
 describe("deriveDotColor (status-only)", () => {
   it("idle → idle token", () => {

@@ -561,8 +561,84 @@ describe("SettingsPanel", () => {
     // Still dirty — edits preserved.
     expect(screen.getByTestId("settings-save-bar")).toBeTruthy();
   });
-});
+  it("defaults malformed push delivery preferences on while keeping subscription controls", async () => {
+    const malformedPushConfig = {
+      ...mockConfig,
+      push: {
+        enabled: true,
+        coalesceWindowMs: 12_000,
+        actionsRequired: "yes",
+        claudeDecides: null,
+        webPush: { contactEmail: "ops@example.com" },
+      },
+    };
+    global.fetch = mockFetchConfig(malformedPushConfig);
 
+    render(<SettingsPanel />);
+    await waitFor(() => expect(screen.getByTestId("push-actions-required")).toBeTruthy());
+
+    expect((screen.getByTestId("push-actions-required") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByTestId("push-claude-decides") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByTestId("push-unsupported")).toBeTruthy();
+  });
+
+  it("saves one push preference as a nested partial without unrelated push siblings", async () => {
+    const pushConfig = {
+      ...mockConfig,
+      push: {
+        enabled: true,
+        coalesceWindowMs: 30_000,
+        actionsRequired: false,
+        claudeDecides: true,
+        webPush: { contactEmail: "ops@example.com" },
+      },
+    };
+    let savedBody: any;
+    global.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url === "/api/config" && !options?.method) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: pushConfig }) });
+      }
+      if (url === "/api/config" && options?.method === "PUT") {
+        savedBody = JSON.parse(options.body);
+        return Promise.resolve({ json: () => Promise.resolve({ success: true }) });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
+    });
+
+    render(<SettingsPanel />);
+    await waitFor(() => screen.getByTestId("push-actions-required"));
+    fireEvent.click(screen.getByTestId("push-claude-decides"));
+    expect((screen.getByTestId("push-actions-required") as HTMLInputElement).checked).toBe(false);
+
+    fireEvent.click(screen.getByTestId("save-btn"));
+    await waitFor(() => expect(savedBody).toEqual({ push: { claudeDecides: false } }));
+    expect(screen.queryByTestId("settings-save-bar")).toBeNull();
+  });
+
+  it("keeps a failed push preference save dirty for retry", async () => {
+    const pushConfig = { ...mockConfig, push: { enabled: true, actionsRequired: true, claudeDecides: true } };
+    global.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url === "/api/config" && !options?.method) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: pushConfig }) });
+      }
+      if (url === "/api/config" && options?.method === "PUT") {
+        return Promise.resolve({ json: () => Promise.resolve({ success: false, error: "push save failed" }) });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
+    });
+
+    render(<SettingsPanel />);
+    await waitFor(() => screen.getByTestId("push-actions-required"));
+    fireEvent.click(screen.getByTestId("push-actions-required"));
+    fireEvent.click(screen.getByTestId("save-btn"));
+
+    await waitFor(() => expect(screen.getByText(/Couldn't save/)).toBeTruthy());
+    expect(screen.getByTestId("settings-save-bar")).toBeTruthy();
+    expect((screen.getByTestId("push-actions-required") as HTMLInputElement).checked).toBe(false);
+  });
+
+
+});
 // Resources nav group (global-scope per-type card pages).
 // See change: resources-card-tabs.
 describe("SettingsPanel Resources group", () => {

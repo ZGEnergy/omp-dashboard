@@ -49,6 +49,23 @@ describe("useViewDispatcher", () => {
     expect(send).toHaveBeenCalledWith({ type: "session_unview", sessionId: "abc" });
   });
 
+  it("releases a viewed session while the app is backgrounded and restores it on return", () => {
+    const { send, rerender } = setup({ id: "abc", status: "connected" });
+    send.mockClear();
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(send).toHaveBeenLastCalledWith({ type: "session_unview", sessionId: "abc" });
+    send.mockClear();
+    rerender({ id: "abc", status: "offline" });
+    rerender({ id: "abc", status: "connected" });
+    expect(send).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(send).toHaveBeenLastCalledWith({ type: "session_view", sessionId: "abc" });
+  });
+
   it("re-sends session_view on reconnect (offline → connected) for the current id", () => {
     const { send, rerender } = setup({ id: "abc", status: "connected" });
     send.mockClear();

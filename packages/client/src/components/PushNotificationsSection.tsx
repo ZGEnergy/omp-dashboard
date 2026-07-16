@@ -24,9 +24,22 @@ function isStandalone(): boolean {
   );
 }
 
-export function PushNotificationsSection() {
+export interface PushNotificationsSectionProps {
+  actionsRequired?: boolean;
+  claudeDecides?: boolean;
+  onActionsRequiredChange?: (value: boolean) => void;
+  onClaudeDecidesChange?: (value: boolean) => void;
+}
+
+export function PushNotificationsSection({
+  actionsRequired = true,
+  claudeDecides = true,
+  onActionsRequiredChange,
+  onClaudeDecidesChange,
+}: PushNotificationsSectionProps) {
   const { supported, status, subscribe, unsubscribe, sendTest } = usePushSubscription();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const ios = isIOS();
   const showIosHint = ios && !isStandalone();
 
@@ -34,30 +47,29 @@ export function PushNotificationsSection() {
     // Enable is a no-op while status is still "unknown" (VAPID key not loaded
     // / server push disabled) — keep the button disabled in that state.
     if (status === "unknown") return;
+    setError(null);
     setBusy(true);
     try {
       if (status === "subscribed") await unsubscribe();
       else await subscribe();
+    } catch {
+      setError("Could not update push notifications. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
   }, [status, subscribe, unsubscribe]);
 
-  if (!supported) {
-    return (
-      <div className="space-y-2" data-testid="push-unsupported">
-        <div className="text-xs text-[var(--text-muted)]">
-          Push notifications are not supported in this browser.
-        </div>
-        {ios && (
-          <div className="text-xs text-[var(--text-muted)]" data-testid="push-ios-hint">
-            iOS users: install this app to your home screen (Share → Add to Home Screen), open the
-            installed app, then enable notifications. Safari tabs cannot receive Web Push.
-          </div>
-        )}
-      </div>
-    );
-  }
+  const handleSendTest = useCallback(async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await sendTest();
+    } catch {
+      setError("Could not send a test notification. Check your connection and subscription, then try again.");
+    } finally {
+      setBusy(false);
+    }
+  }, [sendTest]);
 
   const toggleDisabled = busy || status === "unknown";
   const toggleLabel =
@@ -68,43 +80,92 @@ export function PushNotificationsSection() {
         : "Enable on this device";
 
   return (
-    <div className="space-y-2" data-testid="push-section">
+    <div className="space-y-3" data-testid="push-section">
       <p className="text-xs text-[var(--text-tertiary)]">
         Get a notification when a session finishes a turn, asks for input, or crashes — even when the
         dashboard isn't open.
       </p>
 
-      {status === "denied" ? (
-        <div className="text-xs text-amber-400" data-testid="push-denied">
-          Notification permission was denied. Re-enable it in your browser settings, then try again.
+      <div className="space-y-2" data-testid="push-delivery-preferences">
+        <p className="text-xs text-[var(--text-tertiary)]" data-testid="push-preferences-description">
+          These preferences affect push delivery only. They do not change unread stripes or urgency ordering.
+        </p>
+        <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer">
+          <input
+            type="checkbox"
+            checked={actionsRequired}
+            onChange={(event) => onActionsRequiredChange?.(event.target.checked)}
+            data-testid="push-actions-required"
+            className="accent-blue-500"
+          />
+          Actions required or crash notifications
+        </label>
+        <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer">
+          <input
+            type="checkbox"
+            checked={claudeDecides}
+            onChange={(event) => onClaudeDecidesChange?.(event.target.checked)}
+            data-testid="push-claude-decides"
+            className="accent-blue-500"
+          />
+          Turn-complete notifications
+        </label>
+      </div>
+
+      {!supported ? (
+        <div className="space-y-2" data-testid="push-unsupported">
+          <div className="text-xs text-[var(--text-muted)]">
+            Push notifications are not supported in this browser.
+          </div>
+          {ios && (
+            <div className="text-xs text-[var(--text-muted)]" data-testid="push-ios-hint">
+              iOS users: install this app to your home screen (Share → Add to Home Screen), open the
+              installed app, then enable notifications. Safari tabs cannot receive Web Push.
+            </div>
+          )}
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={handleToggle}
-          disabled={toggleDisabled}
-          data-testid="push-toggle"
-          className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50 cursor-pointer"
-        >
-          {toggleLabel}
-        </button>
-      )}
+        <>
+          {status === "denied" ? (
+            <div className="text-xs text-amber-400" data-testid="push-denied">
+              Notification permission was denied. Re-enable it in your browser settings, then try again.
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleToggle}
+              disabled={toggleDisabled}
+              data-testid="push-toggle"
+              className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              {toggleLabel}
+            </button>
+          )}
 
-      {status === "subscribed" && (
-        <button
-          type="button"
-          onClick={() => sendTest()}
-          data-testid="push-test"
-          className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
-        >
-          Send test notification
-        </button>
-      )}
+          {status === "subscribed" && (
+            <button
+              type="button"
+              onClick={handleSendTest}
+              disabled={busy}
+              data-testid="push-test"
+              className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              Send test notification
+            </button>
+          )}
 
-      {showIosHint && (
-        <div className="text-xs text-[var(--text-muted)]" data-testid="push-ios-hint">
-          iOS users: install this app to your home screen first, then enable notifications.
-        </div>
+          {error && (
+            <div role="alert" className="text-xs text-amber-400" data-testid="push-error">
+              {error}
+            </div>
+          )}
+
+          {showIosHint && (
+            <div className="text-xs text-[var(--text-muted)]" data-testid="push-ios-hint">
+              iOS users: install this app to your home screen first, then enable notifications.
+            </div>
+          )}
+        </>
       )}
     </div>
   );

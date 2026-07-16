@@ -41,7 +41,7 @@ export function createWebPushTransport(opts: WebPushTransportOptions): PushTrans
         if (statusCode === 410 || statusCode === 404) {
           return { ok: false, gone: true };
         }
-        console.error(`[web-push] send failed for token ${token.id}:`, err);
+        console.error(`[web-push] send failed for token ${token.id} (status ${typeof statusCode === "number" ? statusCode : "unknown"})`);
         return { ok: false };
       }
     },

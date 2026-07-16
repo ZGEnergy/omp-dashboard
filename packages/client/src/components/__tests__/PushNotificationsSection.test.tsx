@@ -60,6 +60,18 @@ describe("PushNotificationsSection", () => {
     await waitFor(() => expect(hookState.sendTest).toHaveBeenCalledTimes(1));
   });
 
+  it("shows a delivery error when Send test notification fails", async () => {
+    hookState.status = "subscribed";
+    hookState.sendTest = vi.fn(async () => {
+      throw new Error("delivery failed");
+    });
+    render(<PushNotificationsSection />);
+
+    fireEvent.click(screen.getByTestId("push-test"));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/could not send a test notification/i);
+  });
+
   it("renders the denied notice (no toggle) when permission was denied", () => {
     hookState.status = "denied";
     render(<PushNotificationsSection />);
@@ -75,5 +87,38 @@ describe("PushNotificationsSection", () => {
     expect(toggle.textContent).toContain("Checking");
     fireEvent.click(toggle);
     expect(hookState.subscribe).not.toHaveBeenCalled();
+  });
+  it("renders both delivery controls enabled by default and explains unread/urgency are unchanged", () => {
+    render(<PushNotificationsSection />);
+    expect((screen.getByTestId("push-actions-required") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByTestId("push-claude-decides") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByTestId("push-preferences-description").textContent).toMatch(/push delivery only/i);
+    expect(screen.getByTestId("push-preferences-description").textContent).toMatch(/unread stripes/i);
+    expect(screen.getByTestId("push-preferences-description").textContent).toMatch(/urgency ordering/i);
+  });
+
+  it("updates the two delivery controls independently", () => {
+    const onActionsRequiredChange = vi.fn();
+    const onClaudeDecidesChange = vi.fn();
+    render(
+      <PushNotificationsSection
+        actionsRequired={true}
+        claudeDecides={true}
+        onActionsRequiredChange={onActionsRequiredChange}
+        onClaudeDecidesChange={onClaudeDecidesChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("push-actions-required"));
+    expect((screen.getByTestId("push-actions-required") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByTestId("push-claude-decides") as HTMLInputElement).checked).toBe(true);
+    expect(onActionsRequiredChange).toHaveBeenCalledWith(false);
+    expect((screen.getByTestId("push-claude-decides") as HTMLInputElement).checked).toBe(true);
+    expect(onClaudeDecidesChange).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("push-claude-decides"));
+    expect((screen.getByTestId("push-actions-required") as HTMLInputElement).checked).toBe(true);
+    expect(onClaudeDecidesChange).toHaveBeenCalledWith(false);
+    expect(onActionsRequiredChange).toHaveBeenCalledTimes(1);
   });
 });
