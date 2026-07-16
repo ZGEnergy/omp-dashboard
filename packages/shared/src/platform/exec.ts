@@ -20,22 +20,21 @@
  * direct imports sneak back in. See change: consolidate-platform-handlers.
  */
 import {
-  execSync as nodeExecSync,
-  execFileSync as nodeExecFileSync,
-  exec as nodeExec,
-  execFile as nodeExecFile,
-  spawnSync as nodeSpawnSync,
-  spawn as nodeSpawn,
-  type ExecSyncOptions,
+  type ChildProcess,
+  type ExecFileOptions,
   type ExecFileSyncOptions,
   type ExecOptions,
-  type ExecFileOptions,
-  type SpawnSyncOptions,
+  type ExecSyncOptions,
+  exec as nodeExec,
+  execFile as nodeExecFile,
+  execFileSync as nodeExecFileSync,
+  execSync as nodeExecSync,
+  spawn as nodeSpawn,
+  spawnSync as nodeSpawnSync,
   type SpawnOptions,
-  type ChildProcess,
+  type SpawnSyncOptions,
   type SpawnSyncReturns,
 } from "node:child_process";
-import { promisify } from "node:util";
 
 // ── Argv safety (Windows .cmd / .bat handling) ─────────────────────────────
 
@@ -215,28 +214,42 @@ export function spawn(
 
 // ── Promise-returning variants ──────────────────────────────────────────────
 
-/** Promise-returning exec. */
-export const execAsync = promisify(exec) as unknown as (
+/** Promise-returning exec that preserves stdout and stderr. */
+export function execAsync(
   command: string,
   options?: ExecOptions,
-) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
+): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> {
+  return new Promise((resolve, reject) => {
+    exec(command, options ?? {}, (err, stdout, stderr) => {
+      if (err) reject(err);
+      else resolve({ stdout, stderr });
+    });
+  });
+}
 
-/** Promise-returning execFile. */
-export const execFileAsync = promisify(execFile) as unknown as (
+/** Promise-returning execFile that preserves stdout and stderr. */
+export function execFileAsync(
   file: string,
   args?: readonly string[],
   options?: ExecFileOptions,
-) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
+): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args ?? [], options ?? {}, (err, stdout, stderr) => {
+      if (err) reject(err);
+      else resolve({ stdout, stderr });
+    });
+  });
+}
 
 // ── Types pass-through for convenience ──────────────────────────────────────
 
 export type {
-  ExecSyncOptions,
+  ChildProcess,
+  ExecFileOptions,
   ExecFileSyncOptions,
   ExecOptions,
-  ExecFileOptions,
-  SpawnSyncOptions,
+  ExecSyncOptions,
   SpawnOptions,
-  ChildProcess,
+  SpawnSyncOptions,
   SpawnSyncReturns,
 };
