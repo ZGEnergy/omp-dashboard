@@ -973,34 +973,20 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
             target.style.height = Math.min(target.scrollHeight, 120) + "px";
           }}
         />
-        {onOpenInlineTerminal && (
-          <button
-            onClick={() => onOpenInlineTerminal()}
-            disabled={disabled}
-            className="p-2 bg-[var(--bg-tertiary)] rounded-lg hover:bg-[var(--bg-surface)] disabled:opacity-50 disabled:cursor-not-allowed self-end"
-            title={t("command.inlineTerminal", undefined, "Open inline terminal")}
-            data-testid="open-inline-terminal-button"
-          >
-            <Icon path={mdiConsole} size={0.7} />
-          </button>
-        )}
-        <button
-          onClick={() => handleSend("steer")}
-          /* Send button mirrors textarea: enabled during streaming so the
-             user can queue another mid-turn message. */
-          disabled={inputDisabled || !text.trim()}
-          className="focus-ring flex items-center justify-center min-w-[44px] min-h-[44px] bg-blue-600 rounded-lg hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed self-end"
-          title={t("command.send", undefined, "Send")}
-          aria-label={t("command.send", undefined, "Send")}
-          data-testid="send-button"
-        >
-          <Icon path={mdiPlay} size={0.7} />
-        </button>
-        {isWorking && onStopAfterTurn && stopState === "idle" && !pendingPrompt && (
-          stopAfterTurnRequested ? (
-            <span
-              className="flex items-center gap-1 px-2 self-end text-xs text-[var(--text-muted)]"
-              data-testid="stop-after-turn-pill"
+        {/* Inner toolbar. */}
+        <div className="flex items-center gap-1.5 pt-1">
+          {/* ＋ attach menu. */}
+          <div className="relative" ref={attachRef}>
+            <button
+              type="button"
+              onClick={() => setAttachOpen((v) => !v)}
+              disabled={inputDisabled}
+              className="focus-ring inline-flex items-center justify-center w-[34px] h-[30px] rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+              title={t("command.attach", undefined, "Attach")}
+              aria-label={t("command.attach", undefined, "Attach")}
+              aria-haspopup="menu"
+              aria-expanded={attachOpen}
+              data-testid="attach-button"
             >
               <Icon path={mdiPlus} size={0.85} />
             </button>
