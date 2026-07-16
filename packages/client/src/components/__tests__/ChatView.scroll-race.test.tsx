@@ -287,5 +287,95 @@ describe("ChatView sticky scroll", () => {
 
     // Session-switch + cold return is covered by the wipe/rebuild case above
     // (same-session loadingHistory true→false re-pin) plus cold-open stick arming.
+
+    it("programmatic mid-list scroll during hydrate does not kill live stick after land", async () => {
+      // Regression: virtualizer pin/measurement fires scroll without a user
+      // gesture. Treating those as escape left stick=false after tail hydrate,
+      // so live streaming no longer auto-followed.
+      // See change: session-tail-rehydrate (live-follow after hydrate).
+      const { container, rerender } = render(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-live"
+            state={createInitialState()}
+            toolContext={defaultToolContext}
+            loadingHistory={true}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      const scrollEl = getScrollContainer(container);
+      // Programmatic "jump" mid-list while hydrating — no wheel/touch.
+      setScrollPosition(scrollEl, 100, 5000, 400);
+      fireEvent.scroll(scrollEl);
+
+      // Hydrate completes with content; must re-pin and keep stick.
+      setScrollPosition(scrollEl, 100, 5000, 400);
+      rerender(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-live"
+            state={stateWith(40)}
+            toolContext={defaultToolContext}
+            loadingHistory={false}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+      expect(scrollEl.scrollTop).toBe(5000);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+
+      // Further content growth must still be chased (live follow).
+      setScrollPosition(scrollEl, 5000, 6000, 400);
+      rerender(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-live"
+            state={stateWith(55)}
+            toolContext={defaultToolContext}
+            loadingHistory={false}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+      expect(scrollEl.scrollTop).toBe(6000);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+    });
+
+    it("real wheel during hydrate still allows escape from stick", async () => {
+      const { container, rerender } = render(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-esc"
+            state={createInitialState()}
+            toolContext={defaultToolContext}
+            loadingHistory={true}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      const scrollEl = getScrollContainer(container);
+      fireEvent.wheel(scrollEl, { deltaY: -40 });
+      setScrollPosition(scrollEl, 50, 5000, 400);
+      fireEvent.scroll(scrollEl);
+
+      setScrollPosition(scrollEl, 50, 5000, 400);
+      rerender(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-esc"
+            state={stateWith(40)}
+            toolContext={defaultToolContext}
+            loadingHistory={false}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      // Escaped mid-hydrate: do not force re-pin; scroll-to-bottom button shows.
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+    });
   });
 });

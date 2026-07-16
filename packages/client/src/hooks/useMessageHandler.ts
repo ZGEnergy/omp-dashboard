@@ -603,9 +603,14 @@ export function useMessageHandler(
 
         // Reset on full replay sweep (cold start / re-replay of known seqs),
         // but never for older pages.
-        // See change: fix-replay-duplicates-tool-and-flushed-rows.
+        // Windowed cold tail (mode:tail, firstSeq > 1, no prior max) is also a
+        // reset: seed from the window rather than appending onto empty/partial
+        // state. See change: fix-replay-duplicates-tool-and-flushed-rows,
+        // session-tail-rehydrate.
         const shouldReset =
-          !isOlderPage && firstSeq != null && (firstSeq === 1 || firstSeq <= maxSeq);
+          !isOlderPage &&
+          firstSeq != null &&
+          (firstSeq === 1 || firstSeq <= maxSeq || maxSeq === 0);
 
         if (isOlderPage && replayPersister) {
           const merged = replayPersister.merge(msg.sessionId, msg.events);
@@ -668,24 +673,46 @@ export function useMessageHandler(
         }
 
         // Track window meta for load-older UI.
-        if (msg.windowMinSeq != null || msg.hasMoreOlder != null) {
+        // Infer when the server omits meta (delta after IDB rehydrate, or older
+        // servers): a non-reset older page always has more? No — use firstSeq>1
+        // on a cold/windowed batch as "older exists". Preserve prior hasMoreOlder
+        // unless the server explicitly clears it.
+        // See change: session-tail-rehydrate.
+        {
           const prev = historyWindowRef?.current.get(msg.sessionId);
-          const minSeq =
+          const inferredMin =
             msg.windowMinSeq != null
-              ? prev
-                ? Math.min(prev.minSeq, msg.windowMinSeq)
-                : msg.windowMinSeq
-              : (prev?.minSeq ?? firstSeq ?? 0);
-          const hasMoreOlder =
+              ? msg.windowMinSeq
+              : firstSeq != null
+                ? firstSeq
+                : undefined;
+          const serverSaid = msg.hasMoreOlder != null || msg.windowMinSeq != null;
+          const inferredHasMore =
             msg.hasMoreOlder != null
               ? msg.hasMoreOlder
-              : (prev?.hasMoreOlder ?? false);
-          historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder });
-          setHistoryWindowMap?.((m) => {
-            const next = new Map(m);
-            next.set(msg.sessionId, { minSeq, hasMoreOlder });
-            return next;
-          });
+              : firstSeq != null && firstSeq > 1 && !isOlderPage
+                ? true
+                : undefined;
+          if (serverSaid || inferredHasMore != null || (inferredMin != null && prev)) {
+            const minSeq =
+              inferredMin != null
+                ? prev
+                  ? Math.min(prev.minSeq, inferredMin)
+                  : inferredMin
+                : (prev?.minSeq ?? 0);
+            const hasMoreOlder =
+              msg.hasMoreOlder != null
+                ? msg.hasMoreOlder
+                : inferredHasMore != null
+                  ? inferredHasMore
+                  : (prev?.hasMoreOlder ?? false);
+            historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder });
+            setHistoryWindowMap?.((m) => {
+              const next = new Map(m);
+              next.set(msg.sessionId, { minSeq, hasMoreOlder });
+              return next;
+            });
+          }
         }
 
         // Exit LOADING: first content or terminal empty session.
