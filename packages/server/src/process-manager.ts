@@ -276,12 +276,32 @@ export function buildInteractivePiArgs(options?: SessionOptions): string[] {
  * Build a tmux shell command string to run pi in a new tmux window/session.
  * Kept as a string (not argv) because tmux is invoked via `execSync(cmd)`.
  */
+/**
+ * Shell prefix that drops every `ZELLIJ*` variable from the pane environment.
+ *
+ * `buildSpawnEnv` strips these from the env passed to the *tmux client*, but
+ * an already-running tmux server still injects its stored global/session env
+ * into new windows. Unsetting inside the pane command is the reliable scrub
+ * for that boundary (same attack: tab-namer hijack via inherited pane id).
+ *
+ * Uses POSIX `env -u` so we don't need bash-specific `unset`.
+ */
+export function zellijEnvUnsetPrefix(): string {
+  // Explicit known keys + a small shell loop for any other ZELLIJ_* variants
+  // the server may have cached (layout, socket, etc.).
+  return "env -u ZELLIJ -u ZELLIJ_PANE_ID -u ZELLIJ_SESSION_NAME -u ZELLIJ_LAYOUT -u ZELLIJ_PANE_CONTENT -u ZELLIJ_SESSION";
+}
+
 export function buildTmuxCommand(cwd: string, sessionExists: boolean, options?: SessionOptions): string {
   const safeCwd = shellEscape(cwd);
   const flags = sessionFlagsToArgv(options ?? {})
     .map(shellEscape)
     .join(" ");
-  const piCmd = flags ? `cd ${safeCwd} && pi ${flags}` : `cd ${safeCwd} && pi`;
+  // Scrub Zellij client identity inside the pane (tmux session env may re-inject it).
+  const scrub = zellijEnvUnsetPrefix();
+  const piCmd = flags
+    ? `cd ${safeCwd} && ${scrub} pi ${flags}`
+    : `cd ${safeCwd} && ${scrub} pi`;
   if (sessionExists) {
     return `tmux new-window -t pi-dashboard -c ${safeCwd} "${piCmd}"`;
   }

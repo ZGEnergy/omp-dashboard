@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { buildTmuxCommand, buildHeadlessArgs, shellEscape, spawnPiSession, buildSpawnEnv, stripZellijClientEnv, type SessionOptions } from "../process-manager.js";
+import { buildTmuxCommand, buildHeadlessArgs, shellEscape, spawnPiSession, buildSpawnEnv, stripZellijClientEnv, zellijEnvUnsetPrefix, type SessionOptions } from "../process-manager.js";
 
 // Note: platform-dispatch tests live in packages/shared/src/__tests__/
 // spawn-mechanism.test.ts. `detectPlatform` was removed in change:
@@ -12,6 +12,20 @@ describe("Process Manager", () => {
       const cmd = buildTmuxCommand("/home/user/project", false);
       expect(cmd).toContain("new-session");
       expect(cmd).toContain("pi-dashboard");
+    });
+
+    it("scrubs ZELLIJ* inside the pane command (tmux session env re-injects)", () => {
+      const cmd = buildTmuxCommand("/home/user/project", true);
+      expect(cmd).toContain(zellijEnvUnsetPrefix());
+      expect(cmd).toMatch(/env -u ZELLIJ -u ZELLIJ_PANE_ID.*pi/);
+      // prefix must wrap pi, not only the outer tmux client
+      expect(cmd.indexOf("env -u ZELLIJ")).toBeLessThan(cmd.lastIndexOf(" pi"));
+    });
+
+    it("scrubs ZELLIJ* for new-session path as well", () => {
+      const cmd = buildTmuxCommand("/home/user/project", false);
+      expect(cmd).toContain(zellijEnvUnsetPrefix());
+      expect(cmd).toContain("new-session");
     });
 
     it("should create new window when pi-dashboard session exists", () => {
