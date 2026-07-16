@@ -401,18 +401,31 @@ cmd_ff_develop() {
 main() {
   local cmd="${1:-}"
   shift || true
-  local sync_branch_explicit=0
+  local default_sync_branch="sync/upstream-${UPSTREAM_REF}"
+  # True env override: SYNC_BRANCH differs from default derived at parse start.
+  local env_sync_override=0
+  if [[ "$SYNC_BRANCH" != "$default_sync_branch" ]]; then
+    env_sync_override=1
+  fi
+  local branch_flag=0
+  local ref_flag=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --ref) UPSTREAM_REF="$2"; shift 2 ;;
-      --branch) SYNC_BRANCH="$2"; sync_branch_explicit=1; shift 2 ;;
+      --ref) UPSTREAM_REF="$2"; ref_flag=1; shift 2 ;;
+      --branch) SYNC_BRANCH="$2"; branch_flag=1; shift 2 ;;
       --target) TARGET_BRANCH="$2"; shift 2 ;;
       --dry-run) DRY_RUN=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *) die "unknown arg: $1" ;;
     esac
   done
-  if [[ "$sync_branch_explicit" -eq 0 ]]; then
+  # Precedence: --branch > env SYNC_BRANCH > default from UPSTREAM_REF.
+  # --ref updates the default; only applied when neither --branch nor env override.
+  if [[ "$branch_flag" -eq 1 ]]; then
+    :
+  elif [[ "$env_sync_override" -eq 1 ]]; then
+    :
+  else
     SYNC_BRANCH="sync/upstream-${UPSTREAM_REF}"
   fi
   case "$cmd" in
