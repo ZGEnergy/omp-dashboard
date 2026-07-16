@@ -318,7 +318,12 @@ cmd_pr() {
   fetch_all
   local branch
   branch=$(git branch --show-current)
-  [[ "$branch" == sync/upstream-* || "$branch" == "$SYNC_BRANCH" ]] || warn "current branch $branch does not look like a sync branch"
+  if [[ "$branch" == "main" || "$branch" == "master" || "$branch" == "$TARGET_BRANCH" || "$branch" == "develop" ]]; then
+    die "refusing to force-with-lease push protected branch '$branch' (check out $SYNC_BRANCH first)"
+  fi
+  if [[ "$branch" != sync/upstream-* && "$branch" != "$SYNC_BRANCH" ]]; then
+    die "current branch $branch is not a sync branch (expected $SYNC_BRANCH or sync/upstream-*)"
+  fi
   local tip usha behind ahead
   tip="${UPSTREAM_REMOTE}/${UPSTREAM_REF}"
   usha=$(git rev-parse --short "$tip")
@@ -332,35 +337,42 @@ cmd_pr() {
   close_stale_sync_prs "$branch"
   local body title existing
   title="chore(sync): upstream ${UPSTREAM_REF} @ ${usha}"
-  body=$(cat <<BODY
+  # Quoted delimiter: no command substitution from Markdown ticks in the body.
+  body=$(cat <<'BODY'
 ## Upstream sync (latest only)
 
 Automation **replaces** any previous open sync PR. Review this one when ready; older sync PRs are closed as superseded.
 
-- **Upstream:** `BlackBeltTechnology/pi-agent-dashboard` `${UPSTREAM_REF}` @ `${usha}`
-- **Into:** `${TARGET_BRANCH}`
-- **Branch:** `${branch}` (stable; force-updated each run)
-- **Approx behind/ahead at open:** behind=${behind} ahead=${ahead}
+- **Upstream:** BlackBeltTechnology/pi-agent-dashboard __UPSTREAM_REF__ @ __USHA__
+- **Into:** __TARGET_BRANCH__
+- **Branch:** __BRANCH__ (stable; force-updated each run)
+- **Approx behind/ahead at open:** behind=__BEHIND__ ahead=__AHEAD__
 
 ## Protected ZGE surfaces (must remain green)
-- `deploy/**` self-host installer + systemd/zrok
-- Web Push (`packages/server/src/push/**`, push routes, SW)
-- OMP runtime paths (`omp-agent-paths`, tool registry, spawn env)
+- deploy/** self-host installer + systemd/zrok
+- Web Push (packages/server/src/push/**, push routes, SW)
+- OMP runtime paths (omp-agent-paths, tool registry, spawn env)
 - OMP config mirror routes
 
 ## Policy
-- Conflict default: **ours** on protected paths (see `scripts/upstream-sync.sh`)
-- Shared hubs (`server.ts`, `bridge.ts`, `config.ts`): combined manually
-- Never force-push `main` (sync branch may force-with-lease)
+- Conflict default: **ours** on protected paths (see scripts/upstream-sync.sh)
+- Shared hubs (server.ts, bridge.ts, config.ts): combined manually
+- Never force-push main (sync branch may force-with-lease)
 
 ## Gates
-- [ ] `scripts/upstream-sync.sh verify` (Gate 0–2)
-- [ ] CI `ci-zge` green
+- [ ] scripts/upstream-sync.sh verify (Gate 0–2)
+- [ ] CI ci-zge green
 - [ ] Manual/prod promote **not** done by this PR
 
-Docs: `docs/upstream-sync.md`
+Docs: docs/upstream-sync.md
 BODY
 )
+  body=${body//__UPSTREAM_REF__/${UPSTREAM_REF}}
+  body=${body//__USHA__/${usha}}
+  body=${body//__TARGET_BRANCH__/${TARGET_BRANCH}}
+  body=${body//__BRANCH__/${branch}}
+  body=${body//__BEHIND__/${behind}}
+  body=${body//__AHEAD__/${ahead}}
   existing=$(gh pr list -R "$GH_REPO" --state open --head "$branch" --json number --jq '.[0].number // empty' 2>/dev/null || true)
   if [[ -n "$existing" ]]; then
     log "updating existing PR #$existing on $branch"
@@ -373,7 +385,6 @@ BODY
       --title "$title" --label "upstream-sync" --body "$body"
   fi
 }
-
 
 cmd_ff_develop() {
   fetch_all
@@ -390,19 +401,19 @@ cmd_ff_develop() {
 main() {
   local cmd="${1:-}"
   shift || true
+  local sync_branch_explicit=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --ref) UPSTREAM_REF="$2"; shift 2 ;;
-      --branch) SYNC_BRANCH="$2"; shift 2 ;;
+      --branch) SYNC_BRANCH="$2"; sync_branch_explicit=1; shift 2 ;;
       --target) TARGET_BRANCH="$2"; shift 2 ;;
       --dry-run) DRY_RUN=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *) die "unknown arg: $1" ;;
     esac
   done
-  # recompute default sync branch if ref changed after parse
-  if [[ -z "${SYNC_BRANCH_SET:-}" && "$SYNC_BRANCH" == sync/upstream-develop-* ]]; then
-    :
+  if [[ "$sync_branch_explicit" -eq 0 ]]; then
+    SYNC_BRANCH="sync/upstream-${UPSTREAM_REF}"
   fi
   case "$cmd" in
     status) cmd_status ;;
@@ -410,7 +421,7 @@ main() {
     verify) cmd_verify ;;
     pr) cmd_pr ;;
     ff-develop) cmd_ff_develop ;;
-    ""|-h|--help) usage ;;
+    ""|-h|--help) usage; exit 0 ;;
     *) usage; die "unknown command: $cmd" ;;
   esac
 }
