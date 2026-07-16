@@ -1,0 +1,65 @@
+{
+  "setupVersion": {
+    "value": 1,
+    "type": "number",
+    "description": ""
+  },
+  "auth.broker.url": {
+    "type": "string",
+    "description": ""
+  },
+  "autoResume": {
+    "value": false,
+    "type": "boolean",
+    "description": "Automatically resume the most recent session in the current directory"
+  },
+  "power.sleepPrevention": {
+    "value": "idle",
+    "type": "enum",
+    "description": "Prevent macOS sleep during active sessions. Each level is cumulative \u2014 it adds the flags of all lower levels."
+  },
+  "extensions": {
+    "value": [],
+    "type": "array",
+    "description": ""
+  },
+  "providers.maxInFlightRequests": {
+    "value": {},
+    "type": "record",
+    "description": "Maximum concurrent LLM requests per provider id (for example \"openai\" or \"anthropic\"), shared across local OMP processes with this config root. Omitted providers are unlimited."
+  },
+  "modelRoles": {
+    "value": {
+      "smol": "openai-codex/gpt-5.6-terra:medium",
+      "commit": "openrouter/minimax/minimax-m3",
+      "default": "xai-oauth/grok-4.5",
+      "task": "openai-codex/gpt-5.6-luna:xhigh",
+      "slow": "openai-codex/gpt-5.6-sol:xhigh",
+      "plan": "xai-oauth/grok-4.5:xhigh",
+      "designer": "openai-codex/gpt-5.6-sol:xhigh",
+      "advisor": "xai-oauth/grok-4.5:high",
+      "tiny": "openrouter/minimax/minimax-m3:high"
+    },
+    "type": "record",
+    "description": ""
+  },
+  "cycleOrder": {
+    "value": [
+      "smol",
+      "default",
+      "slow"
+    ],
+    "type": "array",
+    "description": ""
+  },
+  "defaultThinkingLevel": {
+    "value": "auto",
+    "type": "enum",
+    "description": "Reasoning depth for thinking-capable models"
+  },
+  "hideThinkingBlock": {
+    "value": true,
+    "type": "boolean",
+    "description": "Hide thinking blocks in assistant responses"
+  }
+}

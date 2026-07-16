@@ -1,35 +1,20 @@
 /**
- * Role Manager Extension (Dashboard)
+ * Role Manager Extension (Dashboard) — OMP `modelRoles` SSOT.
  *
- * Owns the `roles`, `rolePresets`, and `activePreset` keys of
- * `~/.pi/agent/providers.json`. Registers the `roles:*` event handlers
- * that back the dashboard's Settings → Roles UI. Previously hosted in
- * pi-flows; ownership relocated here per OpenSpec change
- * `adopt-model-resolve-handler-and-roles-ownership` (capabilities
- * `dashboard-roles-ownership` and `dashboard-model-resolution`).
- *
- * Contract (spec: dashboard-roles-ownership):
- *   - Single source of truth on disk is `~/.pi/agent/providers.json`.
- *   - Reads tolerate missing file / malformed JSON (return empty config).
- *   - Writes use atomic tmp+rename, preserve unrelated keys (notably
- *     `providers` and pi-flows-owned `autonomousMode`).
- *   - Handlers re-read the file on every event so cross-session updates
- *     are visible without restart.
- *
- * Event API (dashboard-owned; the legacy `flow:` prefix was dropped — the
- * compatibility window expired and pi-flows has zero role code):
- *   roles:get-all
- *   roles:set
- *   roles:preset-load
- *   roles:preset-save
- *   roles:preset-delete
- * See change: add-agent-role-model-tools (design D11).
+ * Reads/writes OMP agent `config.yml#modelRoles` (default
+ * `~/.omp/agent/config.yml`). Preset handlers are stubs (OMP has no
+ * rolePresets). Writes prefer `omp config set modelRoles … --json`; fall
+ * back to atomic YAML merge of only the `modelRoles` key.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveOmpAgentDir, resolveOmpConfigYml } from "@blackbelt-technology/pi-dashboard-shared/omp-agent-paths.js";
+import { execFileSync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 // -- Types ----------------------------------------------------------------
 
@@ -42,122 +27,156 @@ export interface RoleConfig {
   roles: Record<string, string>;
   rolePresets: RolePreset[];
   activePreset: string | null;
-  /**
-   * User-added role names beyond DEFAULT_ROLE_NAMES. Persisted so an added
-   * role surfaces as an empty slot everywhere even before a model is assigned.
-   * See change: add-agent-role-model-tools (design D5, task 3.1).
-   */
   roleNames?: string[];
-  /**
-   * Removal markers for DEFAULT role names the user removed, so the read-time
-   * overlay does NOT re-inject them. User-added names need no marker (dropping
-   * them from `roleNames` removes them from the effective schema).
-   */
   removedRoles?: string[];
 }
 
-// -- Config path ----------------------------------------------------------
+/** Canonical OMP built-in role ids. */
+export const DEFAULT_ROLE_NAMES = [
+  "default",
+  "smol",
+  "slow",
+  "plan",
+  "task",
+  "tiny",
+  "advisor",
+  "designer",
+  "commit",
+  "vision",
+] as const;
 
-// Resolved lazily so HOME can be changed in tests.
-function configPath(): string {
-  return join(homedir(), ".pi", "agent", "providers.json");
+// -- Paths ----------------------------------------------------------------
+
+function agentDir(): string {
+  return resolveOmpAgentDir({
+    homedir: homedir(),
+    agentDirEnv: process.env.PI_CODING_AGENT_DIR,
+  });
 }
 
-// -- Config I/O -----------------------------------------------------------
+function configYmlPath(): string {
+  return resolveOmpConfigYml({
+    homedir: homedir(),
+    agentDirEnv: process.env.PI_CODING_AGENT_DIR,
+  });
+}
 
-function loadFullConfig(): Record<string, unknown> {
-  const path = configPath();
+// -- Roles I/O ------------------------------------------------------------
+
+function asRolesMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === "string" && v.trim() !== "") out[k] = v.trim();
+  }
+  return out;
+}
+
+function readModelRolesFromYaml(): Record<string, string> {
+  const path = configYmlPath();
   if (!existsSync(path)) return {};
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf-8"));
-    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
-  } catch (err: any) {
-    console.warn(
-      `[dashboard] providers.json parse failed at ${path}: ${err?.message ?? String(err)}`,
-    );
+    const raw = readFileSync(path, "utf-8");
+    const doc: unknown = parseYaml(raw);
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) return {};
+    const modelRoles = (doc as Record<string, unknown>).modelRoles;
+    return asRolesMap(modelRoles);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[dashboard] config.yml parse failed at ${path}: ${message}`);
     return {};
   }
 }
 
-/**
- * Read the role-relevant slice of `providers.json`. Tolerant of missing file
- * and malformed JSON; both produce `{ roles: {}, rolePresets: [], activePreset: null }`.
- *
- * Re-read on every call — handlers depend on this to see cross-session updates.
- */
-export function loadRoleConfig(): RoleConfig {
-  const raw = loadFullConfig();
-  const roles: Record<string, string> = {};
-  const rawRoles = raw.roles;
-  if (rawRoles && typeof rawRoles === "object") {
-    for (const [k, v] of Object.entries(rawRoles)) {
-      if (typeof v === "string" && v.trim() !== "") roles[k] = v.trim();
+function resolveOmpBinary(): string | null {
+  const override = process.env.OMP_BIN?.trim();
+  if (override) return override;
+  try {
+    const res = getDefaultRegistry().resolve("pi");
+    if (res.ok && res.path && !/\.(?:js|cjs|mjs)$/i.test(res.path)) {
+      const base = res.path.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+      if (base === "node" || base === "node.exe") return null;
+      return res.path;
     }
+  } catch {
+    /* ignore */
   }
-  const rolePresets: RolePreset[] = Array.isArray(raw.rolePresets)
-    ? (raw.rolePresets as RolePreset[])
-    : [];
-  const activePreset: string | null =
-    typeof raw.activePreset === "string" ? (raw.activePreset as string) : null;
-  const roleNames: string[] | undefined = Array.isArray(raw.roleNames)
-    ? (raw.roleNames as unknown[]).filter((n): n is string => typeof n === "string")
-    : undefined;
-  const removedRoles: string[] | undefined = Array.isArray(raw.removedRoles)
-    ? (raw.removedRoles as unknown[]).filter((n): n is string => typeof n === "string")
-    : undefined;
-  return { roles, rolePresets, activePreset, roleNames, removedRoles };
+  return null;
 }
 
-/**
- * Atomic write of the role slice of `providers.json`. Preserves every other
- * top-level key (notably `providers` — owned by provider-register.ts — and
- * `autonomousMode` — owned by pi-flows).
- */
-export function saveRoleConfig(roleConfig: RoleConfig): void {
-  const path = configPath();
-  mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
-  const full = loadFullConfig();
-  full.roles = roleConfig.roles;
-  full.rolePresets = roleConfig.rolePresets;
-  full.activePreset = roleConfig.activePreset;
-  // Persist the editable schema markers when present; drop empty arrays so we
-  // don't accrete empty keys on every write.
-  if (roleConfig.roleNames && roleConfig.roleNames.length > 0) full.roleNames = roleConfig.roleNames;
-  else delete full.roleNames;
-  if (roleConfig.removedRoles && roleConfig.removedRoles.length > 0) full.removedRoles = roleConfig.removedRoles;
-  else delete full.removedRoles;
-  // Atomic tmp+rename so readers never observe a partial file.
+function writeModelRolesViaCli(roles: Record<string, string>): boolean {
+  const bin = resolveOmpBinary();
+  if (!bin) return false;
+  try {
+    execFileSync(bin, ["config", "set", "modelRoles", JSON.stringify(roles), "--json"], {
+      encoding: "utf-8",
+      timeout: 15_000,
+      env: process.env,
+    });
+    return true;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[dashboard] omp config set modelRoles failed: ${message}`);
+    return false;
+  }
+}
+
+function writeModelRolesViaYaml(roles: Record<string, string>): void {
+  const path = configYmlPath();
+  const dir = agentDir();
+  mkdirSync(dir, { recursive: true });
+  let doc: Record<string, unknown> = {};
+  if (existsSync(path)) {
+    const raw = readFileSync(path, "utf-8");
+    try {
+      const parsed: unknown = parseYaml(raw);
+      if (parsed == null && raw.trim() === "") {
+        doc = {};
+      } else if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        doc = { ...(parsed as Record<string, unknown>) };
+      } else {
+        throw new Error("OMP config.yml must contain a mapping");
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Refuse destructive fallback writes. Existing config may contain every
+      // OMP setting; writing `{modelRoles}` after a parse failure would erase it.
+      throw new Error(`Refusing to rewrite malformed OMP config.yml at ${path}: ${message}`);
+    }
+  }
+  doc.modelRoles = roles;
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(full, null, 2));
+  writeFileSync(tmp, stringifyYaml(doc));
   renameSync(tmp, path);
 }
 
-// -- Default roles --------------------------------------------------------
-//
-// Dashboard-owned canonical role-name set. Roles ownership moved off
-// pi-flows (change: adopt-model-resolve-handler-and-roles-ownership), so the
-// dashboard owns the default names too rather than depending on pi-flows
-// being installed. Mirrors pi-flows' `KNOWN_MODEL_ROLES`.
-//
-// See change: roles-standalone-defaults-and-local-install-detection.
-export const DEFAULT_ROLE_NAMES = [
-  "planning",
-  "coding",
-  "compact",
-  "fast",
-  "vision",
-  "research",
-] as const;
+function writeModelRoles(roles: Record<string, string>): void {
+  if (!writeModelRolesViaCli(roles)) {
+    writeModelRolesViaYaml(roles);
+  }
+}
 
 /**
- * Overlay the default role names onto an assigned-roles map for DISPLAY.
- * Assigned values win; default names absent from `roles` appear with an
- * empty (unconfigured) value. Non-default assigned roles are preserved.
- *
- * Used by `roles:get-all` so the Roles table is never an empty dead
- * end on a fresh install. NOT used by `role:resolve-model` (which reports
- * the raw assigned map as `probe.available`).
+ * Read OMP modelRoles. Tolerant of missing/malformed config.yml.
+ * Presets are always empty — OMP has no rolePresets.
  */
+export function loadRoleConfig(): RoleConfig {
+  const roles = readModelRolesFromYaml();
+  return {
+    roles,
+    rolePresets: [],
+    activePreset: null,
+  };
+}
+
+/**
+ * Write roles map to OMP modelRoles. Preserves other config.yml keys.
+ * rolePresets/activePreset/roleNames/removedRoles are ignored (OMP surface).
+ */
+export function saveRoleConfig(roleConfig: RoleConfig): void {
+  writeModelRoles(roleConfig.roles ?? {});
+}
+
 export function overlayDefaultRoles(
   roles: Record<string, string>,
 ): Record<string, string> {
@@ -166,11 +185,6 @@ export function overlayDefaultRoles(
   return { ...out, ...roles };
 }
 
-/**
- * Effective role-name schema = (defaults ∪ added ∪ assigned) − removed,
- * order-stable (defaults first, then adds, then any assigned extras).
- * A removed default is NOT re-injected. See change: add-agent-role-model-tools.
- */
 export function effectiveRoleNames(
   cfg: Pick<RoleConfig, "roles" | "roleNames" | "removedRoles">,
 ): string[] {
@@ -185,11 +199,6 @@ export function effectiveRoleNames(
   return out;
 }
 
-/**
- * Read-time overlay keyed off the EFFECTIVE schema (defaults ∪ added − removed)
- * instead of the hardcoded const. Every effective name appears (empty when
- * unassigned); assigned values win. Used by roles:get-all.
- */
 export function overlayRoles(
   cfg: Pick<RoleConfig, "roles" | "roleNames" | "removedRoles">,
 ): Record<string, string> {
@@ -198,11 +207,6 @@ export function overlayRoles(
   return { ...out, ...cfg.roles };
 }
 
-/**
- * Register a role name in the editable schema. Clears any removal marker and
- * (for non-defaults) records it in `roleNames`. Mutates `cfg` in place; the
- * caller persists via saveRoleConfig. See change: add-agent-role-model-tools.
- */
 export function addRoleName(cfg: RoleConfig, role: string): void {
   if (cfg.removedRoles) cfg.removedRoles = cfg.removedRoles.filter((r) => r !== role);
   const isDefault = (DEFAULT_ROLE_NAMES as readonly string[]).includes(role);
@@ -212,12 +216,6 @@ export function addRoleName(cfg: RoleConfig, role: string): void {
   }
 }
 
-/**
- * Purge a role from the schema, the active roles map, and EVERY preset, in a
- * single mutation. A removed DEFAULT gains a removal marker so the overlay
- * does not re-inject it. Mutates `cfg` in place; the caller persists atomically.
- * See change: add-agent-role-model-tools (design D6, task 3.3).
- */
 export function removeRoleFromSchema(cfg: RoleConfig, role: string): void {
   delete cfg.roles[role];
   for (const p of cfg.rolePresets) delete p.roles[role];
@@ -229,34 +227,8 @@ export function removeRoleFromSchema(cfg: RoleConfig, role: string): void {
   }
 }
 
-// Persistence note (change: roles-standalone-defaults-and-local-install-detection):
-// default role names are NOT auto-written to providers.json. The read-time
-// overlay (`overlayDefaultRoles`) populates the Roles table without touching
-// disk; a role reaches disk only when the user assigns a model via the
-// existing `roles:set` handler. This avoids an uninvited write to the
-// shared global providers.json on every session.
-
-// -- In-memory cache ------------------------------------------------------
-//
-// Mirrors pi-flows' behaviour: a module-level snapshot of the current roles
-// map populated at activate() and updated by `roles:set` /
-// `roles:preset-load`. Used by `getModelRole(role)` for in-process callers
-// (specifically `model:resolve` in provider-register.ts) that want to avoid
-// a disk read in the hot path. The handlers themselves still re-read from
-// disk per spec.
-
 let currentRoles: Record<string, string> = {};
 
-/**
- * Single role-slice accessor. Strips a leading `@`, re-reads disk (so callers
- * see cross-session edits without restart), and returns either the mapped
- * literal `"provider/modelId"` or a structured not-configured `reason`.
- *
- * The one source of truth for `@role` → literal resolution, consumed by
- * `model:resolve` (provider-register.ts), the deprecated `role:resolve-model`
- * alias, and the `list_roles`/`update_roles` tools — no fourth independent
- * reader. See change: add-agent-role-model-tools (design D10).
- */
 export function lookupRole(ref: string): { literal?: string; reason?: string } {
   const roleName = ref.startsWith("@") ? ref.slice(1) : ref;
   if (!roleName) return { reason: "empty role name" };
@@ -269,38 +241,30 @@ export function lookupRole(ref: string): { literal?: string; reason?: string } {
   return { reason: `role '${roleName}' not configured yet` };
 }
 
-/** Look up the model literal assigned to `role`. Returns undefined if unset. */
 export function getModelRole(role: string): string | undefined {
   return lookupRole(role).literal;
 }
 
-// -- Extension entry point ------------------------------------------------
+type RolesEventData = {
+  role?: string;
+  modelId?: string;
+  name?: string;
+  success?: boolean;
+  error?: string;
+  roles?: Record<string, string>;
+  presets?: RolePreset[];
+  activePreset?: string | null;
+  ref?: string;
+  available?: Record<string, string>;
+  resolved?: string;
+  reason?: string;
+};
 
-/**
- * Register the five `roles:*` event handlers. No `flow:`-prefixed alias is
- * retained — roles are 100% dashboard-owned and pi-flows has no role code.
- * Writes are atomic tmp+rename so any concurrent writer leaves the file in a
- * single consistent state (last writer wins). See change:
- * add-agent-role-model-tools (design D11).
- */
 export function activate(pi: ExtensionAPI): void {
   const initial = loadRoleConfig();
   currentRoles = initial.roles;
 
-  // Resolve `@role` aliases for the subagents harness. pi-dashboard-subagents
-  // (>=0.2.0) emits `role:resolve-model` with probe `{ ref, resolved?,
-  // available? }` and reads back `probe.resolved` (a literal
-  // "provider/modelId"). The bridge's own `model:resolve` handler
-  // (provider-register.ts) uses a different probe shape, so the subagent
-  // spawn path never reached it — `@role` model fields hard-failed. This
-  // adapter maps the role name to its assigned model via providers.json#roles.
-  // DEPRECATED → model:resolve. Kept ONE release as an alias for legacy
-  // subagents-harness builds that read `probe.resolved` (a literal string)
-  // rather than `probe.model`. Delegates its `@role` → literal lookup to the
-  // shared lookupRole() accessor; preserves its probe.resolved/available/
-  // reason contract. Removed at next major.
-  // See change: add-agent-role-model-tools (design D9).
-  pi.events.on("role:resolve-model", (probe: any) => {
+  pi.events.on("role:resolve-model", (probe: RolesEventData) => {
     if (!probe || typeof probe.ref !== "string") return;
     const ref = probe.ref.trim();
     const roleName = ref.startsWith("@") ? ref.slice(1) : ref;
@@ -312,94 +276,57 @@ export function activate(pi: ExtensionAPI): void {
     if (literal) {
       probe.resolved = literal;
     } else {
-      // Shadow-disabled: role exists by name (default-seeded) or is unknown,
-      // but has no assigned model. Signal a structured "not configured yet"
-      // reason so the subagents harness surfaces an actionable spawn-time
-      // error instead of an opaque resolution failure.
       probe.reason = reason;
     }
   });
 
-  pi.events.on("roles:get-all", (data: any) => {
+  pi.events.on("roles:get-all", (data: RolesEventData) => {
     const cfg = loadRoleConfig();
-    // Overlay the EFFECTIVE role-name schema (defaults ∪ added − removed) so
-    // the Roles table is never empty and tracks user edits. Assigned values
-    // win; unassigned effective names appear with an empty value.
     data.roles = overlayRoles(cfg);
-    data.presets = cfg.rolePresets;
-    data.activePreset = cfg.activePreset;
+    data.presets = [];
+    data.activePreset = null;
   });
 
-  pi.events.on("roles:set", (data: any) => {
-    const { role, modelId } = data ?? {};
-    if (!role || !modelId) {
-      data.success = false;
+  pi.events.on("roles:set", (data: RolesEventData) => {
+    const role = data?.role;
+    const modelId = data?.modelId;
+    if (!role || typeof role !== "string") {
+      if (data) data.success = false;
       return;
     }
     const cfg = loadRoleConfig();
-    cfg.roles[role] = modelId;
-
-    // If a preset is active, update its roles map in-place too.
-    if (cfg.activePreset) {
-      const preset = cfg.rolePresets.find((p) => p.name === cfg.activePreset);
-      if (preset) preset.roles = { ...cfg.roles };
+    const next = { ...cfg.roles };
+    if (!modelId || String(modelId).trim() === "") {
+      delete next[role];
+    } else {
+      next[role] = String(modelId).trim();
     }
-
-    saveRoleConfig(cfg);
-    currentRoles = cfg.roles;
-    data.success = true;
+    try {
+      writeModelRoles(next);
+    } catch (err: unknown) {
+      if (data) {
+        data.success = false;
+        data.error = err instanceof Error ? err.message : String(err);
+      }
+      return;
+    }
+    currentRoles = next;
+    if (data) {
+      data.success = true;
+      data.roles = overlayRoles({ roles: next });
+      data.presets = [];
+      data.activePreset = null;
+    }
   });
 
-  pi.events.on("roles:preset-load", (data: any) => {
-    const { name } = data ?? {};
-    if (!name) {
+  // OMP has no role presets — stubs that refuse writes.
+  const presetStub = (data: RolesEventData) => {
+    if (data) {
       data.success = false;
-      return;
+      data.error = "OMP has no role presets";
     }
-    const cfg = loadRoleConfig();
-    const preset = cfg.rolePresets.find((p) => p.name === name);
-    if (!preset) {
-      data.success = false;
-      return;
-    }
-    // Wholesale replacement (spec scenario "load replaces roles wholesale").
-    cfg.roles = { ...preset.roles };
-    cfg.activePreset = name;
-    saveRoleConfig(cfg);
-    currentRoles = cfg.roles;
-    data.success = true;
-  });
-
-  pi.events.on("roles:preset-save", (data: any) => {
-    const { name } = data ?? {};
-    if (!name) {
-      data.success = false;
-      return;
-    }
-    const cfg = loadRoleConfig();
-    const idx = cfg.rolePresets.findIndex((p) => p.name === name);
-    const preset: RolePreset = { name, roles: { ...cfg.roles } };
-    if (idx >= 0) cfg.rolePresets[idx] = preset;
-    else cfg.rolePresets.push(preset);
-    saveRoleConfig(cfg);
-    data.success = true;
-  });
-
-  pi.events.on("roles:preset-delete", (data: any) => {
-    const { name } = data ?? {};
-    if (!name) {
-      data.success = false;
-      return;
-    }
-    const cfg = loadRoleConfig();
-    const before = cfg.rolePresets.length;
-    cfg.rolePresets = cfg.rolePresets.filter((p) => p.name !== name);
-    if (cfg.rolePresets.length === before) {
-      data.success = false;
-      return;
-    }
-    if (cfg.activePreset === name) cfg.activePreset = null;
-    saveRoleConfig(cfg);
-    data.success = true;
-  });
+  };
+  pi.events.on("roles:preset-load", presetStub);
+  pi.events.on("roles:preset-save", presetStub);
+  pi.events.on("roles:preset-delete", presetStub);
 }

@@ -24,6 +24,18 @@ import { join } from "node:path";
 // and can inject its own registry.
 
 const CONFIG = () => join(homedir(), ".pi", "agent", "providers.json");
+const AGENT_DIR = () => join(homedir(), ".omp", "agent");
+const OMP_CONFIG = () => join(AGENT_DIR(), "config.yml");
+
+function writeModelRoles(roles: Record<string, string>): void {
+  mkdirSync(AGENT_DIR(), { recursive: true });
+  const lines = ["modelRoles:"];
+  for (const [k, v] of Object.entries(roles)) {
+    lines.push(`  ${k}: ${JSON.stringify(v)}`);
+  }
+  writeFileSync(OMP_CONFIG(), lines.join("\n") + "\n");
+  process.env.PI_CODING_AGENT_DIR = AGENT_DIR();
+}
 
 type AnyModel = { id: string; provider?: string };
 
@@ -100,7 +112,10 @@ async function bootstrap(registry: any) {
 
 function resetConfig() {
   mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
+  mkdirSync(AGENT_DIR(), { recursive: true });
   if (existsSync(CONFIG())) rmSync(CONFIG());
+  if (existsSync(OMP_CONFIG())) rmSync(OMP_CONFIG());
+  process.env.PI_CODING_AGENT_DIR = AGENT_DIR();
 }
 
 beforeEach(() => {
@@ -110,13 +125,12 @@ beforeEach(() => {
 
 afterEach(() => {
   resetConfig();
+  delete process.env.PI_CODING_AGENT_DIR;
 });
 
 describe("model:resolve — @role resolution", () => {
-  it("resolves @fast from providers.json#roles to a Model + auth", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "anthropic/claude-haiku-4-5" },
-    }));
+  it("resolves @fast from OMP modelRoles to a Model + auth", async () => {
+    writeModelRoles({ fast: "anthropic/claude-haiku-4-5" });
     const registry = makeRegistry({
       models: [{ id: "claude-haiku-4-5", provider: "anthropic" }],
     });
@@ -132,9 +146,7 @@ describe("model:resolve — @role resolution", () => {
   });
 
   it("unknown @role sets probe.error and probe.available.roles hint", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "anthropic/haiku", research: "anthropic/opus" },
-    }));
+    writeModelRoles({ fast: "anthropic/haiku", research: "anthropic/opus" });
     const fake = await bootstrap(makeRegistry({ models: [] }));
 
     const probe: any = { ref: "@unknownrole" };
@@ -142,6 +154,7 @@ describe("model:resolve — @role resolution", () => {
 
     expect(probe.model).toBeUndefined();
     expect(probe.error).toMatch(/Role "@unknownrole"/);
+    expect(probe.error).toMatch(/modelRoles/);
     expect(probe.available?.roles).toEqual({ fast: "anthropic/haiku", research: "anthropic/opus" });
   });
 
@@ -241,9 +254,7 @@ describe("model:resolve — thinking suffix", () => {
   });
 
   it("parses :low off @role-resolved literal", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "anthropic/claude-haiku-4-5:low" },
-    }));
+    writeModelRoles({ fast: "anthropic/claude-haiku-4-5:low" });
     const m = { id: "claude-haiku-4-5", provider: "anthropic" };
     const fake = await bootstrap(makeRegistry({ models: [m] }));
     const probe: any = { ref: "@fast" };
@@ -287,9 +298,11 @@ describe("model:resolve — cooperative early-return", () => {
   });
 });
 
-describe("model:resolve — malformed providers.json tolerated", () => {
-  it("malformed JSON during @role lookup returns empty available.roles", async () => {
-    writeFileSync(CONFIG(), "{ not json");
+describe("model:resolve — malformed OMP config.yml tolerated", () => {
+  it("malformed YAML during @role lookup returns empty available.roles", async () => {
+    mkdirSync(AGENT_DIR(), { recursive: true });
+    writeFileSync(OMP_CONFIG(), "modelRoles: [\n");
+    process.env.PI_CODING_AGENT_DIR = AGENT_DIR();
     const fake = await bootstrap(makeRegistry({ models: [] }));
     const probe: any = { ref: "@fast" };
     await fake.emit("model:resolve", probe);
@@ -362,9 +375,7 @@ describe("model:resolve — dead pi.modelRegistry fallback is gone", () => {
   });
 
   it("@role with a captured warm ref fills probe.model", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { fast: "anthropic/claude-haiku-4-5" },
-    }));
+    writeModelRoles({ fast: "anthropic/claude-haiku-4-5" });
     const m = { id: "claude-haiku-4-5", provider: "anthropic" };
     const fake = await bootstrap(makeRegistry({ models: [m] }));
 

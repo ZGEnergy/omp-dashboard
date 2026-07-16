@@ -748,8 +748,8 @@ function splitThinkingSuffix(s: string): { base: string; thinking?: ThinkingLeve
 }
 
 async function resolveModelProbe(probe: any, ref: string): Promise<void> {
-  // 1) Role indirection — read providers.json#roles directly. Recurse with
-  //    the literal once resolved.
+  // 1) Role indirection — read OMP config.yml#modelRoles via role-manager.
+  //    Recurse with the literal once resolved.
   let literal = ref;
   if (literal.startsWith("@")) {
     const roleName = literal.slice(1);
@@ -758,11 +758,10 @@ async function resolveModelProbe(probe: any, ref: string): Promise<void> {
       return;
     }
     // Single source of truth for role reads: role-manager's lookupRole()
-    // accessor owns the providers.json#roles slice. See spec
-    // dashboard-roles-ownership + design D10.
+    // accessor owns OMP config.yml#modelRoles.
     const { literal: mapped } = lookupRole(literal);
     if (!mapped) {
-      probe.error = `Role "${ref}" is not assigned in ~/.pi/agent/providers.json#roles.`;
+      probe.error = `Role "${ref}" is not assigned in OMP config.yml#modelRoles.`;
       probe.available = { ...(probe.available ?? {}), roles: loadRoleConfig().roles };
       return;
     }

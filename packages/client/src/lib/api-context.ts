@@ -52,6 +52,9 @@ let _apiBase = "";
 /** Set the global API base (called from App.tsx). */
 export function setGlobalApiBase(base: string): void {
   _apiBase = base;
+  // Plugins cannot import the client package; expose the same value for
+  // same-process plugin fetches (roles/automation REST helpers).
+  (globalThis as { __PI_DASHBOARD_API_BASE__?: string }).__PI_DASHBOARD_API_BASE__ = base;
 }
 
 /** Get the current API base for non-React fetch calls. */
