@@ -1336,7 +1336,7 @@ function initBridge(pi: ExtensionAPI) {
   function sendSessionNameIfChanged() { const bc = syncBc(); _sendSessionNameIfChanged(bc); applyBc(bc); }
   function sendGitInfoIfChanged(cwd: string) { const bc = syncBc(); _sendGitInfoIfChanged(bc, cwd); applyBc(bc); }
   function sendCwdMissingIfChanged(cwd: string) { const bc = syncBc(); _sendCwdMissingIfChanged(bc, cwd); applyBc(bc); }
-  function sendPiVersionIfChanged() { _sendPiVersionIfChanged(syncBc()); }
+  function sendPiVersionIfChanged() { const bc = syncBc(); _sendPiVersionIfChanged(bc); applyBc(bc); }
 
   // Forward all pi core events to the dashboard.
   // Events with special enrichment logic:
