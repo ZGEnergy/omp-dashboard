@@ -46,7 +46,6 @@ export const OMP_ENUM_OPTIONS: Record<string, readonly string[]> = {
     "disabled"
   ],
   "defaultThinkingLevel": [
-    "off",
     "minimal",
     "low",
     "medium",

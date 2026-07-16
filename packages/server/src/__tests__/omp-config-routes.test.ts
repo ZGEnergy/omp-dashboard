@@ -250,6 +250,31 @@ describe("omp-config routes", () => {
     expect(res.json().code).toBe("OMP_INVALID_KEY");
   });
 
+  it("maps invalid enum value to 400 OMP_INVALID_KEY", async () => {
+    await app.close();
+    app = Fastify({ logger: false });
+    registerOmpConfigRoutes(app, {
+      networkGuard: async () => undefined,
+      cli: makeCli({
+        set: async () => {
+          throw new OmpConfigCliError(
+            "OMP_INVALID_KEY",
+            "Error: Invalid value: off. Valid values: minimal, low, medium, high, xhigh, max, auto",
+          );
+        },
+      }),
+    });
+    await app.ready();
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/omp-config",
+      payload: { key: "defaultThinkingLevel", value: "off" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("OMP_INVALID_KEY");
+    expect(res.json().error).toMatch(/Invalid value: off/);
+  });
+
 
   it("GET /api/omp-config redacts secret values", async () => {
     await app.close();

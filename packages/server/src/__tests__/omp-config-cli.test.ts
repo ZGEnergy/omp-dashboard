@@ -188,6 +188,24 @@ describe("createOmpConfigCli", () => {
     });
   });
 
+  it("maps invalid-value stderr to OMP_INVALID_KEY", async () => {
+    const err = Object.assign(new Error("Command failed"), {
+      exitCode: 1,
+      stderr:
+        "Error: Invalid value: off. Valid values: minimal, low, medium, high, xhigh, max, auto",
+    });
+    const cli = createOmpConfigCli({
+      resolveOmpBin: () => "/usr/bin/omp",
+      execFile: makeExec(() => {
+        throw err;
+      }),
+    });
+    await expect(cli.set("defaultThinkingLevel", "off")).rejects.toBeInstanceOf(OmpConfigCliError);
+    await expect(cli.set("defaultThinkingLevel", "off")).rejects.toMatchObject({
+      code: "OMP_INVALID_KEY",
+    });
+  });
+
   it("path returns trimmed stdout", async () => {
     const cli = createOmpConfigCli({
       resolveOmpBin: () => "/usr/bin/omp",

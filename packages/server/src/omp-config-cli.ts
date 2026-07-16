@@ -166,12 +166,14 @@ function classifyCliFailure(
     errText.includes("unknown") ||
     errText.includes("invalid key") ||
     errText.includes("invalid setting") ||
+    errText.includes("invalid value") ||
+    errText.includes("valid values:") ||
     errText.includes("not a valid") ||
     errText.includes("no such setting")
   ) {
     return new OmpConfigCliError(
       "OMP_INVALID_KEY",
-      stderr.trim() || e.message || "Invalid OMP config key",
+      stderr.trim() || e.message || "Invalid OMP config key or value",
       { exitCode, stderr },
     );
   }
