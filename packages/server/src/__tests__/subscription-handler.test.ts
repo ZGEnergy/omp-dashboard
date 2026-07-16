@@ -94,6 +94,50 @@ describe("handleSubscribe — stale lastSeq detection", () => {
     expect(allEvents[0].seq).toBe(1);
   });
 
+  it("stale lastSeq with omitted mode preserves full replay", async () => {
+    const ctx = createMockContext();
+    for (let i = 0; i < 100; i++) {
+      ctx.eventStore.insertEvent("s1", {
+        ...makeEvent(`e${i}`),
+        data: { pad: "x".repeat(20_000) },
+      });
+    }
+
+    handleSubscribe({ type: "subscribe", sessionId: "s1", lastSeq: 1000 }, new Set(), ctx);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const calls = (ctx.sendTo as any).mock.calls as Array<[any, ServerToBrowserMessage]>;
+    const replays = calls.filter(([, msg]) => msg.type === "event_replay");
+    const allEvents = replays.flatMap(([, msg]: any) => msg.events);
+    expect(allEvents).toHaveLength(100);
+    expect((replays[replays.length - 1]![1] as any).hasMoreOlder).toBeUndefined();
+  });
+
+  it("stale lastSeq with mode:tail applies the requested cold window", async () => {
+    const ctx = createMockContext();
+    for (let i = 0; i < 100; i++) {
+      ctx.eventStore.insertEvent("s1", {
+        ...makeEvent(`e${i}`),
+        data: { pad: "x".repeat(20_000) },
+      });
+    }
+
+    handleSubscribe(
+      { type: "subscribe", sessionId: "s1", lastSeq: 1000, mode: "tail", windowBytes: 256 * 1024 },
+      new Set(),
+      ctx,
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    const calls = (ctx.sendTo as any).mock.calls as Array<[any, ServerToBrowserMessage]>;
+    const replays = calls.filter(([, msg]) => msg.type === "event_replay");
+    const allEvents = replays.flatMap(([, msg]: any) => msg.events);
+    expect(allEvents.length).toBeGreaterThan(0);
+    expect(allEvents.length).toBeLessThan(100);
+    expect(allEvents[allEvents.length - 1]!.seq).toBe(100);
+    expect((replays[replays.length - 1]![1] as any).hasMoreOlder).toBe(true);
+  });
+
   it("marks replaying during delta replay and clears after", async () => {
     const markReplaying = vi.fn();
     const clearReplaying = vi.fn();
@@ -197,6 +241,41 @@ describe("handleSubscribe — stale lastSeq detection", () => {
 
     expect(loadSessionEvents).toHaveBeenCalledTimes(1);
     expect(loadSessionEvents).toHaveBeenCalledWith("s-ctx", "/sessions/s-ctx.jsonl", 1_000_000);
+  });
+
+  it("resets a stale cursor after disk load and preserves legacy full replay", async () => {
+    const events = Array.from({ length: 100 }, (_, i) => ({
+      ...makeEvent(`e${i}`),
+      data: { pad: "x".repeat(20_000) },
+    }));
+    const loadSessionEvents = vi.fn(async () => ({ success: true, events }));
+    const ctx = createMockContext({ directoryService: { loadSessionEvents } as any });
+    ctx.getSubscribers = () => [ctx.ws];
+    ctx.sessionManager.restore({
+      id: "s-disk-stale",
+      cwd: "/test",
+      source: "tui",
+      status: "ended",
+      startedAt: 1000,
+      endedAt: 2000,
+      tokensIn: 0,
+      tokensOut: 0,
+      cost: 0,
+      contextWindow: 200_000,
+      sessionFile: "/sessions/s-disk-stale.jsonl",
+      sessionDir: "/sessions",
+      hidden: false,
+    } as any);
+
+    handleSubscribe({ type: "subscribe", sessionId: "s-disk-stale", lastSeq: 1000 }, new Set(), ctx);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const calls = (ctx.sendTo as any).mock.calls as Array<[any, ServerToBrowserMessage]>;
+    expect(calls.filter(([, msg]) => msg.type === "session_state_reset")).toHaveLength(1);
+    const replays = calls.filter(([, msg]) => msg.type === "event_replay");
+    const allEvents = replays.flatMap(([, msg]: any) => msg.events);
+    expect(allEvents).toHaveLength(100);
+    expect((replays[replays.length - 1]![1] as any).hasMoreOlder).toBeUndefined();
   });
 
   it("does full replay when lastSeq is 0", async () => {

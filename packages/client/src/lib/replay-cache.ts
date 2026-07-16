@@ -167,13 +167,25 @@ export function createReplayCache(opts: ReplayCacheOptions = {}): ReplayCache {
   async function put(sessionId: string, value: ReplayCachePut): Promise<void> {
     await safe(async () => {
       // Over-budget: keep newest events that fit instead of dropping the entry.
-      // See change: session-tail-rehydrate.
+      // Trimming fits the persisted ARRAY serialization (JSON.stringify of the
+      // whole payload, including commas + brackets), not just the per-entry
+      // byte sum from selectNewestEventsByBudget — a window whose per-entry sum
+      // fits can still overflow once array overhead is counted. See change:
+      // session-tail-rehydrate.
       let payload = value.payload;
       let maxSeq = value.maxSeq;
       if (JSON.stringify(payload).length > maxBytesPerSession) {
         const windowed = selectNewestEventsByBudget(payload, maxBytesPerSession);
         payload = windowed.events;
         maxSeq = windowed.windowMaxSeq || maxSeqOf(payload) || maxSeq;
+      }
+      // Recheck the full array serialization: selectNewestEventsByBudget sums
+      // per-entry JSON.stringify length, but the persisted array adds commas +
+      // brackets, so the trimmed window can still exceed maxBytesPerSession.
+      // Drop oldest remaining events until the array fits or the window empties;
+      // the newest event is retained throughout so maxSeq stays valid.
+      while (payload.length > 0 && JSON.stringify(payload).length > maxBytesPerSession) {
+        payload = payload.slice(1);
       }
       if (payload.length === 0) {
         await del(sessionId);

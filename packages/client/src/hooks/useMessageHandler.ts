@@ -159,6 +159,17 @@ export interface MessageHandlerDeps {
    * See change: add-auto-session-naming.
    */
   showToast?: (text: string, variant?: "error" | "success" | "info") => void;
+  /**
+   * Per-session history-window cursor for session-tail-rehydrate: the low
+   * watermark (`minSeq`) already loaded and whether older events remain on
+   * the server. Updated as older history is fetched so re-renders don't
+   * refetch. See change: session-tail-rehydrate.
+   */
+  historyWindowRef?: React.MutableRefObject<Map<string, { minSeq: number; hasMoreOlder: boolean }>>;
+  /** Set-state for the history-window cursor map. See change: session-tail-rehydrate. */
+  setHistoryWindowMap?: React.Dispatch<React.SetStateAction<Map<string, { minSeq: number; hasMoreOlder: boolean }>>>;
+  /** Per-session "loading older" flag for the Load-more affordance. See change: session-tail-rehydrate. */
+  setLoadingOlderMap?: React.Dispatch<React.SetStateAction<Map<string, boolean>>>;
 }
 
 export function useMessageHandler(
@@ -413,6 +424,22 @@ export function useMessageHandler(
         // never stitched onto reset sequence numbers; full replay rebuilds it.
         // See change: reduce-session-replay-traffic.
         void replayPersister?.drop(msg.sessionId);
+        // Drop load-older window meta so a rebuilt tail does not Math.min with a
+        // pre-reset minSeq (which can skip a mid-range forever).
+        // See change: session-tail-rehydrate.
+        historyWindowRef?.current.delete(msg.sessionId);
+        setHistoryWindowMap?.((m) => {
+          if (!m.has(msg.sessionId)) return m;
+          const next = new Map(m);
+          next.delete(msg.sessionId);
+          return next;
+        });
+        setLoadingOlderMap?.((m) => {
+          if (!m.get(msg.sessionId)) return m;
+          const next = new Map(m);
+          next.set(msg.sessionId, false);
+          return next;
+        });
         // Mirror the reset into the plugin-runtime per-session event
         // store so plugin reducers (e.g. flows-plugin) re-derive from
         // a clean stream after a replay. See change:
@@ -685,11 +712,30 @@ export function useMessageHandler(
           const merged = replayPersister.merge(msg.sessionId, msg.events);
           setSessionStates((prev) => {
             const next = new Map(prev);
-            const carry = next.get(msg.sessionId)?.pendingPrompt;
+            const prevState = next.get(msg.sessionId);
+            // Re-reduce raw events from empty, but keep out-of-band UI that is
+            // not in the event store (pendingPrompt + active interactive asks).
+            // Server load-older does not re-send pending UI requests.
+            // See change: session-tail-rehydrate.
             let current = createInitialState();
-            if (carry) current.pendingPrompt = carry;
+            if (prevState?.pendingPrompt) current.pendingPrompt = prevState.pendingPrompt;
             for (const { event } of merged) {
               current = reduceEvent(current, event);
+            }
+            if (prevState && prevState.interactiveRequests.length > 0) {
+              const byId = new Map(current.interactiveRequests.map((r) => [r.requestId, r]));
+              for (const req of prevState.interactiveRequests) {
+                if (!byId.has(req.requestId)) {
+                  current.interactiveRequests = [...current.interactiveRequests, req];
+                }
+              }
+              const uiRows = prevState.messages.filter((m) => m.role === "interactiveUi");
+              const have = new Set(
+                current.messages.filter((m) => m.role === "interactiveUi").map((m) => m.id),
+              );
+              for (const row of uiRows) {
+                if (!have.has(row.id)) current.messages = [...current.messages, row];
+              }
             }
             next.set(msg.sessionId, current);
             return next;
@@ -742,43 +788,51 @@ export function useMessageHandler(
         }
 
         // Track window meta for load-older UI.
-        // Infer when the server omits meta (delta after IDB rehydrate, or older
-        // servers): a non-reset older page always has more? No — use firstSeq>1
-        // on a cold/windowed batch as "older exists". Preserve prior hasMoreOlder
-        // unless the server explicitly clears it.
+        // Prefer server meta. Infer hasMoreOlder only for cold/windowed seeds
+        // (no prior maxSeq / shouldReset cold land), never for warm deltas —
+        // otherwise old servers that omit window fields look like gaps forever.
         // See change: session-tail-rehydrate.
         {
           const prev = historyWindowRef?.current.get(msg.sessionId);
-          const inferredMin =
-            msg.windowMinSeq != null
-              ? msg.windowMinSeq
-              : firstSeq != null
-                ? firstSeq
-                : undefined;
           const serverSaid = msg.hasMoreOlder != null || msg.windowMinSeq != null;
-          const inferredHasMore =
-            msg.hasMoreOlder != null
-              ? msg.hasMoreOlder
-              : firstSeq != null && firstSeq > 1 && !isOlderPage
-                ? true
-                : undefined;
-          if (serverSaid || inferredHasMore != null || (inferredMin != null && prev)) {
+          const coldInfer =
+            !isOlderPage &&
+            shouldReset &&
+            firstSeq != null &&
+            firstSeq > 1 &&
+            msg.hasMoreOlder == null;
+          if (serverSaid || coldInfer) {
+            const inferredMin =
+              msg.windowMinSeq != null
+                ? msg.windowMinSeq
+                : firstSeq != null
+                  ? firstSeq
+                  : (prev?.minSeq ?? 0);
+            // On shouldReset cold rebuild, replace minSeq (do not Math.min with
+            // pre-reset values — those were cleared on session_state_reset).
             const minSeq =
-              inferredMin != null
-                ? prev
-                  ? Math.min(prev.minSeq, inferredMin)
-                  : inferredMin
-                : (prev?.minSeq ?? 0);
+              shouldReset || !prev
+                ? inferredMin
+                : Math.min(prev.minSeq, inferredMin);
             const hasMoreOlder =
               msg.hasMoreOlder != null
                 ? msg.hasMoreOlder
-                : inferredHasMore != null
-                  ? inferredHasMore
+                : coldInfer
+                  ? true
                   : (prev?.hasMoreOlder ?? false);
             historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder });
             setHistoryWindowMap?.((m) => {
               const next = new Map(m);
               next.set(msg.sessionId, { minSeq, hasMoreOlder });
+              return next;
+            });
+          } else if (isOlderPage && firstSeq != null && prev) {
+            // Older page without meta: advance minSeq downward only.
+            const minSeq = Math.min(prev.minSeq, firstSeq);
+            historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder: prev.hasMoreOlder });
+            setHistoryWindowMap?.((m) => {
+              const next = new Map(m);
+              next.set(msg.sessionId, { minSeq, hasMoreOlder: prev.hasMoreOlder });
               return next;
             });
           }
@@ -789,16 +843,19 @@ export function useMessageHandler(
         // fix-history-loading-false-empty-flash.
         if (msg.events.length > 0 || msg.isLast === true) {
           clearLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, msg.sessionId);
-          if (msg.isLast === true) {
-            setLoadingOlderMap?.((m) => {
-              if (!m.get(msg.sessionId)) return m;
-              const next = new Map(m);
-              next.set(msg.sessionId, false);
-              return next;
-            });
-          }
         } else {
           rearmLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, msg.sessionId, HYDRATE_CEILING_MS);
+        }
+        // Load-older in-flight ends only on terminal batch (isLast), including
+        // empty terminal pages — multi-batch older pages must not clear early.
+        // See change: session-tail-rehydrate.
+        if (msg.isLast === true) {
+          setLoadingOlderMap?.((m) => {
+            if (!m.get(msg.sessionId)) return m;
+            const next = new Map(m);
+            next.set(msg.sessionId, false);
+            return next;
+          });
         }
         break;
       }
