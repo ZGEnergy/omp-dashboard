@@ -327,8 +327,10 @@ cmd_pr() {
   if [[ "$branch" == "main" || "$branch" == "master" || "$branch" == "$TARGET_BRANCH" || "$branch" == "develop" ]]; then
     die "refusing to force-with-lease push protected branch '$branch' (check out $SYNC_BRANCH first)"
   fi
-  if [[ "$branch" != sync/upstream-* && "$branch" != "$SYNC_BRANCH" ]]; then
-    die "current branch $branch is not a sync branch (expected $SYNC_BRANCH or sync/upstream-*)"
+  # Single-PR policy: only heads under sync/upstream* may be force-published as sync PRs
+  # (custom SYNC_BRANCH/--branch must still use that prefix so close_stale_sync_prs works).
+  if [[ "$branch" != sync/upstream* ]]; then
+    die "current branch $branch is not a sync branch (expected prefix sync/upstream*)"
   fi
   local tip usha behind ahead
   tip="${UPSTREAM_REMOTE}/${UPSTREAM_REF}"
