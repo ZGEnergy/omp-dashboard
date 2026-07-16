@@ -58,6 +58,39 @@ describe("createOmpConfigCli", () => {
     await expect(cli.list()).resolves.toHaveProperty("autoResume");
   });
 
+  it("exposes the resolved binary and parses its first version line", async () => {
+    const cli = createOmpConfigCli({
+      resolveOmpBin: () => "/usr/bin/omp",
+      execFile: makeExec((file, args) => {
+        expect(file).toBe("/usr/bin/omp");
+        expect(args).toEqual(["--version"]);
+        return "omp 16.5.0\nextra details\n";
+      }),
+    });
+
+    expect(cli.resolveBin()).toBe("/usr/bin/omp");
+    await expect(cli.version()).resolves.toBe("omp 16.5.0");
+  });
+
+  it("normalizes values or options arrays of strings", async () => {
+    const cli = createOmpConfigCli({
+      resolveOmpBin: () => "/usr/bin/omp",
+      execFile: makeExec((_file, args) => {
+        expect(args).toEqual(["config", "list", "--json"]);
+        return {
+          withValues: { type: "enum", values: ["one", "two"] },
+          withOptions: { type: "enum", options: ["low", "high"] },
+          invalid: { type: "enum", options: ["ok", 1] },
+        };
+      }),
+    });
+
+    const list = await cli.list();
+    expect(list.withValues.values).toEqual(["one", "two"]);
+    expect(list.withOptions.values).toEqual(["low", "high"]);
+    expect(list.invalid.values).toBeUndefined();
+  });
+
 
   it("list normalizes fixture map into keyed entries", async () => {
     const cli = createOmpConfigCli({

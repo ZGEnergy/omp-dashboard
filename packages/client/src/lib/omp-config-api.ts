@@ -18,11 +18,14 @@ export type OmpConfigEntry = {
   value: unknown;
   type: OmpConfigValueType;
   description: string;
+  values?: string[];
 };
 
 export type OmpConfigSnapshot = {
   agentDir: string;
   settings: Record<string, OmpConfigEntry>;
+  ompBin?: string | null;
+  ompVersion?: string | null;
 };
 
 export class OmpConfigApiError extends Error {
@@ -70,7 +73,9 @@ export async function fetchOmpConfig(signal?: AbortSignal): Promise<OmpConfigSna
     record.settings && typeof record.settings === "object"
       ? (record.settings as Record<string, OmpConfigEntry>)
       : {};
-  return { agentDir, settings };
+  const ompBin = typeof record.ompBin === "string" ? record.ompBin : null;
+  const ompVersion = typeof record.ompVersion === "string" ? record.ompVersion : null;
+  return { agentDir, settings, ompBin, ompVersion };
 }
 
 export async function setOmpConfig(

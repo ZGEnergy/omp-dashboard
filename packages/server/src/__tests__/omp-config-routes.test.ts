@@ -37,6 +37,8 @@ function fixtureAsEntries(): Record<string, OmpConfigEntry> {
 function makeCli(overrides: Partial<OmpConfigCli> = {}): OmpConfigCli {
   const entries = fixtureAsEntries();
   return {
+    resolveBin: () => "/usr/bin/omp",
+    version: async () => "omp 16.5.0",
     path: async () => "/home/joe/.omp/agent",
     list: async () => entries,
     get: async (key) => {
@@ -90,6 +92,8 @@ describe("omp-config routes", () => {
     const body = res.json();
     expect(body.success).toBe(true);
     expect(body.data.agentDir).toBe("/home/joe/.omp/agent");
+    expect(body.data.ompBin).toBe("/usr/bin/omp");
+    expect(body.data.ompVersion).toBe("omp 16.5.0");
     expect(body.data.settings.modelRoles.type).toBe("record");
     expect(body.data.settings.autoResume.type).toBe("boolean");
   });
@@ -148,6 +152,8 @@ describe("omp-config routes", () => {
     let networkChecks = 0;
     let reads = 0;
     const cli: OmpConfigCli = {
+      resolveBin: () => "/usr/bin/omp",
+      version: async () => "omp 16.5.0",
       path: async () => "/home/joe/.omp/agent",
       list: async () => entries,
       get: async (key) => {

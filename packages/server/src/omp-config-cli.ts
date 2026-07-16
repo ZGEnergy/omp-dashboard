@@ -24,6 +24,7 @@ export type OmpConfigEntry = {
   value: unknown;
   type: OmpConfigValueType;
   description: string;
+  values?: string[];
 };
 
 export type OmpConfigCliErrorCode =
@@ -69,9 +70,12 @@ export interface OmpConfigCliOptions {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
 }
-
 export interface OmpConfigCli {
+  /** Resolve the exact omp binary used by CLI operations. */
+  resolveBin(): string | null;
   path(): Promise<string>;
+  /** Return the first line of `omp --version`, or null for empty output. */
+  version(): Promise<string | null>;
   list(): Promise<Record<string, OmpConfigEntry>>;
   get(key: string): Promise<OmpConfigEntry>;
   set(key: string, value: unknown): Promise<OmpConfigEntry>;
@@ -177,16 +181,27 @@ function classifyCliFailure(
   );
 }
 
+function normalizeValues(raw: Record<string, unknown>): string[] | undefined {
+  const candidate = Array.isArray(raw.values)
+    ? raw.values
+    : Array.isArray(raw.options)
+      ? raw.options
+      : undefined;
+  if (!candidate || !candidate.every((value) => typeof value === "string")) return undefined;
+  return [...candidate] as string[];
+}
 function normalizeListMap(
-  raw: Record<string, { value?: unknown; type?: string; description?: string }>,
+  raw: Record<string, Record<string, unknown>>,
 ): Record<string, OmpConfigEntry> {
   const out: Record<string, OmpConfigEntry> = {};
   for (const [key, entry] of Object.entries(raw ?? {})) {
+    const values = normalizeValues(entry);
     out[key] = {
       key,
       value: entry?.value,
       type: (entry?.type as OmpConfigValueType) ?? "string",
-      description: entry?.description ?? "",
+      description: typeof entry?.description === "string" ? entry.description : "",
+      ...(values ? { values } : {}),
     };
   }
   return out;
@@ -209,11 +224,13 @@ function normalizeEntry(raw: unknown, fallbackKey: string): OmpConfigEntry {
       `omp config response for ${fallbackKey} omitted type metadata`,
     );
   }
+  const values = normalizeValues(obj);
   return {
     key: typeof obj.key === "string" ? obj.key : fallbackKey,
     value: obj.value,
     type: obj.type as OmpConfigValueType,
     description: typeof obj.description === "string" ? obj.description : "",
+    ...(values ? { values } : {}),
   };
 }
 
@@ -267,16 +284,25 @@ export function createOmpConfigCli(options: OmpConfigCliOptions = {}): OmpConfig
   }
 
   return {
+    resolveBin() {
+      return resolveBin();
+    },
+
     async path() {
       const out = (await run(["config", "path"])).trim();
       if (out) return out;
       return resolveOmpAgentDir({ agentDirEnv: env.PI_CODING_AGENT_DIR });
     },
 
+    async version() {
+      const output = await run(["--version"]);
+      return output.split(/\r?\n/, 1)[0]?.trim() || null;
+    },
+
     async list() {
       const raw = (await runJson(["config", "list", "--json"])) as Record<
         string,
-        { value?: unknown; type?: string; description?: string }
+        Record<string, unknown>
       >;
       return normalizeListMap(raw);
     },

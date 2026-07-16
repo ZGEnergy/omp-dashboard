@@ -106,15 +106,19 @@ export function registerOmpConfigRoutes(
     { preHandler: networkGuard },
     async (_request, reply) => {
       try {
-        const [settings, agentDir] = await Promise.all([
+        const [settings, agentDir, ompBin, ompVersion] = await Promise.all([
           cli.list(),
           cli.path().catch(() => resolveOmpAgentDir()),
+          Promise.resolve(cli.resolveBin()),
+          cli.version().catch(() => null),
         ]);
         return {
           success: true,
           data: {
             agentDir,
             settings,
+            ompBin,
+            ompVersion,
           },
         };
       } catch (err) {
