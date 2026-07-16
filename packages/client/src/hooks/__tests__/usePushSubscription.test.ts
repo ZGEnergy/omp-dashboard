@@ -193,6 +193,28 @@ describe("usePushSubscription", () => {
     expect(serviceWorker.subscribe).not.toHaveBeenCalled();
   });
 
+  it("sets unsubscribed when register fetch rejects on mount", async () => {
+    const existing = {
+      endpoint: "https://push.example/existing",
+      toJSON: () => ({ endpoint: "https://push.example/existing" }),
+    } as PushSubscription;
+    mockServiceWorker(existing);
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (url.includes("/api/push/vapid-public-key")) {
+        return { ok: true, json: async () => ({ publicKey: VAPID }) };
+      }
+      if (url.includes("/api/push/register")) {
+        throw new TypeError("network down");
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { result } = renderHook(() => usePushSubscription());
+    await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
+    expect(fetchSpy.mock.calls.some((call) => String(call[0]).includes("/api/push/register"))).toBe(true);
+  });
+
   it("does not mark an existing subscription as subscribed when register fails", async () => {
     const existing = {
       endpoint: "https://push.example/existing",

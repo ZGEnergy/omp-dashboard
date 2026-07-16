@@ -94,12 +94,20 @@ export function usePushSubscription(): PushSubscriptionState {
         const publicKey = await fetchVapidPublicKey();
         if (cancelled || !publicKey) return;
         vapidKey.current = publicKey;
-        const initialization = await initializePushSubscription();
-        if (cancelled) return;
-        tokenId.current = initialization.tokenId;
-        setStatus(initialization.status);
+        try {
+          const initialization = await initializePushSubscription();
+          if (cancelled) return;
+          tokenId.current = initialization.tokenId;
+          setStatus(initialization.status);
+        } catch {
+          // Existing browser sub + register network failure: leave VAPID so
+          // Enable can retry; do not stick on unknown (toggle disabled forever).
+          if (cancelled) return;
+          tokenId.current = null;
+          setStatus("unsubscribed");
+        }
       } catch {
-        // Push not enabled on this server (404) or transient — stay unknown.
+        // Push not enabled on this server (404) — stay unknown.
         vapidKey.current = null;
       }
     })();
