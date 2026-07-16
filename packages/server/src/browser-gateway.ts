@@ -72,6 +72,9 @@ import { handleRenameSession, handleHideSession, handleUnhideSession, handleAtta
 import { handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleOpenInlineTerminal, handleCloseInlineTerminal } from "./browser-handlers/terminal-handler.js";
 import { handlePinDirectory, handleUnpinDirectory, handleReorderPinnedDirs, handleFavoriteModel, handleUnfavoriteModel, handleReorderSessions, handleOpenSpecRefresh, handleOpenSpecBulkArchive, handleExtensionUiResponse, handlePiGatewayForward, handleCreateWorkspace, handleRenameWorkspace, handleDeleteWorkspace, handleSetWorkspaceCollapsed, handleAddFolderToWorkspace, handleRemoveFolderFromWorkspace, handleReorderWorkspaceFolders, handleReorderWorkspaces } from "./browser-handlers/directory-handler.js";
 
+export const PROMPT_RESPONSE_RETRY_MAX_AGE_MS = 60_000;
+export const PROMPT_RESPONSE_MAX_RETRIES = 10;
+
 
 
 export interface BrowserGateway {
@@ -108,6 +111,9 @@ export interface BrowserGateway {
   trackPromptRequest(sessionId: string, msg: Record<string, unknown>): boolean;
   /** Clear a pending PromptBus request (dismissed or cancelled) */
   clearPromptRequest(sessionId: string, promptId: string): void;
+  /** Clear all queued PromptBus responses for a session (session unregister). */
+  clearPendingPromptResponses(sessionId: string): void;
+
   /** Tell browser subscribers to reset accumulated state for a session (bridge reconnected) */
   broadcastSessionStateReset(sessionId: string): void;
   /** Shut down all tracked headless child processes */
@@ -182,6 +188,7 @@ export function createBrowserGateway(
   pendingWorktreeBaseRegistry?: import("./pending-worktree-base-registry.js").PendingWorktreeBaseRegistry,
   metaPersistence?: import("./meta-persistence.js").MetaPersistence,
   viewMessageStore: ViewMessageStore = new ViewMessageStore(),
+  promptResponseMaxAgeMs = PROMPT_RESPONSE_RETRY_MAX_AGE_MS,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -219,7 +226,9 @@ export function createBrowserGateway(
   // answered card after a browser refresh.
   const pendingPromptResponses = new Map<string, Map<string, {
     message: Record<string, unknown>;
+    createdAt: number;
     retryDelayMs: number;
+    retryCount: number;
     timer?: ReturnType<typeof setTimeout>;
   }>>();
 
@@ -232,6 +241,15 @@ export function createBrowserGateway(
     if (sessionMap!.size === 0) pendingPromptResponses.delete(sessionId);
   }
 
+  function clearPendingPromptResponses(sessionId: string): void {
+    const sessionMap = pendingPromptResponses.get(sessionId);
+    if (!sessionMap) return;
+    for (const queued of sessionMap.values()) {
+      if (queued.timer) clearTimeout(queued.timer);
+    }
+    pendingPromptResponses.delete(sessionId);
+  }
+
   function queuePromptResponse(sessionId: string, promptId: string, message: Record<string, unknown>): void {
     let sessionMap = pendingPromptResponses.get(sessionId);
     if (!sessionMap) {
@@ -240,14 +258,40 @@ export function createBrowserGateway(
     }
     if (sessionMap.has(promptId)) return;
 
-    const queued: { message: Record<string, unknown>; retryDelayMs: number; timer?: ReturnType<typeof setTimeout> } = { message, retryDelayMs: 250 };
+    const queued: {
+      message: Record<string, unknown>;
+      createdAt: number;
+      retryDelayMs: number;
+      retryCount: number;
+      timer?: ReturnType<typeof setTimeout>;
+    } = {
+      message,
+      createdAt: Date.now(),
+      retryDelayMs: 250,
+      retryCount: 0,
+    };
     sessionMap.set(promptId, queued);
     const forward = (): void => {
       if (pendingPromptResponses.get(sessionId)?.get(promptId) !== queued) return;
+      const ageMs = Date.now() - queued.createdAt;
+      if (ageMs >= promptResponseMaxAgeMs || queued.retryCount > PROMPT_RESPONSE_MAX_RETRIES) {
+        clearQueuedPromptResponse(sessionId, promptId);
+        return;
+      }
       piGateway.sendToSession(sessionId, queued.message as any);
       const delay = queued.retryDelayMs;
       queued.retryDelayMs = Math.min(delay * 2, 30_000);
-      queued.timer = setTimeout(forward, delay);
+      queued.retryCount += 1;
+      if (queued.retryCount > PROMPT_RESPONSE_MAX_RETRIES) {
+        clearQueuedPromptResponse(sessionId, promptId);
+        return;
+      }
+      const remainingMs = promptResponseMaxAgeMs - (Date.now() - queued.createdAt);
+      if (remainingMs <= 0) {
+        clearQueuedPromptResponse(sessionId, promptId);
+        return;
+      }
+      queued.timer = setTimeout(forward, Math.min(delay, remainingMs));
       queued.timer.unref?.();
     };
     forward();
@@ -987,6 +1031,7 @@ export function createBrowserGateway(
 
     trackPromptRequest,
     clearPromptRequest,
+    clearPendingPromptResponses,
 
     shutdownHeadlessProcesses() {
       headlessPidRegistry.killAll();

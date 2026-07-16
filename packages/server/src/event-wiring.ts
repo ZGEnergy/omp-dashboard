@@ -436,6 +436,7 @@ export function wireEvents(deps: EventWiringDeps): void {
 
   // Broadcast session ended to browsers when sessions are unregistered
   sessionManager.onUnregister = (sessionId) => {
+    browserGateway.clearPendingPromptResponses(sessionId);
     const session = sessionManager.get(sessionId);
     if (session) {
       // Durably clear the liveness marker EAGERLY (atomic, not debounced).
