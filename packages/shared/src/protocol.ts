@@ -384,6 +384,13 @@ export interface PromptCancelMessage {
   promptId: string;
 }
 
+/** Bridge → server: idempotent receipt for a browser PromptBus response. */
+export interface PromptResponseAckMessage {
+  type: "prompt_response_ack";
+  sessionId: string;
+  promptId: string;
+}
+
 export interface ProcessInfo {
   pid: number;
   pgid: number;
@@ -539,7 +546,7 @@ export type ExtensionToServerMessage =
   | PromptRequestMessage
   | PromptDismissMessage
   | PromptCancelMessage
-  | ReplayCompleteMessage
+  | PromptResponseAckMessage
   | FirstMessageUpdateMessage
   | RolesListMessage
   | SpawnNewSessionMessage

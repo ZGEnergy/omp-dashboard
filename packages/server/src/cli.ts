@@ -128,6 +128,7 @@ export function buildConfig(flags: Partial<ServerConfig>): ServerConfig {
     maxWsBufferBytes: fileConfig.memoryLimits.maxWsBufferBytes,
     editor: fileConfig.editor,
     openspec: fileConfig.openspec,
+    push: fileConfig.push,
     sessions: fileConfig.sessions,
     reattachPlacement: fileConfig.reattachPlacement,
     completedFirst: fileConfig.completedFirst,

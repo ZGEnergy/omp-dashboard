@@ -103,4 +103,8 @@ describe("toolCallPrefKey", () => {
   it("returns null for ask_user (non-hidable)", () => {
     expect(toolCallPrefKey("ask_user")).toBeNull();
   });
+
+  it("returns null for ask (non-hidable core tool)", () => {
+    expect(toolCallPrefKey("ask")).toBeNull();
+  });
 });

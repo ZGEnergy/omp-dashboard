@@ -141,6 +141,46 @@ export const DEFAULT_OPENSPEC_POLL: OpenSpecPollConfig = {
   jitterSeconds: 5,
 };
 
+/**
+ * Server push-notification configuration.
+ *
+ * Opt-in (`enabled` defaults to `false`). When disabled the dispatcher does not
+ * deliver, push routes return 404, and VAPID keys are generated only when
+ * enabling Web Push — a user who never touches this block sees zero behavior change.
+ *
+ * `transport` union (`"web-push" | "fcm"`) is intentionally kept intact across
+ * types/registry/config so the later Capacitor/FCM change drops in without
+ * schema churn. Web Push is implemented; FCM is a typed stub in v1.
+ * See change: add-server-push-notifications.
+ */
+export interface PushConfig {
+  /** Master gate. Default `false`. */
+  enabled: boolean;
+  /**
+   * Per-(session, device) coalescing window in ms. Default 30 000.
+   * Clamped to [5 000, 300 000].
+   */
+  coalesceWindowMs: number;
+  /** Whether push notifications for input-needed/crash actions are enabled. Defaults to `true`. */
+  actionsRequired: boolean;
+  /** Whether push notifications for turn-done events are enabled. Defaults to `true`. */
+  claudeDecides: boolean;
+  /** Web Push (VAPID) settings. `contactEmail` is required by the VAPID spec. */
+  webPush?: { contactEmail: string };
+  /**
+   * FCM settings. Path to a Google service-account JSON. Kept in the schema so
+   * the FCM transport (stub in v1) can drop in later without a config change.
+   */
+  fcm?: { serviceAccountPath: string };
+}
+
+export const DEFAULT_PUSH_CONFIG: PushConfig = {
+  enabled: false,
+  coalesceWindowMs: 30_000,
+  actionsRequired: true,
+  claudeDecides: true,
+};
+
 export interface SessionsConfig {
   /**
    * When `true` (the default) session-event hydration (JSONL parse + replay)
@@ -282,6 +322,8 @@ export interface DashboardConfig {
   editor: EditorConfig;
   /** OpenSpec background polling behavior (interval, concurrency, change detection, jitter) */
   openspec: OpenSpecPollConfig;
+  /** Server push-notification behavior (opt-in; dispatcher/routes/VAPID gated on `enabled`). */
+  push: PushConfig;
   /** Session behavior — hydration worker offload toggle. */
   sessions: SessionsConfig;
   /** Keeper log behavior — gates capture of pi stdout/stderr into keeper-<id>.log. */
@@ -436,6 +478,7 @@ const DEFAULTS: DashboardConfig = {
   memoryLimits: { ...DEFAULT_MEMORY_LIMITS },
   editor: { ...DEFAULT_EDITOR_CONFIG },
   openspec: { ...DEFAULT_OPENSPEC_POLL },
+  push: { ...DEFAULT_PUSH_CONFIG },
   sessions: { ...DEFAULT_SESSIONS },
   keeperLog: { ...DEFAULT_KEEPER_LOG },
   trustedNetworks: [],
@@ -561,6 +604,31 @@ function parseOpenSpecPollConfig(raw: any): OpenSpecPollConfig {
     useWorker:
       typeof raw.useWorker === "boolean" ? raw.useWorker : DEFAULT_OPENSPEC_POLL.useWorker,
   };
+}
+
+export function parsePushConfig(raw: unknown): PushConfig {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...DEFAULT_PUSH_CONFIG };
+  const source = raw as Record<string, any>;
+  const config: PushConfig = {
+    enabled: typeof source.enabled === "boolean" ? source.enabled : DEFAULT_PUSH_CONFIG.enabled,
+    coalesceWindowMs: clampNumber(
+      source.coalesceWindowMs,
+      DEFAULT_PUSH_CONFIG.coalesceWindowMs,
+      5_000,
+      300_000,
+    ),
+    actionsRequired:
+      typeof source.actionsRequired === "boolean" ? source.actionsRequired : DEFAULT_PUSH_CONFIG.actionsRequired,
+    claudeDecides:
+      typeof source.claudeDecides === "boolean" ? source.claudeDecides : DEFAULT_PUSH_CONFIG.claudeDecides,
+  };
+  if (source.webPush && typeof source.webPush === "object" && typeof source.webPush.contactEmail === "string") {
+    config.webPush = { contactEmail: source.webPush.contactEmail };
+  }
+  if (source.fcm && typeof source.fcm === "object" && typeof source.fcm.serviceAccountPath === "string") {
+    config.fcm = { serviceAccountPath: source.fcm.serviceAccountPath };
+  }
+  return config;
 }
 
 function parseKeeperLogConfig(raw: any): KeeperLogConfig {
@@ -744,6 +812,7 @@ export function loadConfig(): DashboardConfig {
       memoryLimits: parseMemoryLimits(parsed.memoryLimits),
       editor: parseEditorConfig(parsed.editor),
       openspec: parseOpenSpecPollConfig(parsed.openspec),
+      push: parsePushConfig(parsed.push),
       sessions: parseSessionsConfig(parsed.sessions),
       keeperLog: parseKeeperLogConfig(parsed.keeperLog),
       trustedNetworks: parseTrustedNetworks(parsed.trustedNetworks),

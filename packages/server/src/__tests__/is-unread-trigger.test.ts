@@ -76,13 +76,23 @@ describe("isUnreadTrigger", () => {
     });
   });
 
-  describe("trigger 2: currentTool becomes ask_user", () => {
+  describe("trigger 2: currentTool becomes input-needed (ask_user / ask)", () => {
     it("returns true when currentTool flips from null to ask_user", () => {
       expect(
         isUnreadTrigger(
           "tool_execution_start",
           { status: "streaming", currentTool: null },
           { status: "streaming", currentTool: "ask_user" },
+        ),
+      ).toBe(true);
+    });
+
+    it("returns true when currentTool flips from null to core ask", () => {
+      expect(
+        isUnreadTrigger(
+          "tool_execution_start",
+          { status: "streaming", currentTool: null },
+          { status: "streaming", currentTool: "ask" },
         ),
       ).toBe(true);
     });
@@ -103,6 +113,16 @@ describe("isUnreadTrigger", () => {
           "message_end",
           { status: "streaming", currentTool: "ask_user" },
           { status: "streaming", currentTool: "ask_user" },
+        ),
+      ).toBe(false);
+    });
+
+    it("returns false when core ask persists (no transition)", () => {
+      expect(
+        isUnreadTrigger(
+          "message_end",
+          { status: "streaming", currentTool: "ask" },
+          { status: "streaming", currentTool: "ask" },
         ),
       ).toBe(false);
     });

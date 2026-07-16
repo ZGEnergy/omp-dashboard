@@ -4,6 +4,7 @@
  */
 
 import { toolCallPrefKey } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { mdiChevronDown, mdiChevronRight, mdiRepeat } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React, { useState } from "react";
@@ -24,7 +25,7 @@ export function CollapsedToolGroup({ group, toolContext }: Props) {
   const [expanded, setExpanded] = useState(false);
   const isMobile = useMobile();
   const prefs = useDisplayPrefs();
-  // Filter members by tool-kind toggle; `ask_user` is never gated.
+  // Input-needed tools (`ask_user` and core `ask`) are never gated.
   // Hide the entire group only if every member is gated off.
   // See change: configurable-chat-display.
   const visibleMessages = group.messages.filter((m) => {
@@ -75,7 +76,7 @@ export function CollapsedToolGroup({ group, toolContext }: Props) {
                   context={toolContext}
                   startedAt={row.startedAt}
                   duration={row.duration}
-                  showResultBody={prefs.toolResults || row.toolName === "ask_user"}
+                  showResultBody={prefs.toolResults || isInputNeededTool(row.toolName)}
                 />
               );
             }

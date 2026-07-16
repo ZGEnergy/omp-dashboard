@@ -272,6 +272,19 @@ describe("ToolCallStep", () => {
       expect(isExpanded(container)).toBe(true);
     });
   });
+  describe("core ask auto-expand behavior", () => {
+    it("uses the rich tool-card renderer and auto-expands while pending or resolved", () => {
+      const { container } = renderStep({
+        toolName: "ask",
+        toolCallId: "tc-core-ask",
+        args: { questions: [{ id: "q", question: "Pick", options: [{ label: "A" }] }] },
+        status: "running",
+      });
+      expect(container.querySelector(".overflow-x-auto")).not.toBeNull();
+      expect(container.textContent).toContain("Pick");
+      expect(container.textContent).toContain("A");
+    });
+  });
 
   it("renders the full bash command in collapsed summary (no slice)", () => {
     const longCommand =

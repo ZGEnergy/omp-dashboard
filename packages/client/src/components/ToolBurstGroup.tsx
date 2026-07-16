@@ -26,6 +26,7 @@
  */
 
 import { toolCallPrefKey } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { mdiCheck, mdiChevronDown, mdiChevronRight, mdiConsoleLine, mdiLoading } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -148,8 +149,8 @@ function GroupFrame({
 export function ToolBurstGroup({ burst, toolContext }: Props) {
   const prefs = useDisplayPrefs();
 
-  // Gate members by tool-kind toggle (mirrors CollapsedToolGroup). `ask_user`
-  // is never gated (toolCallPrefKey → null). Count/render reflect VISIBLE only.
+  // Input-needed tools (`ask_user` and core `ask`) are never gated.
+  // Count/render reflect VISIBLE only.
   const isVisible = (name: string | undefined) => {
     const key = toolCallPrefKey(name ?? "");
     return key === null || prefs.toolCalls[key];
@@ -299,7 +300,7 @@ function BurstBodyItem({
       startedAt={msg.startedAt}
       duration={msg.duration}
       toolDetails={msg.toolDetails}
-      showResultBody={prefs.toolResults || msg.toolName === "ask_user"}
+      showResultBody={prefs.toolResults || isInputNeededTool(msg.toolName)}
     />
   );
 }

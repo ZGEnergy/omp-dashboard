@@ -2,6 +2,7 @@ import { isWidgetBarPrompt } from "@blackbelt-technology/dashboard-plugin-runtim
 import { EmptyState } from "@blackbelt-technology/pi-dashboard-client-utils/EmptyState";
 import { Skeleton } from "@blackbelt-technology/pi-dashboard-client-utils/Skeleton";
 import { toolCallPrefKey } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { mdiCheck, mdiChevronDown, mdiClose, mdiContentCopy, mdiLoading, mdiSourceFork, mdiTextBox } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -558,8 +559,8 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
 
         if (msg.role === "toolResult") {
           if (!showDebugTools && isDebugTool(msg.toolName ?? "")) return null;
-          // Gate by tool-kind preference. `ask_user` is non-hidable
-          // (toolCallPrefKey returns null → always render).
+          // Input-needed tools are non-hidable (toolCallPrefKey returns null).
+          // Preserve rich history bodies for both `ask_user` and core `ask`.
           const kindKey = toolCallPrefKey(msg.toolName ?? "");
           if (kindKey !== null && !prefs.toolCalls[kindKey]) return null;
           if (hiddenToolResultIds.has(msg.id)) return null;
@@ -591,7 +592,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
               startedAt={msg.startedAt}
               duration={msg.duration}
               toolDetails={msg.toolDetails}
-              showResultBody={prefs.toolResults || msg.toolName === "ask_user"}
+              showResultBody={prefs.toolResults || isInputNeededTool(msg.toolName)}
               onAbort={msg.toolStatus === "running" ? onAbort : undefined}
               onForceKill={msg.toolStatus === "running" ? onForceKill : undefined}
             />

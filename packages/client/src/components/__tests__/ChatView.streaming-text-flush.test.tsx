@@ -106,6 +106,7 @@ describe("Task 6.1: ask_user blocking flow — text bubble appears above questio
       "p1",
       "select",
       { title: "pick", options: ["a", "b"] },
+      false,
       "t1",
     );
     // Note: NO message_end. Question dialog is open while user thinks.

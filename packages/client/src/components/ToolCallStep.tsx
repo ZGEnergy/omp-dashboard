@@ -1,3 +1,4 @@
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { type ClaimEntry, CurrentPluginLayer, forToolName } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { useSlotRegistryOrNull } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import { mdiAlert, mdiAlertCircle, mdiCheck, mdiChevronDown, mdiChevronRight, mdiHelpCircleOutline, mdiLoading, mdiStop } from "@mdi/js";
@@ -50,12 +51,12 @@ interface Props {
    * When `false`, the tool-result body is omitted but the header (name +
    * status + elapsed) still renders. Defaults to `true` for back-compat.
    * Used by `ChatView` to honour `displayPrefs.toolResults`.
-   * `ask_user` is never gated by callers — they always pass `true`.
+   * Input-needed tools (`ask_user` and core `ask`) are never gated by callers — they always pass `true`.
    * See change: configurable-chat-display.
    */
   showResultBody?: boolean;
   /**
-   * When true, the leading status glyph (status/`ask_user` icon) is omitted.
+   * When true, the leading status glyph (status/input-needed icon) is omitted.
    * Defaults to `false` (icon shown) so the main chat is unchanged; flow agent
    * detail views opt in via MinimalChatView's `hideToolStatusIcon`.
    * See change: improve-flow-ui.
@@ -75,9 +76,9 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
   const isMobile = useMobile();
   const hasImages = images && images.length > 0;
   const isAgentRunning = toolName === "Agent" && status === "running";
-  const isAskUser = toolName === "ask_user";
-  const isFailedAskUser = isAskUser && status === "error";
-  const [expanded, setExpanded] = useState(hasImages || isAgentRunning || (isAskUser && !isFailedAskUser));
+  const isInputTool = isInputNeededTool(toolName);
+  const isFailedInputTool = isInputTool && status === "error";
+  const [expanded, setExpanded] = useState(hasImages || isAgentRunning || (isInputTool && !isFailedInputTool));
   const [stopState, setStopState] = useState<StopState>("idle");
   const Renderer = getToolRenderer(toolName);
 
@@ -142,13 +143,13 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
           <span className={`inline-flex ${
             status === "error"
               ? "text-red-400"
-              : isAskUser
+              : isInputTool
                 ? "text-sky-400"
                 : status === "complete"
                   ? "text-green-400"
                   : "text-yellow-400"
           }`}>
-            {isAskUser && status !== "error" && status !== "running"
+            {isInputTool && status !== "error" && status !== "running"
               ? <Icon path={mdiHelpCircleOutline} size={0.55} />
               : statusIcons[status]}
           </span>

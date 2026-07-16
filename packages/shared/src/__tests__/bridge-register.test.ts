@@ -13,16 +13,22 @@ describe("shared bridge-register", () => {
   let tmpDir: string;
   let settingsPath: string;
   let origHome: string | undefined;
+  let origOmpAgentDir: string | undefined;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "shared-bridge-test-"));
     settingsPath = path.join(tmpDir, ".pi", "agent", "settings.json");
     origHome = process.env.HOME;
+    origOmpAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.HOME = tmpDir;
+    delete process.env.PI_CODING_AGENT_DIR;
   });
 
   afterEach(() => {
-    process.env.HOME = origHome;
+    if (origHome === undefined) delete process.env.HOME;
+    else process.env.HOME = origHome;
+    if (origOmpAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = origOmpAgentDir;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -247,6 +253,33 @@ describe("shared bridge-register", () => {
       const packages = settings.packages as string[];
       expect(packages).toContain(npmEntry);
       expect(packages).toContain(localExt);
+    });
+
+    it("updates OMP's extension-file registry while preserving unrelated entries", () => {
+      const oldExt = path.join(tmpDir, "old", "extension");
+      const newExt = path.join(tmpDir, "new", "extension");
+      const unrelated = path.join(tmpDir, "unrelated", "bridge.ts");
+      const ompAgentDir = path.join(tmpDir, "omp-agent");
+      for (const ext of [oldExt, newExt]) {
+        fs.mkdirSync(path.join(ext, "src"), { recursive: true });
+        fs.writeFileSync(
+          path.join(ext, "package.json"),
+          '{"name":"@blackbelt-technology/pi-dashboard-extension"}',
+        );
+      }
+      fs.mkdirSync(ompAgentDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(ompAgentDir, "settings.json"),
+        JSON.stringify({ extensions: [unrelated, path.join(oldExt, "src", "bridge.ts")] }),
+      );
+      process.env.PI_CODING_AGENT_DIR = ompAgentDir;
+
+      registerBridgeExtension(newExt);
+
+      const ompSettings = JSON.parse(
+        fs.readFileSync(path.join(ompAgentDir, "settings.json"), "utf-8"),
+      );
+      expect(ompSettings.extensions).toEqual([unrelated, path.join(newExt, "src", "bridge.ts")]);
     });
   });
 });

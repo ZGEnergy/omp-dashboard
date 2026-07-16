@@ -14,6 +14,7 @@
  */
 
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import {
   mdiApplicationOutline,
   mdiCircle,
@@ -33,8 +34,8 @@ export const statusColors: Record<string, string> = {
 };
 
 /**
- * True when the session is blocked on the chat-routed `ask_user` tool — i.e.
- * `currentTool === "ask_user"` and the pending prompt is NOT owned by a
+ * True when the session is blocked on a user-input tool — dashboard
+ * `ask_user` or OMP/pi core `ask` — and the pending prompt is NOT owned by a
  * widget-bar slot. Drives the dedicated `--status-needs-you` color. Mirrors
  * the suppression rule in `getCardPulseClass`.
  * See change: improve-dashboard-attention-routing.
@@ -43,10 +44,10 @@ export function isChatRoutedAskUser(
   session: DashboardSession,
   hasWidgetBarPrompt = false,
 ): boolean {
-  // Ended sessions never "need you" even if currentTool lingers as ask_user.
+  // Ended sessions never "need you" even if currentTool lingers as ask*.
   return (
     session.status !== "ended" &&
-    session.currentTool === "ask_user" &&
+    isInputNeededTool(session.currentTool) &&
     !hasWidgetBarPrompt
   );
 }
@@ -293,11 +294,10 @@ export function deriveRailBgColor(
  *   See change: fix-flows-plugin-polish (B1).
  */
 export function getCardPulseClass(session: DashboardSession, hasWidgetBarPrompt = false): string {
-  if (session.currentTool === "ask_user" && !hasWidgetBarPrompt) return "card-input-stripes";
+  if (isChatRoutedAskUser(session, hasWidgetBarPrompt)) return "card-input-stripes";
   if (session.status === "streaming" || session.resuming) return "card-working-pulse";
-  // Unread state — cyan scrolling stripes. Lower priority than the two above
-  // so streaming/ask_user keep their stronger colors.
-  // See change: session-card-unread-stripes.
+  // Unread state — cyan scrolling stripes. Lower priority than input-needed
+  // and streaming so active asks keep their stronger colors.
   if (session.unread) return "card-unread-pulse";
   return "";
 }
@@ -320,7 +320,7 @@ export function getCardStripeFxClass(pulseClass: string): string {
 /**
  * Aggregate stripe class for a proposal card from its child sessions. Returns
  * the single most-urgent `card-stripes-*` class via precedence:
- *   any ask_user → card-stripes-input (purple, highest)
+ *   any active input-needed tool → card-stripes-input (purple, highest)
  *   else any streaming/resuming → card-stripes-running (yellow)
  *   else any unread → card-stripes-unread (cyan)
  *   else "" (no overlay — completion signalled elsewhere)
@@ -330,7 +330,7 @@ export function deriveProposalCardState(sessions: DashboardSession[]): string {
   let hasRunning = false;
   let hasUnread = false;
   for (const s of sessions) {
-    if (s.currentTool === "ask_user") return "card-stripes-input";
+    if (isChatRoutedAskUser(s)) return "card-stripes-input";
     if (s.status === "streaming" || s.resuming) hasRunning = true;
     else if (s.unread) hasUnread = true;
   }

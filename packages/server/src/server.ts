@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { createServerPluginContext, discoverPlugins, getPluginStatusStore, loadServerEntries, refreshRequirementProbesFor } from "@blackbelt-technology/dashboard-plugin-runtime/server";
 import { findBundledExtension, registerBridgeExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
 import type { AuthConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { CONFIG_FILE, getPluginConfig as getPluginConfigFromFile, loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { CONFIG_FILE, DEFAULT_PUSH_CONFIG, getPluginConfig as getPluginConfigFromFile, loadConfig, type PushConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { advertiseDashboard, createBrowser, type DashboardBrowser, type DiscoveredServer, stopAdvertising } from "@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js";
 import { setWindowsGitSourceSetting } from "@blackbelt-technology/pi-dashboard-shared/platform/git-source.js";
 import {
@@ -24,7 +24,7 @@ import compress from "@fastify/compress";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
-import { registerAuthPlugin, validateWsUpgrade } from "./auth-plugin.js";
+import { registerAuthPlugin, validateWsUpgrade, validateWsUpgradeWithoutAuth } from "./auth-plugin.js";
 import { registerBearerAuth } from "./bearer-auth.js";
 import { type BrowserGateway, createBrowserGateway } from "./browser-gateway.js";
 import { writeConfigPartial } from "./config-api.js";
@@ -99,6 +99,13 @@ import { registerPackageRoutes } from "./routes/package-routes.js";
 import { registerPairingRoutes } from "./routes/pairing-routes.js";
 import { registerPiChangelogRoutes } from "./routes/pi-changelog-routes.js";
 import { registerPiCoreRoutes } from "./routes/pi-core-routes.js";
+import { registerPushRoutes } from "./routes/push-routes.js";
+import { createPushTokenRegistry } from "./push/push-token-registry.js";
+import { createPushDispatcher, type PushDispatcher } from "./push/push-dispatcher.js";
+import { loadOrGenerateVapidKeys, publicKeyForLivePush } from "./push/push-vapid.js";
+import { createWebPushTransport } from "./push/push-transports/web-push.js";
+import { createFcmTransport } from "./push/push-transports/fcm.js";
+import type { PushTransport, PushTransportKind } from "./push/push-transports/types.js";
 import { registerPluginActivationRoutes } from "./routes/plugin-activation-routes.js";
 import { registerPluginConfigRoutes } from "./routes/plugin-config-routes.js";
 import { registerOmpConfigRoutes } from "./routes/omp-config-routes.js";
@@ -155,6 +162,9 @@ export interface ServerConfig {
   editor: import("@blackbelt-technology/pi-dashboard-shared/config.js").EditorConfig;
   /** OpenSpec polling config (interval, concurrency, change detection, jitter) */
   openspec?: import("@blackbelt-technology/pi-dashboard-shared/config.js").OpenSpecPollConfig;
+  /** Server push-notification config. Dispatcher delivery and transport/VAPID
+   * are live-gated by `enabled`; routes return 404 while disabled. */
+  push?: import("@blackbelt-technology/pi-dashboard-shared/config.js").PushConfig;
   /** Session behavior — hydration worker offload toggle.
    *  See change: offload-session-events-load-to-worker. */
   sessions?: import("@blackbelt-technology/pi-dashboard-shared/config.js").SessionsConfig;
@@ -875,6 +885,60 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     );
   };
 
+  // ── Push notifications (opt-in, hot-reloadable) ───────────────
+  // Keep one dispatcher and registry for the lifetime of the server. Config
+  // saves update the gate, coalescing window, and transport details in place,
+  // so disable → enable cannot leave event-wiring with an orphan dispatcher.
+  // VAPID keys remain lazy: a disabled server does not generate them.
+  // See change: add-server-push-notifications.
+  const pushDir = path.join(os.homedir(), ".pi", "dashboard");
+  const pushRegistry = createPushTokenRegistry({ path: path.join(pushDir, "push-tokens.json") });
+  const pushTransports: Partial<Record<PushTransportKind, PushTransport>> = {};
+  let pushVapidPublicKey = "";
+  let pushVapidKeys: { publicKey: string; privateKey: string } | undefined;
+  let pushDispatcher: PushDispatcher;
+
+  const applyPushConfig = (next: PushConfig): void => {
+    config.push = config.push ?? { ...DEFAULT_PUSH_CONFIG };
+    Object.assign(config.push, next);
+    pushDispatcher.setEnabled(next.enabled);
+    pushDispatcher.setCoalesceWindowMs(next.coalesceWindowMs);
+
+    // Rebuild only transport adapters. Registry, dispatcher, and coalescing
+    // state stay shared with event-wiring and push REST routes.
+    delete pushTransports["web-push"];
+    delete pushTransports.fcm;
+    const contactEmail = next.webPush?.contactEmail;
+    if (!next.enabled) {
+      pushVapidPublicKey = publicKeyForLivePush(false, contactEmail, pushVapidKeys);
+      return;
+    }
+
+    if (contactEmail) {
+      pushVapidKeys ??= loadOrGenerateVapidKeys(path.join(pushDir, "push-vapid.json"));
+      pushVapidPublicKey = publicKeyForLivePush(true, contactEmail, pushVapidKeys);
+      pushTransports["web-push"] = createWebPushTransport({ vapidKeys: pushVapidKeys, contactEmail });
+    } else {
+      pushVapidPublicKey = publicKeyForLivePush(true, undefined, pushVapidKeys);
+      console.warn(
+        "[push] push.enabled=true but push.webPush.contactEmail is unset — Web Push disabled. Set push.webPush.contactEmail in config.json.",
+      );
+    }
+    if (next.fcm?.serviceAccountPath) {
+      // Typed stub in v1 (throws on send) — see add-capacitor-mobile-shell.
+      pushTransports.fcm = createFcmTransport({ serviceAccountPath: next.fcm.serviceAccountPath });
+    }
+  };
+
+  pushDispatcher = createPushDispatcher({
+    registry: pushRegistry,
+    transports: pushTransports,
+    coalesceWindowMs: (config.push ?? DEFAULT_PUSH_CONFIG).coalesceWindowMs,
+    enabled: false,
+    getSession: (id) => sessionManager.get(id),
+  });
+  applyPushConfig(config.push ?? DEFAULT_PUSH_CONFIG);
+
   // Wire up event forwarding from pi gateway to browser gateway
   wireEvents({
     sessionManager,
@@ -897,6 +961,10 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     primeGoalSession: primeGoalSessionImpl,
     pendingInitialPromptRegistry,
     viewedSessionTracker: browserGateway.viewedSessionTracker,
+    pushDispatcher,
+    // Push preferences and the master gate are read from the live config;
+    // system-routes applies each successful push save in place.
+    getPushPreferences: () => config.push,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
@@ -1130,7 +1198,32 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       }
     },
   });
-  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService, piGateway, browserGateway, hydrationMetrics, readEventLoopDelay, eventLoopSpikes });
+  // Push routes stay mounted so enable/disable can take effect without a
+  // restart; each handler returns 404 while the live master gate is off.
+  // See change: add-server-push-notifications.
+  registerPushRoutes(fastify, {
+    networkGuard,
+    registry: pushRegistry,
+    transports: pushTransports,
+    getVapidPublicKey: () => pushVapidPublicKey,
+    getSession: (id) => sessionManager.get(id),
+    isEnabled: () => config.push?.enabled === true,
+  });
+  registerSystemRoutes(fastify, {
+    sessionManager,
+    preferencesStore,
+    metaPersistence,
+    config,
+    networkGuard,
+    version: pkgVersion,
+    directoryService,
+    piGateway,
+    browserGateway,
+    hydrationMetrics,
+    readEventLoopDelay,
+    eventLoopSpikes,
+    applyPushConfig,
+  });
   registerOmpConfigRoutes(fastify, { networkGuard });
   // GET /api/doctor — see change: doctor-rich-output (task 4.2). Auth-gated identically to /api/config.
   registerDoctorRoutes(fastify);
@@ -1776,7 +1869,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         // never the sole gate.
         const scope = routeScopeForUrl(request.url);
         const ticket = extractTicket(request.url, secWsProtocol);
-        const consumeTicket = (t: string, s: WsRouteScope) => wsTicketStore.consume(t, s);
+        const consumeTicket = (t: string, s: WsRouteScope | null) => wsTicketStore.consume(t, s);
         const wsHeaders = request.headers as unknown as Record<string, unknown>;
         if (config.authConfig?.secret) {
           if (!validateWsUpgrade(request.headers.cookie, remoteAddress, config.authConfig.secret, trusted, { ticket, scope, consumeTicket, headers: wsHeaders, localToken })) {
@@ -1785,28 +1878,33 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
             return;
           }
         } else if (
-          !isGenuinelyLocal(remoteAddress, wsHeaders) &&
-          !verifyLocalToken(wsHeaders, localToken) &&
-          (trusted.length === 0 || !isBypassedHost(remoteAddress, trusted)) &&
-          !(scope && ticket && consumeTicket(ticket, scope))
+          !validateWsUpgradeWithoutAuth(remoteAddress, trusted, {
+            ticket,
+            scope,
+            consumeTicket,
+            headers: wsHeaders,
+            localToken,
+          })
         ) {
           // No auth configured — allow genuine-local, local-IPC token, trusted
           // networks, or a valid single-use ticket. A tunnel presenting as
-          // 127.0.0.1 (forwarding header) is NOT trusted (D10, narrowed).
+          // 127.0.0.1 (forwarding header) is not trusted (D10, narrowed).
           socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
           socket.destroy();
           return;
         }
 
-        if (request.url === "/ws") {
+        // Route by scope so `/ws?ticket=…` still reaches the browser gateway.
+        // `routeScopeForUrl` already strips the query; exact `=== "/ws"` does not.
+        if (scope === "browser") {
           browserGateway.wss.handleUpgrade(request, socket, head, (ws) => {
             browserGateway.wss.emit("connection", ws, request);
           });
-        } else if (request.url?.startsWith("/ws/terminal/")) {
+        } else if (scope === "terminal") {
           terminalGateway.handleUpgrade(request, socket, head);
-        } else if (request.url?.startsWith("/editor/")) {
+        } else if (scope === "editor") {
           handleEditorUpgrade(editorManager, request, socket, head);
-        } else if (request.url?.startsWith("/live/")) {
+        } else if (scope === "live") {
           handleLiveServerUpgrade(liveServerManager, request, socket, head);
         } else {
           socket.destroy();
@@ -2047,6 +2145,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       // Stop the dedicated ELD safety-net sampler + its histogram.
       // See change: attribute-openspec-poll-eventloop-stalls.
       try { eventLoopSampler.stop(); } catch { /* ignore */ }
+      pushDispatcher.shutdown();
       // Stop mDNS before closing
       try {
         if (mdnsBrowser) { mdnsBrowser.stop(); mdnsBrowser = null; }

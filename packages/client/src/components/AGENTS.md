@@ -102,6 +102,7 @@ Files in this directory. One row per source file.
 | `ProcessList.tsx` | Repurposed as BackgroundProcessesDrawer (filename kept). Renders bridge PGID scan as collapsible drawer under… → see `ProcessList.tsx.AGENTS.md` |
 | `ProposeDialog.tsx` | Name-only dialog launching `/skill:openspec-propose`. Exports `ProposeDialog`, `formatProposePrompt(name)`. → see `ProposeDialog.tsx.AGENTS.md` |
 | `ProviderAuthSection.tsx` | Settings section for LLM provider auth. Exports `ProviderAuthSection`. → see `ProviderAuthSection.tsx.AGENTS.md` |
+| `PushNotificationsSection.tsx` | Settings → Notifications surface. → see `PushNotificationsSection.tsx.AGENTS.md` |
 | `QrCodeDialog.tsx` | Dialog showing tunnel URL as QR code for mobile access. Exports `QrCodeDialog`. → see `QrCodeDialog.tsx.AGENTS.md` |
 | `QueuePanel.tsx` | Read-only follow-up cycler. Pi ExtensionAPI exposes no queue mutation (verified through pi 0.76.0). → see `QueuePanel.tsx.AGENTS.md` |
 | `RawEventCard.tsx` | Collapsible card showing one raw event in the event log. Exports `RawEventCard`. → see `RawEventCard.tsx.AGENTS.md` |

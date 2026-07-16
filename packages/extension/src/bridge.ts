@@ -19,6 +19,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Loader } from "@earendil-works/pi-tui";
 import { AbortLatch } from "./abort-latch.js";
 import { isUnderArtifactRoot, resolveArtifactRoots } from "./artifact-roots.js";
+import { registerAskTool } from "./ask-tool.js";
 import {
   MAX_PER_MESSAGE_BYTES as ATTACH_MAX_PER_MESSAGE_BYTES,
   cleanupAttachmentsForSession,
@@ -118,6 +119,17 @@ function getBridgeState(): BridgeState {
 }
 
 export default function (pi: ExtensionAPI) {
+  // Preserve dashboard-spawn state across a reload of the same bridge, after
+  // initBridge consumes/scrubs the single-use token. A different pi instance
+  // must use its own current token: it will not inherit this bridge's bus.
+  const bridgeState = getBridgeState();
+  const sameBridgeInstance = bridgeState.pi === pi;
+  const dashboardSpawnedAtFactory = sameBridgeInstance
+    ? bridgeState.dashboardSpawned ?? Boolean(process.env.PI_DASHBOARD_SPAWN_TOKEN)
+    : Boolean(process.env.PI_DASHBOARD_SPAWN_TOKEN);
+  if (bridgeState.pi === undefined || sameBridgeInstance) {
+    bridgeState.dashboardSpawned = dashboardSpawnedAtFactory;
+  }
   try {
     // Activate provider management before bridge init so providers are
     // registered before session_start fires and models_list is sent.
@@ -132,6 +144,19 @@ export default function (pi: ExtensionAPI) {
     // Anthropic-messages payload transforms (system prompt rewrite + tool
     // filter/remap) are handled by the installed @benvargas/pi-claude-code-use
     // package when present. No local duplication here.
+
+    // Register core-named `ask` at factory load (before createAgentSession
+    // snapshots extensionRunner.getAllRegisteredTools into toolRegistry).
+    // session_start registration is too late — only mutates ext.tools.
+    // Routes execute through PromptBus-patched ctx.ui (same as ask_user).
+    // Overwrites core AskTool when present; TUI sessions still work via the
+    // PromptBus TUI adapter registered when original hasUI is true.
+    registerAskTool(pi);
+
+    // Dashboard-spawned sessions snapshot tools before `session_start`; add
+    // the companion interactive tool at the same boundary. Non-dashboard
+    // sessions retain runtime registration to avoid static-name conflicts.
+    if (dashboardSpawnedAtFactory) registerAskUserTool(pi);
 
     initBridge(pi);
   } catch (err) {
@@ -278,6 +303,7 @@ function initBridge(pi: ExtensionAPI) {
   let cachedCtx: any | undefined = prev.ctx;
   let lastModel: string | undefined;
   let lastThinkingLevel: string | undefined;
+  let lastPiVersion: string | undefined;
   let hasRegisteredOnce = false; // see change: reattach-move-to-front
   // Capture-once "was this pi dashboard-spawned?" boolean, read BEFORE the
   // single-use `PI_DASHBOARD_SPAWN_TOKEN` is scrubbed on first register.
@@ -850,7 +876,9 @@ function initBridge(pi: ExtensionAPI) {
         });
         return;
       }
-      // Route PromptBus responses from dashboard client
+      // Route PromptBus responses from dashboard client. Acknowledge every
+      // receipt, including duplicate/late ids, so the server can stop its
+      // reconnect retry without relying on a separately delivered dismiss.
       if (msg.type === "prompt_response" && promptBus) {
         promptBus.respond({
           id: (msg as any).promptId,
@@ -858,8 +886,12 @@ function initBridge(pi: ExtensionAPI) {
           cancelled: (msg as any).cancelled,
           source: (msg as any).source ?? "dashboard-default",
           // Optional pasted images for method:"input".
-          // See change: add-ask-user-input-multiline-paste.
           images: (msg as any).images,
+        });
+        connection.send({
+          type: "prompt_response_ack",
+          sessionId,
+          promptId: (msg as any).promptId,
         });
         return;
       }
@@ -1266,6 +1298,7 @@ function initBridge(pi: ExtensionAPI) {
       pi, connection, sessionId, attachedChange,
       cachedCtx, cachedModelRegistry, cachedHasUI,
       lastModel, lastThinkingLevel,
+      lastPiVersion,
       lastSessionFile, lastSessionDir, lastFirstMessage,
       lastGitBranch, lastGitPrNumber, lastSessionName,
       lastGitWorktreeJson,
@@ -1284,6 +1317,7 @@ function initBridge(pi: ExtensionAPI) {
     cachedHasUI = bc.cachedHasUI;
     lastModel = bc.lastModel;
     lastThinkingLevel = bc.lastThinkingLevel;
+    lastPiVersion = bc.lastPiVersion;
     lastSessionFile = bc.lastSessionFile;
     lastSessionDir = bc.lastSessionDir;
     lastFirstMessage = bc.lastFirstMessage;
@@ -1302,7 +1336,7 @@ function initBridge(pi: ExtensionAPI) {
   function sendSessionNameIfChanged() { const bc = syncBc(); _sendSessionNameIfChanged(bc); applyBc(bc); }
   function sendGitInfoIfChanged(cwd: string) { const bc = syncBc(); _sendGitInfoIfChanged(bc, cwd); applyBc(bc); }
   function sendCwdMissingIfChanged(cwd: string) { const bc = syncBc(); _sendCwdMissingIfChanged(bc, cwd); applyBc(bc); }
-  function sendPiVersionIfChanged() { _sendPiVersionIfChanged(syncBc()); }
+  function sendPiVersionIfChanged() { const bc = syncBc(); _sendPiVersionIfChanged(bc); applyBc(bc); }
 
   // Forward all pi core events to the dashboard.
   // Events with special enrichment logic:
@@ -1803,9 +1837,10 @@ function initBridge(pi: ExtensionAPI) {
     lastWrappedSm = null;
     wrapAppendMessageForCtx(ctx);
 
-    // Register ask_user at runtime (not at load time) to avoid static
-    // tool-name conflicts with other extensions like pi-flows.
-    registerAskUserTool(pi);
+    // Non-dashboard sessions keep runtime registration to avoid static-name
+    // conflicts. Dashboard-spawned sessions were registered at factory load
+    // before the agent snapshots tools.
+    if (!dashboardSpawned) registerAskUserTool(pi);
 
     // Register the agent-facing role/model tools (list_models, list_roles,
     // update_roles). list_models reads the in-process session registry via a
@@ -2064,7 +2099,7 @@ function initBridge(pi: ExtensionAPI) {
           type: "multiselect",
           question: title,
           options,
-          metadata: opts?.message ? { message: opts.message } : undefined,
+          metadata: buildMeta(opts),
         }).then(decodeMultiselectAnswer);
 
       // ── Batch ────────────────────────────────────────────────────
@@ -2452,6 +2487,9 @@ function initBridge(pi: ExtensionAPI) {
       emitQueueUpdate();
     }
     const bc = syncBc();
+    // A new/forked/resumed session must advertise pi version independently
+    // from the previous session, even when the installed version is unchanged.
+    _resetReconnectCaches(bc);
     _handleSessionChange(bc, ctx, getFlowsList);
     applyBc(bc);
 

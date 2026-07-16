@@ -12,8 +12,11 @@ import { resolveOrderKey } from "./resolve-order-key.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { DirectoryService } from "./directory-service.js";
 import { extractSessionUpdates, isActivityEvent, isUnreadTrigger } from "./event-status-extraction.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { composeWorktreePayload } from "./git-worktree-compose.js";
 import type { ViewedSessionTracker } from "./viewed-session-tracker.js";
+import type { PushDispatcher } from "./push/push-dispatcher.js";
+import { classifyPushTrigger, type PushTriggerPreferences } from "./push/push-trigger-classifier.js";
 import { setCatalogueForSession } from "./provider-catalogue-cache.js";
 import { spawnPiSession } from "./process-manager.js";
 import { classifyProcesses, buildPidIndex } from "./process-classifier.js";
@@ -131,6 +134,20 @@ export interface EventWiringDeps {
    */
   viewedSessionTracker?: ViewedSessionTracker;
   /**
+   * Optional push dispatcher. When provided (production, `config.push.enabled`),
+   * the same unread-trigger site fans a notable event out to registered
+   * devices via `fanout(sessionId, event)`. Fire-and-forget — NEVER awaited.
+   * Mirrors how `viewedSessionTracker?` is threaded so push-free tests stay
+   * lean. See change: add-server-push-notifications.
+   */
+  pushDispatcher?: PushDispatcher;
+  /**
+   * Live push bucket preferences. The server passes a getter over its existing
+   * config object so Settings saves apply without rebuilding transports. These
+   * toggles gate push attempts only; unread stamping/broadcast stays unchanged.
+   */
+  getPushPreferences?: () => PushTriggerPreferences | undefined;
+  /**
    * Optional client-correlation registry. When provided, the wiring
    * consumes the requestId for the resolved spawnToken after a successful
    * three-tier link and surfaces it on `session_added` as `spawnRequestId`,
@@ -198,6 +215,8 @@ export function wireEvents(deps: EventWiringDeps): void {
     goalStore,
     primeGoalSession,
     viewedSessionTracker,
+    pushDispatcher,
+    getPushPreferences,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
@@ -417,6 +436,7 @@ export function wireEvents(deps: EventWiringDeps): void {
 
   // Broadcast session ended to browsers when sessions are unregistered
   sessionManager.onUnregister = (sessionId) => {
+    browserGateway.clearPendingPromptResponses(sessionId);
     const session = sessionManager.get(sessionId);
     if (session) {
       // Durably clear the liveness marker EAGERLY (atomic, not debounced).
@@ -541,12 +561,29 @@ export function wireEvents(deps: EventWiringDeps): void {
             sessionManager.update(sessionId, { unread: true });
             browserGateway.broadcastSessionUpdated(sessionId, { unread: true });
           }
+          // Classify only after the existing live, not-viewed unread gate.
+          // Preference toggles suppress this push attempt only; unread state
+          // mutation and broadcast above always retain their current behavior.
+          const pushClassification = classifyPushTrigger(msg.event, beforeSnapshot, afterSnapshot);
+          const pushPreferences = getPushPreferences?.();
+          const pushEnabled =
+            pushClassification !== null &&
+            (pushPreferences === undefined ||
+              (pushClassification.bucket === "actions-required"
+                ? pushPreferences.actionsRequired !== false
+                : pushPreferences.claudeDecides !== false));
+          if (pushEnabled) {
+            // Fire-and-forget (void, never awaited) so transport latency cannot
+            // block the WS fan-out. Dispatcher owns the live master gate and
+            // coalescing state.
+            pushDispatcher?.fanout(sessionId, msg.event);
+          }
         }
       }
 
       // Gated status-transition placement for session-card ordering.
-      //   questionFirst: alive session whose currentTool flips to
-      //     "ask_user" → move to top of active tier.
+      //   questionFirst: alive session whose currentTool flips to an
+      //     input-needed tool (`ask_user` / core `ask`) → top of active tier.
       //   completedFirst: alive session emitting `agent_end` (turn done,
       //     still idle) → move to top of active tier.
       // Both gated by the live config flags, idempotent (moveToFront is a
@@ -559,8 +596,8 @@ export function wireEvents(deps: EventWiringDeps): void {
         if (placed && placed.status !== "ended") {
           const askTrigger =
             !!isQuestionFirst?.() &&
-            placed.currentTool === "ask_user" &&
-            beforeSnapshot.currentTool !== "ask_user";
+            isInputNeededTool(placed.currentTool) &&
+            !isInputNeededTool(beforeSnapshot.currentTool);
           const endTrigger =
             !!isCompletedFirst?.() && msg.event.eventType === "agent_end";
           if (askTrigger || endTrigger) {
@@ -1253,18 +1290,16 @@ export function wireEvents(deps: EventWiringDeps): void {
 
     // ── PromptBus protocol messages (extension → browser) ──
     if (msg.type === "prompt_request") {
-      browserGateway.trackPromptRequest(sessionId, msg as any);
-      browserGateway.sendToSubscribers(sessionId, msg as any);
+      if (browserGateway.trackPromptRequest(sessionId, msg as any)) {
+        browserGateway.sendToSubscribers(sessionId, msg as any);
+      }
     }
 
-    if (msg.type === "prompt_dismiss") {
+    if (msg.type === "prompt_dismiss" || msg.type === "prompt_cancel" || msg.type === "prompt_response_ack") {
       browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
-      browserGateway.sendToSubscribers(sessionId, msg as any);
-    }
-
-    if (msg.type === "prompt_cancel") {
-      browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
-      browserGateway.sendToSubscribers(sessionId, msg as any);
+      if (msg.type !== "prompt_response_ack") {
+        browserGateway.sendToSubscribers(sessionId, msg as any);
+      }
     }
 
     // ── Extension UI System (Phase 1): cache + broadcast ──

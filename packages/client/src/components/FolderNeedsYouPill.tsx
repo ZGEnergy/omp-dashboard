@@ -1,10 +1,10 @@
 /**
  * Folder-header "N need you" rollup. Renders a compact, clickable pill showing
- * the count of the folder's chat-routed `ask_user` (blocked-on-you) child
- * sessions. Hidden when the count is 0. Activating it brings the blocked
- * sessions into view (delegated to `onActivate`).
+ * the count of chat-routed input-needed child sessions (`ask_user` and core
+ * `ask`). Hidden when the count is 0. Activating it brings blocked sessions
+ * into view (delegated to `onActivate`).
  *
- * Widget-bar-placed prompts are excluded: each `ask_user` candidate mounts a
+ * Widget-bar-placed prompts are excluded: each input-needed candidate mounts a
  * hidden `WidgetBarProbe` that reports its widget-bar state up, so the count
  * stays rules-of-hooks-safe (one hook per stable, session-id-keyed child).
  *
@@ -15,6 +15,7 @@
  */
 
 import { useHasWidgetBarPrompt } from "@blackbelt-technology/dashboard-plugin-runtime";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { mdiCommentQuestion } from "@mdi/js";
 import { Icon } from "@mdi/react";
@@ -43,7 +44,9 @@ export function FolderNeedsYouPill({
   /** Invoked with the first chat-routed (non-widget-bar) blocked session id. */
   onActivate: (sessionId: string) => void;
 }) {
-  const candidates = sessions.filter((s) => s.currentTool === "ask_user" && s.status !== "ended");
+  const candidates = sessions.filter(
+    (s) => isInputNeededTool(s.currentTool) && s.status !== "ended",
+  );
   // Per-candidate widget-bar classification once its probe reports. Absent =
   // not yet classified (excluded from the count until known) so the pill never
   // flashes an over-count before the probes resolve.

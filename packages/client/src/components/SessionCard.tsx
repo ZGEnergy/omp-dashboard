@@ -1,3 +1,4 @@
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { mdiClose, mdiCommentQuestion, mdiConsoleLine, mdiEyeOffOutline, mdiEyeOutline, mdiFlash, mdiLoading, mdiOpenInNew, mdiPaperclip, mdiPencil, mdiPencilOutline, mdiPlayCircleOutline, mdiPlus, mdiSourceBranch, mdiSourceBranchPlus, mdiSourceFork } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React, { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -66,7 +67,7 @@ export function ActivityIndicator({ session }: { session: DashboardSession }) {
 
   if (session.status === "ended") return null;
 
-  if (session.currentTool === "ask_user" && !hasWidgetBarPrompt) {
+  if (isInputNeededTool(session.currentTool) && !hasWidgetBarPrompt) {
     // Blocked-on-you: distinct "Needs you" label + needs-you color + icon.
     // See change: improve-dashboard-attention-routing.
     return <span className="text-[var(--status-needs-you)] truncate inline-flex items-center gap-0.5"><Icon path={mdiCommentQuestion} size={0.5} /> {i18nT("auto.needs_you", undefined, "Needs you")}</span>;

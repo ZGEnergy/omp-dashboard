@@ -72,6 +72,9 @@ import { handleRenameSession, handleHideSession, handleUnhideSession, handleAtta
 import { handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleOpenInlineTerminal, handleCloseInlineTerminal } from "./browser-handlers/terminal-handler.js";
 import { handlePinDirectory, handleUnpinDirectory, handleReorderPinnedDirs, handleFavoriteModel, handleUnfavoriteModel, handleReorderSessions, handleOpenSpecRefresh, handleOpenSpecBulkArchive, handleExtensionUiResponse, handlePiGatewayForward, handleCreateWorkspace, handleRenameWorkspace, handleDeleteWorkspace, handleSetWorkspaceCollapsed, handleAddFolderToWorkspace, handleRemoveFolderFromWorkspace, handleReorderWorkspaceFolders, handleReorderWorkspaces } from "./browser-handlers/directory-handler.js";
 
+export const PROMPT_RESPONSE_RETRY_MAX_AGE_MS = 60_000;
+export const PROMPT_RESPONSE_MAX_RETRIES = 10;
+
 
 
 export interface BrowserGateway {
@@ -104,10 +107,13 @@ export interface BrowserGateway {
   trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void;
   /** Clear a pending interactive UI request (resolved or cancelled) */
   clearUiRequest(sessionId: string, requestId: string): void;
-  /** Track a pending PromptBus request for replay on browser refresh */
-  trackPromptRequest(sessionId: string, msg: Record<string, unknown>): void;
+  /** Track a pending PromptBus request for replay on browser refresh. Returns false when answered. */
+  trackPromptRequest(sessionId: string, msg: Record<string, unknown>): boolean;
   /** Clear a pending PromptBus request (dismissed or cancelled) */
   clearPromptRequest(sessionId: string, promptId: string): void;
+  /** Clear all queued PromptBus responses for a session (session unregister). */
+  clearPendingPromptResponses(sessionId: string): void;
+
   /** Tell browser subscribers to reset accumulated state for a session (bridge reconnected) */
   broadcastSessionStateReset(sessionId: string): void;
   /** Shut down all tracked headless child processes */
@@ -182,6 +188,7 @@ export function createBrowserGateway(
   pendingWorktreeBaseRegistry?: import("./pending-worktree-base-registry.js").PendingWorktreeBaseRegistry,
   metaPersistence?: import("./meta-persistence.js").MetaPersistence,
   viewMessageStore: ViewMessageStore = new ViewMessageStore(),
+  promptResponseMaxAgeMs = PROMPT_RESPONSE_RETRY_MAX_AGE_MS,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -214,6 +221,81 @@ export function createBrowserGateway(
 
   // Track pending PromptBus requests per session for replay on browser refresh
   const pendingPromptRequests = new Map<string, Map<string, Record<string, unknown>>>();
+  // Browser answers remain queued until the bridge acknowledges receipt. This
+  // makes retries idempotent across a bridge reconnect without re-showing the
+  // answered card after a browser refresh.
+  const pendingPromptResponses = new Map<string, Map<string, {
+    message: Record<string, unknown>;
+    createdAt: number;
+    retryDelayMs: number;
+    retryCount: number;
+    timer?: ReturnType<typeof setTimeout>;
+  }>>();
+
+  function clearQueuedPromptResponse(sessionId: string, promptId: string): void {
+    const sessionMap = pendingPromptResponses.get(sessionId);
+    const queued = sessionMap?.get(promptId);
+    if (!queued) return;
+    if (queued.timer) clearTimeout(queued.timer);
+    sessionMap!.delete(promptId);
+    if (sessionMap!.size === 0) pendingPromptResponses.delete(sessionId);
+  }
+
+  function clearPendingPromptResponses(sessionId: string): void {
+    const sessionMap = pendingPromptResponses.get(sessionId);
+    if (!sessionMap) return;
+    for (const queued of sessionMap.values()) {
+      if (queued.timer) clearTimeout(queued.timer);
+    }
+    pendingPromptResponses.delete(sessionId);
+  }
+
+  function queuePromptResponse(sessionId: string, promptId: string, message: Record<string, unknown>): void {
+    let sessionMap = pendingPromptResponses.get(sessionId);
+    if (!sessionMap) {
+      sessionMap = new Map();
+      pendingPromptResponses.set(sessionId, sessionMap);
+    }
+    if (sessionMap.has(promptId)) return;
+
+    const queued: {
+      message: Record<string, unknown>;
+      createdAt: number;
+      retryDelayMs: number;
+      retryCount: number;
+      timer?: ReturnType<typeof setTimeout>;
+    } = {
+      message,
+      createdAt: Date.now(),
+      retryDelayMs: 250,
+      retryCount: 0,
+    };
+    sessionMap.set(promptId, queued);
+    const forward = (): void => {
+      if (pendingPromptResponses.get(sessionId)?.get(promptId) !== queued) return;
+      const ageMs = Date.now() - queued.createdAt;
+      if (ageMs >= promptResponseMaxAgeMs || queued.retryCount > PROMPT_RESPONSE_MAX_RETRIES) {
+        clearQueuedPromptResponse(sessionId, promptId);
+        return;
+      }
+      piGateway.sendToSession(sessionId, queued.message as any);
+      const delay = queued.retryDelayMs;
+      queued.retryDelayMs = Math.min(delay * 2, 30_000);
+      queued.retryCount += 1;
+      if (queued.retryCount > PROMPT_RESPONSE_MAX_RETRIES) {
+        clearQueuedPromptResponse(sessionId, promptId);
+        return;
+      }
+      const remainingMs = promptResponseMaxAgeMs - (Date.now() - queued.createdAt);
+      if (remainingMs <= 0) {
+        clearQueuedPromptResponse(sessionId, promptId);
+        return;
+      }
+      queued.timer = setTimeout(forward, Math.min(delay, remainingMs));
+      queued.timer.unref?.();
+    };
+    forward();
+  }
 
   // Track pending auto-resume prompts for ended sessions
   const pendingResumeRegistry = createPendingResumeRegistry({
@@ -242,6 +324,7 @@ export function createBrowserGateway(
     const sessionPrompts = pendingPromptRequests.get(sessionId);
     if (sessionPrompts) {
       for (const msg of sessionPrompts.values()) {
+        if (pendingPromptResponses.get(sessionId)?.has(msg.promptId as string)) continue;
         sendTo(ws, msg as any);
       }
     }
@@ -265,19 +348,20 @@ export function createBrowserGateway(
     return true;
   }
 
-  function trackPromptRequest(sessionId: string, msg: Record<string, unknown>): void {
+  function trackPromptRequest(sessionId: string, msg: Record<string, unknown>): boolean {
+    const promptId = msg.promptId as string;
+    if (!promptId || pendingPromptResponses.get(sessionId)?.has(promptId)) return false;
     let sessionMap = pendingPromptRequests.get(sessionId);
     if (!sessionMap) {
       sessionMap = new Map();
       pendingPromptRequests.set(sessionId, sessionMap);
     }
-    const promptId = msg.promptId as string;
-    if (promptId) {
-      sessionMap.set(promptId, msg);
-    }
+    sessionMap.set(promptId, msg);
+    return true;
   }
 
   function clearPromptRequest(sessionId: string, promptId: string): void {
+    clearQueuedPromptResponse(sessionId, promptId);
     const sessionMap = pendingPromptRequests.get(sessionId);
     if (sessionMap) {
       sessionMap.delete(promptId);
@@ -686,8 +770,11 @@ export function createBrowserGateway(
           }
 
           case "prompt_response": {
-            // Route PromptBus response from browser to extension
-            ctx.piGateway.sendToSession((msg as any).sessionId, msg as any);
+            const sessionId = (msg as any).sessionId;
+            const promptId = (msg as any).promptId;
+            if (typeof sessionId === "string" && sessionId && typeof promptId === "string" && promptId) {
+              queuePromptResponse(sessionId, promptId, msg as any);
+            }
             break;
           }
 
@@ -944,6 +1031,7 @@ export function createBrowserGateway(
 
     trackPromptRequest,
     clearPromptRequest,
+    clearPendingPromptResponses,
 
     shutdownHeadlessProcesses() {
       headlessPidRegistry.killAll();

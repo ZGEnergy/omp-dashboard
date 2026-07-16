@@ -145,6 +145,41 @@ export function registerBridgeExtension(
     }
   } catch { /* start fresh */ }
 
+  // OMP does not consume Pi's packages registry. Its agent profile stores
+  // extension *files* in settings.extensions, so keep the two registries in
+  // sync without copying credentials or other profile state.
+  const ompAgentDir = process.env.PI_CODING_AGENT_DIR;
+  if (ompAgentDir) {
+    const ompSettingsPath = path.join(ompAgentDir, "settings.json");
+    const bridgeFile = path.join(extensionPath, "src", "bridge.ts");
+    const identity = readPackageName(extensionPath);
+    let ompSettings: Record<string, unknown> = {};
+    try {
+      const raw = fs.existsSync(ompSettingsPath) ? fs.readFileSync(ompSettingsPath, "utf-8").trim() : "";
+      if (raw) ompSettings = JSON.parse(raw);
+    } catch { /* start fresh */ }
+    const extensions = Array.isArray(ompSettings.extensions) ? ompSettings.extensions as string[] : [];
+    ompSettings.extensions = [
+      ...extensions.filter((entry) => {
+        if (typeof entry !== "string" || entry === bridgeFile) return false;
+        const parent = path.dirname(entry);
+        const extensionDir = path.basename(parent) === "src" && path.basename(entry) === "bridge.ts"
+          ? path.dirname(parent)
+          : parent;
+        return !identity || readPackageName(extensionDir) !== identity;
+      }),
+      bridgeFile,
+    ];
+    try {
+      fs.mkdirSync(ompAgentDir, { recursive: true });
+      const tmp = ompSettingsPath + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(ompSettings, null, 2) + "\n");
+      fs.renameSync(tmp, ompSettingsPath);
+    } catch (err) {
+      console.error("[dashboard] Failed to register bridge extension in OMP settings:", err);
+    }
+  }
+
   const packages = Array.isArray(settings.packages) ? settings.packages as string[] : [];
 
   // Already registered?
