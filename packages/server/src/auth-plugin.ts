@@ -319,7 +319,7 @@ export function validateWsUpgrade(
     /** Ephemeral single-use ticket (D11); the durable bearer never rides WS. */
     ticket?: string | null;
     scope?: WsRouteScope | null;
-    consumeTicket?: (ticket: string, scope: WsRouteScope) => boolean;
+    consumeTicket?: (ticket: string, scope: WsRouteScope | null) => boolean;
     /** Upgrade request headers (for proxy-hop detection + local token). */
     headers?: Record<string, unknown>;
     /** Local-IPC allowlist token. */
@@ -332,9 +332,8 @@ export function validateWsUpgrade(
   const ticketValid =
     opts?.ticket !== undefined &&
     opts.ticket !== null &&
-    opts.consumeTicket &&
-    opts.scope
-      ? opts.consumeTicket(opts.ticket, opts.scope)
+    opts.consumeTicket
+      ? opts.consumeTicket(opts.ticket, opts.scope ?? null)
       : false;
   // Genuine same-host origin, or a valid local-IPC token. A tunnel presenting
   // as loopback (with a forwarding header) is NOT trusted here (D10, narrowed).

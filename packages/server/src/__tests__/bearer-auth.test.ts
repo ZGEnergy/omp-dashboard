@@ -91,4 +91,25 @@ describe("validateWsUpgrade — ticket branch is additive (Task 3.3/3.5)", () =>
     // token is a durable bearer, never minted as a ticket.
     expect(validateWsUpgrade(undefined, "1.2.3.4", SECRET, [], { ticket: token, scope: "browser", consumeTicket })).toBe(false);
   });
+
+  it("unknown route upgrade still burns a presented ticket (single-use)", () => {
+    const store = new WsTicketStore(() => 1_000);
+    const ticket = store.mint("browser");
+    // scope null mimics routeScopeForUrl("/not-a-route?ticket=…")
+    const allowed = validateWsUpgrade(
+      undefined,
+      "10.0.0.5",
+      "secret",
+      [],
+      {
+        ticket,
+        scope: null,
+        consumeTicket: (t, s) => store.consume(t, s),
+      },
+    );
+    expect(allowed).toBe(false);
+    // Second attempt with correct scope must fail — ticket already burned.
+    expect(store.consume(ticket, "browser")).toBe(false);
+  });
+
 });
