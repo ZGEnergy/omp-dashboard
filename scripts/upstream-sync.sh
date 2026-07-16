@@ -197,7 +197,12 @@ cmd_verify() {
 
   log "Gate 1: focused vitest"
   # Prefer package-local vitest binaries; do not require full monorepo green.
+  # Upstream vitest globalSetup refuses real $HOME (must match root `npm test`).
   local failed=0
+  local test_home
+  test_home="$(mktemp -d -t pi-test-XXXXXX)"
+  local test_ls
+  test_ls="$(mktemp -t pi-test-ls-XXXXXX)"
   run_vitest() {
     local dir="$1"; shift
     local bin=""
@@ -210,20 +215,29 @@ cmd_verify() {
       return 0
     fi
     # Only run files that exist (sync branches may lack some suites temporarily).
-    local args=() f
+    local args=() f resolved
     for f in "$@"; do
-      if [[ -f "${dir}/${f}" || -f "$f" ]]; then
-        args+=("$f")
+      if [[ -f "${dir}/${f}" ]]; then
+        resolved="${f}"
+      elif [[ -f "$f" ]]; then
+        resolved="$f"
       else
         warn "skip missing test file: ${dir}/${f}"
+        continue
       fi
+      args+=("$resolved")
     done
     if [[ ${#args[@]} -eq 0 ]]; then
       warn "no test files to run in $dir"
       return 0
     fi
     log "vitest in $dir -- ${args[*]}"
-    if ! ( cd "$dir" && "$bin" run --reporter=dot "${args[@]}" ); then
+    if ! (
+      cd "$dir" &&
+        HOME="$test_home" \
+        NODE_OPTIONS="--localstorage-file=${test_ls}" \
+        "$bin" run --reporter=dot --config vitest.config.ts "${args[@]}"
+    ); then
       failed=1
       warn "vitest failed in $dir"
     fi
