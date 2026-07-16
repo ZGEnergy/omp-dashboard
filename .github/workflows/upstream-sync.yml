@@ -98,9 +98,9 @@ jobs:
           {
             echo "# Upstream sync needs human/agent merge"
             echo
-            echo "Upstream \\\`${UPSTREAM_REF}\\` @ \\\`${{ steps.status.outputs.usha }}\\` is **${{ steps.status.outputs.behind }}** commits ahead of main."
+            echo "Upstream ${UPSTREAM_REF} @ ${{ steps.status.outputs.usha }} is **${{ steps.status.outputs.behind }}** commits ahead of main."
             echo
-            echo "Automation keeps **one** open PR on \\\`${SYNC_BRANCH}\\` (this branch is force-updated)."
+            echo "Automation keeps **one** open PR on ${SYNC_BRANCH} (this branch is force-updated)."
             echo
             echo "Resolve with:"
             echo
