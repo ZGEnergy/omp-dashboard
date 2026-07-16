@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 import fs from "node:fs";
 import os from "node:os";
@@ -11,6 +11,7 @@ describe("PUT /api/config push preference reload", () => {
   let originalHome: string | undefined;
   let app: ReturnType<typeof Fastify>;
   let runtimeConfig: { push: PushConfig };
+  let applyPushConfig: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     testDir = fs.mkdtempSync(path.join(os.tmpdir(), "push-config-route-"));
@@ -42,12 +43,14 @@ describe("PUT /api/config push preference reload", () => {
         fcm: { serviceAccountPath: "/etc/pi/fcm.json" },
       },
     };
+    applyPushConfig = vi.fn((next: PushConfig) => Object.assign(runtimeConfig.push, next));
     registerSystemRoutes(app, {
       sessionManager: { listActive: () => [], listAll: () => [] } as never,
       preferencesStore: { flush: () => {} } as never,
       metaPersistence: { flushAll: () => {} } as never,
       config: runtimeConfig as never,
       networkGuard: (async () => {}) as never,
+      applyPushConfig: applyPushConfig as unknown as (push: PushConfig) => void,
     });
     await app.ready();
   });
@@ -57,6 +60,49 @@ describe("PUT /api/config push preference reload", () => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
     fs.rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it("hot-applies enable, disable, and re-enable without restarting", async () => {
+    const disable = await app.inject({
+      method: "PUT",
+      url: "/api/config",
+      payload: { push: { enabled: false, coalesceWindowMs: 5_000, webPush: { contactEmail: "new@example.com" } } },
+    });
+
+    expect(disable.statusCode).toBe(200);
+    expect(JSON.parse(disable.body)).toMatchObject({ success: true, restartRequired: false });
+    expect(runtimeConfig.push).toMatchObject({
+      enabled: false,
+      coalesceWindowMs: 5_000,
+      webPush: { contactEmail: "new@example.com" },
+    });
+    expect(applyPushConfig).toHaveBeenCalledTimes(1);
+
+    const enable = await app.inject({
+      method: "PUT",
+      url: "/api/config",
+      payload: { push: { enabled: true, coalesceWindowMs: 6_000 } },
+    });
+
+    expect(enable.statusCode).toBe(200);
+    expect(JSON.parse(enable.body)).toMatchObject({ success: true, restartRequired: false });
+    expect(runtimeConfig.push).toMatchObject({
+      enabled: true,
+      coalesceWindowMs: 6_000,
+      webPush: { contactEmail: "new@example.com" },
+    });
+    expect(applyPushConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not call the lifecycle hook when a non-push config is saved", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/config",
+      payload: { completedFirst: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(applyPushConfig).not.toHaveBeenCalled();
   });
 
   it("refreshes bucket preferences in the existing server config without rebuilding push state", async () => {
