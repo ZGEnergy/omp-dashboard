@@ -250,6 +250,21 @@ export function replaySessionAssets(
   }
 }
 
+/**
+ * Build a cold-rebuild subscribe message without turning legacy/full clients
+ * into tail clients. See change: session-tail-rehydrate.
+ */
+function coldSubscribeMessage(
+  msg: Extract<BrowserToServerMessage, { type: "subscribe" }>,
+): Extract<BrowserToServerMessage, { type: "subscribe" }> {
+  const { mode, ...rest } = msg;
+  return {
+    ...rest,
+    lastSeq: 0,
+    ...(mode === "tail" ? { mode: "tail" } : {}),
+  } as Extract<BrowserToServerMessage, { type: "subscribe" }>;
+}
+
 export function handleSubscribe(
   msg: Extract<BrowserToServerMessage, { type: "subscribe" }>,
   subs: Set<string>,
@@ -300,24 +315,27 @@ export function handleSubscribe(
       sendTo(ws, { type: "session_state_reset", sessionId: msg.sessionId });
       const raw = eventStore.getEvents(msg.sessionId, 1);
       // Reset is a cold rebuild — do not apply delta filter with the stale cursor.
-      // Prefer tail window when the client asked for mode:tail (or default tail on
-      // large sessions). See change: session-tail-rehydrate.
-      const coldMsg = {
-        ...msg,
-        lastSeq: 0,
-        mode: msg.mode ?? "tail",
-      } as typeof msg;
+      // Preserve legacy/full mode; only an explicit tail request gets a tail
+      // window. See change: session-tail-rehydrate.
+      const coldMsg = coldSubscribeMessage(msg);
       const { events, meta } = windowEventsForSubscribe(raw, coldMsg);
       // Replay asset registry BEFORE events so pi-asset:<hash> tokens in
       // message_update / message_end resolve on first reduce.
       // See change: chat-markdown-local-images-and-math.
       replaySessionAssets(ws, msg.sessionId, ctx);
-      markReplaying(ws, msg.sessionId);
-      sendEventBatches(ws, msg.sessionId, events, sendTo, meta).then((lastSent) => {
-        clearReplaying(ws, msg.sessionId, lastSent);
-        replayPendingUiRequests(ws, msg.sessionId);
-        replayUiState(ws, msg.sessionId, ctx);
-      });
+      if (events.length > 0) {
+        markReplaying(ws, msg.sessionId);
+        sendEventBatches(ws, msg.sessionId, events, sendTo, meta).then((lastSent) => {
+          clearReplaying(ws, msg.sessionId, lastSent);
+          replayPendingUiRequests(ws, msg.sessionId);
+          replayUiState(ws, msg.sessionId, ctx);
+        });
+      } else {
+        sendEventBatches(ws, msg.sessionId, events, sendTo, meta).then(() => {
+          replayPendingUiRequests(ws, msg.sessionId);
+          replayUiState(ws, msg.sessionId, ctx);
+        });
+      }
     } else {
       const raw = eventStore.getEvents(msg.sessionId, lastSeq + 1);
       const { events, meta } = windowEventsForSubscribe(raw, msg);
@@ -379,14 +397,40 @@ export function handleSubscribe(
           sessionManager.update(msg.sessionId, metaUpdates);
           broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: metaUpdates });
           const raw = eventStore.getEvents(msg.sessionId, 1);
-          const { events: stored, meta } = windowEventsForSubscribe(raw, msg);
+          const loadedMax = eventStore.getMaxSeq(msg.sessionId);
+          const lastSeq = msg.lastSeq ?? 0;
           const subscribers = getSubscribers(msg.sessionId);
-          for (const sub of subscribers) {
-            // Asset registry first — see change: chat-markdown-local-images-and-math.
-            replaySessionAssets(sub, msg.sessionId, ctx);
-            await sendEventBatches(sub, msg.sessionId, stored, sendTo, meta);
-            replayPendingUiRequests(sub, msg.sessionId);
-            replayUiState(sub, msg.sessionId, ctx);
+          if (lastSeq > loadedMax) {
+            // Disk hydration can load a history older than the browser cursor.
+            // Reset every subscriber before rebuilding from the loaded history.
+            // See change: session-tail-rehydrate.
+            const coldMsg = coldSubscribeMessage(msg);
+            const { events: coldEvents, meta } = windowEventsForSubscribe(raw, coldMsg);
+            for (const sub of subscribers) {
+              sendTo(sub, { type: "session_state_reset", sessionId: msg.sessionId });
+              // Asset registry first — see change: chat-markdown-local-images-and-math.
+              replaySessionAssets(sub, msg.sessionId, ctx);
+              if (coldEvents.length > 0) {
+                markReplaying(sub, msg.sessionId);
+                const lastSent = await sendEventBatches(sub, msg.sessionId, coldEvents, sendTo, meta);
+                clearReplaying(sub, msg.sessionId, lastSent);
+              } else {
+                await sendEventBatches(sub, msg.sessionId, coldEvents, sendTo, meta);
+              }
+              replayPendingUiRequests(sub, msg.sessionId);
+              replayUiState(sub, msg.sessionId, ctx);
+            }
+          } else {
+            // Load-older and normal subscribe paths retain their existing window
+            // selection; stale cursors use the cold message above.
+            const { events: stored, meta } = windowEventsForSubscribe(raw, msg);
+            for (const sub of subscribers) {
+              // Asset registry first — see change: chat-markdown-local-images-and-math.
+              replaySessionAssets(sub, msg.sessionId, ctx);
+              await sendEventBatches(sub, msg.sessionId, stored, sendTo, meta);
+              replayPendingUiRequests(sub, msg.sessionId);
+              replayUiState(sub, msg.sessionId, ctx);
+            }
           }
         } else if (result.error === "cancelled") {
           // The load was cancelled because the subscriber left before it

@@ -90,6 +90,16 @@ interface Props {
    * See change: configurable-chat-display.
    */
   /** Current sparse override for the session, or `undefined`. */
+  /**
+   * Older messages remain on the server for this session — renders the
+   * "load older" affordance at the top of the virtual list.
+   * See change: session-tail-rehydrate.
+   */
+  hasMoreOlder?: boolean;
+  /** Older-history fetch in flight — renders a spinner in the load-older affordance. See change: session-tail-rehydrate. */
+  loadingOlder?: boolean;
+  /** Request the next older batch from the server. See change: session-tail-rehydrate. */
+  onLoadOlder?: () => void;
 }
 
 function ImageAttachments({ images }: { images: ChatImage[] }) {

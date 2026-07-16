@@ -24,6 +24,10 @@ export interface ReplayPersister {
   drop(sessionId: string): Promise<void>;
   /** Force an immediate flush (tests / unmount). */
   flush(sessionId: string): Promise<void>;
+  /** Merge newly-arrived older events into the buffer (dedup by seq), returning the merged snapshot. See change: session-tail-rehydrate. */
+  merge(sessionId: string, events: CachedEvent[]): CachedEvent[];
+  /** Return a defensive copy of the current raw-event buffer. See change: session-tail-rehydrate. */
+  snapshot(sessionId: string): CachedEvent[];
 }
 
 export function createReplayPersister(
