@@ -17,6 +17,7 @@
  */
 
 import { fileKind } from "@blackbelt-technology/pi-dashboard-shared/file-kind.js";
+import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { FileEntry } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type React from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -25,7 +26,9 @@ import {
   type EditorPaneState,
   useEditorPaneState,
 } from "../lib/editor-pane-state.js";
-import { type SplitOrientation, type SplitState, useSplitState } from "../lib/split-state.js";
+import { type TerminalPaneTabs, useTerminalPaneTabs } from "../lib/use-terminal-pane-tabs.js";
+import { type SplitMode, type SplitOrientation, type SplitState, useSplitState } from "../lib/split-state.js";
+import { saveTreeVisible } from "../lib/tree-visible.js";
 
 export interface PendingScroll {
   path: string;
@@ -37,13 +40,26 @@ export interface SplitWorkspaceContextValue {
   cwd: string;
   split: SplitState;
   updateSplit: (patch: Partial<SplitState>) => void;
-  toggleSplit: () => void;
+  /** Set the content-area layout mode (header segmented switch). */
+  setMode: (mode: SplitMode) => void;
   paneState: EditorPaneState;
   dispatch: React.Dispatch<EditorPaneAction>;
-  /** Open a file in the split, auto-opening the split when closed; scroll to `line`. */
-  openInSplit: (relPath: string, line?: number) => void;
+  /**
+   * Open a file in the split, auto-opening the split when closed; scroll to
+   * `line`. `restrictCsp` marks a canvas auto-open (no user click) so document
+   * viewers inject a restrictive CSP (auto-canvas S34).
+   */
+  openInSplit: (relPath: string, line?: number, restrictCsp?: boolean) => void;
   /** Open a loopback dev-server URL in the `live-server` split viewer (auto-launched). */
   openLiveTarget: (url: string) => void;
+  /** Open a generic URL/youtube target in the `url` split viewer (auto-canvas S35). */
+  openUrlTarget: (url: string) => void;
+  /** Open a file's diff as a `diff:<relPath>` viewer tab (coexists with its monaco tab). */
+  openDiffTab: (relPath: string) => void;
+  /** Open the split and reveal the Changes section in the pane rail. */
+  openChanges: () => void;
+  /** Bumps whenever `openChanges()` fires so the rail section expands + scrolls into view. */
+  changesRevealSignal: number;
   /** Pending scroll target for the pane, or `null`. */
   pendingScroll: PendingScroll | null;
   /** Clear the pending scroll once the pane has honoured it. */
@@ -56,11 +72,20 @@ export interface SplitWorkspaceContextValue {
   changedFiles: Set<string> | null;
   /** Clear a path's changed-on-disk flag (Refresh or Dismiss). */
   clearChanged: (path: string) => void;
+  /**
+   * Terminal-tab slice for the pane cwd (`term:<id>` tabs). Inert when the
+   * shell wires no terminal handlers (tests, standalone surfaces).
+   * See change: terminals-in-tabbed-panes.
+   */
+  terminal: TerminalPaneTabs;
 }
 
 const SplitWorkspaceContext = createContext<SplitWorkspaceContextValue | null>(null);
 
 const absOf = (cwd: string, rel: string): string => (rel ? `${cwd}/${rel}` : cwd);
+
+/** Stable empty terminals array — avoids a new [] identity each render. */
+const EMPTY_TERMINALS: TerminalSession[] = [];
 
 interface ProviderProps {
   sessionId: string;
@@ -79,6 +104,14 @@ interface ProviderProps {
   onWatchFiles?: (sessionId: string, cwd: string, paths: string[]) => void;
   /** Clear a path's changed flag (from `App`). */
   onClearChanged?: (path: string) => void;
+  /** cwd-scoped terminals from `App` (ephemeral filtered inside the pane). */
+  terminals?: TerminalSession[];
+  /** Folder pane auto-surfaces every cwd terminal; session split is opt-in. */
+  autoSurfaceTerminals?: boolean;
+  onCreateTerminal?: (cwd: string) => void;
+  onKillTerminal?: (terminalId: string) => void;
+  onRenameTerminal?: (terminalId: string, title: string) => void;
+  onTerminalTitle?: (terminalId: string, title: string) => void;
   children: React.ReactNode;
 }
 
@@ -91,10 +124,29 @@ export function SplitWorkspaceProvider({
   changedFiles = null,
   onWatchFiles,
   onClearChanged,
+  terminals: cwdTerminals,
+  autoSurfaceTerminals = false,
+  onCreateTerminal,
+  onKillTerminal,
+  onRenameTerminal,
+  onTerminalTitle,
   children,
 }: ProviderProps) {
   const [split, updateSplit] = useSplitState(sessionId);
   const [paneState, dispatch] = useEditorPaneState(sessionId);
+  const ensurePaneOpen = useCallback(() => updateSplit({ mode: "split" }), [updateSplit]);
+  const terminal = useTerminalPaneTabs({
+    cwd,
+    terminals: cwdTerminals ?? EMPTY_TERMINALS,
+    autoSurface: autoSurfaceTerminals,
+    paneState,
+    dispatch,
+    ensureOpen: ensurePaneOpen,
+    onCreateTerminal,
+    onKillTerminal,
+    onRenameTerminal,
+    onTerminalTitle,
+  });
   const [pendingScroll, setPendingScroll] = useState<PendingScroll | null>(null);
 
   // Keep the persisted orientation in step with the responsive layout so a
@@ -104,11 +156,11 @@ export function SplitWorkspaceProvider({
   }, [orientation, split.orientation, updateSplit]);
 
   const openInSplit = useCallback(
-    (relPath: string, line?: number) => {
+    (relPath: string, line?: number, restrictCsp?: boolean) => {
       if (!relPath) return;
       const viewer = fileKind(absOf(cwd, relPath)).viewer;
-      dispatch({ type: "openFile", path: relPath, viewer });
-      updateSplit({ open: true });
+      dispatch({ type: "openFile", path: relPath, viewer, restrictCsp });
+      updateSplit({ mode: "split" });
       if (line && line > 0) setPendingScroll({ path: relPath, line });
     },
     [cwd, dispatch, updateSplit],
@@ -120,12 +172,49 @@ export function SplitWorkspaceProvider({
       // never yield `live-server`. The `openFile` reducer is idempotent by
       // path, so the same URL reuses its tab.
       dispatch({ type: "openFile", path: `live:${url}`, viewer: "live-server" });
-      updateSplit({ open: true });
+      updateSplit({ mode: "split" });
     },
     [dispatch, updateSplit],
   );
 
-  const toggleSplit = useCallback(() => updateSplit({ open: !split.open }), [split.open, updateSplit]);
+  const openUrlTarget = useCallback(
+    (url: string) => {
+      // Generic url/youtube canvas target — opened under a virtual `url:<url>`
+      // path so the `url` split viewer (dispatchPreview → PreviewBody) renders
+      // it. Idempotent by path. See change: auto-canvas (S35).
+      if (!url) return;
+      dispatch({ type: "openFile", path: `url:${url}`, viewer: "url" });
+      updateSplit({ mode: "split" });
+    },
+    [dispatch, updateSplit],
+  );
+
+  // Diff tabs open under a virtual `diff:<relPath>` path (mirrors `live:<url>`)
+  // so they never collide with the monaco tab of the same real file (the
+  // reducer dedups by full path). See change: add-change-summary-table.
+  const openDiffTab = useCallback(
+    (relPath: string) => {
+      if (!relPath) return;
+      dispatch({ type: "openFile", path: `diff:${relPath}`, viewer: "diff" });
+      updateSplit({ mode: "split" });
+    },
+    [dispatch, updateSplit],
+  );
+
+  const [changesRevealSignal, setChangesRevealSignal] = useState(0);
+  const openChanges = useCallback(() => {
+    // Persist tree visibility BEFORE the split opens so a freshly-mounted
+    // EditorPane reads it visible (the rail defaults collapsed — change:
+    // collapse-files-panel-by-default — and the pane mounts AFTER this bump, so
+    // an in-pane reveal effect alone would miss the first open). An
+    // already-mounted pane is handled by its changesRevealSignal effect. See
+    // change: detect-tool-created-files.
+    saveTreeVisible(sessionId, true);
+    updateSplit({ mode: "split" });
+    setChangesRevealSignal((n) => n + 1);
+  }, [sessionId, updateSplit]);
+
+  const setMode = useCallback((mode: SplitMode) => updateSplit({ mode }), [updateSplit]);
   const consumePendingScroll = useCallback(() => setPendingScroll(null), []);
 
   const noopFilenameSearch = useCallback((_q: string, _r: boolean) => {}, []);
@@ -145,9 +234,9 @@ export function SplitWorkspaceProvider({
   // (a) Declare the current open set (server reconciles idempotently).
   useEffect(() => {
     if (!sessionId || !cwd) return;
-    const paths = split.open ? openPathsKey.split("\u0000").filter(Boolean) : [];
+    const paths = split.mode !== "closed" ? openPathsKey.split("\u0000").filter(Boolean) : [];
     watchRef.current?.(sessionId, cwd, paths);
-  }, [sessionId, cwd, openPathsKey, split.open]);
+  }, [sessionId, cwd, openPathsKey, split.mode]);
   // (b) Clear this session's watchers on session switch / unmount only.
   useEffect(() => {
     if (!sessionId || !cwd) return;
@@ -160,19 +249,24 @@ export function SplitWorkspaceProvider({
       cwd,
       split,
       updateSplit,
-      toggleSplit,
+      setMode,
       paneState,
       dispatch,
       openInSplit,
       openLiveTarget,
+      openUrlTarget,
+      openDiffTab,
+      openChanges,
+      changesRevealSignal,
       pendingScroll,
       consumePendingScroll,
       fileResults,
       onFilenameSearch: filenameSearch,
       changedFiles,
       clearChanged,
+      terminal,
     }),
-    [sessionId, cwd, split, updateSplit, toggleSplit, paneState, dispatch, openInSplit, openLiveTarget, pendingScroll, consumePendingScroll, fileResults, filenameSearch, changedFiles, clearChanged],
+    [sessionId, cwd, split, updateSplit, setMode, paneState, dispatch, openInSplit, openLiveTarget, openUrlTarget, openDiffTab, openChanges, changesRevealSignal, pendingScroll, consumePendingScroll, fileResults, filenameSearch, changedFiles, clearChanged, terminal],
   );
 
   return <SplitWorkspaceContext.Provider value={value}>{children}</SplitWorkspaceContext.Provider>;

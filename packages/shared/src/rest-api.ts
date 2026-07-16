@@ -361,6 +361,55 @@ export interface GitStashPopResult {
 
 export type GitStashPopResponse = ApiResponse<GitStashPopResult>;
 
+// ── Git status / commit (session-uncommitted-indicator-and-commit) ──────────
+
+/** `GET /api/git/status?cwd=` — fresh working-tree state for a cwd. */
+export type GitStatusResponse = ApiResponse<import("./types.js").GitStatus>;
+
+/** A single changed file in the commit dialog's picker. */
+export interface GitChangedFile {
+  /** Path relative to the repo root (cwd). */
+  path: string;
+  /** Porcelain-v2 status class. */
+  state: "staged" | "unstaged" | "untracked";
+  /** Lines added (undefined for untracked / binary). */
+  additions?: number;
+  /** Lines removed (undefined for untracked / binary). */
+  deletions?: number;
+}
+
+/** `GET /api/git/changed-files?cwd=` — file list for the commit dialog. */
+export type GitChangedFilesResponse = ApiResponse<GitChangedFile[]>;
+
+export interface GitCommitRequest {
+  cwd: string;
+  message: string;
+  /** Repo-relative paths to stage and commit. Must resolve inside cwd. */
+  files: string[];
+}
+
+export interface GitCommitResult {
+  commitHash: string;
+  subject: string;
+}
+
+export type GitCommitResponse = ApiResponse<GitCommitResult>;
+
+export interface GitCommitDraftRequest {
+  cwd: string;
+  files: string[];
+  /** Session whose context seeds the AI draft. */
+  sessionId: string;
+}
+
+export interface GitCommitDraftResult {
+  message: string;
+  /** How the message was produced (fork-subagent, diff-only fallback, stub). */
+  source: "fork-subagent" | "inherit-context" | "diff-only" | "stub";
+}
+
+export type GitCommitDraftResponse = ApiResponse<GitCommitDraftResult>;
+
 // ── Pull Requests ─────────────────────────────────────────────────────────
 
 export interface PullRequestInfo {
@@ -464,6 +513,18 @@ export interface InstalledPackage {
   isRecommended?: boolean;
   /** True when isRecommended AND id is in BUNDLED_EXTENSION_IDS AND bundle subtree exists. */
   isBundled?: boolean;
+  /**
+   * Canonical published spec (`npm:<name>` or a git URL) for a local/git
+   * row that has a resolvable published variant. Two resolution paths:
+   *   - recommended rows → RECOMMENDED_EXTENSIONS manifest source.
+   *   - non-recommended local rows → npm-registry lookup by package.json `name`.
+   * Absent when the row is plain npm, or no published variant resolves.
+   * Drives the second source line + Reset to npm action.
+   * See change: reset-override-to-npm.
+   */
+  publishedVariantSource?: string;
+  /** Latest published version of `publishedVariantSource`, when known (best-effort; undefined offline). */
+  publishedVariantVersion?: string;
 }
 
 export type InstalledPackagesResponse = ApiResponse<InstalledPackage[]>;

@@ -6,7 +6,7 @@ import type { ToolContext } from "../index.js";
 import { ctxFixtures as fx } from "../parse-ctx-result.fixtures.js";
 import { ThemeProvider } from "../../ThemeProvider.js";
 
-const ctx: ToolContext = { cwd: "/r", editors: [] };
+const ctx: ToolContext = { cwd: "/r" };
 
 // jsdom has no matchMedia; ThemeProvider's useTheme reads it for system theme.
 beforeAll(() => {
@@ -130,6 +130,72 @@ describe("CtxToolRenderer — header chip + body per kind", () => {
     });
     const a = container.querySelector("a");
     expect(a?.getAttribute("href")).toBe("http://localhost:4747");
+  });
+});
+
+describe("CtxToolRenderer — running-state preview", () => {
+  it("batch running: chip is args-derived and differs from the tool-name subtitle", () => {
+    const { container } = renderCtx({
+      toolName: "ctx_batch_execute",
+      args: {
+        commands: [
+          { label: "a", command: "echo a" },
+          { label: "b", command: "echo b" },
+          { label: "c", command: "echo c" },
+        ],
+      },
+      status: "running",
+      result: "",
+      context: ctx,
+    });
+    const chip = container.querySelector("span");
+    expect(chip?.textContent).toBe("▦ 3 cmds");
+    // subtitle still shows the tool name, but the chip does NOT equal it
+    expect(chip?.textContent).not.toBe("ctx_batch_execute");
+    expect(container.textContent).toContain("ctx_batch_execute"); // subtitle present
+  });
+
+  it("batch running: lists each command label", () => {
+    const { container } = renderCtx({
+      toolName: "ctx_batch_execute",
+      args: {
+        commands: [
+          { label: "build", command: "npm run build" },
+          { label: "test", command: "npm test" },
+        ],
+      },
+      status: "running",
+      result: "",
+      context: ctx,
+    });
+    expect(container.textContent).toContain("build");
+    expect(container.textContent).toContain("test");
+    expect(container.textContent).toContain("npm run build");
+  });
+
+  it("execute running: chip shows language and body shows the code", () => {
+    const { container } = renderCtx({
+      toolName: "ctx_execute",
+      args: { language: "javascript", code: "console.log(42)" },
+      status: "running",
+      result: "",
+      context: ctx,
+    });
+    expect(container.textContent).toMatch(/⚙ javascript/);
+    expect(container.textContent).toContain("console.log(42)");
+  });
+
+  it("search running: chip shows query count and body lists queries", () => {
+    const { container } = renderCtx({
+      toolName: "ctx_search",
+      args: { queries: ["first query", "second query"] },
+      status: "running",
+      result: "",
+      context: ctx,
+    });
+    expect(container.textContent).toMatch(/🔍 2 queries/);
+    expect(container.textContent).toContain("first query");
+    expect(container.textContent).toContain("second query");
   });
 });
 

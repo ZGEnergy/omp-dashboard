@@ -1,14 +1,14 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
-import { render, fireEvent, cleanup } from "@testing-library/react";
-import React from "react";
-import { ToolCallStep } from "../ToolCallStep.js";
-import { ThemeProvider } from "../ThemeProvider.js";
-import type { ToolContext } from "../tool-renderers/index.js";
+import { type ClaimEntry, createSlotRegistry } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { PluginContextProvider } from "@blackbelt-technology/dashboard-plugin-runtime/context";
-import { createSlotRegistry, type ClaimEntry } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { DemoToolRenderer } from "@blackbelt-technology/demo-plugin";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import type React from "react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { ThemeProvider } from "../ThemeProvider.js";
+import { ToolCallStep } from "../ToolCallStep.js";
+import type { ToolContext } from "../tool-renderers/index.js";
 
-const defaultContext: ToolContext = { editors: [] };
+const defaultContext: ToolContext = {};
 
 // Mock useMobile so ToolCallStep (via EditToolRenderer → RichDiff) always runs in
 // desktop mode for the lazy-mount tests below. Hoisted before any imports of the
@@ -621,5 +621,18 @@ describe("ToolCallStep lazy-mount — <RichDiff> only mounts when expanded", () 
     // Click the summary button to expand
     fireEvent.click(container.querySelector("button")!);
     expect(container.querySelector('[data-testid="rich-diff"]')).not.toBeNull();
+  });
+
+  it("renders the 'recovered' badge when the row was healed by supersede", () => {
+    const { container } = renderStep({
+      status: "complete",
+      toolDetails: { healedBy: "superseded" },
+    });
+    expect(container.querySelector('[data-testid="tool-superseded-badge"]')).not.toBeNull();
+  });
+
+  it("omits the 'recovered' badge for a normal completion", () => {
+    const { container } = renderStep({ status: "complete" });
+    expect(container.querySelector('[data-testid="tool-superseded-badge"]')).toBeNull();
   });
 });

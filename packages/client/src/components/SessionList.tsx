@@ -3,17 +3,17 @@ import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/
 import type { CommandInfo, DashboardSession, ImageContent, OpenSpecData, OpenSpecGroup } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { DndContext, type DragEndEvent, type DragStartEvent, PointerSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { mdiChevronDown, mdiChevronRight, mdiChevronUp, mdiCog, mdiConsoleLine, mdiFolder, mdiFolderOpen, mdiPin, mdiPlus, mdiPuzzleOutline, mdiSortVariant } from "@mdi/js";
+import { mdiChevronDown, mdiChevronRight, mdiChevronUp, mdiCog, mdiConsoleLine, mdiFolder, mdiFolderOpen, mdiOpenInNew, mdiPin, mdiPlus, mdiPuzzleOutline, mdiSortVariant } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useFolderUrgencySort } from "../hooks/useFolderUrgencySort.js";
 import { useInstallPrompt } from "../hooks/useInstallPrompt.js";
 import { maybeAutoInitWorktreeOnSpawn } from "../lib/auto-init-worktree.js";
-import { openEditor } from "../lib/editor-api.js";
 import { encodeFolderPath } from "../lib/folder-encoding.js";
 import { t as i18nT } from "../lib/i18n";
 import { useI18n } from "../lib/i18n.js";
+import { buildFolderHomeUrl } from "../lib/route-builders.js";
 // TerminalCard removed — terminals now in TerminalsView
 import {
   getCollapsedGroups,
@@ -33,21 +33,20 @@ import { selectedCardScrollFingerprint } from "../lib/session-list-scroll.js";
 import { floatAskUserFirst } from "../lib/session-status-visuals.js";
 import { resolveWorkspaceFolderReorder, resolveWorkspaceReorder, sameTypeClosestCenter } from "../lib/sidebar-dnd.js";
 import { truncatePathMiddle } from "../lib/truncate-path.js";
-import { useEditors } from "../lib/use-editors.js";
 import { AddToWorkspaceMenu } from "./AddToWorkspaceMenu.js";
 import { BranchSwitchDialog } from "./BranchSwitchDialog.js";
 import { DashboardSpawnButtons } from "./DashboardSpawnButtons.js";
 import { FolderActionBar } from "./FolderActionBar.js";
 import { FolderNeedsYouPill } from "./FolderNeedsYouPill.js";
 import { FolderOpenSpecSection } from "./FolderOpenSpecSection.js";
-import { FolderStatusRollup } from "./FolderStatusRollup.js";
 import { FolderSpawnButtons } from "./FolderSpawnButtons.js";
+import { FolderStatusRollup } from "./FolderStatusRollup.js";
 import { InstallButton } from "./InstallButton.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { PiLogo } from "./PiLogo.js";
 import { PinDirectoryDialog } from "./PinDirectoryDialog.js";
 import { PlaceholderSessionCard } from "./PlaceholderSessionCard.js";
-import { branchCache, EditorButtons, GroupGitInfo, SessionCard } from "./SessionCard.js";
+import { branchCache, GroupGitInfo, SessionCard } from "./SessionCard.js";
 import { SortablePinnedGroup, useFolderDragHandle } from "./SortablePinnedGroup.js";
 import { SortableSessionCard } from "./SortableSessionCard.js";
 import { SortableWorkspace } from "./SortableWorkspace.js";
@@ -57,6 +56,8 @@ import { ThemePicker } from "./ThemePicker.js";
 import { ThemeToggle } from "./ThemeToggle.js";
 import { Toast, useToast } from "./Toast.js";
 import { TunnelButton } from "./TunnelButton.js";
+import { allTagsInUse } from "./tags/all-tags.js";
+import { TagFilterGroup } from "./tags/TagFilterGroup.js";
 import { WorkspaceHeader } from "./WorkspaceHeader.js";
 import { WorktreeSpawnDialog } from "./WorktreeSpawnDialog.js";
 
@@ -66,10 +67,25 @@ export interface ContextUsageInfo {
   contextWindow: number;
 }
 
+/** Escape a session id for a `[data-session-id="…"]` selector. */
+function cssEscapeId(id: string): string {
+  return (typeof window !== "undefined" && typeof window.CSS?.escape === "function")
+    ? window.CSS.escape(id)
+    : id.replace(/"/g, '\\"');
+}
+
 interface Props {
   sessions: DashboardSession[];
   selectedId?: string;
   onSelect: (sessionId: string) => void;
+  /** One-shot seek-to-card request `{ sessionId, nonce }` from App. A bumped
+   *  nonce re-fires the reveal even for the already-selected session.
+   *  See change: add-seek-to-session-card. */
+  revealRequest?: { sessionId: string; nonce: number } | null;
+  /** Re-dispatch a seek for a session id (wired to App's `seekToCard`). Used
+   *  by the reveal-timeout toast's Retry action. See change:
+   *  add-seek-to-session-card. */
+  onSeekToCard?: (sessionId: string) => void;
   contextUsageMap?: Map<string, ContextUsageInfo>;
   openspecMap?: Map<string, OpenSpecData>;
   /**
@@ -163,14 +179,15 @@ interface Props {
   onOpenBoard?: (cwd: string) => void;
   onOpenTerminals?: (cwd: string) => void;
   onOpenEditor?: (cwd: string) => void;
-  editorStatuses?: Map<string, { id: string; status: import("@blackbelt-technology/pi-dashboard-shared/editor-types.js").EditorInstanceStatus }>;
-  editorAvailable?: boolean;
   /** Extra content rendered in the sidebar header toolbar */
   headerExtra?: React.ReactNode;
   /** Set of session IDs that have an active error */
   errorSessionIds?: Set<string>;
   /** Set of session IDs currently in a synthesized provider-retry phase (no terminal error). */
   retrySessionIds?: Set<string>;
+  /** Set of session IDs whose last turn was only reasoning (non-error notice).
+   *  See change: fix-gemini-subagent-silent-tool-schema-failure. */
+  noticeSessionIds?: Set<string>;
   /** Per-workspace spawn errors (cwd → detail). See change: spawn-failure-diagnostics. */
   spawnErrors?: Map<string, import("../hooks/useMessageHandler.js").SpawnErrorDetail>;
   /** Dismiss a spawn error for a workspace */
@@ -214,7 +231,7 @@ function ToggleButton({
   );
 }
 
-export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, openspecMap, folderGitMap, openspecGroupsMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onReplaceProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onResumeKeepPosition, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, addSpawningCwd, clearSpawningCwd, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onOpenPinDialog, onUnpinDirectory, onReorderPinnedDirs, onReorderWorkspaces, onReorderWorkspaceFolders, workspaces, onCreateWorkspace, onRenameWorkspace, onDeleteWorkspace, onSetWorkspaceCollapsed, onAddFolderToWorkspace, onRemoveFolderFromWorkspace, terminals, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, onKillProcess, onSetProcessDrawer, inflightBashMap, onAbortTool, onOpenSpecs, onOpenArchive, onOpenBoard, onOpenTerminals, onOpenEditor, editorStatuses, editorAvailable, headerExtra, errorSessionIds, retrySessionIds, spawnErrors, onDismissSpawnError, resumeErrors, onDismissResumeError, gitWorktreeEnabled: gitWorktreeEnabledProp }: Props) {
+export function SessionList({ sessions, selectedId, onSelect, revealRequest, onSeekToCard, contextUsageMap, openspecMap, folderGitMap, openspecGroupsMap, sessionOrderMap, onReorderSessions, onSendPrompt, onOpenSpecRefresh, onAttachProposal, onDetachProposal, onReplaceProposal, onBulkArchive, onReadArtifact, onOpenPiResources, onRename, onShutdown, onResume, onResumeKeepPosition, onHideSession, onUnhideSession, onSpawnSession, spawningCwds, addSpawningCwd, clearSpawningCwd, spawnResult, onSpawnResultSeen, pinnedDirectories, onPinDirectory, onOpenPinDialog, onUnpinDirectory, onReorderPinnedDirs, onReorderWorkspaces, onReorderWorkspaceFolders, workspaces, onCreateWorkspace, onRenameWorkspace, onDeleteWorkspace, onSetWorkspaceCollapsed, onAddFolderToWorkspace, onRemoveFolderFromWorkspace, terminals, onKillTerminal, onRenameTerminal, onCollapseSidebar, commandsMap, onKillProcess, onSetProcessDrawer, inflightBashMap, onAbortTool, onOpenSpecs, onOpenArchive, onOpenBoard, onOpenTerminals, onOpenEditor, headerExtra, errorSessionIds, retrySessionIds, noticeSessionIds, spawnErrors, onDismissSpawnError, resumeErrors, onDismissResumeError, gitWorktreeEnabled: gitWorktreeEnabledProp }: Props) {
   const { t } = useI18n();
   // UI preference flag, default-on. Gates folder `+Worktree` and per-change
   // `⥂2+` buttons. See change: openspec-worktree-spawn-button.
@@ -253,26 +270,13 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
       return;
     }
     if (!selectedId) return;
-    const escaped = (window.CSS && typeof window.CSS.escape === "function")
-      ? window.CSS.escape(selectedId)
-      : selectedId.replace(/"/g, '\\"');
+    const escaped = cssEscapeId(selectedId);
     const el = listRef.current?.querySelector(`[data-session-id="${escaped}"]`);
     if (el && typeof (el as HTMLElement).scrollIntoView === "function") {
       (el as HTMLElement).scrollIntoView({ block: "nearest", behavior: "auto" });
     }
   }, [scrollFingerprint, selectedId]);
 
-
-  // Detect editors for all unique cwds (sessions + pinned directories)
-  const cwds = useMemo(() => [...sessions.map((s) => s.cwd), ...(pinnedDirectories ?? [])], [sessions, pinnedDirectories]);
-  const editorMap = useEditors(cwds);
-
-  const handleOpenEditor = useCallback(async (cwd: string, editorId: string) => {
-    const result = await openEditor(cwd, editorId);
-    if (!result.success) {
-      showToast(result.error ?? "Failed to open editor");
-    }
-  }, [showToast]);
 
   // Remove legacy client-side hidden storage on mount
   useEffect(() => {
@@ -315,6 +319,11 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
   // are filled. See change: pin-and-search-sessions (design D1 revised).
   const [workspaceFilter, setWorkspaceFilter] = useState("");
   const [sessionSearch, setSessionSearch] = useState("");
+  // Tag + phase filter axes. Kept as TWO SEPARATE sets so a user tag named
+  // `apply` and an openspecPhase of `apply` never collide. OR-within each
+  // axis; AND-across axes and with folder/search. See change: add-session-tags.
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [selectedPhases, setSelectedPhases] = useState<Set<string>>(new Set());
   // Per-folder "show ended" expansion state. Ended sessions are collapsed
   // by default inside each folder; a minimal `Show N ended` row at the
   // bottom toggles. State is keyed by cwd; absent = collapsed (default).
@@ -557,18 +566,74 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
     }
   }, [allGroups, pinnedGroups, workspaces, onReorderSessions, onReorderPinnedDirs, onReorderWorkspaces, onReorderWorkspaceFolders, onResume, onResumeKeepPosition]);
 
+  // Tag/phase axes derived flags + the per-session predicate. OR-within each
+  // axis; AND-across. Empty axis = inert. See change: add-session-tags.
+  const wantTag = selectedTags.size > 0;
+  const wantPhase = selectedPhases.size > 0;
+  const anyTagFilterActive = wantTag || wantPhase;
+  const passesTagAxes = useCallback(
+    (s: DashboardSession): boolean => {
+      if (wantTag) {
+        const tags = s.tags ?? [];
+        if (!tags.some((t) => selectedTags.has(t))) return false;
+      }
+      if (wantPhase) {
+        if (!s.openspecPhase || !selectedPhases.has(s.openspecPhase)) return false;
+      }
+      return true;
+    },
+    [wantTag, wantPhase, selectedTags, selectedPhases],
+  );
+
+  // Union of tags in use (autocomplete + sidebar filter group) and the phases
+  // actually present. Recompute only when the session list changes.
+  const allTags = useMemo(() => allTagsInUse(sessions), [sessions]);
+  const phasesInUse = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of sessions) if (s.openspecPhase) set.add(s.openspecPhase);
+    return [...set].sort();
+  }, [sessions]);
+
+  const toggleSelectedTag = useCallback((tag: string) => {
+    setSelectedTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }, []);
+  const toggleSelectedPhase = useCallback((phase: string) => {
+    setSelectedPhases((prev) => {
+      const next = new Set(prev);
+      if (next.has(phase)) next.delete(phase);
+      else next.add(phase);
+      return next;
+    });
+  }, []);
+  const clearTagFilters = useCallback(() => {
+    setSelectedTags(new Set());
+    setSelectedPhases(new Set());
+  }, []);
+
   /**
    * Decide whether a folder should be visible given the active filters.
    * Workspace filter matches against folder path; session filter matches
-   * against any session title within the folder. Both are AND'd when set.
+   * against any session title within the folder; the tag/phase axes match
+   * against session tags / openspecPhase. All AND'd when set. When any
+   * session-level narrowing axis (search OR tag/phase) is active, the folder
+   * is visible only when at least one session passes ALL of them (ended
+   * included). See change: add-session-tags.
    */
   function folderMatchesFilters(group: DirectoryGroup): boolean {
     const wf = workspaceFilter.trim().toLowerCase();
     const sf = sessionSearch.trim().toLowerCase();
     const folderHit = wf.length === 0 || group.cwd.toLowerCase().includes(wf);
     if (!folderHit) return false;
-    if (sf.length === 0) return true;
-    return filterByQuery(group.sessions, sf).length > 0;
+    const needsSessionMatch = sf.length > 0 || anyTagFilterActive;
+    if (!needsSessionMatch) return true;
+    let pool = sf.length > 0 ? filterByQuery(group.sessions, sf) : group.sessions;
+    if (anyTagFilterActive) pool = pool.filter(passesTagAxes);
+    return pool.length > 0;
   }
 
   /**
@@ -577,9 +642,168 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
    * `collapsedGroups` set still controls behavior at rest.
    */
   function isFolderCollapsed(cwd: string): boolean {
-    if (workspaceFilter.length > 0 || sessionSearch.length > 0) return false;
+    if (workspaceFilter.length > 0 || sessionSearch.length > 0 || anyTagFilterActive) return false;
     return collapsedGroups.has(cwd);
   }
+
+  // ── Seek-to-card reveal (See change: add-seek-to-session-card) ────────────
+  // A card can be buried under a collapsed workspace (async server echo),
+  // folder, or ended group. `revealCard` GUARD-expands those ancestors, selects
+  // the card, then waits for it to lay out — driven by the `workspaces` prop
+  // echo, with a fixed 5s give-up backstop — before scrolling + flashing.
+  // Presence = laid out (height > 0), NOT `offsetParent` — a collapsed
+  // `grid-template-rows: 0fr` row keeps a non-null offsetParent at height 0.
+  const findLaidOutCard = useCallback((id: string): HTMLElement | null => {
+    const el = listRef.current?.querySelector(
+      `[data-session-id="${cssEscapeId(id)}"]`,
+    ) as HTMLElement | null;
+    return el && el.getBoundingClientRect().height > 0 ? el : null;
+  }, []);
+
+  const pendingRevealRef = useRef<{ sessionId: string; nonce: number } | null>(null);
+  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealRafRef = useRef<number | null>(null);
+
+  const clearPendingReveal = useCallback(() => {
+    pendingRevealRef.current = null;
+    if (revealTimerRef.current !== null) {
+      clearTimeout(revealTimerRef.current);
+      revealTimerRef.current = null;
+    }
+    if (revealRafRef.current !== null) {
+      cancelAnimationFrame(revealRafRef.current);
+      revealRafRef.current = null;
+    }
+  }, []);
+
+  // Try to reveal the pending card if it is laid out; no-op while it is still
+  // absent / 0-height (the echo has not landed yet).
+  const attemptReveal = useCallback(() => {
+    const pending = pendingRevealRef.current;
+    if (!pending) return;
+    const el = findLaidOutCard(pending.sessionId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("card-seek-flash");
+    window.setTimeout(() => el.classList.remove("card-seek-flash"), 1200);
+    clearPendingReveal();
+  }, [findLaidOutCard, clearPendingReveal]);
+
+  // Flat 3-level ancestor lookup from cwd + status (no graph walk).
+  const resolveFoldAncestors = useCallback(
+    (s: DashboardSession): { workspaceId?: string; cwd: string; isEnded: boolean } => ({
+      workspaceId: folderWorkspaceMap.get(s.cwd),
+      cwd: s.cwd,
+      isEnded: s.status === "ended",
+    }),
+    [folderWorkspaceMap],
+  );
+
+  // Classify whether the target is unreachable by fold-expansion alone: hidden
+  // (needs the global Show-hidden toggle) or excluded by an active filter.
+  // Both degrade to an informational toast; we never flip showHidden or clear
+  // a filter (broad, unrequested side effects).
+  const classifyDegrade = useCallback(
+    (s: DashboardSession): "hidden" | "filtered" | null => {
+      if (s.hidden && !showHidden) return "hidden";
+      if (anyTagFilterActive && !passesTagAxes(s)) return "filtered";
+      const sf = sessionSearch.trim().toLowerCase();
+      if (sf.length > 0 && filterByQuery([s], sf).length === 0) return "filtered";
+      const wf = workspaceFilter.trim().toLowerCase();
+      if (wf.length > 0 && !s.cwd.toLowerCase().includes(wf)) return "filtered";
+      return null;
+    },
+    [showHidden, anyTagFilterActive, passesTagAxes, sessionSearch, workspaceFilter],
+  );
+
+  // Reveal effect — keyed on `nonce` so re-seeking the same id re-fires;
+  // captures the current snapshot at gesture time (no other deps by design).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fires ONLY on a new nonce.
+  useEffect(() => {
+    if (!revealRequest) return;
+    // A new gesture supersedes any in-flight reveal — cancel unconditionally,
+    // before the missing-target / degrade early-returns, so a stale pending
+    // reveal can never fire for a superseded session.
+    clearPendingReveal();
+    const target = sessions.find((s) => s.id === revealRequest.sessionId);
+    if (!target) return;
+
+    const degrade = classifyDegrade(target);
+    if (degrade) {
+      showToast(
+        degrade === "hidden"
+          ? t(
+              "sessionList.seekHiddenToast",
+              undefined,
+              "This session is hidden. Enable “Show hidden” to reveal its card.",
+            )
+          : t(
+              "sessionList.seekFilteredToast",
+              undefined,
+              "A filter is hiding this session’s card. Clear the filter to reveal it.",
+            ),
+        "info",
+      );
+      return;
+    }
+
+    // GUARDED ancestor expand: workspace only if collapsed (idempotent server
+    // call); folder only if currently collapsed (the mutator is a TOGGLE);
+    // ended via an ADD-ONLY setter (never the toggle) so a re-seek can't
+    // re-collapse an already-open container.
+    const { workspaceId, cwd, isEnded } = resolveFoldAncestors(target);
+    if (workspaceId) {
+      const ws = (workspaces ?? []).find((w) => w.id === workspaceId);
+      if (ws?.collapsed) onSetWorkspaceCollapsed?.(workspaceId, false);
+    }
+    if (collapsedGroups.has(cwd)) handleToggleCollapse(cwd);
+    if (isEnded) {
+      setEndedExpanded((prev) => (prev.has(cwd) ? prev : new Set(prev).add(cwd)));
+    }
+    onSelect(target.id);
+
+    pendingRevealRef.current = { sessionId: target.id, nonce: revealRequest.nonce };
+    // Fixed give-up backstop — only catches a never-arriving echo; the event
+    // (workspaces prop update) wins the happy path first.
+    revealTimerRef.current = setTimeout(() => {
+      revealTimerRef.current = null;
+      const pending = pendingRevealRef.current;
+      if (!pending) return;
+      if (findLaidOutCard(pending.sessionId)) {
+        attemptReveal();
+        return;
+      }
+      clearPendingReveal();
+      showToast(
+        t("sessionList.seekTimeoutToast", undefined, "Couldn’t reveal the card."),
+        "info",
+        {
+          action: {
+            label: t("common.retry", undefined, "Retry"),
+            onClick: () => onSeekToCard?.(pending.sessionId),
+          },
+          noAutoDismiss: true,
+        },
+      );
+    }, 5000);
+    // Immediate attempt after the sync-ancestor re-render paints.
+    revealRafRef.current = requestAnimationFrame(() => {
+      revealRafRef.current = null;
+      attemptReveal();
+    });
+  }, [revealRequest?.nonce]);
+
+  // The `workspaces` echo landing (async workspace expand resolving) is the
+  // primary completion signal — re-check presence when it changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `workspaces` is the completion trigger (echo); pending state read via ref.
+  useEffect(() => {
+    if (!pendingRevealRef.current) return;
+    const id = requestAnimationFrame(() => attemptReveal());
+    return () => cancelAnimationFrame(id);
+  }, [workspaces, attemptReveal]);
+
+  // Cancel any pending frame/timer on unmount.
+  useEffect(() => clearPendingReveal, [clearPendingReveal]);
 
   /**
    * folder-workspaces: same as renderGroup but injects an "Add to
@@ -668,10 +892,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 if (!sessionId) return;
                 if (isCollapsed) handleToggleCollapse(group.cwd);
                 onSelect(sessionId);
-                const escaped =
-                  typeof window !== "undefined" && typeof window.CSS?.escape === "function"
-                    ? window.CSS.escape(sessionId)
-                    : sessionId.replace(/"/g, '\\"');
+                const escaped = cssEscapeId(sessionId);
                 requestAnimationFrame(() => {
                   document
                     .querySelector(`[data-session-id="${escaped}"]`)
@@ -701,6 +922,25 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                 is irrelevant for visibility/ordering there. The pin state
                 itself is preserved on the server (orthogonal to workspace
                 membership). See change: folder-workspaces. */}
+            {/* Open the directory home page. Distinct from the collapse toggle
+                (the name row) and the drag gutter (a sibling) — stopPropagation
+                keeps the click from toggling collapse or starting a reorder.
+                Pinned rows only. See change: add-directory-home-page (D3). */}
+            {isPinned && !inWorkspace && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(buildFolderHomeUrl(group.cwd));
+                }}
+                className="ml-auto px-1 py-0.5 rounded text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                title={t("sessionList.openFolderHome", undefined, "Open folder home")}
+                aria-label={t("sessionList.openFolderHome", undefined, "Open folder home")}
+                data-testid={`folder-open-home-${group.cwd}`}
+              >
+                <Icon path={mdiOpenInNew} size={0.5} />
+              </button>
+            )}
             {!inWorkspace && (isPinned || onPinDirectory) && (
               <button
                 onClick={(e) => {
@@ -735,12 +975,8 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             <FolderActionBar
               cwd={group.cwd}
               terminalCount={terminalsByCwd.get(group.cwd)?.length ?? 0}
-              editorStatus={editorStatuses?.get(group.cwd)}
-              editorAvailable={editorAvailable}
-              nativeEditors={editorMap.get(group.cwd) ?? []}
               onOpenTerminals={() => onOpenTerminals?.(group.cwd)}
               onOpenEditor={() => onOpenEditor?.(group.cwd)}
-              onOpenNativeEditor={(editorId) => handleOpenEditor(group.cwd, editorId)}
               onOpenPiResources={() => onOpenPiResources?.(group.cwd)}
               onInitializeProject={onSpawnSession ? (cwd) => onSpawnSession(cwd, undefined, { initialPrompt: "/skill:project-init" }) : undefined}
               brokenSessionCount={group.sessions.filter((s) => s.cwdMissing === true && s.status === "ended" && !s.hidden).length}
@@ -770,7 +1006,12 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
           <div className="mt-1">
             <FolderSpawnButtons
               spawningDisabled={spawningCwds?.has(group.cwd)}
-              showWorktree={group.sessions.some((s) => !!s.gitBranch) && gitWorktreeEnabled && !!onSpawnSession}
+              // Show unless EVERY session in the folder is a confirmed non-git
+              // (`isGitRepo === false`). `true`/`undefined` keep the button, so
+              // a real repo whose probe timed out / a legacy session never
+              // hides it. NOT gated on `gitBranch` (data-arrival signal).
+              // See change: gate-session-worktree-button-on-git.
+              showWorktree={group.sessions.some((s) => s.isGitRepo !== false) && gitWorktreeEnabled && !!onSpawnSession}
               onSpawnSession={() => {
                 if (isCollapsed) handleToggleCollapse(group.cwd);
                 onSpawnSession?.(group.cwd);
@@ -809,9 +1050,12 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             //   5. Pin partition (§7) is applied to whichever buckets are
             //      currently rendered.
             // See change: pin-and-search-sessions §8.
-            const matched = sessionSearch.length > 0
+            let matched = sessionSearch.length > 0
               ? filterByQuery(group.sessions, sessionSearch)
               : group.sessions;
+            // Tag/phase axes narrow the in-folder set identically to search.
+            // See change: add-session-tags.
+            if (anyTagFilterActive) matched = matched.filter(passesTagAxes);
             // Flat-merge mode: when session-search is active AND no
             // folder filter is typed, don't apply the active-first sort —
             // ended results stay inline with active so the user sees
@@ -846,7 +1090,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             );
             const showEnded =
               endedSessions.length > 0 &&
-              (endedExpanded.has(group.cwd) || sessionSearch.length > 0);
+              (endedExpanded.has(group.cwd) || sessionSearch.length > 0 || anyTagFilterActive);
             const visibleSessions = flatMergeMode
               ? sortSessionsByOrder(matched, order) // mixed-status, flat stored order
               : (showEnded
@@ -855,7 +1099,7 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             // Empty-state: search query active but nothing matched in
             // this folder. Still rendered inline so the user can clear
             // and recover.
-            if (sessionSearch.length > 0 && matched.length === 0) {
+            if ((sessionSearch.length > 0 || anyTagFilterActive) && matched.length === 0) {
               return (
                 <div
                   className="text-xs text-[var(--text-muted)] italic px-2 py-2 select-none"
@@ -891,7 +1135,8 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               firstEndedIdx >= 0 &&
               endedExpanded.has(group.cwd) &&
               sessionSearch.length === 0 &&
-              workspaceFilter.length === 0;
+              workspaceFilter.length === 0 &&
+              !anyTagFilterActive;
             return (
               <SortableContext items={allIds} strategy={verticalListSortingStrategy}>
                 {allIds.map((id, idx) => {
@@ -953,10 +1198,11 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                         onAbortTool={onAbortTool ? (toolCallId) => onAbortTool(session.id, toolCallId) : undefined}
                         hasError={errorSessionIds?.has(session.id)}
                         isRetrying={retrySessionIds?.has(session.id)}
+                        hasNotice={noticeSessionIds?.has(session.id)}
                       />
                       {resumeErrors?.get(session.id) && (
                         <div data-testid="resume-error-banner" className="mt-1 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-1.5 flex items-center gap-2 text-xs text-red-300">
-                          <span className="flex-1">{i18nT("auto.resume_failed", undefined, "Resume failed:")} {resumeErrors.get(session.id)}</span>
+                          <span className="flex-1">{i18nT("session.resumeFailed", undefined, "Resume failed:")} {resumeErrors.get(session.id)}</span>
                           {onDismissResumeError && (
                             <button
                               data-testid="resume-error-dismiss"
@@ -978,12 +1224,13 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               already expanded them, or when a search query is active
               (search auto-expands ended). Click toggles. */}
           {(() => {
-            const matched = sessionSearch.length > 0
+            let matched = sessionSearch.length > 0
               ? filterByQuery(group.sessions, sessionSearch)
               : group.sessions;
+            if (anyTagFilterActive) matched = matched.filter(passesTagAxes);
             const endedCount = matched.filter((s) => s.status === "ended").length;
             if (endedCount === 0) return null;
-            if (sessionSearch.length > 0) return null; // auto-expanded
+            if (sessionSearch.length > 0 || anyTagFilterActive) return null; // auto-expanded
             const expanded = endedExpanded.has(group.cwd);
             return (
               <button
@@ -1058,6 +1305,44 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
             {t("common.hidden", undefined, "Hidden")}
           </ToggleButton>
         </div>
+        {/* Tag + phase filter groups. Two SEPARATE selection sets (no user-tag
+            vs phase collision). Phase chips write no session state.
+            See change: add-session-tags. */}
+        {(allTags.length > 0 || phasesInUse.length > 0) && (
+          <div className="px-3 pb-2" data-testid="tag-filter-bar">
+            <TagFilterGroup
+              label={t("sessionList.yourTags", undefined, "Your tags")}
+              tags={allTags}
+              selected={selectedTags}
+              onToggle={toggleSelectedTag}
+              tone="user"
+            />
+            <TagFilterGroup
+              label={t("sessionList.phaseReadOnly", undefined, "Phase (read-only)")}
+              tags={phasesInUse}
+              selected={selectedPhases}
+              onToggle={toggleSelectedPhase}
+              tone="exec"
+            />
+            {anyTagFilterActive && (
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={clearTagFilters}
+                  className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] underline"
+                  data-testid="clear-tag-filters"
+                >
+                  {t("sessionList.clearTags", undefined, "Clear tags")}
+                </button>
+                {!sessions.some(passesTagAxes) && (
+                  <span className="text-[10px] text-[var(--text-muted)] italic" data-testid="tag-filter-no-match">
+                    {t("sessionList.zeroMatch", undefined, "0 match")}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <div ref={listRef} className="flex-1 overflow-y-auto">
       {filteredSessions.length === 0 && pinnedGroups.length === 0 && (workspaces?.length ?? 0) === 0 ? (
@@ -1104,8 +1389,8 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
                               {t("sessionList.emptyWorkspace", undefined, "Empty workspace. Use \"+ Add to workspace\" on a folder's actions to assign it here.")}
                             </div>
                           )}
-                          <SortableContext items={ws.folders.map((f) => f.cwd)} strategy={verticalListSortingStrategy}>
-                            {ws.folders.map((folder) => (
+                          <SortableContext items={ws.folders.filter((f) => !anyTagFilterActive || folderMatchesFilters(f)).map((f) => f.cwd)} strategy={verticalListSortingStrategy}>
+                            {ws.folders.filter((folder) => !anyTagFilterActive || folderMatchesFilters(folder)).map((folder) => (
                               <SortableWorkspaceFolder key={`ws-${ws.id}-f-${folder.cwd}`} id={folder.cwd} wsId={ws.id}>
                                 <div className="relative">
                                   {renderGroup(folder, folder.pinned, true)}
@@ -1160,11 +1445,16 @@ export function SessionList({ sessions, selectedId, onSelect, contextUsageMap, o
               currently working in.
               See change: pin-and-search-sessions. */}
           {visibleTopUnpinned
-            .filter((g) =>
-              workspaceFilter.length > 0
+            .filter((g) => {
+              // Tag/phase active: folder visible iff ≥1 session passes ALL active
+              // narrowing axes (path + search + tag/phase), ENDED included — so an
+              // ended-only tag match still reveals the folder, and zero-match
+              // folders are hidden (no empty shell). See change: add-session-tags.
+              if (anyTagFilterActive) return folderMatchesFilters(g);
+              return workspaceFilter.length > 0
                 ? folderMatchesFilters(g)
-                : g.sessions.some((s) => s.status !== "ended")
-            )
+                : g.sessions.some((s) => s.status !== "ended");
+            })
             .map((group) => renderGroupWithWorkspaceMenu(group, false))}
         </ul>
         </DndContext>

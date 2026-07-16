@@ -1,44 +1,58 @@
 /**
  * Git operation REST API routes (localhost-only).
  */
-import type { FastifyInstance } from "fastify";
+
+import fs from "node:fs";
+import { join } from "node:path";
+import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
 import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import type { NetworkGuard } from "./route-deps.js";
-import type { SessionManager } from "../memory-session-manager.js";
+import type { FastifyInstance } from "fastify";
+import { activeSessionsUnder, sessionsUnder } from "../active-sessions-in-cwd.js";
 import type { BrowserGateway } from "../browser-gateway.js";
 import {
   addWorktree,
   addWorktreeFromPr,
-  orphanCleanup,
   checkoutBranch,
+  commitFiles,
   createPullRequest,
+  GitCommitError,
+  getChangedFiles,
+  getGitStatus,
   gitInit,
   isGitRepo,
   listBranches,
   listPullRequests,
   listWorktrees,
   mergeWorktree,
+  orphanCleanup,
   pushBranch,
   readHead,
   removeWorktree,
-  resolveMainPath,
+  resolveConfigRoot,
   stashPop,
   worktreeDiffStat,
 } from "../git-operations.js";
-import { readInitHook, evaluateGate, runInitHook, hookDefHash, type InitProgress, type WorktreeInitHook, type GateResult } from "../worktree-init.js";
-import { mapInitStderrToHint } from "../worktree-init-errors.js";
-import { isTrusted, recordTrust } from "../worktree-init-trust.js";
-import type { WorktreeInitRegistry } from "../worktree-init-registry.js";
-import { activeSessionsUnder, sessionsUnder } from "../active-sessions-in-cwd.js";
-import { getDefaultRegistry } from "@blackbelt-technology/pi-dashboard-shared/tool-registry/index.js";
+import type { SessionManager } from "../memory-session-manager.js";
 import { safeRealpathSync } from "../resolve-path.js";
-import fs from "node:fs";
+import { evaluateGate, type GateResult, hookDefHash, type InitProgress, readInitHook, runInitHook, type WorktreeInitHook } from "../worktree-init.js";
+import { mapInitStderrToHint } from "../worktree-init-errors.js";
+import type { WorktreeInitRegistry } from "../worktree-init-registry.js";
+import { isTrusted, recordTrust } from "../worktree-init-trust.js";
+import type { NetworkGuard } from "./route-deps.js";
 
 export interface GitRoutesDeps {
   networkGuard: NetworkGuard;
   /** Optional — worktree lifecycle endpoints need this to enumerate active sessions + broadcast cwdMissing. */
   sessionManager?: SessionManager;
   browserGateway?: BrowserGateway;
+  /**
+   * Optional — sends `git_commit_draft` to the owning bridge for the AI-draft
+   * relay. When absent the commit-draft route returns a stub.
+   * See change: add-session-uncommitted-indicator-and-commit.
+   */
+  sendToSession?: (sessionId: string, msg: any) => boolean;
+  /** Optional — correlates the async draft reply. See same change. */
+  commitDraftRelay?: import("../commit-draft-relay.js").CommitDraftRelay;
   /**
    * Optional — enables worktree-init progress streaming to the
    * originating browser. When absent, the init hook still runs but
@@ -56,6 +70,20 @@ export interface GitRoutesDeps {
 const GATE_CACHE_TTL_MS = 30 * 1000;
 const gateCache = new Map<string, { needsInit: boolean; evaluatedAt: number }>();
 function invalidateGateCache(checkoutPath: string) { gateCache.delete(checkoutPath); }
+
+/**
+ * Last non-empty line of the progress tail, for the ghost preview. The tail is
+ * the most recent <= 4KB of combined output; the chip shows only its final line.
+ * See change: friendlier-worktree-init.
+ */
+function lastLineOf(tail: string): string {
+  const lines = tail.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]?.trim();
+    if (line) return line;
+  }
+  return "";
+}
 async function evaluateGateCached(checkoutPath: string, hook: WorktreeInitHook): Promise<GateResult> {
   const hit = gateCache.get(checkoutPath);
   if (hit && Date.now() - hit.evaluatedAt < GATE_CACHE_TTL_MS) return { needsInit: hit.needsInit };
@@ -65,7 +93,7 @@ async function evaluateGateCached(checkoutPath: string, hook: WorktreeInitHook):
 }
 
 export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps) {
-  const { networkGuard, sessionManager, browserGateway, worktreeInitRegistry } = deps;
+  const { networkGuard, sessionManager, browserGateway, worktreeInitRegistry, sendToSession, commitDraftRelay } = deps;
   fastify.get<{ Querystring: { cwd?: string } }>(
     "/api/git/branches",
     { preHandler: networkGuard },
@@ -73,16 +101,16 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
       const cwd = request.query.cwd;
       if (!cwd) {
         reply.code(400);
-        return { success: false, error: "cwd parameter required" } satisfies ApiResponse;
+        return { success: false, code: "cwd_required", error: "cwd parameter required" } satisfies ApiResponse;
       }
       if (!isGitRepo(cwd)) {
-        return { success: false, error: "not a git repository" } satisfies ApiResponse;
+        return { success: false, code: "not_a_repo", error: "not a git repository" } satisfies ApiResponse;
       }
       try {
         const data = listBranches(cwd);
         return { success: true, data } satisfies ApiResponse;
       } catch (err: any) {
-        return { success: false, error: err.message ?? "failed to list branches" } satisfies ApiResponse;
+        return { success: false, code: "list_branches_failed", error: err.message ?? "failed to list branches" } satisfies ApiResponse;
       }
     },
   );
@@ -94,7 +122,7 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
       const { cwd, branch, stash } = request.body ?? {};
       if (!cwd || !branch) {
         reply.code(400);
-        return { success: false, error: "cwd and branch required" } satisfies ApiResponse;
+        return { success: false, code: "cwd_and_branch_required", error: "cwd and branch required" } satisfies ApiResponse;
       }
       try {
         const result = checkoutBranch(cwd, branch, stash ?? false);
@@ -104,7 +132,7 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
         }
         return { success: true, data: { stashed: result.stashed } } satisfies ApiResponse;
       } catch (err: any) {
-        return { success: false, error: err.message ?? "checkout failed" } satisfies ApiResponse;
+        return { success: false, code: "checkout_failed", error: err.message ?? "checkout failed" } satisfies ApiResponse;
       }
     },
   );
@@ -116,14 +144,148 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
       const { cwd } = request.body ?? {};
       if (!cwd) {
         reply.code(400);
-        return { success: false, error: "cwd required" } satisfies ApiResponse;
+        return { success: false, code: "cwd_required", error: "cwd required" } satisfies ApiResponse;
       }
       try {
         gitInit(cwd);
         return { success: true } satisfies ApiResponse;
       } catch (err: any) {
-        return { success: false, error: err.message ?? "init failed" } satisfies ApiResponse;
+        return { success: false, code: "git_init_failed", error: err.message ?? "init failed" } satisfies ApiResponse;
       }
+    },
+  );
+
+  // ── Uncommitted-indicator + commit (session-uncommitted-indicator-and-commit) ──
+
+  // On-demand fresh working-tree status for a cwd (erases broadcast staleness
+  // on card/folder focus + right after a commit).
+  fastify.get<{ Querystring: { cwd?: string } }>(
+    "/api/git/status",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const validated = validateCwd(request.query.cwd);
+      if (!validated.ok) {
+        reply.code(400);
+        return { success: false, code: validated.code, error: validated.message } satisfies ApiResponse;
+      }
+      if (!isGitRepo(validated.cwd)) {
+        return { success: false, code: "not_a_repo", error: "not a git repository" } satisfies ApiResponse;
+      }
+      const status = getGitStatus(validated.cwd);
+      if (!status) {
+        return { success: false, code: "git_failed", error: "failed to read git status" } satisfies ApiResponse;
+      }
+      return { success: true, data: status } satisfies ApiResponse;
+    },
+  );
+
+  // Changed-file list for the commit dialog's picker.
+  fastify.get<{ Querystring: { cwd?: string } }>(
+    "/api/git/changed-files",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const validated = validateCwd(request.query.cwd);
+      if (!validated.ok) {
+        reply.code(400);
+        return { success: false, code: validated.code, error: validated.message } satisfies ApiResponse;
+      }
+      if (!isGitRepo(validated.cwd)) {
+        return { success: false, code: "not_a_repo", error: "not a git repository" } satisfies ApiResponse;
+      }
+      try {
+        const files = await getChangedFiles(validated.cwd);
+        return { success: true, data: files } satisfies ApiResponse;
+      } catch (err: any) {
+        return { success: false, code: "git_failed", error: err?.message ?? "failed to list changed files" } satisfies ApiResponse;
+      }
+    },
+  );
+
+  // Commit a chosen subset of files. argv staging + `git commit -F -` stdin
+  // (no shell interpolation of the message). On success broadcasts fresh
+  // status to every session sharing the cwd so their pill updates at once.
+  fastify.post<{ Body: { cwd?: string; message?: string; files?: string[] } }>(
+    "/api/git/commit",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const { cwd, message, files } = request.body ?? {};
+      const validated = validateCwd(cwd);
+      if (!validated.ok) {
+        reply.code(400);
+        return { success: false, code: validated.code, error: validated.message } satisfies ApiResponse;
+      }
+      if (typeof message !== "string" || !Array.isArray(files)) {
+        reply.code(400);
+        return { success: false, code: "bad_request", error: "message and files[] required" } satisfies ApiResponse;
+      }
+      try {
+        const result = await commitFiles({ cwd: validated.cwd, message, files });
+        // Broadcast fresh status to sessions sharing this cwd.
+        if (sessionManager && browserGateway) {
+          const fresh = getGitStatus(validated.cwd);
+          if (fresh) {
+            for (const s of sessionManager.listAll()) {
+              if (safeRealpathSync(s.cwd) === validated.cwd) {
+                sessionManager.update(s.id, { gitStatus: fresh });
+                browserGateway.broadcastSessionUpdated(s.id, { gitStatus: fresh });
+              }
+            }
+          }
+        }
+        return { success: true, data: result } satisfies ApiResponse;
+      } catch (err: any) {
+        if (err instanceof GitCommitError) {
+          reply.code(err.code === "path-escape" || err.code === "no-files" || err.code === "empty-message" ? 400 : 409);
+          return { success: false, code: err.code, error: err.message } satisfies ApiResponse;
+        }
+        return { success: false, code: "commit-failed", error: err?.message ?? "commit failed" } satisfies ApiResponse;
+      }
+    },
+  );
+
+  // AI-drafted commit message. Relays to the owning bridge's fork-subagent
+  // and awaits the result (stub on timeout / no bridge).
+  fastify.post<{ Body: { cwd?: string; files?: string[]; sessionId?: string } }>(
+    "/api/git/commit-draft",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const { cwd, files, sessionId } = request.body ?? {};
+      const validated = validateCwd(cwd);
+      if (!validated.ok) {
+        reply.code(400);
+        return { success: false, code: validated.code, error: validated.message } satisfies ApiResponse;
+      }
+      // Every file must be a non-empty string (the diff is built per path).
+      if (
+        !Array.isArray(files) ||
+        files.length === 0 ||
+        !files.every((f) => typeof f === "string" && f.length > 0) ||
+        typeof sessionId !== "string"
+      ) {
+        reply.code(400);
+        return { success: false, code: "bad_request", error: "sessionId and non-empty files[] required" } satisfies ApiResponse;
+      }
+      // The draft is seeded from the named session's context, so the session
+      // must exist and its working tree must be the cwd being committed — a
+      // client cannot pair an arbitrary sessionId with a foreign cwd.
+      if (sessionManager) {
+        const sess = sessionManager.get(sessionId);
+        if (!sess || safeRealpathSync(sess.cwd) !== validated.cwd) {
+          reply.code(400);
+          return { success: false, code: "bad_request", error: "sessionId does not match cwd" } satisfies ApiResponse;
+        }
+      }
+      if (!commitDraftRelay || !sendToSession) {
+        // Feature not wired — degrade to manual entry.
+        return { success: true, data: { message: "", source: "stub" } } satisfies ApiResponse;
+      }
+      const result = await commitDraftRelay.request({
+        sessionId,
+        cwd: validated.cwd,
+        files,
+        send: (msg) => sendToSession(sessionId, msg),
+      });
+      return { success: true, data: result } satisfies ApiResponse;
     },
   );
 
@@ -185,18 +347,23 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
         reply.code(400);
         return { success: false, code: validated.code, error: validated.message } satisfies ApiResponse;
       }
-      if (!isGitRepo(validated.cwd)) {
-        return { success: false, code: "not_a_repo", error: "not a git repository" } satisfies ApiResponse;
+      // Config root without a git assumption: a non-git dir with
+      // `.pi/settings.json` resolves to itself so its declared hook is read.
+      // See change: support-non-git-init-hook.
+      const configRoot = resolveConfigRoot(validated.cwd);
+      if (!configRoot) {
+        // State ①: no reachable config root at all — truly unconfigured.
+        return { success: true, data: { hasHook: false, configured: false } } satisfies ApiResponse;
       }
-      const repoRoot = resolveMainPath(validated.cwd);
-      if (!repoRoot) {
-        return { success: false, code: "not_a_repo", error: "unable to resolve git common-dir" } satisfies ApiResponse;
-      }
-      const hook = readInitHook(repoRoot);
+      const hook = readInitHook(configRoot);
       if (!hook) {
-        return { success: true, data: { hasHook: false } } satisfies ApiResponse;
+        // No worktreeInit hook. Distinguish state ① (git repo, no
+        // `.pi/settings.json`) from state ③ (configured project, no hook).
+        // See change: distinguish-initialize-actions.
+        const configured = fs.existsSync(join(configRoot, ".pi", "settings.json"));
+        return { success: true, data: { hasHook: false, configured } } satisfies ApiResponse;
       }
-      const trusted = isTrusted(repoRoot, hookDefHash(hook));
+      const trusted = isTrusted(configRoot, hookDefHash(hook));
       // TOFU: do NOT execute the repo-declared `gate` (arbitrary bash) until the
       // hook is trusted. An untrusted hook reports presence only; `needsInit` is
       // unknown until the user confirms. See change: generalize-worktree-init-hook.
@@ -208,11 +375,25 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
     },
   );
 
+  // ── Active worktree-inits (change: friendlier-worktree-init) ────────────
+  //
+  // Boot rehydration: returns the cwd-keyed registry's running entries plus
+  // any terminal entries still within their retention TTL. Empty when no
+  // registry is wired (progress streaming disabled).
+  fastify.get(
+    "/api/git/worktree/active-inits",
+    { preHandler: networkGuard },
+    async () => {
+      const runs = worktreeInitRegistry?.getActiveRuns() ?? [];
+      return { success: true, data: { runs } } satisfies ApiResponse;
+    },
+  );
+
   // ── Worktree init run (change: generalize-worktree-init-hook) ──────────
   //
   // Runs the declared hook for a checkout. TOFU-gated: an untrusted hook
   // returns `init_untrusted` carrying the def for the client to confirm.
-  fastify.post<{ Body: { cwd?: string; requestId?: string; confirmHash?: string } }>(
+  fastify.post<{ Body: { cwd?: string; requestId?: string; confirmHash?: string; scope?: unknown } }>(
     "/api/git/worktree/init",
     { preHandler: networkGuard },
     async (request, reply) => {
@@ -234,43 +415,71 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
         reply.code(400);
         return { success: false, code: validated.code, error: validated.message } satisfies ApiResponse;
       }
-      if (!isGitRepo(validated.cwd)) {
-        return { success: false, code: "not_a_repo", error: "not a git repository" } satisfies ApiResponse;
+      // Config root without a git assumption; a `null` root means an
+      // unconfigured non-git dir — reuse the existing no-hook envelope, not
+      // `not_a_repo`. See change: support-non-git-init-hook.
+      const configRoot = resolveConfigRoot(validated.cwd);
+      if (!configRoot) {
+        return { success: true, data: { ran: false, skippedReason: "no_hook" } } satisfies ApiResponse;
       }
-      const repoRoot = resolveMainPath(validated.cwd);
-      if (!repoRoot) {
-        return { success: false, code: "not_a_repo", error: "unable to resolve git common-dir" } satisfies ApiResponse;
-      }
-      const hook = readInitHook(repoRoot);
+      const hook = readInitHook(configRoot);
       if (!hook) {
         return { success: true, data: { ran: false, skippedReason: "no_hook" } } satisfies ApiResponse;
       }
       const hash = hookDefHash(hook);
       if (typeof body.confirmHash === "string" && body.confirmHash === hash) {
-        recordTrust(repoRoot, hash);
+        // Strict scope validation (no upward coercion): omitted → project
+        // (backward compatible); exactly `session`|`project` honored; any other
+        // present value is rejected WITHOUT recording trust or running, so a
+        // malformed value can never escalate an ephemeral-intent confirm into a
+        // permanent on-disk grant. See change: add-session-scoped-init-trust.
+        const rawScope = body.scope;
+        if (rawScope !== undefined && rawScope !== "session" && rawScope !== "project") {
+          return { success: false, code: "bad_request", error: "invalid scope" } satisfies ApiResponse;
+        }
+        const scope = rawScope === "session" ? "session" : "project";
+        recordTrust(configRoot, hash, scope);
       }
-      if (!isTrusted(repoRoot, hash)) {
+      if (!isTrusted(configRoot, hash)) {
         // Echo the hash so the client confirms with `confirmHash` without
         // re-implementing the canonical hash. See change: generalize-worktree-init-hook.
         return { success: false, code: "init_untrusted", data: { hook, hash } } satisfies ApiResponse;
       }
+      // Re-trust case: the hook was edited (invalidating trust) but the gate is
+      // already satisfied (`needsInit === false`). Granting trust should clear
+      // the control WITHOUT re-running the hook. See change:
+      // friendlier-worktree-init (folder-action-bar spec).
+      const preGate = await evaluateGateCached(validated.cwd, hook);
+      if (!preGate.needsInit) {
+        return { success: true, data: { ran: false, skippedReason: "already_initialized" } } satisfies ApiResponse;
+      }
       const requestId = typeof body.requestId === "string" && body.requestId.length > 0 ? body.requestId : undefined;
       const cwd = validated.cwd;
+      // Fan out to the legacy per-click requestId subscriber (if any) AND to
+      // every cwd-keyed subscriber (refresh / second tab / auto-init).
+      // See change: friendlier-worktree-init.
       const sendIf = (msg: any) => {
-        if (requestId && worktreeInitRegistry) worktreeInitRegistry.send(requestId, msg);
+        if (worktreeInitRegistry) {
+          if (requestId) worktreeInitRegistry.send(requestId, msg);
+          worktreeInitRegistry.sendCwd(cwd, msg);
+        }
       };
+      worktreeInitRegistry?.startRun(cwd);
       const onProgress = (p: InitProgress) => {
+        worktreeInitRegistry?.progressRun(cwd, lastLineOf(p.line), p.line);
         sendIf({ type: "worktree_init_progress", requestId: requestId ?? "", cwd, line: p.line });
       };
       invalidateGateCache(cwd);
       const runResult = await runInitHook(cwd, hook, onProgress);
       invalidateGateCache(cwd);
       if (runResult.ok) {
+        worktreeInitRegistry?.finishRun(cwd, "done");
         sendIf({ type: "worktree_init_done", requestId: requestId ?? "", cwd, durationMs: runResult.durationMs });
         return { success: true, data: { ran: true, durationMs: runResult.durationMs } } satisfies ApiResponse;
       }
       const stderr = runResult.stderr ?? "";
       const hint = mapInitStderrToHint(stderr) ?? `init failed (${runResult.code ?? "unknown"})`;
+      worktreeInitRegistry?.finishRun(cwd, "failed", runResult.code ?? "init_failed");
       sendIf({ type: "worktree_init_failed", requestId: requestId ?? "", cwd, code: runResult.code ?? "init_failed", message: hint, stderr });
       reply.code(500);
       return { success: false, code: "init_failed", error: hint, stderr } satisfies ApiResponse;
@@ -665,13 +874,13 @@ export function registerGitRoutes(fastify: FastifyInstance, deps: GitRoutesDeps)
       const { cwd } = request.body ?? {};
       if (!cwd) {
         reply.code(400);
-        return { success: false, error: "cwd required" } satisfies ApiResponse;
+        return { success: false, code: "cwd_required", error: "cwd required" } satisfies ApiResponse;
       }
       try {
         const result = stashPop(cwd);
         return { success: true, data: result } satisfies ApiResponse;
       } catch (err: any) {
-        return { success: false, error: err.message ?? "stash pop failed" } satisfies ApiResponse;
+        return { success: false, code: "stash_pop_failed", error: err.message ?? "stash pop failed" } satisfies ApiResponse;
       }
     },
   );

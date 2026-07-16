@@ -3,19 +3,20 @@
  * Handles three modes: Edit change (oldText/newText), Write change (all additions),
  * and git aggregate diff.
  */
-import React, { useState, useMemo, useEffect } from "react";
-import { getApiBase } from "../lib/api-context.js";
-import { Icon } from "@mdi/react";
-import { mdiCompare, mdiFileOutline, mdiViewSplitVertical, mdiViewSequential } from "@mdi/js";
-import { DiffView, DiffModeEnum } from "@git-diff-view/react";
+
+import type { EditOperation, FileChangeEvent, FileDiffEntry } from "@blackbelt-technology/pi-dashboard-shared/diff-types.js";
 import { highlighter } from "@git-diff-view/lowlight";
+import { DiffModeEnum, DiffView } from "@git-diff-view/react";
+import { mdiCompare, mdiEyeOutline, mdiFileOutline, mdiViewSequential, mdiViewSplitVertical } from "@mdi/js";
+import { Icon } from "@mdi/react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { getSyntaxTheme } from "../lib/syntax-theme.js";
-import { useThemeContext } from "./ThemeProvider.js";
-import { RichDiff, getLang } from "./RichDiff.js";
-import type { FileChangeEvent, FileDiffEntry } from "@blackbelt-technology/pi-dashboard-shared/diff-types.js";
-import type { FileSelection } from "./DiffFileTree.js";
+import { getApiBase } from "../lib/api-context.js";
 import { t as i18nT } from "../lib/i18n";
+import { getSyntaxTheme } from "../lib/syntax-theme.js";
+import type { FileSelection } from "./DiffFileTree.js";
+import { getLang, RichDiff } from "./RichDiff.js";
+import { useThemeContext } from "./ThemeProvider.js";
 
 /** Map extension to Prism language for SyntaxHighlighter */
 const EXT_PRISM_MAP: Record<string, string> = {
@@ -41,7 +42,44 @@ interface DiffPanelProps {
   sessionId: string;
 }
 
-type ViewMode = "diff" | "file";
+type ViewMode = "diff" | "file" | "preview";
+
+/** A line rendered in Preview mode: the current file's changed regions. */
+interface PreviewLine {
+  /** New-file line number. */
+  n: number;
+  /** True when this line was added by the change (subtly tinted). */
+  added: boolean;
+  text: string;
+}
+
+/**
+ * Preview = the current file's changed regions, removed lines omitted
+ * (change: collapse-diff-file-tree). Derived from the unified `gitDiff`:
+ * keep context (` `) + added (`+`) lines in new-file (`+n`) order, drop
+ * removed (`-`). Scoped to hunk regions — NOT the whole file (that is `File`
+ * mode). Empty when `gitDiff` is absent or unparseable (binary / non-git).
+ */
+function buildPreviewLines(gitDiff: string | undefined): PreviewLine[] {
+  if (!gitDiff) return [];
+  const out: PreviewLine[] = [];
+  for (const hunk of extractHunks(gitDiff)) {
+    const lines = hunk.split("\n");
+    const header = lines[0].match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (!header) continue;
+    let n = Number.parseInt(header[1], 10);
+    for (const line of lines.slice(1)) {
+      if (line.startsWith("-")) continue; // removed — omit
+      if (line.startsWith("\\")) continue; // "\ No newline at end of file"
+      const added = line.startsWith("+");
+      if (added || line.startsWith(" ")) {
+        out.push({ n, added, text: line.slice(1) });
+        n += 1;
+      }
+    }
+  }
+  return out;
+}
 
 export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
   const { resolved: theme, themeName } = useThemeContext();
@@ -55,6 +93,71 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
   const change = selection.changeIndex !== null
     ? file.changes[selection.changeIndex] ?? null
     : null;
+
+  // The change actually rendered (selected, else the file's last change). When
+  // its payload was trimmed in memory (`truncated`), lazily upgrade to the FULL
+  // payload from the session JSONL via the session-addressed endpoint (never a
+  // path). See change: opt-in-out-of-cwd-session-diffs.
+  const activeChange = change ?? file.changes[file.changes.length - 1] ?? null;
+  const [fullPayload, setFullPayload] = useState<{ content?: string; edits?: EditOperation[] } | null>(null);
+  const [fullFetchError, setFullFetchError] = useState(false);
+
+  useEffect(() => {
+    setFullPayload(null);
+    setFullFetchError(false);
+    const tc = activeChange?.toolCallId;
+    if (!activeChange?.truncated || !tc) return;
+    let cancelled = false;
+    fetch(`${getApiBase()}/api/session-change/${encodeURIComponent(sessionId)}/${encodeURIComponent(tc)}`)
+      .then((res) => res.json())
+      .then((body) => {
+        if (cancelled) return;
+        // Accept only a well-formed payload (string `content` or an `edits`
+        // array). A `{ success:true, data:{} }` miss falls through to the
+        // truncation banner rather than silently rendering nothing.
+        const data = body?.success ? (body.data as { content?: unknown; edits?: unknown }) : null;
+        if (data && (typeof data.content === "string" || Array.isArray(data.edits))) {
+          setFullPayload(data as { content?: string; edits?: EditOperation[] });
+        } else {
+          setFullFetchError(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFullFetchError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChange?.toolCallId, activeChange?.truncated, sessionId]);
+
+  // Truncated payload with no successful upgrade → a degradation note (never a
+  // blank panel): edits collapsed → "too large inline"; content → "truncated".
+  const stillTruncated = !!activeChange?.truncated && !fullPayload;
+  const truncationNote =
+    stillTruncated && (fullFetchError || !activeChange?.toolCallId)
+      ? activeChange?.type === "edit" && !activeChange?.edits?.length
+        ? i18nT("diff.tooLargeInline", undefined, "Diff too large to show inline")
+        : i18nT("diff.contentTruncated", undefined, "Content truncated — full version unavailable")
+      : null;
+
+  // Preview (changed regions of the current file). Available only when the
+  // gitDiff yields parseable hunks (disabled for non-git / summed / binary).
+  const previewLines = useMemo(() => buildPreviewLines(file.gitDiff), [file.gitDiff]);
+  const previewAvailable = previewLines.length > 0;
+
+  // If refreshed data drops Preview support while it's active, fall back to Diff
+  // so the toggle isn't left disabled over an empty body.
+  useEffect(() => {
+    if (viewMode === "preview" && !previewAvailable) setViewMode("diff");
+  }, [viewMode, previewAvailable]);
+
+  // If a refresh flips this entry to out-of-cwd (previewable:false) while File
+  // mode is active, fall back to Diff so the File-view /api/session-file fetch
+  // (which 403s for out-of-cwd) can never fire. See change:
+  // opt-in-out-of-cwd-session-diffs.
+  useEffect(() => {
+    if (viewMode === "file" && file.previewable === false) setViewMode("diff");
+  }, [viewMode, file.previewable]);
 
   // Reset file content when file changes
   useEffect(() => {
@@ -85,13 +188,27 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
       .finally(() => setFileLoading(false));
   }, [viewMode, file.path, sessionId]);
 
-  // Build diff data for diff view mode only
+  // Build diff data for diff view mode only.
+  //
+  // Precedence (change: fix-session-diff-open-nongit-and-preview):
+  //   A. a specific change is selected      → render that change's texts
+  //   B. else `file.gitDiff` present (git)   → render git hunks
+  //   C. else (non-git / no gitDiff)         → derive from the file's own
+  //      session change payload (last Write/Edit) and render all-additions /
+  //      edit diff. NEVER blank when the file exists in `data.files`.
   const diffData = useMemo(() => {
-    if (viewMode === "file") return null; // file mode uses SyntaxHighlighter directly
+    if (viewMode !== "diff") return null; // file/preview modes render directly
+
+    // Merge the lazily-fetched full payload over a (possibly truncated) change.
+    const mergeFull = (c: FileChangeEvent): FileChangeEvent => ({
+      ...c,
+      ...(fullPayload?.content !== undefined ? { content: fullPayload.content } : {}),
+      ...(fullPayload?.edits ? { edits: fullPayload.edits } : {}),
+    });
 
     // Diff view — Path A: change-derived diffs (oldText/newText)
     if (change) {
-      const texts = buildChangeDiffTexts(file.path, change);
+      const texts = buildChangeDiffTexts(file.path, mergeFull(change));
       return texts ? { richDiff: { ...texts, filePath: file.path } } : null;
     }
 
@@ -110,15 +227,15 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
       }
     }
 
-    // Fallback: show the most recent change (Path A)
+    // Path C: non-git / no gitDiff — derive from the file's own last change.
     const lastChange = file.changes[file.changes.length - 1];
     if (lastChange) {
-      const texts = buildChangeDiffTexts(file.path, lastChange);
+      const texts = buildChangeDiffTexts(file.path, mergeFull(lastChange));
       return texts ? { richDiff: { ...texts, filePath: file.path } } : null;
     }
 
     return null;
-  }, [file, change, viewMode, fileContent]);
+  }, [file, change, viewMode, fileContent, fullPayload]);
 
   return (
     <div className="flex flex-col h-full">
@@ -132,13 +249,28 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
             className={`px-2 py-0.5 ${viewMode === "diff" ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}
             onClick={() => setViewMode("diff")}
           >
-            <Icon path={mdiCompare} size={0.45} className="inline mr-0.5" />{i18nT("auto.diff", undefined, "Diff")}
+            <Icon path={mdiCompare} size={0.45} className="inline mr-0.5" />{i18nT("diff.diff", undefined, "Diff")}
           </button>
+          {/* The File view fetches /api/session-file, which 403s for out-of-cwd
+              paths (previewable:false). Hide the toggle so it is unreachable.
+              See change: opt-in-out-of-cwd-session-diffs. */}
+          {file.previewable !== false && (
+            <button
+              data-testid="file-view-toggle"
+              className={`px-2 py-0.5 ${viewMode === "file" ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}
+              onClick={() => setViewMode("file")}
+            >
+              <Icon path={mdiFileOutline} size={0.45} className="inline mr-0.5" />{i18nT("common.file", undefined, "File")}
+            </button>
+          )}
           <button
-            className={`px-2 py-0.5 ${viewMode === "file" ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}
-            onClick={() => setViewMode("file")}
+            data-testid="preview-toggle"
+            disabled={!previewAvailable}
+            className={`px-2 py-0.5 ${viewMode === "preview" ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"} ${!previewAvailable ? "cursor-not-allowed opacity-40" : ""}`}
+            onClick={() => previewAvailable && setViewMode("preview")}
+            title={previewAvailable ? undefined : i18nT("diff.previewUnavailable", undefined, "Preview needs a git diff")}
           >
-            <Icon path={mdiFileOutline} size={0.45} className="inline mr-0.5" />{i18nT("auto.file", undefined, "File")}
+            <Icon path={mdiEyeOutline} size={0.45} className="inline mr-0.5" />{i18nT("diff.preview", undefined, "Preview")}
           </button>
         </div>
 
@@ -149,13 +281,13 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
               className={`px-2 py-0.5 ${diffMode === DiffModeEnum.Split ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}
               onClick={() => setDiffMode(DiffModeEnum.Split)}
             >
-              <Icon path={mdiViewSplitVertical} size={0.45} className="inline mr-0.5" />{i18nT("auto.split", undefined, "Split")}
+              <Icon path={mdiViewSplitVertical} size={0.45} className="inline mr-0.5" />{i18nT("common.split", undefined, "Split")}
             </button>
             <button
               className={`px-2 py-0.5 ${diffMode === DiffModeEnum.Unified ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}
               onClick={() => setDiffMode(DiffModeEnum.Unified)}
             >
-              <Icon path={mdiViewSequential} size={0.45} className="inline mr-0.5" />{i18nT("auto.unified", undefined, "Unified")}
+              <Icon path={mdiViewSequential} size={0.45} className="inline mr-0.5" />{i18nT("diff.unified", undefined, "Unified")}
             </button>
           </div>
         )}
@@ -163,9 +295,17 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-auto">
+        {truncationNote && (
+          <div
+            data-testid="diff-truncation-banner"
+            className="px-3 py-1.5 text-xs text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] border-b border-[var(--border-primary)]"
+          >
+            {truncationNote}
+          </div>
+        )}
         {viewMode === "file" && fileLoading && (
           <div className="flex items-center justify-center h-32 text-[var(--text-tertiary)]">
-            {i18nT("auto.loading_file", undefined, "Loading file...")}
+            {i18nT("status.loadingFile", undefined, "Loading file...")}
           </div>
         )}
         {viewMode === "file" && fileError && !fileLoading && (
@@ -204,7 +344,21 @@ export function DiffPanel({ file, selection, sessionId }: DiffPanelProps) {
         )}
         {viewMode === "diff" && !diffData && !fileLoading && (
           <div className="flex items-center justify-center h-32 text-[var(--text-tertiary)]">
-            {i18nT("auto.no_diff_data_available", undefined, "No diff data available")}
+            {i18nT("diff.noDiffDataAvailable", undefined, "No diff data available")}
+          </div>
+        )}
+        {viewMode === "preview" && (
+          <div data-testid="preview-body" className="font-mono text-[13px] leading-relaxed">
+            {previewLines.map((l, i) => (
+              <div
+                key={i}
+                data-preview-line={l.n}
+                className={`flex ${l.added ? "bg-[var(--accent-green)]/10" : ""}`}
+              >
+                <span className="w-12 shrink-0 select-none pr-3 text-right text-[var(--text-muted)]">{l.n}</span>
+                <span className="whitespace-pre">{l.text}</span>
+              </div>
+            ))}
           </div>
         )}
       </div>

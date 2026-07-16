@@ -5,23 +5,26 @@
 
 Web-based dashboard for monitoring and interacting with pi agent sessions remotely. Three-component architecture: bridge extension + Node.js server + React web client.
 
-## STOP — Docs-First Gate
+## Docs-First Gate — kb before grep
 
-**For any project-specific factual / "where is X" / "how does Y work" question: call `kb_search` FIRST — before `ctx_search`, `memory_search`, `grep`, or any source read.** `kb_search` indexes the repo markdown (`docs/`, `openspec/`, `packages/`, `.pi/`). It is the fastest correct map of this codebase. Fall through to grep/source only when `kb_search` returns nothing relevant. (`ctx_search` = session capture, not repo docs; different corpus.)
+`kb_*` tools are faster and cheaper than raw search: they return a one-line purpose + key exports per file instead of raw bytes. For any project-specific "where is X" / "how does Y work" / symbol lookup, run the kb call FIRST. **When your reflex is the left column, run the right column instead:**
+
+| You're about to… | Do this FIRST instead |
+|---|---|
+| `grep -rn "SymbolName" packages/ src/` — find where a fn / type / const lives | `kb_search --doc-type agents "SymbolName"` — tree indexes key exports per file |
+| `grep -rn "feature\|topic" src/` — how does X work / where's X handled | `kb_search "feature topic"` |
+| `cat` / `Read` a file just to learn its purpose before editing | `kb agents <path>` — one-line purpose + exports + `See change:` history |
+| chase imports / callers across files | `kb_neighbors <path\|heading>` |
+| read one doc section in full | `kb_get <path> <section>` |
+| build / run / install / setup / release / "how do I X" answer | `grep -i <kw> docs/faq.md README.md docs/` — then quote the entry |
+
+`kb_search` indexes the repo markdown (`docs/`, `openspec/`, `packages/`, `.pi/`). (`ctx_search` / `memory_search` = session capture, NOT repo docs — different corpus.)
+
+**Fall-through (explicit):** if the kb call returns nothing relevant, `rg` / source read is allowed — then add the missing directory `AGENTS.md` row per the [Documentation Update Protocol](#documentation-update-protocol). kb does NOT replace grep; it goes first.
 
 > **"What files relate to X" / per-file lookups:**
 > - Any file that lives in a directory → the per-directory `AGENTS.md` tree is the per-file record. Covers `packages/**` source AND non-source areas (`docker/`, `scripts/`, `.pi/skills/`, `public/`, `qa/`, `tests/`, `.github/`). `kb agents <path>` returns the root→nearest chain (pull, on demand); `kb_search --doc-type agents` ranks tree rows by symbol/topic; or read the file's own directory `AGENTS.md` (small) for its siblings.
 > - `docs/` topic docs + the 3 root-level config files (`biome.json`, `playwright.config.ts`, `.pi-test-harness.json`) have no owner under `packages/` — they live in `docs/AGENTS.md` (same tree; `kb agents docs/<file>` / `kb_search --doc-type agents`). The `docs/file-index*.md` splits are RETIRED — the per-directory `AGENTS.md` tree is the sole per-file record. See change: migrate-file-index-to-agents-tree.
-
-**Before any build / run / install / setup / release / "how do I X" question: `grep -i <keyword> docs/faq.md README.md docs/` FIRST. No source reads until that returns nothing.**
-
-If you read a script, config, or source file before grepping docs on a how-to, what-is question, you violated the protocol. Re-grep, then answer.
-
-- ❌ User: "how do I ..." → read `<src files>` → guess answer
-- ✅ User: "how do I ..." → `grep -ni '<words>' docs/faq.md` → quote the FAQ entry
-
-- ❌ User: "what is ..." → read `scripts/build-installer.sh`, `forge.config.ts` → guess answer
-- ✅ User: "what is ..." → `grep -ni '<words>' docs/index-*.md` → quote the entry
 
 Full protocol (index-first for code questions, directory `AGENTS.md` tree, etc.) is in [Investigation Protocol — Index First](#investigation-protocol--index-first) below.
 
@@ -38,7 +41,7 @@ Before implementing:
 - If multiple interpretations exist, present them — don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
-- **Never speculate about code you have not opened.** If the user references a specific file, read it before answering. No claims about the codebase without investigation — grounded, hallucination-free answers only.
+- **Never speculate about code you have not opened.** Consult the doc tree first (`kb agents <path>` / `kb_search`), then read the specific file. No claims about the codebase without investigation — grounded, hallucination-free answers only.
 - Before any major change, check in with the user and confirm the plan.
 
 ### 2. Simplicity First
@@ -111,6 +114,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 | Data flow, persistence, reconnection, protocol, config reference | `docs/architecture.md` |
 | End-user / developer setup, prerequisites, CI badges, project structure | `README.md` |
 | Cross-cutting rule EVERY agent needs on EVERY turn (rare) | AGENTS.md, ≤ 200 chars per row, no inline change history |
+| Source-of-truth change the doctor skill derives (peer rename, pi floor bump, new install platform, new bridge/plugin slot) | Run `doctor --regenerate <module>`: peer rename→`peers`; pi floor→`pi-resolution`; new platform→`install-topology`; new bridge slot→`plugins-bridges`. Doctor self-derives facts from live sources — never hand-maintain version/name tables in the module MDs. |
 
 Rules:
 
@@ -145,6 +149,7 @@ Why this exists: AGENTS.md ballooned to 107 KB (~27k tokens) by accreting per-ch
 
 See [docs/architecture.md](docs/architecture.md) for full details.
 - See [docs/electron-bootstrap-flow.md](docs/electron-bootstrap-flow.md) for the Electron app→server bootstrap state machine and end states.
+- See [docs/doctor-skill.md](docs/doctor-skill.md) for the modular doctor diagnostic skill (router + 7 capability modules, shell-first derive-on-run checks, two-tier self-update).
 
 - **Bridge Extension** (`src/extension/`) — Runs in every pi session, forwards events via WebSocket
 - **Dashboard Server** (`src/server/`) — Aggregates events, in-memory + JSON persistence, dual WebSocket servers

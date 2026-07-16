@@ -1,0 +1,3 @@
+# resource-activation-toggle.ts — index
+
+Replays pi's `config-selector` enable/disable write via pi's `SettingsManager` (zero glob logic reimplemented). `applyResourceToggle({scope,cwd?,type,filePath,enabled,packageSource?})`: `PackageManager.resolve()` locates the resource (404 if absent → also rejects `../` escapes), then loose path pushes `+/-<relPath>` into the scope's resource array (baseDir `.pi`/agentDir) or package path rewrites the `settings.packages` entry to object form (never uninstalls). Scope-bounded realpath guard. Exports `settingsPathForScope`, `ToggleRequest`/`ToggleResult`/`ToggleScope`/`ToggleType`. See change: folder-resource-activation-toggle.

@@ -268,22 +268,30 @@ The `POST /api/git/worktree` endpoint SHALL extend its `path_exists` error envel
 
 The server SHALL expose `GET /api/git/worktree/init-status` (localhost-only) reporting whether a checkout needs initialization per its declared hook. Query/body carries `cwd`. The server SHALL validate `cwd`, resolve the repo root, and `readInitHook(repoRoot)`.
 
-- When no hook is declared, respond `{ success: true, data: { hasHook: false } }`.
+- When no hook is declared, respond `{ success: true, data: { hasHook: false, configured: boolean } }`, where `configured` distinguishes an unconfigured directory from a configured project that simply declares no `worktreeInit` hook:
+  - `configured: false` when the resolved config root is `null` (no reachable `.pi/settings.json`) — the directory is not yet a pi project.
+  - `configured: true` when a config root resolves and `<configRoot>/.pi/settings.json` exists but declares no (valid) `worktreeInit` hook — the directory is already a pi project.
 - When a hook is declared but NOT trusted, respond `{ success: true, data: { hasHook: true, trusted: false } }` WITHOUT evaluating the gate (the gate is repo-declared bash and SHALL NOT run before TOFU trust).
 - When a hook is declared AND trusted, evaluate the gate (using the cache) and respond `{ success: true, data: { hasHook: true, needsInit: boolean, trusted: true } }`.
 
-The endpoint replaces the removed `GET /api/git/worktree/bootstrap-status`.
+The `configured` field SHALL be present only on `hasHook: false` responses; it SHALL be absent when `hasHook` is `true`. The endpoint replaces the removed `GET /api/git/worktree/bootstrap-status`.
 
-#### Scenario: No hook declared
+#### Scenario: Unconfigured directory reports configured false
 
-- **WHEN** `init-status` is requested for a checkout whose repo declares no `worktreeInit`
-- **THEN** the response SHALL be `{ success: true, data: { hasHook: false } }`
+- **WHEN** `init-status` is requested for a directory with no reachable `.pi/settings.json` (config root is `null`)
+- **THEN** the response SHALL be `{ success: true, data: { hasHook: false, configured: false } }`
+
+#### Scenario: Configured project without a hook reports configured true
+
+- **WHEN** `init-status` is requested for a checkout whose resolved config root has a `.pi/settings.json` that declares no valid `worktreeInit` hook
+- **THEN** the response SHALL be `{ success: true, data: { hasHook: false, configured: true } }`
 
 #### Scenario: Hook present but untrusted does not run the gate
 
 - **WHEN** `init-status` is requested for a checkout whose hook is not yet trusted
 - **THEN** the server SHALL NOT spawn the gate
 - **AND** the response SHALL be `{ hasHook: true, trusted: false }` with no `needsInit`
+- **AND** the response SHALL NOT include a `configured` field
 
 #### Scenario: Hook present + trusted, gate says needs init
 
@@ -418,4 +426,36 @@ The handler SHALL reuse the worktree-creation success/failure contract of the ex
 - **WHEN** `gh` cannot be resolved or the user is not authenticated
 - **THEN** the response SHALL be `gh_not_found` (400) or `gh_not_authed` (401) respectively
 - **AND** no worktree SHALL be created
+
+### Requirement: Active worktree-inits endpoint
+The server SHALL expose `GET /api/git/worktree/active-inits` returning the current
+worktree-init runs known to the cwd-keyed registry: all `running` entries plus any terminal
+entries still within their retention TTL.
+
+#### Scenario: Reports a running run
+- **WHEN** an init run for `cwd` is in flight and `GET /api/git/worktree/active-inits` is called
+- **THEN** the response SHALL include an entry for `cwd` with `phase: "running"`, `startedAt`, and the latest `lastLine` when available
+
+#### Scenario: Reports a recent terminal run
+- **WHEN** a run for `cwd` finished within the retention TTL
+- **THEN** the response SHALL include an entry for `cwd` with `phase: "done"` or `phase: "failed"` (with `code` on failure)
+
+#### Scenario: Omits expired and absent runs
+- **WHEN** no run for a `cwd` is running and none finished within the TTL
+- **THEN** the response SHALL NOT include an entry for that `cwd`
+
+### Requirement: Worktree-init progress channel is cwd-addressable
+The worktree-init progress channel SHALL accept subscriptions addressed by `cwd` in addition
+to the existing client-minted `requestId`, and progress/done/failed messages SHALL carry the
+run's `cwd`. The existing `requestId`-addressed delivery SHALL continue to work for
+back-compat.
+
+#### Scenario: cwd subscription receives events
+- **WHEN** a client sends `worktree_init_subscribe` addressed by `cwd`
+- **THEN** the server SHALL deliver subsequent progress/done/failed events for that run to the subscriber
+- **AND** each message SHALL include the run's `cwd`
+
+#### Scenario: requestId subscription still works
+- **WHEN** a client subscribes by the legacy `requestId`
+- **THEN** the server SHALL still deliver that run's events to the requestId subscriber
 

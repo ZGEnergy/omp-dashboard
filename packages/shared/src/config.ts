@@ -6,6 +6,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { WindowsGitSourceSetting } from "./platform/select-git-source.js";
+import {
+  providerSupportsMode,
+  type TunnelMode,
+  type TunnelProviderId,
+} from "./tunnel-provider.js";
 
 export type { WindowsGitSourceSetting } from "./platform/select-git-source.js";
 
@@ -213,29 +218,6 @@ export const DEFAULT_KEEPER_LOG: KeeperLogConfig = {
   capturePiOutput: false,
 };
 
-export interface EditorConfig {
-  /** Override path to code-server binary */
-  binary?: string;
-  /** Minutes before idle instance is killed (default: 10) */
-  idleTimeoutMinutes: number;
-  /** Maximum concurrent code-server instances (default: 3) */
-  maxInstances: number;
-  /**
-   * When true, graceful dashboard shutdown (stop / restart / shutdown)
-   * sends `{"cmd":"stop"}` to every editor keeper and waits for them to
-   * exit. When false or omitted (default), keepers and their code-server children
-   * persist across dashboard restarts so editor tabs and dirty buffers
-   * survive. See change: add-editor-keeper-sidecar.
-   */
-  stopOnDashboardExit?: boolean;
-}
-
-export const DEFAULT_EDITOR_CONFIG: EditorConfig = {
-  idleTimeoutMinutes: 10,
-  maxInstances: 3,
-  stopOnDashboardExit: false,
-};
-
 export interface KnownServer {
   host: string;
   port: number;
@@ -262,6 +244,19 @@ export interface ModelProxyConfig {
   enabled: boolean;
   /** Default model for requests that omit it. */
   defaultModel?: string;
+  /**
+   * Ordered list of fully-qualified `provider/id`s. The first *available*
+   * entry is used when a request omits `model` or names an unresolved model.
+   * Supersedes `defaultModel` when both are set and an entry is available.
+   * See change: fix-and-prefer-model-proxy-resolution.
+   */
+  preferredModels?: string[];
+  /**
+   * Alias → fully-qualified `provider/id`, expanded (exact key match) before
+   * parsing. Lets a caller send `claude` and route to `anthropic/claude-3.5-sonnet`.
+   * See change: fix-and-prefer-model-proxy-resolution.
+   */
+  modelAliases?: Record<string, string>;
   /** Optional second port for /v1/* routes (for SDKs that hardcode path-prefix-less base URLs). */
   secondPort?: number;
   /** Server-wide max concurrent streams. Default 16. Clamped [1, 256]. */
@@ -307,7 +302,23 @@ export interface DashboardConfig {
   spawnStrategy: SpawnStrategy;
   tunnel: {
     enabled: boolean;
+    /**
+     * Which provider backs the tunnel. Required (non-undefined) once a
+     * post-migration config is written; a legacy config with only
+     * `reservedToken` is normalized to `provider: "zrok"` at read time.
+     */
+    provider?: TunnelProviderId;
+    /** public reverse-proxy vs private mesh. Required when enabled + provider set. */
+    mode?: TunnelMode;
+    /**
+     * Legacy top-level zrok reserved token. Preserved on read for downgrade
+     * safety; the normalized shape also carries it under `zrok.reservedToken`.
+     */
     reservedToken?: string;
+    zrok?: { reservedToken?: string };
+    ngrok?: { authtoken?: string; domain?: string };
+    tailscale?: { authKey?: string };
+    zerotier?: { networkId?: string };
     watchdog?: {
       enabled: boolean;
       intervalMs: number;
@@ -319,7 +330,6 @@ export interface DashboardConfig {
   auth?: AuthConfig;
   defaultModel: string;
   memoryLimits: MemoryLimitsConfig;
-  editor: EditorConfig;
   /** OpenSpec background polling behavior (interval, concurrency, change detection, jitter) */
   openspec: OpenSpecPollConfig;
   /** Server push-notification behavior (opt-in; dispatcher/routes/VAPID gated on `enabled`). */
@@ -476,7 +486,6 @@ const DEFAULTS: DashboardConfig = {
   devBuildOnReload: false,
   defaultModel: "",
   memoryLimits: { ...DEFAULT_MEMORY_LIMITS },
-  editor: { ...DEFAULT_EDITOR_CONFIG },
   openspec: { ...DEFAULT_OPENSPEC_POLL },
   push: { ...DEFAULT_PUSH_CONFIG },
   sessions: { ...DEFAULT_SESSIONS },
@@ -559,19 +568,6 @@ function parseAuthConfig(raw: any): AuthConfig | undefined {
     ...(typeof raw.admin === "string" && raw.admin ? { admin: raw.admin } : {}),
   };
 }
-
-function parseEditorConfig(raw: any): EditorConfig {
-  if (!raw || typeof raw !== "object") return { ...DEFAULT_EDITOR_CONFIG };
-  return {
-    ...(typeof raw.binary === "string" ? { binary: raw.binary } : {}),
-    idleTimeoutMinutes: typeof raw.idleTimeoutMinutes === "number" ? raw.idleTimeoutMinutes : DEFAULT_EDITOR_CONFIG.idleTimeoutMinutes,
-    maxInstances: typeof raw.maxInstances === "number" ? raw.maxInstances : DEFAULT_EDITOR_CONFIG.maxInstances,
-    stopOnDashboardExit: typeof raw.stopOnDashboardExit === "boolean" ? raw.stopOnDashboardExit : DEFAULT_EDITOR_CONFIG.stopOnDashboardExit,
-  };
-}
-
-/** Exported for tests; same parser used by `parseConfig`. */
-export const parseEditorConfigForTest = parseEditorConfig;
 
 function clampNumber(raw: any, fallback: number, min: number, max: number): number {
   const n = typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
@@ -709,6 +705,20 @@ export function parseModelProxyConfig(raw: any): ModelProxyConfig {
     }
   }
 
+  const preferredModels: string[] = Array.isArray(raw.preferredModels)
+    ? raw.preferredModels.filter((s: unknown) => typeof s === "string" && s.length > 0)
+    : [];
+
+  let modelAliases: Record<string, string> | undefined;
+  if (raw.modelAliases && typeof raw.modelAliases === "object" && !Array.isArray(raw.modelAliases)) {
+    modelAliases = {};
+    for (const [key, val] of Object.entries(raw.modelAliases)) {
+      if (typeof key === "string" && key.length > 0 && typeof val === "string" && val.length > 0) {
+        modelAliases[key] = val;
+      }
+    }
+  }
+
   let perProviderCaps: Record<string, number> | undefined;
   if (raw.perProviderCaps && typeof raw.perProviderCaps === "object" && !Array.isArray(raw.perProviderCaps)) {
     perProviderCaps = {};
@@ -738,6 +748,8 @@ export function parseModelProxyConfig(raw: any): ModelProxyConfig {
       64,
     ),
     ...(perProviderCaps ? { perProviderCaps } : {}),
+    ...(preferredModels.length > 0 ? { preferredModels } : {}),
+    ...(modelAliases && Object.keys(modelAliases).length > 0 ? { modelAliases } : {}),
     logRequests:
       typeof raw.logRequests === "boolean" ? raw.logRequests : DEFAULT_MODEL_PROXY.logRequests,
     apiKeys,
@@ -759,6 +771,95 @@ function parseKnownServers(raw: any): KnownServer[] {
 function parseTrustedNetworks(raw: any): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((entry: unknown) => typeof entry === "string" && entry.length > 0);
+}
+
+const KNOWN_TUNNEL_PROVIDERS: TunnelProviderId[] = ["zrok", "ngrok", "tailscale", "zerotier"];
+const KNOWN_TUNNEL_MODES: TunnelMode[] = ["public", "private"];
+
+/**
+ * Read-time back-compat shim (idempotent, pure). Normalizes a raw persisted
+ * `tunnel` block into the provider+mode shape without rewriting disk:
+ *  - a legacy bare `reservedToken` + no `provider` resolves to
+ *    `{ provider: "zrok", mode: "public", zrok: { reservedToken } }`;
+ *  - the legacy top-level `reservedToken` is preserved for downgrade safety;
+ *  - an explicit `provider` wins over a stray legacy `reservedToken`.
+ * See change: add-tunnel-providers.
+ */
+export function normalizeTunnelConfig(
+  raw: any,
+  defaults: DashboardConfig["tunnel"],
+): DashboardConfig["tunnel"] {
+  const rawProvider =
+    typeof raw?.provider === "string" && (KNOWN_TUNNEL_PROVIDERS as string[]).includes(raw.provider)
+      ? (raw.provider as TunnelProviderId)
+      : undefined;
+  const legacyToken = typeof raw?.reservedToken === "string" ? raw.reservedToken : undefined;
+  // Legacy bare token + no explicit provider → zrok/public.
+  const provider = rawProvider ?? (legacyToken ? ("zrok" as TunnelProviderId) : undefined);
+  const rawMode =
+    typeof raw?.mode === "string" && (KNOWN_TUNNEL_MODES as string[]).includes(raw.mode)
+      ? (raw.mode as TunnelMode)
+      : undefined;
+  const mode = rawMode ?? (provider === "zrok" && !rawProvider ? ("public" as TunnelMode) : undefined);
+
+  const zrok =
+    raw?.zrok?.reservedToken || legacyToken
+      ? { reservedToken: raw?.zrok?.reservedToken ?? legacyToken }
+      : undefined;
+
+  const out: DashboardConfig["tunnel"] = {
+    enabled: raw?.enabled ?? defaults.enabled,
+    ...(provider ? { provider } : {}),
+    ...(mode ? { mode } : {}),
+    ...(legacyToken ? { reservedToken: legacyToken } : {}),
+    ...(zrok ? { zrok } : {}),
+    ...(raw?.ngrok && typeof raw.ngrok === "object" ? { ngrok: { ...raw.ngrok } } : {}),
+    ...(raw?.tailscale && typeof raw.tailscale === "object" ? { tailscale: { ...raw.tailscale } } : {}),
+    ...(raw?.zerotier && typeof raw.zerotier === "object" ? { zerotier: { ...raw.zerotier } } : {}),
+    watchdog: {
+      enabled: raw?.watchdog?.enabled ?? defaults.watchdog!.enabled,
+      intervalMs:
+        typeof raw?.watchdog?.intervalMs === "number" && raw.watchdog.intervalMs > 0
+          ? raw.watchdog.intervalMs
+          : defaults.watchdog!.intervalMs,
+      failureThreshold:
+        typeof raw?.watchdog?.failureThreshold === "number" && raw.watchdog.failureThreshold > 0
+          ? Math.floor(raw.watchdog.failureThreshold)
+          : defaults.watchdog!.failureThreshold,
+      probeTimeoutMs:
+        typeof raw?.watchdog?.probeTimeoutMs === "number" && raw.watchdog.probeTimeoutMs > 0
+          ? raw.watchdog.probeTimeoutMs
+          : defaults.watchdog!.probeTimeoutMs,
+    },
+  };
+  return out;
+}
+
+/** A tunnel config error surfaced instead of silently starting a tunnel. */
+export type TunnelConfigError =
+  | { ok: true }
+  | { ok: false; reason: "mode-unset" | "unsupported-mode" | "provider-unset"; message: string };
+
+/**
+ * Validate a normalized tunnel block before connect. The server MUST refuse
+ * to start a tunnel when `mode` is unset or the provider does not support the
+ * selected mode. See change: add-tunnel-providers.
+ */
+export function validateTunnelForConnect(tunnel: DashboardConfig["tunnel"]): TunnelConfigError {
+  if (!tunnel.provider) {
+    return { ok: false, reason: "provider-unset", message: "tunnel.provider is required when enabled" };
+  }
+  if (!tunnel.mode) {
+    return { ok: false, reason: "mode-unset", message: "tunnel.mode is required when enabled" };
+  }
+  if (!providerSupportsMode(tunnel.provider, tunnel.mode)) {
+    return {
+      ok: false,
+      reason: "unsupported-mode",
+      message: `provider ${tunnel.provider} does not support mode ${tunnel.mode}`,
+    };
+  }
+  return { ok: true };
 }
 
 /**
@@ -787,30 +888,11 @@ export function loadConfig(): DashboardConfig {
       autoShutdown: parsed.autoShutdown ?? defaults.autoShutdown,
       shutdownIdleSeconds: parsed.shutdownIdleSeconds ?? defaults.shutdownIdleSeconds,
       spawnStrategy,
-      tunnel: {
-        enabled: parsed.tunnel?.enabled ?? defaults.tunnel.enabled,
-        ...(parsed.tunnel?.reservedToken ? { reservedToken: parsed.tunnel.reservedToken } : {}),
-        watchdog: {
-          enabled: parsed.tunnel?.watchdog?.enabled ?? defaults.tunnel.watchdog!.enabled,
-          intervalMs:
-            typeof parsed.tunnel?.watchdog?.intervalMs === "number" && parsed.tunnel.watchdog.intervalMs > 0
-              ? parsed.tunnel.watchdog.intervalMs
-              : defaults.tunnel.watchdog!.intervalMs,
-          failureThreshold:
-            typeof parsed.tunnel?.watchdog?.failureThreshold === "number" && parsed.tunnel.watchdog.failureThreshold > 0
-              ? Math.floor(parsed.tunnel.watchdog.failureThreshold)
-              : defaults.tunnel.watchdog!.failureThreshold,
-          probeTimeoutMs:
-            typeof parsed.tunnel?.watchdog?.probeTimeoutMs === "number" && parsed.tunnel.watchdog.probeTimeoutMs > 0
-              ? parsed.tunnel.watchdog.probeTimeoutMs
-              : defaults.tunnel.watchdog!.probeTimeoutMs,
-        },
-      },
+      tunnel: normalizeTunnelConfig(parsed.tunnel, defaults.tunnel),
       devBuildOnReload: parsed.devBuildOnReload ?? defaults.devBuildOnReload,
       defaultModel: typeof parsed.defaultModel === "string" ? parsed.defaultModel : defaults.defaultModel,
       auth: parseAuthConfig(parsed.auth),
       memoryLimits: parseMemoryLimits(parsed.memoryLimits),
-      editor: parseEditorConfig(parsed.editor),
       openspec: parseOpenSpecPollConfig(parsed.openspec),
       push: parsePushConfig(parsed.push),
       sessions: parseSessionsConfig(parsed.sessions),

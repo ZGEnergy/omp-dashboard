@@ -77,6 +77,12 @@ export interface DoctorCheck {
   status: DoctorStatus;
   section: DoctorSection;
   message: string;
+  // See change: make-all-ui-text-i18n — optional code-mapping fields let the
+  // web client translate STABLE check messages via `resolveServerMessage`.
+  // `message` stays the English fallback; `code` maps to `err.<code>` and
+  // `vars` supply interpolation values. Absent on pure data-readout rows.
+  code?: string;
+  vars?: Record<string, string | number>;
   detail?: string;
   suggestion?: string;
   fixable?: boolean;
@@ -119,6 +125,10 @@ export interface SafeExecErr {
   ok: false;
   kind: ExecFailureKind;
   message: string;
+  // See change: make-all-ui-text-i18n — coded classifier + vars propagated
+  // into the consuming DoctorCheck so the message can be translated.
+  code?: string;
+  vars?: Record<string, string | number>;
   detail: string;
   exitCode?: number;
   stderrTail?: string;
@@ -177,6 +187,7 @@ function classifyExecError(err: unknown, cmd: string, timeoutMs: number): SafeEx
       ok: false,
       kind: "not-found",
       message: "Command not found",
+      code: "doctor.command_not_found",
       detail: `${cmd}\n${baseMsg}`,
       stderrTail: stderrTail || undefined,
       timeoutMs,
@@ -188,6 +199,7 @@ function classifyExecError(err: unknown, cmd: string, timeoutMs: number): SafeEx
       ok: false,
       kind: "permission-denied",
       message: "Permission denied",
+      code: "doctor.permission_denied",
       detail: `${cmd}\n${baseMsg}`,
       stderrTail: stderrTail || undefined,
       timeoutMs,
@@ -200,10 +212,13 @@ function classifyExecError(err: unknown, cmd: string, timeoutMs: number): SafeEx
     errno === -2 ||
     /timed?\s*out/i.test(baseMsg)
   ) {
+    const seconds = Math.round(timeoutMs / 1000);
     return {
       ok: false,
       kind: "timeout",
-      message: `Command did not respond within ${Math.round(timeoutMs / 1000)}s`,
+      message: `Command did not respond within ${seconds}s`,
+      code: "doctor.command_timeout",
+      vars: { seconds },
       detail: `${cmd}\nDeadline: ${timeoutMs}ms`,
       stderrTail: stderrTail || undefined,
       timeoutMs,
@@ -215,6 +230,8 @@ function classifyExecError(err: unknown, cmd: string, timeoutMs: number): SafeEx
       ok: false,
       kind: "non-zero-exit",
       message: `Command exited with status ${status}`,
+      code: "doctor.command_exit_status",
+      vars: { status },
       detail: `${cmd}${stdoutRaw ? `\nstdout: ${stripAnsi(stdoutRaw).slice(-200)}` : ""}`,
       exitCode: status,
       stderrTail: stderrTail || undefined,
@@ -226,6 +243,7 @@ function classifyExecError(err: unknown, cmd: string, timeoutMs: number): SafeEx
     ok: false,
     kind: "unknown",
     message: "Command failed",
+    code: "doctor.command_failed",
     detail: `${cmd}\n${baseMsg}`,
     stderrTail: stderrTail || undefined,
     timeoutMs,
@@ -257,6 +275,7 @@ export async function safeCheck(
       section,
       status: "error",
       message: "Check failed to run",
+      code: "doctor.check_failed_to_run",
       detail: `${e.message}\n${stack}`,
       suggestion:
         "This is a doctor-internal failure. Please file an issue with the Markdown export attached.",
@@ -298,6 +317,7 @@ export function assumedMandatory<T>(
         section: "diagnostics",
         status: "error",
         message: "An assumed-safe operation failed",
+        code: "doctor.assumed_safe_operation_failed",
         detail: `${e.message}\n${(e.stack || "").split("\n").slice(0, 4).join("\n")}`,
         suggestion:
           "Open `~/.pi-dashboard/doctor.log` for full context, then file an issue with the Markdown export attached.",
@@ -392,7 +412,6 @@ export const SECTION_OF: Record<string, DoctorSection> = {
   "tunnel runtime": "tunnel",
   // diagnostics
   "Legacy install directory": "diagnostics",
-  "macos-alias native module": "diagnostics",
 };
 
 /**
@@ -541,75 +560,11 @@ export const SUGGESTIONS: Record<string, SuggestionFn> = {
     status === "ok"
       ? undefined
       : "Left over from a previous version. Nothing reads or writes `~/.pi-dashboard/` under the immutable-bundle architecture. Delete the directory manually to reclaim disk space.",
-  // darwin-only DMG-maker prerequisite. The predicate (`checkMacosAliasVolume`)
-  // sets `suggestion` inline; this factory backs the Decision-8 lint and any
-  // stamping path. See change: fix-darwin-dmg-maker-macos-alias.
-  "macos-alias native module": (status) =>
-    status === "ok"
-      ? undefined
-      : "macos-alias `volume.node` is not built — `electron-forge make` will fail at the DMG step. Run `npm run -w packages/electron postinstall` to self-heal, or `xcode-select --install` if Xcode Command Line Tools are missing.",
 };
 
-// ─── macos-alias native module check (darwin-only) ────────────────────
-
-/**
- * Locate the hoisted `macos-alias` package dir via Node module resolution.
- * Returns null when the package is absent (shipped end-user app, or a build
- * env where `@electron-forge/maker-dmg` is pruned).
- */
-function defaultResolveMacosAliasDir(): string | null {
-  const pkg = tryResolvePkg("macos-alias");
-  return pkg ? path.dirname(pkg) : null;
-}
-
-export interface MacosAliasCheckDeps {
-  /** Defaults to `process.platform`. */
-  platform?: NodeJS.Platform | string;
-  /** Locate the macos-alias package dir; null = not installed → row omitted. */
-  resolveMacosAliasDir?: () => string | null;
-  /** Defaults to `existsSync`. */
-  fileExists?: (p: string) => boolean;
-}
-
-/**
- * Darwin-only diagnostic for the `macos-alias` native module
- * (`build/Release/volume.node`), a `@electron-forge/maker-dmg` prerequisite.
- *
- * Returns:
- *   - `null` on non-darwin hosts, OR when macos-alias is not installed
- *     (row omitted so shipped end-user apps never warn).
- *   - `{ status: "ok" }` when `volume.node` exists.
- *   - `{ status: "warning", suggestion }` when it is missing.
- *
- * See change: fix-darwin-dmg-maker-macos-alias.
- */
-export function checkMacosAliasVolume(deps: MacosAliasCheckDeps = {}): DoctorCheck | null {
-  const platform = deps.platform ?? process.platform;
-  if (platform !== "darwin") return null;
-  const resolveDir = deps.resolveMacosAliasDir ?? defaultResolveMacosAliasDir;
-  const fileExists = deps.fileExists ?? existsSync;
-  const dir = resolveDir();
-  if (!dir) return null;
-  const volumePath = path.join(dir, "build", "Release", "volume.node");
-  const exists = fileExists(volumePath);
-  if (exists) {
-    return {
-      name: "macos-alias native module",
-      section: "diagnostics",
-      status: "ok",
-      message: `Built at ${volumePath}`,
-    };
-  }
-  return {
-    name: "macos-alias native module",
-    section: "diagnostics",
-    status: "warning",
-    message: "Not built — the DMG maker will fail at `electron-forge make`",
-    detail: `Expected ${volumePath}`,
-    suggestion:
-      "Run `npm run -w packages/electron postinstall` to self-heal, or `xcode-select --install` if Xcode Command Line Tools are missing.",
-  };
-}
+// (macos-alias DMG-maker prereq check removed — electron-builder produces the
+// DMG now via hdiutil, not the macos-alias native module. See change:
+// fix-local-electron-dmg-build.)
 
 // ─── dns helper (test seam) ─────────────────────────────────────────
 
@@ -674,6 +629,7 @@ export async function checkAttachedServerVersion(
       section: "setup",
       status: "error",
       message: "Attached dashboard server is unreachable or reports no version",
+      code: "doctor.attached_server_unreachable",
       detail: "GET /api/health returned no response or a body without a `version` field",
       suggestion:
         "Confirm a dashboard server is running on the configured port, then re-run Doctor.",
@@ -685,6 +641,8 @@ export async function checkAttachedServerVersion(
       section: "setup",
       status: "ok",
       message: `Server and app bundle both v${health.version}`,
+      code: "doctor.server_app_version_match",
+      vars: { version: health.version },
     };
   }
   const ls = health.launchSource;
@@ -709,6 +667,8 @@ export async function checkAttachedServerVersion(
     section: "setup",
     status: "warning",
     message: `Dashboard server reports v${health.version}; this app bundle is v${deps.appVersion}`,
+    code: "doctor.server_app_version_skew",
+    vars: { serverVersion: health.version, appVersion: deps.appVersion },
     detail: `launchSource: ${ls ?? "unknown"}`,
     suggestion,
   };
@@ -801,6 +761,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "runtime",
           status: "warning",
           message: "Not found on PATH (bundled Node will be used)",
+          code: "doctor.node_not_on_path",
           detail: "PATH searched without success",
         };
       }
@@ -811,6 +772,8 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "runtime",
           status: "warning",
           message: ver.message,
+          code: ver.code,
+          vars: ver.vars,
           detail: `${ver.detail}${ver.stderrTail ? `\nstderr: ${ver.stderrTail}` : ""}`,
           kind: ver.kind,
         };
@@ -834,6 +797,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "pi-tooling",
           status: "error",
           message: "Library not found — dashboard cannot spawn agent sessions",
+          code: "doctor.lib_not_found_pi",
           detail: "Searched override, bundled (server/node_modules), managed install, and system PATH",
           fixable: true,
         };
@@ -861,6 +825,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
             section: "pi-tooling",
             status: "warning",
             message: "Not on $PATH — `pi` won't run from a fresh terminal",
+            code: "doctor.pi_not_on_path",
             detail: "Dashboard-spawned sessions still work (the dashboard injects PATH for them). Manual `pi` invocation in any other shell does not.",
             fixable: true,
           };
@@ -885,6 +850,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "pi-tooling",
           status: "warning",
           message: "Library not found — dashboard-internal OpenSpec workflows disabled",
+          code: "doctor.lib_not_found_openspec",
           detail: "Searched override, bundled (server/node_modules), managed install, and system PATH",
           fixable: true,
         };
@@ -912,6 +878,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
             section: "pi-tooling",
             status: "warning",
             message: "Not on $PATH — `openspec` won't run from a fresh terminal",
+            code: "doctor.openspec_not_on_path",
             detail: "Optional. Needed only for running `openspec` manually in a terminal; dashboard-internal use already covered by the library row above.",
             fixable: true,
           };
@@ -1010,6 +977,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
         section: "server",
         status: "error",
         message: "Not found — required to run the dashboard server",
+        code: "doctor.ts_loader_not_found",
         detail: `Looked under ${managedJitiPkg}, ${managedTsxPkg}, bundled (server/node_modules), and on PATH`,
         fixable: true,
       };
@@ -1025,6 +993,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "server",
           status: "warning",
           message: "Not probed (no probe configured)",
+          code: "doctor.server_not_probed",
           detail: "deps.probeServer was not provided",
         };
       }
@@ -1035,6 +1004,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "server",
           status: "warning",
           message: "Not running — will be started automatically when needed",
+          code: "doctor.server_not_running",
           detail: "GET http://localhost:8000/api/health returned no response",
         };
       }
@@ -1067,6 +1037,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
         section: "server",
         status: "warning",
         message: "Last entries:",
+        code: "doctor.server_log_last_entries",
         detail: result.value,
       });
     }
@@ -1091,6 +1062,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           message: has
             ? "Configured"
             : "Not configured — pi sessions will need a credential to use LLM providers",
+          code: has ? "doctor.api_key_configured" : "doctor.api_key_not_configured",
           detail: has ? undefined : `Inspected: ${files.join(", ")}`,
         };
       }),
@@ -1111,6 +1083,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
             section: "tunnel",
             status: "warning",
             message: "Not found — public tunnel button cannot be used",
+            code: "doctor.zrok_binary_not_found",
             detail: "Searched override, managed install, and system PATH",
           };
         }
@@ -1134,6 +1107,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "tunnel",
           status: "warning",
           message: "Not enrolled — public tunnel cannot start",
+          code: "doctor.zrok_not_enrolled",
           detail: r.reason ?? "No zrok environment file present",
         };
       }
@@ -1160,6 +1134,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "tunnel",
           status: "ok",
           message: "DNS lookup of api-v1.zrok.io succeeded",
+          code: "doctor.zrok_dns_ok",
         };
       } catch (err: any) {
         const reason = err?.message ?? String(err);
@@ -1168,6 +1143,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "tunnel",
           status: "warning",
           message: "DNS lookup of api-v1.zrok.io failed",
+          code: "doctor.zrok_dns_failed",
           detail: reason,
         };
       }
@@ -1183,6 +1159,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "tunnel",
           status: "ok",
           message: "No tunnel data available",
+          code: "doctor.tunnel_no_data",
           detail: "The host process does not run an in-process tunnel watchdog",
         };
       }
@@ -1193,6 +1170,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           section: "tunnel",
           status: "ok",
           message: "No tunnel active",
+          code: "doctor.tunnel_none_active",
           detail: "Click the 🌐 Tunnel button to start one",
         };
       }
@@ -1209,6 +1187,10 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
           message: failing
             ? `Probe failing (${wd.consecutiveFailures}/${wd.failureThreshold})`
             : "No successful probe in the last 3 intervals",
+          code: failing ? "doctor.tunnel_probe_failing" : "doctor.tunnel_no_recent_probe",
+          vars: (failing
+            ? { failures: wd.consecutiveFailures, threshold: wd.failureThreshold }
+            : undefined) as Record<string, string | number> | undefined,
           detail: [
             `lastFailureReason: ${wd.lastFailureReason ?? "(none yet)"}`,
             `recycleCount: ${wd.recycleCount}`,
@@ -1221,6 +1203,8 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
         section: "tunnel",
         status: "ok",
         message: `Healthy — ${wd.recycleCount} recycle(s) so far`,
+        code: "doctor.tunnel_healthy",
+        vars: { recycles: wd.recycleCount } as Record<string, string | number>,
         detail: `lastSuccessAt: ${new Date(wd.lastSuccessAt!).toISOString()}`,
       };
     }),
@@ -1252,16 +1236,6 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
     /* advisory only — never block doctor output */
   }
 
-  // Darwin-only: macos-alias native-module readiness (DMG maker prereq).
-  // Row omitted off darwin or when macos-alias is not installed. See change:
-  // fix-darwin-dmg-maker-macos-alias.
-  try {
-    const row = checkMacosAliasVolume();
-    if (row) checks.push(row);
-  } catch {
-    /* advisory only — never block doctor output */
-  }
-
   // Windows-only: bundled-vs-host git & shell source. See change:
   // embed-git-bash-on-windows.
   try {
@@ -1276,6 +1250,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
         message: wantHostButBundled
           ? "windowsGitSource is 'host' but git/bash are not on PATH; using bundled fallback"
           : `${readout.gitVersion ?? "git"} ${tag}`,
+        code: wantHostButBundled ? "doctor.git_source_host_fallback" : undefined,
         detail: readout.gitPath ?? "git.exe not resolved",
         suggestion: wantHostButBundled
           ? "Install Git for Windows, or set windowsGitSource to 'auto' / 'bundled'."
@@ -1286,6 +1261,7 @@ export async function runSharedChecks(deps: SharedChecksDeps): Promise<DoctorChe
         section: "runtime",
         status: readout.shellPath ? "ok" : "warning",
         message: readout.shellPath ? `sh ${tag}` : "no POSIX shell resolved",
+        code: readout.shellPath ? undefined : "doctor.no_posix_shell",
         detail: readout.shellPath ?? "sh.exe / bash.exe not resolved",
       });
     }

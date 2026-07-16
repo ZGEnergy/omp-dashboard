@@ -9,10 +9,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { loadConfig, type ResolvedConfig } from "@blackbelt-technology/pi-dashboard-kb";
-import { SqliteFtsStore } from "@blackbelt-technology/pi-dashboard-kb";
-import { indexSource } from "@blackbelt-technology/pi-dashboard-kb";
-import { agentsChain, parseRowPaths } from "@blackbelt-technology/pi-dashboard-kb";
+import { agentsChain, indexSource, loadConfig, parseRowPaths, type ResolvedConfig, SqliteFtsStore } from "@blackbelt-technology/pi-dashboard-kb";
 
 /** Resolve a DOX row path relative to its AGENTS.md dir, with a project-root
  *  fallback (a nested AGENTS.md may document a file living at the root).
@@ -105,10 +102,20 @@ export function nudgeText(decision: NudgeDecision, editedPath: string): string |
   return `[kb] Edited \`${editedPath}\`. Update its row in \`${decision.agentsFile}\` (it is ${decision.kind === "missing" ? "missing a row" : "stale"}).`;
 }
 
-/** Lazily open (and cache) the KB store + config for a cwd. */
+/** Lazily open (and cache) the KB store + config for a cwd.
+ *
+ *  Refuses to construct a fresh store when `cwd` no longer exists on disk: a
+ *  `new SqliteFtsStore` runs `mkdirSync(dirname(dbPath), {recursive:true})`,
+ *  which would RE-CREATE `<cwd>/.pi/dashboard/kb` by path after the worktree
+ *  was removed — resurrecting an orphan husk. A cache HIT still returns the
+ *  live handle (the caller opened it while the cwd existed). See change:
+ *  sweep-worktree-residual-on-remove. */
 export function getKb(state: ReindexState, cwd: string): { store: SqliteFtsStore; cfg: ResolvedConfig } {
   let entry = state.kb.get(cwd);
   if (!entry) {
+    if (!existsSync(cwd)) {
+      throw new Error(`kb: cwd removed, refusing to recreate store: ${cwd}`);
+    }
     const cfg = loadConfig(cwd);
     const store = new SqliteFtsStore(cfg.dbAbsPath);
     store.init();
@@ -124,6 +131,14 @@ export function reindexNow(state: ReindexState, cwd: string): Promise<{ changed:
   // Coalesce concurrent reindexes for one cwd onto a single in-flight walk
   // (they share a cached store; overlapping async walks would interleave the
   // batched transaction). See change: fix-kb-index-feedback.
+  // Self-heal on cwd removal: if the worktree dir is gone (e.g. `git worktree
+  // remove`), evict any cached handle and no-op instead of reopening — a fresh
+  // store would recreate `<cwd>/.pi/dashboard/kb` and resurrect a husk. See
+  // change: sweep-worktree-residual-on-remove.
+  if (!existsSync(cwd)) {
+    closeKbForCwd(state, cwd);
+    return Promise.resolve({ changed: 0, chunks: 0 });
+  }
   const existing = state.inflight.get(cwd);
   if (existing) return existing;
   const p = (async () => {
@@ -141,6 +156,22 @@ export function reindexNow(state: ReindexState, cwd: string): Promise<{ changed:
   return p;
 }
 
+/** Cold-start guard for the pull tools. Builds the index once when it is empty
+ *  so `kb_neighbors` / `kb_get` never return a false-empty result on a
+ *  never-indexed cwd (they open a store via `getKb` but do not populate it,
+ *  unlike `kb_search` which always runs a freshness `reindexNow`). On a warm
+ *  index this is a single `COUNT(*)` and a no-op walk-wise. A removed cwd is a
+ *  safe no-op. Throws propagate to the caller, which guards them (extension.ts),
+ *  mirroring `kb_search`'s existing graceful fallback. See change:
+ *  fix-kb-neighbors-get-cold-start. */
+export async function ensurePopulated(state: ReindexState, cwd: string): Promise<void> {
+  if (!existsSync(cwd)) return;
+  const { store } = getKb(state, cwd);
+  if (store.counts().chunks === 0) {
+    await reindexNow(state, cwd);
+  }
+}
+
 /** Schedule a debounced reindex for an edited .md path. */
 export function scheduleReindex(state: ReindexState, cwd: string, _path: string, debounceMs = DEFAULT_DEBOUNCE_MS): void {
   const key = cwd;
@@ -150,6 +181,18 @@ export function scheduleReindex(state: ReindexState, cwd: string, _path: string,
     state.timers.delete(key);
     reindexNow(state, cwd).catch((e) => console.warn(`[kb] reindex failed: ${(e as Error).message}`));
   }, debounceMs));
+}
+
+/** Close + evict the cached store for a single cwd, cancelling its debounce
+ *  timer. Used when a cwd is removed so a later tick cannot reopen it. Closing
+ *  the last WAL connection checkpoints and drops the `-wal`/`-shm` sidecars, so
+ *  no residue lingers. See change: sweep-worktree-residual-on-remove. */
+export function closeKbForCwd(state: ReindexState, cwd: string): void {
+  const entry = state.kb.get(cwd);
+  if (entry) { try { entry.store.close(); } catch { /* */ } }
+  state.kb.delete(cwd);
+  const t = state.timers.get(cwd);
+  if (t) { clearTimeout(t); state.timers.delete(cwd); }
 }
 
 /** Close any cached store (on session_shutdown). */

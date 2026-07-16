@@ -5,19 +5,16 @@
 Define the folder-group action bar and elevated spawn buttons rendered in the sidebar.
 ## Requirements
 ### Requirement: Folder action bar layout
-Each folder group in the sidebar SHALL render a horizontal action bar below the group header containing buttons in this order: `Terminals(N)`, `Editor`, native editors (e.g. `Zed`), `Clean up broken (N)` (conditional), and Pi Resources (right-aligned). The action bar SHALL NOT contain `+Session` or `+Worktree` buttons — those are relocated to the elevated spawn-button stack (see "Elevated folder spawn buttons").
 
-#### Scenario: Action bar omits spawn buttons
-- **WHEN** a folder group action bar is rendered for a git repository with Zed detected
-- **THEN** the action bar SHALL display: Terminals(0), Editor, Zed, and the Pi Resources icon
+Each folder group in the sidebar SHALL render a horizontal action bar below the group header containing buttons in this order: `Terminals(N)`, `Editor`, `Clean up broken (N)` (conditional), and Pi Resources (right-aligned). The action bar SHALL NOT contain native-editor (e.g. `Zed`) buttons, `+Session`, or `+Worktree` buttons — native-editor launch is removed, and spawn buttons live in the elevated spawn-button stack.
+
+#### Scenario: Action bar omits native-editor and spawn buttons
+
+- **WHEN** a folder group action bar is rendered for a git repository
+- **THEN** the action bar SHALL display: Terminals(0), Editor, and the Pi Resources icon
+- **THEN** the action bar SHALL NOT contain a `Zed` (or any native-editor) button
 - **THEN** the action bar SHALL NOT contain a `+Session` button
 - **THEN** the action bar SHALL NOT contain a `+Worktree` button
-- **THEN** the action bar SHALL NOT contain a `+Terminal` button
-
-#### Scenario: Zed not detected
-- **WHEN** a folder group is rendered and Zed is not detected
-- **THEN** the Zed button SHALL NOT appear in the action bar
-- **THEN** all other action-bar buttons SHALL remain visible
 
 ### Requirement: +Worktree button opens worktree dialog
 The `+ New Worktree` action SHALL be presented as a full-width line button in the elevated spawn-button stack (see "Elevated folder spawn buttons"), not as a pill in the action bar. Clicking it SHALL open `WorktreeSpawnDialog` scoped to the folder's cwd. The button SHALL be hidden (not disabled) unless the folder is detected as a git repository AND the global preference `gitWorktreeEnabled` is `true` AND a spawn handler is wired.
@@ -60,36 +57,20 @@ The Terminals button SHALL display the count of open terminals for the folder as
 - **WHEN** a folder has no terminals
 - **THEN** the Terminals button SHALL display `Terminals(0)`
 
-### Requirement: Editor button with status indicator
-The Editor button SHALL navigate to the EditorView for the folder. It SHALL display a status indicator: green dot when code-server is running, pulsing dot when starting, yellow warning icon when code-server binary is not found, no indicator when stopped.
+### Requirement: Editor button opens the internal folder pane
 
-#### Scenario: Editor running
-- **WHEN** a code-server instance is running for the folder
-- **THEN** the Editor button SHALL display a green dot indicator
+The Editor button SHALL navigate to `/folder/:encodedCwd/editor`, which mounts the internal Monaco editor pane rooted at the folder cwd (see capability `folder-scoped-editor-pane`). The button SHALL NOT display any `code-server` status indicator (green/pulsing/warning), because no external editor process exists.
 
-#### Scenario: Editor starting
-- **WHEN** a code-server instance is starting for the folder
-- **THEN** the Editor button SHALL display a pulsing dot indicator
+#### Scenario: Click navigates to the internal folder pane
 
-#### Scenario: Editor stopped
-- **WHEN** no code-server instance exists for the folder
-- **THEN** the Editor button SHALL display no indicator
-
-#### Scenario: code-server not found
-- **WHEN** code-server binary is not detected on the system
-- **THEN** the Editor button SHALL display a yellow warning icon
-
-#### Scenario: Click navigates to editor
-- **WHEN** user clicks the Editor button
+- **WHEN** the user clicks the Editor button
 - **THEN** the content area SHALL navigate to `/folder/:encodedCwd/editor`
+- **AND** the internal Monaco pane SHALL mount rooted at the folder cwd
 
-### Requirement: Zed button for native launch
-The Zed button SHALL launch Zed natively via the existing `POST /api/open-editor` endpoint. It SHALL NOT cause any content area navigation. It SHALL only appear when Zed is detected as running.
+#### Scenario: Editor button has no status indicator
 
-#### Scenario: Launch Zed
-- **WHEN** user clicks the Zed button
-- **THEN** the system SHALL call `POST /api/open-editor` with `{ path: cwd, editor: "zed" }`
-- **THEN** no content area navigation SHALL occur
+- **WHEN** the Editor button is rendered for any folder
+- **THEN** it SHALL NOT display a green/pulsing dot or a yellow warning icon
 
 ### Requirement: Pi Resources button with updated icon
 The Pi Resources button SHALL be right-aligned in the action bar and use a more representative icon (replacing `mdiPuzzleOutline`). Clicking it SHALL open the PiResourcesView (existing behavior, relocated).
@@ -100,19 +81,25 @@ The Pi Resources button SHALL be right-aligned in the action bar and use a more 
 
 ### Requirement: Initialize button gated on worktree-init status
 
-For a row whose repo declares a worktree-init hook (`hasHook: true`), the row SHALL display an "Initialize" button when, and only when, the cached worktree-init status reports `needsInit: true`. When `hasHook` is true and `needsInit` is false, the Initialize button SHALL NOT be shown. Behavior for rows with no declared hook (`hasHook: false`) is governed by a separate capability and is out of scope here. Init-status SHALL be probed lazily per row and fail-open (on probe error the button is hidden).
+For a row whose repo declares a worktree-init hook (`hasHook: true`), the row SHALL display the init control when the cached worktree-init status reports `needsInit: true` OR the hook is not trusted (`trusted: false`). When `hasHook` is true, `needsInit` is false, and the hook is trusted, the control SHALL NOT be shown. The control SHALL label itself by reason: "Initialize" when `needsInit: true`; "Review & trust changes" when `needsInit: false` and `trusted: false` (the hook was edited after it was last trusted, invalidating its `repoRoot + sha256(canonical(worktreeInit))` trust key). Behavior for rows with no declared hook (`hasHook: false`) is governed by a separate capability and is out of scope here. Init-status SHALL be probed lazily per row and fail-open (on probe error the button is hidden).
 
-Clicking Initialize SHALL run the hook via `POST /api/git/worktree/init`. When the hook is untrusted, the client SHALL first show a trust-confirm dialog naming the gate and the run command (or agent prompt + model); on confirm it SHALL re-issue the run with `confirmHash`. Hook progress SHALL stream to a live tail. A hook failure SHALL render in a card reusing the spawn-error card surface (stderr / log tail). On success the client SHALL re-fetch init-status, after which the gate flips and the Initialize button disappears.
+Clicking Initialize SHALL run the hook via `POST /api/git/worktree/init`. When the hook is untrusted, the client SHALL first show a trust-confirm dialog naming the gate and the run command (or agent prompt + model); on confirm it SHALL re-issue the run with `confirmHash`. While the hook runs, the row SHALL show a status chip (label + elapsed time) with the last log line as a muted preview; the full log SHALL be opt-in behind a collapsed disclosure, NOT rendered inline as a raw output block. A hook failure SHALL render as a compact chip with a plain-language summary (exit code + short command) and a Retry action, with the stderr / log tail available behind the same opt-in disclosure; the failure chip SHALL NOT auto-dismiss on a timer. On success the client SHALL briefly show a success confirmation, then re-fetch init-status, after which the gate flips and the Initialize button disappears.
 
 #### Scenario: Button shown when init needed
 
 - **WHEN** a row's init-status is `{ hasHook: true, needsInit: true }`
-- **THEN** the row SHALL show an "Initialize" button
+- **THEN** the row SHALL show the control labeled "Initialize"
 
-#### Scenario: Button hidden when already initialized
+#### Scenario: Button labeled for re-trust when hook edited
 
-- **WHEN** a row's init-status is `{ hasHook: true, needsInit: false }`
-- **THEN** the row SHALL NOT show an "Initialize" button
+- **WHEN** a row's init-status is `{ hasHook: true, needsInit: false, trusted: false }` (the hook was edited after last trust, invalidating its trust key)
+- **THEN** the row SHALL show the control labeled "Review & trust changes" (not "Initialize")
+- **AND** clicking it SHALL open the trust-confirm dialog; granting trust SHALL clear the control without running an init when the gate reports `needsInit: false`
+
+#### Scenario: Button hidden when initialized and trusted
+
+- **WHEN** a row's init-status is `{ hasHook: true, needsInit: false, trusted: true }`
+- **THEN** the row SHALL NOT show the init control
 
 #### Scenario: Untrusted hook prompts before running
 
@@ -120,15 +107,23 @@ Clicking Initialize SHALL run the hook via `POST /api/git/worktree/init`. When t
 - **THEN** the client SHALL show a trust-confirm dialog naming the gate and run command/prompt
 - **AND** SHALL only run the hook (with `confirmHash`) after the user confirms
 
-#### Scenario: Failure renders a card
+#### Scenario: Running shows a status chip with opt-in log
+
+- **WHEN** a hook run is in flight
+- **THEN** the row SHALL show a status chip with elapsed time and the last log line as a muted preview
+- **AND** the full log SHALL be hidden until the user opens the disclosure (no inline raw output block)
+
+#### Scenario: Failure renders a compact, retryable chip
 
 - **WHEN** a hook run fails
-- **THEN** the client SHALL render the failure in a card with the stderr / log tail
+- **THEN** the client SHALL render a compact failure chip with a plain-language summary and a Retry action
+- **AND** the stderr / log tail SHALL be available behind an opt-in disclosure
+- **AND** the failure chip SHALL NOT auto-dismiss on a timer
 
 #### Scenario: Success removes the button
 
 - **WHEN** a hook run succeeds
-- **THEN** the client SHALL re-fetch init-status
+- **THEN** the client SHALL briefly show a success confirmation, then re-fetch init-status
 - **AND** the Initialize button SHALL disappear once the gate reports `needsInit: false`
 
 ### Requirement: Elevated folder spawn buttons
@@ -161,22 +156,33 @@ When a folder is collapsed and the user clicks `+ New Session` or `+ New Worktre
 
 ### Requirement: Initialize button routes unconfigured directories to project-init
 
-For a directory / worktree row whose repo declares NO worktree-init hook (worktree-init-status `hasHook: false`), the row SHALL show an "Initialize" button that, when clicked, spawns an interactive project-init session in that directory (cwd = the row's path), reusing the existing spawn-session machinery with the project-init skill pre-injected. This complements the hook-present behavior: for rows with a declared hook the gate-gated hook-run behavior applies instead.
+For a directory / worktree row whose worktree-init-status reports `{ hasHook: false, configured: false }` (no declared hook AND not yet a configured pi project), the row SHALL show a "Set up project" button, rendered by a dedicated `ProjectInitButton` component distinct from the hook-run `WorktreeInitButton`. The `ProjectInitButton` SHALL carry its own label ("Set up project"), icon, and neutral/primary color — visually distinct from the amber, repo-code-executing hook-run control — so the scaffold action and the hook-run action are never confusable. Clicking it SHALL spawn an interactive project-init session in that directory (cwd = the row's path), reusing the existing spawn-session machinery with the project-init skill pre-injected.
 
-#### Scenario: No-hook row shows Initialize routing to the skill
+For a row reporting `{ hasHook: false, configured: true }` (already a configured pi project that declares no worktree-init hook), the row SHALL render NO initialize control of either kind — there is nothing to initialize.
 
-- **WHEN** a row's worktree-init-status is `{ hasHook: false }`
-- **THEN** the row SHALL show an "Initialize" button
+For a row reporting `{ hasHook: true }`, the hook-run behavior applies (governed by "Initialize button gated on worktree-init status"), NOT the project-init scaffold.
+
+#### Scenario: Unconfigured row shows Set up project routing to the skill
+
+- **WHEN** a row's worktree-init-status is `{ hasHook: false, configured: false }`
+- **THEN** the row SHALL show a "Set up project" button rendered by `ProjectInitButton`
+- **AND** the button SHALL be visually distinct (label, icon, color) from the hook-run Initialize control
 - **AND** clicking it SHALL spawn an interactive project-init session with cwd set to the row's directory
+
+#### Scenario: Configured-but-hookless row shows nothing
+
+- **WHEN** a row's worktree-init-status is `{ hasHook: false, configured: true }`
+- **THEN** the row SHALL NOT show a "Set up project" button
+- **AND** the row SHALL NOT show a hook-run Initialize button
 
 #### Scenario: Hook-present row is unaffected
 
 - **WHEN** a row's worktree-init-status is `{ hasHook: true }`
-- **THEN** the Initialize button SHALL follow the hook-run behavior (not the project-init skill)
+- **THEN** the initialize control SHALL follow the hook-run behavior (not the project-init scaffold)
 
 #### Scenario: Project-init session is first-class
 
-- **WHEN** the project-init session is spawned from the Initialize button
+- **WHEN** the project-init session is spawned from the `ProjectInitButton`
 - **THEN** it SHALL appear as a normal dashboard session (visible transcript, abortable)
 - **AND** SHALL NOT be a detached process
 

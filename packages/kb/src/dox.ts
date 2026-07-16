@@ -7,8 +7,16 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { createHash } from "node:crypto";
 import type { KbStore } from "./types.js";
 
-// delta ②: exclude worktree checkouts, archived openspec proposals, and doc-example noise
-const DEFAULT_EXCLUDE = /(^|\/)(node_modules|\.git|dist|build|\.next|coverage|\.kb|\.pi|\.worktrees|openspec|doc-example)(\/|$)/;
+// delta ②: exclude worktree checkouts, archived openspec proposals, and doc-example noise.
+// Also exclude build output (`out`) and the electron bundled/vendored trees
+// (`bundled-extensions`, `electron/resources/server`) — all gitignored, zero
+// tracked md; the walk is fs-based so they surface as bogus missing/companion
+// rows without this. `server` is scoped to `electron/resources/server` so real
+// `server` source dirs (packages/server, kb-plugin/src/server) stay indexed.
+// Also skip scratch/output dirs (`mockups`, `research`, `site`, `.github`) and
+// self-evident top-level docs (`CHANGELOG.md`, `CLAUDE.md`, repo-root `README.md`)
+// with no per-file DOX value; `README` anchored to root so package READMEs stay documented.
+const DEFAULT_EXCLUDE = /(^|\/)(node_modules|\.git|\.github|dist|build|out|\.next|coverage|\.kb|\.pi|\.worktrees|openspec|doc-example|bundled-extensions|mockups|research|site)(\/|$)|(^|\/)electron\/resources\/server(\/|$)|(^|\/)(CHANGELOG|CLAUDE)\.md$|^README\.md$/;
 const AGENTS_FILES = ["AGENTS.md"];
 // delta ①: dox init now maps SOURCE, not docs. Source globs, minus type decls and tests.
 const SOURCE_EXT = /\.(ts|tsx|js|jsx)$/;
@@ -17,9 +25,16 @@ function isSourceFile(name: string): boolean {
   return SOURCE_EXT.test(name) && !/\.d\.ts$/.test(name) && !/\.(test|spec)\.[cm]?[jt]sx?$/.test(name);
 }
 function isMdFile(name: string): boolean {
-  // `*.AGENTS.md` sidecars are per-file index promotions, not doc md needing
-  // their own dir row/companion — exclude from the md walk.
-  return MD_EXT.test(name) && !AGENTS_FILES.includes(name) && !name.endsWith(".AGENTS.md");
+  // `*.AGENTS.md` sidecars (per-file index promotions) and `*.agent.md`
+  // companions (pull-only index of a large doc) are DOX index artifacts, not
+  // documentable source — exclude from the md walk so they need no row/companion
+  // of their own (else a companion needs a companion-of-a-companion, ad infinitum).
+  return (
+    MD_EXT.test(name) &&
+    !AGENTS_FILES.includes(name) &&
+    !name.endsWith(".AGENTS.md") &&
+    !name.endsWith(".agent.md")
+  );
 }
 export const AREA_FILE_THRESHOLD = 8; // ≥ this many md files in a subdir → own AGENTS.md
 export const ROW_CAP = 40;

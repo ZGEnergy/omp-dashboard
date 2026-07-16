@@ -1,18 +1,19 @@
-import React, { useState } from "react";
-import { Icon } from "@mdi/react";
 import { mdiChevronDown, mdiChevronRight, mdiOpenInNew } from "@mdi/js";
+import { Icon } from "@mdi/react";
+import type React from "react";
+import { useState } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { useThemeContext } from "../ThemeProvider.js";
+import { t as i18nT } from "../../lib/i18n";
 import { getSyntaxTheme } from "../../lib/syntax-theme.js";
-import type { ToolRendererProps } from "./types.js";
+import { useThemeContext } from "../ThemeProvider.js";
 import { LinkifiedText } from "./LinkifiedText.js";
 import {
-  parseCtxResult,
   type CtxResult,
-  type QueryBlock,
   type IntentPreview,
+  parseCtxResult,
+  type QueryBlock,
 } from "./parse-ctx-result.js";
-import { t as i18nT } from "../../lib/i18n";
+import type { ToolRendererProps } from "./types.js";
 
 // Single renderer for every context-mode (`ctx_*`) tool. Parses the result
 // text into a typed struct (parse-ctx-result.ts) and switches the body layout
@@ -41,6 +42,36 @@ function headerChip(toolName: string, parsed: CtxResult, args?: Record<string, u
       return `📊 insight`;
     case "error":
       return `✕ ${parsed.variant} error`;
+    default:
+      return argsChip(toolName, args);
+  }
+}
+
+// Chip derived purely from `args`, used when there is no parsed result yet
+// (running) or the parse degraded to `{ kind: "raw" }`. Same emoji vocabulary
+// as the result-state chips, so the header never collides with the tool-name
+// subtitle for a recognized ctx_* tool. Unknown ctx_* → the bare tool name.
+function argsChip(toolName: string, args?: Record<string, unknown>): string {
+  const a = args ?? {};
+  switch (toolName) {
+    case "ctx_batch_execute": {
+      const n = Array.isArray(a.commands) ? a.commands.length : 0;
+      return `▦ ${n} cmds`;
+    }
+    case "ctx_execute":
+    case "ctx_execute_file":
+      return `⚙ ${(a.language as string) ?? "code"}`;
+    case "ctx_search": {
+      const n = Array.isArray(a.queries) ? a.queries.length : 0;
+      return `🔍 ${n} ${n === 1 ? "query" : "queries"}`;
+    }
+    case "ctx_fetch_and_index": {
+      const first = Array.isArray(a.requests) ? (a.requests[0] as { url?: string } | undefined)?.url : undefined;
+      const url = (a.url as string) ?? first ?? (a.source as string);
+      return `🌐 ${url ? hostOf(url) : "fetch"}`;
+    }
+    case "ctx_index":
+      return `🗂 ${(a.source as string) ?? (a.path as string) ?? "index"}`;
     default:
       return toolName;
   }
@@ -108,7 +139,7 @@ function QueryAccordions({ queries, context }: { queries: QueryBlock[]; context:
       {queries.map((q, i) => (
         <Collapsible key={i} title={q.query}>
           {q.noResults || q.sections.length === 0 ? (
-            <span className="text-[11px] text-[var(--text-muted)] italic">{i18nT("auto.no_results_found", undefined, "No results found")}</span>
+            <span className="text-[11px] text-[var(--text-muted)] italic">{i18nT("common.noResultsFound", undefined, "No results found")}</span>
           ) : (
             <div className="space-y-2">
               {q.sections.map((s, j) => (
@@ -131,7 +162,7 @@ function IntentPreviewList({ intent }: { intent: IntentPreview }) {
   return (
     <div className="text-[11px] text-[var(--text-muted)] space-y-0.5">
       <div>
-        {intent.matched} {i18nT("auto.sections_matched", undefined, "sections matched")} <span className="font-mono">"{intent.query}"</span>
+        {intent.matched} {i18nT("common.sectionsMatched", undefined, "sections matched")} <span className="font-mono">"{intent.query}"</span>
         {intent.indexed != null && ` · ${intent.indexed} indexed`}
       </div>
       <ul className="list-disc list-inside">
@@ -159,7 +190,7 @@ function ErrorCard({
         <LinkifiedText text={parsed.message} context={context} />
       </pre>
       {parsed.receivedArgs && (
-        <Collapsible title={i18nT("auto.received_arguments", undefined, "Received arguments")}>
+        <Collapsible title={i18nT("common.receivedArguments", undefined, "Received arguments")}>
           <pre className="whitespace-pre-wrap text-code text-[var(--text-secondary)] p-2 bg-[var(--bg-code)] rounded">
             {parsed.receivedArgs}
           </pre>
@@ -167,6 +198,79 @@ function ErrorCard({
       )}
     </div>
   );
+}
+
+function RunningLabel() {
+  return (
+    <div className="text-xs text-[var(--text-muted)] italic">
+      {i18nT("status.running", undefined, "Running…")}
+    </div>
+  );
+}
+
+// Preview the pending work from `args` while a ctx_* call is still running,
+// instead of a bare "Running…". Mirrors the result-state body per tool.
+function RunningPreview({ toolName, args }: { toolName: string; args?: Record<string, unknown> }) {
+  const a = args ?? {};
+  switch (toolName) {
+    case "ctx_batch_execute": {
+      const cmds = (Array.isArray(a.commands) ? a.commands : []) as Array<{ label?: string; command?: string }>;
+      if (cmds.length === 0) return <RunningLabel />;
+      return (
+        <ul className="text-[11px] font-mono text-[var(--text-muted)] space-y-0.5">
+          {cmds.map((c, i) => (
+            <li key={i} className="truncate">
+              <span className="text-[var(--text-secondary)]">{c.label}</span>{" "}
+              <span className="text-[var(--text-tertiary)]">{c.command}</span>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    case "ctx_execute":
+    case "ctx_execute_file": {
+      const code = a.code as string | undefined;
+      const language = a.language as string | undefined;
+      const path = a.path as string | undefined;
+      if (!code) return <RunningLabel />;
+      return (
+        <div className="space-y-2">
+          {path && <div className="text-xs font-mono text-[var(--text-secondary)]">{path}</div>}
+          <CodeBlock code={code} language={language} />
+        </div>
+      );
+    }
+    case "ctx_search": {
+      const queries = (Array.isArray(a.queries) ? a.queries : []) as string[];
+      if (queries.length === 0) return <RunningLabel />;
+      return (
+        <ul className="list-disc list-inside text-[11px] font-mono text-[var(--text-secondary)] space-y-0.5">
+          {queries.map((q, i) => (
+            <li key={i} className="truncate">
+              {q}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    case "ctx_fetch_and_index": {
+      const first = Array.isArray(a.requests) ? (a.requests[0] as { url?: string } | undefined)?.url : undefined;
+      const url = (a.url as string) ?? first;
+      if (!url) return <RunningLabel />;
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-blue-400 hover:underline break-all"
+        >
+          {url}
+        </a>
+      );
+    }
+    default:
+      return <RunningLabel />;
+  }
 }
 
 function CtxBody({
@@ -246,7 +350,7 @@ function CtxBody({
       return (
         <div className="text-xs text-[var(--text-secondary)] font-mono space-y-0.5">
           <div>
-            {parsed.sections} {i18nT("auto.sections", undefined, "sections ·")} {parsed.size} — {parsed.source}
+            {parsed.sections} {i18nT("common.sections", undefined, "sections ·")} {parsed.size} — {parsed.source}
           </div>
           {parsed.url && (
             <a
@@ -304,7 +408,9 @@ export function CtxToolRenderer({ toolName, args, status, result, context }: Too
       </div>
 
       {status === "running" && !result && (
-        <div className="text-xs text-[var(--text-muted)] italic">{i18nT("auto.running", undefined, "Running…")}</div>
+        <div className={bodyCap}>
+          <RunningPreview toolName={toolName} args={args} />
+        </div>
       )}
 
       {result && <CtxBody parsed={parsed} toolName={toolName} args={args} context={context} />}

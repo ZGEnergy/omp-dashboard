@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { applyPromptReceived, createInitialState, deriveBannerState, findLastUserPrompt, reduceEvent, toDisplayString, addInteractiveRequest, resolveInteractiveRequest, dismissInteractiveRequest, extractAgentEndError, type SessionState, type PendingPrompt, type ChatMessage } from "../event-reducer.js";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { describe, expect, it } from "vitest";
+import { addInteractiveRequest, applyPromptReceived, type ChatMessage, createInitialState, deriveBannerState, dismissInteractiveRequest, extractAgentEndError, findLastUserPrompt, type PendingPrompt, reduceEvent, resolveInteractiveRequest, type SessionState, toDisplayString } from "../event-reducer.js";
 
 function applyEvents(events: DashboardEvent[]): SessionState {
   return events.reduce((s, e) => reduceEvent(s, e), createInitialState());
@@ -1989,6 +1989,59 @@ describe("command_feedback events", () => {
       ]);
       expect(state.subagents.get("s")!.startedAt).toBe(1234);
     });
+
+    // --- D3: empty-array overwrite guard (fix-subagent-live-detail-reliability) ---
+
+    it("empty-array frame does NOT clobber a populated timeline", () => {
+      const three = [
+        { kind: "tool" as const, toolName: "Read", input: {}, ts: 1 },
+        { kind: "tool" as const, toolName: "Bash", input: {}, ts: 2 },
+        { kind: "text" as const, text: "hi", ts: 3 },
+      ];
+      const state = applyEvents([
+        {
+          eventType: "subagent_started",
+          timestamp: 1000,
+          data: { id: "s", type: "x", description: "", details: { entries: three } },
+        },
+        {
+          eventType: "subagent_started",
+          timestamp: 2000,
+          data: { id: "s", type: "x", description: "", details: { entries: [] } },
+        },
+      ]);
+      const sub = state.subagents.get("s")!;
+      expect(sub.entries).toEqual(three);
+      expect(sub.entries!.length).toBe(3);
+    });
+
+    it("non-empty frame replaces the timeline wholesale", () => {
+      const three = [
+        { kind: "tool" as const, toolName: "Read", input: {}, ts: 1 },
+        { kind: "tool" as const, toolName: "Bash", input: {}, ts: 2 },
+        { kind: "text" as const, text: "hi", ts: 3 },
+      ];
+      const five = [
+        ...three,
+        { kind: "tool" as const, toolName: "Grep", input: {}, ts: 4 },
+        { kind: "text" as const, text: "done", ts: 5 },
+      ];
+      const state = applyEvents([
+        {
+          eventType: "subagent_started",
+          timestamp: 1000,
+          data: { id: "s", type: "x", description: "", details: { entries: three } },
+        },
+        {
+          eventType: "subagent_started",
+          timestamp: 2000,
+          data: { id: "s", type: "x", description: "", details: { entries: five } },
+        },
+      ]);
+      const sub = state.subagents.get("s")!;
+      expect(sub.entries).toEqual(five);
+      expect(sub.entries!.length).toBe(5);
+    });
   });
 
   // §12: tool_execution_end backfills the subagents map for replayed/refreshed
@@ -2877,7 +2930,7 @@ describe("deriveBannerState (unified SessionBanner selector)", () => {
     });
   });
 
-  it("returns error anchor (kind error) for non-USAGE_LIMIT lastError", () => {
+  it("returns error anchor (kind error) for a generic lastError", () => {
     const s = createInitialState();
     s.lastError = { message: "fetch failed: ECONNRESET", timestamp: 1 };
     expect(deriveBannerState(s)).toEqual({
@@ -2885,11 +2938,11 @@ describe("deriveBannerState (unified SessionBanner selector)", () => {
     });
   });
 
-  it("returns error anchor (kind limit-exceeded) for USAGE_LIMIT_PATTERN match", () => {
+  it("returns error anchor (kind error) — NEVER limit-exceeded — for a billing/quota string", () => {
     const s = createInitialState();
     s.lastError = { message: "monthly_spending_cap exceeded", timestamp: 1 };
     expect(deriveBannerState(s)).toEqual({
-      error: { kind: "limit-exceeded", message: "monthly_spending_cap exceeded" },
+      error: { kind: "error", message: "monthly_spending_cap exceeded" },
     });
   });
 
@@ -2910,23 +2963,23 @@ describe("deriveBannerState (unified SessionBanner selector)", () => {
     });
   });
 
-  it("limit-exceeded kind distinguishes various USAGE_LIMIT_PATTERN matches", () => {
-    const cases: Array<[string, "limit-exceeded" | "error"]> = [
-      ["usage_limit_reached", "limit-exceeded"],
-      ["quota_exceeded", "limit-exceeded"],
-      ["insufficient_quota", "limit-exceeded"],
-      ["credit balance too low", "limit-exceeded"],
-      ["monthly_spending_cap", "limit-exceeded"],
-      ["reset after 12h", "limit-exceeded"],
-      ["fetch failed", "error"],
-      ["tool execution failed", "error"],
-      ["429 too many requests", "error"],
+  it("every error string — billing/quota or generic — resolves to kind error", () => {
+    const cases: string[] = [
+      "usage_limit_reached",
+      "quota_exceeded",
+      "insufficient_quota",
+      "credit balance too low",
+      "monthly_spending_cap",
+      "reset after 12h",
+      "fetch failed",
+      "tool execution failed",
+      "429 too many requests",
     ];
-    for (const [msg, expected] of cases) {
+    for (const msg of cases) {
       const s = createInitialState();
       s.lastError = { message: msg, timestamp: 1 };
       const banner = deriveBannerState(s);
-      expect("error" in banner && banner.error?.kind, msg).toBe(expected);
+      expect("error" in banner && banner.error?.kind, msg).toBe("error");
     }
   });
 });

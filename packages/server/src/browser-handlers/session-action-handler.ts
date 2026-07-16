@@ -3,14 +3,8 @@
  */
 import { existsSync } from "node:fs";
 import type { BrowserToServerMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import type { BrowserHandlerContext } from "./handler-context.js";
-import { spawnPiSession } from "../process-manager.js";
-import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { preflightSpawn } from "../spawn-preflight.js";
-import { getSpawnRegisterWatchdog } from "../spawn-register-watchdog.js";
-import { appendSpawnFailure } from "../spawn-failure-log.js";
-import { createBranchedSessionFile } from "../session-file-reader.js";
+import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import {
   killPidWithGroup,
   killProcess,
@@ -18,8 +12,14 @@ import {
 import {
   findPidByMarker,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/process-identify.js";
-import { shouldInterceptReload } from "./session-action-helpers.js";
 import { keeperOptsFromSpawnResult } from "../headless-pid-registry.js";
+import { spawnPiSession } from "../process-manager.js";
+import { createBranchedSessionFile } from "../session-file-reader.js";
+import { appendSpawnFailure } from "../spawn-failure-log.js";
+import { preflightSpawn } from "../spawn-preflight.js";
+import { getSpawnRegisterWatchdog } from "../spawn-register-watchdog.js";
+import type { BrowserHandlerContext } from "./handler-context.js";
+import { shouldInterceptReload } from "./session-action-helpers.js";
 
 /**
  * Status message + code emitted when fork is attempted on a session whose
@@ -272,7 +272,7 @@ export async function handleResumeSession(
   const { ws, sessionManager, pendingForkRegistry, headlessPidRegistry, pendingDashboardSpawns, pendingResumeIntents, pendingClientCorrelations, sendTo } = ctx;
   const session = sessionManager.get(msg.sessionId);
   if (!session) {
-    sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session not found", requestId: msg.requestId });
+    sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session not found", code: "resume.session_not_found", requestId: msg.requestId });
     return;
   }
   // Resolve placement intent. Old browsers omit the field; default to
@@ -281,15 +281,15 @@ export async function handleResumeSession(
   // See change: differentiate-resume-intent-by-trigger.
   const placement: "front" | "keep" = msg.placement ?? "front";
   if (!session.sessionFile) {
-    sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session file is unknown (pre-migration session)", requestId: msg.requestId });
+    sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session file is unknown (pre-migration session)", code: "resume.session_file_unknown", requestId: msg.requestId });
     return;
   }
   if (msg.mode === "continue" && session.status !== "ended") {
-    sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session is already active", requestId: msg.requestId });
+    sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session is already active", code: "resume.already_active", requestId: msg.requestId });
     return;
   }
   if (session.resuming) {
-    sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session is already being resumed", requestId: msg.requestId });
+    sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session is already being resumed", code: "resume.already_resuming", requestId: msg.requestId });
     return;
   }
   // Fork preflight: silent-degrade when the source session has no on-disk
@@ -641,6 +641,23 @@ export function handleKillProcess(
 }
 
 /**
+ * Forward a browser subagent-resync request to the owning bridge. The bridge
+ * replies with the latest retained snapshot as a synthetic subagent_started
+ * event_forward, or no-ops for an unknown/finished agent.
+ * See change: fix-subagent-live-detail-reliability (D2).
+ */
+export function handleSubagentResyncRequest(
+  msg: Extract<BrowserToServerMessage, { type: "subagent_resync_request" }>,
+  ctx: BrowserHandlerContext,
+): void {
+  ctx.piGateway.sendToSession(msg.sessionId, {
+    type: "subagent_resync_request",
+    sessionId: msg.sessionId,
+    agentId: msg.agentId,
+  });
+}
+
+/**
  * Pure predicate: does a `ps`/cmdline output string look like a pi/node process?
  * Re-exported from `platform/process-identify.ts` for backwards compat with
  * any external consumer of this handler.
@@ -654,7 +671,7 @@ export async function handleForceKill(
   const { sessionManager, piGateway, headlessPidRegistry, broadcast, sendTo, ws, metaPersistence } = ctx;
   const session = sessionManager.get(msg.sessionId);
   if (!session) {
-    sendTo(ws, { type: "force_kill_result", sessionId: msg.sessionId, success: false, message: "Session not found" });
+    sendTo(ws, { type: "force_kill_result", sessionId: msg.sessionId, success: false, message: "Session not found", code: "resume.session_not_found" });
     return;
   }
 

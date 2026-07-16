@@ -1,0 +1,3 @@
+# pi-resource-activation.ts — index
+
+Activation-state bridge to pi's own resolver. Loads pi via ToolRegistry; `resolveActivation(cwd, agentDir)` runs `PackageManager.resolve()` (onMissing=skip) → `ResolvedPaths` (null on failure). `buildEnabledMap`/`lookupEnabled` map resolved `path`→`enabled` (realpath-normalized, default true). `getPiCore()` returns pi's `DefaultPackageManager`+`SettingsManager` for the toggle write. Exports pi surface types `PiSettings`/`PiSettingsManager`/`PiPackageManager`/`PiPackageEntry`/`ResolvedPaths`/`ResolvedResource`, `AGENT_DIR`. See change: folder-resource-activation-toggle.

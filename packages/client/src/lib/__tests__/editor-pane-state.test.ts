@@ -30,6 +30,15 @@ describe("editorPaneReducer", () => {
     expect(s.activeIndex).toBe(0);
   });
 
+  it("a diff tab and a monaco tab for the same file coexist (virtual path)", () => {
+    // change: add-change-summary-table — `diff:<path>` never collides with the
+    // monaco tab of the same real file (dedup is by full path).
+    let s = editorPaneReducer(EMPTY_PANE_STATE, { type: "openFile", path: "src/a.ts", viewer: "monaco" });
+    s = editorPaneReducer(s, { type: "openFile", path: "diff:src/a.ts", viewer: "diff" });
+    expect(s.openFiles.map((f) => f.path)).toEqual(["src/a.ts", "diff:src/a.ts"]);
+    expect(s.openFiles.map((f) => f.viewer)).toEqual(["monaco", "diff"]);
+  });
+
   it("openFile expands the ancestor dir chain (#5)", () => {
     const s = editorPaneReducer(EMPTY_PANE_STATE, {
       type: "openFile",
@@ -84,6 +93,23 @@ describe("editorPaneReducer", () => {
     expect(s.activeIndex).toBe(-1);
   });
 
+  it("closeByPath closes the tab addressed by its full path", () => {
+    const base: EditorPaneState = {
+      openFiles: [tab("a.ts"), { path: "term:t1", viewer: "terminal", addedAt: 2 }, tab("c.ts", 3)],
+      activeIndex: 2,
+      treeOpenRoots: [],
+    };
+    const s = editorPaneReducer(base, { type: "closeByPath", path: "term:t1" });
+    expect(s.openFiles.map((f) => f.path)).toEqual(["a.ts", "c.ts"]);
+    // Active pointer shifts left (a tab before the active one was removed).
+    expect(s.openFiles[s.activeIndex].path).toBe("c.ts");
+  });
+
+  it("closeByPath is a no-op for an absent path", () => {
+    const base: EditorPaneState = { openFiles: [tab("a.ts")], activeIndex: 0, treeOpenRoots: [] };
+    expect(editorPaneReducer(base, { type: "closeByPath", path: "term:gone" })).toBe(base);
+  });
+
   it("setActive clamps to valid range", () => {
     const base: EditorPaneState = { openFiles: [tab("a.ts")], activeIndex: 0, treeOpenRoots: [] };
     expect(editorPaneReducer(base, { type: "setActive", index: 5 })).toBe(base);
@@ -135,6 +161,29 @@ describe("persistence", () => {
     localStorage.setItem(`${EDITOR_PANE_KEY_PREFIX}weird`, JSON.stringify({ openFiles: "nope" }));
     expect(loadEditorPaneState("weird")).toEqual(EMPTY_PANE_STATE);
     spy.mockRestore();
+  });
+
+  it("retains a persisted terminal tab across reload (VALID_VIEWERS includes terminal)", () => {
+    // change: terminals-in-tabbed-panes — `term:<id>` tabs must survive reload
+    // (reconcile against live terminals happens after load, not at validation).
+    const state: EditorPaneState = {
+      openFiles: [{ path: "term:abc123", viewer: "terminal", addedAt: 1 }],
+      activeIndex: 0,
+      treeOpenRoots: [],
+    };
+    saveEditorPaneState("termsess", state);
+    expect(loadEditorPaneState("termsess")).toEqual(state);
+  });
+
+  it("retains a persisted diff tab across reload (VALID_VIEWERS includes diff)", () => {
+    // change: add-change-summary-table — diff tabs must survive reload.
+    const state: EditorPaneState = {
+      openFiles: [{ path: "diff:src/a.ts", viewer: "diff", addedAt: 1 }],
+      activeIndex: 0,
+      treeOpenRoots: [],
+    };
+    saveEditorPaneState("diffsess", state);
+    expect(loadEditorPaneState("diffsess")).toEqual(state);
   });
 });
 
