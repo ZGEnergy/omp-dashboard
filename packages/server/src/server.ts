@@ -1838,7 +1838,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         // never the sole gate.
         const scope = routeScopeForUrl(request.url);
         const ticket = extractTicket(request.url, secWsProtocol);
-        const consumeTicket = (t: string, s: WsRouteScope) => wsTicketStore.consume(t, s);
+        const consumeTicket = (t: string, s: WsRouteScope | null) => wsTicketStore.consume(t, s);
         const wsHeaders = request.headers as unknown as Record<string, unknown>;
         if (config.authConfig?.secret) {
           if (!validateWsUpgrade(request.headers.cookie, remoteAddress, config.authConfig.secret, trusted, { ticket, scope, consumeTicket, headers: wsHeaders, localToken })) {
