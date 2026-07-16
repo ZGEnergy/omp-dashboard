@@ -5,7 +5,7 @@
  *
  *   POST   /api/push/register            { deviceToken, transport, sessionFilter? } → 200 { tokenId }
  *   DELETE /api/push/register/:tokenId                                              → 204
- *   POST   /api/push/test                { tokenId? }                              → 200 { results }
+ *   POST   /api/push/test                { tokenId }                               → 200 { results }
  *   GET    /api/push/vapid-public-key                                              → 200 { publicKey }
  *
  * See change: add-server-push-notifications.
@@ -104,8 +104,11 @@ export function registerPushRoutes(fastify: FastifyInstance, deps: PushRoutesDep
     async (request, reply) => {
       if (!isEnabled()) return reply.code(404).send({ error: "push disabled" });
       const tokenId = typeof request.body?.tokenId === "string" ? request.body.tokenId : undefined;
-      const all = registry.list();
-      const targets = tokenId ? all.filter((t) => t.id === tokenId) : all;
+      if (!tokenId) {
+        reply.code(400);
+        return { error: "tokenId is required" };
+      }
+      const targets = registry.list().filter((t) => t.id === tokenId);
       const results = await Promise.all(targets.map((t) => sendTest(t, transports, getSession)));
       return { results };
     },

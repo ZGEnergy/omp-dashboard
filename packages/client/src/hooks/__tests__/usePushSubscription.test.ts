@@ -156,21 +156,90 @@ describe("usePushSubscription", () => {
     await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
   });
 
-  it("rejects sendTest when the server rejects delivery", async () => {
+  it("does not send a test push without a registered tokenId", async () => {
     mockServiceWorker(null);
     const fetchSpy = mockFetchOk();
-    fetchSpy.mockImplementation((url: string) => {
-      if (url.includes("/api/push/vapid-public-key")) {
-        return Promise.resolve({ ok: true, json: async () => ({ publicKey: VAPID }) });
-      }
-      if (url.includes("/api/push/test")) return Promise.resolve({ ok: true, json: async () => ({ results: [{ ok: false }] }) });
-      return Promise.resolve({ ok: true, json: async () => ({ tokenId: "tok-1" }) });
-    });
     globalThis.fetch = fetchSpy as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
 
-    await expect(result.current.sendTest()).rejects.toThrow(/test notification/i);
+    await expect(result.current.sendTest()).rejects.toThrow(/not registered/i);
+    expect(fetchSpy.mock.calls.some((call) => String(call[0]).includes("/api/push/test"))).toBe(false);
+  });
+  it("keeps push unavailable when the VAPID public key is empty", async () => {
+    const serviceWorker = mockServiceWorker(null);
+    const requestPermission = vi.fn(async () => "granted" as NotificationPermission);
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: { permission: "default" as NotificationPermission, requestPermission },
+    });
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (url.includes("/api/push/vapid-public-key")) {
+        return { ok: true, json: async () => ({ publicKey: "   " }) };
+      }
+      return { ok: true, json: async () => ({ tokenId: "tok-1" }) };
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { result } = renderHook(() => usePushSubscription());
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(result.current.status).toBe("unknown");
+
+    await act(async () => {
+      await result.current.subscribe();
+    });
+    expect(requestPermission).not.toHaveBeenCalled();
+    expect(serviceWorker.subscribe).not.toHaveBeenCalled();
+  });
+
+  it("does not mark an existing subscription as subscribed when register fails", async () => {
+    const existing = {
+      endpoint: "https://push.example/existing",
+      toJSON: () => ({ endpoint: "https://push.example/existing" }),
+    } as PushSubscription;
+    mockServiceWorker(existing);
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (url.includes("/api/push/vapid-public-key")) {
+        return { ok: true, json: async () => ({ publicKey: VAPID }) };
+      }
+      if (url.includes("/api/push/register")) return { ok: false, json: async () => ({}) };
+      return { ok: true, json: async () => ({}) };
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { result } = renderHook(() => usePushSubscription());
+    await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
+    expect(fetchSpy.mock.calls.some((call) => String(call[0]).includes("/api/push/register"))).toBe(true);
+  });
+
+  it("keeps local subscription state when unregister DELETE fails", async () => {
+    const unsubscribe = vi.fn(async () => true);
+    const existing = {
+      endpoint: "https://push.example/existing",
+      toJSON: () => ({ endpoint: "https://push.example/existing" }),
+      unsubscribe,
+    } as unknown as PushSubscription;
+    mockServiceWorker(existing);
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (url.includes("/api/push/vapid-public-key")) {
+        return { ok: true, json: async () => ({ publicKey: VAPID }) };
+      }
+      if (url.includes("/api/push/register/") && url.includes("tok-1")) {
+        return { ok: false, json: async () => ({}) };
+      }
+      if (url.includes("/api/push/register")) {
+        return { ok: true, json: async () => ({ tokenId: "tok-1" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const { result } = renderHook(() => usePushSubscription());
+    await waitFor(() => expect(result.current.status).toBe("subscribed"));
+
+    await expect(result.current.unsubscribe()).rejects.toThrow(/unregister/i);
+    expect(result.current.status).toBe("subscribed");
+    expect(unsubscribe).not.toHaveBeenCalled();
   });
 });
