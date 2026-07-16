@@ -278,8 +278,10 @@ for pr in prs:
     labels = set()
     for l in (pr.get("labels") or []):
         labels.add(l.get("name") if isinstance(l, dict) else str(l))
-    is_sync = ("upstream-sync" in labels) or head.startswith("sync/upstream")
-    if not is_sync or head == keep:
+    # Only supersede stable/ephemeral *sync heads*. Do not close tooling PRs
+    # that merely carry the upstream-sync label.
+    is_sync_head = head.startswith("sync/upstream")
+    if not is_sync_head or head == keep:
         continue
     n = pr["number"]
     body = (

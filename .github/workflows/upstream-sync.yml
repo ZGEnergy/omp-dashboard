@@ -132,7 +132,7 @@ for pr in json.loads(raw):
     labels = {(l.get("name") if isinstance(l, dict) else l) for l in (pr.get("labels") or [])}
     if head == keep:
         continue
-    if "upstream-sync" not in labels and not head.startswith("sync/upstream"):
+    if not head.startswith("sync/upstream"):
         continue
     n = str(pr["number"])
     body = f"Superseded by latest automated sync on `{keep}`."
