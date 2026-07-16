@@ -154,9 +154,19 @@ export function replayEntriesAsEvents(
     }
 
     if (entry.type === "model_change") {
+      // pi records provider + modelId as separate fields; omp records a single
+      // "provider/id" string under `model` (e.g. "openrouter/z-ai/glm-5.2").
+      // Support both so the reducer's `${provider}/${id}` round-trips.
+      let provider = entry.provider;
+      let id = entry.modelId;
+      if ((provider === undefined || id === undefined) && typeof entry.model === "string") {
+        const slash = entry.model.indexOf("/");
+        provider = slash >= 0 ? entry.model.slice(0, slash) : "";
+        id = slash >= 0 ? entry.model.slice(slash + 1) : entry.model;
+      }
       messages.push(makeEvent(sessionId, "model_select", ts, {
         type: "model_select",
-        model: { provider: entry.provider, id: entry.modelId },
+        model: { provider, id },
       }));
     }
   }

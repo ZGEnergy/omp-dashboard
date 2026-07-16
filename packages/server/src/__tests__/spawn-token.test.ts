@@ -79,6 +79,23 @@ describe("buildSpawnEnv: PI_DASHBOARD_URL injection", () => {
 		expect(env.PI_DASHBOARD_URL).toBe("ws://remote:1234");
 	});
 
+	// A co-located dashboard (e.g. the user's real pi-dashboard) advertising
+	// _pi-dashboard._tcp on a different piPort would otherwise hijack the
+	// spawned bridge off our gateway via the post-register mDNS updateUrl().
+	// Pinning the spawn to our piPort MUST also disable mDNS discovery.
+	// See change: fix-keeper-mdns-hijack.
+	it("disables mDNS on the spawned bridge when pinned to this server", () => {
+		setSpawnDashboardPiPort(9234);
+		const env = buildSpawnEnv({ HOME: "/tmp" });
+		expect(env.PI_DASHBOARD_NO_MDNS).toBe("1");
+	});
+
+	it("does not force PI_DASHBOARD_NO_MDNS when no server piPort is set", () => {
+		setSpawnDashboardPiPort(null);
+		const env = buildSpawnEnv({ HOME: "/tmp" });
+		expect(env.PI_DASHBOARD_NO_MDNS).toBeUndefined();
+	});
+
 	it("does not mutate the caller's baseEnv object", () => {
 		setSpawnDashboardPiPort(9234);
 		const base = { HOME: "/tmp" } as NodeJS.ProcessEnv;

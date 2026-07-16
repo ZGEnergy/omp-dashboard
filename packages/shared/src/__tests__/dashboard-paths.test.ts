@@ -82,8 +82,8 @@ describe("dashboard-paths getters", () => {
         ...over,
       });
 
-    it("all unset → literal ~/.pi/agent/sessions", () => {
-      expect(resolve({})).toBe(path.join(HOME, ".pi", "agent", "sessions"));
+    it("all unset → literal ~/.omp/agent/sessions", () => {
+      expect(resolve({})).toBe(path.join(HOME, ".omp", "agent", "sessions"));
     });
     it("PI_CODING_AGENT_DIR + /sessions when nothing higher set", () => {
       expect(resolve({ agentDirEnv: "/custom/agent" })).toBe(
@@ -110,7 +110,7 @@ describe("dashboard-paths getters", () => {
       );
     });
     it("blank agentDirEnv ignored, falls to literal default", () => {
-      expect(resolve({ agentDirEnv: "  " })).toBe(path.join(HOME, ".pi", "agent", "sessions"));
+      expect(resolve({ agentDirEnv: "  " })).toBe(path.join(HOME, ".omp", "agent", "sessions"));
     });
     it("tilde config expands against homedir", () => {
       expect(resolve({ piSessionsDir: "~/mine" })).toBe(path.join(HOME, "mine"));

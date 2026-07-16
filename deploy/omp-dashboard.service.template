@@ -1,0 +1,19 @@
+[Unit]
+Description=omp-dashboard server (Oh My Pi fork)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PREFIX__
+Environment=HOME=%h
+Environment=PI_CODING_AGENT_DIR=%h/.omp/agent
+Environment=PI_CODING_AGENT_SESSION_DIR=%h/.omp/agent/sessions
+Environment=PI_DASHBOARD_NO_MDNS=1
+Environment=PATH=__OMP_DIR__:__NODE_DIR__:/usr/local/bin:/usr/bin:/bin
+ExecStart=__PREFIX__/node_modules/.bin/tsx __PREFIX__/packages/server/src/cli.ts --host 0.0.0.0 --port 8088 --pi-port 9098
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

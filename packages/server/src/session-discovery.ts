@@ -4,7 +4,8 @@
  * Reads session JSONL files from ~/.pi/agent/sessions/<encoded-cwd>/.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { resolvePiSessionsDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 import { condenseForFirstMessage } from "@blackbelt-technology/pi-dashboard-shared/skill-block-parser.js";
@@ -20,9 +21,32 @@ export interface DiscoveredSession {
   sessionDir: string;
 }
 
-/** Encode cwd to the safe directory name pi uses */
-function encodeCwd(cwd: string): string {
-  return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+function encodeRelative(prefix: string, relPath: string): string {
+  const encoded = relPath.replace(/[/\\:]/g, "-");
+  if (!encoded) return prefix;
+  return prefix.endsWith("-") ? `${prefix}${encoded}` : `${prefix}-${encoded}`;
+}
+
+/**
+ * Encode cwd to omp's session-directory name (oh-my-pi getDefaultSessionDirName):
+ * under $HOME -> `-<relpath>` (separators -> `-`; home root -> `-`);
+ * under os.tmpdir() -> `-tmp[-<relpath>]`; otherwise legacy `--<abs>--`.
+ * Exported for unit test.
+ * ponytail: skips omp's resolveEquivalentPath symlink/alias canonicalization
+ * (identity for real paths under $HOME on Linux). Add it if cwds are symlinks
+ * or macOS /var->/private/var tmp paths must match omp's dir.
+ */
+export function encodeCwd(cwd: string): string {
+  const resolved = resolve(cwd);
+  const homeRel = relative(homedir(), resolved);
+  if (homeRel === "" || (!homeRel.startsWith("..") && !isAbsolute(homeRel))) {
+    return encodeRelative("-", homeRel);
+  }
+  const tmpRel = relative(tmpdir(), resolved);
+  if (tmpRel === "" || (!tmpRel.startsWith("..") && !isAbsolute(tmpRel))) {
+    return encodeRelative("-tmp", tmpRel);
+  }
+  return `--${resolved.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 }
 
 function getSessionsDir(): string {

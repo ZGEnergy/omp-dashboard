@@ -1,0 +1,15 @@
+[Unit]
+Description=omp-dashboard zrok reserved share
+Requires=omp-dashboard.service
+After=omp-dashboard.service
+
+[Service]
+Type=simple
+Environment=HOME=%h
+Environment=PATH=__LOCAL_BIN__:/usr/local/bin:/usr/bin:/bin
+ExecStart=__LOCAL_BIN__/zrok share reserved __SHARE_NAME__ --headless
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

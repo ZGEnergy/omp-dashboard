@@ -17,6 +17,7 @@ import type { ProviderAuthStatus } from "@blackbelt-technology/pi-dashboard-shar
 import type { ProviderInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { getAllHandlers, type ProviderHandler } from "./provider-auth-handlers.js";
 import { getLatestCatalogue } from "./provider-catalogue-cache.js";
+import { ompAuthedProviderIds } from "./omp-auth-detect.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -180,10 +181,37 @@ export function _buildAuthStatus(
   return statuses;
 }
 
+/**
+ * OR-merge providers authenticated in omp's SQLite vault (`agent.db`) into the
+ * pi-derived status list, so the onboarding "providers ready" gate reflects
+ * omp's real credentials. omp stores creds in SQLite, not `~/.pi/agent/auth.json`,
+ * so the pi-only `_buildAuthStatus` misses them. Pure; the id set comes from
+ * `ompAuthedProviderIds()`. See change: omp-aware-provider-auth.
+ */
+export function overlayOmpAuth(
+  statuses: ProviderAuthStatus[],
+  ompProviderIds: Set<string>,
+): ProviderAuthStatus[] {
+  if (ompProviderIds.size === 0) return statuses;
+  const present = new Set(statuses.map((s) => s.id));
+  for (const s of statuses) {
+    if (ompProviderIds.has(s.id)) s.authenticated = true;
+  }
+  // Providers omp authed that have no pi/catalogue row still count toward
+  // readiness — append a minimal authenticated row.
+  for (const id of ompProviderIds) {
+    if (!present.has(id)) {
+      statuses.push({ id, name: id, flowType: "api_key", authenticated: true });
+    }
+  }
+  return statuses;
+}
+
 // ── Public API: status / OAuth meta / id resolution ─────────────────────────
 
 export function getAuthStatus(): ProviderAuthStatus[] {
-  return _buildAuthStatus(getLatestCatalogue(), readAuthJson(), getAllHandlers());
+  const statuses = _buildAuthStatus(getLatestCatalogue(), readAuthJson(), getAllHandlers());
+  return overlayOmpAuth(statuses, ompAuthedProviderIds());
 }
 
 export function getOAuthProvidersMeta(): OAuthProviderMeta[] {

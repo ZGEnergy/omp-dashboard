@@ -15,7 +15,7 @@
 🌐 **Website & demo:** [blackbelttechnology.github.io/pi-agent-dashboard](https://blackbelttechnology.github.io/pi-agent-dashboard) — animated tour, screenshots, and install guide.
 📝 **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
 
-> **Note:** This dashboard only works with [pi](https://github.com/badlogic/pi-mono). Oh My Pi is **not** supported.
+> **This is [ZGEnergy's Oh My Pi fork](https://github.com/ZGEnergy/omp-dashboard) of pi-agent-dashboard.** It works with **[Oh My Pi](https://github.com/can1357/oh-my-pi) (`omp`)**, not `pi`. For a one-command secure self-host install (localhost + OAuth-gated zrok tunnel + reboot persistence), see [`deploy/`](deploy/). See [Oh My Pi fork](#oh-my-pi-fork) below for what differs from upstream.
 
 ---
 
@@ -958,3 +958,39 @@ No secrets to rotate, no tokens to leak.
 ## License
 
 MIT
+
+---
+
+## Oh My Pi fork
+
+This fork adapts pi-agent-dashboard to run against **[Oh My Pi](https://github.com/can1357/oh-my-pi) (`omp`)** with the
+smallest possible delta (it still tracks upstream). Changes vs upstream:
+
+- **Runtime:** resolves the `omp` binary + `@oh-my-pi/pi-coding-agent`; runs the
+  omp binary directly (it's a bun bundle, not node).
+- **Sessions:** default sessions dir `~/.omp/agent/sessions`; omp's `-repos`-style
+  cwd encoding for per-folder discovery.
+- **omp event-shape adaptations:** parse omp's `provider/id` model string; render
+  omp `ask` options (`{label, description}` objects); send bare (no `deliverAs`) to
+  an idle omp so prompts start a turn; push model/thinking-level changes explicitly
+  (omp applies them silently); preserve `toolCallId` when large tool results are
+  truncated; pin dashboard-spawned bridges to this server (`PI_DASHBOARD_NO_MDNS`)
+  so a co-located dashboard can't hijack them via mDNS.
+
+### Install
+
+Opinionated secure self-host (recommended): see **[`deploy/`](deploy/)** —
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZGEnergy/omp-dashboard/omp-minimal/deploy/install.sh | bash
+```
+
+For the plain/manual route, use upstream's Quickstart paths above (point them at
+`omp`, and build from source since the fork isn't published to npm).
+
+### Known gaps
+
+- PWA "install"/`manifest.json` over a zrok tunnel 503s (zrok-edge OAuth intercepts
+  the manifest fetch) — cosmetic, zrok-side.
+- Extension slash-command success is optimistic (reported on delivery, not on omp's
+  actual result).

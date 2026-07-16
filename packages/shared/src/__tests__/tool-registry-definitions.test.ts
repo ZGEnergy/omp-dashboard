@@ -59,30 +59,35 @@ function freshRegistry(opts: {
 }
 
 describe("pi binary definition", () => {
-  it("chain order: override → bare-import ×2 → managed → where", () => {
-    // bare-import strategies probe both pi-coding-agent aliases
-    // (@earendil-works + @mariozechner) before falling through to
-    // managed-bin and PATH. They fail in this fixture because the
-    // injected `exists` returns false for all paths.
-    // See change: eliminate-electron-runtime-install F9.
+  it("chain order: override → managed → where (omp binary)", () => {
+    // omp-dashboard fork: the pi executor resolves the `omp` binary
+    // (managed-bin → PATH) BEFORE any legacy pi-package bare-import. omp's
+    // cli.js is a bun-only bundle, so we never resolve it for node. Here
+    // managed-bin misses (exists=false) and `where` finds `omp` on PATH.
     const r = freshRegistry({
-      which: (n) => (n === "pi" ? "/usr/bin/pi" : null),
-      // No resolveModule injection — real resolver runs against the
-      // repo's node_modules. The bare-import strategy returns a
-      // path, but `exists: () => false` invalidates it, so the chain
-      // falls through to `where`.
+      which: (n) => (n === "omp" ? "/usr/bin/omp" : null),
     });
     const res = r.resolve("pi");
     expect(res.tried.map((t) => t.strategy)).toEqual([
       "override",
-      "bare-import",
-      "bare-import",
       "managed",
       "where",
     ]);
     expect(res.ok).toBe(true);
-    expect(res.path).toBe("/usr/bin/pi");
+    expect(res.path).toBe("/usr/bin/omp");
     expect(res.source).toBe("system");
+  });
+
+  it("runs the omp binary directly (bun shebang), not node-wrapped", () => {
+    // node cannot execute omp's bun-only cli.js (SyntaxError, exit 1). The
+    // omp binary must be spawned directly so its `#!/usr/bin/env bun` shebang
+    // selects the runtime — argv is just [ompPath], never [node, cli.js].
+    const r = freshRegistry({
+      which: (n) => (n === "omp" ? "/usr/bin/omp" : n === "node" ? "/usr/bin/node" : null),
+    });
+    const res = r.resolveExecutor("pi");
+    expect(res.path).toBe("/usr/bin/omp");
+    expect(res.argv).toEqual(["/usr/bin/omp"]);
   });
 
   it("bare-import wins over PATH when bundled cli.js exists (F9)", () => {
@@ -115,13 +120,15 @@ describe("pi binary definition", () => {
     const res = r.resolve("pi");
     expect(res.ok).toBe(true);
     expect(res.path).toBe(bundledCli);
-    expect(res.tried.find((t) => t.strategy === "bare-import")?.result).toBe(
-      "ok",
-    );
+    // omp-dashboard fork: @oh-my-pi is probed first (returns null here),
+    // so the bundled @earendil-works bare-import is the one that resolves.
+    expect(
+      res.tried.some((t) => t.strategy === "bare-import" && t.result === "ok"),
+    ).toBe(true);
   });
 
   it("managed wins over system when MANAGED_BIN/pi exists", () => {
-    const managed = path.join(os.homedir(), ".pi-dashboard", "node_modules", ".bin", "pi");
+    const managed = path.join(os.homedir(), ".pi-dashboard", "node_modules", ".bin", "omp");
     const r = freshRegistry({
       exists: (p) => p === managed,
       which: () => "/usr/bin/pi",
@@ -134,7 +141,7 @@ describe("pi binary definition", () => {
   });
 
   it("picks .cmd extension on Windows", () => {
-    const managed = path.join(os.homedir(), ".pi-dashboard", "node_modules", ".bin", "pi.cmd");
+    const managed = path.join(os.homedir(), ".pi-dashboard", "node_modules", ".bin", "omp.cmd");
     const r = freshRegistry({
       exists: (p) => p === managed,
       platform: "win32",

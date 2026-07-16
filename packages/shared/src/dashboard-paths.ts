@@ -55,7 +55,7 @@ function expandTilde(p: string, env?: DashboardPathsEnv): string {
  *   1. `config.json#piSessionsDir`            (highest)
  *   2. `process.env.PI_CODING_AGENT_SESSION_DIR`
  *   3. `process.env.PI_CODING_AGENT_DIR` + `/sessions`
- *   4. literal `~/.pi/agent/sessions`         (last-ditch)
+ *   4. literal `~/.omp/agent/sessions`        (last-ditch; omp default)
  * Each string layer is trimmed; whitespace-only is treated as unset and
  * falls through. Leading `~/` expands against `homedir`; absolute paths pass
  * through untouched.
@@ -76,7 +76,7 @@ export function resolvePiSessionsDir(env?: DashboardPathsEnv): string {
     pick(env?.piSessionsDir) ??
     pick(env?.sessionDirEnv ?? process.env.PI_CODING_AGENT_SESSION_DIR) ??
     (agentDir ? path.join(agentDir, "sessions") : undefined) ??
-    path.join(env?.homedir ?? os.homedir(), ".pi", "agent", "sessions")
+    path.join(env?.homedir ?? os.homedir(), ".omp", "agent", "sessions")
   );
 }
 

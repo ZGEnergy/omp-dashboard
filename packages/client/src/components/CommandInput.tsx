@@ -237,6 +237,21 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFileQueryRef = useRef<string | null>(null);
 
+  // Restore composer focus after the optimistic idle-send window closes.
+  // Sending briefly disables the textarea (`pendingPrompt && !isWorking`, see
+  // the `disabled` prop below) to block a double-send; the browser blurs a
+  // disabled element and nothing re-focused it, so the field went dead after
+  // every send. Re-focus on the disabled -> enabled transition.
+  // See change: fix-composer-focus-after-send.
+  const inputDisabled = !!(disabled || (pendingPrompt && !isWorking));
+  const wasInputDisabledRef = useRef(false);
+  useEffect(() => {
+    if (wasInputDisabledRef.current && !inputDisabled) {
+      inputRef.current?.focus();
+    }
+    wasInputDisabledRef.current = inputDisabled;
+  }, [inputDisabled]);
+
   // --- Command autocomplete ---
   const isCommand = text.startsWith("/") && !text.includes("\n");
   const commandFilter = isCommand ? text.slice(1).toLowerCase() : "";
@@ -678,7 +693,7 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
              `optimistic-prompt` capability, disable only when pendingPrompt
              is in flight AND the agent is NOT streaming (idle-send case).
              See change: surface-mid-turn-prompt-queue. */
-          disabled={disabled || (pendingPrompt && !isWorking)}
+          disabled={inputDisabled}
           rows={1}
           className="focus-ring flex-1 bg-[var(--bg-tertiary)] rounded-lg px-4 py-2 text-sm text-[var(--text-primary)] placeholder-gray-500 border border-[var(--border-secondary)] disabled:opacity-50 resize-none"
           style={{ minHeight: "38px", maxHeight: "120px" }}
@@ -703,7 +718,7 @@ export function CommandInput({ commands: externalCommands, onSend, onListFiles, 
           onClick={() => handleSend("steer")}
           /* Send button mirrors textarea: enabled during streaming so the
              user can queue another mid-turn message. */
-          disabled={disabled || (pendingPrompt && !isWorking) || !text.trim()}
+          disabled={inputDisabled || !text.trim()}
           className="focus-ring flex items-center justify-center min-w-[44px] min-h-[44px] bg-blue-600 rounded-lg hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed self-end"
           title={t("command.send", undefined, "Send")}
           aria-label={t("command.send", undefined, "Send")}
