@@ -13,6 +13,12 @@ UPSTREAM_REF="${UPSTREAM_REF:-develop}"
 TARGET_BRANCH="${TARGET_BRANCH:-main}"
 DATE_TAG="${DATE_TAG:-$(date -u +%Y%m%d)}"
 # Stable branch so each automated run supersedes the previous open PR.
+# Capture whether the caller exported SYNC_BRANCH before applying the default
+# (value may equal the default name; presence still counts as explicit).
+SYNC_BRANCH_FROM_ENV=0
+if [[ -n "${SYNC_BRANCH+x}" ]]; then
+  SYNC_BRANCH_FROM_ENV=1
+fi
 SYNC_BRANCH="${SYNC_BRANCH:-sync/upstream-${UPSTREAM_REF}}"
 GH_REPO="${GH_REPO:-ZGEnergy/omp-dashboard}"
 
@@ -401,17 +407,10 @@ cmd_ff_develop() {
 main() {
   local cmd="${1:-}"
   shift || true
-  local default_sync_branch="sync/upstream-${UPSTREAM_REF}"
-  # True env override: SYNC_BRANCH differs from default derived at parse start.
-  local env_sync_override=0
-  if [[ "$SYNC_BRANCH" != "$default_sync_branch" ]]; then
-    env_sync_override=1
-  fi
   local branch_flag=0
-  local ref_flag=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --ref) UPSTREAM_REF="$2"; ref_flag=1; shift 2 ;;
+      --ref) UPSTREAM_REF="$2"; shift 2 ;;
       --branch) SYNC_BRANCH="$2"; branch_flag=1; shift 2 ;;
       --target) TARGET_BRANCH="$2"; shift 2 ;;
       --dry-run) DRY_RUN=1; shift ;;
@@ -419,11 +418,10 @@ main() {
       *) die "unknown arg: $1" ;;
     esac
   done
-  # Precedence: --branch > env SYNC_BRANCH > default from UPSTREAM_REF.
-  # --ref updates the default; only applied when neither --branch nor env override.
+  # Precedence: --branch > env SYNC_BRANCH (presence) > default from UPSTREAM_REF.
   if [[ "$branch_flag" -eq 1 ]]; then
     :
-  elif [[ "$env_sync_override" -eq 1 ]]; then
+  elif [[ "${SYNC_BRANCH_FROM_ENV}" -eq 1 ]]; then
     :
   else
     SYNC_BRANCH="sync/upstream-${UPSTREAM_REF}"
