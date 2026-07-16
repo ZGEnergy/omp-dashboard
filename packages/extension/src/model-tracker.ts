@@ -72,12 +72,10 @@ export function sendGitInfoIfChanged(bc: BridgeContext, cwd: string): void {
 }
 
 /**
- * Last pi version pushed via `pi_version_update`. Module-scoped: a single pi
- * process has exactly one pi version, so this correctly survives bridge
- * reconnect and suppresses redundant pushes. See change:
- * restore-pi-version-skew-surface.
+ * The last pi version is cached on BridgeContext so each bridge/session tracks
+ * its own initial emission. The warning timestamp remains module-scoped because
+ * it only rate-limits noisy diagnostics.
  */
-let lastPiVersion: string | undefined;
 /** Rate-limit failed-read warnings so Bun poll ticks don't flood the session log. */
 let lastPiVersionWarnAt = 0;
 
@@ -221,8 +219,8 @@ export function sendPiVersionIfChanged(
     }
     return;
   }
-  if (!version || version === lastPiVersion) return;
-  lastPiVersion = version;
+  if (!version || version === bc.lastPiVersion) return;
+  bc.lastPiVersion = version;
   bc.connection.send({
     type: "pi_version_update",
     sessionId: bc.sessionId,
@@ -230,9 +228,8 @@ export function sendPiVersionIfChanged(
   });
 }
 
-/** Test-only: clear the module-scoped pi-version cache. */
-export function _resetPiVersionCache(): void {
-  lastPiVersion = undefined;
+/** Test-only: clear the failed-read warning rate-limit state. */
+export function _resetPiVersionWarnRateLimit(): void {
   lastPiVersionWarnAt = 0;
 }
 
@@ -247,6 +244,7 @@ export function resetReconnectCaches(bc: BridgeContext): void {
   // doesn't surface stale branch info if .meta.json wasn't persisted yet.
   bc.lastGitBranch = undefined;
   bc.lastGitPrNumber = undefined;
+  bc.lastPiVersion = undefined;
   bc.lastGitWorktreeJson = undefined;
 }
 

@@ -5,20 +5,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   sendPiVersionIfChanged,
-  _resetPiVersionCache,
+  resetReconnectCaches,
+  _resetPiVersionWarnRateLimit,
   readPkgVersionByWalkUp,
   readPiVersionFromFilesystem,
 } from "../model-tracker.js";
 import type { BridgeContext } from "../bridge-context.js";
 
-function makeBc() {
+function makeBc(sessionId = "sess-1") {
   const send = vi.fn();
-  const bc = { sessionId: "sess-1", connection: { send } } as unknown as BridgeContext;
+  const bc = { sessionId, lastPiVersion: undefined, connection: { send } } as unknown as BridgeContext;
   return { bc, send };
 }
 
 describe("sendPiVersionIfChanged", () => {
-  beforeEach(() => _resetPiVersionCache());
+  beforeEach(() => _resetPiVersionWarnRateLimit());
 
   it("pushes once on first read", () => {
     const { bc, send } = makeBc();
@@ -32,6 +33,23 @@ describe("sendPiVersionIfChanged", () => {
     sendPiVersionIfChanged(bc, () => "0.80.2");
     sendPiVersionIfChanged(bc, () => "0.80.2");
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-emits an unchanged version after reconnect", () => {
+    const { bc, send } = makeBc();
+    sendPiVersionIfChanged(bc, () => "0.80.2");
+    resetReconnectCaches(bc);
+    sendPiVersionIfChanged(bc, () => "0.80.2");
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not suppress the same version for a second session", () => {
+    const first = makeBc("sess-1");
+    const second = makeBc("sess-2");
+    sendPiVersionIfChanged(first.bc, () => "0.80.2");
+    sendPiVersionIfChanged(second.bc, () => "0.80.2");
+    expect(first.send).toHaveBeenCalledTimes(1);
+    expect(second.send).toHaveBeenCalledTimes(1);
   });
 
   it("pushes again when the version changes (out-of-band upgrade)", () => {
@@ -51,12 +69,32 @@ describe("sendPiVersionIfChanged", () => {
     warn.mockRestore();
   });
 
+  it("rate-limits repeated failed-read warnings", () => {
+    vi.useFakeTimers({ now: 120_000 });
+    const { bc, send } = makeBc();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const readVersion = () => { throw new Error("boom"); };
+    try {
+      sendPiVersionIfChanged(bc, readVersion);
+      sendPiVersionIfChanged(bc, readVersion);
+      expect(send).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(60_001);
+      sendPiVersionIfChanged(bc, readVersion);
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("undefined version: no push", () => {
     const { bc, send } = makeBc();
     sendPiVersionIfChanged(bc, () => undefined);
     expect(send).not.toHaveBeenCalled();
   });
 });
+
 
 describe("readPkgVersionByWalkUp", () => {
   const PKG = "@earendil-works/pi-coding-agent";

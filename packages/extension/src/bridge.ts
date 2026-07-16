@@ -285,6 +285,7 @@ function initBridge(pi: ExtensionAPI) {
   let cachedCtx: any | undefined = prev.ctx;
   let lastModel: string | undefined;
   let lastThinkingLevel: string | undefined;
+  let lastPiVersion: string | undefined;
   let hasRegisteredOnce = false; // see change: reattach-move-to-front
   // Capture-once "was this pi dashboard-spawned?" boolean, read BEFORE the
   // single-use `PI_DASHBOARD_SPAWN_TOKEN` is scrubbed on first register.
@@ -1279,6 +1280,7 @@ function initBridge(pi: ExtensionAPI) {
       pi, connection, sessionId, attachedChange,
       cachedCtx, cachedModelRegistry, cachedHasUI,
       lastModel, lastThinkingLevel,
+      lastPiVersion,
       lastSessionFile, lastSessionDir, lastFirstMessage,
       lastGitBranch, lastGitPrNumber, lastSessionName,
       lastGitWorktreeJson,
@@ -1297,6 +1299,7 @@ function initBridge(pi: ExtensionAPI) {
     cachedHasUI = bc.cachedHasUI;
     lastModel = bc.lastModel;
     lastThinkingLevel = bc.lastThinkingLevel;
+    lastPiVersion = bc.lastPiVersion;
     lastSessionFile = bc.lastSessionFile;
     lastSessionDir = bc.lastSessionDir;
     lastFirstMessage = bc.lastFirstMessage;
@@ -2460,6 +2463,9 @@ function initBridge(pi: ExtensionAPI) {
       emitQueueUpdate();
     }
     const bc = syncBc();
+    // A new/forked/resumed session must advertise pi version independently
+    // from the previous session, even when the installed version is unchanged.
+    _resetReconnectCaches(bc);
     _handleSessionChange(bc, ctx, getFlowsList);
     applyBc(bc);
 
