@@ -334,9 +334,20 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     onChange: () => {
       const el = scrollRef.current;
       if (!el) return;
-      const grew = el.scrollHeight !== lastScrollHeightRef.current;
-      lastScrollHeightRef.current = el.scrollHeight;
-      if (grew && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+      const prevH = lastScrollHeightRef.current;
+      const nextH = el.scrollHeight;
+      if (nextH === prevH) return;
+      // Stick: pin to bottom. Unstuck: compensate so prepended older rows
+      // do not shove the viewport content down. Must live here (not only in a
+      // messages.length layout effect) because this onChange also updates
+      // lastScrollHeightRef and would otherwise win the race and skip D5.
+      // See change: session-tail-rehydrate (D5 load-older anchor).
+      if (stickToBottomRef.current) {
+        el.scrollTop = nextH;
+      } else if (prevH > 0) {
+        el.scrollTop += nextH - prevH;
+      }
+      lastScrollHeightRef.current = nextH;
     },
   });
   const virtualItems = virtualizer.getVirtualItems();
@@ -504,14 +515,17 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     }
   }, [state.messages.length, state.streamingText, state.pendingPrompt, state.streamingThinking, pendingSteering]);
 
-  // When older rows prepend (or any growth while not sticking), keep the
-  // viewport on the same content by compensating scrollTop for height delta.
+  // Fallback when message count changes but virtualizer onChange did not
+  // observe a height delta (common in jsdom). If onChange already synced
+  // lastScrollHeightRef to the new height, nextH === prevH and this is a no-op
+  // (avoids double-compensation after the onChange path above).
   // See change: session-tail-rehydrate (D5 load-older anchor).
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const prevH = lastScrollHeightRef.current;
     const nextH = el.scrollHeight;
+    if (nextH === prevH) return;
     if (!stickToBottomRef.current && prevH > 0 && nextH > prevH) {
       el.scrollTop += nextH - prevH;
     }

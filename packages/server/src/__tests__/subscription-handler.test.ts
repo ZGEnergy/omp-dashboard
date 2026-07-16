@@ -278,6 +278,56 @@ describe("handleSubscribe — stale lastSeq detection", () => {
     expect((replays[replays.length - 1]![1] as any).hasMoreOlder).toBeUndefined();
   });
 
+  it("resets a stale cursor after disk load with mode:tail and windows newest", async () => {
+    // Disk-stale + explicit mode:tail: hydration loads history older than the
+    // browser cursor, so every subscriber is reset and the cold rebuild applies
+    // the requested tail window (not a legacy full replay). Fat events force
+    // the 256 KiB clamp to trim so hasMoreOlder/windowMaxSeq are exercised.
+    // See change: session-tail-rehydrate (disk-stale tail recovery).
+    const events = Array.from({ length: 100 }, (_, i) => ({
+      ...makeEvent(`e${i}`),
+      data: { pad: "x".repeat(20_000) },
+    }));
+    const loadSessionEvents = vi.fn(async () => ({ success: true, events }));
+    const ctx = createMockContext({ directoryService: { loadSessionEvents } as any });
+    ctx.getSubscribers = () => [ctx.ws];
+    ctx.sessionManager.restore({
+      id: "s-disk-tail",
+      cwd: "/test",
+      source: "tui",
+      status: "ended",
+      startedAt: 1000,
+      endedAt: 2000,
+      tokensIn: 0,
+      tokensOut: 0,
+      cost: 0,
+      contextWindow: 200_000,
+      sessionFile: "/sessions/s-disk-tail.jsonl",
+      sessionDir: "/sessions",
+      hidden: false,
+    } as any);
+
+    handleSubscribe(
+      { type: "subscribe", sessionId: "s-disk-tail", lastSeq: 1000, mode: "tail", windowBytes: 256 * 1024 },
+      new Set(),
+      ctx,
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    const calls = (ctx.sendTo as any).mock.calls as Array<[any, ServerToBrowserMessage]>;
+    expect(calls.filter(([, msg]) => msg.type === "session_state_reset")).toHaveLength(1);
+    const replays = calls.filter(([, msg]) => msg.type === "event_replay") as Array<
+      [any, Extract<ServerToBrowserMessage, { type: "event_replay" }>]
+    >;
+    const allEvents = replays.flatMap(([, msg]) => msg.events);
+    expect(allEvents.length).toBeGreaterThan(0);
+    expect(allEvents.length).toBeLessThan(100);
+    expect(allEvents[allEvents.length - 1]!.seq).toBe(100);
+    const last = replays[replays.length - 1]![1];
+    expect(last.hasMoreOlder).toBe(true);
+    expect(last.windowMaxSeq).toBe(100);
+  });
+
   it("does full replay when lastSeq is 0", async () => {
     const ctx = createMockContext();
     for (let i = 0; i < 3; i++) ctx.eventStore.insertEvent("s1", makeEvent());
