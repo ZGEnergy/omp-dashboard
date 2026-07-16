@@ -27,3 +27,13 @@ export function loadOrGenerateVapidKeys(filePath: string): VapidKeys {
   writeJsonFile(filePath, vapid, { mode: 0o600 });
   return vapid;
 }
+
+/** Public key advertised to clients only when Web Push can actually send. */
+export function publicKeyForLivePush(
+  enabled: boolean,
+  contactEmail: string | undefined,
+  keys: { publicKey: string } | undefined,
+): string {
+  if (!enabled || !contactEmail || !keys?.publicKey) return "";
+  return keys.publicKey;
+}

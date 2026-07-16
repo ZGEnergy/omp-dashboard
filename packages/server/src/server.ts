@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { createServerPluginContext, discoverPlugins, getPluginStatusStore, loadServerEntries, refreshRequirementProbesFor } from "@blackbelt-technology/dashboard-plugin-runtime/server";
 import { findBundledExtension, registerBridgeExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
 import type { AuthConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { CONFIG_FILE, getPluginConfig as getPluginConfigFromFile, loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { CONFIG_FILE, DEFAULT_PUSH_CONFIG, getPluginConfig as getPluginConfigFromFile, loadConfig, type PushConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { advertiseDashboard, createBrowser, type DashboardBrowser, type DiscoveredServer, stopAdvertising } from "@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js";
 import { setWindowsGitSourceSetting } from "@blackbelt-technology/pi-dashboard-shared/platform/git-source.js";
 import {
@@ -102,7 +102,7 @@ import { registerPiCoreRoutes } from "./routes/pi-core-routes.js";
 import { registerPushRoutes } from "./routes/push-routes.js";
 import { createPushTokenRegistry } from "./push/push-token-registry.js";
 import { createPushDispatcher, type PushDispatcher } from "./push/push-dispatcher.js";
-import { loadOrGenerateVapidKeys } from "./push/push-vapid.js";
+import { loadOrGenerateVapidKeys, publicKeyForLivePush } from "./push/push-vapid.js";
 import { createWebPushTransport } from "./push/push-transports/web-push.js";
 import { createFcmTransport } from "./push/push-transports/fcm.js";
 import type { PushTransport, PushTransportKind } from "./push/push-transports/types.js";
@@ -161,8 +161,8 @@ export interface ServerConfig {
   editor: import("@blackbelt-technology/pi-dashboard-shared/config.js").EditorConfig;
   /** OpenSpec polling config (interval, concurrency, change detection, jitter) */
   openspec?: import("@blackbelt-technology/pi-dashboard-shared/config.js").OpenSpecPollConfig;
-  /** Server push-notification config. Dispatcher/routes/VAPID gated on `enabled`.
-   *  See change: add-server-push-notifications. */
+  /** Server push-notification config. Dispatcher delivery and transport/VAPID
+   * are live-gated by `enabled`; routes return 404 while disabled. */
   push?: import("@blackbelt-technology/pi-dashboard-shared/config.js").PushConfig;
   /** Session behavior — hydration worker offload toggle.
    *  See change: offload-session-events-load-to-worker. */
@@ -884,39 +884,59 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     );
   };
 
-  // ── Push notifications (opt-in) ──────────────────────────────
-  // Constructed BEFORE wireEvents so the same dispatcher instance is shared
-  // with the REST routes registered further down. When disabled, nothing is
-  // built, no routes mount, and no VAPID keys are generated (spec: opt-in).
+  // ── Push notifications (opt-in, hot-reloadable) ───────────────
+  // Keep one dispatcher and registry for the lifetime of the server. Config
+  // saves update the gate, coalescing window, and transport details in place,
+  // so disable → enable cannot leave event-wiring with an orphan dispatcher.
+  // VAPID keys remain lazy: a disabled server does not generate them.
   // See change: add-server-push-notifications.
-  let pushDispatcher: PushDispatcher | undefined;
-  let pushRegistry: ReturnType<typeof createPushTokenRegistry> | undefined;
+  const pushDir = path.join(os.homedir(), ".pi", "dashboard");
+  const pushRegistry = createPushTokenRegistry({ path: path.join(pushDir, "push-tokens.json") });
   const pushTransports: Partial<Record<PushTransportKind, PushTransport>> = {};
   let pushVapidPublicKey = "";
-  if (config.push?.enabled === true) {
-    const pushDir = path.join(os.homedir(), ".pi", "dashboard");
-    pushRegistry = createPushTokenRegistry({ path: path.join(pushDir, "push-tokens.json") });
-    const contactEmail = config.push.webPush?.contactEmail;
+  let pushVapidKeys: { publicKey: string; privateKey: string } | undefined;
+  let pushDispatcher: PushDispatcher;
+
+  const applyPushConfig = (next: PushConfig): void => {
+    config.push = config.push ?? { ...DEFAULT_PUSH_CONFIG };
+    Object.assign(config.push, next);
+    pushDispatcher.setEnabled(next.enabled);
+    pushDispatcher.setCoalesceWindowMs(next.coalesceWindowMs);
+
+    // Rebuild only transport adapters. Registry, dispatcher, and coalescing
+    // state stay shared with event-wiring and push REST routes.
+    delete pushTransports["web-push"];
+    delete pushTransports.fcm;
+    const contactEmail = next.webPush?.contactEmail;
+    if (!next.enabled) {
+      pushVapidPublicKey = publicKeyForLivePush(false, contactEmail, pushVapidKeys);
+      return;
+    }
+
     if (contactEmail) {
-      const vapidKeys = loadOrGenerateVapidKeys(path.join(pushDir, "push-vapid.json"));
-      pushVapidPublicKey = vapidKeys.publicKey;
-      pushTransports["web-push"] = createWebPushTransport({ vapidKeys, contactEmail });
+      pushVapidKeys ??= loadOrGenerateVapidKeys(path.join(pushDir, "push-vapid.json"));
+      pushVapidPublicKey = publicKeyForLivePush(true, contactEmail, pushVapidKeys);
+      pushTransports["web-push"] = createWebPushTransport({ vapidKeys: pushVapidKeys, contactEmail });
     } else {
+      pushVapidPublicKey = publicKeyForLivePush(true, undefined, pushVapidKeys);
       console.warn(
         "[push] push.enabled=true but push.webPush.contactEmail is unset — Web Push disabled. Set push.webPush.contactEmail in config.json.",
       );
     }
-    if (config.push.fcm?.serviceAccountPath) {
+    if (next.fcm?.serviceAccountPath) {
       // Typed stub in v1 (throws on send) — see add-capacitor-mobile-shell.
-      pushTransports["fcm"] = createFcmTransport({ serviceAccountPath: config.push.fcm.serviceAccountPath });
+      pushTransports.fcm = createFcmTransport({ serviceAccountPath: next.fcm.serviceAccountPath });
     }
-    pushDispatcher = createPushDispatcher({
-      registry: pushRegistry,
-      transports: pushTransports,
-      coalesceWindowMs: config.push.coalesceWindowMs,
-      getSession: (id) => sessionManager.get(id),
-    });
-  }
+  };
+
+  pushDispatcher = createPushDispatcher({
+    registry: pushRegistry,
+    transports: pushTransports,
+    coalesceWindowMs: (config.push ?? DEFAULT_PUSH_CONFIG).coalesceWindowMs,
+    enabled: false,
+    getSession: (id) => sessionManager.get(id),
+  });
+  applyPushConfig(config.push ?? DEFAULT_PUSH_CONFIG);
 
   // Wire up event forwarding from pi gateway to browser gateway
   wireEvents({
@@ -941,8 +961,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     pendingInitialPromptRegistry,
     viewedSessionTracker: browserGateway.viewedSessionTracker,
     pushDispatcher,
-    // Bucket preferences stay on the live config object; system-routes mutates
-    // these fields after a successful save without rebuilding the dispatcher.
+    // Push preferences and the master gate are read from the live config;
+    // system-routes applies each successful push save in place.
     getPushPreferences: () => config.push,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
@@ -1177,21 +1197,32 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       }
     },
   });
-  // Push routes — mounted only when push is enabled. When disabled, the routes
-  // are never registered and Fastify returns 404 (spec: opt-in by default).
-  // Reuses the registry/transports/VAPID built above the wireEvents call.
+  // Push routes stay mounted so enable/disable can take effect without a
+  // restart; each handler returns 404 while the live master gate is off.
   // See change: add-server-push-notifications.
-  if (config.push?.enabled === true && pushRegistry) {
-    const registry = pushRegistry;
-    registerPushRoutes(fastify, {
-      networkGuard,
-      registry,
-      transports: pushTransports,
-      getVapidPublicKey: () => pushVapidPublicKey,
-      getSession: (id) => sessionManager.get(id),
-    });
-  }
-  registerSystemRoutes(fastify, { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version: pkgVersion, directoryService, piGateway, browserGateway, hydrationMetrics, readEventLoopDelay, eventLoopSpikes });
+  registerPushRoutes(fastify, {
+    networkGuard,
+    registry: pushRegistry,
+    transports: pushTransports,
+    getVapidPublicKey: () => pushVapidPublicKey,
+    getSession: (id) => sessionManager.get(id),
+    isEnabled: () => config.push?.enabled === true,
+  });
+  registerSystemRoutes(fastify, {
+    sessionManager,
+    preferencesStore,
+    metaPersistence,
+    config,
+    networkGuard,
+    version: pkgVersion,
+    directoryService,
+    piGateway,
+    browserGateway,
+    hydrationMetrics,
+    readEventLoopDelay,
+    eventLoopSpikes,
+    applyPushConfig,
+  });
   // GET /api/doctor — see change: doctor-rich-output (task 4.2). Auth-gated identically to /api/config.
   registerDoctorRoutes(fastify);
   registerToolRoutes(fastify, { registry: getDefaultRegistry(), networkGuard });
@@ -2112,6 +2143,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       // Stop the dedicated ELD safety-net sampler + its histogram.
       // See change: attribute-openspec-poll-eventloop-stalls.
       try { eventLoopSampler.stop(); } catch { /* ignore */ }
+      pushDispatcher.shutdown();
       // Stop mDNS before closing
       try {
         if (mdnsBrowser) { mdnsBrowser.stop(); mdnsBrowser = null; }

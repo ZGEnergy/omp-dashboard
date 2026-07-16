@@ -23,6 +23,10 @@ import type { PushTransport, PushTransportKind } from "./push-transports/types.j
 
 export interface PushDispatcher {
   fanout(sessionId: string, event: DashboardEvent): void;
+  /** Enable/disable delivery without rebuilding event wiring or transports. */
+  setEnabled(enabled: boolean): void;
+  /** Replace coalescing window and discard state from the previous window. */
+  setCoalesceWindowMs(coalesceWindowMs: number): void;
   shutdown(): void;
 }
 
@@ -31,6 +35,8 @@ export interface PushDispatcherOptions {
   /** Transports keyed by `PushTransportKind`. A missing kind is skipped + warned. */
   transports: Partial<Record<PushTransportKind, PushTransport>>;
   coalesceWindowMs: number;
+  /** Master delivery gate. Defaults to `true` for backwards-compatible unit use. */
+  enabled?: boolean;
   /** Resolve a session for payload composition. Returns undefined if gone. */
   getSession: (sessionId: string) => DashboardSession | undefined;
   /** Injectable clock for deterministic tests. Defaults to `Date.now`. */
@@ -38,12 +44,14 @@ export interface PushDispatcherOptions {
 }
 
 export function createPushDispatcher(opts: PushDispatcherOptions): PushDispatcher {
-  const { registry, transports, coalesceWindowMs, getSession } = opts;
+  const { registry, transports, getSession } = opts;
   const now = opts.now ?? Date.now;
+  let enabled = opts.enabled ?? true;
+  let coalesceWindowMs = opts.coalesceWindowMs;
 
   // `${sessionId}::${tokenId}` → lastSentAt (ms).
   const lastSent = new Map<string, number>();
-  const expiryMs = 2 * coalesceWindowMs;
+  let expiryMs = 2 * coalesceWindowMs;
 
   function pruneExpired(current: number): void {
     for (const [key, ts] of lastSent) {
@@ -80,6 +88,7 @@ export function createPushDispatcher(opts: PushDispatcherOptions): PushDispatche
   return {
     fanout(sessionId: string, event: DashboardEvent): void {
       try {
+        if (!enabled) return;
         const current = now();
         pruneExpired(current);
 
@@ -108,7 +117,25 @@ export function createPushDispatcher(opts: PushDispatcherOptions): PushDispatche
       }
     },
 
+    setEnabled(nextEnabled: boolean): void {
+      if (enabled === nextEnabled) return;
+      enabled = nextEnabled;
+      // A disabled period must not leave stale coalescing state that suppresses
+      // the first notification after re-enable.
+      lastSent.clear();
+    },
+
+    setCoalesceWindowMs(nextWindowMs: number): void {
+      if (coalesceWindowMs === nextWindowMs) return;
+      coalesceWindowMs = nextWindowMs;
+      expiryMs = 2 * nextWindowMs;
+      // Entries were stamped under a different window; drop them instead of
+      // applying the old window to new settings.
+      lastSent.clear();
+    },
+
     shutdown(): void {
+      enabled = false;
       lastSent.clear();
     },
   };

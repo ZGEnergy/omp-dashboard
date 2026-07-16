@@ -1,8 +1,7 @@
 /**
- * Push device-management REST routes (auth-gated via `networkGuard`, mirroring
- * `goal-routes.ts`). Mounted only when `config.push.enabled === true`; when
- * disabled the routes are never registered and Fastify returns 404 (spec
- * `Requirement: Opt-in by default`).
+ * Push device-management REST routes (auth-gated via `networkGuard`). Routes
+ * stay mounted for runtime config changes and return 404 while
+ * `config.push.enabled` is false (opt-in by default).
  *
  *   POST   /api/push/register            { deviceToken, transport, sessionFilter? } → 200 { tokenId }
  *   DELETE /api/push/register/:tokenId                                              → 204
@@ -26,6 +25,8 @@ export interface PushRoutesDeps {
   getVapidPublicKey: () => string;
   /** Resolve a session for the test-notification payload. */
   getSession: (sessionId: string) => DashboardSession | undefined;
+  /** Live master gate; disabled routes return 404 without unregistering Fastify paths. */
+  isEnabled?: () => boolean;
 }
 
 const VALID_TRANSPORTS: ReadonlySet<string> = new Set<PushTransportKind>(["web-push", "fcm"]);
@@ -52,10 +53,11 @@ async function sendTest(
 }
 
 export function registerPushRoutes(fastify: FastifyInstance, deps: PushRoutesDeps): void {
-  const { networkGuard, registry, transports, getVapidPublicKey, getSession } = deps;
+  const { networkGuard, registry, transports, getVapidPublicKey, getSession, isEnabled = () => true } = deps;
 
   // ── GET vapid public key ─────────────────────────────────────
-  fastify.get("/api/push/vapid-public-key", { preHandler: networkGuard }, async () => {
+  fastify.get("/api/push/vapid-public-key", { preHandler: networkGuard }, async (_request, reply) => {
+    if (!isEnabled()) return reply.code(404).send({ error: "push disabled" });
     return { publicKey: getVapidPublicKey() };
   });
 
@@ -63,6 +65,7 @@ export function registerPushRoutes(fastify: FastifyInstance, deps: PushRoutesDep
   fastify.post<{
     Body: { deviceToken?: unknown; transport?: unknown; sessionFilter?: unknown };
   }>("/api/push/register", { preHandler: networkGuard }, async (request, reply) => {
+    if (!isEnabled()) return reply.code(404).send({ error: "push disabled" });
     const body = request.body ?? {};
     const deviceToken = typeof body.deviceToken === "string" ? body.deviceToken : "";
     const transport = typeof body.transport === "string" ? body.transport : "";
@@ -87,6 +90,7 @@ export function registerPushRoutes(fastify: FastifyInstance, deps: PushRoutesDep
     "/api/push/register/:tokenId",
     { preHandler: networkGuard },
     async (request, reply) => {
+      if (!isEnabled()) return reply.code(404).send({ error: "push disabled" });
       registry.remove(request.params.tokenId);
       reply.code(204);
       return null;
@@ -97,7 +101,8 @@ export function registerPushRoutes(fastify: FastifyInstance, deps: PushRoutesDep
   fastify.post<{ Body: { tokenId?: unknown } }>(
     "/api/push/test",
     { preHandler: networkGuard },
-    async (request) => {
+    async (request, reply) => {
+      if (!isEnabled()) return reply.code(404).send({ error: "push disabled" });
       const tokenId = typeof request.body?.tokenId === "string" ? request.body.tokenId : undefined;
       const all = registry.list();
       const targets = tokenId ? all.filter((t) => t.id === tokenId) : all;

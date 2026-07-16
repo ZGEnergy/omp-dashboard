@@ -23,6 +23,7 @@ import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/type
 import type { FastifyInstance } from "fastify";
 import { bootParentPid, computeBootParentAlive, readLivePpid } from "../boot-parent-liveness.js";
 import { readConfigRedacted, writeConfigPartial } from "../config-api.js";
+import type { PushConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import type { DirectoryService } from "../directory-service.js";
 import { detectCodeServerBinary, resetDetectionCache } from "../editor-detection.js";
 import { detectEditors, EDITORS } from "../editor-registry.js";
@@ -97,6 +98,8 @@ export function registerSystemRoutes(
     networkGuard: NetworkGuard;
     version?: string;
     directoryService?: DirectoryService;
+    /** Apply all live push fields without rebuilding event wiring. */
+    applyPushConfig?: (push: PushConfig) => void;
     piGateway?: PiGateway;
     browserGateway?: {
       broadcastToAll: (msg: ServerToBrowserMessage) => void;
@@ -116,7 +119,7 @@ export function registerSystemRoutes(
     eventLoopSpikes?: EventLoopSpikeMetrics;
   },
 ) {
-  const { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version, directoryService, piGateway, browserGateway, hydrationMetrics, readEventLoopDelay, eventLoopSpikes } = deps;
+  const { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version, directoryService, piGateway, browserGateway, hydrationMetrics, readEventLoopDelay, eventLoopSpikes, applyPushConfig } = deps;
 
   // Quiesce windows for the bridge `server_restarting` broadcast. See change
   // `fix-restart-bridge-auto-start-race`. Bridges that receive this message
@@ -266,12 +269,17 @@ export function registerSystemRoutes(
           await (fastify as any)._reloadAuth(reloaded.auth);
         }
       }
-      // Push transports and dispatcher are boot-time state. Only refresh the
-      // mutable bucket preferences so an enabled dispatcher observes saves
-      // without rebuilding transports or changing the master gate.
-      if (partial.push !== undefined && config.push && reloaded.push) {
-        config.push.actionsRequired = reloaded.push.actionsRequired;
-        config.push.claudeDecides = reloaded.push.claudeDecides;
+      // Push lifecycle is kept on one long-lived dispatcher. The callback
+      // updates its master gate, coalescing window, and transport details;
+      // bucket preferences remain visible through the live config getter.
+      if (partial.push !== undefined && reloaded.push) {
+        if (applyPushConfig) {
+          applyPushConfig(reloaded.push);
+        } else if (config.push) {
+          // Keep lightweight route tests and embedders that do not provide a
+          // dispatcher callback behaviorally consistent.
+          Object.assign(config.push, reloaded.push);
+        }
       }
       if (partial.openspec !== undefined && directoryService) {
         directoryService.reconfigurePolling(reloaded.openspec);
