@@ -47,16 +47,20 @@ Two layers:
    session is usually #0/`latest`; documenting a finished prior session gives a complete
    picture (the live one won't include the not-yet-written tail).
 
-2. **Extract the facts sheet** (cheap, deterministic):
+2. **Extract the facts sheet** (cheap, deterministic). Use a UNIQUE output path per run —
+   the fixed `/tmp/session_facts.md` is **NOT parallel-safe**: concurrent runs (e.g. a batch
+   of `SessionGuideline` spawns) clobber the same file and every reader gets the last
+   writer's sheet. Always `mktemp`:
    ```bash
-   npx tsx scripts/extract_session.ts <id-or-'latest'> --cwd "$(pwd)" \
-       --out-md /tmp/session_facts.md --out-json /tmp/session_facts.json
+   FACTS=$(mktemp /tmp/session_facts.XXXXXX.md)
+   npx tsx scripts/extract_session.ts <selector> --cwd "$(pwd)" --out-md "$FACTS"
    ```
    - `<selector>` may be an 8-char id, a full path, or `latest` (use `--index N` for the
-     Nth most recent).
+     Nth most recent). In BATCH runs prefer the **explicit JSONL path** — the extract's
+     parent-chain walk can drift to a parent file on forked sessions.
    - Use `--max-text` / `--max-cmd` to widen truncation if you need more prompt/command text.
 
-3. **Read the facts sheet** (`/tmp/session_facts.md`). Pay attention to:
+3. **Read the facts sheet** (`$FACTS`). Pay attention to:
    - **Prompt 1 = the goal**; **prompts 2..N = steering** (corrections, scope additions,
      quality bars, yes/all-three style unlocks).
    - **Skills created / Memories saved** — these are the reusable assets; explain *why*.
@@ -92,15 +96,18 @@ context and sessions don't accumulate there:
    ```bash
    npx tsx scripts/list_sessions.ts --cwd "$(pwd)" --limit 50    # or --all
    ```
-2. For each session id, spawn `SessionGuideline` (explicit `Agent` call), passing the
-   session id + an explicit output path. Each spawn runs BOTH layers in isolation
-   (extract → synthesise) and returns only the written path + a short abstract:
+2. For each session, spawn `SessionGuideline` (explicit `Agent` call), passing the
+   **explicit JSONL path** (not a partial id — the extract's parent-chain walk can drift to
+   a parent file on forked sessions) + an explicit output path. Each spawn runs BOTH layers
+   in isolation (extract → synthesise) and returns only the written path + a short abstract:
    ```
    Agent(subagent_type="SessionGuideline",
-         prompt="session id <id>; cwd <dir>; write to Prompt stories/<Topic>.md")
+         prompt="session JSONL <abs-path>; cwd <dir>; write to Prompt stories/<Topic>.md")
    ```
-3. Collect the returned paths. Run spawns sequentially (or in small parallel batches) so
-   the git tree / disk stays sane.
+3. Collect the returned paths. Parallel batches are safe ONLY because step 2 uses a
+   `mktemp` facts sheet per run — the old fixed `/tmp/session_facts.md` raced (concurrent
+   spawns overwrote it, so every playbook got the same sheet). Verify no two outputs share
+   an H1 title before trusting a batch.
 
 **Model role.** The synthesis is judgment-heavy WRITING on a SMALL, pre-condensed input
 (the extract script shrinks the JSONL first — it is NOT a long-context job). Quality lives
