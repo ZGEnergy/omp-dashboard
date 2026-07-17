@@ -1,24 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useRef } from "react";
-import { chooseHorizontalAlign, usePopoverFlip } from "../usePopoverFlip.js";
+import { usePopoverFlip } from "../usePopoverFlip.js";
 
 /**
  * Build a fake trigger ref whose `getBoundingClientRect` returns a rect placing
  * the trigger's top/bottom at the supplied viewport coordinates.
  */
-function makeRef(top: number, bottom: number, left = 0, right = 0) {
+function makeRef(top: number, bottom: number) {
   const el = {
     getBoundingClientRect: vi.fn(
-      () =>
-        ({
-          top,
-          bottom,
-          left,
-          right,
-          width: right - left,
-          height: bottom - top,
-        }) as DOMRect,
+      () => ({ top, bottom, left: 0, right: 0, width: 0, height: bottom - top }) as DOMRect,
     ),
   } as unknown as HTMLElement;
   return { current: el } as React.RefObject<HTMLElement>;
@@ -37,15 +29,14 @@ function makeRefH(left: number, right: number) {
 function setViewportHeight(h: number) {
   Object.defineProperty(window, "innerHeight", { value: h, configurable: true, writable: true });
 }
+
 function setViewportWidth(w: number) {
   Object.defineProperty(window, "innerWidth", { value: w, configurable: true, writable: true });
 }
 
-
 describe("usePopoverFlip", () => {
   beforeEach(() => {
     setViewportHeight(1000);
-    setViewportWidth(1200);
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -112,8 +103,9 @@ describe("usePopoverFlip", () => {
     const { result } = renderHook(() =>
       usePopoverFlip(ref, { open: true, estimatedWidth: 256 }),
     );
-    // Current API: alignRight (no maxWidth / anchorRight fields).
-    expect(result.current.alignRight).toBe(true);
+    expect(result.current.anchorRight).toBe(true);
+    // spaceRightAnchor = rect.right - gap = 600 - 8 = 592
+    expect(result.current.maxWidth).toBe(592);
   });
 
   it("flips to left-anchor in a slim container with the trigger near the left edge", () => {
@@ -123,16 +115,21 @@ describe("usePopoverFlip", () => {
     const { result } = renderHook(() =>
       usePopoverFlip(ref, { open: true, estimatedWidth: 256 }),
     );
-    expect(result.current.alignRight).toBe(false);
+    // spaceRightAnchor = 80 - 8 = 72 < 256; spaceLeftAnchor = 300 - 20 - 8 = 272 > 72 → flip
+    expect(result.current.anchorRight).toBe(false);
+    expect(result.current.maxWidth).toBe(272);
   });
 
-  it("picks left when neither side fits and left keeps more visible width", () => {
+  it("clamps maxWidth to the larger side when neither side fits the full width", () => {
     setViewportWidth(400);
     const ref = makeRefH(150, 200);
     const { result } = renderHook(() =>
       usePopoverFlip(ref, { open: true, estimatedWidth: 256 }),
     );
-    expect(result.current.alignRight).toBe(false);
+    // spaceRightAnchor = 200 - 8 = 192; spaceLeftAnchor = 400 - 150 - 8 = 242.
+    // Both < 256 (natural width); left side larger → flip + clamp to 242.
+    expect(result.current.anchorRight).toBe(false);
+    expect(result.current.maxWidth).toBe(242);
   });
 
   it("preserves the right-anchor by default (unknown estimatedWidth) even near the left edge", () => {
@@ -140,7 +137,9 @@ describe("usePopoverFlip", () => {
     const ref = makeRefH(10, 40); // near the left edge
     const { result } = renderHook(() => usePopoverFlip(ref, { open: true }));
     // estimatedWidth defaults to Infinity → never flips → backward-compatible.
-    expect(result.current.alignRight).toBe(true);
+    expect(result.current.anchorRight).toBe(true);
+    // spaceRightAnchor = 40 - 8 = 32 → clamped up to the 160px floor.
+    expect(result.current.maxWidth).toBe(160);
   });
 
   it("attaches no listeners and does not measure when open=false", () => {
@@ -151,97 +150,6 @@ describe("usePopoverFlip", () => {
     expect(ref.current!.getBoundingClientRect).not.toHaveBeenCalled();
     expect(addSpy).not.toHaveBeenCalledWith("resize", expect.anything(), expect.anything());
     expect(addSpy).not.toHaveBeenCalledWith("scroll", expect.anything(), expect.anything());
-  });
-
-  it("aligns right by default when the popover fits left of the trigger right edge", () => {
-    // Trigger near the right side of a wide viewport — classic desktop case.
-    const ref = makeRef(100, 130, 900, 980);
-    const { result } = renderHook(() =>
-      usePopoverFlip(ref, { open: true, estimatedWidth: 256 }),
-    );
-    expect(result.current.alignRight).toBe(true);
-  });
-
-  it("aligns left when right-align would hang past the left viewport edge", () => {
-    // Mobile StatusBar leading: View button near left edge (repro of the iOS clip).
-    setViewportWidth(390);
-    const ref = makeRef(719, 743, 41, 101);
-    const { result } = renderHook(() =>
-      usePopoverFlip(ref, { open: true, estimatedWidth: 256 }),
-    );
-    expect(result.current.alignRight).toBe(false);
-  });
-
-  it("picks the side with more visible area when both alignments overflow", () => {
-    // estimatedWidth (300) exceeds viewport (200) on both sides.
-    setViewportWidth(200);
-    // Trigger near the left → left-align keeps more of the panel on-screen.
-    const refLeft = makeRef(100, 130, 20, 80);
-    const { result: leftBias } = renderHook(() =>
-      usePopoverFlip(refLeft, { open: true, estimatedWidth: 300 }),
-    );
-    expect(leftBias.current.alignRight).toBe(false);
-
-    // Trigger near the right → right-align keeps more visible.
-    const refRight = makeRef(100, 130, 120, 180);
-    const { result: rightBias } = renderHook(() =>
-      usePopoverFlip(refRight, { open: true, estimatedWidth: 300 }),
-    );
-    expect(rightBias.current.alignRight).toBe(true);
-  });
-});
-
-describe("chooseHorizontalAlign", () => {
-  it("returns true when estimated width is unknown or non-positive", () => {
-    expect(
-      chooseHorizontalAlign({
-        triggerRight: 50,
-        triggerLeft: 10,
-        viewportWidth: 100,
-        estimatedWidth: Infinity,
-      }),
-    ).toBe(true);
-    expect(
-      chooseHorizontalAlign({
-        triggerRight: 50,
-        triggerLeft: 10,
-        viewportWidth: 100,
-        estimatedWidth: 0,
-      }),
-    ).toBe(true);
-  });
-
-  it("prefers right-align on a visible-area tie when both sides overflow", () => {
-    // rightVisible = leftVisible = 150 → rightVisible >= leftVisible
-    expect(
-      chooseHorizontalAlign({
-        triggerRight: 150,
-        triggerLeft: 50,
-        viewportWidth: 200,
-        estimatedWidth: 300,
-      }),
-    ).toBe(true);
-  });
-
-  it("selects the larger visible side when both alignments overflow", () => {
-    // left-biased trigger
-    expect(
-      chooseHorizontalAlign({
-        triggerRight: 80,
-        triggerLeft: 20,
-        viewportWidth: 200,
-        estimatedWidth: 300,
-      }),
-    ).toBe(false);
-    // right-biased trigger
-    expect(
-      chooseHorizontalAlign({
-        triggerRight: 180,
-        triggerLeft: 120,
-        viewportWidth: 200,
-        estimatedWidth: 300,
-      }),
-    ).toBe(true);
   });
 });
 
