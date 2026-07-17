@@ -44,14 +44,13 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") <status|merge|verify|pr|ff-develop> [options]
+Usage: $(basename "$0") <status|merge|verify|pr> [options]
 
 Commands:
   status       Show ahead/behind vs upstream ref
   merge        Create/update sync branch and merge upstream (auto-ours on deploy/**)
   verify       Run structural + focused unit + build gates
   pr           Open/update PR from current sync branch into ${TARGET_BRANCH}
-  ff-develop   Fast-forward origin/develop to origin/main (mirror)
 
 Env:
   UPSTREAM_REF   upstream branch (default: develop)
@@ -394,17 +393,6 @@ BODY
   fi
 }
 
-cmd_ff_develop() {
-  fetch_all
-  local main_sha
-  main_sha=$(git rev-parse "${ORIGIN_REMOTE}/${TARGET_BRANCH}")
-  if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    log "DRY_RUN: would move origin/develop to $main_sha"
-    return 0
-  fi
-  log "fast-forward origin/develop -> ${TARGET_BRANCH} ($main_sha)"
-  git push "$ORIGIN_REMOTE" "${main_sha}:refs/heads/develop"
-}
 
 main() {
   local cmd="${1:-}"
@@ -433,7 +421,6 @@ main() {
     merge) cmd_merge ;;
     verify) cmd_verify ;;
     pr) cmd_pr ;;
-    ff-develop) cmd_ff_develop ;;
     ""|-h|--help) usage; exit 0 ;;
     *) usage; die "unknown command: $cmd" ;;
   esac
