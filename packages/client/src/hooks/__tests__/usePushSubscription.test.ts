@@ -180,7 +180,7 @@ describe("usePushSubscription", () => {
       }
       return { ok: true, json: async () => ({ tokenId: "tok-1" }) };
     });
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
@@ -208,7 +208,7 @@ describe("usePushSubscription", () => {
       }
       return { ok: true, json: async () => ({}) };
     });
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
@@ -228,7 +228,7 @@ describe("usePushSubscription", () => {
       if (url.includes("/api/push/register")) return { ok: false, json: async () => ({}) };
       return { ok: true, json: async () => ({}) };
     });
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
@@ -255,7 +255,7 @@ describe("usePushSubscription", () => {
       }
       return { ok: true, json: async () => ({}) };
     });
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("subscribed"));

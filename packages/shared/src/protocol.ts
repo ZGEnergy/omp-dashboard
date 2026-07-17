@@ -560,7 +560,8 @@ export type ExtensionToServerMessage =
   | PiVersionUpdateMessage
   | PluginPiMessage
   | QueueUpdateToServerMessage
-  | PromptReceivedToServerMessage;
+  | PromptReceivedToServerMessage
+  | ReplayCompleteMessage;
 
 // ── Server → Extension ──────────────────────────────────────────────
 

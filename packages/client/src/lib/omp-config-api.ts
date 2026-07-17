@@ -5,6 +5,9 @@
  */
 import { getApiBase } from "./api-context.js";
 
+/** Client → server: keep the stored secret as-is (mirrors server `omp-config-secrets.ts`). */
+export const OMP_SECRET_UNCHANGED = "__omp_secret_unchanged__";
+
 export type OmpConfigValueType =
   | "boolean"
   | "number"

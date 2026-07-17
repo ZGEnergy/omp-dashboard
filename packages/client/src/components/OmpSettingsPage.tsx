@@ -15,6 +15,7 @@ import {
   type OmpConfigSnapshot,
   resetOmpConfig,
   setOmpConfig,
+  OMP_SECRET_UNCHANGED,
 } from "../lib/omp-config-api.js";
 import { enumOptionsFor } from "../lib/omp-enum-options.js";
 
