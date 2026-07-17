@@ -332,8 +332,11 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     // ping-pong bug). A pin sets scrollTop, not scrollHeight, so the next
     // onChange sees no growth and the loop cannot sustain itself.
     onChange: () => {
+      // Virtualizer may fire notify after jsdom teardown (suite-level
+      // unhandled "window is not defined"). Bail when unmounted / no DOM.
+      if (typeof window === "undefined") return;
       const el = scrollRef.current;
-      if (!el) return;
+      if (!el || !el.isConnected) return;
       const prevH = lastScrollHeightRef.current;
       const nextH = el.scrollHeight;
       if (nextH === prevH) return;
