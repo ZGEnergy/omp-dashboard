@@ -19,7 +19,7 @@
  */
 
 import { Dialog } from "@blackbelt-technology/pi-dashboard-client-utils/Dialog";
-import { SubagentDetailView } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
+import { SubagentDetailView, type SubagentTimelineEntry } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
 import { mdiChevronDown, mdiChevronUp, mdiOpenInNew } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import type React from "react";
@@ -39,6 +39,7 @@ interface AgentDetails {
   status?: "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error";
   activity?: string;
   toolUses?: number;
+  entries?: SubagentTimelineEntry[];
   tokens?: string;
   turnCount?: number;
   maxTurns?: number;
@@ -48,7 +49,6 @@ interface AgentDetails {
   agentId?: string;
   error?: string;
 }
-
 /** Map AgentDetails status to AgentCardShell status key */
 function mapStatus(details: AgentDetails | undefined, toolStatus: string): string {
   if (!details?.status) return toolStatus === "error" ? "error" : toolStatus === "complete" ? "complete" : "running";
@@ -69,15 +69,22 @@ function mapStatus(details: AgentDetails | undefined, toolStatus: string): strin
   }
 }
 
-/** Build a stats string from AgentDetails */
-function buildStats(d: AgentDetails): string {
+/** Build a stats string from AgentDetails and its canonical timeline. */
+function buildStats(d: AgentDetails, entries?: SubagentTimelineEntry[]): string {
   const parts: string[] = [];
   if (d.modelName) parts.push(d.modelName);
   if (d.tags?.length) parts.push(...d.tags);
   if (d.turnCount != null && d.turnCount > 0) {
     parts.push(d.maxTurns != null ? `⟳${d.turnCount}≤${d.maxTurns}` : `⟳${d.turnCount}`);
   }
-  if (d.toolUses != null && d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
+  if (entries) {
+    const toolUses = entries.filter((entry) => entry.kind === "tool").length;
+    if (toolUses > 0) parts.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
+  } else if (d.toolUses != null) {
+    parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"} (details unavailable)`);
+  } else {
+    parts.push("tool uses unavailable");
+  }
   if (d.tokens) parts.push(d.tokens);
   return parts.join(" · ");
 }
@@ -188,6 +195,8 @@ export function AgentToolRenderer({ args, status, result, toolDetails, context }
   const sessionId = context?.sessionId;
   const session = context?.session;
   const agentId = details?.agentId;
+  const sessionEntries = agentId ? session?.subagents.get(agentId)?.entries : undefined;
+  const canonicalEntries = details?.entries ?? sessionEntries;
   // Popout affordance is enabled only when both the agent id and the session
   // state are available (SubagentDetailView needs both). Disabled otherwise
   // — no dialog opens (spec: "Detail affordance disabled without an agent id").
@@ -277,7 +286,7 @@ export function AgentToolRenderer({ args, status, result, toolDetails, context }
     );
   }
 
-  const statsText = buildStats(details);
+  const statsText = buildStats(details, canonicalEntries);
 
   // --- Running ---
   if (details.status === "running" || details.status === "queued") {

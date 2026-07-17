@@ -541,4 +541,42 @@ describe("replayEntriesAsEvents", () => {
     expect(agentMsg!.toolDetails!.durationMs).toBe(6000);
     expect(agentMsg!.toolDetails!.toolUses).toBe(3);
   });
+  it("replays terminal Agent snapshots with every nested entry", () => {
+    const timeline = [
+      { kind: "tool", toolName: "Read", input: { path: "a" }, ts: 1 },
+      { kind: "text", text: "between", ts: 2 },
+      { kind: "tool", toolName: "Bash", input: { command: "b" }, ts: 3 },
+    ];
+    const persisted = [
+      { type: "message", id: "a1", timestamp: "2025-01-01T00:00:00Z", message: { role: "assistant", content: [{ type: "toolCall", id: "agent-call", name: "Agent", arguments: { prompt: "inspect" } }] } },
+      { type: "message", id: "a2", timestamp: "2025-01-01T00:00:03Z", message: { role: "toolResult", toolCallId: "agent-call", toolName: "Agent", content: [{ type: "text", text: "done" }], isError: false, details: { agentId: "agent-1", subagentType: "Explore", status: "completed", entries: timeline, toolUses: 2, durationMs: 3000 } } },
+    ];
+    const events = replayEntriesAsEvents("sess-1", persisted);
+    expect(events.map((event) => event.event.eventType)).toEqual([
+      "tool_execution_start", "message_update", "message_end", "subagent_completed", "tool_execution_end",
+    ]);
+    const state = events.reduce((s, event) => reduceEvent(s, event.event), createInitialState());
+    expect(state.messages.find((message) => message.toolCallId === "agent-call")?.toolDetails?.entries).toEqual(timeline);
+    expect(state.subagents.get("agent-1")).toMatchObject({ status: "completed", entries: timeline, toolUses: 2 });
+  });
+
+  it("replays an open Agent start snapshot without closing its parent row", () => {
+    const timeline = [{ kind: "tool" as const, toolName: "Read", input: {}, ts: 1 }];
+    const persisted = [{
+      type: "message",
+      id: "open-1",
+      timestamp: "2025-01-01T00:00:00Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "agent-open", name: "Agent", arguments: { prompt: "inspect" }, details: { agentId: "agent-open-1", subagentType: "Explore", entries: timeline, toolUses: 1 } }],
+      },
+    }];
+    const events = replayEntriesAsEvents("sess-1", persisted);
+    expect(events.map((event) => event.event.eventType)).toEqual([
+      "tool_execution_start", "subagent_started", "message_update", "message_end",
+    ]);
+    const state = events.reduce((s, event) => reduceEvent(s, event.event), createInitialState());
+    expect(state.messages.find((message) => message.toolCallId === "agent-open")?.toolStatus).toBe("running");
+    expect(state.subagents.get("agent-open-1")).toMatchObject({ status: "running", entries: timeline, toolUses: 1 });
+  });
 });

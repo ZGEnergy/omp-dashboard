@@ -230,4 +230,41 @@ describe("AgentToolRenderer — expand + popout", () => {
     fireEvent.click(btn);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("counts only canonical tool entries and renders the full nested timeline", () => {
+    const entries = [
+      { kind: "tool" as const, toolName: "Read", input: {}, output: "a", ts: 1 },
+      { kind: "text" as const, text: "between", ts: 2 },
+      { kind: "tool" as const, toolName: "Bash", input: {}, output: "b", ts: 3 },
+    ];
+    const session = sessionWithAgent("abc123", { entries, status: "completed" });
+    render(wrapInProviders(
+      <AgentToolRenderer
+        toolName="Agent"
+        args={{ subagent_type: "Explore" }}
+        status="complete"
+        context={makeContext(session, "sess_42")}
+        toolDetails={{ agentId: "abc123", status: "completed", toolUses: 99, entries }}
+      />
+    ));
+    expect(screen.getByText(/2 tool uses/)).toBeTruthy();
+    expect(screen.queryByText(/99 tool uses/)).toBeNull();
+    fireEvent.click(screen.getByTitle(/Expand to inspect/i));
+    expect(screen.getByText("between")).toBeTruthy();
+    expect(screen.getByText("Read")).toBeTruthy();
+    expect(screen.getByText("Bash")).toBeTruthy();
+  });
+
+  it("marks producer toolUses as unavailable when entries are absent", () => {
+    render(wrapInProviders(
+      <AgentToolRenderer
+        toolName="Agent"
+        args={{ subagent_type: "Explore" }}
+        status="complete"
+        context={makeContext()}
+        toolDetails={{ status: "completed", toolUses: 3 }}
+      />
+    ));
+    expect(screen.getByText(/3 tool uses \(details unavailable\)/)).toBeTruthy();
+  });
 });
