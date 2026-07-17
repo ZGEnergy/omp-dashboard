@@ -24,6 +24,10 @@ export interface ReplayPersister {
   drop(sessionId: string): Promise<void>;
   /** Force an immediate flush (tests / unmount). */
   flush(sessionId: string): Promise<void>;
+  /** Merge newly-arrived older events into the buffer (dedup by seq), returning the merged snapshot. See change: session-tail-rehydrate. */
+  merge(sessionId: string, events: CachedEvent[]): CachedEvent[];
+  /** Return a defensive copy of the current raw-event buffer. See change: session-tail-rehydrate. */
+  snapshot(sessionId: string): CachedEvent[];
 }
 
 export function createReplayPersister(
@@ -81,6 +85,21 @@ export function createReplayPersister(
     schedule(sessionId);
   }
 
+  function merge(sessionId: string, events: CachedEvent[]): CachedEvent[] {
+    if (events.length === 0) return snapshot(sessionId);
+    const bySeq = new Map<number, CachedEvent>();
+    for (const e of buffers.get(sessionId) ?? []) bySeq.set(e.seq, e);
+    for (const e of events) bySeq.set(e.seq, e);
+    const merged = [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+    buffers.set(sessionId, merged);
+    schedule(sessionId);
+    return merged;
+  }
+
+  function snapshot(sessionId: string): CachedEvent[] {
+    return [...(buffers.get(sessionId) ?? [])];
+  }
+
   async function drop(sessionId: string): Promise<void> {
     const t = timers.get(sessionId);
     if (t) {
@@ -91,5 +110,5 @@ export function createReplayPersister(
     await cache.delete(sessionId);
   }
 
-  return { record, seed, drop, flush };
+  return { record, seed, merge, snapshot, drop, flush };
 }

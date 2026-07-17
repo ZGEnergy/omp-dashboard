@@ -96,7 +96,7 @@ export default function imageFitExtension(pi: ExtensionAPI): void {
  */
 async function maybeResize(
   srcPath: string,
-  event: { input: { path: string } },
+  event: { input: Record<string, unknown> },
   ctx: unknown,
   config: ImageFitConfig,
   getScopeFor: (ctx: unknown) => CacheScope,

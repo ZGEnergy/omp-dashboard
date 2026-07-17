@@ -3,6 +3,11 @@
  */
 
 import type { BrowserToServerMessage, ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import {
+  clampTailWindowBytes,
+  selectNewestEventsByBudget,
+  selectOlderEventsByBudget,
+} from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
 import type { WebSocket } from "ws";
 import { extractStatsFromEvents } from "../event-status-extraction.js";
 import type { StoredEvent } from "../memory-event-store.js";
@@ -24,10 +29,69 @@ const BACKPRESSURE_THRESHOLD = 1_024 * 1_024;
  */
 const HYDRATE_HEARTBEAT_MS = 10000;
 
+/** Optional window metadata stamped onto event_replay batches. */
+interface ReplayWindowMeta {
+  hasMoreOlder?: boolean;
+  windowMinSeq?: number;
+  windowMaxSeq?: number;
+}
+
 /**
- * Send stored events to a WebSocket in batches with backpressure handling.
- * Yields between batches to let the event loop flush data and avoid OOM.
+ * Apply tail / load-older windowing to an ascending event list based on the
+ * subscribe message. Delta paths (`lastSeq > 0` without `fromSeq`) pass through.
+ * See change: session-tail-rehydrate.
  */
+export function windowEventsForSubscribe(
+  events: StoredEvent[],
+  msg: Extract<BrowserToServerMessage, { type: "subscribe" }>,
+): { events: StoredEvent[]; meta: ReplayWindowMeta } {
+  let list = events;
+  if (MAX_REPLAY_EVENTS > 0 && list.length > MAX_REPLAY_EVENTS) {
+    list = list.slice(list.length - MAX_REPLAY_EVENTS);
+  }
+
+  // Load-older: exclusive upper bound (works on full buffer).
+  if (msg.fromSeq != null && Number.isFinite(msg.fromSeq)) {
+    const budget = clampTailWindowBytes(msg.windowBytes);
+    const r = selectOlderEventsByBudget(list, msg.fromSeq, budget);
+    return {
+      events: r.events as StoredEvent[],
+      meta: {
+        hasMoreOlder: r.hasMoreOlder,
+        windowMinSeq: r.windowMinSeq || undefined,
+        windowMaxSeq: r.windowMaxSeq || undefined,
+      },
+    };
+  }
+
+  const lastSeq = msg.lastSeq ?? 0;
+
+  // Delta subscribe after IDB rehydrate (or any lastSeq>0): only events after the
+  // client cursor. Apply BEFORE cold-tail detection — a full buffer from disk
+  // still starts at seq 1 and must not be re-sent wholesale (that wiped load-older
+  // meta and defeated the tail). See change: session-tail-rehydrate.
+  if (lastSeq > 0) {
+    list = list.filter((e) => e.seq > lastSeq);
+    return { events: list, meta: {} };
+  }
+
+  // Cold open (lastSeq 0): optional tail window.
+  if (msg.mode === "tail") {
+    const budget = clampTailWindowBytes(msg.windowBytes);
+    const r = selectNewestEventsByBudget(list, budget);
+    return {
+      events: r.events as StoredEvent[],
+      meta: {
+        hasMoreOlder: r.hasMoreOlder,
+        windowMinSeq: r.windowMinSeq || undefined,
+        windowMaxSeq: r.windowMaxSeq || undefined,
+      },
+    };
+  }
+
+  return { events: list, meta: {} };
+}
+
 /**
  * Send stored events to a WebSocket in batches with backpressure handling.
  * Returns the highest seq sent, or 0 if no events were sent.
@@ -37,21 +101,30 @@ async function sendEventBatches(
   sessionId: string,
   stored: StoredEvent[],
   sendTo: (ws: WebSocket, msg: ServerToBrowserMessage) => void,
+  windowMeta: ReplayWindowMeta = {},
 ): Promise<number> {
+  // Empty delivery still needs a terminal event_replay so the client clears
+  // loadingHistory (and learns hasMoreOlder for empty older pages).
+  if (stored.length === 0) {
+    if (ws.readyState === ws.OPEN) {
+      sendTo(ws, {
+        type: "event_replay",
+        sessionId,
+        events: [],
+        isLast: true,
+        ...windowMeta,
+      });
+    }
+    return 0;
+  }
+
   for (let i = 0; i < stored.length; i += REPLAY_BATCH_SIZE) {
     if (ws.readyState !== ws.OPEN) return 0;
-    const batch = stored.slice(i, i + REPLAY_BATCH_SIZE);
-    sendTo(ws, {
-      type: "event_replay",
-      sessionId,
-      // Strategy B (reduce-session-replay-traffic): pre-truncate heavy tool
-      // results to the display form to trim replay bytes. Additive — the store
-      // keeps the full body for develop's "Show full output" route; small
-      // results and non-tool events pass through untouched.
-      events: batch.map((e) => ({ seq: e.seq, event: truncateToolResultForReplay(e.event) })),
-      isLast: i + REPLAY_BATCH_SIZE >= stored.length,
-    });
-    // Yield to event loop between batches to allow GC and buffer flushing
+    // Wait BEFORE enqueueing the next batch so sendTo does not drop under
+    // MAX_WS_BUFFER back-pressure (mobile/tunnel drains slowly). Dropped
+    // event_replay batches leave the client stuck mid-tail with live events
+    // suppressed until clearReplaying — or missing entirely if catch-up also
+    // drops. See change: session-tail-rehydrate (live-follow after hydrate).
     if (ws.bufferedAmount > BACKPRESSURE_THRESHOLD) {
       await new Promise<void>((resolve) => {
         const check = () => {
@@ -63,11 +136,26 @@ async function sendEventBatches(
         };
         setTimeout(check, 10);
       });
-    } else {
-      await new Promise<void>((r) => setImmediate(r));
+      if (ws.readyState !== ws.OPEN) return 0;
     }
+    const batch = stored.slice(i, i + REPLAY_BATCH_SIZE);
+    const isLast = i + REPLAY_BATCH_SIZE >= stored.length;
+    sendTo(ws, {
+      type: "event_replay",
+      sessionId,
+      // Strategy B (reduce-session-replay-traffic): pre-truncate heavy tool
+      // results to the display form to trim replay bytes. Additive — the store
+      // keeps the full body for develop's "Show full output" route; small
+      // results and non-tool events pass through untouched.
+      events: batch.map((e) => ({ seq: e.seq, event: truncateToolResultForReplay(e.event) })),
+      isLast,
+      // Stamp window meta on every batch (stable) so partial clients still see it.
+      ...windowMeta,
+    });
+    // Yield to event loop between batches to allow GC and buffer flushing
+    await new Promise<void>((r) => setImmediate(r));
   }
-  return stored.length > 0 ? stored[stored.length - 1].seq : 0;
+  return stored[stored.length - 1]!.seq;
 }
 
 /**
@@ -162,6 +250,21 @@ export function replaySessionAssets(
   }
 }
 
+/**
+ * Build a cold-rebuild subscribe message without turning legacy/full clients
+ * into tail clients. See change: session-tail-rehydrate.
+ */
+function coldSubscribeMessage(
+  msg: Extract<BrowserToServerMessage, { type: "subscribe" }>,
+): Extract<BrowserToServerMessage, { type: "subscribe" }> {
+  const { mode, ...rest } = msg;
+  return {
+    ...rest,
+    lastSeq: 0,
+    ...(mode === "tail" ? { mode: "tail" } : {}),
+  } as Extract<BrowserToServerMessage, { type: "subscribe" }>;
+}
+
 export function handleSubscribe(
   msg: Extract<BrowserToServerMessage, { type: "subscribe" }>,
   subs: Set<string>,
@@ -193,49 +296,64 @@ export function handleSubscribe(
     const lastSeq = msg.lastSeq ?? 0;
     const maxSeq = eventStore.getMaxSeq(msg.sessionId);
 
+    // Load-older: page from the full buffer regardless of lastSeq.
+    // Do NOT mark replaying / run clearReplaying catch-up: the client already
+    // holds the live tail and merges older pages via isOlderPage. Catch-up
+    // keyed on windowMaxSeq would re-send the entire live tail and the client
+    // shouldReset path wipes state down to that tail-only batch — freezing
+    // follow-on live events out of view. See change: session-tail-rehydrate.
+    if (msg.fromSeq != null && Number.isFinite(msg.fromSeq)) {
+      const raw = eventStore.getEvents(msg.sessionId, 1);
+      const { events, meta } = windowEventsForSubscribe(raw, msg);
+      replaySessionAssets(ws, msg.sessionId, ctx);
+      void sendEventBatches(ws, msg.sessionId, events, sendTo, meta);
+      return;
+    }
+
     // Stale lastSeq: client has higher seq than server (e.g. server restarted)
     if (lastSeq > 0 && lastSeq > maxSeq) {
       sendTo(ws, { type: "session_state_reset", sessionId: msg.sessionId });
-      // Full replay from seq 1
-      let events = eventStore.getEvents(msg.sessionId, 1);
-      if (MAX_REPLAY_EVENTS > 0 && events.length > MAX_REPLAY_EVENTS) {
-        events = events.slice(events.length - MAX_REPLAY_EVENTS);
-      }
+      const raw = eventStore.getEvents(msg.sessionId, 1);
+      // Reset is a cold rebuild — do not apply delta filter with the stale cursor.
+      // Preserve legacy/full mode; only an explicit tail request gets a tail
+      // window. See change: session-tail-rehydrate.
+      const coldMsg = coldSubscribeMessage(msg);
+      const { events, meta } = windowEventsForSubscribe(raw, coldMsg);
       // Replay asset registry BEFORE events so pi-asset:<hash> tokens in
       // message_update / message_end resolve on first reduce.
       // See change: chat-markdown-local-images-and-math.
       replaySessionAssets(ws, msg.sessionId, ctx);
-      markReplaying(ws, msg.sessionId);
-      sendEventBatches(ws, msg.sessionId, events, sendTo).then((lastSent) => {
-        clearReplaying(ws, msg.sessionId, lastSent);
-        replayPendingUiRequests(ws, msg.sessionId);
-        replayUiState(ws, msg.sessionId, ctx);
-      });
-    } else {
-      let events = eventStore.getEvents(msg.sessionId, lastSeq + 1);
-      if (MAX_REPLAY_EVENTS > 0 && events.length > MAX_REPLAY_EVENTS) {
-        events = events.slice(events.length - MAX_REPLAY_EVENTS);
-      }
-      // Replay asset registry on every subscribe (delta or full). Cheap when
-      // empty; assets already known to the client are simply re-overwritten
-      // with identical bytes. See change: chat-markdown-local-images-and-math.
-      replaySessionAssets(ws, msg.sessionId, ctx);
-      // Suppress live events during paginated replay to prevent out-of-order
-      // delivery. The client's `event_replay` reset rule (firstSeq <= maxSeq)
-      // misfires if a live `event` arrives between batches and bumps maxSeq
-      // past the next batch's firstSeq — wiping state to a fresh build of
-      // only the last batch. Suppression+catch-up via clearReplaying preserves
-      // ordering for both cold (lastSeq=0) and warm (lastSeq>0) subscribes.
-      // See change: fix-cold-subscribe-replay-interleave.
       if (events.length > 0) {
         markReplaying(ws, msg.sessionId);
-        sendEventBatches(ws, msg.sessionId, events, sendTo).then((lastSent) => {
+        sendEventBatches(ws, msg.sessionId, events, sendTo, meta).then((lastSent) => {
           clearReplaying(ws, msg.sessionId, lastSent);
           replayPendingUiRequests(ws, msg.sessionId);
           replayUiState(ws, msg.sessionId, ctx);
         });
       } else {
-        sendEventBatches(ws, msg.sessionId, events, sendTo).then(() => {
+        sendEventBatches(ws, msg.sessionId, events, sendTo, meta).then(() => {
+          replayPendingUiRequests(ws, msg.sessionId);
+          replayUiState(ws, msg.sessionId, ctx);
+        });
+      }
+    } else {
+      const raw = eventStore.getEvents(msg.sessionId, lastSeq + 1);
+      const { events, meta } = windowEventsForSubscribe(raw, msg);
+      // Replay asset registry on every subscribe (delta or full). Cheap when
+      // empty; assets already known to the client are simply re-overwritten
+      // with identical bytes. See change: chat-markdown-local-images-and-math.
+      replaySessionAssets(ws, msg.sessionId, ctx);
+      // Suppress live events during paginated replay to prevent out-of-order
+      // delivery. See change: fix-cold-subscribe-replay-interleave.
+      if (events.length > 0) {
+        markReplaying(ws, msg.sessionId);
+        sendEventBatches(ws, msg.sessionId, events, sendTo, meta).then((lastSent) => {
+          clearReplaying(ws, msg.sessionId, lastSent);
+          replayPendingUiRequests(ws, msg.sessionId);
+          replayUiState(ws, msg.sessionId, ctx);
+        });
+      } else {
+        sendEventBatches(ws, msg.sessionId, events, sendTo, meta).then(() => {
           replayPendingUiRequests(ws, msg.sessionId);
           replayUiState(ws, msg.sessionId, ctx);
         });
@@ -278,17 +396,41 @@ export function handleSubscribe(
           const metaUpdates: Record<string, unknown> = { dataUnavailable: false, ...statsUpdates };
           sessionManager.update(msg.sessionId, metaUpdates);
           broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: metaUpdates });
-          let stored = eventStore.getEvents(msg.sessionId, 1);
-          if (MAX_REPLAY_EVENTS > 0 && stored.length > MAX_REPLAY_EVENTS) {
-            stored = stored.slice(stored.length - MAX_REPLAY_EVENTS);
-          }
+          const raw = eventStore.getEvents(msg.sessionId, 1);
+          const loadedMax = eventStore.getMaxSeq(msg.sessionId);
+          const lastSeq = msg.lastSeq ?? 0;
           const subscribers = getSubscribers(msg.sessionId);
-          for (const sub of subscribers) {
-            // Asset registry first — see change: chat-markdown-local-images-and-math.
-            replaySessionAssets(sub, msg.sessionId, ctx);
-            await sendEventBatches(sub, msg.sessionId, stored, sendTo);
-            replayPendingUiRequests(sub, msg.sessionId);
-            replayUiState(sub, msg.sessionId, ctx);
+          if (lastSeq > loadedMax) {
+            // Disk hydration can load a history older than the browser cursor.
+            // Reset every subscriber before rebuilding from the loaded history.
+            // See change: session-tail-rehydrate.
+            const coldMsg = coldSubscribeMessage(msg);
+            const { events: coldEvents, meta } = windowEventsForSubscribe(raw, coldMsg);
+            for (const sub of subscribers) {
+              sendTo(sub, { type: "session_state_reset", sessionId: msg.sessionId });
+              // Asset registry first — see change: chat-markdown-local-images-and-math.
+              replaySessionAssets(sub, msg.sessionId, ctx);
+              if (coldEvents.length > 0) {
+                markReplaying(sub, msg.sessionId);
+                const lastSent = await sendEventBatches(sub, msg.sessionId, coldEvents, sendTo, meta);
+                clearReplaying(sub, msg.sessionId, lastSent);
+              } else {
+                await sendEventBatches(sub, msg.sessionId, coldEvents, sendTo, meta);
+              }
+              replayPendingUiRequests(sub, msg.sessionId);
+              replayUiState(sub, msg.sessionId, ctx);
+            }
+          } else {
+            // Load-older and normal subscribe paths retain their existing window
+            // selection; stale cursors use the cold message above.
+            const { events: stored, meta } = windowEventsForSubscribe(raw, msg);
+            for (const sub of subscribers) {
+              // Asset registry first — see change: chat-markdown-local-images-and-math.
+              replaySessionAssets(sub, msg.sessionId, ctx);
+              await sendEventBatches(sub, msg.sessionId, stored, sendTo, meta);
+              replayPendingUiRequests(sub, msg.sessionId);
+              replayUiState(sub, msg.sessionId, ctx);
+            }
           }
         } else if (result.error === "cancelled") {
           // The load was cancelled because the subscriber left before it

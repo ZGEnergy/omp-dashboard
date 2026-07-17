@@ -84,6 +84,10 @@ import { rehydrateSession } from "./lib/rehydrate-session.js";
 import { replayCache } from "./lib/replay-cache.js";
 import { createReplayPersister } from "./lib/replay-persist.js";
 import {
+  buildLoadOlderSubscribe,
+  buildSessionSubscribe,
+} from "./lib/session-subscribe.js";
+import {
   buildFolderSettingsUrl,
   buildOpenSpecArchiveUrl,
   buildOpenSpecBoardUrl,
@@ -529,6 +533,12 @@ export default function App() {
   // ChatView loading indicator. See change: show-chat-history-loading-indicator.
   const [loadingHistory, setLoadingHistory] = useState<Map<string, boolean>>(new Map());
   const loadingHistoryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // Tail window meta for load-older (session-tail-rehydrate).
+  const historyWindowRef = useRef(new Map<string, { minSeq: number; hasMoreOlder: boolean }>());
+  const [historyWindowMap, setHistoryWindowMap] = useState(
+    () => new Map<string, { minSeq: number; hasMoreOlder: boolean }>(),
+  );
+  const [loadingOlderMap, setLoadingOlderMap] = useState(() => new Map<string, boolean>());
   // After overlay-url-routing: shell overlays are URL-driven via the
   // useRoute matches declared above. `previewState`, `specsBrowserCwd`,
   // `archiveBrowserCwd`, `diffViewSessionId`, and the three useContentViews
@@ -673,9 +683,23 @@ export default function App() {
     );
   }, []);
 
+  const handleLoadOlder = useCallback(() => {
+    if (!selectedId) return;
+    if (loadingOlderMap.get(selectedId)) return;
+    const win = historyWindowRef.current.get(selectedId);
+    // minSeq must be a positive cursor; `!win.minSeq` also rejected valid... no, 0 is invalid.
+    if (!win?.hasMoreOlder || !(win.minSeq > 0)) return;
+    setLoadingOlderMap((prev) => {
+      const next = new Map(prev);
+      next.set(selectedId, true);
+      return next;
+    });
+    send(buildLoadOlderSubscribe(selectedId, win.minSeq));
+  }, [selectedId, loadingOlderMap, send]);
+
   const handleMessage = useMessageHandler(
     { setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap, setLoadingHistory },
-    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, replayPersister: replayPersisterRef.current },
+    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, replayPersister: replayPersisterRef.current, historyWindowRef, setHistoryWindowMap, setLoadingOlderMap },
   );
 
   useEffect(() => {
@@ -839,7 +863,9 @@ export default function App() {
       // models if missing. Extracted so the cache-rehydrate path can call it
       // after the async IndexedDB read resolves.
       const doSubscribe = (lastSeq: number) => {
-        send({ type: "subscribe", sessionId: sid, lastSeq });
+        // Cold lastSeq=0 uses mode:tail; delta omits mode.
+        // See change: session-tail-rehydrate.
+        send(buildSessionSubscribe(sid, lastSeq));
         // Enter LOADING. Covers warm (in-memory replay / reconnect re-subscribe)
         // and cold (disk-load) paths uniformly, since the warm path never sends
         // an empty `isLast:false` start marker.
@@ -869,6 +895,20 @@ export default function App() {
               });
               if (!maxSeqMapRef.current.has(sid)) maxSeqMapRef.current.set(sid, r.lastSeq);
               replayPersisterRef.current.seed(sid, r.events);
+              // IDB holds only a newest-byte tail. Delta subscribe will not re-send
+              // window meta, so seed load-older from the cached min seq: any gap
+              // below seq 1 means older history exists server-side.
+              // See change: session-tail-rehydrate.
+              if (r.events.length > 0) {
+                const minSeq = r.events[0]!.seq;
+                const hasMoreOlder = minSeq > 1;
+                historyWindowRef.current.set(sid, { minSeq, hasMoreOlder });
+                setHistoryWindowMap((m) => {
+                  const next = new Map(m);
+                  next.set(sid, { minSeq, hasMoreOlder });
+                  return next;
+                });
+              }
               doSubscribe(maxSeqMapRef.current.get(sid) ?? r.lastSeq);
             } else {
               doSubscribe(0);
@@ -1430,7 +1470,7 @@ export default function App() {
             maxSeqMapRef.current.set(selectedId, 0);
             subscribedRef.current.delete(selectedId);
             subscribedRef.current.add(selectedId);
-            send({ type: "subscribe", sessionId: selectedId, lastSeq: 0 });
+            send(buildSessionSubscribe(selectedId, 0));
             beginLoadingHistory(selectedId);
           },
         } : undefined}
@@ -1452,7 +1492,7 @@ export default function App() {
           maxSeqMapRef.current.set(selectedId, 0);
           subscribedRef.current.delete(selectedId);
           subscribedRef.current.add(selectedId);
-          send({ type: "subscribe", sessionId: selectedId, lastSeq: 0 });
+          send(buildSessionSubscribe(selectedId, 0));
           beginLoadingHistory(selectedId);
         }}
       />
@@ -1581,7 +1621,23 @@ export default function App() {
             </div>
           }>
             <SessionAssetsProvider assets={selectedSession?.assets}>
-            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? handleForkFromMessage : undefined} onCloseInlineTerminal={selectedId ? handleCloseInlineTerminalForSelected : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? EMPTY_STEERING} loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false} onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined} />
+            <ChatView
+              ref={chatViewRef}
+              sessionId={selectedId}
+              state={selectedState}
+              toolContext={toolContext}
+              onRespondToUi={handleRespondToUi}
+              onAbort={handleAbort}
+              onForceKill={handleForceKill}
+              onForkFromMessage={selectedId ? handleForkFromMessage : undefined}
+              onCloseInlineTerminal={selectedId ? handleCloseInlineTerminalForSelected : undefined}
+              pendingSteering={selectedSession?.pendingQueues?.steering ?? EMPTY_STEERING}
+              loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false}
+              hasMoreOlder={selectedId ? historyWindowMap.get(selectedId)?.hasMoreOlder ?? false : false}
+              loadingOlder={selectedId ? loadingOlderMap.get(selectedId) ?? false : false}
+              onLoadOlder={selectedId ? handleLoadOlder : undefined}
+              onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined}
+            />
             </SessionAssetsProvider>
           </ErrorBoundary>
           {/* Unified status banner. Sticky above the command input — ONE

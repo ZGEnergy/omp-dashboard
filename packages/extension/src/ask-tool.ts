@@ -19,7 +19,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { polyfillMultiselect } from "./multiselect-polyfill.js";
+import { polyfillMultiselect, type PolyfillCtx } from "./multiselect-polyfill.js";
 
 const OptionSchema = Type.Object({
   label: Type.String({ description: "display label" }),
@@ -165,7 +165,7 @@ async function presentOne(
   const method = methodForQuestion(q);
   if (method === "multiselect") {
     return polyfillMultiselect(
-      ctx as { ui: { multiselect?: UiCtx["ui"]["multiselect"]; custom: NonNullable<UiCtx["ui"]["custom"]> } },
+      ctx as unknown as PolyfillCtx,
       title,
       labels,
       opts,

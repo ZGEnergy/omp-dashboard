@@ -13,4 +13,11 @@ export default defineConfig({
     // client config's resolve.alias rationale. See change: parallelize-test-suite.
     setupFiles: [path.resolve(__dirname, "../shared/src/test-support/setup-home-perfile.ts")],
   },
+  resolve: {
+    // Worktree-local shared source wins over hoisted node_modules symlink so
+    // new modules (e.g. event-window) resolve during tests. Mirrors client.
+    alias: {
+      "@blackbelt-technology/pi-dashboard-shared": path.resolve(__dirname, "../shared/src"),
+    },
+  },
 });
