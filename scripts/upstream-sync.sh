@@ -200,7 +200,7 @@ cmd_verify() {
   grep -q 'upstream-sync' docs/upstream-sync.md 2>/dev/null || warn "docs/upstream-sync.md missing (ok only mid-bootstrap)"
   log "Gate 0 OK"
 
-  log "Gate 1: focused vitest"
+  log "Gate 1: unit suites (shared full + ZGE focus)"
   # Prefer package-local vitest binaries; do not require full monorepo green.
   # Upstream vitest globalSetup refuses real $HOME (must match root `npm test`).
   local failed=0
@@ -208,14 +208,20 @@ cmd_verify() {
   test_home="$(mktemp -d -t pi-test-XXXXXX)"
   local test_ls
   test_ls="$(mktemp -t pi-test-ls-XXXXXX)"
+  resolve_vitest() {
+    local dir="$1"
+    if [[ -x "${REPO_ROOT}/node_modules/.bin/vitest" ]]; then
+      printf '%s\n' "${REPO_ROOT}/node_modules/.bin/vitest"
+    elif [[ -x "${dir}/node_modules/.bin/vitest" ]]; then
+      printf '%s\n' "${dir}/node_modules/.bin/vitest"
+    else
+      return 1
+    fi
+  }
   run_vitest() {
     local dir="$1"; shift
-    local bin=""
-    if [[ -x "${REPO_ROOT}/node_modules/.bin/vitest" ]]; then
-      bin="${REPO_ROOT}/node_modules/.bin/vitest"
-    elif [[ -x "${dir}/node_modules/.bin/vitest" ]]; then
-      bin="${dir}/node_modules/.bin/vitest"
-    else
+    local bin
+    if ! bin="$(resolve_vitest "$dir")"; then
       warn "vitest not installed — run npm ci at repo root; skipping tests in $dir"
       return 0
     fi
@@ -247,16 +253,36 @@ cmd_verify() {
       warn "vitest failed in $dir"
     fi
   }
+  run_vitest_all() {
+    local dir="$1"
+    local bin
+    if ! bin="$(resolve_vitest "$dir")"; then
+      warn "vitest not installed — run npm ci at repo root; skipping tests in $dir"
+      return 0
+    fi
+    log "vitest all in $dir"
+    if ! (
+      cd "$dir" &&
+        HOME="$test_home" \
+        NODE_OPTIONS="--localstorage-file=${test_ls}" \
+        "$bin" run --reporter=dot --config vitest.config.ts
+    ); then
+      failed=1
+      warn "vitest failed in $dir"
+    fi
+  }
 
-  # Shared omp/push config tests
+  # Full shared suite is green today (~1.3k tests) and is the main PR safety net.
   if [[ -d packages/shared ]]; then
-    run_vitest packages/shared src/__tests__/omp-agent-paths.test.ts src/__tests__/config-push.test.ts || true
+    run_vitest_all packages/shared || true
   fi
-  # Server push + spawn-related tests when present
+  # Server push + ticket tests (ZGE surfaces)
   if [[ -d packages/server ]]; then
-    # glob via vitest path filters
     run_vitest packages/server src/__tests__/build-push-payload.test.ts src/__tests__/push-dispatcher.test.ts src/__tests__/push-vapid.test.ts src/__tests__/push-trigger-classifier.test.ts src/__tests__/ws-ticket.test.ts || true
-    # optional files may not exist on older tips
+  fi
+  # Client SettingsPanel (quick regression catch; needs mdiTunnel import)
+  if [[ -d packages/client ]]; then
+    run_vitest packages/client src/components/__tests__/SettingsPanel.test.tsx || true
   fi
 
   if [[ "$failed" -ne 0 ]]; then

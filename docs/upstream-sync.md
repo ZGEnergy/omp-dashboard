@@ -24,7 +24,7 @@ scripts/upstream-sync.sh pr             # force-with-lease push + upsert **one**
 Env knobs: `UPSTREAM_REF`, `TARGET_BRANCH`, `SYNC_BRANCH`, `DRY_RUN=1`, `SKIP_BUILD=1`, `SYNC_ADOPT_UPSTREAM=1`.
 
 Weekly automation: [`.github/workflows/upstream-sync.yml`](../.github/workflows/upstream-sync.yml) — always leaves **at most one** open `upstream-sync` PR (latest).  
-ZGE CI gates: [`.github/workflows/ci-zge.yml`](../.github/workflows/ci-zge.yml)
+ZGE CI gates: [`.github/workflows/ci-zge.yml`](../.github/workflows/ci-zge.yml) — required **`zge-gates`** runs shared full unit suite + ZGE focus + build; advisory job runs full monorepo `npm test` until that suite is green.
 
 ## Protected paths (ZGE wins on conflict by default)
 
