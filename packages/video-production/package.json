@@ -43,7 +43,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "vitest run"
+    "test": "node ../../node_modules/vitest/vitest.mjs run --config vitest.config.ts"
   },
   "dependencies": {
     "@blackbelt-technology/pi-dashboard-nano-banana": "^0.5.4",

@@ -1944,9 +1944,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
           });
         } else if (scope === "terminal") {
           terminalGateway.handleUpgrade(request, socket, head);
-        } else if (scope === "editor") {
-          // External code-server editor removed (upstream remove-external-editor-integration).
-          socket.destroy();
         } else if (scope === "live") {
           handleLiveServerUpgrade(liveServerManager, request, socket, head);
         } else {

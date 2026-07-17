@@ -19,6 +19,8 @@ import {
 import { enumOptionsFor } from "../lib/omp-enum-options.js";
 
 const PRIORITY_KEYS = ["defaultThinkingLevel", "cycleOrder"] as const;
+/** Must match server `omp-config-secrets.ts` keep-secret sentinel. */
+const OMP_SECRET_UNCHANGED = "__omp_secret_unchanged__";
 
 type OmpConfigEntryWithValues = OmpConfigEntry & {
   values?: readonly string[];
