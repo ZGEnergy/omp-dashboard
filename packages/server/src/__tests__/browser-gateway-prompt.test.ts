@@ -212,4 +212,81 @@ describe("browser gateway PromptBus replay and response routing", () => {
       vi.useRealTimers();
     }
   });
+
+  it("clearPromptRequestsForTool drops matching toolCallId and stops subscribe replay", async () => {
+    const piGateway = makeStubPiGateway();
+    const gateway = createBrowserGateway(
+      createMemorySessionManager(),
+      createMemoryEventStore(() => false),
+      piGateway,
+    );
+    gateway.trackPromptRequest("s1", {
+      ...promptRequest,
+      prompt: {
+        ...promptRequest.prompt,
+        metadata: { toolCallId: "tool-ask-1" },
+      },
+    });
+    gateway.trackPromptRequest("s1", secondPromptRequest);
+
+    const cleared = gateway.clearPromptRequestsForTool("s1", "tool-ask-1");
+    expect(cleared).toEqual(["prompt-1"]);
+
+    const ws = makeFakeWs();
+    connectAndSubscribe(gateway, ws, "s1");
+    await flush();
+    const replayed = sentMessages(ws).filter((m) => m.type === "prompt_request");
+    expect(replayed).toHaveLength(1);
+    expect(replayed[0]?.promptId).toBe("prompt-2");
+  });
+
+  it("clearPromptRequestsForTool leaves free-floating prompts when toolCallId has no match", async () => {
+    const piGateway = makeStubPiGateway();
+    const gateway = createBrowserGateway(
+      createMemorySessionManager(),
+      createMemoryEventStore(() => false),
+      piGateway,
+    );
+    // promptRequest has toolCallId "tool-1"; second has none after we strip it
+    gateway.trackPromptRequest("s1", promptRequest);
+    gateway.trackPromptRequest("s1", {
+      ...secondPromptRequest,
+      prompt: { ...secondPromptRequest.prompt, metadata: {} },
+    });
+
+    const cleared = gateway.clearPromptRequestsForTool("s1", "unknown-tool");
+    expect(cleared).toEqual([]);
+
+    const ws = makeFakeWs();
+    connectAndSubscribe(gateway, ws, "s1");
+    await flush();
+    expect(sentMessages(ws).filter((m) => m.type === "prompt_request").map((m) => m.promptId).sort()).toEqual([
+      "prompt-1",
+      "prompt-2",
+    ]);
+  });
+
+  it("clearPromptRequestsForTool without toolCallId only drops tool-originated prompts", async () => {
+    const piGateway = makeStubPiGateway();
+    const gateway = createBrowserGateway(
+      createMemorySessionManager(),
+      createMemoryEventStore(() => false),
+      piGateway,
+    );
+    gateway.trackPromptRequest("s1", promptRequest); // metadata.toolCallId = tool-1
+    gateway.trackPromptRequest("s1", {
+      ...secondPromptRequest,
+      prompt: { ...secondPromptRequest.prompt, metadata: {} },
+    });
+
+    const cleared = gateway.clearPromptRequestsForTool("s1");
+    expect(cleared).toEqual(["prompt-1"]);
+
+    const ws = makeFakeWs();
+    connectAndSubscribe(gateway, ws, "s1");
+    await flush();
+    const replayed = sentMessages(ws).filter((m) => m.type === "prompt_request");
+    expect(replayed).toHaveLength(1);
+    expect(replayed[0]?.promptId).toBe("prompt-2");
+  });
 });
