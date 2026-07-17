@@ -74,7 +74,7 @@ describe("usePushSubscription", () => {
     Reflect.deleteProperty(navigator, "serviceWorker");
     Reflect.deleteProperty(window, "PushManager");
     const fetchSpy = vi.fn();
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
     const { result } = renderHook(() => usePushSubscription());
     expect(result.current.supported).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -83,7 +83,7 @@ describe("usePushSubscription", () => {
   it("subscribe() POSTs the subscription to /api/push/register", async () => {
     mockServiceWorker(null);
     const fetchSpy = mockFetchOk();
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     expect(result.current.supported).toBe(true);
@@ -109,7 +109,7 @@ describe("usePushSubscription", () => {
     } as PushSubscription;
     mockServiceWorker(existing);
     const fetchSpy = mockFetchOk();
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("subscribed"));
@@ -129,7 +129,7 @@ describe("usePushSubscription", () => {
       },
     });
     const fetchSpy = mockFetchOk();
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("denied"));
@@ -145,7 +145,7 @@ describe("usePushSubscription", () => {
       },
     });
     const fetchSpy = mockFetchOk();
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
@@ -159,7 +159,7 @@ describe("usePushSubscription", () => {
   it("does not send a test push without a registered tokenId", async () => {
     mockServiceWorker(null);
     const fetchSpy = mockFetchOk();
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
@@ -180,7 +180,7 @@ describe("usePushSubscription", () => {
       }
       return { ok: true, json: async () => ({ tokenId: "tok-1" }) };
     });
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
@@ -208,7 +208,7 @@ describe("usePushSubscription", () => {
       }
       return { ok: true, json: async () => ({}) };
     });
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
@@ -228,7 +228,7 @@ describe("usePushSubscription", () => {
       if (url.includes("/api/push/register")) return { ok: false, json: async () => ({}) };
       return { ok: true, json: async () => ({}) };
     });
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("unsubscribed"));
@@ -255,7 +255,7 @@ describe("usePushSubscription", () => {
       }
       return { ok: true, json: async () => ({}) };
     });
-    globalThis.fetch = fetchSpy as typeof fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const { result } = renderHook(() => usePushSubscription());
     await waitFor(() => expect(result.current.status).toBe("subscribed"));

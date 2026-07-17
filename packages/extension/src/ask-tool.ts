@@ -165,7 +165,7 @@ async function presentOne(
   const method = methodForQuestion(q);
   if (method === "multiselect") {
     return polyfillMultiselect(
-      ctx as { ui: { multiselect?: UiCtx["ui"]["multiselect"]; custom: NonNullable<UiCtx["ui"]["custom"]> } },
+      ctx as unknown as Parameters<typeof polyfillMultiselect>[0],
       title,
       labels,
       opts,

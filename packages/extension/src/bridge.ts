@@ -10,7 +10,6 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureConfig, loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { USAGE_LIMIT_PATTERN } from "@blackbelt-technology/pi-dashboard-shared/error-patterns.js";
 import { discoverDashboard } from "@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js";
 import type { ServerToExtensionMessage } from "@blackbelt-technology/pi-dashboard-shared/protocol.js";
 import { isDashboardRunning } from "@blackbelt-technology/pi-dashboard-shared/server-identity.js";
@@ -26,37 +25,66 @@ import {
   persistAttachment,
 } from "./ask-user-attachments.js";
 import { registerAskUserTool } from "./ask-user-tool.js";
+import { type AutoNamer, createAutoNamer, type StreamSimpleFn } from "./auto-session-namer.js";
 import type { BridgeContext } from "./bridge-context.js";
-import { extractFirstMessage, filterHiddenCommands, getCurrentModelString } from "./bridge-context.js";
+import {
+  extractFirstAssistantReply,
+  extractFirstMessage,
+  filterHiddenCommands,
+  getCurrentModelString,
+} from "./bridge-context.js";
 import { shouldApplyDefaultModel } from "./bridge-default-model-gate.js";
+import { registerCanvasTool } from "./canvas-tool.js";
 import { createCommandHandler, tryExecSlashTemplate } from "./command-handler.js";
+import { buildSessionContextText, runForkSubagentDraft } from "./commit-draft-agent.js";
 import { ConnectionManager } from "./connection.js";
 import { registerDashboardContextInjector } from "./dashboard-context-injector.js";
 import { DashboardDefaultAdapter } from "./dashboard-default-adapter.js";
 import { runDevBuild } from "./dev-build.js";
+import { EmptyActionableGuard, SURFACE_MESSAGE } from "./empty-actionable-guard.js";
+import { resolveGuardConfig } from "./empty-actionable-guard-config.js";
 import { mapEventToProtocol } from "./event-forwarder.js";
 import { FLOW_EVENT_MAP, registerFlowEventListeners, SUBAGENT_EVENT_MAP } from "./flow-event-wiring.js";
 import { runGitPollTick } from "./git-poll.js";
 import { flipHasUI } from "./hasui-flip.js";
 import { inlineMessageText, type ReadFileOutcome } from "./markdown-image-inliner.js";
-import { resetReconnectCaches as _resetReconnectCaches, sendCwdMissingIfChanged as _sendCwdMissingIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged, sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendPiVersionIfChanged as _sendPiVersionIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged } from "./model-tracker.js";
+import {
+  resetReconnectCaches as _resetReconnectCaches,
+  sendCwdMissingIfChanged as _sendCwdMissingIfChanged,
+  sendGitInfoIfChanged as _sendGitInfoIfChanged,
+  sendModelUpdateIfChanged as _sendModelUpdateIfChanged,
+  sendPiVersionIfChanged as _sendPiVersionIfChanged,
+  sendSessionNameIfChanged as _sendSessionNameIfChanged,
+} from "./model-tracker.js";
 import { decodeMultiselectAnswer } from "./multiselect-decode.js";
 import { collectMetrics, startMetricsMonitor, stopMetricsMonitor } from "./process-metrics.js";
 import { getOwnPgid, scanChildProcesses } from "./process-scanner.js";
 import { PromptBus } from "./prompt-bus.js";
 import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
-import { activate as activateProviderRegister, buildProviderCatalogue, onProviderChanged, reloadProviders, toModelInfo } from "./provider-register.js";
+import {
+  activate as activateProviderRegister,
+  buildProviderCatalogue,
+  onProviderChanged,
+  reloadProviders,
+  toModelInfo,
+} from "./provider-register.js";
 import { RetryTracker } from "./retry-tracker.js";
-import { activate as activateRoleManager, getModelRole } from "./role-manager.js";
+import { activate as activateRoleManager, getModelRole, lookupRole } from "./role-manager.js";
 import { registerRoleModelTools } from "./role-model-tools.js";
 import { autoStartServer } from "./server-auto-start.js";
 import { launchServer } from "./server-launcher.js";
-import { handleSessionChange as _handleSessionChange, replaySessionEntries as _replaySessionEntries, sendStateSync as _sendStateSync } from "./session-sync.js";
+import {
+  handleSessionChange as _handleSessionChange,
+  replaySessionEntries as _replaySessionEntries,
+  sendStateSync as _sendStateSync,
+} from "./session-sync.js";
 import { tryDispatchExtensionCommand } from "./slash-dispatch.js";
 import { detectSessionSource } from "./source-detector.js";
+import { SubagentFrameBuffer } from "./subagent-frame-buffer.js";
 import { inlineToolResultImages } from "./tool-result-image-inliner.js";
+import { classifyTurnActionability } from "./turn-actionability.js";
 import { handleUiManagement, refreshUiModules, subscribeUiInvalidate, type UiModulesBridgeCtx } from "./ui-modules.js";
-import { UsageLimitOrderer } from "./usage-limit-orderer.js";
+import { detectIsGitRepo } from "./vcs-info.js";
 import { buildVisibilityRegisterFields } from "./visibility-intent.js";
 
 const HEARTBEAT_INTERVAL = 15_000;

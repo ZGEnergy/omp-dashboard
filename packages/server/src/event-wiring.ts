@@ -907,7 +907,7 @@ export function wireEvents(deps: EventWiringDeps): void {
       }
     }
 
-    if (msg.type === "replay_complete") {
+    if ((msg as { type: string }).type === "replay_complete") {
       const wasSkipped = skipReplayInsert.has(sessionId);
       replayingSessions.delete(sessionId);
       skipReplayInsert.delete(sessionId);

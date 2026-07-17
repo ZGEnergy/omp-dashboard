@@ -16,14 +16,14 @@ vi.mock("../role-manager.js", () => ({ activate: vi.fn() }));
 
 describe("bridge ask registration timing", () => {
   const bridgeKey = "__pi_dashboard_bridge__";
-  const priorBridgeState = (process as Record<string, unknown>)[bridgeKey];
+  const priorBridgeState = (process as unknown as Record<string, unknown>)[bridgeKey];
   const priorSpawnToken = process.env.PI_DASHBOARD_SPAWN_TOKEN;
 
   afterEach(() => {
     if (priorBridgeState === undefined) {
-      delete (process as Record<string, unknown>)[bridgeKey];
+      delete (process as unknown as Record<string, unknown>)[bridgeKey];
     } else {
-      (process as Record<string, unknown>)[bridgeKey] = priorBridgeState;
+      (process as unknown as Record<string, unknown>)[bridgeKey] = priorBridgeState;
     }
     if (priorSpawnToken === undefined) {
       delete process.env.PI_DASHBOARD_SPAWN_TOKEN;
@@ -40,7 +40,7 @@ describe("bridge ask registration timing", () => {
 
     // Keep initBridge from doing any runtime work: this asserts the synchronous
     // factory boundary before the headless tool registry is snapshotted.
-    (process as Record<string, unknown>)[bridgeKey] = { generation: 1, pi: {} };
+    (process as unknown as Record<string, unknown>)[bridgeKey] = { generation: 1, pi: {} };
 
     bridge(pi as never);
 
@@ -76,7 +76,7 @@ describe("bridge ask registration timing", () => {
       "ask",
       "ask_user",
     ]);
-    const activeState = (process as Record<string, { cleanup?: () => void }>)[bridgeKey];
+    const activeState = (process as unknown as Record<string, { cleanup?: () => void }>)[bridgeKey];
     activeState?.cleanup?.();
   });
 });
