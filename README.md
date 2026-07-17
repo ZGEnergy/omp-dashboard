@@ -982,11 +982,15 @@ smallest possible delta (it still tracks upstream). Changes vs upstream:
 Opinionated secure self-host (recommended): see **[`deploy/`](deploy/)** —
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ZGEnergy/omp-dashboard/omp-minimal/deploy/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ZGEnergy/omp-dashboard/main/deploy/install.sh | bash
 ```
 
 For the plain/manual route, use upstream's Quickstart paths above (point them at
 `omp`, and build from source since the fork isn't published to npm).
+
+### Tracking upstream
+
+We merge BlackBelt `develop` on a schedule via `scripts/upstream-sync.sh` and `.github/workflows/upstream-sync.yml`. Policy, protected paths, and gates: [`docs/upstream-sync.md`](docs/upstream-sync.md).
 
 ### Known gaps
 

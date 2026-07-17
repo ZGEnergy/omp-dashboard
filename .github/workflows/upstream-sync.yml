@@ -1,0 +1,172 @@
+# Keep exactly one open upstream-sync PR: stable branch force-updated each run.
+name: upstream-sync
+
+on:
+  schedule:
+    # Mondays 15:00 UTC
+    - cron: "0 15 * * 1"
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream branch to merge
+        required: false
+        default: develop
+      dry_run:
+        description: If true, only print status
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'develop' }}
+      GH_REPO: ${{ github.repository }}
+      # Stable branch — each run force-with-lease updates the same PR head
+      SYNC_BRANCH: sync/upstream-${{ github.event.inputs.upstream_ref || 'develop' }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/BlackBeltTechnology/pi-agent-dashboard.git \
+            || git remote set-url upstream https://github.com/BlackBeltTechnology/pi-agent-dashboard.git
+          git fetch upstream "$UPSTREAM_REF" --prune
+          git fetch origin main --prune
+
+      - name: Status
+        id: status
+        run: |
+          chmod +x scripts/upstream-sync.sh
+          scripts/upstream-sync.sh status | tee /tmp/upstream-status.txt
+          BEHIND=$(git rev-list --count "origin/main..upstream/${UPSTREAM_REF}")
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          SHA=$(git rev-parse --short "upstream/${UPSTREAM_REF}")
+          echo "usha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if up to date
+        if: steps.status.outputs.behind == '0'
+        run: echo "Already up to date with upstream."
+
+      - name: Dry run only
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
+        run: echo "dry_run=true; stopping before merge"
+
+      - name: Merge + upsert single PR
+        if: steps.status.outputs.behind != '0' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          scripts/upstream-sync.sh merge
+          rc=$?
+          set -e
+          echo "merge_rc=$rc"
+          if [[ $rc -eq 0 ]]; then
+            scripts/upstream-sync.sh pr
+            exit 0
+          fi
+          if [[ $rc -ne 2 ]]; then
+            exit $rc
+          fi
+
+          # Conflicts remain: publish help on the same stable branch (still one PR),
+          # close any other sync PRs, leave draft for human/agent resolution.
+          # Persist the just-written inventory outside the worktree before merge --abort
+          # (abort drops newly staged/uncommitted conflict report files).
+          DATE_TAG=$(date -u +%Y%m%d)
+          REPORT_REL="docs/upstream-sync-conflicts-${DATE_TAG}.md"
+          REPORT_TMP="/tmp/upstream-sync-conflicts-${DATE_TAG}.md"
+          if [[ -f "$REPORT_REL" ]]; then
+            cp -f "$REPORT_REL" "$REPORT_TMP"
+          elif [[ -f "$(git rev-parse --git-path MERGE_HEAD 2>/dev/null || true)" ]] || git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+            # Fallback: rebuild inventory from remaining unmerged paths before abort
+            {
+              echo "# Upstream sync conflicts (${DATE_TAG})"
+              echo
+              echo "- upstream: ${UPSTREAM_REF}@${{ steps.status.outputs.usha }}"
+              echo "- branch: ${SYNC_BRANCH}"
+              echo
+              echo "## Remaining unmerged paths"
+              echo
+              git diff --name-only --diff-filter=U | sed 's/^/- /'
+            } >"$REPORT_TMP"
+          fi
+          git merge --abort || true
+          git checkout -B "$SYNC_BRANCH" origin/main
+          mkdir -p docs
+          {
+            echo "# Upstream sync needs human/agent merge"
+            echo
+            echo "Upstream ${UPSTREAM_REF} @ ${{ steps.status.outputs.usha }} is **${{ steps.status.outputs.behind }}** commits ahead of main."
+            echo
+            echo "Automation keeps **one** open PR on ${SYNC_BRANCH} (this branch is force-updated)."
+            echo
+            echo "Resolve with:"
+            echo
+            echo '```bash'
+            echo "git fetch upstream && scripts/upstream-sync.sh merge"
+            echo "# resolve remaining paths, then:"
+            echo "scripts/upstream-sync.sh verify && scripts/upstream-sync.sh pr"
+            echo '```'
+            echo
+            if [[ -f "$REPORT_TMP" ]]; then
+              echo "## Conflict inventory"
+              echo
+              cat "$REPORT_TMP"
+            fi
+          } > docs/upstream-sync-help.md
+          git add docs/upstream-sync-help.md
+          if [[ -f "$REPORT_TMP" ]]; then
+            cp -f "$REPORT_TMP" "$REPORT_REL"
+            git add "$REPORT_REL"
+          fi
+          git commit -m "chore(sync): conflict help for ${UPSTREAM_REF}@${{ steps.status.outputs.usha }}"
+          git push --force-with-lease -u origin "$SYNC_BRANCH"
+
+          # Close other sync PRs; upsert this one as draft
+          KEEP_HEAD="$SYNC_BRANCH" GH_REPO_VAL="$GH_REPO" python3 - <<'PY'
+import json, os, subprocess
+repo = os.environ["GH_REPO_VAL"]
+keep = os.environ["KEEP_HEAD"]
+raw = subprocess.check_output(["gh","pr","list","-R",repo,"--state","open","--limit","100","--json","number,headRefName,labels"], text=True)
+for pr in json.loads(raw):
+    head = pr.get("headRefName") or ""
+    labels = {(l.get("name") if isinstance(l, dict) else l) for l in (pr.get("labels") or [])}
+    if head == keep:
+        continue
+    if not head.startswith("sync/upstream"):
+        continue
+    n = str(pr["number"])
+    body = f"Superseded by latest automated sync on `{keep}`."
+    subprocess.run(["gh","pr","close",n,"-R",repo,"--comment",body], check=False)
+PY
+
+          existing=$(gh pr list -R "$GH_REPO" --state open --head "$SYNC_BRANCH" --json number --jq '.[0].number // empty' || true)
+          TITLE="chore(sync): CONFLICTS upstream ${UPSTREAM_REF} @ ${{ steps.status.outputs.usha }}"
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" -R "$GH_REPO" --title "$TITLE" --body-file docs/upstream-sync-help.md || true
+            gh pr ready "$existing" -R "$GH_REPO" --undo 2>/dev/null || true
+          else
+            gh pr create -R "$GH_REPO" --base main --head "$SYNC_BRANCH" --draft \
+              --title "$TITLE" --label upstream-sync --body-file docs/upstream-sync-help.md
+          fi

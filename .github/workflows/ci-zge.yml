@@ -1,0 +1,41 @@
+# ZGEnergy fork gates — required for main protection once registered as a check.
+name: ci-zge
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-zge-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zge-gates:
+    name: zge-gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22"
+          cache: npm
+
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: |
+          npm ci || npm install --force
+
+      - name: Structural + focused tests + build
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: |
+          chmod +x scripts/upstream-sync.sh
+          scripts/upstream-sync.sh verify
