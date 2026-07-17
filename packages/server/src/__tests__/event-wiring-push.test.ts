@@ -313,6 +313,50 @@ describe("event-wiring push dispatch", () => {
     expect(clearPromptRequest).toHaveBeenCalledWith(SID, "prompt-1");
   });
 
+  it("clears pending PromptBus requests when an ask_user tool ends", () => {
+    const { deps, piGateway } = makeDeps({ isViewed: false, pushDispatcher: dispatcher });
+    const clearPromptRequestsForTool = vi.fn(() => ["prompt-1"]);
+    const sendToSubscribers = vi.fn();
+    (deps.browserGateway as any).clearPromptRequestsForTool = clearPromptRequestsForTool;
+    (deps.browserGateway as any).sendToSubscribers = sendToSubscribers;
+    wireEvents(deps);
+
+    piGateway.onEvent(SID, {
+      type: "event_forward",
+      sessionId: SID,
+      event: {
+        eventType: "tool_execution_end",
+        timestamp: Date.now(),
+        data: { toolName: "ask_user", toolCallId: "tool-ask-1", result: "yes" },
+      },
+    });
+
+    expect(clearPromptRequestsForTool).toHaveBeenCalledWith(SID, "tool-ask-1");
+    expect(sendToSubscribers).toHaveBeenCalledWith(
+      SID,
+      expect.objectContaining({ type: "prompt_dismiss", sessionId: SID, promptId: "prompt-1" }),
+    );
+  });
+
+  it("does not clear pending prompts on non-input-needed tool end", () => {
+    const { deps, piGateway } = makeDeps({ isViewed: false, pushDispatcher: dispatcher });
+    const clearPromptRequestsForTool = vi.fn(() => ["prompt-1"]);
+    (deps.browserGateway as any).clearPromptRequestsForTool = clearPromptRequestsForTool;
+    wireEvents(deps);
+
+    piGateway.onEvent(SID, {
+      type: "event_forward",
+      sessionId: SID,
+      event: {
+        eventType: "tool_execution_end",
+        timestamp: Date.now(),
+        data: { toolName: "bash", toolCallId: "tool-bash-1", result: "ok" },
+      },
+    });
+
+    expect(clearPromptRequestsForTool).not.toHaveBeenCalled();
+  });
+
   // Latency guarantee (tasks.md 7.5): a hanging transport must not block the
   // event pipeline. Uses a REAL dispatcher + a transport whose `send` never
   // resolves; the event handler must return synchronously regardless.

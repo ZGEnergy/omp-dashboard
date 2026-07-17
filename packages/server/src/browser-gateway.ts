@@ -113,6 +113,16 @@ export interface BrowserGateway {
   trackPromptRequest(sessionId: string, msg: Record<string, unknown>): boolean;
   /** Clear a pending PromptBus request (dismissed or cancelled) */
   clearPromptRequest(sessionId: string, promptId: string): void;
+  /**
+   * Drop pending PromptBus requests for an input-needed tool that already
+   * finished. Backstops a lost/late `prompt_dismiss` after a TUI answer so a
+   * late browser subscribe does not re-surface a dead ask as the latest card.
+   * When `toolCallId` is set, only prompts whose `prompt.metadata.toolCallId`
+   * matches are cleared; if none match (or toolCallId is absent), clear every
+   * pending prompt for the session (one ask at a time is the common case).
+   * Returns the cleared promptIds so callers can fan out `prompt_dismiss`.
+   */
+  clearPromptRequestsForTool(sessionId: string, toolCallId?: string): string[];
   /** Clear all queued PromptBus responses for a session (session unregister). */
   clearPendingPromptResponses(sessionId: string): void;
 
@@ -390,6 +400,30 @@ export function createBrowserGateway(
       sessionMap.delete(promptId);
       if (sessionMap.size === 0) pendingPromptRequests.delete(sessionId);
     }
+  }
+
+  function clearPromptRequestsForTool(sessionId: string, toolCallId?: string): string[] {
+    const sessionMap = pendingPromptRequests.get(sessionId);
+    if (!sessionMap || sessionMap.size === 0) return [];
+
+    const cleared: string[] = [];
+    if (toolCallId) {
+      for (const [promptId, msg] of sessionMap) {
+        const meta = (msg as { prompt?: { metadata?: { toolCallId?: unknown } } }).prompt?.metadata;
+        if (meta?.toolCallId === toolCallId) {
+          cleared.push(promptId);
+        }
+      }
+    }
+    // No metadata match (or no toolCallId) → clear the whole session map.
+    // A finished ask_user/ask tool means no pending PromptBus card is live.
+    if (cleared.length === 0) {
+      for (const promptId of sessionMap.keys()) cleared.push(promptId);
+    }
+    for (const promptId of cleared) {
+      clearPromptRequest(sessionId, promptId);
+    }
+    return cleared;
   }
 
   function getSubscribers(sessionId: string): WebSocket[] {
@@ -1096,6 +1130,7 @@ export function createBrowserGateway(
 
     trackPromptRequest,
     clearPromptRequest,
+    clearPromptRequestsForTool,
     clearPendingPromptResponses,
 
     shutdownHeadlessProcesses() {

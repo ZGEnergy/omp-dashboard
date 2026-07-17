@@ -212,4 +212,50 @@ describe("browser gateway PromptBus replay and response routing", () => {
       vi.useRealTimers();
     }
   });
+
+  it("clearPromptRequestsForTool drops matching toolCallId and stops subscribe replay", async () => {
+    const piGateway = makeStubPiGateway();
+    const gateway = createBrowserGateway(
+      createMemorySessionManager(),
+      createMemoryEventStore(() => false),
+      piGateway,
+    );
+    gateway.trackPromptRequest("s1", {
+      ...promptRequest,
+      prompt: {
+        ...promptRequest.prompt,
+        metadata: { toolCallId: "tool-ask-1" },
+      },
+    });
+    gateway.trackPromptRequest("s1", secondPromptRequest);
+
+    const cleared = gateway.clearPromptRequestsForTool("s1", "tool-ask-1");
+    expect(cleared).toEqual(["prompt-1"]);
+
+    const ws = makeFakeWs();
+    connectAndSubscribe(gateway, ws, "s1");
+    await flush();
+    const replayed = sentMessages(ws).filter((m) => m.type === "prompt_request");
+    expect(replayed).toHaveLength(1);
+    expect(replayed[0]?.promptId).toBe("prompt-2");
+  });
+
+  it("clearPromptRequestsForTool clears all when toolCallId has no metadata match", async () => {
+    const piGateway = makeStubPiGateway();
+    const gateway = createBrowserGateway(
+      createMemorySessionManager(),
+      createMemoryEventStore(() => false),
+      piGateway,
+    );
+    gateway.trackPromptRequest("s1", promptRequest);
+    gateway.trackPromptRequest("s1", secondPromptRequest);
+
+    const cleared = gateway.clearPromptRequestsForTool("s1", "unknown-tool");
+    expect(cleared.sort()).toEqual(["prompt-1", "prompt-2"]);
+
+    const ws = makeFakeWs();
+    connectAndSubscribe(gateway, ws, "s1");
+    await flush();
+    expect(sentMessages(ws).filter((m) => m.type === "prompt_request")).toHaveLength(0);
+  });
 });

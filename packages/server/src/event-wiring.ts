@@ -631,6 +631,30 @@ export function wireEvents(deps: EventWiringDeps): void {
         }
       }
 
+      // After an input-needed tool finishes, drop any still-tracked PromptBus
+      // requests for it. TUI answers normally emit prompt_dismiss; if that
+      // frame is lost, pendingPromptRequests would otherwise re-surface the
+      // already-answered card on the next browser subscribe (mobile open).
+      if (
+        !replayingSessions.has(sessionId) &&
+        msg.event.eventType === "tool_execution_end" &&
+        isInputNeededTool((msg.event.data?.toolName as string | undefined) ?? null)
+      ) {
+        const toolCallId =
+          typeof msg.event.data?.toolCallId === "string" ? msg.event.data.toolCallId : undefined;
+        const cleared =
+          typeof (browserGateway as any).clearPromptRequestsForTool === "function"
+            ? (browserGateway as any).clearPromptRequestsForTool(sessionId, toolCallId) as string[]
+            : [];
+        for (const promptId of cleared) {
+          browserGateway.sendToSubscribers(sessionId, {
+            type: "prompt_dismiss",
+            sessionId,
+            promptId,
+          } as any);
+        }
+      }
+
       // Unread-trigger evaluation. Only fires for live (non-replay) events
       // and only stamps when no browser is currently viewing the session.
       // The viewedSessionTracker dep is optional for backward compatibility

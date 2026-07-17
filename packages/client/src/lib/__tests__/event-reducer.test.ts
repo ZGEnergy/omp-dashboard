@@ -1353,6 +1353,64 @@ describe("command_feedback events", () => {
     });
   });
 
+  describe("stale answered ask replay (fix-stale-answered-ask-replay)", () => {
+    it("addInteractiveRequest ignores prompt when originating tool already completed", () => {
+      const withTool = applyEvents([
+        {
+          eventType: "tool_execution_start",
+          timestamp: 1,
+          data: { toolCallId: "tool-ask-1", toolName: "ask_user", args: {} },
+        },
+        {
+          eventType: "tool_execution_end",
+          timestamp: 2,
+          data: { toolCallId: "tool-ask-1", toolName: "ask_user", result: "A", isError: false },
+        },
+      ]);
+      const next = addInteractiveRequest(
+        withTool,
+        "prompt-1",
+        "select",
+        { title: "Pick one" },
+        false,
+        "tool-ask-1",
+      );
+      expect(next).toBe(withTool);
+      expect(next.interactiveRequests).toHaveLength(0);
+    });
+
+    it("tool_execution_end dismisses pending interactive card for that toolCallId", () => {
+      const initial = createInitialState();
+      const withAsk = addInteractiveRequest(
+        initial,
+        "prompt-1",
+        "select",
+        { title: "Pick one" },
+        false,
+        "tool-ask-1",
+      );
+      const seeded: SessionState = {
+        ...withAsk,
+        toolCalls: new Map(withAsk.toolCalls).set("tool-ask-1", {
+          toolCallId: "tool-ask-1",
+          toolName: "ask_user",
+          args: {},
+          status: "running",
+          startedAt: 1,
+        }),
+      };
+      const ended = reduceEvent(seeded, {
+        eventType: "tool_execution_end",
+        timestamp: 3,
+        data: { toolCallId: "tool-ask-1", toolName: "ask_user", result: "A", isError: false },
+      });
+      expect(ended.interactiveRequests[0]?.status).toBe("dismissed");
+      expect((ended.messages.find((m) => m.role === "interactiveUi")?.args as any)?.status).toBe(
+        "dismissed",
+      );
+    });
+  });
+
   describe("duration tracking", () => {
     it("should store startedAt on tool_execution_start messages", () => {
       const state = applyEvents([
