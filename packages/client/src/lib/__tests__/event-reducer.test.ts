@@ -2250,6 +2250,45 @@ describe("command_feedback events", () => {
     expect(state.toolCalls.get(`late-end-${isError}`)?.status).toBe(status);
   });
 
+  it("delayed tool_execution_start after end does not resurrect running status", () => {
+    const state = applyEvents([
+      {
+        eventType: "tool_execution_end",
+        timestamp: 3000,
+        data: {
+          toolCallId: "end-first",
+          toolName: "bash",
+          args: { command: "ls" },
+          result: "ok",
+          isError: false,
+        },
+      },
+      {
+        eventType: "tool_execution_start",
+        timestamp: 3100,
+        data: {
+          toolCallId: "end-first",
+          toolName: "bash",
+          args: { command: "ls" },
+        },
+      },
+    ]);
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({
+      toolCallId: "end-first",
+      toolName: "bash",
+      toolStatus: "complete",
+      result: "ok",
+    });
+    expect(state.toolCalls.get("end-first")).toMatchObject({
+      toolCallId: "end-first",
+      toolName: "bash",
+      status: "complete",
+      result: "ok",
+    });
+    expect(state.currentTool).toBeUndefined();
+  });
+
   it("does not let a superseded heal create a phantom row", () => {
     const state = applyEvents([{
       eventType: "tool_execution_end",

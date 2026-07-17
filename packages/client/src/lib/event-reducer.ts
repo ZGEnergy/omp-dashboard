@@ -1539,18 +1539,35 @@ export function reduceEvent(
       const startDetails = data.details && typeof data.details === "object"
         ? data.details as Record<string, unknown>
         : undefined;
-      next.toolCalls.set(toolCallId, {
-        toolCallId,
-        toolName,
-        args,
-        status: "running",
-        startedAt: event.timestamp,
-        // Stamp the emitting inference index; its own `message_start` has
-        // already advanced the counter, so only a LATER inference satisfies the
-        // supersede proof. See change: fix-stuck-tool-card-superseded-heal.
-        emittedAtInferenceSeq: next.assistantInferenceSeq,
-      });
-      next.currentTool = toolName;
+      // End-before-start (and re-replay of start after end) must not resurrect a
+      // terminal map entry as running — that puts completed tools back into the
+      // in-flight list / stale-heal path while the message card stays complete.
+      const existingCall = next.toolCalls.get(toolCallId);
+      const existingIsTerminal =
+        existingCall?.status === "complete" || existingCall?.status === "error";
+      if (existingIsTerminal && existingCall) {
+        next.toolCalls.set(toolCallId, {
+          ...existingCall,
+          toolCallId,
+          toolName: toolName !== "unknown" ? toolName : existingCall.toolName,
+          ...(args !== undefined ? { args } : {}),
+          // Preserve terminal status/result/startedAt/emittedAtInferenceSeq.
+        });
+        // Do not set currentTool — call is already finished.
+      } else {
+        next.toolCalls.set(toolCallId, {
+          toolCallId,
+          toolName,
+          args,
+          status: "running",
+          startedAt: event.timestamp,
+          // Stamp the emitting inference index; its own `message_start` has
+          // already advanced the counter, so only a LATER inference satisfies the
+          // supersede proof. See change: fix-stuck-tool-card-superseded-heal.
+          emittedAtInferenceSeq: next.assistantInferenceSeq,
+        });
+        next.currentTool = toolName;
+      }
 
       // Track file-modifying tools
       const toolLower = toolName.toLowerCase();
