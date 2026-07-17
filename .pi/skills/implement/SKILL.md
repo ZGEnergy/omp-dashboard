@@ -71,6 +71,18 @@ npx tsx ./scripts/review-changes.ts                            # default: skips 
 
 > openspec-apply: the `review-code` inner-loop pass runs after each task's code is written; the CodeRabbit gate is opt-in at ship (ship-change owns the PR-time review). Both run in the worktree without touching the main server.
 
+## Subagent checkpoints (apply loop) — offload read/write-light work, keep the builder inline
+
+The builder (this loop) owns all decisions and code writes — coherence stays in one context. Spawn a subagent (explicit `Agent` call) only at these signals, to keep the main context sharp:
+
+| Signal in the task / diff | Spawn | Why isolated |
+|---|---|---|
+| touches auth, secrets, PII, untrusted input, webhooks, or a latency/throughput budget | `Audit` | deep read-only risk pass → findings; fix inline |
+| contextFiles list is large (many files / big) | `Explore` | distill the spec; else read directly for coherence |
+| a change landed and `docs/` prose needs updating | `DocScribe` | Rule-6 docs-delegation; caveman-style writes |
+
+Review stays a **skill** (`review-code`), not a subagent — review+fix is coherence-critical and wants full context. Tests: run+capture inline (tee→grep); root-cause via `systematic-debugging` inline. Full rationale: `docs/skills-as-subagents.md`.
+
 ## The discipline — write less code, write the right code
 
 The full code-discipline reference lives in [`references/code-discipline.md`](references/code-discipline.md). It expands `AGENTS.md` "Code Instructions" with concrete patterns, anti-patterns, and examples. Headline rules:

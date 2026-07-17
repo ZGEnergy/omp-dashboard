@@ -260,6 +260,16 @@ Delegate specialist work to the matching subagent instead of doing it inline. Su
 | `typescript-expert` | Type-system work, generics, strict-mode fixes, async/Promise typing, `.d.ts` authoring. |
 | `nodejs-expert` | Server-side async, streams, perf, Node API usage in `src/server/`, `packages/server/`, Electron main process. |
 | `tailwind-expert` | Utility-class refactors, responsive breakpoints, design-token audits, dark-mode plumbing. |
+| `Audit` | Deep security + performance risk pass on a specific diff (read-only, returns labelled findings; parent fixes inline). Wraps `security-hardening` + `performance-optimization` analysis. Narrow+deep — complements `review-code`'s broad per-change pass. |
+| `DocScribe` | Write `docs/` prose for a landed change in caveman style (the Rule-6 docs-delegation target). Self-contained: pass it the diff + target doc paths. Returns proposed non-docs tree rows for the parent to apply. |
+
+**Apply-loop spawn checkpoints** (openspec-apply / implement) — spawn via an explicit `Agent` call when the diff signal appears; keeps the builder inline (coherence) and offloads only read/write-light work:
+
+| Signal in the task / diff | Spawn |
+|---|---|
+| change touches auth, secrets, PII, untrusted input, webhooks, or a latency/throughput budget | `Audit` (before commit; fix findings inline) |
+| contextFiles list is large (many files / exceeds a comfortable read) | `Explore` (distill the spec; else read directly for coherence) |
+| a change landed and `docs/` prose needs updating | `DocScribe` (after the code + tree rows are settled) |
 
 Rules:
 - One specialist per task. Don't chain react-expert → typescript-expert if a single pass covers it.

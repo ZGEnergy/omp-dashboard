@@ -159,6 +159,8 @@ Per-Tier-A/B model pick:
 | AntiSlopReview (`anti-slop-frontend`) | `@vision` | Reviews rendered UI |
 | DocConvert (`document-converter`) | `@fast` | Deterministic conversion |
 | DashboardOps (`pi-dashboard`) | `@fast` | REST orchestration glue |
+| Audit (security-hardening + performance-optimization) | `glm-5.2` / `@research` | Deep step-by-step analysis over untrusted-input + latency-critical paths; returns findings report (fix inline) |
+| DocScribe (docs prose writer) | `@compact` | Caveman-style `docs/` updates for landed changes; AGENTS.md Rule-6 delegation target |
 
 ## 5. Context, KB & sibling-skill injection per skill
 
@@ -207,16 +209,18 @@ Repo-specific conventions:
 - Helper scripts in **TypeScript**, run with `bun` (or `node ≥22`), Node built-ins only, no build step.
 - Caveman style for tree rows / architecture notes; readable prose for standalone docs like this one.
 
-## 7. Tier A wrappers shipped with this doc
+## 7. Tier A/B wrappers shipped with this doc
 
-Generated alongside this doc under `.pi/agents/`:
+Generated alongside this doc under `.pi/agents/` (project tier — see §8):
 
-| Agent file | Wraps skill | Model | `inherit_context` |
-|---|---|---|---|
-| `Transcribe.md` | `video-transcription` | `@fast` | false |
-| `SessionGuideline.md` | `session-to-guideline` | `@research` | false |
-| `DocSummarize.md` | `doc-summarizer` | `@research` (chunks `@fast`) | false |
-| `KbLookup.md` | `kb-search` | `@fast` | false |
+| Agent file | Wraps / purpose | Model | `inherit_context` | Tier |
+|---|---|---|---|---|
+| `Transcribe.md` | `video-transcription` | `@fast` | false | A |
+| `SessionGuideline.md` | `session-to-guideline` | `@research` | false | A |
+| `DocSummarize.md` | `doc-summarizer` | `@research` (chunks `@fast`) | false | A |
+| `KbLookup.md` | `kb-search` | `@fast` | false | A |
+| `Audit.md` | `security-hardening` + `performance-optimization` analysis | `glm-5.2` / `@research` | false | B |
+| `DocScribe.md` | `docs/` prose writer (Rule-6 delegation) | `@compact` | false | B |
 
 Spawn via the `Agent` tool with the matching `subagent_type`. Each returns a distilled report,
 not raw output — protecting the parent's context budget.
