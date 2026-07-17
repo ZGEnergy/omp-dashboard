@@ -474,7 +474,7 @@ describe("ChatView", () => {
         </ThemeProvider>,
       );
 
-      expect(scrollEl.scrollTop).toBe(950);
+      expect(scrollEl.scrollTop).toBe(1450); // D5 height-delta compensation
     });
 
     it("clicking scroll-to-bottom button uses instant scroll while streaming", () => {

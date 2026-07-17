@@ -155,7 +155,7 @@ describe("useMessageHandler session-tail-rehydrate", () => {
 
     expect(historyWindowRef.current.has(SID)).toBe(false);
     expect(historyWindowMapRef.current.has(SID)).toBe(false);
-    expect(loadingOlderMapRef.current.get(SID)).toBe(false);
+    expect(loadingOlderMapRef.current.has(SID)).toBe(false);
   });
 
   it("does not invent hasMoreOlder from warm deltas without window meta", () => {

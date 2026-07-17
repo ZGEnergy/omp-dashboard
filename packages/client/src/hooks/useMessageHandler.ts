@@ -132,10 +132,6 @@ export interface MessageHandlerDeps {
    * See change: show-chat-history-loading-indicator.
    */
   loadingHistoryTimersRef: React.MutableRefObject<Map<string, ReturnType<typeof setTimeout>>>;
-  /** Client-side tail-window metadata used to request older history pages. */
-  historyWindowRef?: React.MutableRefObject<Map<string, { minSeq: number; hasMoreOlder: boolean }>>;
-  setHistoryWindowMap?: React.Dispatch<React.SetStateAction<Map<string, { minSeq: number; hasMoreOlder: boolean }>>>;
-  setLoadingOlderMap?: React.Dispatch<React.SetStateAction<Map<string, boolean>>>;
   /**
    * Live snapshot of pinned dirs + workspaces + sessions for the
    * `isVisibleCwd` check that gates the off-screen spawn_error toast.

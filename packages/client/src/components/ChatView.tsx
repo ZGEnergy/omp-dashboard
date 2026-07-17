@@ -79,12 +79,6 @@ interface Props {
    * session. See change: show-chat-history-loading-indicator.
    */
   loadingHistory?: boolean;
-  /** True when the server has retained events older than the current tail window. */
-  hasMoreOlder?: boolean;
-  /** True while an older history page is being fetched. */
-  loadingOlder?: boolean;
-  /** Request the next older history page when the viewport reaches the top. */
-  onLoadOlder?: () => void;
   /**
    * Client-only signal: the user manually collapsed the LIVE streaming
    * reasoning block. Sets `streamingThinkingCollapsed` on the session state so
@@ -595,16 +589,15 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       // See change: session-tail-rehydrate (D5 load-older anchor).
       if (stickToBottomRef.current) {
         if (!isSelectingRef.current) el.scrollTop = nextH;
+      } else if (ascendingRef.current) {
+        // Ascending owns scroll lock — re-target top; do not D5-compensate.
+        if (el.scrollTop <= 0) ascendingRef.current = false;
+        else virtualizer.scrollToIndex(0, { align: "start" });
       } else if (prevH > 0) {
+        // Unstuck mid-history: keep viewport content under load-older prepend.
         el.scrollTop += nextH - prevH;
       }
       lastScrollHeightRef.current = nextH;
-      // Ascending: re-target index 0 whenever a measurement grows the total
-      // size (above-viewport row mount/measure, incl. async image remeasure).
-      if (ascendingRef.current) {
-        if (el.scrollTop <= 0) ascendingRef.current = false;
-        else virtualizer.scrollToIndex(0, { align: "start" });
-      }
     },
   });
   const virtualItems = virtualizer.getVirtualItems();
