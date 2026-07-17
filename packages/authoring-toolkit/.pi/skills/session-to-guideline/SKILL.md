@@ -24,9 +24,11 @@ Two layers:
    the active branch and emits a structured **facts sheet** (prompts in order, tool usage,
    files written/edited, searches, skills/memories created, failed commands, cost). This is
    raw material, not the deliverable. TypeScript, run with `npx tsx` (repo convention).
-2. **Synthesis (you, the agent)** — read the facts sheet and write the guideline using
+2. **Synthesis** — read the facts sheet and write the guideline using
    `references/guideline-template.md`. The *why it's effective* and *what to steer* parts
-   require judgment; that's your job.
+   require judgment. Run it inline for a single session, or delegate to the
+   **`SessionGuideline` subagent** for batch / past-session application (see below) — the
+   synthesis is self-contained (facts sheet in, one guideline out), so it isolates cleanly.
 
 ## Where sessions live
 
@@ -77,6 +79,36 @@ Two layers:
    When the write-up references images (storyboards, screenshots), link them with paths
    relative to `Prompt stories/` (e.g. `../Projektek/<Project>/.../shot_01.png`) and verify
    each resolves. Tell the user the path.
+
+## Batch / past-session application (via the `SessionGuideline` subagent)
+
+The synthesis is self-contained — facts sheet in, one guideline out, no coherence with any
+ongoing work — so it is a clean subagent job. For a SINGLE interactive session, running it
+inline (above) is fine. For applying to MANY past sessions, delegate each to the
+**`SessionGuideline`** subagent so the facts sheet and the reasoning stay out of the main
+context and sessions don't accumulate there:
+
+1. List the target sessions once:
+   ```bash
+   npx tsx scripts/list_sessions.ts --cwd "$(pwd)" --limit 50    # or --all
+   ```
+2. For each session id, spawn `SessionGuideline` (explicit `Agent` call), passing the
+   session id + an explicit output path. Each spawn runs BOTH layers in isolation
+   (extract → synthesise) and returns only the written path + a short abstract:
+   ```
+   Agent(subagent_type="SessionGuideline",
+         prompt="session id <id>; cwd <dir>; write to Prompt stories/<Topic>.md")
+   ```
+3. Collect the returned paths. Run spawns sequentially (or in small parallel batches) so
+   the git tree / disk stays sane.
+
+**Model role.** The synthesis is judgment-heavy WRITING on a SMALL, pre-condensed input
+(the extract script shrinks the JSONL first — it is NOT a long-context job). Quality lives
+in the insight sections (goal-vs-steering, steering→guardrails, why-skills-effective),
+where a weak model produces generic slop. Use **`@research`** (the subagent's default) for
+quality. For bulk backfill where cost dominates, **`@compact`** is the budget fallback
+(mechanical sections stay fine; insight degrades) — pass `model` on the `Agent` call to
+override per run.
 
 ## Selector cheatsheet
 

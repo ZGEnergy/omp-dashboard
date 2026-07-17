@@ -7,7 +7,7 @@ Web-based dashboard for monitoring and interacting with pi agent sessions remote
 
 ## Docs-First Gate — kb before grep
 
-`kb_*` tools are faster and cheaper than raw search: they return a one-line purpose + key exports per file instead of raw bytes. For any project-specific "where is X" / "how does Y work" / symbol lookup, run the kb call FIRST. **When your reflex is the left column, run the right column instead:**
+`kb_*` tools are faster and cheaper than raw search: they return a one-line purpose + key exports per file instead of raw bytes. **This gate fires on the ACTION, not the intent** — before you type `grep`/`rg` for a symbol, `cat`/Read a file to learn what it does, or chase an import, the kb call goes first. It fires **even mid-task when you already know the file**: executing a known edit still means kb the symbol/file first, then edit. Do not exclude yourself because you think you already know where X is. **When your reflex is the left column, run the right column instead:**
 
 | You're about to… | Do this FIRST instead |
 |---|---|
@@ -262,6 +262,7 @@ Delegate specialist work to the matching subagent instead of doing it inline. Su
 | `tailwind-expert` | Utility-class refactors, responsive breakpoints, design-token audits, dark-mode plumbing. |
 | `Audit` | Deep security + performance risk pass on a specific diff (read-only, returns labelled findings; parent fixes inline). Wraps `security-hardening` + `performance-optimization` analysis. Narrow+deep — complements `review-code`'s broad per-change pass. |
 | `DocScribe` | Write `docs/` prose for a landed change in caveman style (the Rule-6 docs-delegation target). Self-contained: pass it the diff + target doc paths. Returns proposed non-docs tree rows for the parent to apply. |
+| `SessionGuideline` | Turn a pi session into a how-we-did-it playbook (wraps `/skill:session-to-guideline`). `@research` for quality (judgment-heavy writing on a pre-condensed facts sheet; `@compact` for bulk backfill). Best for batch-documenting MANY past sessions — one spawn per session id, each isolated. Pass session id + output path. |
 
 **Apply-loop spawn checkpoints** (openspec-apply / implement) — spawn via an explicit `Agent` call when the diff signal appears; keeps the builder inline (coherence) and offloads only read/write-light work:
 
