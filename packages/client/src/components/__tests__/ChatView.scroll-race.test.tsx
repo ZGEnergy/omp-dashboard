@@ -193,6 +193,191 @@ describe("ChatView sticky scroll", () => {
     // Escape respected: button re-appears, no forced pin.
     expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
   });
+
+  /**
+   * Cold return / full replay often wipes then rebuilds messages without
+   * changing `sessionId`. Restore only runs on sessionId change, so a prior
+   * scroll-lock would leave stickToBottom=false while history floods in.
+   * loadingHistory true→false re-pins bottom unless the user escapes mid-hydrate.
+   * See change: session-tail-rehydrate.
+   */
+  describe("hydrate land after same-session wipe/rebuild", () => {
+    it("re-pins to bottom after empty wipe + full history even if stick was escaped before hydrate", async () => {
+      const { container, rerender } = render(
+        <ThemeProvider>
+          <ChatView sessionId="s-hydrate" state={stateWith(40)} toolContext={defaultToolContext} />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      const scrollEl = getScrollContainer(container);
+      // User (or estimate-correction scroll event) leaves the bottom.
+      setScrollPosition(scrollEl, 200, 4000, 400);
+      fireEvent.scroll(scrollEl);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+
+      // Full wipe: same sessionId, empty transcript + loadingHistory.
+      rerender(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-hydrate"
+            state={createInitialState()}
+            toolContext={defaultToolContext}
+            loadingHistory={true}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      const rebuilt = stateWith(80);
+      rebuilt.messages[rebuilt.messages.length - 1] = {
+        id: "asst-last",
+        role: "assistant",
+        content: "final agent reply",
+        timestamp: Date.now(),
+      };
+      rebuilt.messages[40] = {
+        id: "asst-mid",
+        role: "assistant",
+        content: "mid-history agent reply that looks like a resume target",
+        timestamp: Date.now(),
+      };
+
+      // Layout lag: content taller than viewport, scrollTop still mid.
+      setScrollPosition(scrollEl, 200, 8000, 400);
+      rerender(
+        <ThemeProvider>
+          <ChatView sessionId="s-hydrate" state={rebuilt} toolContext={defaultToolContext} loadingHistory={false} />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      expect(scrollEl.scrollTop).toBe(8000);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+    });
+
+    it("first visit with empty then hydrate still chases bottom while stick is armed", async () => {
+      const { container, rerender } = render(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-cold"
+            state={createInitialState()}
+            toolContext={defaultToolContext}
+            loadingHistory={true}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      const scrollEl = getScrollContainer(container);
+      setScrollPosition(scrollEl, 0, 400, 400);
+      fireEvent.scroll(scrollEl);
+
+      setScrollPosition(scrollEl, 0, 5000, 400);
+      rerender(
+        <ThemeProvider>
+          <ChatView sessionId="s-cold" state={stateWith(60)} toolContext={defaultToolContext} loadingHistory={false} />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      expect(scrollEl.scrollTop).toBe(5000);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+    });
+
+    // Session-switch + cold return is covered by the wipe/rebuild case above
+    // (same-session loadingHistory true→false re-pin) plus cold-open stick arming.
+
+    it("programmatic mid-list scroll during hydrate does not kill live stick after land", async () => {
+      // Regression: virtualizer pin/measurement fires scroll without a user
+      // gesture. Treating those as escape left stick=false after tail hydrate,
+      // so live streaming no longer auto-followed.
+      // See change: session-tail-rehydrate (live-follow after hydrate).
+      const { container, rerender } = render(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-live"
+            state={createInitialState()}
+            toolContext={defaultToolContext}
+            loadingHistory={true}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      const scrollEl = getScrollContainer(container);
+      // Programmatic "jump" mid-list while hydrating — no wheel/touch.
+      setScrollPosition(scrollEl, 100, 5000, 400);
+      fireEvent.scroll(scrollEl);
+
+      // Hydrate completes with content; must re-pin and keep stick.
+      setScrollPosition(scrollEl, 100, 5000, 400);
+      rerender(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-live"
+            state={stateWith(40)}
+            toolContext={defaultToolContext}
+            loadingHistory={false}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+      expect(scrollEl.scrollTop).toBe(5000);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+
+      // Further content growth must still be chased (live follow).
+      setScrollPosition(scrollEl, 5000, 6000, 400);
+      rerender(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-live"
+            state={stateWith(55)}
+            toolContext={defaultToolContext}
+            loadingHistory={false}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+      expect(scrollEl.scrollTop).toBe(6000);
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
+    });
+
+    it("real wheel during hydrate still allows escape from stick", async () => {
+      const { container, rerender } = render(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-esc"
+            state={createInitialState()}
+            toolContext={defaultToolContext}
+            loadingHistory={true}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      const scrollEl = getScrollContainer(container);
+      fireEvent.wheel(scrollEl, { deltaY: -40 });
+      setScrollPosition(scrollEl, 50, 5000, 400);
+      fireEvent.scroll(scrollEl);
+
+      setScrollPosition(scrollEl, 50, 5000, 400);
+      rerender(
+        <ThemeProvider>
+          <ChatView
+            sessionId="s-esc"
+            state={stateWith(40)}
+            toolContext={defaultToolContext}
+            loadingHistory={false}
+          />
+        </ThemeProvider>,
+      );
+      await flushRaf();
+
+      // Escaped mid-hydrate: do not force re-pin; scroll-to-bottom button shows.
+      expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+    });
+  });
 });
 
 // Scroll-to-top affordance (change: fix-chat-scroll-to-top-estimate-drift,
@@ -263,5 +448,127 @@ describe("ChatView scroll-to-top", () => {
       </ThemeProvider>,
     );
     expect(scrollEl.scrollTop).toBe(before); // not yanked to scrollHeight (2000)
+  });
+});
+
+describe("ChatView load-older + prepend scroll anchor (session-tail-rehydrate)", () => {
+  it("calls onLoadOlder once when scrolled near the top with hasMoreOlder; silent while scrollTop is high", async () => {
+    const onLoadOlder = vi.fn();
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView
+          state={stateWith(50)}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          loadingOlder={false}
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const scrollEl = getScrollContainer(container);
+
+    // Park well below the near-top band: onLoadOlder must NOT fire here.
+    // (SCROLL_THRESHOLD gates both the bottom-pin and the load-older trigger;
+    // 500 is comfortably above it.) Two scrolls mirror the escape tests so the
+    // virtualizer's measurement onChange settles stick=false without a pin.
+    setScrollPosition(scrollEl, 500, 2000, 400);
+    fireEvent.scroll(scrollEl);
+    setScrollPosition(scrollEl, 500, 2000, 400);
+    fireEvent.scroll(scrollEl);
+    expect(onLoadOlder).not.toHaveBeenCalled();
+
+    // Cross into the near-top band. scrollHeight is unchanged so the virtual
+    // range does not grow — the only handleScroll that crosses the threshold
+    // fires onLoadOlder exactly once.
+    setScrollPosition(scrollEl, 0, 2000, 400);
+    fireEvent.scroll(scrollEl);
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicking data-testid=load-older-button fires onLoadOlder", async () => {
+    const onLoadOlder = vi.fn();
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView
+          state={stateWith(5)}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          loadingOlder={false}
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const button = container.querySelector('[data-testid="load-older-button"]');
+    expect(button).not.toBeNull();
+    fireEvent.click(button!);
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("prepend growth while not sticking compensates scrollTop by height delta", async () => {
+    // See change: session-tail-rehydrate (D5 load-older anchor).
+    // Product path: virtualizer onChange (or messages.length layout fallback)
+    // adds height delta to scrollTop when stick is false so prepended older
+    // rows keep the same content under the viewport.
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView state={stateWith(50)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const scrollEl = getScrollContainer(container);
+    let top = 400;
+    Object.defineProperty(scrollEl, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = Number(v);
+      },
+    });
+    Object.defineProperty(scrollEl, "clientHeight", {
+      configurable: true,
+      value: 400,
+      writable: true,
+    });
+    Object.defineProperty(scrollEl, "scrollHeight", {
+      configurable: true,
+      value: 2000,
+      writable: true,
+    });
+
+    // Escape sticky bottom (mid-list).
+    fireEvent.scroll(scrollEl);
+    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+
+    // Seed lastScrollHeightRef at 2000 (mount often sees jsdom height 0).
+    rerender(
+      <ThemeProvider>
+        <ChatView state={stateWith(51)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    top = 400;
+    fireEvent.scroll(scrollEl);
+
+    // Grow height before message-count update so onChange/layout see the delta.
+    Object.defineProperty(scrollEl, "scrollHeight", {
+      configurable: true,
+      value: 3000,
+      writable: true,
+    });
+    rerender(
+      <ThemeProvider>
+        <ChatView state={stateWith(80)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    // 400 + (3000 - 2000) = 1400; stick path would pin to 3000.
+    expect(top).toBe(1400);
+    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
   });
 });

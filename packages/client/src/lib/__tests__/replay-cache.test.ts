@@ -55,12 +55,46 @@ describe("replay-cache", () => {
     expect(await writer.get("sess-a")).toBeNull();
   });
 
-  it("skips persisting a session whose payload exceeds the per-session byte cap", async () => {
+  it("trims over-budget payload to newest events and persists the tail", async () => {
+    // Tiny budget so a handful of events overflow; put must keep newest, not drop.
     const cache = createReplayCache({ factory, maxBytesPerSession: 200 });
     const big = Array.from({ length: 50 }, (_, i) => evt(i + 1));
     await cache.put("huge", { maxSeq: 50, payload: big });
-    // Over-cap payload is not persisted → next load full-replays.
-    expect(await cache.get("huge")).toBeNull();
+    const hit = await cache.get("huge");
+    expect(hit).not.toBeNull();
+    expect(hit!.payload.length).toBeGreaterThan(0);
+    expect(hit!.payload.length).toBeLessThan(50);
+    // Newest seqs only, ascending
+    expect(hit!.payload[hit!.payload.length - 1]!.seq).toBe(50);
+    expect(hit!.maxSeq).toBe(50);
+    for (let i = 1; i < hit!.payload.length; i++) {
+      expect(hit!.payload[i]!.seq).toBeGreaterThan(hit!.payload[i - 1]!.seq);
+    }
+    // Guarantee: persisted array serialization never exceeds the byte budget.
+    expect(JSON.stringify(hit!.payload).length).toBeLessThanOrEqual(200);
+  });
+
+  it("recheck trims array serialization, not just per-entry byte sum", async () => {
+    // selectNewestEventsByBudget sums per-entry JSON.stringify length; the
+    // persisted array serialization adds commas + brackets, so a window whose
+    // per-entry sum fits the budget can still overflow once array overhead is
+    // counted. put() must recheck the full array serialization and drop oldest
+    // remaining events until it fits (or the window empties).
+    const entryLen = JSON.stringify(evt(1)).length;
+    // Budget fits exactly two entries by per-entry sum (2 * entryLen) but the
+    // array serialization of two entries (2 * entryLen + comma + brackets) overflows.
+    const budget = 2 * entryLen;
+    const cache = createReplayCache({ factory, maxBytesPerSession: budget });
+    await cache.put("s", { maxSeq: 3, payload: [evt(1), evt(2), evt(3)] });
+    const hit = await cache.get("s");
+    expect(hit).not.toBeNull();
+    // Two entries fit by per-entry sum, but their array serialization overflows,
+    // so the recheck drops the oldest leaving exactly the newest event.
+    expect(hit!.payload.length).toBe(1);
+    expect(hit!.payload[0]!.seq).toBe(3);
+    expect(hit!.maxSeq).toBe(3);
+    // Guarantee: persisted array serialization never exceeds the byte budget.
+    expect(JSON.stringify(hit!.payload).length).toBeLessThanOrEqual(budget);
   });
 
   it("evicts the least-recently-accessed entry past the cap", async () => {

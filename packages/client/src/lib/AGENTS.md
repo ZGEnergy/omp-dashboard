@@ -85,13 +85,14 @@ Files in this directory. One row per source file.
 | `providers-api.ts` | Fetch helper for custom-LLM-provider management. Exports `TestProviderInput`, `TestProviderResult` (discriminated union), `testProvider(input)` — POST `/api/providers/test` verifying baseUrl+apiKey+api against upstream `/models` without saving; `apiKey` accepts literal, `$ENV_VAR` ref, or `"***"` (resolved server-side from saved provider). |
 | `rail-width.ts` | Per-session browse-rail width, localStorage `pi-dashboard:rail:<id>`, clamp [160,480], default 224. `useRailWidth`. Independent of outer split ratio. See change: split-editor-workspace. |
 | `rehydrate-session.ts` | rehydrateSession(sessionId,cache). Cache hit → re-reduce raw payload via reduceEvent into provisional… → see `rehydrate-session.ts.AGENTS.md` |
-| `replay-cache.ts` | Durable per-session replay cache. IndexedDB.… → see `replay-cache.ts.AGENTS.md` |
+| `replay-cache.ts` | Durable per-session replay cache. IndexedDB. put trims newest-by-byte-budget (schema v2, ~4 MiB). → see `replay-cache.ts.AGENTS.md` |
 | `replay-persist.ts` | Debounced replay-cache writer. createReplayPersister(cache,debounceMs). → see `replay-persist.ts.AGENTS.md` |
 | `route-builders.ts` | URL builders for shell overlay routes: `buildOpenSpecPreviewUrl`, `buildOpenSpecArchiveUrl`,… → see `route-builders.ts.AGENTS.md` |
 | `selectedSessionId.ts` | Pure derivation of selected session id from wouter route matches. → see `selectedSessionId.ts.AGENTS.md` |
 | `selectViewedSessionId.ts` | Pure selector for currently-viewed session id from `/session/:id` route. → see `selectViewedSessionId.ts.AGENTS.md` |
 | `server-switch.ts` | `performServerSwitch(target, deps)` — extracted two-phase transaction (stage → commit) from `App.tsx`'s… → see `server-switch.ts.AGENTS.md` |
 | `session-card-time.ts` | Pure picker of session-card relative-time badge anchor timestamp. Exports `selectBadgeTimestamp(session)`. → see `session-card-time.ts.AGENTS.md` |
+| `session-subscribe.ts` | Cold/warm/load-older subscribe message builders (`mode:"tail"`, `fromSeq`). See change: session-tail-rehydrate. |
 | `session-display-name.ts` | Pure derivation of session display name. Exports `getSessionDisplayName(session)` → name → firstMessage (truncated 50 chars) → cwd last segment → ID prefix (8 chars). |
 | `session-filter-storage.ts` | localStorage persistence for session-list filter state. Exports `removeLegacyHiddenSessions`,… → see `session-filter-storage.ts.AGENTS.md` |
 | `session-grouping.ts` | Pure session grouping/sorting/filtering utilities. Exports `DirectoryGroup`, `WorkspaceGroup`,… → see `session-grouping.ts.AGENTS.md` |

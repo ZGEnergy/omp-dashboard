@@ -64,6 +64,8 @@ interface Props {
   hideStatusIcon?: boolean;
   onAbort?: () => void;
   onForceKill?: () => void;
+  /** When true, show a "superseded" badge (retried tool call). */
+  isSuperseded?: boolean;
 }
 
 const statusIcons: Record<string, ReactNode> = {
@@ -72,7 +74,7 @@ const statusIcons: Record<string, ReactNode> = {
   error: <Icon path={mdiAlertCircle} size={0.55} />,
 };
 
-export function ToolCallStep({ toolName, toolCallId, args, status, result, images, context, startedAt, duration, toolDetails, showResultBody = true, hideStatusIcon = false, onAbort, onForceKill }: Props) {
+export function ToolCallStep({ toolName, toolCallId, args, status, result, images, context, startedAt, duration, toolDetails, showResultBody = true, hideStatusIcon = false, onAbort, onForceKill, isSuperseded = false }: Props) {
   const isMobile = useMobile();
   const hasImages = images && images.length > 0;
   const isAgentRunning = toolName === "Agent" && status === "running";
