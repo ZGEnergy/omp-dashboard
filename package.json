@@ -49,7 +49,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "postinstall": "node scripts/maybe-patch-package.cjs && node scripts/fix-pty-permissions.cjs",
+    "postinstall": "node scripts/maybe-patch-package.cjs && node scripts/fix-pty-permissions.cjs && node scripts/ensure-gh-default.cjs",
     "dev": "npm run dev --workspace=@blackbelt-technology/pi-dashboard-web",
     "build": "npm run build --workspace=@blackbelt-technology/pi-dashboard-web",
     "test": "HOME=$(mktemp -d -t pi-test-XXXXXX) NODE_OPTIONS=\"--localstorage-file=$(mktemp -t pi-test-ls-XXXXXX)\" vitest run",
