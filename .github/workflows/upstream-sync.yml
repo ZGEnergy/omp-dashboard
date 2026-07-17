@@ -71,10 +71,25 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
         run: echo "dry_run=true; stopping before merge"
 
-      - name: Merge + upsert single PR
+      - name: Setup Node
+        if: steps.status.outputs.behind != '0' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22"
+          cache: npm
+
+      - name: Install (for verify)
+        if: steps.status.outputs.behind != '0' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm ci || npm install --force
+
+      - name: Merge + verify + upsert single PR
         if: steps.status.outputs.behind != '0' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+          VERIFY_STRICT: "1"
         run: |
           set +e
           scripts/upstream-sync.sh merge
@@ -82,8 +97,50 @@ jobs:
           set -e
           echo "merge_rc=$rc"
           if [[ $rc -eq 0 ]]; then
-            scripts/upstream-sync.sh pr
-            exit 0
+            set +e
+            scripts/upstream-sync.sh verify 2>&1 | tee /tmp/upstream-verify.log
+            vrc=${PIPESTATUS[0]}
+            set -e
+            if [[ $vrc -eq 0 ]]; then
+              scripts/upstream-sync.sh pr
+              exit 0
+            fi
+            # Verify failed after clean merge: keep branch tip, draft PR with log.
+            git push --force-with-lease -u origin "$SYNC_BRANCH" || true
+            {
+              echo "# Upstream sync VERIFY FAILED"
+              echo
+              echo "Merge of ${UPSTREAM_REF} @ ${{ steps.status.outputs.usha }} succeeded, but \`scripts/upstream-sync.sh verify\` failed."
+              echo
+              echo "**Do not merge** until Gate 0–2 is green on this branch."
+              echo
+              echo '```bash'
+              echo "git fetch origin && git checkout $SYNC_BRANCH && git pull"
+              echo "npm ci || npm install --force"
+              echo "scripts/upstream-sync.sh verify"
+              echo "# fix product/tests, then:"
+              echo "scripts/upstream-sync.sh pr"
+              echo '```'
+              echo
+              echo "## verify log (tail)"
+              echo
+              echo '```'
+              tail -n 200 /tmp/upstream-verify.log || true
+              echo '```'
+            } > docs/upstream-sync-help.md
+            git add docs/upstream-sync-help.md
+            git commit -m "chore(sync): VERIFY FAILED ${UPSTREAM_REF}@${{ steps.status.outputs.usha }}" || true
+            git push --force-with-lease -u origin "$SYNC_BRANCH" || true
+            existing=$(gh pr list -R "$GH_REPO" --state open --head "$SYNC_BRANCH" --json number --jq '.[0].number // empty' || true)
+            TITLE="chore(sync): VERIFY FAILED upstream ${UPSTREAM_REF} @ ${{ steps.status.outputs.usha }}"
+            if [[ -n "$existing" ]]; then
+              gh pr edit "$existing" -R "$GH_REPO" --title "$TITLE" --body-file docs/upstream-sync-help.md || true
+              gh pr ready "$existing" -R "$GH_REPO" --undo 2>/dev/null || true
+            else
+              gh pr create -R "$GH_REPO" --base main --head "$SYNC_BRANCH" --draft \
+                --title "$TITLE" --label upstream-sync --body-file docs/upstream-sync-help.md
+            fi
+            exit 1
           fi
           if [[ $rc -ne 2 ]]; then
             exit $rc
@@ -145,21 +202,21 @@ jobs:
 
           # Close other sync PRs; upsert this one as draft
           KEEP_HEAD="$SYNC_BRANCH" GH_REPO_VAL="$GH_REPO" python3 - <<'PY'
-import json, os, subprocess
-repo = os.environ["GH_REPO_VAL"]
-keep = os.environ["KEEP_HEAD"]
-raw = subprocess.check_output(["gh","pr","list","-R",repo,"--state","open","--limit","100","--json","number,headRefName,labels"], text=True)
-for pr in json.loads(raw):
-    head = pr.get("headRefName") or ""
-    labels = {(l.get("name") if isinstance(l, dict) else l) for l in (pr.get("labels") or [])}
-    if head == keep:
-        continue
-    if not head.startswith("sync/upstream"):
-        continue
-    n = str(pr["number"])
-    body = f"Superseded by latest automated sync on `{keep}`."
-    subprocess.run(["gh","pr","close",n,"-R",repo,"--comment",body], check=False)
-PY
+          import json, os, subprocess
+          repo = os.environ["GH_REPO_VAL"]
+          keep = os.environ["KEEP_HEAD"]
+          raw = subprocess.check_output(["gh","pr","list","-R",repo,"--state","open","--limit","100","--json","number,headRefName,labels"], text=True)
+          for pr in json.loads(raw):
+              head = pr.get("headRefName") or ""
+              labels = {(l.get("name") if isinstance(l, dict) else l) for l in (pr.get("labels") or [])}
+              if head == keep:
+                  continue
+              if not head.startswith("sync/upstream"):
+                  continue
+              n = str(pr["number"])
+              body = f"Superseded by latest automated sync on `{keep}`."
+              subprocess.run(["gh","pr","close",n,"-R",repo,"--comment",body], check=False)
+          PY
 
           existing=$(gh pr list -R "$GH_REPO" --state open --head "$SYNC_BRANCH" --json number --jq '.[0].number // empty' || true)
           TITLE="chore(sync): CONFLICTS upstream ${UPSTREAM_REF} @ ${{ steps.status.outputs.usha }}"

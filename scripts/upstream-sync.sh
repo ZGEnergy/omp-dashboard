@@ -200,10 +200,13 @@ cmd_verify() {
   grep -q 'upstream-sync' docs/upstream-sync.md 2>/dev/null || warn "docs/upstream-sync.md missing (ok only mid-bootstrap)"
   log "Gate 0 OK"
 
-  log "Gate 1: unit suites (shared full + ZGE focus)"
-  # Prefer package-local vitest binaries; do not require full monorepo green.
+  log "Gate 1: unit suites (shared + server + client + roles-plugin + extension)"
   # Upstream vitest globalSetup refuses real $HOME (must match root `npm test`).
   local failed=0
+  local strict=0
+  if [[ "${VERIFY_STRICT:-0}" == "1" || -n "${CI:-}" ]]; then
+    strict=1
+  fi
   local test_home
   test_home="$(mktemp -d -t pi-test-XXXXXX)"
   local test_ls
@@ -218,45 +221,13 @@ cmd_verify() {
       return 1
     fi
   }
-  run_vitest() {
-    local dir="$1"; shift
-    local bin
-    if ! bin="$(resolve_vitest "$dir")"; then
-      warn "vitest not installed — run npm ci at repo root; skipping tests in $dir"
-      return 0
-    fi
-    # Only run files that exist (sync branches may lack some suites temporarily).
-    local args=() f resolved
-    for f in "$@"; do
-      if [[ -f "${dir}/${f}" ]]; then
-        resolved="${f}"
-      elif [[ -f "$f" ]]; then
-        resolved="$f"
-      else
-        warn "skip missing test file: ${dir}/${f}"
-        continue
-      fi
-      args+=("$resolved")
-    done
-    if [[ ${#args[@]} -eq 0 ]]; then
-      warn "no test files to run in $dir"
-      return 0
-    fi
-    log "vitest in $dir -- ${args[*]}"
-    if ! (
-      cd "$dir" &&
-        HOME="$test_home" \
-        NODE_OPTIONS="--localstorage-file=${test_ls}" \
-        "$bin" run --reporter=dot --config vitest.config.ts "${args[@]}"
-    ); then
-      failed=1
-      warn "vitest failed in $dir"
-    fi
-  }
   run_vitest_all() {
     local dir="$1"
     local bin
     if ! bin="$(resolve_vitest "$dir")"; then
+      if [[ "$strict" -eq 1 ]]; then
+        die "vitest not installed — run npm ci at repo root (required for $dir)"
+      fi
       warn "vitest not installed — run npm ci at repo root; skipping tests in $dir"
       return 0
     fi
@@ -272,23 +243,32 @@ cmd_verify() {
     fi
   }
 
-  # Full shared suite is green today (~1.3k tests) and is the main PR safety net.
   if [[ -d packages/shared ]]; then
     run_vitest_all packages/shared || true
+  elif [[ "$strict" -eq 1 ]]; then
+    die "packages/shared missing"
   fi
-  # Server push + ticket tests (ZGE surfaces)
   if [[ -d packages/server ]]; then
-    run_vitest packages/server src/__tests__/build-push-payload.test.ts src/__tests__/push-dispatcher.test.ts src/__tests__/push-vapid.test.ts src/__tests__/push-trigger-classifier.test.ts src/__tests__/ws-ticket.test.ts || true
+    run_vitest_all packages/server || true
+  elif [[ "$strict" -eq 1 ]]; then
+    die "packages/server missing"
   fi
-  # Client SettingsPanel (quick regression catch; needs mdiTunnel import)
   if [[ -d packages/client ]]; then
-    run_vitest packages/client src/components/__tests__/SettingsPanel.test.tsx || true
+    run_vitest_all packages/client || true
+  elif [[ "$strict" -eq 1 ]]; then
+    die "packages/client missing"
+  fi
+  if [[ -d packages/roles-plugin ]]; then
+    run_vitest_all packages/roles-plugin || true
+  fi
+  if [[ -d packages/extension ]]; then
+    run_vitest_all packages/extension || true
   fi
 
   if [[ "$failed" -ne 0 ]]; then
     die "Gate 1 failed"
   fi
-  log "Gate 1 OK (or skipped missing files)"
+  log "Gate 1 OK"
 
   if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
     warn "SKIP_BUILD=1 — skipping Gate 2"
@@ -357,6 +337,12 @@ cmd_pr() {
   if [[ "$branch" != sync/upstream* ]]; then
     die "current branch $branch is not a sync branch (expected prefix sync/upstream*)"
   fi
+  if [[ "${SKIP_VERIFY:-0}" != "1" ]]; then
+    log "pr: running verify before push (SKIP_VERIFY=1 to bypass)"
+    cmd_verify
+  else
+    warn "SKIP_VERIFY=1 — publishing without local Gate 0–2"
+  fi
   local tip usha behind ahead
   tip="${UPSTREAM_REMOTE}/${UPSTREAM_REF}"
   usha=$(git rev-parse --short "$tip")
@@ -366,6 +352,7 @@ cmd_pr() {
     log "DRY_RUN: would force-with-lease push $branch, close stale sync PRs, upsert single PR into $TARGET_BRANCH"
     return 0
   fi
+
   push_sync_branch "$branch"
   close_stale_sync_prs "$branch"
   local body title existing

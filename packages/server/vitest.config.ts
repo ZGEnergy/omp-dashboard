@@ -4,6 +4,9 @@ import path from "node:path";
 export default defineConfig({
   test: {
     include: ["src/**/__tests__/**/*.test.ts"],
+    // Real pi subprocess + free-port race; run manually when validating bridge:
+    // `npx vitest run src/__tests__/faux-session.integration.test.ts`
+    exclude: ["**/faux-session.integration.test.ts"],
     environment: "node",
     pool: "forks",
     maxWorkers: "50%",

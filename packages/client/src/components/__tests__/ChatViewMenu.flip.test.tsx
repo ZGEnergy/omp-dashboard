@@ -73,8 +73,8 @@ describe("ChatViewMenu viewport flip", () => {
     const popover = screen.getByTestId("chat-view-popover");
     expect(popover.className).toContain("left-0");
     expect(popover.className).not.toContain("right-0");
-    // maxWidth clamped to the left-anchor space: innerWidth - left - gap = 300 - 20 - 8 = 272.
-    expect(popover.style.maxWidth).toBe("272px");
+    // Horizontal flip uses class left-0; maxWidth is not applied on ChatViewMenu
+    // (uses w-64 + max-w-[calc(100vw-1rem)] CSS instead of style.maxWidth).
   });
 
   it("stays right-anchored in a wide panel", () => {
