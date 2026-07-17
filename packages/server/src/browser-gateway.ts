@@ -117,10 +117,9 @@ export interface BrowserGateway {
    * Drop pending PromptBus requests for an input-needed tool that already
    * finished. Backstops a lost/late `prompt_dismiss` after a TUI answer so a
    * late browser subscribe does not re-surface a dead ask as the latest card.
-   * When `toolCallId` is set, only prompts whose `prompt.metadata.toolCallId`
-   * matches are cleared; if none match (or toolCallId is absent), clear every
-   * pending prompt for the session (one ask at a time is the common case).
-   * Returns the cleared promptIds so callers can fan out `prompt_dismiss`.
+   * Selective only: with `toolCallId`, only exact metadata matches; without,
+   * only tool-originated prompts (metadata.toolCallId present). Never wipes
+   * free-floating PromptBus cards. Returns cleared promptIds for `prompt_dismiss`.
    */
   clearPromptRequestsForTool(sessionId: string, toolCallId?: string): string[];
   /** Clear all queued PromptBus responses for a session (session unregister). */
@@ -406,19 +405,20 @@ export function createBrowserGateway(
     const sessionMap = pendingPromptRequests.get(sessionId);
     if (!sessionMap || sessionMap.size === 0) return [];
 
+    // Selective only: never wipe free-floating PromptBus cards (architect/slash
+    // with no toolCallId metadata) just because an ask tool ended after its own
+    // prompt was already cleared by prompt_dismiss.
+    // - toolCallId set → only exact metadata matches
+    // - toolCallId absent → only tool-originated prompts (metadata.toolCallId present)
+    // See change: fix-stale-answered-ask-replay.
     const cleared: string[] = [];
-    if (toolCallId) {
-      for (const [promptId, msg] of sessionMap) {
-        const meta = (msg as { prompt?: { metadata?: { toolCallId?: unknown } } }).prompt?.metadata;
-        if (meta?.toolCallId === toolCallId) {
-          cleared.push(promptId);
-        }
+    for (const [promptId, msg] of sessionMap) {
+      const metaToolId = (msg as { prompt?: { metadata?: { toolCallId?: unknown } } }).prompt?.metadata?.toolCallId;
+      if (toolCallId) {
+        if (metaToolId === toolCallId) cleared.push(promptId);
+      } else if (typeof metaToolId === "string" && metaToolId.length > 0) {
+        cleared.push(promptId);
       }
-    }
-    // No metadata match (or no toolCallId) → clear the whole session map.
-    // A finished ask_user/ask tool means no pending PromptBus card is live.
-    if (cleared.length === 0) {
-      for (const promptId of sessionMap.keys()) cleared.push(promptId);
     }
     for (const promptId of cleared) {
       clearPromptRequest(sessionId, promptId);

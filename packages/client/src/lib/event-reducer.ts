@@ -163,6 +163,8 @@ export interface InteractiveUiRequest {
   params: Record<string, unknown>;
   status: "pending" | "resolved" | "cancelled" | "dismissed";
   result?: unknown;
+  /** Originating tool call id when the prompt came from ask_user/ask. */
+  toolCallId?: string;
 }
 
 /**
