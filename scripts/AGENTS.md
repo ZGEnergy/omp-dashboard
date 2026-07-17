@@ -4,6 +4,7 @@ Files in this directory. One row per file. Non-source area (migrated from `docs/
 
 | File | Purpose |
 |------|---------|
+| `__tests__/ensure-gh-default.test.mjs` | Vitest: ensure-gh-default.cjs pins remote.origin.gh-resolved=base for ZGEnergy origin, no-ops when already base / non-ZGE origin / outside git. |
 | `__tests__/repair-meta-source.test.mjs` | Vitest unit tests for repair-meta-source.mjs. Asserts source:"dashboard" → cleaned (other fields preserved), source:"tui"/"cli"/"tmux"/absent → kept, malformed JSON counted as errors, idempotent re-run, --dry-run modifies nothing. |
 | `__tests__/review-changes-parser.test.mjs` | Vitest unit tests for parseFindings + splitFindings (.pi/skills/implement/scripts/parse-findings.ts). parseFindings keeps only `finding` events, skips non-JSON lines; splitFindings buckets critical/major/warning/error as must-fix. |
 | `__tests__/ship-it-manifest.test.mjs` | Vitest unit tests for ship-it `manifest.ts` (`.pi/skills/ship-it/scripts/`). parseManifest (well-formed / malformed / no-disposition-column → skip), deferDecision (all-manual→defer, non-manual→stop, id-ref resolve, no-manifest→legacy keyword fallback), filesystemRealityCheck (automated missing file → unsatisfied; manual-only never gated). See change: add-openspec-pipeline-orchestrators. |
@@ -14,6 +15,7 @@ Files in this directory. One row per file. Non-source area (migrated from `docs/
 | `build.sh` | Type-check + build dashboard. Flags: --check-only (tsc --noEmit only), --client-only (Vite build only). Auto-runs npm install if node_modules absent. |
 | `commit-windows-parity.sh` | Stages and commits fix-windows-server-parity + consolidate-platform-handlers work in 5 logical chunks (fix:, test:, docs: x3). Modes: all | dry | 1..5. commit_stage helper resets index, stages per-stage filesets, commits with imperative conventional messages. |
 | `fix-pty-permissions.cjs` | Postinstall: fix node-pty spawn-helper execute permissions |
+| `ensure-gh-default.cjs` | Postinstall/sync: pin `gh` to origin via `remote.origin.gh-resolved=base` when origin is ZGEnergy/omp-dashboard. Stops bare `gh issue/pr` falling back to BlackBelt package.json#repository. No-op outside git / non-ZGE origin / already set. |
 | `generate-plugin-registry.mjs` | Standalone generator for packages/client/src/generated/plugin-registry.tsx (gitignored). Runs regeneratePluginRegistry via jiti outside Vite so prelint/prebuild hooks + fresh clones produce the file before tsc/vitest/vite. Respects NODE_ENV=production. |
 | `lib/smoke-spawn-session.mjs` | Test helper: connects dashboard browser WS (`/ws`), sends spawn_session for cwd, waits for session_register/session_added. Uses global WebSocket (Node 22+, no wscat). Exit 0 on session live, 1 on failure/timeout, 2 on usage error. --url --cwd --timeout flags. Used by Docker smoke. |
 | `maybe-patch-package.cjs` | postinstall guard: runs patch-package only when module resolvable + patches/ dir exists. No-ops on --omit=dev standalone installs (no patch-package, no patches/) → fixes exit 127 breaking standalone/Docker installs. Resolves bin via package.json bin field (Windows-safe). |

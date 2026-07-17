@@ -60,6 +60,8 @@ ensure_remotes() {
     log "adding remote $UPSTREAM_REMOTE -> $UPSTREAM_URL"
     git remote add "$UPSTREAM_REMOTE" "$UPSTREAM_URL"
   fi
+  # Pin gh to origin so bare `gh issue/pr` never targets BlackBelt package.json#repository.
+  node "${REPO_ROOT}/scripts/ensure-gh-default.cjs" >/dev/null 2>&1 || true
 }
 
 fetch_all() {
