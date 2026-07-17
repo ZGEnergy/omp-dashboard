@@ -2,24 +2,44 @@
  * Tests for the agent-facing role/model tools (list_models, list_roles,
  * update_roles) registered by role-model-tools.ts.
  *
- * See change: add-agent-role-model-tools.
+ * OMP surface: roles live in `~/.omp/agent/config.yml#modelRoles`.
+ * rolePresets/activePreset are not persisted (role-manager stubs).
+ *
+ * See change: add-agent-role-model-tools + omp settings mirror.
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { activate as activateProviderRegister } from "../provider-register.js";
 import { buildModelRows, registerRoleModelTools } from "../role-model-tools.js";
 
-const CONFIG = () => join(homedir(), ".pi", "agent", "providers.json");
+const AGENT_DIR = () => join(homedir(), ".omp", "agent");
+const CONFIG = () => join(AGENT_DIR(), "config.yml");
+/** Legacy pi providers path — still used by provider-register custom names. */
+const PI_PROVIDERS = () => join(homedir(), ".pi", "agent", "providers.json");
 
 function resetConfig() {
+  mkdirSync(AGENT_DIR(), { recursive: true });
   mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
   if (existsSync(CONFIG())) rmSync(CONFIG());
+  if (existsSync(PI_PROVIDERS())) rmSync(PI_PROVIDERS());
 }
-function readFile() {
-  return JSON.parse(readFileSync(CONFIG(), "utf-8"));
+
+function writeModelRoles(roles: Record<string, string>, extra: Record<string, unknown> = {}) {
+  mkdirSync(AGENT_DIR(), { recursive: true });
+  writeFileSync(CONFIG(), stringifyYaml({ ...extra, modelRoles: roles }));
+}
+
+function readModelRoles(): Record<string, string> {
+  const doc = parseYaml(readFileSync(CONFIG(), "utf-8")) as Record<string, unknown>;
+  const roles = doc.modelRoles;
+  if (!roles || typeof roles !== "object" || Array.isArray(roles)) return {};
+  return Object.fromEntries(
+    Object.entries(roles as Record<string, unknown>).filter(([, v]) => typeof v === "string" && v.trim() !== ""),
+  ) as Record<string, string>;
 }
 
 // Minimal pi stub capturing registered tools.
@@ -63,7 +83,7 @@ describe("list_models", () => {
   });
 
   it("works when roles are missing/malformed (roles-independent)", async () => {
-    writeFileSync(CONFIG(), "{ not json");
+    writeFileSync(CONFIG(), "{ not yaml: [");
     const { pi, tools } = mkPi();
     const registry = makeRegistry([{ provider: "openai", id: "gpt-5" }]);
     registerRoleModelTools(pi, { getRegistry: () => registry });
@@ -72,9 +92,8 @@ describe("list_models", () => {
   });
 
   it("flags custom-registered providers with custom:true (matching ModelSelector source)", async () => {
-    // Register a custom provider so getCustomProviderNames() knows it. The
-    // provider-register activate() reads providers.json#providers.
-    writeFileSync(CONFIG(), JSON.stringify({
+    // provider-register still reads ~/.pi/agent/providers.json#providers.
+    writeFileSync(PI_PROVIDERS(), JSON.stringify({
       providers: { mycustom: { baseUrl: "http://x", apiKey: "$MYKEY" } },
     }));
     process.env.MYKEY = "";
@@ -118,24 +137,20 @@ describe("list_models", () => {
 });
 
 describe("list_roles", () => {
-  it("returns bound roles only, presets, and activePreset — no models key", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { planning: "anthropic/claude-x", coding: "openai/gpt-5", vision: "" },
-      rolePresets: [{ name: "cheap", roles: {} }, { name: "premium", roles: {} }],
-      activePreset: "cheap",
-    }));
+  it("returns bound modelRoles only; OMP has no presets", async () => {
+    writeModelRoles({ planning: "anthropic/claude-x", coding: "openai/gpt-5", vision: "" });
     const { pi, tools } = mkPi();
     registerRoleModelTools(pi, { getRegistry: () => null });
     const res = await tools.get("list_roles").execute("id", {}, null, null, {});
     expect(res.details.roles).toEqual({ planning: "anthropic/claude-x", coding: "openai/gpt-5" });
     expect(res.details.roles.vision).toBeUndefined();
-    expect(res.details.presets).toEqual(["cheap", "premium"]);
-    expect(res.details.activePreset).toBe("cheap");
+    expect(res.details.presets).toEqual([]);
+    expect(res.details.activePreset).toBeNull();
     expect("models" in res.details).toBe(false);
   });
 
   it("tolerates a malformed role slice", async () => {
-    writeFileSync(CONFIG(), "{ not json");
+    writeFileSync(CONFIG(), "{ not yaml: [");
     const { pi, tools } = mkPi();
     registerRoleModelTools(pi, { getRegistry: () => null });
     const res = await tools.get("list_roles").execute("id", {}, null, null, {});
@@ -163,67 +178,48 @@ describe("update_roles", () => {
       "id", { action: "set_role", role: "review", ref: "anthropic/claude-x" }, null, null, confirmCtx(true),
     );
     expect(res.details.success).toBe(true);
-    expect(readFile().roles.review).toBe("anthropic/claude-x");
-    expect(readFile().roleNames).toContain("review");
+    expect(readModelRoles().review).toBe("anthropic/claude-x");
   });
 
-  it("set_role targets a named preset without loading it", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      roles: { coding: "old/model" },
-      rolePresets: [{ name: "premium", roles: {} }],
-      activePreset: null,
-    }));
+  it("set_role with preset fails on OMP (presets not persisted)", async () => {
+    writeModelRoles({ coding: "old/model" });
     const { pi, tools } = mkPi();
     registerRoleModelTools(pi, { getRegistry: () => null });
-    await tools.get("update_roles").execute(
+    const res = await tools.get("update_roles").execute(
       "id", { action: "set_role", role: "coding", ref: "openai/gpt-5", preset: "premium" }, null, null, confirmCtx(true),
     );
-    const after = readFile();
-    expect(after.rolePresets[0].roles.coding).toBe("openai/gpt-5");
-    expect(after.roles.coding).toBe("old/model"); // active map unchanged
+    expect(res.details.success).toBe(false);
+    expect(readModelRoles().coding).toBe("old/model");
   });
 
-  it("remove_role purges from active map and every preset, preserving unrelated keys", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({
-      providers: { p: { baseUrl: "u", apiKey: "k" } },
-      autonomousMode: false,
-      roles: { vision: "x/y" },
-      rolePresets: [
-        { name: "cheap", roles: { vision: "a/b" } },
-        { name: "premium", roles: { vision: "c/d" } },
-      ],
-      activePreset: null,
-    }));
+  it("remove_role purges from active modelRoles map", async () => {
+    writeModelRoles({ vision: "x/y", coding: "a/b" }, { someOtherKey: true });
     const { pi, tools } = mkPi();
     registerRoleModelTools(pi, { getRegistry: () => null });
     await tools.get("update_roles").execute(
       "id", { action: "remove_role", role: "vision" }, null, null, confirmCtx(true),
     );
-    const after = readFile();
-    expect(after.roles.vision).toBeUndefined();
-    expect(after.rolePresets[0].roles.vision).toBeUndefined();
-    expect(after.rolePresets[1].roles.vision).toBeUndefined();
-    expect(after.providers).toEqual({ p: { baseUrl: "u", apiKey: "k" } });
-    expect(after.autonomousMode).toBe(false);
+    const after = readModelRoles();
+    expect(after.vision).toBeUndefined();
+    expect(after.coding).toBe("a/b");
+    // other config.yml keys preserved
+    const doc = parseYaml(readFileSync(CONFIG(), "utf-8")) as Record<string, unknown>;
+    expect(doc.someOtherKey).toBe(true);
   });
 
-  it("create_preset / load_preset / delete_preset round-trip (confirmed)", async () => {
-    writeFileSync(CONFIG(), JSON.stringify({ roles: { fast: "a/b" }, rolePresets: [], activePreset: null }));
+  it("create_preset succeeds in-memory but OMP does not persist presets", async () => {
+    writeModelRoles({ fast: "a/b" });
     const { pi, tools } = mkPi();
     registerRoleModelTools(pi, { getRegistry: () => null });
     const tool = tools.get("update_roles");
 
-    await tool.execute("id", { action: "create_preset", name: "snap" }, null, null, confirmCtx(true));
-    expect(readFile().rolePresets).toEqual([{ name: "snap", roles: { fast: "a/b" } }]);
+    const created = await tool.execute("id", { action: "create_preset", name: "snap" }, null, null, confirmCtx(true));
+    expect(created.details.success).toBe(true);
+    // saveRoleConfig only writes modelRoles — presets never land on disk.
+    const listed = await tools.get("list_roles").execute("id", {}, null, null, {});
+    expect(listed.details.presets).toEqual([]);
 
-    await tool.execute("id", { action: "set_role", role: "fast", ref: "c/d" }, null, null, confirmCtx(true));
-    await tool.execute("id", { action: "load_preset", name: "snap" }, null, null, confirmCtx(true));
-    expect(readFile().roles.fast).toBe("a/b");
-    expect(readFile().activePreset).toBe("snap");
-
-    const del = await tool.execute("id", { action: "delete_preset", name: "snap" }, null, null, confirmCtx(true));
-    expect(del.details.success).toBe(true);
-    expect(readFile().rolePresets).toEqual([]);
-    expect(readFile().activePreset).toBeNull();
+    const load = await tool.execute("id", { action: "load_preset", name: "snap" }, null, null, confirmCtx(true));
+    expect(load.details.success).toBe(false);
   });
 });
