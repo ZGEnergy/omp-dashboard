@@ -463,6 +463,10 @@ describe("ChatView", () => {
 
       // Escape button must appear
       expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+      // Height grows while stick is false (escaped via scrollToTurn). D5 prepend
+      // compensation advances scrollTop by the height delta so the same content
+      // stays under the viewport (950 + (1500 - 1000) = 1450). See change:
+      // session-tail-rehydrate.
       setScrollPosition(scrollEl, 950, 1500, 400);
       const state2 = stateWithMessages([
         { id: "1", role: "user", content: "Hello" },
@@ -474,7 +478,7 @@ describe("ChatView", () => {
         </ThemeProvider>,
       );
 
-      expect(scrollEl.scrollTop).toBe(950);
+      expect(scrollEl.scrollTop).toBe(1450);
     });
 
     it("clicking scroll-to-bottom button uses instant scroll while streaming", () => {
