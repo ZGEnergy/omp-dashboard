@@ -1536,6 +1536,9 @@ export function reduceEvent(
         );
       }
       const args = data.args as Record<string, unknown> | undefined;
+      const startDetails = data.details && typeof data.details === "object"
+        ? data.details as Record<string, unknown>
+        : undefined;
       next.toolCalls.set(toolCallId, {
         toolCallId,
         toolName,
@@ -1572,6 +1575,9 @@ export function reduceEvent(
           ...next.messages[existingToolIdx],
           toolName,
           args,
+          ...(mergeToolDetails(startDetails, next.messages[existingToolIdx].toolDetails)
+            ? { toolDetails: mergeToolDetails(startDetails, next.messages[existingToolIdx].toolDetails) }
+            : {}),
           // Keep startedAt/timestamp from the original row — the existing
           // values are already correct for terminal rows, and refreshing them
           // would invalidate `duration` derived from startedAt at end-time.
@@ -1589,6 +1595,7 @@ export function reduceEvent(
           toolName,
           toolCallId,
           args,
+          ...(startDetails ? { toolDetails: startDetails } : {}),
           toolStatus: "running",
           timestamp: event.timestamp,
           startedAt: event.timestamp,
@@ -1615,6 +1622,7 @@ export function reduceEvent(
           args,
           status: "running",
           startedAt,
+          emittedAtInferenceSeq: next.assistantInferenceSeq,
         });
       }
       let messageIdx = idx;

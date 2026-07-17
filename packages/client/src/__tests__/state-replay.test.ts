@@ -576,7 +576,9 @@ describe("replayEntriesAsEvents", () => {
       "tool_execution_start", "subagent_started", "message_update", "message_end",
     ]);
     const state = events.reduce((s, event) => reduceEvent(s, event.event), createInitialState());
-    expect(state.messages.find((message) => message.toolCallId === "agent-open")?.toolStatus).toBe("running");
+    const agentMessage = state.messages.find((message) => message.toolCallId === "agent-open");
+    expect(agentMessage?.toolStatus).toBe("running");
+    expect(agentMessage?.toolDetails).toMatchObject({ agentId: "agent-open-1", entries: timeline });
     expect(state.subagents.get("agent-open-1")).toMatchObject({ status: "running", entries: timeline, toolUses: 1 });
   });
 });
