@@ -22,21 +22,9 @@ fi
 SYNC_BRANCH="${SYNC_BRANCH:-sync/upstream-${UPSTREAM_REF}}"
 GH_REPO="${GH_REPO:-ZGEnergy/omp-dashboard}"
 
-# Paths where ZGE wins on conflict unless SYNC_ADOPT_UPSTREAM=1
-PROTECTED_PATHS=(
-  "deploy"
-  "packages/server/src/push"
-  "packages/server/src/routes/push-routes.ts"
-  "packages/server/src/routes/omp-config-routes.ts"
-  "packages/shared/src/omp-agent-paths.ts"
-  "packages/shared/src/input-needed-tools.ts"
-  "packages/shared/src/__tests__/omp-agent-paths.test.ts"
-  "packages/shared/src/__tests__/config-push.test.ts"
-  "docs/upstream-sync.md"
-  "scripts/upstream-sync.sh"
-  ".github/workflows/ci-zge.yml"
-  ".github/workflows/upstream-sync.yml"
-)
+# Conflict path policy (protected / hub / prefer-upstream). See scripts/lib/upstream-sync-policy.sh.
+# shellcheck source=lib/upstream-sync-policy.sh
+source "${REPO_ROOT}/scripts/lib/upstream-sync-policy.sh"
 
 log() { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -48,7 +36,8 @@ Usage: $(basename "$0") <status|merge|verify|pr> [options]
 
 Commands:
   status       Show ahead/behind vs upstream ref
-  merge        Create/update sync branch and merge upstream (auto-ours on deploy/**)
+  merge        Create/update sync branch and merge upstream
+               (auto-ours on protected, auto-theirs on same-intent product, manual hubs)
   verify       Run structural + focused unit + build gates
   pr           Open/update PR from current sync branch into ${TARGET_BRANCH}
 
@@ -59,6 +48,7 @@ Env:
   DRY_RUN=1      print actions only for merge/pr
   SKIP_BUILD=1   verify skips npm run build
   SYNC_ADOPT_UPSTREAM=1  do not auto-checkout --ours for protected paths
+  SYNC_KEEP_OURS=1       do not auto-checkout --theirs for non-protected product paths
 USAGE
 }
 
@@ -97,33 +87,59 @@ cmd_status() {
   else
     log "sync needed: merge upstream/$UPSTREAM_REF into a sync branch"
   fi
-  log "protected paths (ZGE wins by default):"
+  log "protected paths (ZGE wins on conflict):"
   printf '  - %s\n' "${PROTECTED_PATHS[@]}"
+  log "semantic hubs (manual combine):"
+  printf '  - %s\n' "${SEMANTIC_HUB_PATHS[@]}"
+  log "default for other conflicts: take upstream (--theirs)"
 }
 
-is_protected_path() {
-  local f="$1" p
-  for p in "${PROTECTED_PATHS[@]}"; do
-    if [[ "$f" == "$p" || "$f" == "$p"/* ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
 
-resolve_protected_ours() {
-  [[ "${SYNC_ADOPT_UPSTREAM:-0}" == "1" ]] && return 0
-  local f
-  # unmerged paths
+# Auto-resolve unmerged paths by policy:
+#   protected → --ours (unless SYNC_ADOPT_UPSTREAM=1)
+#   hub       → leave for manual semantic merge
+#   default   → --theirs (prefer upstream same-intent product; unless SYNC_KEEP_OURS=1)
+resolve_conflicts_by_policy() {
+  local f decision ours_n=0 theirs_n=0 manual_n=0
   while IFS= read -r f; do
     [[ -z "$f" ]] && continue
-    if is_protected_path "$f"; then
-      log "conflict auto-ours (protected): $f"
-      git checkout --ours -- "$f"
-      git add -- "$f"
-    fi
+    decision="$(classify_conflict_path "$f")"
+    case "$decision" in
+      ours)
+        if [[ "${SYNC_ADOPT_UPSTREAM:-0}" == "1" ]]; then
+          log "conflict leave manual (SYNC_ADOPT_UPSTREAM=1, would be protected-ours): $f"
+          manual_n=$((manual_n + 1))
+          continue
+        fi
+        log "conflict auto-ours (protected): $f"
+        git checkout --ours -- "$f"
+        git add -- "$f"
+        ours_n=$((ours_n + 1))
+        ;;
+      theirs)
+        if [[ "${SYNC_KEEP_OURS:-0}" == "1" ]]; then
+          log "conflict leave manual (SYNC_KEEP_OURS=1, would be prefer-upstream): $f"
+          manual_n=$((manual_n + 1))
+          continue
+        fi
+        log "conflict auto-theirs (prefer upstream): $f"
+        git checkout --theirs -- "$f"
+        git add -- "$f"
+        theirs_n=$((theirs_n + 1))
+        ;;
+      manual)
+        log "conflict leave manual (semantic hub): $f"
+        manual_n=$((manual_n + 1))
+        ;;
+      *)
+        warn "unknown classify_conflict_path result '$decision' for $f — leaving manual"
+        manual_n=$((manual_n + 1))
+        ;;
+    esac
   done < <(git diff --name-only --diff-filter=U)
+  log "conflict auto-resolve summary: ours=$ours_n theirs=$theirs_n manual=$manual_n"
 }
+
 
 cmd_merge() {
   fetch_all
@@ -149,8 +165,8 @@ cmd_merge() {
   local rc=$?
   set -e
   if [[ $rc -ne 0 ]]; then
-    warn "merge reported conflicts; applying protected-path ours policy"
-    resolve_protected_ours
+    warn "merge reported conflicts; applying path policy (protected=ours, product=theirs, hub=manual)"
+    resolve_conflicts_by_policy
     local left
     left=$(git diff --name-only --diff-filter=U | wc -l | tr -d ' ')
     if [[ "$left" -gt 0 ]]; then
@@ -162,13 +178,17 @@ cmd_merge() {
         echo "- base: ${TARGET_BRANCH}@$(short_sha "$base")"
         echo "- branch: ${SYNC_BRANCH}"
         echo
-        echo "## Remaining unmerged paths"
+        echo "## Remaining unmerged paths (manual)"
         echo
-        git diff --name-only --diff-filter=U | sed 's/^/- /'
+        while IFS= read -r f; do
+          [[ -z "$f" ]] && continue
+          printf -- '- `%s` → %s\n' "$f" "$(classify_conflict_path "$f")"
+        done < <(git diff --name-only --diff-filter=U)
         echo
         echo "## Policy"
-        echo "- deploy/** and other protected paths already took --ours when listed"
-        echo "- resolve shared hubs (server.ts, bridge.ts, config.ts) by combining both sides"
+        echo "- **protected** paths → \`--ours\` (ZGE deploy/push/OMP/tooling)"
+        echo "- **semantic hubs** (\`server.ts\`, \`bridge.ts\`, \`config.ts\`, package manifests) → combine both sides"
+        echo "- **everything else** already took \`--theirs\` (prefer upstream same-intent product code)"
         echo "- re-run: scripts/upstream-sync.sh verify"
       } >"$report"
       git add "$report" 2>/dev/null || true
@@ -177,7 +197,7 @@ cmd_merge() {
       return 2
     fi
     # all conflicts auto-resolved
-    git commit --no-edit -m "chore(sync): merge upstream/${UPSTREAM_REF}@${usha} (protected-path ours)"
+    git commit --no-edit -m "chore(sync): merge upstream/${UPSTREAM_REF}@${usha} (policy: protected-ours product-theirs)"
   fi
   log "merge complete on $SYNC_BRANCH"
   git status -sb | head -20
@@ -375,8 +395,9 @@ Automation **replaces** any previous open sync PR. Review this one when ready; o
 - OMP config mirror routes
 
 ## Policy
-- Conflict default: **ours** on protected paths (see scripts/upstream-sync.sh)
-- Shared hubs (server.ts, bridge.ts, config.ts): combined manually
+- **Protected** ZGE paths: `--ours` on conflict
+- **Same-intent product** (non-protected, non-hub): `--theirs` (prefer upstream maintenance)
+- **Semantic hubs** (`server.ts`, `bridge.ts`, `config.ts`, package manifests): combine manually
 - Never force-push main (sync branch may force-with-lease)
 
 ## Gates
