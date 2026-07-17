@@ -110,6 +110,7 @@ import { registerPluginActivationRoutes } from "./routes/plugin-activation-route
 import { registerPluginConfigRoutes } from "./routes/plugin-config-routes.js";
 import { registerOmpConfigRoutes } from "./routes/omp-config-routes.js";
 import { registerPreferencesDisplayRoutes } from "./routes/preferences-display-routes.js";
+import { registerPreferencesAutoNameRoutes } from "./routes/preferences-auto-name-routes.js";
 import { registerPreferencesWorktreeInitRoutes } from "./routes/preferences-worktree-init-routes.js";
 import { registerProviderAuthRoutes } from "./routes/provider-auth-routes.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
