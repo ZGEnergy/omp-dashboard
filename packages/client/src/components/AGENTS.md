@@ -14,8 +14,8 @@ Files in this directory. One row per source file.
 | `BranchListbox.tsx` | Presentational branch list. Splits local/remote with separator. Current-branch `●` marker. Remote badge. → see `BranchListbox.tsx.AGENTS.md` |
 | `BranchPicker.tsx` | Typeahead branch picker with keyboard navigation. Delegates row rendering + keyboard nav to `BranchListbox`. → see `BranchPicker.tsx.AGENTS.md` |
 | `BranchSwitchDialog.tsx` | Modal dialog for git branch switch. Exports `BranchSwitchDialog`. → see `BranchSwitchDialog.tsx.AGENTS.md` |
-| `CanvasDriver.tsx` | Auto-canvas driver. Consumes a session's `CanvasState`; viewport-gated open via `useSplitWorkspace` `openInSplit`/`openLiveTarget` (desktop/tablet) or a tap-to-open `canvas-file-chip` (mobile). Renders `CanvasServerChip`. Coexists with URL-driven preview. See change: auto-canvas (Section 6). |
-| `CanvasServerChip.tsx` | Declared-server confirm chip (`data-testid=canvas-server-chip`, carries only port). Tap routes through LiveServerViewer loopback probe (`onTap(127.0.0.1:port)`); NO pre-tap fetch. See change: auto-canvas (Section 7). |
+| `CanvasDriver.tsx` | Auto-canvas driver. Consumes a session's `CanvasState`; viewport-gated open via `useSplitWorkspace`… → see `CanvasDriver.tsx.AGENTS.md` |
+| `CanvasServerChip.tsx` | Declared-server confirm chip (`data-testid=canvas-server-chip`, carries only port). → see `CanvasServerChip.tsx.AGENTS.md` |
 | `ChangeSummaryBlock.tsx` | Per-turn change-summary block in chat stream. Collapses to `N files · +X −Y`. Gated on `displayPrefs.changeSummaryTable`. Deltas via `buildTurnSummaries`. See change: add-change-summary-table. |
 | `ChatView.tsx` | `msg.view` rows render as `<PreviewCard target={msg.view}>` (right-aligned, `bubbleMax` width) BEFORE… → see `ChatView.tsx.AGENTS.md` |
 | `ChatViewMenu.tsx` | Discord-style ⚙ View popover mounted in chat toolbar. Edits per-session `displayPrefsOverride` via… → see `ChatViewMenu.tsx.AGENTS.md` |
@@ -36,7 +36,7 @@ Files in this directory. One row per source file.
 | `DiffFileTree.tsx` | Two-level file tree of changed files. Exports `DiffFileTree`, `FileSelection`. → see `DiffFileTree.tsx.AGENTS.md` |
 | `DiffPanel.tsx` | Diff renderer for a selected file. Exports `DiffPanel`. Modes: `diff` (split/unified via… → see `DiffPanel.tsx.AGENTS.md` |
 | `DiffView.tsx` | Minimal line-by-line unified-diff renderer. Exports `DiffView`. Colors `+` lines green, `-` lines red, `@@` hunk headers blue. No syntax highlighting. |
-| `DirectoryHomeView.tsx` | Directory home page for the bare `/folder/:encodedCwd` route. Centered spawn prompt → `onSpawnSession(cwd, undefined, {initialPrompt})`. Eligibility guard: renders when cwd in `pinnedDirectories` OR in `workspaceFolders: Set<string>`; cold-load loading gate on `pinnedDirectoriesLoaded && workspacesLoaded` (both flags, separate WS messages); else neutral miss notice + pin CTA (`directory-home-not-pinned`). Exports `DirectoryHomeView`, `DirectoryHomeViewProps`. See change: add-directory-home-page, enable-workspace-folder-home-page (workspace-folder eligibility + `workspacesLoaded` gate + de-pinned notice copy). |
+| `DirectoryHomeView.tsx` | Directory home page for the bare `/folder/:encodedCwd` route. → see `DirectoryHomeView.tsx.AGENTS.md` |
 | `DraggableChangeRow.tsx` | dnd-kit draggable wrapper for OpenSpec change rows. Exports `DraggableChangeRow`. → see `DraggableChangeRow.tsx.AGENTS.md` |
 | `ElapsedBadge.tsx` | Elapsed-time badge. Exports `ElapsedBadge`, `formatElapsed`. Static when `duration` set; live ticking (1s interval) when only `startedAt` set. Formats <1s / Ns / Nm Ns / Nh Nm. |
 | `ErrorBoundary.tsx` | Generic React error boundary. Exports `ErrorBoundary`. Catches render errors via `getDerivedStateFromError`;… → see `ErrorBoundary.tsx.AGENTS.md` |
@@ -45,8 +45,8 @@ Files in this directory. One row per source file.
 | `FilePreviewContext.tsx` | Owns hoisted file-preview open-state above chat message list. → see `FilePreviewContext.tsx.AGENTS.md` |
 | `FilePreviewOverlay.tsx` | Modal overlay. Reads file via `/api/file?cwd&path`. Routes by ext: `.md`/`.mdx` → `MarkdownContent`; image →… → see `FilePreviewOverlay.tsx.AGENTS.md` |
 | `FirstLaunchDisplayModal.tsx` | One-shot preset picker (simple / standard / everything) shown when `/api/preferences/display.global ===… → see `FirstLaunchDisplayModal.tsx.AGENTS.md` |
-| `FolderActionBar.tsx` | Sidebar folder-group action bar. Buttons: Terminals(N), Editor (plain button → `/folder/:cwd/editor` internal pane), Clean up broken, Directory Settings. Native-editor / code-server status wiring removed. See change: remove-external-editor-integration. → see `FolderActionBar.tsx.AGENTS.md` |
-| `FolderEditorView.tsx` | Folder-scoped internal Monaco pane. Wraps `SplitWorkspaceProvider` keyed by `folderPaneId(cwd)`, renders `EditorPane` full-width; omits session file-watch (no changed-on-disk banner in folder scope, Non-Goal v1). Replaces removed external `EditorView`. Now the folder-level terminal surface: `autoSurfaceTerminals` + threaded `terminals`/`onCreateTerminal`/`onKillTerminal`/`onRenameTerminal`/`onTerminalTitle` open a `term:<id>` tab per cwd terminal (replaces deleted `TerminalsView`). Exports `FolderEditorView`. See change: remove-external-editor-integration, terminals-in-tabbed-panes. |
+| `FolderActionBar.tsx` | Sidebar folder-group action bar. Buttons: Terminals(N), Editor (plain button → `/folder/:cwd/editor` internal… → see `FolderActionBar.tsx.AGENTS.md` |
+| `FolderEditorView.tsx` | Folder-scoped internal Monaco pane. Wraps `SplitWorkspaceProvider` keyed by `folderPaneId(cwd)`, renders… → see `FolderEditorView.tsx.AGENTS.md` |
 | `FolderNeedsYouPill.tsx` | Folder-header "N need you" rollup pill. Counts chat-routed ask_user child sessions; excludes widget-bar via… → see `FolderNeedsYouPill.tsx.AGENTS.md` |
 | `FolderOpenSpecSection.tsx` | Slim single-line navigation entry `OpenSpec (N) →` to board route + Refresh + Specs/Archive buttons. → see `FolderOpenSpecSection.tsx.AGENTS.md` |
 | `FolderSpawnButtons.tsx` | Stacked spawn buttons in folder header: `+ New Session` (green, always) + `+ New Worktree` (orange, gated by `showWorktree`). Min-height 44px on mobile. Exports `FolderSpawnButtons`. |
@@ -63,7 +63,7 @@ Files in this directory. One row per source file.
 | `InstalledPackagesList.tsx` | Shared installed-packages list for Settings + Pi Resources. → see `InstalledPackagesList.tsx.AGENTS.md` |
 | `KnownServersSection.tsx` | Settings section managing persisted known remote servers. → see `KnownServersSection.tsx.AGENTS.md` |
 | `LandingPage.tsx` | Onboarding landing screen. Three-step gated flow: credentials → pin folder → spawn session; step states… → see `LandingPage.tsx.AGENTS.md` |
-| `LayoutModeSwitch.tsx` | Header `Chat│Split│Editor` segmented switch. WAI-ARIA radiogroup (3 `role=radio`, roving tabindex, Arrow/Home/End + Enter/Space), `aria-checked`=`split.mode`; sets `setMode`. Renders null without provider. testid `layout-mode-switch`. See change: editor-layout-modes. |
+| `LayoutModeSwitch.tsx` | Header `Chat│Split│Editor` segmented switch. WAI-ARIA radiogroup (3 `role=radio`, roving tabindex,… → see `LayoutModeSwitch.tsx.AGENTS.md` |
 | `MarkdownContent.tsx` | ReactMarkdown renderer (chat/thinking/flow agent detail/READMEs/previews); KaTeX math + `pi-asset:` image… → see `MarkdownContent.tsx.AGENTS.md` |
 | `MarkdownPreviewView.tsx` | Markdown preview pane with header (back + title + `MarkdownSearch`) and optional tab bar (`PreviewTab[]`). → see `MarkdownPreviewView.tsx.AGENTS.md` |
 | `MarkdownSearch.tsx` | In-markdown fuzzy search overlay. `fuse.js` index over text blocks; exact-substring match first, fuzzy… → see `MarkdownSearch.tsx.AGENTS.md` |
@@ -80,7 +80,7 @@ Files in this directory. One row per source file.
 | `NewWorkspaceDialog.tsx` | Single-input dialog creating a workspace. Exports `NewWorkspaceDialog`. Validates trimmed name 1–80 chars (`NAME_MAX`), calls `onCreate(name)`. Auto-focuses input. See change: `folder-workspaces`. |
 | `openspec-helpers.tsx` | Shared OpenSpec UI helpers. Exports `LETTER_MAP`, `artifactLetter(id)`, `statusColor(status)`,… → see `openspec-helpers.tsx.AGENTS.md` |
 | `OpenSpecActivityBadge.tsx` | Session-card sub-badge showing active OpenSpec phase. Exports `OpenSpecActivityBadge`. → see `OpenSpecActivityBadge.tsx.AGENTS.md` |
-| `OpenSpecArtifactDialog.tsx` | Non-mobile artifact reader in a flush full `Dialog` (URL unchanged). Local `activeTab`→`useOpenSpecReader(archive=false)`; height-constrained flex wrapper; explicit cold-load + not-found states re-derived from live `openspecMap`. Exports `OpenSpecArtifactDialog`. See change: openspec-artifact-dialog-desktop. |
+| `OpenSpecArtifactDialog.tsx` | Non-mobile artifact reader in a flush full `Dialog` (URL unchanged). → see `OpenSpecArtifactDialog.tsx.AGENTS.md` |
 | `OpenSpecBoardView.tsx` | Full-page OpenSpec kanban board. Route `/folder/:encodedCwd/openspec`. → see `OpenSpecBoardView.tsx.AGENTS.md` |
 | `OpenSpecGroupManager.tsx` | CRUD manager: create/rename/recolor/reorder(dnd-kit)/delete groups. See change: add-openspec-change-grouping. |
 | `OpenSpecGroupPicker.tsx` | Per-row chip+dropdown assigning change to group; inline create. See change: add-openspec-change-grouping. |
@@ -92,9 +92,9 @@ Files in this directory. One row per source file.
 | `PackageBrowser.tsx` | Main package management surface. Exports `PackageBrowser`. → see `PackageBrowser.tsx.AGENTS.md` |
 | `PackageCard.tsx` | Search-result card for one npm package. Exports `PackageCard`. → see `PackageCard.tsx.AGENTS.md` |
 | `PackageInstallConfirmDialog.tsx` | Pre-install confirmation dialog. Exports `PackageInstallConfirmDialog`. Shows source + optional name + scope. → see `PackageInstallConfirmDialog.tsx.AGENTS.md` |
-| `PackagePartialSuccessBanner.tsx` | Shared kind-aware partial-success banner for composite package ops (move + reset). Exports `PackagePartialSuccessBanner`. Copy branches on `MoveState.kind`: reset → "Remove local link"; move → "Cleanup origin". Extracted from `InstalledPackagesList`. See change: reset-override-to-npm. |
+| `PackagePartialSuccessBanner.tsx` | Shared kind-aware partial-success banner for composite package ops (move + reset). → see `PackagePartialSuccessBanner.tsx.AGENTS.md` |
 | `PackageReadmeDialog.tsx` | Dialog fetching + rendering a package README. Exports `PackageReadmeDialog`. → see `PackageReadmeDialog.tsx.AGENTS.md` |
-| `PackageRow.tsx` | Generic installed-package row used across unified packages sections. Exports `PackageRow`, `PackageRowProps`. Local/git rows with `publishedVariantSource` render a 2nd source line (published link + `<v> available`) + inline `↺ Reset to npm` + `⋮` "Reset to published version", both confirm-gated (`onResetToNpm` fires after accept). See change: reset-override-to-npm. → see `PackageRow.tsx.AGENTS.md` |
+| `PackageRow.tsx` | Generic installed-package row used across unified packages sections. Exports `PackageRow`, `PackageRowProps`. → see `PackageRow.tsx.AGENTS.md` |
 | `PairLanding.tsx` | Browser `/pair` landing — phone-camera counterpart of the Electron shell `PairView`. Exports `PairLanding`. → see `PairLanding.tsx.AGENTS.md` |
 | `PairingView.tsx` | Settings→Security operator pairing view. Exports `PairingView`. → see `PairingView.tsx.AGENTS.md` |
 | `PathPicker.tsx` | Reusable keyboard-first path picker with typeahead directory list. → see `PathPicker.tsx.AGENTS.md` |
@@ -132,10 +132,10 @@ Files in this directory. One row per source file.
 | `SessionCard.tsx` | Gates both `<ContextUsageBar>` mounts on `useDisplayPrefs(session.id).contextUsageBar` → see `SessionCard.tsx.AGENTS.md` |
 | `SessionDiffContext.tsx` | `SessionDiffProvider` — one `useSessionDiff` per session, shared by rail/diff-tab/takeover; refreshes on edit signal. See change: add-change-summary-table. |
 | `SessionHeader.tsx` | Session chat header (desktop + mobile). Renders name/rename (`InlineRenameInput`), model, thinking level, pi… → see `SessionHeader.tsx.AGENTS.md` |
-| `SessionList.tsx` | Main sidebar session list. DnD-ordered (`@dnd-kit`) pinned/unpinned + workspace tiers, folder grouping,… `renderGroup` folder-home open affordance (`folder-open-home-<cwd>`) renders when `isPinned \|\| inWorkspace` (unpinned workspace folder has `folder.pinned===false`). See change: enable-workspace-folder-home-page. → see `SessionList.tsx.AGENTS.md` |
+| `SessionList.tsx` | Main sidebar session list. DnD-ordered (`@dnd-kit`) pinned/unpinned + workspace tiers, folder grouping,…… → see `SessionList.tsx.AGENTS.md` |
 | `SessionOpenSpecActions.tsx` | OpenSpec action panel for a session (attach/detach, New/Propose/Explore, Continue/FF/Apply/Verify/Archive,… → see `SessionOpenSpecActions.tsx.AGENTS.md` |
 | `SessionSidebar.tsx` | Legacy compact session sidebar. Active + ended (`<details>`) lists with status dots, source icons, model,… → see `SessionSidebar.tsx.AGENTS.md` |
-| `SessionSplitView.tsx` | Connects context → `SplitWorkspace` (editor slot=`EditorPane`), passing `mode`/`onModeChange`. `SplitRouteSync` opens split from `/session/:id/editor` deep-link via `openInSplit` (else `mode:"split"`). See change: split-editor-workspace. See change: editor-layout-modes. |
+| `SessionSplitView.tsx` | Connects context → `SplitWorkspace` (editor slot=`EditorPane`), passing `mode`/`onModeChange`. → see `SessionSplitView.tsx.AGENTS.md` |
 | `SessionSubcard.tsx` | Inset titled panel wrapper grouping session-card sections (OPENSPEC, WORKSPACE, PROCESS, MEMORY, FLOWS). → see `SessionSubcard.tsx.AGENTS.md` |
 | `SettingsPanel.tsx` | Settings UI: left-nav rail + page content… → see `SettingsPanel.tsx.AGENTS.md` |
 | `SkillInvocationCard.tsx` | Collapsible card rendering a `<skill>` user invocation. Purple-tinted, wrench icon, default-collapsed body… → see `SkillInvocationCard.tsx.AGENTS.md` |
@@ -143,11 +143,11 @@ Files in this directory. One row per source file.
 | `SortableSessionCard.tsx` | dnd-kit sortable wrapper for a session card (`data.type: "session"`). Drag handle props fed to descendant `SessionCard` via `DragHandleCtx`. Exports `SortableSessionCard`, `useSessionCardDragHandle`. |
 | `SortableWorkspace.tsx` | dnd-kit sortable wrapper for a workspace tier (`data.type: "workspace"`), drop indicator. → see `SortableWorkspace.tsx.AGENTS.md` |
 | `SortableWorkspaceFolder.tsx` | dnd-kit sortable wrapper for a folder inside a workspace (`data.type: "workspace-folder"`, carries `wsId`). → see `SortableWorkspaceFolder.tsx.AGENTS.md` |
-| `SpawnErrorBanner.tsx` | Renders structured spawn error: code→hint, preflight reasons, stderr details, timeout banner. Error shades → `--severity-error-*`; `TimeoutBanner` amber → `--severity-warning-*`. See change: spawn-failure-diagnostics, unify-message-severity-colors. |
+| `SpawnErrorBanner.tsx` | Renders structured spawn error: code→hint, preflight reasons, stderr details, timeout banner. → see `SpawnErrorBanner.tsx.AGENTS.md` |
 | `SpawnErrorToastHost.tsx` | App-level toast container for off-screen `spawn_error` events. Raw red → `--severity-error-*`. → see `SpawnErrorToastHost.tsx.AGENTS.md` |
 | `SpecsBrowserView.tsx` | Full-page main specs reader for a cwd. Combobox jump-to-spec + `MarkdownPreviewView` (searchable). Backed by `useMainSpecsReader`. Props: `cwd`, `onBack`. Exports `SpecsBrowserView`. |
-| `SplitDivider.tsx` | Draggable divider (outer chat/editor + inner rail). Reports pointer coord; orientation-aware cursor. Optional `‹`/`›` collapse chevrons (`onCollapseChat`→full, `onCollapseEditor`→closed; `stopPropagation` drag-vs-click guard, testids `split-fold-chat`/`split-fold-editor`). See change: split-editor-workspace. See change: editor-layout-modes. |
-| `SplitWorkspace.tsx` | Pure layout, 3 modes via `mode` prop: `closed` (chat + right-edge Editor peek), `split` (chat+divider+editor), `full` (editor + leading Chat peek; ChatView kept mounted hidden). Stable chat/editor keys → no remount. `onModeChange` for peeks/chevrons. See change: split-editor-workspace. See change: editor-layout-modes. |
+| `SplitDivider.tsx` | Draggable divider (outer chat/editor + inner rail). Reports pointer coord; orientation-aware cursor. → see `SplitDivider.tsx.AGENTS.md` |
+| `SplitWorkspace.tsx` | Pure layout, 3 modes via `mode` prop: `closed` (chat + right-edge Editor peek), `split`… → see `SplitWorkspace.tsx.AGENTS.md` |
 | `SplitWorkspaceContext.tsx` | Per-session provider. Lifts `useSplitState`+`useEditorPaneState`. → see `SplitWorkspaceContext.tsx.AGENTS.md` |
 | `StatePill.tsx` | Color-coded OpenSpec ChangeState pill (`PLANNING`=zinc, `READY`=blue, `IMPLEMENTING`=amber, `COMPLETE`=green)… → see `StatePill.tsx.AGENTS.md` |
 | `StatusBar.tsx` | Working-status label ONLY; null when idle. Model row retired; model/thinking moved to composer toolbar → see `StatusBar.tsx.AGENTS.md`. See change: redesign-prompt-input. |
@@ -159,7 +159,7 @@ Files in this directory. One row per source file.
 | `ThemeToggle.tsx` | Exports `ThemeToggle`. Three-button light/system/dark switcher; reads `preference`/`setPreference` from `useThemeContext`. Renders mdi icons, `data-testid="theme-toggle"`. |
 | `ThinkingBlock.tsx` | Exports `ThinkingBlock`. Collapsible reasoning panel; props `content`, `isStreaming`, `defaultExpanded`,… → see `ThinkingBlock.tsx.AGENTS.md` |
 | `ThinkingLevelSelector.tsx` | Thinking-level picker. Optional prop `supportedLevels` filters `THINKING_LEVELS` to supported set (canonical… → see `ThinkingLevelSelector.tsx.AGENTS.md` |
-| `Toast.tsx` | Canonical `ToastVariant = error\|warning\|success\|info\|neutral` (re-exported by `useAsyncAction`, referenced by `useMessageHandler`). `showToast(text, variant="neutral")` — default flipped error→neutral. `VARIANT_CLASSES` sources every tier from `--severity-*` triples; close (×) = variant `-fg`/70. See change: add-async-action-feedback, unify-message-severity-colors. |
+| `Toast.tsx` | Canonical `ToastVariant = error\|warning\|success\|info\|neutral` (re-exported by `useAsyncAction`,… → see `Toast.tsx.AGENTS.md` |
 | `TokenStatsBar.tsx` | Exports `TokenStatsBar`. Renders per-turn butterfly chart (input up / output down) + stats panel +… → see `TokenStatsBar.tsx.AGENTS.md` |
 | `ToolBurstGroup.tsx` | Renders temporal BURST group (data from `lib/group-tool-bursts.ts`). → see `ToolBurstGroup.tsx.AGENTS.md` |
 | `ToolCallStep.tsx` | Renders tool-call card. Adds `showResultBody?: boolean` prop (default `true`); when `false` hides result body… → see `ToolCallStep.tsx.AGENTS.md` |

@@ -45,7 +45,7 @@ Files in this directory. One row per source file.
 | `group-tool-bursts.ts` | Temporal burst grouping — OUTER pass over `groupConsecutiveToolCalls`. → see `group-tool-bursts.ts.AGENTS.md` |
 | `group-tool-calls.ts` | Collapses repetitive retry loops in chat view. Exports `ToolCallGroup`, `ChatItem`,… → see `group-tool-calls.ts.AGENTS.md` |
 | `history-back.ts` | Exports `goBack(navigate, currentRoute, tracker)` — depth-aware mobile/overlay back action. → see `history-back.ts.AGENTS.md` |
-| `i18n.tsx` | i18n provider + `t()` translator. Exports `Language` ("en"|"zh-CN"), `LANGUAGE_OPTIONS`, `t(key, vars?,… → see `i18n.tsx.AGENTS.md` |
+| `i18n.tsx` | i18n provider + `t()` translator. Exports `Language` ("en"|"zh-CN"|"hu"), `LANGUAGE_OPTIONS`, `t(key, vars?,… → see `i18n.tsx.AGENTS.md` |
 | `installed-list-helpers.ts` | Pure client helpers for installed-packages UI. Exports `computeDestIdentity(source)` — mirrors server… → see `installed-list-helpers.ts.AGENTS.md` |
 | `known-servers-api.ts` | Client fetch helpers for known-servers management. Exports `listKnownServers`, `addKnownServer(host, port,… → see `known-servers-api.ts.AGENTS.md` |
 | `lineDelta.ts` | Per-turn +/- line-delta derivation from Edit/Write events (jsdiff `structuredPatch`, no git). → see `lineDelta.ts.AGENTS.md` |
