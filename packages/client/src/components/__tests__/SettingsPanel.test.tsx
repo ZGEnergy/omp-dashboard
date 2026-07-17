@@ -191,7 +191,7 @@ describe("SettingsPanel", () => {
     const { unmount } = render(<SettingsPanel />);
     await waitFor(() => {
       expect(window.location.pathname).toBe("/settings/developer");
-      expect(screen.getByText("Editor (code-server)")).toBeTruthy();
+      expect(screen.getByText("Dev Build on Reload")).toBeTruthy();
     });
     unmount();
     cleanup();
@@ -231,11 +231,11 @@ describe("SettingsPanel", () => {
     // Memory Limits lives on Server only.
     gotoPage("Server");
     await waitFor(() => screen.getByText("Memory Limits"));
-    expect(screen.queryByText("Editor (code-server)")).toBeNull();
+    expect(screen.queryByText("Dev Build on Reload")).toBeNull();
 
-    // Editor lives on Developer only; Memory Limits is gone there.
+    // Dev Build on Reload lives on Developer only; Memory Limits is gone there.
     gotoPage("Developer");
-    await waitFor(() => screen.getByText("Editor (code-server)"));
+    await waitFor(() => screen.getByText("Dev Build on Reload"));
     expect(screen.queryByText("Memory Limits")).toBeNull();
   });
 
@@ -414,6 +414,82 @@ describe("SettingsPanel", () => {
       expect(savedBody).toBeTruthy();
       expect(savedBody.modelProxy.defaultModel).toBe("anthropic/claude-3-5-sonnet");
       expect(savedBody.modelProxy.enabled).toBe(true);
+    });
+  });
+
+  it("adds a preferred model via ModelSelector and persists modelProxy.preferredModels on Save", async () => {
+    const configWithModelProxy = {
+      ...mockConfig,
+      modelProxy: { enabled: true },
+    };
+    let savedBody: any;
+    global.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url === "/api/config" && options?.method === "PUT") {
+        savedBody = JSON.parse(options.body);
+        return Promise.resolve({ json: () => Promise.resolve({ success: true }) });
+      }
+      if (url === "/api/config") {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: configWithModelProxy }) });
+      }
+      if (url === "/api/provider-auth/status") {
+        return Promise.resolve({ json: () => Promise.resolve([]) });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
+    });
+    setPath("/settings/providers");
+
+    render(<SettingsPanel availableModels={[{ provider: "openai", id: "gpt-4o" }]} />);
+    await waitFor(() => screen.getByTestId("preferred-models-editor"));
+
+    // Open the "Add model" selector and pick the one available model.
+    const editor = screen.getByTestId("preferred-models-editor");
+    fireEvent.click(within(editor).getByTestId("model-selector-button"));
+    fireEvent.click(within(editor).getByTestId("model-row"));
+
+    fireEvent.click(screen.getAllByTestId("save-btn")[0]);
+
+    await waitFor(() => {
+      expect(savedBody).toBeTruthy();
+      expect(savedBody.modelProxy.preferredModels).toEqual(["openai/gpt-4o"]);
+    });
+  });
+
+  it("adds a model alias and persists modelProxy.modelAliases on Save", async () => {
+    const configWithModelProxy = {
+      ...mockConfig,
+      modelProxy: { enabled: true },
+    };
+    let savedBody: any;
+    global.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url === "/api/config" && options?.method === "PUT") {
+        savedBody = JSON.parse(options.body);
+        return Promise.resolve({ json: () => Promise.resolve({ success: true }) });
+      }
+      if (url === "/api/config") {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: configWithModelProxy }) });
+      }
+      if (url === "/api/provider-auth/status") {
+        return Promise.resolve({ json: () => Promise.resolve([]) });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
+    });
+    setPath("/settings/providers");
+
+    render(<SettingsPanel availableModels={[{ provider: "anthropic", id: "claude-3-5-sonnet" }]} />);
+    await waitFor(() => screen.getByTestId("model-aliases-editor"));
+
+    const editor = screen.getByTestId("model-aliases-editor");
+    fireEvent.click(within(editor).getByTestId("add-alias-button"));
+    fireEvent.change(within(editor).getByTestId("alias-key-0"), { target: { value: "claude" } });
+    // Pick the alias target from the ModelSelector.
+    fireEvent.click(within(editor).getByTestId("model-selector-button"));
+    fireEvent.click(within(editor).getByTestId("model-row"));
+
+    fireEvent.click(screen.getAllByTestId("save-btn")[0]);
+
+    await waitFor(() => {
+      expect(savedBody).toBeTruthy();
+      expect(savedBody.modelProxy.modelAliases).toEqual({ claude: "anthropic/claude-3-5-sonnet" });
     });
   });
 

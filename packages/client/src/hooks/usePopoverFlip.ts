@@ -8,6 +8,13 @@
  *  - horizontal: right-align (`right-0`, legacy default) or left-align (`left-0`)
  *    when a right-aligned panel would hang past the left viewport edge
  *
+ * On the horizontal axis it additionally measures the trigger's left/right
+ * viewport space and returns an `anchorRight` edge selection plus a clamped
+ * `maxWidth`, so a right-anchored popover in a slim container flips toward the
+ * side with room instead of clipping off-screen. The horizontal axis is
+ * additive: it defaults to the consumer's existing right-anchor and only flips
+ * when a finite `estimatedWidth` genuinely does not fit the anchored side.
+ *
  * Single source of truth retiring the hand-rolled `bottom-full` + `max-h-NN`
  * flip logic previously duplicated across ModelSelector / ThinkingLevelSelector
  * / CommandInput, and restoring the specced auto-flip on ChatViewMenu.
@@ -55,6 +62,8 @@ export interface PopoverFlipState {
 
 /** Minimum popover height so it never collapses to nothing. */
 export const MIN_POPOVER_HEIGHT = 120;
+/** Minimum popover width so it never collapses to nothing. */
+export const MIN_POPOVER_WIDTH = 160;
 const DEFAULT_GAP = 8;
 const DEFAULT_THRESHOLD = 200;
 const DEFAULT_EDGE_MARGIN = 8;

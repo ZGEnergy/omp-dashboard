@@ -2,21 +2,22 @@
  * Browser Gateway - WebSocket handler for browser client connections.
  * Runs on the HTTP server port via upgrade handling.
  */
-import { WebSocketServer, WebSocket } from "ws";
+
 import type {
-  ServerToBrowserMessage,
   BrowserOpenSpecUpdateMessage,
   BrowserToServerMessage,
+  ServerToBrowserMessage,
 } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import type { SessionManager } from "./memory-session-manager.js";
-import type { EventStore } from "./memory-event-store.js";
-import type { PiGateway } from "./pi-gateway.js";
+import { WebSocket, WebSocketServer } from "ws";
+import { type DirectoryService, hasOpenSpecDir, hasOpenSpecRoot } from "./directory-service.js";
 // PendingLoadManager removed — server loads sessions directly via DirectoryService
 import { createHeadlessPidRegistry, type HeadlessPidRegistry } from "./headless-pid-registry.js";
+import type { EventStore } from "./memory-event-store.js";
+import type { SessionManager } from "./memory-session-manager.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
-import type { SessionOrderManager } from "./session-order-manager.js";
+import type { PiGateway } from "./pi-gateway.js";
 import type { PreferencesStore } from "./preferences-store.js";
-import { hasOpenSpecDir, hasOpenSpecRoot, type DirectoryService } from "./directory-service.js";
+import type { SessionOrderManager } from "./session-order-manager.js";
 
 /**
  * Pure helper: build the per-cwd `openspec_update` messages a freshly
@@ -61,16 +62,17 @@ export function buildOpenSpecConnectSnapshot(
   }
   return out;
 }
-import { createPendingResumeRegistry, type PendingResumeRegistry } from "./pending-resume-registry.js";
-import { createViewedSessionTracker, type ViewedSessionTracker } from "./viewed-session-tracker.js";
-import type { TerminalManager } from "./terminal-manager.js";
+
+import { handleAddFolderToWorkspace, handleCreateWorkspace, handleDeleteWorkspace, handleExtensionUiResponse, handleFavoriteModel, handleOpenSpecBulkArchive, handleOpenSpecRefresh, handlePiGatewayForward, handlePinDirectory, handleRemoveFolderFromWorkspace, handleRenameWorkspace, handleReorderPinnedDirs, handleReorderSessions, handleReorderWorkspaceFolders, handleReorderWorkspaces, handleSetWorkspaceCollapsed, handleUnfavoriteModel, handleUnpinDirectory } from "./browser-handlers/directory-handler.js";
 import type { BrowserHandlerContext } from "./browser-handlers/handler-context.js";
+import { handleAbort, handleClearFollowupEntries, handleEditFollowupEntry, handleFlowControl, handleForceKill, handleKillProcess, handlePromoteFollowupEntry, handleRemoveFollowupEntry, handleResumeSession, handleSendPrompt, handleShutdown, handleSpawnSession, handleStopAfterTurn, handleSubagentResyncRequest } from "./browser-handlers/session-action-handler.js";
+import { handleAcceptReplaceProposal, handleAttachProposal, handleDetachProposal, handleDismissReplaceProposal, handleFetchContent, handleHideSession, handleListSessions, handleRenameSession, handleSetSessionDisplayPrefs, handleSetSessionProcessDrawer, handleSetSessionTags, handleUnhideSession } from "./browser-handlers/session-meta-handler.js";
 import { handleSubscribe } from "./browser-handlers/subscription-handler.js";
+import { handleCloseInlineTerminal, handleCreateTerminal, handleKillTerminal, handleOpenInlineTerminal, handleRenameTerminal } from "./browser-handlers/terminal-handler.js";
+import { createPendingResumeRegistry, type PendingResumeRegistry } from "./pending-resume-registry.js";
+import type { TerminalManager } from "./terminal-manager.js";
 import { ViewMessageStore } from "./view-message-store.js";
-import { handleSendPrompt, handleResumeSession, handleSpawnSession, handleShutdown, handleAbort, handleStopAfterTurn, handleFlowControl, handleForceKill, handleKillProcess, handleClearFollowupEntries, handleEditFollowupEntry, handleRemoveFollowupEntry, handlePromoteFollowupEntry } from "./browser-handlers/session-action-handler.js";
-import { handleRenameSession, handleHideSession, handleUnhideSession, handleAttachProposal, handleDetachProposal, handleAcceptReplaceProposal, handleDismissReplaceProposal, handleFetchContent, handleListSessions, handleSetSessionDisplayPrefs, handleSetSessionProcessDrawer } from "./browser-handlers/session-meta-handler.js";
-import { handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleOpenInlineTerminal, handleCloseInlineTerminal } from "./browser-handlers/terminal-handler.js";
-import { handlePinDirectory, handleUnpinDirectory, handleReorderPinnedDirs, handleFavoriteModel, handleUnfavoriteModel, handleReorderSessions, handleOpenSpecRefresh, handleOpenSpecBulkArchive, handleExtensionUiResponse, handlePiGatewayForward, handleCreateWorkspace, handleRenameWorkspace, handleDeleteWorkspace, handleSetWorkspaceCollapsed, handleAddFolderToWorkspace, handleRemoveFolderFromWorkspace, handleReorderWorkspaceFolders, handleReorderWorkspaces } from "./browser-handlers/directory-handler.js";
+import { createViewedSessionTracker, type ViewedSessionTracker } from "./viewed-session-tracker.js";
 
 export const PROMPT_RESPONSE_RETRY_MAX_AGE_MS = 60_000;
 export const PROMPT_RESPONSE_MAX_RETRIES = 10;
@@ -162,6 +164,17 @@ export interface BrowserGateway {
     handler: (msg: any, ws: WebSocket) => void,
   ): void;
   /**
+   * Register a `plugin_action` handler keyed by pluginId, so multiple plugins
+   * service `plugin_action` concurrently without one shadowing another. The
+   * host supplies the pluginId from the plugin manifest (not self-declared).
+   * See change: fix-plugin-action-fanout-and-handlers.
+   */
+  registerPluginActionHandler(
+    pluginId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    handler: (msg: any, ws: WebSocket) => void,
+  ): void;
+  /**
    * Register a callback invoked when any browser connection closes, so
    * per-connection resources (e.g. the open-files watch) are torn down.
    * See change: split-editor-workspace.
@@ -199,6 +212,16 @@ export function createBrowserGateway(
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const customHandlers = new Map<string, (msg: any, ws: WebSocket) => void>();
+
+  /**
+   * `plugin_action` handlers keyed by pluginId (fan-out registry). Distinct
+   * from `customHandlers` (single-owner types like `watch_files`): a
+   * `plugin_action` is routed to the handler whose pluginId matches
+   * `message.pluginId`, so N plugins coexist regardless of load order.
+   * See change: fix-plugin-action-fanout-and-handlers.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pluginActionHandlers = new Map<string, (msg: any, ws: WebSocket) => void>();
 
   // Callbacks invoked on browser disconnect (per-connection resource cleanup).
   // See change: split-editor-workspace.
@@ -630,6 +653,9 @@ export function createBrowserGateway(
           case "kill_process":
             handleKillProcess(msg, ctx);
             break;
+          case "subagent_resync_request":
+            handleSubagentResyncRequest(msg, ctx);
+            break;
           case "shutdown":
             handleShutdown(msg, ctx);
             break;
@@ -659,6 +685,9 @@ export function createBrowserGateway(
             break;
           case "set_session_process_drawer":
             handleSetSessionProcessDrawer(msg, ctx);
+            break;
+          case "set_session_tags":
+            handleSetSessionTags(msg, ctx);
             break;
           case "fetch_content":
             handleFetchContent(msg, ctx);
@@ -828,6 +857,14 @@ export function createBrowserGateway(
             });
             break;
           }
+          case "role_remove": {
+            ctx.piGateway.sendToSession(msg.sessionId, {
+              type: "role_remove",
+              sessionId: msg.sessionId,
+              role: (msg as any).role,
+            });
+            break;
+          }
           case "request_roles": {
             ctx.piGateway.sendToSession(msg.sessionId, {
               type: "request_roles",
@@ -886,9 +923,28 @@ export function createBrowserGateway(
             break;
           }
           default: {
-            // Plugin-registered custom handler takes precedence over pi-gateway forward.
             const type = (msg as { type?: string } | undefined)?.type;
-            if (type && customHandlers.has(type)) {
+            // plugin_action fans out by pluginId to the owning plugin's handler.
+            // Unknown pluginId → structured error to the sender, never a silent
+            // drop. See change: fix-plugin-action-fanout-and-handlers.
+            if (type === "plugin_action") {
+              const pa = msg as { pluginId?: string; action?: string };
+              const handler = pa.pluginId ? pluginActionHandlers.get(pa.pluginId) : undefined;
+              if (handler) {
+                handler(msg, ws);
+              } else {
+                sendTo(ws, {
+                  type: "plugin_action_error",
+                  pluginId: pa.pluginId ?? "",
+                  ...(pa.action ? { action: pa.action } : {}),
+                  error: `no plugin_action handler for pluginId "${pa.pluginId ?? ""}"`,
+                });
+                console.error(
+                  `[browser-gw] plugin_action dropped: no handler for pluginId=${pa.pluginId ?? "(none)"} action=${pa.action ?? "(none)"}`,
+                );
+              }
+            } else if (type && customHandlers.has(type)) {
+              // Plugin-registered custom handler takes precedence over pi-gateway forward.
               customHandlers.get(type)!(msg, ws);
             } else {
               // Forward simple pi-gateway commands
@@ -939,6 +995,15 @@ export function createBrowserGateway(
 
     registerHandler(type, handler) {
       customHandlers.set(type, handler);
+    },
+
+    registerPluginActionHandler(pluginId, handler) {
+      if (pluginActionHandlers.has(pluginId)) {
+        console.warn(
+          `[browser-gw] duplicate plugin_action handler for pluginId=${pluginId}; replacing (manifest ids should be unique)`,
+        );
+      }
+      pluginActionHandlers.set(pluginId, handler);
     },
 
     registerDisconnectHandler(handler) {

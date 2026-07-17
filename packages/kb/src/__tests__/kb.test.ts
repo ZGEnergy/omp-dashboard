@@ -558,4 +558,36 @@ describe("dox: kb dox lint", () => {
     // `Explore` lives under a non-DOX heading → not a file row, no orphan
     expect(r.issues.filter((i) => i.path === "Explore").length).toBe(0);
   });
+
+  it("excludes build output + electron bundled/vendored trees from the md walk", () => {
+    // gitignored build/vendored md must never surface as missing/companion rows
+    for (const rel of [
+      "packages/electron/out/app/README.md",
+      "packages/electron/resources/bundled-extensions/pi-flows/docs/flows.md",
+      "packages/electron/resources/server/README.md",
+    ]) {
+      mkdirSync(join(dir, rel, ".."), { recursive: true });
+      writeFileSync(join(dir, rel), "# vendored\nbundled copy, not documented.\n");
+    }
+    const r = doxLint({ cwd: dir });
+    const touched = r.issues.filter(
+      (i) => i.path?.includes("/out/") || i.path?.includes("bundled-extensions") || i.path?.includes("resources/server"),
+    );
+    expect(touched.length).toBe(0);
+    // a real `server` source dir stays eligible (token scoped to electron/resources/server)
+    mkdirSync(join(dir, "packages/server"), { recursive: true });
+    writeFileSync(join(dir, "packages/server", "guide.md"), "# guide\nreal server doc.\n");
+    const r2 = doxLint({ cwd: dir });
+    expect(r2.issues.some((i) => i.path === "packages/server/guide.md" && i.kind === "missing")).toBe(true);
+  });
+
+  it("treats `*.agent.md` companions as index artifacts (no row/companion of their own)", () => {
+    // a big doc + its pull-only companion sidecar
+    writeFileSync(join(dir, "src", "big.md"), "# Big\n" + "line\n".repeat(400));
+    writeFileSync(join(dir, "src", "big.agent.md"), "# big \u2014 index\n\nmap of big.md.\n");
+    const r = doxLint({ cwd: dir });
+    // the companion must not surface as its own missing row or need a nested companion
+    expect(r.issues.some((i) => i.path === "src/big.agent.md")).toBe(false);
+    expect(r.issues.some((i) => (i.agentsFile || "").endsWith(".agent.agent.md"))).toBe(false);
+  });
 });

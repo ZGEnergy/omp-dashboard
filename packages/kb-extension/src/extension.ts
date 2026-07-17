@@ -23,7 +23,7 @@ import { agentsChain } from "@blackbelt-technology/pi-dashboard-kb";
 import { readFileSync } from "node:fs";
 import {
   createReindexState, getKb, scheduleReindex, acknowledgeRows,
-  decideNudge, nudgeText, closeKb, reindexNow, type ReindexState,
+  decideNudge, nudgeText, closeKb, reindexNow, ensurePopulated, type ReindexState,
 } from "./reindex.js";
 
 const WRITE_TOOLS = new Set(["write", "edit", "bash"]);
@@ -102,6 +102,14 @@ export default function kbExtension(pi: ExtensionAPI): void {
     }),
     async execute(_id: string, params: { node: string; depth?: number }, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: Ctx) {
       const cwd = ctx?.cwd ?? process.cwd();
+      // Cold-start populate: an active-but-uninitialized KB would otherwise
+      // return empty here. Guarded like kb_search — a failed walk falls back to
+      // the existing index. See change: fix-kb-neighbors-get-cold-start.
+      try {
+        await ensurePopulated(state, cwd);
+      } catch (e) {
+        console.warn(`[kb] cold-start populate failed, using existing index: ${(e as Error).message}`);
+      }
       const { store } = getKb(state, cwd);
       const nodes = store.neighbors(params.node as string, (params.depth as number) ?? 2);
       return { content: [{ type: "text", text: JSON.stringify(nodes, null, 2) }], details: { nodes: nodes.length } };
@@ -118,6 +126,12 @@ export default function kbExtension(pi: ExtensionAPI): void {
     }),
     async execute(_id: string, params: { path: string; section?: string }, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: Ctx) {
       const cwd = ctx?.cwd ?? process.cwd();
+      // Cold-start populate (see kb_neighbors). See change: fix-kb-neighbors-get-cold-start.
+      try {
+        await ensurePopulated(state, cwd);
+      } catch (e) {
+        console.warn(`[kb] cold-start populate failed, using existing index: ${(e as Error).message}`);
+      }
       const { store, cfg } = getKb(state, cwd);
       const root = cfg.resolvedSources[0]?.id ?? "";
       const chunk = store.getChunk(root, params.path as string, params.section as string | undefined);
@@ -189,4 +203,4 @@ export default function kbExtension(pi: ExtensionAPI): void {
   });
 }
 
-export { createReindexState, getKb, scheduleReindex, acknowledgeRows, decideNudge, nudgeText, closeKb, reindexNow } from "./reindex.js";
+export { createReindexState, getKb, scheduleReindex, acknowledgeRows, decideNudge, nudgeText, closeKb, closeKbForCwd, reindexNow, ensurePopulated } from "./reindex.js";

@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createSessionOrderManager } from "../session-order-manager.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PreferencesStore } from "../preferences-store.js";
+import { createSessionOrderManager } from "../session-order-manager.js";
 
 function createMockPreferencesStore(initialOrder: Record<string, string[]> = {}): PreferencesStore {
   let order = { ...initialOrder };
@@ -29,6 +29,8 @@ function createMockPreferencesStore(initialOrder: Record<string, string[]> = {})
     getDisplayPrefs: vi.fn(() => undefined),
     getOpenSpecUpdateSignature: vi.fn(() => undefined),
     getAutoInitWorktreeOnSpawn: vi.fn(() => false),
+    getAutoNameSessions: vi.fn(() => true),
+    setAutoNameSessions: vi.fn(),
     getLiveServers: vi.fn(() => []),
     setLiveServers: vi.fn(),
     setAutoInitWorktreeOnSpawn: vi.fn(),

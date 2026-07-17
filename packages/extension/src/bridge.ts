@@ -296,8 +296,16 @@ function initBridge(pi: ExtensionAPI) {
   let lastGitBranch: string | undefined;
   let lastGitPrNumber: number | undefined;
   let lastGitWorktreeJson: string | undefined; // see change: add-worktree-spawn-dialog
+  let lastGitStatusJson: string | undefined; // see change: add-session-uncommitted-indicator-and-commit
   let lastCwdMissing: boolean | undefined; // see change: add-worktree-lifecycle-actions
   let lastSessionName: string | undefined;
+  // ── add-auto-session-naming ────────────────────────────────────────────
+  // Global auto-naming toggle, relayed by the server via `preferences_update`.
+  // Default true so a bridge that registers before the first push still names.
+  let autoNameSessions = true;
+  let autoNamer: AutoNamer | undefined;
+  // Lazily-loaded pi-ai streamSimple (null = load attempted and failed).
+  let piAiStreamSimple: StreamSimpleFn | null | undefined;
   let cachedHasUI: boolean | undefined = prev.hasUI;
   let cachedModelRegistry: any | undefined = prev.modelRegistry;
   let cachedCtx: any | undefined = prev.ctx;
@@ -316,17 +324,29 @@ function initBridge(pi: ExtensionAPI) {
   const dashboardSpawned = prev.dashboardSpawned;
   let promptBus: PromptBus | undefined;
 
-  // Provider-retry synthesis trackers. pi's ExtensionAPI does not expose
-  // `auto_retry_*` events, so the bridge synthesizes them from observed
-  // `message_end` / `agent_end` events. See change: fix-provider-retry-infinite-loop.
+  // Provider-retry synthesis tracker. pi's ExtensionAPI does not expose
+  // `auto_retry_*` events, so the bridge synthesizes them by OBSERVING pi's
+  // own retry behavior (error message_end → fresh assistant message_start →
+  // auto_retry_start). See change: simplify-error-retry-single-card.
   const retryTracker = new RetryTracker();
-  const usageLimitOrderer = new UsageLimitOrderer();
+  // Empty-actionable-turn guard: when a terminal turn is a clean-but-empty
+  // `stop` (thinking-only, no text, no tool call), continue-or-surface instead
+  // of idling silently. Provider-agnostic. See change:
+  // fix-gemini-subagent-silent-tool-schema-failure.
+  const guardConfig = resolveGuardConfig();
+  const emptyActionableGuard = new EmptyActionableGuard(guardConfig.mode, guardConfig.retryCap);
   // Abort latch: keeps a user abort latched so a provider backoff that
   // outlives the 2 s persistent-abort scheduler still stops pi's retry.
   // Set on abort; cleared on a new user prompt or terminal agent_end; honored
   // on every observed resumption of the aborted turn. See change:
   // unify-error-retry-lifecycle (design D3b).
   const abortLatch = new AbortLatch();
+
+  // Subagent live-detail reliability: retain subagent frames emitted while the
+  // bridge is not ready (buffer-and-flush on re-register, D1) and keep the
+  // latest snapshot of each running subagent for the resync responder (D2).
+  // See change: fix-subagent-live-detail-reliability.
+  const subagentFrameBuffer = new SubagentFrameBuffer();
 
   // Bridge-owned queue structures with TWO different ownership models:
   //
@@ -773,6 +793,14 @@ function initBridge(pi: ExtensionAPI) {
         }
         return;
       }
+      // Auto-naming toggle relay: store the pushed value so the namer gates on
+      // the current preference. See change: add-auto-session-naming.
+      if (msg.type === "preferences_update") {
+        if (typeof (msg as any).autoNameSessions === "boolean") {
+          autoNameSessions = (msg as any).autoNameSessions;
+        }
+        return;
+      }
       // Graceful stop-after-turn: latch a per-session flag; the next turn_end
       // shuts the session down cleanly. Idempotent. See change:
       // adopt-pi-071-072-073-features.
@@ -812,6 +840,7 @@ function initBridge(pi: ExtensionAPI) {
             roles: rolesData.roles ?? {},
             presets: rolesData.presets ?? [],
             activePreset: rolesData.activePreset ?? null,
+            builtinRoleNames: rolesData.builtinRoleNames ?? [],
           });
         }
         return;
@@ -828,6 +857,7 @@ function initBridge(pi: ExtensionAPI) {
             roles: rolesData.roles ?? {},
             presets: rolesData.presets ?? [],
             activePreset: rolesData.activePreset ?? null,
+            builtinRoleNames: rolesData.builtinRoleNames ?? [],
           });
         }
         return;
@@ -844,6 +874,7 @@ function initBridge(pi: ExtensionAPI) {
             roles: rolesData.roles ?? {},
             presets: rolesData.presets ?? [],
             activePreset: rolesData.activePreset ?? null,
+            builtinRoleNames: rolesData.builtinRoleNames ?? [],
           });
         }
         return;
@@ -860,6 +891,27 @@ function initBridge(pi: ExtensionAPI) {
             roles: rolesData.roles ?? {},
             presets: rolesData.presets ?? [],
             activePreset: rolesData.activePreset ?? null,
+            builtinRoleNames: rolesData.builtinRoleNames ?? [],
+          });
+        }
+        return;
+      }
+      // Remove a CUSTOM role: purge from schema + active map + every preset.
+      // Built-ins are rejected server-side in the roles:remove handler.
+      // Mirrors the role_set routing block. See change: add-custom-roles-ui.
+      if (msg.type === "role_remove" && pi.events) {
+        const data: any = { role: (msg as any).role };
+        pi.events.emit("roles:remove", data);
+        if (data.success) {
+          const rolesData: any = {};
+          pi.events.emit("roles:get-all", rolesData);
+          connection.send({
+            type: "roles_list",
+            sessionId,
+            roles: rolesData.roles ?? {},
+            presets: rolesData.presets ?? [],
+            activePreset: rolesData.activePreset ?? null,
+            builtinRoleNames: rolesData.builtinRoleNames ?? [],
           });
         }
         return;
@@ -873,6 +925,7 @@ function initBridge(pi: ExtensionAPI) {
           roles: rolesData.roles ?? {},
           presets: rolesData.presets ?? [],
           activePreset: rolesData.activePreset ?? null,
+          builtinRoleNames: rolesData.builtinRoleNames ?? [],
         });
         return;
       }
@@ -909,6 +962,23 @@ function initBridge(pi: ExtensionAPI) {
         if (typeof eventType === "string" && eventType.length > 0) {
           const data = (msg as { data?: unknown }).data;
           pi.events.emit(eventType, data && typeof data === "object" ? (data as Record<string, unknown>) : {});
+        }
+        return;
+      }
+      // Subagent resync (D2): reply with the latest retained snapshot of a
+      // running subagent as a synthetic subagent_started event_forward. No-op
+      // for an unknown/finished agent (durable completed-case backfill covers
+      // those). See change: fix-subagent-live-detail-reliability.
+      if (msg.type === "subagent_resync_request") {
+        const agentId = (msg as { agentId?: unknown }).agentId;
+        if (typeof agentId === "string" && agentId.length > 0 && sessionReady && isActive()) {
+          const snap = subagentFrameBuffer.resync(agentId);
+          if (snap) {
+            sendEventForward("subagents:started", snap.data);
+            console.log(`[dashboard] served subagent resync for agentId=${agentId}`);
+          } else {
+            console.log(`[dashboard] subagent resync no-op (unknown/finished) agentId=${agentId}`);
+          }
         }
         return;
       }
@@ -1031,6 +1101,12 @@ function initBridge(pi: ExtensionAPI) {
         }
       } catch { /* probe failure non-fatal */ }
       replaySessionEntries();
+      // Flush subagent frames buffered while the socket was down (D1). Unlike
+      // session_start, a transient WS reconnect keeps `sessionReady` true, so
+      // the intercept routes those frames into the per-agent buffer; drain them
+      // now that the transport is open again. See change:
+      // fix-subagent-live-detail-reliability.
+      flushPendingSubagentFrames();
       // Re-send pending PromptBus requests so dashboard dialogs survive browser refresh.
       // Synchronous within this tick to prevent TUI respond() from interleaving.
       // Client-side dedup by requestId prevents double-rendering.
@@ -1071,6 +1147,12 @@ function initBridge(pi: ExtensionAPI) {
 
   const commandHandler = createCommandHandler(pi, () => sessionId, {
     getModelRegistry: () => cachedModelRegistry,
+    // AI-draft fork-subagent wiring (see change:
+    // add-session-uncommitted-indicator-and-commit). Both degrade silently
+    // to the draft ladder's lower rungs when unavailable.
+    getSessionContextText: () => buildSessionContextText(cachedCtx),
+    runDraftAgent: (seed: string, cwd: string) =>
+      runForkSubagentDraft(seed, cwd, () => cachedCtx?.model),
     // Mirror server attach/detach pushes into BridgeContext.attachedChange so
     // the before_agent_start injector exposes it. See change:
     // inject-session-context-into-agent.
@@ -1135,15 +1217,10 @@ function initBridge(pi: ExtensionAPI) {
       // double-emit auto_retry_end{success:true}. See change:
       // fix-provider-retry-infinite-loop.
       retryTracker.noteAbort(sessionId);
-      // Intentionally NOT clearing usageLimitOrderer.noteRetryEnd here.
-      // The orderer's `pending` flag MUST survive user-initiated abort
-      // so pi's eventual terminal agent_end can still surface the real
-      // provider errorMessage via the orderer's maybeSynthesize path.
-      // Without this, the user would see no provider context after
-      // pressing Stop on a rate-limit retry — the placeholder
-      // "Aborted by user" used to overwrite the truth, both swallowing
-      // the real error. See change:
-      // unify-status-banner-and-terminal-limit-stop.
+      // pi's eventual terminal agent_end still surfaces the real provider
+      // errorMessage through the reducer's own agent_end error path; the
+      // observe-based tracker only synthesizes retry lifecycle events, never
+      // the settled error. See change: simplify-error-retry-single-card.
     },
     /**
      * Raw cachedCtx.abort() only. Used by the persistent-abort scheduler
@@ -1302,6 +1379,7 @@ function initBridge(pi: ExtensionAPI) {
       lastSessionFile, lastSessionDir, lastFirstMessage,
       lastGitBranch, lastGitPrNumber, lastSessionName,
       lastGitWorktreeJson,
+      lastGitStatusJson,
       lastCwdMissing,
       hasRegisteredOnce,
       dashboardSpawned,
@@ -1325,6 +1403,7 @@ function initBridge(pi: ExtensionAPI) {
     lastGitPrNumber = bc.lastGitPrNumber;
     lastSessionName = bc.lastSessionName;
     lastGitWorktreeJson = bc.lastGitWorktreeJson;
+    lastGitStatusJson = bc.lastGitStatusJson;
     lastCwdMissing = bc.lastCwdMissing;
     hasRegisteredOnce = bc.hasRegisteredOnce;
   }
@@ -1334,6 +1413,57 @@ function initBridge(pi: ExtensionAPI) {
   function replaySessionEntries() { _replaySessionEntries(syncBc()); }
   function sendModelUpdateIfChanged() { const bc = syncBc(); _sendModelUpdateIfChanged(bc); applyBc(bc); }
   function sendSessionNameIfChanged() { const bc = syncBc(); _sendSessionNameIfChanged(bc); applyBc(bc); }
+
+  // ── add-auto-session-naming ──────────────────────────────────────────────
+  // Lazily acquire pi-ai's streamSimple the way the server's model-proxy does.
+  async function loadStreamSimple(): Promise<StreamSimpleFn | undefined> {
+    if (piAiStreamSimple !== undefined) return piAiStreamSimple ?? undefined;
+    try {
+      const mod: any = await import("@earendil-works/pi-ai");
+      piAiStreamSimple = (mod.streamSimple as StreamSimpleFn) ?? null;
+    } catch {
+      piAiStreamSimple = null;
+    }
+    return piAiStreamSimple ?? undefined;
+  }
+
+  // One namer per bridge (a bridge is a single pi session). Built lazily so it
+  // captures the live `cachedCtx` / `cachedModelRegistry` at call time.
+  function getAutoNamer(): AutoNamer {
+    if (autoNamer) return autoNamer;
+    autoNamer = createAutoNamer({
+      getAutoNameSessions: () => autoNameSessions,
+      resolveFastModel: () => lookupRole("@fast"),
+      getRegistry: () => cachedModelRegistry,
+      loadStreamSimple,
+      getTranscript: () => ({
+        firstUserMsg: extractFirstMessage(cachedCtx),
+        firstAssistantReply: extractFirstAssistantReply(cachedCtx),
+      }),
+      applyName: (title: string) => {
+        try { pi.setSessionName(title); } catch { /* ignore */ }
+        lastSessionName = title; // suppress the redundant plain name_update poll
+        connection.send({ type: "session_name_update", sessionId, name: title, nameSource: "auto" });
+      },
+      reportUserRename: (name: string) => {
+        connection.send({ type: "session_name_update", sessionId, name, nameSource: "user" });
+      },
+      emitError: (reason: string) => {
+        connection.send({ type: "auto_name_error", sessionId, reason });
+      },
+    });
+    return autoNamer;
+  }
+
+  // Run one naming attempt after a terminal turn. Observing the current name
+  // first catches a pre-existing / in-pi rename (external → permanent "user"
+  // lockout) before attempting to auto-name.
+  function runAutoNameOnTurnEnd(): void {
+    if (!autoNameSessions) return;
+    const namer = getAutoNamer();
+    namer.onObservedName(pi.getSessionName() ?? "");
+    void namer.maybeName();
+  }
   function sendGitInfoIfChanged(cwd: string) { const bc = syncBc(); _sendGitInfoIfChanged(bc, cwd); applyBc(bc); }
   function sendCwdMissingIfChanged(cwd: string) { const bc = syncBc(); _sendCwdMissingIfChanged(bc, cwd); applyBc(bc); }
   function sendPiVersionIfChanged() { const bc = syncBc(); _sendPiVersionIfChanged(bc); applyBc(bc); }
@@ -1406,47 +1536,19 @@ function initBridge(pi: ExtensionAPI) {
         // unify-error-retry-lifecycle.
         abortLatch.clear(sessionId);
         // Provider-retry synthesis: forward auto_retry_end BEFORE agent_end
-        // when retries were in flight, so the dashboard's retry banner
-        // clears before the error banner appears. The usage-limit orderer
-        // takes precedence (it carries the actual error string); the retry
-        // tracker handles the non-usage-limit case. See change:
-        // fix-provider-retry-infinite-loop.
-        const orderedSynth = usageLimitOrderer.maybeSynthesize(sessionId, (event as any));
-        if (orderedSynth) {
-          sendSyntheticRetryEvent(orderedSynth.eventType, orderedSynth.data);
-          retryTracker.noteAbort(sessionId); // clear tracker; orderer's event is authoritative
-        } else {
-          // First-attempt terminal USAGE_LIMIT branch: when no retry chain
-          // was in flight (RETRYABLE_PATTERN didn't match) but the terminal
-          // agent_end carries a USAGE_LIMIT_PATTERN error, synthesize the
-          // same auto_retry_end{finalError} the orderer would have produced.
-          // Without this, first-attempt terminal billing errors surface as
-          // the generic `error` banner variant instead of `limit-exceeded`.
-          // Mutually exclusive with the orderer's synth above.
-          // See change: unify-status-banner-and-terminal-limit-stop.
-          const agentMessages = (event as any)?.messages;
-          const lastMsg = Array.isArray(agentMessages) && agentMessages.length > 0
-            ? agentMessages[agentMessages.length - 1] as Record<string, unknown>
-            : undefined;
-          const lastErr = typeof lastMsg?.errorMessage === "string" ? lastMsg.errorMessage : "";
-          const isFirstAttemptTerminalLimit =
-            lastMsg?.stopReason === "error" &&
-            lastErr.length > 0 &&
-            USAGE_LIMIT_PATTERN.test(lastErr);
-
-          if (isFirstAttemptTerminalLimit) {
-            sendSyntheticRetryEvent("auto_retry_end", {
-              success: false,
-              attempt: -1,
-              finalError: lastErr,
-            });
-          } else {
-            const trackerSynth = retryTracker.observeAgentEnd(sessionId, event as any);
-            if (trackerSynth) {
-              sendSyntheticRetryEvent(trackerSynth.eventType, trackerSynth.data);
-            }
-          }
+        // when a retry chain was in flight, so the dashboard's retry sub-line
+        // clears before the settled error renders. A terminal error pi never
+        // re-attempted (no chain) yields nothing here — the reducer's own
+        // agent_end arm surfaces lastError.
+        // See change: simplify-error-retry-single-card.
+        const trackerSynth = retryTracker.observeAgentEnd(sessionId, event as any);
+        if (trackerSynth) {
+          sendSyntheticRetryEvent(trackerSynth.eventType, trackerSynth.data);
         }
+        // Automatic session topic-naming: attempt on each terminal turn until
+        // the first success (or a permanent lockout). Non-blocking; all errors
+        // are handled inside the namer. See change: add-auto-session-naming.
+        runAutoNameOnTurnEnd();
         // Bridge shadow follow-up queue: the per-entry drain matcher in
         // the `message_start` handler removes each entry as pi delivers it
         // (mirrors pi's internal `_processAgentEvent`). No bulk clear here
@@ -1461,6 +1563,57 @@ function initBridge(pi: ExtensionAPI) {
         // ~2s if pi hasn't transitioned yet.
         // See change: rework-mid-turn-prompt-queue (post-smoke fix #3).
         setTimeout(() => drainFollowupQueue(0), 0);
+
+        // Empty-actionable-turn guard: classify this turn's terminal shape.
+        // A thinking-only / empty `stop` (no visible text, no tool call, no
+        // error) would otherwise idle the session silently. Continue-or-
+        // surface instead. Normal / tool-call / truncated / error turns yield
+        // `none` and only reset the guard's per-session counter.
+        // See change: fix-gemini-subagent-silent-tool-schema-failure.
+        {
+          const agentMsgs = (event as any)?.messages;
+          const terminalMsg =
+            Array.isArray(agentMsgs) && agentMsgs.length > 0
+              ? (agentMsgs[agentMsgs.length - 1] as Record<string, unknown>)
+              : undefined;
+          if (terminalMsg?.role === "assistant") {
+            const actionability = classifyTurnActionability(terminalMsg as any);
+            const decision = emptyActionableGuard.observe(sessionId, actionability);
+            if (decision.action === "continue" && decision.nudge) {
+              // Only nudge when nothing else will already re-run the session
+              // (no user/system follow-up pending). A pending entry means the
+              // session is not idling, so the guard can safely no-op.
+              if (bridgeFollowUp.length === 0) {
+                enqueueSystemFollowup(decision.nudge);
+              }
+            } else if (decision.action === "surface") {
+              // Non-error status: the model returned only reasoning. Forward a
+              // structured, non-error notice so the server logs it to
+              // server.log and the dashboard card renders it (distinct from an
+              // error banner).
+              const model =
+                typeof terminalMsg.model === "string"
+                  ? (terminalMsg.model as string)
+                  : undefined;
+              const provider =
+                typeof terminalMsg.provider === "string"
+                  ? (terminalMsg.provider as string)
+                  : undefined;
+              connection.send({
+                type: "event_forward",
+                sessionId,
+                event: {
+                  eventType: "empty_actionable_surface",
+                  timestamp: Date.now(),
+                  data: {
+                    message: decision.reason ?? SURFACE_MESSAGE,
+                    model: provider && model ? `${provider}/${model}` : model,
+                  },
+                },
+              });
+            }
+          }
+        }
 
       }
       // For model_select, enrich the event data with thinkingLevel
@@ -1538,8 +1691,22 @@ function initBridge(pi: ExtensionAPI) {
           // See change: unify-error-retry-lifecycle.
           if (role === "user") {
             abortLatch.clear(sessionId);
+            // A deliberate new user turn resets the empty-actionable guard's
+            // consecutive-continuation counter, so a stale count from a prior
+            // (possibly aborted) empty-actionable chain never shortens the next
+            // unrelated prompt's retry budget.
+            // See change: fix-gemini-subagent-silent-tool-schema-failure.
+            emptyActionableGuard.reset(sessionId);
           } else if (abortLatch.shouldAbort(sessionId)) {
             try { cachedCtx?.abort?.(); } catch { /* idempotent */ }
+          }
+          // Observe-based retry: an assistant message_start that follows an
+          // error message_end in the same turn (no user prompt between) is pi
+          // re-attempting — emit auto_retry_start so the dashboard shows the
+          // live retry sub-line. See change: simplify-error-retry-single-card.
+          if (role !== "user") {
+            const retrySynth = retryTracker.observeMessageStart(sessionId, messageRef as any);
+            if (retrySynth) sendSyntheticRetryEvent(retrySynth.eventType, retrySynth.data);
           }
           if (role === "user") {
             // Per-entry shadow-queue drain matcher: mirror pi's internal
@@ -1612,68 +1779,25 @@ function initBridge(pi: ExtensionAPI) {
         // messages immediately so they precede the deferred message_end
         // send below. See change: chat-markdown-local-images-and-math.
         maybeInlineAssistantImages(event);
-        // Run retry-tracker / usage-limit-orderer SYNCHRONOUSLY here, BEFORE
-        // the handler returns. Both the state update AND the synth event
-        // send must be sync so they land on the wire BEFORE the next
-        // `agent_end` (which pi fires synchronously back-to-back, see
-        // pi-coding-agent agent-session.js:298–331).
+        // Run the retry-tracker SYNCHRONOUSLY here, BEFORE the handler
+        // returns, so any synthesized retry event lands on the wire BEFORE
+        // the next `agent_end` (which pi fires synchronously back-to-back,
+        // see pi-coding-agent agent-session.js:298–331). The message_end
+        // body itself stays deferred for the entryId workaround
+        // (`fix-per-message-fork`); that does not affect retry-state ordering
+        // since the reducer's message_end arm does not touch
+        // retryState/lastError.
         //
-        // Previously these ran inside the setTimeout(0) macrotask intended
-        // for entryId capture, so `agent_end` was processed (and shipped)
-        // BEFORE the synthesizers had marked the retry as in-flight —
-        // leaving the dashboard's `retryState` stuck (yellow + red banners
-        // both visible). The message_end body itself stays deferred for
-        // the entryId workaround (`fix-per-message-fork`); it doesn't
-        // affect retry-state ordering since the reducer's message_end arm
-        // does not touch retryState/lastError.
-        // See change: fix-retry-banner-stuck-on-limit-exceeded.
-        // Terminal billing/quota auto-abort: if this message_end carries a
-        // USAGE_LIMIT_PATTERN match, pi's retry sleep is pointless — the
-        // error won't resolve regardless of how many times we retry. Call
-        // cachedCtx.abort() to short-circuit pi's retry loop, then
-        // synthesize an auto_retry_end{finalError:errorMessage} so the
-        // dashboard routes straight to the limit-exceeded banner variant
-        // carrying the real provider error. Skips the retry-tracker / orderer
-        // pending-set path entirely — there is no retry chain to track.
-        // See change: unify-status-banner-and-terminal-limit-stop.
-        const msgRole = (messageRef as any)?.role;
-        const msgStopReason = (messageRef as any)?.stopReason;
-        const msgErrorMessage = typeof (messageRef as any)?.errorMessage === "string"
-          ? (messageRef as any).errorMessage as string
-          : "";
-        const isTerminalLimit =
-          msgRole === "assistant" &&
-          msgStopReason === "error" &&
-          msgErrorMessage.length > 0 &&
-          USAGE_LIMIT_PATTERN.test(msgErrorMessage);
-
-        if (isTerminalLimit) {
-          try {
-            cachedCtx?.abort?.();
-          } catch (err) {
-            console.warn("[dashboard] cachedCtx.abort threw during terminal-limit auto-abort:", err);
-          }
-          sendSyntheticRetryEvent("auto_retry_end", {
-            success: false,
-            attempt: -1,
-            finalError: msgErrorMessage,
-          });
-          // Intentionally fall through to the deferred message_end body send
-          // below; the message_end itself still goes on the wire (the
-          // reducer's message_end arm doesn't touch retryState/lastError).
-        } else {
-          // Normal path: retry-tracker / orderer state updates SYNCHRONOUSLY,
-          // before the handler returns. See change:
-          // fix-retry-banner-stuck-on-limit-exceeded.
-          const synthetic = retryTracker.observeMessageEnd(sessionId, messageRef as any);
-          if (synthetic) {
-            if (synthetic.eventType === "auto_retry_start") {
-              usageLimitOrderer.noteRetryStart(sessionId);
-            } else {
-              usageLimitOrderer.noteRetryEnd(sessionId);
-            }
-            sendSyntheticRetryEvent(synthetic.eventType, synthetic.data);
-          }
+        // Observe-based: an error message_end records a pending failure and
+        // emits NOTHING (the retry is confirmed only when pi starts a fresh
+        // assistant message_start). A non-error message_end that closes an
+        // in-flight chain emits auto_retry_end{success:true}. Billing/quota
+        // failures flow through this same path — pi treats them as terminal,
+        // so they settle via agent_end with no special-casing.
+        // See change: simplify-error-retry-single-card.
+        const synthetic = retryTracker.observeMessageEnd(sessionId, messageRef as any);
+        if (synthetic) {
+          sendSyntheticRetryEvent(synthetic.eventType, synthetic.data);
         }
         setTimeout(() => {
           if (!isActive() || !sessionReady) return;
@@ -1783,6 +1907,33 @@ function initBridge(pi: ExtensionAPI) {
   // clear here — it would wipe entries the user adds DURING the drain.
   // See change: add-followup-edit-and-steer-cancel (per-entry-drain).
 
+  // Forward one EventBus frame as an `event_forward` message. Known channels
+  // get renamed via EVENT_BUS_MAP; unknown channels use the channel name.
+  function sendEventForward(channel: string, data: Record<string, unknown>): void {
+    const eventType = EVENT_BUS_MAP[channel] ?? channel;
+    connection.send({
+      type: "event_forward",
+      sessionId,
+      event: { eventType, timestamp: Date.now(), data },
+    });
+  }
+
+  // Flush subagent frames buffered while the bridge was not ready (D1). Called
+  // right after `sessionReady` flips true on (re-)register, in emission order.
+  // See change: fix-subagent-live-detail-reliability.
+  function flushPendingSubagentFrames(): void {
+    const drained = subagentFrameBuffer.drain();
+    if (drained.length === 0) return;
+    for (const { channel, data } of drained) {
+      try { sendEventForward(channel, data); } catch { /* keep flushing */ }
+    }
+    console.log(
+      `[dashboard] flushed ${drained.length} buffered subagent frame(s) on re-register` +
+        ` (forwarded=${subagentFrameBuffer.stats.forwarded} buffered=${subagentFrameBuffer.stats.buffered}` +
+        ` flushed=${subagentFrameBuffer.stats.flushed})`,
+    );
+  }
+
   // EventBus catch-all: intercept pi.events.emit to forward all EventBus
   // traffic (flow events, subagent events, custom extension events).
   // Known channels get renamed via EVENT_BUS_MAP; unknown channels use the
@@ -1791,17 +1942,30 @@ function initBridge(pi: ExtensionAPI) {
   if (pi.events) {
     origEventsEmit = pi.events.emit.bind(pi.events);
     pi.events.emit = (channel: string, data: unknown) => {
-      if (sessionReady && isActive()) {
-        try {
-          const eventType = EVENT_BUS_MAP[channel] ?? channel;
-          const eventData = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
-          connection.send({
-            type: "event_forward",
-            sessionId,
-            event: { eventType, timestamp: Date.now(), data: eventData },
-          });
-        } catch { /* forwarding failure must never break the original emit */ }
-      }
+      try {
+        const eventData = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+        if (SubagentFrameBuffer.isSubagentChannel(channel)) {
+          // Subagent frames are reconcilable state, not fire-and-forget. Forward
+          // live only when the session is ready AND the transport is actually
+          // open; otherwise buffer the latest frame per agent (latest-wins,
+          // bounded) instead of letting it fall into the shared FIFO ring.
+          // `sessionReady` stays true across a transient WS drop, so gating on
+          // `connection.isConnected` routes reconnect-window frames into the
+          // per-agent buffer (flushed on session_start AND onReconnect) rather
+          // than risking eviction from the shared ring.
+          // See change: fix-subagent-live-detail-reliability (D1/D2).
+          if (sessionReady && isActive() && connection.isConnected) {
+            sendEventForward(channel, eventData);
+            subagentFrameBuffer.markForwarded(channel, eventData);
+          } else if (!subagentFrameBuffer.buffer(channel, eventData)) {
+            console.warn(
+              `[dashboard] subagent frame dropped (no agentId) channel=${channel} while not ready`,
+            );
+          }
+        } else if (sessionReady && isActive()) {
+          sendEventForward(channel, eventData);
+        }
+      } catch { /* forwarding failure must never break the original emit */ }
       origEventsEmit!(channel, data);
     };
   }
@@ -1841,6 +2005,11 @@ function initBridge(pi: ExtensionAPI) {
     // conflicts. Dashboard-spawned sessions were registered at factory load
     // before the agent snapshots tools.
     if (!dashboardSpawned) registerAskUserTool(pi);
+
+    // Register the canvas declare-tool (change: auto-canvas). Fire-and-forget
+    // UI intent; the server observes the forwarded tool call and drives the
+    // canvas. Runtime registration for the same conflict-avoidance reason.
+    registerCanvasTool(pi);
 
     // Register the agent-facing role/model tools (list_models, list_roles,
     // update_roles). list_models reads the in-process session registry via a
@@ -2252,6 +2421,9 @@ function initBridge(pi: ExtensionAPI) {
       firstMessage,
       eventCount,
       ...(dashboardSpawned ? { dashboardSpawned: true } : {}),
+      // Tri-state git-repo signal, computed at register time (authority).
+      // See change: gate-session-worktree-button-on-git.
+      isGitRepo: detectIsGitRepo(ctx.cwd),
       // Fact-forwarding: server decides auto-hide. See change:
       // auto-hide-headless-worker-sessions.
       ...buildVisibilityRegisterFields(cachedHasUI, process.env),
@@ -2259,6 +2431,11 @@ function initBridge(pi: ExtensionAPI) {
 
     // Allow event forwarding now that session_register is buffered
     sessionReady = true;
+
+    // Flush any subagent frames buffered during the not-ready window (D1) so a
+    // reconnect/discovery/reload gap self-heals instead of leaving a running
+    // subagent's detail empty. See change: fix-subagent-live-detail-reliability.
+    flushPendingSubagentFrames();
 
     // Replay full session history so the dashboard has all messages
     replaySessionEntries();
@@ -2326,6 +2503,7 @@ function initBridge(pi: ExtensionAPI) {
           roles: rolesData.roles ?? {},
           presets: rolesData.presets ?? [],
           activePreset: rolesData.activePreset ?? null,
+          builtinRoleNames: rolesData.builtinRoleNames ?? [],
         });
       }
     }
@@ -2475,6 +2653,10 @@ function initBridge(pi: ExtensionAPI) {
     // sessionId on its session_register. See change: inject-session-context-into-agent.
     attachedChange = null;
     getBridgeState().attachedChange = null;
+    // Drop retained subagent frames/snapshots on a real session switch — the
+    // new/fork/resumed session's subagents are unrelated to the outgoing one.
+    // See change: fix-subagent-live-detail-reliability.
+    subagentFrameBuffer.reset();
     // Clear the stop-after-turn latch so a new/fork/resumed session does not
     // inherit the previous session's pending graceful-stop and shut down on
     // its first turn_end. See change: adopt-pi-071-072-073-features.
@@ -2554,6 +2736,10 @@ function initBridge(pi: ExtensionAPI) {
       type: "session_unregister",
       sessionId,
     });
+
+    // Drop retained subagent frames/snapshots on shutdown.
+    // See change: fix-subagent-live-detail-reliability.
+    subagentFrameBuffer.reset();
 
     // Best-effort: remove this session's pasted ask_user attachments.
     // See change: add-ask-user-input-multiline-paste.

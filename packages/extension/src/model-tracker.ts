@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BridgeContext } from "./bridge-context.js";
 import { getCurrentModelString } from "./bridge-context.js";
-import { gatherGitInfo } from "./vcs-info.js";
+import { gatherGitInfo, gatherGitStatus } from "./vcs-info.js";
 
 /**
  * Send model_update if model or thinking level has changed since last send.
@@ -53,21 +53,35 @@ export function sendGitInfoIfChanged(bc: BridgeContext, cwd: string): void {
   // explicit "cwd is not a worktree" so a subsequent transition into a
   // worktree still counts as a change.
   const nextWorktreeJson = info.gitWorktree ? JSON.stringify(info.gitWorktree) : "null";
+  // Working-tree dirtiness + drift, gathered on the same tick (one extra
+  // `git status` — cheap; git is already running here). Serialised for a
+  // stable change-diff; `"null"` = inconclusive probe this tick.
+  // See change: add-session-uncommitted-indicator-and-commit.
+  const status = gatherGitStatus(cwd);
+  const nextStatusJson = status ? JSON.stringify(status) : "null";
   if (
     info.gitBranch === bc.lastGitBranch &&
     info.gitPrNumber === bc.lastGitPrNumber &&
-    nextWorktreeJson === bc.lastGitWorktreeJson
+    nextWorktreeJson === bc.lastGitWorktreeJson &&
+    nextStatusJson === bc.lastGitStatusJson
   ) return;
   bc.lastGitBranch = info.gitBranch;
   bc.lastGitPrNumber = info.gitPrNumber;
   bc.lastGitWorktreeJson = nextWorktreeJson;
+  bc.lastGitStatusJson = nextStatusJson;
   bc.connection.send({
     type: "git_info_update",
     sessionId: bc.sessionId,
     ...info,
+    // `info` present ⇒ branch resolved ⇒ cwd is a confirmed git repo.
+    // See change: gate-session-worktree-button-on-git.
+    isGitRepo: true,
     // Use explicit `null` on the wire when worktree state went from
     // present → absent, so the server can clear its cached value.
     gitWorktree: info.gitWorktree ?? null,
+    // Omit when the probe was inconclusive so the server keeps the last
+    // known status rather than clearing it to a false all-clean.
+    ...(status ? { gitStatus: status } : {}),
   });
 }
 
@@ -246,6 +260,7 @@ export function resetReconnectCaches(bc: BridgeContext): void {
   bc.lastGitPrNumber = undefined;
   bc.lastPiVersion = undefined;
   bc.lastGitWorktreeJson = undefined;
+  bc.lastGitStatusJson = undefined;
 }
 
 /**

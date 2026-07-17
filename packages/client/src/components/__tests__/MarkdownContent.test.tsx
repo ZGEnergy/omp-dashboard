@@ -96,7 +96,7 @@ describe("isFencedBlockComplete — mermaid streaming gate", () => {
 });
 
 describe("MarkdownContent — prose & inline-code linkification", () => {
-  const ctx: ToolContext = { cwd: "/Users/me/repo", editors: [] };
+  const ctx: ToolContext = { cwd: "/Users/me/repo" };
   const renderWithCtx = (content: string) =>
     render(<ThemeProvider><MarkdownContent content={content} context={ctx} /></ThemeProvider>);
 
@@ -254,6 +254,30 @@ describe("MarkdownContent", () => {
     expect(mdBtn?.querySelector("svg")).not.toBeNull();
     expect(tsvBtn).not.toBeNull();
     expect(tsvBtn?.querySelector("svg")).not.toBeNull();
+  });
+
+  it("copies real table markdown on a single memoized render", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const content = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
+    const { container } = render(<ThemeProvider><MarkdownContent content={content} /></ThemeProvider>);
+    const mdBtn = container.querySelector('button[title="Copy as Markdown"]') as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(mdBtn);
+    });
+    expect(writeText).toHaveBeenCalledWith("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+  });
+
+  it("copies real table TSV on a single memoized render", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const content = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
+    const { container } = render(<ThemeProvider><MarkdownContent content={content} /></ThemeProvider>);
+    const tsvBtn = container.querySelector('button[title="Copy as TSV"]') as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(tsvBtn);
+    });
+    expect(writeText).toHaveBeenCalledWith("Name\tAge\nAlice\t30");
   });
 
   it("tableToMarkdown produces correct output", () => {

@@ -14,6 +14,14 @@ Type `/view <target>` in the composer.
 - `/view @pic.png` — image, capped `max-h-[40vh]`.
 - `/view https://youtu.be/dQw4w9WgXcQ` — YouTube embed iframe.
 - `/view https://example.com/spec.pdf` — URL with PDF extension renders inline pdfjs viewer.
+- `/view @spec.docx` — docx. Two-tier: `document-converter` PDF render when engine available (mounts pdfjs `PdfPreview` via `/api/file/rendered-pdf`), else in-process `mammoth` HTML baseline (hyperlink-guard + DOMPurify + image cap). Any engine error falls through to HTML.
+- `/view @deck.pptx` — pptx (slide deck). On-demand: card shows "Render slides" button, no auto-convert. Activate → `document-converter` renders pptx→PDF (LibreOffice Impress export filter, cached), mounts pdfjs `PdfPreview` via `/api/file/rendered-pdf`. NO in-process fallback — engine absent → Download fallback. Size cap 100 MB → 413. See change: render-pptx-preview.
+- `/view @data.xlsx` — spreadsheet. SheetJS structured JSON via `/api/file/sheet`, frozen-header grid + sheet tabs, no Docker.
+- `/view @export.csv` — spreadsheet. Encoding detected (chardet) + decoded (iconv-lite); charset pill shown.
+
+Bounded preview: server caps rows/images/bytes; truncation banner "Showing first N of M"; download reaches full file. Corrupt / password-protected / oversize degrade to Download fallback.
+
+docx render mode configurable: `docxRender` `"pdf"|"html"|"auto"` (default `"auto"` = fidelity-first). Engine image name from `PI_DOC_ENGINE_IMAGE` env (default `pi-doc-engine`).
 
 Click `⤢` icon on card to expand to full-viewport overlay (`/folder/:cwd/view?path=` or `/pi-view?url=`).
 
@@ -27,6 +35,12 @@ Cross-refs:
 - openspec/changes/render-file-previews/
 - packages/client/src/components/PreviewCard.tsx
 - packages/server/src/routes/file-routes.ts
+- openspec/changes/render-office-previews/
+- packages/server/src/lib/office-preview.ts
+- packages/client/src/components/preview/DocxPreview.tsx
+- packages/client/src/components/preview/SpreadsheetPreview.tsx
+- openspec/changes/render-pptx-preview/
+- packages/client/src/components/preview/PptxPreview.tsx
 
 ## How to build Windows electron zip?
 
@@ -443,6 +457,8 @@ Cross-refs:
 
 ## How do I set up a zrok tunnel for a persistent public URL?
 
+Feature presented as **Gateway** in UI. Internal id stays `tunnel`. zrok = one provider; pick via `tunnel.provider: "zrok"`. See providers matrix below.
+
 Install zrok, enrol with token, leave `tunnel.enabled: true` (default).
 
 Steps:
@@ -464,6 +480,31 @@ Dashboard never stores zrok API keys — they live in zrok's config directory.
 Cross-refs:
 - README.md:259
 - docs/architecture.md:978
+
+## What Gateway providers are available?
+
+Four providers behind `TunnelProvider` seam (`packages/shared/src/tunnel-provider.ts`). Select via `tunnel.provider` + `tunnel.mode`.
+
+| Provider | Scope | Mode | Lifecycle | TLS | URL |
+|----------|-------|------|-----------|-----|-----|
+| `zrok` | public | public | child | https | stdout |
+| `ngrok` | public | public | child | https | stdout |
+| `tailscale` | public + private | funnel / serve+MagicDNS | daemon | https | `tailscale serve status --json` |
+| `zerotier` | private-only | private | daemon | — | none (mesh IP only) |
+
+Child (zrok/ngrok) = server owns child process, PID + watchdog. Daemon (tailscale/zerotier) = control commands against `tailscaled`/`zerotier-one`, PID/watchdog skipped. Per-provider sub-config: `tunnel.zrok`, `tunnel.ngrok` (`authtoken`, `domain`), `tunnel.tailscale` (`authKey`), `tunnel.zerotier` (`networkId`).
+
+## How do I add my own HTTPS endpoint?
+
+Gateway UI → "Add HTTPS URL". Appends to `pairing.publicBaseUrls` via auth-gated `PUT /api/config`. No new route.
+
+https/wss only. Gate authoritative server-side at read time in `reachableUrls()`; plain-http dropped before advertisement. Endpoint surfaces in `GET /api/tunnel/endpoints` as tagged `{kind, url, tls}`.
+
+## Why do some endpoints get a link QR instead of the pairing QR?
+
+Two QR kinds. **Pairing QR** = secure payload `{v,id,code,urls[]}`, `urls[]` TLS-only (https/wss, incl. MagicDNS). **Link QR** = per no-TLS http mesh/LAN endpoint; encodes bare URL string only — no pairing payload, no crypto.subtle, no bearer.
+
+No-TLS endpoints cannot carry the secure payload, so they get a link QR. Link-QR arrival governed by `config.trustedNetworks`.
 
 ## Why does my zrok tunnel sometimes return Bad Gateway, and is there auto-recovery?
 
@@ -621,7 +662,8 @@ Step-by-step equivalent:
 npm run build                         # web client
 cd packages/electron
 bash scripts/download-node.sh         # bundled Node.js
-npm run make                          # electron-forge make
+electron-forge package --platform=darwin --arch=<a>   # sign .app
+npx electron-builder --mac dmg --prepackaged <.app>   # DMG + update metadata
 ```
 
 Outputs in `packages/electron/out/make/`:
@@ -1208,6 +1250,24 @@ Recovery order:
 Diagnostic: `ps -p <piPid>` after Shutdown. Alive after 3 s indicates regression.
 
 See change: `fix-keeper-kill-escalation`. See also `docs/architecture.md` § "RPC keeper sidecar".
+
+## Gemini session starts, model never responds, no error — "Gemini doesn't work with subagents"?
+
+Symptom: dashboard spawns Gemini session (`google-vertex/gemini-2.5-pro`). Model never emits visible text. No error on card. Session idles silent.
+
+NOT auth. NOT access. Vertex auth works. Model works.
+
+Root cause: heavy first agentic turn. Gemini 2.5 Pro returns thinking-only completion. All output tokens reasoning. Zero visible text. No tool call. `stopReason=stop`. Empty-actionable turn. Pre-fix pi/dashboard treated clean-but-empty turn as finished. Session idled silent.
+
+Fix (change: fix-gemini-subagent-silent-tool-schema-failure): empty-actionable-turn guard continues-or-surfaces instead of idling. Default auto-continue — bounded continuation nudge, cap 2 — to elicit answer. Cap exceeded or surface-only mode → card shows NON-error status "model returned only reasoning, no answer" + writes line to `~/.pi/dashboard/server.log`.
+
+Guard provider-agnostic. Applies to any `reasoning:true` model that emits reasoning-then-stop.
+
+Config:
+- `PI_DASHBOARD_EMPTY_TURN_GUARD` = `auto-continue` (default) | `surface-only`.
+- `PI_DASHBOARD_EMPTY_TURN_RETRY_CAP` (default `2`).
+
+See change: fix-gemini-subagent-silent-tool-schema-failure.
 
 ## Why does Windows session spawning fail with 'spawn npm ENOENT'?
 
@@ -2354,8 +2414,32 @@ Cross-refs:
 - packages/client/src/components/SettingsPanel.tsx
 - packages/server/src/routes/preferences-worktree-init-routes.ts
 
-## Local `electron-forge make` fails with `Cannot find module '.../volume.node'`
+## Local macOS DMG: the old `macos-alias`/`volume.node` error is gone
 
-DMG maker chain (`@electron-forge/maker-dmg` → appdmg → macos-alias) needs compiled native module `macos-alias/build/Release/volume.node`. Missing when install ran `--ignore-scripts` or Xcode CLT absent at install time.
+Obsolete since change `fix-local-electron-dmg-build`. DMG no longer built by `@electron-forge/maker-dmg`; built by `electron-builder` `dmg` target (uses `hdiutil`, not `macos-alias`). Removed: the `macos-alias`/`volume.node` prerequisite, the `packages/electron` `postinstall` hook (`ensure-macos-alias.mjs`), the darwin build-time gate in `build-installer.sh`, the Doctor `macos-alias native module` row. macOS DMG builds now need only `electron-builder` (already a dependency) + Xcode Command Line Tools for any native rebuild `electron-forge package` triggers.
 
-Fix: run `pnpm install` — `packages/electron` postinstall (`scripts/ensure-macos-alias.mjs`) self-heals, rebuilds `volume.node`. Rebuild fail → install Xcode Command Line Tools: `xcode-select --install`, then `pnpm install` again. `build-installer.sh` also gates `electron-forge make` on darwin; exits 1 with the same hint when rebuild fails. Doctor row `macos-alias native module` (darwin-only) surfaces state.
+## What feedback do I get while a worktree initializes?
+
+Worktree-init shows friendly feedback, not raw terminal wall (change: friendlier-worktree-init).
+
+Running: one-line status chip `⚙ Initializing… · {elapsed}` + slim progress bar + last log line as muted ghost preview. Full log opt-in behind collapsed `<details>` (`View log`). No inline `<pre>` block.
+
+Success: green `✓ Initialized` flashes ~2s (`DONE_FLASH_MS=2000`), then feedback collapses. Never silent-vanishes.
+
+Failure: red `✕ Init failed · {code}` chip + `↻ Retry` + opt-in log. Sticky — never auto-dismisses on timer.
+
+Same feedback across all three trigger paths (manual Initialize button, auto-init on spawn, page refresh mid-run). Run state keyed by `cwd` server-side, not ephemeral client requestId.
+
+Auto-init on spawn no longer silent. Failed auto-init now visible + retryable, not silently-broken worktree.
+
+Boot/refresh: client fetches `GET /api/git/worktree/active-inits`, rehydrates correct chip state per cwd. Still-running runs keep streaming. Terminal states within ~60s TTL show done-flash / failed-sticky.
+
+Concurrent runs (N worktrees at once) collapse into one corner stack: header `Initializing N worktrees · M done · K failed` over ≤4 rows (`+N more` overflow). Any failed row holds it open.
+
+Manual control distinguishes label: `needsInit:true` → "Initialize"; `needsInit:false && trusted:false` (hook edited after last trust) → "Review & trust changes" (grants trust without re-running).
+
+Cross-refs:
+- packages/server/src/worktree-init-registry.ts
+- packages/server/src/routes/git-routes.ts
+- packages/client/src/lib/worktree-init-store.ts
+- packages/client/src/components/WorktreeInitChip.tsx

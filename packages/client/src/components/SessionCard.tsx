@@ -1,7 +1,7 @@
 import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { mdiClose, mdiCommentQuestion, mdiConsoleLine, mdiEyeOffOutline, mdiEyeOutline, mdiFlash, mdiLoading, mdiOpenInNew, mdiPaperclip, mdiPencil, mdiPencilOutline, mdiPlayCircleOutline, mdiPlus, mdiSourceBranch, mdiSourceBranchPlus, mdiSourceFork } from "@mdi/js";
 import { Icon } from "@mdi/react";
-import React, { type ReactNode, useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { getApiBase } from "../lib/api-context.js";
 import {
   deriveDotColorWithFlags,
@@ -29,30 +29,34 @@ export const statusColors = statusColorsExt;
 export const sourceBadgeColors = sourceBadgeColorsExt;
 
 import { SessionCardActionBarSlot, SessionCardBadgeSlot, SessionCardFlowsSlot, SessionCardMemorySlot, useHasWidgetBarPrompt, useSlotHasClaimsForSession, WorktreeCardSectionSlot } from "@blackbelt-technology/dashboard-plugin-runtime";
-import type { CommandInfo, DashboardSession, ImageContent, OpenSpecChange, OpenSpecData, OpenSpecGroup } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { CommandInfo, DashboardSession, GitStatus, ImageContent, OpenSpecChange, OpenSpecData, OpenSpecGroup } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
 import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import type { InflightBashTool } from "../hooks/useInflightBashTools.js";
 import { useMobile } from "../hooks/useMobile.js";
-import type { DetectedEditor } from "../lib/editor-api.js";
 import { formatRelativeTime, formatTokens } from "../lib/format.js";
+import { refreshGitStatus, setCachedGitStatus, useGitStatus } from "../lib/git-status-cache.js";
 import { t as i18nT } from "../lib/i18n";
 import { useOpenSpecConfig } from "../lib/openspec-config-api.js";
 import { selectBadgeTimestamp } from "../lib/session-card-time.js";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
+import { useCommitDialog } from "./CommitDialog.js";
 import { ContextUsageBar } from "./ContextUsageBar.js";
 import { CwdGonePill } from "./CwdGonePill.js";
-import { InlineRenameInput } from "./InlineRenameInput.js";
-import { OpenSpecActivityBadge } from "./OpenSpecActivityBadge.js";
 // flows-plugin components (FlowActivityBadge, SessionFlowActions) are
 // rendered exclusively via plugin slot consumers (SessionCardBadgeSlot /
 // SessionCardActionBarSlot) per change pluginize-flows-via-registry.
+import { CollapseSummary } from "./collapse-summary.js";
+import { GitDirtyPill } from "./GitDirtyPill.js";
+import { InlineRenameInput } from "./InlineRenameInput.js";
+import { OpenSpecActivityBadge } from "./OpenSpecActivityBadge.js";
 import { type ProcessEntry, ProcessList } from "./ProcessList.js";
-import { SessionActivityBar } from "./SessionActivityBar.js";
+import { formatElapsed, SessionActivityBar, truncateCommand } from "./SessionActivityBar.js";
 import type { ContextUsageInfo } from "./SessionList.js";
 import { SessionOpenSpecActions } from "./SessionOpenSpecActions.js";
 import { SessionSubcard } from "./SessionSubcard.js";
 import { useSessionCardDragHandle } from "./SortableSessionCard.js";
+import { TagStrip } from "./tags/TagStrip.js";
 import { WorktreeActionsMenu } from "./WorktreeActionsMenu.js";
 
 export function ActivityIndicator({ session }: { session: DashboardSession }) {
@@ -62,7 +66,7 @@ export function ActivityIndicator({ session }: { session: DashboardSession }) {
   const hasWidgetBarPrompt = useHasWidgetBarPrompt(session.id);
 
   if (session.resuming) {
-    return <span className="text-yellow-400">{i18nT("auto.resuming", undefined, "Resuming…")}</span>;
+    return <span className="text-yellow-400">{i18nT("common.resuming", undefined, "Resuming…")}</span>;
   }
 
   if (session.status === "ended") return null;
@@ -70,7 +74,7 @@ export function ActivityIndicator({ session }: { session: DashboardSession }) {
   if (isInputNeededTool(session.currentTool) && !hasWidgetBarPrompt) {
     // Blocked-on-you: distinct "Needs you" label + needs-you color + icon.
     // See change: improve-dashboard-attention-routing.
-    return <span className="text-[var(--status-needs-you)] truncate inline-flex items-center gap-0.5"><Icon path={mdiCommentQuestion} size={0.5} /> {i18nT("auto.needs_you", undefined, "Needs you")}</span>;
+    return <span className="text-[var(--status-needs-you)] truncate inline-flex items-center gap-0.5"><Icon path={mdiCommentQuestion} size={0.5} /> {i18nT("common.needsYou", undefined, "Needs you")}</span>;
   }
 
   if (session.currentTool) {
@@ -78,13 +82,13 @@ export function ActivityIndicator({ session }: { session: DashboardSession }) {
   }
 
   if (session.status === "streaming") {
-    return <span className="text-[var(--status-working)]">{i18nT("auto.thinking", undefined, "Thinking…")}</span>;
+    return <span className="text-[var(--status-working)]">{i18nT("session.thinking", undefined, "Thinking…")}</span>;
   }
 
   if (session.status === "idle" || session.status === "active") {
     // Turn-finished passive state: distinct "Idle" label, never "Waiting for
     // input". See change: improve-dashboard-attention-routing.
-    return <span className="text-[var(--text-tertiary)]">{i18nT("auto.idle", undefined, "Idle")}</span>;
+    return <span className="text-[var(--text-tertiary)]">{i18nT("status.idle", undefined, "Idle")}</span>;
   }
 
   return null;
@@ -131,6 +135,15 @@ export function TokenStats({ session }: { session: DashboardSession }) {
 }
 
 export function GitInfo({ session }: { session: DashboardSession }) {
+  const dirtyStatus = useGitStatus(session.cwd, session.gitStatus);
+  const { open: openCommitDialog } = useCommitDialog();
+  // On-demand fresh read on mount/focus so the pill is not up-to-30s stale.
+  useEffect(() => { void refreshGitStatus(session.cwd); }, [session.cwd]);
+  // Fold each broadcast into the shared per-cwd cache so the folder header and
+  // a solo card at the same path converge on one value.
+  useEffect(() => {
+    if (session.gitStatus) setCachedGitStatus(session.cwd, session.gitStatus);
+  }, [session.cwd, session.gitStatus]);
   if (!session.gitBranch) return null;
 
   return (
@@ -157,6 +170,7 @@ export function GitInfo({ session }: { session: DashboardSession }) {
       )}
       <WorktreePill session={session} />
       <CwdGonePill session={session} />
+      <GitDirtyPill status={dirtyStatus} onClick={() => openCommitDialog(session.cwd, session.id)} />
     </div>
   );
 }
@@ -176,7 +190,7 @@ export function GitInfo({ session }: { session: DashboardSession }) {
 export function WorktreePill({ session }: { session: DashboardSession }) {
   const wt = session.gitWorktree;
   if (!wt) return null;
-  const title = wt.base ? `created from ${wt.base}` : "git worktree";
+  const title = wt.base ? i18nT("worktree.createdFrom", { base: wt.base }, "created from {base}") : i18nT("worktree.gitWorktree", undefined, "git worktree");
   return (
     <span
       data-testid="worktree-pill"
@@ -213,9 +227,35 @@ interface GroupGitInfoProps {
    */
   folderBranch?: string | null;
   onBranchClick?: () => void;
+  /**
+   * Folder-head working-tree status (from the folder-head poll). Rendered as
+   * ONE dirty/drift pill + Commit action for all same-cwd sessions, never
+   * duplicated on the child cards. See change:
+   * add-session-uncommitted-indicator-and-commit.
+   */
+  folderStatus?: GitStatus;
 }
 
-export function GroupGitInfo({ sessions, cwd, folderBranch, onBranchClick }: GroupGitInfoProps) {
+export function GroupGitInfo({ sessions, cwd, folderBranch, onBranchClick, folderStatus }: GroupGitInfoProps) {
+  // Folder status: prefer the explicit folder-head value, else any same-cwd
+  // session's broadcast (all share one tree → identical). One on-demand read
+  // per cwd erases staleness; no per-session redundancy.
+  const seededStatus = folderStatus ?? sessions.find((s) => s.gitStatus)?.gitStatus;
+  const dirtyStatus = useGitStatus(cwd, seededStatus);
+  const { open: openCommitDialog } = useCommitDialog();
+  // The dirty pill + Commit live on the folder header ONLY for GROUPED
+  // same-cwd sessions (2+). For a solo session the header still renders (its
+  // branch), but the pill belongs to the card's own `GitInfo` — rendering it
+  // here too would duplicate it. Worktree sessions have a distinct cwd → own
+  // 1-session group → card pill. See change:
+  // add-session-uncommitted-indicator-and-commit.
+  const showFolderPill = sessions.length > 1;
+  // Seed AI-draft from any session sharing this cwd.
+  const anySessionId = sessions[0]?.id ?? "";
+  useEffect(() => { void refreshGitStatus(cwd); }, [cwd]);
+  useEffect(() => {
+    if (seededStatus) setCachedGitStatus(cwd, seededStatus);
+  }, [cwd, seededStatus]);
   const session = sessions.find((s) => s.gitBranch);
   const cached = branchCache.get(cwd);
   const [fetchedBranch, setFetchedBranch] = useState<string | null>(cached?.branch ?? null);
@@ -274,11 +314,11 @@ export function GroupGitInfo({ sessions, cwd, folderBranch, onBranchClick }: Gro
         <button
           onClick={(e) => { e.stopPropagation(); onBranchClick?.(); }}
           className="flex items-center gap-1 hover:text-[var(--text-secondary)] transition-colors"
-          title={showInitGit ? "Initialize git repository" : "Git branches"}
+          title={showInitGit ? i18nT("git.initializeRepo", undefined, "Initialize git repository") : i18nT("git.gitBranches", undefined, "Git branches")}
           data-testid="git-init-btn"
         >
           <Icon path={mdiSourceBranch} size={0.5} />
-          {showInitGit && <span className="text-[10px]">{i18nT("auto.init_git", undefined, "Init git")}</span>}
+          {showInitGit && <span className="text-[10px]">{i18nT("git.initGit", undefined, "Init git")}</span>}
         </button>
       </div>
     );
@@ -289,7 +329,7 @@ export function GroupGitInfo({ sessions, cwd, folderBranch, onBranchClick }: Gro
       <button
         onClick={(e) => { e.stopPropagation(); onBranchClick?.(); }}
         className="flex items-center gap-1 hover:text-blue-400 transition-colors"
-        title={i18nT("auto.switch_branch", undefined, "Switch branch")}
+        title={i18nT("git.switchBranch", undefined, "Switch branch")}
         data-testid="git-branch-btn"
       >
         <Icon path={mdiSourceBranch} size={0.5} />
@@ -313,43 +353,24 @@ export function GroupGitInfo({ sessions, cwd, folderBranch, onBranchClick }: Gro
           )}
         </>
       )}
-    </div>
-  );
-}
-
-const editorIcons: Record<string, ReactNode> = {
-  zed: <Icon path={mdiOpenInNew} size={0.5} />,
-  vscode: <Icon path={mdiOpenInNew} size={0.5} />,
-  idea: <Icon path={mdiOpenInNew} size={0.5} />,
-};
-
-export function EditorButtons({
-  editors,
-  onOpen,
-}: {
-  editors: DetectedEditor[];
-  onOpen: (editorId: string) => void;
-}) {
-  if (editors.length === 0) return null;
-
-  return (
-    <div className="flex items-center gap-1">
-      {editors.map((editor) => (
+      {showFolderPill && (
+        <GitDirtyPill status={dirtyStatus} onClick={() => openCommitDialog(cwd, anySessionId)} />
+      )}
+      {showFolderPill && (dirtyStatus?.dirtyCount ?? 0) > 0 && (
         <button
-          key={editor.id}
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpen(editor.id);
-          }}
-          className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-secondary)] text-[var(--text-secondary)] hover:text-blue-400 hover:border-blue-500/50"
-          title={`Open in ${editor.name}`}
+          type="button"
+          data-testid="group-commit-btn"
+          onClick={(e) => { e.stopPropagation(); openCommitDialog(cwd, anySessionId); }}
+          className="text-[10px] text-blue-400 hover:underline"
+          title={i18nT("common.commitChanges", undefined, "Commit changes")}
         >
-          <span className="inline-flex items-center gap-0.5">{editorIcons[editor.id] ?? <Icon path={mdiOpenInNew} size={0.5} />} {editor.name}</span>
+          {i18nT("git.commit", undefined, "Commit")}
         </button>
-      ))}
+      )}
     </div>
   );
 }
+
 
 export function SessionCard({
   session,
@@ -387,6 +408,7 @@ export function SessionCard({
   onAbortTool,
   hasError,
   isRetrying,
+  hasNotice,
 }: {
   session: DashboardSession;
   selectedId?: string;
@@ -482,6 +504,8 @@ export function SessionCard({
   hasError?: boolean;
   /** True iff a synthesized provider retry is in flight (retryState set, no error yet). */
   isRetrying?: boolean;
+  /** True iff the model returned only reasoning, no answer (non-error notice). */
+  hasNotice?: boolean;
 }) {
   // dnd-kit drag handle props (attributes + listeners) supplied by
   // SortableSessionCard via context. When non-null, the desktop card's left
@@ -498,7 +522,7 @@ export function SessionCard({
   // Also gates the chat-routed `ask_user` → needs-you color in dot/rail.
   // See change: improve-dashboard-attention-routing.
   const hasWidgetBarPrompt = useHasWidgetBarPrompt(session.id);
-  const dotColor = deriveDotColorWithFlags(session, { hasError, isRetrying, hasWidgetBarPrompt });
+  const dotColor = deriveDotColorWithFlags(session, { hasError, isRetrying, hasWidgetBarPrompt, hasNotice });
   // State marker class stays on the <li>; the matching color class drives the
   // compositor-only `.card-stripes-fx` overlay rendered behind card content.
   // See change: throttle-idle-ui-animations.
@@ -522,12 +546,12 @@ export function SessionCard({
   // Non-hue state channel: a shape marker (filled/half/ring/✕) so state is
   // distinguishable without color and under reduced motion.
   // See change: improve-dashboard-attention-routing.
-  const statusShape = deriveStatusShape(session, { hasError, isRetrying, hasWidgetBarPrompt });
+  const statusShape = deriveStatusShape(session, { hasError, isRetrying, hasWidgetBarPrompt, hasNotice });
   // Status-tinted background color for the left-gutter mosaic rail. The
   // mosaic shape is carved by an SVG mask asset; the gutter element's
   // background-color supplies the colour. Selected cards use the brighter
   // -400 shade. See change: add-session-card-status-mosaic-rail.
-  const railBgClass = deriveRailBgColor(session, { hasError, isRetrying, hasWidgetBarPrompt }, isSelected);
+  const railBgClass = deriveRailBgColor(session, { hasError, isRetrying, hasWidgetBarPrompt, hasNotice }, isSelected);
 
   function handleConfirmRename(name: string) {
     setIsRenaming(false);
@@ -562,7 +586,7 @@ export function SessionCard({
           </span>
           <span
             className="text-[11px] text-[var(--text-muted)] flex-shrink-0"
-            title={`Started ${new Date(session.startedAt).toLocaleString()}`}
+            title={i18nT("session.startedAtTime", { time: new Date(session.startedAt).toLocaleString() }, "Started {time}")}
           >
             {formatRelativeTime(now - selectBadgeTimestamp(session))}
           </span>
@@ -585,7 +609,7 @@ export function SessionCard({
               <span
                 data-testid="queue-count-badge"
                 className="flex-shrink-0 inline-flex items-center px-1.5 py-0 text-[10px] rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30"
-                title={`${totalQueued} queued message${totalQueued === 1 ? "" : "s"}`}
+                title={i18nT("session.queuedMessages", { count: totalQueued }, `${totalQueued} queued message${totalQueued === 1 ? "" : "s"}`)}
               >
                 {totalQueued}
               </span>
@@ -612,7 +636,7 @@ export function SessionCard({
           <div
             className="mt-1 flex items-center gap-1 text-[11px] text-blue-400"
             data-testid="mobile-card-attached-chip"
-            title={`Attached: ${session.attachedProposal}`}
+            title={i18nT("session.attachedProposal", { proposal: session.attachedProposal }, "Attached: {proposal}")}
           >
             <Icon path={mdiPaperclip} size={0.4} />
             <span className="truncate">{session.attachedProposal}</span>
@@ -634,6 +658,13 @@ export function SessionCard({
                 : undefined
             }
           />
+        ) : null}
+        {/* Compact read-only tag strip: user chips + `+N` overflow + read-only
+            phase pseudo-tag (openspecPhase only). See change: add-session-tags. */}
+        {((session.tags?.length ?? 0) > 0 || session.openspecPhase) ? (
+          <div className="mt-1">
+            <TagStrip tags={session.tags ?? []} phase={session.openspecPhase} />
+          </div>
         ) : null}
         {/* PROCESS subcard (mobile compact) — activity bar + drawer.
             See change: redesign-process-list-activity-bar. */}
@@ -726,14 +757,14 @@ export function SessionCard({
           <button
             onClick={(e) => { e.stopPropagation(); setIsRenaming(true); }}
             className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] p-0.5 flex-shrink-0"
-            title={i18nT("auto.rename_session", undefined, "Rename session")}
+            title={i18nT("session.renameSession", undefined, "Rename session")}
           >
             <Icon path={mdiPencilOutline} size={0.45} />
           </button>
         )}
         <span
           className="text-[10px] text-[var(--text-muted)]"
-          title={`Started ${new Date(session.startedAt).toLocaleString()}`}
+          title={i18nT("session.startedAtTime", { time: new Date(session.startedAt).toLocaleString() }, "Started {time}")}
         >
           {formatRelativeTime(now - selectBadgeTimestamp(session))}
         </span>
@@ -742,7 +773,7 @@ export function SessionCard({
           <button
             onClick={(e) => { e.stopPropagation(); onUnhide(session.id); }}
             className="text-[var(--text-tertiary)] hover:text-green-400 p-0.5 flex-shrink-0"
-            title={i18nT("auto.show_session", undefined, "Show session")}
+            title={i18nT("session.showSession", undefined, "Show session")}
             data-testid="session-unhide-btn"
           >
             <Icon path={mdiEyeOutline} size={0.45} />
@@ -751,7 +782,7 @@ export function SessionCard({
           <button
             onClick={(e) => { e.stopPropagation(); onHide(session.id); }}
             className="text-[var(--text-tertiary)] hover:text-[var(--text-muted)] p-0.5 flex-shrink-0"
-            title={i18nT("auto.hide_session", undefined, "Hide session")}
+            title={i18nT("session.hideSession", undefined, "Hide session")}
             data-testid="session-hide-btn"
           >
             <Icon path={mdiEyeOffOutline} size={0.45} />
@@ -763,13 +794,13 @@ export function SessionCard({
               e.stopPropagation();
               if (session.closing) return;
               if (session.status === "streaming") {
-                if (!window.confirm("Session is currently running. Exit anyway?")) return;
+                if (!window.confirm(i18nT("session.exitWhileRunningConfirm", undefined, "Session is currently running. Exit anyway?"))) return;
               }
               onShutdown(session.id);
             }}
             disabled={session.closing}
             className="text-[var(--text-muted)] hover:text-red-400 p-0.5 flex-shrink-0 disabled:cursor-default disabled:hover:text-[var(--text-muted)]"
-            title={session.closing ? "Closing…" : "Exit pi session"}
+            title={session.closing ? i18nT("session.closing", undefined, "Closing…") : i18nT("session.exitPiSession", undefined, "Exit pi session")}
             data-testid="session-close-btn"
           >
             <Icon path={session.closing ? mdiLoading : mdiClose} size={0.5} className={session.closing ? "animate-spin" : undefined} />
@@ -792,18 +823,18 @@ export function SessionCard({
                 onClick={(e) => { e.stopPropagation(); onResume("continue"); }}
                 disabled={session.resuming || session.cwdMissing === true}
                 className="text-[9px] px-1 py-px rounded border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                title={session.cwdMissing ? "session's directory no longer exists" : "Resume session (continue same session)"}
+                title={session.cwdMissing ? i18nT("session.cwdMissing", undefined, "session's directory no longer exists") : i18nT("session.resumeTitle", undefined, "Resume session (continue same session)")}
               >
-                <Icon path={mdiPlayCircleOutline} size={0.35} className="inline mr-px" />{i18nT("auto.resume", undefined, "Resume")}
+                <Icon path={mdiPlayCircleOutline} size={0.35} className="inline mr-px" />{i18nT("session.resume", undefined, "Resume")}
               </button>
             )}
             <button
               onClick={(e) => { e.stopPropagation(); onResume("fork"); }}
               disabled={session.resuming || session.cwdMissing === true}
               className="text-[9px] px-1 py-px rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={session.cwdMissing ? "session's directory no longer exists" : "Fork session (new session from this point)"}
+              title={session.cwdMissing ? i18nT("session.cwdMissing", undefined, "session's directory no longer exists") : i18nT("session.forkTitle", undefined, "Fork session (new session from this point)")}
             >
-              <Icon path={mdiSourceFork} size={0.35} className="inline mr-px" />{i18nT("auto.fork", undefined, "Fork")}
+              <Icon path={mdiSourceFork} size={0.35} className="inline mr-px" />{i18nT("session.fork", undefined, "Fork")}
             </button>
           </>
         )}
@@ -815,26 +846,33 @@ export function SessionCard({
             onClick={(e) => { e.stopPropagation(); onSpawnSibling(session); }}
             disabled={!!session.cwdMissing}
             className="text-[9px] px-1 py-px rounded border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-            title={session.cwdMissing ? "session's directory no longer exists" : "+Session clean sibling in same folder"}
+            title={session.cwdMissing ? i18nT("session.cwdMissing", undefined, "session's directory no longer exists") : i18nT("session.spawnSiblingTitle", undefined, "+Session clean sibling in same folder")}
             data-testid="session-card-spawn-sibling"
           >
-            <Icon path={mdiPlus} size={0.35} className="inline mr-px" />{i18nT("auto.session", undefined, "Session")}
+            <Icon path={mdiPlus} size={0.35} className="inline mr-px" />{i18nT("session.session", undefined, "Session")}
           </button>
         )}
         {/* +Worktree — create git worktree (if needed) + spawn session inside
             it via WorktreeSpawnDialog. Gated upstream by gitWorktreeEnabled.
             Hidden when the session is ALREADY a worktree session
             (`session.gitWorktree` set) — spawning a worktree from inside a
-            worktree is redundant. See change: session-card-plus-session-button. */}
-        {onSpawnWorktree && !session.gitWorktree && (
+            worktree is redundant. Also hidden ONLY when the cwd is a
+            confirmed non-git directory (`isGitRepo === false`); `true` and
+            `undefined` (unknown / probe-timed-out / legacy) keep the button
+            so a real repo never loses it. NOT gated on `gitBranch` — that is
+            a data-arrival signal (absent during the register race, on probe
+            failure, and after restart for cold sessions).
+            See changes: session-card-plus-session-button,
+            gate-session-worktree-button-on-git. */}
+        {onSpawnWorktree && !session.gitWorktree && session.isGitRepo !== false && (
           <button
             onClick={(e) => { e.stopPropagation(); onSpawnWorktree(session); }}
             disabled={!!session.cwdMissing}
             className="text-[9px] px-1 py-px rounded border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-            title={session.cwdMissing ? "session's directory no longer exists" : "Create git worktree + spawn session inside it"}
+            title={session.cwdMissing ? i18nT("session.cwdMissing", undefined, "session's directory no longer exists") : i18nT("session.spawnWorktreeTitle", undefined, "Create git worktree + spawn session inside it")}
             data-testid="session-card-spawn-worktree"
           >
-            <Icon path={mdiSourceBranchPlus} size={0.35} className="inline mr-px" />{i18nT("auto.worktree", undefined, "Worktree")}
+            <Icon path={mdiSourceBranchPlus} size={0.35} className="inline mr-px" />{i18nT("worktree.worktree", undefined, "Worktree")}
           </button>
         )}
       </div>
@@ -873,6 +911,14 @@ export function SessionCard({
         />
       ) : null}
 
+      {/* Compact read-only tag strip: user chips + `+N` overflow + read-only
+          phase pseudo-tag (openspecPhase only). See change: add-session-tags. */}
+      {((session.tags?.length ?? 0) > 0 || session.openspecPhase) ? (
+        <div className="mt-1 px-1">
+          <TagStrip tags={session.tags ?? []} phase={session.openspecPhase} />
+        </div>
+      ) : null}
+
       {/* Subcard stack — see change: redesign-session-card-subcards.
           Flow activity badge has been removed from the shell — it is now
           rendered via SessionCardBadgeSlot (inside WorkspaceSubcard below)
@@ -895,7 +941,7 @@ export function SessionCard({
             ? true
             : Boolean(openspecInitialized) || Boolean(openspecPending)
       ) && (
-        <SessionSubcard title="OPENSPEC">
+        <SessionSubcard title={i18nT("session.subcardOpenspec", undefined, "OPENSPEC")}>
           <SessionOpenSpecActions
             session={session}
             changes={openspecChanges}
@@ -944,6 +990,7 @@ export function SessionCard({
         collapsed={session.processDrawerCollapsed}
         onSetCollapsed={onSetProcessDrawerCollapsed}
         onNavigateToSession={onSelect}
+        reserveAtIdle={prefs.reserveProcessLineAtIdle}
       />
 
       {/* FLOWS subcard — plugin slot only.
@@ -1011,31 +1058,92 @@ interface ProcessSubcardProps {
   onSetCollapsed?: (collapsed: boolean) => void;
   /** Focus/scroll to a referenced session (for `sub-session` rows). */
   onNavigateToSession?: (sessionId: string) => void;
+  /**
+   * Effective `reserveProcessLineAtIdle` pref. When true the desktop subcard
+   * renders a reserved `⏵ idle` line even when both surfaces are empty, so the
+   * grid never reflows. Mobile ignores it.
+   */
+  reserveAtIdle?: boolean;
 }
 
 /**
- * Desktop PROCESS subcard — stacks SessionActivityBar above the
- * BackgroundProcessesDrawer (ProcessList). Subcard hides only when BOTH
- * surfaces have nothing to render.
+ * Compose the stable-width counts pill for the collapsed process line:
+ * `N running`, `⚠M`, or both joined by ` · `. Returns null when neither
+ * segment applies. Pure; exported for unit tests.
+ * See change: stable-process-line.
  */
-function ProcessSubcard({ activity, processes, onKill, onAbortTool, now, collapsed, onSetCollapsed, onNavigateToSession }: ProcessSubcardProps) {
+export function formatCountsPill(running: number, bg: number): string | null {
+  const segs: string[] = [];
+  if (running > 0) segs.push(`${running} running`);
+  if (bg > 0) segs.push(`⚠${bg}`);
+  return segs.length > 0 ? segs.join(" · ") : null;
+}
+
+/**
+ * Desktop PROCESS subcard — ONE fixed-height summary line that folds the
+ * in-flight bash activity and the background-process drawer together. Collapsed
+ * height is invariant across tool count (the core goal of stable-process-line):
+ * the line shows the newest running command + a counts pill + elapsed, or
+ * `⚠ M background process(es)`, or `⏵ idle`. Expanding reveals the activity
+ * rows (each `⏹` → session abort) then the bg-process rows (each `✕` → PGID
+ * kill). Expand state persists per session via `useDrawerExpansion`.
+ *
+ * Unmounts (returns null) only when both surfaces are empty AND `reserveAtIdle`
+ * is false. See change: stable-process-line.
+ */
+function ProcessSubcard({ activity, processes, onKill, onAbortTool, now, collapsed, onSetCollapsed, onNavigateToSession, reserveAtIdle }: ProcessSubcardProps) {
   const hasActivity = activity.length > 0;
   const hasProcesses = processes.length > 0;
   const { expanded, onToggle } = useDrawerExpansion(collapsed, onSetCollapsed);
-  if (!hasActivity && !hasProcesses) return null;
+  if (!hasActivity && !hasProcesses && !reserveAtIdle) return null;
+
+  const primary = activity[0];
+  // Pill only when a bash is running — in the bg-only case the line text already
+  // carries the count, so a `⚠M` pill would duplicate it.
+  const pill = hasActivity ? formatCountsPill(activity.length, processes.length) : null;
+
+  let lineIcon = mdiPlay;
+  let lineIconClass = "text-green-400";
+  let lineText: string;
+  if (primary) {
+    lineText = truncateCommand(primary.command, 60);
+  } else if (hasProcesses) {
+    lineIcon = mdiAlertOutline;
+    lineIconClass = "text-amber-500/80";
+    lineText = i18nT(
+      "session.backgroundProcessCount",
+      { count: processes.length },
+      `${processes.length} background process${processes.length === 1 ? "" : "es"}`,
+    );
+  } else {
+    lineText = i18nT("session.processIdle", undefined, "idle");
+  }
+
   return (
-    <SessionSubcard title="PROCESS">
-      {hasActivity && onAbortTool ? (
-        <SessionActivityBar tools={[...activity]} onAbort={onAbortTool} now={now} />
-      ) : null}
-      {hasProcesses && onKill ? (
-        <ProcessList
-          processes={[...processes]}
-          onKill={onKill}
-          expanded={expanded}
-          onToggle={onToggle}
-          onNavigateToSession={onNavigateToSession}
-        />
+    <SessionSubcard title={i18nT("session.subcardProcess", undefined, "PROCESS")}>
+      <CollapseSummary expanded={expanded} onToggle={onToggle} testId="process-summary-line">
+        <Icon path={lineIcon} size={0.4} className={`${lineIconClass} flex-shrink-0`} />
+        <span className="text-[var(--text-secondary)] truncate flex-1" title={primary?.command ?? lineText}>
+          {lineText}
+        </span>
+        {pill ? (
+          <span className="flex-shrink-0 text-[10px] text-[var(--text-tertiary)] tabular-nums" data-testid="process-counts-pill">
+            [{pill}]
+          </span>
+        ) : null}
+        {primary ? (
+          <span className="flex-shrink-0 text-[var(--text-tertiary)]">{formatElapsed(now - primary.startedAt)}</span>
+        ) : null}
+      </CollapseSummary>
+      {expanded && (hasActivity || hasProcesses) ? (
+        <div className="mt-1.5 space-y-0.5" data-testid="process-expanded-body">
+          {hasActivity && onAbortTool ? (
+            <SessionActivityBar tools={[...activity]} onAbort={onAbortTool} now={now} />
+          ) : null}
+          {hasProcesses && onKill ? (
+            <ProcessList processes={[...processes]} onKill={onKill} onNavigateToSession={onNavigateToSession} />
+          ) : null}
+        </div>
       ) : null}
     </SessionSubcard>
   );
@@ -1064,7 +1172,7 @@ function MobileProcessSubcard({ activity, processes, onKill, onAbortTool, now, o
           onClick={(e) => { e.stopPropagation(); setSheetOpen(true); }}
           className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] border border-[var(--border-subtle)] text-[var(--text-muted)] bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]"
           data-testid="background-drawer-chip"
-          aria-label={`${processes.length} background processes — tap to view`}
+          aria-label={i18nT("session.backgroundProcessesTapToView", { count: processes.length }, "{count} background processes — tap to view")}
         >
           ⚠ {processes.length}
         </button>
@@ -1079,12 +1187,10 @@ function MobileProcessSubcard({ activity, processes, onKill, onAbortTool, now, o
             className="bg-[var(--bg-secondary)] rounded-t-lg p-4 w-full max-w-lg border-t border-[var(--border-secondary)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-semibold mb-2 text-[var(--text-secondary)]">{i18nT("auto.background_processes", undefined, "Background processes")}</h3>
+            <h3 className="text-sm font-semibold mb-2 text-[var(--text-secondary)]">{i18nT("common.backgroundProcesses", undefined, "Background processes")}</h3>
             <ProcessList
               processes={[...processes]}
               onKill={onKill}
-              expanded={true}
-              onToggle={() => { /* always expanded in the sheet */ }}
               compact
               onNavigateToSession={onNavigateToSession}
             />
@@ -1107,7 +1213,7 @@ function GitSubcard({ session, showGitInfo, allSessions, onShutdownSession }: { 
   const hasWorktreeActions = !!session.gitWorktree;
   if (!renderGitInfo && !hasWorktreeActions) return null;
   return (
-    <SessionSubcard title="GIT">
+    <SessionSubcard title={i18nT("session.subcardGit", undefined, "GIT")}>
       {renderGitInfo ? <GitInfo session={session} /> : null}
       {hasWorktreeActions ? <WorktreeActionsMenu session={session} allSessions={allSessions} onShutdownSession={onShutdownSession} /> : null}
     </SessionSubcard>
@@ -1123,7 +1229,7 @@ function BadgeSubcard({ session }: { session: DashboardSession }) {
   const hasBadge = useSlotHasClaimsForSession("session-card-badge", session);
   if (!hasBadge) return null;
   return (
-    <SessionSubcard title="STATUS">
+    <SessionSubcard title={i18nT("session.subcardStatus", undefined, "STATUS")}>
       <SessionCardBadgeSlot session={session} />
     </SessionSubcard>
   );
@@ -1137,7 +1243,7 @@ function MemorySubcard({ session }: { session: DashboardSession }) {
   const hasMemory = useSlotHasClaimsForSession("session-card-memory", session);
   if (!hasMemory) return null;
   return (
-    <SessionSubcard title="MEMORY">
+    <SessionSubcard title={i18nT("session.subcardMemory", undefined, "MEMORY")}>
       <SessionCardMemorySlot session={session} />
     </SessionSubcard>
   );
@@ -1152,7 +1258,7 @@ function FlowsSubcard({ session }: { session: DashboardSession }) {
   const hasFlows = useSlotHasClaimsForSession("session-card-flows", session);
   if (!hasFlows) return null;
   return (
-    <SessionSubcard title="FLOWS">
+    <SessionSubcard title={i18nT("session.subcardFlows", undefined, "FLOWS")}>
       <SessionCardFlowsSlot session={session} />
     </SessionSubcard>
   );

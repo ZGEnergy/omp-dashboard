@@ -18,16 +18,19 @@
     "skills": [
       ".pi/skills/pi-dashboard",
       ".pi/skills/browser",
-      ".pi/skills/project-init"
+      ".pi/skills/project-init",
+      ".pi/skills/doctor"
     ]
   },
   "files": [
     "src/",
     ".pi/skills/pi-dashboard/",
     ".pi/skills/browser/",
-    ".pi/skills/project-init/"
+    ".pi/skills/project-init/",
+    ".pi/skills/doctor/"
   ],
   "dependencies": {
+    "@blackbelt-technology/pi-dashboard-bus-client": "^0.5.4",
     "@blackbelt-technology/pi-dashboard-shared": "^0.5.4",
     "ws": "^8.18.0",
     "yaml": "^2.9.0"

@@ -1,9 +1,9 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Icon } from "@mdi/react";
-import { mdiServerNetwork, mdiChevronDown, mdiCog } from "@mdi/js";
 import type { KnownServer } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { listKnownServers } from "../lib/known-servers-api.js";
+import { mdiChevronDown, mdiCog, mdiServerNetwork } from "@mdi/js";
+import { Icon } from "@mdi/react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { t as i18nT } from "../lib/i18n";
+import { listKnownServers } from "../lib/known-servers-api.js";
 
 /** Re-export for backward compat — consumers that imported this type */
 export interface DiscoveredServerInfo {
@@ -69,7 +69,31 @@ export function buildServerEntries(
 }
 
 /** Probe outcome for a selector entry. */
-type ProbeState = "available" | "unreachable" | "denied";
+type ProbeState = "available" | "unreachable" | "denied" | "cors-blocked";
+
+/**
+ * True when `host` is a private-LAN address literal (RFC-1918, CGNAT, link-
+ * local, or an mDNS `.local` name). A cross-origin probe to such a host that
+ * fails at the transport layer (`.catch()`, no readable response) is more
+ * likely a CORS block — the remote hasn't allowlisted this origin — than a
+ * genuine outage, so we surface an actionable "allowlist this origin" hint
+ * instead of a bare "Unreachable". The browser cannot distinguish a CORS block
+ * from connection-refused (both throw an opaque error), so this LAN heuristic
+ * is the client-observable proxy for a trusted-network candidate.
+ * See change: fix-remote-connect-cors-gates.
+ */
+export function isLanHost(host: string): boolean {
+  if (host.endsWith(".local")) return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  if (a === 10) return true; // 10.0.0.0/8
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
+  return false;
+}
 
 interface Props {
   /** mDNS-discovered servers — kept for Settings panel, no longer primary data source */
@@ -138,8 +162,12 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
           if (!cancelled) setAvailability((prev) => new Map(prev).set(key, state));
         })
         .catch(() => {
-          // Transport failure (no response) — genuine unreachable.
-          if (!cancelled) setAvailability((prev) => new Map(prev).set(key, "unreachable"));
+          // Transport failure (no readable response). The browser cannot tell a
+          // CORS block from a genuine outage. For a LAN host — a trusted-network
+          // candidate — surface the actionable "allowlist this origin" hint;
+          // otherwise a plain "Unreachable". See change: fix-remote-connect-cors-gates.
+          const state: ProbeState = isLanHost(s.host) ? "cors-blocked" : "unreachable";
+          if (!cancelled) setAvailability((prev) => new Map(prev).set(key, state));
         });
     }
     return () => {
@@ -167,7 +195,7 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer"
-        title={i18nT("auto.switch_server", undefined, "Switch server")}
+        title={i18nT("connection.switchServer", undefined, "Switch server")}
       >
         <Icon path={mdiServerNetwork} size={0.55} />
         <span className="truncate max-w-[180px]">{displayLabel}</span>
@@ -183,7 +211,7 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
               className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer border-b border-[var(--border-secondary)] mb-1"
             >
               <Icon path={mdiCog} size={0.45} />
-              <span>{i18nT("auto.manage_servers", undefined, "Manage servers…")}</span>
+              <span>{i18nT("common.manageServers", undefined, "Manage servers…")}</span>
             </button>
           )}
           {entries.map((entry) => {
@@ -192,8 +220,9 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
             const probe = availability.get(key);
             const denied = !isCurrent && probe === "denied";
             const unreachable = !isCurrent && probe === "unreachable";
-            // Both denied and unreachable disable switching, but render distinctly.
-            const blocked = denied || unreachable;
+            const corsBlocked = !isCurrent && probe === "cors-blocked";
+            // denied, unreachable, and cors-blocked all disable switching, but render distinctly.
+            const blocked = denied || unreachable || corsBlocked;
             const isSwitching = inFlightSwitchKey === key;
             return (
               <button
@@ -202,6 +231,8 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
                 title={
                   denied
                     ? `${entry.host}:${entry.port}: network not allowed`
+                    : corsBlocked
+                    ? `${entry.host}:${entry.port}: CORS-blocked — allowlist this origin on the remote (add this network to its trustedNetworks)`
                     : unreachable
                     ? `${entry.host}:${entry.port} is unreachable`
                     : undefined
@@ -213,6 +244,7 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
                 }}
                 data-unreachable={unreachable || undefined}
                 data-denied={denied || undefined}
+                data-cors-blocked={corsBlocked || undefined}
                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors ${
                   isCurrent ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"
                 } ${blocked ? "opacity-50 cursor-not-allowed" : "hover:bg-[var(--bg-tertiary)] cursor-pointer"}`}
@@ -234,17 +266,19 @@ export function ServerSelector({ currentHost, currentPort, connected, onSwitch, 
                 </span>
                 {isSwitching ? (
                   <span
-                    aria-label={i18nT("auto.switching_u2026", undefined, "Switching\\u2026")}
+                    aria-label={i18nT("common.switchingU2026", undefined, "Switching\\u2026")}
                     className="shrink-0 w-3 h-3 rounded-full border-2 border-[var(--text-tertiary)] border-t-transparent animate-spin"
                   />
                 ) : isCurrent ? (
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${connected ? "bg-green-500" : "bg-red-500"}`} />
                 ) : denied ? (
-                  <span className="shrink-0 text-[10px] text-amber-400">{i18nT("auto.network_not_allowed", undefined, "Network not allowed")}</span>
+                  <span className="shrink-0 text-[10px] text-amber-400">{i18nT("common.networkNotAllowed", undefined, "Network not allowed")}</span>
+                ) : corsBlocked ? (
+                  <span className="shrink-0 text-[10px] text-amber-400">{i18nT("common.corsBlocked", undefined, "CORS-blocked")}</span>
                 ) : unreachable ? (
-                  <span className="shrink-0 text-[10px] text-red-400">{i18nT("auto.unreachable", undefined, "Unreachable")}</span>
+                  <span className="shrink-0 text-[10px] text-red-400">{i18nT("connection.unreachable", undefined, "Unreachable")}</span>
                 ) : probe === "available" ? (
-                  <span className="shrink-0 text-[10px] text-green-500">{i18nT("auto.available", undefined, "Available")}</span>
+                  <span className="shrink-0 text-[10px] text-green-500">{i18nT("common.available", undefined, "Available")}</span>
                 ) : null}
               </button>
             );

@@ -17,16 +17,19 @@
  *
  * See change: add-subagent-inspector.
  */
-import React, { useState } from "react";
-import { Icon } from "@mdi/react";
+
+import { Dialog } from "@blackbelt-technology/pi-dashboard-client-utils/Dialog";
+import { SubagentDetailView } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
 import { mdiChevronDown, mdiChevronUp, mdiOpenInNew } from "@mdi/js";
-import type { ToolRendererProps } from "./types.js";
+import { Icon } from "@mdi/react";
+import type React from "react";
+import { useState } from "react";
+import { t as i18nT } from "../../lib/i18n";
 import { AgentCardShell } from "../AgentCardShell.js";
 import { formatDuration } from "../agent-card-utils.js";
 import { ElapsedBadge } from "../ElapsedBadge.js";
 import { MarkdownContent } from "../MarkdownContent.js";
-import { SubagentDetailView } from "@blackbelt-technology/pi-dashboard-subagents-plugin/client";
-import { t as i18nT } from "../../lib/i18n";
+import type { ToolRendererProps } from "./types.js";
 
 /** Shape of AgentDetails sent by pi-dashboard-subagents via partialResult.details */
 interface AgentDetails {
@@ -83,8 +86,12 @@ function buildStats(d: AgentDetails): string {
 function PromptBlock({ text }: { text: string }) {
   return (
     <div className="mt-1.5">
-      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-0.5">{i18nT("auto.prompt", undefined, "Prompt")}</div>
-      <pre className="whitespace-pre-wrap text-[11px] text-[var(--text-secondary)] max-h-40 overflow-auto">
+      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-0.5">{i18nT("session.prompt", undefined, "Prompt")}</div>
+      {/* Renders a 1000-char prefix but exposes the full text to the copy path
+          via `data-copy-text` so a selection over this card copies the whole
+          prompt, not the DOM-capped prefix. See change:
+          chat-copy-fidelity-intercept. */}
+      <pre data-copy-text={text} className="whitespace-pre-wrap text-[11px] text-[var(--text-secondary)] max-h-40 overflow-auto">
         {text.slice(0, 1000)}
       </pre>
     </div>
@@ -95,7 +102,7 @@ function PromptBlock({ text }: { text: string }) {
 function ResultBlock({ text }: { text: string }) {
   return (
     <div className="mt-1.5">
-      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-0.5">{i18nT("auto.result", undefined, "Result")}</div>
+      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-0.5">{i18nT("common.result", undefined, "Result")}</div>
       <div className="max-h-80 overflow-auto text-[12px]">
         <MarkdownContent content={text} />
       </div>
@@ -116,12 +123,14 @@ function ResultBlock({ text }: { text: string }) {
 function CardControls({
   expanded,
   onToggleExpand,
-  popoutUrl,
+  onOpenPopout,
+  canPopout,
   elapsed,
 }: {
   expanded: boolean;
   onToggleExpand: () => void;
-  popoutUrl?: string;
+  onOpenPopout: () => void;
+  canPopout: boolean;
   elapsed?: React.ReactNode;
 }) {
   return (
@@ -144,18 +153,18 @@ function CardControls({
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          if (popoutUrl) window.open(popoutUrl, "_blank", "noopener");
+          if (canPopout) onOpenPopout();
         }}
-        disabled={!popoutUrl}
+        disabled={!canPopout}
         className={`transition-colors px-1.5 py-0.5 rounded text-[11px] inline-flex items-center gap-1 border ${
-          popoutUrl
+          canPopout
             ? "border-[var(--border-subtle)] text-[var(--text-tertiary)] hover:text-blue-400 hover:border-blue-400/40 hover:bg-blue-400/10"
             : "border-[var(--border-subtle)] text-[var(--text-muted)] opacity-40 cursor-not-allowed"
         }`}
-        title={popoutUrl ? "Open subagent in new tab" : "Subagent id not yet available"}
+        title={canPopout ? "Open subagent detail" : "Subagent id not yet available"}
       >
         <Icon path={mdiOpenInNew} size={0.5} />
-        <span>{i18nT("auto.popout", undefined, "Popout")}</span>
+        <span>{i18nT("common.popout", undefined, "Popout")}</span>
       </button>
     </div>
   );
@@ -164,6 +173,11 @@ function CardControls({
 export function AgentToolRenderer({ args, status, result, toolDetails, context }: ToolRendererProps) {
   const details = toolDetails as AgentDetails | undefined;
   const [expanded, setExpanded] = useState(false);
+  // Detail popout opens in the shell `ui:dialog` primitive (parity with
+  // `flow-agent-detail`), replacing the prior `window.open(..., "_blank")`
+  // browser popout that broke on Electron/PWA/mobile.
+  // See change: fix-subagent-live-detail-reliability (D4).
+  const [detailOpen, setDetailOpen] = useState(false);
 
   // Derive display values
   const displayName = details?.displayName ?? (args?.subagent_type as string) ?? "Agent";
@@ -174,13 +188,64 @@ export function AgentToolRenderer({ args, status, result, toolDetails, context }
   const sessionId = context?.sessionId;
   const session = context?.session;
   const agentId = details?.agentId;
-  const popoutUrl = sessionId && agentId ? `/session/${sessionId}/subagent/${agentId}` : undefined;
+  // Popout affordance is enabled only when both the agent id and the session
+  // state are available (SubagentDetailView needs both). Disabled otherwise
+  // — no dialog opens (spec: "Detail affordance disabled without an agent id").
+  const canPopout = Boolean(agentId && session);
+
+  const detailDialog = agentId && session ? (
+    <Dialog open={detailOpen} onClose={() => setDetailOpen(false)} size="lg" flush>
+      <div className="h-[70vh] overflow-hidden flex flex-col">
+        <SubagentDetailView
+          session={session}
+          agentId={agentId}
+          mode="popout"
+          sessionId={sessionId}
+          onBack={() => setDetailOpen(false)}
+        />
+      </div>
+    </Dialog>
+  ) : null;
+
+  // Request a resync when the subagent is still running but its inspector
+  // timeline is empty or the map has no entry at all (a gap swallowed its
+  // live frames, or the client subscribed after it started and state-replay
+  // does not re-synthesize subagent_* events for running agents). The bridge
+  // replays the latest snapshot in response.
+  // See change: fix-subagent-live-detail-reliability (D2);
+  // see change: fix-subagent-inline-expand-resync (inline path parity).
+  const requestResyncIfStale = () => {
+    if (!agentId || !sessionId || !context?.send) return;
+    const sub = session?.subagents.get(agentId);
+    const emptyTimeline = !sub?.entries || sub.entries.length === 0;
+    // Card status is authoritative for "still running" even when the map has
+    // no entry yet (sub === undefined) — that is exactly the not-found case.
+    const running = details?.status === "running" || details?.status === "queued" || sub?.status === "running";
+    if (running && emptyTimeline) {
+      context.send({ type: "subagent_resync_request", sessionId, agentId });
+    }
+  };
+
+  // Open the detail dialog, resyncing first if the timeline is stale.
+  const openDetail = () => {
+    setDetailOpen(true);
+    requestResyncIfStale();
+  };
+
+  // Toggle the inline expanded body; when expanding, resync if stale so the
+  // inline timeline hydrates the same way the popout does (previously the
+  // inline path skipped resync → "Subagent not found in this session.").
+  const toggleExpand = () => {
+    if (!expanded) requestResyncIfStale();
+    setExpanded((v) => !v);
+  };
 
   const controls = (
     <CardControls
       expanded={expanded}
-      onToggleExpand={() => setExpanded((v) => !v)}
-      popoutUrl={popoutUrl}
+      onToggleExpand={toggleExpand}
+      onOpenPopout={openDetail}
+      canPopout={canPopout}
       elapsed={
         details?.status === "running" || details?.status === "queued"
           ? <ElapsedBadge startedAt={details.durationMs ? Date.now() - details.durationMs : undefined} />
@@ -207,6 +272,7 @@ export function AgentToolRenderer({ args, status, result, toolDetails, context }
         {!expanded && promptText && <PromptBlock text={promptText} />}
         {!expanded && result && <ResultBlock text={result} />}
         {expandedBody}
+        {detailDialog}
       </AgentCardShell>
     );
   }
@@ -230,6 +296,7 @@ export function AgentToolRenderer({ args, status, result, toolDetails, context }
         )}
         {!expanded && promptText && <PromptBlock text={promptText} />}
         {expandedBody}
+        {detailDialog}
       </AgentCardShell>
     );
   }
@@ -247,11 +314,12 @@ export function AgentToolRenderer({ args, status, result, toolDetails, context }
           <div className="text-[11px] text-[var(--text-secondary)] mt-1 truncate">"{description}"</div>
         )}
         {details.status === "steered" && (
-          <div className="text-[11px] text-orange-400 mt-0.5">{i18nT("auto.wrapped_up_turn_limit", undefined, "Wrapped up (turn limit)")}</div>
+          <div className="text-[11px] text-orange-400 mt-0.5">{i18nT("session.wrappedUpTurnLimit", undefined, "Wrapped up (turn limit)")}</div>
         )}
         {!expanded && promptText && <PromptBlock text={promptText} />}
         {!expanded && result && <ResultBlock text={result} />}
         {expandedBody}
+        {detailDialog}
       </AgentCardShell>
     );
   }
@@ -269,17 +337,18 @@ export function AgentToolRenderer({ args, status, result, toolDetails, context }
         <div className="text-[11px] text-[var(--text-secondary)] mt-1 truncate">"{description}"</div>
       )}
       {details.status === "error" && details.error && (
-        <div className="text-[11px] text-red-400 mt-1">{i18nT("auto.error", undefined, "Error:")} {details.error}</div>
+        <div className="text-[11px] text-red-400 mt-1">{i18nT("common.error", undefined, "Error:")} {details.error}</div>
       )}
       {details.status === "aborted" && (
-        <div className="text-[11px] text-orange-400 mt-1">{i18nT("auto.aborted_max_turns_exceeded", undefined, "Aborted (max turns exceeded)")}</div>
+        <div className="text-[11px] text-orange-400 mt-1">{i18nT("session.abortedMaxTurnsExceeded", undefined, "Aborted (max turns exceeded)")}</div>
       )}
       {details.status === "stopped" && (
-        <div className="text-[11px] text-[var(--text-muted)] mt-1">{i18nT("auto.stopped", undefined, "Stopped")}</div>
+        <div className="text-[11px] text-[var(--text-muted)] mt-1">{i18nT("status.stopped", undefined, "Stopped")}</div>
       )}
       {!expanded && promptText && <PromptBlock text={promptText} />}
       {!expanded && result && <ResultBlock text={result} />}
       {expandedBody}
+      {detailDialog}
     </AgentCardShell>
   );
 }

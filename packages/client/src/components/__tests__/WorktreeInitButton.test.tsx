@@ -9,11 +9,14 @@
  *
  * See change: generalize-worktree-init-hook.
  */
+
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { WorktreeInitButton } from "../WorktreeInitButton.js";
 import type { WorktreeInitHook } from "../../lib/git-api.js";
+import { __resetInitBusForTests, dispatchInitEvent } from "../../lib/worktree-init-bus.js";
+import { initStore } from "../../lib/worktree-init-store.js";
+import { WorktreeInitButton } from "../WorktreeInitButton.js";
 
 const { fetchWorktreeInitStatus, runWorktreeInit } = vi.hoisted(() => ({
   fetchWorktreeInitStatus: vi.fn(),
@@ -27,7 +30,7 @@ vi.mock("../../lib/git-api.js", async () => {
 
 const hook: WorktreeInitHook = { gate: "test ! -d node_modules", run: { type: "script", command: "npm ci" } };
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); initStore.__resetForTests(); __resetInitBusForTests(); });
 
 describe("WorktreeInitButton", () => {
   it("shows the button when needsInit is true", async () => {
@@ -50,14 +53,21 @@ describe("WorktreeInitButton", () => {
     expect(screen.queryByTestId("worktree-init-btn")).toBeNull();
   });
 
-  it("hides the button when the repo declares no hook", async () => {
-    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: false });
+  it("hides the button when the repo declares no hook (state ①)", async () => {
+    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: false, configured: false });
     render(<WorktreeInitButton cwd="/repo" />);
     await waitFor(() => expect(fetchWorktreeInitStatus).toHaveBeenCalled());
     expect(screen.queryByTestId("worktree-init-btn")).toBeNull();
   });
 
-  it("untrusted hook → trust dialog gates the run, then re-runs with confirmHash", async () => {
+  it("hides the button for a configured project with no hook (state ③)", async () => {
+    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: false, configured: true });
+    render(<WorktreeInitButton cwd="/repo" />);
+    await waitFor(() => expect(fetchWorktreeInitStatus).toHaveBeenCalled());
+    expect(screen.queryByTestId("worktree-init-btn")).toBeNull();
+  });
+
+  it("untrusted hook → two-action trust dialog; 'Always trust' re-runs with confirmHash + project scope", async () => {
     fetchWorktreeInitStatus.mockResolvedValue({ hasHook: true, needsInit: true, trusted: false });
     runWorktreeInit
       .mockResolvedValueOnce({ ok: false, untrusted: true, hook, hash: "abc123" })
@@ -66,15 +76,33 @@ describe("WorktreeInitButton", () => {
     await waitFor(() => screen.getByTestId("worktree-init-btn"));
 
     fireEvent.click(screen.getByTestId("worktree-init-btn"));
-    // Trust dialog names the gate.
+    // Trust dialog names the gate and offers both affirmative actions.
     await waitFor(() => screen.getByText(/test ! -d node_modules/));
+    expect(screen.getByTestId("worktree-init-trust-session")).toBeTruthy();
+    expect(screen.getByTestId("worktree-init-trust-always")).toBeTruthy();
     expect(runWorktreeInit).toHaveBeenCalledTimes(1);
     expect(runWorktreeInit.mock.calls[0][0].confirmHash).toBeUndefined();
 
-    // Confirm → re-run carries confirmHash.
-    fireEvent.click(screen.getByText("Run"));
+    // "Always trust" → re-run carries confirmHash + scope "project".
+    fireEvent.click(screen.getByTestId("worktree-init-trust-always"));
     await waitFor(() => expect(runWorktreeInit).toHaveBeenCalledTimes(2));
     expect(runWorktreeInit.mock.calls[1][0].confirmHash).toBe("abc123");
+    expect(runWorktreeInit.mock.calls[1][0].scope).toBe("project");
+  });
+
+  it("untrusted hook → 'Trust until dashboard restarts' re-runs with confirmHash + session scope", async () => {
+    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: true, needsInit: true, trusted: false });
+    runWorktreeInit
+      .mockResolvedValueOnce({ ok: false, untrusted: true, hook, hash: "abc123" })
+      .mockResolvedValueOnce({ ok: true, ran: true, durationMs: 10 });
+    render(<WorktreeInitButton cwd="/repo" />);
+    await waitFor(() => screen.getByTestId("worktree-init-btn"));
+    fireEvent.click(screen.getByTestId("worktree-init-btn"));
+    await waitFor(() => screen.getByTestId("worktree-init-trust-session"));
+    fireEvent.click(screen.getByTestId("worktree-init-trust-session"));
+    await waitFor(() => expect(runWorktreeInit).toHaveBeenCalledTimes(2));
+    expect(runWorktreeInit.mock.calls[1][0].confirmHash).toBe("abc123");
+    expect(runWorktreeInit.mock.calls[1][0].scope).toBe("session");
   });
 
   it("renders a failure card when the run fails", async () => {
@@ -99,33 +127,63 @@ describe("WorktreeInitButton", () => {
     await waitFor(() => expect(screen.queryByTestId("worktree-init-btn")).toBeNull());
   });
 
-  // ── Polymorphic no-hook branch (change: project-init-skill-and-profiles) ──
-
-  it("no-hook row shows the project-init Initialize button and routes its click", async () => {
-    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: false });
-    const onInitializeProject = vi.fn();
-    render(<WorktreeInitButton cwd="/bare" onInitializeProject={onInitializeProject} />);
-    await waitFor(() => screen.getByTestId("project-init-btn"));
-    // The hook-run button must NOT be present for a no-hook row.
-    expect(screen.queryByTestId("worktree-init-btn")).toBeNull();
-    fireEvent.click(screen.getByTestId("project-init-btn"));
-    expect(onInitializeProject).toHaveBeenCalledWith("/bare");
+  it("running renders a status chip with opt-in log (not a raw <pre>)", async () => {
+    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: true, needsInit: true, trusted: true });
+    // Keep the run in flight so the chip stays visible.
+    runWorktreeInit.mockReturnValue(new Promise(() => {}));
+    render(<WorktreeInitButton cwd="/repo" />);
+    await waitFor(() => screen.getByTestId("worktree-init-btn"));
+    fireEvent.click(screen.getByTestId("worktree-init-btn"));
+    await waitFor(() => screen.getByTestId("worktree-init-chip"));
+    // Stream a progress line by the run's cwd (survives refresh / cross-tab).
+    act(() => dispatchInitEvent({ type: "worktree_init_progress", requestId: "", cwd: "/repo", line: "$ npm ci\nadded 412 packages" }));
+    await waitFor(() => expect(screen.getByTestId("worktree-init-ghost").textContent).toContain("added 412 packages"));
+    // Full log is opt-in behind a collapsed disclosure, not an inline pre.
+    expect(screen.getByTestId("worktree-init-log").hasAttribute("open")).toBe(false);
+    expect(screen.queryByTestId("worktree-init-tail")).toBeNull();
   });
 
-  it("no-hook row renders nothing without an onInitializeProject handler", async () => {
-    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: false });
+  it("failure chip is sticky + retryable and re-runs on Retry", async () => {
+    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: true, needsInit: true, trusted: true });
+    runWorktreeInit
+      .mockResolvedValueOnce({ ok: false, code: "init_failed", error: "boom", stderr: "trace tail" })
+      .mockReturnValueOnce(new Promise(() => {}));
+    render(<WorktreeInitButton cwd="/repo" />);
+    await waitFor(() => screen.getByTestId("worktree-init-btn"));
+    fireEvent.click(screen.getByTestId("worktree-init-btn"));
+    await waitFor(() => screen.getByTestId("worktree-init-error"));
+    // Retry re-issues the run.
+    fireEvent.click(screen.getByTestId("worktree-init-retry"));
+    await waitFor(() => expect(runWorktreeInit).toHaveBeenCalledTimes(2));
+  });
+
+  it("success flashes a confirmation before collapsing", async () => {
+    fetchWorktreeInitStatus
+      .mockResolvedValueOnce({ hasHook: true, needsInit: true, trusted: true })
+      .mockResolvedValue({ hasHook: true, needsInit: false, trusted: true });
+    runWorktreeInit.mockResolvedValue({ ok: true, ran: true, durationMs: 12 });
+    render(<WorktreeInitButton cwd="/repo" />);
+    await waitFor(() => screen.getByTestId("worktree-init-btn"));
+    fireEvent.click(screen.getByTestId("worktree-init-btn"));
+    // Green flash confirms success before the store collapses it.
+    await waitFor(() => expect(screen.getByTestId("worktree-init-chip").textContent).toContain("Initialized"));
+  });
+
+  it("labels the control 'Review & trust changes' when the hook was edited", async () => {
+    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: true, needsInit: false, trusted: false });
+    render(<WorktreeInitButton cwd="/repo" />);
+    await waitFor(() => screen.getByTestId("worktree-init-btn"));
+    expect(screen.getByTestId("worktree-init-btn").textContent).toContain("Review & trust changes");
+  });
+
+  // The no-hook / scaffold branch moved to `ProjectInitButton`
+  // (change: distinguish-initialize-actions). `WorktreeInitButton` is now
+  // hook-only and never renders a `project-init-btn`.
+  it("never renders a project-init button, even on a no-hook row", async () => {
+    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: false, configured: false });
     render(<WorktreeInitButton cwd="/bare" />);
     await waitFor(() => expect(fetchWorktreeInitStatus).toHaveBeenCalled());
     expect(screen.queryByTestId("project-init-btn")).toBeNull();
     expect(screen.queryByTestId("worktree-init-btn")).toBeNull();
-  });
-
-  it("hook-present row keeps change-A behavior (no project-init button)", async () => {
-    fetchWorktreeInitStatus.mockResolvedValue({ hasHook: true, needsInit: true, trusted: true });
-    const onInitializeProject = vi.fn();
-    render(<WorktreeInitButton cwd="/repo" onInitializeProject={onInitializeProject} />);
-    await waitFor(() => screen.getByTestId("worktree-init-btn"));
-    expect(screen.queryByTestId("project-init-btn")).toBeNull();
-    expect(onInitializeProject).not.toHaveBeenCalled();
   });
 });

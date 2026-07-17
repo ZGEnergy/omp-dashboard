@@ -193,7 +193,7 @@ export function BuiltInRolesSettings() {
     >
       <div className="flex items-baseline justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-          Roles
+          {t("rolesHeading", undefined, "Roles")}
         </h3>
         <span className="text-[10px] text-[var(--text-muted)]">
           OMP modelRoles → provider/model

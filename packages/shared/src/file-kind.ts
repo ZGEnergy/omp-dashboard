@@ -20,6 +20,18 @@ export type ViewerKind =
   | "video"
   | "audio"
   | "live-server"
+  // Opened explicitly (never returned by `fileKind()`), like `live-server`.
+  // `url:<url>` renders a `canvas()` url/youtube declare in the split pane.
+  // See change: auto-canvas (S35).
+  | "url"
+  // Opened explicitly (never returned by `fileKind()`), like `live-server`.
+  // Diff tabs open under a virtual `diff:<relPath>` path so they coexist with
+  // a monaco tab of the same file. See change: add-change-summary-table.
+  | "diff"
+  // Opened explicitly (never returned by `fileKind()`), like `live-server`.
+  // A terminal opens under a virtual `term:<terminalId>` tab hosting the
+  // xterm `TerminalView`. See change: terminals-in-tabbed-panes.
+  | "terminal"
   | "binary-warn";
 
 /** Coarse semantic file class. */

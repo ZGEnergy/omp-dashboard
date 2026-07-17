@@ -8,7 +8,7 @@
  */
 import path from "node:path";
 import * as git from "@blackbelt-technology/pi-dashboard-shared/platform/git.js";
-import type { GitWorktreeInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { GitStatus, GitWorktreeInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { buildGitLinks, type GitLinks } from "./git-link-builder.js";
 
 export interface GitInfo {
@@ -23,6 +23,29 @@ export interface GitInfo {
    * metadata supplied by the server.
    */
   gitWorktree?: GitWorktreeInfo;
+}
+
+/**
+ * Detect whether `cwd` is a git repository as a tri-state.
+ *
+ * Uses the `git.isGitRepo()` `Result` (NOT `isGitRepoOr`) to distinguish
+ * *confirmed non-git* from *unknown*:
+ *   - `ok` → the boolean value (`git rev-parse --is-inside-work-tree`);
+ *   - `error kind:"exit" code:128` → `false` (git ran and definitively
+ *     reported "not a repository");
+ *   - any other failure (missing binary, timeout, signal, other exit code)
+ *     → `undefined` (unknown).
+ *
+ * Returns `undefined` — never `false` — on an inconclusive probe so a real
+ * git repo whose probe failed never loses its truthy signal (the client
+ * gate hides the `+Worktree` button only on a confirmed `false`).
+ * See change: gate-session-worktree-button-on-git.
+ */
+export function detectIsGitRepo(cwd: string): boolean | undefined {
+  const res = git.isGitRepo({ cwd });
+  if (res.ok) return res.value;
+  if (res.error.kind === "exit" && res.error.code === 128) return false;
+  return undefined;
 }
 
 /** Detect the current git branch. Returns short SHA for detached HEAD. */
@@ -88,6 +111,18 @@ export function detectWorktree(cwd: string): GitWorktreeInfo | undefined {
   const mainPath = path.dirname(commonDirAbs);
   const name = path.basename(cwd);
   return { mainPath, name };
+}
+
+/**
+ * Gather working-tree dirtiness + upstream drift for `cwd` via one
+ * `git status --porcelain=v2 --branch` call. Returns `undefined` on an
+ * inconclusive probe (git missing, not a repo, timeout) so the broadcast
+ * omits the field rather than sending a false all-clean status.
+ * See change: add-session-uncommitted-indicator-and-commit.
+ */
+export function gatherGitStatus(cwd: string): GitStatus | undefined {
+  const res = git.gitStatusV2({ cwd });
+  return res.ok ? res.value : undefined;
 }
 
 /** Gather all git info for a directory. Returns undefined if not a git repo. */

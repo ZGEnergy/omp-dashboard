@@ -1,8 +1,7 @@
-import React from "react";
-import { Icon } from "@mdi/react";
 import { mdiFormatListBulleted } from "@mdi/js";
-import type { InteractiveRendererProps } from "./types.js";
-import { InlineMarkdown } from "./InlineMarkdown.js";
+import { Icon } from "@mdi/react";
+import React from "react";
+import { t as i18nT } from "../../lib/i18n";
 import { MarkdownContent } from "../MarkdownContent.js";
 import { AnsweredOption } from "./AnsweredOption.js";
 import { parseOption, isCancelOption, optionValue } from "./parseOption.js";
@@ -33,6 +32,9 @@ export function SelectRenderer({ params, status, result, onRespond, onCancel }: 
           <Icon path={mdiFormatListBulleted} size={0.55} className="text-[var(--text-secondary)] shrink-0" />
           <span className="text-[var(--text-primary)] font-medium"><InlineMarkdown content={title} /></span>
         </div>
+        {message && (
+          <div className="text-xs text-[var(--text-secondary)] mb-2 ml-6"><MarkdownContent content={message} /></div>
+        )}
         <div className="flex flex-col gap-1 ml-6">
           {options.map((option) => {
             const { title: oTitle, description } = parseOption(option);
@@ -78,7 +80,7 @@ export function SelectRenderer({ params, status, result, onRespond, onCancel }: 
           );
         })}
         {!hasCancelOption && (
-          <OptionRow title={i18nT("auto.cancel", undefined, "Cancel")} cancel onClick={onCancel} />
+          <OptionRow title={i18nT("common.cancel", undefined, "Cancel")} cancel onClick={onCancel} />
         )}
       </div>
     </div>

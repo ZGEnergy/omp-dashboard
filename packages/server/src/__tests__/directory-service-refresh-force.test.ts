@@ -5,13 +5,14 @@
  *   - User-initiated refresh (`refreshOpenSpec`) MUST bypass the change-detection gate.
  *   - Periodic poll (`pollDirectoryGated`) MUST honor the gate.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDirectoryService, type DirectoryService } from "../directory-service.js";
-import type { PreferencesStore } from "../preferences-store.js";
 import type { SessionManager } from "../memory-session-manager.js";
+import type { PreferencesStore } from "../preferences-store.js";
 
 vi.mock("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@blackbelt-technology/pi-dashboard-shared/openspec-poller.js")>();
@@ -72,6 +73,8 @@ function createMockPreferencesStore(): PreferencesStore {
     getDisplayPrefs: vi.fn(() => undefined),
     getOpenSpecUpdateSignature: vi.fn(() => undefined),
     getAutoInitWorktreeOnSpawn: vi.fn(() => false),
+    getAutoNameSessions: vi.fn(() => true),
+    setAutoNameSessions: vi.fn(),
     getLiveServers: vi.fn(() => []),
     setLiveServers: vi.fn(),
     setAutoInitWorktreeOnSpawn: vi.fn(),

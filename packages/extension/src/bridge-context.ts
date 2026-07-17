@@ -38,6 +38,13 @@ export interface BridgeContext {
    * See change: add-worktree-spawn-dialog.
    */
   lastGitWorktreeJson: string | undefined;
+  /**
+   * Last serialized `GitStatus` snapshot sent via `git_info_update`, or
+   * `undefined` when nothing sent yet. Compared each VCS tick so the
+   * dirty/drift counts re-broadcast only on change.
+   * See change: add-session-uncommitted-indicator-and-commit.
+   */
+  lastGitStatusJson: string | undefined;
   lastSessionName: string | undefined;
   /**
    * `true` once the bridge's VCS tick has observed `existsSync(cwd) === false`
@@ -180,6 +187,30 @@ export function extractFirstMessage(ctx: any): string | undefined {
             return part.text.slice(0, 200);
           }
         }
+      }
+    }
+  } catch { /* ignore */ }
+  return undefined;
+}
+
+/**
+ * Extract the first assistant reply text from session entries. Used to build
+ * the bounded transcript window fed to the auto-naming summarizer.
+ * See change: add-auto-session-naming.
+ */
+export function extractFirstAssistantReply(ctx: any): string | undefined {
+  try {
+    const entries = ctx?.sessionManager?.getEntries?.();
+    if (!entries || !Array.isArray(entries)) return undefined;
+    for (const entry of entries) {
+      if (entry.role !== "assistant") continue;
+      if (typeof entry.content === "string") return entry.content.slice(0, 2000);
+      if (Array.isArray(entry.content)) {
+        let text = "";
+        for (const part of entry.content) {
+          if (part?.type === "text" && typeof part.text === "string") text += part.text;
+        }
+        if (text) return text.slice(0, 2000);
       }
     }
   } catch { /* ignore */ }

@@ -54,33 +54,41 @@ the threshold stay verbatim (lossless).
 <!-- dox:read:kb:start -->
 ## Finding docs (READ discipline)
 
-For any "where is X" / "how does Y work" / "what files relate to X" question,
-consult the doc tree BEFORE grepping source:
+`kb_*` tools are faster and cheaper than raw search — they return a one-line
+purpose + key exports per file, not raw bytes. For any "where is X" / "how does
+Y work" / symbol lookup, run the kb call FIRST. When your reflex is the left
+column, run the right column instead:
 
-1. `kb agents <path>` — returns the root→nearest `AGENTS.md` chain for a file or
-   directory (the cheapest map: one-line purpose + key exports + change history
-   per file).
-2. `kb_search "<terms>"` — full-text search across the indexed markdown tree.
-3. Only then open source for the few files that matter.
+| You're about to… | Do this FIRST instead |
+|---|---|
+| `grep -rn "SymbolName" src/` — find where a fn / type / const lives | `kb_search --doc-type agents "SymbolName"` — tree indexes key exports per file |
+| `grep -rn "feature\|topic" src/` — how does X work / where's X handled | `kb_search "feature topic"` |
+| `cat` / read a file just to learn its purpose before editing | `kb agents <path>` — one-line purpose + exports + change history |
+| chase imports / callers across files | `kb_neighbors <path\|heading>` |
+| read one doc section in full | `kb_get <path> <section>` |
 
-Grepping source before checking the tree wastes tokens and risks hallucinated
-answers. Fall through to `rg` / manual search only when the tree misses — then
-add the missing row per the WRITE discipline.
+**Fall-through (explicit):** if the kb call returns nothing relevant, `rg` /
+source read is allowed — then add the missing directory `AGENTS.md` row per the
+WRITE discipline. kb does NOT replace grep; it goes first.
 <!-- dox:read:kb:end -->
 
 <!-- dox:read:manual:start -->
 ## Finding docs (READ discipline)
 
-For any "where is X" / "how does Y work" / "what files relate to X" question,
-consult the doc tree BEFORE grepping source:
+The directory `AGENTS.md` tree is faster and cheaper than raw search — each row
+carries a one-line purpose + key exports per file. For any "where is X" / "how
+does Y work" / symbol lookup, consult the tree FIRST. When your reflex is the
+left column, do the right column instead:
 
-1. Read the ROOT `AGENTS.md`, then walk down the directory `AGENTS.md` chain
-   toward the file's directory. Each directory `AGENTS.md` records the files in
-   that directory (one-line purpose + key exports + change history per file).
-2. Read the nearest directory `AGENTS.md` for the file's row.
-3. Only then open source for the few files that matter.
+| You're about to… | Do this FIRST instead |
+|---|---|
+| `grep -rn "SymbolName" src/` — find where a fn / type / const lives | read the nearest directory `AGENTS.md`; scan rows for the symbol |
+| `grep -rn "feature\|topic" src/` — how does X work / where's X handled | walk the root→nearest `AGENTS.md` chain toward the file's directory |
+| `cat` a file just to learn its purpose before editing | read that file's row in its directory `AGENTS.md` (purpose + exports + change history) |
+| chase imports / callers across files | follow the `See change:` / pointer references in the nearest `AGENTS.md` |
+| read one doc section in full | open the specific `docs/<topic>.md` section |
 
-Grepping source before checking the tree wastes tokens and risks hallucinated
-answers. Fall through to manual search only when the tree misses — then add the
-missing row per the WRITE discipline.
+**Fall-through (explicit):** if the tree misses, `rg` / source read is allowed —
+then add the missing directory `AGENTS.md` row per the WRITE discipline. The tree
+goes first.
 <!-- dox:read:manual:end -->

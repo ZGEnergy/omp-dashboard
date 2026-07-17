@@ -1,5 +1,5 @@
 /**
- * System REST API routes: config, health, shutdown, tunnel, editors.
+ * System REST API routes: config, health, shutdown, tunnel.
  */
 
 import fs from "node:fs";
@@ -15,7 +15,6 @@ import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-
 import type { BridgeLoadSource, PluginStatus } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/plugin-status.js";
 import { parseLaunchSource } from "@blackbelt-technology/pi-dashboard-shared/dashboard-starter.js";
 import { whichSync } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
-import { spawn } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import { getGitSourceReadout } from "@blackbelt-technology/pi-dashboard-shared/platform/git-source.js";
 import { classifyBridgeSource } from "@blackbelt-technology/pi-dashboard-shared/plugin-bridge-register.js";
 import type { NetworkInterface } from "@blackbelt-technology/pi-dashboard-shared/rest-api.js";
@@ -25,13 +24,9 @@ import { bootParentPid, computeBootParentAlive, readLivePpid } from "../boot-par
 import { readConfigRedacted, writeConfigPartial } from "../config-api.js";
 import type { PushConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import type { DirectoryService } from "../directory-service.js";
-import { detectCodeServerBinary, resetDetectionCache } from "../editor-detection.js";
-import { detectEditors, EDITORS } from "../editor-registry.js";
 import type { EventLoopSpikeMetrics } from "../eventloop-spike-metrics.js";
 import type { HydrationMetrics } from "../hydration-metrics.js";
 import { computeEffectiveLaunchSource } from "../launch-source-effective.js";
-import { decodeFileUri } from "../lib/decode-file-uri.js";
-import { isAllowed } from "../lib/path-containment.js";
 import { localhostGuard, netmaskToCidrBits, networkAddress } from "../localhost-guard.js";
 import type { SessionManager } from "../memory-session-manager.js";
 import type { MetaPersistence } from "../meta-persistence.js";
@@ -48,6 +43,9 @@ import { spawnRestart } from "../restart-helper.js";
 import type { ServerConfig } from "../server.js";
 import { readSpawnFailures } from "../spawn-failure-log.js";
 import { createTunnel, deleteTunnel, getTunnelStatus, getTunnelUrl } from "../tunnel.js";
+import { blockEvents } from "../tunnel-block-events.js";
+import { collectEndpoints } from "../tunnel-endpoints.js";
+import { runEnrollStep } from "../tunnel-enroll.js";
 import { startTunnelWatchdog, stopTunnelWatchdog } from "../tunnel-watchdog.js";
 import type { NetworkGuard } from "./route-deps.js";
 
@@ -117,6 +115,14 @@ export function registerSystemRoutes(
     // self-records); `/api/health` reads its snapshot additively.
     // See change: attribute-openspec-poll-eventloop-stalls.
     eventLoopSpikes?: EventLoopSpikeMetrics;
+    // Store-shed telemetry source; `/api/health` reads getTrimStats() into the
+    // additive `storeTrim` field. See change: instrument-event-store-trim.
+    eventStore?: {
+      getTrimStats?: () => {
+        trimmedEvents: { total: number; toolExecutionEnd: number; bySession: Record<string, number> };
+        evictedSessions: number;
+      };
+    };
   },
 ) {
   const { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version, directoryService, piGateway, browserGateway, hydrationMetrics, readEventLoopDelay, eventLoopSpikes, applyPushConfig } = deps;
@@ -166,81 +172,62 @@ export function registerSystemRoutes(
     return value;
   };
 
-  // Editor detection endpoint
-  fastify.get<{ Querystring: { path?: string } }>(
-    "/api/editors",
-    { preHandler: networkGuard },
-    async (request) => {
-      const cwd = request.query.path;
-      if (!cwd) {
-        return { success: false, error: "path parameter required" } satisfies ApiResponse;
-      }
-      const editors = detectEditors(cwd);
-      return { success: true, data: editors } satisfies ApiResponse;
-    },
-  );
-
-  // code-server binary detection endpoint
-  fastify.get(
-    "/api/editor/detect",
-    { preHandler: networkGuard },
-    async () => {
-      resetDetectionCache();
-      const result = detectCodeServerBinary(config.editor);
-      return { success: true, data: result } satisfies ApiResponse;
-    },
-  );
-
-  // Open editor endpoint
-  fastify.post<{ Body: { path?: string; editor?: string; file?: string; line?: number } }>(
-    "/api/open-editor",
-    { preHandler: networkGuard },
-    async (request) => {
-      const { path: cwd, editor: editorId, file: rawFile, line } = request.body ?? {};
-      const file = rawFile ? decodeFileUri(rawFile) : rawFile;
-      if (!cwd || !editorId) {
-        return { success: false, error: "path and editor required" } satisfies ApiResponse;
-      }
-
-      const allSessions = sessionManager.listAll();
-      if (!allSessions.some((s) => s.cwd === cwd)) {
-        return { success: false, error: "unknown session path" } satisfies ApiResponse;
-      }
-
-      const editorEntry = EDITORS.find((e) => e.id === editorId);
-      if (!editorEntry) {
-        return { success: false, error: "unknown editor" } satisfies ApiResponse;
-      }
-
-      const target = file ? path.resolve(cwd, file) : cwd;
-      // Containment gate (mirrors /api/file): the resolved target MUST stay
-      // under the known session cwd or its git common root. Rejects `../..`
-      // traversal and absolute paths (`/etc/...`, decoded `file://...`) outside
-      // the workspace.
-      if (!(await isAllowed(target, { anchors: [cwd] }))) {
-        return { success: false, error: "path outside working directory" } satisfies ApiResponse;
-      }
-      const args = line && file ? [`${target}:${line}`] : [target];
-
-      try {
-        const child = spawn(editorEntry.cli, args, {
-          detached: true,
-          stdio: "ignore",
-        });
-        child.unref();
-        return { success: true } satisfies ApiResponse;
-      } catch (err: any) {
-        return { success: false, error: `failed to open editor: ${err.message}` } satisfies ApiResponse;
-      }
-    },
-  );
-
   // Config endpoints
   fastify.get(
     "/api/config",
     { preHandler: networkGuard },
     async () => {
       return { success: true, data: readConfigRedacted() };
+    },
+  );
+
+  // ── Gateway (tunnel) — endpoints, enroll, block-events ──────────────
+  // "Accessible at": every tagged address the dashboard answers on. Sourced
+  // from the active tunnel URL + manual publicBaseUrls + LAN/local. Auth-gated.
+  // See change: add-tunnel-providers.
+  fastify.get(
+    "/api/tunnel/endpoints",
+    { preHandler: networkGuard },
+    async () => {
+      const url = getTunnelUrl();
+      const providerEndpoints = url
+        ? [{ kind: "public" as const, url, tls: url.startsWith("https://") }]
+        : [];
+      const cfg = (await import("@blackbelt-technology/pi-dashboard-shared/config.js")).loadConfig();
+      const endpoints = collectEndpoints({
+        providerEndpoints,
+        publicBaseUrls: cfg.pairing?.publicBaseUrls,
+        port: config.port,
+      });
+      return { success: true, data: { endpoints } } satisfies ApiResponse;
+    },
+  );
+
+  // Run a whitelisted enroll step (auth-token/activate) server-side. The token
+  // is a validated parameter; arbitrary commands are refused. Auth-gated.
+  fastify.post<{ Body: { provider?: string; step?: string; param?: string } }>(
+    "/api/tunnel/enroll",
+    { preHandler: networkGuard },
+    async (request, reply) => {
+      const { provider, step, param } = request.body ?? {};
+      if (!provider || !step || typeof param !== "string") {
+        return reply.code(400).send({ success: false, error: "provider, step, param required" });
+      }
+      const result = await runEnrollStep(provider as any, step as any, param);
+      if (result.ok) return { success: true };
+      const code = result.reason === "unknown-step" || result.reason === "invalid-param" ? 400 : 422;
+      return reply.code(code).send({ success: false, error: result.message });
+    },
+  );
+
+  // Recent network-guard denials for the "Trust this network?" banner.
+  // Anti-poisoning buffer; trust/remove itself goes through PUT /api/config
+  // (config.trustedNetworks). Auth-gated.
+  fastify.get(
+    "/api/tunnel/block-events",
+    { preHandler: networkGuard },
+    async () => {
+      return { success: true, data: { events: blockEvents.list() } } satisfies ApiResponse;
     },
   );
 
@@ -468,6 +455,13 @@ export function registerSystemRoutes(
           (max, s) => Math.max(max, (s.processMetrics as { droppedBufferedFrames?: number } | undefined)?.droppedBufferedFrames ?? 0),
           0,
         ),
+      },
+      // In-memory event-store shed counters (per-session trim + cross-session
+      // LRU eviction). The third silent tool_execution_end loss path, made
+      // observable beside droppedFrames. See change: instrument-event-store-trim.
+      storeTrim: eventStore?.getTrimStats?.() ?? {
+        trimmedEvents: { total: 0, toolExecutionEnd: 0, bySession: {} },
+        evictedSessions: 0,
       },
     };
   });

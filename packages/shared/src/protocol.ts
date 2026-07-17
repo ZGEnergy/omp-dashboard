@@ -1,7 +1,7 @@
 /**
  * Extension ↔ Server WebSocket protocol messages.
  */
-import type { DashboardEvent, CommandInfo, FlowInfo, SessionSource, ImageContent, FileEntry, TurnUsage, ContextUsage, ModelInfo, ProviderInfo, PiSessionInfo, OpenSpecPhase, RoleInfo, ExtensionUiModule, DecoratorDescriptor } from "./types.js";
+import type { CommandInfo, ContextUsage, DashboardEvent, DecoratorDescriptor, ExtensionUiModule, FileEntry, FlowInfo, ImageContent, ModelInfo, OpenSpecPhase, PiSessionInfo, ProviderInfo, RoleInfo, SessionSource, TurnUsage } from "./types.js";
 
 /**
  * Bridge -> server: mirror of pi's native steering + follow-up queues, forwarded
@@ -108,6 +108,16 @@ export interface SessionRegisterMessage {
    * See change: auto-hide-headless-worker-sessions.
    */
   visibilityIntent?: "hidden" | "visible";
+  /**
+   * Tri-state whether the session's cwd is a git repository, computed
+   * synchronously at register time (no `git_info_update` arrival race).
+   * `true` = confirmed git repo, `false` = confirmed non-git (git exited
+   * 128), `undefined` = unknown (probe inconclusive: missing binary,
+   * timeout, signal — never a false negative). Optional/back-compatible;
+   * an absent field is treated as `undefined`.
+   * See change: gate-session-worktree-button-on-git.
+   */
+  isGitRepo?: boolean;
 }
 
 export interface SessionUnregisterMessage {
@@ -216,6 +226,20 @@ export interface GitInfoUpdateMessage {
    * "no change". See change: add-worktree-spawn-dialog.
    */
   gitWorktree?: import("./types.js").GitWorktreeInfo | null;
+  /**
+   * Optional refresh of the tri-state git-repo signal. The bridge only
+   * emits `git_info_update` for a confirmed repo (branch resolved), so this
+   * is `true` when present. `session_register` remains the authority.
+   * See change: gate-session-worktree-button-on-git.
+   */
+  isGitRepo?: boolean;
+  /**
+   * Working-tree dirtiness + upstream drift for the session's cwd, gathered
+   * on the same 30 s VCS tick from `git status --porcelain=v2 --branch`.
+   * Absent on older bridges and when the probe is inconclusive.
+   * See change: add-session-uncommitted-indicator-and-commit.
+   */
+  gitStatus?: import("./types.js").GitStatus;
 }
 
 // OpenSpecUpdateMessage removed — server polls directly via DirectoryService
@@ -241,6 +265,26 @@ export interface SessionNameUpdateMessage {
   type: "session_name_update";
   sessionId: string;
   name: string;
+  /**
+   * Provenance of this name change, when the bridge can attribute it.
+   * `"auto"` = the bridge's automatic topic-naming applied it; `"user"` =
+   * an in-pi rename the bridge did not originate. Absent = unattributed
+   * (server keeps existing provenance). See change: add-auto-session-naming.
+   */
+  nameSource?: "auto" | "user";
+}
+
+/**
+ * Bridge → server: automatic session naming failed. Carries a human-readable
+ * `reason`; the server forwards it to browser subscribers as a one-shot toast
+ * and logs one line. Emitted once per session for hard-config errors
+ * (`@fast` unconfigured / OAuth-only-unauthable); transient model errors are
+ * silent. See change: add-auto-session-naming.
+ */
+export interface AutoNameErrorMessage {
+  type: "auto_name_error";
+  sessionId: string;
+  reason: string;
 }
 
 /**
@@ -291,6 +335,13 @@ export interface RolesListMessage {
   roles: Record<string, string>;
   presets: Array<{ name: string; roles: Record<string, string> }>;
   activePreset: string | null;
+  /**
+   * Built-in (seeded default) role names, sourced server-side from
+   * DEFAULT_ROLE_NAMES. The client classifies a role as custom iff its name
+   * ∉ builtinRoleNames. Additive; older clients ignore it.
+   * See change: add-custom-roles-ui (design D2).
+   */
+  builtinRoleNames?: string[];
 }
 
 export interface ExtensionUiDismissMessage {
@@ -560,6 +611,8 @@ export type ExtensionToServerMessage =
   | PiVersionUpdateMessage
   | PluginPiMessage
   | QueueUpdateToServerMessage
+  | GitCommitDraftResultMessage
+  | AutoNameErrorMessage
   | PromptReceivedToServerMessage;
 
 // ── Server → Extension ──────────────────────────────────────────────
@@ -719,6 +772,18 @@ export interface RolePresetDeleteExtensionMessage {
   presetName: string;
 }
 
+/**
+ * Human-facing removal of a CUSTOM role. Routed to the `roles:remove` handler
+ * which purges the name from the schema, active map, and every preset in one
+ * atomic write. Built-in names are rejected server-side.
+ * See change: add-custom-roles-ui (design D3).
+ */
+export interface RoleRemoveExtensionMessage {
+  type: "role_remove";
+  sessionId: string;
+  role: string;
+}
+
 export interface RequestRolesMessage {
   type: "request_roles";
   sessionId: string;
@@ -844,6 +909,19 @@ export interface PluginEmitEventExtensionMessage {
   data: Record<string, unknown>;
 }
 
+/**
+ * Server → extension: broadcast the current value of bridge-relevant global
+ * preferences. Sent to a bridge on register (initial state) and to all bridges
+ * whenever the value changes (`piGateway.broadcast`). The bridge gates its
+ * automatic session naming on `autoNameSessions`. See change:
+ * add-auto-session-naming.
+ */
+export interface PreferencesUpdateExtensionMessage {
+  type: "preferences_update";
+  /** Global auto-naming toggle; bridge attempts naming only when true. */
+  autoNameSessions: boolean;
+}
+
 export type ServerToExtensionMessage =
   | SendPromptToExtensionMessage
   | AbortToExtensionMessage
@@ -870,6 +948,7 @@ export type ServerToExtensionMessage =
   | RolePresetLoadExtensionMessage
   | RolePresetSaveExtensionMessage
   | RolePresetDeleteExtensionMessage
+  | RoleRemoveExtensionMessage
   | RequestRolesMessage
   | UiManagementMessage
   | KillProcessMessage
@@ -879,6 +958,49 @@ export type ServerToExtensionMessage =
   | RemoveFollowupEntryToExtensionMessage
   | PromoteFollowupEntryToExtensionMessage
   | AttachProposalChangedExtensionMessage
-  | PluginEmitEventExtensionMessage;
+  | PluginEmitEventExtensionMessage
+  | PreferencesUpdateExtensionMessage
+  | GitCommitDraftMessage
+  | SubagentResyncRequestExtensionMessage;
+
+/**
+ * Server → extension: request an AI-drafted commit message. The bridge builds
+ * `git diff HEAD -- <files>`, seeds an ephemeral in-memory fork-subagent with
+ * the live session context, prompts once, and replies with
+ * `git_commit_draft_result` carrying the same `requestId`. The visible
+ * conversation is never appended to. See change:
+ * add-session-uncommitted-indicator-and-commit.
+ */
+export interface GitCommitDraftMessage {
+  type: "git_commit_draft";
+  sessionId: string;
+  /** Correlates the async reply back to the pending HTTP request. */
+  requestId: string;
+  cwd: string;
+  /** Repo-relative files chosen for the commit. */
+  files: string[];
+}
+
+/** Extension → server: the drafted commit message for `requestId`. */
+export interface GitCommitDraftResultMessage {
+  type: "git_commit_draft_result";
+  sessionId: string;
+  requestId: string;
+  message: string;
+  /** Which ladder rung produced the message. */
+  source: "fork-subagent" | "diff-only" | "stub";
+}
+
+/**
+ * Server → extension: forward a browser resync request to the owning bridge.
+ * The bridge replies with the latest retained `AgentDetails` snapshot of the
+ * running subagent as a synthetic `subagent_started` `event_forward`, or no-ops
+ * for an unknown/finished agent. See change: fix-subagent-live-detail-reliability (D2).
+ */
+export interface SubagentResyncRequestExtensionMessage {
+  type: "subagent_resync_request";
+  sessionId: string;
+  agentId: string;
+}
 
 

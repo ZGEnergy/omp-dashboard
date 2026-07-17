@@ -13,8 +13,24 @@ export interface SessionMeta {
   // Dashboard-owned (user-set via UI)
   source?: string;
   name?: string;
+  /**
+   * Provenance of the current session name. `"auto"` = set by the bridge's
+   * automatic topic-naming; `"user"` = set by a dashboard rename or an in-pi
+   * rename. Absent = no name has been set by either path. Dashboard-owned;
+   * drives the auto-naming lockout — once `"user"`, auto-naming never runs
+   * again for that session. See change: add-auto-session-naming.
+   */
+  nameSource?: "auto" | "user";
   attachedProposal?: string | null;
   hidden?: boolean;
+
+  /**
+   * User-owned, free-form tags for classifying a session. Normalized on write
+   * (trim/lowercase/dedupe/cap — see `normalizeTags`). Absent field reads as
+   * untagged. Bridges SHALL NOT send this — it is dashboard-owned.
+   * See change: add-session-tags.
+   */
+  tags?: string[];
 
   // Cached identity & state (from .jsonl header / bridge)
   cwd?: string;
@@ -66,6 +82,17 @@ export interface SessionMeta {
    * See change: fix-cold-start-worktree-session-grouping.
    */
   gitWorktree?: { mainPath?: string; name?: string };
+
+  /**
+   * Persisted mirror of `DashboardSession.isGitRepo` tri-state. `true` =
+   * confirmed git repo, `false` = confirmed non-git, `undefined` (field
+   * absent) = unknown. Restored by `sessionFromMeta` on cold start so an
+   * ended/cold git-repo session keeps a truthy signal across restarts
+   * without a live bridge. Gates the `+Worktree` button (hide only on
+   * `=== false`).
+   * See change: gate-session-worktree-button-on-git.
+   */
+  isGitRepo?: boolean;
 
   /**
    * Sparse per-session override for chat-view display preferences.

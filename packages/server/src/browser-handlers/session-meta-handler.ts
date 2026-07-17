@@ -2,9 +2,10 @@
  * Session metadata handlers: rename, hide, unhide, attach/detach proposal, fetch_content, list_sessions.
  */
 import type { BrowserToServerMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import type { BrowserHandlerContext } from "./handler-context.js";
+import { normalizeTags } from "@blackbelt-technology/pi-dashboard-shared/tags.js";
 import { attachRenameTarget, detachShouldClearName } from "../proposal-attach-naming.js";
 import { resolveOrderKey } from "../resolve-order-key.js";
+import type { BrowserHandlerContext } from "./handler-context.js";
 
 /**
  * Move a session to the front of its resolved-group order list and broadcast
@@ -32,7 +33,10 @@ export function handleRenameSession(
   ctx: BrowserHandlerContext,
 ): void {
   const { sessionManager, piGateway, broadcast } = ctx;
-  const nameUpdates = { name: msg.name || undefined };
+  // A dashboard-initiated rename is a user action — tag provenance "user" so
+  // auto-naming is permanently locked out for this session.
+  // See change: add-auto-session-naming.
+  const nameUpdates = { name: msg.name || undefined, nameSource: "user" as const };
   sessionManager.update(msg.sessionId, nameUpdates);
   broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: nameUpdates });
   piGateway.sendToSession(msg.sessionId, { type: "rename_session", sessionId: msg.sessionId, name: msg.name });
@@ -48,6 +52,23 @@ export function handleHideSession(
   // Surface at the top of the HIDDEN tier (stable status-partition).
   // See change: simplify-session-card-ordering.
   moveSessionToFront(msg.sessionId, ctx);
+}
+
+/**
+ * Browser → server: replace a session's full user-owned tag list. Mirrors
+ * `handleHideSession`: normalize, `sessionManager.update(id, { tags })` (which
+ * triggers the debounced `onChange` full-overwrite persist), then broadcast
+ * `session_updated`. Does NOT call `mergeSessionMeta` — persistence flows
+ * through `onChange` (which MUST enumerate `tags`, else the next unrelated save
+ * wipes it). See change: add-session-tags.
+ */
+export function handleSetSessionTags(
+  msg: Extract<BrowserToServerMessage, { type: "set_session_tags" }>,
+  ctx: BrowserHandlerContext,
+): void {
+  const updates = { tags: normalizeTags(msg.tags) };
+  ctx.sessionManager.update(msg.sessionId, updates);
+  ctx.broadcast({ type: "session_updated", sessionId: msg.sessionId, updates });
 }
 
 export function handleUnhideSession(

@@ -2,36 +2,36 @@
  * Server ↔ Browser WebSocket protocol messages.
  */
 import type {
-  PluginIntentsMessage,
   PluginActionMessage,
   PluginEventBroadcast,
+  PluginIntentsMessage,
 } from "./dashboard-plugin/intent-types.js";
+import type { DisplayPrefs, PartialDisplayPrefs } from "./display-prefs.js";
+import type { TerminalSession } from "./terminal-types.js";
 import type {
-  DashboardSession,
-  DashboardEvent,
   CommandInfo,
-  FlowInfo,
-  ImageContent,
+  DashboardEvent,
+  DashboardSession,
+  DecoratorDescriptor,
+  ExtensionUiModule,
   FileEntry,
+  FlowInfo,
+  GoalRecord,
+  ImageContent,
+  ModelInfo,
   OpenSpecData,
   OpenSpecGroup,
-  GoalRecord,
-  ModelInfo,
   PiSessionInfo,
-  ExtensionUiModule,
-  DecoratorDescriptor,
+  ViewTarget,
 } from "./types.js";
-import type { TerminalSession } from "./terminal-types.js";
-import type { EditorInstanceStatus } from "./editor-types.js";
-import type { DisplayPrefs, PartialDisplayPrefs } from "./display-prefs.js";
 
 // Batch ask_user contracts live in protocol.ts; re-export so browser-side
 // consumers import from one place. See change: redesign-ask-user-question-cards.
 export type {
-  InteractiveMethod,
-  BatchQuestion,
   BatchAnswer,
+  BatchQuestion,
   BatchResult,
+  InteractiveMethod,
 } from "./protocol.js";
 
 // ── Configurable chat display ───────────────────────────────────────
@@ -65,6 +65,17 @@ export interface SetSessionProcessDrawerBrowserMessage {
   type: "set_session_process_drawer";
   sessionId: string;
   collapsed: boolean;
+}
+
+/**
+ * Browser → server: replace a session's full user-owned tag list. The server
+ * normalizes the list (`normalizeTags`) before persist. Whole-array replace
+ * (last-write-wins). See change: add-session-tags.
+ */
+export interface SetSessionTagsBrowserMessage {
+  type: "set_session_tags";
+  sessionId: string;
+  tags: string[];
 }
 
 // ── Server → Browser ────────────────────────────────────────────────
@@ -208,6 +219,14 @@ export interface BrowserRolesListMessage {
   roles: Record<string, string>;
   presets: Array<{ name: string; roles: Record<string, string> }>;
   activePreset: string | null;
+  /**
+   * Built-in (seeded default) role names, equal to `DEFAULT_ROLE_NAMES`.
+   * Forwarded verbatim from the bridge's `roles_list`. The Roles panel reads
+   * it to split roles into Built-in vs Custom and to show "＋ Add custom role".
+   * Additive/optional; older clients ignore it.
+   * See change: fix-builtin-role-names-relay.
+   */
+  builtinRoleNames?: string[];
 }
 
 export interface SessionsListBrowserMessage {
@@ -240,6 +259,12 @@ export interface ResumeResultBrowserMessage {
    * `message`. See change: fix-fork-empty-session-silent-timeout.
    */
   code?: string;
+  /**
+   * Interpolation variables for the client-side translation of `code`
+   * (`err.<domain>.<code>`). Additive; ignored by old clients.
+   * See change: make-all-ui-text-i18n.
+   */
+  vars?: Record<string, string | number>;
 }
 
 export interface SpawnResultBrowserMessage {
@@ -251,6 +276,10 @@ export interface SpawnResultBrowserMessage {
   requestId?: string;
   /** Spawned process PID when known (headless strategies); informational. */
   pid?: number;
+  /** Stable failure classifier for client translation. Additive. See change: make-all-ui-text-i18n. */
+  code?: string;
+  /** Interpolation vars for `err.<domain>.<code>`. Additive. */
+  vars?: Record<string, string | number>;
 }
 
 /**
@@ -297,6 +326,8 @@ export interface SpawnErrorMessage {
   code?: SpawnFailureCode;
   /** Preflight failure reasons. Only set when code === "PREFLIGHT_FAILED". See change: spawn-failure-diagnostics. */
   reasons?: PreflightReason[];
+  /** Interpolation vars for `err.<domain>.<code>`. Additive. See change: make-all-ui-text-i18n. */
+  vars?: Record<string, string | number>;
 }
 
 /**
@@ -411,14 +442,6 @@ export interface TerminalUpdatedMessage {
 export interface SessionStateResetMessage {
   type: "session_state_reset";
   sessionId: string;
-}
-
-/** Notifies browsers of editor instance status changes. */
-export interface EditorStatusMessage {
-  type: "editor_status";
-  cwd: string;
-  id: string;
-  status: EditorInstanceStatus;
 }
 
 // ── PromptBus protocol (Server → Browser) ───────────────────────────
@@ -562,6 +585,15 @@ export interface BootstrapStatusUpdateMessage {
  * which describe the dashboard's own pi-core install. See change:
  * generalize-worktree-init-hook (renamed from worktree_bootstrap_*).
  */
+/**
+ * Trust scope chosen at confirm time for `POST /api/git/worktree/init`.
+ * `session` = ephemeral (server memory, gone on restart); `project` = persisted
+ * (today's behavior). Omitted → `project` (backward compatible). Any other value
+ * is rejected `bad_request` by the server — no upward coercion.
+ * See change: add-session-scoped-init-trust.
+ */
+export type WorktreeInitTrustScope = "session" | "project";
+
 export interface WorktreeInitProgressMessage {
   type: "worktree_init_progress";
   requestId: string;
@@ -602,18 +634,20 @@ export interface BootstrapTicketCompleteMessage {
 export interface PackageOperationCompleteMessage {
   type: "package_operation_complete";
   operationId: string;
-  /** Optional move grouping id; set on every event of a composite move op. */
+  /** Optional composite grouping id; set on every event of a composite move/reset op. */
   moveId?: string;
-  action: "install" | "remove" | "update" | "move";
+  action: "install" | "remove" | "update" | "move" | "reset";
   source: string;
   scope: "global" | "local";
   success: boolean;
   error?: string;
   /** Number of sessions reloaded (only on success). */
   sessionsReloaded?: number;
-  /** Set on a move op when install succeeded but remove failed.
-   * Indicates the package now exists in BOTH scopes; UI should surface
-   * a recovery action (POST /api/packages/remove against fromScope). */
+  /** Set on a composite move OR reset op when install succeeded but remove
+   * failed. Move: the package now exists in BOTH scopes. Reset: the published
+   * spec installed but the local/git entry is still registered. Either way the
+   * UI should surface a recovery action (POST /api/packages/remove of the
+   * still-present entry). */
   partialSuccess?: {
     installed: boolean;
     removed: boolean;
@@ -669,6 +703,22 @@ export interface BrowserAssetRegisterMessage {
   hash: string;
   mimeType: string;
   data: string;
+}
+
+/**
+ * Server → browser: a `plugin_action` arrived for a `pluginId` with no
+ * registered handler. Surfaced to the sender so the action is never silently
+ * dropped. Best-effort out-of-band signal (plugin_action is fire-and-forget,
+ * not correlated). See change: fix-plugin-action-fanout-and-handlers.
+ */
+export interface PluginActionErrorMessage {
+  type: "plugin_action_error";
+  /** The pluginId that had no registered handler. */
+  pluginId: string;
+  /** The action that could not be delivered (echoed for client branching). */
+  action?: string;
+  /** Human-readable error description. */
+  error: string;
 }
 
 /** Sent when a plugin's config changes; carries only that plugin's namespace. */
@@ -733,10 +783,23 @@ export interface RecoveryDismissMessage {
   sessionIds: string[];
 }
 
+/**
+ * Server → browser: automatic session naming failed for `sessionId`. Forwarded
+ * from the bridge's `auto_name_error`; the client renders a one-shot toast
+ * ("Couldn't auto-name session: <reason>"). See change: add-auto-session-naming.
+ */
+export interface AutoNameErrorBrowserMessage {
+  type: "auto_name_error";
+  sessionId: string;
+  reason: string;
+}
+
 export type ServerToBrowserMessage =
   | ServerRestartingMessage
+  | AutoNameErrorBrowserMessage
   | RecoveryOfferMessage
   | PluginConfigUpdateMessage
+  | PluginActionErrorMessage
   | SessionAddedMessage
   | SessionUpdatedMessage
   | SessionRemovedMessage
@@ -771,7 +834,6 @@ export type ServerToBrowserMessage =
   | PackageOperationCompleteMessage
   | PiCoreUpdateProgressMessage
   | PiCoreUpdateCompleteMessage
-  | EditorStatusMessage
   | ForceKillResultMessage
   | BrowserRolesListMessage
   | ProcessListUpdateMessage
@@ -796,7 +858,50 @@ export type ServerToBrowserMessage =
   | QueueUpdateToBrowserMessage
   | PromptReceivedToBrowserMessage
   | ViewMessagesUpdateMessage
+  | CanvasIntentMessage
+  | CanvasServerChipMessage
   | FileChangedMessage;
+
+/**
+ * Server push: drive the per-session auto-canvas surface (change: auto-canvas).
+ *
+ * Two phases (Decision 1 two-phase open):
+ *   - `eager`  — the first qualifying candidate mid-turn; open immediately
+ *                (subject to the client viewport gate — mobile surfaces a chip
+ *                instead of yanking chat).
+ *   - `settle` — fired at `agent_end`; the turn's winning target owns the slot.
+ *
+ * `target` is the normalized winning `ViewTarget` (file/url), or `null` when the
+ * turn produced nothing renderable. `mode` maps to the lifecycle state
+ * (`replace` transient vs `pin` kept). Servers never arrive here — they use
+ * `canvas_server_chip`.
+ */
+export interface CanvasIntentMessage {
+  type: "canvas_intent";
+  sessionId: string;
+  phase: "eager" | "settle";
+  target: ViewTarget | null;
+  mode?: "replace" | "pin";
+  title?: string;
+}
+
+/**
+ * Server push: surface a declared-server confirm chip (Decision 4). Carries
+ * ONLY the port — NO announced host (SSRF gate: the client probes
+ * `127.0.0.1:port` on tap, never a host the agent named). No pre-tap fetch.
+ */
+export interface CanvasServerChipMessage {
+  type: "canvas_server_chip";
+  sessionId: string;
+  port: number;
+  title?: string;
+  /**
+   * True = the chip expired at the turn boundary / server-exit and MUST become
+   * non-actionable (S32). When set, `port` echoes the expired chip's port; the
+   * client drops it. Absent/false = surface a fresh, tappable chip.
+   */
+  expire?: boolean;
+}
 
 /**
  * Server push: an open editor-pane file changed on disk (agent edit or
@@ -1007,6 +1112,10 @@ export interface ForceKillResultMessage {
   sessionId: string;
   success: boolean;
   message?: string;
+  /** Stable failure classifier for client translation. Additive. See change: make-all-ui-text-i18n. */
+  code?: string;
+  /** Interpolation vars for `err.<domain>.<code>`. Additive. */
+  vars?: Record<string, string | number>;
 }
 
 export interface ProcessListUpdateMessage {
@@ -1383,6 +1492,17 @@ export interface RolePresetDeleteBrowserMessage {
   presetName: string;
 }
 
+/**
+ * Browser → server: remove a CUSTOM role. Forwarded to the target session
+ * bridge which purges it via the `roles:remove` handler (built-ins rejected
+ * server-side). See change: add-custom-roles-ui.
+ */
+export interface RoleRemoveBrowserMessage {
+  type: "role_remove";
+  sessionId: string;
+  role: string;
+}
+
 export interface RequestRolesBrowserMessage {
   type: "request_roles";
   sessionId: string;
@@ -1494,6 +1614,7 @@ export type BrowserToServerMessage =
   | RolePresetLoadBrowserMessage
   | RolePresetSaveBrowserMessage
   | RolePresetDeleteBrowserMessage
+  | RoleRemoveBrowserMessage
   | RequestRolesBrowserMessage
   | UiManagementBrowserMessage
   | SessionViewBrowserMessage
@@ -1508,9 +1629,25 @@ export type BrowserToServerMessage =
   | WorktreeInitUnsubscribeMessage
   | SetSessionDisplayPrefsBrowserMessage
   | SetSessionProcessDrawerBrowserMessage
+  | SetSessionTagsBrowserMessage
   | InjectViewMessageBrowserMessage
   | RecoveryDismissMessage
+  | SubagentResyncRequestBrowserMessage
   | WatchFilesBrowserMessage;
+
+/**
+ * Browser → server → bridge: request the latest retained snapshot of a
+ * still-running subagent's timeline, to recover after a gap/reconnect without
+ * waiting for completion. The server forwards it to the owning bridge, which
+ * replies with a synthetic `subagent_started` `event_forward`, or no-ops for an
+ * unknown/finished agent (the durable completed-case backfill covers those).
+ * See change: fix-subagent-live-detail-reliability (D2).
+ */
+export interface SubagentResyncRequestBrowserMessage {
+  type: "subagent_resync_request";
+  sessionId: string;
+  agentId: string;
+}
 
 /**
  * Browser declares the editor pane's currently-open files for a session so the
@@ -1535,12 +1672,33 @@ export interface WatchFilesBrowserMessage {
  */
 export interface WorktreeInitSubscribeMessage {
   type: "worktree_init_subscribe";
-  requestId: string;
+  /** Legacy per-click correlation key. */
+  requestId?: string;
+  /**
+   * Stable per-checkout key. Subscribing by `cwd` survives refresh and reaches
+   * every tab; used by the manual button, auto-on-spawn, and boot rehydration.
+   * See change: friendlier-worktree-init.
+   */
+  cwd?: string;
 }
 
 /** Drops the subscription if the dialog is cancelled or completes. */
 export interface WorktreeInitUnsubscribeMessage {
   type: "worktree_init_unsubscribe";
-  requestId: string;
+  requestId?: string;
+  cwd?: string;
+}
+
+/**
+ * One active worktree-init run in the server's cwd-keyed registry, as returned
+ * by `GET /api/git/worktree/active-inits`. See change: friendlier-worktree-init.
+ */
+export interface ActiveWorktreeInit {
+  cwd: string;
+  phase: "running" | "done" | "failed";
+  startedAt: number;
+  lastLine?: string;
+  /** Failure classifier (phase `failed` only). */
+  code?: string;
 }
 

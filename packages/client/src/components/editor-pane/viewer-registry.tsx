@@ -22,18 +22,27 @@ import { ImagePreview } from "../preview/ImagePreview.js";
 import { PdfPreview } from "../preview/PdfPreview.js";
 import { VideoPreview } from "../preview/VideoPreview.js";
 import BinaryWarn from "./BinaryWarn.js";
+import DiffViewer from "./DiffViewer.js";
 import LiveServerViewer from "./LiveServerViewer.js";
 import MarkdownViewer from "./MarkdownViewer.js";
 import MermaidViewer from "./MermaidViewer.js";
 import type { ViewerProps } from "./types.js";
+import UrlViewer from "./UrlViewer.js";
 
 const MonacoBuffer = lazy(() => import("./MonacoBuffer.js"));
 
 /** Adapt the editor-pane `ViewerProps` to a `preview/*` file target. */
 const asTarget = ({ cwd, path }: ViewerProps) => ({ kind: "file" as const, cwd, path });
 
+/**
+ * `terminal` viewer placeholder. A `term:<id>` tab's real xterm mount lives in
+ * the keep-alive `TerminalPaneLayer` (single mount per id — see change:
+ * terminals-in-tabbed-panes), so the registry entry renders nothing.
+ */
+const TerminalPlaceholder = (_p: ViewerProps) => null;
+
 const PdfViewer = (p: ViewerProps) => <PdfPreview target={asTarget(p)} />;
-const HtmlViewer = (p: ViewerProps) => <HtmlPreview target={asTarget(p)} />;
+const HtmlViewer = (p: ViewerProps) => <HtmlPreview target={asTarget(p)} restrictCsp={p.restrictCsp} />;
 const VideoViewer = (p: ViewerProps) => <VideoPreview target={asTarget(p)} />;
 const ImageTab = (p: ViewerProps) => <ImagePreview target={asTarget(p)} variant="full" />;
 const AudioViewer = (p: ViewerProps) => <AudioPreview target={asTarget(p)} />;
@@ -48,5 +57,11 @@ export const viewerRegistry: Record<ViewerKind, ComponentType<ViewerProps>> = {
   video: VideoViewer,
   audio: AudioViewer,
   "live-server": LiveServerViewer,
+  // Opened explicitly under a virtual `url:<url>` path (never from `fileKind()`),
+  // for `canvas()` url/youtube declares. See change: auto-canvas (S35).
+  url: UrlViewer,
+  diff: DiffViewer,
+  // See TerminalPlaceholder above — real mount is the keep-alive layer.
+  terminal: TerminalPlaceholder,
   "binary-warn": BinaryWarn,
 };

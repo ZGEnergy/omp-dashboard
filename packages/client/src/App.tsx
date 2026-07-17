@@ -5,13 +5,16 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Redirect, Route, Switch, useLocation, useRoute, useSearchParams } from "wouter";
 import { ArchiveBrowserView } from "./components/ArchiveBrowserView.js";
+import { CanvasDriver } from "./components/CanvasDriver.js";
 import { ChatView, type ChatViewHandle } from "./components/ChatView.js";
 import { ChatViewMenu } from "./components/ChatViewMenu.js";
 import { CommandInput } from "./components/CommandInput.js";
+import { CommitDialogProvider } from "./components/CommitDialog.js";
 import { ComposerSessionActions } from "./components/ComposerSessionActions.js";
 import { ConnectionStatusBanner } from "./components/ConnectionStatusBanner.js";
+import { DirectoryHomeView } from "./components/DirectoryHomeView.js";
 import { DirectorySettings, type DirectorySettingsPage } from "./components/DirectorySettings/DirectorySettings.js";
-import { EditorView } from "./components/EditorView.js";
+import { FolderEditorView } from "./components/FolderEditorView.js";
 import { FileDiffView } from "./components/FileDiffView.js";
 import { InstallBanner } from "./components/InstallBanner.js";
 import { LandingPage } from "./components/LandingPage.js";
@@ -28,22 +31,23 @@ import { PiUpdateBadge } from "./components/PiUpdateBadge.js";
 import { PluginStalenessBanner } from "./components/PluginStalenessBanner.js";
 import { PreviewOverlayView } from "./components/PreviewOverlayView.js";
 import { QueuePanel } from "./components/QueuePanel.js";
+import { RecoveryOfferHost } from "./components/RecoveryOfferHost.js";
 import { ResizableSidebar } from "./components/ResizableSidebar.js";
 import { ServerSelector } from "./components/ServerSelector.js";
 import { SessionBanner } from "./components/SessionBanner.js";
+import { SessionDiffProvider } from "./components/SessionDiffContext.js";
 import { SessionHeader } from "./components/SessionHeader.js";
 import { SessionList } from "./components/SessionList.js";
 import { SessionSplitView, SplitRouteSync } from "./components/SessionSplitView.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { SpawnErrorToastHost } from "./components/SpawnErrorToastHost.js";
-import { RecoveryOfferHost } from "./components/RecoveryOfferHost.js";
-import { clearRecoveryOffer } from "./lib/recovery-offer-bus.js";
 import { SpecsBrowserView } from "./components/SpecsBrowserView.js";
 import { SplitWorkspaceProvider } from "./components/SplitWorkspaceContext.js";
 import { StatusBar } from "./components/StatusBar.js";
-import { TerminalsView } from "./components/TerminalsView.js";
 import { Toast, useToast } from "./components/Toast.js";
 import { TokenStatsBar } from "./components/TokenStatsBar.js";
+import { allTagsInUse } from "./components/tags/all-tags.js";
+import { WorktreeInitStack } from "./components/WorktreeInitStack.js";
 import { WorktreeSpawnDialog } from "./components/WorktreeSpawnDialog.js";
 import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
 import { useAppHidden } from "./hooks/useAppHidden.js";
@@ -53,19 +57,22 @@ import { selectInflightBashTools } from "./hooks/useInflightBashTools.js";
 import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { useLaunchSource } from "./hooks/useLaunchSource.js";
 import { useMessageHandler } from "./hooks/useMessageHandler.js";
-import { useStaleToolReconcile } from "./hooks/useStaleToolReconcile.js";
 import { useMobile } from "./hooks/useMobile.js";
 import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
 import { usePiResourceFileFetch } from "./hooks/usePiResourceFileFetch.js";
 import { useSidebarState } from "./hooks/useSidebarState.js";
+import { useStaleToolReconcile } from "./hooks/useStaleToolReconcile.js";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import { maybeAutoInitWorktreeOnSpawn } from "./lib/auto-init-worktree.js";
+import { EMPTY_CANVAS_STATE } from "./lib/canvas-gate.js";
 import { deleteDraft, readAllDrafts, writeDraft } from "./lib/draft-storage.js";
 // SubagentPopoutPage no longer imported by the shell — it's registered via
 // the subagents-plugin's `shell-overlay-route` claim and mounted through
 // `<ShellOverlayRouteSlot>` below. See change: add-flow-agent-popout.
-import { createInitialState, deriveBannerState, findLastUserPrompt, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { createInitialState, deriveBannerState, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { decodeFolderPath, encodeFolderPath } from "./lib/folder-encoding.js";
+import { fetchActiveInits } from "./lib/git-api.js";
+import { refreshGitStatus } from "./lib/git-status-cache.js";
 import { goBack as goBackAction } from "./lib/history-back.js";
 import { clearLoadingHistory, SUBSCRIBE_ACK_MS } from "./lib/loading-history.js";
 import { extractUserPromptHistory } from "./lib/message-history.js";
@@ -79,6 +86,7 @@ import {
 } from "./lib/nav-tracker.js";
 import { useOpenSpecConfig } from "./lib/openspec-config-api.js";
 import { dispatchPluginMessage } from "./lib/plugins-api.js";
+import { clearRecoveryOffer } from "./lib/recovery-offer-bus.js";
 import { rehydrateSession } from "./lib/rehydrate-session.js";
 // Strategy A (reduce-session-replay-traffic): durable replay cursor.
 import { replayCache } from "./lib/replay-cache.js";
@@ -93,8 +101,8 @@ import {
 } from "./lib/route-builders.js";
 import { performServerSwitch } from "./lib/server-switch.js";
 import { openStagingSocket } from "./lib/staging-socket.js";
-import { useEditors } from "./lib/use-editors.js";
-import { setInitSender } from "./lib/worktree-init-bus.js";
+import { resendActiveCwdSubscriptions, setInitSender } from "./lib/worktree-init-bus.js";
+import { initStore } from "./lib/worktree-init-store.js";
 
 // Stable tracker facade for the depth-aware back action
 // (change: fix-mobile-back-depth-aware).
@@ -102,7 +110,6 @@ const NAV_TRACKER = { predecessor, popNav };
 
 import { applyPluginConfigUpdate, initPluginConfigs, PluginContextProvider, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import type { EditorInstanceStatus } from "@blackbelt-technology/pi-dashboard-shared/editor-types.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, FileEntry, ImageContent, ModelInfo, OpenSpecData, OpenSpecGroup, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { DialogPortal } from "./components/DialogPortal.js";
@@ -121,7 +128,7 @@ import { useViewDispatcher } from "./hooks/useViewDispatcher.js";
 import { ApiContext, deriveApiBase, setGlobalApiBase, VITE_API_URL } from "./lib/api-context.js";
 import { buildContextUsageMap } from "./lib/context-usage.js";
 import { DisplayPrefsProvider } from "./lib/DisplayPrefsContext.js";
-import { useI18n } from "./lib/i18n.js";
+import { registerPluginCatalog, useI18n } from "./lib/i18n.js";
 import { SessionAssetsProvider } from "./lib/SessionAssetsContext.js";
 import { deriveSelectedSessionId } from "./lib/selectedSessionId.js";
 import { selectViewedSessionId } from "./lib/selectViewedSessionId.js";
@@ -157,6 +164,10 @@ for (const entry of PLUGIN_REGISTRY) {
   for (const claim of entry.claims) {
     _pluginRegistry.addClaim(claim);
   }
+  // Merge each plugin's i18n catalog under plugin.<id>.* so plugin surfaces
+  // resolve via the plugin-context `t`. Idempotent; language-partitioned.
+  // See change: make-all-ui-text-i18n.
+  registerPluginCatalog(entry.manifest.id, entry.catalog);
 }
 
 // Feed plugin `shell-overlay-route` claims into the back-target classifier so
@@ -296,7 +307,7 @@ function PiResourceFileRoute({
 const EMPTY_STEERING: string[] = [];
 
 export default function App() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   // Pause all CSS animations while the window is hidden to the tray /
   // backgrounded, so the renderer + GPU stop continuous compositing.
   // See change: throttle-idle-ui-animations.
@@ -309,6 +320,22 @@ export default function App() {
     setInitSender(send);
     return () => setInitSender(null);
   }, [send]);
+  // Boot rehydration: seed the cwd-keyed init store from the server's
+  // active-inits registry so a refresh mid-run keeps streaming and a refresh
+  // just-after-terminal shows done-flash / failed-sticky. Runs once the socket
+  // is open so `seed`'s re-subscribe reaches the server.
+  // See change: friendlier-worktree-init.
+  useEffect(() => {
+    if (status !== "connected") return;
+    let alive = true;
+    // Re-attach cwd subscriptions the reconnect dropped, then reconcile state
+    // with the server's authoritative registry.
+    resendActiveCwdSubscriptions();
+    // Reconcile (not seed): an EMPTY snapshot must still prune a stale running
+    // chip left by a run that finished + evicted while the ws was down.
+    void fetchActiveInits().then((runs) => { if (alive) initStore.reconcile(runs); });
+    return () => { alive = false; };
+  }, [status]);
   // Drives the slot-registry enable filter from /api/health.plugins[] +
   // plugin_config_update broadcasts. The returned `startedAt` is also
   // consumed inside the Plugins tab via this same hook re-call, so we don't
@@ -340,11 +367,15 @@ export default function App() {
   }, []);
   const [match, params] = useRoute("/session/:id");
   // Legacy /terminal/:id route removed — see change:
-  // fix-terminal-half-height-dual-mount. Terminals are reached via
-  // /folder/:encodedCwd/terminals. The dual-mount it caused (one
-  // <TerminalView> here + one inside <TerminalsView>) was the root
-  // cause of half-height rendering and competing FitAddon resizes.
-  const [folderTermMatch, folderTermParams] = useRoute("/folder/:encodedCwd/terminals");
+  // fix-terminal-half-height-dual-mount. The standalone /folder/:cwd/terminals
+  // route + TerminalsView were removed by terminals-in-tabbed-panes; terminals
+  // now open as `term:<id>` tabs inside the folder-scoped editor pane
+  // (/folder/:encodedCwd/editor), auto-surfaced there.
+  // Bare directory home page (design D1). wouter's regexparam compiles
+  // `/folder/:encodedCwd` to `^/folder/([^/]+?)/?$`; `[^/]+?` never crosses `/`,
+  // so it cannot match `/folder/:enc/terminals` — no shadowing of deeper folder
+  // routes. See change: add-directory-home-page.
+  const [folderHomeMatch, folderHomeParams] = useRoute("/folder/:encodedCwd");
   const [folderEditorMatch, folderEditorParams] = useRoute("/folder/:encodedCwd/editor");
   const [settingsMatch] = useRoute("/settings/:page?");
   const [tunnelSetupMatch] = useRoute("/tunnel-setup");
@@ -417,6 +448,15 @@ export default function App() {
   const selectedSessionIdRef = useRef<string | undefined>(selectedId);
   selectedSessionIdRef.current = selectedId;
 
+  // Seek-to-card reveal request. A one-shot `{ sessionId, nonce }`: the Seek
+  // button in SessionHeader bumps `nonce` so re-seeking the SAME session (its
+  // card may have been re-collapsed since) still re-fires the SessionList
+  // reveal effect (keyed on nonce, not id). See change: add-seek-to-session-card.
+  const [revealRequest, setRevealRequest] = useState<{ sessionId: string; nonce: number } | null>(null);
+  const seekToCard = useCallback((sessionId: string) => {
+    setRevealRequest((prev) => ({ sessionId, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+
   // Drives the server-side viewed-session tracker for unread state.
   // See change: session-card-unread-stripes.
   useViewDispatcher({
@@ -424,7 +464,7 @@ export default function App() {
     connectionStatus: status,
     send,
   });
-  const folderTermCwd = folderTermMatch ? decodeFolderPath(folderTermParams?.encodedCwd ?? "") : null;
+  const folderHomeCwd = folderHomeMatch ? decodeFolderPath(folderHomeParams?.encodedCwd ?? "") : null;
   const folderEditorCwd = folderEditorMatch ? decodeFolderPath(folderEditorParams?.encodedCwd ?? "") : null;
   const sidebar = useSidebarState();
   const chatViewRef = useRef<ChatViewHandle>(null);
@@ -462,6 +502,9 @@ export default function App() {
   // Per-session rel-paths that changed on disk while open in the editor pane
   // (drives the changed-on-disk banner). See change: split-editor-workspace.
   const [changedOnDisk, setChangedOnDisk] = useState<Map<string, Set<string>>>(() => new Map());
+  // Per-session auto-canvas state (coexists with the URL-driven preview routes).
+  // Folded from `canvas_intent` / `canvas_server_chip`. See change: auto-canvas.
+  const [canvasMap, setCanvasMap] = useState<Map<string, import("./lib/canvas-gate.js").CanvasState>>(() => new Map());
   const [openspecMap, setOpenspecMap] = useState<Map<string, OpenSpecData>>(new Map());
   // Folder-HEAD branch map (`cwd → branch | null`), synced via `git_head_update`.
   // See change: refresh-folder-header-branch.
@@ -472,7 +515,11 @@ export default function App() {
   // See change: redesign-openspec-board.
   const [boardWorktreeForChange, setBoardWorktreeForChange] = useState<{ cwd: string; changeName: string } | null>(null);
   const [modelsMap, setModelsMap] = useState<Map<string, ModelInfo[]>>(new Map());
-  const [rolesMap, setRolesMap] = useState<Map<string, RoleInfo>>(new Map());
+  // Write-only: the last reader (StatusBar's deprecated `roles` prop) was
+  // removed in `redesign-prompt-input`; roles UI lives in the roles settings
+  // plugin. `setRolesMap` still consumes server role events. Full excision of
+  // this state chain (incl. useMessageHandler) is a separate cleanup.
+  const [, setRolesMap] = useState<Map<string, RoleInfo>>(new Map());
   const [spawnResult, setSpawnResult] = useState<{ success: boolean; message: string } | null>(null);
   const [spawnErrors, setSpawnErrors] = useState<Map<string, import("./hooks/useMessageHandler.js").SpawnErrorDetail>>(new Map());
   const [resumeErrors, setResumeErrors] = useState<Map<string, string>>(new Map());
@@ -487,6 +534,11 @@ export default function App() {
   const pendingSpawnsRef = useRef<Map<string, { cwd: string; kind: "spawn" | "resume"; placeholderCwd?: string }>>(new Map());
   const [sessionOrderMap, setSessionOrderMap] = useState<Map<string, string[]>>(new Map());
   const [pinnedDirectories, setPinnedDirectories] = useState<string[]>([]);
+  // Flipped true on the first `pinned_dirs_updated` (server sends it on
+  // connect). Gates DirectoryHomeView's cold-load guard so a direct URL /
+  // refresh shows a loading state instead of flashing "not pinned".
+  // See change: add-directory-home-page.
+  const [pinnedDirsLoaded, setPinnedDirsLoaded] = useState(false);
   // Favorite model labels ("provider/id"), server-persisted. Synced via
   // `favorite_models_updated`; cold-loaded from GET /api/favorite-models.
   // See change: enrich-model-selector-capabilities-favorites.
@@ -498,8 +550,6 @@ export default function App() {
   const [terminals, setTerminals] = useState<Map<string, TerminalSession>>(new Map());
   const pendingTerminalCwdRef = useRef<string | null>(null);
   const lastCreatedTerminalIdRef = useRef<string | null>(null);
-  const [editorStatuses, setEditorStatuses] = useState<Map<string, { id: string; status: EditorInstanceStatus }>>(new Map());
-  const [editorAvailable, setEditorAvailable] = useState<boolean | undefined>(undefined);
   // UI preference: show worktree spawn buttons. Fetched from /api/config on
   // mount. Defaults to true while loading. See change:
   // openspec-worktree-spawn-button.
@@ -674,8 +724,8 @@ export default function App() {
   }, []);
 
   const handleMessage = useMessageHandler(
-    { setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setFavoriteModels, setWorkspaces, setTerminals, setEditorStatuses, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap, setLoadingHistory },
-    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, replayPersister: replayPersisterRef.current },
+    { setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap, setLoadingHistory, setCanvasMap },
+    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, replayPersister: replayPersisterRef.current, showToast },
   );
 
   useEffect(() => {
@@ -687,14 +737,6 @@ export default function App() {
   // tool-result route. Session-scoped (survives transcript virtualization).
   // See change: fix-stuck-tool-card-on-dropped-event.
   useStaleToolReconcile(sessionStates, setSessionStates, apiBase);
-
-  // Detect code-server binary availability on mount
-  useEffect(() => {
-    fetch(`${apiBase}/api/editor/detect`)
-      .then((r) => r.json())
-      .then((d) => { if (d.success) setEditorAvailable(d.data.available); })
-      .catch(() => {});
-  }, []);
 
   // Fetch the gitWorktreeEnabled preference on mount.
   // See change: openspec-worktree-spawn-button.
@@ -762,21 +804,6 @@ export default function App() {
       // `sessions_snapshot` message — no pre-reset needed.
       // See change: fix-stale-sessions-on-reconnect.
       setTerminals(new Map());
-      // Fetch current editor statuses
-      fetch(`${apiBase}/api/editor/status`)
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.success && Array.isArray(data.data)) {
-            const map = new Map<string, { id: string; status: EditorInstanceStatus }>();
-            for (const inst of data.data) {
-              if (inst.status !== "stopped") {
-                map.set(inst.cwd, { id: inst.id, status: inst.status });
-              }
-            }
-            setEditorStatuses(map);
-          }
-        })
-        .catch(() => {});
     }
     prevStatusRef.current = status;
   }, [status]);
@@ -835,6 +862,20 @@ export default function App() {
     if (selectedId && !subscribedRef.current.has(selectedId) && status === "connected") {
       subscribedRef.current.add(selectedId);
       const sid = selectedId;
+      // Resync running subagents whose live timeline is empty: a reconnect gap
+      // may have swallowed their frames downstream of the bridge, so pull the
+      // latest snapshot instead of waiting for completion. No-op server-side
+      // for unknown/finished agents. See change: fix-subagent-live-detail-reliability (D2).
+      {
+        const st = sessionStates.get(sid);
+        if (st) {
+          for (const sub of st.subagents.values()) {
+            if (sub.status === "running" && (!sub.entries || sub.entries.length === 0)) {
+              send({ type: "subagent_resync_request", sessionId: sid, agentId: sub.id });
+            }
+          }
+        }
+      }
       // Send subscribe with the resolved cursor, enter LOADING, and request
       // models if missing. Extracted so the cache-rehydrate path can call it
       // after the async IndexedDB read resolves.
@@ -908,6 +949,21 @@ export default function App() {
   const selectedImages = (selectedId ? pendingImagesMap.get(selectedId) : undefined) ?? (EMPTY_IMAGES as ImageContent[]);
   const selectedHistory = useMemo(
     () => extractUserPromptHistory(selectedState.messages),
+    [selectedState.messages],
+  );
+  // Monotonic edit/write/bash count for the selected session — drives the
+  // shared session-diff refetch (change: add-change-summary-table). Bash is
+  // included so tool-created files (converter/image/script output detected via
+  // git-status) surface after the command completes, not just Write/Edit.
+  // See change: detect-tool-created-files.
+  const diffChangeSignal = useMemo(
+    () =>
+      selectedState.messages.reduce(
+        (n, m) =>
+          n +
+          (m.role === "toolResult" && /^(edit|write|bash)$/i.test(m.toolName ?? "") ? 1 : 0),
+        0,
+      ),
     [selectedState.messages],
   );
 
@@ -1005,7 +1061,7 @@ export default function App() {
             ...current,
             pendingPrompt: undefined,
             lastError: {
-              message: "No response from session — the prompt may not have been received.",
+              message: t("session.noResponse", undefined, "No response from session — the prompt may not have been received."),
               timestamp: Date.now(),
             },
           });
@@ -1027,19 +1083,17 @@ export default function App() {
   // Per-cwd OpenSpec workflow config — drives which action buttons render.
   // See change: redesign-session-card-and-composer (config-driven-workflow).
   const openspecConfig = useOpenSpecConfig(selectedSession?.cwd);
-  const folderTitleCwd = folderEditorCwd ?? folderTermCwd
+  const folderTitleCwd = folderEditorCwd
     ?? openspecPreviewCwd ?? archiveCwd ?? specsCwd
     ?? piResourcesCwd ?? folderSettingsCwd ?? null;
   useDocumentTitle(selectedSession, folderTitleCwd ?? undefined);
   const selectedCwd = selectedSession?.cwd;
-  const editorCwds = useMemo(() => selectedCwd ? [selectedCwd] : [], [selectedCwd]);
-  const editorMap = useEditors(editorCwds);
   const toolContext: ToolContext = useMemo(() => ({
     cwd: selectedCwd,
-    editors: selectedCwd ? editorMap.get(selectedCwd) ?? [] : [],
     sessionId: selectedId,
     session: selectedId ? sessionStates.get(selectedId) : undefined,
-  }), [selectedCwd, editorMap, selectedId, sessionStates]);
+    send,
+  }), [selectedCwd, selectedId, sessionStates, send]);
 
   const contextUsageMap = useMemo(
     () => buildContextUsageMap(sessionStates, sessions),
@@ -1067,7 +1121,7 @@ export default function App() {
     handleAbort, handleForceKill, handleStopAfterTurn, handleCancelPending, handleRespondToUi, handleSend,
     handleSelect, handleRenameSession, handleShutdownSession, handleKillProcess,
     handleSendPromptToSession, handleResumeSession, handleResumeSessionKeepPosition, handleSpawnSession,
-    handleHideSession, handleUnhideSession,
+    handleHideSession, handleUnhideSession, handleSetSessionTags,
     handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleTerminalTitle,
     handleOpenInlineTerminal, handleCloseInlineTerminal,
     handleListFiles,
@@ -1219,6 +1273,17 @@ export default function App() {
     return ids;
   }, [sessionStates]);
 
+  // Sessions whose last turn returned only reasoning, no answer (non-error
+  // notice). Suppressed when a real error is also present.
+  // See change: fix-gemini-subagent-silent-tool-schema-failure.
+  const noticeSessionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, state] of sessionStates) {
+      if (state.notice && !state.lastError) ids.add(id);
+    }
+    return ids;
+  }, [sessionStates]);
+
   // Per-session map of unresolved `bash` toolCalls, consumed by the
   // SessionActivityBar inside each session card's PROCESS subcard.
   // See change: redesign-process-list-activity-bar.
@@ -1239,12 +1304,19 @@ export default function App() {
     send({ type: "abort", sessionId });
   }, [send]);
 
+  // Union of all tags in use across sessions — feeds TagEditor autocomplete
+  // (card + detail) and the sidebar tag filter group. Recomputes only when the
+  // session list changes. See change: add-session-tags.
+  const allTags = useMemo(() => allTagsInUse(Array.from(sessions.values())), [sessions]);
+
   const sessionList = (
     <SessionList
       sessions={Array.from(sessions.values())}
       terminals={Array.from(terminals.values())}
       selectedId={selectedId}
       onSelect={handleSelect}
+      revealRequest={revealRequest}
+      onSeekToCard={seekToCard}
       contextUsageMap={contextUsageMap}
       openspecMap={openspecMap}
       folderGitMap={folderGitMap}
@@ -1316,12 +1388,11 @@ export default function App() {
       onSetProcessDrawer={(sessionId, collapsed) => send({ type: "set_session_process_drawer", sessionId, collapsed })}
       inflightBashMap={inflightBashMap}
       onAbortTool={handleAbortTool}
-      onOpenTerminals={(cwd) => navigate(`/folder/${encodeFolderPath(cwd)}/terminals`)}
+      onOpenTerminals={(cwd) => navigate(`/folder/${encodeFolderPath(cwd)}/editor`)}
       onOpenEditor={(cwd) => navigate(`/folder/${encodeFolderPath(cwd)}/editor`)}
-      editorStatuses={editorStatuses}
-      editorAvailable={editorAvailable}
       gitWorktreeEnabled={gitWorktreeEnabled}
       errorSessionIds={errorSessionIds}
+      noticeSessionIds={noticeSessionIds}
       retrySessionIds={retrySessionIds}
       spawnErrors={spawnErrors}
       onDismissSpawnError={(cwd) => setSpawnErrors((prev) => { const next = new Map(prev); next.delete(cwd); return next; })}
@@ -1404,19 +1475,18 @@ export default function App() {
         session={sessions.get(selectedId)}
         state={selectedState}
         onRename={handleRenameSession}
+        allTags={allTags}
+        onSetTags={selectedId ? (tags) => handleSetSessionTags(selectedId, tags) : undefined}
+        onSeekToCard={selectedId ? () => seekToCard(selectedId) : undefined}
         showBack
         onBack={goBack}
         onResume={selectedId ? (mode) => handleResumeSession(selectedId, mode) : undefined}
         mobileActions={isMobile ? {
-          editors: selectedCwd ? editorMap.get(selectedCwd) : undefined,
           openspecChanges: selectedCwd ? openspecMap.get(selectedCwd)?.changes : undefined,
           onHide: () => handleHideSession(selectedId),
           onUnhide: () => handleUnhideSession(selectedId),
           onResume: (mode) => handleResumeSession(selectedId, mode),
           onShutdown: () => handleShutdownSession(selectedId),
-          onOpenEditor: selectedCwd ? (editorId) => {
-            import("./lib/editor-api.js").then(({ openEditor }) => openEditor(selectedCwd!, editorId));
-          } : undefined,
           onAttachProposal: (changeName) => handleAttachProposal(selectedId, changeName),
           onDetachProposal: () => handleDetachProposal(selectedId),
           onSendPrompt: (text) => wrappedHandleSend(text),
@@ -1584,38 +1654,23 @@ export default function App() {
             <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? handleForkFromMessage : undefined} onCloseInlineTerminal={selectedId ? handleCloseInlineTerminalForSelected : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? EMPTY_STEERING} loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false} onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined} />
             </SessionAssetsProvider>
           </ErrorBoundary>
-          {/* Unified status banner. Sticky above the command input — ONE
-              composed error-lifecycle surface: a persistent error anchor
-              (lastError) with a live retry sub-status (retryState) on top.
-              Dismiss ✕ is state-dependent inside SessionBanner: abort+clear
-              on a retrying/retryable surface, clear-only on limit-exceeded.
-              See change: unify-error-retry-lifecycle. */}
+          {/* Single-card error-lifecycle surface. Sticky above the command
+              input: ONE card showing the error string plus a live retry
+              sub-line. ✕ (onDismiss) is CLEAR-ONLY — it never aborts. The
+              "Stop (ends the session)" control inside the banner is the sole
+              abort (onAbort), shown only while a retry is in flight.
+              See change: simplify-error-retry-single-card. */}
           <SessionBanner
             state={deriveBannerState(selectedState)}
             onAbort={handleAbort}
-            onRetry={selectedId && !selectedState.isStreaming ? () => {
-              // Retry the last user prompt by re-sending it via send_prompt.
-              // The reducer flags the new user message `retriedFrom` so the
-              // chat view does not render a duplicate bubble. See change:
-              // fix-retry-resends-last-user-message.
-              // Gated on `!isStreaming`: while the (manual or auto) retry turn
-              // is already in flight the error anchor still shows but the
-              // manual Retry control is suppressed to avoid a duplicate send.
-              // See change: unify-error-retry-lifecycle.
-              const last = findLastUserPrompt(selectedState.messages);
-              if (last) handleSendPromptToSession(selectedId, last.text, last.images);
-            } : undefined}
             onDismiss={selectedId ? () => {
               setSessionStates((prev) => {
                 const next = new Map(prev);
                 const current = next.get(selectedId!);
-                // Clear BOTH the error anchor and any live retry sub-status so
-                // the composed surface disappears immediately. On a retrying
-                // dismiss the banner also fired onAbort (handleAbort) — the
-                // bridge will confirm via a synthesized auto_retry_end, but we
-                // clear retryState locally so the amber block does not linger
-                // until that round-trip lands.
-                // See change: unify-error-retry-lifecycle.
+                // Clear-only: drop BOTH the error anchor and any live retry
+                // sub-status locally so the card disappears immediately. This
+                // does NOT abort the session — a live pi retry keeps running.
+                // See change: simplify-error-retry-single-card.
                 if (current?.lastError || current?.retryState) {
                   next.set(selectedId!, { ...current, lastError: undefined, retryState: undefined });
                 }
@@ -1623,32 +1678,26 @@ export default function App() {
               });
             } : undefined}
           />
-          <StatusBar
-            model={selectedState.model ?? selectedSession?.model}
-            models={modelsMap.get(selectedId)}
-            favorites={favoriteModels}
-            onToggleFavorite={(label, makeFavorite) =>
-              send({ type: makeFavorite ? "favorite_model" : "unfavorite_model", label })
-            }
-            roles={rolesMap.get(selectedId)}
-            thinkingLevel={selectedState.thinkingLevel ?? selectedSession?.thinkingLevel}
-            status={selectedState.status}
-            currentTool={selectedState.currentTool}
-            streamingText={selectedState.streamingText || undefined}
-            onRefreshModels={() => selectedId && send({ type: "request_models", sessionId: selectedId })}
-            leading={selectedSession && selectedCwd ? (
-              <>
-                <StatusBarRefreshButton cwd={selectedCwd} onRefresh={handleOpenSpecRefresh} />
-                {selectedId && (
-                  <ChatViewMenu
-                    sessionId={selectedId}
-                    currentOverride={selectedSession?.displayPrefsOverride}
-                    send={(msg) => send({ type: "setSessionDisplayPrefs", sessionId: selectedId, override: msg.override })}
-                  />
-                )}
-              </>
-            ) : undefined}
-            actions={selectedSession ? (
+          {/* Context strip above the composer card: OpenSpec refresh + View
+              menu + session-action groups (relocated from the retired
+              StatusBar model row). See change: redesign-prompt-input. */}
+          {selectedSession && (
+            <div
+              className="flex items-center gap-2 flex-wrap px-3 pt-2 text-xs"
+              data-testid="composer-context-strip"
+            >
+              {selectedCwd && (
+                <>
+                  <StatusBarRefreshButton cwd={selectedCwd} onRefresh={handleOpenSpecRefresh} />
+                  {selectedId && (
+                    <ChatViewMenu
+                      sessionId={selectedId}
+                      currentOverride={selectedSession?.displayPrefsOverride}
+                      send={(msg) => send({ type: "setSessionDisplayPrefs", sessionId: selectedId, override: msg.override })}
+                    />
+                  )}
+                </>
+              )}
               <ComposerSessionActions
                 session={selectedSession}
                 changes={selectedCwd ? openspecMap.get(selectedCwd)?.changes : undefined}
@@ -1661,30 +1710,12 @@ export default function App() {
                 showGitInfo={true}
                 openspecConfig={openspecConfig}
               />
-            ) : undefined}
-            onSelectModel={(modelStr) => {
-              const slashIdx = modelStr.indexOf("/");
-              if (slashIdx > 0) {
-                const provider = modelStr.slice(0, slashIdx);
-                const modelId = modelStr.slice(slashIdx + 1);
-                send({ type: "set_model", sessionId: selectedId, provider, modelId });
-              }
-            }}
-            onSelectThinkingLevel={(level) => {
-              send({ type: "set_thinking_level", sessionId: selectedId, level });
-            }}
-            onRoleSet={(role, modelId) => {
-              send({ type: "role_set", sessionId: selectedId, role, modelId });
-            }}
-            onPresetLoad={(presetName) => {
-              send({ type: "role_preset_load", sessionId: selectedId, presetName });
-            }}
-            onPresetSave={(presetName) => {
-              send({ type: "role_preset_save", sessionId: selectedId, presetName });
-            }}
-            onPresetDelete={(presetName) => {
-              send({ type: "role_preset_delete", sessionId: selectedId, presetName });
-            }}
+            </div>
+          )}
+          <StatusBar
+            status={selectedState.status}
+            currentTool={selectedState.currentTool}
+            streamingText={selectedState.streamingText || undefined}
           />
           {/* Pi-native follow-up queue — DISPLAY-ONLY (cycle with ↑/↓).
               Mutation controls (clear / edit / promote / remove) removed:
@@ -1726,6 +1757,26 @@ export default function App() {
             }}
             onOpenInlineTerminal={selectedId && selectedCwd ? () => handleOpenInlineTerminal(selectedId, selectedCwd) : undefined}
             sessionMessages={selectedState.messages}
+            model={selectedState.model ?? selectedSession?.model}
+            models={modelsMap.get(selectedId)}
+            favorites={favoriteModels}
+            onToggleFavorite={(label, makeFavorite) =>
+              send({ type: makeFavorite ? "favorite_model" : "unfavorite_model", label })
+            }
+            thinkingLevel={selectedState.thinkingLevel ?? selectedSession?.thinkingLevel}
+            onSelectModel={(modelStr) => {
+              const slashIdx = modelStr.indexOf("/");
+              if (slashIdx > 0) {
+                const provider = modelStr.slice(0, slashIdx);
+                const modelId = modelStr.slice(slashIdx + 1);
+                send({ type: "set_model", sessionId: selectedId, provider, modelId });
+              }
+            }}
+            onSelectThinkingLevel={(level) => {
+              send({ type: "set_thinking_level", sessionId: selectedId, level });
+            }}
+            onRefreshModels={() => selectedId && send({ type: "request_models", sessionId: selectedId })}
+            contextUsage={selectedContextUsage}
           />
           {/* Plugin slot: content-inline-footer — contributions from flows-plugin (per-session inline footer) and other plugins. */}
           {selectedSession && <ContentInlineFooterSlot session={selectedSession} />}
@@ -1796,16 +1847,14 @@ export default function App() {
   navigateRef.current = navigate;
   const handleEditorClose = useCallback(() => navigateRef.current("/"), []);
 
-  // Folder view content (TerminalsView or EditorView)
+  // Folder view content (folder-scoped editor pane — hosts terminal tabs).
   const folderViewContent = useMemo(() => {
-    if (folderTermCwd) {
-      const pendingTermId = lastCreatedTerminalIdRef.current;
-      if (pendingTermId) lastCreatedTerminalIdRef.current = null;
+    if (folderEditorCwd) {
       return (
-        <TerminalsView
-          cwd={folderTermCwd}
-          terminals={getTerminalsForCwd(folderTermCwd)}
-          activeTerminalId={pendingTermId ?? undefined}
+        <FolderEditorView
+          cwd={folderEditorCwd}
+          onClose={handleEditorClose}
+          terminals={getTerminalsForCwd(folderEditorCwd)}
           onCreateTerminal={handleCreateTerminal}
           onKillTerminal={handleKillTerminal}
           onRenameTerminal={handleRenameTerminal}
@@ -1813,13 +1862,31 @@ export default function App() {
         />
       );
     }
-    if (folderEditorCwd) {
-      return <EditorView cwd={folderEditorCwd} onClose={handleEditorClose} />;
-    }
     return null;
-  }, [folderTermCwd, folderEditorCwd, getTerminalsForCwd, handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleTerminalTitle, handleEditorClose]);
+  }, [folderEditorCwd, getTerminalsForCwd, handleCreateTerminal, handleKillTerminal, handleRenameTerminal, handleTerminalTitle, handleEditorClose]);
 
   const allSessionsList = useMemo(() => Array.from(sessions.values()), [sessions]);
+
+  // Bare `/folder/:encodedCwd` directory home page (design D1/D2/D4).
+  // Rendered in BOTH the desktop and mobile chains. See change:
+  // add-directory-home-page.
+  const directoryHomeView = folderHomeCwd ? (
+    <DirectoryHomeView
+      cwd={folderHomeCwd}
+      pinnedDirectories={pinnedDirectories}
+      pinnedDirectoriesLoaded={pinnedDirsLoaded}
+      sessions={allSessionsList.filter((s) => s.cwd === folderHomeCwd)}
+      onSpawnSession={handleSpawnSession}
+      onSelectSession={handleSelect}
+      onPinDirectory={(dirPath) => {
+        setPinnedDirectories((prev) => (prev.includes(dirPath) ? prev : [...prev, dirPath]));
+        send({ type: "pin_directory", path: dirPath });
+      }}
+      onOpenTerminals={(cwd) => navigate(`/folder/${encodeFolderPath(cwd)}/editor`)}
+      onOpenEditor={(cwd) => navigate(`/folder/${encodeFolderPath(cwd)}/editor`)}
+      onOpenSettings={(cwd) => navigate(buildFolderSettingsUrl(cwd))}
+    />
+  ) : null;
 
   // Outer chrome ErrorBoundary — defense-in-depth for first-party shell
   // components (sidebar, session list, content header, MobileShell). The
@@ -1854,6 +1921,7 @@ export default function App() {
   const apiProvider = (children: React.ReactNode) => (
     <ApiContext.Provider value={apiBase}>
       <DisplayPrefsProvider value={displayPrefsContextValue}>
+      <CommitDialogProvider onCommitted={(shortHash, cwd) => { showToast(`Committed ${shortHash}`); void refreshGitStatus(cwd); }}>
       <PluginContextProvider
         registry={_pluginRegistry}
         sessions={allSessionsList}
@@ -1876,6 +1944,8 @@ export default function App() {
         connectionStatus={
           status === "connected" || status === "connecting" ? status : "disconnected"
         }
+        t={t}
+        language={language}
       >
       <ShellSessionsProvider value={sessions}>
         <ErrorBoundary fallback={
@@ -1894,6 +1964,11 @@ export default function App() {
             onFilenameSearch={handleListFiles}
             changedFiles={selectedId ? changedOnDisk.get(selectedId) ?? null : null}
             onWatchFiles={(sid, cwd, paths) => send({ type: "watch_files", sessionId: sid, cwd, paths })}
+            terminals={selectedSession?.cwd ? getTerminalsForCwd(selectedSession.cwd) : undefined}
+            onCreateTerminal={handleCreateTerminal}
+            onKillTerminal={handleKillTerminal}
+            onRenameTerminal={handleRenameTerminal}
+            onTerminalTitle={handleTerminalTitle}
             onClearChanged={(path) => {
               if (!selectedId) return;
               setChangedOnDisk((prev) => {
@@ -1908,11 +1983,15 @@ export default function App() {
             }}
           >
             <SplitRouteSync active={!!editorMatch} file={editorFile} line={editorLine} />
-            {children}
+            <CanvasDriver state={selectedId ? canvasMap.get(selectedId) ?? EMPTY_CANVAS_STATE : EMPTY_CANVAS_STATE} />
+            <SessionDiffProvider sessionId={selectedId ?? ""} changeSignal={diffChangeSignal}>
+              {children}
+            </SessionDiffProvider>
           </SplitWorkspaceProvider>
         </ErrorBoundary>
       </ShellSessionsProvider>
       </PluginContextProvider>
+      </CommitDialogProvider>
       </DisplayPrefsProvider>
     </ApiContext.Provider>
   );
@@ -1921,7 +2000,7 @@ export default function App() {
   if (isMobile) {
     const mobileDepth = getMobileDepth({
       hasSessionRoute: !!selectedId,
-      hasFolderRoute: !!folderTermCwd || !!folderEditorCwd,
+      hasFolderRoute: !!folderEditorCwd || !!folderHomeCwd,
       hasSettingsRoute: !!settingsMatch,
       hasFolderSettingsRoute: !!folderSettingsMatch,
       hasTunnelRoute: !!tunnelSetupMatch,
@@ -1937,6 +2016,7 @@ export default function App() {
           inFlightSwitch={inFlightSwitchKey !== null}
         />
         <Toast messages={toastMessages} onDismiss={dismissToast} />
+        <WorktreeInitStack />
         <SpawnErrorToastHost />
         <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} onDismiss={(ids) => send({ type: "recovery_dismiss", sessionIds: ids })} />
         {firstLaunchModal}
@@ -1955,7 +2035,7 @@ export default function App() {
           }
           detailPanel={
             settingsMatch ? (
-              <SettingsPanel onMessage={onMessage} onBack={goBack} />
+              <SettingsPanel onMessage={onMessage} onBack={goBack} selectedCwd={selectedCwd} />
             ) : tunnelSetupMatch ? (
               <ZrokInstallGuide onBack={goBack} />
             ) : pluginOverlayMatched ? (
@@ -2006,18 +2086,18 @@ export default function App() {
                 target={{ kind: "url", url: urlViewUrl }}
                 onBack={goBack}
               />
-            ) : folderTermCwd ? (
-              <TerminalsView
-                cwd={folderTermCwd}
-                terminals={getTerminalsForCwd(folderTermCwd)}
-                activeTerminalId={lastCreatedTerminalIdRef.current ?? undefined}
+            ) : folderEditorCwd ? (
+              <FolderEditorView
+                cwd={folderEditorCwd}
+                onClose={handleEditorClose}
+                terminals={getTerminalsForCwd(folderEditorCwd)}
                 onCreateTerminal={handleCreateTerminal}
                 onKillTerminal={handleKillTerminal}
                 onRenameTerminal={handleRenameTerminal}
                 onTerminalTitle={handleTerminalTitle}
               />
-            ) : folderEditorCwd ? (
-              <EditorView cwd={folderEditorCwd} onClose={handleEditorClose} />
+            ) : folderHomeCwd ? (
+              directoryHomeView
             ) : sessionDetail ?? (
             // Legacy /terminal/:id branch removed — see change:
             // fix-terminal-half-height-dual-mount.
@@ -2054,6 +2134,10 @@ export default function App() {
   return apiProvider(
     <div className="flex h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">
       {firstLaunchModal}
+      {/* Concurrent worktree-init stack — fixed overlay, mounted in both shells
+          (mobile branch above) so desktop also surfaces it. See change:
+          friendlier-worktree-init. */}
+      <WorktreeInitStack />
       <div className="hidden md:flex">
         <ResizableSidebar sidebar={sidebar}>
           {sessionList}
@@ -2068,17 +2152,14 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {connectionBanner}
         <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} onDismiss={(ids) => send({ type: "recovery_dismiss", sessionIds: ids })} />
-        {/* Folder views (TerminalsView or EditorView) — single owner of
-            <TerminalView> mounting. The legacy keep-alive list above
-            (mounted unconditionally for the /terminal/:id route) was
-            removed; it caused dual-mounting per terminal id and the
-            half-height rendering bug. See change:
-            fix-terminal-half-height-dual-mount. */}
+        {/* Folder-scoped editor pane (hosts terminal tabs via the keep-alive
+            TerminalPaneLayer — single <TerminalView> mount per id). See change:
+            terminals-in-tabbed-panes, fix-terminal-half-height-dual-mount. */}
         {folderViewContent && (
           <div className="flex-1 flex flex-col min-w-0 min-h-0">{folderViewContent}</div>
         )}
         {/* Show session detail or landing page when no folder view is selected */}
-        {!folderTermCwd && !folderEditorCwd && !settingsMatch && !tunnelSetupMatch && (
+        {!folderEditorCwd && !settingsMatch && !tunnelSetupMatch && (
           pluginOverlayMatched ? (
             // Plugin-owned overlay routes — see change: add-flow-agent-popout.
             // Pass `_pluginRegistry` explicitly (see comment on
@@ -2123,6 +2204,8 @@ export default function App() {
               target={{ kind: "url", url: urlViewUrl }}
               onBack={goBack}
             />
+          ) : folderHomeCwd && !selectedId ? (
+            directoryHomeView
           ) : (
             /* Plugin slot: content-view — only render when at least one
                registered claim's predicate returns true for the current
@@ -2161,7 +2244,7 @@ export default function App() {
             }
           }
           return models;
-        })()} onMessage={onMessage} onBack={goBack} />}
+        })()} onMessage={onMessage} onBack={goBack} selectedCwd={selectedCwd} />}
         {tunnelSetupMatch && <ZrokInstallGuide onBack={goBack} />}
       </div>
       {boardWorktreeForChange && (
