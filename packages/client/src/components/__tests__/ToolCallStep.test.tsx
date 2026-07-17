@@ -626,7 +626,8 @@ describe("ToolCallStep lazy-mount — <RichDiff> only mounts when expanded", () 
   it("renders the 'recovered' badge when the row was healed by supersede", () => {
     const { container } = renderStep({
       status: "complete",
-      toolDetails: { healedBy: "superseded" },
+      // Prop is isSuperseded; toolDetails.healedBy is not wired on ToolCallStep.
+      isSuperseded: true,
     });
     expect(container.querySelector('[data-testid="tool-superseded-badge"]')).not.toBeNull();
   });

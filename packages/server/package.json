@@ -37,7 +37,6 @@
     "@blackbelt-technology/pi-dashboard-extension": "^0.5.4",
     "@blackbelt-technology/pi-dashboard-shared": "^0.5.4",
     "@earendil-works/pi-coding-agent": "^0.80.6",
-    "chardet": "^2.1.0",
     "@fastify/compress": "^8.3.1",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.0.0",
@@ -48,6 +47,7 @@
     "@fission-ai/openspec": "^1.3.0",
     "asciidoctor": "^3.0.4",
     "bonjour-service": "^1.3.0",
+    "chardet": "^2.1.0",
     "diff": "^8.0.3",
     "fastify": "^5.0.0",
     "iconv-lite": "^0.6.3",
@@ -60,15 +60,16 @@
     "proper-lockfile": "^4.1.2",
     "tsx": "^4.21.0",
     "web-push": "^3.6.7",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "xlsx": "^0.18.5"
   },
   "optionalDependencies": {
     "koffi": "^3.1.0"
   },
   "devDependencies": {
     "@types/diff": "^7.0.0",
-    "@types/mailparser": "^3.4.6",
     "@types/jsonwebtoken": "^9.0.9",
+    "@types/mailparser": "^3.4.6",
     "@types/proper-lockfile": "^4.1.4",
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1"

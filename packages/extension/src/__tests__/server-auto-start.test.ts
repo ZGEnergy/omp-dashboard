@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { getDashboardServerLogPath } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
 import { autoStartServer, type AutoStartDeps, type DiscoveredServer } from "../server-auto-start.js";
 
@@ -14,6 +14,12 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
 
 const baseConfig = { piPort: 9999, port: 8000, autoStart: true };
 
+
+// Agent/CI shells often set PI_DASHBOARD_NO_MDNS=1; mDNS-path tests need it off.
+// Nested opt-out suite sets its own value.
+beforeEach(() => {
+  delete process.env.PI_DASHBOARD_NO_MDNS;
+});
 describe("autoStartServer", () => {
   it("returns server from mDNS when local server is discovered", async () => {
     const localServer: DiscoveredServer = {

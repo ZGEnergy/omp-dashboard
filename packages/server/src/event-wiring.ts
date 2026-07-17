@@ -22,7 +22,6 @@ import { classifyPushTrigger, type PushTriggerPreferences } from "./push/push-tr
 import { setCatalogueForSession } from "./provider-catalogue-cache.js";
 import { spawnPiSession } from "./process-manager.js";
 import { attachRenameTarget, isNameAutoSetFromAttachment } from "./proposal-attach-naming.js";
-import { setCatalogueForSession } from "./provider-catalogue-cache.js";
 import { resolveOrderKey } from "./resolve-order-key.js";
 import { handleDispatchExtensionCommand } from "./rpc-keeper/dispatch-router.js";
 import type { SessionOrderManager } from "./session-order-manager.js";
@@ -31,7 +30,8 @@ import {
   buildModelErrorLogLine,
   extractModelTurnError,
 } from "./spawned-turn-log.js";
-import type { ViewedSessionTracker } from "./viewed-session-tracker.js";
+import { keeperOptsFromSpawnResult } from "./headless-pid-registry.js";
+import { buildPidIndex, classifyProcesses } from "./process-classifier.js";
 
 /**
  * `true` iff `changeName` appears in the cwd's authoritative OpenSpec poll

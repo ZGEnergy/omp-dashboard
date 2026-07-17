@@ -16,6 +16,9 @@ import {
   fetchOmpConfig,
   mergeOmpModelRoles,
 } from "./omp-config-client.js";
+
+/** Plugin has no i18n bundle; keep signature compatible with dashboard t(). */
+const t = (_key: string, _vars: unknown, fallback: string) => fallback;
 /** Canonical OMP built-in role ids (docs settings.md Models section). */
 export const OMP_BUILTIN_ROLES = [
   "default",

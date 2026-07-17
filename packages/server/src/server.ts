@@ -1190,6 +1190,66 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       }
     },
   });
+
+  // ── Goal session supervisor ─────────────────────────────────────
+  // Rides the death fanout (dispatchPluginSessionEnded, wired above) and adds
+  // goal PURSUIT policy. See change: add-goal-session-supervisor.
+  const spawnGoalDriver = async (req: GoalDriverSpawnRequest): Promise<{ success: boolean; message?: string }> => {
+    if (req.reason === "fresh" && req.reprime) {
+      pendingInitialPromptRegistry.enqueue(req.cwd, req.reprime);
+    }
+    pendingGoalLinkRegistry.enqueue(req.cwd, req.goalId);
+    try {
+      const result = await spawnPiSession(req.cwd, {
+        strategy: "headless",
+        spawnToken: req.spawnToken,
+        ...(req.reason === "resume" && req.sessionFile
+          ? { sessionFile: req.sessionFile, mode: "continue" as const }
+          : {}),
+      });
+      if (result.process && result.pid) {
+        browserGateway.headlessPidRegistry.register(
+          result.pid,
+          req.cwd,
+          result.process,
+          result.spawnToken ?? req.spawnToken,
+          keeperOptsFromSpawnResult(result),
+          req.goalId,
+        );
+      }
+      if (!result.success) {
+        pendingGoalLinkRegistry.consume(req.cwd);
+        if (req.reason === "fresh" && req.reprime) pendingInitialPromptRegistry.consume(req.cwd);
+      }
+      return { success: result.success, ...(result.message ? { message: result.message } : {}) };
+    } catch (err) {
+      pendingGoalLinkRegistry.consume(req.cwd);
+      if (req.reason === "fresh" && req.reprime) pendingInitialPromptRegistry.consume(req.cwd);
+      return { success: false, message: err instanceof Error ? err.message : String(err) };
+    }
+  };
+  goalSupervisor = createGoalSupervisor({
+    store: goalStore,
+    isSessionLive: (sessionId) => {
+      const s = sessionManager.get(sessionId);
+      return !!s && s.status !== "ended";
+    },
+    resolveSessionFile: (sessionId) => sessionManager.get(sessionId)?.sessionFile,
+    spawnDriver: spawnGoalDriver,
+    killByToken: (token) => browserGateway.headlessPidRegistry.killByToken(token),
+    killBySession: (sessionId) => browserGateway.headlessPidRegistry.killBySessionId(sessionId),
+    buildReprime: (goal) => buildGoalReprime(goal),
+    headlessAvailable: () => true,
+    log: (msg, meta) => console.error(msg, meta ?? ""),
+  });
+  const GOAL_BOOT_RECONCILE_DELAY_MS = 30_000;
+  const bootReconcileTimer = setTimeout(() => {
+    goalSupervisor?.reconcileOnBoot().catch((err) =>
+      console.error("[goal-supervisor] boot reconcile failed", err),
+    );
+  }, GOAL_BOOT_RECONCILE_DELAY_MS);
+  bootReconcileTimer.unref?.();
+
   // Push routes stay mounted so enable/disable can take effect without a
   // restart; each handler returns 404 while the live master gate is off.
   // See change: add-server-push-notifications.
@@ -1215,6 +1275,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     readEventLoopDelay,
     eventLoopSpikes,
     applyPushConfig,
+    eventStore,
   });
   registerOmpConfigRoutes(fastify, { networkGuard });
   // GET /api/doctor — see change: doctor-rich-output (task 4.2). Auth-gated identically to /api/config.
@@ -1884,7 +1945,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         } else if (scope === "terminal") {
           terminalGateway.handleUpgrade(request, socket, head);
         } else if (scope === "editor") {
-          handleEditorUpgrade(editorManager, request, socket, head);
+          // External code-server editor removed (upstream remove-external-editor-integration).
+          socket.destroy();
         } else if (scope === "live") {
           handleLiveServerUpgrade(liveServerManager, request, socket, head);
         } else {
