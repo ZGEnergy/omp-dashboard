@@ -300,6 +300,68 @@ function readSubagentDetails(
   return out;
 }
 
+function warnMalformedToolEvent(eventType: string): void {
+  console.warn(`[event-reducer] ${eventType} ignored: missing non-empty toolCallId`);
+}
+
+function mergeToolDetails(
+  existing: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!incoming) return existing;
+  const merged = { ...(existing ?? {}), ...incoming };
+  if (Array.isArray(incoming.entries) && incoming.entries.length === 0 && Array.isArray(existing?.entries) && existing.entries.length > 0) {
+    merged.entries = existing.entries;
+  }
+  return merged;
+}
+
+function subagentStatusFromDetails(details: Record<string, unknown> | undefined): SubagentState["status"] | undefined {
+  switch (details?.status) {
+    case "created": return "created";
+    case "running":
+    case "queued": return "running";
+    case "completed":
+    case "steered": return "completed";
+    case "failed":
+    case "error":
+    case "aborted":
+    case "stopped": return "failed";
+    default: return undefined;
+  }
+}
+
+function mergeAgentSubagent(
+  next: SessionState,
+  details: Record<string, unknown> | undefined,
+  terminalStatus?: "completed" | "failed",
+  result?: string,
+): void {
+  const agentId = typeof details?.agentId === "string" && details.agentId.length > 0 ? details.agentId : undefined;
+  if (!agentId) return;
+  const existing = next.subagents.get(agentId);
+  const detailStatus = terminalStatus ?? subagentStatusFromDetails(details) ?? existing?.status ?? "running";
+  const detailError = typeof details?.error === "string" ? details.error : undefined;
+  const patch: Partial<SubagentState> = {
+    status: detailStatus,
+    ...(result !== undefined ? (terminalStatus === "failed" ? { error: result } : { result }) : {}),
+    ...(detailError !== undefined ? { error: detailError } : {}),
+    ...(typeof details?.durationMs === "number" ? { durationMs: details.durationMs } : {}),
+    ...(details?.tokensUsage !== undefined ? { tokens: details.tokensUsage as SubagentState["tokens"] } : {}),
+    ...(typeof details?.toolUses === "number" ? { toolUses: details.toolUses } : {}),
+    ...readSubagentDetails(details),
+  };
+  const merged: SubagentState = {
+    id: agentId,
+    type: existing?.type ?? (typeof details?.subagentType === "string" ? details.subagentType : "unknown"),
+    description: existing?.description ?? (typeof details?.description === "string" ? details.description : ""),
+    ...(existing ?? {}),
+    ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+  } as SubagentState;
+  next.subagents = new Map(next.subagents);
+  next.subagents.set(agentId, merged);
+}
+
 export function createInitialState(): SessionState {
   return {
     messages: [],
@@ -1474,18 +1536,38 @@ export function reduceEvent(
         );
       }
       const args = data.args as Record<string, unknown> | undefined;
-      next.toolCalls.set(toolCallId, {
-        toolCallId,
-        toolName,
-        args,
-        status: "running",
-        startedAt: event.timestamp,
-        // Stamp the emitting inference index; its own `message_start` has
-        // already advanced the counter, so only a LATER inference satisfies the
-        // supersede proof. See change: fix-stuck-tool-card-superseded-heal.
-        emittedAtInferenceSeq: next.assistantInferenceSeq,
-      });
-      next.currentTool = toolName;
+      const startDetails = data.details && typeof data.details === "object"
+        ? data.details as Record<string, unknown>
+        : undefined;
+      // End-before-start (and re-replay of start after end) must not resurrect a
+      // terminal map entry as running — that puts completed tools back into the
+      // in-flight list / stale-heal path while the message card stays complete.
+      const existingCall = next.toolCalls.get(toolCallId);
+      const existingIsTerminal =
+        existingCall?.status === "complete" || existingCall?.status === "error";
+      if (existingIsTerminal && existingCall) {
+        next.toolCalls.set(toolCallId, {
+          ...existingCall,
+          toolCallId,
+          toolName: toolName !== "unknown" ? toolName : existingCall.toolName,
+          ...(args !== undefined ? { args } : {}),
+          // Preserve terminal status/result/startedAt/emittedAtInferenceSeq.
+        });
+        // Do not set currentTool — call is already finished.
+      } else {
+        next.toolCalls.set(toolCallId, {
+          toolCallId,
+          toolName,
+          args,
+          status: "running",
+          startedAt: event.timestamp,
+          // Stamp the emitting inference index; its own `message_start` has
+          // already advanced the counter, so only a LATER inference satisfies the
+          // supersede proof. See change: fix-stuck-tool-card-superseded-heal.
+          emittedAtInferenceSeq: next.assistantInferenceSeq,
+        });
+        next.currentTool = toolName;
+      }
 
       // Track file-modifying tools
       const toolLower = toolName.toLowerCase();
@@ -1510,6 +1592,9 @@ export function reduceEvent(
           ...next.messages[existingToolIdx],
           toolName,
           args,
+          ...(mergeToolDetails(startDetails, next.messages[existingToolIdx].toolDetails)
+            ? { toolDetails: mergeToolDetails(startDetails, next.messages[existingToolIdx].toolDetails) }
+            : {}),
           // Keep startedAt/timestamp from the original row — the existing
           // values are already correct for terminal rows, and refreshing them
           // would invalidate `duration` derived from startedAt at end-time.
@@ -1527,6 +1612,7 @@ export function reduceEvent(
           toolName,
           toolCallId,
           args,
+          ...(startDetails ? { toolDetails: startDetails } : {}),
           toolStatus: "running",
           timestamp: event.timestamp,
           startedAt: event.timestamp,
@@ -1536,180 +1622,151 @@ export function reduceEvent(
     }
 
     case "tool_execution_update": {
-      const toolCallId = data.toolCallId as string;
+      const toolCallId = data.toolCallId;
+      if (typeof toolCallId !== "string" || toolCallId.length === 0) {
+        warnMalformedToolEvent("tool_execution_update");
+        break;
+      }
+      const existingTool = next.toolCalls.get(toolCallId);
+      const idx = next.messages.findLastIndex((m) => m.toolCallId === toolCallId);
+      const toolName = existingTool?.toolName ?? (typeof data.toolName === "string" && data.toolName.length > 0 ? data.toolName : "unknown");
+      const args = data.args !== undefined ? data.args as Record<string, unknown> : existingTool?.args;
+      const startedAt = existingTool?.startedAt ?? (typeof data.startedAt === "number" ? data.startedAt : event.timestamp);
+      if (!existingTool) {
+        next.toolCalls.set(toolCallId, {
+          toolCallId,
+          toolName,
+          args,
+          status: "running",
+          startedAt,
+          emittedAtInferenceSeq: next.assistantInferenceSeq,
+        });
+      }
+      let messageIdx = idx;
+      if (messageIdx === -1) {
+        next.messages = [...next.messages, {
+          id: `tool-${toolCallId}`,
+          role: "toolResult",
+          content: toolName,
+          toolName,
+          toolCallId,
+          args,
+          toolStatus: existingTool?.status ?? "running",
+          timestamp: event.timestamp,
+          startedAt,
+        }];
+        messageIdx = next.messages.length - 1;
+      } else if (existingTool && next.messages[messageIdx].toolName !== toolName) {
+        next.messages = [...next.messages];
+        next.messages[messageIdx] = { ...next.messages[messageIdx], toolName, args: args ?? next.messages[messageIdx].args };
+      }
       const partialResult = data.partialResult;
-      if (partialResult) {
-        const idx = next.messages.findLastIndex((m) => m.toolCallId === toolCallId);
-        if (idx !== -1) {
-          next.messages = [...next.messages];
-          // Structured partialResult (e.g. Agent tool sends { content, details })
-          if (typeof partialResult === "object" && partialResult !== null) {
-            const structured = partialResult as Record<string, unknown>;
-            const details = structured.details as Record<string, unknown> | undefined;
-            // Extract text from content array or stringify
-            let text: string | undefined;
-            const content = structured.content;
-            if (Array.isArray(content) && content.length > 0 && content[0]?.text) {
-              text = content[0].text as string;
-            } else if (content != null) {
-              text = String(content);
-            }
-            next.messages[idx] = {
-              ...next.messages[idx],
-              ...(text != null ? { result: truncateOutputForDisplay(text) } : {}),
-              ...(details ? { toolDetails: details } : {}),
-            };
-          } else {
-            // Plain string partialResult (standard tools)
-            next.messages[idx] = {
-              ...next.messages[idx],
-              result: truncateOutputForDisplay(partialResult as string),
-            };
+      if (partialResult !== undefined) {
+        next.messages = [...next.messages];
+        const current = next.messages[messageIdx];
+        if (typeof partialResult === "object" && partialResult !== null) {
+          const structured = partialResult as Record<string, unknown>;
+          const details = structured.details as Record<string, unknown> | undefined;
+          let text: string | undefined;
+          const content = structured.content;
+          if (Array.isArray(content) && content.length > 0 && content[0]?.text) {
+            text = content[0].text as string;
+          } else if (content != null) {
+            text = String(content);
           }
+          const mergedDetails = mergeToolDetails(current.toolDetails, details);
+          next.messages[messageIdx] = {
+            ...current,
+            ...(text != null ? { result: truncateOutputForDisplay(text) } : {}),
+            ...(mergedDetails ? { toolDetails: mergedDetails } : {}),
+          };
+          if (toolName === "Agent") mergeAgentSubagent(next, mergedDetails);
+        } else {
+          next.messages[messageIdx] = {
+            ...current,
+            result: truncateOutputForDisplay(String(partialResult)),
+          };
         }
       }
       break;
     }
 
     case "tool_execution_end": {
-      const toolCallId = data.toolCallId as string;
-      // Supersede heal (`healedBy:"superseded"`) is a client-synthesized
-      // placeholder. D4: it MUST NOT clobber a real terminal row nor another
-      // superseded row — only a `running` row is eligible. A real end (no
-      // `healedBy`) always proceeds and overwrites a superseded placeholder.
-      // See change: fix-stuck-tool-card-superseded-heal.
-      const healedBy = data.healedBy as string | undefined;
-      const existing = next.toolCalls.get(toolCallId);
-      // A superseded synth may only finalize a live `running` map entry. An
-      // absent entry (`existing === undefined`) is also rejected so a stray
-      // synth can never mutate a message row while leaving `toolCalls`
-      // inconsistent. Real ends (no `healedBy`) are unaffected.
-      if (healedBy === "superseded" && existing?.status !== "running") {
+      const toolCallId = data.toolCallId;
+      if (typeof toolCallId !== "string" || toolCallId.length === 0) {
+        warnMalformedToolEvent("tool_execution_end");
         break;
       }
-      if (existing) {
-        next.toolCalls.set(toolCallId, {
-          ...existing,
-          status: (data.isError as boolean) ? "error" : "complete",
-        });
-      }
+      const healedBy = data.healedBy as string | undefined;
+      const existing = next.toolCalls.get(toolCallId);
+      // A superseded synth may only finalize a live running map entry. It must
+      // never create a phantom row when the original row is absent.
+      if (healedBy === "superseded" && existing?.status !== "running") break;
+
+      const isError = data.isError === true;
+      const existingMessageIdx = next.messages.findLastIndex((m) => m.toolCallId === toolCallId);
+      const existingMessage = existingMessageIdx === -1 ? undefined : next.messages[existingMessageIdx];
+      const toolName = existing?.toolName ?? existingMessage?.toolName ?? (typeof data.toolName === "string" && data.toolName.length > 0 ? data.toolName : "unknown");
+      const args = existing?.args ?? existingMessage?.args ?? (data.args as Record<string, unknown> | undefined);
+      const startedAt = existing?.startedAt ?? existingMessage?.startedAt ?? (typeof data.startedAt === "number" ? data.startedAt : undefined);
+      const result = data.result !== undefined ? toDisplayString(data.result) : undefined;
+      next.toolCalls.set(toolCallId, {
+        ...(existing ?? { toolCallId, toolName, args }),
+        toolCallId,
+        toolName,
+        ...(args !== undefined ? { args } : {}),
+        status: isError ? "error" : "complete",
+        ...(startedAt !== undefined ? { startedAt } : {}),
+        ...(result !== undefined ? { result: truncateOutputForDisplay(result) } : {}),
+      });
       next.currentTool = undefined;
 
-      // Extract images from tool result (live events have result.content, replayed have data.images)
       const images = extractToolResultImages(data);
+      const endDetails = data.details as Record<string, unknown> | undefined;
+      let mergedDetails = mergeToolDetails(existingMessage?.toolDetails, endDetails);
+      if (!endDetails && existingMessage?.toolDetails) {
+        mergedDetails = { ...existingMessage.toolDetails, status: isError ? "error" : "completed" };
+      }
+      let finalDetails = mergedDetails;
+      if (healedBy === "superseded") {
+        finalDetails = { ...(finalDetails ?? {}), healedBy: "superseded" };
+      } else if (finalDetails && "healedBy" in finalDetails) {
+        const { healedBy: _dropped, ...rest } = finalDetails;
+        finalDetails = rest;
+      }
 
-      // Update existing tool message in-place
-      const idx = next.messages.findLastIndex((m) => m.toolCallId === toolCallId);
-      if (idx !== -1) {
-        const result = data.result as string | undefined;
-        const msgStartedAt = next.messages[idx].startedAt;
+      if (existingMessageIdx !== -1) {
+        const message = next.messages[existingMessageIdx];
         next.messages = [...next.messages];
-        // Extract tool details (e.g. AgentDetails from replayed sessions)
-        const endDetails = data.details as Record<string, unknown> | undefined;
-        // For live events (no endDetails), update existing toolDetails.status
-        // so renderers (e.g. AgentToolRenderer) see the final status
-        const isError = data.isError as boolean;
-        let mergedDetails: Record<string, unknown> | undefined;
-        if (endDetails) {
-          mergedDetails = endDetails;
-        } else if (next.messages[idx].toolDetails) {
-          mergedDetails = {
-            ...next.messages[idx].toolDetails,
-            status: isError ? "error" : "completed",
-          };
-        }
-        // Thread the supersede marker: set it on a synthesized heal; CLEAR it
-        // when a real end (no `healedBy`) overwrites a prior superseded
-        // placeholder, so the recovered badge disappears with the real body.
-        // See change: fix-stuck-tool-card-superseded-heal.
-        let finalDetails = mergedDetails;
-        if (healedBy === "superseded") {
-          finalDetails = { ...(finalDetails ?? {}), healedBy: "superseded" };
-        } else if (finalDetails && "healedBy" in finalDetails) {
-          const { healedBy: _dropped, ...rest } = finalDetails;
-          finalDetails = rest;
-        }
-        next.messages[idx] = {
-          ...next.messages[idx],
+        next.messages[existingMessageIdx] = {
+          ...message,
+          toolName,
+          args,
           toolStatus: isError ? "error" : "complete",
-          result: result ? truncateOutputForDisplay(result) : next.messages[idx].result,
-          duration: msgStartedAt ? event.timestamp - msgStartedAt : undefined,
+          ...(result !== undefined ? { result: truncateOutputForDisplay(result) } : {}),
+          ...(startedAt !== undefined ? { duration: event.timestamp - startedAt } : {}),
           ...(images ? { images } : {}),
           ...(finalDetails ? { toolDetails: finalDetails } : {}),
         };
+      } else if (healedBy !== "superseded") {
+        next.messages = [...next.messages, {
+          id: `tool-${toolCallId}`,
+          role: "toolResult",
+          content: toolName,
+          toolName,
+          toolCallId,
+          args,
+          toolStatus: isError ? "error" : "complete",
+          timestamp: event.timestamp,
+          ...(startedAt !== undefined ? { startedAt, duration: event.timestamp - startedAt } : {}),
+          ...(result !== undefined ? { result: truncateOutputForDisplay(result) } : {}),
+          ...(images ? { images } : {}),
+          ...(finalDetails ? { toolDetails: finalDetails } : {}),
+        }];
       }
 
-      // Subagent backfill: when this tool_execution_end refers to a completed
-      // Agent run (toolName === "Agent" + details.agentId), also write to
-      // next.subagents so `/resume` and page-refresh re-hydrate the inspector
-      // map. Live `subagent_*` events normally populate this map, but
-      // state-replay.ts does NOT synthesize them — it only re-emits the
-      // tool_execution_end. Without this branch, expand/popout for completed
-      // subagents shows "Subagent not found" after refresh.
-      //
-      // Merge semantics preserve prior non-undefined fields (live
-      // subagent_completed could arrive before or after this backfill),
-      // making the two paths commutative.
-      //
-      // See change: add-subagent-inspector §12 and design.md Decision 7.
-      {
-        const toolName = data.toolName as string | undefined;
-        const endDetails = data.details as Record<string, unknown> | undefined;
-        const agentId =
-          endDetails && typeof endDetails.agentId === "string" ? endDetails.agentId : undefined;
-        if (toolName === "Agent" && agentId) {
-          const isError = data.isError as boolean;
-          const resultStr = typeof data.result === "string" ? (data.result as string) : undefined;
-          const detailError =
-            endDetails && typeof endDetails.error === "string"
-              ? (endDetails.error as string)
-              : undefined;
-          const durationMs =
-            endDetails && typeof endDetails.durationMs === "number"
-              ? (endDetails.durationMs as number)
-              : undefined;
-          const tokensUsage = endDetails?.tokensUsage as SubagentState["tokens"] | undefined;
-          const toolUses =
-            endDetails && typeof endDetails.toolUses === "number"
-              ? (endDetails.toolUses as number)
-              : undefined;
-          const detailsPatch = readSubagentDetails(endDetails);
-
-          // Build the patch with the explicit-fields-take-precedence rule.
-          const patch: Partial<SubagentState> = {
-            status: isError ? "failed" : "completed",
-            ...(resultStr && !isError ? { result: resultStr } : {}),
-            ...(isError ? { error: resultStr ?? detailError } : {}),
-            ...(durationMs !== undefined ? { durationMs } : {}),
-            ...(tokensUsage !== undefined ? { tokens: tokensUsage } : {}),
-            ...(toolUses !== undefined ? { toolUses } : {}),
-            ...detailsPatch,
-          };
-
-          next.subagents = new Map(next.subagents);
-          const existingSub = next.subagents.get(agentId);
-          // mergeNonUndefined semantics: preserve prior non-undefined fields
-          // rather than overwrite with undefined. This makes live + replay
-          // paths commutative regardless of arrival order.
-          const merged: SubagentState = {
-            id: agentId,
-            type:
-              existingSub?.type ??
-              (typeof endDetails?.subagentType === "string"
-                ? (endDetails.subagentType as string)
-                : "unknown"),
-            description:
-              existingSub?.description ??
-              (typeof endDetails?.description === "string"
-                ? (endDetails.description as string)
-                : ""),
-            ...existingSub,
-            ...Object.fromEntries(
-              Object.entries(patch).filter(([, v]) => v !== undefined),
-            ),
-          } as SubagentState;
-          next.subagents.set(agentId, merged);
-        }
+      if (toolName === "Agent") {
+        mergeAgentSubagent(next, finalDetails, isError ? "failed" : "completed", result);
       }
       break;
     }

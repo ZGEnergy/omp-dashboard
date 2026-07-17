@@ -43,6 +43,8 @@ export function replayEntriesAsEvents(
   // during the loop, then emitted sorted by seq so the client's idempotent
   // reduceFlowEvent rebuilds the flow card identically to the live path.
   const flowEventRecords: Array<{ seq: number; eventType: string; data: unknown; ts: number }> = [];
+  const openAgentToolCalls = new Set<string>(); // known Agent starts stay open in tail replay
+  const terminalAgentToolCalls = new Set<string>();
 
   let currentModel = "";
 
@@ -81,14 +83,25 @@ export function replayEntriesAsEvents(
         // Emit tool_execution_start for each tool call
         for (const part of content) {
           if (part.type === "toolCall") {
+            const agentDetails = part.name === "Agent" ? extractAgentSnapshot(part) : undefined;
             messages.push(makeEvent(sessionId, "tool_execution_start", ts, {
               toolCallId: part.id,
               toolName: part.name,
               args: typeof part.arguments === "string"
                 ? tryParseJson(part.arguments)
                 : part.arguments,
+              ...(agentDetails ? { details: agentDetails } : {}),
             }));
             openToolCalls.add(part.id);
+            if (agentDetails) openAgentToolCalls.add(part.id);
+            if (agentDetails) {
+              messages.push(makeEvent(sessionId, "subagent_started", ts, {
+                id: agentDetails.agentId,
+                type: agentDetails.subagentType ?? agentDetails.type ?? "unknown",
+                description: agentDetails.description ?? "",
+                details: agentDetails,
+              }));
+            }
           }
         }
         // Emit message_update (sets streamingText) then message_end (finalizes)
@@ -148,8 +161,24 @@ export function replayEntriesAsEvents(
         if (msg.details && typeof msg.details === "object") {
           eventData.details = msg.details;
         }
+        const agentDetails = msg.toolName === "Agent" ? extractAgentSnapshot(msg.details) : undefined;
+        if (agentDetails && !terminalAgentToolCalls.has(msg.toolCallId)) {
+          terminalAgentToolCalls.add(msg.toolCallId);
+          const isError = msg.isError === true;
+          messages.push(makeEvent(sessionId, isError ? "subagent_failed" : "subagent_completed", ts, {
+            id: agentDetails.agentId,
+            type: agentDetails.subagentType ?? agentDetails.type ?? "unknown",
+            description: agentDetails.description ?? "",
+            ...(isError ? { error: agentDetails.error ?? resultText } : { result: resultText }),
+            ...(agentDetails.durationMs !== undefined ? { durationMs: agentDetails.durationMs } : {}),
+            ...(agentDetails.tokensUsage !== undefined ? { tokens: agentDetails.tokensUsage } : {}),
+            ...(agentDetails.toolUses !== undefined ? { toolUses: agentDetails.toolUses } : {}),
+            details: msg.details,
+          }));
+        }
         messages.push(makeEvent(sessionId, "tool_execution_end", ts, eventData));
         openToolCalls.delete(msg.toolCallId);
+        openAgentToolCalls.delete(msg.toolCallId);
       }
     }
 
@@ -173,6 +202,7 @@ export function replayEntriesAsEvents(
 
   // Close any orphaned tool calls (agent killed mid-execution)
   for (const toolCallId of openToolCalls) {
+    if (openAgentToolCalls.has(toolCallId)) continue;
     const startEvent = messages.find(
       (m) => m.event.eventType === "tool_execution_start" && (m.event.data as any).toolCallId === toolCallId,
     );
@@ -195,6 +225,19 @@ export function replayEntriesAsEvents(
   }
 
   return messages;
+}
+
+function extractAgentSnapshot(value: unknown): Record<string, any> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Record<string, any>;
+  if (typeof candidate.agentId === "string" && candidate.agentId.length > 0) return candidate;
+  for (const key of ["details", "agentDetails", "agentSnapshot"]) {
+    const nested = candidate[key];
+    if (nested && typeof nested === "object" && typeof nested.agentId === "string" && nested.agentId.length > 0) {
+      return nested as Record<string, any>;
+    }
+  }
+  return undefined;
 }
 
 function makeEvent(
