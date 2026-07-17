@@ -40,7 +40,7 @@ jobs:
           chmod +x scripts/upstream-sync.sh
           scripts/upstream-sync.sh verify
 
-  # Full monorepo suite is still red on main (merge debt). Advisory only.
+  # Full monorepo unit suite is green (electron still excluded). Advisory so flakes cannot block land.
   zge-full-tests:
     name: zge-full-tests (advisory)
     runs-on: ubuntu-latest

@@ -9,6 +9,11 @@ import { mergeSessionMeta, writeSessionMeta } from "@blackbelt-technology/pi-das
 import { extractTurnStats } from "@blackbelt-technology/pi-dashboard-shared/stats-extractor.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { BrowserGateway } from "./browser-gateway.js";
+import type { EventStore } from "./memory-event-store.js";
+import type { SessionManager } from "./memory-session-manager.js";
+import type { PendingForkRegistry } from "./pending-fork-registry.js";
+import type { PreferencesStore } from "./preferences-store.js";
+import type { PiGateway } from "./pi-gateway.js";
 import { createCanvasAccumulator } from "./canvas-accumulator.js";
 import { readEffectiveCanvasTypes } from "./canvas-settings.js";
 import { decideDashboardSource } from "./dashboard-source-decision.js";
