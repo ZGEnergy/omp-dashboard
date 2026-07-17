@@ -103,9 +103,10 @@ describe("registerAskTool", () => {
     )) as { content: Array<{ text: string }>; details: { selectedOptions: string[] } };
 
     expect(select).toHaveBeenCalledTimes(1);
-    expect(select.mock.calls[0][0]).toBe("Favorite color?");
-    expect(select.mock.calls[0][1]).toEqual(["Red", "Blue"]);
-    expect(select.mock.calls[0][2]).toMatchObject({ toolCallId: "tc1" });
+    const selectCall = select.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
+    expect(selectCall[0]).toBe("Favorite color?");
+    expect(selectCall[1]).toEqual(["Red", "Blue"]);
+    expect(selectCall[2]).toMatchObject({ toolCallId: "tc1" });
     expect(result.details.selectedOptions).toEqual(["Blue"]);
     expect(result.content[0]?.text).toContain("User answered ask");
   });
