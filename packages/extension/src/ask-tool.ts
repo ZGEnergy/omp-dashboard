@@ -79,6 +79,10 @@ interface UiCtx {
   };
 }
 
+function asAbortSignal(value: unknown): AbortSignal | undefined {
+  return value instanceof AbortSignal ? value : undefined;
+}
+
 function optionLabels(options: AskOption[] | undefined): string[] {
   if (!Array.isArray(options)) return [];
   return options
@@ -209,7 +213,7 @@ export function registerAskTool(pi: ExtensionAPI): void {
     async execute(
       toolCallId: unknown,
       rawParams: unknown,
-      _signal: unknown,
+      signal: unknown,
       _onUpdate: unknown,
       ctx: unknown,
     ) {
@@ -218,14 +222,19 @@ export function registerAskTool(pi: ExtensionAPI): void {
         throw new Error("ask: questions must be a non-empty array");
       }
       const uiCtx = ctx as UiCtx;
+      const abortSignal = asAbortSignal(signal);
       const tcid =
         typeof toolCallId === "string" && toolCallId.length > 0 ? toolCallId : undefined;
       const withTcid = (opts?: Record<string, unknown>): Record<string, unknown> | undefined => {
-        if (!tcid) return opts;
-        return { ...(opts ?? {}), toolCallId: tcid };
+        const base = { ...(opts ?? {}) };
+        if (tcid) base.toolCallId = tcid;
+        if (abortSignal) base.signal = abortSignal;
+        return Object.keys(base).length > 0 ? base : undefined;
       };
 
       // Multi-question → one batch request when the bridge exposes ui.batch.
+      // On TUI the PromptBus batch arm sequentializes originals.select/input
+      // (see bridge.ts); without that arm this hung with no selectable UI.
       if (params.questions.length > 1 && typeof uiCtx.ui.batch === "function") {
         const batchQuestions = params.questions.map((q) => {
           const method = methodForQuestion(q);
