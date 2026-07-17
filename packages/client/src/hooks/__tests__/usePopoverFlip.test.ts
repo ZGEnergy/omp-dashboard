@@ -26,6 +26,15 @@ function makeRefH(left: number, right: number) {
   return { current: el } as React.RefObject<HTMLElement>;
 }
 
+function makeBoundaryRef(left: number, right: number) {
+  const el = {
+    getBoundingClientRect: vi.fn(
+      () => ({ top: 0, bottom: 1000, left, right, width: right - left, height: 1000 }) as DOMRect,
+    ),
+  } as unknown as HTMLElement;
+  return { current: el } as React.RefObject<HTMLElement>;
+}
+
 function setViewportHeight(h: number) {
   Object.defineProperty(window, "innerHeight", { value: h, configurable: true, writable: true });
 }
@@ -130,6 +139,62 @@ describe("usePopoverFlip", () => {
     // Both < 256 (natural width); left side larger → flip + clamp to 242.
     expect(result.current.anchorRight).toBe(false);
     expect(result.current.maxWidth).toBe(242);
+  });
+
+  it("uses the containing pane boundary for an expanded-sidebar trigger", () => {
+    setViewportWidth(1440);
+    const ref = makeRefH(536, 596);
+    const boundaryRef = makeBoundaryRef(500, 1440);
+    const { result } = renderHook(() =>
+      usePopoverFlip(ref, { open: true, estimatedWidth: 256, boundaryRef }),
+    );
+    expect(result.current.anchorRight).toBe(false);
+    // Pane-left to trigger-left leaves 896px for a left-anchored popover.
+    expect(result.current.maxWidth).toBe(896);
+  });
+
+  it("keeps the right anchor when the popover fits near the pane's right edge", () => {
+    setViewportWidth(1440);
+    const ref = makeRefH(1300, 1380);
+    const boundaryRef = makeBoundaryRef(500, 1440);
+    const { result } = renderHook(() =>
+      usePopoverFlip(ref, { open: true, estimatedWidth: 256, boundaryRef }),
+    );
+    expect(result.current.anchorRight).toBe(true);
+    // Trigger-right to pane-left leaves 872px on the right-anchor side.
+    expect(result.current.maxWidth).toBe(872);
+  });
+
+  it("remeasures boundary geometry on resize and scroll", () => {
+    setViewportWidth(1440);
+    const ref = makeRefH(536, 596);
+    const boundaryRef = makeBoundaryRef(500, 1440);
+    const { result } = renderHook(() =>
+      usePopoverFlip(ref, { open: true, estimatedWidth: 256, boundaryRef }),
+    );
+    expect(result.current.anchorRight).toBe(false);
+    expect(result.current.maxWidth).toBe(896);
+
+    ref.current!.getBoundingClientRect = vi.fn(
+      () => ({ top: 100, bottom: 130, left: 100, right: 160, width: 60, height: 30 }) as DOMRect,
+    );
+    boundaryRef.current!.getBoundingClientRect = vi.fn(
+      () => ({ top: 0, bottom: 1000, left: 0, right: 700, width: 700, height: 1000 }) as DOMRect,
+    );
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current.anchorRight).toBe(false);
+    expect(result.current.maxWidth).toBe(592);
+
+    ref.current!.getBoundingClientRect = vi.fn(
+      () => ({ top: 100, bottom: 130, left: 500, right: 560, width: 60, height: 30 }) as DOMRect,
+    );
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    expect(result.current.anchorRight).toBe(true);
+    expect(result.current.maxWidth).toBe(552);
   });
 
   it("preserves the right-anchor by default (unknown estimatedWidth) even near the left edge", () => {
