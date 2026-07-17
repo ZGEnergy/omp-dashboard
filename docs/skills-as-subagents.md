@@ -7,6 +7,8 @@ role best fits each function.
 > Audience: maintainers deciding when to delegate a skill's work to an isolated
 > subagent instead of running it inline in the main agent's context.
 
+> **Note:** The portable, tech-stack-independent methodology for wrapping skills as subagents now lives in the [`skill-to-subagent`](../packages/authoring-toolkit/.pi/skills/skill-to-subagent/) skill — invoke `/skill:skill-to-subagent`. This doc is pi-agent-dashboard's *applied instance*: the scored skills (§3), the role map (§4), per-skill context/KB injection (§5), and the shipped wrapper agents (§7) are repo-specific and remain here.
+
 ## Table of contents
 
 - [1. Skill vs. subagent — two mechanisms](#1-skill-vs-subagent--two-mechanisms)
@@ -22,69 +24,11 @@ role best fits each function.
 
 ## 1. Skill vs. subagent — two mechanisms
 
-They are **orthogonal**. A skill is instructions loaded *into* the main agent. A subagent
-is a worker spawned *beside* it in an isolated context window.
-
-| | **Skill** (`.pi/skills/<name>/SKILL.md`) | **Subagent** (`.pi/agents/<Name>.md`) |
-|---|---|---|
-| What it is | Markdown instructions + bundled `scripts/`, `references/`, `assets/` | A spawnable worker with its own frontmatter (`model`, `tools`, `inherit_context`) + prompt |
-| Loading | Progressive disclosure: (1) name+desc always in prompt, (2) body on NL-trigger or `/skill:name`, (3) resources on demand | Invoked via the `Agent` tool (`subagent_type`) |
-| Context | **Shares** the parent's budget | **Isolated** window; returns a distilled summary, then its context is burned |
-| Model | Runs on the parent's model | Own `model:` (role alias or literal id) |
-| Best for | Procedural knowledge the main agent should follow inline | Read-heavy / batch / self-contained work that would otherwise bloat the parent |
-
-Source of truth: pi docs `skills.md` (progressive disclosure, `/skill:name`, frontmatter)
-and the `pi-dashboard-subagents` producer (`inherit_context` forks a *compressed* snapshot
-of the parent conversation into the child; default `true`, per-agent overridable).
-
-**So "can a skill be a subagent?"** — Not automatically, but you can **bridge** them: the
-skill stays the single source of truth; a thin agent `.md` spawns an isolated worker whose
-prompt says *"load and follow `/skill:<name>`, work in isolation, return a distilled report."*
+Skills are instructions loaded inline into the main agent; subagents are isolated workers spawned beside it with their own context window, model, and tools. The portable breakdown (fitness scoring, bridge recipe, context tuning) now lives in the [`skill-to-subagent` skill](../packages/authoring-toolkit/.pi/skills/skill-to-subagent/) — invoke `/skill:skill-to-subagent` for the complete procedure. This section summarizes the two mechanisms; see §3–§5 below for pi-agent-dashboard's scored skills, role map, and per-skill context.
 
 ## 2. The bridge: wrapping a skill as a subagent
 
-```mermaid
-flowchart LR
-    U[User / main agent] -->|Agent tool<br/>subagent_type| S{{"Agent .md<br/>(thin spawn shell)"}}
-    S -->|model: role alias| M["role → model<br/>(providers.json)"]
-    S -->|inherit_context| C["compressed parent<br/>snapshot (opt)"]
-    S -->|prompt| L["load /skill:name"]
-    L --> K[".pi/skills/name/SKILL.md<br/>+ scripts/ refs/ assets/"]
-    K --> W["isolated work<br/>(read / run / synthesize)"]
-    W -->|distilled report ≤2KB| U
-    subgraph "isolated context — burned after"
-      L
-      K
-      W
-    end
-```
-
-Recipe — an agent `.md` that wraps a skill:
-
-```yaml
----
-description: <when the parent should spawn this>. Wraps /skill:<name>.
-model: "@fast"           # role alias, resolved at spawn from providers.json
-inherit_context: false   # batch jobs: false (cheaper); analysis-in-context: true
-tools: [read, grep, find, ls, bash]   # least-privilege; add write only if the skill emits files
----
-
-You are the <Name> subagent. Load and follow `/skill:<name>`.
-Work entirely in isolation. Do NOT dump raw file contents back to the parent —
-return only a distilled summary (findings + artifact paths). Then stop.
-```
-
-Notes:
-- **Model** is chosen by *role alias* (`@fast`, `@research`, `@coding`, `@vision`, `@compact`)
-  so the agent follows the operator's role config and stays portable. Overridable per-call via
-  the `Agent` tool's `model` param.
-- **`inherit_context: false`** for self-contained batch jobs — they need only their inputs, not
-  parent chatter, so the child starts cheaper. `true` when the skill's judgement depends on the
-  surrounding decision context.
-- **SDK quirk:** `createAgentSession()` builds its own `DefaultResourceLoader` unless a
-  `resourceLoader` is passed, so a spawned subagent gets *fresh* skill/extension discovery, not
-  the parent's already-loaded set. The wrapped skill must therefore be discoverable on disk
-  (it is — it lives under `packages/*/.pi/skills`).
+The recipe for wrapping a skill as a thin spawn shell — frontmatter (model, inherit_context, tools), prompt shape, and SDK quirks — is detailed in the [`skill-to-subagent` skill](../packages/authoring-toolkit/.pi/skills/skill-to-subagent/). See that skill for the Mermaid diagram, YAML template, and context-tuning notes. The sections below (§3–§7) are pi-agent-dashboard's repo-specific application: scored fitness per skill, role-alias routing, per-skill KB injection, and the shipped agents.
 
 ## 3. Subagent-fitness scoring
 
@@ -187,16 +131,7 @@ named in the prompt; (d) **`inherit_context`** tuned per skill.
 
 ## 6. The skill-authoring workflow
 
-The repeatable process (from the `skill-creator` skill) plus this repo's conventions.
-
-Six steps:
-1. **Understand with concrete examples** — what triggers it, sample user phrasings.
-2. **Plan reusable resources** — which `scripts/` / `references/` / `assets/` avoid re-work.
-3. **Initialize** — `init_skill.py <name> --path <dir>` scaffolds SKILL.md + resource dirs.
-4. **Edit** — imperative voice; keep SKILL.md < 500 lines; push bulk detail into `references/`
-   (progressive disclosure); test any scripts by running them.
-5. **Package** — `package_skill.py <folder>` validates then zips to `<name>.skill`.
-6. **Iterate** — use on real tasks, note friction, refine.
+The authoring workflow — planning, initializing, editing, packaging, and iterating — is covered by two skills: [`skill-creator`](../packages/authoring-toolkit/.pi/skills/skill-creator/) for crafting new skills from scratch, and [`skill-to-subagent`](../packages/authoring-toolkit/.pi/skills/skill-to-subagent/) for turning an existing skill into an isolated worker. Invoke them as `/skill:skill-creator` and `/skill:skill-to-subagent` respectively.
 
 Repo-specific conventions:
 - Skills live at `packages/*/.pi/skills/<name>/` (or `.pi/skills/` for project skills); trigger by

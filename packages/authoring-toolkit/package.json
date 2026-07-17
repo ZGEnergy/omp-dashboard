@@ -15,6 +15,7 @@
   "pi": {
     "skills": [
       ".pi/skills/skill-creator",
+      ".pi/skills/skill-to-subagent",
       ".pi/skills/session-to-guideline"
     ]
   },
