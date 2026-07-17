@@ -129,17 +129,34 @@ export class PromptBus {
 
   /**
    * Submit a prompt. Returns a promise that resolves when any adapter answers.
+   * Optional `signal` cancels the pending prompt (tool abort / Esc interrupt).
    */
-  request(options: Omit<PromptRequest, "id">): Promise<PromptResponse> {
+  request(
+    options: Omit<PromptRequest, "id">,
+    signal?: AbortSignal,
+  ): Promise<PromptResponse> {
     const id = crypto.randomUUID();
     const request: PromptRequest = { id, ...options };
 
     return new Promise<PromptResponse>((resolve) => {
+      if (signal?.aborted) {
+        resolve({ id, cancelled: true, source: "__bus__" });
+        return;
+      }
+
       const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       // timeoutMs <= 0 means infinite — never fire a cancellation timer.
-      const timer = timeoutMs > 0
-        ? setTimeout(() => { this.cancel(id); }, timeoutMs)
-        : (null as unknown as ReturnType<typeof setTimeout>);
+      const timer =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              this.cancel(id);
+            }, timeoutMs)
+          : (null as unknown as ReturnType<typeof setTimeout>);
+
+      const onAbort = (): void => {
+        this.cancel(id);
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
 
       // Distribute to all adapters and collect claims
       const claims: PendingPrompt["claims"] = [];
@@ -155,7 +172,7 @@ export class PromptBus {
       }
 
       // Resolve dashboard rendering: first adapter with a component wins
-      const componentClaim = claims.find(c => c.claim.component);
+      const componentClaim = claims.find((c) => c.claim.component);
       let resolvedComponent: PromptComponent | undefined;
       let resolvedPlacement: string | undefined;
       if (componentClaim) {
@@ -175,7 +192,17 @@ export class PromptBus {
       }
 
       // Store pending state (with resolved component for reconnect replay)
-      this.pending.set(id, { request, resolve, timer, claims, resolvedComponent, resolvedPlacement });
+      this.pending.set(id, {
+        request,
+        resolve: (response) => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve(response);
+        },
+        timer,
+        claims,
+        resolvedComponent,
+        resolvedPlacement,
+      });
 
       // Send to dashboard
       if (resolvedComponent && this.options.onDashboardRequest) {

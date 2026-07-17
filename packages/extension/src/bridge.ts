@@ -2140,6 +2140,91 @@ function initBridge(pi: ExtensionAPI) {
                 answer = await originals.confirm(prompt.question, "", { signal: ac.signal });
               } else if (prompt.type === "editor" && originals.editor) {
                 answer = await originals.editor(prompt.question, prompt.defaultValue || "", { signal: ac.signal });
+              } else if (prompt.type === "batch") {
+                // Multi-question wizard is dashboard-first. On pure TUI there was
+                // previously no arm, so `ui.batch` (used by bridge `ask` for 2+
+                // questions and by ask_user method:batch) hung forever with no
+                // selector and Esc only aborted the agent turn — not the bus.
+                // Sequential originals.* keeps TUI interactive and still races
+                // dashboard via first-response-wins.
+                const questions = Array.isArray(prompt.metadata?.questions)
+                  ? (prompt.metadata.questions as Array<Record<string, unknown>>)
+                  : [];
+                const answers: Array<Record<string, unknown>> = [];
+                let cancelled = questions.length === 0;
+                for (const q of questions) {
+                  if (ac.signal.aborted) {
+                    cancelled = true;
+                    break;
+                  }
+                  const method = typeof q.method === "string" ? q.method : "select";
+                  const title =
+                    (typeof q.title === "string" && q.title) ||
+                    (typeof q.message === "string" && q.message) ||
+                    (typeof q.question === "string" && q.question) ||
+                    "Question";
+                  const rawOptions = Array.isArray(q.options) ? q.options : [];
+                  const options = rawOptions
+                    .map((o) =>
+                      typeof o === "string"
+                        ? o
+                        : String(
+                            o && typeof o === "object" && "label" in o
+                              ? (o as { label: unknown }).label
+                              : (o ?? ""),
+                          ),
+                    )
+                    .filter((label) => label.length > 0);
+
+                  if (method === "confirm" && originals.confirm) {
+                    const yes = await originals.confirm(title, "", { signal: ac.signal });
+                    if (yes === undefined || ac.signal.aborted) {
+                      cancelled = true;
+                      break;
+                    }
+                    answers.push({ value: yes ? "true" : "false", confirmed: yes });
+                    continue;
+                  }
+
+                  if ((method === "input" || options.length === 0) && originals.input) {
+                    const placeholder = typeof q.placeholder === "string" ? q.placeholder : "";
+                    const text = await originals.input(title, placeholder, { signal: ac.signal });
+                    if (text === undefined || ac.signal.aborted) {
+                      cancelled = true;
+                      break;
+                    }
+                    answers.push({ value: text });
+                    continue;
+                  }
+
+                  if (originals.select && options.length > 0) {
+                    const picked = await originals.select(title, options, { signal: ac.signal });
+                    if (picked === undefined || ac.signal.aborted) {
+                      cancelled = true;
+                      break;
+                    }
+                    // multiselect has no stock TUI primitive; single-pick is the
+                    // interactive fallback (full multi stays on dashboard).
+                    answers.push(method === "multiselect" ? { values: [picked] } : { value: picked });
+                    continue;
+                  }
+
+                  cancelled = true;
+                  break;
+                }
+                if (!ac.signal.aborted) {
+                  if (cancelled) {
+                    bus.respond({ id: prompt.id, cancelled: true, source: "tui" });
+                  } else {
+                    bus.respond({
+                      id: prompt.id,
+                      answer: JSON.stringify(answers),
+                      cancelled: false,
+                      source: "tui",
+                    });
+                  }
+                }
+                return;
               } else {
                 // NOTE: there is intentionally no `else if` arm for the
                 // multiselect prompt type here. See change
@@ -2218,12 +2303,26 @@ function initBridge(pi: ExtensionAPI) {
       };
 
       (ctx.ui as any).select = (title: string, options: string[], opts?: any) =>
-        bus.request({ pipeline: "command", type: "select", question: title, options, metadata: buildMeta(opts) })
-          .then(r => r.cancelled ? undefined : r.answer);
+        bus
+          .request(
+            { pipeline: "command", type: "select", question: title, options, metadata: buildMeta(opts) },
+            opts?.signal,
+          )
+          .then((r) => (r.cancelled ? undefined : r.answer));
 
       (ctx.ui as any).input = (title: string, placeholder?: string, opts?: any) =>
-        bus.request({ pipeline: "command", type: "input", question: title, defaultValue: placeholder, metadata: buildMeta(opts) })
-          .then(r => r.cancelled ? undefined : r.answer);
+        bus
+          .request(
+            {
+              pipeline: "command",
+              type: "input",
+              question: title,
+              defaultValue: placeholder,
+              metadata: buildMeta(opts),
+            },
+            opts?.signal,
+          )
+          .then((r) => (r.cancelled ? undefined : r.answer));
 
       // Persist pasted images for an ask_user input answer to disk + emit one
       // asset_register per new hash (dashboard thumbnail). Returns absolute
@@ -2266,20 +2365,44 @@ function initBridge(pi: ExtensionAPI) {
       // (images). See change: add-ask-user-input-multiline-paste, design.md
       // Decision 1.
       (ctx.ui as any).inputWithImages = (title: string, placeholder?: string, opts?: any) =>
-        bus.request({ pipeline: "command", type: "input", question: title, defaultValue: placeholder, metadata: buildMeta(opts) })
-          .then(r => {
+        bus
+          .request(
+            {
+              pipeline: "command",
+              type: "input",
+              question: title,
+              defaultValue: placeholder,
+              metadata: buildMeta(opts),
+            },
+            opts?.signal,
+          )
+          .then((r) => {
             if (r.cancelled) return undefined;
             const atts = r.images?.length ? persistAnswerImages(r.images) : [];
             return atts.length ? { value: r.answer ?? "", attachments: atts } : (r.answer ?? "");
           });
 
       (ctx.ui as any).confirm = (title: string, message?: string, opts?: any) =>
-        bus.request({ pipeline: "command", type: "confirm", question: title, metadata: buildMeta(opts, message) })
-          .then(r => !r.cancelled && r.answer === "true");
+        bus
+          .request(
+            { pipeline: "command", type: "confirm", question: title, metadata: buildMeta(opts, message) },
+            opts?.signal,
+          )
+          .then((r) => !r.cancelled && r.answer === "true");
 
       (ctx.ui as any).editor = (title: string, prefill?: string, opts?: any) =>
-        bus.request({ pipeline: "command", type: "editor", question: title, defaultValue: prefill, metadata: buildMeta(opts) })
-          .then(r => r.cancelled ? undefined : r.answer);
+        bus
+          .request(
+            {
+              pipeline: "command",
+              type: "editor",
+              question: title,
+              defaultValue: prefill,
+              metadata: buildMeta(opts),
+            },
+            opts?.signal,
+          )
+          .then((r) => (r.cancelled ? undefined : r.answer));
 
       // ── Multiselect ──────────────────────────────────────────────
       // ctx.ui.multiselect is NOT a built-in pi method — we attach it here
@@ -2298,13 +2421,18 @@ function initBridge(pi: ExtensionAPI) {
         console.warn("[bridge] ctx.ui.multiselect already exists — overriding for PromptBus routing");
       }
       (ctx.ui as any).multiselect = (title: string, options: string[], opts?: any) =>
-        bus.request({
-          pipeline: "command",
-          type: "multiselect",
-          question: title,
-          options,
-          metadata: buildMeta(opts),
-        }).then(decodeMultiselectAnswer);
+        bus
+          .request(
+            {
+              pipeline: "command",
+              type: "multiselect",
+              question: title,
+              options,
+              metadata: buildMeta(opts),
+            },
+            opts?.signal,
+          )
+          .then(decodeMultiselectAnswer);
 
       // ── Batch ────────────────────────────────────────────────────
       // ctx.ui.batch is NOT a built-in pi method. The ask_user tool calls it
@@ -2313,32 +2441,38 @@ function initBridge(pi: ExtensionAPI) {
       // wizard and returns one `{answers}` response (JSON-encoded in the bus
       // `answer` string). Resolves to BatchAnswer[] on submit, or undefined on
       // cancel. See change: redesign-ask-user-question-cards.
+      // TUI: sequential originals.* via the batch arm above (fix: multi-ask hang).
       (ctx.ui as any).batch = (title: string, questions: unknown[], opts?: any) =>
-        bus.request({
-          pipeline: "command",
-          type: "batch",
-          question: title,
-          metadata: { ...(buildMeta(opts) ?? {}), questions },
-        }).then((r) => {
-          if (r.cancelled || r.answer == null) return undefined;
-          try {
-            const parsed = JSON.parse(r.answer);
-            if (!Array.isArray(parsed)) return undefined;
-            // Persist any input-step images and rewrite that answer to
-            // {value, attachments}, dropping the raw base64 `images`.
-            // See change: add-ask-user-input-multiline-paste.
-            return parsed.map((a: any) => {
-              if (a && typeof a === "object" && Array.isArray(a.images) && a.images.length) {
-                const atts = persistAnswerImages(a.images);
-                const { images: _drop, ...rest } = a;
-                return atts.length ? { ...rest, attachments: atts } : rest;
-              }
-              return a;
-            });
-          } catch {
-            return undefined;
-          }
-        });
+        bus
+          .request(
+            {
+              pipeline: "command",
+              type: "batch",
+              question: title,
+              metadata: { ...(buildMeta(opts) ?? {}), questions },
+            },
+            opts?.signal,
+          )
+          .then((r) => {
+            if (r.cancelled || r.answer == null) return undefined;
+            try {
+              const parsed = JSON.parse(r.answer);
+              if (!Array.isArray(parsed)) return undefined;
+              // Persist any input-step images and rewrite that answer to
+              // {value, attachments}, dropping the raw base64 `images`.
+              // See change: add-ask-user-input-multiline-paste.
+              return parsed.map((a: any) => {
+                if (a && typeof a === "object" && Array.isArray(a.images) && a.images.length) {
+                  const atts = persistAnswerImages(a.images);
+                  const { images: _drop, ...rest } = a;
+                  return atts.length ? { ...rest, attachments: atts } : rest;
+                }
+                return a;
+              });
+            } catch {
+              return undefined;
+            }
+          });
 
       // Notify is fire-and-forget: call original + forward to dashboard
       (ctx.ui as any).notify = (message: string, level?: string) => {
