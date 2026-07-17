@@ -188,8 +188,15 @@ export default function (pi: ExtensionAPI) {
 
     initBridge(pi);
   } catch (err) {
-    // Never crash the host pi agent — dashboard is non-essential
+    // Never crash an interactive host pi — dashboard is non-essential there.
     console.error("[dashboard] Bridge init failed:", err);
+    // Dashboard-spawned sessions must `session_register` within the spawn
+    // watchdog. Swallowing ReferenceError (typical missing-import residue)
+    // leaves a live PID that never registers → 30s REGISTER_TIMEOUT. Exit so
+    // the keeper/spawner fails fast. See change: fix-bridge-init-missing-imports.
+    if (dashboardSpawnedAtFactory && err instanceof ReferenceError) {
+      process.exit(1);
+    }
   }
 }
 
