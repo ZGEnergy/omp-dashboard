@@ -2,11 +2,10 @@
  * usePopoverFlip — shared viewport-anchored popover positioning primitive.
  *
  * Measures a trigger button's bounding rect on open (and on resize/scroll while
- * open) and decides:
- *  - vertical: below (default) or above so it stays within the viewport, plus
- *    a clamped `maxHeight` so the list scrolls internally as a last resort
- *  - horizontal: right-align (`right-0`, legacy default) or left-align (`left-0`)
- *    when a right-aligned panel would hang past the left viewport edge
+ * open) and decides whether a popover should render below (default) or above
+ * the trigger so it stays within the viewport, plus a clamped `maxHeight` so it
+ * never overflows the screen edge — the list scrolls internally as a last
+ * resort.
  *
  * On the horizontal axis it additionally measures the trigger's left/right
  * viewport space and returns an `anchorRight` edge selection plus a clamped
@@ -20,8 +19,7 @@
  * / CommandInput, and restoring the specced auto-flip on ChatViewMenu.
  *
  * See change: fix-popover-viewport-flip.
- * Horizontal arm: ChatViewMenu StatusBar-leading clip on mobile (right-0 + w-64
- * from a left-edge trigger hangs off-screen; MobileShell overflow-hidden clips it).
+ * See change: fix-popover-horizontal-flip.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -34,18 +32,16 @@ export interface PopoverFlipOptions {
    * dips under `threshold`).
    */
   estimatedHeight?: number;
-  /**
-   * Approximate popover width in px. Used for horizontal alignment. When
-   * omitted / `Infinity`, `alignRight` stays `true` (legacy default) so
-   * call sites that only care about vertical flip keep current behavior.
-   */
-  estimatedWidth?: number;
   /** Gap between trigger and popover (≈ `mt-1`/`mb-1`). Default 8px. */
   gap?: number;
   /** Below-space (px) under which an up-flip is considered. Default 200px. */
   threshold?: number;
-  /** Horizontal margin from the viewport edge. Default 8px. */
-  edgeMargin?: number;
+  /**
+   * Approximate popover width in px. Used to decide when the anchored side is
+   * too narrow to fit. Defaults to `Infinity` (unknown → never flip the
+   * horizontal anchor, preserving the consumer's existing right-anchor).
+   */
+  estimatedWidth?: number;
 }
 
 export interface PopoverFlipState {
@@ -54,10 +50,13 @@ export interface PopoverFlipState {
   /** Clamped max height (px) for the popover in the chosen direction. */
   maxHeight: number;
   /**
-   * True → `right-0` (popover right edge aligns to trigger right edge).
-   * False → `left-0`. Defaults true when width is unknown.
+   * True → anchor the popover to the right edge (`right-0`, extends left);
+   * false → anchor to the left edge (`left-0`, extends right). Defaults to
+   * true (preserves the existing right-anchored consumers).
    */
-  alignRight: boolean;
+  anchorRight: boolean;
+  /** Clamped max width (px) for the popover in the chosen anchor direction. */
+  maxWidth: number;
 }
 
 /** Minimum popover height so it never collapses to nothing. */
@@ -66,65 +65,14 @@ export const MIN_POPOVER_HEIGHT = 120;
 export const MIN_POPOVER_WIDTH = 160;
 const DEFAULT_GAP = 8;
 const DEFAULT_THRESHOLD = 200;
-const DEFAULT_EDGE_MARGIN = 8;
 
 const CLOSED_STATE: PopoverFlipState = {
   flipUp: false,
   maxHeight: MIN_POPOVER_HEIGHT,
-  alignRight: true,
+  anchorRight: true,
+  maxWidth: MIN_POPOVER_WIDTH,
 };
 
-/**
- * Pure horizontal placement helper.
- *
- * Prefers right-align (legacy `right-0`) unless that would place any part of
- * the popover left of the viewport margin. When both alignments overflow,
- * picks the side with the larger on-screen visible width; ties prefer right.
- *
- * @param opts.triggerRight - Trigger's `getBoundingClientRect().right`
- * @param opts.triggerLeft - Trigger's `getBoundingClientRect().left`
- * @param opts.viewportWidth - `window.innerWidth`
- * @param opts.estimatedWidth - Popover width in px (`Infinity` / non-positive → always right-align)
- * @param opts.edgeMargin - Horizontal margin from the viewport edge (default 8)
- * @returns `true` for `right-0`, `false` for `left-0`
- */
-export function chooseHorizontalAlign(opts: {
-  triggerRight: number;
-  triggerLeft: number;
-  viewportWidth: number;
-  estimatedWidth: number;
-  edgeMargin?: number;
-}): boolean {
-  const margin = opts.edgeMargin ?? DEFAULT_EDGE_MARGIN;
-  const width = opts.estimatedWidth;
-  if (!Number.isFinite(width) || width <= 0) return true;
-
-  const rightAlignedLeft = opts.triggerRight - width;
-  // Prefer right-0 when the full width fits on-screen.
-  if (rightAlignedLeft >= margin) return true;
-
-  const leftAlignedRight = opts.triggerLeft + width;
-  // Prefer left-0 when that keeps the panel on-screen (or at least better).
-  if (leftAlignedRight <= opts.viewportWidth - margin) return false;
-
-  // Both overflow: pick the side that keeps more of the panel visible.
-  const rightVisible = Math.min(opts.triggerRight, opts.viewportWidth) - Math.max(rightAlignedLeft, 0);
-  const leftVisible = Math.min(leftAlignedRight, opts.viewportWidth) - Math.max(opts.triggerLeft, 0);
-  return rightVisible >= leftVisible;
-}
-
-/**
- * Measure a trigger and return viewport-safe popover placement.
- *
- * Attaches passive `resize`/`scroll` listeners only while `options.open` is
- * true. Vertical: default down, flip up near the bottom with clamped
- * `maxHeight`. Horizontal: when `estimatedWidth` is set, choose `alignRight`
- * so a left-edge trigger does not hang a fixed-width panel off-screen.
- *
- * @param triggerRef - Ref to the trigger element (button/anchor)
- * @param options - Open flag plus optional size/threshold overrides
- * @returns `{ flipUp, maxHeight, alignRight }` — closed state when `open` is false
- */
 export function usePopoverFlip(
   triggerRef: React.RefObject<HTMLElement | null>,
   options: PopoverFlipOptions,
@@ -132,10 +80,9 @@ export function usePopoverFlip(
   const {
     open,
     estimatedHeight = Infinity,
-    estimatedWidth = Infinity,
     gap = DEFAULT_GAP,
     threshold = DEFAULT_THRESHOLD,
-    edgeMargin = DEFAULT_EDGE_MARGIN,
+    estimatedWidth = Infinity,
   } = options;
   const [state, setState] = useState<PopoverFlipState>(CLOSED_STATE);
 
@@ -148,15 +95,25 @@ export function usePopoverFlip(
     const spaceAbove = rect.top - gap;
     const flipUp = spaceBelow < Math.min(estimatedHeight, threshold) && spaceAbove > spaceBelow;
     const maxHeight = Math.max(MIN_POPOVER_HEIGHT, flipUp ? spaceAbove : spaceBelow);
-    const alignRight = chooseHorizontalAlign({
-      triggerRight: rect.right,
-      triggerLeft: rect.left,
-      viewportWidth: window.innerWidth,
-      estimatedWidth,
-      edgeMargin,
-    });
-    setState({ flipUp, maxHeight, alignRight });
-  }, [triggerRef, estimatedHeight, estimatedWidth, gap, threshold, edgeMargin]);
+    // Horizontal axis. Right-anchored (`right-0`) popovers extend leftward from
+    // the trigger's right edge → available room is `rect.right`. Left-anchored
+    // (`left-0`) popovers extend rightward from the trigger's left edge →
+    // available room is `innerWidth - rect.left`. Preserve the right-anchor by
+    // default; only flip when a finite estimated width does not fit the
+    // right-anchor side AND the left-anchor side has more room.
+    const spaceRightAnchor = rect.right - gap;
+    const spaceLeftAnchor = window.innerWidth - rect.left - gap;
+    const flipHorizontal =
+      Number.isFinite(estimatedWidth) &&
+      spaceRightAnchor < estimatedWidth &&
+      spaceLeftAnchor > spaceRightAnchor;
+    const anchorRight = !flipHorizontal;
+    const maxWidth = Math.max(
+      MIN_POPOVER_WIDTH,
+      anchorRight ? spaceRightAnchor : spaceLeftAnchor,
+    );
+    setState({ flipUp, maxHeight, anchorRight, maxWidth });
+  }, [triggerRef, estimatedHeight, gap, threshold, estimatedWidth]);
 
   useEffect(() => {
     if (!open || typeof window === "undefined") return;

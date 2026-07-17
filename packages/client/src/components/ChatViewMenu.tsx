@@ -45,9 +45,9 @@ export function ChatViewMenu({ sessionId, send, currentOverride }: Props): React
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const { flipUp, maxHeight, alignRight } = usePopoverFlip(triggerRef, {
+  const { flipUp, maxHeight, anchorRight, maxWidth } = usePopoverFlip(triggerRef, {
     open,
-    estimatedWidth: 256, // w-64
+    estimatedWidth: 256, // w-64 natural width
   });
 
   useEffect(() => {
@@ -122,9 +122,9 @@ export function ChatViewMenu({ sessionId, send, currentOverride }: Props): React
       {open && (
         <div
           data-testid="chat-view-popover"
-          style={{ maxHeight }}
-          className={`absolute z-30 w-64 max-w-[calc(100vw-1rem)] overflow-y-auto bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded-lg shadow-lg p-2 text-xs ${
-            alignRight ? "right-0" : "left-0"
+          style={{ maxHeight, maxWidth }}
+          className={`absolute z-30 w-64 overflow-y-auto bg-[var(--bg-secondary)] border border-[var(--border-secondary)] rounded-lg shadow-lg p-2 text-xs ${
+            anchorRight ? "right-0" : "left-0"
           } ${flipUp ? "bottom-full mb-1" : "top-full mt-1"}`}
         >
           <Row label={i18nT("common.tokenStatsBar", undefined, "Token stats bar")} value={prefs.tokenStatsBar} marked={isOverridden("tokenStatsBar")} onChange={(v) => patch({ tokenStatsBar: v })} />
