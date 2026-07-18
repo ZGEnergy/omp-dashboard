@@ -1264,6 +1264,8 @@ export interface UnhideSessionBrowserMessage {
 export interface SpawnSessionBrowserMessage {
   type: "spawn_session";
   cwd: string;
+  /** Old servers ignore unknown field and perform bare spawn. */
+  advisor?: boolean;
   /**
    * Optional kebab-case OpenSpec change name to attach to the spawned session
    * once it registers. The server queues the intent in `pendingAttachByCwd`

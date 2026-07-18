@@ -5,9 +5,10 @@
  */
 import { describe, it, expect } from "vitest";
 import type {
-  SpawnSessionBrowserMessage,
   BrowserToServerMessage,
+  SpawnSessionBrowserMessage,
 } from "../browser-protocol.js";
+import type { DashboardSession } from "../types.js";
 
 describe("SpawnSessionBrowserMessage.attachProposal", () => {
   it("is optional — the bare-spawn payload still type-checks", () => {
@@ -43,5 +44,39 @@ describe("SpawnSessionBrowserMessage.attachProposal", () => {
     const sent: SpawnSessionBrowserMessage = { type: "spawn_session", cwd: "/x" };
     const parsed = JSON.parse(JSON.stringify(sent)) as SpawnSessionBrowserMessage;
     expect("attachProposal" in parsed).toBe(false);
+  });
+});
+
+describe("SpawnSessionBrowserMessage.advisor", () => {
+  it("preserves an enabled advisor flag through JSON", () => {
+    const enabled: SpawnSessionBrowserMessage = {
+      type: "spawn_session",
+      cwd: "/repo",
+      advisor: true,
+    };
+
+    expect(JSON.parse(JSON.stringify(enabled))).toMatchObject({ advisor: true });
+  });
+
+  it("omits an absent advisor flag from JSON", () => {
+    const defaulted: SpawnSessionBrowserMessage = {
+      type: "spawn_session",
+      cwd: "/repo",
+    };
+
+    expect(JSON.parse(JSON.stringify(defaulted))).not.toHaveProperty("advisor");
+  });
+
+  it("projects enabled advisor metadata onto dashboard sessions", () => {
+    const session: DashboardSession = {
+      id: "session-1",
+      cwd: "/repo",
+      source: "dashboard",
+      status: "idle",
+      startedAt: Date.now(),
+      advisor: true,
+    };
+
+    expect(session.advisor).toBe(true);
   });
 });
