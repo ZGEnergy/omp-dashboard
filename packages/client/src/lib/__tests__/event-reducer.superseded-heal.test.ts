@@ -55,6 +55,19 @@ describe("assistantInferenceSeq / emittedAtInferenceSeq", () => {
     expect(s.toolCalls.get("t1")?.emittedAtInferenceSeq).toBe(1);
   });
 
+  it("stamps update-before-start rows with their inference sequence", () => {
+    const update: DashboardEvent = {
+      eventType: "tool_execution_update",
+      timestamp: 2,
+      data: { toolCallId: "t1", toolName: "bash", partialResult: "partial" },
+    };
+    let s = apply([asstStart(1), update]);
+    expect(s.toolCalls.get("t1")?.emittedAtInferenceSeq).toBe(1);
+    expect(hasLaterAssistantInference(s, "t1")).toBe(false);
+    s = reduceEvent(s, asstStart(3));
+    expect(hasLaterAssistantInference(s, "t1")).toBe(true);
+  });
+
   it("user message_start does NOT advance the inference counter", () => {
     const s = apply([
       asstStart(1),

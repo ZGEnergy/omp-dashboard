@@ -1,5 +1,5 @@
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { addInteractiveRequest, applyPromptReceived, type ChatMessage, createInitialState, deriveBannerState, dismissInteractiveRequest, extractAgentEndError, findLastUserPrompt, type PendingPrompt, reduceEvent, resolveInteractiveRequest, type SessionState, toDisplayString } from "../event-reducer.js";
 
 function applyEvents(events: DashboardEvent[]): SessionState {
@@ -2278,6 +2278,124 @@ describe("command_feedback events", () => {
       expect(state.subagents.get("sub_abc")?.displayName).toBe("explorer");
     });
   });
+  it("reconciles tool_execution_update that arrives before its start", () => {
+    const state = applyEvents([{
+      eventType: "tool_execution_update",
+      timestamp: 2000,
+      data: {
+        toolCallId: "late-update",
+        toolName: "bash",
+        args: { command: "pwd" },
+        partialResult: { content: [{ type: "text", text: "/tmp" }], details: { stream: true } },
+      },
+    }]);
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({ id: "tool-late-update", toolCallId: "late-update", toolName: "bash", toolStatus: "running", result: "/tmp", toolDetails: { stream: true } });
+    expect(state.toolCalls.get("late-update")).toMatchObject({ toolCallId: "late-update", status: "running", toolName: "bash" });
+  });
+
+  it.each([
+    [false, "complete"],
+    [true, "error"],
+  ])("reconciles a real tool_execution_end before start (%s)", (isError, status) => {
+    const state = applyEvents([{
+      eventType: "tool_execution_end",
+      timestamp: 3000,
+      data: { toolCallId: `late-end-${isError}`, toolName: "read", args: { path: "x" }, result: "done", isError },
+    }]);
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({ toolCallId: `late-end-${isError}`, toolName: "read", toolStatus: status, result: "done" });
+    expect(state.toolCalls.get(`late-end-${isError}`)?.status).toBe(status);
+  });
+
+  it("delayed tool_execution_start after end does not resurrect running status", () => {
+    const state = applyEvents([
+      {
+        eventType: "tool_execution_end",
+        timestamp: 3000,
+        data: {
+          toolCallId: "end-first",
+          toolName: "bash",
+          args: { command: "ls" },
+          result: "ok",
+          isError: false,
+        },
+      },
+      {
+        eventType: "tool_execution_start",
+        timestamp: 3100,
+        data: {
+          toolCallId: "end-first",
+          toolName: "bash",
+          args: { command: "ls" },
+        },
+      },
+    ]);
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({
+      toolCallId: "end-first",
+      toolName: "bash",
+      toolStatus: "complete",
+      result: "ok",
+    });
+    expect(state.toolCalls.get("end-first")).toMatchObject({
+      toolCallId: "end-first",
+      toolName: "bash",
+      status: "complete",
+      result: "ok",
+    });
+    expect(state.currentTool).toBeUndefined();
+  });
+
+  it("does not let a superseded heal create a phantom row", () => {
+    const state = applyEvents([{
+      eventType: "tool_execution_end",
+      timestamp: 3000,
+      data: { toolCallId: "missing-heal", healedBy: "superseded", isError: false },
+    }]);
+    expect(state.messages).toHaveLength(0);
+    expect(state.toolCalls.has("missing-heal")).toBe(false);
+  });
+
+  it("diagnoses malformed update and end IDs without mutating state", () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const before = createInitialState();
+      const state = applyEvents([
+        { eventType: "tool_execution_update", timestamp: 1, data: { partialResult: "x" } },
+        { eventType: "tool_execution_end", timestamp: 2, data: { toolCallId: 42, result: "x" } },
+      ]);
+      expect(state.messages).toEqual(before.messages);
+      expect(state.toolCalls).toEqual(before.toolCalls);
+      expect(warning).toHaveBeenCalledTimes(2);
+      expect(warning.mock.calls[0][0]).toContain("tool_execution_update");
+      expect(warning.mock.calls[1][0]).toContain("tool_execution_end");
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("backfills cumulative Agent entries from an unmatched update through terminal end", () => {
+    const entries = [
+      { kind: "tool" as const, toolName: "Read", input: {}, ts: 1 },
+      { kind: "text" as const, text: "working", ts: 2 },
+      { kind: "tool" as const, toolName: "Bash", input: {}, ts: 3 },
+    ];
+    const state = applyEvents([
+      {
+        eventType: "tool_execution_update",
+        timestamp: 1000,
+        data: { toolCallId: "agent-late", toolName: "Agent", partialResult: { content: [{ type: "text", text: "working" }], details: { agentId: "sub-late", entries, toolUses: 2, displayName: "late" } } },
+      },
+      {
+        eventType: "tool_execution_end",
+        timestamp: 2000,
+        data: { toolCallId: "agent-late", toolName: "Agent", result: "done", isError: false, details: { agentId: "sub-late", entries, toolUses: 2 } },
+      },
+    ]);
+    expect(state.subagents.get("sub-late")).toMatchObject({ status: "completed", entries, toolUses: 2, displayName: "late" });
+  });
+
 });
 
 describe("turnIndex tracking", () => {
