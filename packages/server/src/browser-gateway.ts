@@ -216,6 +216,7 @@ export function createBrowserGateway(
   viewMessageStore: ViewMessageStore = new ViewMessageStore(),
   promptResponseMaxAgeMs = PROMPT_RESPONSE_RETRY_MAX_AGE_MS,
   serverEpoch?: string,
+  pendingAdvisorRegistry?: import("./pending-advisor-registry.js").PendingAdvisorRegistry,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -671,6 +672,7 @@ export function createBrowserGateway(
           pendingInitialPromptRegistry,
           pendingResumeIntents,
           pendingClientCorrelations,
+          pendingAdvisorRegistry,
           pendingWorktreeBaseRegistry,
           sendTo, broadcast, getSubscribers, replayPendingUiRequests,
           replayUiState(targetWs, sessionId) { replayUiState(targetWs, sessionId, { sessionManager, sendTo }); },

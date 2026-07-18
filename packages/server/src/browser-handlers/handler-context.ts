@@ -19,6 +19,7 @@ import type { PendingAttachRegistry } from "../pending-attach-registry.js";
 import type { PendingInitialPromptRegistry } from "../pending-initial-prompt-registry.js";
 import type { PendingWorktreeBaseRegistry } from "../pending-worktree-base-registry.js";
 import type { PendingResumeIntentRegistry } from "../pending-resume-intent-registry.js";
+import type { PendingAdvisorRegistry } from "../pending-advisor-registry.js";
 import type { PendingClientCorrelations } from "../pending-client-correlations.js";
 import type { ViewMessageStore } from "../view-message-store.js";
 import type { ReplayCoordinator } from "../replay-coordinator.js";
@@ -80,6 +81,8 @@ export interface BrowserHandlerContext {
   pendingClientCorrelations?: PendingClientCorrelations;
   /** Optional generation-aware replay coordinator. */
   replayCoordinator?: ReplayCoordinator;
+  /** Advisor spawn proof keyed only by the server-minted spawn token. */
+  pendingAdvisorRegistry?: PendingAdvisorRegistry;
   /** Send message to a specific WebSocket */
   sendTo(ws: WebSocket, msg: any): void;
   /** Broadcast to all connected browsers */

@@ -163,6 +163,8 @@ export interface EventWiringDeps {
    * correlation. See change: spawn-correlation-token.
    */
   pendingClientCorrelations?: import("./pending-client-correlations.js").PendingClientCorrelations;
+  /** Advisor proof records keyed only by successful spawn tokens. */
+  pendingAdvisorRegistry?: import("./pending-advisor-registry.js").PendingAdvisorRegistry;
   /**
    * Optional plugin pi-message dispatcher. When provided, every
    * `plugin_pi_message` envelope forwarded from a plugin bridge entry is
@@ -232,6 +234,7 @@ export function wireEvents(deps: EventWiringDeps): void {
     pushDispatcher,
     getPushPreferences,
     pendingClientCorrelations,
+    pendingAdvisorRegistry,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
     metaPersistence,
@@ -1051,9 +1054,10 @@ export function wireEvents(deps: EventWiringDeps): void {
       // bridges that send neither token nor pid (and is logged so we can see
       // when it actually triggers).
       let linked = false;
-      if (msg.spawnToken) {
-        linked = browserGateway.headlessPidRegistry.linkByToken(msg.spawnToken, sessionId, msg.pid);
-      }
+      const linkedBySpawnToken = msg.spawnToken
+        ? browserGateway.headlessPidRegistry.linkByToken(msg.spawnToken, sessionId, msg.pid)
+        : false;
+      linked = linkedBySpawnToken;
       if (!linked && msg.pid !== undefined) {
         linked = browserGateway.headlessPidRegistry.linkByPid(sessionId, msg.pid);
       }
@@ -1100,6 +1104,22 @@ export function wireEvents(deps: EventWiringDeps): void {
       const spawnRequestId = (msg.spawnToken && pendingClientCorrelations)
         ? pendingClientCorrelations.consume(msg.spawnToken)
         : undefined;
+
+      // Advisor proof can only cross the registration boundary on the same
+      // token that linkByToken just verified. PID and cwd fallbacks resolve
+      // process ownership, but are not strong enough to prove browser intent.
+      const advisor = linkedBySpawnToken
+        ? pendingAdvisorRegistry?.consume(msg.spawnToken)
+        : undefined;
+      if (advisor) {
+        sessionManager.update(sessionId, advisor);
+        if (msg.sessionFile) {
+          try {
+            mergeSessionMeta(msg.sessionFile, advisor);
+          } catch { /* best-effort */ }
+        }
+        browserGateway.broadcastSessionUpdated(sessionId, advisor);
+      }
 
       const isNewSession = !knownSessionIds.has(sessionId);
       knownSessionIds.add(sessionId);

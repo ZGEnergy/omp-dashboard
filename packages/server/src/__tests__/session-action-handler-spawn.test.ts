@@ -66,6 +66,7 @@ function makeCtx() {
     headlessPidRegistry: { register: vi.fn() } as never,
     pendingDashboardSpawns: new Map(),
     pendingAttachRegistry: { enqueue: vi.fn() } as never,
+    pendingAdvisorRegistry: { record: vi.fn(), consume: vi.fn(), size: vi.fn() },
     sessionManager: {} as never,
     broadcast: vi.fn() as never,
     piGateway: {} as never,
@@ -146,5 +147,44 @@ describe("handleSpawnSession", () => {
     await handleSpawnSession({ type: "spawn_session", cwd: "/p/x" } as never, ctx as never);
 
     expect(mockAppendSpawnFailure).toHaveBeenCalledWith(expect.objectContaining({ code: "SPAWN_ERRNO" }));
+  });
+
+  it("passes advisor through and arms only a successful true spawn token", async () => {
+    mockPreflightSpawn.mockReturnValue({ ok: true, reasons: [] });
+    mockSpawnPiSession.mockResolvedValueOnce({
+      success: true,
+      spawnToken: "advisor-token",
+      message: "spawned",
+    });
+
+    const ctx = makeCtx();
+    await handleSpawnSession(
+      { type: "spawn_session", cwd: "/p/x", advisor: true } as never,
+      ctx as never,
+    );
+
+    expect(mockSpawnPiSession).toHaveBeenCalledWith("/p/x", expect.objectContaining({ advisor: true }));
+    expect(ctx.pendingAdvisorRegistry.record).toHaveBeenCalledWith("advisor-token");
+  });
+
+  it("does not arm advisor proof for false, absent, or failed spawns", async () => {
+    mockPreflightSpawn.mockReturnValue({ ok: true, reasons: [] });
+    mockSpawnPiSession
+      .mockResolvedValueOnce({ success: true, spawnToken: "false-token", message: "spawned" })
+      .mockResolvedValueOnce({ success: true, spawnToken: "absent-token", message: "spawned" })
+      .mockResolvedValueOnce({ success: false, spawnToken: "failed-token", message: "failed" });
+
+    const ctx = makeCtx();
+    await handleSpawnSession(
+      { type: "spawn_session", cwd: "/p/x", advisor: false } as never,
+      ctx as never,
+    );
+    await handleSpawnSession({ type: "spawn_session", cwd: "/p/x" } as never, ctx as never);
+    await handleSpawnSession(
+      { type: "spawn_session", cwd: "/p/x", advisor: true } as never,
+      ctx as never,
+    );
+
+    expect(ctx.pendingAdvisorRegistry.record).not.toHaveBeenCalled();
   });
 });

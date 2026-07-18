@@ -395,7 +395,7 @@ export async function handleSpawnSession(
   msg: Extract<BrowserToServerMessage, { type: "spawn_session" }>,
   ctx: BrowserHandlerContext,
 ): Promise<void> {
-  const { ws, headlessPidRegistry, pendingDashboardSpawns, pendingAttachRegistry, pendingInitialPromptRegistry, pendingWorktreeBaseRegistry, pendingClientCorrelations, sendTo } = ctx;
+  const { ws, headlessPidRegistry, pendingDashboardSpawns, pendingAttachRegistry, pendingInitialPromptRegistry, pendingWorktreeBaseRegistry, pendingClientCorrelations, pendingAdvisorRegistry, sendTo } = ctx;
   const config = loadConfig();
   const strategy = config.spawnStrategy ?? "tmux";
 
@@ -449,7 +449,7 @@ export async function handleSpawnSession(
   // silently. Previous behaviour left the user staring at an empty state
   // when pi itself was broken in the target folder.
   try {
-    const spawnResult = await spawnPiSession(msg.cwd, { strategy });
+    const spawnResult = await spawnPiSession(msg.cwd, { strategy, advisor: msg.advisor });
     if (spawnResult.process && spawnResult.pid) {
       headlessPidRegistry.register(
         spawnResult.pid,
@@ -463,6 +463,12 @@ export async function handleSpawnSession(
     // spawnRequestId. See change: spawn-correlation-token.
     if (msg.requestId && spawnResult.spawnToken && pendingClientCorrelations) {
       pendingClientCorrelations.record(spawnResult.spawnToken, msg.requestId);
+    }
+    // The token is server-minted and only exists after a successful spawn. Do
+    // not arm advisor proof for a failed result: an unrelated later register
+    // must never inherit this browser request.
+    if (msg.advisor === true && spawnResult.success && spawnResult.spawnToken) {
+      pendingAdvisorRegistry?.record(spawnResult.spawnToken);
     }
     if (spawnResult.dashboardSpawned && spawnResult.success) {
       pendingDashboardSpawns?.set(msg.cwd, (pendingDashboardSpawns?.get(msg.cwd) ?? 0) + 1);
