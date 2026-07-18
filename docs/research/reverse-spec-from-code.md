@@ -71,3 +71,27 @@ CAVEAT/CONFOUND: @fast prompts added ONE explicit format directive ("use `#### S
 2. Format compliance CHEAP to recover: explicit heading directive fixed it even on fast model (6/6 valid). Bake directive into generator prompt regardless of model.
 3. Cheaper generators still hallucinate a little (jiti tsx-loader contradiction; force-kill WS-close ordering). Keep @research auditor + `openspec validate` gate + revise loop; catches both.
 4. Practical config: @fast generator + format directive + validate gate + @research auditor/revise ~= opus quality at fraction of cost.
+
+## Large / complex scenario test (generator swap; judge constant @research)
+Extends the small-6 baseline (1-7 reqs each) to large capabilities. Same blind-generate + judge harness. Judge = @research for all.
+
+| target | real size | opus req | opus scen | flash req | flash scen | opus-flash req gap | format (both) |
+|---|---|---|---|---|---|---|---|
+| small-6 baseline | 1-7 reqs | 97.2 | 90.8 | 95.8 | 90.3 | ~1 | ~96 |
+| event-reducer | 20 reqs, one 2003-line file | 85 | 68 | 80 | 55 | 5 | 96 |
+| model-proxy | 15 reqs, ~18-file subsystem | 62 | 55 | 67 | 58 | ~0 | 96 |
+| dashboard-plugin-loader | 53 reqs, whole product | 72 | 66 | 50 | 46 | 22 | 96 |
+
+### Findings
+1. Coverage degrades with size. ~97% (small) -> 50-85% (large). Bigger capability = lower single-pass coverage.
+2. Cheap-model gap WIDENS with complexity. Small ~1 pt; event-reducer 5 pts; 53-req giant 22 pts (opus 72 vs flash 50). Flash saturates ONE slice (server loader ~50%), leaves client-runtime / REST / bridge / UI unrepresented; opus spreads across the surface. Cheap models cover one slice deep; strong models spread.
+3. Two large-spec failure modes:
+   - Scenario-depth collapse (event-reducer, one big file): requirement BREADTH holds (~85%), but 77 fine-grained edge-case scenarios (reorder races, boundary clamps) compress to a few happy-path each. Breadth survives, depth does not.
+   - Under-scoped product surface (model-proxy, giant): a large capability spans server engine + routes + config + client UI + bridge. File list = engine dir only -> both models miss the same host-integration reqs REGARDLESS of model. Ceiling set by discovery's file gathering, not the generator. model-proxy flash 67 ~= opus 62 proves it.
+4. Format + grounding hold at every scale. 96% format compliance, ZERO hallucinations, both models, all sizes. Format directive + validate gate + code-oracle discipline do not degrade with complexity. Both models add finer code-grounded detail than the stale real specs.
+5. Validates the skill design. Giant monolithic specs (1312-line loader spec = one delta across two changes) are exactly what conservative discovery decomposes into bounded sub-capabilities. Reverse-gen at bounded granularity (~90-95% each) beats one blind pass at a 53-req monolith (50-72%). Decomposition is the mitigation.
+
+### Practical guidance (large capabilities)
+- Split, do not monolith. Let discovery decompose a giant into sub-capabilities; spec each. Higher aggregate coverage than one giant pass.
+- Scope completeness sets the ceiling. Product-level capability -> discovery gathers ALL layers (server + routes + client + bridge), else whole requirement clusters missed.
+- Use opus / @research for large cross-cutting capabilities; reserve @fast for bounded single-file ones. Model gap bites only at scale.
