@@ -884,10 +884,18 @@ export function SessionList({ sessions, selectedId, onSelect, revealRequest, onS
             onToggle={() => handleToggleCollapse(group.cwd)}
           />
           <div className="flex-1 min-w-0">
+          {/* Whole header row is clickable to open the directory home page —
+              same affordance as clicking a session card selects its session.
+              Collapse/expand now lives solely on the chevron in the drag
+              gutter (folder-toggle-btn). The small mdiOpenInNew icon below is
+              kept as a redundant explicit affordance. Child buttons/pills
+              stopPropagation so they don't trigger navigation.
+              See change: directory-card-clickable-select. */}
           <div
             className="flex items-center gap-1.5 cursor-pointer"
-            onClick={() => handleToggleCollapse(group.cwd)}
-            title={isCollapsed ? "Expand folder" : "Collapse folder"}
+            onClick={() => navigate(buildFolderHomeUrl(group.cwd))}
+            title={t("sessionList.openFolderHome", undefined, "Open folder home")}
+            data-testid={`folder-home-row-${group.cwd}`}
           >
             <span className="text-xs font-medium text-[var(--text-secondary)] truncate flex items-center gap-1">
               <Icon path={isCollapsed ? mdiFolder : mdiFolderOpen} size={0.5} className="shrink-0" />
