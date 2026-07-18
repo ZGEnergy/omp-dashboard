@@ -17,6 +17,7 @@ import type { FlowInfo, ImageContent } from "@blackbelt-technology/pi-dashboard-
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Loader } from "@earendil-works/pi-tui";
 import { AbortLatch } from "./abort-latch.js";
+import { nativeAgentSettledSupported, settleFollowUp } from "./agent-settled.js";
 import { isUnderArtifactRoot, resolveArtifactRoots } from "./artifact-roots.js";
 import {
   MAX_PER_MESSAGE_BYTES as ATTACH_MAX_PER_MESSAGE_BYTES,
@@ -42,12 +43,11 @@ import { FLOW_EVENT_MAP, registerFlowEventListeners, SUBAGENT_EVENT_MAP } from "
 import { runGitPollTick } from "./git-poll.js";
 import { flipHasUI } from "./hasui-flip.js";
 import { inlineMessageText, type ReadFileOutcome } from "./markdown-image-inliner.js";
-import { defaultReadPiVersion, resetReconnectCaches as _resetReconnectCaches, sendCwdMissingIfChanged as _sendCwdMissingIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged, sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendPiVersionIfChanged as _sendPiVersionIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged } from "./model-tracker.js";
-import { nativeAgentSettledSupported, settleFollowUp } from "./agent-settled.js";
-import { decideProjectTrust, readEventCwd } from "./project-trust.js";
+import { resetReconnectCaches as _resetReconnectCaches, sendCwdMissingIfChanged as _sendCwdMissingIfChanged, sendGitInfoIfChanged as _sendGitInfoIfChanged, sendModelUpdateIfChanged as _sendModelUpdateIfChanged, sendPiVersionIfChanged as _sendPiVersionIfChanged, sendSessionNameIfChanged as _sendSessionNameIfChanged, defaultReadPiVersion } from "./model-tracker.js";
 import { decodeMultiselectAnswer } from "./multiselect-decode.js";
 import { collectMetrics, startMetricsMonitor, stopMetricsMonitor } from "./process-metrics.js";
 import { getOwnPgid, scanChildProcesses } from "./process-scanner.js";
+import { decideProjectTrust, readEventCwd } from "./project-trust.js";
 import { PromptBus } from "./prompt-bus.js";
 import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
 import { activate as activateProviderRegister, buildProviderCatalogue, onProviderChanged, reloadProviders, toModelInfo } from "./provider-register.js";
@@ -945,14 +945,20 @@ function initBridge(pi: ExtensionAPI) {
       // for an unknown/finished agent (durable completed-case backfill covers
       // those). See change: fix-subagent-live-detail-reliability.
       if (msg.type === "subagent_resync_request") {
-        const agentId = (msg as { agentId?: unknown }).agentId;
-        if (typeof agentId === "string" && agentId.length > 0 && sessionReady && isActive()) {
-          const snap = subagentFrameBuffer.resync(agentId);
+        // The incoming id may be EITHER a v4 agentId or a v7 runner
+        // agentSessionId (from a deep-link route); resync() resolves both.
+        // See change: resolve-subagent-inspector-by-session-id (D3/D4).
+        const requestedId = (msg as { agentId?: unknown }).agentId;
+        if (typeof requestedId === "string" && requestedId.length > 0 && sessionReady && isActive()) {
+          const snap = subagentFrameBuffer.resync(requestedId);
           if (snap) {
+            const resolvedAgentId = SubagentFrameBuffer.agentIdOf(snap.data) ?? requestedId;
             sendEventForward("subagents:started", snap.data);
-            console.log(`[dashboard] served subagent resync for agentId=${agentId}`);
+            console.log(
+              `[dashboard] served subagent resync for id=${requestedId} (resolved agentId=${resolvedAgentId})`,
+            );
           } else {
-            console.log(`[dashboard] subagent resync no-op (unknown/finished) agentId=${agentId}`);
+            console.log(`[dashboard] subagent resync no-op (unknown/finished) id=${requestedId}`);
           }
         }
         return;
