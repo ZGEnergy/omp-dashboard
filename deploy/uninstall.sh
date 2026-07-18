@@ -8,11 +8,14 @@ UNIT_DIR="$HOME/.config/systemd/user"
 LOCAL_BIN="$HOME/.local/bin"
 
 log "Stopping + disabling services"
-systemctl --user disable --now omp-dashboard-zrok.service omp-dashboard.service 2>/dev/null || true
-rm -f "$UNIT_DIR/omp-dashboard.service" "$UNIT_DIR/omp-dashboard-zrok.service"
+systemctl --user disable --now omp-dashboard-zrok.service omp-dashboard-cloudflared.service omp-dashboard.service 2>/dev/null || true
+rm -f "$UNIT_DIR/omp-dashboard.service" "$UNIT_DIR/omp-dashboard-zrok.service" "$UNIT_DIR/omp-dashboard-cloudflared.service"
 systemctl --user daemon-reload 2>/dev/null || true
+# Remove the mode-600 cloudflared token env file (harmless if it never existed).
+rm -f "$HOME/.config/omp-dashboard/cloudflared.env"
 
-read -rp "Release the zrok reserved share too? Enter its name (blank to skip): " name
+name=""
+read -rp "Release the zrok reserved share too? Enter its name (blank to skip): " name || true
 if [[ -n "$name" ]]; then
   if have zrok; then zrok release "$name" || warn "Could not release '$name' (not reserved?)."; else warn "zrok not found; skipping release."; fi
 fi
