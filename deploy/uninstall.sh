@@ -14,7 +14,8 @@ systemctl --user daemon-reload 2>/dev/null || true
 # Remove the mode-600 cloudflared token env file (harmless if it never existed).
 rm -f "$HOME/.config/omp-dashboard/cloudflared.env"
 
-read -rp "Release the zrok reserved share too? Enter its name (blank to skip): " name
+name=""
+read -rp "Release the zrok reserved share too? Enter its name (blank to skip): " name || true
 if [[ -n "$name" ]]; then
   if have zrok; then zrok release "$name" || warn "Could not release '$name' (not reserved?)."; else warn "zrok not found; skipping release."; fi
 fi

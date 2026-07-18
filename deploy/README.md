@@ -24,7 +24,7 @@ server, `config.json`, and dashboard state untouched.
 - Linux with a systemd **user** session.
 - **omp** installed and authenticated (`~/.omp/agent` exists). See <https://github.com/can1357/oh-my-pi>.
 - **Node.js ≥ 22.18** (≥ 22.22 preferred — below it `npm install` uses `--force`, which the installer handles), plus **git** and **curl**.
-- For `zrok`: a free <https://zrok.io> account (you paste its token during install).
+- For `zrok`: a free <https://zrok.io> account with an environment enabled before running the installer (see [zrok member install](#zrok-member-install)).
 - For `cloudflare`: a tunnel token from your ZGEnergy admin (see Admin setup below).
 
 ## Install
@@ -57,9 +57,24 @@ bash install.sh --check-only
 
 ### zrok member install
 
-Interactive: paste your zrok account token, pick a share name, and enter your
-`@zerogcapital.com` email (the only account allowed in). The installer reserves
-`https://<name>.share.zrok.io` behind Google OAuth and runs
+Before running the installer, enable zrok v1.1.11 in a separate interactive
+terminal. It accepts its account token only as the required positional
+`enable <token>` argument; it has no stdin, environment-variable, or file token
+interface. Use this no-history/no-echo pattern so no secret literal is entered
+in shell history or echoed:
+
+```bash
+read -rsp "zrok account token: " zrok_token
+printf '\n'
+zrok enable "$zrok_token"
+unset zrok_token
+```
+
+zrok v1.1.11 therefore puts the token in its process argv temporarily; this
+unavoidable exposure happens outside the installer. Once the command succeeds,
+run the installer. It verifies the enabled environment, then prompts only for a
+share name and your `@zerogcapital.com` email (the only account allowed in). It
+reserves `https://<name>.share.zrok.io` behind Google OAuth and runs
 `omp-dashboard-zrok.service`.
 
 ### Cloudflare member install
@@ -94,10 +109,12 @@ environment only — never inline in the command history file, never committed,
 never logged:
 
 ```bash
-CLOUDFLARE_API_TOKEN=<scoped-token> \
+read -rs CLOUDFLARE_API_TOKEN
+printf '\n'
+export CLOUDFLARE_API_TOKEN
 CF_ACCOUNT_ID=<account-id> \
 CF_ZONE_ID=<zone-id> \
-[CF_DOMAIN=zgenergy.app] \
+CF_DOMAIN=zgenergy.app \
   deploy/cloudflare-provision.sh <person> <email>
 ```
 
