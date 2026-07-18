@@ -472,6 +472,7 @@ export default function App() {
   const folderEditorCwd = folderEditorMatch ? decodeFolderPath(folderEditorParams?.encodedCwd ?? "") : null;
   const sidebar = useSidebarState();
   const chatViewRef = useRef<ChatViewHandle>(null);
+  const contentPaneRef = useRef<HTMLDivElement>(null);
   const isMobile = useMobile();
   const installPrompt = useInstallPrompt();
   const launchSource = useLaunchSource();
@@ -1750,6 +1751,7 @@ export default function App() {
                       sessionId={selectedId}
                       currentOverride={selectedSession?.displayPrefsOverride}
                       send={(msg) => send({ type: "setSessionDisplayPrefs", sessionId: selectedId, override: msg.override })}
+                      boundaryRef={contentPaneRef}
                     />
                   )}
                 </>
@@ -2205,7 +2207,7 @@ export default function App() {
         {sessionList}
       </MobileOverlay>
 
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      <div ref={contentPaneRef} className="flex-1 flex flex-col min-w-0 min-h-0">
         {connectionBanner}
         <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} onDismiss={(ids) => send({ type: "recovery_dismiss", sessionIds: ids })} />
         {/* Folder-scoped editor pane (hosts terminal tabs via the keep-alive

@@ -113,6 +113,15 @@ export interface BrowserGateway {
   trackPromptRequest(sessionId: string, msg: Record<string, unknown>): boolean;
   /** Clear a pending PromptBus request (dismissed or cancelled) */
   clearPromptRequest(sessionId: string, promptId: string): void;
+  /**
+   * Drop pending PromptBus requests for an input-needed tool that already
+   * finished. Backstops a lost/late `prompt_dismiss` after a TUI answer so a
+   * late browser subscribe does not re-surface a dead ask as the latest card.
+   * Selective only: with `toolCallId`, only exact metadata matches; without,
+   * only tool-originated prompts (metadata.toolCallId present). Never wipes
+   * free-floating PromptBus cards. Returns cleared promptIds for `prompt_dismiss`.
+   */
+  clearPromptRequestsForTool(sessionId: string, toolCallId?: string): string[];
   /** Clear all queued PromptBus responses for a session (session unregister). */
   clearPendingPromptResponses(sessionId: string): void;
 
@@ -390,6 +399,31 @@ export function createBrowserGateway(
       sessionMap.delete(promptId);
       if (sessionMap.size === 0) pendingPromptRequests.delete(sessionId);
     }
+  }
+
+  function clearPromptRequestsForTool(sessionId: string, toolCallId?: string): string[] {
+    const sessionMap = pendingPromptRequests.get(sessionId);
+    if (!sessionMap || sessionMap.size === 0) return [];
+
+    // Selective only: never wipe free-floating PromptBus cards (architect/slash
+    // with no toolCallId metadata) just because an ask tool ended after its own
+    // prompt was already cleared by prompt_dismiss.
+    // - toolCallId set → only exact metadata matches
+    // - toolCallId absent → only tool-originated prompts (metadata.toolCallId present)
+    // See change: fix-stale-answered-ask-replay.
+    const cleared: string[] = [];
+    for (const [promptId, msg] of sessionMap) {
+      const metaToolId = (msg as { prompt?: { metadata?: { toolCallId?: unknown } } }).prompt?.metadata?.toolCallId;
+      if (toolCallId) {
+        if (metaToolId === toolCallId) cleared.push(promptId);
+      } else if (typeof metaToolId === "string" && metaToolId.length > 0) {
+        cleared.push(promptId);
+      }
+    }
+    for (const promptId of cleared) {
+      clearPromptRequest(sessionId, promptId);
+    }
+    return cleared;
   }
 
   function getSubscribers(sessionId: string): WebSocket[] {
@@ -1096,6 +1130,7 @@ export function createBrowserGateway(
 
     trackPromptRequest,
     clearPromptRequest,
+    clearPromptRequestsForTool,
     clearPendingPromptResponses,
 
     shutdownHeadlessProcesses() {

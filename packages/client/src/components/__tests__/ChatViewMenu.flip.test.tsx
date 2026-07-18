@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { ChatViewMenu } from "../ChatViewMenu.js";
+import type React from "react";
 
 function setViewportHeight(h: number) {
   Object.defineProperty(window, "innerHeight", { value: h, configurable: true, writable: true });
@@ -69,6 +70,48 @@ describe("ChatViewMenu viewport flip", () => {
     expect(popover.className).not.toContain("right-0");
     // maxWidth clamped to the left-anchor space: innerWidth - left - gap = 300 - 20 - 8 = 272.
     expect(popover.style.maxWidth).toBe("272px");
+  });
+
+  it("uses the expanded content pane boundary for horizontal anchoring", () => {
+    setViewportWidth(1440);
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      bottom: 130,
+      left: 536,
+      right: 596,
+      width: 60,
+      height: 30,
+      x: 536,
+      y: 100,
+      toJSON: () => ({}),
+    } as DOMRect);
+    const boundaryRef = {
+      current: {
+        getBoundingClientRect: () => ({
+          top: 0,
+          bottom: 1000,
+          left: 500,
+          right: 1440,
+          width: 940,
+          height: 1000,
+        } as DOMRect),
+      } as unknown as HTMLElement,
+    } as React.RefObject<HTMLElement>;
+
+    render(
+      <ChatViewMenu
+        sessionId="s1"
+        send={() => {}}
+        currentOverride={undefined}
+        boundaryRef={boundaryRef}
+      />,
+    );
+    fireEvent.click(screen.getByText("View"));
+
+    const popover = screen.getByTestId("chat-view-popover");
+    expect(popover.className).toContain("left-0");
+    expect(popover.className).not.toContain("right-0");
+    expect(popover.style.maxWidth).toBe("896px");
   });
 
   it("stays right-anchored in a wide panel", () => {

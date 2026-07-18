@@ -163,6 +163,8 @@ export interface InteractiveUiRequest {
   params: Record<string, unknown>;
   status: "pending" | "resolved" | "cancelled" | "dismissed";
   result?: unknown;
+  /** Originating tool call id when the prompt came from ask_user/ask. */
+  toolCallId?: string;
 }
 
 /**
@@ -897,7 +899,30 @@ export function addInteractiveRequest(
   )) {
     return state;
   }
-  const request: InteractiveUiRequest = { requestId, method, params, status: "pending" };
+
+  // Stale-replay guard: if the originating input-needed tool already finished
+  // (TUI answered; tool_execution_end already reduced), do not re-open a
+  // pending card. Server may still re-emit prompt_request on subscribe when
+  // prompt_dismiss was lost. See change: fix-stale-answered-ask-replay.
+  if (toolCallId) {
+    const tool = state.toolCalls.get(toolCallId);
+    if (tool && tool.status !== "running") {
+      return state;
+    }
+    // Also refuse when a toolResult row already exists for this call id even
+    // if the map entry was pruned / not present after a partial rehydrate.
+    if (state.messages.some((m) => m.role === "toolResult" && m.toolCallId === toolCallId && m.toolStatus !== "running")) {
+      return state;
+    }
+  }
+
+  const request: InteractiveUiRequest = {
+    requestId,
+    method,
+    params,
+    status: "pending",
+    ...(toolCallId ? { toolCallId } : {}),
+  };
   return {
     ...state,
     interactiveRequests: [...state.interactiveRequests, request],
@@ -1768,6 +1793,36 @@ export function reduceEvent(
       if (toolName === "Agent") {
         mergeAgentSubagent(next, finalDetails, isError ? "failed" : "completed", result);
       }
+
+      // Dismiss any still-pending interactive ask cards for this tool call.
+      // Covers live TUI answers when prompt_dismiss was lost/late: once the
+      // ask tool ends, the card is no longer actionable. Matches by toolCallId
+      // when present; otherwise falls back to requestId === toolCallId.
+      // See change: fix-stale-answered-ask-replay.
+      if (toolCallId && healedBy !== "superseded") {
+        const hasPending = next.interactiveRequests.some(
+          (r) =>
+            r.status === "pending" &&
+            (r.toolCallId === toolCallId || r.requestId === toolCallId),
+        );
+        if (hasPending) {
+          next.interactiveRequests = next.interactiveRequests.map((req) =>
+            req.status === "pending" &&
+            (req.toolCallId === toolCallId || req.requestId === toolCallId)
+              ? { ...req, status: "dismissed" as const }
+              : req,
+          );
+          next.messages = next.messages.map((msg) => {
+            if (msg.role !== "interactiveUi") return msg;
+            const args = msg.args as { requestId?: string; status?: string } | undefined;
+            const matches =
+              msg.toolCallId === toolCallId || args?.requestId === toolCallId;
+            if (!matches || args?.status !== "pending") return msg;
+            return { ...msg, args: { ...args, status: "dismissed" } as any };
+          });
+        }
+      }
+
       break;
     }
 
