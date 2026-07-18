@@ -1729,7 +1729,11 @@ export function reduceEvent(
       if (healedBy === "superseded" && existing?.status !== "running") break;
 
       const isError = data.isError === true;
-      const existingMessageIdx = next.messages.findLastIndex((m) => m.toolCallId === toolCallId);
+      // Only toolResult rows — interactiveUi also stamps toolCallId and must
+      // not be rewritten into a terminal tool card (destroys args.status).
+      const existingMessageIdx = next.messages.findLastIndex(
+        (m) => m.role === "toolResult" && m.toolCallId === toolCallId,
+      );
       const existingMessage = existingMessageIdx === -1 ? undefined : next.messages[existingMessageIdx];
       const toolName = existing?.toolName ?? existingMessage?.toolName ?? (typeof data.toolName === "string" && data.toolName.length > 0 ? data.toolName : "unknown");
       const args = existing?.args ?? existingMessage?.args ?? (data.args as Record<string, unknown> | undefined);
