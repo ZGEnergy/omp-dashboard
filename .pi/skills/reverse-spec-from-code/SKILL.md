@@ -8,8 +8,8 @@ description: Reverse-generate OpenSpec capability specs (openspec/specs/<cap>/sp
 Turn spec-less code into OpenSpec capability specs so `kb_search` has high-signal,
 consistently-formatted behavioral documents to index. Tuned via a blind
 generate→judge loop against 6 real specs: requirement coverage 97%, scenario
-coverage 91% (see `.reverse-spec-scratch/RESULTS.md` for the tuning record + a
-model-loss test across opus / deepseek-flash / haiku).
+coverage 91% (see `docs/research/reverse-spec-from-code.md` for the tuning record
++ a model-loss test across opus / deepseek-flash / haiku).
 
 > Scratch MUST live OUTSIDE `openspec/` (kb indexes `openspec/`). Use the
 > gitignored repo-root dir `.reverse-spec-scratch/` — otherwise every draft
@@ -116,7 +116,7 @@ Code-current divergence from a stale spec is a win, not a miss.
 Fan out generators (then auditors) as multiple `Agent` calls in a SINGLE message
 so they run concurrently. One capability per subagent — isolated context.
 
-### Model choice (from the model-loss test in RESULTS.md)
+### Model choice (from the model-loss test in docs/research/reverse-spec-from-code.md)
 
 Judge/generator swap on the 6 ground-truth specs (judge held `@research`):
 
