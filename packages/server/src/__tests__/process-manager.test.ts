@@ -93,12 +93,25 @@ describe("Process Manager", () => {
       expect(cmd).not.toContain("--advisor");
     });
 
-    it("adds one --advisor for tmux and WSL tmux commands only when true", () => {
+    it("adds one --advisor to tmux commands only when true", () => {
       const enabled = buildTmuxCommand("/home/user/project", false, { advisor: true });
       const disabled = buildTmuxCommand("/home/user/project", false, { advisor: false });
 
       expect(enabled.match(/--advisor/g)).toHaveLength(1);
       expect(disabled).not.toContain("--advisor");
+    });
+
+    it("adds one --advisor to WSL tmux commands only when true", () => {
+      const wslTmuxCommand = (options?: SessionOptions) =>
+        `wsl ${buildTmuxCommand("/home/user/project", false, options)}`;
+      const enabled = wslTmuxCommand({ advisor: true });
+      const disabled = wslTmuxCommand({ advisor: false });
+      const absent = wslTmuxCommand();
+
+      expect(enabled).toMatch(/^wsl tmux /);
+      expect(enabled.match(/--advisor/g)).toHaveLength(1);
+      expect(disabled).not.toContain("--advisor");
+      expect(absent).not.toContain("--advisor");
     });
 
     it("should create new session for continue mode when no tmux session exists", () => {
