@@ -1,6 +1,6 @@
 # reverse-spec-from-code — Method Playbook
 
-Companion doc. This one holds METHOD. Metrics/data live in [`docs/research/reverse-spec-from-code.md`](reverse-spec-from-code.md). Shipped skill: [`.pi/skills/reverse-spec-from-code/`](../../.pi/skills/reverse-spec-from-code/).
+Companion doc. This one holds METHOD. Metrics/data live in [`docs/research/reverse-spec-from-code.md`](reverse-spec-from-code.md). Shipped skill: [`packages/openspec-workflow/.pi/skills/reverse-spec-from-code/`](../../packages/openspec-workflow/.pi/skills/reverse-spec-from-code/).
 
 How-we-did-it record. One pi session produced the `reverse-spec-from-code` skill plus a 102-spec backfill across ~16 packages. Below: the method, the decisions and their rationale, the levers, the failure-mode catalog, the takeaways.
 
@@ -42,7 +42,7 @@ Levers applied:
 
 ### Phase 3 — Build the skill
 
-`.pi/skills/reverse-spec-from-code/` = `SKILL.md` + `prompts/{discovery,generator,auditor}.md`.
+`packages/openspec-workflow/.pi/skills/reverse-spec-from-code/` = `SKILL.md` + `prompts/{discovery,generator,auditor}.md`.
 
 Pipeline: discover capabilities → generate blind (parallel) → audit vs code (parallel) → revise → `openspec validate` gate → promote on user confirm.
 
@@ -134,7 +134,7 @@ Caught by the auditor / revise loop across 102 specs:
 
 ## Artifacts
 
-- Skill: [`.pi/skills/reverse-spec-from-code/`](../../.pi/skills/reverse-spec-from-code/) — `SKILL.md` + `prompts/{discovery,generator,auditor}.md`.
+- Skill: [`packages/openspec-workflow/.pi/skills/reverse-spec-from-code/`](../../packages/openspec-workflow/.pi/skills/reverse-spec-from-code/) — `SKILL.md` + `prompts/{discovery,generator,auditor}.md`.
 - Commit `e9c582433` — skill + 102 specs.
 - Commit `b999373c7` — results moved into `docs/research/`.
 - Metrics doc: [`docs/research/reverse-spec-from-code.md`](reverse-spec-from-code.md).

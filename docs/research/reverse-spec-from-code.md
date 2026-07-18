@@ -1,6 +1,6 @@
 # Reverse-spec prompt tuning — results
 
-Records `reverse-spec-from-code` skill prompt tuning + generator-model-loss experiment. Raw per-capability generated specs live in gitignored `.reverse-spec-scratch/`. Skill lives at `.pi/skills/reverse-spec-from-code/`.
+Records `reverse-spec-from-code` skill prompt tuning + generator-model-loss experiment. Raw per-capability generated specs live in gitignored `.reverse-spec-scratch/`. Skill lives at `packages/openspec-workflow/.pi/skills/reverse-spec-from-code/`.
 
 Ground truth: 6 real openspec/specs. Generators ran BLIND (code only). Judge scored gen-vs-real semantically (granularity-neutral, stale-spec-aware).
 

@@ -1,12 +1,12 @@
 ---
 name: "pre-scaffold-openspec-coherence-check"
-description: "Run before scaffolding any OpenSpec proposal in pi-agent-dashboard to catch duplicates of archived work and contradictions with already-shipped architecture. Always run when about to create openspec/changes/&lt;name&gt;/ (proposal.md/design.md/tasks.md), especially for proposals touching tool-renderers, plugin slots, MCP rendering, or any subsystem with a recent archive entry. Skipping this check produces stale proposals that duplicate archived work and contradict shipped architecture. Triggers: 'scaffold OpenSpec', 'write a proposal', 'create change', 'openspec change new'."
+description: "Run before scaffolding any OpenSpec proposal in the project to catch duplicates of archived work and contradictions with already-shipped architecture. Always run when about to create openspec/changes/&lt;name&gt;/ (proposal.md/design.md/tasks.md), especially for proposals touching any subsystem with a recent archive entry. Skipping this check produces stale proposals that duplicate archived work and contradict shipped architecture. Triggers: 'scaffold OpenSpec', 'write a proposal', 'create change', 'openspec change new'."
 version: 1
 created: "2026-06-13"
 updated: "2026-06-13"
 ---
 ## When to Use
-Use before scaffolding any new OpenSpec change in pi-agent-dashboard, regardless of whether the topic feels novel. Two of the most damaging mistakes the assistant has made are (a) re-proposing work that already shipped and was archived, and (b) basing claims about current code on stale file-index harvests or grep results that miss the actual wiring idiom. This skill front-loads the cheap checks that would have caught both.
+Use before scaffolding any new OpenSpec change in this project, regardless of whether the topic feels novel. Two of the most damaging mistakes the assistant has made are (a) re-proposing work that already shipped and was archived, and (b) basing claims about current code on stale file-index harvests or grep results that miss the actual wiring idiom. This skill front-loads the cheap checks that would have caught both.
 
 Trigger this skill when about to run any of: openspec change new, Write to openspec/changes/&lt;name&gt;/proposal.md, the openspec-new-change skill, the openspec-ff-change skill, or any drafted "## Why / ## What Changes" markdown that will become a proposal.
 

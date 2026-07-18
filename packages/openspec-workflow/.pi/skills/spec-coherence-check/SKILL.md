@@ -148,17 +148,17 @@ extract key statements and verify them against the current codebase.
 
 - **Protocol message references** — Verify messages still exist:
   ```bash
-  rg "<message_type>" src/shared/protocol.ts src/shared/browser-protocol.ts
+  rg "<message_type>" <protocol-source-files>
   ```
 
 - **Component references** — Verify components still exist:
   ```bash
-  find src/client/components/ -name "<ComponentName>*"
+  find <components-dir>/ -name "<ComponentName>*"
   ```
 
 - **"Bridge does W"** statements — Check bridge still has that behavior:
   ```bash
-  rg "<W-pattern>" src/extension/ --type ts -l
+  rg "<W-pattern>" <source-dir>/ --type ts -l
   ```
 
 For each invalidated statement:

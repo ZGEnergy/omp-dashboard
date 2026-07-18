@@ -2,14 +2,14 @@
 name: faq-mine
 description: >-
   Mine docs/faq.md from README.md, docs/*.md, AND the pi-hermes memory stores
-  (project MEMORY.md + global failures.md). Dispatches haiku subagents per source
+  (project MEMORY.md + global failures.md). Dispatches @fast subagents per source
   to extract recurring how-to / what-is questions and runtime-problem fixes,
   dedupes against existing FAQ, and merges entries in caveman style. Use when the
   user asks to "build / regenerate / extend the FAQ", "mine docs into FAQ", "mine
   hermes memory into FAQ", "surface runtime problems in the FAQ", "create FAQ from
   README + docs", or "process knowledge into faq.md".
 license: MIT
-compatibility: Requires haiku subagents (general-purpose) + write access to docs/ + read access to ~/.pi/agent hermes stores.
+compatibility: Requires @fast subagents (general-purpose) + write access to docs/ + read access to ~/.pi/agent hermes stores.
 metadata:
   author: robson
   version: "2.0"
@@ -70,9 +70,9 @@ Non-interactive: passing BOTH `--docs` (incl. `--docs skip`) and `--memory` skip
 
 Use `ask_user` (`multiselect`) to let the user pick which sources to mine — list the docs AND the resolved hermes stores as options. Pre-select the evergreen docs + the project store + `failures.md`. Skip the prompt only when the user already passed both `--docs` and `--memory`.
 
-## Phase 2 — Parallel extraction (haiku subagents)
+## Phase 2 — Parallel extraction (@fast subagents)
 
-Dispatch ONE `general-purpose` subagent with `model: haiku`, `run_in_background: true` per selected source (docs AND stores). All agents run in parallel — each writes to its OWN draft file to avoid write conflicts:
+Dispatch ONE `general-purpose` subagent with `model: @fast`, `run_in_background: true` per selected source (docs AND stores). All agents run in parallel — each writes to its OWN draft file to avoid write conflicts:
 - Docs → `docs/.faq-draft-<basename>.md`
 - Stores → `docs/.faq-draft-mem-<label>.md` (`label` = `project` | `failures` | `memory`)
 
@@ -156,7 +156,7 @@ Runtime problems live in the hermes stores as `§`-separated terse entries, each
 
 **`<FILTER>` value by store:**
 - Project store (`<LABEL>=project`): `STEP 2b — no filter. Every entry is scoped to this repo; consider all of them.`
-- Global `failures.md` / `MEMORY.md` (`<LABEL>=failures`|`memory`): `STEP 2b — RELEVANCE FILTER. This store mixes many projects. KEEP only entries about pi-agent-dashboard specifically, its paths (packages/, docs/, openspec/, src/), or a dev-in-this-repo tooling quirk (vitest, playwright, biome, mermaid rendering, git worktree, electron, node-pty, jiti). DROP everything else (unrelated product decks, OAuth-license research, Drive/rclone uploads, other repos). When unsure, DROP.`
+- Global `failures.md` / `MEMORY.md` (`<LABEL>=failures`|`memory`): `STEP 2b — RELEVANCE FILTER. This store mixes many projects. KEEP only entries about THIS project specifically, its paths (packages/, docs/, openspec/, src/), or a dev-in-this-repo tooling quirk (test runner, linter, build tool, git worktree, etc.). DROP everything else (unrelated product decks, OAuth-license research, Drive/rclone uploads, other repos). When unsure, DROP.`
 
 Wait for all agents (2A + 2B) to finish.
 
