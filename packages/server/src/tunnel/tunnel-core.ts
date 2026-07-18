@@ -44,6 +44,8 @@ export interface ChildProviderSpec {
   buildArgs(port: number, token: string | undefined): string[];
   /** Matches the public URL in combined stdout/stderr. */
   urlRegex: RegExp;
+  /** Optional post-match normalization (e.g. prepend scheme to a bare host). */
+  normalizeUrl?(raw: string): string;
   /** Reserve a persistent share; returns a token or null. Omit for public-only-no-reserve providers. */
   reserve?(port: number): Promise<string | null>;
   /** Release a reserved token; best-effort boolean. */
@@ -206,7 +208,7 @@ export class ChildTunnelRuntime {
         if (urlMatch && !resolved) {
           resolved = true;
           clearTimeout(timeout);
-          const url = urlMatch[0];
+          const url = this.spec.normalizeUrl ? this.spec.normalizeUrl(urlMatch[0]) : urlMatch[0];
           this.activeTunnelUrl = url;
           this.activeProcess = child;
           this.writePid(child.pid!);

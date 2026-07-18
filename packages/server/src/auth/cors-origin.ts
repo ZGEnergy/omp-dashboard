@@ -29,7 +29,7 @@ export interface CorsOriginOptions {
  *     Preserved intentionally; never relaxed. See improve-content-editor §6.5.
  *  3. Loopback host (any port) → allow.
  *  4. Active zrok tunnel URL → allow.
- *  5. Any `*.share.zrok.io` host → allow.
+ *  5. Any `*.share.zrok.io` / `*.shares.zrok.io` (zrok v2) host → allow.
  *  6. Neutral static PWA shell `https://pi-dashboard.dev` → allow.
  *  7. Explicitly configured origin → allow.
  *  8. Origin host matches a trusted network (CIDR / wildcard / exact) → allow.
@@ -54,8 +54,8 @@ export function isCorsOriginAllowed(
     // 4. Active zrok tunnel URL (dynamic — rotation without restart).
     const tunnelUrl = opts.getTunnelUrl?.() ?? null;
     if (tunnelUrl && origin === tunnelUrl) return true;
-    // 5. Any *.share.zrok.io host.
-    if (host.endsWith(".share.zrok.io")) return true;
+    // 5. Any *.share.zrok.io (v1) or *.shares.zrok.io (v2) host.
+    if (host.endsWith(".share.zrok.io") || host.endsWith(".shares.zrok.io")) return true;
     // 6. Neutral static PWA shell (D1/D8).
     if (origin === "https://pi-dashboard.dev") return true;
     // 8. Trusted-network origin — LAN-to-LAN switching. Same matcher the WS

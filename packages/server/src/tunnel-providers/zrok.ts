@@ -128,7 +128,9 @@ export const zrokChildSpec: ChildProviderSpec = {
     token
       ? ["share", "reserved", token, "--headless", "--override-endpoint", `http://localhost:${port}`]
       : ["share", "public", "--headless", `http://localhost:${port}`],
-  urlRegex: /https?:\/\/[^\s"]*\.share\.zrok\.io[^\s"]*/,
+  // v1 emits `https://<t>.share.zrok.io`; v2 emits a bare `<t>.shares.zrok.io` (plural, no scheme).
+  urlRegex: /(?:https?:\/\/)?[a-z0-9-]+\.shares?\.zrok\.io[^\s"]*/i,
+  normalizeUrl: (raw) => (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`),
   reserve: reserveShare,
   release: releaseShare,
   processMarker: "zrok share",
