@@ -111,6 +111,21 @@ export function replayEntriesAsEvents(
       }
     }
 
+    if (
+      entry.type === "custom_message" &&
+      entry.customType === "advisor" &&
+      entry.display !== false
+    ) {
+      const message = {
+        role: "custom",
+        customType: entry.customType,
+        content: entry.content,
+        details: entry.details,
+      };
+      messages.push(makeEvent(sessionId, "message_start", ts, { message, entryId: entry.id }));
+      messages.push(makeEvent(sessionId, "message_end", ts, { message, entryId: entry.id }));
+    }
+
     if (entry.type === "message" && entry.message) {
       const msg = entry.message;
 
