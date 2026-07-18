@@ -90,6 +90,15 @@ describe("Process Manager", () => {
       const cmd = buildTmuxCommand("/home/user/project", false);
       expect(cmd).not.toContain("--session");
       expect(cmd).not.toContain("--fork");
+      expect(cmd).not.toContain("--advisor");
+    });
+
+    it("adds one --advisor for tmux and WSL tmux commands only when true", () => {
+      const enabled = buildTmuxCommand("/home/user/project", false, { advisor: true });
+      const disabled = buildTmuxCommand("/home/user/project", false, { advisor: false });
+
+      expect(enabled.match(/--advisor/g)).toHaveLength(1);
+      expect(disabled).not.toContain("--advisor");
     });
 
     it("should create new session for continue mode when no tmux session exists", () => {
@@ -127,6 +136,11 @@ describe("Process Manager", () => {
     it("should not include session flags when no options", () => {
       const args = buildHeadlessArgs({});
       expect(args).toEqual(["--mode", "rpc"]);
+    });
+
+    it("adds one --advisor to headless args only when true", () => {
+      expect(buildHeadlessArgs({ advisor: true })).toEqual(["--mode", "rpc", "--advisor"]);
+      expect(buildHeadlessArgs({ advisor: false })).toEqual(["--mode", "rpc"]);
     });
   });
 

@@ -112,23 +112,28 @@ export interface SessionFlags {
    * See change: add-automation-plugin.
    */
   model?: string;
+  advisor?: boolean;
 }
 
 /**
- * Return `["--session", file]` or `["--fork", file]` or `[]`.
+ * Return `--session` / `--fork` flags followed by enabled optional flags.
  * Every mechanism MUST use this to append flags; dropping them silently
  * is the exact bug that motivated this change (B1, B2).
  */
 export function sessionFlagsToArgv(flags: SessionFlags): string[] {
   if (flags.sessionFile && flags.mode === "continue") {
-    return ["--session", flags.sessionFile];
+    return ["--session", flags.sessionFile, ...advisorFlag(flags)];
   }
   if (flags.sessionFile && flags.mode === "fork") {
-    return ["--fork", flags.sessionFile, ...modelFlag(flags)];
+    return ["--fork", flags.sessionFile, ...modelFlag(flags), ...advisorFlag(flags)];
   }
-  return [...modelFlag(flags)];
+  return [...modelFlag(flags), ...advisorFlag(flags)];
 }
 
 function modelFlag(flags: SessionFlags): string[] {
   return flags.model ? ["--model", flags.model] : [];
+}
+
+function advisorFlag(flags: SessionFlags): string[] {
+  return flags.advisor === true ? ["--advisor"] : [];
 }

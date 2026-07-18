@@ -127,6 +127,7 @@ export interface SessionOptions {
    * add-automation-plugin.
    */
   model?: string;
+  advisor?: boolean;
 }
 
 export interface SpawnResult {

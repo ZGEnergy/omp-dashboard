@@ -128,4 +128,16 @@ describe("sessionFlagsToArgv", () => {
   it("returns empty array with file but no mode", () => {
     expect(sessionFlagsToArgv({ sessionFile: "/s/x.jsonl" })).toEqual([]);
   });
+
+  it("appends --advisor only when explicitly enabled", () => {
+    expect(sessionFlagsToArgv({ advisor: true })).toEqual(["--advisor"]);
+    expect(sessionFlagsToArgv({ advisor: false })).toEqual([]);
+  });
+
+  it("appends --advisor after continue and fork flags", () => {
+    expect(sessionFlagsToArgv({ sessionFile: "/s.jsonl", mode: "continue", advisor: true }))
+      .toEqual(["--session", "/s.jsonl", "--advisor"]);
+    expect(sessionFlagsToArgv({ sessionFile: "/s.jsonl", mode: "fork", advisor: true }))
+      .toEqual(["--fork", "/s.jsonl", "--advisor"]);
+  });
 });
