@@ -5,6 +5,8 @@ PREFIX="${PREFIX:-$HOME/.omp-dashboard}"
 LOCAL_BIN="$HOME/.local/bin"
 REPO_URL="https://github.com/ZGEnergy/omp-dashboard.git"
 REF="${OMP_DASH_REF:-main}"
+# Tunnel provider: "zrok" (default/fallback) or "cloudflare". Empty → prompt.
+TUNNEL_PROVIDER="${TUNNEL_PROVIDER:-}"
 
 # ── Bootstrap for `curl … | bash` ────────────────────────────────────────────
 # When piped over stdin there is no sibling lib.sh/templates, and stdin is the
@@ -62,6 +64,8 @@ check_prereqs() {
 # Pinned to the version proven with our reserve/share commands (v2.x may change
 # the CLI). Bump deliberately after testing the reserve + share-reserved flow.
 ZROK_VERSION="${ZROK_VERSION:-1.1.11}"
+# cloudflared release tag. Bump deliberately after testing `tunnel run --token`.
+CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-2024.12.2}"
 
 fetch_and_build() {
   if [[ -d "$PREFIX/.git" ]]; then
@@ -88,6 +92,23 @@ fetch_and_build() {
   fi
 }
 
+# Choose the tunnel provider. Honors a preset TUNNEL_PROVIDER env, otherwise
+# prompts (default zrok).
+prompt_provider() {
+  if [[ -n "$TUNNEL_PROVIDER" ]]; then
+    validate_tunnel_provider "$TUNNEL_PROVIDER" || die "TUNNEL_PROVIDER must be 'zrok' or 'cloudflare'."
+    log "Tunnel provider: $TUNNEL_PROVIDER (from environment)."
+    return
+  fi
+  local p
+  while :; do
+    read -rp "Tunnel provider [zrok/cloudflare] (default zrok): " p
+    [[ -z "$p" ]] && p=zrok
+    validate_tunnel_provider "$p" && break || warn "Enter 'zrok' or 'cloudflare'."
+  done
+  TUNNEL_PROVIDER="$p"
+}
+
 ensure_zrok() {
   if have zrok; then log "zrok present: $(zrok version 2>/dev/null | tail -1)"; return; fi
   mkdir -p "$LOCAL_BIN"
@@ -104,6 +125,25 @@ ensure_zrok() {
   export PATH="$LOCAL_BIN:$PATH"
   have zrok || die "zrok install failed."
   log "zrok installed: $("$LOCAL_BIN/zrok" version 2>/dev/null | tail -1)"
+}
+
+ensure_cloudflared() {
+  if have cloudflared; then log "cloudflared present: $(cloudflared --version 2>/dev/null | tail -1)"; return; fi
+  mkdir -p "$LOCAL_BIN"
+  local arch
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) die "Unsupported arch $(uname -m) for cloudflared auto-install; install cloudflared manually." ;;
+  esac
+  # cloudflared ships a raw static binary per arch (NOT a tarball).
+  local url="https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${arch}"
+  log "Downloading cloudflared ${CLOUDFLARED_VERSION} ($arch)"
+  curl -fsSL -o "$LOCAL_BIN/cloudflared" "$url"
+  chmod +x "$LOCAL_BIN/cloudflared"
+  export PATH="$LOCAL_BIN:$PATH"
+  have cloudflared || die "cloudflared install failed."
+  log "cloudflared installed: $("$LOCAL_BIN/cloudflared" --version 2>/dev/null | tail -1)"
 }
 
 zrok_enable() {
@@ -154,6 +194,28 @@ zrok_reserve() {
 # real ~/.omp credentials + sessions. Config lives at the standard ~/.pi/dashboard.
 CONFIG_DIR="$HOME/.pi/dashboard"
 UNIT_DIR="$HOME/.config/systemd/user"
+# mode-600 env file that feeds TUNNEL_TOKEN to the cloudflared unit.
+CLOUDFLARED_ENV="$HOME/.config/omp-dashboard/cloudflared.env"
+
+# Cloudflare path: paste the admin-provisioned tunnel token, stash it mode-600,
+# and (optionally) record the public hostname for the final report.
+cloudflare_setup() {
+  local token host
+  log "Your admin provisions the tunnel (deploy/cloudflare-provision.sh) and hands you a tunnel token."
+  read -rp "Paste the tunnel token from your admin: " token
+  [[ -n "$token" ]] || die "No tunnel token provided."
+  read -rp "Public hostname (e.g. omp-joe.zgenergy.app), for the report only: " host
+  if [[ -n "$host" ]]; then
+    SHARE_URL="https://$host"
+  else
+    SHARE_URL="(ask your admin for the URL)"
+  fi
+  SHARE_EMAIL="(Cloudflare Access — single email allowed by your admin)"
+  mkdir -p "$(dirname "$CLOUDFLARED_ENV")"
+  printf 'TUNNEL_TOKEN=%s\n' "$token" > "$CLOUDFLARED_ENV"
+  chmod 600 "$CLOUDFLARED_ENV"
+  log "Wrote $CLOUDFLARED_ENV (mode 600)."
+}
 
 write_config() {
   mkdir -p "$CONFIG_DIR"
@@ -166,10 +228,20 @@ install_services() {
   mkdir -p "$UNIT_DIR"
   sed -e "s#__PREFIX__#$PREFIX#g" -e "s#__OMP_DIR__#$OMP_DIR#g" -e "s#__NODE_DIR__#$NODE_DIR#g" \
     "$DEPLOY_DIR/omp-dashboard.service.template" > "$UNIT_DIR/omp-dashboard.service"
-  sed -e "s#__LOCAL_BIN__#$LOCAL_BIN#g" -e "s#__SHARE_NAME__#$SHARE_NAME#g" \
-    "$DEPLOY_DIR/omp-dashboard-zrok.service.template" > "$UNIT_DIR/omp-dashboard-zrok.service"
-  systemctl --user daemon-reload
-  systemctl --user enable --now omp-dashboard.service omp-dashboard-zrok.service
+  if [[ "$TUNNEL_PROVIDER" == "cloudflare" ]]; then
+    sed -e "s#__LOCAL_BIN__#$LOCAL_BIN#g" -e "s#__ENV_FILE__#$CLOUDFLARED_ENV#g" \
+      "$DEPLOY_DIR/omp-dashboard-cloudflared.service.template" > "$UNIT_DIR/omp-dashboard-cloudflared.service"
+    # Only one tunnel unit is ever enabled at a time.
+    systemctl --user disable --now omp-dashboard-zrok.service 2>/dev/null || true
+    systemctl --user daemon-reload
+    systemctl --user enable --now omp-dashboard.service omp-dashboard-cloudflared.service
+  else
+    sed -e "s#__LOCAL_BIN__#$LOCAL_BIN#g" -e "s#__SHARE_NAME__#$SHARE_NAME#g" \
+      "$DEPLOY_DIR/omp-dashboard-zrok.service.template" > "$UNIT_DIR/omp-dashboard-zrok.service"
+    systemctl --user disable --now omp-dashboard-cloudflared.service 2>/dev/null || true
+    systemctl --user daemon-reload
+    systemctl --user enable --now omp-dashboard.service omp-dashboard-zrok.service
+  fi
   loginctl enable-linger "$USER" || warn "enable-linger failed; services may not start before login."
   log "Services enabled (start on boot via linger)."
 }
@@ -216,7 +288,23 @@ configure_omp_autoattach() {
 }
 
 report() {
-  cat <<EOF
+  local tunnel_log
+  if [[ "$TUNNEL_PROVIDER" == "cloudflare" ]]; then
+    tunnel_log="journalctl --user -u omp-dashboard-cloudflared -f"
+    cat <<EOF
+
+$(log "Install complete.")
+  Local URL : http://localhost:8088
+  Public URL: $SHARE_URL   (Cloudflare Access, single email set by your admin)
+  Sessions  : new 'omp' sessions auto-attach; restart any already-running omp to see it.
+  Logs      : journalctl --user -u omp-dashboard -f
+              $tunnel_log
+  Update    : re-run this installer (or: cd $PREFIX && git pull && npm run build && systemctl --user restart omp-dashboard)
+  Uninstall : $PREFIX/deploy/uninstall.sh
+  NOTE: $LOCAL_BIN must be on your PATH to use the 'omp-dashboard' launcher.
+EOF
+  else
+    cat <<EOF
 
 $(log "Install complete.")
   Local URL : http://localhost:8088
@@ -228,17 +316,25 @@ $(log "Install complete.")
   Uninstall : $PREFIX/deploy/uninstall.sh
   NOTE: $LOCAL_BIN must be on your PATH to use the 'omp-dashboard' launcher.
 EOF
+  fi
 }
 
 main() {
   if [[ "${1:-}" == "--check-only" ]]; then check_prereqs; log "check-only: OK"; exit 0; fi
   check_prereqs
-  ensure_zrok
+  prompt_provider
   # Ask the interactive questions UP FRONT, before the long/noisy build, so the
   # prompts aren't buried in build output (and the build then runs unattended).
-  banner "Set up your public tunnel — a couple of quick questions:"
-  zrok_enable
-  zrok_reserve
+  if [[ "$TUNNEL_PROVIDER" == "cloudflare" ]]; then
+    ensure_cloudflared
+    banner "Set up your Cloudflare tunnel — paste the token from your admin:"
+    cloudflare_setup
+  else
+    ensure_zrok
+    banner "Set up your public tunnel — a couple of quick questions:"
+    zrok_enable
+    zrok_reserve
+  fi
   fetch_and_build
   write_config
   install_services

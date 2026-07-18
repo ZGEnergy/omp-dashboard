@@ -18,3 +18,14 @@ validate_share_name() {
 validate_zge_email() {
   [[ "$1" =~ ^[A-Za-z0-9._%+-]+@zerogcapital\.com$ ]]
 }
+
+# Single-level DNS label for the omp-<person> subdomain (NOT a multi-level host):
+# lowercase alnum + hyphen, no leading/trailing dash, 1-63 chars, no dots.
+validate_hostname_label() {
+  [[ "$1" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]
+}
+
+# Tunnel provider selector — exactly one of the two supported values.
+validate_tunnel_provider() {
+  [[ "$1" == "zrok" || "$1" == "cloudflare" ]]
+}

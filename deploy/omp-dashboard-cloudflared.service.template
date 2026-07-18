@@ -1,0 +1,17 @@
+[Unit]
+Description=omp-dashboard cloudflared tunnel
+Requires=omp-dashboard.service
+After=omp-dashboard.service
+
+[Service]
+Type=simple
+Environment=HOME=%h
+Environment=PATH=__LOCAL_BIN__:/usr/local/bin:/usr/bin:/bin
+# TUNNEL_TOKEN is read from the mode-600 env file, never inline in ExecStart.
+EnvironmentFile=__ENV_FILE__
+ExecStart=__LOCAL_BIN__/cloudflared tunnel run --token ${TUNNEL_TOKEN}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
