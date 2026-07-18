@@ -37,9 +37,11 @@ interface Props {
    * fields accumulate rather than replacing each other).
    */
   currentOverride: PartialDisplayPrefs | undefined;
+  /** Desktop content pane boundary for horizontal popover positioning. */
+  boundaryRef?: React.RefObject<HTMLElement | null>;
 }
 
-export function ChatViewMenu({ sessionId, send, currentOverride }: Props): React.ReactElement {
+export function ChatViewMenu({ sessionId, send, currentOverride, boundaryRef }: Props): React.ReactElement {
   const { global } = useDisplayPrefsContext();
   const prefs = useDisplayPrefs(sessionId);
   const [open, setOpen] = useState(false);
@@ -48,6 +50,7 @@ export function ChatViewMenu({ sessionId, send, currentOverride }: Props): React
   const { flipUp, maxHeight, anchorRight, maxWidth } = usePopoverFlip(triggerRef, {
     open,
     estimatedWidth: 256, // w-64 natural width
+    boundaryRef,
   });
 
   useEffect(() => {
