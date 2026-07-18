@@ -77,8 +77,9 @@ Do this once for the whole team:
 
 1. Register `zgenergy.app` on **Cloudflare Registrar** inside a **shared
    ZGEnergy Cloudflare account** (so every member's subdomain lives in one zone).
-2. In **Zero Trust → Settings → Authentication**, configure a login method —
-   **Google IdP** (recommended) or **One-Time PIN** (email code).
+2. In **Zero Trust → Settings → Authentication**, configure **Google** as the
+   Access identity provider. This deployment uses **Google OAuth exclusively** —
+   One-Time PIN (OTP) is not used.
 3. Mint a **scoped** Cloudflare API token (My Profile → API Tokens → Create
    Custom Token) with exactly these permissions:
    - **Account** → **Cloudflare Tunnel : Edit**
