@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup } from "@testing-library/react";
+import { render, cleanup, screen } from "@testing-library/react";
 import React from "react";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
@@ -207,5 +207,17 @@ describe("SessionList auto-scroll-selected-session-card", () => {
       onSelect: () => {},
     });
     expect(scrollSpy).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("SessionList advisor activity threading", () => {
+  it("passes App-derived advisor rows to the production session card", () => {
+    mount({
+      sessions: [s()],
+      sessionMessagesMap: new Map([["s1", [{ role: "advisor" } as any]]]),
+      onSelect: () => {},
+    });
+    expect(screen.getByTestId("advisor-chip").title).toBe("Advisor enabled");
   });
 });

@@ -156,6 +156,20 @@ describe("WorktreeSpawnDialog — advisor option", () => {
     expect((screen.getByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement).checked).toBe(false);
   });
 
+  it("syncs an async mirror result until the user changes the checkbox", async () => {
+    defaultMocks();
+    const { rerender } = render(<WorktreeSpawnDialog cwd="/repo" advisorDefault={false} onSpawn={() => {}} onCancel={() => {}} />);
+    await waitFor(() => screen.getByTestId("worktree-dialog-existing"));
+    const checkbox = screen.getByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement;
+
+    rerender(<WorktreeSpawnDialog cwd="/repo" advisorDefault onSpawn={() => {}} onCancel={() => {}} />);
+    expect(checkbox.checked).toBe(true);
+
+    fireEvent.click(checkbox);
+    rerender(<WorktreeSpawnDialog cwd="/repo" advisorDefault={false} onSpawn={() => {}} onCancel={() => {}} />);
+    expect(checkbox.checked).toBe(false);
+  });
+
   it("forwards advisor only when checked for existing worktrees", async () => {
     defaultMocks();
     const onSpawn = vi.fn();

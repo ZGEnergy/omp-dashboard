@@ -105,6 +105,10 @@ export function WorktreeSpawnDialog({ cwd, onSpawn, onCancel, initialBranch, att
   const [loadError, setLoadError] = useState<string | null>(null);
   const [newBranch, setNewBranch] = useState(initialBranch ?? "");
   const [advisorEnabled, setAdvisorEnabled] = useState(advisorDefault);
+  const advisorTouchedRef = useRef(false);
+  useEffect(() => {
+    if (!advisorTouchedRef.current) setAdvisorEnabled(advisorDefault);
+  }, [advisorDefault]);
   // Dirty-flag: flips on first user onChange of the branch input. Mount-
   // time seeding from `initialBranch` does NOT flip the flag (no onChange
   // fires for initial useState value). Used by the `attachProposal`
@@ -520,7 +524,7 @@ export function WorktreeSpawnDialog({ cwd, onSpawn, onCancel, initialBranch, att
           <input
             type="checkbox"
             checked={advisorEnabled}
-            onChange={(event) => setAdvisorEnabled(event.target.checked)}
+            onChange={(event) => { advisorTouchedRef.current = true; setAdvisorEnabled(event.target.checked); }}
           />
           {i18nT("advisor.enable", undefined, "Enable advisor")}
         </label>

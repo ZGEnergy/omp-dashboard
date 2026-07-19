@@ -85,6 +85,7 @@ import {
   resetNavStack,
 } from "./lib/nav-tracker.js";
 import { useOpenSpecConfig } from "./lib/openspec-config-api.js";
+import { fetchOmpConfig } from "./lib/omp-config-api.js";
 import { dispatchPluginMessage } from "./lib/plugins-api.js";
 import { clearRecoveryOffer } from "./lib/recovery-offer-bus.js";
 import { rehydrateSession } from "./lib/rehydrate-session.js";
@@ -547,6 +548,7 @@ export default function App() {
       window.removeEventListener("pageshow", onPageShow);
     };
   }, [requestForegroundReplay]);
+  const [advisorDefault, setAdvisorDefault] = useState(false);
   // Per-session dashboard-local `/view` preview rows. Lives separately from
   // event-reducer state so the reducer never sees them. Merged with
   // `state.messages` by timestamp when passing to ChatView.
@@ -588,6 +590,18 @@ export default function App() {
   // See change: redesign-openspec-board.
   const [boardWorktreeForChange, setBoardWorktreeForChange] = useState<{ cwd: string; changeName: string } | null>(null);
   const [modelsMap, setModelsMap] = useState<Map<string, ModelInfo[]>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchOmpConfig()
+      .then((snapshot) => {
+        if (!cancelled) setAdvisorDefault(snapshot.settings["advisor.enabled"]?.value === true);
+      })
+      .catch(() => {
+        // An unavailable mirror must not block spawning; false is the safe default.
+      });
+    return () => { cancelled = true; };
+  }, []);
   // Write-only: the last reader (StatusBar's deprecated `roles` prop) was
   // removed in `redesign-prompt-input`; roles UI lives in the roles settings
   // plugin. `setRolesMap` still consumes server role events. Full excision of
@@ -1558,10 +1572,16 @@ export default function App() {
   // (card + detail) and the sidebar tag filter group. Recomputes only when the
   // session list changes. See change: add-session-tags.
   const allTags = useMemo(() => allTagsInUse(Array.from(sessions.values())), [sessions]);
+  const sessionMessagesMap = useMemo(
+    () => new Map(Array.from(sessionStates, ([sessionId, state]) => [sessionId, state.messages])),
+    [sessionStates],
+  );
 
   const sessionList = (
     <SessionList
       sessions={Array.from(sessions.values())}
+      sessionMessagesMap={sessionMessagesMap}
+      advisorDefault={advisorDefault}
       terminals={Array.from(terminals.values())}
       selectedId={selectedId}
       onSelect={handleSelect}
@@ -2519,6 +2539,7 @@ export default function App() {
           cwd={boardWorktreeForChange.cwd}
           initialBranch={`os/${boardWorktreeForChange.changeName}`}
           attachProposal={boardWorktreeForChange.changeName}
+          advisorDefault={advisorDefault}
           onCancel={() => setBoardWorktreeForChange(null)}
           onSpawnStart={(c) => addSpawningCwd(c)}
           onSpawnAbort={(c) => clearSpawningCwd(c)}
