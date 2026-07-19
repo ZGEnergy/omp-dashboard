@@ -1447,8 +1447,13 @@ export function wireEvents(deps: EventWiringDeps): void {
     if (msg.type === "model_update") {
       const modelUpdates: Partial<DashboardSession> = {
         model: msg.model,
-        thinkingLevel: msg.thinkingLevel,
       };
+      // Older bridges omit thinkingLevel; do not turn that omission into an
+      // explicit undefined update. A complete current snapshot still carries
+      // either a string or null, both of which are forwarded below.
+      if (msg.thinkingLevel !== undefined) {
+        modelUpdates.thinkingLevel = msg.thinkingLevel;
+      }
       sessionManager.update(sessionId, modelUpdates);
       browserGateway.broadcastSessionUpdated(sessionId, modelUpdates);
     }

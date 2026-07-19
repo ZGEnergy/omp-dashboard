@@ -80,4 +80,21 @@ describe("event-wiring model_update", () => {
     expect(broadcastSessionUpdated).toHaveBeenCalledWith(SESSION_ID, expected);
     expect(callOrder).toEqual(["update", "broadcast"]);
   });
+
+  it("does not send explicit undefined for a model_update from an older bridge", () => {
+    const { piGateway, update, broadcastSessionUpdated } = makeWiring();
+    const message = {
+      type: "model_update",
+      sessionId: SESSION_ID,
+      model: "anthropic/claude-opus-4-6",
+    } as ModelUpdateMessage;
+
+    piGateway.onEvent(SESSION_ID, message);
+
+    const expected = { model: message.model };
+    expect(update).toHaveBeenCalledWith(SESSION_ID, expected);
+    expect(broadcastSessionUpdated).toHaveBeenCalledWith(SESSION_ID, expected);
+    expect(Object.hasOwn(update.mock.calls[0][1], "thinkingLevel")).toBe(false);
+    expect(Object.hasOwn(broadcastSessionUpdated.mock.calls[0][1], "thinkingLevel")).toBe(false);
+  });
 });
