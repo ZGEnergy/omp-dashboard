@@ -13,9 +13,19 @@ import { gatherGitInfo, gatherGitStatus } from "./vcs-info.js";
 /**
  * Send model_update if model or thinking level has changed since last send.
  */
-export function sendModelUpdateIfChanged(bc: BridgeContext): void {
-  const model = getCurrentModelString(bc);
-  const thinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? null;
+type ModelUpdateSnapshot = {
+  model: string | undefined;
+  thinkingLevel: string | null;
+};
+
+export function sendModelUpdateIfChanged(
+  bc: BridgeContext,
+  snapshot?: ModelUpdateSnapshot,
+): void {
+  const model = snapshot ? snapshot.model : getCurrentModelString(bc);
+  const thinkingLevel = snapshot
+    ? snapshot.thinkingLevel
+    : (bc.pi as any).getThinkingLevel?.() ?? null;
   const thinkingLevelCache = thinkingLevel === null ? undefined : thinkingLevel;
   if (model === bc.lastModel && thinkingLevelCache === bc.lastThinkingLevel) return;
   bc.lastModel = model;

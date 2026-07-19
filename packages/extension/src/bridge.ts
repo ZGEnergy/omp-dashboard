@@ -1448,11 +1448,19 @@ function initBridge(pi: ExtensionAPI) {
   // the wire preserves Pi application order without exposing a transport API.
   let modelUpdatePublishTail: Promise<void> = Promise.resolve();
   function sendModelUpdateIfChanged(): void {
+    // Capture the post-Pi state before enqueueing. Reading it inside `.then`
+    // would let a rapid A→B sequence publish B twice and dedup A away.
+    const queuedBc = syncBc();
+    const snapshot = {
+      model: getCurrentModelString(queuedBc),
+      thinkingLevel: (pi as any).getThinkingLevel?.() ?? null,
+    };
     modelUpdatePublishTail = modelUpdatePublishTail
       .then(() => {
-        const bc = syncBc();
-        _sendModelUpdateIfChanged(bc);
-        applyBc(bc);
+        _sendModelUpdateIfChanged(queuedBc, snapshot);
+        // A session switch may have happened while an older publication waited
+        // in the tail. Never restore stale closure state across that boundary.
+        if (syncBc().sessionId === queuedBc.sessionId) applyBc(queuedBc);
       })
       .catch((err) => {
         console.error("[dashboard] model update publish failed:", err);
