@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { sendModelUpdateIfChanged } from "../model-tracker.js";
 import type { BridgeContext } from "../bridge-context.js";
+import bridge from "../bridge.js";
 
 function makeBc(thinkingLevel: string | null | undefined): { bc: BridgeContext; sent: any[] } {
   const sent: any[] = [];
@@ -23,6 +24,15 @@ function makeBc(thinkingLevel: string | null | undefined): { bc: BridgeContext; 
     lastThinkingLevel: undefined,
   } as unknown as BridgeContext;
   return { bc, sent };
+}
+
+function privateBridgeHelpers(): any {
+  let helpers: any;
+  bridge({
+    __piDashboardModelPreferenceTestSeam: (value: any) => { helpers = value; },
+  } as any);
+  expect(helpers).toBeDefined();
+  return helpers;
 }
 
 describe("bridge thinking_level_select → model_update", () => {
@@ -106,6 +116,104 @@ describe("bridge thinking_level_select → model_update", () => {
 
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ model: "anthropic/claude", thinkingLevel: "after" });
+  });
+
+  it("private bridge tail emits rapid A→B and A→A snapshots correctly", async () => {
+    const helpers = privateBridgeHelpers();
+    const sent: any[] = [];
+    const bc = {
+      sessionId: "S-tail",
+      cachedCtx: { model: { provider: "provider", id: "a" } },
+      pi: { getThinkingLevel: () => "low" },
+      connection: { send: (m: any) => sent.push(m) },
+      lastModel: undefined,
+      lastThinkingLevel: undefined,
+    } as unknown as BridgeContext;
+    const queue = helpers.createPublisher({
+      readState: () => bc,
+      captureSnapshot: (state: BridgeContext) => ({
+        model: `${state.cachedCtx.model.provider}/${state.cachedCtx.model.id}`,
+        thinkingLevel: (state.pi as any).getThinkingLevel?.() ?? null,
+      }),
+      publish: (state: BridgeContext, snapshot: any) => sendModelUpdateIfChanged(state, snapshot),
+      applyState: () => undefined,
+    });
+
+    queue();
+    bc.cachedCtx.model = { provider: "provider", id: "b" };
+    queue();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent.map((m) => m.model)).toEqual(["provider/a", "provider/b"]);
+
+    sent.length = 0;
+    bc.cachedCtx.model = { provider: "provider", id: "a" };
+    bc.lastModel = undefined;
+    bc.lastThinkingLevel = undefined;
+    queue();
+    queue();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent.map((m) => m.model)).toEqual(["provider/a"]);
+  });
+
+  it("private dashboard setters publish only after successful Pi application", async () => {
+    const helpers = privateBridgeHelpers();
+    const sent: any[] = [];
+    let model = { provider: "provider", id: "before" };
+    let level: string | undefined = "before";
+    const bc = {
+      sessionId: "S-setter",
+      cachedCtx: { get model() { return model; } },
+      pi: { getThinkingLevel: () => level },
+      connection: { send: (m: any) => sent.push(m) },
+      lastModel: undefined,
+      lastThinkingLevel: undefined,
+    } as unknown as BridgeContext;
+    const queue = helpers.createPublisher({
+      readState: () => bc,
+      captureSnapshot: (state: BridgeContext) => ({
+        model: `${state.cachedCtx.model.provider}/${state.cachedCtx.model.id}`,
+        thinkingLevel: (state.pi as any).getThinkingLevel?.() ?? null,
+      }),
+      publish: (state: BridgeContext, snapshot: any) => sendModelUpdateIfChanged(state, snapshot),
+      applyState: () => undefined,
+    });
+    const setters = helpers.createSetters({
+      pi: {
+        setThinkingLevel(next: string) { level = next; },
+        async setModel(next: any) { model = next; },
+      },
+      getModelRegistry: () => ({ find: () => ({ provider: "provider", id: "after" }) }),
+      publish: queue,
+    });
+
+    await setters.setModel("provider", "after");
+    setters.setThinkingLevel("after-thinking");
+    const beforeFailure = sent.length;
+    const failing = helpers.createSetters({
+      pi: {
+        setThinkingLevel() { throw new Error("Pi rejected thinking level"); },
+        async setModel() { throw new Error("Pi rejected model"); },
+      },
+      getModelRegistry: () => ({ find: () => ({ provider: "provider", id: "rejected" }) }),
+      publish: queue,
+    });
+    await failing.setModel("provider", "rejected");
+    try { failing.setThinkingLevel("rejected"); } catch { /* expected */ }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(beforeFailure).toBe(1);
+    expect(sent.map((m) => m.thinkingLevel)).toEqual(["before", "after-thinking"]);
+  });
+
+  it("private reconnect sequence resets, registers, then queues a fresh snapshot", () => {
+    const helpers = privateBridgeHelpers();
+    const order: string[] = [];
+    helpers.runReconnect({
+      reset: () => order.push("reset"),
+      stateSync: () => order.push("register"),
+      publish: () => order.push("snapshot"),
+    });
+    expect(order).toEqual(["reset", "register", "snapshot"]);
   });
 
   it("does not re-emit when the thinking level is unchanged", () => {
