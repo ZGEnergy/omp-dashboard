@@ -4,29 +4,32 @@
  * spawn token: cwd, terminal names, and registration arrival order are never
  * identity signals here.
  */
-const DEFAULT_TTL_MS = 60_000;
+const defaultUnconfirmedReservationTtlMs = () => 5 * 60_000;
 
 type AdvisorProof = { advisor: true };
 type DeferredConsumer = (proof: AdvisorProof) => void;
 
 interface PendingEntry {
-  confirmed: boolean;
+  armed: boolean;
   timer: ReturnType<typeof setTimeout>;
   consumer?: DeferredConsumer;
 }
 
 export interface PendingAdvisorRegistry {
-  /** Reserve a token while an advisor spawn awaits its crash gate. */
+  /** Reserve a token while the async advisor spawn is in flight. */
   reserve(spawnToken: string): void;
-  /** Confirm a reserved token only after its spawn succeeds. */
-  confirm(spawnToken: string): void;
+  /**
+   * Confirm a successful spawn and begin its registration window from this
+   * instant, using the exact timeout snapshot passed to the watchdog.
+   */
+  arm(spawnToken: string, registrationWindowMs: number): void;
   /** Discard a reservation when its spawn fails or throws. */
   discard(spawnToken: string): void;
   /** True when a server-minted token belongs to an advisor spawn in flight. */
   has(spawnToken: string | undefined): boolean;
   /**
-   * Consume confirmed proof after verified registration. If registration wins
-   * the spawn's completion race, retain its consumer until `confirm` succeeds.
+   * Consume armed proof after verified registration. If registration wins the
+   * spawn's completion race, retain its consumer until `arm` succeeds.
    */
   consume(spawnToken: string | undefined, onConfirmed?: DeferredConsumer): AdvisorProof | undefined;
   /** Drop all pending timers and records during shutdown/tests. */
@@ -36,13 +39,14 @@ export interface PendingAdvisorRegistry {
 }
 
 export interface PendingAdvisorRegistryOptions {
-  ttlMs?: number;
+  /** Bounded cleanup for reservations whose async spawn never completes. */
+  getUnconfirmedReservationTtlMs?: () => number;
 }
 
 export function createPendingAdvisorRegistry(
   options?: PendingAdvisorRegistryOptions,
 ): PendingAdvisorRegistry {
-  const ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
+  const getUnconfirmedReservationTtlMs = options?.getUnconfirmedReservationTtlMs ?? defaultUnconfirmedReservationTtlMs;
   const pendingAdvisorBySpawnToken = new Map<string, PendingEntry>();
 
   function remove(spawnToken: string): PendingEntry | undefined {
@@ -57,15 +61,21 @@ export function createPendingAdvisorRegistry(
     reserve(spawnToken: string): void {
       if (!spawnToken) return;
       remove(spawnToken);
-      const timer = setTimeout(() => pendingAdvisorBySpawnToken.delete(spawnToken), ttlMs);
+      const timer = setTimeout(
+        () => pendingAdvisorBySpawnToken.delete(spawnToken),
+        getUnconfirmedReservationTtlMs(),
+      );
       timer.unref?.();
-      pendingAdvisorBySpawnToken.set(spawnToken, { confirmed: false, timer });
+      pendingAdvisorBySpawnToken.set(spawnToken, { armed: false, timer });
     },
 
-    confirm(spawnToken: string): void {
+    arm(spawnToken: string, registrationWindowMs: number): void {
       const entry = pendingAdvisorBySpawnToken.get(spawnToken);
       if (!entry) return;
-      entry.confirmed = true;
+      clearTimeout(entry.timer);
+      entry.armed = true;
+      entry.timer = setTimeout(() => pendingAdvisorBySpawnToken.delete(spawnToken), registrationWindowMs);
+      entry.timer.unref?.();
       if (entry.consumer) {
         remove(spawnToken);
         entry.consumer({ advisor: true });
@@ -84,7 +94,7 @@ export function createPendingAdvisorRegistry(
       if (!spawnToken) return undefined;
       const entry = pendingAdvisorBySpawnToken.get(spawnToken);
       if (!entry) return undefined;
-      if (entry.confirmed) {
+      if (entry.armed) {
         remove(spawnToken);
         return { advisor: true };
       }

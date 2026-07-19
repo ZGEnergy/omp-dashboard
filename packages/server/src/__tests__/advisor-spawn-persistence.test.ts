@@ -87,7 +87,7 @@ describe("advisor spawn proof persistence", () => {
       "ordinary-token-b",
     );
     server.pendingAdvisorRegistry.reserve("advisor-token-a");
-    server.pendingAdvisorRegistry.confirm("advisor-token-a");
+    server.pendingAdvisorRegistry.arm("advisor-token-a", 120_000);
 
     // Register B first to prove same-cwd arrival order cannot inherit A's proof.
     sockets.push(await registerSession(server.piPort()!, {
@@ -126,7 +126,7 @@ describe("advisor spawn proof persistence", () => {
     const sessionFile = join(tmpDir, "unmatched.jsonl");
     writeFileSync(sessionFile, "");
     server.pendingAdvisorRegistry.reserve("real-token");
-    server.pendingAdvisorRegistry.confirm("real-token");
+    server.pendingAdvisorRegistry.arm("real-token", 120_000);
 
     sockets.push(await registerSession(server.piPort()!, {
       sessionId: "unmatched-session",
@@ -163,7 +163,7 @@ describe("advisor spawn proof persistence", () => {
     expect(server.sessionManager.get("early-session")?.advisor).toBeUndefined();
 
     // This mirrors the successful return after headless spawn's 300 ms gate.
-    server.pendingAdvisorRegistry.confirm("early-token");
+    server.pendingAdvisorRegistry.arm("early-token", 120_000);
     await wait(20);
     expect(server.sessionManager.get("early-session")?.advisor).toBe(true);
     expect(readSessionMeta(sessionFile)?.advisor).toBe(true);
@@ -173,7 +173,7 @@ describe("advisor spawn proof persistence", () => {
     const sessionFile = join(tmpDir, "tmux.jsonl");
     writeFileSync(sessionFile, "");
     server.pendingAdvisorRegistry.reserve("tmux-token");
-    server.pendingAdvisorRegistry.confirm("tmux-token");
+    server.pendingAdvisorRegistry.arm("tmux-token", 120_000);
 
     sockets.push(await registerSession(server.piPort()!, {
       sessionId: "tmux-session",
@@ -192,7 +192,7 @@ describe("advisor spawn proof persistence", () => {
     const sessionFile = join(tmpDir, "bare-dashboard-spawned.jsonl");
     writeFileSync(sessionFile, "");
     server.pendingAdvisorRegistry.reserve("verified-token");
-    server.pendingAdvisorRegistry.confirm("verified-token");
+    server.pendingAdvisorRegistry.arm("verified-token", 120_000);
 
     sockets.push(await registerSession(server.piPort()!, {
       sessionId: "bare-dashboard-spawned",
@@ -244,18 +244,48 @@ describe("pending advisor registry bounds", () => {
 
   it("expires and disposes unconfirmed records without delivering proof", () => {
     vi.useFakeTimers();
-    const registry = createPendingAdvisorRegistry({ ttlMs: 50 });
+    const registry = createPendingAdvisorRegistry({ getUnconfirmedReservationTtlMs: () => 50 });
     const delivered = vi.fn();
     registry.reserve("expiring-token");
     registry.consume("expiring-token", delivered);
     vi.advanceTimersByTime(50);
-    registry.confirm("expiring-token");
+    registry.arm("expiring-token", 120_000);
 
     expect(registry.size()).toBe(0);
     expect(delivered).not.toHaveBeenCalled();
 
     registry.reserve("dispose-token");
     registry.dispose();
+    expect(registry.size()).toBe(0);
+  });
+
+  it("starts the 120 s proof window only after an async spawn arms it", async () => {
+    vi.useFakeTimers();
+    const registry = createPendingAdvisorRegistry();
+    const preSpawnDelayMs = 20_000;
+    const registrationWindowMs = 120_000;
+
+    async function armAfterAsyncSpawn(spawnToken: string): Promise<void> {
+      registry.reserve(spawnToken);
+      await new Promise<void>((resolve) => setTimeout(resolve, preSpawnDelayMs));
+      registry.arm(spawnToken, registrationWindowMs);
+    }
+
+    const delayedSpawn = armAfterAsyncSpawn("delayed-registration-token");
+    await vi.advanceTimersByTimeAsync(preSpawnDelayMs);
+    await delayedSpawn;
+    vi.advanceTimersByTime(registrationWindowMs - 1);
+
+    // The old reserve-time timer would have expired 20 s earlier. This remains
+    // consumable through the complete watchdog-valid window.
+    expect(registry.consume("delayed-registration-token")).toEqual({ advisor: true });
+
+    const expiringSpawn = armAfterAsyncSpawn("expired-registration-token");
+    await vi.advanceTimersByTimeAsync(preSpawnDelayMs);
+    await expiringSpawn;
+    vi.advanceTimersByTime(registrationWindowMs);
+
+    expect(registry.consume("expired-registration-token")).toBeUndefined();
     expect(registry.size()).toBe(0);
   });
 });

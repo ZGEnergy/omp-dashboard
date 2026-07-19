@@ -293,6 +293,8 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // session_added.spawnRequestId so the client can auto-select / dismiss
   // its placeholder by exact correlation. See change: spawn-correlation-token.
   const pendingClientCorrelations = createPendingClientCorrelations();
+  // Reservations are bounded independently; successful spawns arm proof with
+  // the same timeout snapshot passed to the registration watchdog.
   const pendingAdvisorRegistry = createPendingAdvisorRegistry();
 
   // Worktree-init progress registry: maps requestId -> originating ws

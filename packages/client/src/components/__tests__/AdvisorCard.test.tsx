@@ -41,6 +41,30 @@ describe("AdvisorCard", () => {
     expect(screen.getByText("blocked note")).not.toBeNull();
   });
 
+  it("shows each expanded note's actual or fallback severity visibly and accessibly", () => {
+    render(
+      <AdvisorCard
+        message={advisorMessage({
+          notes: [
+            { note: "minor observation", severity: "nit" },
+            { note: "needs attention", severity: "concern" },
+            { note: "must fix", severity: "blocker" },
+            { note: "severity omitted" },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /advisor.*4.*blocker/i }));
+
+    expect(screen.getAllByText(/severity: nit/i)).toHaveLength(2);
+    expect(screen.getByText(/severity: concern/i)).not.toBeNull();
+    expect(screen.getByText(/severity: blocker/i)).not.toBeNull();
+    expect(screen.getByRole("listitem", { name: /severity: concern.*needs attention/i })).not.toBeNull();
+    expect(screen.getByRole("listitem", { name: /severity: blocker.*must fix/i })).not.toBeNull();
+    expect(screen.getByRole("listitem", { name: /severity: nit.*severity omitted/i })).not.toBeNull();
+  });
+
   it("falls back to preformatted raw content when structured notes are absent", () => {
     const { container } = render(<AdvisorCard message={advisorMessage({ content: "raw\nadvisory" })} />);
 

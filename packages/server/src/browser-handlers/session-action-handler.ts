@@ -3,7 +3,7 @@
  */
 import { existsSync } from "node:fs";
 import type { BrowserToServerMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { clampSpawnRegisterTimeoutMs, loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import {
   killPidWithGroup,
@@ -476,14 +476,10 @@ export async function handleSpawnSession(
       pendingClientCorrelations.record(spawnResult.spawnToken, msg.requestId);
     }
     // Registration can arrive during headless spawn's completion gate. Reserve
-    // only an in-flight correlation before waiting; confirm it only after this
+    // only an in-flight correlation before waiting; arm it only after this
     // result succeeds, so failed spawns never stamp durable advisor proof.
-    if (advisorSpawnToken) {
-      if (spawnResult.success && spawnResult.spawnToken === advisorSpawnToken) {
-        pendingAdvisorRegistry?.confirm(advisorSpawnToken);
-      } else {
-        pendingAdvisorRegistry?.discard(advisorSpawnToken);
-      }
+    if (advisorSpawnToken && (!spawnResult.success || spawnResult.spawnToken !== advisorSpawnToken)) {
+      pendingAdvisorRegistry?.discard(advisorSpawnToken);
     }
     if (spawnResult.dashboardSpawned && spawnResult.success) {
       pendingDashboardSpawns?.set(msg.cwd, (pendingDashboardSpawns?.get(msg.cwd) ?? 0) + 1);
@@ -514,19 +510,22 @@ export async function handleSpawnSession(
         ...(spawnResult.stderr ? { stderrTail: spawnResult.stderr } : {}),
       });
     } else {
-      // Arm watchdog for every successful spawn. See change: spawn-failure-diagnostics.
+      // Snapshot at arm time so the advisor proof and watchdog share both their
+      // start point and timeout even if Settings changed while spawnPiSession ran.
+      const registrationWindowMs = clampSpawnRegisterTimeoutMs(loadConfig().spawnRegisterTimeoutMs);
       const watchdog = getSpawnRegisterWatchdog();
       watchdog.arm({
         pid: spawnResult.pid,
         cwd: msg.cwd,
         mechanism: strategy as import("@blackbelt-technology/pi-dashboard-shared/platform/spawn-mechanism.js").SpawnMechanism,
         logPath: spawnResult.logPath,
-        // Read-on-arm: pass current config value so a Settings change takes effect
-        // on the next spawn without a server restart. See change: spawn-failure-diagnostics (fix W1).
-        timeoutMs: config.spawnRegisterTimeoutMs,
+        timeoutMs: registrationWindowMs,
         ws,
         spawnToken: spawnResult.spawnToken,
       });
+      if (advisorSpawnToken && spawnResult.spawnToken === advisorSpawnToken) {
+        pendingAdvisorRegistry?.arm(advisorSpawnToken, registrationWindowMs);
+      }
     }
   } catch (err) {
     if (advisorSpawnToken) pendingAdvisorRegistry?.discard(advisorSpawnToken);

@@ -25,6 +25,7 @@ vi.mock("../process-manager.js", () => ({
 }));
 
 vi.mock("@blackbelt-technology/pi-dashboard-shared/config.js", () => ({
+  clampSpawnRegisterTimeoutMs: vi.fn((timeoutMs: number) => timeoutMs),
   loadConfig: vi.fn().mockReturnValue({
     spawnStrategy: "headless",
     spawnRegisterTimeoutMs: 30000,
@@ -66,7 +67,7 @@ function makeCtx() {
     headlessPidRegistry: { register: vi.fn() } as never,
     pendingDashboardSpawns: new Map(),
     pendingAttachRegistry: { enqueue: vi.fn() } as never,
-    pendingAdvisorRegistry: { reserve: vi.fn(), confirm: vi.fn(), discard: vi.fn(), has: vi.fn(), consume: vi.fn(), dispose: vi.fn(), size: vi.fn() },
+    pendingAdvisorRegistry: { reserve: vi.fn(), arm: vi.fn(), discard: vi.fn(), has: vi.fn(), consume: vi.fn(), dispose: vi.fn(), size: vi.fn() },
     sessionManager: {} as never,
     broadcast: vi.fn() as never,
     piGateway: {} as never,
@@ -151,6 +152,8 @@ describe("handleSpawnSession", () => {
 
   it("passes advisor through and arms only a successful true spawn token", async () => {
     mockPreflightSpawn.mockReturnValue({ ok: true, reasons: [] });
+    const watchdog = { arm: vi.fn() };
+    vi.mocked(getSpawnRegisterWatchdog).mockReturnValue(watchdog as never);
     mockSpawnPiSession.mockImplementationOnce(async (_cwd, options) => ({
       success: true,
       spawnToken: options?.spawnToken,
@@ -167,7 +170,8 @@ describe("handleSpawnSession", () => {
     const spawnOptions = mockSpawnPiSession.mock.calls[0]?.[1];
     expect(spawnOptions?.spawnToken).toBeTypeOf("string");
     expect(ctx.pendingAdvisorRegistry.reserve).toHaveBeenCalledWith(spawnOptions?.spawnToken);
-    expect(ctx.pendingAdvisorRegistry.confirm).toHaveBeenCalledWith(spawnOptions?.spawnToken);
+    expect(ctx.pendingAdvisorRegistry.arm).toHaveBeenCalledWith(spawnOptions?.spawnToken, 30_000);
+    expect(watchdog.arm).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 30_000 }));
   });
 
   it("does not arm advisor proof for false, absent, or failed spawns", async () => {
@@ -191,6 +195,6 @@ describe("handleSpawnSession", () => {
     const failedSpawnOptions = mockSpawnPiSession.mock.calls[2]?.[1];
     expect(ctx.pendingAdvisorRegistry.reserve).toHaveBeenCalledTimes(1);
     expect(ctx.pendingAdvisorRegistry.discard).toHaveBeenCalledWith(failedSpawnOptions?.spawnToken);
-    expect(ctx.pendingAdvisorRegistry.confirm).not.toHaveBeenCalled();
+    expect(ctx.pendingAdvisorRegistry.arm).not.toHaveBeenCalled();
   });
 });

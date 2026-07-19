@@ -74,13 +74,24 @@ export function AdvisorCard({ message }: { message: ChatMessage }) {
         <span aria-hidden="true" className="shrink-0 text-[var(--text-tertiary)]">{expanded ? "−" : "+"}</span>
       </button>
       {expanded && (
-        <div className="space-y-2 border-t border-[var(--border-subtle)] px-3 py-2">
-          {notes.map((note, index) => (
-            <div key={`${note.advisor ?? "advisor"}-${index}`} className={`border-l-2 pl-2 text-sm text-[var(--text-secondary)] ${severityRail[note.severity ?? "nit"]}`}>
-              {note.advisor && <span className="mr-1 font-medium text-[var(--text-primary)]">{note.advisor}:</span>}
-              {note.note}
-            </div>
-          ))}
+        <div role="list" className="space-y-2 border-t border-[var(--border-subtle)] px-3 py-2">
+          {notes.map((note, index) => {
+            const noteSeverity = note.severity ?? "nit";
+            const noteLabel = `Severity: ${noteSeverity}. ${note.advisor ? `${note.advisor}: ` : ""}${note.note}`;
+
+            return (
+              <div
+                key={`${note.advisor ?? "advisor"}-${index}`}
+                role="listitem"
+                aria-label={noteLabel}
+                className={`border-l-2 pl-2 text-sm text-[var(--text-secondary)] ${severityRail[noteSeverity]}`}
+              >
+                <span className="mr-2 font-medium text-[var(--text-primary)]">Severity: {noteSeverity}</span>
+                {note.advisor && <span className="mr-1 font-medium text-[var(--text-primary)]">{note.advisor}:</span>}
+                {note.note}
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

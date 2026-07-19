@@ -17,7 +17,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,7 +31,7 @@ import {
   waitForNoCrash,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/detached-spawn.js";
 import type { ChildProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
-import { buildSafeArgv, execSync, spawnSync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { buildSafeArgv, execFileSync, spawnSync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import { prependManagedNodeToPath } from "@blackbelt-technology/pi-dashboard-shared/platform/managed-node-path.js";
 import { electronAsNodeRequired } from "@blackbelt-technology/pi-dashboard-shared/platform/runner.js";
 import {
@@ -275,8 +275,8 @@ export function buildInteractivePiArgs(options?: SessionOptions): string[] {
 }
 
 /**
- * Build a tmux shell command string to run pi in a new tmux window/session.
- * Kept as a string (not argv) because tmux is invoked via `execSync(cmd)`.
+ * Build a tmux pane command to run pi in a new tmux window/session.
+ * The pane command is passed as one tmux argv element.
  */
 /**
  * Shell prefix that drops every `ZELLIJ*` variable from the pane environment.
@@ -294,11 +294,16 @@ export function zellijEnvUnsetPrefix(): string {
   return "env -u ZELLIJ -u ZELLIJ_PANE_ID -u ZELLIJ_SESSION_NAME -u ZELLIJ_LAYOUT -u ZELLIJ_PANE_CONTENT -u ZELLIJ_SESSION";
 }
 
-export function buildTmuxCommand(cwd: string, sessionExists: boolean, options?: SessionOptions): string {
+function buildTmuxPaneCommand(
+  cwd: string,
+  piCmd: readonly string[],
+  options?: SessionOptions,
+): string {
   const safeCwd = shellEscape(cwd);
   const flags = sessionFlagsToArgv(options ?? {})
     .map(shellEscape)
     .join(" ");
+  const resolvedPiInvocation = piCmd.map(shellEscape).join(" ");
   // Scrub Zellij client identity inside the pane (tmux session env may re-inject it).
   // Set the token inside the pane command as well: a long-lived tmux server
   // does not reliably propagate the client process environment, and WSL does
@@ -307,14 +312,155 @@ export function buildTmuxCommand(cwd: string, sessionExists: boolean, options?: 
   const tokenEnv = options?.spawnToken
     ? ` PI_DASHBOARD_SPAWN_TOKEN=${shellEscape(options.spawnToken)}`
     : "";
-  const piInvocation = `${scrub}${tokenEnv} pi`;
-  const piCmd = flags
+  const piInvocation = `${scrub}${tokenEnv} ${resolvedPiInvocation}`;
+  return flags
     ? `cd ${safeCwd} && ${piInvocation} ${flags}`
     : `cd ${safeCwd} && ${piInvocation}`;
+}
+
+/**
+ * Build the tmux client argv. The pane command is deliberately one argv element:
+ * tmux passes it to exactly one pane shell, rather than an outer Node shell
+ * parsing OMP arguments before tmux sees them.
+ */
+function buildTmuxArgs(
+  cwd: string,
+  sessionExists: boolean,
+  piCmd: readonly string[],
+  options?: SessionOptions,
+): string[] {
+  const paneCommand = buildTmuxPaneCommand(cwd, piCmd, options);
   if (sessionExists) {
-    return `tmux new-window -t pi-dashboard -c ${safeCwd} "${piCmd}"`;
+    return ["new-window", "-t", "pi-dashboard", "-c", cwd, paneCommand];
   }
-  return `tmux new-session -d -s pi-dashboard -c ${safeCwd} "${piCmd}"`;
+  return ["new-session", "-d", "-s", "pi-dashboard", "-c", cwd, paneCommand];
+}
+
+/**
+ * Build a human-readable tmux command. Production launches use buildTmuxArgs
+ * with execFileSync so this string is never passed through an outer shell.
+ */
+export function buildTmuxCommand(
+  cwd: string,
+  sessionExists: boolean,
+  piCmd: readonly string[],
+  options?: SessionOptions,
+): string {
+  const safeCwd = shellEscape(cwd);
+  const paneCommand = buildTmuxPaneCommand(cwd, piCmd, options);
+  if (sessionExists) {
+    return `tmux new-window -t pi-dashboard -c ${safeCwd} "${paneCommand}"`;
+  }
+  return `tmux new-session -d -s pi-dashboard -c ${safeCwd} "${paneCommand}"`;
+}
+
+function powershellLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+type ManagedOmpPackage = {
+  name?: unknown;
+  bin?: unknown;
+  engines?: { bun?: unknown; node?: unknown };
+};
+
+/**
+ * Convert the managed OMP npm `.cmd` shim into the executable and CLI script it
+ * represents. PowerShell delegates `.cmd` files to cmd.exe, which reparses
+ * metacharacters after our encoded payload. Only the exact managed OMP shim is
+ * unwrapped; arbitrary third-party `.cmd` executables retain their resolver
+ * behaviour.
+ */
+function normalizeManagedOmpCmd(piArgv: readonly string[]): string[] | null {
+  const [cmd, ...args] = piArgv;
+  if (!cmd) return [...piArgv];
+
+  // Resolver paths are Windows paths whenever the server runs on Windows,
+  // regardless of whether the resolver spelled them with `\` or `/`.
+  // The platform seam in tests mocks process.platform, so do not infer the
+  // path flavour from the candidate's separator spelling.
+  const pathApi = process.platform === "win32" ? path.win32 : path.posix;
+  const managedBin = pathApi.normalize(MANAGED_BIN);
+  const managedCmd = pathApi.normalize(cmd);
+  const managedCmdDir = pathApi.dirname(managedCmd);
+  const samePath = pathApi === path.win32
+    ? managedCmdDir.toLowerCase() === managedBin.toLowerCase()
+    : managedCmdDir === managedBin;
+  if (pathApi.basename(managedCmd).toLowerCase() !== "omp.cmd" || !samePath) {
+    return [...piArgv];
+  }
+
+  const packageDir = pathApi.join(pathApi.dirname(managedBin), "@oh-my-pi", "pi-coding-agent");
+  const packageJsonPath = pathApi.join(packageDir, "package.json");
+  try {
+    const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as ManagedOmpPackage;
+    const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin && typeof pkg.bin === "object"
+      ? (pkg.bin as Record<string, unknown>).omp
+      : null;
+    if (
+      pkg.name !== "@oh-my-pi/pi-coding-agent"
+      || typeof bin !== "string"
+      || bin.length === 0
+      || pathApi.isAbsolute(bin)
+    ) {
+      return null;
+    }
+
+    const script = pathApi.resolve(packageDir, bin);
+    const canonicalPackageDir = pathApi.normalize(realpathSync(packageDir));
+    const canonicalScript = pathApi.normalize(realpathSync(script));
+    const canonicalPackageForCompare = pathApi === path.win32
+      ? canonicalPackageDir.toLowerCase()
+      : canonicalPackageDir;
+    const canonicalScriptForCompare = pathApi === path.win32
+      ? canonicalScript.toLowerCase()
+      : canonicalScript;
+    const relativeScript = pathApi.relative(canonicalPackageForCompare, canonicalScriptForCompare);
+    if (
+      relativeScript === ""
+      || relativeScript === ".."
+      || relativeScript.startsWith(`..${pathApi.sep}`)
+      || pathApi.isAbsolute(relativeScript)
+      || !statSync(canonicalScript).isFile()
+    ) {
+      return null;
+    }
+
+    const runtime = typeof pkg.engines?.bun === "string"
+      ? resolver.which("bun")
+      : typeof pkg.engines?.node === "string"
+        ? resolver.resolveNode()
+        : null;
+    if (typeof runtime !== "string" || runtime.length === 0) return null;
+    const runtimeExt = pathApi.extname(runtime).toLowerCase();
+    if (runtimeExt === ".cmd" || runtimeExt === ".bat") return null;
+    return [runtime, canonicalScript, ...args];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Windows Terminal's `-w 0` server owns the tab environment, so the token must
+ * be set by the tab's child command. An encoded PowerShell script avoids
+ * cmd.exe's second parse, including `%NAME%` expansion in arbitrary OMP argv.
+ */
+function buildWtChildArgv(piArgv: readonly string[], spawnToken?: string): string[] {
+  const [pi, ...piArgs] = piArgv;
+  const script = [
+    spawnToken ? `$env:PI_DASHBOARD_SPAWN_TOKEN = ${powershellLiteral(spawnToken)}` : "",
+    `$pi = ${powershellLiteral(pi ?? "")}`,
+    `$piArgs = @(${piArgs.map(powershellLiteral).join(", ")})`,
+    "& $pi @piArgs",
+  ].filter(Boolean).join("; ");
+  return [
+    "powershell.exe",
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-EncodedCommand",
+    Buffer.from(script, "utf16le").toString("base64"),
+  ];
 }
 
 // ── Availability probes (isolated, one place) ───────────────────────────────
@@ -381,9 +527,9 @@ function isWslTmuxAvailable(): boolean {
   return _wslTmuxAvailabilityCache;
 }
 
-function dashboardSessionExists(): boolean {
+function dashboardSessionExists(tmux: string): boolean {
   try {
-    execSync("tmux has-session -t pi-dashboard 2>/dev/null", { stdio: "ignore" });
+    execFileSync(tmux, ["has-session", "-t", "pi-dashboard"], { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -393,6 +539,25 @@ function dashboardSessionExists(): boolean {
 /** Resolve pi as argv. Prefers node.exe + cli.js on Windows (avoids .cmd). */
 function resolvePiCommand(): string[] | null {
   return resolver.resolvePi();
+}
+
+/** Resolve OMP from the Linux side of WSL; host Windows resolution is unusable in a Linux pane. */
+function resolveWslPiCommand(): string[] | null {
+  try {
+    const { argv, spawnOptions } = buildSafeArgv(
+      "wsl.exe",
+      ["--exec", "sh", "-lc", "command -v omp"],
+    );
+    const result = spawnSync<string>(argv[0], argv.slice(1), {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+      ...spawnOptions,
+    });
+    const pi = result.status === 0 ? result.stdout.trim().split(/\r?\n/, 1)[0] : "";
+    return pi ? [pi] : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Mechanism dispatch ─────────────────────────────────────────────────────
@@ -488,14 +653,21 @@ export async function spawnPiSession(
 // ── Per-mechanism spawn ────────────────────────────────────────────────────
 
 function spawnTmux(cwd: string, options?: SessionOptions): SpawnResult {
-  const exists = dashboardSessionExists();
-  const cmd = buildTmuxCommand(cwd, exists, options);
-  // Pass env explicitly so PI_DASHBOARD_SPAWN_TOKEN reaches the tmux pane's
-  // pi process (tmux inherits the caller's env into new windows/sessions).
-  // See change: spawn-correlation-token.
-  const env = buildSpawnEnv(process.env, { spawnToken: options?.spawnToken });
+  const piCmd = resolvePiCommand();
+  if (!piCmd) {
+    return { success: false, code: "PI_NOT_FOUND", message: `pi binary not found. Checked: ${MANAGED_BIN} and system PATH.` };
+  }
+  const tmux = resolver.which("tmux");
+  if (!tmux) {
+    return { success: false, code: "TMUX_MISSING", message: "tmux binary not found" };
+  }
+  const exists = dashboardSessionExists(tmux);
+  const args = buildTmuxArgs(cwd, exists, piCmd, options);
+  // The token is also set in the pane command because an existing tmux server
+  // can retain its own environment. Passing the client env covers new servers.
+  const env = buildSpawnEnv(process.env, { spawnToken: options?.spawnToken, argv0: piCmd[0] });
   try {
-    execSync(cmd, { stdio: "ignore", env });
+    execFileSync(tmux, args, { stdio: "ignore", env });
     return {
       success: true,
       dashboardSpawned: true,
@@ -507,16 +679,21 @@ function spawnTmux(cwd: string, options?: SessionOptions): SpawnResult {
 }
 
 function spawnWslTmux(cwd: string, options?: SessionOptions): SpawnResult {
+  const piCmd = resolveWslPiCommand();
+  if (!piCmd) {
+    return { success: false, code: "PI_NOT_FOUND", message: "pi binary not found in WSL. Checked Linux PATH." };
+  }
   try {
-    const cmd = `wsl ${buildTmuxCommand(cwd, false, options)}`;
+    const args = ["--exec", "tmux", ...buildTmuxArgs(cwd, false, piCmd, options)];
+    // The token is set in the pane command. Retain the sanitized parent env for
+    // WSL itself, but never derive a Linux pane executable from the host resolver.
     const env = buildSpawnEnv(process.env, { spawnToken: options?.spawnToken });
-    execSync(cmd, { stdio: "ignore", env });
+    execFileSync("wsl.exe", args, { stdio: "ignore", env });
     return { success: true, dashboardSpawned: true, message: "Pi session spawned via WSL tmux" };
   } catch (err: any) {
     return { success: false, code: "TMUX_MISSING", message: `Failed to spawn via WSL tmux (wsl-tmux mechanism): ${err.message}` };
   }
 }
-
 async function spawnWt(cwd: string, options?: SessionOptions): Promise<SpawnResult> {
   const wt = resolver.which("wt");
   if (!wt) {
@@ -527,16 +704,26 @@ async function spawnWt(cwd: string, options?: SessionOptions): Promise<SpawnResu
     return { success: false, code: "PI_NOT_FOUND", message: `pi binary not found. Checked: ${MANAGED_BIN} and system PATH.` };
   }
 
-  const piArgv = [...piCmd, ...buildInteractivePiArgs(options)];
-  const args = buildWtArgs({ cwd, title: path.basename(cwd) || "pi", piArgv });
+  const piArgv = normalizeManagedOmpCmd([...piCmd, ...buildInteractivePiArgs(options)]);
+  if (!piArgv) {
+    return { success: false, code: "PI_NOT_FOUND", message: "Managed OMP runtime or CLI script not found" };
+  }
+  // `-w 0` connects to an existing Windows Terminal server, which does not
+  // inherit the wt.exe client's environment. Set the token in the per-tab
+  // child command so the bridge sees it regardless of terminal reuse.
+  const args = buildWtArgs({
+    cwd,
+    title: path.basename(cwd) || "pi",
+    piArgv: buildWtChildArgv(piArgv, options?.spawnToken),
+  });
 
   const r = await spawnDetached({
     cmd: wt,
     args,
     cwd,
-    // pass the node-wrapped pi argv[0] so the Electron-as-node flag is
-    // re-added when it is the Electron binary (execpath-fallback topology).
-    env: buildSpawnEnv(process.env, { spawnToken: options?.spawnToken, argv0: piCmd[0] }),
+    // Pass the actual child executable so Electron-as-node is restored only
+    // when the encoded Windows Terminal payload invokes Electron itself.
+    env: buildSpawnEnv(process.env, { spawnToken: options?.spawnToken, argv0: piArgv[0] }),
   });
 
   if (!r.ok) {
