@@ -10,6 +10,7 @@ import { useLocation } from "wouter";
 import { useFolderUrgencySort } from "../hooks/useFolderUrgencySort.js";
 import { useInstallPrompt } from "../hooks/useInstallPrompt.js";
 import { maybeAutoInitWorktreeOnSpawn } from "../lib/auto-init-worktree.js";
+import { fetchOmpConfig } from "../lib/omp-config-api.js";
 import { encodeFolderPath } from "../lib/folder-encoding.js";
 import { t as i18nT } from "../lib/i18n";
 import { useI18n } from "../lib/i18n.js";
@@ -120,7 +121,7 @@ interface Props {
   onResumeKeepPosition?: (sessionId: string) => void;
   onHideSession?: (sessionId: string) => void;
   onUnhideSession?: (sessionId: string) => void;
-  onSpawnSession?: (cwd: string, attachProposal?: string, opts?: { gitWorktreeBase?: string; placeholderCwd?: string; initialPrompt?: string }) => void;
+  onSpawnSession?: (cwd: string, attachProposal?: string, opts?: { gitWorktreeBase?: string; placeholderCwd?: string; initialPrompt?: string; advisor?: true }) => void;
   spawningCwds?: Set<string>;
   /**
    * Add/remove a cwd from the spawning set (placeholder + disabled-button).
@@ -300,6 +301,19 @@ export function SessionList({ sessions, selectedId, onSelect, revealRequest, onS
   // existing `WorktreeSpawnDialog` component to avoid duplicate state.
   // See change: openspec-worktree-spawn-button.
   const [worktreeForChange, setWorktreeForChange] = useState<{ cwd: string; changeName: string } | null>(null);
+  const [advisorDefault, setAdvisorDefault] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchOmpConfig()
+      .then((snapshot) => {
+        if (!cancelled) setAdvisorDefault(snapshot.settings["advisor.enabled"]?.value === true);
+      })
+      .catch(() => {
+        // An unavailable mirror must not block spawning; false is the safe default.
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // Filter state - active-only defaults to ON
   // Single visibility toggle: `Show hidden`. The previous `Active only`
@@ -1494,6 +1508,7 @@ export function SessionList({ sessions, selectedId, onSelect, revealRequest, onS
       {worktreeDialogCwd && (
         <WorktreeSpawnDialog
           cwd={worktreeDialogCwd}
+          advisorDefault={advisorDefault}
           onCancel={() => setWorktreeDialogCwd(null)}
           onSpawnStart={(c) => addSpawningCwd?.(c)}
           onSpawnAbort={(c) => clearSpawningCwd?.(c)}
@@ -1514,6 +1529,7 @@ export function SessionList({ sessions, selectedId, onSelect, revealRequest, onS
           cwd={worktreeForChange.cwd}
           initialBranch={`os/${worktreeForChange.changeName}`}
           attachProposal={worktreeForChange.changeName}
+          advisorDefault={advisorDefault}
           onCancel={() => setWorktreeForChange(null)}
           onSpawnStart={(c) => addSpawningCwd?.(c)}
           onSpawnAbort={(c) => clearSpawningCwd?.(c)}

@@ -212,6 +212,19 @@ export function WorktreePill({ session }: { session: DashboardSession }) {
 
 // Simple cache to avoid redundant fetches across re-renders.
 // Exported so the BranchSwitchDialog can invalidate on close.
+function AdvisorChip({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return (
+    <span
+      data-testid="advisor-chip"
+      title={i18nT("advisor.chipTooltip", undefined, "Advisor enabled")}
+      className="pointer-events-none inline-flex items-center px-1.5 py-px rounded-full text-[9px] uppercase tracking-wider border border-[var(--border-subtle)] text-[var(--text-muted)] bg-[var(--bg-tertiary)]"
+    >
+      {i18nT("advisor.chip", undefined, "Advisor")}
+    </span>
+  );
+}
+
 export const branchCache = new Map<string, { branch: string | null; noGit: boolean }>();
 
 interface GroupGitInfoProps {
@@ -374,6 +387,7 @@ export function GroupGitInfo({ sessions, cwd, folderBranch, onBranchClick, folde
 
 export function SessionCard({
   session,
+  messages = [],
   selectedId,
   onSelect,
   now,
@@ -411,6 +425,8 @@ export function SessionCard({
   hasNotice,
 }: {
   session: DashboardSession;
+  /** Reduced activity used only for passive session metadata. */
+  messages?: Array<{ role: string }>;
   selectedId?: string;
   onSelect: (id: string) => void;
   now: number;
@@ -516,6 +532,7 @@ export function SessionCard({
   const canRename = session.status !== "ended" && !!onRename;
   const isAlive = session.status !== "ended";
   const isMobile = useMobile();
+  const hasAdvisor = session.advisor === true || messages.some((message) => message.role === "advisor");
   const prefs = useDisplayPrefs(session.id);
   // Suppress purple `card-input-stripes` when a widget-bar slot owns the
   // pending prompt. Plugin-agnostic. See change: fix-flows-plugin-polish (B1).
@@ -666,6 +683,9 @@ export function SessionCard({
             <TagStrip tags={session.tags ?? []} phase={session.openspecPhase} />
           </div>
         ) : null}
+        <div className="mt-1">
+          <AdvisorChip visible={hasAdvisor} />
+        </div>
         {/* PROCESS subcard (mobile compact) — activity bar + drawer.
             See change: redesign-process-list-activity-bar. */}
         <MobileProcessSubcard
@@ -918,6 +938,9 @@ export function SessionCard({
           <TagStrip tags={session.tags ?? []} phase={session.openspecPhase} />
         </div>
       ) : null}
+      <div className="mt-1 px-1">
+        <AdvisorChip visible={hasAdvisor} />
+      </div>
 
       {/* Subcard stack — see change: redesign-session-card-subcards.
           Flow activity badge has been removed from the shell — it is now

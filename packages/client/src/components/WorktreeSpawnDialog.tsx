@@ -61,6 +61,8 @@ interface Props {
    * See change: openspec-worktree-spawn-button.
    */
   attachProposal?: string;
+  /** Initial checkbox state derived from the OMP configuration mirror. */
+  advisorDefault?: boolean;
   /**
    * Called when the user chooses to spawn a pi session in a worktree path.
    * `gitWorktreeBase` is supplied when the dialog created a new worktree
@@ -71,7 +73,7 @@ interface Props {
    */
   onSpawn: (
     worktreePath: string,
-    opts?: { gitWorktreeBase?: string; attachProposal?: string },
+    opts?: { gitWorktreeBase?: string; attachProposal?: string; advisor?: true },
   ) => void;
   onCancel: () => void;
   /**
@@ -98,10 +100,11 @@ interface LoadedData {
   remoteBranches: GitBranchEntry[];
 }
 
-export function WorktreeSpawnDialog({ cwd, onSpawn, onCancel, initialBranch, attachProposal, onSpawnStart, onSpawnAbort }: Props) {
+export function WorktreeSpawnDialog({ cwd, onSpawn, onCancel, initialBranch, attachProposal, advisorDefault = false, onSpawnStart, onSpawnAbort }: Props) {
   const [data, setData] = useState<LoadedData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [newBranch, setNewBranch] = useState(initialBranch ?? "");
+  const [advisorEnabled, setAdvisorEnabled] = useState(advisorDefault);
   // Dirty-flag: flips on first user onChange of the branch input. Mount-
   // time seeding from `initialBranch` does NOT flip the flag (no onChange
   // fires for initial useState value). Used by the `attachProposal`
@@ -231,13 +234,12 @@ export function WorktreeSpawnDialog({ cwd, onSpawn, onCancel, initialBranch, att
   // Always include attachProposal in opts when the prop was supplied;
   // never invent it. See change: openspec-worktree-spawn-button.
   const buildOpts = useCallback(
-    (gitWorktreeBase?: string): { gitWorktreeBase?: string; attachProposal?: string } | undefined => {
-      const opts: { gitWorktreeBase?: string; attachProposal?: string } = {};
-      if (gitWorktreeBase) opts.gitWorktreeBase = gitWorktreeBase;
-      if (attachProposal) opts.attachProposal = attachProposal;
-      return Object.keys(opts).length > 0 ? opts : undefined;
-    },
-    [attachProposal],
+    (gitWorktreeBase?: string): { gitWorktreeBase?: string; attachProposal?: string; advisor?: true } => ({
+      ...(gitWorktreeBase ? { gitWorktreeBase } : {}),
+      ...(attachProposal ? { attachProposal } : {}),
+      ...(advisorEnabled ? { advisor: true as const } : {}),
+    }),
+    [attachProposal, advisorEnabled],
   );
   // Existing worktree rows spawn directly. Any required initialization is
   // a separate gated action (the folder-action-bar Initialize button).
@@ -513,6 +515,15 @@ export function WorktreeSpawnDialog({ cwd, onSpawn, onCancel, initialBranch, att
             </span>
           )}
         </div>
+
+        <label className="mb-3 flex items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+          <input
+            type="checkbox"
+            checked={advisorEnabled}
+            onChange={(event) => setAdvisorEnabled(event.target.checked)}
+          />
+          {i18nT("advisor.enable", undefined, "Enable advisor")}
+        </label>
 
         <div className="space-y-2">
           {sourceMode !== "pr" ? (

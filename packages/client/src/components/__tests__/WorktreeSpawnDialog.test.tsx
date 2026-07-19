@@ -134,7 +134,53 @@ describe("WorktreeSpawnDialog — loading + existing worktrees", () => {
       screen.getByTestId(`worktree-row-${encodeURIComponent("/repo/.worktrees/feat-x")}`),
     );
     expect(onSpawn).toHaveBeenCalledTimes(1);
-    expect(onSpawn).toHaveBeenCalledWith("/repo/.worktrees/feat-x", undefined);
+    expect(onSpawn).toHaveBeenCalledWith("/repo/.worktrees/feat-x", {});
+  });
+});
+
+describe("WorktreeSpawnDialog — advisor option", () => {
+  it("seeds the checkbox from the mirrored advisor default", async () => {
+    defaultMocks();
+    render(<WorktreeSpawnDialog cwd="/repo" advisorDefault onSpawn={() => {}} onCancel={() => {}} />);
+    await waitFor(() => screen.getByTestId("worktree-dialog-existing"));
+    expect((screen.getByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("keeps the checkbox unchecked when the mirror is false or unavailable", async () => {
+    defaultMocks();
+    const { rerender } = render(<WorktreeSpawnDialog cwd="/repo" advisorDefault={false} onSpawn={() => {}} onCancel={() => {}} />);
+    await waitFor(() => screen.getByTestId("worktree-dialog-existing"));
+    expect((screen.getByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement).checked).toBe(false);
+
+    rerender(<WorktreeSpawnDialog cwd="/repo" onSpawn={() => {}} onCancel={() => {}} />);
+    expect((screen.getByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("forwards advisor only when checked for existing worktrees", async () => {
+    defaultMocks();
+    const onSpawn = vi.fn();
+    render(<WorktreeSpawnDialog cwd="/repo" advisorDefault onSpawn={onSpawn} onCancel={() => {}} />);
+    await waitFor(() => screen.getByTestId("worktree-row-main"));
+    fireEvent.click(screen.getByTestId("worktree-row-main"));
+    expect(onSpawn).toHaveBeenCalledWith("/repo", { advisor: true });
+
+    cleanup();
+    defaultMocks();
+    render(<WorktreeSpawnDialog cwd="/repo" advisorDefault={false} onSpawn={onSpawn} onCancel={() => {}} />);
+    await waitFor(() => screen.getByTestId("worktree-row-main"));
+    fireEvent.click(screen.getByTestId("worktree-row-main"));
+    expect(onSpawn).toHaveBeenLastCalledWith("/repo", {});
+
+    cleanup();
+    defaultMocks();
+    createWorktree.mockResolvedValue({ ok: true, path: "/repo/.worktrees/main" });
+    render(<WorktreeSpawnDialog cwd="/repo" advisorDefault onSpawn={onSpawn} onCancel={() => {}} />);
+    await waitFor(() => screen.getByTestId("worktree-dialog-create-submit"));
+    fireEvent.click(screen.getByTestId("worktree-dialog-create-submit"));
+    await waitFor(() => expect(onSpawn).toHaveBeenLastCalledWith(
+      "/repo/.worktrees/main",
+      { gitWorktreeBase: "main", advisor: true },
+    ));
   });
 });
 
