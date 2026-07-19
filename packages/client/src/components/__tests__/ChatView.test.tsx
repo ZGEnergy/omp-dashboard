@@ -474,7 +474,8 @@ describe("ChatView", () => {
         </ThemeProvider>,
       );
 
-      expect(scrollEl.scrollTop).toBe(1450); // D5 height-delta compensation
+      // Navigation owns the viewport; replay/stream growth must not compensate it.
+      expect(scrollEl.scrollTop).toBe(950);
     });
 
     it("clicking scroll-to-bottom button uses instant scroll while streaming", () => {

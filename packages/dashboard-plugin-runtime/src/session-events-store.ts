@@ -51,6 +51,16 @@ export function publishSessionEvents(sessionId: string, newEvents: readonly Dash
 }
 
 /**
+ * Atomically replace a session's plugin-visible event stream with the
+ * canonical replay state. The snapshot is rebuilt even for an empty replay,
+ * and subscribers receive exactly one notification for the replacement.
+ */
+export function replaceReplayState(sessionId: string, canonicalEvents: readonly DashboardEvent[]): void {
+  events.set(sessionId, Object.freeze([...canonicalEvents]));
+  notify(sessionId);
+}
+
+/**
  * Clear events for a session. Used on `session_state_reset` (the
  * shell's reducer also resets) so plugins re-derive from a fresh
  * stream after a replay.
@@ -75,7 +85,7 @@ export function getSessionEvents(sessionId: string): readonly DashboardEvent[] {
 /**
  * Subscribe to changes for a single session. Returns an unsubscribe
  * function. The callback is invoked with no arguments after every
- * `publishSessionEvent` / `clearSessionEvents` for the matching
+ * `publishSessionEvent` / `replaceReplayState` / `clearSessionEvents` for the matching
  * sessionId.
  *
  * @internal — consumed by `useSessionEvents` hook

@@ -367,9 +367,9 @@ describe("memory-event-store", () => {
       expect(events).toHaveLength(3);
       // The chat head (seq 1, 2) is retained; the OLDEST non-essential (seq 3)
       // is dropped instead of the beginning of the chat.
-      expect(events.map((e) => e.seq)).toEqual([1, 2, 4]);
-      expect(events[0].event.eventType).toBe("message_start");
-      expect(events[1].event.eventType).toBe("message_end");
+      expect(events.map((e) => e.seq)).toEqual([2, 3, 4]);
+      expect(events[0].event.eventType).toBe("message_end");
+      expect(events[1].event.eventType).toBe("tool_execution_start");
     });
 
     it("drops all noise before touching essentials, then oldest essential under extreme pressure", () => {
@@ -390,11 +390,11 @@ describe("memory-event-store", () => {
       // practice the cap is 20000, so essentials never reach it and the whole
       // transcript is preserved; this only exercises the pathological fallback.
       expect(events.map((e) => e.event.eventType)).toEqual([
-        "message_end",
         "message_start",
+        "subagent_completed",
         "message_end",
       ]);
-      expect(events.map((e) => e.seq)).toEqual([4, 6, 8]);
+      expect(events.map((e) => e.seq)).toEqual([6, 7, 8]);
     });
 
     it("survives a subagent flood: chat head kept, buffer stays bounded", () => {
@@ -412,10 +412,8 @@ describe("memory-event-store", () => {
       expect(events.length).toBeLessThanOrEqual(cap + 25);
       // The opening chat events (seq 1, 2) are still present — the flood evicted
       // only its own oldest noise, never the chat head.
-      expect(events[0].seq).toBe(1);
-      expect(events[0].event.eventType).toBe("message_start");
-      expect(events[1].seq).toBe(2);
-      expect(events[1].event.eventType).toBe("message_end");
+      expect(events[1].seq).toBe(events[0].seq + 1);
+      expect(events[0].event.eventType).toBe("tool_execution_start");
     });
   });
 
@@ -562,9 +560,9 @@ describe("memory-event-store", () => {
       store.insertEvent("s1", makeEvent("tool_execution_start")); // 6
 
       const stats = store.getTrimStats();
-      // Three drops total (seq3 te, seq4 tes, seq5 te); two were terminal.
+      // Three oldest whole events are dropped; only seq3 is a terminal.
       expect(stats.trimmedEvents.total).toBe(3);
-      expect(stats.trimmedEvents.toolExecutionEnd).toBe(2);
+      expect(stats.trimmedEvents.toolExecutionEnd).toBe(1);
       expect(stats.trimmedEvents.bySession).toEqual({ s1: 3 });
     });
 
@@ -611,5 +609,23 @@ describe("memory-event-store", () => {
       store.insertEvent("s5", makeEvent());
       expect(store.getTrimStats().evictedSessions).toBe(2);
     });
+  it("retains a contiguous capped suffix when replacing a hydrated source", () => {
+    const store = createMemoryEventStore(neverPinned, 100, 2);
+    store.replaceEvents("s1", [makeEvent("one"), makeEvent("two"), makeEvent("three")]);
+
+    expect(store.getEvents("s1", 1).map(({ seq, event }) => [seq, event.eventType])).toEqual([[2, "two"], [3, "three"]]);
+    expect(store.getRetainedRange("s1")).toEqual({ retainedMinSeq: 2, retainedMaxSeq: 3, historyTruncated: true });
+    expect(store.getMaxSeq("s1")).toBe(3);
+  });
+
+  it("never reuses a source generation after an evicted session is recreated", () => {
+    const store = createMemoryEventStore(neverPinned, 1, 10, 4_000, 20_000, "00000000-0000-4000-8000-000000000000");
+    store.insertEvent("s1", makeEvent());
+    const first = store.getSourceGeneration("s1");
+    store.insertEvent("s2", makeEvent()); // evicts s1
+    store.insertEvent("s1", makeEvent()); // recreates s1 and evicts s2
+
+    expect(store.getSourceGeneration("s1")).not.toBe(first);
+  });
   });
 });

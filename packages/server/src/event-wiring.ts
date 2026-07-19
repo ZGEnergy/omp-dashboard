@@ -954,23 +954,10 @@ export function wireEvents(deps: EventWiringDeps): void {
           openspecChange: null,
         });
       }
-      // Send replayed events to browser subscribers.
-      // During replay, event_forward messages were stored but not broadcast.
-      // Subscribers who received session_state_reset need the events to rebuild chat.
-      // Skip when canSkipWipe was true — browser already has the events.
-      if (!wasSkipped) {
-        const storedEvents = eventStore.getEvents(sessionId, 1);
-        if (storedEvents.length > 0) {
-          browserGateway.sendToSubscribers(sessionId, {
-            type: "event_replay",
-            sessionId,
-            events: storedEvents.map((e) => ({ seq: e.seq, event: e.event })),
-            isLast: true,
-          } as any);
-        }
-      }
+      // Replay completion is serialized with live delivery by the gateway coordinator.
+      // Legacy test doubles may omit the optional method.
+      if (!wasSkipped) browserGateway.completeBridgeReplay?.(sessionId);
     }
-
     if (msg.type === "session_register") {
       // Reset the once-per-activation liveness guard on every (re)register so
       // a resumed session re-stamps `{ live:true, liveEpoch }` on its next
@@ -993,18 +980,8 @@ export function wireEvents(deps: EventWiringDeps): void {
               currentTool: session.currentTool ?? null,
             });
           }
-          // Send any accumulated events to browser subscribers
-          if (!wasSkipped) {
-            const fallbackEvents = eventStore.getEvents(sessionId, 1);
-            if (fallbackEvents.length > 0) {
-              browserGateway.sendToSubscribers(sessionId, {
-                type: "event_replay",
-                sessionId,
-                events: fallbackEvents.map((e) => ({ seq: e.seq, event: e.event })),
-                isLast: true,
-              } as any);
-            }
-          }
+          // Let the coordinator serialize the bounded fallback with live events.
+          if (!wasSkipped) browserGateway.completeBridgeReplay?.(sessionId);
         }
       }, 5_000);
       // Skip wipe if bridge provides eventCount matching the last known entry count.
@@ -1019,7 +996,7 @@ export function wireEvents(deps: EventWiringDeps): void {
       }
       if (!canSkipWipe) {
         eventStore.deleteEventsForSession(sessionId);
-        browserGateway.broadcastSessionStateReset(sessionId);
+        browserGateway.broadcastSessionStateReset(sessionId, "source_replaced");
       } else {
         // Mark this session so replayed events are not re-inserted into the store
         skipReplayInsert.add(sessionId);

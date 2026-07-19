@@ -67,7 +67,8 @@ import { handleAddFolderToWorkspace, handleCreateWorkspace, handleDeleteWorkspac
 import type { BrowserHandlerContext } from "./browser-handlers/handler-context.js";
 import { handleAbort, handleClearFollowupEntries, handleEditFollowupEntry, handleFlowControl, handleForceKill, handleKillProcess, handlePromoteFollowupEntry, handleRemoveFollowupEntry, handleResumeSession, handleSendPrompt, handleShutdown, handleSpawnSession, handleStopAfterTurn, handleSubagentResyncRequest } from "./browser-handlers/session-action-handler.js";
 import { handleAcceptReplaceProposal, handleAttachProposal, handleDetachProposal, handleDismissReplaceProposal, handleFetchContent, handleHideSession, handleListSessions, handleRenameSession, handleSetSessionDisplayPrefs, handleSetSessionProcessDrawer, handleSetSessionTags, handleUnhideSession } from "./browser-handlers/session-meta-handler.js";
-import { handleSubscribe } from "./browser-handlers/subscription-handler.js";
+import { handleSubscribe, replayUiState } from "./browser-handlers/subscription-handler.js";
+import { createReplayCoordinator, type ReplayCoordinator } from "./replay-coordinator.js";
 import { handleCloseInlineTerminal, handleCreateTerminal, handleKillTerminal, handleOpenInlineTerminal, handleRenameTerminal } from "./browser-handlers/terminal-handler.js";
 import { createPendingResumeRegistry, type PendingResumeRegistry } from "./pending-resume-registry.js";
 import type { TerminalManager } from "./terminal-manager.js";
@@ -105,6 +106,8 @@ export interface BrowserGateway {
    * fix-stuck-tool-card-on-dropped-event.
    */
   getDroppedFrameStats(): { total: number; bySession: Record<string, number> };
+  /** Bounded, metadata-only client replay diagnostics accepted by this server. */
+  getReplayDiagnosticStats(): { total: number; byCode: Record<string, number>; bySession: Record<string, number> };
   /** Track a pending interactive UI request for replay on reconnect */
   trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void;
   /** Clear a pending interactive UI request (resolved or cancelled) */
@@ -126,7 +129,8 @@ export interface BrowserGateway {
   clearPendingPromptResponses(sessionId: string): void;
 
   /** Tell browser subscribers to reset accumulated state for a session (bridge reconnected) */
-  broadcastSessionStateReset(sessionId: string): void;
+  broadcastSessionStateReset(sessionId: string, reason?: import("@blackbelt-technology/pi-dashboard-shared/browser-protocol.js").SessionStateResetReason): void;
+  completeBridgeReplay?(sessionId: string): void;
   /** Shut down all tracked headless child processes */
   shutdownHeadlessProcesses(): void;
   /** Registry for linking headless PIDs to session IDs */
@@ -140,7 +144,7 @@ export interface BrowserGateway {
    */
   viewedSessionTracker: ViewedSessionTracker;
   /** Send a message to a specific WebSocket client */
-  sendToClient(ws: WebSocket, msg: ServerToBrowserMessage): void;
+  sendToClient(ws: WebSocket, msg: ServerToBrowserMessage): boolean;
   /** Callback invoked when a new browser client connects */
   onConnect?: (ws: WebSocket) => void;
   /**
@@ -211,6 +215,7 @@ export function createBrowserGateway(
   metaPersistence?: import("./meta-persistence.js").MetaPersistence,
   viewMessageStore: ViewMessageStore = new ViewMessageStore(),
   promptResponseMaxAgeMs = PROMPT_RESPONSE_RETRY_MAX_AGE_MS,
+  serverEpoch?: string,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -238,6 +243,7 @@ export function createBrowserGateway(
 
   // Track subscriptions: ws → Set<sessionId>
   const subscriptions = new Map<WebSocket, Set<string>>();
+  let replayCoordinator: ReplayCoordinator;
   // Track which sessions are mid-replay per WebSocket (suppress live events)
   const replayingSessions = new Map<WebSocket, Set<string>>();
 
@@ -447,6 +453,56 @@ export function createBrowserGateway(
   // stall (a log-storm would itself add load).
   let droppedFramesTotal = 0;
   const droppedFramesBySession = new Map<string, number>();
+  const REPLAY_DIAGNOSTIC_WINDOW_MS = 60_000;
+  const REPLAY_DIAGNOSTIC_SESSION_CAP = 128;
+  const REPLAY_DIAGNOSTIC_CODES = new Set([
+    "cache_timeout", "cache_poison", "reset_domination", "sequence_gap", "sequence_conflict", "gap_overflow",
+    "terminal_timeout", "wrong_generation", "reducer_failure", "preparation_failure", "sender_rejected",
+    "socket_closed", "anchor_timeout", "stale_callback",
+  ]);
+  let replayDiagnosticsTotal = 0;
+  const replayDiagnosticsByCode = new Map<string, number>();
+  const replayDiagnosticsBySession = new Map<string, number>();
+  const replayDiagnosticLastAccepted = new Map<string, number>();
+  const REPLAY_DIAGNOSTIC_KEY_CAP = 4096;
+
+  function isBoundedReplayDiagnostic(msg: unknown): msg is { code: string; sessionId: string } {
+    if (!msg || typeof msg !== "object") return false;
+    const value = msg as Record<string, unknown>;
+    const allowed = new Set(["type", "code", "sessionId", "requestId", "sourceGeneration", "connectionEpoch", "replayGeneration", "contiguousMinSeq", "contiguousMaxSeq", "eventCount", "byteCount", "durationMs", "scrollOwner"]);
+    if (Object.keys(value).some((key) => !allowed.has(key))) return false;
+    const boundedString = (candidate: unknown, max: number) => candidate === undefined || (typeof candidate === "string" && candidate.length <= max);
+    const boundedCount = (candidate: unknown, max: number) => candidate === undefined || (typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate >= 0 && candidate <= max);
+    const boundedSeq = (candidate: unknown) => candidate === undefined || candidate === null || boundedCount(candidate, Number.MAX_SAFE_INTEGER);
+    return value.type === "replay_diagnostic" && REPLAY_DIAGNOSTIC_CODES.has(value.code as string) && typeof value.sessionId === "string" && value.sessionId.length > 0 && value.sessionId.length <= 256 &&
+      boundedString(value.requestId, 256) && boundedString(value.sourceGeneration, 256) && boundedString(value.scrollOwner, 64) &&
+      boundedCount(value.connectionEpoch, 1_000_000_000) && boundedCount(value.replayGeneration, 1_000_000_000) &&
+      boundedSeq(value.contiguousMinSeq) && boundedSeq(value.contiguousMaxSeq) && boundedCount(value.eventCount, 1_000_000) &&
+      boundedCount(value.byteCount, 64 * 1024 * 1024) && boundedCount(value.durationMs, 86_400_000);
+  }
+  function recordReplayDiagnostic(msg: unknown): void {
+    if (!isBoundedReplayDiagnostic(msg)) return;
+    const value = msg as { code: string; sessionId: string };
+    const key = JSON.stringify([value.code, value.sessionId]);
+    const now = Date.now();
+    if (now - (replayDiagnosticLastAccepted.get(key) ?? -Infinity) < REPLAY_DIAGNOSTIC_WINDOW_MS) return;
+    replayDiagnosticLastAccepted.delete(key);
+    replayDiagnosticLastAccepted.set(key, now);
+    while (replayDiagnosticLastAccepted.size > REPLAY_DIAGNOSTIC_KEY_CAP) {
+      const oldest = replayDiagnosticLastAccepted.keys().next().value;
+      if (oldest === undefined) break;
+      replayDiagnosticLastAccepted.delete(oldest);
+    }
+    replayDiagnosticsTotal++;
+    replayDiagnosticsByCode.set(value.code, (replayDiagnosticsByCode.get(value.code) ?? 0) + 1);
+    replayDiagnosticsBySession.delete(value.sessionId);
+    replayDiagnosticsBySession.set(value.sessionId, (replayDiagnosticsBySession.get(value.sessionId) ?? 0) + 1);
+    while (replayDiagnosticsBySession.size > REPLAY_DIAGNOSTIC_SESSION_CAP) {
+      const oldest = replayDiagnosticsBySession.keys().next().value;
+      if (oldest === undefined) break;
+      replayDiagnosticsBySession.delete(oldest);
+    }
+  }
   const DROP_WARN_WINDOW_MS = 5_000;
   let lastDropWarnAt = 0;
 
@@ -462,15 +518,13 @@ export function createBrowserGateway(
     }
   }
 
-  function sendTo(ws: WebSocket, msg: ServerToBrowserMessage, ctx?: { sessionId?: string; seq?: number }) {
-    if (ws.readyState === WebSocket.OPEN) {
-      // Drop messages if the send buffer is full (browser not consuming)
-      if (MAX_WS_BUFFER > 0 && ws.bufferedAmount > MAX_WS_BUFFER) {
-        recordDroppedFrame(ctx?.sessionId, ctx?.seq, ws.bufferedAmount);
-        return;
-      }
-      ws.send(JSON.stringify(msg));
+  function sendTo(ws: WebSocket, msg: ServerToBrowserMessage, ctx?: { sessionId?: string; seq?: number }): boolean {
+    if (ws.readyState !== WebSocket.OPEN) return false;
+    if (MAX_WS_BUFFER > 0 && ws.bufferedAmount > MAX_WS_BUFFER) {
+      recordDroppedFrame(ctx?.sessionId, ctx?.seq, ws.bufferedAmount);
+      return false;
     }
+    try { ws.send(JSON.stringify(msg)); return true; } catch { return false; }
   }
 
   function broadcast(msg: ServerToBrowserMessage) {
@@ -506,6 +560,14 @@ export function createBrowserGateway(
     fanout(serialized);
   }
 
+  replayCoordinator = createReplayCoordinator({
+    store: eventStore,
+    directoryService,
+    sessionManager,
+    send: (target, msg) => sendTo(target, msg),
+    close: (target, code, reason) => target.close(code, reason),
+  });
+
   wss.on("connection", (ws, req) => {
     const remoteAddr = req?.socket?.remoteAddress ?? 'unknown';
     const origin = req?.headers?.origin ?? 'no-origin';
@@ -528,7 +590,7 @@ export function createBrowserGateway(
           if (sessionIds.length > 0) orders[cwd] = sessionIds;
         }
       }
-      sendTo(ws, { type: "sessions_snapshot", sessions: sessionsSnapshot, orders });
+      sendTo(ws, { type: "sessions_snapshot", serverEpoch: serverEpoch ?? eventStore.getSourceGeneration("").split(":")[0], sessions: sessionsSnapshot, orders } as any);
     }
 
     // Send pinned directories on connect
@@ -605,41 +667,34 @@ export function createBrowserGateway(
           pendingClientCorrelations,
           pendingWorktreeBaseRegistry,
           sendTo, broadcast, getSubscribers, replayPendingUiRequests,
+          replayUiState(targetWs, sessionId) { replayUiState(targetWs, sessionId, { sessionManager, sendTo }); },
           broadcastEvent: gateway.broadcastEvent,
           viewMessageStore,
+          replayCoordinator,
           trackUiRequest: trackUiRequest,
           markReplaying(targetWs, sessionId) {
             let set = replayingSessions.get(targetWs);
             if (!set) { set = new Set(); replayingSessions.set(targetWs, set); }
             set.add(sessionId);
           },
-          clearReplaying(targetWs, sessionId, lastReplayedSeq) {
+          clearReplaying(targetWs, sessionId, _lastReplayedSeq) {
             const set = replayingSessions.get(targetWs);
             if (set) {
               set.delete(sessionId);
               if (set.size === 0) replayingSessions.delete(targetWs);
             }
-            // Send catch-up: any events after lastReplayedSeq
-            if (lastReplayedSeq > 0) {
-              const catchUp = eventStore.getEvents(sessionId, lastReplayedSeq + 1);
-              if (catchUp.length > 0) {
-                sendTo(targetWs, {
-                  type: "event_replay",
-                  sessionId,
-                  events: catchUp.map((e) => ({ seq: e.seq, event: e.event })),
-                  isLast: true,
-                });
-              }
-            }
-          },
-        };
+          },        };
 
         switch (msg.type) {
+          case "replay_diagnostic":
+            recordReplayDiagnostic(msg);
+            break;
           case "subscribe":
             handleSubscribe(msg, subs, ctx);
             break;
           case "unsubscribe":
             subs.delete(msg.sessionId);
+            replayCoordinator.unsubscribe(ws, msg.sessionId);
             // Cancel an in-flight hydration once the last subscriber leaves,
             // so clicking session A then B doesn't waste A's parse+replay and
             // deliver an event_replay to a now-unsubscribed ws. Guarded by the
@@ -1001,6 +1056,7 @@ export function createBrowserGateway(
       console.error(`[browser-gw] browser client disconnected (remaining: ${subscriptions.size - 1})`);
       subscriptions.delete(ws);
       replayingSessions.delete(ws);
+      replayCoordinator.disconnect(ws);
       // Drop this ws from every viewed-session entry so disconnected browsers
       // don't hold sessions in the viewed state. See change: session-card-unread-stripes.
       viewedSessionTracker.unviewAll(ws);
@@ -1020,7 +1076,15 @@ export function createBrowserGateway(
     wss,
 
     sendToClient(ws: WebSocket, msg: ServerToBrowserMessage) {
-      sendTo(ws, msg);
+      return sendTo(ws, msg);
+    },
+
+    getReplayDiagnosticStats() {
+      return {
+        total: replayDiagnosticsTotal,
+        byCode: Object.fromEntries(replayDiagnosticsByCode),
+        bySession: Object.fromEntries(replayDiagnosticsBySession),
+      };
     },
 
     broadcast(msg: ServerToBrowserMessage) {
@@ -1045,22 +1109,15 @@ export function createBrowserGateway(
     },
 
     broadcastEvent(sessionId: string, seq: number, event: any) {
-      const subscribers = getSubscribers(sessionId);
-      const msg: ServerToBrowserMessage = {
-        type: "event",
-        sessionId,
-        seq,
-        event,
-      };
-      for (const ws of subscribers) {
-        // Skip WebSockets that are mid-replay for this session
-        const replaying = replayingSessions.get(ws);
-        if (replaying?.has(sessionId)) continue;
-        // Carry sessionId+seq so a back-pressure drop of a live event (the
-        // stuck-tool-card cause) is attributable in the warning + counter.
-        // See change: fix-stuck-tool-card-on-dropped-event.
-        sendTo(ws, msg, { sessionId, seq });
+      // Event wiring inserts authoritative events before fan-out. Preserve the
+      // gateway's documented direct-send behavior for diagnostics/tests that
+      // publish synthetic, unretained frames; those cannot participate in a
+      // replay snapshot or its barrier.
+      if (!eventStore.getEvent(sessionId, seq)) {
+        for (const ws of getSubscribers(sessionId)) sendTo(ws, { type: "event", sessionId, seq, event }, { sessionId, seq });
+        return;
       }
+      replayCoordinator.publishLive(sessionId, { seq, event });
     },
 
     broadcastSessionAdded(session: any, opts?: { spawnRequestId?: string }) {
@@ -1082,14 +1139,13 @@ export function createBrowserGateway(
       broadcast({ type: "session_removed", sessionId });
     },
 
-    broadcastSessionStateReset(sessionId: string) {
-      const subscribers = getSubscribers(sessionId);
-      const msg: ServerToBrowserMessage = { type: "session_state_reset", sessionId };
-      for (const ws of subscribers) {
-        sendTo(ws, msg);
-      }
+    broadcastSessionStateReset(sessionId: string, reason = "source_replaced") {
+      replayCoordinator.broadcastReset(sessionId, getSubscribers, reason);
     },
 
+    completeBridgeReplay(sessionId: string) {
+      void replayCoordinator.completeBridgeReplay(sessionId, getSubscribers, (targetWs, targetSessionId) => replayUiState(targetWs, targetSessionId, { sessionManager, sendTo }));
+    },
     sendToSubscribers(sessionId: string, msg: ServerToBrowserMessage) {
       const subscribers = getSubscribers(sessionId);
       for (const ws of subscribers) {

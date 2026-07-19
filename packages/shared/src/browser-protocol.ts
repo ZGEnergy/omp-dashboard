@@ -111,20 +111,24 @@ export interface EventMessage {
   event: DashboardEvent;
 }
 
+export type ReplayKind = "cold" | "delta" | "older";
+export type ReplayErrorCode = "unavailable" | "malformed_source" | "delivery_failed";
+
 export interface EventReplayMessage {
   type: "event_replay";
   sessionId: string;
+  requestId?: string;
+  sourceGeneration: string;
+  replayKind: ReplayKind;
   events: Array<{ seq: number; event: DashboardEvent }>;
   isLast: boolean;
-  /**
-   * True when older history exists below the delivered window.
-   * See change: session-tail-rehydrate.
-   */
-  hasMoreOlder?: boolean;
-  /** Lowest seq in the retained/delivered window (tail or older page). */
-  windowMinSeq?: number;
-  /** Highest seq in this delivery. */
-  windowMaxSeq?: number;
+  windowMinSeq: number | null;
+  windowMaxSeq: number | null;
+  retainedMinSeq: number | null;
+  hasMoreOlder: boolean;
+  partialHead: boolean;
+  historyTruncated: boolean;
+  errorCode?: ReplayErrorCode;
 }
 
 export interface BrowserCommandsListMessage {
@@ -388,6 +392,8 @@ export interface SessionsReorderedMessage {
  */
 export interface SessionsSnapshotMessage {
   type: "sessions_snapshot";
+  /** Opaque identity generated once per server process. */
+  serverEpoch: string;
   /** Every session known to the server at construction time, alive AND ended. */
   sessions: DashboardSession[];
   /** cwd → ordered session ids. Only non-empty arrays are included. */
@@ -447,10 +453,20 @@ export interface TerminalUpdatedMessage {
   updates: Partial<TerminalSession>;
 }
 
-/** Tells the browser to reset accumulated state for a session (bridge reconnected). */
+export type SessionStateResetReason =
+  | "source_replaced"
+  | "retention_gap"
+  | "source_generation_mismatch"
+  | "malformed_source"
+  | "manual_reset";
+
+/** Tells the browser to replace accumulated state for one authoritative generation. */
 export interface SessionStateResetMessage {
   type: "session_state_reset";
   sessionId: string;
+  requestId?: string;
+  sourceGeneration: string;
+  reason: SessionStateResetReason;
 }
 
 // ── PromptBus protocol (Server → Browser) ───────────────────────────
@@ -714,6 +730,27 @@ export interface BrowserAssetRegisterMessage {
   data: string;
 }
 
+export interface AssetReplayChunkMessage {
+  type: "asset_replay_chunk";
+  sessionId: string;
+  requestId: string;
+  sourceGeneration: string;
+  hash: string;
+  mimeType: string;
+  chunkIndex: number;
+  chunkCount: number;
+  data: string;
+}
+
+export interface AssetUnavailableMessage {
+  type: "asset_unavailable";
+  sessionId: string;
+  requestId: string;
+  sourceGeneration: string;
+  hash: string;
+  reason: "missing" | "budget_exceeded" | "malformed";
+}
+
 /**
  * Server → browser: a `plugin_action` arrived for a `pluginId` with no
  * registered handler. Surfaced to the sender so the action is never silently
@@ -861,6 +898,8 @@ export type ServerToBrowserMessage =
   | BrowserUiDataListMessage
   | BrowserExtUiDecoratorMessage
   | BrowserAssetRegisterMessage
+  | AssetReplayChunkMessage
+  | AssetUnavailableMessage
   | PluginIntentsMessage
   | PluginEventBroadcast
   | DisplayPrefsUpdatedMessage
@@ -930,6 +969,8 @@ export interface FileChangedMessage {
 export interface SubscribeMessage {
   type: "subscribe";
   sessionId: string;
+  requestId?: string;
+  knownSourceGeneration?: string;
   lastSeq?: number;
   /**
    * `"tail"` = newest events under a byte budget (cold open).
@@ -1580,8 +1621,41 @@ export interface InjectViewMessageBrowserMessage {
   target: import("./types.js").ViewTarget;
 }
 
+export type ReplayDiagnosticCode =
+  | "cache_timeout"
+  | "cache_poison"
+  | "reset_domination"
+  | "sequence_gap"
+  | "sequence_conflict"
+  | "gap_overflow"
+  | "terminal_timeout"
+  | "wrong_generation"
+  | "reducer_failure"
+  | "preparation_failure"
+  | "sender_rejected"
+  | "socket_closed"
+  | "anchor_timeout"
+  | "stale_callback";
+
+export interface ReplayDiagnosticMessage {
+  type: "replay_diagnostic";
+  code: ReplayDiagnosticCode;
+  sessionId: string;
+  requestId?: string;
+  sourceGeneration?: string;
+  connectionEpoch: number;
+  replayGeneration: number;
+  contiguousMinSeq: number | null;
+  contiguousMaxSeq: number | null;
+  eventCount: number;
+  byteCount: number;
+  durationMs: number;
+  scrollOwner?: string;
+}
+
 export type BrowserToServerMessage =
   | SubscribeMessage
+  | ReplayDiagnosticMessage
   | UnsubscribeMessage
   | BrowserExtensionUiResponseMessage
   | SendPromptToBrowserMessage

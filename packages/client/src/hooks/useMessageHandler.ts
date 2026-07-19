@@ -21,6 +21,7 @@ import { t } from "../lib/i18n";
 import { clearLoadingHistory, HYDRATE_CEILING_MS, rearmLoadingHistory } from "../lib/loading-history.js";
 import { clearRecoveryOffer, setRecoveryOffer } from "../lib/recovery-offer-bus.js";
 import type { ReplayPersister } from "../lib/replay-persist.js";
+import type { SessionReplayController } from "./useSessionReplayController.js";
 import { inferPlatform, pathKey } from "../lib/session-grouping.js";
 import { pushSpawnErrorToast } from "../lib/spawn-error-toast-bus.js";
 import { dispatchInitEvent } from "../lib/worktree-init-bus.js";
@@ -166,6 +167,10 @@ export interface MessageHandlerDeps {
   setHistoryWindowMap?: React.Dispatch<React.SetStateAction<Map<string, { minSeq: number; hasMoreOlder: boolean }>>>;
   /** Per-session "loading older" flag for the Load-more affordance. See change: session-tail-rehydrate. */
   setLoadingOlderMap?: React.Dispatch<React.SetStateAction<Map<string, boolean>>>;
+  /** The single authoritative replay admission boundary. When supplied, replay,
+   * reset, live event, and correlated asset frames must not fall through to
+   * legacy reducer/persister/plugin side effects. */
+  replayController?: Pick<SessionReplayController, "handle">;
 }
 
 export function useMessageHandler(
@@ -196,6 +201,7 @@ export function useMessageHandler(
     historyWindowRef,
     setHistoryWindowMap,
     setLoadingOlderMap,
+    replayController,
   } = deps;
   // One-shot per session: suppress a repeat auto-name toast for the same
   // session id. See change: add-auto-session-naming.
@@ -271,6 +277,17 @@ export function useMessageHandler(
   );
 
   return useCallback((msg: ServerToBrowserMessage) => {
+    // The controller owns every replay-adjacent side effect. Its `true` result
+    // is a hard stop: stale frames cannot reach reducer/cache/plugin/loading.
+    const replayAdjacent = msg.type === "event" || msg.type === "event_replay" ||
+      msg.type === "session_state_reset" || msg.type === "asset_replay_chunk" ||
+      msg.type === "asset_unavailable";
+    if (replayAdjacent && replayController) {
+      // Once a controller is installed, every replay frame is owned by its
+      // authority gate. Unknown/stale replay frames are intentionally consumed
+      // too, rather than falling through to legacy reducer/cache/plugin effects.
+      if (replayController.handle(msg as never) || msg.type !== "event") return;
+    }
     // Preserve strict ordering: any queued live events must apply before a
     // non-`event` message can mutate the same session's state (reset, replay,
     // interactive request, removal). Draining here keeps coalescing on the hot
@@ -1301,5 +1318,5 @@ export function useMessageHandler(
         break;
       }
     }
-  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals, setDiscoveredServers, setLoadingHistory, setCanvasMap, setHistoryWindowMap, setLoadingOlderMap, spawningCwdsRef, subscribedRef, maxSeqMapRef, selectedSessionIdRef, historyWindowRef, loadingHistoryTimersRef, replayPersister, flushLiveEvents, scheduleLiveFlush, showToast]);
+  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals, setDiscoveredServers, setLoadingHistory, setCanvasMap, setHistoryWindowMap, setLoadingOlderMap, spawningCwdsRef, subscribedRef, maxSeqMapRef, selectedSessionIdRef, historyWindowRef, loadingHistoryTimersRef, replayPersister, flushLiveEvents, scheduleLiveFlush, showToast, replayController]);
 }

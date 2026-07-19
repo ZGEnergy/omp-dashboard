@@ -84,6 +84,15 @@ describe("useMessageHandler loading-history exit edges", () => {
 
     dispatch({
       type: "event_replay",
+      requestId: "loading-replay",
+      sourceGeneration: "source-a",
+      replayKind: "cold",
+      windowMinSeq: null,
+      windowMaxSeq: null,
+      retainedMinSeq: null,
+      hasMoreOlder: false,
+      partialHead: false,
+      historyTruncated: false,
       sessionId: SID,
       events: [{ seq: 1, event: makeEvt("t1", 100) }],
       isLast: false,
@@ -100,6 +109,15 @@ describe("useMessageHandler loading-history exit edges", () => {
 
     dispatch({
       type: "event_replay",
+      requestId: "loading-replay",
+      sourceGeneration: "source-a",
+      replayKind: "cold",
+      windowMinSeq: null,
+      windowMaxSeq: null,
+      retainedMinSeq: null,
+      hasMoreOlder: false,
+      partialHead: false,
+      historyTruncated: false,
       sessionId: SID,
       events: [],
       isLast: true,
@@ -130,6 +148,15 @@ describe("useMessageHandler loading-history exit edges", () => {
 
     dispatch({
       type: "event_replay",
+      requestId: "loading-replay",
+      sourceGeneration: "source-a",
+      replayKind: "cold",
+      windowMinSeq: null,
+      windowMaxSeq: null,
+      retainedMinSeq: null,
+      hasMoreOlder: false,
+      partialHead: false,
+      historyTruncated: false,
       sessionId: SID,
       events: [],
       isLast: false,
@@ -165,9 +192,18 @@ describe("useMessageHandler two-stage safety net (re-arm)", () => {
     );
   }
 
-  const primingMarker = { type: "event_replay", sessionId: SID, events: [], isLast: false } as ServerToBrowserMessage;
+  const primingMarker = { type: "event_replay", requestId: "loading-replay", sourceGeneration: "source-a", replayKind: "cold", windowMinSeq: null, windowMaxSeq: null, retainedMinSeq: null, hasMoreOlder: false, partialHead: false, historyTruncated: false, sessionId: SID, events: [], isLast: false } as ServerToBrowserMessage;
   const contentBatch = {
     type: "event_replay",
+      requestId: "loading-replay",
+      sourceGeneration: "source-a",
+      replayKind: "cold",
+      windowMinSeq: null,
+      windowMaxSeq: null,
+      retainedMinSeq: null,
+      hasMoreOlder: false,
+      partialHead: false,
+      historyTruncated: false,
     sessionId: SID,
     events: [{ seq: 1, event: makeEvt("t1", 100) }],
     isLast: false,
@@ -222,7 +258,7 @@ describe("useMessageHandler two-stage safety net (re-arm)", () => {
     const { dispatch, loadingHistoryRef, setLoadingHistory, timersRef } = setup();
     beginLoading(setLoadingHistory, timersRef);
     dispatch(primingMarker);
-    dispatch({ type: "event_replay", sessionId: SID, events: [], isLast: true } as ServerToBrowserMessage);
+    dispatch({ type: "event_replay", requestId: "loading-replay", sourceGeneration: "source-a", replayKind: "cold", windowMinSeq: null, windowMaxSeq: null, retainedMinSeq: null, hasMoreOlder: false, partialHead: false, historyTruncated: false, sessionId: SID, events: [], isLast: true } as ServerToBrowserMessage);
     expect(loadingHistoryRef.current.get(SID)).toBe(false);
     expect(timersRef.current.has(SID)).toBe(false);
   });

@@ -162,8 +162,16 @@ describe("Protocol message serialization round-trip", () => {
       {
         type: "event_replay",
         sessionId: "s1",
+        sourceGeneration: "00000000-0000-4000-8000-000000000000:0",
+        replayKind: "cold",
         events: [],
         isLast: true,
+        windowMinSeq: null,
+        windowMaxSeq: null,
+        retainedMinSeq: null,
+        hasMoreOlder: false,
+        partialHead: false,
+        historyTruncated: false,
       },
       {
         type: "commands_list",
