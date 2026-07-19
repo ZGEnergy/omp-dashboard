@@ -665,3 +665,22 @@ describe("ChatView", () => {
     });
   });
 });
+
+
+describe("advisor transcript rows", () => {
+  it("renders an advisor row through the virtualized ChatView", () => {
+    const state = createInitialState();
+    state.messages.push({
+      id: "advisor-1",
+      role: "advisor",
+      content: "raw advisory",
+      timestamp: Date.now(),
+      advisorDetails: { notes: [{ note: "fix the type", severity: "concern", advisor: "Scout" }] },
+    });
+
+    const { getByRole } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
+    );
+    expect(getByRole("button", { name: /scout.*concern/i })).not.toBeNull();
+  });
+});

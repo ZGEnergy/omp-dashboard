@@ -19,7 +19,7 @@ export interface ChatImage {
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | "toolResult" | "thinking" | "bashOutput" | "commandFeedback" | "interactiveUi" | "turnSeparator" | "rawEvent" | "inlineTerminal";
+  role: "user" | "assistant" | "toolResult" | "thinking" | "bashOutput" | "commandFeedback" | "interactiveUi" | "turnSeparator" | "rawEvent" | "inlineTerminal" | "advisor";
   content: string;
   images?: ChatImage[];
   toolName?: string;
@@ -37,6 +37,8 @@ export interface ChatMessage {
   turnIndex?: number;
   /** Structured metadata from tool (e.g. AgentDetails from pi-subagents) */
   toolDetails?: Record<string, unknown>;
+  /** Structured advisory metadata carried by advisor custom messages. */
+  advisorDetails?: Record<string, unknown>;
   /** Session entry ID (for fork-from-message) */
   entryId?: string;
   /**
@@ -1379,6 +1381,25 @@ export function reduceEvent(
 
     case "message_end": {
       const msg = data.message as any;
+      if (
+        msg?.role === "custom" &&
+        msg.customType === "advisor" &&
+        msg.display !== false
+      ) {
+        const id = data.entryId ?? msg.id;
+        if (typeof id !== "string" || !id) return state;
+        const row: ChatMessage = {
+          id,
+          role: "advisor",
+          content: typeof msg.content === "string" ? msg.content : "",
+          advisorDetails: msg.details,
+          timestamp: event.timestamp,
+        };
+        const index = state.messages.findIndex((message) => message.id === id);
+        return index < 0
+          ? { ...state, messages: [...state.messages, row] }
+          : { ...state, messages: state.messages.map((message, i) => i === index ? row : message) };
+      }
       if (msg?.role === "assistant") {
         // Confirmed-good clear: an assistant message that completed with a
         // terminal SUCCESS stop (pi-ai `"stop"`; `"end_turn"` accepted too)

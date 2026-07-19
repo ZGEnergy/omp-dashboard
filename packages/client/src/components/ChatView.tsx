@@ -25,6 +25,7 @@ import type { ToolCallGroup } from "../lib/group-tool-calls.js";
 import { t as i18nT } from "../lib/i18n";
 import { buildTurnSummaries, type TurnSummary } from "../lib/lineDelta.js";
 import { isOutOfCwd, normalizeUnderCwd } from "../lib/normalize-path.js";
+import { AdvisorCard } from "./AdvisorCard.js";
 import { BashOutputCard } from "./BashOutputCard.js";
 import { ChangeSummaryBlock } from "./ChangeSummaryBlock.js";
 import { CollapsedToolGroup } from "./CollapsedToolGroup.js";
@@ -1287,6 +1288,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
               </div>
             </div>
           );
+        }
+
+        if (msg.role === "advisor") {
+          return <AdvisorCard key={msg.id} message={msg} />;
         }
 
         if (msg.role === "turnSeparator") {
