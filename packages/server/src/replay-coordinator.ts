@@ -90,6 +90,17 @@ function replayKindFor(msg: Extract<BrowserToServerMessage, { type: "subscribe" 
  * the newest unfinished text snapshot, and let completed message_end events
  * provide their canonical content.
  */
+function isToolOnlyAssistantMessage(data: Record<string, unknown> | undefined): boolean {
+  const message = (data as any)?.message;
+  const content = message?.content;
+  if (message?.role !== "assistant" || !Array.isArray(content)) return false;
+  return content.some((part: any) => part?.type === "toolCall") && content.every((part: any) => {
+    if (part?.type === "toolCall") return true;
+    if (part?.type !== "thinking") return false;
+    return !part.thinking && !part.text;
+  });
+}
+
 function compactStreamUpdates(entries: readonly StoredEvent[]): StoredEvent[] {
   const compacted = entries.slice();
   let latestTextUpdate: number | null = null;
@@ -105,6 +116,10 @@ function compactStreamUpdates(entries: readonly StoredEvent[]): StoredEvent[] {
     const entry = compacted[index]!;
     const event = entry.event as any;
     const data = event.data as Record<string, unknown> | undefined;
+    if ((event.eventType === "message_update" || event.eventType === "message_end") && isToolOnlyAssistantMessage(data)) {
+      noop(index);
+      continue;
+    }
     if (event.eventType === "message_end" && (data as any)?.message?.role === "assistant") {
       if (latestTextUpdate !== null) noop(latestTextUpdate);
       latestTextUpdate = null;
