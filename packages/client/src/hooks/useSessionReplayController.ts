@@ -5,25 +5,31 @@ import type {
   EventReplayMessage,
   SessionStateResetMessage,
 } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import {
-  buildColdTailSubscribe,
+  type LedgerEvent,
+  type ReplayRequest,
+  SessionReplayLedger,
+} from "../lib/session-replay-ledger.js";
+import {
   buildLoadOlderSubscribe,
   buildSessionSubscribe,
   type SessionSubscribeMessage,
 } from "../lib/session-subscribe.js";
-import {
-  SessionReplayLedger,
-  type LedgerEvent,
-  type ReplayRequest,
-} from "../lib/session-replay-ledger.js";
 
 export type ReplayInbound = EventReplayMessage | EventMessage | SessionStateResetMessage | AssetReplayChunkMessage | AssetUnavailableMessage;
+
+export interface ReplayWindowMetadata {
+  minSeq: number | null;
+  hasMoreOlder: boolean | null;
+  kind: ReplayRequest["kind"];
+}
 
 export interface ReplayControllerEffects {
   send(message: SessionSubscribeMessage): void;
   /** Reducer/persister/plugin effects are called only after ledger admission. */
   apply(sessionId: string, events: readonly LedgerEvent[]): void;
+  /** Authoritative server window metadata for every admitted replay frame. */
+  window?(sessionId: string, metadata: ReplayWindowMetadata): void;
   /** Older replay is rebuilt atomically from the same canonical sequence. */
   replace(
     sessionId: string,
@@ -175,6 +181,14 @@ export class SessionReplayController {
       this.begin(message.sessionId, "cold", message.sourceGeneration);
       return true;
     }
+    // A non-stale frame has passed request/source correlation and ledger admission.
+    // Publish its metadata separately so terminal and empty frames cannot lose the
+    // server's continuation bit, and so reducer effects remain single-application.
+    this.effects.window?.(message.sessionId, {
+      minSeq: message.windowMinSeq ?? null,
+      hasMoreOlder: typeof message.hasMoreOlder === "boolean" ? message.hasMoreOlder : null,
+      kind: message.replayKind,
+    });
     if (message.replayKind !== "older" && result.accepted.length) this.effects.apply(message.sessionId, result.accepted);
     if (message.isLast) {
       this.clearPending(message.sessionId);

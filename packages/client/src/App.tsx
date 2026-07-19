@@ -91,7 +91,7 @@ import { rehydrateSession } from "./lib/rehydrate-session.js";
 // Strategy A (reduce-session-replay-traffic): durable replay cursor.
 import { replayCache, type ReplayCacheScope } from "./lib/replay-cache.js";
 import { createReplayPersister, type ReplayPersister } from "./lib/replay-persist.js";
-import { SessionReplayController } from "./hooks/useSessionReplayController.js";
+import { SessionReplayController, type ReplayWindowMetadata } from "./hooks/useSessionReplayController.js";
 import {
   buildFolderSettingsUrl,
   buildOpenSpecArchiveUrl,
@@ -838,6 +838,26 @@ export default function App() {
           publishSessionEvents(sessionId, accepted.map((entry) => entry.event));
         }
       },
+      window: (sessionId, metadata: ReplayWindowMetadata) => {
+        const previous = historyWindowRef.current.get(sessionId);
+        const ledgerMin = controller.ledger(sessionId).minSeq;
+        const inferredMin = (metadata.minSeq ?? ledgerMin) || previous?.minSeq || 0;
+        // Keep the old-client inference only when the server genuinely omitted
+        // both window fields. Controller-owned frames never reach the legacy
+        // handler, so this preserves compatibility without overriding metadata.
+        const coldFallback = metadata.kind === "cold" &&
+          metadata.minSeq === null && metadata.hasMoreOlder === null &&
+          inferredMin > 1;
+        const shouldAdvanceOlder = metadata.kind === "older" && previous !== undefined && inferredMin < previous.minSeq;
+        if (metadata.minSeq === null && metadata.hasMoreOlder === null && !coldFallback && !shouldAdvanceOlder) return;
+        const minSeq = metadata.kind === "older" && previous
+          ? Math.min(previous.minSeq, inferredMin)
+          : inferredMin;
+        const hasMoreOlder = metadata.hasMoreOlder ?? (coldFallback ? true : previous?.hasMoreOlder ?? false);
+        const next = { minSeq, hasMoreOlder };
+        historyWindowRef.current.set(sessionId, next);
+        setHistoryWindowMap((prev) => new Map(prev).set(sessionId, next));
+      },
       replace: (sessionId, entries, completion) => {
         const source = controller.ledger(sessionId).sourceGeneration ?? sourceGenerationRef.current.get(sessionId);
         const persister = persisterFor(sessionId, source);
@@ -862,12 +882,6 @@ export default function App() {
         publishSessionEvents(sessionId, entries.map((entry) => entry.event));
         const last = entries.at(-1);
         maxSeqMapRef.current.set(sessionId, last?.seq ?? 0);
-        if (entries.length > 0) {
-          const minSeq = entries[0]!.seq;
-          const hasMoreOlder = minSeq > 1;
-          historyWindowRef.current.set(sessionId, { minSeq, hasMoreOlder });
-          setHistoryWindowMap((prev) => new Map(prev).set(sessionId, { minSeq, hasMoreOlder }));
-        }
         if (completion) {
           setLoadingOlderMap((prev) => new Map(prev).set(sessionId, false));
           const anchorToken = completion.anchorToken ?? null;

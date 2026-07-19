@@ -7,15 +7,26 @@ const LONG_TRANSCRIPT_TAIL = "long-transcript complete";
 interface ReplayFrame {
   type: string;
   sessionId?: string;
+  requestId?: string;
+  sourceGeneration?: string;
+  replayKind?: string;
   events?: unknown[];
   isLast?: boolean;
+  windowMinSeq?: number | null;
+  windowMaxSeq?: number | null;
+  retainedMinSeq?: number | null;
+  hasMoreOlder?: boolean;
+  partialHead?: boolean;
+  historyTruncated?: boolean;
   errorCode?: string;
 }
 
 interface SubscribeFrame {
   type: string;
   sessionId?: string;
+  requestId?: string;
   lastSeq?: number;
+  fromSeq?: number;
 }
 
 function parseSubscribe(payload: string): SubscribeFrame | null {
@@ -165,7 +176,36 @@ test.describe("@mobile-replay mobile session activation", () => {
     test.setTimeout(300_000);
 
     const card = await spawnFreshGitSession(page);
-    await card.click();
+    const sessionId = await card.getAttribute("data-session-id");
+    expect(sessionId).toBeTruthy();
+
+    // Register observers before replacing the dashboard route: the existing
+    // /ws was opened by spawnFreshGitSession before this point. The fresh
+    // route below opens the connection whose frames this test inspects, and
+    // every captured frame is filtered to this test's session.
+    const subscribes: SubscribeFrame[] = [];
+    const replays: ReplayFrame[] = [];
+    page.on("websocket", (ws: PWWebSocket) => {
+      if (new URL(ws.url()).pathname !== "/ws") return;
+      ws.on("framesent", (frame) => {
+        const payload = typeof frame.payload === "string" ? frame.payload : frame.payload.toString("utf8");
+        const subscribe = parseSubscribe(payload);
+        if (subscribe?.sessionId === sessionId) subscribes.push(subscribe);
+      });
+      ws.on("framereceived", (frame) => {
+        const payload = typeof frame.payload === "string" ? frame.payload : frame.payload.toString("utf8");
+        const replay = parseReplay(payload);
+        if (replay?.sessionId === sessionId) replays.push(replay);
+      });
+    });
+
+    await page.goto("/");
+    await byTestId(page, "headerAppBar").waitFor({ state: "visible" });
+    const reloadedCard = page.locator(
+      `[data-testid="session-card-desktop"][data-session-id="${sessionId}"]`,
+    );
+    await expect(reloadedCard).toBeVisible({ timeout: 60_000 });
+    await reloadedCard.click();
     await sendPrompt(page, "[[faux:long-transcript]] mobile history");
 
     const transcript = chatScroll(page);
@@ -198,6 +238,55 @@ test.describe("@mobile-replay mobile session activation", () => {
     await touchSwipe(page, transcript, 0.28, 0.92);
     await loadingStarted;
     await expect(olderButton).toBeVisible({ timeout: 60_000 });
+
+    const isOlderRequest = (message: SubscribeFrame) =>
+      message.sessionId === sessionId &&
+      message.fromSeq != null &&
+      Number.isFinite(message.fromSeq) &&
+      message.fromSeq > 0;
+    await expect.poll(() => subscribes.filter(isOlderRequest).length, { timeout: 60_000 }).toBe(1);
+    const olderRequest = subscribes.find(isOlderRequest);
+    expect(olderRequest).toBeDefined();
+    expect(olderRequest?.sessionId).toBe(sessionId);
+    expect(olderRequest?.fromSeq).toEqual(expect.any(Number));
+    expect(olderRequest?.fromSeq).toBeGreaterThan(0);
+    expect(olderRequest?.requestId).toEqual(expect.any(String));
+    const requestId = olderRequest?.requestId;
+    if (!requestId) throw new Error("older replay subscribe did not carry a requestId");
+
+    await expect
+      .poll(
+        () => {
+          const matching = replays.filter((message) => message.sessionId === sessionId && message.requestId === requestId && message.replayKind === "older");
+          const hasEvents = matching.some((message) => !message.isLast && (message.events?.length ?? 0) > 0);
+          const terminal = matching.find((message) => message.isLast === true);
+          return hasEvents && terminal !== undefined && terminal.errorCode === undefined;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe(true);
+
+    const matchingOlderReplay = replays.filter(
+      (message) => message.sessionId === sessionId && message.requestId === requestId && message.replayKind === "older",
+    );
+    const olderEvents = matchingOlderReplay.filter((message) => !message.isLast && (message.events?.length ?? 0) > 0);
+    expect(olderEvents.length).toBeGreaterThan(0);
+    const olderTerminal = matchingOlderReplay.find((message) => message.isLast === true);
+    expect(olderTerminal).toEqual(
+      expect.objectContaining({
+        replayKind: "older",
+        isLast: true,
+        events: [],
+        sourceGeneration: expect.any(String),
+        hasMoreOlder: expect.any(Boolean),
+        partialHead: expect.any(Boolean),
+        historyTruncated: expect.any(Boolean),
+      }),
+    );
+    expect(olderTerminal).not.toHaveProperty("errorCode");
+    expect(olderTerminal?.windowMinSeq).toEqual(expect.any(Number));
+    expect(olderTerminal?.windowMaxSeq).toEqual(expect.any(Number));
+    expect(olderTerminal).toHaveProperty("retainedMinSeq");
 
     // Older rows were prepended, but the same DOM row must retain its visible
     // identity and pixel offset. Also prove the user gesture still owns the

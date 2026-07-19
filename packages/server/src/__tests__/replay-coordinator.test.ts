@@ -190,6 +190,35 @@ describe("replay coordinator", () => {
     expect(ws.frames.filter((frame: any) => frame.type === "event_replay" && frame.requestId === "same" && !frame.isLast).flatMap((frame: any) => frame.events.map((entry: any) => entry.event.data.label))).toEqual(["one"]);
   });
 
+  it("pages persisted history before a truncated retained head", async () => {
+    const store = createMemoryEventStore(() => false, 10, 2);
+    const persisted = ["one", "two", "three", "four", "five"].map((label) => event(label));
+    for (const entry of persisted) store.insertEvent("s", entry);
+    const ws = socket();
+    const sessionManager: any = { get: () => ({ sessionFile: "/tmp/session.jsonl" }) };
+    const coordinator = createReplayCoordinator({
+      store,
+      directoryService: { loadSessionEvents: async () => ({ success: true, events: persisted }) } as any,
+      sessionManager,
+    });
+    const ctx: any = {
+      ws, sessionManager, eventStore: store,
+      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
+      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
+    };
+
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "cold", mode: "tail", windowBytes: 256 * 1024 }, ctx);
+    const coldReplay = ws.frames.filter((frame: any) => frame.type === "event_replay");
+    expect(coldReplay.flatMap((frame: any) => frame.events.map((entry: any) => entry.event.data.label))).toEqual(["four", "five"]);
+    expect(coldReplay.at(-1)).toMatchObject({ requestId: "cold", isLast: true, retainedMinSeq: 4, hasMoreOlder: true });
+
+    ws.frames.length = 0;
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "older", fromSeq: 4, windowBytes: 256 * 1024 }, ctx);
+    const olderReplay = ws.frames.filter((frame: any) => frame.type === "event_replay");
+    expect(olderReplay.flatMap((frame: any) => frame.events.map((entry: any) => [entry.seq, entry.event.data.label]))).toEqual([[1, "one"], [2, "two"], [3, "three"]]);
+    expect(olderReplay.at(-1)).toMatchObject({ requestId: "older", isLast: true, windowMinSeq: 1, windowMaxSeq: 3, hasMoreOlder: false });
+  });
+
   it("resets a retention-gap delta before cold-delivering the retained suffix", async () => {
     const store = createMemoryEventStore(() => false, 10, 1);
     store.insertEvent("s", event("old-one"));

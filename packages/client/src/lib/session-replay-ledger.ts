@@ -49,6 +49,8 @@ export class SessionReplayLedger {
   private gapBytes = 0;
   private repairLatched = false;
   private completion: { requestId: string; anchorToken?: string } | null = null;
+  /** Highest sequence admitted for the current ascending older-page stream. */
+  private olderPageLastSeq: number | null = null;
   private failures = new Map<ReplayKind, number>();
   private readonly maxGapEvents: number;
   private readonly maxGapBytes: number;
@@ -90,6 +92,7 @@ export class SessionReplayLedger {
       this.clear(request.sourceGeneration, false);
     }
     this.active = request;
+    this.olderPageLastSeq = null;
     this.status = "cold";
   }
 
@@ -101,6 +104,7 @@ export class SessionReplayLedger {
     this.gapBytes = 0;
     this.repairLatched = false;
     this.completion = null;
+    this.olderPageLastSeq = null;
     this.status = "retry";
   }
 
@@ -219,23 +223,24 @@ export class SessionReplayLedger {
   }
 
   private acceptOlder(events: LedgerEvent[], originalMin: number, result: LedgerAdmission, terminal: boolean): boolean {
-    if (events.length === 0) return true;
-    if (!this.isContiguous(events)) return false;
-    if (terminal && (originalMin <= 0 || events.at(-1)!.seq !== originalMin - 1)) return false;
-    for (const entry of events) {
-      if (entry.seq >= originalMin) {
+    const boundary = this.active?.fromSeq ?? originalMin;
+    if (boundary <= 0) return false;
+    if (events.length > 0) {
+      if (!this.isContiguous(events) || events.at(-1)!.seq >= boundary) return false;
+      if (this.olderPageLastSeq !== null && events[0]!.seq !== this.olderPageLastSeq + 1) return false;
+      for (const entry of events) {
         const old = this.bySeq.get(entry.seq);
-        if (!old || !sameEvent(old, entry)) return false;
-        continue;
+        if (old && !sameEvent(old, entry)) return false;
+        if (!old) {
+          this.bySeq.set(entry.seq, entry);
+          result.accepted.push(entry);
+        }
       }
-      const old = this.bySeq.get(entry.seq);
-      if (old && !sameEvent(old, entry)) return false;
-      if (!old) {
-        this.bySeq.set(entry.seq, entry);
-        result.accepted.push(entry);
-      }
+      this.olderPageLastSeq = events.at(-1)!.seq;
     }
-    return true;
+    // Older pages arrive in ascending batches, while their terminal is often
+    // empty. Validate against the request boundary, not the mutable ledger head.
+    return !terminal || this.olderPageLastSeq === boundary - 1;
   }
 
   private acceptForward(entry: LedgerEvent): "accepted" | "duplicate" | "conflict" | "gap" {
@@ -283,6 +288,7 @@ export class SessionReplayLedger {
     this.gapBytes = 0;
     this.repairLatched = false;
     this.completion = null;
+    this.olderPageLastSeq = null;
     if (clearFailures) this.failures.clear();
     this.activeSource = sourceGeneration;
   }
@@ -300,6 +306,7 @@ export class SessionReplayLedger {
     this.gapBytes = 0;
     this.repairLatched = false;
     this.completion = null;
+    this.olderPageLastSeq = null;
     this.active = null;
     this.status = "cold";
     return { accepted: [], stale: false, reset: reason, repair: null, rebuild: false };

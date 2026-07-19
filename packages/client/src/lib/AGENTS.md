@@ -97,7 +97,7 @@ Files in this directory. One row per source file.
 | `session-filter-storage.ts` | localStorage persistence for session-list filter state. Exports `removeLegacyHiddenSessions`,… → see `session-filter-storage.ts.AGENTS.md` |
 | `session-grouping.ts` | Pure session grouping/sorting/filtering utilities. Exports `DirectoryGroup`, `WorkspaceGroup`,… → see `session-grouping.ts.AGENTS.md` |
 | `session-list-scroll.ts` | Pure helper producing stable scroll-fingerprint of selected session card's position-affecting state. → see `session-list-scroll.ts.AGENTS.md` |
-| `session-replay-ledger.ts` | Canonical contiguous replay ledger. Validates source generation and sequence continuity, tracks active requests, and atomically replaces older windows. |
+| `session-replay-ledger.ts` | Canonical contiguous replay ledger. Validates source generation and sequence continuity, admits ascending multi-frame older pages against immutable request boundary, and atomically replaces older windows. |
 | `session-status-visuals.ts` | Shared session-status visual primitives. Exports `statusColors`, `sourceIcons`, `sourceLabels`,… → see `session-status-visuals.ts.AGENTS.md` |
 | `SessionAssetsContext.tsx` | Per-session image-asset registry context resolving `pi-asset:<hash>` srcs in `MarkdownContent` |
 | `sidebar-dnd.ts` | Shared drag-and-drop helpers for sidebar `SessionList`. Exports `sameTypeClosestCenter` (type-aware collision… → see `sidebar-dnd.ts.AGENTS.md` |

@@ -39,15 +39,18 @@ export function loadSessionEntries(filePath: string): SessionEntry[] {
 
   if (entries.length === 0) return [];
 
-  // Validate session header
-  const header = entries[0];
-  if (header.type !== "session" || typeof header.id !== "string") return [];
+  // Pi may prepend title metadata before the canonical session header. Ignore
+  // those preamble records; only records after the session header belong to
+  // the replay tree.
+  const headerIndex = entries.findIndex((entry) => entry.type === "session" && typeof entry.id === "string");
+  if (headerIndex < 0) return [];
+  const sessionEntries = entries.slice(headerIndex);
 
   // Build entry index for tree traversal
   const byId = new Map<string, SessionEntry>();
   let leafId: string | undefined;
 
-  for (const entry of entries) {
+  for (const entry of sessionEntries) {
     if (entry.type === "session") continue; // skip header
     if (entry.id) {
       byId.set(entry.id, entry);
@@ -56,7 +59,7 @@ export function loadSessionEntries(filePath: string): SessionEntry[] {
   }
 
   // Check for leaf pointer in header or metadata
-  for (const entry of entries) {
+  for (const entry of sessionEntries) {
     if (entry.type === "leaf" && typeof entry.entryId === "string") {
       leafId = entry.entryId;
     }
@@ -74,7 +77,7 @@ export function loadSessionEntries(filePath: string): SessionEntry[] {
   }
 
   // Fallback: return all entries except header in order
-  return entries.filter(e => e.type !== "session");
+  return sessionEntries.filter(e => e.type !== "session");
 }
 
 /**

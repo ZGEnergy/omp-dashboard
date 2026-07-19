@@ -21,6 +21,9 @@ export type ReplaySendResult = boolean | void | typeof REPLAY_SEND_BACKPRESSURE;
 
 type ReplayKind = "cold" | "delta" | "older";
 type RequestKey = string;
+type PersistedSourceResult =
+  | { ok: true; events: StoredEvent[] | null }
+  | { ok: false; code: ReplayErrorCode };
 
 interface RequestState {
   key: RequestKey;
@@ -82,7 +85,8 @@ function replayKindFor(msg: Extract<BrowserToServerMessage, { type: "subscribe" 
 
 export function createReplayCoordinator(options: ReplayCoordinatorOptions): ReplayCoordinator {
   const states = new Map<WebSocket, Map<string, SocketSessionState>>();
-  const hydration = new Map<string, Promise<{ ok: true } | { ok: false; code: ReplayErrorCode }>>();
+  const hydration = new Map<string, Promise<PersistedSourceResult>>();
+  const persistedSources = new Map<string, { sourceGeneration: string; events: StoredEvent[] }>();
   const send = options.send ?? ((ws, msg) => {
     if (!asWebSocketOpen(ws)) return false;
     try { ws.send(JSON.stringify(msg)); return true; } catch { return false; }
@@ -234,23 +238,37 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     state.queuedEvents += 1;
   }
 
-  async function ensureHydrated(sessionId: string, context?: BrowserHandlerContext): Promise<{ ok: true } | { ok: false; code: ReplayErrorCode }> {
+  async function loadPersistedSource(sessionId: string, context?: BrowserHandlerContext): Promise<PersistedSourceResult> {
+    const sourceGeneration = options.store.getSourceGeneration(sessionId);
+    const cached = persistedSources.get(sessionId);
+    if (cached?.sourceGeneration === sourceGeneration) return { ok: true, events: cached.events };
     const existing = hydration.get(sessionId);
     if (existing) return existing;
     const manager = options.sessionManager ?? context?.sessionManager;
     const session = manager?.get(sessionId) as { sessionFile?: string; contextWindow?: number } | undefined;
-    if (!options.directoryService || !session?.sessionFile || options.store.hasEvents(sessionId)) return { ok: true };
-    const work = (async () => {
+    if (!options.directoryService || !session?.sessionFile) return { ok: true, events: null };
+    const work = (async (): Promise<PersistedSourceResult> => {
       try {
         const result = await options.directoryService!.loadSessionEvents(sessionId, session.sessionFile!, session.contextWindow);
-        if (!result.success) return { ok: false as const, code: result.error === "cancelled" ? "unavailable" : "malformed_source" as ReplayErrorCode };
-        options.store.replaceEvents(sessionId, result.events);
-        manager?.update(sessionId, { dataUnavailable: false });
-        return { ok: true as const };
-      } catch { return { ok: false as const, code: "malformed_source" as ReplayErrorCode }; }
+        if (!result.success) return { ok: false, code: result.error === "cancelled" ? "unavailable" : "malformed_source" };
+        const events = result.events.map((event, index) => ({ seq: index + 1, event }));
+        persistedSources.set(sessionId, { sourceGeneration, events });
+        return { ok: true, events };
+      } catch { return { ok: false, code: "malformed_source" }; }
     })();
     hydration.set(sessionId, work);
     try { return await work; } finally { hydration.delete(sessionId); }
+  }
+
+  async function ensureHydrated(sessionId: string, context?: BrowserHandlerContext): Promise<PersistedSourceResult> {
+    if (options.store.hasEvents(sessionId)) return { ok: true, events: null };
+    const loaded = await loadPersistedSource(sessionId, context);
+    if (!loaded.ok || loaded.events === null || options.store.hasEvents(sessionId)) return loaded;
+    options.store.replaceEvents(sessionId, loaded.events.map((entry) => entry.event));
+    persistedSources.set(sessionId, { sourceGeneration: options.store.getSourceGeneration(sessionId), events: loaded.events });
+    const manager = options.sessionManager ?? context?.sessionManager;
+    manager?.update(sessionId, { dataUnavailable: false });
+    return loaded;
   }
   function inlineAssetRegistrar(sessionId: string, ctx: BrowserHandlerContext): (asset: { data: string; mimeType: string }) => string | undefined {
     return ({ data, mimeType }) => {
@@ -283,6 +301,14 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     const budget = clampTailWindowBytes(msg.windowBytes);
     const windowBudget = Math.max(1024, Math.min(budget, REPLAY_FRAME_BYTES - 2048));
     const raw = options.store.getEvents(sessionId, 1);
+    const retainedRange = options.store.getRetainedRange(sessionId);
+    const needsPersistedPaging = retainedRange.historyTruncated && (retainedRange.retainedMinSeq ?? 1) > 1;
+    let persistedRaw: StoredEvent[] | undefined;
+    if (needsPersistedPaging && (request.replayKind === "older" || (request.replayKind === "cold" && msg.mode === "tail"))) {
+      const persisted = await loadPersistedSource(sessionId, ctx);
+      if (!requestValid(state, request, ws)) return;
+      if (persisted.ok) persistedRaw = persisted.events ?? undefined;
+    }
     const snapshotMax = raw.at(-1)?.seq ?? 0;
     for (const [seq, { bytes }] of state.pendingLive) {
       if (!raw.some((entry) => entry.seq === seq)) continue;
@@ -295,9 +321,10 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     let selectionHasMoreOlder = false;
     let selectionPartialHead = false;
     if (request.replayKind === "older") {
-      const selected = selectOlderEventsByBudget(raw, msg.fromSeq!, windowBudget);
+      const usePersisted = persistedRaw !== undefined && retainedRange.retainedMinSeq != null && msg.fromSeq! <= retainedRange.retainedMinSeq;
+      const selected = selectOlderEventsByBudget(usePersisted ? persistedRaw! : raw, msg.fromSeq!, windowBudget);
       const selectedSeqs = new Set(selected.events.map((entry) => entry.seq));
-      initial = raw.filter((entry) => selectedSeqs.has(entry.seq));
+      initial = usePersisted ? selected.events : raw.filter((entry) => selectedSeqs.has(entry.seq));
       selectionHasMoreOlder = selected.hasMoreOlder;
       selectionPartialHead = selected.partialHead;
     } else if (request.replayKind === "delta") {
@@ -306,7 +333,7 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
       const selected = selectNewestEventsByBudget(raw, windowBudget);
       const selectedSeqs = new Set(selected.events.map((entry) => entry.seq));
       initial = raw.filter((entry) => selectedSeqs.has(entry.seq));
-      selectionHasMoreOlder = selected.hasMoreOlder;
+      selectionHasMoreOlder = selected.hasMoreOlder || Boolean(persistedRaw?.some((entry) => retainedRange.retainedMinSeq != null && entry.seq < retainedRange.retainedMinSeq));
       selectionPartialHead = selected.partialHead;
     } else initial = raw;
 

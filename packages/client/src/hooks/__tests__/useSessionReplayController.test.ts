@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { describe, expect, it, vi } from "vitest";
 import { SessionReplayController } from "../useSessionReplayController.js";
 
 const entry = (seq: number) => ({ seq, event: { sessionId: "s", eventType: "message_end", timestamp: seq, data: {} } as unknown as DashboardEvent });
@@ -77,6 +77,23 @@ describe("SessionReplayController", () => {
     expect(effects.retry).toHaveBeenCalledWith("s", "cold");
     expect(effects.loading).toHaveBeenLastCalledWith("s", false);
     expect(controller.ledger("s").status).toBe("retry");
+  });
+
+  it("publishes authoritative continuation metadata and anchors older paging at the retained head", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), window: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+
+    controller.handle({ ...frame(cold.requestId!, [entry(50)], true), windowMinSeq: 50, hasMoreOlder: true });
+    expect(effects.window).toHaveBeenLastCalledWith("s", { minSeq: 50, hasMoreOlder: true, kind: "cold" });
+
+    // The UI's older callback uses the controller's canonical minimum sequence.
+    const older = controller.begin("s", "older", "source-a", "anchor-50");
+    expect(older.fromSeq).toBe(50);
+    controller.handle({ ...frame(older.requestId!, [entry(49)], true), replayKind: "older", windowMinSeq: 49, hasMoreOlder: false });
+
+    expect(effects.window).toHaveBeenLastCalledWith("s", { minSeq: 49, hasMoreOlder: false, kind: "older" });
+    expect(effects.replace).toHaveBeenCalledWith("s", [entry(49), entry(50)], { requestId: older.requestId, anchorToken: "anchor-50" });
   });
 
   it("resets conflicting live state and starts cold recovery without preserving the prefix", () => {

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { describe, expect, it } from "vitest";
 import { SessionReplayLedger } from "../session-replay-ledger.js";
 
 const event = (seq: number) => ({
@@ -151,6 +151,21 @@ describe("SessionReplayLedger", () => {
     ledger.begin({ requestId: "older-1", kind: "older", sourceGeneration: "source-a", fromSeq: 10, anchorToken: "anchor" });
     expect(ledger.admit({ ...cold([event(8), event(9)]), requestId: "older-1", replayKind: "older", isLast: true }).reset).toBeNull();
     expect(ledger.events.map((entry) => entry.seq)).toEqual([8, 9, 10, 11]);
+    expect(ledger.takeOlderCompletion()).toEqual({ requestId: "older-1", anchorToken: "anchor" });
+  });
+
+  it("admits an ascending older page split across replay frames", () => {
+    const ledger = new SessionReplayLedger("s");
+    ledger.begin({ requestId: "cold-1", kind: "cold", sourceGeneration: "source-a" });
+    ledger.admit(cold());
+    ledger.begin({ requestId: "older-1", kind: "older", sourceGeneration: "source-a", fromSeq: 10, anchorToken: "anchor" });
+
+    expect(ledger.admit({ ...cold([event(6), event(7)]), requestId: "older-1", replayKind: "older" }).reset).toBeNull();
+    const terminal = ledger.admit({ ...cold([event(8), event(9)]), requestId: "older-1", replayKind: "older", isLast: true });
+
+    expect(terminal.reset).toBeNull();
+    expect(terminal.rebuild).toBe(true);
+    expect(ledger.events.map((entry) => entry.seq)).toEqual([6, 7, 8, 9, 10, 11]);
     expect(ledger.takeOlderCompletion()).toEqual({ requestId: "older-1", anchorToken: "anchor" });
   });
 
