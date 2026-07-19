@@ -138,6 +138,34 @@ describe("replay coordinator", () => {
     expect(delivered.at(-1)?.event).toMatchObject({ eventType: "message_end", data: { message: { content: [{ text: "final answer" }] } } });
   });
 
+  it("keeps preceding prose when tool-only assistant shells duplicate large tool arguments", async () => {
+    const store = createMemoryEventStore(() => false);
+    store.insertEvent("s", { eventType: "message_start", timestamp: 1, data: { message: { role: "user", content: "keep this request" } } });
+    for (let index = 0; index < 100; index += 1) {
+      const toolCallId = `hub-${index}`;
+      const toolCall = { type: "toolCall", id: toolCallId, name: "hub", arguments: JSON.stringify({ payload: "x".repeat(6 * 1024) }) };
+      store.insertEvent("s", { eventType: "tool_execution_start", timestamp: index + 2, data: { toolCallId, toolName: "hub", args: { payload: "x".repeat(6 * 1024) } } });
+      store.insertEvent("s", { eventType: "message_update", timestamp: index + 2, data: { message: { role: "assistant", content: [{ type: "thinking", text: "" }, toolCall] } } });
+      store.insertEvent("s", { eventType: "message_end", timestamp: index + 2, data: { message: { role: "assistant", content: [{ type: "thinking", text: "" }, toolCall] } } });
+      store.insertEvent("s", { eventType: "tool_execution_end", timestamp: index + 2, data: { toolCallId, toolName: "hub", result: "delivered", isError: false } });
+    }
+    store.insertEvent("s", assistantEnd("final answer"));
+    const ws = socket();
+    const coordinator = createReplayCoordinator({ store });
+    const ctx: any = {
+      ws, sessionManager: { get: () => undefined }, eventStore: store,
+      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
+      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
+    };
+
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r", mode: "tail", windowBytes: 1024 * 1024 }, ctx);
+
+    const delivered = ws.frames.filter((frame: any) => frame.type === "event_replay").flatMap((frame: any) => frame.events);
+    expect(delivered[0]?.seq).toBe(1);
+    expect(delivered.filter((entry: any) => entry.event.eventType === "message_end").slice(0, -1).every((entry: any) => Object.keys(entry.event.data).length === 0)).toBe(true);
+    expect(delivered.at(-1)?.event).toMatchObject({ eventType: "message_end", data: { message: { content: [{ text: "final answer" }] } } });
+  });
+
   it("trims the oldest batches, never the newest events, when frame overhead crosses the wire budget", async () => {
     const store = createMemoryEventStore(() => false);
     for (let index = 0; index < 600; index += 1) {
