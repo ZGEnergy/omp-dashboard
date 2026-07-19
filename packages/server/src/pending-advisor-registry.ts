@@ -22,6 +22,8 @@ export interface PendingAdvisorRegistry {
   confirm(spawnToken: string): void;
   /** Discard a reservation when its spawn fails or throws. */
   discard(spawnToken: string): void;
+  /** True when a server-minted token belongs to an advisor spawn in flight. */
+  has(spawnToken: string | undefined): boolean;
   /**
    * Consume confirmed proof after verified registration. If registration wins
    * the spawn's completion race, retain its consumer until `confirm` succeeds.
@@ -72,6 +74,10 @@ export function createPendingAdvisorRegistry(
 
     discard(spawnToken: string): void {
       remove(spawnToken);
+    },
+
+    has(spawnToken: string | undefined): boolean {
+      return Boolean(spawnToken && pendingAdvisorBySpawnToken.has(spawnToken));
     },
 
     consume(spawnToken: string | undefined, onConfirmed?: DeferredConsumer): AdvisorProof | undefined {

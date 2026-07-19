@@ -188,6 +188,26 @@ describe("advisor spawn proof persistence", () => {
     expect(readSessionMeta(sessionFile)?.advisor).toBe(true);
   });
 
+  it("does not consume advisor proof from dashboardSpawned without its verified token", async () => {
+    const sessionFile = join(tmpDir, "bare-dashboard-spawned.jsonl");
+    writeFileSync(sessionFile, "");
+    server.pendingAdvisorRegistry.reserve("verified-token");
+    server.pendingAdvisorRegistry.confirm("verified-token");
+
+    sockets.push(await registerSession(server.piPort()!, {
+      sessionId: "bare-dashboard-spawned",
+      cwd: tmpDir,
+      sessionFile,
+      dashboardSpawned: true,
+      spawnToken: "different-token",
+    }));
+    await wait(80);
+
+    expect(server.sessionManager.get("bare-dashboard-spawned")?.advisor).toBeUndefined();
+    expect(readSessionMeta(sessionFile)?.advisor).toBeUndefined();
+    expect(server.pendingAdvisorRegistry.size()).toBe(1);
+  });
+
   it("retains advisor through a later full sessionToMeta overwrite and omits false", () => {
     const sessionDir = join(tmpDir, "--test-cwd--");
     mkdirSync(sessionDir);

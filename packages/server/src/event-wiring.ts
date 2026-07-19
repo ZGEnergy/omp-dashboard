@@ -1105,14 +1105,11 @@ export function wireEvents(deps: EventWiringDeps): void {
         ? pendingClientCorrelations.consume(msg.spawnToken)
         : undefined;
 
-      // A token registered in the headless PID registry is strong proof. Tmux
-      // and WSL-tmux do not have a server-owned child process to register, so
-      // their bridge-provided dashboardSpawned provenance is the equivalent
-      // strong signal. In both cases, the secret spawn token must still match
-      // a pending advisor record before any proof is applied.
-      const verifiedDashboardSpawnToken = msg.spawnToken && (
-        linkedBySpawnToken || msg.dashboardSpawned === true
-      )
+      // The handler reserves only its server-minted spawn token. Matching that
+      // exact token is strategy-independent provenance: headless, tmux, and
+      // WSL-tmux bridges all echo it in session_register. A dashboardSpawned
+      // boolean alone is never enough to consume advisor proof.
+      const verifiedDashboardSpawnToken = pendingAdvisorRegistry?.has(msg.spawnToken)
         ? msg.spawnToken
         : undefined;
       const applyAdvisorProof = (advisor: { advisor: true }): void => {

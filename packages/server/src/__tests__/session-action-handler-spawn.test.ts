@@ -66,7 +66,7 @@ function makeCtx() {
     headlessPidRegistry: { register: vi.fn() } as never,
     pendingDashboardSpawns: new Map(),
     pendingAttachRegistry: { enqueue: vi.fn() } as never,
-    pendingAdvisorRegistry: { reserve: vi.fn(), confirm: vi.fn(), discard: vi.fn(), consume: vi.fn(), dispose: vi.fn(), size: vi.fn() },
+    pendingAdvisorRegistry: { reserve: vi.fn(), confirm: vi.fn(), discard: vi.fn(), has: vi.fn(), consume: vi.fn(), dispose: vi.fn(), size: vi.fn() },
     sessionManager: {} as never,
     broadcast: vi.fn() as never,
     piGateway: {} as never,
