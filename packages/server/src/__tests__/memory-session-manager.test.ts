@@ -143,6 +143,21 @@ describe("memory-session-manager", () => {
     });
   });
 
+  it("preserves durable advisor proof through bridge re-registration", () => {
+    const sm = createMemorySessionManager();
+    sm.register({ id: "advisor", cwd: "/tmp", source: "tui" });
+    sm.update("advisor", { advisor: true });
+
+    const reattached = sm.register({
+      id: "advisor",
+      cwd: "/tmp",
+      source: "tui",
+      registerReason: "reattach",
+    });
+
+    expect(reattached.advisor).toBe(true);
+  });
+
   it("onChange receives sessionId", () => {
     const sm = createMemorySessionManager();
     const ids: string[] = [];

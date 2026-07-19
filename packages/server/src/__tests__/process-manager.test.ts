@@ -101,6 +101,25 @@ describe("Process Manager", () => {
       expect(disabled).not.toContain("--advisor");
     });
 
+    it("injects the exact spawn token inside tmux pane commands", () => {
+      const cmd = buildTmuxCommand("/home/user/project", true, {
+        spawnToken: "tmux-token-123",
+      });
+
+      expect(cmd).toContain("PI_DASHBOARD_SPAWN_TOKEN=tmux-token-123 pi");
+      expect(cmd.indexOf("PI_DASHBOARD_SPAWN_TOKEN=tmux-token-123")).toBeGreaterThan(
+        cmd.indexOf("new-window"),
+      );
+    });
+
+    it("injects the exact spawn token inside WSL tmux pane commands", () => {
+      const cmd = `wsl ${buildTmuxCommand("/home/user/project", false, {
+        spawnToken: "wsl-token-456",
+      })}`;
+
+      expect(cmd).toContain("PI_DASHBOARD_SPAWN_TOKEN=wsl-token-456 pi");
+    });
+
     it("adds one --advisor to WSL tmux commands only when true", () => {
       const wslTmuxCommand = (options?: SessionOptions) =>
         `wsl ${buildTmuxCommand("/home/user/project", false, options)}`;

@@ -299,10 +299,17 @@ export function buildTmuxCommand(cwd: string, sessionExists: boolean, options?: 
     .map(shellEscape)
     .join(" ");
   // Scrub Zellij client identity inside the pane (tmux session env may re-inject it).
+  // Set the token inside the pane command as well: a long-lived tmux server
+  // does not reliably propagate the client process environment, and WSL does
+  // not inherit the Windows client environment into its Linux pane.
   const scrub = zellijEnvUnsetPrefix();
+  const tokenEnv = options?.spawnToken
+    ? ` PI_DASHBOARD_SPAWN_TOKEN=${shellEscape(options.spawnToken)}`
+    : "";
+  const piInvocation = `${scrub}${tokenEnv} pi`;
   const piCmd = flags
-    ? `cd ${safeCwd} && ${scrub} pi ${flags}`
-    : `cd ${safeCwd} && ${scrub} pi`;
+    ? `cd ${safeCwd} && ${piInvocation} ${flags}`
+    : `cd ${safeCwd} && ${piInvocation}`;
   if (sessionExists) {
     return `tmux new-window -t pi-dashboard -c ${safeCwd} "${piCmd}"`;
   }

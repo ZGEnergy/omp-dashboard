@@ -100,6 +100,10 @@ export function createMemorySessionManager(): SessionManager {
           // Preserve context usage until bridge sends fresh data
           contextTokens: existing.contextTokens,
           contextWindow: existing.contextWindow,
+          // Advisor proof is server-owned durable provenance. Bridges never
+          // send it on register, so a reconnect must not clear it before the
+          // next full metadata overwrite.
+          ...(existing.advisor === true ? { advisor: true as const } : {}),
         } : {
           tokensIn: 0,
           tokensOut: 0,
