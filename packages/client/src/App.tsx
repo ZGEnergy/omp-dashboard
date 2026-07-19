@@ -2523,24 +2523,20 @@ export default function App() {
         })()} onMessage={onMessage} onBack={goBack} selectedCwd={selectedCwd} />}
         {tunnelSetupMatch && <ZrokInstallGuide onBack={goBack} />}
       </div>
-      {boardWorktreeForChange && (
-        <WorktreeSpawnDialog
-          cwd={boardWorktreeForChange.cwd}
-          initialBranch={`os/${boardWorktreeForChange.changeName}`}
-          attachProposal={boardWorktreeForChange.changeName}
-          advisorDefault={advisorDefault}
-          onCancel={() => setBoardWorktreeForChange(null)}
-          onSpawnStart={(c) => addSpawningCwd(c)}
-          onSpawnAbort={(c) => clearSpawningCwd(c)}
-          onSpawn={(path, opts) => {
-            const placeholderCwd = boardWorktreeForChange.cwd;
-            setBoardWorktreeForChange(null);
-            handleSpawnSession(path, opts?.attachProposal, { ...opts, placeholderCwd });
-            // Opt-in trusted-only worktree auto-init. See change: auto-init-worktree-on-spawn.
-            void maybeAutoInitWorktreeOnSpawn(path);
-          }}
-        />
-      )}
+      <BoardWorktreeSpawnDialog
+        worktree={boardWorktreeForChange}
+        advisorDefault={advisorDefault}
+        onCancel={() => setBoardWorktreeForChange(null)}
+        onSpawnStart={addSpawningCwd}
+        onSpawnAbort={clearSpawningCwd}
+        onSpawn={(path, opts) => {
+          const placeholderCwd = boardWorktreeForChange?.cwd;
+          setBoardWorktreeForChange(null);
+          handleSpawnSession(path, opts?.attachProposal, { ...opts, ...(placeholderCwd ? { placeholderCwd } : {}) });
+          // Opt-in trusted-only worktree auto-init. See change: auto-init-worktree-on-spawn.
+          void maybeAutoInitWorktreeOnSpawn(path);
+        }}
+      />
       {pinDialogOpen && (
         <DialogPortal>
           <PinDirectoryDialog
@@ -2555,6 +2551,37 @@ export default function App() {
         </DialogPortal>
       )}
     </div>
+  );
+}
+
+
+export function BoardWorktreeSpawnDialog({
+  worktree,
+  advisorDefault,
+  onCancel,
+  onSpawnStart,
+  onSpawnAbort,
+  onSpawn,
+}: {
+  worktree: { cwd: string; changeName: string } | null;
+  advisorDefault: boolean;
+  onCancel: () => void;
+  onSpawnStart: (cwd: string) => void;
+  onSpawnAbort: (cwd: string) => void;
+  onSpawn: (path: string, opts?: { gitWorktreeBase?: string; attachProposal?: string; advisor?: true }) => void;
+}) {
+  if (!worktree) return null;
+  return (
+    <WorktreeSpawnDialog
+      cwd={worktree.cwd}
+      initialBranch={`os/${worktree.changeName}`}
+      attachProposal={worktree.changeName}
+      advisorDefault={advisorDefault}
+      onCancel={onCancel}
+      onSpawnStart={onSpawnStart}
+      onSpawnAbort={onSpawnAbort}
+      onSpawn={onSpawn}
+    />
   );
 }
 
