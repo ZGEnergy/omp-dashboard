@@ -1111,11 +1111,6 @@ function initBridge(pi: ExtensionAPI) {
       }
       const response = await commandHandler.handle(msg);
       if (response) connection.send(response);
-      // Immediately send model/thinking update after handling set_thinking_level
-      if (msg.type === "set_thinking_level") {
-        // Small delay to let pi process the level change
-        setTimeout(() => sendModelUpdateIfChanged(), 50);
-      }
     }),
     onReconnect: safe(() => {
       if (!isActive()) return; // Stale listener guard
@@ -1125,6 +1120,9 @@ function initBridge(pi: ExtensionAPI) {
       _resetReconnectCaches(_bc);
       applyBc(_bc);
       sendStateSync();
+      // Registration carries model state for server rehydration; the private
+      // bridge publisher sends the required full snapshot after registration.
+      sendModelUpdateIfChanged();
       // Force-emit git state for the active session’s cwd. The bridge
       // doesn't have direct ctx here, so we walk the active session.
       try {
@@ -1198,11 +1196,9 @@ function initBridge(pi: ExtensionAPI) {
     },
     setThinkingLevel: (level: string) => {
       (pi as any).setThinkingLevel?.(level);
-      // omp APPLIES the level (getThinkingLevel() reflects it) but emits NO
-      // thinking_level_select event, so the dashboard never learns of the
-      // change and the UI reverts. Push it explicitly, mirroring setModel
-      // below. See change: fix-omp-thinking-level-not-pushed.
-      setTimeout(() => sendModelUpdateIfChanged(), 50);
+      // omp applies the level but emits no thinking_level_select event. Queue
+      // publication only after the Pi setter has returned successfully.
+      sendModelUpdateIfChanged();
     },
     getThinkingLevel: () => (pi as any).getThinkingLevel?.(),
     setModel: async (provider: string, modelId: string) => {
@@ -1215,8 +1211,8 @@ function initBridge(pi: ExtensionAPI) {
       } catch {
         return;
       }
-      // model_select event updates cachedCtx; small delay lets it propagate
-      setTimeout(() => sendModelUpdateIfChanged(), 50);
+      // The awaited Pi setter has applied the model; publish only now.
+      sendModelUpdateIfChanged();
     },
     shutdown: () => {
       // Pi does not expose clear*Queue to extensions (verified through 0.76.0).
@@ -1446,7 +1442,22 @@ function initBridge(pi: ExtensionAPI) {
   // Local wrappers that sync bc around extracted module calls
   function sendStateSync() { const bc = syncBc(); _sendStateSync(bc, getFlowsList); applyBc(bc); }
   function replaySessionEntries() { _replaySessionEntries(syncBc()); }
-  function sendModelUpdateIfChanged() { const bc = syncBc(); _sendModelUpdateIfChanged(bc); applyBc(bc); }
+
+  // Model snapshots can be triggered by Pi events, dashboard setters, and
+  // reconnect. Serialize every publisher call in one private bridge tail so
+  // the wire preserves Pi application order without exposing a transport API.
+  let modelUpdatePublishTail: Promise<void> = Promise.resolve();
+  function sendModelUpdateIfChanged(): void {
+    modelUpdatePublishTail = modelUpdatePublishTail
+      .then(() => {
+        const bc = syncBc();
+        _sendModelUpdateIfChanged(bc);
+        applyBc(bc);
+      })
+      .catch((err) => {
+        console.error("[dashboard] model update publish failed:", err);
+      });
+  }
   function sendSessionNameIfChanged() { const bc = syncBc(); _sendSessionNameIfChanged(bc); applyBc(bc); }
 
   // ── add-auto-session-naming ──────────────────────────────────────────────
@@ -1656,6 +1667,9 @@ function initBridge(pi: ExtensionAPI) {
         const enriched = { ...event, thinkingLevel: (pi as any).getThinkingLevel?.() };
         const msg = mapEventToProtocol(sessionId, enriched);
         connection.send(msg);
+        // Pi has applied the model before this event; publish the complete
+        // snapshot after the history event, preserving application order.
+        sendModelUpdateIfChanged();
         return;
       }
 

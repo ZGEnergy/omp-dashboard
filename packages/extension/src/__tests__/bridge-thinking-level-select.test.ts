@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import { sendModelUpdateIfChanged } from "../model-tracker.js";
 import type { BridgeContext } from "../bridge-context.js";
 
-function makeBc(thinkingLevel: string): { bc: BridgeContext; sent: any[] } {
+function makeBc(thinkingLevel: string | null | undefined): { bc: BridgeContext; sent: any[] } {
   const sent: any[] = [];
   const bc = {
     sessionId: "S1",
@@ -37,6 +37,17 @@ describe("bridge thinking_level_select → model_update", () => {
       model: "anthropic/claude",
       thinkingLevel: "high",
     });
+  });
+
+  it("publishes an explicit null when Pi clears the thinking level", () => {
+    const { bc, sent } = makeBc(null);
+    sendModelUpdateIfChanged(bc);
+    expect(sent).toEqual([{
+      type: "model_update",
+      sessionId: "S1",
+      model: "anthropic/claude",
+      thinkingLevel: null,
+    }]);
   });
 
   it("does not re-emit when the thinking level is unchanged", () => {

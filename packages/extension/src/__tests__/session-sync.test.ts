@@ -55,6 +55,29 @@ describe("sendStateSync", () => {
     expect(registerMsg.pid).toBeGreaterThan(0);
   });
 
+  it("leaves model dedup caches to the bridge publisher", () => {
+    const bc = createMockBridgeContext({
+      cachedCtx: {
+        model: { provider: "anthropic", id: "claude" },
+        sessionManager: {
+          getSessionFile: () => "/path/to/session.json",
+          getSessionDir: () => "/path/to/session",
+          getBranch: () => [],
+        },
+      },
+      pi: {
+        getSessionName: () => "test-session",
+        getCommands: () => [],
+        getThinkingLevel: () => "high",
+      } as any,
+    } as any);
+
+    sendStateSync(bc, () => []);
+
+    expect(bc.lastModel).toBeUndefined();
+    expect(bc.lastThinkingLevel).toBeUndefined();
+  });
+
   // ── reattach-move-to-front ──
 
   it("first sendStateSync after boot tags registerReason: spawn", () => {

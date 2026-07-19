@@ -15,10 +15,11 @@ import { gatherGitInfo, gatherGitStatus } from "./vcs-info.js";
  */
 export function sendModelUpdateIfChanged(bc: BridgeContext): void {
   const model = getCurrentModelString(bc);
-  const thinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? undefined;
-  if (model === bc.lastModel && thinkingLevel === bc.lastThinkingLevel) return;
+  const thinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? null;
+  const thinkingLevelCache = thinkingLevel === null ? undefined : thinkingLevel;
+  if (model === bc.lastModel && thinkingLevelCache === bc.lastThinkingLevel) return;
   bc.lastModel = model;
-  bc.lastThinkingLevel = thinkingLevel;
+  bc.lastThinkingLevel = thinkingLevelCache;
   if (model) {
     bc.connection.send({
       type: "model_update",
@@ -254,6 +255,10 @@ export function _resetPiVersionWarnRateLimit(): void {
  * staleness.
  */
 export function resetReconnectCaches(bc: BridgeContext): void {
+  // Model updates are bridge-owned full snapshots; clear their dedup state so
+  // reconnect publication cannot be suppressed by the prior socket lifetime.
+  bc.lastModel = undefined;
+  bc.lastThinkingLevel = undefined;
   // Defensive: reset git so a reconnect through a stale state cache
   // doesn't surface stale branch info if .meta.json wasn't persisted yet.
   bc.lastGitBranch = undefined;
