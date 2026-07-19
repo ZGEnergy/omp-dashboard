@@ -291,6 +291,7 @@ export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDep
         sessionFile: session.sessionFile,
         mode,
         strategy: config.spawnStrategy,
+        advisor: mode === "continue" && session.advisor === true,
       });
       // Fork bookkeeping uses the spawn token (not cwd) so two concurrent
       // forks in the same cwd correlate correctly. See change:

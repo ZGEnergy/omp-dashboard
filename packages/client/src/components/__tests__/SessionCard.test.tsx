@@ -1447,7 +1447,7 @@ describe("SessionCard — advisor chip", () => {
     render(<SessionCard session={makeSession({ advisor: true } as Partial<DashboardSession>)} {...defaultProps} />);
     const chip = screen.getByTestId("advisor-chip");
     expect(chip.tagName).toBe("SPAN");
-    expect(chip.title).toBe("Advisor enabled");
+    expect(chip.title).toBe("Advisor reviews this session's transcript as a second agent; status only.");
     expect(chip.getAttribute("role")).toBeNull();
     expect(chip.getAttribute("tabindex")).toBeNull();
   });
@@ -1460,7 +1460,7 @@ describe("SessionCard — advisor chip", () => {
   it("shows the advisor chip on mobile and omits it when advisor is absent", () => {
     vi.mocked(useMobile).mockReturnValue(true);
     const { rerender } = render(<SessionCard session={makeSession({ advisor: true } as Partial<DashboardSession>)} {...defaultProps} />);
-    expect(screen.getByTestId("advisor-chip").title).toBe("Advisor enabled");
+    expect(screen.getByTestId("advisor-chip").title).toBe("Advisor reviews this session's transcript as a second agent; status only.");
 
     rerender(<SessionCard session={makeSession()} {...defaultProps} />);
     expect(screen.queryByTestId("advisor-chip")).toBeNull();

@@ -32,7 +32,7 @@ describe("AdvisorCard", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: /scout.*2.*blocker/i });
+    const trigger = screen.getByRole("button", { name: /advisor scout.*2.*blocker/i });
     expect(screen.queryByText("blocked note")).toBeNull();
 
     fireEvent.click(trigger);

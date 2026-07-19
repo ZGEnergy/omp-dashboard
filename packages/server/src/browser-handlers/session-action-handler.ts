@@ -148,6 +148,7 @@ export async function handleHeadlessReload(
       sessionFile: session.sessionFile,
       mode: "continue",
       strategy: "headless",
+      advisor: session.advisor === true,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -233,6 +234,7 @@ export async function handleSendPrompt(
       sessionFile: promptSession.sessionFile,
       mode: "continue",
       strategy: autoResumeConfig.spawnStrategy,
+      advisor: promptSession.advisor === true,
     });
     if (!spawnResult.success) {
       console.error(`[dashboard] auto-resume spawn failed: ${spawnResult.message}`);
@@ -366,6 +368,7 @@ export async function handleResumeSession(
     sessionFile: forkSessionFile,
     mode: msg.mode,
     strategy: resumeConfig.spawnStrategy,
+    advisor: msg.mode === "continue" && session.advisor === true,
   });
   // Record fork parent keyed by spawn token (was: keyed by cwd, racy on
   // multi-fork-in-same-cwd). See change: spawn-correlation-token.

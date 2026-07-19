@@ -54,7 +54,9 @@ export function AdvisorCard({ message }: { message: ChatMessage }) {
   const advisor = notes.find((note) => note.advisor)?.advisor;
   const preview = notes[0]!.note;
   const label = [
-    advisor ?? i18nT("advisor.card", undefined, "Advisor"),
+    advisor
+      ? `${i18nT("advisor.card", undefined, "Advisor")} ${advisor}`
+      : i18nT("advisor.card", undefined, "Advisor"),
     `${notes.length} ${notes.length === 1 ? "note" : "notes"}`,
     severity,
     preview,

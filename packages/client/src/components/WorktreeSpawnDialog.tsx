@@ -32,6 +32,7 @@ import {
   type WorktreeEntry,
 } from "../lib/git-api.js";
 import { t as i18nT } from "../lib/i18n";
+import { fetchOmpConfig } from "../lib/omp-config-api.js";
 import { BranchCombobox } from "./BranchCombobox.js";
 import { PrCombobox } from "./PrCombobox.js";
 
@@ -109,6 +110,19 @@ export function WorktreeSpawnDialog({ cwd, onSpawn, onCancel, initialBranch, att
   useEffect(() => {
     if (!advisorTouchedRef.current) setAdvisorEnabled(advisorDefault);
   }, [advisorDefault]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchOmpConfig()
+      .then((snapshot) => {
+        if (!cancelled && !advisorTouchedRef.current) {
+          setAdvisorEnabled(snapshot.settings["advisor.enabled"]?.value === true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled && !advisorTouchedRef.current) setAdvisorEnabled(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
   // Dirty-flag: flips on first user onChange of the branch input. Mount-
   // time seeding from `initialBranch` does NOT flip the flag (no onChange
   // fires for initial useState value). Used by the `attachProposal`

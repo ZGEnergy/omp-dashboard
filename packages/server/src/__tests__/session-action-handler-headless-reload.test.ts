@@ -157,6 +157,27 @@ describe("handleHeadlessReload — happy path", () => {
   });
 });
 
+describe("handleHeadlessReload — advisor preservation", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("passes persisted advisor to the replacement spawn", async () => {
+    (spawnPiSession as any).mockResolvedValueOnce({ success: true, message: "ok" });
+    const { ctx } = makeCtx({
+      sessions: {
+        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "active", advisor: true },
+      },
+    });
+
+    await handleHeadlessReload(
+      { type: "send_prompt", sessionId: "S1", text: "/reload" } as any,
+      ctx,
+    );
+
+    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.objectContaining({ advisor: true }));
+  });
+});
+
 describe("handleHeadlessReload — streaming session", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.restoreAllMocks());
@@ -346,6 +367,38 @@ describe("handleHeadlessReload — concurrent calls", () => {
     expect(spawnPiSession).toHaveBeenCalledTimes(2);
     expect(registerCalls).toHaveLength(2);
     expect(pidBySession.S1).toBe(registerCalls[registerCalls.length - 1].pid);
+  });
+});
+
+describe("advisor preservation on session replacement", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("passes persisted advisor to ended-session auto-resume", async () => {
+    (spawnPiSession as any).mockResolvedValueOnce({ success: true, message: "ok" });
+    const { ctx } = makeCtx({
+      sessions: {
+        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "ended", advisor: true },
+      },
+    });
+
+    await handleSendPrompt({ type: "send_prompt", sessionId: "S1", text: "continue" } as any, ctx);
+
+    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.objectContaining({ advisor: true }));
+  });
+
+  it("passes persisted advisor to explicit websocket resume", async () => {
+    (spawnPiSession as any).mockResolvedValueOnce({ success: true, message: "ok" });
+    const { ctx } = makeCtx({
+      sessions: {
+        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "ended", advisor: true },
+      },
+    });
+
+    const { handleResumeSession } = await import("../browser-handlers/session-action-handler.js");
+    await handleResumeSession({ type: "resume_session", sessionId: "S1", mode: "continue" } as any, ctx);
+
+    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.objectContaining({ advisor: true }));
   });
 });
 

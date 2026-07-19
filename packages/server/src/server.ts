@@ -1213,7 +1213,11 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         strategy: "headless",
         spawnToken: req.spawnToken,
         ...(req.reason === "resume" && req.sessionFile
-          ? { sessionFile: req.sessionFile, mode: "continue" as const }
+          ? {
+              sessionFile: req.sessionFile,
+              mode: "continue" as const,
+              ...(req.advisor === true ? { advisor: true as const } : {}),
+            }
           : {}),
       });
       if (result.process && result.pid) {
@@ -1244,6 +1248,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       return !!s && s.status !== "ended";
     },
     resolveSessionFile: (sessionId) => sessionManager.get(sessionId)?.sessionFile,
+    resolveSessionAdvisor: (sessionId) => sessionManager.get(sessionId)?.advisor === true,
     spawnDriver: spawnGoalDriver,
     killByToken: (token) => browserGateway.headlessPidRegistry.killByToken(token),
     killBySession: (sessionId) => browserGateway.headlessPidRegistry.killBySessionId(sessionId),
@@ -2169,6 +2174,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
               sessionFile: cand.sessionFile,
               mode: "continue",
               strategy: resumeConfig.spawnStrategy,
+              advisor: cand.advisor === true,
             });
             if (result.process && result.pid) {
               browserGateway.headlessPidRegistry.register(
