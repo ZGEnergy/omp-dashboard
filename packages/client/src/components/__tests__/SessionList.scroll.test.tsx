@@ -218,6 +218,6 @@ describe("SessionList advisor activity threading", () => {
       sessionMessagesMap: new Map([["s1", [{ role: "advisor" } as any]]]),
       onSelect: () => {},
     });
-    expect(screen.getByTestId("advisor-chip").title).toBe("Advisor enabled");
+    expect(screen.getByTestId("advisor-chip").title).toBe("Advisor reviews this session's transcript as a second agent; status only.");
   });
 });
