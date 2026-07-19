@@ -83,6 +83,49 @@ function replayKindFor(msg: Extract<BrowserToServerMessage, { type: "subscribe" 
   return "cold";
 }
 
+/**
+ * The bridge emits a full assistant snapshot for every streamed delta. During
+ * a tool-heavy turn those snapshots consume the tail window before its actual
+ * messages do. Preserve sequence continuity with inert update events, retain
+ * the newest unfinished text snapshot, and let completed message_end events
+ * provide their canonical content.
+ */
+function compactStreamUpdates(entries: readonly StoredEvent[]): StoredEvent[] {
+  const compacted = entries.slice();
+  let latestTextUpdate: number | null = null;
+  const noop = (index: number) => {
+    const entry = compacted[index]!;
+    compacted[index] = {
+      ...entry,
+      event: { eventType: "message_update", timestamp: entry.event.timestamp, data: {} } as StoredEvent["event"],
+    };
+  };
+
+  for (let index = 0; index < compacted.length; index += 1) {
+    const entry = compacted[index]!;
+    const event = entry.event as any;
+    const data = event.data as Record<string, unknown> | undefined;
+    if (event.eventType === "message_end" && (data as any)?.message?.role === "assistant") {
+      if (latestTextUpdate !== null) noop(latestTextUpdate);
+      latestTextUpdate = null;
+      continue;
+    }
+    if (event.eventType !== "message_update" || (data as any)?.message?.role !== "assistant") continue;
+
+    const assistantEvent = (data as any).assistantMessageEvent;
+    if (typeof assistantEvent?.type === "string" && assistantEvent.type.startsWith("thinking_")) {
+      // Keep incremental thinking semantics without carrying the duplicate
+      // assistant-text snapshot alongside every thinking delta.
+      const { message: _message, ...withoutMessage } = data as any;
+      compacted[index] = { ...entry, event: { ...event, data: withoutMessage } };
+      continue;
+    }
+    if (latestTextUpdate !== null) noop(latestTextUpdate);
+    latestTextUpdate = index;
+  }
+  return compacted;
+}
+
 export function createReplayCoordinator(options: ReplayCoordinatorOptions): ReplayCoordinator {
   const states = new Map<WebSocket, Map<string, SocketSessionState>>();
   const hydration = new Map<string, Promise<PersistedSourceResult>>();
@@ -328,14 +371,14 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     // Selection spans the whole window budget across as many frames as it
     // needs; a single event is still prepared (and accounted) at frame size.
     const selectionOptions = { maxEventBytes: windowBudget };
-    const raw = options.store.getEvents(sessionId, 1);
+    const raw = compactStreamUpdates(options.store.getEvents(sessionId, 1));
     const retainedRange = options.store.getRetainedRange(sessionId);
     const needsPersistedPaging = retainedRange.historyTruncated && (retainedRange.retainedMinSeq ?? 1) > 1;
     let persistedRaw: StoredEvent[] | undefined;
     if (needsPersistedPaging && (request.replayKind === "older" || (request.replayKind === "cold" && msg.mode === "tail"))) {
       const persisted = await loadPersistedSource(sessionId, ctx);
       if (!requestValid(state, request, ws)) return;
-      if (persisted.ok) persistedRaw = persisted.events ?? undefined;
+      if (persisted.ok) persistedRaw = persisted.events ? compactStreamUpdates(persisted.events) : undefined;
     }
     const snapshotMax = raw.at(-1)?.seq ?? 0;
     for (const [seq, { bytes }] of state.pendingLive) {

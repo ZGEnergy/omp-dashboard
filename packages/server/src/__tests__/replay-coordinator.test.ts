@@ -7,6 +7,25 @@ function event(label: string): DashboardEvent {
   return { eventType: "message_end", timestamp: 1, data: { label } };
 }
 
+function assistantUpdate(text: string): DashboardEvent {
+  return {
+    eventType: "message_update",
+    timestamp: 1,
+    data: {
+      assistantMessageEvent: { type: "text_delta" },
+      message: { role: "assistant", content: [{ type: "text", text }] },
+    },
+  };
+}
+
+function assistantEnd(text: string): DashboardEvent {
+  return {
+    eventType: "message_end",
+    timestamp: 1,
+    data: { message: { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" } },
+  };
+}
+
 function socket() {
   const frames: any[] = [];
   return {
@@ -96,6 +115,27 @@ describe("replay coordinator", () => {
     expect(replays.filter((frame: any) => frame.events.length > 0).length).toBeGreaterThan(1);
     const terminal = replays.find((frame: any) => frame.isLast);
     expect(terminal).toMatchObject({ windowMinSeq: 1, windowMaxSeq: 82, hasMoreOlder: false });
+  });
+
+  it("retains completed turns instead of spending the tail budget on superseded stream updates", async () => {
+    const store = createMemoryEventStore(() => false);
+    store.insertEvent("s", { eventType: "message_start", timestamp: 1, data: { message: { role: "user", content: "keep this turn" } } });
+    for (let index = 0; index < 300; index += 1) store.insertEvent("s", assistantUpdate("x".repeat(4 * 1024)));
+    store.insertEvent("s", assistantEnd("final answer"));
+    const ws = socket();
+    const coordinator = createReplayCoordinator({ store });
+    const ctx: any = {
+      ws, sessionManager: { get: () => undefined }, eventStore: store,
+      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
+      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
+    };
+
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r", mode: "tail", windowBytes: 1024 * 1024 }, ctx);
+
+    const delivered = ws.frames.filter((frame: any) => frame.type === "event_replay").flatMap((frame: any) => frame.events);
+    expect(delivered.map((entry: any) => entry.seq)).toEqual(Array.from({ length: 302 }, (_, index) => index + 1));
+    expect(delivered[0]?.event).toMatchObject({ eventType: "message_start", data: { message: { content: "keep this turn" } } });
+    expect(delivered.at(-1)?.event).toMatchObject({ eventType: "message_end", data: { message: { content: [{ text: "final answer" }] } } });
   });
 
   it("trims the oldest batches, never the newest events, when frame overhead crosses the wire budget", async () => {
