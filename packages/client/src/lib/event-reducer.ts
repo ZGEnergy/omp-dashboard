@@ -202,7 +202,7 @@ export interface SessionState {
   thinkingStartedAt?: number;
   isStreaming: boolean;
   model?: string;
-  thinkingLevel?: string;
+  thinkingLevel?: string | null;
   tokensIn: number;
   tokensOut: number;
   cacheRead: number;
@@ -1893,17 +1893,13 @@ export function reduceEvent(
       break;
     }
 
-    case "model_select": {
-      const model = data.model as any;
-      if (model) {
-        next.model = `${model.provider}/${model.id}`;
-      }
-      const thinkingLevel = data.thinkingLevel as string | undefined;
-      if (thinkingLevel !== undefined) {
-        next.thinkingLevel = thinkingLevel;
-      }
+    case "model_select":
+      // `model_select` is retained in the event stream for replay/history, but
+      // it is not an authoritative preference snapshot. The bridge publishes
+      // the complete `{ model, thinkingLevel }` state through `session_updated`;
+      // applying this partial event would optimistically overwrite the browser
+      // before that server confirmation arrives.
       break;
-    }
 
     case "session_compact": {
       next.messages = [
