@@ -222,7 +222,7 @@ function AdvisorChip({ visible }: { visible: boolean }) {
         undefined,
         "Advisor reviews this session's transcript as a second agent; status only.",
       )}
-      className="pointer-events-none inline-flex items-center px-1.5 py-px rounded-full text-[9px] uppercase tracking-wider border border-[var(--border-subtle)] text-[var(--text-muted)] bg-[var(--bg-tertiary)]"
+      className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] uppercase tracking-wider border border-[var(--border-subtle)] text-[var(--text-muted)] bg-[var(--bg-tertiary)]"
     >
       {i18nT("advisor.chip", undefined, "Advisor")}
     </span>

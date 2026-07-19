@@ -1450,6 +1450,7 @@ describe("SessionCard — advisor chip", () => {
     expect(chip.title).toBe("Advisor reviews this session's transcript as a second agent; status only.");
     expect(chip.getAttribute("role")).toBeNull();
     expect(chip.getAttribute("tabindex")).toBeNull();
+    expect(chip.className).not.toContain("pointer-events-none");
   });
 
   it("shows the advisor chip from observed advisor activity on desktop", () => {
