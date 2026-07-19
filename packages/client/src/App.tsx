@@ -54,6 +54,7 @@ import { useAppHidden } from "./hooks/useAppHidden.js";
 import { useContentViews } from "./hooks/useContentViews.js";
 import { useDocumentTitle } from "./hooks/useDocumentTitle.js";
 import { selectInflightBashTools } from "./hooks/useInflightBashTools.js";
+import { useAdvisorSpawnDefault } from "./hooks/useAdvisorSpawnDefault.js";
 import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { useLaunchSource } from "./hooks/useLaunchSource.js";
 import { useMessageHandler } from "./hooks/useMessageHandler.js";
@@ -85,7 +86,6 @@ import {
   resetNavStack,
 } from "./lib/nav-tracker.js";
 import { useOpenSpecConfig } from "./lib/openspec-config-api.js";
-import { fetchOmpConfig } from "./lib/omp-config-api.js";
 import { dispatchPluginMessage } from "./lib/plugins-api.js";
 import { clearRecoveryOffer } from "./lib/recovery-offer-bus.js";
 import { rehydrateSession } from "./lib/rehydrate-session.js";
@@ -548,7 +548,7 @@ export default function App() {
       window.removeEventListener("pageshow", onPageShow);
     };
   }, [requestForegroundReplay]);
-  const [advisorDefault, setAdvisorDefault] = useState(false);
+  const advisorDefault = useAdvisorSpawnDefault();
   // Per-session dashboard-local `/view` preview rows. Lives separately from
   // event-reducer state so the reducer never sees them. Merged with
   // `state.messages` by timestamp when passing to ChatView.
@@ -591,17 +591,6 @@ export default function App() {
   const [boardWorktreeForChange, setBoardWorktreeForChange] = useState<{ cwd: string; changeName: string } | null>(null);
   const [modelsMap, setModelsMap] = useState<Map<string, ModelInfo[]>>(new Map());
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetchOmpConfig()
-      .then((snapshot) => {
-        if (!cancelled) setAdvisorDefault(snapshot.settings["advisor.enabled"]?.value === true);
-      })
-      .catch(() => {
-        // An unavailable mirror must not block spawning; false is the safe default.
-      });
-    return () => { cancelled = true; };
-  }, []);
   // Write-only: the last reader (StatusBar's deprecated `roles` prop) was
   // removed in `redesign-prompt-input`; roles UI lives in the roles settings
   // plugin. `setRolesMap` still consumes server role events. Full excision of

@@ -20,6 +20,9 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { WorktreeSpawnDialog } from "../WorktreeSpawnDialog.js";
+import { useAdvisorSpawnDefault } from "../../hooks/useAdvisorSpawnDefault.js";
+
+const { fetchOmpConfig } = vi.hoisted(() => ({ fetchOmpConfig: vi.fn() }));
 
 const {
   fetchGitHead,
@@ -49,6 +52,8 @@ vi.mock("../../lib/git-api.js", async () => {
     cleanupOrphanWorktreePath,
   };
 });
+
+vi.mock("../../lib/omp-config-api.js", () => ({ fetchOmpConfig }));
 
 afterEach(() => {
   cleanup();
@@ -82,6 +87,7 @@ function defaultMocks(opts: {
 // Default mocks for the orphan-probe + cleanup APIs that newly-fetched on
 // every render. Override in specific tests as needed.
 beforeEach(() => {
+  fetchOmpConfig.mockResolvedValue({ settings: {} });
   probePathExists.mockResolvedValue(false);
   cleanupOrphanWorktreePath.mockResolvedValue({ ok: true });
 });
@@ -138,7 +144,43 @@ describe("WorktreeSpawnDialog — loading + existing worktrees", () => {
   });
 });
 
+function AdvisorDefaultDialogPaths() {
+  const advisorDefault = useAdvisorSpawnDefault();
+  return (
+    <>
+      <div data-testid="advisor-default-plain"><WorktreeSpawnDialog cwd="/plain" advisorDefault={advisorDefault} onSpawn={() => {}} onCancel={() => {}} /></div>
+      <div data-testid="advisor-default-proposal"><WorktreeSpawnDialog cwd="/proposal" attachProposal="change" advisorDefault={advisorDefault} onSpawn={() => {}} onCancel={() => {}} /></div>
+      <div data-testid="advisor-default-board"><WorktreeSpawnDialog cwd="/board" attachProposal="change" advisorDefault={advisorDefault} onSpawn={() => {}} onCancel={() => {}} /></div>
+    </>
+  );
+}
+
+function expectAllAdvisorDefaults(value: boolean) {
+  const checkboxes = screen.getAllByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement[];
+  expect(checkboxes).toHaveLength(3);
+  for (const checkbox of checkboxes) expect(checkbox.checked).toBe(value);
+}
+
 describe("WorktreeSpawnDialog — advisor option", () => {
+  it.each([
+    ["true", { settings: { "advisor.enabled": { value: true } } }, true],
+    ["false", { settings: { "advisor.enabled": { value: false } } }, false],
+    ["missing", { settings: {} }, false],
+  ])("mirrors a %s config response to plain, proposal, and board dialogs", async (_kind, snapshot, expected) => {
+    defaultMocks();
+    fetchOmpConfig.mockResolvedValue(snapshot);
+    render(<AdvisorDefaultDialogPaths />);
+    await waitFor(() => expectAllAdvisorDefaults(expected));
+  });
+
+  it("keeps every production dialog path spawnable when the config request rejects", async () => {
+    defaultMocks();
+    fetchOmpConfig.mockRejectedValue(new Error("mirror unavailable"));
+    render(<AdvisorDefaultDialogPaths />);
+    await waitFor(() => expectAllAdvisorDefaults(false));
+    expect(screen.getAllByTestId("worktree-dialog-create-submit")).toHaveLength(3);
+  });
+
   it("seeds the checkbox from the mirrored advisor default", async () => {
     defaultMocks();
     render(<WorktreeSpawnDialog cwd="/repo" advisorDefault onSpawn={() => {}} onCancel={() => {}} />);
@@ -166,7 +208,7 @@ describe("WorktreeSpawnDialog — advisor option", () => {
     expect(checkbox.checked).toBe(true);
 
     fireEvent.click(checkbox);
-    rerender(<WorktreeSpawnDialog cwd="/repo" advisorDefault={false} onSpawn={() => {}} onCancel={() => {}} />);
+    rerender(<WorktreeSpawnDialog cwd="/repo" advisorDefault onSpawn={() => {}} onCancel={() => {}} />);
     expect(checkbox.checked).toBe(false);
   });
 
