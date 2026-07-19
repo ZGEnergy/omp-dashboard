@@ -15,6 +15,10 @@ export const REPLAY_QUEUE_BYTES_CAP = 2 * 1024 * 1024;
 const ASSET_CHUNK_DATA_BYTES = 160 * 1024;
 const BACKPRESSURE_THRESHOLD = 1_024 * 1_024;
 
+/** Internal adapter result: the ordered replay item remains queued until low-water. */
+export const REPLAY_SEND_BACKPRESSURE = Symbol("replay-send-backpressure");
+export type ReplaySendResult = boolean | void | typeof REPLAY_SEND_BACKPRESSURE;
+
 type ReplayKind = "cold" | "delta" | "older";
 type RequestKey = string;
 
@@ -36,6 +40,7 @@ interface SocketSessionState {
   pendingLive: Map<number, { entry: StoredEvent; bytes: number }>;
   suppressed: boolean;
   draining: Promise<void>;
+  deliveryTail: Promise<void>;
   epoch: number;
   nextToken: number;
   requests: Map<RequestKey, RequestState>;
@@ -49,7 +54,7 @@ export interface ReplayCoordinatorOptions {
   store: EventStore;
   directoryService?: Pick<DirectoryService, "loadSessionEvents">;
   sessionManager?: Pick<SessionManager, "get" | "update">;
-  send?: (ws: WebSocket, msg: ServerToBrowserMessage) => boolean | void | Promise<boolean | void>;
+  send?: (ws: WebSocket, msg: ServerToBrowserMessage) => ReplaySendResult | Promise<ReplaySendResult>;
   close?: (ws: WebSocket, code: number, reason?: string) => void;
 }
 
@@ -89,7 +94,7 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     if (!sessions) { sessions = new Map(); states.set(ws, sessions); }
     let state = sessions.get(sessionId);
     if (!state) {
-      state = { queue: [], queueBytes: 0, queuedEvents: 0, pendingLive: new Map(), suppressed: false, draining: Promise.resolve(), epoch: 0, nextToken: 0, requests: new Map() };
+      state = { queue: [], queueBytes: 0, queuedEvents: 0, pendingLive: new Map(), suppressed: false, draining: Promise.resolve(), deliveryTail: Promise.resolve(), epoch: 0, nextToken: 0, requests: new Map() };
       sessions.set(sessionId, state);
     }
     return state;
@@ -179,14 +184,27 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
           if (request?.token === item.token) completeRequest(state, request);
           continue;
         }
-        state.queueBytes = Math.max(0, state.queueBytes - item.bytes);
-        state.queuedEvents = Math.max(0, state.queuedEvents - item.eventCount);
-        if (item.requestKey && !state.requests.has(item.requestKey)) continue;
+        if (item.requestKey && !state.requests.has(item.requestKey)) {
+          state.queueBytes = Math.max(0, state.queueBytes - item.bytes);
+          state.queuedEvents = Math.max(0, state.queuedEvents - item.eventCount);
+          continue;
+        }
         if (!asWebSocketOpen(ws)) { resolveAll(state); return; }
         while (Number(ws.bufferedAmount ?? 0) > BACKPRESSURE_THRESHOLD && asWebSocketOpen(ws)) await new Promise((resolve) => setTimeout(resolve, 10));
         if (!asWebSocketOpen(ws)) { resolveAll(state); return; }
         const accepted = await send(ws, item.msg);
+        if (accepted === REPLAY_SEND_BACKPRESSURE) {
+          // Gateway pressure is temporary, not a queue overflow: restore the
+          // item at the head. Its queue accounting stays reserved while the
+          // retry waits, keeping the queue within its caps.
+          state.queue.unshift(item);
+          while (Number(ws.bufferedAmount ?? 0) > BACKPRESSURE_THRESHOLD && asWebSocketOpen(ws)) await new Promise((resolve) => setTimeout(resolve, 10));
+          if (!asWebSocketOpen(ws)) { resolveAll(state); return; }
+          continue;
+        }
         if (accepted === false) { queueOverflow(ws, sessionId, state); return; }
+        state.queueBytes = Math.max(0, state.queueBytes - item.bytes);
+        state.queuedEvents = Math.max(0, state.queuedEvents - item.eventCount);
       }
     }).catch(() => queueOverflow(ws, sessionId, state));
   }
@@ -247,6 +265,18 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
   }
 
   async function deliverRequest(msg: Extract<BrowserToServerMessage, { type: "subscribe" }>, ctx: BrowserHandlerContext, state: SocketSessionState, request: RequestState, resetReason?: SessionStateResetReason): Promise<void> {
+    const previous = state.deliveryTail;
+    let release!: () => void;
+    state.deliveryTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      await deliverRequestBody(msg, ctx, state, request, resetReason);
+    } finally {
+      release();
+    }
+  }
+
+  async function deliverRequestBody(msg: Extract<BrowserToServerMessage, { type: "subscribe" }>, ctx: BrowserHandlerContext, state: SocketSessionState, request: RequestState, resetReason?: SessionStateResetReason): Promise<void> {
     const ws = ctx.ws;
     const sessionId = msg.sessionId;
     if (!requestValid(state, request, ws)) return;
@@ -322,7 +352,11 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
       const serialized = JSON.stringify(entry.event);
       for (const match of serialized.matchAll(/pi-asset:([A-Za-z0-9_-]+)/g)) hashes.add(match[1]!);
     }
-    if (resetReason) enqueueMessage(ws, sessionId, state, { type: "session_state_reset", sessionId, sourceGeneration: options.store.getSourceGeneration(sessionId), reason: resetReason, ...(msg.requestId ? { requestId: msg.requestId } : {}) } as any, request.key);
+    if (resetReason) {
+      if (!enqueueMessage(ws, sessionId, state, { type: "session_state_reset", sessionId, sourceGeneration: options.store.getSourceGeneration(sessionId), reason: resetReason, ...(msg.requestId ? { requestId: msg.requestId } : {}) } as any, request.key)) return;
+      await state.draining;
+      if (!requestValid(state, request, ws)) return;
+    }
     const session = (options.sessionManager ?? ctx.sessionManager)?.get(sessionId) as { assets?: Record<string, { data: string; mimeType: string }> } | undefined;
     let usedBytes = 0;
     const enqueueAssetCounted = (out: ServerToBrowserMessage, requestKey = request.key): boolean => {
@@ -342,7 +376,9 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     for (const hash of hashes) {
       const asset = session?.assets?.[hash];
       if (!asset || typeof asset.data !== "string" || typeof asset.mimeType !== "string") {
-        enqueueMessage(ws, sessionId, state, { type: "asset_unavailable", sessionId, requestId: msg.requestId ?? "", sourceGeneration: options.store.getSourceGeneration(sessionId), hash, reason: "missing" } as any, request.key);
+        if (!enqueueMessage(ws, sessionId, state, { type: "asset_unavailable", sessionId, requestId: msg.requestId ?? "", sourceGeneration: options.store.getSourceGeneration(sessionId), hash, reason: "missing" } as any, request.key)) return;
+        await state.draining;
+        if (!requestValid(state, request, ws)) return;
         continue;
       }
       const chunks: string[] = [];
@@ -351,21 +387,43 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
       const frames = chunks.map((data, index) => ({ type: "asset_replay_chunk", sessionId, requestId: msg.requestId ?? "", sourceGeneration: options.store.getSourceGeneration(sessionId), hash, mimeType: asset.mimeType, chunkIndex: index, chunkCount: count, data } as any));
       const total = frames.reduce((sum, frame) => sum + messageBytes(frame), 0);
       if (total + usedBytes + eventBytes + terminalReserve > budget || frames.some((frame) => messageBytes(frame) > REPLAY_FRAME_BYTES)) {
-        enqueueMessage(ws, sessionId, state, { type: "asset_unavailable", sessionId, requestId: msg.requestId ?? "", sourceGeneration: options.store.getSourceGeneration(sessionId), hash, reason: "budget_exceeded" } as any, request.key);
-      } else for (const frame of frames) enqueueAssetCounted(frame);
+        if (!enqueueMessage(ws, sessionId, state, { type: "asset_unavailable", sessionId, requestId: msg.requestId ?? "", sourceGeneration: options.store.getSourceGeneration(sessionId), hash, reason: "budget_exceeded" } as any, request.key)) return;
+        await state.draining;
+        if (!requestValid(state, request, ws)) return;
+      } else {
+        for (const frame of frames) {
+          if (!enqueueAssetCounted(frame)) {
+            if (!requestValid(state, request, ws)) return;
+            continue;
+          }
+          await state.draining;
+          if (!requestValid(state, request, ws)) return;
+        }
+      }
     }
     const delivered: Array<{ seq: number; event: any }> = [];
     for (const batch of finalBatches) {
       const frame: EventReplayMessage = { type: "event_replay", sessionId, ...(msg.requestId ? { requestId: msg.requestId } : {}), sourceGeneration: options.store.getSourceGeneration(sessionId), replayKind: request.replayKind, events: batch, isLast: false, windowMinSeq: finalEntries[0]?.seq ?? null, windowMaxSeq: finalEntries.at(-1)?.seq ?? null, retainedMinSeq: options.store.getRetainedRange(sessionId).retainedMinSeq, hasMoreOlder: selectionHasMoreOlder, partialHead: selectionPartialHead, historyTruncated: options.store.getRetainedRange(sessionId).historyTruncated };
-      if (enqueueEventCounted(frame)) delivered.push(...batch);
+      if (!enqueueEventCounted(frame)) {
+        if (!requestValid(state, request, ws)) return;
+        continue;
+      }
+      delivered.push(...batch);
+      await state.draining;
+      if (!requestValid(state, request, ws)) return;
     }
     const range = options.store.getRetainedRange(sessionId);
     const terminal: EventReplayMessage = { type: "event_replay", sessionId, ...(msg.requestId ? { requestId: msg.requestId } : {}), sourceGeneration: options.store.getSourceGeneration(sessionId), replayKind: request.replayKind, events: [], isLast: true, windowMinSeq: delivered[0]?.seq ?? null, windowMaxSeq: delivered.at(-1)?.seq ?? null, retainedMinSeq: range.retainedMinSeq, hasMoreOlder: selectionHasMoreOlder || delivered.length < finalEntries.length, partialHead: selectionPartialHead, historyTruncated: range.historyTruncated };
     if (!enqueueMessage(ws, sessionId, state, terminal, request.key)) return;
-    if (request.replayKind !== "older") enqueue(ws, sessionId, state, { kind: "barrier", token: request.token, sessionId, requestKey: request.key });
     await state.draining;
-    if (request.replayKind === "older" && state.requests.get(request.key) === request) completeRequest(state, request);
-    await state.draining;
+    if (!requestValid(state, request, ws)) return;
+    if (request.replayKind !== "older") {
+      if (!enqueue(ws, sessionId, state, { kind: "barrier", token: request.token, sessionId, requestKey: request.key })) return;
+      await state.draining;
+    } else if (state.requests.get(request.key) === request) {
+      completeRequest(state, request);
+      await state.draining;
+    }
     if (!request.cancelled && request.epoch === state.epoch && asWebSocketOpen(ws)) {
       ctx.replayPendingUiRequests(ws, sessionId);
       ctx.replayUiState?.(ws, sessionId);

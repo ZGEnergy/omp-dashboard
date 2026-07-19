@@ -63,14 +63,16 @@ describe("SessionReplayController", () => {
     expect(effects.loading).toHaveBeenLastCalledWith("s", false);
   });
 
-  it("recovers a matching replay terminal error with bounded retry behavior", () => {
+  it("retries a matching replay terminal through the open sender before settling", () => {
     const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn(), retry: vi.fn() };
     const controller = new SessionReplayController(effects);
     const first = controller.begin("s", "cold", "source-a");
     controller.handle({ ...frame(first.requestId!, [], true), errorCode: "delivery_failed" });
-    expect(effects.reconnect).toHaveBeenCalledWith("retry");
+    expect(effects.reconnect).not.toHaveBeenCalled();
     expect(effects.retry).not.toHaveBeenCalled();
+    expect(effects.send).toHaveBeenCalledTimes(2);
     const second = effects.send.mock.calls.at(-1)![0];
+    expect(second.requestId).not.toBe(first.requestId);
     controller.handle({ ...frame(second.requestId, [], true), errorCode: "delivery_failed" });
     expect(effects.retry).toHaveBeenCalledWith("s", "cold");
     expect(effects.loading).toHaveBeenLastCalledWith("s", false);
@@ -127,8 +129,7 @@ describe("SessionReplayController", () => {
       vi.advanceTimersByTime(90_000);
       const second = effects.send.mock.calls.at(-1)![0];
       expect(second.requestId).not.toBe(first.requestId);
-      expect(effects.reconnect).toHaveBeenCalledTimes(1);
-      expect(effects.reconnect).toHaveBeenCalledWith("retry");
+      expect(effects.reconnect).not.toHaveBeenCalled();
       expect(effects.retry).not.toHaveBeenCalled();
       vi.advanceTimersByTime(89_999);
       expect(effects.retry).not.toHaveBeenCalled();
@@ -150,7 +151,7 @@ describe("SessionReplayController", () => {
       const replacement = controller.begin("s", "cold", "source-a");
       expect(replacement.requestId).not.toBe(first.requestId);
       vi.advanceTimersByTime(90_000);
-      expect(effects.reconnect).toHaveBeenCalledTimes(1);
+      expect(effects.reconnect).not.toHaveBeenCalled();
       expect(effects.retry).not.toHaveBeenCalled();
       expect(effects.send).toHaveBeenCalledTimes(3);
       controller.handle(frame(first.requestId!, [entry(1)], true));

@@ -1497,10 +1497,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
 
       {/*
         3-way empty state (see change: show-chat-history-loading-indicator):
-        loading spinner while history is in flight, "No messages yet" for a
-        genuinely-empty session, else nothing (bubbles render above).
+        loading spinner while history is in flight, "No messages yet" when no
+        rows can render, else nothing (bubbles render above).
       */}
-      {state.messages.length === 0 && !state.streamingText && !state.pendingPrompt && !(pendingSteering && pendingSteering.length > 0) && (
+      {displayRows.length === 0 && !state.streamingText && !state.pendingPrompt && !(pendingSteering && pendingSteering.length > 0) && (
         loadingHistory ? (
           <div
             className="flex flex-col gap-3 px-4 py-3"

@@ -271,6 +271,48 @@ describe("memory-event-store", () => {
     });
   });
 
+  describe("string cap normalization", () => {
+    const replayedEvent: DashboardEvent = {
+      eventType: "message_start",
+      timestamp: 1,
+      data: {
+        message: { role: "assistant", content: "replayed short message" },
+        tool: { name: "read", callId: "replayed-call" },
+        entry: { path: "src/replayed.ts", text: "replayed short entry" },
+      },
+    };
+
+    it("preserves short nested fields for live and hydrated events with a zero cap", () => {
+      const epoch = "00000000-0000-4000-8000-000000000000";
+      const store = createMemoryEventStore(neverPinned, 100, 5000, 0, 20_000, epoch);
+
+      store.insertEvent("live", replayedEvent);
+      const liveData = store.getEvent("live", 1)!.data as any;
+      expect(liveData.message.content).toBe("replayed short message");
+      expect(liveData.tool.callId).toBe("replayed-call");
+      expect(liveData.entry.text).toBe("replayed short entry");
+
+      const hydrated = store.replaceEvents("hydrated", [replayedEvent]);
+      const hydratedData = hydrated.events[0]!.event.data as any;
+      expect(hydratedData.message.content).toBe("replayed short message");
+      expect(hydratedData.tool.name).toBe("read");
+      expect(hydratedData.entry.path).toBe("src/replayed.ts");
+      expect(hydrated.sourceGeneration).toBe(`${epoch}:1`);
+      expect(store.getSourceGeneration("hydrated")).toBe(hydrated.sourceGeneration);
+    });
+
+    it("still truncates oversized strings with a positive custom cap", () => {
+      const store = createMemoryEventStore(neverPinned, 100, 5000, 8);
+      store.insertEvent("s1", {
+        eventType: "message_start",
+        timestamp: 1,
+        data: { message: { content: "0123456789abcdef" } },
+      });
+
+      expect((store.getEvent("s1", 1)!.data as any).message.content).toBe("01234567\n…[truncated]");
+    });
+  });
+
   describe("over-ceiling truncation preserves tool-call identity", () => {
     // Regression (Bug C): a tool_execution_end whose data exceeds
     // MAX_EVENT_DATA_SIZE was replaced by a placeholder that DROPPED toolCallId,

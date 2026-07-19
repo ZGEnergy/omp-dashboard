@@ -1133,12 +1133,21 @@ export default function App() {
         if (!r || abort.signal.aborted || r.sourceGeneration !== source || !authority.isCurrent()) return;
         const ledger = replayController.ledger(sid);
         if (ledger.events.length > 0 || !ledger.seed(source, r.events)) return;
+        const stateAtAdmission = sessionStatesRef.current.get(sid);
         const existing = replayPersistersRef.current.get(sid);
         const persister = existing?.scope.serverEpoch === serverEpoch && existing.scope.sourceGeneration === source
           ? existing.persister
           : createReplayPersister(replayCache, 1000, { serverEpoch: serverEpoch!, sourceGeneration: source });
         if (!existing) replayPersistersRef.current.set(sid, { scope: { serverEpoch: serverEpoch!, sourceGeneration: source }, persister });
-        setSessionStates((prev) => { const next = new Map(prev); if (!next.has(sid)) next.set(sid, r.state); return next; });
+        setSessionStates((prev) => {
+          // Cache admission must not overwrite a state update that raced the
+          // async cache read. The reset-created placeholder is the exact
+          // object captured above; any newer live/replay update replaces it.
+          if (prev.get(sid) !== stateAtAdmission) return prev;
+          const next = new Map(prev);
+          next.set(sid, r.state);
+          return next;
+        });
         clearSessionEvents(sid);
         publishSessionEvents(sid, r.events.map((entry) => entry.event));
         persister.seed(sid, r.events);

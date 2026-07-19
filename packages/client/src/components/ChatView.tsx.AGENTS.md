@@ -22,7 +22,7 @@ Renders `inlineTerminal` role via `InlineTerminalCard`; `onCloseInlineTerminal` 
 
 `bashOutput` branch renders `<MissingToolInlineError>` when `args.missingTool.kind==="missing-tool"`. See change: register-bash-and-tool-install-help.
 
-New optional prop `loadingHistory?: boolean`. Empty-state 3-way: `loadingHistory && messages empty` → spinner (`mdiLoading` animate-spin + i18n "Loading conversation…"); else messages empty → "No messages yet"; else bubbles. See change: show-chat-history-loading-indicator.
+New optional prop `loadingHistory?: boolean`. Empty-state 3-way derives emptiness from `displayRows`, the rows that can actually render: `loadingHistory && displayRows empty` → spinner (`mdiLoading` animate-spin + i18n "Loading conversation…"); otherwise displayRows empty → "No messages yet"; else visible bubbles. Raw messages filtered by display preferences therefore never leave a blank viewport. See change: show-chat-history-loading-indicator.
 
 Wraps message list in `FilePreviewProvider`; renders single `FilePreviewHost`. See change: fix-file-preview-survives-message-churn.
 

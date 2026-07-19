@@ -68,7 +68,7 @@ import type { BrowserHandlerContext } from "./browser-handlers/handler-context.j
 import { handleAbort, handleClearFollowupEntries, handleEditFollowupEntry, handleFlowControl, handleForceKill, handleKillProcess, handlePromoteFollowupEntry, handleRemoveFollowupEntry, handleResumeSession, handleSendPrompt, handleShutdown, handleSpawnSession, handleStopAfterTurn, handleSubagentResyncRequest } from "./browser-handlers/session-action-handler.js";
 import { handleAcceptReplaceProposal, handleAttachProposal, handleDetachProposal, handleDismissReplaceProposal, handleFetchContent, handleHideSession, handleListSessions, handleRenameSession, handleSetSessionDisplayPrefs, handleSetSessionProcessDrawer, handleSetSessionTags, handleUnhideSession } from "./browser-handlers/session-meta-handler.js";
 import { handleSubscribe, replayUiState } from "./browser-handlers/subscription-handler.js";
-import { createReplayCoordinator, type ReplayCoordinator } from "./replay-coordinator.js";
+import { createReplayCoordinator, REPLAY_SEND_BACKPRESSURE, type ReplayCoordinator } from "./replay-coordinator.js";
 import { handleCloseInlineTerminal, handleCreateTerminal, handleKillTerminal, handleOpenInlineTerminal, handleRenameTerminal } from "./browser-handlers/terminal-handler.js";
 import { createPendingResumeRegistry, type PendingResumeRegistry } from "./pending-resume-registry.js";
 import type { TerminalManager } from "./terminal-manager.js";
@@ -527,6 +527,12 @@ export function createBrowserGateway(
     try { ws.send(JSON.stringify(msg)); return true; } catch { return false; }
   }
 
+  function sendToReplay(ws: WebSocket, msg: ServerToBrowserMessage) {
+    if (ws.readyState !== WebSocket.OPEN) return false;
+    if (MAX_WS_BUFFER > 0 && ws.bufferedAmount > MAX_WS_BUFFER) return REPLAY_SEND_BACKPRESSURE;
+    try { ws.send(JSON.stringify(msg)); return true; } catch { return false; }
+  }
+
   function broadcast(msg: ServerToBrowserMessage) {
     // Serialize once per fan-out: O(payload) instead of O(payload ×
     // subscribers). Matters for large recurring frames such as
@@ -564,7 +570,7 @@ export function createBrowserGateway(
     store: eventStore,
     directoryService,
     sessionManager,
-    send: (target, msg) => sendTo(target, msg),
+    send: (target, msg) => sendToReplay(target, msg),
     close: (target, code, reason) => target.close(code, reason),
   });
 

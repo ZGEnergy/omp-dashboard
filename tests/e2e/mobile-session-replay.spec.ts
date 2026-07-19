@@ -4,6 +4,14 @@ import { byTestId, sendPrompt, spawnFreshGitSession } from "./helpers/index.js";
 const PLAIN_TEXT_MARKER = "The quick brown faux jumps over the lazy dog.";
 const LONG_TRANSCRIPT_TAIL = "long-transcript complete";
 
+interface ReplayFrame {
+  type: string;
+  sessionId?: string;
+  events?: unknown[];
+  isLast?: boolean;
+  errorCode?: string;
+}
+
 interface SubscribeFrame {
   type: string;
   sessionId?: string;
@@ -14,6 +22,15 @@ function parseSubscribe(payload: string): SubscribeFrame | null {
   try {
     const message = JSON.parse(payload) as SubscribeFrame;
     return message.type === "subscribe" ? message : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseReplay(payload: string): ReplayFrame | null {
+  try {
+    const message = JSON.parse(payload) as ReplayFrame;
+    return message.type === "event_replay" ? message : null;
   } catch {
     return null;
   }
@@ -79,6 +96,70 @@ async function visibleAnchor(scroller: Locator) {
 }
 
 test.describe("@mobile-replay mobile session activation", () => {
+  test("session selection rehydrates a populated transcript after replay settles", async ({ page }) => {
+    test.setTimeout(300_000);
+
+    const card = await spawnFreshGitSession(page);
+    const sessionId = await card.getAttribute("data-session-id");
+    expect(sessionId).toBeTruthy();
+
+    const sockets: { closed: boolean; replayEvents: number; replayTerminals: number; replayErrors: string[] }[] = [];
+    page.on("websocket", (ws: PWWebSocket) => {
+      if (new URL(ws.url()).pathname !== "/ws") return;
+      const socket = { closed: false, replayEvents: 0, replayTerminals: 0, replayErrors: [] as string[] };
+      sockets.push(socket);
+      ws.on("framereceived", (frame) => {
+        const payload = typeof frame.payload === "string" ? frame.payload : frame.payload.toString("utf8");
+        const replay = parseReplay(payload);
+        if (!replay || replay.sessionId !== sessionId || !Array.isArray(replay.events)) return;
+        socket.replayEvents += replay.events.length;
+        if (replay.isLast) socket.replayTerminals += 1;
+        if (replay.errorCode) socket.replayErrors.push(replay.errorCode);
+      });
+      ws.on("close", () => {
+        socket.closed = true;
+      });
+    });
+
+    await card.click();
+    // The shared 120-turn fixture emits hundreds of persisted events, so this
+    // seeds a real cold replay larger than REPLAY_QUEUE_EVENT_CAP (256).
+    await sendPrompt(page, "[[faux:long-transcript]] mobile rehydrate");
+    await expect(page.getByText(LONG_TRANSCRIPT_TAIL).last()).toBeVisible({ timeout: 240_000 });
+
+    // Let the debounced replay-cache writer flush before replacing the app.
+    await page.waitForTimeout(1_800);
+    await page.goto("/");
+    await byTestId(page, "headerAppBar").waitFor({ state: "visible" });
+
+    // Selecting the existing session from the mobile list is the real
+    // rehydration trigger after the prior app instance has been discarded.
+    const rehydratedCard = page.locator(
+      `[data-testid="session-card-desktop"][data-session-id="${sessionId}"]`,
+    );
+    await expect(rehydratedCard).toBeVisible({ timeout: 60_000 });
+    await rehydratedCard.click();
+    await expect(chatScroll(page)).toBeVisible({ timeout: 30_000 });
+
+    // The regression must paint the previously populated transcript, not
+    // merely reconnect the socket or hide the history-loading placeholder.
+    await expect(page.getByText(LONG_TRANSCRIPT_TAIL).last()).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("chat-history-skeleton")).toBeHidden();
+    await expect
+      .poll(
+        () => sockets.some((socket) => socket.replayEvents > 256 && socket.replayTerminals === 1 && !socket.closed && socket.replayErrors.length === 0),
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    const visibleTranscript = await chatScroll(page).innerText();
+    expect(visibleTranscript).toContain(LONG_TRANSCRIPT_TAIL);
+    expect(visibleTranscript).not.toContain("…[truncated]");
+    const socketCountAfterReplay = sockets.length;
+    await page.waitForTimeout(1_000);
+    expect(sockets).toHaveLength(socketCountAfterReplay);
+    expect(sockets.at(-1)?.closed).toBe(false);
+  });
+
   test("Chromium touch paging restores the visible DOM anchor after older replay", async ({ page, browserName }) => {
     test.skip(browserName !== "chromium", "touch CDP swipe assertions are Chromium-only");
     test.setTimeout(300_000);

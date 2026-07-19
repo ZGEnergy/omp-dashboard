@@ -1,7 +1,7 @@
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { describe, expect, it } from "vitest";
 import { createMemoryEventStore } from "../memory-event-store.js";
-import { createReplayCoordinator } from "../replay-coordinator.js";
+import { createReplayCoordinator, REPLAY_SEND_BACKPRESSURE } from "../replay-coordinator.js";
 
 function event(label: string): DashboardEvent {
   return { eventType: "message_end", timestamp: 1, data: { label } };
@@ -91,6 +91,41 @@ describe("replay coordinator", () => {
     expect(terminalIndex).toBeGreaterThanOrEqual(0);
     if (replayLiveIndex >= 0) expect(replayLiveIndex).toBeLessThan(terminalIndex);
     if (rawLiveIndex >= 0) expect(rawLiveIndex).toBeGreaterThan(terminalIndex);
+  });
+
+  it("retries a replay item after temporary gateway back-pressure without closing", async () => {
+    const store = createMemoryEventStore(() => false);
+    store.insertEvent("s", event("one"));
+    const ws = socket();
+    let firstAttempt = true;
+    let closed: [number, string | undefined] | undefined;
+    const send = (target: any, msg: any) => {
+      if (firstAttempt) {
+        firstAttempt = false;
+        // A direct selected-session frame can push the browser socket above
+        // the gateway high-water mark between coordinator pacing checks.
+        target.bufferedAmount = 5 * 1024 * 1024;
+        setTimeout(() => { target.bufferedAmount = 512 * 1024; }, 5);
+      }
+      if (target.bufferedAmount > 4 * 1024 * 1024) return REPLAY_SEND_BACKPRESSURE;
+      target.send(JSON.stringify(msg));
+      return true;
+    };
+    const coordinator = createReplayCoordinator({ store, send, close: (_target, code, reason) => { closed = [code, reason]; } });
+    const ctx: any = {
+      ws, sessionManager: { get: () => undefined }, eventStore: store,
+      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
+      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
+    };
+
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "pressure", lastSeq: 0 }, ctx);
+
+    expect(closed).toBeUndefined();
+    expect(ws.frames.map((frame: any) => [frame.type, frame.isLast])).toEqual([
+      ["event_replay", false],
+      ["event_replay", true],
+    ]);
+    expect(ws.frames[0].events.map((entry: any) => entry.event.data.label)).toEqual(["one"]);
   });
 
   it("fails and closes on byte overflow below the event cap after attempting serialized sends", async () => {
@@ -196,23 +231,25 @@ describe("replay coordinator", () => {
     expect(replay.at(-1)).toEqual({ type: "event_replay", sessionId: "s", requestId: "older", sourceGeneration: generation, replayKind: "cold", events: [], isLast: true, windowMinSeq: 1, windowMaxSeq: 2, retainedMinSeq: 1, hasMoreOlder: false, partialHead: false, historyTruncated: false });
   });
 
-  it("enforces queue limits for replay frames, not just suppressed live events", async () => {
+  it("drains a finite 300-event replay in order without queue overflow", async () => {
     const store = createMemoryEventStore(() => false);
-    for (let seq = 0; seq < 300; seq += 1) store.insertEvent("s", event(String(seq)));
+    for (let seq = 0; seq < 300; seq += 1) store.insertEvent("s", event(String(seq + 1)));
     const ws = socket();
-    let release!: () => void;
-    const send = async () => new Promise<boolean>((resolve) => { release = () => resolve(true); });
     let closed: number | undefined;
-    const coordinator = createReplayCoordinator({ store, send, close: (_target, code) => { closed = code; ws.readyState = 3; } });
+    const coordinator = createReplayCoordinator({ store, close: (_target, code) => { closed = code; } });
     const ctx: any = {
       ws, sessionManager: { get: () => undefined }, eventStore: store,
       piGateway: { sendToSession() {} }, sendTo() {}, broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
     };
-    const pending = coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "queue", lastSeq: 0 }, ctx);
-    await Promise.resolve();
-    expect(closed).toBe(1013);
-    release();
-    await pending;
+
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "queue", lastSeq: 0 }, ctx);
+
+    const replay = ws.frames.filter((frame: any) => frame.type === "event_replay");
+    expect(replay.flatMap((frame: any) => frame.events.map((entry: any) => entry.seq))).toEqual(Array.from({ length: 300 }, (_value, index) => index + 1));
+    expect(replay.filter((frame: any) => frame.isLast)).toHaveLength(1);
+    expect(replay.at(-1)).not.toHaveProperty("errorCode");
+    expect(closed).toBeUndefined();
+    expect(ws.readyState).toBe(1);
   });
 
   it("arms every bridge subscriber before awaiting replay delivery", async () => {
@@ -222,17 +259,19 @@ describe("replay coordinator", () => {
     const second = socket();
     let release!: () => void;
     let sends = 0;
+    let started!: () => void;
+    const sendStarted = new Promise<void>((resolve) => { started = resolve; });
     const coordinator = createReplayCoordinator({
       store,
       send: async (ws: any, message: any) => {
         sends += 1;
-        if (sends === 1) await new Promise<void>((resolve) => { release = resolve; });
+        if (sends === 1) await new Promise<void>((resolve) => { release = resolve; started(); });
         ws.send(JSON.stringify(message));
         return true;
       },
     });
     const replay = coordinator.completeBridgeReplay("s", () => [first, second], (target: any) => target.frames.push({ type: "ui_state" }));
-    await Promise.resolve();
+    await sendStarted;
     const live = event("live");
     const liveSeq = store.insertEvent("s", live);
     coordinator.publishLive("s", { seq: liveSeq, event: live });

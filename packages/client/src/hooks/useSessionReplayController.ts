@@ -163,7 +163,7 @@ export class SessionReplayController {
       pending.kind === message.replayKind && this.isCurrentPending(message.sessionId, pending) &&
       (ledger.sourceGeneration === message.sourceGeneration ||
         (pending.kind === "cold" && ledger.sourceGeneration === "" && ledger.events.length === 0))) {
-      this.recover(message.sessionId, { ...pending, sourceGeneration: message.sourceGeneration });
+      this.recover(message.sessionId, { ...pending, sourceGeneration: message.sourceGeneration }, true);
       return true;
     }
     const result = ledger.admit(message);
@@ -299,10 +299,10 @@ export class SessionReplayController {
   private timeout(sessionId: string, requestId: string): void {
     const pending = this.pending.get(sessionId);
     if (!pending || pending.requestId !== requestId || this.isCurrentPending(sessionId, pending) === false) return;
-    this.recover(sessionId, pending);
+    this.recover(sessionId, pending, pending.kind === "cold");
   }
 
-  private recover(sessionId: string, request: ReplayRequest): void {
+  private recover(sessionId: string, request: ReplayRequest, reuseTransport = false): void {
     const pending = this.pending.get(sessionId);
     if (!pending || pending.requestId !== request.requestId || this.isCurrentPending(sessionId, pending) === false) return;
     const ledger = this.ledger(sessionId);
@@ -312,7 +312,7 @@ export class SessionReplayController {
       this.effects.retry?.(sessionId, request.kind);
       return;
     }
-    this.effects.reconnect("retry");
+    if (!reuseTransport) this.effects.reconnect("retry");
     this.begin(sessionId, request.kind, request.sourceGeneration, request.anchorToken);
   }
 

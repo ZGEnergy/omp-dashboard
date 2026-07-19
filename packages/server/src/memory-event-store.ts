@@ -141,6 +141,7 @@ export function createMemoryEventStore(
   maxEventDataSize = DEFAULT_MAX_EVENT_DATA_SIZE,
   serverEpoch = randomUUID(),
 ): EventStore {
+  const stringFieldLimit = Number.isFinite(maxStringFieldSize) && maxStringFieldSize > 0 ? maxStringFieldSize : DEFAULT_MAX_STRING_SIZE;
   const buffers = new Map<string, SessionBuffer>();
   // Retain revisions independently of evictable event buffers. A cache miss must
   // never recreate an earlier source authority for the same session id.
@@ -190,7 +191,7 @@ export function createMemoryEventStore(
     insertEvent(sessionId, event) {
       const buffer = getOrCreate(sessionId);
       const seq = buffer.nextSeq++;
-      buffer.events.push({ seq, event: truncateEvent(event, maxStringFieldSize, maxEventDataSize) });
+      buffer.events.push({ seq, event: truncateEvent(event, stringFieldLimit, maxEventDataSize) });
       trim(buffer, sessionId);
       evictIfNeeded();
       return seq;
@@ -233,7 +234,7 @@ export function createMemoryEventStore(
       const previous = buffers.get(sessionId);
       const revision = Math.max(previous?.revision ?? -1, revisions.get(sessionId) ?? 0) + 1;
       const buffer = newBuffer(revision);
-      buffer.events = events.map((event, index) => ({ seq: index + 1, event: truncateEvent(event, maxStringFieldSize, maxEventDataSize) }));
+      buffer.events = events.map((event, index) => ({ seq: index + 1, event: truncateEvent(event, stringFieldLimit, maxEventDataSize) }));
       buffer.nextSeq = buffer.events.length + 1;
       trim(buffer, sessionId);
       buffer.lastAccess = Date.now();

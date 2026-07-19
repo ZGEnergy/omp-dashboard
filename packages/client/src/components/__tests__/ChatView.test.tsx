@@ -318,6 +318,23 @@ describe("ChatView", () => {
     });
   });
 
+  it("shows an empty fallback when all history rows are filtered", () => {
+    const state = createInitialState();
+    state.messages.push({
+      id: "thinking-only",
+      role: "thinking",
+      content: "hidden reasoning",
+      timestamp: Date.now(),
+    } as ChatMessage);
+    const { container } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} loadingHistory={false} /></ThemeProvider>,
+    );
+
+    expect(state.messages.length).toBe(1);
+    expect(container.textContent).toContain("No messages yet");
+    expect(container.querySelector("[data-testid=\"chat-history-skeleton\"]")).toBeNull();
+  });
+
   describe("scroll lock", () => {
     let scrollToSpy: ReturnType<typeof vi.fn>;
 
