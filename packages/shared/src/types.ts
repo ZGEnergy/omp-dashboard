@@ -72,7 +72,7 @@ export interface DashboardSession {
   source: SessionSource;
   status: SessionStatus;
   model?: string;
-  thinkingLevel?: string;
+  thinkingLevel?: string | null;
   startedAt: number;
   endedAt?: number;
   /**

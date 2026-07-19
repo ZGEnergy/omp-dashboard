@@ -313,7 +313,7 @@ export interface ModelUpdateMessage {
   type: "model_update";
   sessionId: string;
   model: string;
-  thinkingLevel?: string;
+  thinkingLevel: string | null;
 }
 
 export interface ReplayCompleteMessage {

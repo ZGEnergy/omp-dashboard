@@ -27,23 +27,16 @@ describe("extractSessionUpdates", () => {
     expect(updates).toEqual({ currentTool: null });
   });
 
-  it("should extract model from model_select event", () => {
-    const updates = extractSessionUpdates(
-      makeEvent("model_select", {
-        model: { provider: "anthropic", id: "claude-opus-4-6" },
-      })
-    );
-    expect(updates).toEqual({ model: "anthropic/claude-opus-4-6" });
-  });
-
-  it("should extract model and thinkingLevel from model_select event", () => {
+  it("does not derive model state from model_select events", () => {
     const updates = extractSessionUpdates(
       makeEvent("model_select", {
         model: { provider: "anthropic", id: "claude-opus-4-6" },
         thinkingLevel: "high",
-      })
+      }),
     );
-    expect(updates).toEqual({ model: "anthropic/claude-opus-4-6", thinkingLevel: "high" });
+    // model_select remains in the forwarded event history; extraction must
+    // not project its payload onto live session state.
+    expect(updates).toBeNull();
   });
 
   it("should return null for model_select without model data", () => {

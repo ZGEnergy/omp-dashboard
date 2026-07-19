@@ -1447,10 +1447,8 @@ export function wireEvents(deps: EventWiringDeps): void {
     if (msg.type === "model_update") {
       const modelUpdates: Partial<DashboardSession> = {
         model: msg.model,
+        thinkingLevel: msg.thinkingLevel,
       };
-      if (msg.thinkingLevel !== undefined) {
-        modelUpdates.thinkingLevel = msg.thinkingLevel;
-      }
       sessionManager.update(sessionId, modelUpdates);
       browserGateway.broadcastSessionUpdated(sessionId, modelUpdates);
     }

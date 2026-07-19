@@ -96,7 +96,9 @@ export interface SessionAddedMessage {
 export interface SessionUpdatedMessage {
   type: "session_updated";
   sessionId: string;
-  updates: Partial<DashboardSession>;
+  updates: Partial<Omit<DashboardSession, "thinkingLevel">> & {
+    thinkingLevel?: string | null;
+  };
 }
 
 export interface SessionRemovedMessage {
