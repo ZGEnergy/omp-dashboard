@@ -16,17 +16,18 @@
  *    it is set. Fork-mode tests below explicitly select fork mode via the
  *    `worktree-source-fork` toggle (see `enterFork`).
  */
-import React from "react";
+
+import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type React from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
-import { ThemeProvider } from "../ThemeProvider.js";
-import { SessionList } from "../SessionList.js";
 import { BoardWorktreeSpawnDialog } from "../../App.js";
-import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { WorktreeSpawnDialog } from "../WorktreeSpawnDialog.js";
 import { useAdvisorSpawnDefault } from "../../hooks/useAdvisorSpawnDefault.js";
+import { SessionList } from "../SessionList.js";
+import { ThemeProvider } from "../ThemeProvider.js";
+import { WorktreeSpawnDialog } from "../WorktreeSpawnDialog.js";
 
 const { fetchOmpConfig } = vi.hoisted(() => ({ fetchOmpConfig: vi.fn() }));
 

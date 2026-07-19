@@ -4,29 +4,30 @@
  */
 
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { detectOpenSpecActivity, isValidOpenSpecChangeSlug } from "@blackbelt-technology/pi-dashboard-shared/openspec-activity-detector.js";
 import { mergeSessionMeta, writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
 import { extractTurnStats } from "@blackbelt-technology/pi-dashboard-shared/stats-extractor.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { BrowserGateway } from "./browser-gateway.js";
-import type { EventStore } from "./memory-event-store.js";
-import type { SessionManager } from "./memory-session-manager.js";
-import type { PendingForkRegistry } from "./pending-fork-registry.js";
-import type { PreferencesStore } from "./preferences-store.js";
-import type { PiGateway } from "./pi-gateway.js";
 import { createCanvasAccumulator } from "./canvas-accumulator.js";
 import { readEffectiveCanvasTypes } from "./canvas-settings.js";
 import { decideDashboardSource } from "./dashboard-source-decision.js";
 import type { DirectoryService } from "./directory-service.js";
 import { extractSessionUpdates, isActivityEvent, isUnreadTrigger } from "./event-status-extraction.js";
-import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { composeWorktreePayload } from "./git-worktree-compose.js";
-import type { ViewedSessionTracker } from "./viewed-session-tracker.js";
-import type { PushDispatcher } from "./push/push-dispatcher.js";
-import { classifyPushTrigger, type PushTriggerPreferences } from "./push/push-trigger-classifier.js";
-import { setCatalogueForSession } from "./provider-catalogue-cache.js";
+import { keeperOptsFromSpawnResult } from "./headless-pid-registry.js";
+import type { EventStore } from "./memory-event-store.js";
+import type { SessionManager } from "./memory-session-manager.js";
+import type { PendingForkRegistry } from "./pending-fork-registry.js";
+import type { PiGateway } from "./pi-gateway.js";
+import type { PreferencesStore } from "./preferences-store.js";
+import { buildPidIndex, classifyProcesses } from "./process-classifier.js";
 import { spawnPiSession } from "./process-manager.js";
 import { attachRenameTarget, isNameAutoSetFromAttachment } from "./proposal-attach-naming.js";
+import { setCatalogueForSession } from "./provider-catalogue-cache.js";
+import type { PushDispatcher } from "./push/push-dispatcher.js";
+import { classifyPushTrigger, type PushTriggerPreferences } from "./push/push-trigger-classifier.js";
 import { resolveOrderKey } from "./resolve-order-key.js";
 import { handleDispatchExtensionCommand } from "./rpc-keeper/dispatch-router.js";
 import type { SessionOrderManager } from "./session-order-manager.js";
@@ -35,8 +36,7 @@ import {
   buildModelErrorLogLine,
   extractModelTurnError,
 } from "./spawned-turn-log.js";
-import { keeperOptsFromSpawnResult } from "./headless-pid-registry.js";
-import { buildPidIndex, classifyProcesses } from "./process-classifier.js";
+import type { ViewedSessionTracker } from "./viewed-session-tracker.js";
 
 /**
  * `true` iff `changeName` appears in the cwd's authoritative OpenSpec poll

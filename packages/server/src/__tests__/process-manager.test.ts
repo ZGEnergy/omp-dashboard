@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { buildTmuxCommand, buildHeadlessArgs, shellEscape, spawnPiSession, buildSpawnEnv, stripZellijClientEnv, zellijEnvUnsetPrefix, type SessionOptions } from "../process-manager.js";
+import { describe, expect, it, vi } from "vitest";
+import { buildHeadlessArgs, buildSpawnEnv, buildTmuxCommand, type SessionOptions, shellEscape, spawnPiSession, stripZellijClientEnv, zellijEnvUnsetPrefix } from "../process-manager.js";
 
 // Note: platform-dispatch tests live in packages/shared/src/__tests__/
 // spawn-mechanism.test.ts. `detectPlatform` was removed in change:

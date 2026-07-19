@@ -2,25 +2,26 @@
  * Shared context for browser message handlers.
  * Each handler receives only what it needs via this context.
  */
-import type { WebSocket } from "ws";
+
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import type { SessionManager } from "../memory-session-manager.js";
-import type { EventStore } from "../memory-event-store.js";
-import type { PiGateway } from "../pi-gateway.js";
-import type { PendingForkRegistry } from "../pending-fork-registry.js";
-import type { SessionOrderManager } from "../session-order-manager.js";
-import type { PreferencesStore } from "../preferences-store.js";
+import type { WebSocket } from "ws";
 import type { DirectoryService } from "../directory-service.js";
-import type { TerminalManager } from "../terminal-manager.js";
 import type { HeadlessPidRegistry } from "../headless-pid-registry.js";
+import type { EventStore } from "../memory-event-store.js";
+import type { SessionManager } from "../memory-session-manager.js";
 import type { MetaPersistence } from "../meta-persistence.js";
-import type { PendingResumeRegistry } from "../pending-resume-registry.js";
-import type { PendingAttachRegistry } from "../pending-attach-registry.js";
-import type { PendingInitialPromptRegistry } from "../pending-initial-prompt-registry.js";
-import type { PendingWorktreeBaseRegistry } from "../pending-worktree-base-registry.js";
-import type { PendingResumeIntentRegistry } from "../pending-resume-intent-registry.js";
 import type { PendingAdvisorRegistry } from "../pending-advisor-registry.js";
+import type { PendingAttachRegistry } from "../pending-attach-registry.js";
 import type { PendingClientCorrelations } from "../pending-client-correlations.js";
+import type { PendingForkRegistry } from "../pending-fork-registry.js";
+import type { PendingInitialPromptRegistry } from "../pending-initial-prompt-registry.js";
+import type { PendingResumeIntentRegistry } from "../pending-resume-intent-registry.js";
+import type { PendingResumeRegistry } from "../pending-resume-registry.js";
+import type { PendingWorktreeBaseRegistry } from "../pending-worktree-base-registry.js";
+import type { PiGateway } from "../pi-gateway.js";
+import type { PreferencesStore } from "../preferences-store.js";
+import type { SessionOrderManager } from "../session-order-manager.js";
+import type { TerminalManager } from "../terminal-manager.js";
 import type { ViewMessageStore } from "../view-message-store.js";
 import type { ReplayCoordinator } from "../replay-coordinator.js";
 

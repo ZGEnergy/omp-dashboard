@@ -4,18 +4,18 @@
  * for use by skills, scripts, and external tooling.
  */
 import { existsSync } from "node:fs";
-import type { FastifyInstance } from "fastify";
-import type { SessionManager } from "./memory-session-manager.js";
-import type { PiGateway } from "./pi-gateway.js";
-import type { BrowserGateway } from "./browser-gateway.js";
-import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { spawnPiSession } from "./process-manager.js";
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { FastifyInstance } from "fastify";
+import type { BrowserGateway } from "./browser-gateway.js";
+import { FORK_DEGRADED_TO_NEW_CODE, FORK_DEGRADED_TO_NEW_MESSAGE } from "./browser-handlers/session-action-handler.js";
+import { keeperOptsFromSpawnResult } from "./headless-pid-registry.js";
+import type { SessionManager } from "./memory-session-manager.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
 import type { PendingResumeIntentRegistry } from "./pending-resume-intent-registry.js";
+import type { PiGateway } from "./pi-gateway.js";
+import { spawnPiSession } from "./process-manager.js";
 import { attachRenameTarget, detachShouldClearName } from "./proposal-attach-naming.js";
-import { FORK_DEGRADED_TO_NEW_MESSAGE, FORK_DEGRADED_TO_NEW_CODE } from "./browser-handlers/session-action-handler.js";
-import { keeperOptsFromSpawnResult } from "./headless-pid-registry.js";
 
 export interface SessionApiDeps {
   sessionManager: SessionManager;

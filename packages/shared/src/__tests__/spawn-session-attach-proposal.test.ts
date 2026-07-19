@@ -3,7 +3,7 @@
  * `SpawnSessionBrowserMessage`. See change:
  * add-folder-task-checker-and-spawn-attach.
  */
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
   BrowserToServerMessage,
   SpawnSessionBrowserMessage,

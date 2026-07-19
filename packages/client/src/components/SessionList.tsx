@@ -1,7 +1,6 @@
 import { SidebarFolderSectionSlot } from "@blackbelt-technology/dashboard-plugin-runtime";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, ImageContent, OpenSpecData, OpenSpecGroup } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import type { ChatMessage } from "../lib/event-reducer.js";
 import { DndContext, type DragEndEvent, type DragStartEvent, PointerSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { mdiChevronDown, mdiChevronRight, mdiChevronUp, mdiCog, mdiConsoleLine, mdiFolder, mdiFolderOpen, mdiOpenInNew, mdiPin, mdiPlus, mdiPuzzleOutline, mdiSortVariant } from "@mdi/js";
@@ -11,6 +10,7 @@ import { useLocation } from "wouter";
 import { useFolderUrgencySort } from "../hooks/useFolderUrgencySort.js";
 import { useInstallPrompt } from "../hooks/useInstallPrompt.js";
 import { maybeAutoInitWorktreeOnSpawn } from "../lib/auto-init-worktree.js";
+import type { ChatMessage } from "../lib/event-reducer.js";
 import { encodeFolderPath } from "../lib/folder-encoding.js";
 import { t as i18nT } from "../lib/i18n";
 import { useI18n } from "../lib/i18n.js";

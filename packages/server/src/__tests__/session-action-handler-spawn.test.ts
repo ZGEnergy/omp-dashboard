@@ -2,7 +2,7 @@
  * Tests for handleSpawnSession — preflight gate, watchdog arming, failure log.
  * See change: spawn-failure-diagnostics.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 
 // Mock everything the handler depends on.
@@ -42,9 +42,9 @@ vi.mock("@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js", (
 
 import { handleSpawnSession } from "../browser-handlers/session-action-handler.js";
 import { spawnPiSession } from "../process-manager.js";
+import { appendSpawnFailure } from "../spawn-failure-log.js";
 import { preflightSpawn } from "../spawn-preflight.js";
 import { getSpawnRegisterWatchdog } from "../spawn-register-watchdog.js";
-import { appendSpawnFailure } from "../spawn-failure-log.js";
 
 const mockSpawnPiSession = vi.mocked(spawnPiSession);
 const mockPreflightSpawn = vi.mocked(preflightSpawn);

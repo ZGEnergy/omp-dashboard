@@ -15,36 +15,37 @@
  *
  * See change: consolidate-windows-spawn-and-platform-handlers.
  */
+
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
-import type { ChildProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { findBundledExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
+import type { SpawnFailureCode } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import { loadConfig, type SpawnStrategy } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { MANAGED_BIN } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
-import { findBundledExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
-import { prependManagedNodeToPath } from "@blackbelt-technology/pi-dashboard-shared/platform/managed-node-path.js";
-import { electronAsNodeRequired } from "@blackbelt-technology/pi-dashboard-shared/platform/runner.js";
-import { mintSpawnToken } from "./spawn-token.js";
-import {
-  createKeeperManager,
-  type KeeperManager,
-} from "./rpc-keeper/keeper-manager.js";
-import { randomUUID } from "node:crypto";
-import { execSync, spawnSync, buildSafeArgv } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
 import {
   spawnDetached,
   waitForNoCrash,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/detached-spawn.js";
+import type { ChildProcess } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { buildSafeArgv, execSync, spawnSync } from "@blackbelt-technology/pi-dashboard-shared/platform/exec.js";
+import { prependManagedNodeToPath } from "@blackbelt-technology/pi-dashboard-shared/platform/managed-node-path.js";
+import { electronAsNodeRequired } from "@blackbelt-technology/pi-dashboard-shared/platform/runner.js";
 import {
-  selectMechanism,
   buildWtArgs,
-  sessionFlagsToArgv,
   type SpawnMechanism,
+  selectMechanism,
+  sessionFlagsToArgv,
   type UserSpawnStrategy,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/spawn-mechanism.js";
-import type { SpawnFailureCode } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import {
+  createKeeperManager,
+  type KeeperManager,
+} from "./rpc-keeper/keeper-manager.js";
+import { mintSpawnToken } from "./spawn-token.js";
 
 const SERVER_REPO_BASE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 

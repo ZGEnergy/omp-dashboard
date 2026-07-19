@@ -14,8 +14,8 @@ import { ComposerSessionActions } from "./components/ComposerSessionActions.js";
 import { ConnectionStatusBanner } from "./components/ConnectionStatusBanner.js";
 import { DirectoryHomeView } from "./components/DirectoryHomeView.js";
 import { DirectorySettings, type DirectorySettingsPage } from "./components/DirectorySettings/DirectorySettings.js";
-import { FolderEditorView } from "./components/FolderEditorView.js";
 import { FileDiffView } from "./components/FileDiffView.js";
+import { FolderEditorView } from "./components/FolderEditorView.js";
 import { InstallBanner } from "./components/InstallBanner.js";
 import { LandingPage } from "./components/LandingPage.js";
 // Flow components are no longer imported by the shell. They render
@@ -50,11 +50,11 @@ import { allTagsInUse } from "./components/tags/all-tags.js";
 import { WorktreeInitStack } from "./components/WorktreeInitStack.js";
 import { WorktreeSpawnDialog } from "./components/WorktreeSpawnDialog.js";
 import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
+import { useAdvisorSpawnDefault } from "./hooks/useAdvisorSpawnDefault.js";
 import { useAppHidden } from "./hooks/useAppHidden.js";
 import { useContentViews } from "./hooks/useContentViews.js";
 import { useDocumentTitle } from "./hooks/useDocumentTitle.js";
 import { selectInflightBashTools } from "./hooks/useInflightBashTools.js";
-import { useAdvisorSpawnDefault } from "./hooks/useAdvisorSpawnDefault.js";
 import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { useLaunchSource } from "./hooks/useLaunchSource.js";
 import { useMessageHandler } from "./hooks/useMessageHandler.js";
@@ -102,6 +102,10 @@ import {
   buildSessionDiffUrl,
 } from "./lib/route-builders.js";
 import { performServerSwitch } from "./lib/server-switch.js";
+import {
+  buildLoadOlderSubscribe,
+  buildSessionSubscribe,
+} from "./lib/session-subscribe.js";
 import { openStagingSocket } from "./lib/staging-socket.js";
 import { resendActiveCwdSubscriptions, setInitSender } from "./lib/worktree-init-bus.js";
 import { initStore } from "./lib/worktree-init-store.js";
