@@ -18,6 +18,7 @@ import { createBranchedSessionFile } from "../session-file-reader.js";
 import { appendSpawnFailure } from "../spawn-failure-log.js";
 import { preflightSpawn } from "../spawn-preflight.js";
 import { getSpawnRegisterWatchdog } from "../spawn-register-watchdog.js";
+import { mintSpawnToken } from "../spawn-token.js";
 import type { BrowserHandlerContext } from "./handler-context.js";
 import { shouldInterceptReload } from "./session-action-helpers.js";
 
@@ -448,8 +449,15 @@ export async function handleSpawnSession(
   // spawn_error so the UI can render a retryable banner instead of failing
   // silently. Previous behaviour left the user staring at an empty state
   // when pi itself was broken in the target folder.
+  const advisorSpawnToken = msg.advisor === true ? mintSpawnToken() : undefined;
+  if (advisorSpawnToken) pendingAdvisorRegistry?.reserve(advisorSpawnToken);
+
   try {
-    const spawnResult = await spawnPiSession(msg.cwd, { strategy, advisor: msg.advisor });
+    const spawnResult = await spawnPiSession(msg.cwd, {
+      strategy,
+      advisor: msg.advisor,
+      ...(advisorSpawnToken ? { spawnToken: advisorSpawnToken } : {}),
+    });
     if (spawnResult.process && spawnResult.pid) {
       headlessPidRegistry.register(
         spawnResult.pid,
@@ -464,11 +472,15 @@ export async function handleSpawnSession(
     if (msg.requestId && spawnResult.spawnToken && pendingClientCorrelations) {
       pendingClientCorrelations.record(spawnResult.spawnToken, msg.requestId);
     }
-    // The token is server-minted and only exists after a successful spawn. Do
-    // not arm advisor proof for a failed result: an unrelated later register
-    // must never inherit this browser request.
-    if (msg.advisor === true && spawnResult.success && spawnResult.spawnToken) {
-      pendingAdvisorRegistry?.record(spawnResult.spawnToken);
+    // Registration can arrive during headless spawn's completion gate. Reserve
+    // only an in-flight correlation before waiting; confirm it only after this
+    // result succeeds, so failed spawns never stamp durable advisor proof.
+    if (advisorSpawnToken) {
+      if (spawnResult.success && spawnResult.spawnToken === advisorSpawnToken) {
+        pendingAdvisorRegistry?.confirm(advisorSpawnToken);
+      } else {
+        pendingAdvisorRegistry?.discard(advisorSpawnToken);
+      }
     }
     if (spawnResult.dashboardSpawned && spawnResult.success) {
       pendingDashboardSpawns?.set(msg.cwd, (pendingDashboardSpawns?.get(msg.cwd) ?? 0) + 1);
@@ -514,6 +526,7 @@ export async function handleSpawnSession(
       });
     }
   } catch (err) {
+    if (advisorSpawnToken) pendingAdvisorRegistry?.discard(advisorSpawnToken);
     const message = err instanceof Error ? err.message : String(err);
     const stderr = err instanceof Error && "stderr" in err ? String((err as { stderr: unknown }).stderr).slice(-2048) : undefined;
     sendTo(ws, { type: "spawn_result", cwd: msg.cwd, success: false, message, requestId: msg.requestId });

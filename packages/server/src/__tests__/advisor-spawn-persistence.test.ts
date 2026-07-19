@@ -1,13 +1,15 @@
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
 import { createMemorySessionManager } from "../memory-session-manager.js";
 import { createMetaPersistence } from "../meta-persistence.js";
+import { createPendingAdvisorRegistry } from "../pending-advisor-registry.js";
 import { createServer, type DashboardServer } from "../server.js";
+import { scanAllSessions } from "../session-scanner.js";
 import { sessionToMeta } from "../session-to-meta.js";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -84,7 +86,8 @@ describe("advisor spawn proof persistence", () => {
       new EventEmitter() as never,
       "ordinary-token-b",
     );
-    server.pendingAdvisorRegistry.record("advisor-token-a");
+    server.pendingAdvisorRegistry.reserve("advisor-token-a");
+    server.pendingAdvisorRegistry.confirm("advisor-token-a");
 
     // Register B first to prove same-cwd arrival order cannot inherit A's proof.
     sockets.push(await registerSession(server.piPort()!, {
@@ -122,7 +125,8 @@ describe("advisor spawn proof persistence", () => {
   it("does not stamp advisor for an unmatched registration token", async () => {
     const sessionFile = join(tmpDir, "unmatched.jsonl");
     writeFileSync(sessionFile, "");
-    server.pendingAdvisorRegistry.record("real-token");
+    server.pendingAdvisorRegistry.reserve("real-token");
+    server.pendingAdvisorRegistry.confirm("real-token");
 
     sockets.push(await registerSession(server.piPort()!, {
       sessionId: "unmatched-session",
@@ -137,8 +141,60 @@ describe("advisor spawn proof persistence", () => {
     expect(server.pendingAdvisorRegistry.size()).toBe(1);
   });
 
+
+  it("applies proof after a registration wins the headless completion race", async () => {
+    const sessionFile = join(tmpDir, "early-register.jsonl");
+    writeFileSync(sessionFile, "");
+    server.browserGateway.headlessPidRegistry.register(
+      95_003,
+      tmpDir,
+      new EventEmitter() as never,
+      "early-token",
+    );
+    server.pendingAdvisorRegistry.reserve("early-token");
+
+    sockets.push(await registerSession(server.piPort()!, {
+      sessionId: "early-session",
+      cwd: tmpDir,
+      sessionFile,
+      spawnToken: "early-token",
+    }));
+    await wait(80);
+    expect(server.sessionManager.get("early-session")?.advisor).toBeUndefined();
+
+    // This mirrors the successful return after headless spawn's 300 ms gate.
+    server.pendingAdvisorRegistry.confirm("early-token");
+    await wait(20);
+    expect(server.sessionManager.get("early-session")?.advisor).toBe(true);
+    expect(readSessionMeta(sessionFile)?.advisor).toBe(true);
+  });
+
+  it("accepts verified tmux provenance without a headless child registry entry", async () => {
+    const sessionFile = join(tmpDir, "tmux.jsonl");
+    writeFileSync(sessionFile, "");
+    server.pendingAdvisorRegistry.reserve("tmux-token");
+    server.pendingAdvisorRegistry.confirm("tmux-token");
+
+    sockets.push(await registerSession(server.piPort()!, {
+      sessionId: "tmux-session",
+      cwd: tmpDir,
+      sessionFile,
+      spawnToken: "tmux-token",
+      dashboardSpawned: true,
+    }));
+    await wait(80);
+
+    expect(server.sessionManager.get("tmux-session")?.advisor).toBe(true);
+    expect(readSessionMeta(sessionFile)?.advisor).toBe(true);
+  });
+
   it("retains advisor through a later full sessionToMeta overwrite and omits false", () => {
-    const sessionFile = join(tmpDir, "overwrite.jsonl");
+    const sessionDir = join(tmpDir, "--test-cwd--");
+    mkdirSync(sessionDir);
+    const sessionFile = join(sessionDir, "2026-01-01T00-00-00-000Z_overwrite.jsonl");
+    writeFileSync(sessionFile, `${JSON.stringify({
+      type: "session", id: "overwrite", cwd: tmpDir, timestamp: "2026-01-01T00:00:00.000Z",
+    })}\n`);
     const manager = createMemorySessionManager();
     const persistence = createMetaPersistence();
     manager.onChange = (id) => {
@@ -150,13 +206,36 @@ describe("advisor spawn proof persistence", () => {
     manager.update("overwrite", { name: "unrelated update" });
     persistence.flushAll();
 
-    expect(JSON.parse(readFileSync(join(tmpDir, "overwrite.meta.json"), "utf8"))).toMatchObject({
+    expect(readSessionMeta(sessionFile)).toMatchObject({
       advisor: true,
       name: "unrelated update",
     });
+    expect(scanAllSessions(tmpDir).sessions.find((session) => session.id === "overwrite")?.advisor).toBe(true);
     expect(sessionToMeta({
       id: "false", cwd: tmpDir, source: "tui", status: "idle", startedAt: 1, advisor: false as never,
     })).not.toHaveProperty("advisor");
     persistence.dispose();
+  });
+});
+
+
+describe("pending advisor registry bounds", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("expires and disposes unconfirmed records without delivering proof", () => {
+    vi.useFakeTimers();
+    const registry = createPendingAdvisorRegistry({ ttlMs: 50 });
+    const delivered = vi.fn();
+    registry.reserve("expiring-token");
+    registry.consume("expiring-token", delivered);
+    vi.advanceTimersByTime(50);
+    registry.confirm("expiring-token");
+
+    expect(registry.size()).toBe(0);
+    expect(delivered).not.toHaveBeenCalled();
+
+    registry.reserve("dispose-token");
+    registry.dispose();
+    expect(registry.size()).toBe(0);
   });
 });

@@ -66,7 +66,7 @@ function makeCtx() {
     headlessPidRegistry: { register: vi.fn() } as never,
     pendingDashboardSpawns: new Map(),
     pendingAttachRegistry: { enqueue: vi.fn() } as never,
-    pendingAdvisorRegistry: { record: vi.fn(), consume: vi.fn(), size: vi.fn() },
+    pendingAdvisorRegistry: { reserve: vi.fn(), confirm: vi.fn(), discard: vi.fn(), consume: vi.fn(), dispose: vi.fn(), size: vi.fn() },
     sessionManager: {} as never,
     broadcast: vi.fn() as never,
     piGateway: {} as never,
@@ -151,11 +151,11 @@ describe("handleSpawnSession", () => {
 
   it("passes advisor through and arms only a successful true spawn token", async () => {
     mockPreflightSpawn.mockReturnValue({ ok: true, reasons: [] });
-    mockSpawnPiSession.mockResolvedValueOnce({
+    mockSpawnPiSession.mockImplementationOnce(async (_cwd, options) => ({
       success: true,
-      spawnToken: "advisor-token",
+      spawnToken: options?.spawnToken,
       message: "spawned",
-    });
+    }));
 
     const ctx = makeCtx();
     await handleSpawnSession(
@@ -164,7 +164,10 @@ describe("handleSpawnSession", () => {
     );
 
     expect(mockSpawnPiSession).toHaveBeenCalledWith("/p/x", expect.objectContaining({ advisor: true }));
-    expect(ctx.pendingAdvisorRegistry.record).toHaveBeenCalledWith("advisor-token");
+    const spawnOptions = mockSpawnPiSession.mock.calls[0]?.[1];
+    expect(spawnOptions?.spawnToken).toBeTypeOf("string");
+    expect(ctx.pendingAdvisorRegistry.reserve).toHaveBeenCalledWith(spawnOptions?.spawnToken);
+    expect(ctx.pendingAdvisorRegistry.confirm).toHaveBeenCalledWith(spawnOptions?.spawnToken);
   });
 
   it("does not arm advisor proof for false, absent, or failed spawns", async () => {
@@ -185,6 +188,9 @@ describe("handleSpawnSession", () => {
       ctx as never,
     );
 
-    expect(ctx.pendingAdvisorRegistry.record).not.toHaveBeenCalled();
+    const failedSpawnOptions = mockSpawnPiSession.mock.calls[2]?.[1];
+    expect(ctx.pendingAdvisorRegistry.reserve).toHaveBeenCalledTimes(1);
+    expect(ctx.pendingAdvisorRegistry.discard).toHaveBeenCalledWith(failedSpawnOptions?.spawnToken);
+    expect(ctx.pendingAdvisorRegistry.confirm).not.toHaveBeenCalled();
   });
 });

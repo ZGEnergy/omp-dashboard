@@ -2221,6 +2221,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       clearTimeout(bootReconcileTimer);
       goalSupervisor?.dispose();
       pendingForkRegistry.dispose();
+      pendingAdvisorRegistry.dispose();
       preferencesStore.flush();
       preferencesStore.dispose();
 

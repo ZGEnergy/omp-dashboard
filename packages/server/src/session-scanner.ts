@@ -69,6 +69,7 @@ function sessionFromMeta(
     // See change: add-auto-session-naming.
     nameSource: meta.nameSource,
     source: (meta.source as SessionSource) ?? "tui",
+    ...(meta.advisor === true ? { advisor: true as const } : {}),
     status: (meta.status as DashboardSession["status"]) ?? "ended",
     model: meta.model,
     thinkingLevel: meta.thinkingLevel,

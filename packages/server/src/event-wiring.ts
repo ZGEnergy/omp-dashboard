@@ -1105,13 +1105,17 @@ export function wireEvents(deps: EventWiringDeps): void {
         ? pendingClientCorrelations.consume(msg.spawnToken)
         : undefined;
 
-      // Advisor proof can only cross the registration boundary on the same
-      // token that linkByToken just verified. PID and cwd fallbacks resolve
-      // process ownership, but are not strong enough to prove browser intent.
-      const advisor = linkedBySpawnToken
-        ? pendingAdvisorRegistry?.consume(msg.spawnToken)
+      // A token registered in the headless PID registry is strong proof. Tmux
+      // and WSL-tmux do not have a server-owned child process to register, so
+      // their bridge-provided dashboardSpawned provenance is the equivalent
+      // strong signal. In both cases, the secret spawn token must still match
+      // a pending advisor record before any proof is applied.
+      const verifiedDashboardSpawnToken = msg.spawnToken && (
+        linkedBySpawnToken || msg.dashboardSpawned === true
+      )
+        ? msg.spawnToken
         : undefined;
-      if (advisor) {
+      const applyAdvisorProof = (advisor: { advisor: true }): void => {
         sessionManager.update(sessionId, advisor);
         if (msg.sessionFile) {
           try {
@@ -1119,7 +1123,12 @@ export function wireEvents(deps: EventWiringDeps): void {
           } catch { /* best-effort */ }
         }
         browserGateway.broadcastSessionUpdated(sessionId, advisor);
-      }
+      };
+      const advisor = pendingAdvisorRegistry?.consume(
+        verifiedDashboardSpawnToken,
+        applyAdvisorProof,
+      );
+      if (advisor) applyAdvisorProof(advisor);
 
       const isNewSession = !knownSessionIds.has(sessionId);
       knownSessionIds.add(sessionId);
