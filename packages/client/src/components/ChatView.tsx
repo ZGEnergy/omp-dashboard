@@ -783,13 +783,18 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
 
   const enterReadingHistory = useCallback((olderDirected: boolean) => {
     if (!mobileActive || mobileInactive) return;
-    cancelProgrammaticWrites();
     const pending = pendingOlderAnchorRef.current;
     if (pending?.restoring) {
+      // A fast server completes the older page mid-gesture; the same pull's
+      // remaining older-directed callbacks must not cancel the anchor settle
+      // they triggered. Only newer-directed movement (or a fresh touch, which
+      // reports olderDirected=false) is the user taking the viewport back.
+      if (olderDirected) return;
       pending.cancelled = true;
       pendingOlderAnchorRef.current = null;
       olderRequestLatchRef.current = null;
     }
+    cancelProgrammaticWrites();
     scrollOwnerRef.current = "READING_HISTORY";
     userGestureRef.current = true;
     olderGestureRef.current = { id: ++gestureSerialRef.current, olderDirected, consumed: false };

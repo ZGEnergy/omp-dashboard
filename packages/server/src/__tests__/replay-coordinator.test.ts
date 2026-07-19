@@ -68,6 +68,60 @@ describe("replay coordinator", () => {
     expect(wsB.frames).toHaveLength(2);
   });
 
+  it("delivers every fitting tail turn across multiple frames, not a one-frame suffix", async () => {
+    const store = createMemoryEventStore(() => false);
+    let timestamp = 0;
+    const stamp = () => { timestamp += 1; return timestamp; };
+    store.insertEvent("s", { eventType: "message_start", timestamp: stamp(), data: { role: "user", message: { role: "user", content: "turn one" } } });
+    for (let index = 0; index < 40; index += 1) {
+      store.insertEvent("s", { eventType: "message_update", timestamp: stamp(), data: { turn: 1, index, pad: "a".repeat(6 * 1024) } });
+    }
+    store.insertEvent("s", { eventType: "message_start", timestamp: stamp(), data: { role: "user", message: { role: "user", content: "turn two" } } });
+    for (let index = 0; index < 40; index += 1) {
+      store.insertEvent("s", { eventType: "message_update", timestamp: stamp(), data: { turn: 2, index, pad: "b".repeat(6 * 1024) } });
+    }
+    const ws = socket();
+    const coordinator = createReplayCoordinator({ store });
+    const ctx: any = {
+      ws, sessionManager: { get: () => undefined }, eventStore: store,
+      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
+      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
+    };
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r", mode: "tail", windowBytes: 1024 * 1024 }, ctx);
+    const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
+    const deliveredSeqs = replays.flatMap((frame: any) => frame.events.map((entry: any) => entry.seq));
+    // The ~400 KiB of tail history fits the 1 MiB window budget: both turns
+    // must hydrate, chunked across frames, instead of the newest 254 KiB turn.
+    expect(deliveredSeqs).toEqual(Array.from({ length: 82 }, (_, index) => index + 1));
+    expect(replays.filter((frame: any) => frame.events.length > 0).length).toBeGreaterThan(1);
+    const terminal = replays.find((frame: any) => frame.isLast);
+    expect(terminal).toMatchObject({ windowMinSeq: 1, windowMaxSeq: 82, hasMoreOlder: false });
+  });
+
+  it("trims the oldest batches, never the newest events, when frame overhead crosses the wire budget", async () => {
+    const store = createMemoryEventStore(() => false);
+    for (let index = 0; index < 600; index += 1) {
+      store.insertEvent("s", { eventType: "message_update", timestamp: index + 1, data: { n: index, pad: "x".repeat(700) } });
+    }
+    const ws = socket();
+    const coordinator = createReplayCoordinator({ store });
+    const ctx: any = {
+      ws, sessionManager: { get: () => undefined }, eventStore: store,
+      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
+      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
+    };
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r", mode: "tail", windowBytes: 262144 }, ctx);
+    const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
+    const deliveredSeqs = replays.flatMap((frame: any) => frame.events.map((entry: any) => entry.seq));
+    // The delivered window must stay a contiguous suffix anchored at the
+    // newest event; the ledger rejects pages that end before it.
+    expect(deliveredSeqs.length).toBeGreaterThan(0);
+    expect(deliveredSeqs.at(-1)).toBe(600);
+    expect(deliveredSeqs).toEqual(deliveredSeqs.map((seq: number, index: number) => deliveredSeqs[0] + index));
+    const terminal = replays.find((frame: any) => frame.isLast);
+    expect(terminal).toMatchObject({ windowMaxSeq: 600, hasMoreOlder: true });
+  });
+
   it("delivers a live event once across the replay barrier", async () => {
     const store = createMemoryEventStore(() => false);
     store.insertEvent("s", event("one"));
@@ -409,8 +463,11 @@ describe("replay coordinator", () => {
 
   it("does not persist inline assets from events excluded before final replay planning", async () => {
     const store = createMemoryEventStore(() => false);
-    for (let seq = 1; seq <= 100; seq += 1) store.insertEvent("s", { eventType: "message_end", timestamp: seq, data: { text: "x".repeat(3 * 1024) } } as any);
-    store.insertEvent("s", { eventType: "message_end", timestamp: 101, data: { images: [{ type: "image", mimeType: "image/png", data: "excluded-inline-image" }] } } as any);
+    // The oldest event carries the inline image: over-budget cold/full windows
+    // trim whole batches from the oldest end, so that event is the one
+    // excluded before final replay planning.
+    store.insertEvent("s", { eventType: "message_end", timestamp: 1, data: { images: [{ type: "image", mimeType: "image/png", data: "excluded-inline-image" }] } } as any);
+    for (let seq = 2; seq <= 101; seq += 1) store.insertEvent("s", { eventType: "message_end", timestamp: seq, data: { text: "x".repeat(3 * 1024) } } as any);
     const session: any = { assets: {} };
     const manager: any = { get: () => session, update: (_id: string, patch: any) => Object.assign(session, patch) };
     const ws = socket();
@@ -422,7 +479,8 @@ describe("replay coordinator", () => {
     };
     await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "excluded", mode: "full", windowBytes: 256 * 1024 }, ctx);
     const replaySeqs = ws.frames.filter((frame: any) => frame.type === "event_replay").flatMap((frame: any) => frame.events.map((entry: any) => entry.seq));
-    expect(replaySeqs).not.toContain(101);
+    expect(replaySeqs).not.toContain(1);
+    expect(replaySeqs.at(-1)).toBe(101);
     expect(Object.keys(session.assets)).toHaveLength(0);
   });
 

@@ -110,6 +110,7 @@ import { initStore } from "./lib/worktree-init-store.js";
 const NAV_TRACKER = { predecessor, popNav };
 
 import { applyPluginConfigUpdate, initPluginConfigs, PluginContextProvider, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import { mergeReplayWindow } from "./lib/replay-window.js";
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, FileEntry, ImageContent, ModelInfo, OpenSpecData, OpenSpecGroup, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -839,22 +840,14 @@ export default function App() {
         }
       },
       window: (sessionId, metadata: ReplayWindowMetadata) => {
-        const previous = historyWindowRef.current.get(sessionId);
-        const ledgerMin = controller.ledger(sessionId).minSeq;
-        const inferredMin = (metadata.minSeq ?? ledgerMin) || previous?.minSeq || 0;
-        // Keep the old-client inference only when the server genuinely omitted
-        // both window fields. Controller-owned frames never reach the legacy
-        // handler, so this preserves compatibility without overriding metadata.
-        const coldFallback = metadata.kind === "cold" &&
-          metadata.minSeq === null && metadata.hasMoreOlder === null &&
-          inferredMin > 1;
-        const shouldAdvanceOlder = metadata.kind === "older" && previous !== undefined && inferredMin < previous.minSeq;
-        if (metadata.minSeq === null && metadata.hasMoreOlder === null && !coldFallback && !shouldAdvanceOlder) return;
-        const minSeq = metadata.kind === "older" && previous
-          ? Math.min(previous.minSeq, inferredMin)
-          : inferredMin;
-        const hasMoreOlder = metadata.hasMoreOlder ?? (coldFallback ? true : previous?.hasMoreOlder ?? false);
-        const next = { minSeq, hasMoreOlder };
+        // The merge helper owns cold/older/delta semantics; a delta frame must
+        // never clobber a cache-admitted older window or load-older dies.
+        const next = mergeReplayWindow(
+          historyWindowRef.current.get(sessionId),
+          metadata,
+          controller.ledger(sessionId).minSeq,
+        );
+        if (!next) return;
         historyWindowRef.current.set(sessionId, next);
         setHistoryWindowMap((prev) => new Map(prev).set(sessionId, next));
       },
@@ -916,6 +909,12 @@ export default function App() {
       reconnect: () => {
         if (selectedSessionIdRef.current) bumpReplayGeneration(selectedSessionIdRef.current);
         reconnectNow("retry");
+      },
+      retry: (sessionId, kind) => {
+        // A retried-then-abandoned older page must release the load-older
+        // latch; otherwise pull-down stays disabled for the session.
+        if (kind !== "older") return;
+        setLoadingOlderMap((prev) => new Map(prev).set(sessionId, false));
       },
       publishAsset: (sessionId, asset) => {
         setSessions((prev) => {

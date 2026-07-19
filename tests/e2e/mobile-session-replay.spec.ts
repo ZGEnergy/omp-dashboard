@@ -237,6 +237,11 @@ test.describe("@mobile-replay mobile session activation", () => {
     );
     await touchSwipe(page, transcript, 0.28, 0.92);
     await loadingStarted;
+    // The gesture continues older-directed while the page is in flight and the
+    // anchor restore settles (a fast server completes mid-gesture). None of
+    // these callbacks may cancel the restore they triggered.
+    await touchSwipe(page, transcript, 0.3, 0.85);
+    await touchSwipe(page, transcript, 0.3, 0.85);
     await expect(olderButton).toBeVisible({ timeout: 60_000 });
 
     const isOlderRequest = (message: SubscribeFrame) =>

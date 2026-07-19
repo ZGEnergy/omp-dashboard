@@ -98,6 +98,24 @@ describe("selectNewestEventsByBudget", () => {
     expect(r.bytes).toBeLessThanOrEqual(budget);
   });
 
+  it("accounts oversized events at a per-event cap so other turns still fit", () => {
+    const all: SeqEvent<DashboardEvent>[] = [
+      { seq: 1, event: event("message_start", { message: { role: "user", content: "first" } }) },
+      { seq: 2, event: event("message_update", { pad: "x".repeat(3 * 1024 * 1024) }) },
+      { seq: 3, event: event("message_start", { message: { role: "user", content: "second" } }) },
+      { seq: 4, event: event("message_update", { pad: "tiny" }) },
+    ];
+    const r = selectNewestEventsByBudget(all, 1024 * 1024, { maxEventBytes: 100 * 1024 });
+    // Without the per-event cap the 3 MiB event consumes the whole 1 MiB
+    // selection budget even though it is delivered truncated, crowding the
+    // first turn out of the tail window.
+    expect(r.events.map((entry) => entry.seq)).toEqual([1, 2, 3, 4]);
+    expect(r.hasMoreOlder).toBe(false);
+    expect(r.windowMinSeq).toBe(1);
+    expect(r.windowMaxSeq).toBe(4);
+    expect(r.bytes).toBeLessThanOrEqual(1024 * 1024);
+  });
+
   it("outputs ascending contiguous seq order", () => {
     const all = [ev(10, 50), ev(11, 50), ev(12, 50)];
     const r = selectNewestEventsByBudget(all, 1_000_000);

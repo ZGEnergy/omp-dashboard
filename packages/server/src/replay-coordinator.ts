@@ -270,16 +270,41 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     manager?.update(sessionId, { dataUnavailable: false });
     return loaded;
   }
-  function inlineAssetRegistrar(sessionId: string, ctx: BrowserHandlerContext): (asset: { data: string; mimeType: string }) => string | undefined {
-    return ({ data, mimeType }) => {
-      if (!data || !mimeType) return undefined;
-      const manager = options.sessionManager ?? ctx.sessionManager;
-      const session = manager?.get(sessionId) as { assets?: Record<string, { data: string; mimeType: string }> } | undefined;
-      if (!session) return undefined;
-      const hash = createHash("sha256").update(mimeType).update("\0").update(data).digest("base64url");
-      if (!session.assets?.[hash]) manager?.update(sessionId, { assets: { ...(session.assets ?? {}), [hash]: { data, mimeType } } });
-      return hash;
+  interface InlineAssetRegistration {
+    register: (asset: { data: string; mimeType: string }) => string | undefined;
+    /** Persist staged assets for hashes that survive replay planning/trimming. */
+    flush(hashes: ReadonlySet<string>): void;
+  }
+
+  function inlineAssetRegistrar(sessionId: string, ctx: BrowserHandlerContext): InlineAssetRegistration {
+    // Registrations stage locally: batches trimmed from the final replay plan
+    // must never leak their inline assets into the persisted session record.
+    const staged = new Map<string, { data: string; mimeType: string }>();
+    const registrar: InlineAssetRegistration = {
+      register: ({ data, mimeType }) => {
+        if (!data || !mimeType) return undefined;
+        const manager = options.sessionManager ?? ctx.sessionManager;
+        const session = manager?.get(sessionId) as { assets?: Record<string, { data: string; mimeType: string }> } | undefined;
+        if (!session) return undefined;
+        const hash = createHash("sha256").update(mimeType).update("\0").update(data).digest("base64url");
+        if (!session.assets?.[hash] && !staged.has(hash)) staged.set(hash, { data, mimeType });
+        return hash;
+      },
+      flush: (hashes) => {
+        if (staged.size === 0) return;
+        const manager = options.sessionManager ?? ctx.sessionManager;
+        const session = manager?.get(sessionId) as { assets?: Record<string, { data: string; mimeType: string }> } | undefined;
+        if (!session) return;
+        const admitted: Record<string, { data: string; mimeType: string }> = {};
+        for (const hash of hashes) {
+          const asset = staged.get(hash);
+          if (asset && !session.assets?.[hash]) admitted[hash] = asset;
+        }
+        staged.clear();
+        if (Object.keys(admitted).length > 0) manager?.update(sessionId, { assets: { ...(session.assets ?? {}), ...admitted } });
+      },
     };
+    return registrar;
   }
 
   async function deliverRequest(msg: Extract<BrowserToServerMessage, { type: "subscribe" }>, ctx: BrowserHandlerContext, state: SocketSessionState, request: RequestState, resetReason?: SessionStateResetReason): Promise<void> {
@@ -300,6 +325,9 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     if (!requestValid(state, request, ws)) return;
     const budget = clampTailWindowBytes(msg.windowBytes);
     const windowBudget = Math.max(1024, Math.min(budget, REPLAY_FRAME_BYTES - 2048));
+    // Selection spans the whole window budget across as many frames as it
+    // needs; a single event is still prepared (and accounted) at frame size.
+    const selectionOptions = { maxEventBytes: windowBudget };
     const raw = options.store.getEvents(sessionId, 1);
     const retainedRange = options.store.getRetainedRange(sessionId);
     const needsPersistedPaging = retainedRange.historyTruncated && (retainedRange.retainedMinSeq ?? 1) > 1;
@@ -322,7 +350,7 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     let selectionPartialHead = false;
     if (request.replayKind === "older") {
       const usePersisted = persistedRaw !== undefined && retainedRange.retainedMinSeq != null && msg.fromSeq! <= retainedRange.retainedMinSeq;
-      const selected = selectOlderEventsByBudget(usePersisted ? persistedRaw! : raw, msg.fromSeq!, windowBudget);
+      const selected = selectOlderEventsByBudget(usePersisted ? persistedRaw! : raw, msg.fromSeq!, budget, selectionOptions);
       const selectedSeqs = new Set(selected.events.map((entry) => entry.seq));
       initial = usePersisted ? selected.events : raw.filter((entry) => selectedSeqs.has(entry.seq));
       selectionHasMoreOlder = selected.hasMoreOlder;
@@ -330,7 +358,7 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     } else if (request.replayKind === "delta") {
       initial = raw.filter((entry) => entry.seq > (msg.lastSeq ?? 0));
     } else if (msg.mode === "tail") {
-      const selected = selectNewestEventsByBudget(raw, windowBudget);
+      const selected = selectNewestEventsByBudget(raw, budget, selectionOptions);
       const selectedSeqs = new Set(selected.events.map((entry) => entry.seq));
       initial = raw.filter((entry) => selectedSeqs.has(entry.seq));
       selectionHasMoreOlder = selected.hasMoreOlder || Boolean(persistedRaw?.some((entry) => retainedRange.retainedMinSeq != null && entry.seq < retainedRange.retainedMinSeq));
@@ -341,6 +369,10 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     const candidates = [...initial, ...catchup];
     const preparedCandidates = candidates.map((entry) => ({ seq: entry.seq, event: prepareEventForReplay(entry.event, { maxEventBytes: windowBudget, maxTextBytes: windowBudget }).event }));
     const terminalReserve = 1024;
+    // A delta must stay a contiguous prefix of the client's missing range, so
+    // it keeps the old drop-the-rest behavior; cold/older windows instead trim
+    // whole batches from the oldest end after planning (see below).
+    const prefixBounded = request.replayKind === "delta";
     const eventBatches: Array<Array<{ seq: number; event: any }>> = [];
     let eventBytes = 0;
     let current: Array<{ seq: number; event: any }> = [];
@@ -348,18 +380,19 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
       const candidate = [...current, entry];
       const frame: EventReplayMessage = { type: "event_replay", sessionId, ...(msg.requestId ? { requestId: msg.requestId } : {}), sourceGeneration: options.store.getSourceGeneration(sessionId), replayKind: request.replayKind, events: candidate, isLast: false, windowMinSeq: null, windowMaxSeq: null, retainedMinSeq: options.store.getRetainedRange(sessionId).retainedMinSeq, hasMoreOlder: selectionHasMoreOlder, partialHead: selectionPartialHead, historyTruncated: options.store.getRetainedRange(sessionId).historyTruncated };
       const bytes = messageBytes(frame);
-      if (candidate.length > REPLAY_BATCH_SIZE || bytes > REPLAY_FRAME_BYTES || eventBytes + bytes + terminalReserve > budget) {
+      if (candidate.length > REPLAY_BATCH_SIZE || bytes > REPLAY_FRAME_BYTES || (prefixBounded && eventBytes + bytes + terminalReserve > budget)) {
         if (current.length > 0) { eventBatches.push(current); eventBytes += messageBytes({ ...frame, events: current }); current = []; }
         const single = { ...frame, events: [entry] };
         const singleBytes = messageBytes(single);
-        if (singleBytes <= REPLAY_FRAME_BYTES && eventBytes + singleBytes + terminalReserve <= budget) current = [entry];
+        if (singleBytes <= REPLAY_FRAME_BYTES && (!prefixBounded || eventBytes + singleBytes + terminalReserve <= budget)) current = [entry];
         else break;
       } else current = candidate;
     }
     if (current.length > 0) { const sample = { type: "event_replay", sessionId, events: current, isLast: false } as any; eventBatches.push(current); eventBytes += messageBytes(sample); }
     const plannedEntries = eventBatches.flat();
     const rawEventsBySeq = new Map(candidates.map((entry) => [entry.seq, entry.event]));
-    const registerInlineAsset = inlineAssetRegistrar(sessionId, ctx);
+    const inlineAssets = inlineAssetRegistrar(sessionId, ctx);
+    const registerInlineAsset = inlineAssets.register;
     const finalPrepared = plannedEntries.map((entry) => {
       const prepared = prepareEventForReplay(rawEventsBySeq.get(entry.seq) ?? entry.event, { maxEventBytes: windowBudget, maxTextBytes: windowBudget, registerInlineAsset });
       return { seq: entry.seq, event: prepared.event, assetHashes: prepared.assetHashes };
@@ -370,7 +403,7 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
       preparedOffset += batch.length;
       return prepared;
     });
-    const finalEntries = finalBatches.flat();
+    let finalEntries = finalBatches.flat();
     eventBytes = finalBatches.reduce((sum, batch) => sum + messageBytes({ type: "event_replay", sessionId, ...(msg.requestId ? { requestId: msg.requestId } : {}), sourceGeneration: options.store.getSourceGeneration(sessionId), replayKind: request.replayKind, events: batch, isLast: false, windowMinSeq: finalEntries[0]?.seq ?? null, windowMaxSeq: finalEntries.at(-1)?.seq ?? null, retainedMinSeq: options.store.getRetainedRange(sessionId).retainedMinSeq, hasMoreOlder: selectionHasMoreOlder, partialHead: selectionPartialHead, historyTruncated: options.store.getRetainedRange(sessionId).historyTruncated } as EventReplayMessage), 0);
     const hashes = new Set(finalPrepared.flatMap((entry) => entry.assetHashes));
     // Keep delivery robust if a prepared legacy image block exposes only its
@@ -385,6 +418,43 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
       if (!requestValid(state, request, ws)) return;
     }
     const session = (options.sessionManager ?? ctx.sessionManager)?.get(sessionId) as { assets?: Record<string, { data: string; mimeType: string }> } | undefined;
+    if (!prefixBounded && finalBatches.length > 1) {
+      // Frame envelopes add overhead the byte selection cannot see. When the
+      // total crosses the wire budget, trim whole batches from the OLDEST end
+      // so the delivered window stays a contiguous suffix anchored at the
+      // newest event — the client ledger rejects any page that ends early.
+      const plannedAssetBytes = (): number => {
+        let planned = 0;
+        for (const hash of hashes) {
+          const asset = session?.assets?.[hash];
+          if (!asset || typeof asset.data !== "string" || typeof asset.mimeType !== "string") {
+            planned += messageBytes({ type: "asset_unavailable", sessionId, requestId: msg.requestId ?? "", sourceGeneration: options.store.getSourceGeneration(sessionId), hash, reason: "missing" } as any);
+            continue;
+          }
+          const count = Math.max(1, Math.ceil(asset.data.length / ASSET_CHUNK_DATA_BYTES));
+          for (let index = 0; index < count; index += 1) {
+            planned += messageBytes({ type: "asset_replay_chunk", sessionId, requestId: msg.requestId ?? "", sourceGeneration: options.store.getSourceGeneration(sessionId), hash, mimeType: asset.mimeType, chunkIndex: index, chunkCount: count, data: asset.data.slice(index * ASSET_CHUNK_DATA_BYTES, (index + 1) * ASSET_CHUNK_DATA_BYTES) } as any);
+          }
+        }
+        return planned;
+      };
+      while (finalBatches.length > 1 && eventBytes + plannedAssetBytes() + terminalReserve > budget) {
+        const dropped = finalBatches.shift()!;
+        eventBytes -= messageBytes({ type: "event_replay", sessionId, ...(msg.requestId ? { requestId: msg.requestId } : {}), sourceGeneration: options.store.getSourceGeneration(sessionId), replayKind: request.replayKind, events: dropped, isLast: false, windowMinSeq: null, windowMaxSeq: null, retainedMinSeq: options.store.getRetainedRange(sessionId).retainedMinSeq, hasMoreOlder: selectionHasMoreOlder, partialHead: selectionPartialHead, historyTruncated: options.store.getRetainedRange(sessionId).historyTruncated } as EventReplayMessage);
+        selectionHasMoreOlder = true;
+        // Rebuild the asset set so assets referenced only by trimmed events
+        // are neither delivered nor charged against the event budget.
+        hashes.clear();
+        for (const entry of finalBatches.flat()) {
+          const serialized = JSON.stringify(entry.event);
+          for (const match of serialized.matchAll(/pi-asset:([A-Za-z0-9_-]+)/g)) hashes.add(match[1]!);
+        }
+      }
+      finalEntries = finalBatches.flat();
+    }
+    // Persist staged inline assets only for the hashes the final window still
+    // references; trimmed events leave no persisted trace.
+    inlineAssets.flush(hashes);
     let usedBytes = 0;
     const enqueueAssetCounted = (out: ServerToBrowserMessage, requestKey = request.key): boolean => {
       const bytes = messageBytes(out);

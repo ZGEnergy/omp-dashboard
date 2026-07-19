@@ -28,15 +28,26 @@ export function isGroup(item: BurstItem): item is ToolCallGroup {
  * Stable virtualizer/React key for a display row (CR-3). Mirrors the current
  * render keys per row type:
  *   burst  → `burst.id` (first tool-like member id; survives head-trim churn)
- *   group  → first member id, else `group-<index>` (never a bare `toolName`,
+ *   group  → first member key, else `group-<index>` (never a bare `toolName`,
  *            which collides across two sub-threshold bursts of the same tool)
- *   message→ `msg.id`
+ *   message→ `messageKey(msg)`
  * Uniqueness is a hard precondition for measurement caching under windowing.
  */
 export function virtualRowKey(item: BurstItem, index: number): string {
   if (isBurst(item)) return item.id;
-  if (isGroup(item)) return item.messages[0]?.id ?? `group-${index}`;
-  return (item as ChatMessage).id;
+  if (isGroup(item)) { const first = item.messages[0]; return first ? messageKey(first) : `group-${index}`; }
+  return messageKey(item as ChatMessage);
+}
+
+/**
+ * Position-independent key for a chat message. Reducer ids (`msg-N`) are
+ * positional and shift whenever an older replay page prepends rows, which
+ * silently re-pointed scroll anchors at the wrong row. Live rows carry a
+ * bridge nonce (never flips when `entry_persisted` later stamps `entryId`);
+ * replayed rows carry the persisted entry id. Positional id is the fallback.
+ */
+function messageKey(message: ChatMessage): string {
+  return message.nonce ?? message.entryId ?? message.id;
 }
 
 /**

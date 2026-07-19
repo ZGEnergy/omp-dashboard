@@ -14,7 +14,7 @@ export interface SeqEvent<T = DashboardEvent> {
   event: T;
 }
 
-export type EventWindowPreparationOptions = Pick<PrepareEventForReplayOptions, "registerInlineAsset">;
+export type EventWindowPreparationOptions = Pick<PrepareEventForReplayOptions, "registerInlineAsset" | "maxEventBytes">;
 
 export interface EventWindowResult<T> {
   /** Selected events in ascending seq order. */
@@ -108,9 +108,15 @@ function prepareEntries(
   budgetBytes: number,
   options: EventWindowPreparationOptions = {},
 ): { events: SeqEvent<DashboardEvent>[]; truncatedSeqs: Set<number> } {
+  // A single event can never exceed one replay frame even when the selection
+  // spans many frames; callers pass the frame budget so oversized events are
+  // accounted (and truncated) at their delivered size, not their raw size.
+  const perEventCap = options.maxEventBytes != null && Number.isFinite(options.maxEventBytes) && options.maxEventBytes > 0
+    ? Math.min(budgetBytes, Math.floor(options.maxEventBytes))
+    : budgetBytes;
   const truncatedSeqs = new Set<number>();
   const events = eventsAsc.map((entry) => {
-    const maxEventBytes = Math.max(1, budgetBytes - eventEnvelopeOverhead(entry.seq));
+    const maxEventBytes = Math.max(1, perEventCap - eventEnvelopeOverhead(entry.seq));
     const prepared = prepareEventForReplay(entry.event, {
       maxEventBytes,
       maxTextBytes: maxEventBytes,
