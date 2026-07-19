@@ -172,7 +172,7 @@ pi-dashboard --dev   # Start with Vite proxy
 
 ### Local deployment
 
-`~/.omp-dashboard/deploy/README.md` documents deployed port `8088` and zrok tunnel operations.
+`~/.omp-dashboard/deploy/README.md` documents port `8088`; Cloudflare tunnel uses `omp-dashboard-cloudflared.service`.
 
 ### Docker
 
