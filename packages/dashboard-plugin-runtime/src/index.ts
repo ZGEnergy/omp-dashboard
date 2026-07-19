@@ -38,7 +38,13 @@ export {
   publishSessionData,
   subscribeSessionDataKey,
 } from "./session-data-store.js";
-export { clearSessionEvents, getSessionEvents, publishSessionEvent, publishSessionEvents } from "./session-events-store.js";
+export {
+  clearSessionEvents,
+  getSessionEvents,
+  publishSessionEvent,
+  publishSessionEvents,
+  replaceReplayState,
+} from "./session-events-store.js";
 export type {
   RegisteredSource,
   SettingsDraftRegistry,

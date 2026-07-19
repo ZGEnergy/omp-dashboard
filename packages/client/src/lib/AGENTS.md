@@ -11,7 +11,7 @@ Files in this directory. One row per source file.
 | `canvas-doc-csp.ts` | Injects subresource-blocking CSP meta into auto-opened file docs. See change: auto-canvas. |
 | `canvas-gate.ts` | Pure canvas viewport-gate + two-phase state reducers. See change: auto-canvas. |
 | `chat-selection-copy.ts` | Pure `buildSelectionClipboardText(range, container)`: rebuilds clipboard text for a transcript `copy`. → see `chat-selection-copy.ts.AGENTS.md` |
-| `chat-virtual-rows.ts` | Pure helpers for the windowed (TanStack Virtual) transcript. → see `chat-virtual-rows.ts.AGENTS.md` |
+| `chat-virtual-rows.ts` | Pure helpers for the windowed (TanStack Virtual) transcript. `virtualRowKey` = nonce ?? entryId ?? positional id (position-independent so older-page prepends cannot re-point anchors). → see `chat-virtual-rows.ts.AGENTS.md` |
 | `clipboard.ts` | `copyText(text)`: `navigator.clipboard.writeText` with hidden-textarea + `execCommand` fallback for non-secure (HTTP tunnel) contexts. See change: register-bash-and-tool-install-help. |
 | `collapse-retried-errors.ts` | ChatView duplicate-collapse helpers. `findRetriedErrorIds` flags failed `toolResult` superseded by successful… → see `collapse-retried-errors.ts.AGENTS.md` |
 | `command-filter.ts` | Exports `filterCommands(commands, filter)` — case-insensitive substring match on `CommandInfo.name` or `description`. Returns input unchanged when filter empty. |
@@ -87,6 +87,7 @@ Files in this directory. One row per source file.
 | `rehydrate-session.ts` | rehydrateSession(sessionId,cache). Cache hit → re-reduce raw payload via reduceEvent into provisional… → see `rehydrate-session.ts.AGENTS.md` |
 | `replay-cache.ts` | Durable per-session replay cache. IndexedDB. put trims newest-by-byte-budget (schema v2, ~4 MiB). → see `replay-cache.ts.AGENTS.md` |
 | `replay-persist.ts` | Debounced replay-cache writer. createReplayPersister(cache,debounceMs). → see `replay-persist.ts.AGENTS.md` |
+| `replay-window.ts` | Pure `mergeReplayWindow(previous, frame, ledgerMin)` — cold replaces history window, older advances minSeq down, delta never regresses it. |
 | `route-builders.ts` | URL builders for shell overlay routes: `buildOpenSpecPreviewUrl`, `buildOpenSpecArchiveUrl`,… → see `route-builders.ts.AGENTS.md` |
 | `selectedSessionId.ts` | Pure derivation of selected session id from wouter route matches. → see `selectedSessionId.ts.AGENTS.md` |
 | `selectViewedSessionId.ts` | Pure selector for currently-viewed session id from `/session/:id` route. → see `selectViewedSessionId.ts.AGENTS.md` |
@@ -97,6 +98,7 @@ Files in this directory. One row per source file.
 | `session-filter-storage.ts` | localStorage persistence for session-list filter state. Exports `removeLegacyHiddenSessions`,… → see `session-filter-storage.ts.AGENTS.md` |
 | `session-grouping.ts` | Pure session grouping/sorting/filtering utilities. Exports `DirectoryGroup`, `WorkspaceGroup`,… → see `session-grouping.ts.AGENTS.md` |
 | `session-list-scroll.ts` | Pure helper producing stable scroll-fingerprint of selected session card's position-affecting state. → see `session-list-scroll.ts.AGENTS.md` |
+| `session-replay-ledger.ts` | Canonical contiguous replay ledger. Validates source generation and sequence continuity, admits ascending multi-frame older pages against immutable request boundary, and atomically replaces older windows. |
 | `session-status-visuals.ts` | Shared session-status visual primitives. Exports `statusColors`, `sourceIcons`, `sourceLabels`,… → see `session-status-visuals.ts.AGENTS.md` |
 | `SessionAssetsContext.tsx` | Per-session image-asset registry context resolving `pi-asset:<hash>` srcs in `MarkdownContent` |
 | `sidebar-dnd.ts` | Shared drag-and-drop helpers for sidebar `SessionList`. Exports `sameTypeClosestCenter` (type-aware collision… → see `sidebar-dnd.ts.AGENTS.md` |

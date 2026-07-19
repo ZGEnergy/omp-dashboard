@@ -10,7 +10,7 @@ Passes `showResultBody={prefs.toolResultBodies}` to `<ToolCallStep>`.
 
 See change: configurable-chat-display.
 
-Sticky-bottom auto-scroll via `useLayoutEffect` (synchronizes scroll before paint, avoids per-line jumps). `stickToBottomRef` chases new content until scroll-up or `scrollToTurn`; re-arms on scroll-to-bottom button or near-bottom (`SCROLL_THRESHOLD`). Scroll-to-bottom uses `behavior: "instant"` while `streamingText`/`streamingThinking`/`pendingSteering` active, else `"smooth"`. Scroll container `overflowAnchor: "auto"`. Per-session scroll position persisted across switches. Replaces old `markProgrammatic`/`programmaticScroll` suppression window. See change: fix-chat-scroll-race-during-replay.
+Scroll: one owner. Mobile follows latest only until real touch/wheel says history. `overflowAnchor: "none"`. Browser anchoring bad here. Image decode queues guarded `resizeItem` row measurement. One guarded rAF writes mobile scroll. Desktop writes synchronously and keeps saved scroll state.
 
 **User-message branch routes to `<SkillInvocationCard>` when `msg.skill` is set** (raw `<MessageBubble>` for plain users); container preserves `mt-4 mb-4 flex justify-end` + `bubbleMax`. See change: render-skill-invocations-collapsibly.
 
@@ -22,7 +22,7 @@ Renders `inlineTerminal` role via `InlineTerminalCard`; `onCloseInlineTerminal` 
 
 `bashOutput` branch renders `<MissingToolInlineError>` when `args.missingTool.kind==="missing-tool"`. See change: register-bash-and-tool-install-help.
 
-New optional prop `loadingHistory?: boolean`. Empty-state 3-way: `loadingHistory && messages empty` → spinner (`mdiLoading` animate-spin + i18n "Loading conversation…"); else messages empty → "No messages yet"; else bubbles. See change: show-chat-history-loading-indicator.
+New optional prop `loadingHistory?: boolean`. Empty-state 3-way derives emptiness from `displayRows`, the rows that can actually render: `loadingHistory && displayRows empty` → spinner (`mdiLoading` animate-spin + i18n "Loading conversation…"); otherwise displayRows empty → "No messages yet"; else visible bubbles. Raw messages filtered by display preferences therefore never leave a blank viewport. See change: show-chat-history-loading-indicator.
 
 Wraps message list in `FilePreviewProvider`; renders single `FilePreviewHost`. See change: fix-file-preview-survives-message-churn.
 

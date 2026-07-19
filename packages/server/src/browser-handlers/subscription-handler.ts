@@ -113,7 +113,7 @@ async function sendEventBatches(
         events: [],
         isLast: true,
         ...windowMeta,
-      });
+      } as any);
     }
     return 0;
   }
@@ -151,7 +151,7 @@ async function sendEventBatches(
       isLast,
       // Stamp window meta on every batch (stable) so partial clients still see it.
       ...windowMeta,
-    });
+    } as any);
     // Yield to event loop between batches to allow GC and buffer flushing
     await new Promise<void>((r) => setImmediate(r));
   }
@@ -292,6 +292,11 @@ export function handleSubscribe(
   piGateway.sendToSession(msg.sessionId, { type: "request_providers", sessionId: msg.sessionId });
   piGateway.sendToSession(msg.sessionId, { type: "request_roles", sessionId: msg.sessionId });
 
+  if (ctx.replayCoordinator) {
+    void ctx.replayCoordinator.subscribe(msg, ctx);
+    return;
+  }
+
   if (eventStore.hasEvents(msg.sessionId)) {
     const lastSeq = msg.lastSeq ?? 0;
     const maxSeq = eventStore.getMaxSeq(msg.sessionId);
@@ -312,7 +317,7 @@ export function handleSubscribe(
 
     // Stale lastSeq: client has higher seq than server (e.g. server restarted)
     if (lastSeq > 0 && lastSeq > maxSeq) {
-      sendTo(ws, { type: "session_state_reset", sessionId: msg.sessionId });
+      sendTo(ws, { type: "session_state_reset", sessionId: msg.sessionId } as any);
       const raw = eventStore.getEvents(msg.sessionId, 1);
       // Reset is a cold rebuild — do not apply delta filter with the stale cursor.
       // Preserve legacy/full mode; only an explicit tail request gets a tail
@@ -438,13 +443,13 @@ export function handleSubscribe(
           // gone ws — the session is fine, the work was just abandoned.
           // See change: offload-session-events-load-to-worker.
         } else {
-          sendTo(ws, { type: "event_replay", sessionId: msg.sessionId, events: [], isLast: true });
+          sendTo(ws, { type: "event_replay", sessionId: msg.sessionId, events: [], isLast: true } as any);
           sessionManager.update(msg.sessionId, { dataUnavailable: true });
           broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { dataUnavailable: true } });
         }
       }).catch(() => {
         stopHeartbeat();
-        sendTo(ws, { type: "event_replay", sessionId: msg.sessionId, events: [], isLast: true });
+        sendTo(ws, { type: "event_replay", sessionId: msg.sessionId, events: [], isLast: true } as any);
         sessionManager.update(msg.sessionId, { dataUnavailable: true });
         broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { dataUnavailable: true } });
       });

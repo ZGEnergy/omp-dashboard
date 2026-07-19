@@ -84,6 +84,8 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:chrome": "PW_CHANNEL=chrome playwright test",
     "test:e2e:perf": "PW_PERF=1 PW_CHANNEL=chrome playwright test chat-render-perf",
+    "pretest:e2e:mobile-replay": "playwright install chromium webkit",
+    "test:e2e:mobile-replay": "PW_MOBILE_REPLAY=1 playwright test --project=mobile-chromium --project=mobile-webkit",
     "pretest:e2e:electron": "node -e \"const fs=require('fs');if(process.env.PW_ELECTRON_BINARY||fs.existsSync('packages/electron/out')){process.exit(0)}require('child_process').execSync('npm run -w packages/electron package',{stdio:'inherit'})\"",
     "test:e2e:electron": "playwright test --config playwright.electron.config.ts"
   },

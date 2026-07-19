@@ -12,7 +12,27 @@ import { BASE_URL } from "./tests/e2e/lifecycle.js";
 // "chrome-canary") to drive the SYSTEM-installed browser instead — no
 // `playwright install chromium` needed (the pretest:e2e download self-skips).
 // CI leaves PW_CHANNEL unset so the hermetic bundled Chromium is used.
+//
+// Mobile replay matrix: opt-in via `PW_MOBILE_REPLAY=1` (enables
+// `npm run test:e2e:mobile-replay`). Two extra projects run ONLY tests
+// tagged `@mobile-replay` on Pixel 7 (Chromium) and iPhone 13 (WebKit).
+// The default project is always present; the matrix appends — never
+// replaces — the desktop/Chromium default.
+//
+// Project `grep` must be a RegExp (Playwright collection calls `.lastIndex`
+// on it; a string throws `Cannot create property 'lastIndex' on string`).
 const PW_CHANNEL = process.env.PW_CHANNEL;
+const PW_MOBILE_REPLAY = process.env.PW_MOBILE_REPLAY === "1";
+const MOBILE_REPLAY_GREP = /@mobile-replay/;
+const desktopProject = PW_CHANNEL
+  ? { name: PW_CHANNEL, use: { ...devices["Desktop Chrome"], channel: PW_CHANNEL } }
+  : { name: "chromium", use: { ...devices["Desktop Chrome"] } };
+const mobileReplayProjects = PW_MOBILE_REPLAY
+  ? [
+      { name: "mobile-chromium", use: { ...devices["Pixel 7"] }, grep: MOBILE_REPLAY_GREP },
+      { name: "mobile-webkit", use: { ...devices["iPhone 13"] }, grep: MOBILE_REPLAY_GREP },
+    ]
+  : [];
 export default defineConfig({
   testDir: "tests/e2e",
   // Container boot is slow; first run may build the image. Keep generous.
@@ -31,9 +51,5 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
-  projects: [
-    PW_CHANNEL
-      ? { name: PW_CHANNEL, use: { ...devices["Desktop Chrome"], channel: PW_CHANNEL } }
-      : { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-  ],
+  projects: [desktopProject, ...mobileReplayProjects],
 });

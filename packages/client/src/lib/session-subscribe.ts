@@ -1,43 +1,51 @@
-/**
- * Build browser→server `subscribe` messages for session history.
- *
- * Cold open (`lastSeq === 0`) asks for a tail window so large sessions do not
- * force a full replay. Warm/delta (`lastSeq > 0`) stays a plain delta so the
- * server only sends events after the client's cursor.
- *
- * See change: session-tail-rehydrate.
- */
 import type { BrowserToServerMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 
-export type SessionSubscribeMessage = Extract<
-  BrowserToServerMessage,
-  { type: "subscribe" }
->;
+export type SessionSubscribeMessage = Extract<BrowserToServerMessage, { type: "subscribe" }>;
 
-/** Cold open / full refresh: newest events under the server's default budget. */
-export function buildColdTailSubscribe(sessionId: string): SessionSubscribeMessage {
-  return { type: "subscribe", sessionId, lastSeq: 0, mode: "tail" };
+let requestSequence = 0;
+
+/** Injectable only for deterministic tests; production uses crypto UUIDs. */
+export function mintReplayRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  requestSequence += 1;
+  return `replay-${Date.now().toString(36)}-${requestSequence.toString(36)}`;
 }
 
-/**
- * Subscribe for a known cursor.
- * - `lastSeq > 0` → delta only (no mode)
- * - `lastSeq === 0` → cold tail
- */
+function subscribe(
+  sessionId: string,
+  fields: Omit<SessionSubscribeMessage, "type" | "sessionId" | "requestId">,
+  knownSourceGeneration?: string,
+): SessionSubscribeMessage {
+  return {
+    type: "subscribe",
+    sessionId,
+    requestId: mintReplayRequestId(),
+    ...(knownSourceGeneration ? { knownSourceGeneration } : {}),
+    ...fields,
+  };
+}
+
+/** Cold open asks for the newest byte-bounded tail under a fresh correlation id. */
+export function buildColdTailSubscribe(sessionId: string, knownSourceGeneration?: string): SessionSubscribeMessage {
+  return subscribe(sessionId, { lastSeq: 0, mode: "tail" }, knownSourceGeneration);
+}
+
+/** A positive contiguous cursor requests a delta; zero asks for cold tail. */
 export function buildSessionSubscribe(
   sessionId: string,
   lastSeq: number,
+  knownSourceGeneration?: string,
 ): SessionSubscribeMessage {
-  if (lastSeq > 0) {
-    return { type: "subscribe", sessionId, lastSeq };
-  }
-  return buildColdTailSubscribe(sessionId);
+  return lastSeq > 0
+    ? subscribe(sessionId, { lastSeq }, knownSourceGeneration)
+    : buildColdTailSubscribe(sessionId, knownSourceGeneration);
 }
 
-/** Load older history: exclusive upper bound `seq < fromSeq`. */
+/** Load an exclusive older page, preserving the caller's anchor token separately. */
 export function buildLoadOlderSubscribe(
   sessionId: string,
   fromSeq: number,
+  knownSourceGeneration?: string,
 ): SessionSubscribeMessage {
-  return { type: "subscribe", sessionId, fromSeq };
+  return subscribe(sessionId, { fromSeq }, knownSourceGeneration);
 }

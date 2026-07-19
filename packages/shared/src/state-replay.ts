@@ -3,6 +3,41 @@
  * so the browser can rebuild the chat view after a reconnect or DB reset.
  */
 import type { EventForwardMessage } from "./protocol.js";
+import {
+  prepareEventForReplay,
+  type InlineReplayAsset,
+} from "./prepare-event-for-replay.js";
+
+/**
+ * Backward-compatible replay-preparation seam
+ * (mobile-session-rehydration: shared replay-preparation cutover).
+ *
+ * When the caller passes an `options` object, EVERY synthesized
+ * `DashboardEvent` is routed through shared `prepareEventForReplay`:
+ * tool results are bounded, tool events are validated, and legacy inline
+ * tool-result images are converted to bounded `pi-asset:` references via
+ * `registerInlineAsset`. Malformed records become recoverable prepared
+ * events / issues and never abort the whole session.
+ *
+ * The 3-argument form (no `options`) is byte-for-byte backward compatible:
+ * no preparation, no truncation, inline image bodies preserved. This keeps
+ * existing callers (server load worker, legacy extension replay) unchanged
+ * until they opt in.
+ */
+export interface ReplayPreparationOptions {
+  /**
+   * Hash-and-register a legacy inline tool-result image. Receives the raw
+   * base64 `data` and `mimeType`; returns the content hash (sha256 truncated
+   * to 16 hex chars) under which the bytes were registered, or `undefined`
+   * when registration is impossible (the prepared event then carries explicit
+   * `asset_unavailable` metadata instead of an inline body). The caller owns
+   * dedup and emission of the bridge `asset_register` message, which MUST
+   * precede the referencing `event_forward`.
+   */
+  registerInlineAsset?: (asset: InlineReplayAsset) => string | undefined;
+  /** UTF-8 byte ceiling for `tool_execution_end.result` text. */
+  maxTextBytes?: number;
+}
 
 /**
  * Convert pi session entries (from ctx.sessionManager.getBranch())
@@ -31,11 +66,16 @@ import type { EventForwardMessage } from "./protocol.js";
  *   `stats_update` event. The heuristic ignores Sonnet's 1M variant and
  *   pins Claude to 200k, so passing the persisted value avoids a brief
  *   200k flicker on reload before the next live `turn_end` arrives.
+ * @param options Optional replay-preparation seam. When provided, every
+ *   synthesized `DashboardEvent` is validated and prepared through
+ *   `prepareEventForReplay` (bounded tool results, validated tool events,
+ *   inline images → `pi-asset:` references). Omit to keep legacy behavior.
  */
 export function replayEntriesAsEvents(
   sessionId: string,
   entries: any[],
   knownContextWindow?: number,
+  options?: ReplayPreparationOptions,
 ): EventForwardMessage[] {
   const messages: EventForwardMessage[] = [];
   const openToolCalls = new Set<string>(); // track tool calls without results
@@ -224,7 +264,58 @@ export function replayEntriesAsEvents(
     messages.push(makeEvent(sessionId, rec.eventType, rec.ts, (rec.data ?? {}) as Record<string, unknown>));
   }
 
-  return messages;
+  return prepareMessagesForReplay(messages, options);
+}
+
+/**
+ * Apply the shared replay-preparation seam to every synthesized message.
+ *
+ * Backward compatible: when `options` is omitted the array is returned
+ * untouched (no preparation, no truncation, inline bodies preserved). When
+ * `options` is provided, each event is routed through
+ * `prepareEventForReplay`, which validates tool events, bounds tool-result
+ * text, and converts legacy inline tool-result images into bounded
+ * `pi-asset:` references via `options.registerInlineAsset` (or explicit
+ * `asset_unavailable` metadata when registration is impossible).
+ *
+ * Preparation is non-throwing: `prepareEventForReplay` returns recoverable
+ * issues instead of aborting. If it nevertheless throws unexpectedly, retry
+ * without the caller registrar so inline bodies become explicit unavailable
+ * metadata. A second failure emits a small explicit unavailable event rather
+ * than leaking the original inline payload. Exact count/order is preserved.
+ */
+function prepareMessagesForReplay(
+  messages: EventForwardMessage[],
+  options: ReplayPreparationOptions | undefined,
+): EventForwardMessage[] {
+  if (!options) return messages;
+  const prepareOptions = {
+    registerInlineAsset: options.registerInlineAsset,
+    maxTextBytes: options.maxTextBytes,
+  };
+  const out: EventForwardMessage[] = [];
+  for (const msg of messages) {
+    try {
+      const prepared = prepareEventForReplay(msg.event, prepareOptions);
+      out.push({ ...msg, event: prepared.event });
+    } catch {
+      try {
+        const prepared = prepareEventForReplay(msg.event, {
+          maxTextBytes: options.maxTextBytes,
+        });
+        out.push({ ...msg, event: prepared.event });
+      } catch {
+        out.push({
+          ...msg,
+          event: {
+            ...msg.event,
+            data: { replayUnavailable: true },
+          },
+        });
+      }
+    }
+  }
+  return out;
 }
 
 function extractAgentSnapshot(value: unknown): Record<string, any> | undefined {

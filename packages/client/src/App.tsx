@@ -89,12 +89,9 @@ import { dispatchPluginMessage } from "./lib/plugins-api.js";
 import { clearRecoveryOffer } from "./lib/recovery-offer-bus.js";
 import { rehydrateSession } from "./lib/rehydrate-session.js";
 // Strategy A (reduce-session-replay-traffic): durable replay cursor.
-import { replayCache } from "./lib/replay-cache.js";
-import { createReplayPersister } from "./lib/replay-persist.js";
-import {
-  buildLoadOlderSubscribe,
-  buildSessionSubscribe,
-} from "./lib/session-subscribe.js";
+import { replayCache, type ReplayCacheScope } from "./lib/replay-cache.js";
+import { createReplayPersister, type ReplayPersister } from "./lib/replay-persist.js";
+import { SessionReplayController, type ReplayWindowMetadata } from "./hooks/useSessionReplayController.js";
 import {
   buildFolderSettingsUrl,
   buildOpenSpecArchiveUrl,
@@ -113,6 +110,7 @@ import { initStore } from "./lib/worktree-init-store.js";
 const NAV_TRACKER = { predecessor, popNav };
 
 import { applyPluginConfigUpdate, initPluginConfigs, PluginContextProvider, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import { mergeReplayWindow } from "./lib/replay-window.js";
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, FileEntry, ImageContent, ModelInfo, OpenSpecData, OpenSpecGroup, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -146,8 +144,10 @@ const EMPTY_INTERACTIVE_REQUESTS: readonly never[] = Object.freeze([]);
 const EMPTY_SUBAGENTS_MAP: ReadonlyMap<string, SubagentStateSnapshot> = Object.freeze(new Map());
 
 import {
+  clearSessionEvents,
   ContentHeaderStickySlot,
   ContentInlineFooterSlot,
+  publishSessionEvents,
   ContentViewSlot,createSlotRegistry, 
   forSession,
   ShellOverlayRouteSlot,
@@ -317,7 +317,7 @@ export default function App() {
   // See change: throttle-idle-ui-animations.
   useAppHidden();
   const [wsUrl, setWsUrl] = useState(getInitialWsUrl);
-  const { send, onMessage, status } = useWebSocket(wsUrl);
+  const { send, onMessage, status, serverEpoch, connectionEpoch, reconnectNow } = useWebSocket(wsUrl);
   // Worktree-init bus needs a way to send subscribe/unsubscribe
   // messages over the same socket. See change: generalize-worktree-init-hook.
   useEffect(() => {
@@ -474,11 +474,79 @@ export default function App() {
   const chatViewRef = useRef<ChatViewHandle>(null);
   const contentPaneRef = useRef<HTMLDivElement>(null);
   const isMobile = useMobile();
+  const mobileDepth = isMobile ? getMobileDepth({
+    hasSessionRoute: !!selectedId,
+    hasFolderRoute: !!folderEditorCwd || !!folderHomeCwd,
+    hasSettingsRoute: !!settingsMatch,
+    hasFolderSettingsRoute: !!folderSettingsMatch,
+    hasTunnelRoute: !!tunnelSetupMatch,
+    hasOverlayRoute: hasShellOverlayRoute,
+    hasPiResourceRoute: hasPiResourceRouteFlag,
+  }) : 0;
+  const mobileDetailVisible = !isMobile || mobileDepth >= 1;
+  const mobileActivationEpochRef = useRef(0);
+  const [mobileActivationEpoch, setMobileActivationEpoch] = useState(0);
+  const previousMobileActivationKeyRef = useRef<string | null>(null);
+  const bumpMobileActivation = useCallback(() => {
+    mobileActivationEpochRef.current += 1;
+    setMobileActivationEpoch(mobileActivationEpochRef.current);
+  }, []);
+  const mobileActivationKey = mobileDetailVisible
+    ? `${selectedId ?? ""}:${mobileDepth >= 2 ? "overlay" : "detail"}`
+    : "list";
+  useEffect(() => {
+    if (!isMobile) return;
+    if (previousMobileActivationKeyRef.current !== mobileActivationKey && mobileDetailVisible) {
+      bumpMobileActivation();
+    }
+    previousMobileActivationKeyRef.current = mobileActivationKey;
+  }, [bumpMobileActivation, isMobile, mobileActivationKey, mobileDetailVisible]);
   const installPrompt = useInstallPrompt();
   const launchSource = useLaunchSource();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sessions, setSessions] = useState<Map<string, DashboardSession>>(new Map());
   const [sessionStates, setSessionStates] = useState<Map<string, SessionState>>(new Map());
+  const sessionStatesRef = useRef(sessionStates);
+  sessionStatesRef.current = sessionStates;
+  const replayGenerationRef = useRef(new Map<string, number>());
+  const [replayGenerationMap, setReplayGenerationMap] = useState(() => new Map<string, number>());
+  const bumpReplayGeneration = useCallback((sessionId: string) => {
+    const generation = (replayGenerationRef.current.get(sessionId) ?? 0) + 1;
+    replayGenerationRef.current.set(sessionId, generation);
+    setReplayGenerationMap((previous) => {
+      if (previous.get(sessionId) === generation) return previous;
+      const next = new Map(previous);
+      next.set(sessionId, generation);
+      return next;
+    });
+    return generation;
+  }, []);
+  const completedOlderAnchorRef = useRef(new Map<string, string | null>());
+  const [completedOlderAnchorMap, setCompletedOlderAnchorMap] = useState(() => new Map<string, string | null>());
+  // A controller is recreated for every connection epoch. Its new ledger has
+  // no cursor, so cold replay must not reduce onto the prior reducer state.
+  // The subscription effect waits for this reset to commit before requesting
+  // replay (same-server foreground reconnect included).
+  const replayResetPendingRef = useRef(false);
+  const replayResetStateRef = useRef<Map<string, SessionState> | null>(null);
+  const foregroundReplayRequestedRef = useRef(false);
+  const requestForegroundReplay = useCallback(() => {
+    if (mobileDetailVisible) bumpMobileActivation();
+    foregroundReplayRequestedRef.current = true;
+    reconnectNow("foreground");
+  }, [bumpMobileActivation, mobileDetailVisible, reconnectNow]);
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") requestForegroundReplay();
+    };
+    const onPageShow = () => requestForegroundReplay();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [requestForegroundReplay]);
   // Per-session dashboard-local `/view` preview rows. Lives separately from
   // event-reducer state so the reducer never sees them. Merged with
   // `state.messages` by timestamp when passing to ChatView.
@@ -577,8 +645,10 @@ export default function App() {
   // Strategy A (reduce-session-replay-traffic): durable replay-cache writer +
   // "already rehydrated from IndexedDB" guard so reconnect re-subscribes don't
   // re-read (and clobber) live state. See change: reduce-session-replay-traffic.
-  const replayPersisterRef = useRef(createReplayPersister());
+  const replayPersistersRef = useRef(new Map<string, { scope: ReplayCacheScope; persister: ReplayPersister }>());
+  const sourceGenerationRef = useRef(new Map<string, string>());
   const rehydratedRef = useRef(new Set<string>());
+  const rehydrateAbortRef = useRef(new Map<string, AbortController>());
   // Per-session "history loading" flag: true between sending `subscribe`
   // and the first content / terminal / failure / timeout. Drives the
   // ChatView loading indicator. See change: show-chat-history-loading-indicator.
@@ -734,28 +804,178 @@ export default function App() {
     );
   }, []);
 
-  const handleLoadOlder = useCallback(() => {
-    if (!selectedId) return;
-    if (loadingOlderMap.get(selectedId)) return;
-    const win = historyWindowRef.current.get(selectedId);
-    // minSeq must be a positive cursor; `!win.minSeq` also rejected valid... no, 0 is invalid.
-    if (!win?.hasMoreOlder || !(win.minSeq > 0)) return;
-    setLoadingOlderMap((prev) => {
-      const next = new Map(prev);
-      next.set(selectedId, true);
-      return next;
+  const authorityKey = `${serverEpoch ?? "unknown"}:${connectionEpoch}`;
+  const replayController = useMemo(() => {
+    let controller: SessionReplayController;
+    const persisterFor = (sessionId: string, sourceGeneration?: string): ReplayPersister | null => {
+      if (!serverEpoch || !sourceGeneration) return null;
+      const scope: ReplayCacheScope = { serverEpoch, sourceGeneration };
+      const existing = replayPersistersRef.current.get(sessionId);
+      if (existing && existing.scope.serverEpoch === scope.serverEpoch && existing.scope.sourceGeneration === scope.sourceGeneration) {
+        return existing.persister;
+      }
+      existing?.persister.dispose();
+      const persister = createReplayPersister(replayCache, 1000, scope);
+      replayPersistersRef.current.set(sessionId, { scope, persister });
+      return persister;
+    };
+    controller = new SessionReplayController({
+      send,
+      apply: (sessionId, entries) => {
+        const source = controller.ledger(sessionId).sourceGeneration ?? undefined;
+        sourceGenerationRef.current.set(sessionId, source ?? sourceGenerationRef.current.get(sessionId) ?? "");
+        persisterFor(sessionId, source)?.record(sessionId, [...entries]);
+        const accepted = [...entries];
+        setSessionStates((prev) => {
+          const next = new Map(prev);
+          let current = next.get(sessionId) ?? createInitialState();
+          for (const entry of accepted) current = reduceEvent(current, entry.event);
+          next.set(sessionId, current);
+          return next;
+        });
+        if (accepted.length > 0) {
+          const last = accepted[accepted.length - 1]!;
+          maxSeqMapRef.current.set(sessionId, Math.max(maxSeqMapRef.current.get(sessionId) ?? 0, last.seq));
+          publishSessionEvents(sessionId, accepted.map((entry) => entry.event));
+        }
+      },
+      window: (sessionId, metadata: ReplayWindowMetadata) => {
+        // The merge helper owns cold/older/delta semantics; a delta frame must
+        // never clobber a cache-admitted older window or load-older dies.
+        const next = mergeReplayWindow(
+          historyWindowRef.current.get(sessionId),
+          metadata,
+          controller.ledger(sessionId).minSeq,
+        );
+        if (!next) return;
+        historyWindowRef.current.set(sessionId, next);
+        setHistoryWindowMap((prev) => new Map(prev).set(sessionId, next));
+      },
+      replace: (sessionId, entries, completion) => {
+        const source = controller.ledger(sessionId).sourceGeneration ?? sourceGenerationRef.current.get(sessionId);
+        const persister = persisterFor(sessionId, source);
+        persister?.seed(sessionId, [...entries]);
+        setSessionStates((prev) => {
+          const next = new Map(prev);
+          const previous = next.get(sessionId);
+          let current = createInitialState();
+          if (previous?.pendingPrompt) current.pendingPrompt = previous.pendingPrompt;
+          for (const entry of entries) current = reduceEvent(current, entry.event);
+          if (previous && previous.interactiveRequests.length > 0) {
+            const existing = new Set(current.interactiveRequests.map((request) => request.requestId));
+            current.interactiveRequests = [
+              ...current.interactiveRequests,
+              ...previous.interactiveRequests.filter((request) => !existing.has(request.requestId)),
+            ];
+          }
+          next.set(sessionId, current);
+          return next;
+        });
+        clearSessionEvents(sessionId);
+        publishSessionEvents(sessionId, entries.map((entry) => entry.event));
+        const last = entries.at(-1);
+        maxSeqMapRef.current.set(sessionId, last?.seq ?? 0);
+        if (completion) {
+          setLoadingOlderMap((prev) => new Map(prev).set(sessionId, false));
+          const anchorToken = completion.anchorToken ?? null;
+          completedOlderAnchorRef.current.set(sessionId, anchorToken);
+          setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, anchorToken));
+        }
+      },
+      reset: (sessionId) => {
+        bumpReplayGeneration(sessionId);
+        completedOlderAnchorRef.current.set(sessionId, null);
+        setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, null));
+        replayPersistersRef.current.get(sessionId)?.persister.dispose();
+        replayPersistersRef.current.delete(sessionId);
+        setSessionStates((prev) => {
+          const next = new Map(prev);
+          const pendingPrompt = next.get(sessionId)?.pendingPrompt;
+          const fresh = createInitialState();
+          if (pendingPrompt) fresh.pendingPrompt = pendingPrompt;
+          next.set(sessionId, fresh);
+          return next;
+        });
+        maxSeqMapRef.current.delete(sessionId);
+        historyWindowRef.current.delete(sessionId);
+        setHistoryWindowMap((prev) => { const next = new Map(prev); next.delete(sessionId); return next; });
+        setLoadingOlderMap((prev) => { const next = new Map(prev); next.delete(sessionId); return next; });
+        clearSessionEvents(sessionId);
+      },
+      loading: (sessionId, loading) => {
+        if (loading) beginLoadingHistory(sessionId);
+        else clearLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, sessionId);
+      },
+      reconnect: () => {
+        if (selectedSessionIdRef.current) bumpReplayGeneration(selectedSessionIdRef.current);
+        reconnectNow("retry");
+      },
+      retry: (sessionId, kind) => {
+        // A retried-then-abandoned older page must release the load-older
+        // latch; otherwise pull-down stays disabled for the session.
+        if (kind !== "older") return;
+        setLoadingOlderMap((prev) => new Map(prev).set(sessionId, false));
+      },
+      publishAsset: (sessionId, asset) => {
+        setSessions((prev) => {
+          const current = prev.get(sessionId);
+          if (!current) return prev;
+          const next = new Map(prev);
+          next.set(sessionId, { ...current, assets: { ...(current.assets ?? {}), [asset.hash]: { data: asset.data, mimeType: asset.mimeType } } });
+          return next;
+        });
+      },
     });
-    send(buildLoadOlderSubscribe(selectedId, win.minSeq));
-  }, [selectedId, loadingOlderMap, send]);
+    return controller;
+  }, [authorityKey, bumpReplayGeneration]);
+
+  const beginReplay = useCallback((sessionId: string, kind: "cold" | "delta" | "older", sourceGeneration: string, anchorToken?: string) => {
+    if (kind !== "older") bumpReplayGeneration(sessionId);
+    return replayController.begin(sessionId, kind, sourceGeneration, anchorToken);
+  }, [bumpReplayGeneration, replayController]);
+
+  useEffect(() => {
+    const retainedSessionIds = [...sessionStatesRef.current.keys()];
+    if (retainedSessionIds.length > 0) {
+      replayResetPendingRef.current = true;
+      replayResetStateRef.current = sessionStatesRef.current;
+      for (const sessionId of retainedSessionIds) replayController.reset(sessionId);
+    }
+    subscribedRef.current.clear();
+    return () => {
+    replayController.dispose();
+    for (const { persister } of replayPersistersRef.current.values()) persister.dispose();
+    replayPersistersRef.current.clear();
+    for (const abort of rehydrateAbortRef.current.values()) abort.abort();
+    rehydrateAbortRef.current.clear();
+    };
+  }, [replayController]);
+
+  const handleLoadOlder = useCallback((anchorToken: string) => {
+    if (!selectedId || loadingOlderMap.get(selectedId)) return;
+    const win = historyWindowRef.current.get(selectedId);
+    if (!win?.hasMoreOlder || !(win.minSeq > 0)) return;
+    setLoadingOlderMap((prev) => new Map(prev).set(selectedId, true));
+    const source = sourceGenerationRef.current.get(selectedId) || replayController.ledger(selectedId).sourceGeneration || "";
+    completedOlderAnchorRef.current.set(selectedId, null);
+    setCompletedOlderAnchorMap((prev) => new Map(prev).set(selectedId, null));
+    beginReplay(selectedId, "older", source, anchorToken);
+  }, [selectedId, loadingOlderMap, replayController, beginReplay]);
 
   const handleMessage = useMessageHandler(
     { setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap, setLoadingHistory, setCanvasMap },
-    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, replayPersister: replayPersisterRef.current, showToast, historyWindowRef, setHistoryWindowMap, setLoadingOlderMap },
+    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, showToast, historyWindowRef, setHistoryWindowMap, setLoadingOlderMap, replayController },
   );
+  const handleAuthorityMessage = useCallback((msg: ServerToBrowserMessage) => {
+    handleMessage(msg);
+    if ((msg.type === "event_replay" || msg.type === "session_state_reset") && replayController.ledger(msg.sessionId).sourceGeneration === msg.sourceGeneration) {
+      sourceGenerationRef.current.set(msg.sessionId, msg.sourceGeneration);
+    }
+  }, [handleMessage, replayController]);
 
   useEffect(() => {
-    return onMessage(handleMessage);
-  }, [onMessage, handleMessage]);
+    return onMessage(handleAuthorityMessage);
+  }, [onMessage, handleAuthorityMessage]);
 
   // Stale running-tool reconcile: heal a tool card whose terminal
   // `tool_execution_end` was dropped on the WS hop, via the independent HTTP
@@ -820,11 +1040,24 @@ export default function App() {
     return () => { cancelled = true; };
   }, [apiBase]);
 
+  const previousServerEpochRef = useRef(serverEpoch);
+  useEffect(() => {
+    if (previousServerEpochRef.current && serverEpoch && previousServerEpochRef.current !== serverEpoch) {
+      sourceGenerationRef.current.clear();
+      maxSeqMapRef.current.clear();
+      rehydratedRef.current.clear();
+    }
+    previousServerEpochRef.current = serverEpoch;
+  }, [serverEpoch]);
+
   // Clear subscriptions on reconnect so sessions get re-subscribed
   const prevStatusRef = useRef(status);
   useEffect(() => {
     if (status === "connected" && prevStatusRef.current !== "connected") {
       subscribedRef.current.clear();
+      rehydratedRef.current.clear();
+      for (const abort of rehydrateAbortRef.current.values()) abort.abort();
+      rehydrateAbortRef.current.clear();
       // sessionOrderMap is replaced atomically by the on-connect
       // `sessions_snapshot` message — no pre-reset needed.
       // See change: fix-stale-sessions-on-reconnect.
@@ -878,94 +1111,70 @@ export default function App() {
   // for the subscription side-effect below.
   const prevSelectedRef = useRef(selectedId);
   useEffect(() => {
-    if (selectedId !== prevSelectedRef.current) {
-      prevSelectedRef.current = selectedId;
+    if (replayResetPendingRef.current) {
+      if (!selectedId || status !== "connected" || sessionStatesRef.current === replayResetStateRef.current) return;
+      replayResetPendingRef.current = false;
+      replayResetStateRef.current = null;
     }
-    // Lazy subscribe: load events for ended sessions when first selected.
-    // Also re-subscribes the selected session after reconnect (status change
-    // clears subscribedRef, and adding `status` here re-triggers the effect).
-    if (selectedId && !subscribedRef.current.has(selectedId) && status === "connected") {
-      subscribedRef.current.add(selectedId);
-      const sid = selectedId;
-      // Resync running subagents whose live timeline is empty: a reconnect gap
-      // may have swallowed their frames downstream of the bridge, so pull the
-      // latest snapshot instead of waiting for completion. No-op server-side
-      // for unknown/finished agents. See change: fix-subagent-live-detail-reliability (D2).
-      {
-        const st = sessionStates.get(sid);
-        if (st) {
-          for (const sub of st.subagents.values()) {
-            if (sub.status === "running" && (!sub.entries || sub.entries.length === 0)) {
-              send({ type: "subagent_resync_request", sessionId: sid, agentId: sub.id });
-            }
-          }
+    if (selectedId !== prevSelectedRef.current) prevSelectedRef.current = selectedId;
+    if (!selectedId || subscribedRef.current.has(selectedId) || status !== "connected") return;
+    subscribedRef.current.add(selectedId);
+    const sid = selectedId;
+    const st = sessionStates.get(sid);
+    if (st) {
+      for (const sub of st.subagents.values()) {
+        if (sub.status === "running" && (!sub.entries || sub.entries.length === 0)) {
+          send({ type: "subagent_resync_request", sessionId: sid, agentId: sub.id });
         }
       }
-      // Send subscribe with the resolved cursor, enter LOADING, and request
-      // models if missing. Extracted so the cache-rehydrate path can call it
-      // after the async IndexedDB read resolves.
-      const doSubscribe = (lastSeq: number) => {
-        // Cold lastSeq=0 uses mode:tail; delta omits mode.
-        // See change: session-tail-rehydrate.
-        send(buildSessionSubscribe(sid, lastSeq));
-        // Enter LOADING. Covers warm (in-memory replay / reconnect re-subscribe)
-        // and cold (disk-load) paths uniformly, since the warm path never sends
-        // an empty `isLast:false` start marker.
-        // See change: show-chat-history-loading-indicator.
-        beginLoadingHistory(sid);
-        // Request model list for this session if we don't have it yet (e.g. after page refresh)
-        if (!modelsMap.has(sid)) {
-          send({ type: "request_models", sessionId: sid });
-        }
+    }
+    if (!modelsMap.has(sid)) send({ type: "request_models", sessionId: sid });
+    const source = sourceGenerationRef.current.get(sid) ?? "";
+    const foregroundDelta = foregroundReplayRequestedRef.current && replayController.ledger(sid).events.length > 0;
+    foregroundReplayRequestedRef.current = false;
+    const initialRequest = beginReplay(sid, foregroundDelta ? "delta" : "cold", source);
+    if (source && !rehydratedRef.current.has(sid)) {
+      rehydratedRef.current.add(sid);
+      const abort = new AbortController();
+      rehydrateAbortRef.current.set(sid, abort);
+      const authority = {
+        scope: { serverEpoch: serverEpoch!, sourceGeneration: source },
+        signal: abort.signal,
+        isCurrent: () => replayController.ledger(sid).request?.requestId === initialRequest.requestId && replayController.ledger(sid).sourceGeneration === source,
       };
-      // Strategy A (reduce-session-replay-traffic): on the FIRST subscribe after
-      // a page load (no live cursor yet, not previously rehydrated), try the
-      // durable replay cache. A hit pre-seeds reduced state + the raw-event
-      // buffer and subscribes with `lastSeq = persistedMaxSeq` so the server
-      // delta-replays only the tail. Any miss/error degrades to `lastSeq: 0`.
-      // Reconnect re-subscribes already hold a live cursor → skip the cache read.
-      if (!maxSeqMapRef.current.has(sid) && !rehydratedRef.current.has(sid)) {
-        rehydratedRef.current.add(sid);
-        void rehydrateSession(sid, replayCache)
-          .then((r) => {
-            if (r) {
-              setSessionStates((prev) => {
-                const next = new Map(prev);
-                // Don't clobber state that arrived live while the read was in flight.
-                if (!next.has(sid)) next.set(sid, r.state);
-                return next;
-              });
-              if (!maxSeqMapRef.current.has(sid)) maxSeqMapRef.current.set(sid, r.lastSeq);
-              replayPersisterRef.current.seed(sid, r.events);
-              // IDB holds only a newest-byte tail. Delta subscribe will not re-send
-              // window meta, so seed load-older from the cached min seq: any gap
-              // below seq 1 means older history exists server-side.
-              // See change: session-tail-rehydrate.
-              if (r.events.length > 0) {
-                const minSeq = r.events[0]!.seq;
-                const hasMoreOlder = minSeq > 1;
-                historyWindowRef.current.set(sid, { minSeq, hasMoreOlder });
-                setHistoryWindowMap((m) => {
-                  const next = new Map(m);
-                  next.set(sid, { minSeq, hasMoreOlder });
-                  return next;
-                });
-              }
-              doSubscribe(maxSeqMapRef.current.get(sid) ?? r.lastSeq);
-            } else {
-              doSubscribe(0);
-            }
-          })
-          .catch(() => doSubscribe(0));
-      } else {
-        doSubscribe(maxSeqMapRef.current.get(sid) ?? 0);
-      }
+      void rehydrateSession(sid, replayCache, { authority }).then((r) => {
+        if (!r || abort.signal.aborted || r.sourceGeneration !== source || !authority.isCurrent()) return;
+        const ledger = replayController.ledger(sid);
+        if (ledger.events.length > 0 || !ledger.seed(source, r.events)) return;
+        const stateAtAdmission = sessionStatesRef.current.get(sid);
+        const existing = replayPersistersRef.current.get(sid);
+        const persister = existing?.scope.serverEpoch === serverEpoch && existing.scope.sourceGeneration === source
+          ? existing.persister
+          : createReplayPersister(replayCache, 1000, { serverEpoch: serverEpoch!, sourceGeneration: source });
+        if (!existing) replayPersistersRef.current.set(sid, { scope: { serverEpoch: serverEpoch!, sourceGeneration: source }, persister });
+        setSessionStates((prev) => {
+          // Cache admission must not overwrite a state update that raced the
+          // async cache read. The reset-created placeholder is the exact
+          // object captured above; any newer live/replay update replaces it.
+          if (prev.get(sid) !== stateAtAdmission) return prev;
+          const next = new Map(prev);
+          next.set(sid, r.state);
+          return next;
+        });
+        clearSessionEvents(sid);
+        publishSessionEvents(sid, r.events.map((entry) => entry.event));
+        persister.seed(sid, r.events);
+        maxSeqMapRef.current.set(sid, r.lastSeq);
+        historyWindowRef.current.set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder });
+        setHistoryWindowMap((prev) => new Map(prev).set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder }));
+        beginReplay(sid, "delta", source);
+      }).catch(() => { /* cache admission is an optimization; cold replay remains active */ })
+        .finally(() => rehydrateAbortRef.current.delete(sid));
     }
-  }, [selectedId, send, status]);
+  }, [selectedId, send, status, modelsMap, sessionStates, replayController, beginReplay, serverEpoch]);
 
   // Cold-open subscription for plugin overlay routes is now the claim's
-  // responsibility — each claim (e.g. SubagentPopoutClaim)
-  // subscribes on mount via `usePluginSend({ type: "subscribe", ... })`.
+  // responsibility — each claim subscribes via its own plugin sender.
   // See change: add-flow-agent-popout.
 
   const rawSelectedState = selectedId
@@ -1541,8 +1750,10 @@ export default function App() {
             maxSeqMapRef.current.set(selectedId, 0);
             subscribedRef.current.delete(selectedId);
             subscribedRef.current.add(selectedId);
-            send(buildSessionSubscribe(selectedId, 0));
-            beginLoadingHistory(selectedId);
+            replayPersistersRef.current.get(selectedId)?.persister.dispose();
+            replayPersistersRef.current.delete(selectedId);
+            clearSessionEvents(selectedId);
+            beginReplay(selectedId, "cold", sourceGenerationRef.current.get(selectedId) ?? "");
           },
         } : undefined}
         commands={selectedCommands}
@@ -1563,8 +1774,10 @@ export default function App() {
           maxSeqMapRef.current.set(selectedId, 0);
           subscribedRef.current.delete(selectedId);
           subscribedRef.current.add(selectedId);
-          send(buildSessionSubscribe(selectedId, 0));
-          beginLoadingHistory(selectedId);
+          replayPersistersRef.current.get(selectedId)?.persister.dispose();
+          replayPersistersRef.current.delete(selectedId);
+          clearSessionEvents(selectedId);
+          beginReplay(selectedId, "cold", sourceGenerationRef.current.get(selectedId) ?? "");
         }}
       />
       {/* Mobile info strip */}
@@ -1706,7 +1919,11 @@ export default function App() {
               loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false}
               hasMoreOlder={selectedId ? historyWindowMap.get(selectedId)?.hasMoreOlder ?? false : false}
               loadingOlder={selectedId ? loadingOlderMap.get(selectedId) ?? false : false}
-              onLoadOlder={selectedId ? handleLoadOlder : undefined}
+              mobileActive={isMobile && mobileDetailVisible}
+              mobileActivationEpoch={mobileActivationEpoch}
+              replayGeneration={selectedId ? replayGenerationMap.get(selectedId) ?? 0 : 0}
+              completedOlderAnchorToken={selectedId ? completedOlderAnchorMap.get(selectedId) ?? null : null}
+              onLoadOlder={selectedId && (!isMobile || mobileDetailVisible) ? handleLoadOlder : undefined}
               onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined}
             />
             </SessionAssetsProvider>
@@ -2056,15 +2273,6 @@ export default function App() {
 
   // Mobile: two-step full-screen navigation
   if (isMobile) {
-    const mobileDepth = getMobileDepth({
-      hasSessionRoute: !!selectedId,
-      hasFolderRoute: !!folderEditorCwd || !!folderHomeCwd,
-      hasSettingsRoute: !!settingsMatch,
-      hasFolderSettingsRoute: !!folderSettingsMatch,
-      hasTunnelRoute: !!tunnelSetupMatch,
-      hasOverlayRoute: hasShellOverlayRoute,
-      hasPiResourceRoute: hasPiResourceRouteFlag,
-    });
     return apiProvider(
       <div className="bg-[var(--bg-primary)] text-[var(--text-primary)]">
         <PluginStalenessBanner />

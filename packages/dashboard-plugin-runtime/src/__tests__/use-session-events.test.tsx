@@ -6,7 +6,7 @@ import React from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, act, cleanup } from "@testing-library/react";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { PluginContextProvider, useSessionEvents, publishSessionEvent, publishSessionEvents } from "../index.js";
+import { PluginContextProvider, useSessionEvents, publishSessionEvent, publishSessionEvents, replaceReplayState } from "../index.js";
 import { __resetSessionEventsStoreForTests, getSessionEvents, subscribeSessionEvents } from "../session-events-store.js";
 
 function makeEvent(seq: number, eventType = "tool_start"): DashboardEvent {
@@ -140,6 +140,32 @@ describe("useSessionEvents", () => {
     publishSessionEvent("C", makeEvent(1));
     publishSessionEvents("C", [makeEvent(2), makeEvent(3)]);
     expect(getSessionEvents("C").map((e) => (e as unknown as { seq: number }).seq)).toEqual([1, 2, 3]);
+  });
+
+  it("replaceReplayState atomically replaces prior events with one notification", () => {
+    publishSessionEvents("R", [makeEvent(1), makeEvent(2)]);
+    let notifyCount = 0;
+    const unsub = subscribeSessionEvents("R", () => { notifyCount++; });
+
+    const canonicalEvents = [makeEvent(10), makeEvent(11)];
+    replaceReplayState("R", canonicalEvents);
+
+    expect(getSessionEvents("R").map((e) => (e as unknown as { seq: number }).seq)).toEqual([10, 11]);
+    expect(getSessionEvents("R")).not.toBe(canonicalEvents);
+    expect(notifyCount).toBe(1);
+    unsub();
+  });
+
+  it("replaceReplayState replaces with an empty canonical replay and still notifies once", () => {
+    publishSessionEvent("R", makeEvent(1));
+    let notifyCount = 0;
+    const unsub = subscribeSessionEvents("R", () => { notifyCount++; });
+
+    replaceReplayState("R", []);
+
+    expect(getSessionEvents("R")).toEqual([]);
+    expect(notifyCount).toBe(1);
+    unsub();
   });
 
   it("throws when called outside PluginContextProvider", () => {

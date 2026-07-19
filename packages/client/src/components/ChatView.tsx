@@ -104,8 +104,20 @@ interface Props {
   hasMoreOlder?: boolean;
   /** Older-history fetch in flight — renders a spinner in the load-older affordance. See change: session-tail-rehydrate. */
   loadingOlder?: boolean;
-  /** Request the next older batch from the server. See change: session-tail-rehydrate. */
-  onLoadOlder?: () => void;
+  /** Visible mobile-detail ownership. Omit on desktop/legacy callers. */
+  mobileActive?: boolean;
+  /** Increments for every visible mobile activation, including same-session returns. */
+  mobileActivationEpoch?: number;
+  /** Invalidates scroll work when replay/source/reset authority changes. */
+  replayGeneration?: number;
+  /**
+   * Request an older page. ChatView captures the visible row first and mints
+   * the anchor token synchronously; the replay controller retains the token
+   * across retries and returns it only with the matching terminal.
+   */
+  onLoadOlder?: (anchorToken: string) => void;
+  /** Anchor token returned by the matching older terminal. */
+  completedOlderAnchorToken?: string | null;
 }
 
 function ImageAttachments({
@@ -233,6 +245,31 @@ function hasMermaid(content: string): boolean {
 
 const SCROLL_THRESHOLD = 50;
 
+type ScrollOwner =
+  | "HYDRATING"
+  | "FOLLOWING"
+  | "READING_HISTORY"
+  | "RESTORING_ANCHOR"
+  | "NAVIGATING_TOP"
+  | "NAVIGATING_BOTTOM";
+
+interface ScrollAuthority {
+  sessionId: string | null;
+  mobileActive: boolean;
+  mobileActivationEpoch: number;
+  replayGeneration: number;
+  element: HTMLDivElement | null;
+}
+
+interface CapturedScrollAnchor {
+  token: string;
+  rowId: string | null;
+  offset: number;
+  authority: ScrollAuthority;
+  cancelled: boolean;
+  restoring: boolean;
+}
+
 // Retained-row ceiling for an active selection (change:
 // preserve-chat-selection-during-churn, D3). The `rangeExtractor` keeps up to
 // this many selection-intersecting rows mounted; past it the view actively
@@ -244,51 +281,42 @@ const SELECTION_RETAIN_CAP_DESKTOP = 100;
 const SELECTION_RETAIN_CAP_MOBILE = 40;
 
 // Per-session scroll state, persisted across session switches
-const scrollStateMap = new Map<string, { anchorRowId: string | null; offset: number; nearBottom: boolean }>();
+const scrollStateMap = new Map<string, { anchorRowId: string | null; offset: number; rawTop: number; nearBottom: boolean }>();
 
 export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, onLoadOlder, onCollapseStreamingThinking }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  // True when the user wants the chat to chase new content. Flips to false on
-  // any real scroll-up gesture, on explicit navigation (scrollToTurn), and on
-  // session restore when the saved position was away from the bottom. Re-arms
-  // when the user clicks the scroll-to-bottom button or scrolls back to the end.
+  // Desktop retains its saved anchor; mobile ownership is explicit below.
+  // These refs were accidentally removed by an interrupted migration and are
+  // deliberately kept separate from the generation-bound mobile owner.
   const stickToBottomRef = useRef(true);
-  // Last observed scroll height, used to distinguish content growth (legit
-  // re-pin) from a user scroll (must NOT re-pin) in the virtualizer onChange.
-  const lastScrollHeightRef = useRef(0);
-  // True while a scroll-to-bottom descent is in flight. Under virtualization
-  // the below-viewport rows are ESTIMATED; as the smooth scroll descends they
-  // mount + measure and scrollHeight grows past the click-time target, so the
-  // intermediate scroll events see nearBottom=false. Without this latch those
-  // events cleared stickToBottomRef and the descent stalled short — the button
-  // had to be clicked repeatedly. The latch holds the pin until arrival and is
-  // cancelled by real user input (wheel / touch). See change:
-  // virtualize-chat-transcript-tanstack (scroll-to-bottom regression fix).
   const descendingRef = useRef(false);
-  // True while a scroll-to-TOP ascent is in flight (Decision 3, change:
-  // fix-chat-scroll-to-top-estimate-drift). `scrollToIndex(0)` is BOUNDED
-  // (maxAttempts=10) and a late async image-load remeasure can bump the view
-  // off index 0 after the retries exhaust; this latch (a) re-issues
-  // `scrollToIndex(0)` from `onChange` when a measurement grows the total size,
-  // and (b) stops `handleScroll` re-arming the bottom-pin mid-flight (the
-  // re-arm race: starting the ascent from the bottom would otherwise flip
-  // `stickToBottomRef` back to true and yank the view down). Cleared on arrival
-  // at the top or on real user input (wheel / touch), mirroring descendingRef.
   const ascendingRef = useRef(false);
-  // loadingHistory true→false re-pins bottom unless the user scrolled away
-  // during THIS hydrate cycle. Prior escape (before hydrate) is intentionally
-  // ignored — wipe/rebuild is a cold land. See change: session-tail-rehydrate.
   const loadingHistoryRef = useRef(!!loadingHistory);
   const escapedDuringHydrateRef = useRef(false);
-  // Programmatic scroll (virtualizer pin / hydrate re-pin) fires `scroll` events
-  // that look like "left the bottom". Only real wheel/touch may clear stick —
-  // otherwise live follow dies right after a large tail lands.
-  // See change: session-tail-rehydrate (live-follow after hydrate).
+  // One owner decides every transcript write. User input moves ownership to
+  // READING_HISTORY synchronously; stale authority/command frames are inert.
+  const scrollOwnerRef = useRef<ScrollOwner>(loadingHistory ? "HYDRATING" : "FOLLOWING");
+  const commandEpochRef = useRef(0);
+  const pendingWriteRef = useRef<{
+    authority: ScrollAuthority;
+    commandEpoch: number;
+    run: (element: HTMLDivElement) => void;
+  } | null>(null);
+  const pendingMeasureRef = useRef<
+    Map<HTMLElement, { authority: ScrollAuthority; commandEpoch: number; measure: (node: HTMLElement) => void }>
+  >(new Map());
+  const scrollRafRef = useRef<number | null>(null);
   const userGestureRef = useRef(false);
+  const gestureSerialRef = useRef(0);
+  const olderGestureRef = useRef<{ id: number; olderDirected: boolean; consumed: boolean } | null>(null);
+  const touchYRef = useRef<number | null>(null);
+  const olderAnchorSerialRef = useRef(0);
+  const pendingOlderAnchorRef = useRef<CapturedScrollAnchor | null>(null);
+  const olderRequestLatchRef = useRef<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   // Streaming-tail selection preservation (change: preserve-streaming-tail-selection).
@@ -350,6 +378,9 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   }, [turnSummaries]);
   const prevSessionRef = useRef(sessionId);
   const isMobile = useMobile();
+  // A mobile detail remains mounted while hidden. It must not inherit the
+  // desktop scroll owner or issue measurement/paging writes off-screen.
+  const mobileInactive = isMobile && mobileActive === false;
   // Pause the streaming bubble's glow/shimmer when it scrolls off-screen.
   // See change: reduce-chat-render-cpu-umbrella (Phase 1, task 2.5).
   const streamFxRef = useFxVisibility<HTMLDivElement>();
@@ -543,6 +574,108 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   const isSelectingRef = useRef(false);
   isSelectingRef.current = isSelecting;
 
+  const authorityRef = useRef<ScrollAuthority>({
+    sessionId: sessionId ?? null,
+    mobileActive: !!mobileActive,
+    mobileActivationEpoch,
+    replayGeneration,
+    element: null,
+  });
+  authorityRef.current = {
+    sessionId: sessionId ?? null,
+    mobileActive: !!mobileActive,
+    mobileActivationEpoch,
+    replayGeneration,
+    element: scrollRef.current,
+  };
+  // Closures installed on image nodes carry these render-time values. If the
+  // node decodes after a route/source change, its token no longer matches.
+  const renderAuthority = {
+    sessionId: sessionId ?? null,
+    mobileActive: !!mobileActive,
+    mobileActivationEpoch,
+    replayGeneration,
+  };
+
+  const isAuthorityCurrent = useCallback((candidate: ScrollAuthority): boolean => {
+    const current = authorityRef.current;
+    const element = scrollRef.current;
+    return !!(
+      element &&
+      element.isConnected &&
+      candidate.element === element &&
+      candidate.sessionId === current.sessionId &&
+      candidate.mobileActive === current.mobileActive &&
+      candidate.mobileActivationEpoch === current.mobileActivationEpoch &&
+      candidate.replayGeneration === current.replayGeneration
+    );
+  }, []);
+
+  const ensureScrollFrame = useCallback(() => {
+    if (scrollRafRef.current != null) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const measures = Array.from(pendingMeasureRef.current.entries());
+      pendingMeasureRef.current.clear();
+      for (const [node, request] of measures) {
+        if (request.commandEpoch !== commandEpochRef.current) continue;
+        if (!isAuthorityCurrent(request.authority)) continue;
+        const element = scrollRef.current;
+        if (!node.isConnected || !element?.contains(node)) continue;
+        request.measure(node);
+      }
+
+      const write = pendingWriteRef.current;
+      pendingWriteRef.current = null;
+      if (!write || write.commandEpoch !== commandEpochRef.current) return;
+      // This is the single gate immediately before every direct DOM scroll
+      // write and every TanStack navigation invocation.
+      if (!isAuthorityCurrent(write.authority)) return;
+      const element = scrollRef.current;
+      if (!element) return;
+      write.run(element);
+    });
+  }, [isAuthorityCurrent]);
+
+  const captureAuthority = useCallback(
+    (): ScrollAuthority => ({
+      sessionId: sessionId ?? null,
+      mobileActive: !!mobileActive,
+      mobileActivationEpoch,
+      replayGeneration,
+      element: scrollRef.current,
+    }),
+    [sessionId, mobileActive, mobileActivationEpoch, replayGeneration],
+  );
+
+  const scheduleProgrammaticWrite = useCallback(
+    (
+      run: (element: HTMLDivElement) => void,
+      authority: ScrollAuthority = captureAuthority(),
+      commandEpoch: number = commandEpochRef.current,
+    ) => {
+      if (mobileInactive) return;
+      // Desktop scroll behavior remains synchronous: existing navigation and
+      // follow effects observe the settled viewport in the same layout pass.
+      // Only the mobile active detail needs a queued, generation-fenced write.
+      if (!mobileActive) {
+        if (commandEpoch !== commandEpochRef.current || !isAuthorityCurrent(authority)) return;
+        const element = scrollRef.current;
+        if (element) run(element);
+        return;
+      }
+      pendingWriteRef.current = { authority, commandEpoch, run };
+      ensureScrollFrame();
+    },
+    [captureAuthority, ensureScrollFrame, isAuthorityCurrent, mobileActive, mobileInactive],
+  );
+
+  const cancelProgrammaticWrites = useCallback(() => {
+    commandEpochRef.current += 1;
+    pendingWriteRef.current = null;
+    pendingMeasureRef.current.clear();
+  }, []);
+
   const virtualizer = useVirtualizer({
     count: displayRows.length,
     getScrollElement: () => scrollRef.current,
@@ -564,40 +697,19 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         selectionCapRef.current,
         range.count,
       ),
-    // Re-pin the bottom on measurement-driven size changes while following.
-    // Bottom-pin stays DOM-measured (CR-1): getTotalSize() excludes the live
-    // tail siblings, so pin to the real scrollHeight, not the virtual total.
-    //
-    // onChange fires on EVERY scroll (range recompute), not only on growth.
-    // Guard the pin on an actual scrollHeight change so a small user scroll-up
-    // inside the near-bottom band is NOT yanked back to the bottom (the
-    // ping-pong bug). A pin sets scrollTop, not scrollHeight, so the next
-    // onChange sees no growth and the loop cannot sustain itself.
+    // TanStack owns all measured-row correction. The only scroll reaction to a
+    // measurement is a generation-guarded latest follow command; history and
+    // prepend restoration never use total-height deltas.
     onChange: () => {
-      // Virtualizer may fire notify after jsdom teardown (suite-level
-      // unhandled "window is not defined"). Bail when unmounted / no DOM.
-      if (typeof window === "undefined") return;
-      const el = scrollRef.current;
-      if (!el || !el.isConnected) return;
-      const prevH = lastScrollHeightRef.current;
-      const nextH = el.scrollHeight;
-      if (nextH === prevH) return;
-      // Stick: pin to bottom (unless a transcript selection is held — D2).
-      // Unstuck: compensate so prepended older rows do not shove the viewport
-      // content down. Must live here because this onChange also updates
-      // lastScrollHeightRef and would otherwise win the race and skip D5.
-      // See change: session-tail-rehydrate (D5 load-older anchor).
-      if (stickToBottomRef.current) {
-        if (!isSelectingRef.current) el.scrollTop = nextH;
-      } else if (ascendingRef.current) {
-        // Ascending owns scroll lock — re-target top; do not D5-compensate.
-        if (el.scrollTop <= 0) ascendingRef.current = false;
-        else virtualizer.scrollToIndex(0, { align: "start" });
-      } else if (prevH > 0) {
-        // Unstuck mid-history: keep viewport content under load-older prepend.
-        el.scrollTop += nextH - prevH;
+      if (typeof window === "undefined" || isSelectingRef.current || mobileInactive) return;
+      const element = scrollRef.current;
+      if (element === null || element.isConnected === false) return;
+      const follow = mobileActive
+        ? scrollOwnerRef.current === "FOLLOWING"
+        : stickToBottomRef.current;
+      if (follow) {
+        scheduleProgrammaticWrite((target) => { target.scrollTop = target.scrollHeight; });
       }
-      lastScrollHeightRef.current = nextH;
     },
   });
   const virtualItems = virtualizer.getVirtualItems();
@@ -608,70 +720,164 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // See change: preserve-streaming-tail-selection.
   const streamingTailText = frozenTailText ?? state.streamingText;
 
-  // Async image-decode re-measure (issue #267). A base64 data-URL decodes after
-  // mount, so an image-bearing row is first measured near-zero. The reused
-  // (not remounted) ChatView + no-op ResizeObserver paths can leave that stale
-  // collapsed height cached, overlapping the next row. Each `<img onLoad>` asks
-  // us to re-measure its owning virtual row (the `[data-index]` ancestor that
-  // already carries `ref={virtualizer.measureElement}`). Coalesce to one
-  // measure per row per animation frame so a many-image message can't storm.
-  const pendingRowMeasure = useRef<Map<number, HTMLElement>>(new Map());
-  const rowMeasureRaf = useRef<number | null>(null);
+  // Image decoding changes only its measured virtual row. It shares the same
+  // guarded rAF as scroll commands, so a late image from another activation
+  // cannot measure or move the newly attached transcript.
   const requestRowMeasure = useCallback(
-    (from: HTMLElement | null) => {
+    (from: HTMLElement | null, authority: ScrollAuthority = captureAuthority()) => {
       const row = from?.closest?.("[data-index]") as HTMLElement | null;
-      if (!row) return;
-      pendingRowMeasure.current.set(Number(row.getAttribute("data-index")), row);
-      if (rowMeasureRaf.current != null) return;
-      rowMeasureRaf.current = requestAnimationFrame(() => {
-        rowMeasureRaf.current = null;
-        for (const node of pendingRowMeasure.current.values()) virtualizer.measureElement(node);
-        pendingRowMeasure.current.clear();
+      if (row === null) return;
+      if (mobileInactive) return;
+      pendingMeasureRef.current.set(row, {
+        authority,
+        commandEpoch: commandEpochRef.current,
+        measure: (node) => {
+          const index = Number(node.dataset.index);
+          if (Number.isInteger(index) && index >= 0) {
+            virtualizer.resizeItem(index, node.getBoundingClientRect().height);
+          }
+        },
       });
+      ensureScrollFrame();
     },
-    [virtualizer],
-  );
-  useLayoutEffect(
-    () => () => {
-      if (rowMeasureRaf.current != null) cancelAnimationFrame(rowMeasureRaf.current);
-    },
-    [],
+    [captureAuthority, ensureScrollFrame, mobileInactive, virtualizer],
   );
 
-  // Real user input (wheel / touch) cancels an in-flight descent so the user
-  // can always escape mid-flight. Also marks a gesture so handleScroll can
-  // distinguish user intent from programmatic pin scrolls.
-  const onUserScrollGesture = useCallback(() => {
+  const pinLatest = useCallback(
+    (authority: ScrollAuthority = captureAuthority()) => {
+      if (mobileInactive) return;
+      scheduleProgrammaticWrite((element) => {
+        if (scrollOwnerRef.current === "READING_HISTORY" || scrollOwnerRef.current === "RESTORING_ANCHOR") return;
+        element.scrollTop = element.scrollHeight;
+      }, authority);
+    },
+    [captureAuthority, mobileInactive, scheduleProgrammaticWrite],
+  );
+
+  const captureOlderAnchor = useCallback((): CapturedScrollAnchor | null => {
+    const element = scrollRef.current;
+    if (mobileInactive || !element || !sessionId) return null;
+    const item = virtualizer.getVirtualItems().find((candidate) => candidate.start + candidate.size > element.scrollTop)
+      ?? virtualizer.getVirtualItems()[0];
+    const authority = captureAuthority();
+    return {
+      token: `${sessionId}:${++olderAnchorSerialRef.current}`,
+      rowId: item ? String(item.key) : null,
+      offset: item ? element.scrollTop - item.start : element.scrollTop,
+      authority,
+      cancelled: false,
+      restoring: false,
+    };
+  }, [captureAuthority, mobileInactive, sessionId, virtualizer]);
+
+  const requestOlder = useCallback(() => {
+    if (!onLoadOlder || loadingOlder || olderRequestLatchRef.current) return;
+    const anchor = captureOlderAnchor();
+    if (!anchor) return;
+    // The latch is synchronous: a burst of native wheel/scroll events cannot
+    // emit a second exclusive older request before the parent rerenders.
+    olderRequestLatchRef.current = anchor.token;
+    pendingOlderAnchorRef.current = anchor;
+    onLoadOlder(anchor.token);
+  }, [captureOlderAnchor, loadingOlder, onLoadOlder]);
+
+  const enterReadingHistory = useCallback((olderDirected: boolean) => {
+    if (!mobileActive || mobileInactive) return;
+    const pending = pendingOlderAnchorRef.current;
+    if (pending?.restoring) {
+      // A fast server completes the older page mid-gesture; the same pull's
+      // remaining older-directed callbacks must not cancel the anchor settle
+      // they triggered. Only newer-directed movement (or a fresh touch, which
+      // reports olderDirected=false) is the user taking the viewport back.
+      if (olderDirected) return;
+      pending.cancelled = true;
+      pendingOlderAnchorRef.current = null;
+      olderRequestLatchRef.current = null;
+    }
+    cancelProgrammaticWrites();
+    scrollOwnerRef.current = "READING_HISTORY";
+    userGestureRef.current = true;
+    olderGestureRef.current = { id: ++gestureSerialRef.current, olderDirected, consumed: false };
+  }, [cancelProgrammaticWrites, mobileActive, mobileInactive]);
+
+  const onWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (mobileActive) {
+      enterReadingHistory(event.deltaY < 0);
+      return;
+    }
+    // Desktop's bottom button also uses the shared rAF writer. A wheel event
+    // must fence that queued write before it can call scrollTo.
+    cancelProgrammaticWrites();
     descendingRef.current = false;
-    // Real user input also escapes an in-flight scroll-to-top ascent so the
-    // onChange re-issue cannot fight the user scrolling back down.
     ascendingRef.current = false;
     userGestureRef.current = true;
-  }, []);
+  }, [cancelProgrammaticWrites, enterReadingHistory, mobileActive, mobileInactive]);
+
+  const onTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    touchYRef.current = event.touches[0]?.clientY ?? null;
+    if (mobileActive && !mobileInactive) enterReadingHistory(false);
+    else if (!mobileInactive) cancelProgrammaticWrites();
+  }, [cancelProgrammaticWrites, enterReadingHistory, mobileActive, mobileInactive]);
+
+  const onTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const nextY = event.touches[0]?.clientY;
+    const previousY = touchYRef.current;
+    touchYRef.current = nextY ?? null;
+    if (nextY == null || previousY == null) return;
+    if (mobileActive) {
+      enterReadingHistory(nextY > previousY);
+      return;
+    }
+    if (!mobileInactive) cancelProgrammaticWrites();
+    descendingRef.current = false;
+    ascendingRef.current = false;
+    userGestureRef.current = true;
+  }, [cancelProgrammaticWrites, enterReadingHistory, mobileActive, mobileInactive]);
 
   const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
-    const nearTop = el.scrollTop <= SCROLL_THRESHOLD;
+    if (mobileInactive) return;
+    const element = scrollRef.current;
+    if (!element) return;
+    const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < SCROLL_THRESHOLD;
+    const nearTop = element.scrollTop <= SCROLL_THRESHOLD;
+
+    if (mobileActive) {
+      const owner = scrollOwnerRef.current;
+      if (owner === "NAVIGATING_BOTTOM" && nearBottom) scrollOwnerRef.current = "FOLLOWING";
+      if (owner === "NAVIGATING_TOP" && nearTop) scrollOwnerRef.current = "READING_HISTORY";
+      let reading = scrollOwnerRef.current === "READING_HISTORY";
+      if (reading && nearBottom && userGestureRef.current) {
+        scrollOwnerRef.current = "FOLLOWING";
+        olderGestureRef.current = null;
+        reading = false;
+      }
+      setShowScrollButton(!nearBottom && reading);
+      setShowScrollTopButton(!nearTop);
+      const gesture = olderGestureRef.current;
+      if (
+        reading &&
+        nearTop &&
+        hasMoreOlder &&
+        (loadingOlder == null || loadingOlder === false) &&
+        olderRequestLatchRef.current === null &&
+        gesture?.olderDirected &&
+        gesture.consumed === false
+      ) {
+        gesture.consumed = true;
+        requestOlder();
+      }
+      return;
+    }
+
     if (descendingRef.current) {
-      // In-flight descent: hold the pin through intermediate (not-yet-bottom)
-      // scroll events; clear the latch on arrival.
       if (nearBottom) descendingRef.current = false;
       stickToBottomRef.current = true;
       setShowScrollButton(false);
     } else if (ascendingRef.current) {
-      // In-flight ascent: hold scroll-lock and NEVER re-arm the bottom-pin,
-      // even if an early frame reads nearBottom (starting from the bottom).
-      // Clear the latch on arrival at the top.
       if (nearTop) ascendingRef.current = false;
       stickToBottomRef.current = false;
       setShowScrollButton(true);
     } else if (loadingHistory) {
-      // During hydrate, virtualizer pin/measurement fires synthetic scroll that
-      // is not a user escape. Only wheel/touch may clear stick mid-hydrate;
-      // otherwise live follow dies after the tail lands.
-      // See change: session-tail-rehydrate (live-follow after hydrate).
       if (userGestureRef.current) {
         stickToBottomRef.current = nearBottom;
         setShowScrollButton(!nearBottom);
@@ -682,183 +888,193 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         setShowScrollButton(false);
       }
     } else {
-      // Steady-state: any scroll (incl. scrollbar drag) updates stick.
       stickToBottomRef.current = nearBottom;
       setShowScrollButton(!nearBottom);
       if (nearBottom) userGestureRef.current = false;
     }
-    // Near top + more history available → request older page. Parent de-dupes
-    // in-flight requests. See change: session-tail-rehydrate.
-    if (
-      hasMoreOlder &&
-      !loadingOlder &&
-      onLoadOlder &&
-      el.scrollTop < SCROLL_THRESHOLD
-    ) {
-      onLoadOlder();
-    }
     setShowScrollTopButton(!nearTop);
-    // Persist scroll position for this session in VIRTUAL coordinates (CR-6):
-    // the first below-the-fold row's stable id + its intra-row offset. Raw
-    // scrollTop is meaningless once total size is an estimate across a remount.
     if (sessionId) {
-      const items = virtualizer.getVirtualItems();
-      const anchor = items.find((vi) => vi.start + vi.size > el.scrollTop) ?? items[0];
+      const item = virtualizer.getVirtualItems().find((candidate) => candidate.start + candidate.size > element.scrollTop)
+        ?? virtualizer.getVirtualItems()[0];
+      // A windowed list can transiently report no virtual item during a
+      // session switch. The first stable row is still a valid desktop anchor;
+      // do not discard its saved position merely because it is between range
+      // calculations.
+      const fallbackRow = displayRows[0];
       scrollStateMap.set(sessionId, {
-        anchorRowId: anchor ? String(anchor.key) : null,
-        offset: anchor ? el.scrollTop - anchor.start : el.scrollTop,
+        anchorRowId: item ? String(item.key) : fallbackRow ? virtualRowKey(fallbackRow, 0) : null,
+        offset: item ? element.scrollTop - item.start : element.scrollTop,
+        rawTop: element.scrollTop,
         nearBottom,
       });
     }
-  }, [sessionId, virtualizer, loadingHistory, hasMoreOlder, loadingOlder, onLoadOlder]);
+  }, [hasMoreOlder, loadingHistory, loadingOlder, mobileActive, mobileInactive, requestOlder, sessionId, virtualizer]);
 
   const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // Smooth when quiet, instant when streaming/tool output is active so the
-    // animation cannot race with incoming chunks and re-introduce jumps.
-    const isStreaming = Boolean(state.streamingText || state.streamingThinking || pendingSteering?.length);
+    if (mobileInactive) return;
+    const authority = captureAuthority();
     descendingRef.current = true;
-    el.scrollTo({ top: el.scrollHeight, behavior: isStreaming ? "instant" : "smooth" });
     stickToBottomRef.current = true;
+    if (mobileActive) scrollOwnerRef.current = "NAVIGATING_BOTTOM";
     setShowScrollButton(false);
-    if (sessionId) {
-      scrollStateMap.set(sessionId, { anchorRowId: null, offset: 0, nearBottom: true });
-    }
-  }, [sessionId, state.streamingText, state.streamingThinking, pendingSteering]);
+    scheduleProgrammaticWrite((element) => {
+      const streaming = Boolean(state.streamingText || state.streamingThinking || pendingSteering?.length);
+      element.scrollTo({ top: element.scrollHeight, behavior: streaming ? "instant" : "smooth" });
+    }, authority);
+    if (sessionId) scrollStateMap.set(sessionId, { anchorRowId: null, offset: 0, rawTop: 0, nearBottom: true });
+  }, [captureAuthority, mobileActive, mobileInactive, pendingSteering, scheduleProgrammaticWrite, sessionId, state.streamingText, state.streamingThinking]);
 
-  // Scroll-to-top (Decision 3). Latch suppression FIRST, then scroll: escape
-  // sticky-bottom so streaming can't pull the view back down, mark the ascent
-  // so handleScroll won't re-arm the pin and onChange re-issues on remeasure,
-  // then target index 0 top-aligned. `scrollToIndex` mounts the first row if
-  // unmounted and (for index 0) self-corrects toward offset 0.
   const scrollToTop = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
+    if (mobileInactive) return;
+    const authority = captureAuthority();
     descendingRef.current = false;
     ascendingRef.current = true;
     stickToBottomRef.current = false;
+    if (mobileActive) {
+      scrollOwnerRef.current = "NAVIGATING_TOP";
+      olderGestureRef.current = null;
+      userGestureRef.current = false;
+    }
     setShowScrollButton(true);
-    virtualizer.scrollToIndex(0, { align: "start" });
-  }, [virtualizer]);
+    scheduleProgrammaticWrite(() => virtualizer.scrollToIndex(0, { align: "start" }), authority);
+  }, [captureAuthority, mobileActive, mobileInactive, scheduleProgrammaticWrite, virtualizer]);
 
-  // Save scroll state when leaving, restore when arriving. Layout effect keeps
-  // the restored position synchronized with the first paint so there is no flash.
-  // Restore runs ONLY on session switch; displayRows/virtualizer are read via
-  // the current-render closure. Listing them would re-run restore on every row
-  // change (CR-6), so the dep list is intentionally [sessionId] only.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional session-switch-only restore; see comment above.
+  // Mobile visible activation is always a fresh follow command. Desktop keeps
+  // the saved virtual anchor behavior below and never receives this override.
+  const mobileActivationRef = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (sessionId === prevSessionRef.current) return;
-    // Outgoing scroll state is kept fresh by handleScroll (persists the
-    // virtual anchor on every scroll), so no re-capture here — re-capturing
-    // now would read the INCOMING session's virtualizer (CR-6).
+    if (!mobileActive) return;
+    const key = `${sessionId ?? ""}:${mobileActivationEpoch}:${replayGeneration}`;
+    if (mobileActivationRef.current === key) return;
+    mobileActivationRef.current = key;
+    cancelProgrammaticWrites();
+    const pending = pendingOlderAnchorRef.current;
+    if (pending !== null) pending.cancelled = true;
+    pendingOlderAnchorRef.current = null;
+    olderRequestLatchRef.current = null;
+    if (loadingHistory) {
+      scrollOwnerRef.current = "HYDRATING";
+      return;
+    }
+    scrollOwnerRef.current = "FOLLOWING";
+    pinLatest();
+  }, [cancelProgrammaticWrites, loadingHistory, mobileActivationEpoch, mobileActive, pinLatest, replayGeneration, sessionId]);
+
+  // Desktop-only anchor restoration. It is intentionally not shared with the
+  // mobile owner: an activation must follow latest instead of resurrecting a
+  // saved desktop position.
+  useLayoutEffect(() => {
+    if (mobileInactive || mobileActive || sessionId === prevSessionRef.current) return;
+    // A session swap invalidates every pending desktop write from the outgoing
+    // transcript before restoring this session's stored viewport.
+    cancelProgrammaticWrites();
     prevSessionRef.current = sessionId;
     escapedDuringHydrateRef.current = false;
-    loadingHistoryRef.current = !!loadingHistory;
-
-    // Restore incoming session scroll state in virtual coordinates.
-    // Cold hydrate (empty + loadingHistory): ignore a prior mid-list lock and
-    // land at bottom after history arrives (session-tail-rehydrate).
+    loadingHistoryRef.current = Boolean(loadingHistory);
     const saved = sessionId ? scrollStateMap.get(sessionId) : undefined;
-    const coldHydrate = !!(loadingHistory && state.messages.length === 0);
-    if (saved && !saved.nearBottom && saved.anchorRowId && !coldHydrate) {
-      // Scroll-locked: resolve the saved row id → current index, scroll it to
-      // the top, then re-apply the intra-row offset once the row measures.
-      descendingRef.current = false;
+    const coldHydrate = Boolean(loadingHistory) && state.messages.length === 0;
+    const authority = captureAuthority();
+    if (saved && !saved.nearBottom && !coldHydrate) {
       stickToBottomRef.current = false;
       setShowScrollButton(true);
-      const anchorId = saved.anchorRowId;
-      const idx = displayRows.findIndex((r, i) => virtualRowKey(r, i) === anchorId);
-      if (idx >= 0) {
-        virtualizer.scrollToIndex(idx, { align: "start" });
-        const off = saved.offset;
-        requestAnimationFrame(() => {
-          const el = scrollRef.current;
-          if (el) el.scrollTop += off;
-        });
-      } else {
-        scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
-      }
+      // Keep the exact desktop viewport while its mounted range catches up.
+      // A missing row key is handled by the next normal scroll, rather than
+      // replacing an intentional history position with an unrelated latest pin.
+      const element = scrollRef.current;
+      if (element !== null) element.scrollTop = saved.rawTop;
+      const restoreSession = sessionId;
+      requestAnimationFrame(() => {
+        if (prevSessionRef.current === restoreSession && scrollRef.current !== null) {
+          scrollRef.current.scrollTop = saved.rawTop;
+        }
+      });
+      scheduleProgrammaticWrite((target) => { target.scrollTop = saved.rawTop; });
     } else {
-      // Near bottom, first visit, or cold hydrate: scroll to end and follow.
       stickToBottomRef.current = true;
       setShowScrollButton(false);
-      scrollRef.current?.scrollTo(0, scrollRef.current!.scrollHeight);
+      scheduleProgrammaticWrite((element) => { element.scrollTop = element.scrollHeight; }, authority);
     }
-  }, [sessionId]);
+  }, [cancelProgrammaticWrites, captureAuthority, displayRows, loadingHistory, mobileActive, mobileInactive, scheduleProgrammaticWrite, sessionId, state.messages.length, virtualizer]);
 
-  // After a same-session wipe→rebuild (`loadingHistory` true→false), re-pin
-  // to the true bottom unless the user scrolled away mid-hydrate. Restore only
-  // runs on sessionId change, so cold return / multi-batch replay would
-  // otherwise land mid-transcript. See change: session-tail-rehydrate.
   useLayoutEffect(() => {
     const wasLoading = loadingHistoryRef.current;
-    const nowLoading = !!loadingHistory;
+    const nowLoading = Boolean(loadingHistory);
     loadingHistoryRef.current = nowLoading;
+    if (mobileInactive) return;
     if (!wasLoading && nowLoading) {
-      // Hydrate started: treat as cold land — arm stick unless user escapes mid-hydrate.
       escapedDuringHydrateRef.current = false;
-      stickToBottomRef.current = true;
-      setShowScrollButton(false);
+      if (mobileActive) scrollOwnerRef.current = "HYDRATING";
+      else stickToBottomRef.current = true;
       return;
     }
     if (wasLoading && !nowLoading) {
-      if (!escapedDuringHydrateRef.current) {
+      if (mobileActive) {
+        if (scrollOwnerRef.current !== "READING_HISTORY") {
+          scrollOwnerRef.current = "FOLLOWING";
+          pinLatest();
+        }
+      } else if (!escapedDuringHydrateRef.current) {
         stickToBottomRef.current = true;
         setShowScrollButton(false);
-        const el = scrollRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-        if (sessionId) {
-          scrollStateMap.set(sessionId, { anchorRowId: null, offset: 0, nearBottom: true });
-        }
+        pinLatest();
+        if (sessionId) scrollStateMap.set(sessionId, { anchorRowId: null, offset: 0, rawTop: 0, nearBottom: true });
       }
       escapedDuringHydrateRef.current = false;
     }
-  }, [loadingHistory, sessionId]);
+  }, [loadingHistory, mobileActive, mobileInactive, pinLatest, sessionId]);
 
-  // Auto-scroll on new content when the user has not escaped the bottom.
-  // Layout effect keeps the DOM and scroll position synchronized before paint,
-  // eliminating the per-line jumps caused by async scrollTo calls.
-  //
-  // Suspended while a transcript selection is held (D2) WITHOUT clearing
-  // stickToBottomRef, so the selected row is not scrolled out of its overscan
-  // band. `isSelecting` is in the dep array so the `→ false` edge re-fires the
-  // pin even when no content arrived after collapse (else the user is stranded
-  // at a stale position). On that edge lastScrollHeightRef is resynced so the
-  // next onChange does not read a stale height and fire a spurious pin.
-  const wasSelectingRef = useRef(false);
+  // Content and virtual measurements can only follow latest. TanStack remains
+  // the sole owner of row measurement correction; no total-height delta writes
+  // compensate history/prepend growth here.
   useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (isSelecting) {
-      wasSelectingRef.current = true;
-      return;
+    if (isSelecting || mobileInactive) return;
+    if (mobileActive) {
+      if (scrollOwnerRef.current === "FOLLOWING") pinLatest();
+    } else if (stickToBottomRef.current) {
+      pinLatest();
     }
-    const resumedFromSelection = wasSelectingRef.current;
-    wasSelectingRef.current = false;
-    if (resumedFromSelection && el) lastScrollHeightRef.current = el.scrollHeight;
-    if (stickToBottomRef.current && el) {
-      el.scrollTop = el.scrollHeight;
-      lastScrollHeightRef.current = el.scrollHeight;
-    }
-  }, [state.messages.length, state.streamingText, state.pendingPrompt, state.streamingThinking, pendingSteering, isSelecting]);
+  }, [isSelecting, mobileActive, mobileInactive, pendingSteering, pinLatest, state.messages.length, state.pendingPrompt, state.streamingText, state.streamingThinking]);
 
-  // Fallback when message count changes but virtualizer onChange did not
-  // observe a height delta (common in jsdom). If onChange already synced
-  // lastScrollHeightRef to the new height, nextH === prevH and this is a no-op
-  // (avoids double-compensation after the onChange path above).
-  // See change: session-tail-rehydrate (D5 load-older anchor).
   useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const prevH = lastScrollHeightRef.current;
-    const nextH = el.scrollHeight;
-    if (nextH === prevH) return;
-    if (!stickToBottomRef.current && prevH > 0 && nextH > prevH) {
-      el.scrollTop += nextH - prevH;
-    }
-    lastScrollHeightRef.current = nextH;
-  }, [state.messages.length]);
+    const anchor = pendingOlderAnchorRef.current;
+    if (!anchor || anchor.token !== completedOlderAnchorToken || anchor.cancelled || anchor.restoring) return;
+    if (!isAuthorityCurrent(anchor.authority)) return;
+    anchor.restoring = true;
+    scrollOwnerRef.current = "RESTORING_ANCHOR";
+    const commandEpoch = commandEpochRef.current;
+    let frames = 0;
+    let settled = 0;
+    const restore = (element: HTMLDivElement) => {
+      if (anchor.cancelled || !isAuthorityCurrent(anchor.authority)) return;
+      const index = anchor.rowId == null ? -1 : displayRows.findIndex((row, i) => virtualRowKey(row, i) === anchor.rowId);
+      if (index < 0) {
+        pendingOlderAnchorRef.current = null;
+        olderRequestLatchRef.current = null;
+        scrollOwnerRef.current = "READING_HISTORY";
+        return;
+      }
+      virtualizer.scrollToIndex(index, { align: "start" });
+      const item = virtualizer.getVirtualItems().find((candidate) => candidate.index === index);
+      if (!item) {
+        if (++frames < 12) scheduleProgrammaticWrite(restore, anchor.authority, commandEpoch);
+        return;
+      }
+      const target = item.start + anchor.offset;
+      if (Math.abs(element.scrollTop - target) <= 1) settled += 1;
+      else {
+        settled = 0;
+        element.scrollTop = target;
+      }
+      if (settled >= 2 || ++frames >= 12) {
+        pendingOlderAnchorRef.current = null;
+        olderRequestLatchRef.current = null;
+        scrollOwnerRef.current = "READING_HISTORY";
+      } else {
+        scheduleProgrammaticWrite(restore, anchor.authority, commandEpoch);
+      }
+    };
+    scheduleProgrammaticWrite(restore, anchor.authority, commandEpoch);
+  }, [completedOlderAnchorToken, displayRows, isAuthorityCurrent, scheduleProgrammaticWrite, virtualizer]);
 
   useImperativeHandle(ref, () => ({
     scrollToTurn(turnIndex: number) {
@@ -866,14 +1082,15 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       // the old querySelector([data-turn]) path this works for OFF-SCREEN
       // (unmounted) turns — scrollToIndex scrolls, THEN the row mounts.
       const rowIndex = turnToFirstRowIndex.get(turnIndex);
-      if (rowIndex == null) return;
+      if (rowIndex == null || mobileInactive) return;
       // Escape sticky bottom so streaming does not pull the user off the turn.
       descendingRef.current = false;
       stickToBottomRef.current = false;
       setShowScrollButton(true);
-      virtualizer.scrollToIndex(rowIndex, { align: "start" });
+      if (mobileActive) scrollOwnerRef.current = "READING_HISTORY";
+      scheduleProgrammaticWrite(() => virtualizer.scrollToIndex(rowIndex, { align: "start" }));
     },
-  }), [turnToFirstRowIndex, virtualizer]);
+  }), [mobileActive, mobileInactive, scheduleProgrammaticWrite, turnToFirstRowIndex, virtualizer]);
 
   return (
     // Key by sessionId so switching sessions (ChatView is reused, not remounted)
@@ -899,14 +1116,14 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
               type="button"
               data-testid="load-older-button"
               className="underline-offset-2 hover:underline text-[var(--text-secondary)]"
-              onClick={() => onLoadOlder?.()}
+              onClick={requestOlder}
             >
               {i18nT("auto.load_older_messages", undefined, "Load older messages")}
             </button>
           )}
         </div>
       )}
-    <div ref={scrollRef} onScroll={handleScroll} onCopy={handleCopy} onWheel={onUserScrollGesture} onTouchMove={onUserScrollGesture} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`}>
+    <div ref={scrollRef} onScroll={handleScroll} onCopy={handleCopy} onWheel={onWheel} onTouchStart={onTouchStart} onTouchMove={onTouchMove} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`}>
       {/* Windowed historical rows (TanStack Virtual): only viewport + overscan
           are mounted. The spacer reserves getTotalSize(); each row is absolutely
           positioned + re-measured on mount. chat-cv-skip keeps Step A's
@@ -977,7 +1194,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
                 <div className={bubbleMax}>
                   {msg.images && msg.images.length > 0 && (
                     <div className="mb-2">
-                      <ImageAttachments images={msg.images} onImageLoad={(e) => requestRowMeasure(e.currentTarget)} />
+                      <ImageAttachments images={msg.images} onImageLoad={(e) => requestRowMeasure(e.currentTarget, { ...renderAuthority, element: scrollRef.current })} />
                     </div>
                   )}
                   <SkillInvocationCard
@@ -999,7 +1216,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
               {msg.streamingBehavior && <StreamingBehaviorBadge behavior={msg.streamingBehavior} />}
               <div className={`bg-blue-500/10 border border-blue-500/20 border-l-2 border-l-blue-400 rounded-xl shadow-md px-4 py-2 ${bubbleMax}`}>
                 {msg.images && msg.images.length > 0 && (
-                  <ImageAttachments images={msg.images} onImageLoad={(e) => requestRowMeasure(e.currentTarget)} />
+                  <ImageAttachments images={msg.images} onImageLoad={(e) => requestRowMeasure(e.currentTarget, { ...renderAuthority, element: scrollRef.current })} />
                 )}
                 {msg.content && (
                   <MessageBubble
@@ -1285,10 +1502,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
 
       {/*
         3-way empty state (see change: show-chat-history-loading-indicator):
-        loading spinner while history is in flight, "No messages yet" for a
-        genuinely-empty session, else nothing (bubbles render above).
+        loading spinner while history is in flight, "No messages yet" when no
+        rows can render, else nothing (bubbles render above).
       */}
-      {state.messages.length === 0 && !state.streamingText && !state.pendingPrompt && !(pendingSteering && pendingSteering.length > 0) && (
+      {displayRows.length === 0 && !state.streamingText && !state.pendingPrompt && !(pendingSteering && pendingSteering.length > 0) && (
         loadingHistory ? (
           <div
             className="flex flex-col gap-3 px-4 py-3"

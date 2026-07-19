@@ -1,533 +1,257 @@
 /**
- * In-memory event store with LRU eviction.
- * Replaces SQLite-backed event-store.ts.
+ * Bounded in-memory event store with generation-aware contiguous retention.
  */
+import { randomUUID } from "node:crypto";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
-export interface StoredEvent {
-  seq: number;
-  event: DashboardEvent;
+export interface StoredEvent { seq: number; event: DashboardEvent; }
+export interface RetainedRange {
+  retainedMinSeq: number | null;
+  retainedMaxSeq: number | null;
+  historyTruncated: boolean;
 }
-
-export interface EventStore {
-  /** Insert an event, returns assigned sequence number */
-  insertEvent(sessionId: string, event: DashboardEvent): number;
-  /** Get events for a session starting from minSeq (inclusive) */
-  getEvents(sessionId: string, minSeq: number): StoredEvent[];
-  /** Get a single event by sessionId and seq */
-  getEvent(sessionId: string, seq: number): DashboardEvent | undefined;
-  /**
-   * Find the most recent `tool_execution_end` event for a tool call. Pure
-   * read; returns undefined when the call is still in flight or its event was
-   * evicted under memory pressure. See change: adopt-pi-071-072-073-features.
-   */
-  findToolEndEvent(sessionId: string, toolCallId: string): DashboardEvent | undefined;
-  /** Delete all events for a specific session */
-  deleteEventsForSession(sessionId: string): number;
-  /** Check if session has events in memory */
-  hasEvents(sessionId: string): boolean;
-  /** Return the highest seq for a session, or 0 if no events */
-  getMaxSeq(sessionId: string): number;
-  /** Number of cached sessions */
-  sessionCount(): number;
-  /**
-   * Cumulative store-shed telemetry (process lifetime, never reset on read).
-   * `trimmedEvents` counts per-session-cap drops; `evictedSessions` counts
-   * whole-session LRU evictions. See change: instrument-event-store-trim.
-   */
-  getTrimStats(): TrimStats;
+export interface StoredSource {
+  sourceGeneration: string;
+  events: StoredEvent[];
+  range: RetainedRange;
 }
-
 export interface TrimStats {
-  trimmedEvents: {
-    total: number;
-    toolExecutionEnd: number;
-    bySession: Record<string, number>;
-  };
+  trimmedEvents: { total: number; toolExecutionEnd: number; bySession: Record<string, number> };
   evictedSessions: number;
+}
+export interface EventStore {
+  insertEvent(sessionId: string, event: DashboardEvent): number;
+  getEvents(sessionId: string, minSeq: number): StoredEvent[];
+  getEvent(sessionId: string, seq: number): DashboardEvent | undefined;
+  findToolEndEvent(sessionId: string, toolCallId: string): DashboardEvent | undefined;
+  deleteEventsForSession(sessionId: string): number;
+  hasEvents(sessionId: string): boolean;
+  getMaxSeq(sessionId: string): number;
+  getSourceGeneration(sessionId: string): string;
+  getRetainedRange(sessionId: string): RetainedRange;
+  replaceEvents(sessionId: string, events: DashboardEvent[]): StoredSource;
+  sessionCount(): number;
+  getTrimStats(): TrimStats;
 }
 
 interface SessionBuffer {
   events: StoredEvent[];
   nextSeq: number;
+  revision: number;
+  sourceGeneration: string;
+  historyTruncated: boolean;
   lastAccess: number;
 }
 
 export const DEFAULT_MAX_CACHED_SESSIONS = 100;
-// Raised 5000 → 20000: sessions that run subagents forward every subagent
-// lifecycle + inner tool-call/result event into the PARENT session buffer, so a
-// single subagent-heavy turn can emit thousands of events and blow the old cap,
-// trimming the start of the chat. See change: preserve-chat-head-on-event-trim.
-export const DEFAULT_MAX_EVENTS_PER_SESSION = 20000;
-
-/**
- * Event types that carry the visible conversation transcript. The per-session
- * trim NEVER drops these — only the surrounding heavy/ephemeral events
- * (tool_execution_*, subagent_*, flow_*, reasoning, stats_update, streaming
- * message_update deltas). `message_start` + `message_end` are sufficient to
- * rebuild a completed message's text on the client (the finalized content lands
- * at message_end; intermediate `message_update` deltas only matter for the
- * still-streaming tail, which is newest and never trimmed).
- * See change: preserve-chat-head-on-event-trim.
- */
-const ESSENTIAL_CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
-  "message_start",
-  "message_end",
-]);
-
-/**
- * Trim `buf.events` down to `cap` in a SINGLE O(n) pass, dropping the oldest
- * NON-essential events first (tool/subagent/flow/reasoning/stats/streaming
- * noise) and only dropping the oldest essential chat events when essentials
- * alone exceed the cap. Reassigns `buf.events`; safe because seq values ride
- * on the surviving entries and `getEvents` filters by seq (gaps are fine).
- * See change: preserve-chat-head-on-event-trim.
- */
-function trimBufferToLimit(
-  buf: SessionBuffer,
-  cap: number,
-): { dropped: number; toolEndDropped: number } {
-  let toDrop = buf.events.length - cap;
-  if (toDrop <= 0) return { dropped: 0, toolEndDropped: 0 };
-  const kept: StoredEvent[] = [];
-  let dropped = 0;
-  let toolEndDropped = 0;
-  // Pass 1 (fused into the copy): drop the oldest non-essential entries.
-  for (const e of buf.events) {
-    if (toDrop > 0 && !ESSENTIAL_CHAT_EVENT_TYPES.has(e.event.eventType)) {
-      toDrop--;
-      dropped++;
-      if (e.event.eventType === "tool_execution_end") toolEndDropped++;
-      continue;
-    }
-    kept.push(e);
-  }
-  // Pass 2: essentials alone still exceed the cap → drop oldest essentials to
-  // hold the memory bound (pathological; cap is 20000 so never hit in practice).
-  if (kept.length > cap) {
-    dropped += kept.length - cap;
-    kept.splice(0, kept.length - cap);
-  }
-  buf.events = kept;
-  return { dropped, toolEndDropped };
-}
-
-/** Default max size for any string field within event data */
+export const DEFAULT_MAX_EVENTS_PER_SESSION = 20_000;
 const DEFAULT_MAX_STRING_SIZE = 4_000;
-/**
- * Default cap on the TOTAL serialized size of an individual event's `data`
- * (bytes). A single subagent turn embeds its full timeline (tool calls,
- * reasoning, assistant text) into ONE forwarded event; without this ceiling a
- * deeply-nested payload can escape per-field truncation and blow the server
- * heap when `JSON.stringify`d on the broadcast path (whole-server OOM).
- * See change: bound-subagent-event-serialization.
- */
 export const DEFAULT_MAX_EVENT_DATA_SIZE = 20_000;
+const SKILL_ENVELOPE_RE = /^(<skill name="[^"]+" location="[^"]+">\n)([\s\S]*?)(\n<\/skill>)((?:\n\n[\s\S]+)?)$/;
 
-/** True for a base64 image content block (`data` string + sibling `mimeType`). */
-function isImageBlock(obj: object): boolean {
-  return (
-    typeof (obj as Record<string, unknown>).data === "string" &&
-    "mimeType" in obj
-  );
+function isImageBlock(value: object): boolean {
+  return typeof (value as Record<string, unknown>).data === "string" && "mimeType" in value;
 }
-
-/**
- * Anchored match of a `/skill:<name>` invocation envelope
- * (`<skill name=".." location="..">\nbody\n</skill>[\n\nargs]`) — the shape
- * pi's `_expandSkillCommand` + the bridge's prompt-expander emit as the USER
- * message content. Mirrors `skill-block-parser.ts` (`SKILL_BLOCK_RE`).
- */
-const SKILL_ENVELOPE_RE =
-  /^(<skill name="[^"]+" location="[^"]+">\n)([\s\S]*?)(\n<\/skill>)((?:\n\n[\s\S]+)?)$/;
-
-/** Cap a string to `maxSize`, appending a truncation marker when trimmed. */
-function capString(s: string, maxSize: number): string {
-  if (s.length <= maxSize) return s;
-  // Skill invocation envelope: naive mid-string truncation would sever the
-  // closing </skill> tag, making the client's parseSkillBlock return null —
-  // the message then renders as a wall of raw pseudo-HTML (or nothing).
-  // Truncate the BODY only, keeping header + closing tag + trailing args
-  // intact so the envelope stays well-formed and parseable.
-  // See change: bound-subagent-event-serialization (skill regression fix).
-  const skill = s.match(SKILL_ENVELOPE_RE);
+function capString(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const skill = value.match(SKILL_ENVELOPE_RE);
   if (skill) {
-    const [, header, body, closer, args] = skill;
-    const overhead = header.length + closer.length + args.length;
-    const budget = Math.max(0, maxSize - overhead);
-    if (body.length > budget) {
-      return `${header}${body.slice(0, budget)}\n…[truncated]${closer}${args}`;
-    }
-    return s; // over maxSize only due to envelope overhead — leave intact
+    const [, head, body, tail, args] = skill;
+    const budget = Math.max(0, max - head.length - tail.length - args.length);
+    return `${head}${body.slice(0, budget)}\n…[truncated]${tail}${args}`;
   }
-  return `${s.slice(0, maxSize)}\n…[truncated]`;
+  return `${value.slice(0, max)}\n…[truncated]`;
 }
-
-/**
- * Handle a value that sits BEYOND the recursion depth limit. Never returns the
- * sub-tree raw — that let deeply-nested subagent payloads smuggle unbounded
- * data past truncation. Strings are capped; containers collapse to a bounded
- * marker; base64 image blocks are preserved.
- * See change: bound-subagent-event-serialization.
- */
-function summarizeAtDepthLimit(obj: unknown, maxSize: number): unknown {
-  if (typeof obj === "string") return capString(obj, maxSize);
-  if (obj && typeof obj === "object") {
-    if (!Array.isArray(obj) && isImageBlock(obj)) return obj;
-    return "[truncated: deep]";
+function truncateStrings(value: unknown, max: number, depth = 0): unknown {
+  if (depth > 4) {
+    if (typeof value === "string") return capString(value, max);
+    if (value && typeof value === "object" && !Array.isArray(value) && isImageBlock(value)) return value;
+    return value && typeof value === "object" ? "[truncated: deep]" : value;
   }
-  return obj;
-}
-
-/**
- * Recursively truncate large string fields in an object.
- * Returns a new object if any truncation occurred, otherwise the original.
- */
-function truncateStrings(obj: unknown, maxSize: number, depth = 0): unknown {
-  if (depth > 4) return summarizeAtDepthLimit(obj, maxSize);
-  if (typeof obj === "string") return capString(obj, maxSize);
-  if (Array.isArray(obj)) {
-    // Skip large arrays (e.g., edits arrays)
-    if (obj.length > 20) return "[array truncated]";
+  if (typeof value === "string") return capString(value, max);
+  if (Array.isArray(value)) {
+    if (value.length > 20) return "[array truncated]";
     let changed = false;
-    const result = obj.map((item) => {
-      const t = truncateStrings(item, maxSize, depth + 1);
-      if (t !== item) changed = true;
-      return t;
-    });
-    return changed ? result : obj;
+    const result = value.map((child) => { const next = truncateStrings(child, max, depth + 1); changed ||= next !== child; return next; });
+    return changed ? result : value;
   }
-  if (obj && typeof obj === "object") {
-    let changed = false;
-    const result: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(obj)) {
-      // Preserve base64 image data — skip truncation when sibling mimeType exists
-      if (key === "data" && typeof val === "string" && "mimeType" in obj) {
-        result[key] = val;
-        continue;
-      }
-      // Skip 'thinking' blocks entirely — large and not shown in chat
-      if (key === "thinking" && typeof val === "string" && val.length > maxSize) {
-        result[key] = `${(val as string).slice(0, 500)}\n…[truncated]`;
-        changed = true;
-        continue;
-      }
-      const t = truncateStrings(val, maxSize, depth + 1);
-      if (t !== val) changed = true;
-      result[key] = t;
-    }
-    return changed ? result : obj;
+  if (!value || typeof value !== "object") return value;
+  let changed = false;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "data" && typeof child === "string" && "mimeType" in value) { result[key] = child; continue; }
+    const next = truncateStrings(child, max, depth + 1);
+    changed ||= next !== child;
+    result[key] = next;
   }
-  return obj;
+  return changed ? result : value;
 }
 
-/**
- * Bounded-cost check: does `value` serialize to more than `cap` bytes?
- * Early-exits the moment the running estimate crosses `cap`, so it NEVER
- * materializes the full serialization (that allocation is exactly the OOM we
- * are guarding against). Worst-case cost is O(cap), not O(payload).
- * The estimate approximates JSON byte length (ignores escape expansion); it is
- * a guard threshold, not an exact size. See change:
- * bound-subagent-event-serialization.
- */
-interface SizeWalk {
-  total: number;
-  cap: number;
-  seen: WeakSet<object>;
+interface SizeWalk { total: number; cap: number; seen: WeakSet<object>; }
+function walkSize(value: unknown, state: SizeWalk): boolean {
+  if (state.total > state.cap) return true;
+  if (typeof value === "string") { state.total += value.length + 2; return state.total > state.cap; }
+  if (typeof value === "number" || typeof value === "boolean") { state.total += 8; return state.total > state.cap; }
+  if (value == null) { state.total += value === null ? 4 : 0; return state.total > state.cap; }
+  if (typeof value !== "object") return false;
+  if (state.seen.has(value)) { state.total += 2; return state.total > state.cap; }
+  state.seen.add(value);
+  if (Array.isArray(value)) {
+    state.total += 2;
+    for (const child of value) { if (walkSize(child, state)) return true; state.total += 1; }
+    return state.total > state.cap;
+  }
+  state.total += 2;
+  const image = isImageBlock(value);
+  for (const key of Object.keys(value as Record<string, unknown>)) {
+    state.total += key.length + 3;
+    if (state.total > state.cap) return true;
+    const child = (value as Record<string, unknown>)[key];
+    if (image && key === "data" && typeof child === "string") state.total += 8;
+    else if (walkSize(child, state)) return true;
+    state.total += 1;
+  }
+  return state.total > state.cap;
 }
-
-/** Accumulate an array's approximate JSON size; early-exit once over cap. */
-function walkArraySize(arr: unknown[], w: SizeWalk): boolean {
-  w.total += 2; // []
-  for (const item of arr) {
-    if (walkSize(item, w)) return true;
-    w.total += 1; // comma
-  }
-  return w.total > w.cap;
-}
-
-/** Accumulate an object's approximate JSON size; early-exit once over cap. */
-function walkObjectSize(obj: Record<string, unknown>, w: SizeWalk): boolean {
-  w.total += 2; // {}
-  // Preserved base64 image blocks (`data` string + sibling `mimeType`) are
-  // deliberately exempt from string truncation, so their bytes must not count
-  // toward the per-event ceiling either — otherwise ANY user message with a
-  // pasted image (> cap base64) collapses to the {__truncated} placeholder and
-  // vanishes from chat. Count a small constant instead of the raw bytes.
-  // See change: bound-subagent-event-serialization (image regression fix).
-  const imageBlock = isImageBlock(obj);
-  for (const k of Object.keys(obj)) {
-    w.total += k.length + 3; // "k":
-    if (w.total > w.cap) return true;
-    if (imageBlock && k === "data" && typeof obj[k] === "string") {
-      w.total += 8; // stand-in for the preserved base64 payload
-      if (w.total > w.cap) return true;
-      continue;
-    }
-    if (walkSize(obj[k], w)) return true;
-    w.total += 1; // comma
-  }
-  return w.total > w.cap;
-}
-
-/** Add `v`'s approximate JSON size to `w.total`; return true once over cap. */
-function walkSize(v: unknown, w: SizeWalk): boolean {
-  if (w.total > w.cap) return true;
-  switch (typeof v) {
-    case "string":
-      w.total += v.length + 2; // surrounding quotes
-      return w.total > w.cap;
-    case "number":
-    case "boolean":
-      w.total += 8;
-      return w.total > w.cap;
-    case "object":
-      break; // handled below
-    default:
-      return w.total > w.cap; // undefined / function → omitted by JSON
-  }
-  if (v === null) {
-    w.total += 4;
-    return w.total > w.cap;
-  }
-  if (w.seen.has(v)) {
-    w.total += 2;
-    return w.total > w.cap;
-  }
-  w.seen.add(v);
-  return Array.isArray(v)
-    ? walkArraySize(v, w)
-    : walkObjectSize(v as Record<string, unknown>, w);
-}
-
 export function exceedsSerializedSize(value: unknown, cap: number): boolean {
   return walkSize(value, { total: 0, cap, seen: new WeakSet<object>() });
 }
-
-/**
- * Max length of a string field preserved into the over-ceiling placeholder.
- * Identity/status fields (toolCallId, toolName, type) are short; a small cap
- * keeps the placeholder tightly bounded so it can never re-trip the ceiling it
- * exists to enforce. See change: fix-truncated-tool-end-loses-id.
- */
-const PLACEHOLDER_SCALAR_MAX = 512;
-
-/**
- * Copy only the small scalar (string ≤ maxLen / number / boolean) top-level
- * fields of `data`. Used to keep identity/status fields (toolCallId, toolName,
- * isError, type) in the over-ceiling placeholder without reintroducing the
- * heavy fields (result, details, message) that tripped the ceiling — so the
- * placeholder stays bounded. See change: fix-truncated-tool-end-loses-id.
- */
-function pickSmallScalars(data: unknown, maxLen: number): Record<string, unknown> {
+function pickSmallScalars(value: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (!data || typeof data !== "object" || Array.isArray(data)) return out;
-  for (const [k, v] of Object.entries(data)) {
-    if (typeof v === "number" || typeof v === "boolean") out[k] = v;
-    else if (typeof v === "string" && v.length <= maxLen) out[k] = v;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [key, child] of Object.entries(value)) {
+    if (typeof child === "number" || typeof child === "boolean" || (typeof child === "string" && child.length <= 512)) out[key] = child;
   }
   return out;
 }
-
-/**
- * Truncate large event data to bound memory usage per event. Applies a
- * per-field string cap (`maxStringSize`) and then a hard per-event total-size
- * ceiling (`maxEventDataSize`); an over-ceiling event's data is replaced with a
- * bounded placeholder (small scalar identity fields + markers) so it can never
- * OOM the persist/broadcast path.
- */
-function createTruncator(maxStringSize: number, maxEventDataSize: number) {
-  const stringPass = maxStringSize > 0;
-  const sizePass = maxEventDataSize > 0;
-  if (!stringPass && !sizePass) return (event: DashboardEvent) => event; // disabled
-  return (event: DashboardEvent): DashboardEvent => {
-    const data = event.data;
-    if (!data || typeof data !== "object") return event;
-    const truncated = stringPass
-      ? (truncateStrings(data, maxStringSize) as Record<string, unknown>)
-      : (data as Record<string, unknown>);
-    if (sizePass && exceedsSerializedSize(truncated, maxEventDataSize)) {
-      return {
-        ...event,
-        data: {
-          // Preserve the cheap scalar identity/status fields (toolCallId,
-          // toolName, isError, type, …) so a truncated tool_execution_end still
-          // pairs with its start: findToolEndEvent matches on toolCallId, and
-          // the client reducer needs it to clear the running-tool row. Without
-          // this, a large read/edit result stranded the row "running" forever
-          // (404 flood via useStaleToolReconcile). See change: fix-truncated-tool-end-loses-id.
-          ...pickSmallScalars(truncated, PLACEHOLDER_SCALAR_MAX),
-          __truncated: true,
-          reason: "event data exceeded MAX_EVENT_DATA_SIZE",
-          thresholdBytes: maxEventDataSize,
-          eventType: event.eventType,
-        },
-      };
-    }
-    return truncated !== data ? { ...event, data: truncated } : event;
-  };
+function truncateEvent(event: DashboardEvent, maxString: number, maxData: number): DashboardEvent {
+  if (!event.data || typeof event.data !== "object") return event;
+  const data = truncateStrings(event.data, maxString) as Record<string, unknown>;
+  if (maxData > 0 && exceedsSerializedSize(data, maxData)) {
+    return { ...event, data: { ...pickSmallScalars(data), __truncated: true, reason: "event data exceeded MAX_EVENT_DATA_SIZE", thresholdBytes: maxData, eventType: event.eventType } };
+  }
+  return data === event.data ? event : { ...event, data };
 }
 
 export function createMemoryEventStore(
   isSessionPinned: (sessionId: string) => boolean,
-  maxCachedSessions: number = DEFAULT_MAX_CACHED_SESSIONS,
-  maxEventsPerSession: number = DEFAULT_MAX_EVENTS_PER_SESSION,
-  maxStringFieldSize: number = DEFAULT_MAX_STRING_SIZE,
-  maxEventDataSize: number = DEFAULT_MAX_EVENT_DATA_SIZE,
+  maxCachedSessions = DEFAULT_MAX_CACHED_SESSIONS,
+  maxEventsPerSession = DEFAULT_MAX_EVENTS_PER_SESSION,
+  maxStringFieldSize = DEFAULT_MAX_STRING_SIZE,
+  maxEventDataSize = DEFAULT_MAX_EVENT_DATA_SIZE,
+  serverEpoch = randomUUID(),
 ): EventStore {
-  const truncateEventData = createTruncator(maxStringFieldSize, maxEventDataSize);
+  const stringFieldLimit = Number.isFinite(maxStringFieldSize) && maxStringFieldSize > 0 ? maxStringFieldSize : DEFAULT_MAX_STRING_SIZE;
   const buffers = new Map<string, SessionBuffer>();
-  // Overshoot allowed before a reclaim pass runs. Scales to 0 for the tiny
-  // caps used in unit tests (so they trim on every over-cap insert, exercising
-  // the exact-cap behavior) and to 256 for the 20000 production cap (~1 pass
-  // per 256 inserts). See change: preserve-chat-head-on-event-trim.
-  const trimSlack = Math.min(256, Math.floor(maxEventsPerSession * 0.05));
+  // Retain revisions independently of evictable event buffers. A cache miss must
+  // never recreate an earlier source authority for the same session id.
+  const revisions = new Map<string, number>();
+  let trimmedTotal = 0;
+  let trimmedToolEnd = 0;
+  let evictedTotal = 0;
+  const trimmedBySession = new Map<string, number>();
 
-  // Cumulative store-shed counters (process lifetime, never reset on read).
-  // Mirrors browserGateway's droppedFramesTotal shape. Answers "does trim/evict
-  // ever fire, and does trim ever hit a terminal tool_execution_end."
-  // See change: instrument-event-store-trim.
-  let trimmedEventsTotal = 0;
-  let trimmedToolEndTotal = 0;
-  // Per-session trim tally. Lifecycle-scoped: the entry is dropped whenever its
-  // session buffer is removed (LRU evict / explicit delete), so the Map cannot
-  // accumulate stale sessions over process lifetime. The cumulative global
-  // counters above are the lifetime record. See change: instrument-event-store-trim.
-  const trimmedEventsBySession = new Map<string, number>();
-  let evictedSessionsTotal = 0;
-
+  const generation = (revision: number) => `${serverEpoch}:${revision}`;
+  const newBuffer = (revision = 0): SessionBuffer => ({ events: [], nextSeq: 1, revision, sourceGeneration: generation(revision), historyTruncated: false, lastAccess: Date.now() });
   function getOrCreate(sessionId: string): SessionBuffer {
-    let buf = buffers.get(sessionId);
-    if (!buf) {
-      buf = { events: [], nextSeq: 1, lastAccess: Date.now() };
-      buffers.set(sessionId, buf);
+    let buffer = buffers.get(sessionId);
+    if (!buffer) {
+      const revision = revisions.get(sessionId) ?? 0;
+      buffer = newBuffer(revision);
+      buffers.set(sessionId, buffer);
+      revisions.set(sessionId, revision);
     }
-    buf.lastAccess = Date.now();
-    return buf;
+    buffer.lastAccess = Date.now();
+    return buffer;
   }
-
-  function evictIfNeeded(): number {
-    if (buffers.size <= maxCachedSessions) return 0;
-
-    // Collect evictable sessions sorted by lastAccess ascending
-    const evictable: Array<[string, number]> = [];
-    for (const [id, buf] of buffers) {
-      if (!isSessionPinned(id)) {
-        evictable.push([id, buf.lastAccess]);
-      }
-    }
-    evictable.sort((a, b) => a[1] - b[1]);
-
-    // Evict until we're at or below the limit
-    let toEvict = buffers.size - maxCachedSessions;
-    let evicted = 0;
-    for (const [id] of evictable) {
-      if (toEvict <= 0) break;
+  function evictIfNeeded(): void {
+    if (buffers.size <= maxCachedSessions) return;
+    const candidates = [...buffers.entries()].filter(([id]) => !isSessionPinned(id)).sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+    let count = buffers.size - maxCachedSessions;
+    for (const [id, buffer] of candidates) {
+      if (count-- <= 0) break;
       buffers.delete(id);
-      trimmedEventsBySession.delete(id);
-      toEvict--;
-      evicted++;
+      revisions.set(id, buffer.revision + 1);
+      trimmedBySession.delete(id);
+      evictedTotal++;
     }
-    return evicted;
+  }
+  function trim(buffer: SessionBuffer, sessionId: string): void {
+    if (maxEventsPerSession <= 0 || buffer.events.length <= maxEventsPerSession) return;
+    const dropped = buffer.events.length - maxEventsPerSession;
+    const removed = buffer.events.splice(0, dropped);
+    buffer.historyTruncated = true;
+    trimmedTotal += dropped;
+    const toolEnds = removed.filter((entry) => entry.event.eventType === "tool_execution_end").length;
+    trimmedToolEnd += toolEnds;
+    trimmedBySession.set(sessionId, (trimmedBySession.get(sessionId) ?? 0) + dropped);
   }
 
   return {
-    insertEvent(sessionId: string, event: DashboardEvent): number {
-      const buf = getOrCreate(sessionId);
-      const seq = buf.nextSeq++;
-      buf.events.push({ seq, event: truncateEventData(event) });
-      // Trim over the per-session limit (0 = unlimited). Hysteresis: only
-      // reclaim once the buffer overshoots the cap by TRIM_SLACK, then trim
-      // back to the cap in one O(n) pass. This amortizes the trim cost to O(1)
-      // per insert (vs O(n) per insert if we trimmed on every over-cap insert)
-      // — critical because the history-load path inserts every replayed event
-      // through here in a loop, and subagent floods emit thousands at the cap.
-      // The pass preserves the chat head (message_start/end) and drops the
-      // oldest tool/subagent/flow noise first. See change:
-      // preserve-chat-head-on-event-trim.
-      if (
-        maxEventsPerSession > 0 &&
-        buf.events.length > maxEventsPerSession + trimSlack
-      ) {
-        const { dropped, toolEndDropped } = trimBufferToLimit(buf, maxEventsPerSession);
-        if (dropped > 0) {
-          trimmedEventsTotal += dropped;
-          trimmedToolEndTotal += toolEndDropped;
-          trimmedEventsBySession.set(
-            sessionId,
-            (trimmedEventsBySession.get(sessionId) ?? 0) + dropped,
-          );
-        }
-      }
-      evictedSessionsTotal += evictIfNeeded();
+    insertEvent(sessionId, event) {
+      const buffer = getOrCreate(sessionId);
+      const seq = buffer.nextSeq++;
+      buffer.events.push({ seq, event: truncateEvent(event, stringFieldLimit, maxEventDataSize) });
+      trim(buffer, sessionId);
+      evictIfNeeded();
       return seq;
     },
-
-    getEvents(sessionId: string, minSeq: number): StoredEvent[] {
-      const buf = buffers.get(sessionId);
-      if (!buf) return [];
-      buf.lastAccess = Date.now();
-      const effectiveMin = minSeq > 0 ? minSeq : 1;
-      return buf.events.filter((e) => e.seq >= effectiveMin);
+    getEvents(sessionId, minSeq) {
+      const buffer = buffers.get(sessionId);
+      if (!buffer) return [];
+      buffer.lastAccess = Date.now();
+      const min = minSeq > 0 ? minSeq : 1;
+      return buffer.events.filter((entry) => entry.seq >= min);
     },
-
-    getEvent(sessionId: string, seq: number): DashboardEvent | undefined {
-      const buf = buffers.get(sessionId);
-      if (!buf) return undefined;
-      buf.lastAccess = Date.now();
-      const entry = buf.events.find((e) => e.seq === seq);
-      return entry?.event;
+    getEvent(sessionId, seq) {
+      const buffer = buffers.get(sessionId);
+      if (!buffer) return undefined;
+      buffer.lastAccess = Date.now();
+      return buffer.events.find((entry) => entry.seq === seq)?.event;
     },
-
-    findToolEndEvent(sessionId: string, toolCallId: string): DashboardEvent | undefined {
-      const buf = buffers.get(sessionId);
-      if (!buf) return undefined;
-      buf.lastAccess = Date.now();
-      for (let i = buf.events.length - 1; i >= 0; i--) {
-        const ev = buf.events[i].event;
-        if (
-          ev.eventType === "tool_execution_end" &&
-          (ev.data as Record<string, unknown> | undefined)?.toolCallId === toolCallId
-        ) {
-          return ev;
-        }
+    findToolEndEvent(sessionId, toolCallId) {
+      const buffer = buffers.get(sessionId);
+      if (!buffer) return undefined;
+      buffer.lastAccess = Date.now();
+      for (let index = buffer.events.length - 1; index >= 0; index--) {
+        const entry = buffer.events[index]!;
+        if (entry.event.eventType === "tool_execution_end" && (entry.event.data as Record<string, unknown> | undefined)?.toolCallId === toolCallId) return entry.event;
       }
       return undefined;
     },
-
-    deleteEventsForSession(sessionId: string): number {
-      const buf = buffers.get(sessionId);
-      if (!buf) return 0;
-      const count = buf.events.length;
-      buffers.delete(sessionId);
-      trimmedEventsBySession.delete(sessionId);
+    deleteEventsForSession(sessionId) {
+      const buffer = buffers.get(sessionId);
+      if (!buffer) return 0;
+      const count = buffer.events.length;
+      const nextRevision = buffer.revision + 1;
+      const next = newBuffer(nextRevision);
+      buffers.set(sessionId, next);
+      revisions.set(sessionId, nextRevision);
+      trimmedBySession.delete(sessionId);
       return count;
     },
-
-    hasEvents(sessionId: string): boolean {
-      const buf = buffers.get(sessionId);
-      return buf !== undefined && buf.events.length > 0;
+    replaceEvents(sessionId, events) {
+      const previous = buffers.get(sessionId);
+      const revision = Math.max(previous?.revision ?? -1, revisions.get(sessionId) ?? 0) + 1;
+      const buffer = newBuffer(revision);
+      buffer.events = events.map((event, index) => ({ seq: index + 1, event: truncateEvent(event, stringFieldLimit, maxEventDataSize) }));
+      buffer.nextSeq = buffer.events.length + 1;
+      trim(buffer, sessionId);
+      buffer.lastAccess = Date.now();
+      buffers.set(sessionId, buffer);
+      revisions.set(sessionId, revision);
+      trimmedBySession.delete(sessionId);
+      evictIfNeeded();
+      return { sourceGeneration: buffer.sourceGeneration, events: buffer.events.slice(), range: { retainedMinSeq: buffer.events[0]?.seq ?? null, retainedMaxSeq: buffer.events.at(-1)?.seq ?? null, historyTruncated: buffer.historyTruncated } };
     },
-
-    getMaxSeq(sessionId: string): number {
-      const buf = buffers.get(sessionId);
-      if (!buf || buf.events.length === 0) return 0;
-      return buf.events[buf.events.length - 1].seq;
+    hasEvents(sessionId) { return (buffers.get(sessionId)?.events.length ?? 0) > 0; },
+    getMaxSeq(sessionId) { return buffers.get(sessionId)?.events.at(-1)?.seq ?? 0; },
+    getSourceGeneration(sessionId) { return buffers.get(sessionId)?.sourceGeneration ?? generation(revisions.get(sessionId) ?? 0); },
+    getRetainedRange(sessionId) {
+      const buffer = buffers.get(sessionId);
+      return { retainedMinSeq: buffer?.events[0]?.seq ?? null, retainedMaxSeq: buffer?.events.at(-1)?.seq ?? null, historyTruncated: buffer?.historyTruncated ?? false };
     },
-
-    sessionCount(): number {
-      return buffers.size;
-    },
-
-    getTrimStats(): TrimStats {
-      return {
-        trimmedEvents: {
-          total: trimmedEventsTotal,
-          toolExecutionEnd: trimmedToolEndTotal,
-          bySession: Object.fromEntries(trimmedEventsBySession),
-        },
-        evictedSessions: evictedSessionsTotal,
-      };
-    },
+    sessionCount() { return buffers.size; },
+    getTrimStats() { return { trimmedEvents: { total: trimmedTotal, toolExecutionEnd: trimmedToolEnd, bySession: Object.fromEntries(trimmedBySession) }, evictedSessions: evictedTotal }; },
   };
 }

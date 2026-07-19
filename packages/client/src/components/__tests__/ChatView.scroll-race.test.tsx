@@ -33,10 +33,28 @@ function getScrollContainer(container: HTMLElement): HTMLElement {
   return container.querySelector("[class*='overflow-y-auto']")!;
 }
 
+function getRowTop(row: Element): number {
+  const match = row.getAttribute("style")?.match(/translateY\(([-\d.]+)px\)/);
+  return match ? Number(match[1]) : 0;
+}
+
+function findRowContaining(scrollEl: Element, text: string): Element | undefined {
+  return Array.from(scrollEl.querySelectorAll("[data-index]"))
+    .find((row) => row.textContent?.includes(text));
+}
+
 function stateWith(n: number) {
   const s = createInitialState();
   for (let i = 0; i < n; i++) {
     s.messages.push({ id: String(i), role: "user", content: `m${i}`, timestamp: Date.now() });
+  }
+  return s;
+}
+
+function stateWithRange(start: number, end: number) {
+  const s = createInitialState();
+  for (let i = start; i < end; i++) {
+    s.messages.push({ id: `row-${i}`, role: "user", content: `m${i}`, timestamp: i });
   }
   return s;
 }
@@ -127,6 +145,7 @@ describe("ChatView sticky scroll", () => {
         <ChatView state={stateWith(50)} toolContext={defaultToolContext} />
       </ThemeProvider>,
     );
+    await flushRaf();
 
     expect(scrollEl.scrollTop).toBe(1500);
   });
@@ -169,6 +188,7 @@ describe("ChatView sticky scroll", () => {
         <ChatView state={stateWith(51)} toolContext={defaultToolContext} />
       </ThemeProvider>,
     );
+    await flushRaf();
     expect(scrollEl.scrollTop).toBe(3000);
   });
 
@@ -183,15 +203,20 @@ describe("ChatView sticky scroll", () => {
     const scrollEl = getScrollContainer(container);
     setScrollPosition(scrollEl, 0, 2000, 400);
     fireEvent.scroll(scrollEl);
+    const scrollToSpy = vi.spyOn(scrollEl, "scrollTo");
     fireEvent.click(container.querySelector('[data-testid="scroll-to-bottom"]')!);
+    const callsAfterClick = scrollToSpy.mock.calls.length;
 
-    // The user grabs the wheel mid-descent — that must cancel the latch.
+    // The user grabs the wheel mid-descent — that must cancel both the latch
+    // and the already queued rAF write.
     fireEvent.wheel(scrollEl, { deltaY: -100 });
     setScrollPosition(scrollEl, 700, 2600, 400);
     fireEvent.scroll(scrollEl);
+    await flushRaf();
 
     // Escape respected: button re-appears, no forced pin.
     expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+    expect(scrollToSpy.mock.calls.length).toBe(callsAfterClick);
   });
 
   /**
@@ -451,124 +476,274 @@ describe("ChatView scroll-to-top", () => {
   });
 });
 
-describe("ChatView load-older + prepend scroll anchor (session-tail-rehydrate)", () => {
-  it("calls onLoadOlder once when scrolled near the top with hasMoreOlder; silent while scrollTop is high", async () => {
-    const onLoadOlder = vi.fn();
-    const { container } = render(
+describe("ChatView mobile scroll owner", () => {
+  it("lands latest when only the same-session mobile activation epoch changes", async () => {
+    const state = stateWith(60);
+    const { container, rerender } = render(
       <ThemeProvider>
         <ChatView
-          state={stateWith(50)}
+          sessionId="same"
+          state={state}
           toolContext={defaultToolContext}
-          hasMoreOlder
-          loadingOlder={false}
-          onLoadOlder={onLoadOlder}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={1}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 175, 4_000, 400);
+
+    rerender(
+      <ThemeProvider>
+        <ChatView
+          sessionId="same"
+          state={state}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={2}
+          replayGeneration={1}
         />
       </ThemeProvider>,
     );
     await flushRaf();
 
-    const scrollEl = getScrollContainer(container);
-
-    // Park well below the near-top band: onLoadOlder must NOT fire here.
-    // (SCROLL_THRESHOLD gates both the bottom-pin and the load-older trigger;
-    // 500 is comfortably above it.) Two scrolls mirror the escape tests so the
-    // virtualizer's measurement onChange settles stick=false without a pin.
-    setScrollPosition(scrollEl, 500, 2000, 400);
-    fireEvent.scroll(scrollEl);
-    setScrollPosition(scrollEl, 500, 2000, 400);
-    fireEvent.scroll(scrollEl);
-    expect(onLoadOlder).not.toHaveBeenCalled();
-
-    // Cross into the near-top band. scrollHeight is unchanged so the virtual
-    // range does not grow — the only handleScroll that crosses the threshold
-    // fires onLoadOlder exactly once.
-    setScrollPosition(scrollEl, 0, 2000, 400);
-    fireEvent.scroll(scrollEl);
-    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    expect(scrollEl.scrollTop).toBe(4_000);
+    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
   });
 
-  it("clicking data-testid=load-older-button fires onLoadOlder", async () => {
+  it("does not page when a programmatic top navigation emits scroll", async () => {
     const onLoadOlder = vi.fn();
     const { container } = render(
       <ThemeProvider>
         <ChatView
+          sessionId="programmatic-top"
+          state={stateWith(50)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={1}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 800, 2_000, 400);
+    fireEvent.scroll(scrollEl);
+    fireEvent.click(container.querySelector('[data-testid="scroll-to-top"]')!);
+    setScrollPosition(scrollEl, 0, 2_000, 400);
+    fireEvent.scroll(scrollEl);
+
+    expect(onLoadOlder).not.toHaveBeenCalled();
+  });
+
+  it("consumes one older page for a burst of older-directed wheel callbacks", async () => {
+    const onLoadOlder = vi.fn();
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="wheel-burst"
+          state={stateWithRange(0, 50)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={7}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 20, 2_000, 400);
+
+    for (let i = 0; i < 4; i++) {
+      fireEvent.wheel(scrollEl, { deltaY: -30 });
+      fireEvent.scroll(scrollEl);
+    }
+
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    expect(onLoadOlder).toHaveBeenCalledWith(expect.stringMatching(/^wheel-burst:/));
+  });
+
+  it("lets touch input escape a hydrate before replay completion", async () => {
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="touch-escape"
+          state={createInitialState()}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={2}
+          loadingHistory
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 40, 3_000, 400);
+    fireEvent.touchStart(scrollEl, { touches: [{ clientY: 100 }] });
+    fireEvent.touchMove(scrollEl, { touches: [{ clientY: 150 }] });
+    fireEvent.scroll(scrollEl);
+
+    rerender(
+      <ThemeProvider>
+        <ChatView
+          sessionId="touch-escape"
+          state={stateWith(60)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={2}
+          loadingHistory={false}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    expect(scrollEl.scrollTop).toBe(40);
+    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+  });
+
+  it("restores only the matching completed older anchor and ignores generic height growth", async () => {
+    const onLoadOlder = vi.fn();
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="anchor"
+          state={stateWithRange(0, 3)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={3}
+          replayGeneration={4}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 20, 2_000, 400);
+    // TanStack's jsdom range is intentionally narrow; anchor whichever row is
+    // actually mounted at this viewport rather than assuming row zero exists.
+    const mountedRows = Array.from(scrollEl.querySelectorAll("[data-index]"));
+    // ChatView captures the first virtual item whose end is below scrollTop;
+    // at this near-top position that is the first mounted row.
+    const capturedRow = mountedRows[0];
+    expect(capturedRow).toBeDefined();
+    const capturedIdentity = capturedRow!.textContent ?? "";
+    expect(capturedIdentity).not.toBe("");
+    const capturedRowTop = getRowTop(capturedRow!);
+    const capturedOffset = 20 - capturedRowTop;
+    fireEvent.wheel(scrollEl, { deltaY: -30 });
+    fireEvent.scroll(scrollEl);
+    const anchorToken = onLoadOlder.mock.calls[0]?.[0] as string;
+    expect(anchorToken).toBeTruthy();
+
+    setScrollPosition(scrollEl, 20, 3_000, 400);
+    rerender(
+      <ThemeProvider>
+        <ChatView
+          sessionId="anchor"
+          state={stateWithRange(-1, 3)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={3}
+          replayGeneration={4}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+          completedOlderAnchorToken="some-other-request"
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    expect(scrollEl.scrollTop).toBe(20);
+
+    rerender(
+      <ThemeProvider>
+        <ChatView
+          sessionId="anchor"
+          state={stateWithRange(-1, 3)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={3}
+          replayGeneration={4}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+          completedOlderAnchorToken={anchorToken}
+        />
+      </ThemeProvider>,
+    );
+    for (let i = 0; i < 4; i++) await flushRaf();
+    // jsdom does not emit the native scroll notification for the virtualizer's
+    // direct anchor write. Drive that real event once so its mounted range
+    // catches up before checking the retained row identity.
+    fireEvent.scroll(scrollEl);
+    for (let i = 0; i < 2; i++) await flushRaf();
+
+    // The removed total-height compensation would jump to 1020. Correlated
+    // restoration must converge on the same row and its captured offset.
+    const restoredRow = Array.from(scrollEl.querySelectorAll("[data-index]")).find(
+      (row) => row.textContent === capturedIdentity,
+    );
+    expect(restoredRow).toBeDefined();
+    expect(scrollEl.scrollTop).toBe(getRowTop(restoredRow!) + capturedOffset);
+    expect(scrollEl.scrollTop).not.toBe(1_020);
+  });
+
+  it("keeps the desktop saved anchor across session switches", async () => {
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView sessionId="desktop-a" state={stateWithRange(0, 50)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 240, 2_000, 400);
+    fireEvent.scroll(scrollEl);
+
+    rerender(
+      <ThemeProvider>
+        <ChatView sessionId="desktop-b" state={stateWithRange(100, 150)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    setScrollPosition(scrollEl, 900, 2_000, 400);
+
+    rerender(
+      <ThemeProvider>
+        <ChatView sessionId="desktop-a" state={stateWithRange(0, 50)} toolContext={defaultToolContext} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    await flushRaf();
+
+    const restoredScrollEl = getScrollContainer(container);
+    expect(restoredScrollEl.scrollTop).toBe(240);
+    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+  });
+
+  it("keeps the explicit older button and captures an anchor token", async () => {
+    const onLoadOlder = vi.fn();
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="button"
           state={stateWith(5)}
           toolContext={defaultToolContext}
           hasMoreOlder
-          loadingOlder={false}
           onLoadOlder={onLoadOlder}
         />
       </ThemeProvider>,
     );
     await flushRaf();
 
-    const button = container.querySelector('[data-testid="load-older-button"]');
-    expect(button).not.toBeNull();
-    fireEvent.click(button!);
+    fireEvent.click(container.querySelector('[data-testid="load-older-button"]')!);
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
-  });
-
-  it("prepend growth while not sticking compensates scrollTop by height delta", async () => {
-    // See change: session-tail-rehydrate (D5 load-older anchor).
-    // Product path: virtualizer onChange (or messages.length layout fallback)
-    // adds height delta to scrollTop when stick is false so prepended older
-    // rows keep the same content under the viewport.
-    const { container, rerender } = render(
-      <ThemeProvider>
-        <ChatView state={stateWith(50)} toolContext={defaultToolContext} />
-      </ThemeProvider>,
-    );
-    await flushRaf();
-
-    const scrollEl = getScrollContainer(container);
-    let top = 400;
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => top,
-      set: (v: number) => {
-        top = Number(v);
-      },
-    });
-    Object.defineProperty(scrollEl, "clientHeight", {
-      configurable: true,
-      value: 400,
-      writable: true,
-    });
-    Object.defineProperty(scrollEl, "scrollHeight", {
-      configurable: true,
-      value: 2000,
-      writable: true,
-    });
-
-    // Escape sticky bottom (mid-list).
-    fireEvent.scroll(scrollEl);
-    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
-
-    // Seed lastScrollHeightRef at 2000 (mount often sees jsdom height 0).
-    rerender(
-      <ThemeProvider>
-        <ChatView state={stateWith(51)} toolContext={defaultToolContext} />
-      </ThemeProvider>,
-    );
-    await flushRaf();
-    top = 400;
-    fireEvent.scroll(scrollEl);
-
-    // Grow height before message-count update so onChange/layout see the delta.
-    Object.defineProperty(scrollEl, "scrollHeight", {
-      configurable: true,
-      value: 3000,
-      writable: true,
-    });
-    rerender(
-      <ThemeProvider>
-        <ChatView state={stateWith(80)} toolContext={defaultToolContext} />
-      </ThemeProvider>,
-    );
-    await flushRaf();
-
-    // 400 + (3000 - 2000) = 1400; stick path would pin to 3000.
-    expect(top).toBe(1400);
-    expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+    expect(onLoadOlder).toHaveBeenCalledWith(expect.stringMatching(/^button:/));
   });
 });

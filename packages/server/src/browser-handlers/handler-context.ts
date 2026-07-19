@@ -21,6 +21,7 @@ import type { PendingWorktreeBaseRegistry } from "../pending-worktree-base-regis
 import type { PendingResumeIntentRegistry } from "../pending-resume-intent-registry.js";
 import type { PendingClientCorrelations } from "../pending-client-correlations.js";
 import type { ViewMessageStore } from "../view-message-store.js";
+import type { ReplayCoordinator } from "../replay-coordinator.js";
 
 export interface BrowserHandlerContext {
   ws: WebSocket;
@@ -77,8 +78,10 @@ export interface BrowserHandlerContext {
    * See change: spawn-correlation-token.
    */
   pendingClientCorrelations?: PendingClientCorrelations;
+  /** Optional generation-aware replay coordinator. */
+  replayCoordinator?: ReplayCoordinator;
   /** Send message to a specific WebSocket */
-  sendTo(ws: WebSocket, msg: ServerToBrowserMessage): void;
+  sendTo(ws: WebSocket, msg: any): void;
   /** Broadcast to all connected browsers */
   broadcast(msg: ServerToBrowserMessage): void;
   /**
@@ -94,6 +97,8 @@ export interface BrowserHandlerContext {
   trackUiRequest(sessionId: string, requestId: string, method: string, params: Record<string, unknown>): boolean | void;
   /** Replay pending UI requests to a browser */
   replayPendingUiRequests(ws: WebSocket, sessionId: string): void;
+  /** Replay cached extension UI state after a correlated replay terminal. */
+  replayUiState?(ws: WebSocket, sessionId: string): void;
   /** Mark a session as mid-replay for a specific WebSocket (suppresses live events) */
   markReplaying(ws: WebSocket, sessionId: string): void;
   /** Clear replay flag and send catch-up events */
