@@ -170,6 +170,10 @@ pi-dashboard         # Start dashboard server
 pi-dashboard --dev   # Start with Vite proxy
 ```
 
+### Local deployment
+
+`~/.omp-dashboard/deploy/README.md` documents deployed port `8088` and zrok tunnel operations.
+
 ### Docker
 
 Self-contained all-in-one image (server + pi agent + code-server + zrok + tmux). Files live in `docker/`. Electron gains a wizard "remote" mode (attach to a Docker-hosted URL). Full guide: [`docker/README.md`](docker/README.md). Per-file map: [`docker/AGENTS.md`](docker/AGENTS.md).
