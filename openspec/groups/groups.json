@@ -189,13 +189,16 @@
     "add-google-oauth-provider": "next-phase",
     "add-chat-gateway": "next-phase",
     "open-view-command-in-editor-pane": "ui",
-    "fold-oversized-agents-directories": "ui"
+    "fold-oversized-agents-directories": "ui",
+    "adopt-pi-074-080-features": "ui",
+    "resolve-subagent-inspector-by-session-id": "ui",
+    "slim-kb-search-output": "ui",
+    "fix-empty-git-aggregate-diff-tab": "ui",
+    "support-zrok-v2": "ui",
+    "distill-hermes-memory-into-skills": "next-phase"
   },
   "changeOrder": {
-    "__ungrouped__": [
-      "distill-hermes-memory-into-skills",
-      "adopt-pi-074-080-features"
-    ],
+    "__ungrouped__": [],
     "kowledge-base": [
       "add-lora-dataset-export-skill",
       "add-automatic-session-kb-index",
@@ -204,10 +207,12 @@
       "memory-retrieval-injection"
     ],
     "ui": [
-      "open-view-command-in-editor-pane",
-      "fold-oversized-agents-directories"
+      "slim-kb-search-output",
+      "support-zrok-v2",
+      "fix-empty-git-aggregate-diff-tab"
     ],
     "next-phase": [
+      "distill-hermes-memory-into-skills",
       "add-chat-gateway",
       "add-google-oauth-provider",
       "add-workspace-checkpointing",

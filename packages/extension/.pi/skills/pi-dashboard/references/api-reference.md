@@ -451,6 +451,12 @@ Create a tunnel connection.
 ### `POST /api/tunnel-disconnect`
 Disconnect the active tunnel.
 
+**Body (optional):**
+```json
+{ "forget": true }
+```
+When `forget: true`, releases reserved URL (zrok v2 `zrok2 delete name`) and clears config `tunnel.zrok.reservedName`. Without body or `forget: false`, plain disconnect preserves reserved URL + config (URL stable on next connect).
+
 ---
 
 ## Server Lifecycle
