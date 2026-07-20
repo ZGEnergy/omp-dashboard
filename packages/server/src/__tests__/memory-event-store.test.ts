@@ -313,6 +313,46 @@ describe("memory-event-store", () => {
     });
   });
 
+  describe("assistant prose preservation", () => {
+    it("preserves long assistant text through insertion and hydration while capping unrelated fields", () => {
+      const store = createMemoryEventStore(neverPinned);
+      const longText = "assistant prose ".repeat(600);
+      const events: DashboardEvent[] = ["message_update", "message_end"].map((eventType) => ({
+        eventType,
+        timestamp: 1,
+        data: {
+          message: { role: "assistant", content: [{ type: "text", text: longText }] },
+          unrelated: "U".repeat(5_000),
+        },
+      }));
+
+      for (const [index, event] of events.entries()) {
+        store.insertEvent("live", event);
+        const stored = store.getEvent("live", index + 1) as any;
+        expect(stored.data.message.content[0].text).toBe(longText);
+        expect(stored.data.message.content[0].text).not.toContain("…[truncated]");
+        expect(stored.data.unrelated).toContain("…[truncated]");
+      }
+
+      const hydrated = store.replaceEvents("hydrated", events);
+      for (const [index, entry] of hydrated.events.entries()) {
+        const stored = entry.event as any;
+        expect(stored.data.message.content[0].text).toBe(longText);
+        expect(stored.data.message.content[0].text).not.toContain("…[truncated]");
+        expect(stored.data.unrelated).toContain("…[truncated]");
+        expect(entry.seq).toBe(index + 1);
+      }
+
+      const userStore = createMemoryEventStore(neverPinned);
+      userStore.insertEvent("user", {
+        eventType: "message_end",
+        timestamp: 1,
+        data: { message: { role: "user", content: [{ type: "text", text: longText }] } },
+      });
+      expect((userStore.getEvent("user", 1) as any).data.message.content[0].text).toContain("…[truncated]");
+    });
+  });
+
   describe("over-ceiling truncation preserves tool-call identity", () => {
     // Regression (Bug C): a tool_execution_end whose data exceeds
     // MAX_EVENT_DATA_SIZE was replaced by a placeholder that DROPPED toolCallId,

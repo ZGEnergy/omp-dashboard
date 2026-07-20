@@ -66,6 +66,22 @@ describe("GET /api/sessions/:sessionId/tool-result/:toolCallId", () => {
     const res = await fastify.inject({ method: "GET", url: "/api/sessions/ghost/tool-result/t3" });
     expect(res.statusCode).toBe(404);
   });
+
+  it("returns complete long assistant prose from the retained event", async () => {
+    const longText = "assistant prose ".repeat(600);
+    eventStore.insertEvent("s1", {
+      eventType: "message_end",
+      timestamp: 1,
+      data: { message: { role: "assistant", content: [{ type: "text", text: longText }] } },
+    });
+
+    const res = await fastify.inject({ method: "GET", url: "/api/events/s1/1" });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.payload);
+    expect(body.success).toBe(true);
+    expect(body.data.data.message.content[0].text).toBe(longText);
+    expect(body.data.data.message.content[0].text).not.toContain("…[truncated]");
+  });
 });
 
 // opt-in-out-of-cwd-session-diffs: GET /api/session-change/:sessionId/:toolCallId
