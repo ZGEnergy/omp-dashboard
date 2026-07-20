@@ -62,25 +62,40 @@ function capString(value: string, max: number): string {
   }
   return `${value.slice(0, max)}\n…[truncated]`;
 }
-function truncateStrings(value: unknown, max: number, depth = 0): unknown {
+type TruncateContext = "normal" | "assistant-content" | "assistant-text";
+
+function isAssistantTextBlock(value: unknown): boolean {
+  return !!value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).type === "text";
+}
+
+function truncateStrings(value: unknown, max: number, depth = 0, context: TruncateContext = "normal"): unknown {
   if (depth > 4) {
-    if (typeof value === "string") return capString(value, max);
+    if (typeof value === "string") return context === "assistant-text" ? value : capString(value, max);
     if (value && typeof value === "object" && !Array.isArray(value) && isImageBlock(value)) return value;
     return value && typeof value === "object" ? "[truncated: deep]" : value;
   }
-  if (typeof value === "string") return capString(value, max);
+  if (typeof value === "string") return context === "assistant-text" ? value : capString(value, max);
   if (Array.isArray(value)) {
     if (value.length > 20) return "[array truncated]";
     let changed = false;
-    const result = value.map((child) => { const next = truncateStrings(child, max, depth + 1); changed ||= next !== child; return next; });
+    const result = value.map((child) => {
+      const childContext = context === "assistant-content" && isAssistantTextBlock(child) ? "assistant-text" : "normal";
+      const next = truncateStrings(child, max, depth + 1, childContext);
+      changed ||= next !== child;
+      return next;
+    });
     return changed ? result : value;
   }
   if (!value || typeof value !== "object") return value;
   let changed = false;
   const result: Record<string, unknown> = {};
+  const isAssistantMessage = (value as Record<string, unknown>).role === "assistant";
   for (const [key, child] of Object.entries(value)) {
     if (key === "data" && typeof child === "string" && "mimeType" in value) { result[key] = child; continue; }
-    const next = truncateStrings(child, max, depth + 1);
+    const childContext: TruncateContext = context === "assistant-text"
+      ? key === "text" ? "assistant-text" : "normal"
+      : isAssistantMessage && key === "content" ? "assistant-content" : "normal";
+    const next = truncateStrings(child, max, depth + 1, childContext);
     changed ||= next !== child;
     result[key] = next;
   }

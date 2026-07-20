@@ -215,6 +215,49 @@ describe("replay coordinator", () => {
     if (rawLiveIndex >= 0) expect(rawLiveIndex).toBeGreaterThan(terminalIndex);
   });
 
+  it("preserves long assistant prose in live delivery and cold replay", async () => {
+    const store = createMemoryEventStore(() => false);
+    const longText = "assistant prose ".repeat(600);
+    const event: DashboardEvent = {
+      eventType: "message_end",
+      timestamp: 1,
+      data: { message: { role: "assistant", content: [{ type: "text", text: longText }] } },
+    };
+    const seq = store.insertEvent("s", event);
+    const stored = store.getEvent("s", seq)!;
+    expect((stored.data as any).message.content[0].text).toBe(longText);
+
+    const liveWs = socket();
+    const coordinator = createReplayCoordinator({ store });
+    const ctx = (ws: any) => ({
+      ws,
+      sessionManager: { get: () => undefined },
+      eventStore: store,
+      piGateway: { sendToSession() {} },
+      sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
+      broadcast() {},
+      getSubscribers: () => [ws],
+      replayPendingUiRequests() {},
+      markReplaying() {},
+      clearReplaying() {},
+    });
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "live", lastSeq: seq }, ctx(liveWs) as any);
+    coordinator.publishLive("s", { seq, event: stored });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const liveFrame = liveWs.frames.find((frame: any) => frame.type === "event" && frame.seq === seq);
+    expect(liveFrame.event.data.message.content[0].text).toBe(longText);
+    expect(liveFrame.event.data.message.content[0].text).not.toContain("…[truncated]");
+
+    const replayWs = socket();
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "cold", mode: "tail" }, ctx(replayWs) as any);
+    const replayEntry = replayWs.frames
+      .filter((frame: any) => frame.type === "event_replay")
+      .flatMap((frame: any) => frame.events)
+      .find((entry: any) => entry.seq === seq);
+    expect(replayEntry.event.data.message.content[0].text).toBe(longText);
+    expect(replayEntry.event.data.message.content[0].text).not.toContain("…[truncated]");
+  });
+
   it("retries a replay item after temporary gateway back-pressure without closing", async () => {
     const store = createMemoryEventStore(() => false);
     store.insertEvent("s", event("one"));
