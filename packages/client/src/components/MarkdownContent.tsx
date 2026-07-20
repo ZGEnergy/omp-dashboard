@@ -167,6 +167,131 @@ export function isFencedBlockComplete(content: string, code: string): boolean {
   return content.slice(idx + code.length).includes("```");
 }
 
+type MarkdownFence = { character: "`" | "~"; length: number };
+
+function fenceAtLineStart(content: string, lineStart: number): MarkdownFence | null {
+  let cursor = lineStart;
+  let indentation = 0;
+  while (indentation < 4 && content[cursor] === " ") {
+    cursor++;
+    indentation++;
+  }
+  if (indentation === 4) return null;
+
+  const character = content[cursor];
+  if (character !== "`" && character !== "~") return null;
+
+  let length = 0;
+  while (content[cursor + length] === character) length++;
+  return length >= 3 ? { character, length } : null;
+}
+
+function closingFence(content: string, openingLineEnd: number, fence: MarkdownFence): number {
+  let lineStart = openingLineEnd;
+  while (lineStart < content.length) {
+    const candidate = fenceAtLineStart(content, lineStart);
+    if (candidate?.character === fence.character && candidate.length >= fence.length) {
+      let cursor = lineStart;
+      while (cursor < content.length && content[cursor] !== "\n") cursor++;
+      const line = content.slice(lineStart, cursor);
+      if (/^ {0,3}[`~]+[ \t]*$/.test(line)) {
+        return cursor < content.length ? cursor + 1 : cursor;
+      }
+    }
+
+    const nextLine = content.indexOf("\n", lineStart);
+    if (nextLine === -1) return -1;
+    lineStart = nextLine + 1;
+  }
+  return -1;
+}
+
+function matchingDollar(content: string, start: number): number {
+  let inlineCodeDelimiter = "";
+  for (let cursor = start; cursor < content.length; cursor++) {
+    if (inlineCodeDelimiter) {
+      if (content.startsWith(inlineCodeDelimiter, cursor)) {
+        cursor += inlineCodeDelimiter.length - 1;
+        inlineCodeDelimiter = "";
+      }
+      continue;
+    }
+    if (content[cursor] === "`") {
+      let length = 0;
+      while (content[cursor + length] === "`") length++;
+      inlineCodeDelimiter = String.fromCharCode(96).repeat(length);
+      cursor += length - 1;
+      continue;
+    }
+    if (content[cursor] === "\\") {
+      cursor++;
+      continue;
+    }
+    if (content[cursor] === "$" && content[cursor + 1] !== "$") return cursor;
+    if (content[cursor] === "$" && content[cursor + 1] === "$") cursor++;
+  }
+  return -1;
+}
+
+function containsTeXMarker(content: string, start: number, end: number): boolean {
+  for (let cursor = start; cursor < end; cursor++) {
+    const character = content[cursor];
+    if (character === "^" || character === "_" || character === "{" || character === "}") return true;
+    if (character === "\\" && /[A-Za-z]/.test(content[cursor + 1] ?? "")) return true;
+  }
+  return false;
+}
+
+/** Escape numeric currency markers without disabling single-dollar TeX math. */
+function protectCurrencyInMarkdown(content: string): string {
+  const output: string[] = [];
+  let cursor = 0;
+
+  while (cursor < content.length) {
+    if (cursor === 0 || content[cursor - 1] === "\n") {
+      const fence = fenceAtLineStart(content, cursor);
+      if (fence) {
+        const openingLineEnd = content.indexOf("\n", cursor);
+        const end = openingLineEnd === -1 ? content.length : closingFence(content, openingLineEnd + 1, fence);
+        output.push(content.slice(cursor, end === -1 ? content.length : end));
+        cursor = end === -1 ? content.length : end;
+        continue;
+      }
+    }
+
+    if (content[cursor] === "`") {
+      let length = 0;
+      while (content[cursor + length] === "`") length++;
+      const delimiter = "`".repeat(length);
+      const closing = content.indexOf(delimiter, cursor + length);
+      output.push(content.slice(cursor, closing === -1 ? content.length : closing + length));
+      cursor = closing === -1 ? content.length : closing + length;
+      continue;
+    }
+
+    if (content[cursor] === "$" && content[cursor - 1] !== "$" && content[cursor + 1] !== "$" && content[cursor + 1] >= "0" && content[cursor + 1] <= "9") {
+      let backslashes = 0;
+      for (let previous = cursor - 1; previous >= 0 && content[previous] === "\\"; previous--) backslashes++;
+      if (backslashes % 2 === 0) {
+        const closing = matchingDollar(content, cursor + 1);
+        if (closing !== -1 && containsTeXMarker(content, cursor + 1, closing)) {
+          output.push(content.slice(cursor, closing + 1));
+          cursor = closing + 1;
+          continue;
+        }
+        output.push("\\", content[cursor]);
+        cursor++;
+        continue;
+      }
+    }
+
+    output.push(content[cursor]);
+    cursor++;
+  }
+
+  return output.join("");
+}
+
 function CodeBlockWrapper({ codeString, children }: { codeString: string; children: React.ReactNode }) {
   return (
     <div>
@@ -383,7 +508,7 @@ function PiAssetImg(props: React.ImgHTMLAttributes<HTMLImageElement>) {
 export const MarkdownContent = React.memo(function MarkdownContent({ content, context, frontmatter = "hide" }: Props) {
   // ASCII table monospace fixer — disabled pending further refinement
   // const processedContent = useMemo(() => wrapAsciiTables(content), [content]);
-  const processedContent = content;
+  const processedContent = useMemo(() => protectCurrencyInMarkdown(content), [content]);
   const containerRef = useRef<HTMLDivElement>(null);
   const onLoopbackClick = useLoopbackLinkOpen();
   const { resolved: theme, themeName } = useThemeContext();

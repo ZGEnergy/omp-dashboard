@@ -453,12 +453,77 @@ describe("MarkdownContent", () => {
       expect(container.querySelector(".katex")).not.toBeNull();
     });
 
+    it("keeps standalone currency amounts as literal text", () => {
+      const { container } = renderMd("It costs $100 today.");
+      expect(container.querySelector(".katex")).toBeNull();
+      expect(container.textContent).toContain("$100");
+    });
+
+    it("keeps multiple currency amounts out of math", () => {
+      const { container } = renderMd("It cost $100 yesterday and $200 today.");
+      expect(container.querySelector(".katex")).toBeNull();
+      expect(container.textContent).toContain("$100");
+      expect(container.textContent).toContain("$200");
+    });
+
+    it("preserves later Markdown after currency prose", () => {
+      const { container } = renderMd(
+        "Consequence: ~$552k of the window's money; the whole $552k constraint moved into the **matches ERCOT** band.",
+      );
+      expect(container.querySelector(".katex")).toBeNull();
+      expect(container.textContent).toContain("$552k");
+      expect(container.querySelector("strong")?.textContent).toBe("matches ERCOT");
+    });
+
+    it("keeps surrounding prose when rendering genuine inline TeX", () => {
+      const { container } = renderMd("Pythagoras: $a^2 + b^2 = c^2$.");
+      expect(container.querySelector(".katex")).not.toBeNull();
+      expect(container.textContent).toContain("Pythagoras:");
+    });
+
+    it("does not mistake numeric-leading TeX for currency", () => {
+      const { container } = renderMd("The growth term is $2^n$.");
+      expect(container.querySelector(".katex")).not.toBeNull();
+      expect(container.textContent).not.toContain("$2^n$");
+    });
+
+    it("allows escaped currency to coexist with math", () => {
+      const { container } = renderMd("Total \\$100, where $x > 0$.");
+      expect(container.textContent).toContain("$100");
+      expect(container.querySelector(".katex")).not.toBeNull();
+    });
+
+    it("does not rewrite currency inside inline code", () => {
+      const { container } = renderMd("Use `$100` literally.");
+      expect(container.querySelector(".katex")).toBeNull();
+      const code = container.querySelector("code");
+      expect(code?.textContent).toContain("$100");
+      expect(code?.textContent).not.toContain("\\$100");
+    });
+
+    it("does not rewrite currency inside fenced code", () => {
+      const { container } = renderMd("```text\n$100 and $200\n```");
+      expect(container.querySelector(".katex")).toBeNull();
+      const code = container.querySelector("code");
+      expect(code?.textContent).toContain("$100");
+      expect(code?.textContent).toContain("$200");
+      expect(code?.textContent).not.toContain("\\$100");
+      expect(code?.textContent).not.toContain("\\$200");
+    });
+
     it("renders display double-dollar math as katex-display when on its own line", () => {
       // remark-math treats `$$…$$` as DISPLAY math only when it's a
       // block-level construct (preceded/followed by blank lines or at
       // the start/end of input). Inline `$$…$$` is treated as inline.
       const { container } = renderMd("$$\n\\sum_{i=0}^{n} i\n$$");
       expect(container.querySelector(".katex-display")).not.toBeNull();
+    });
+
+    it("preserves numeric same-line double-dollar math delimiters", () => {
+      const { container } = renderMd("$$100$$");
+      expect(container.querySelector(".katex")).not.toBeNull();
+      expect(container.textContent).toContain("100");
+      expect(container.textContent).not.toContain("$");
     });
 
     it("renders \\beta as the beta glyph", () => {
