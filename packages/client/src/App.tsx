@@ -136,7 +136,7 @@ import { ApiContext, deriveApiBase, setGlobalApiBase, VITE_API_URL } from "./lib
 import { buildContextUsageMap } from "./lib/context-usage.js";
 import { DisplayPrefsProvider } from "./lib/DisplayPrefsContext.js";
 import { registerPluginCatalog, useI18n } from "./lib/i18n.js";
-import { mergeReplayWindow } from "./lib/replay-window.js";
+import { mergeReplayWindow, type ReplayWindow } from "./lib/replay-window.js";
 import { SessionAssetsProvider } from "./lib/SessionAssetsContext.js";
 import { deriveSelectedSessionId } from "./lib/selectedSessionId.js";
 import { selectViewedSessionId } from "./lib/selectViewedSessionId.js";
@@ -1566,15 +1566,9 @@ export default function App() {
   // (card + detail) and the sidebar tag filter group. Recomputes only when the
   // session list changes. See change: add-session-tags.
   const allTags = useMemo(() => allTagsInUse(Array.from(sessions.values())), [sessions]);
-  const sessionMessagesMap = useMemo(
-    () => new Map(Array.from(sessionStates, ([sessionId, state]) => [sessionId, state.messages])),
-    [sessionStates],
-  );
-
   const sessionList = (
     <SessionList
       sessions={Array.from(sessions.values())}
-      sessionMessagesMap={sessionMessagesMap}
       terminals={Array.from(terminals.values())}
       selectedId={selectedId}
       onSelect={handleSelect}

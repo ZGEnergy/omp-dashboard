@@ -1,5 +1,5 @@
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Router } from "wouter";
@@ -211,13 +211,3 @@ describe("SessionList auto-scroll-selected-session-card", () => {
 });
 
 
-describe("SessionList advisor activity threading", () => {
-  it("passes App-derived advisor rows to the production session card", () => {
-    mount({
-      sessions: [s()],
-      sessionMessagesMap: new Map([["s1", [{ role: "advisor" } as any]]]),
-      onSelect: () => {},
-    });
-    expect(screen.getByTestId("advisor-chip").title).toBe("Advisor reviews this session's transcript as a second agent; status only.");
-  });
-});

@@ -1438,23 +1438,9 @@ describe("SessionCard — +Worktree button (session-card-plus-session-button)", 
 });
 
 
-describe("SessionCard — advisor chip", () => {
-  it("does not show an advisor chip for legacy persisted metadata", () => {
-    render(<SessionCard session={makeSession({ advisor: true } as Partial<DashboardSession>)} {...defaultProps} />);
-    expect(screen.queryByTestId("advisor-chip")).toBeNull();
-  });
-
-  it("shows the advisor chip from observed advisor activity on desktop", () => {
-    render(<SessionCard session={makeSession()} messages={[{ role: "advisor" }]} {...defaultProps} />);
-    expect(screen.getByTestId("advisor-chip")).toBeTruthy();
-  });
-
-  it("shows the advisor chip on mobile only for observed advisor activity", () => {
-    vi.mocked(useMobile).mockReturnValue(true);
-    const { rerender } = render(<SessionCard session={makeSession()} messages={[{ role: "advisor" }]} {...defaultProps} />);
-    expect(screen.getByTestId("advisor-chip").title).toBe("Advisor reviews this session's transcript as a second agent; status only.");
-
-    rerender(<SessionCard session={makeSession()} {...defaultProps} />);
+describe("SessionCard — no passive advisor chip", () => {
+  it("does not render an advisor chip", () => {
+    render(<SessionCard session={makeSession()} {...defaultProps} />);
     expect(screen.queryByTestId("advisor-chip")).toBeNull();
   });
 });
