@@ -576,7 +576,13 @@ jobs:
       #     first-run bootstrap is network/time-sensitive. Harden to fatal once
       #     observed stably green.
       - name: Smoke-test NSIS Setup.exe (install/uninstall)
-        if: matrix.platform == 'win32'
+        # x64 only: the runner is x64 Windows and cannot execute an arm64
+        # Setup.exe/app, so the arm64 silent install never extracts files
+        # (pi-dashboard.exe absent → 150s timeout). The arm64 installer still
+        # builds + uploads above; its install/uninstall is validated on real
+        # arm64 hardware via the QA harness, same as the launch check. See
+        # change: restore-windows-nsis-installer.
+        if: matrix.platform == 'win32' && matrix.arch == 'x64'
         shell: pwsh
         run: |
           $arch = "${{ matrix.arch }}"
