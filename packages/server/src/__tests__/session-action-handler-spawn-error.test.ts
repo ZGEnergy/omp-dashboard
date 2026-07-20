@@ -5,9 +5,11 @@ vi.mock("../process-manager.js", () => ({
   spawnPiSession: vi.fn(),
 }));
 vi.mock("../../../shared/src/config.js", () => ({
+  clampSpawnRegisterTimeoutMs: (timeoutMs: number) => timeoutMs,
   loadConfig: () => ({ spawnStrategy: "headless" as const, spawnRegisterTimeoutMs: 30000 }),
 }));
 vi.mock("@blackbelt-technology/pi-dashboard-shared/config.js", () => ({
+  clampSpawnRegisterTimeoutMs: (timeoutMs: number) => timeoutMs,
   loadConfig: () => ({ spawnStrategy: "headless" as const, spawnRegisterTimeoutMs: 30000 }),
 }));
 // Preflight always passes in these tests so spawnPiSession is always reached.

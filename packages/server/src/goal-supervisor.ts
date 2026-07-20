@@ -253,7 +253,6 @@ export function createGoalSupervisor(deps: GoalSupervisorDeps): GoalSupervisor {
     const poisoned = consecutiveNoProgressResumes(goal) >= POISON_K;
     const sessionFile = poisoned ? undefined : deps.resolveSessionFile(sessionId);
     const reason: GoalRespawn["reason"] = poisoned || !sessionFile ? "fresh" : "resume";
-
     // Record this death as a respawn attempt (drives future counters) + flip to
     // the visible respawning state (never `pursuing` with no live driver — S1).
     const respawn: GoalRespawn = { at: now(), sessionId, reason, madeProgress };

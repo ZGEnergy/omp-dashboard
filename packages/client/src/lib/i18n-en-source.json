@@ -1,4 +1,8 @@
 {
+  "advisor.card": "Advisor",
+  "advisor.chip": "Advisor",
+  "advisor.chipTooltip": "Advisor reviews this session's transcript as a second agent; status only.",
+  "advisor.enable": "Enable advisor",
   "common.192168162028000Or": "192.168.16.202:8000  or  http://host:8000",
   "tunnel.1InstallZrok": "1. Install zrok",
   "gateway.2CreateAccountEnroll": "2. Create Account & Enroll",

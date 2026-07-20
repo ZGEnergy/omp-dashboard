@@ -3,7 +3,7 @@
  */
 import { existsSync } from "node:fs";
 import type { BrowserToServerMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { clampSpawnRegisterTimeoutMs, loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import {
   killPidWithGroup,
@@ -18,6 +18,7 @@ import { createBranchedSessionFile } from "../session-file-reader.js";
 import { appendSpawnFailure } from "../spawn-failure-log.js";
 import { preflightSpawn } from "../spawn-preflight.js";
 import { getSpawnRegisterWatchdog } from "../spawn-register-watchdog.js";
+import { mintSpawnToken } from "../spawn-token.js";
 import type { BrowserHandlerContext } from "./handler-context.js";
 import { shouldInterceptReload } from "./session-action-helpers.js";
 
@@ -449,7 +450,10 @@ export async function handleSpawnSession(
   // silently. Previous behaviour left the user staring at an empty state
   // when pi itself was broken in the target folder.
   try {
-    const spawnResult = await spawnPiSession(msg.cwd, { strategy });
+    const spawnResult = await spawnPiSession(msg.cwd, {
+      strategy,
+      spawnToken: mintSpawnToken(),
+    });
     if (spawnResult.process && spawnResult.pid) {
       headlessPidRegistry.register(
         spawnResult.pid,
@@ -493,16 +497,15 @@ export async function handleSpawnSession(
         ...(spawnResult.stderr ? { stderrTail: spawnResult.stderr } : {}),
       });
     } else {
-      // Arm watchdog for every successful spawn. See change: spawn-failure-diagnostics.
+      // Snapshot timeout at arm time so Settings changes cannot alter this spawn.
+      const registrationWindowMs = clampSpawnRegisterTimeoutMs(loadConfig().spawnRegisterTimeoutMs);
       const watchdog = getSpawnRegisterWatchdog();
       watchdog.arm({
         pid: spawnResult.pid,
         cwd: msg.cwd,
         mechanism: strategy as import("@blackbelt-technology/pi-dashboard-shared/platform/spawn-mechanism.js").SpawnMechanism,
         logPath: spawnResult.logPath,
-        // Read-on-arm: pass current config value so a Settings change takes effect
-        // on the next spawn without a server restart. See change: spawn-failure-diagnostics (fix W1).
-        timeoutMs: config.spawnRegisterTimeoutMs,
+        timeoutMs: registrationWindowMs,
         ws,
         spawnToken: spawnResult.spawnToken,
       });

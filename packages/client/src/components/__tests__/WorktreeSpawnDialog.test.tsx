@@ -16,10 +16,20 @@
  *    it is set. Fork-mode tests below explicitly select fork mode via the
  *    `worktree-source-fork` toggle (see `enterFork`).
  */
-import React from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+
+
+
+
+
 import { WorktreeSpawnDialog } from "../WorktreeSpawnDialog.js";
+
+
 
 const {
   fetchGitHead,
@@ -49,6 +59,8 @@ vi.mock("../../lib/git-api.js", async () => {
     cleanupOrphanWorktreePath,
   };
 });
+
+
 
 afterEach(() => {
   cleanup();
@@ -82,6 +94,11 @@ function defaultMocks(opts: {
 // Default mocks for the orphan-probe + cleanup APIs that newly-fetched on
 // every render. Override in specific tests as needed.
 beforeEach(() => {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+  });
+  
   probePathExists.mockResolvedValue(false);
   cleanupOrphanWorktreePath.mockResolvedValue({ ok: true });
 });
@@ -134,7 +151,31 @@ describe("WorktreeSpawnDialog — loading + existing worktrees", () => {
       screen.getByTestId(`worktree-row-${encodeURIComponent("/repo/.worktrees/feat-x")}`),
     );
     expect(onSpawn).toHaveBeenCalledTimes(1);
-    expect(onSpawn).toHaveBeenCalledWith("/repo/.worktrees/feat-x", undefined);
+    expect(onSpawn).toHaveBeenCalledWith("/repo/.worktrees/feat-x", {});
+  });
+});
+
+
+
+
+
+
+
+
+
+
+
+describe("WorktreeSpawnDialog — global advisor default", () => {
+  it("does not override OMP's advisor default", async () => {
+    defaultMocks();
+    const onSpawn = vi.fn();
+    render(<WorktreeSpawnDialog cwd="/repo" onSpawn={onSpawn} onCancel={() => {}} />);
+
+    await waitFor(() => screen.getByTestId("worktree-row-main"));
+    expect(screen.queryByRole("checkbox", { name: "Enable advisor" })).toBeNull();
+
+    fireEvent.click(screen.getByTestId("worktree-row-main"));
+    expect(onSpawn).toHaveBeenCalledWith("/repo", {});
   });
 });
 

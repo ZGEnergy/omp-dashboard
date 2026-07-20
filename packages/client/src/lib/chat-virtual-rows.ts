@@ -96,6 +96,7 @@ function baseRowSize(role: ChatMessage["role"]): number {
     case "commandFeedback":
       return 48;
     case "thinking":
+    case "advisor":
       return 72;
     case "user":
       return 96;

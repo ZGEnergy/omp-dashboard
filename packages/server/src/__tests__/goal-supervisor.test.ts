@@ -185,9 +185,18 @@ describe("goal-supervisor", () => {
     expect(spawns[0]!.reason).toBe("resume");
     expect(spawns[0]!.sessionFile).toBe("/sessions/driver-1.jsonl");
     // A respawn record was written with madeProgress true.
+    // The resumed process inherits the OMP global default; Dashboard sends no advisor flag.
     const rec = await get(g.id);
     expect(rec.respawns![0]!.madeProgress).toBe(true);
     expect(rec.inFlightSpawn?.spawnToken).toBeTruthy();
+  });
+
+  it("resumed goal driver inherits OMP advisor default instead of preserving old state", async () => {
+    const g = await activeGoal({ autoRespawn: true, totalTurns: 5 });
+    await death("driver-1");
+    await runTimers();
+    expect(spawns[0]).not.toHaveProperty("advisor");
+    expect((await get(g.id)).status).toBe("respawning");
   });
 
   it("no-progress deaths grow backoff 5s → 15s → 45s (spread beyond breaker window)", async () => {

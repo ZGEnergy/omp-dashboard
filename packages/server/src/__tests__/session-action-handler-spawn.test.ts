@@ -2,7 +2,7 @@
  * Tests for handleSpawnSession — preflight gate, watchdog arming, failure log.
  * See change: spawn-failure-diagnostics.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 
 // Mock everything the handler depends on.
@@ -25,6 +25,7 @@ vi.mock("../process-manager.js", () => ({
 }));
 
 vi.mock("@blackbelt-technology/pi-dashboard-shared/config.js", () => ({
+  clampSpawnRegisterTimeoutMs: vi.fn((timeoutMs: number) => timeoutMs),
   loadConfig: vi.fn().mockReturnValue({
     spawnStrategy: "headless",
     spawnRegisterTimeoutMs: 30000,
@@ -42,9 +43,9 @@ vi.mock("@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js", (
 
 import { handleSpawnSession } from "../browser-handlers/session-action-handler.js";
 import { spawnPiSession } from "../process-manager.js";
+import { appendSpawnFailure } from "../spawn-failure-log.js";
 import { preflightSpawn } from "../spawn-preflight.js";
 import { getSpawnRegisterWatchdog } from "../spawn-register-watchdog.js";
-import { appendSpawnFailure } from "../spawn-failure-log.js";
 
 const mockSpawnPiSession = vi.mocked(spawnPiSession);
 const mockPreflightSpawn = vi.mocked(preflightSpawn);
@@ -66,6 +67,7 @@ function makeCtx() {
     headlessPidRegistry: { register: vi.fn() } as never,
     pendingDashboardSpawns: new Map(),
     pendingAttachRegistry: { enqueue: vi.fn() } as never,
+    pendingAdvisorRegistry: { reserve: vi.fn(), arm: vi.fn(), discard: vi.fn(), has: vi.fn(), consume: vi.fn(), dispose: vi.fn(), size: vi.fn() },
     sessionManager: {} as never,
     broadcast: vi.fn() as never,
     piGateway: {} as never,
@@ -147,4 +149,25 @@ describe("handleSpawnSession", () => {
 
     expect(mockAppendSpawnFailure).toHaveBeenCalledWith(expect.objectContaining({ code: "SPAWN_ERRNO" }));
   });
+
+  it("inherits OMP advisor default and arms the generic successful-spawn watchdog", async () => {
+    mockPreflightSpawn.mockReturnValue({ ok: true, reasons: [] });
+    const watchdog = { arm: vi.fn() };
+    vi.mocked(getSpawnRegisterWatchdog).mockReturnValue(watchdog as never);
+    mockSpawnPiSession.mockImplementationOnce(async (_cwd, options) => ({
+      success: true,
+      spawnToken: options?.spawnToken,
+      message: "spawned",
+    }));
+
+    const ctx = makeCtx();
+    await handleSpawnSession({ type: "spawn_session", cwd: "/p/x" } as never, ctx as never);
+
+    expect(mockSpawnPiSession).toHaveBeenCalledWith("/p/x", expect.not.objectContaining({ advisor: expect.anything() }));
+    const spawnOptions = mockSpawnPiSession.mock.calls[0]?.[1];
+    expect(spawnOptions?.spawnToken).toBeTypeOf("string");
+    expect(spawnOptions).not.toHaveProperty("advisor");
+    expect(watchdog.arm).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 30_000 }));
+  });
+
 });

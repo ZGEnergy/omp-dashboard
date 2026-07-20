@@ -15,18 +15,18 @@
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
+import type { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  resetResolver,
+  setKeeperManager,
+  setResolver,
+  spawnPiSession,
+} from "../process-manager.js";
 import type {
   KeeperManager,
   KeeperSpawnResult,
 } from "../rpc-keeper/keeper-manager.js";
-import {
-  setKeeperManager,
-  setResolver,
-  resetResolver,
-  spawnPiSession,
-} from "../process-manager.js";
-import type { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 
 // Fake resolver returning a fixed pi argv so spawnHeadlessViaKeeper's
 // resolvePiCommand() call succeeds. The PI_NOT_FOUND branch is exercised
@@ -132,6 +132,7 @@ describe("spawnHeadless (headless via keeper)", () => {
     expect(state.spawnCalls[0].piArgs).toBeDefined();
     expect(state.spawnCalls[0].piArgs).toContain("--mode");
     expect(state.spawnCalls[0].piArgs).toContain("rpc");
+    expect(state.spawnCalls[0].piArgs).not.toContain("--advisor");
 
     // SpawnResult.keeperSockPath populated so callers can pass it to
     // `headlessPidRegistry.register(..., {keeperPid, keeperSockPath})`
@@ -192,6 +193,7 @@ describe("spawnHeadless (headless via keeper)", () => {
     // we only assert the path token is present so we don't double-bind to
     // upstream argv shape.
     expect(piArgs).toContain(sessionFile);
+    expect(piArgs).not.toContain("--advisor");
   });
 
   it("returns SPAWN_ERRNO when KeeperManager.spawnKeeperFor reports !success", async () => {

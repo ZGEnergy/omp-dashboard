@@ -1,0 +1,202 @@
+diff --git a/node_modules/@tanstack/virtual-core/dist/cjs/index.cjs b/node_modules/@tanstack/virtual-core/dist/cjs/index.cjs
+index ea619f4..adba51b 100644
+--- a/node_modules/@tanstack/virtual-core/dist/cjs/index.cjs
++++ b/node_modules/@tanstack/virtual-core/dist/cjs/index.cjs
+@@ -80,7 +80,7 @@ const observeElementOffset = (instance, cb) => {
+     return;
+   }
+   let offset = 0;
+-  const fallback = instance.options.useScrollendEvent && supportsScrollend ? () => void 0 : utils.debounce(
++  const fallback = instance.options.useScrollendEvent && supportsScrollend ? Object.assign(() => void 0, { cancel: () => void 0 }) : utils.debounce(
+     targetWindow,
+     () => {
+       cb(offset, false);
+@@ -102,6 +102,7 @@ const observeElementOffset = (instance, cb) => {
+     element.addEventListener("scrollend", endHandler, addEventListenerOptions);
+   }
+   return () => {
++    fallback.cancel();
+     element.removeEventListener("scroll", handler);
+     if (registerScrollendEvent) {
+       element.removeEventListener("scrollend", endHandler);
+@@ -118,7 +119,7 @@ const observeWindowOffset = (instance, cb) => {
+     return;
+   }
+   let offset = 0;
+-  const fallback = instance.options.useScrollendEvent && supportsScrollend ? () => void 0 : utils.debounce(
++  const fallback = instance.options.useScrollendEvent && supportsScrollend ? Object.assign(() => void 0, { cancel: () => void 0 }) : utils.debounce(
+     targetWindow,
+     () => {
+       cb(offset, false);
+@@ -139,6 +140,7 @@ const observeWindowOffset = (instance, cb) => {
+     element.addEventListener("scrollend", endHandler, addEventListenerOptions);
+   }
+   return () => {
++    fallback.cancel();
+     element.removeEventListener("scroll", handler);
+     if (registerScrollendEvent) {
+       element.removeEventListener("scrollend", endHandler);
+diff --git a/node_modules/@tanstack/virtual-core/dist/cjs/utils.cjs b/node_modules/@tanstack/virtual-core/dist/cjs/utils.cjs
+index 310dfe7..59b0e07 100644
+--- a/node_modules/@tanstack/virtual-core/dist/cjs/utils.cjs
++++ b/node_modules/@tanstack/virtual-core/dist/cjs/utils.cjs
+@@ -57,10 +57,18 @@ function notUndefined(value, msg) {
+ const approxEqual = (a, b) => Math.abs(a - b) < 1.01;
+ const debounce = (targetWindow, fn, ms) => {
+   let timeoutId;
+-  return function(...args) {
+-    targetWindow.clearTimeout(timeoutId);
+-    timeoutId = targetWindow.setTimeout(() => fn.apply(this, args), ms);
++  const debounced = function(...args) {
++    if (timeoutId !== void 0) targetWindow.clearTimeout(timeoutId);
++    timeoutId = targetWindow.setTimeout(() => {
++      timeoutId = void 0;
++      fn.apply(this, args);
++    }, ms);
+   };
++  debounced.cancel = () => {
++    if (timeoutId !== void 0) targetWindow.clearTimeout(timeoutId);
++    timeoutId = void 0;
++  };
++  return debounced;
+ };
+ exports.approxEqual = approxEqual;
+ exports.debounce = debounce;
+diff --git a/node_modules/@tanstack/virtual-core/dist/esm/index.js b/node_modules/@tanstack/virtual-core/dist/esm/index.js
+index 8acf35b..331b49f 100644
+--- a/node_modules/@tanstack/virtual-core/dist/esm/index.js
++++ b/node_modules/@tanstack/virtual-core/dist/esm/index.js
+@@ -78,7 +78,7 @@ const observeElementOffset = (instance, cb) => {
+     return;
+   }
+   let offset = 0;
+-  const fallback = instance.options.useScrollendEvent && supportsScrollend ? () => void 0 : debounce(
++  const fallback = instance.options.useScrollendEvent && supportsScrollend ? Object.assign(() => void 0, { cancel: () => void 0 }) : debounce(
+     targetWindow,
+     () => {
+       cb(offset, false);
+@@ -100,6 +100,7 @@ const observeElementOffset = (instance, cb) => {
+     element.addEventListener("scrollend", endHandler, addEventListenerOptions);
+   }
+   return () => {
++    fallback.cancel();
+     element.removeEventListener("scroll", handler);
+     if (registerScrollendEvent) {
+       element.removeEventListener("scrollend", endHandler);
+@@ -116,7 +117,7 @@ const observeWindowOffset = (instance, cb) => {
+     return;
+   }
+   let offset = 0;
+-  const fallback = instance.options.useScrollendEvent && supportsScrollend ? () => void 0 : debounce(
++  const fallback = instance.options.useScrollendEvent && supportsScrollend ? Object.assign(() => void 0, { cancel: () => void 0 }) : debounce(
+     targetWindow,
+     () => {
+       cb(offset, false);
+@@ -137,6 +138,7 @@ const observeWindowOffset = (instance, cb) => {
+     element.addEventListener("scrollend", endHandler, addEventListenerOptions);
+   }
+   return () => {
++    fallback.cancel();
+     element.removeEventListener("scroll", handler);
+     if (registerScrollendEvent) {
+       element.removeEventListener("scrollend", endHandler);
+diff --git a/node_modules/@tanstack/virtual-core/dist/esm/utils.js b/node_modules/@tanstack/virtual-core/dist/esm/utils.js
+index ff39058..63d47c1 100644
+--- a/node_modules/@tanstack/virtual-core/dist/esm/utils.js
++++ b/node_modules/@tanstack/virtual-core/dist/esm/utils.js
+@@ -55,10 +55,18 @@ function notUndefined(value, msg) {
+ const approxEqual = (a, b) => Math.abs(a - b) < 1.01;
+ const debounce = (targetWindow, fn, ms) => {
+   let timeoutId;
+-  return function(...args) {
+-    targetWindow.clearTimeout(timeoutId);
+-    timeoutId = targetWindow.setTimeout(() => fn.apply(this, args), ms);
++  const debounced = function(...args) {
++    if (timeoutId !== void 0) targetWindow.clearTimeout(timeoutId);
++    timeoutId = targetWindow.setTimeout(() => {
++      timeoutId = void 0;
++      fn.apply(this, args);
++    }, ms);
+   };
++  debounced.cancel = () => {
++    if (timeoutId !== void 0) targetWindow.clearTimeout(timeoutId);
++    timeoutId = void 0;
++  };
++  return debounced;
+ };
+ export {
+   approxEqual,
+diff --git a/node_modules/@tanstack/virtual-core/src/index.ts b/node_modules/@tanstack/virtual-core/src/index.ts
+index b4794e0..5b25729 100644
+--- a/node_modules/@tanstack/virtual-core/src/index.ts
++++ b/node_modules/@tanstack/virtual-core/src/index.ts
+@@ -159,7 +159,7 @@ export const observeElementOffset = <T extends Element>(
+   let offset = 0
+   const fallback =
+     instance.options.useScrollendEvent && supportsScrollend
+-      ? () => undefined
++      ? Object.assign(() => undefined, { cancel: () => undefined })
+       : debounce(
+           targetWindow,
+           () => {
+@@ -187,6 +187,7 @@ export const observeElementOffset = <T extends Element>(
+     element.addEventListener('scrollend', endHandler, addEventListenerOptions)
+   }
+   return () => {
++    fallback.cancel()
+     element.removeEventListener('scroll', handler)
+     if (registerScrollendEvent) {
+       element.removeEventListener('scrollend', endHandler)
+@@ -210,7 +211,7 @@ export const observeWindowOffset = (
+   let offset = 0
+   const fallback =
+     instance.options.useScrollendEvent && supportsScrollend
+-      ? () => undefined
++      ? Object.assign(() => undefined, { cancel: () => undefined })
+       : debounce(
+           targetWindow,
+           () => {
+@@ -235,6 +236,7 @@ export const observeWindowOffset = (
+     element.addEventListener('scrollend', endHandler, addEventListenerOptions)
+   }
+   return () => {
++    fallback.cancel()
+     element.removeEventListener('scroll', handler)
+     if (registerScrollendEvent) {
+       element.removeEventListener('scrollend', endHandler)
+diff --git a/node_modules/@tanstack/virtual-core/src/utils.ts b/node_modules/@tanstack/virtual-core/src/utils.ts
+index c11b3d3..66d5ac7 100644
+--- a/node_modules/@tanstack/virtual-core/src/utils.ts
++++ b/node_modules/@tanstack/virtual-core/src/utils.ts
+@@ -85,14 +85,27 @@ export function notUndefined<T>(value: T | undefined, msg?: string): T {
+ 
+ export const approxEqual = (a: number, b: number) => Math.abs(a - b) < 1.01
+ 
++type DebouncedFunction = {
++  (this: any, ...args: Array<any>): void
++  cancel: () => void
++}
++
+ export const debounce = (
+   targetWindow: Window & typeof globalThis,
+   fn: Function,
+   ms: number,
+ ) => {
+-  let timeoutId: number
+-  return function (this: any, ...args: Array<any>) {
+-    targetWindow.clearTimeout(timeoutId)
+-    timeoutId = targetWindow.setTimeout(() => fn.apply(this, args), ms)
++  let timeoutId: number | undefined
++  const debounced: DebouncedFunction = function (this: any, ...args: Array<any>) {
++    if (timeoutId !== undefined) targetWindow.clearTimeout(timeoutId)
++    timeoutId = targetWindow.setTimeout(() => {
++      timeoutId = undefined
++      fn.apply(this, args)
++    }, ms)
++  }
++  debounced.cancel = () => {
++    if (timeoutId !== undefined) targetWindow.clearTimeout(timeoutId)
++    timeoutId = undefined
+   }
++  return debounced
+ }

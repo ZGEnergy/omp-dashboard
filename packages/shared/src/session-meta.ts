@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { DisplayPrefs, PartialDisplayPrefs } from "./display-prefs.js";
+import type { PartialDisplayPrefs } from "./display-prefs.js";
 
 /**
  * Session metadata stored as a sidecar `.meta.json` file

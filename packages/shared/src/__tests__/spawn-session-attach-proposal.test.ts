@@ -3,10 +3,10 @@
  * `SpawnSessionBrowserMessage`. See change:
  * add-folder-task-checker-and-spawn-attach.
  */
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
-  SpawnSessionBrowserMessage,
   BrowserToServerMessage,
+  SpawnSessionBrowserMessage,
 } from "../browser-protocol.js";
 
 describe("SpawnSessionBrowserMessage.attachProposal", () => {
@@ -45,3 +45,4 @@ describe("SpawnSessionBrowserMessage.attachProposal", () => {
     expect("attachProposal" in parsed).toBe(false);
   });
 });
+

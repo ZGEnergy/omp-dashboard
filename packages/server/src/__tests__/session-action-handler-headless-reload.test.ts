@@ -3,7 +3,7 @@
  *
  * See change: headless-reload-via-respawn.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock spawnPiSession BEFORE importing the handler.
 vi.mock("../process-manager.js", () => ({
@@ -154,6 +154,27 @@ describe("handleHeadlessReload — happy path", () => {
     // Feedback sequence: started → completed
     const feedback = findFeedback(insertedEvents);
     expect(feedback.map((f) => f.status)).toEqual(["started", "completed"]);
+  });
+});
+
+describe("handleHeadlessReload — global advisor default", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("does not preserve prior advisor metadata on the replacement spawn", async () => {
+    (spawnPiSession as any).mockResolvedValueOnce({ success: true, message: "ok" });
+    const { ctx } = makeCtx({
+      sessions: {
+        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "active" },
+      },
+    });
+
+    await handleHeadlessReload(
+      { type: "send_prompt", sessionId: "S1", text: "/reload" } as any,
+      ctx,
+    );
+
+    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.not.objectContaining({ advisor: expect.anything() }));
   });
 });
 
@@ -346,6 +367,38 @@ describe("handleHeadlessReload — concurrent calls", () => {
     expect(spawnPiSession).toHaveBeenCalledTimes(2);
     expect(registerCalls).toHaveLength(2);
     expect(pidBySession.S1).toBe(registerCalls[registerCalls.length - 1].pid);
+  });
+});
+
+describe("global advisor default on session replacement", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("omits advisor override for ended-session auto-resume", async () => {
+    (spawnPiSession as any).mockResolvedValueOnce({ success: true, message: "ok" });
+    const { ctx } = makeCtx({
+      sessions: {
+        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "ended" },
+      },
+    });
+
+    await handleSendPrompt({ type: "send_prompt", sessionId: "S1", text: "continue" } as any, ctx);
+
+    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.not.objectContaining({ advisor: expect.anything() }));
+  });
+
+  it("omits advisor override for explicit websocket resume", async () => {
+    (spawnPiSession as any).mockResolvedValueOnce({ success: true, message: "ok" });
+    const { ctx } = makeCtx({
+      sessions: {
+        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "ended" },
+      },
+    });
+
+    const { handleResumeSession } = await import("../browser-handlers/session-action-handler.js");
+    await handleResumeSession({ type: "resume_session", sessionId: "S1", mode: "continue" } as any, ctx);
+
+    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.not.objectContaining({ advisor: expect.anything() }));
   });
 });
 

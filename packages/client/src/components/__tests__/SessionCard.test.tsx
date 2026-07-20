@@ -4,6 +4,7 @@ import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared
 import { cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import type React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useMobile } from "../../hooks/useMobile.js";
 import { useSessionActions } from "../../hooks/useSessionActions.js";
 import { DisplayPrefsProvider } from "../../lib/DisplayPrefsContext.js";
 import { branchCache, GroupGitInfo, SessionCard } from "../SessionCard.js";
@@ -12,7 +13,10 @@ vi.mock("../../hooks/useMobile.js", () => ({
   useMobile: vi.fn(() => false),
 }));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.mocked(useMobile).mockReturnValue(false);
+});
 
 function makeSession(overrides: Partial<DashboardSession> = {}): DashboardSession {
   return {
@@ -1336,7 +1340,7 @@ describe("SessionCard — +Session wiring through handleSpawnSession (session-ca
     );
     const onSpawnSession = result.current.handleSpawnSession;
     const onSpawnSibling = (s: any) => onSpawnSession(s.cwd, s.attachedProposal || undefined);
-    return { send, onSpawnSibling };
+    return { send, onSpawnSession, onSpawnSibling };
   }
 
   it("4.1 click sends spawn_session with cwd + attachProposal + requestId", () => {
@@ -1370,7 +1374,13 @@ describe("SessionCard — +Session wiring through handleSpawnSession (session-ca
     expect("attachProposal" in send.mock.calls[0][0]).toBe(false);
   });
 
-  it("4.3 cwdMissing → button disabled, click does NOT send", () => {
+  it("4.3 omits advisor from spawn messages", () => {
+    const { send, onSpawnSession } = setup();
+    onSpawnSession("/project/plain");
+    expect("advisor" in send.mock.calls[0][0]).toBe(false);
+  });
+
+  it("4.4 cwdMissing → button disabled, click does NOT send", () => {
     const { send, onSpawnSibling } = setup();
     const session = makeSession({ cwd: "/project/gone", cwdMissing: true });
     render(<SessionCard session={session} {...defaultProps} onSpawnSibling={onSpawnSibling} />);
@@ -1424,5 +1434,13 @@ describe("SessionCard — +Worktree button (session-card-plus-session-button)", 
     render(<SessionCard session={makeSession()} {...defaultProps} onSpawnSibling={() => {}} onSpawnWorktree={() => {}} />);
     expect(screen.getByTestId("session-card-spawn-sibling")).toBeTruthy();
     expect(screen.getByTestId("session-card-spawn-worktree")).toBeTruthy();
+  });
+});
+
+
+describe("SessionCard — no passive advisor chip", () => {
+  it("does not render an advisor chip", () => {
+    render(<SessionCard session={makeSession()} {...defaultProps} />);
+    expect(screen.queryByTestId("advisor-chip")).toBeNull();
   });
 });

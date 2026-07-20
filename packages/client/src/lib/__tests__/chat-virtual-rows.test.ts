@@ -80,6 +80,7 @@ describe("estimateVirtualRowSize (task 2.2)", () => {
       "turnSeparator",
       "rawEvent",
       "inlineTerminal",
+      "advisor",
     ];
     for (const role of roles) {
       expect(estimateVirtualRowSize(msg({ id: role, role }))).toBeGreaterThan(0);
@@ -350,5 +351,16 @@ describe("extendRangeWithSelection (task 4.2 / 4.4)", () => {
     expect(out.length).toBe(100);
     expect(out[0]).toBe(0);
     expect(out[99]).toBe(99);
+  });
+});
+
+
+describe("advisor virtual rows", () => {
+  it("uses the advisor base size and reserves its content length", () => {
+    const advisor = msg({ id: "advisor-1", role: "advisor", content: "x".repeat(81) });
+
+    expect(estimateVirtualRowSize(advisor)).toBe(72);
+    expect(computeRowTextChars(advisor)).toBe(81);
+    expect(estimateVirtualRowSize(advisor, computeRowTextChars(advisor))).toBe(112);
   });
 });

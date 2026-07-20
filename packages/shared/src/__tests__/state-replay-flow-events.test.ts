@@ -5,7 +5,7 @@
  * event_forward carrying eventType + data verbatim, ordered by seq, so the
  * client's idempotent reduceFlowEvent rebuilds the flow card on reload.
  */
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { replayEntriesAsEvents } from "../state-replay.js";
 
 function flowEventEntry(
@@ -43,6 +43,29 @@ describe("replayEntriesAsEvents — persisted flow events", () => {
     ]);
     expect((flows[0].event.data as any).flowName).toBe("demo");
     expect((flows[2].event.data as any).toolName).toBe("read");
+  });
+
+  it("preserves flow-event replay when advisor records are interleaved", () => {
+    const events = replayEntriesAsEvents("sess-1", [
+      flowEventEntry("f0", 0, "flow_started", { flowName: "demo" }),
+      {
+        type: "custom_message",
+        id: "advisor-7",
+        customType: "advisor",
+        display: true,
+        content: "<advisory>fix type</advisory>",
+        details: { notes: [{ note: "fix type", severity: "concern" }] },
+      },
+    ]);
+
+    expect(events.map((event) => event.event.eventType)).toEqual([
+      "message_start",
+      "message_end",
+      "flow_started",
+    ]);
+    expect(events.filter((event) => event.event.eventType === "flow_started")).toHaveLength(1);
+    expect(events[0]?.event.data).toMatchObject({ entryId: "advisor-7" });
+    expect(events[1]?.event.data).toMatchObject({ entryId: "advisor-7" });
   });
 
   it("sorts emitted flow events by ascending seq even when file order differs", () => {

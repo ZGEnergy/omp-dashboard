@@ -3,12 +3,12 @@
  *
  * Every test passes `platform` explicitly. Never mutates process.platform.
  */
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  selectMechanism,
   buildWtArgs,
-  sessionFlagsToArgv,
   type SpawnMechanismContext,
+  selectMechanism,
+  sessionFlagsToArgv,
 } from "../platform/spawn-mechanism.js";
 
 function ctx(overrides: Partial<SpawnMechanismContext> = {}): SpawnMechanismContext {
@@ -128,4 +128,5 @@ describe("sessionFlagsToArgv", () => {
   it("returns empty array with file but no mode", () => {
     expect(sessionFlagsToArgv({ sessionFile: "/s/x.jsonl" })).toEqual([]);
   });
+
 });

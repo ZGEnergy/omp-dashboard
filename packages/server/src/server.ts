@@ -2,8 +2,8 @@
  * Dashboard HTTP + WebSocket server.
  */
 
-import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -77,6 +77,12 @@ import { createPiGateway, type PiGateway } from "./pi-gateway.js";
 import { pluginIntentCache } from "./plugin-intent-cache.js";
 import { createPreferencesStore, type PreferencesStore } from "./preferences-store.js";
 import { spawnPiSession } from "./process-manager.js";
+import { createPushDispatcher, type PushDispatcher } from "./push/push-dispatcher.js";
+import { createPushTokenRegistry } from "./push/push-token-registry.js";
+import { createFcmTransport } from "./push/push-transports/fcm.js";
+import type { PushTransport, PushTransportKind } from "./push/push-transports/types.js";
+import { createWebPushTransport } from "./push/push-transports/web-push.js";
+import { loadOrGenerateVapidKeys, publicKeyForLivePush } from "./push/push-vapid.js";
 import { applyReattachPolicy } from "./reattach-placement.js";
 import { reconcileSessionOrder } from "./reconcile-session-order.js";
 import { resolveOrderKey } from "./resolve-order-key.js";
@@ -94,27 +100,21 @@ import { registerModelProxyDiagnosticsRoutes } from "./routes/model-proxy-diagno
 import { registerModelProxyRefreshRoutes } from "./routes/model-proxy-refresh-routes.js";
 import { registerModelProxyRoutes } from "./routes/model-proxy-routes.js";
 import { registerModelsIntrospectionRoute } from "./routes/models-introspection-routes.js";
+import { registerOmpConfigRoutes } from "./routes/omp-config-routes.js";
 import { registerOpenSpecGroupRoutes } from "./routes/openspec-group-routes.js";
 import { registerOpenSpecRoutes } from "./routes/openspec-routes.js";
 import { registerPackageRoutes } from "./routes/package-routes.js";
 import { registerPairingRoutes } from "./routes/pairing-routes.js";
 import { registerPiChangelogRoutes } from "./routes/pi-changelog-routes.js";
 import { registerPiCoreRoutes } from "./routes/pi-core-routes.js";
-import { registerPushRoutes } from "./routes/push-routes.js";
-import { createPushTokenRegistry } from "./push/push-token-registry.js";
-import { createPushDispatcher, type PushDispatcher } from "./push/push-dispatcher.js";
-import { loadOrGenerateVapidKeys, publicKeyForLivePush } from "./push/push-vapid.js";
-import { createWebPushTransport } from "./push/push-transports/web-push.js";
-import { createFcmTransport } from "./push/push-transports/fcm.js";
-import type { PushTransport, PushTransportKind } from "./push/push-transports/types.js";
 import { registerPluginActivationRoutes } from "./routes/plugin-activation-routes.js";
 import { registerPluginConfigRoutes } from "./routes/plugin-config-routes.js";
-import { registerOmpConfigRoutes } from "./routes/omp-config-routes.js";
-import { registerPreferencesDisplayRoutes } from "./routes/preferences-display-routes.js";
 import { registerPreferencesAutoNameRoutes } from "./routes/preferences-auto-name-routes.js";
+import { registerPreferencesDisplayRoutes } from "./routes/preferences-display-routes.js";
 import { registerPreferencesWorktreeInitRoutes } from "./routes/preferences-worktree-init-routes.js";
 import { registerProviderAuthRoutes } from "./routes/provider-auth-routes.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
+import { registerPushRoutes } from "./routes/push-routes.js";
 import { invalidateRecommendedCache, registerRecommendedRoutes } from "./routes/recommended-routes.js";
 import { registerResourceActivationRoutes } from "./routes/resource-activation-routes.js";
 import { registerSessionRoutes } from "./routes/session-routes.js";
@@ -1208,7 +1208,10 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
         strategy: "headless",
         spawnToken: req.spawnToken,
         ...(req.reason === "resume" && req.sessionFile
-          ? { sessionFile: req.sessionFile, mode: "continue" as const }
+          ? {
+              sessionFile: req.sessionFile,
+              mode: "continue" as const,
+            }
           : {}),
       });
       if (result.process && result.pid) {

@@ -21,6 +21,7 @@ import { t } from "../lib/i18n";
 import { clearLoadingHistory, HYDRATE_CEILING_MS, rearmLoadingHistory } from "../lib/loading-history.js";
 import { clearRecoveryOffer, setRecoveryOffer } from "../lib/recovery-offer-bus.js";
 import type { ReplayPersister } from "../lib/replay-persist.js";
+import type { ReplayWindow } from "../lib/replay-window.js";
 import type { SessionReplayController } from "./useSessionReplayController.js";
 import { inferPlatform, pathKey } from "../lib/session-grouping.js";
 import { pushSpawnErrorToast } from "../lib/spawn-error-toast-bus.js";
@@ -162,9 +163,9 @@ export interface MessageHandlerDeps {
    * the server. Updated as older history is fetched so re-renders don't
    * refetch. See change: session-tail-rehydrate.
    */
-  historyWindowRef?: React.MutableRefObject<Map<string, { minSeq: number; hasMoreOlder: boolean }>>;
+  historyWindowRef?: React.MutableRefObject<Map<string, ReplayWindow>>;
   /** Set-state for the history-window cursor map. See change: session-tail-rehydrate. */
-  setHistoryWindowMap?: React.Dispatch<React.SetStateAction<Map<string, { minSeq: number; hasMoreOlder: boolean }>>>;
+  setHistoryWindowMap?: React.Dispatch<React.SetStateAction<Map<string, ReplayWindow>>>;
   /** Per-session "loading older" flag for the Load-more affordance. See change: session-tail-rehydrate. */
   setLoadingOlderMap?: React.Dispatch<React.SetStateAction<Map<string, boolean>>>;
   /** The single authoritative replay admission boundary. When supplied, replay,
@@ -833,19 +834,19 @@ export function useMessageHandler(
                 : coldInfer
                   ? true
                   : (prev?.hasMoreOlder ?? false);
-            historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder });
+            historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder, partialHead: prev?.partialHead ?? false });
             setHistoryWindowMap?.((m) => {
               const next = new Map(m);
-              next.set(msg.sessionId, { minSeq, hasMoreOlder });
+              next.set(msg.sessionId, { minSeq, hasMoreOlder, partialHead: prev?.partialHead ?? false });
               return next;
             });
           } else if (isOlderPage && firstSeq != null && prev) {
             // Older page without meta: advance minSeq downward only.
             const minSeq = Math.min(prev.minSeq, firstSeq);
-            historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder: prev.hasMoreOlder });
+            historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder: prev.hasMoreOlder, partialHead: prev.partialHead });
             setHistoryWindowMap?.((m) => {
               const next = new Map(m);
-              next.set(msg.sessionId, { minSeq, hasMoreOlder: prev.hasMoreOlder });
+              next.set(msg.sessionId, { minSeq, hasMoreOlder: prev.hasMoreOlder, partialHead: prev.partialHead });
               return next;
             });
           }

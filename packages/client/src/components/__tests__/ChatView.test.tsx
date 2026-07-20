@@ -1,5 +1,6 @@
 import { act, fireEvent, render } from "@testing-library/react";
 import React from "react";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ChatMessage, createInitialState, type PendingPrompt } from "../../lib/event-reducer.js";
 import { ChatView } from "../ChatView.js";
@@ -7,6 +8,11 @@ import { ThemeProvider } from "../ThemeProvider.js";
 import type { ToolContext } from "../tool-renderers/index.js";
 
 const defaultToolContext: ToolContext = {};
+
+function WindowVirtualizerProbe() {
+  useWindowVirtualizer({ count: 1, estimateSize: () => 1 });
+  return null;
+}
 
 beforeAll(() => {
   // jsdom doesn't implement scrollTo
@@ -49,6 +55,54 @@ function stateWithToolMessage(overrides: Partial<ChatMessage> = {}) {
 }
 
 describe("ChatView", () => {
+  it("cancels the virtualizer reset timer when unmounted", () => {
+    vi.useFakeTimers();
+    const timerCountBeforeRender = vi.getTimerCount();
+
+    try {
+      const view = render(
+        <ThemeProvider><ChatView state={createInitialState()} toolContext={defaultToolContext} /></ThemeProvider>,
+      );
+
+      expect(vi.getTimerCount()).toBeGreaterThan(timerCountBeforeRender);
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(timerCountBeforeRender);
+
+      // Advancing past TanStack Virtual's 150ms reset delay must not schedule
+      // a React update after the ChatView tree is gone.
+      act(() => {
+        vi.advanceTimersByTime(151);
+      });
+      expect(vi.getTimerCount()).toBe(timerCountBeforeRender);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the window virtualizer reset timer when unmounted", () => {
+    vi.useFakeTimers();
+    const timerCountBeforeRender = vi.getTimerCount();
+    let view: ReturnType<typeof render> | undefined;
+
+    try {
+      view = render(<WindowVirtualizerProbe />);
+
+      expect(vi.getTimerCount()).toBeGreaterThan(timerCountBeforeRender);
+      view.unmount();
+      view = undefined;
+      expect(vi.getTimerCount()).toBe(timerCountBeforeRender);
+
+      act(() => {
+        vi.advanceTimersByTime(151);
+      });
+      expect(vi.getTimerCount()).toBe(timerCountBeforeRender);
+    } finally {
+      view?.unmount();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it("does not render the display-prefs View menu (relocated to the StatusBar)", () => {
     // The ⚙ View trigger moved out of ChatView into the composer StatusBar.
     // Guards against a duplicate ChatViewMenu re-appearing here. See change:
@@ -663,5 +717,24 @@ describe("ChatView", () => {
       expect(state.messages.length).toBe(3);
       expect(bubbles.length).toBe(1);
     });
+  });
+});
+
+
+describe("advisor transcript rows", () => {
+  it("renders an advisor row through the virtualized ChatView", () => {
+    const state = createInitialState();
+    state.messages.push({
+      id: "advisor-1",
+      role: "advisor",
+      content: "raw advisory",
+      timestamp: Date.now(),
+      advisorDetails: { notes: [{ note: "fix the type", severity: "concern", advisor: "Scout" }] },
+    });
+
+    const { getByRole } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
+    );
+    expect(getByRole("button", { name: /scout.*concern/i })).not.toBeNull();
   });
 });

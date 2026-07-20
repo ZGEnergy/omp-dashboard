@@ -184,7 +184,7 @@ describe("useMessageHandler session-tail-rehydrate", () => {
       isLast: true,
     } as ServerToBrowserMessage);
 
-    expect(historyWindowRef.current.get(SID)).toEqual({ minSeq: 50, hasMoreOlder: true });
+    expect(historyWindowRef.current.get(SID)).toEqual({ minSeq: 50, hasMoreOlder: true, partialHead: false });
   });
 
   it("loadingOlder clears only on isLast terminal batch", () => {

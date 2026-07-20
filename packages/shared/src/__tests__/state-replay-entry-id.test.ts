@@ -4,7 +4,7 @@
  * message_end carries entryId === entry.id. Replay does NOT need
  * entry_persisted back-fill because it reads from the persisted JSONL.
  */
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { replayEntriesAsEvents } from "../state-replay.js";
 
 describe("replayEntriesAsEvents — entryId fidelity", () => {
@@ -42,6 +42,38 @@ describe("replayEntriesAsEvents — entryId fidelity", () => {
     const end = events.find((e) => e.event.eventType === "message_end");
     expect(end).toBeDefined();
     expect((end!.event.data as any).entryId).toBe("a1");
+  });
+
+
+  it("replays visible advisor records as one message event pair", () => {
+    const events = replayEntriesAsEvents("s1", [{
+      type: "custom_message",
+      id: "advisor-7",
+      customType: "advisor",
+      display: true,
+      content: "<advisory>fix type</advisory>",
+      details: { notes: [{ note: "fix type", severity: "concern" }] },
+    }]);
+
+    expect(events.map((event) => event.event.eventType)).toEqual(["message_start", "message_end"]);
+    expect(events[1]?.event.data).toMatchObject({
+      message: {
+        role: "custom",
+        customType: "advisor",
+        content: "<advisory>fix type</advisory>",
+        details: { notes: [{ note: "fix type", severity: "concern" }] },
+      },
+      entryId: "advisor-7",
+    });
+  });
+
+  it("skips hidden and non-advisor custom_message records", () => {
+    const events = replayEntriesAsEvents("s1", [
+      { type: "custom_message", id: "hidden", customType: "advisor", display: false },
+      { type: "custom_message", id: "other", customType: "rewind-report", display: true },
+    ]);
+
+    expect(events).toEqual([]);
   });
 
   it("emits no entry_persisted events during replay", () => {

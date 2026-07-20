@@ -3305,3 +3305,52 @@ describe("manual retry visual-dedup (ChatMessage.retriedFrom)", () => {
     expect(state.messages[0]!.retriedFrom).toBeUndefined();
   });
 });
+
+
+describe("advisor message_end rows", () => {
+  const advisorEvent = (overrides: Record<string, unknown> = {}): DashboardEvent => ({
+    eventType: "message_end",
+    timestamp: 7000,
+    data: {
+      entryId: "advisor-7",
+      message: {
+        id: "bridge-7",
+        role: "custom",
+        customType: "advisor",
+        display: true,
+        content: "<advisory>fix type</advisory>",
+        details: { notes: [{ note: "fix type", severity: "concern", advisor: "Scout" }] },
+        ...overrides,
+      },
+    },
+  });
+
+  it("upserts advisor rows for both live and replay event delivery", () => {
+    const event = advisorEvent();
+    const once = reduceEvent(createInitialState(), event, { isLive: true });
+    const twice = reduceEvent(once, event);
+
+    expect(twice.messages.filter((message) => message.role === "advisor")).toHaveLength(1);
+    expect(twice.messages.find((message) => message.id === "advisor-7")).toMatchObject({
+      content: "<advisory>fix type</advisory>",
+      timestamp: 7000,
+      advisorDetails: { notes: [{ note: "fix type", severity: "concern", advisor: "Scout" }] },
+    });
+  });
+
+  it("uses message id when an advisor event has no entry id", () => {
+    const event = advisorEvent();
+    delete event.data.entryId;
+    const state = reduceEvent(createInitialState(), event);
+
+    expect(state.messages).toContainEqual(expect.objectContaining({ id: "bridge-7", role: "advisor" }));
+  });
+
+  it("skips hidden and unrelated custom message_end events", () => {
+    const hidden = reduceEvent(createInitialState(), advisorEvent({ display: false }));
+    const unrelated = reduceEvent(createInitialState(), advisorEvent({ customType: "rewind-report" }));
+
+    expect(hidden.messages).toHaveLength(0);
+    expect(unrelated.messages).toHaveLength(0);
+  });
+});

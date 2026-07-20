@@ -68,9 +68,9 @@ import type { BrowserHandlerContext } from "./browser-handlers/handler-context.j
 import { handleAbort, handleClearFollowupEntries, handleEditFollowupEntry, handleFlowControl, handleForceKill, handleKillProcess, handlePromoteFollowupEntry, handleRemoveFollowupEntry, handleResumeSession, handleSendPrompt, handleShutdown, handleSpawnSession, handleStopAfterTurn, handleSubagentResyncRequest } from "./browser-handlers/session-action-handler.js";
 import { handleAcceptReplaceProposal, handleAttachProposal, handleDetachProposal, handleDismissReplaceProposal, handleFetchContent, handleHideSession, handleListSessions, handleRenameSession, handleSetSessionDisplayPrefs, handleSetSessionProcessDrawer, handleSetSessionTags, handleUnhideSession } from "./browser-handlers/session-meta-handler.js";
 import { handleSubscribe, replayUiState } from "./browser-handlers/subscription-handler.js";
-import { createReplayCoordinator, REPLAY_SEND_BACKPRESSURE, type ReplayCoordinator } from "./replay-coordinator.js";
 import { handleCloseInlineTerminal, handleCreateTerminal, handleKillTerminal, handleOpenInlineTerminal, handleRenameTerminal } from "./browser-handlers/terminal-handler.js";
 import { createPendingResumeRegistry, type PendingResumeRegistry } from "./pending-resume-registry.js";
+import { createReplayCoordinator, REPLAY_SEND_BACKPRESSURE, type ReplayCoordinator } from "./replay-coordinator.js";
 import type { TerminalManager } from "./terminal-manager.js";
 import { ViewMessageStore } from "./view-message-store.js";
 import { createViewedSessionTracker, type ViewedSessionTracker } from "./viewed-session-tracker.js";
