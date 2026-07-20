@@ -4,10 +4,11 @@ description: >
   Cut a new pi-agent-dashboard release. Promotes `## [Unreleased]` in
   CHANGELOG.md to a versioned section, bumps all workspace package.json
   versions per SemVer, commits, tags `v<version>`, and pushes — which
-  triggers the Release workflow that publishes **10 npm packages** (root +
-  shared/extension/server/web/image-fit/kb/kb-extension +
-  session-distiller/distill-session-knowledge via `npm publish -ws --include-workspace-root`)
-  and the Electron artifacts
+  triggers the Release workflow that publishes **every non-private workspace**
+  (~32 `@blackbelt-technology/*` packages as of v0.6.0 — count grows over time;
+  derive live with `for f in package.json packages/*/package.json; do node -e
+  "const p=require('./$f'); if(!p.private) console.log(p.name)"; done`) via
+  `npm publish -ws --include-workspace-root`, plus the Electron artifacts
   and creates a GitHub Release (published automatically for production
   tags `vX.Y.Z`; draft for pre-release tags `vX.Y.Z-rc.N`). Use when the user says "cut a
   release", "release vX.Y.Z", "publish a new version", "tag a release".
@@ -65,6 +66,8 @@ Run these in order. If any fails, **stop and report** — do not continue.
    node scripts/verify-release-deps.mjs
    ```
    Asserts critical runtime deps (`jiti`, pinned `node-pty`, etc.) are still declared in the publishable workspace `package.json` files. Failure means the next published tarball would be broken — STOP and fix the workspace before cutting.
+
+   > **Known false-positive (substring gate).** `verify-release-deps.mjs` checks the declared range with a naive `String.includes(minVersion)` — NOT semver math. So a legitimate pi bump ABOVE the floor (e.g. floor `0.74.0`, pin `^0.80.10`) fails the gate because `"^0.80.10"` does not contain the substring `"0.74.0"`. When this fires and the pin is genuinely newer than the rule's `minVersion`, the FIX is to bump that rule's `minVersion` (+ its evidence note in the RULES array, and the `scripts/AGENTS.md` row) to the new floor — do NOT downgrade the pin. This recurs on every pi version bump. See change: fix-release-lockfile-drift (gate lives in `scripts/verify-release-deps.mjs`).
 
 7. **Dispatch `ci-smoke.yml` against `develop`** (recommended; catches installer regressions BEFORE the tag exists)
 
@@ -217,7 +220,8 @@ Give the user this summary:
 Next steps (human):
 1. Watch CI:  https://github.com/BlackBeltTechnology/pi-agent-dashboard/actions
    The Release workflow will:
-     • publish @blackbelt-technology/pi-dashboard to npm
+     • publish every non-private workspace (~32 @blackbelt-technology/*
+       packages via `npm publish -ws --include-workspace-root`) to npm
      • build Electron installers (macOS DMG × 2 — Apple Silicon +
        Intel, Linux DEB+AppImage, Windows NSIS+ZIP+portable per arch)
      • create a GitHub Release with artifacts + latest*.yml metadata.
@@ -245,6 +249,14 @@ If something is wrong, see `.pi/skills/release-revoke/SKILL.md`.
 
 - **Never skip pre-flight.** A failing test or dirty tree means the
   release is not ready.
+- **If a gate-fix commit lands AFTER `chore(release)`, tag `HEAD`, not the
+  release commit.** When the pre-tag smoke matrix (step 7) surfaces a latent
+  `develop` bug, you fix it in a follow-up commit on top of `chore(release)`.
+  The Release workflow re-runs the release-gate against the TAGGED tree, so
+  the tag MUST include that fix — tag current `HEAD`. The version files
+  (`0.6.0`) live in the ancestor `chore(release)` commit, so the tagged tree
+  still carries the right version. Tagging the release commit instead would
+  re-run the gate WITHOUT the fix and fail the publish (dangling tag).
 - **Production tags publish automatically** (electron-updater needs a
   published release). Only pre-release tags (`-rc.N`, `-beta.N`) stay
   drafts for manual review — never hand-edit a production release to draft.
