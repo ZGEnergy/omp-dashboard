@@ -102,7 +102,10 @@ export default function fauxProviderExtension(pi: ExtensionAPI): void {
   const registration = registerFauxProvider({
     api: "faux",
     provider: "faux",
-    models: [{ id: "faux-1", input: ["text", "image"] }],
+    models: [
+      { id: "faux-1", input: ["text", "image"] },
+      { id: "faux-2", input: ["text", "image"] },
+    ],
     tokensPerSecond: Number(process.env.FAUX_TPS ?? 50),
   });
 
@@ -125,13 +128,44 @@ export default function fauxProviderExtension(pi: ExtensionAPI): void {
       {
         id: "faux-1",
         name: "faux-1",
-        reasoning: false,
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: 16384,
+      },
+      {
+        id: "faux-2",
+        name: "faux-2",
+        reasoning: true,
         input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 128000,
         maxTokens: 16384,
       },
     ],
+  });
+
+  // Test-only TUI control: real browser slash-command prompts reach this
+  // handler through the spawned Pi bridge, allowing deterministic ordered
+  // model/thinking changes without exposing a production API.
+  pi.registerCommand("e2e_model_sync", {
+    description: "E2E-only ordered model/thinking control",
+    handler: async (args, ctx) => {
+      for (const token of args.trim().split(/\s+/).filter(Boolean)) {
+        const separator = token.indexOf(":");
+        if (separator <= 0) continue;
+        const ref = token.slice(0, separator);
+        const level = token.slice(separator + 1);
+        const slash = ref.indexOf("/");
+        if (slash <= 0) continue;
+        const model = ctx.modelRegistry.find(ref.slice(0, slash), ref.slice(slash + 1));
+        if (!model) continue;
+        await pi.setModel(model);
+        pi.setThinkingLevel(level === "null" ? "off" : level as never);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    },
   });
 
   // Self-perpetuating router: re-appends itself each call so the faux queue

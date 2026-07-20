@@ -26,6 +26,13 @@ export const TESTIDS = {
   folderSpawnSessionBtn: "folder-spawn-session-btn", // sidebar "New Session"
   // Composer send button (faux round-trip specs drive a prompt through it).
   sendButton: "send-button",
+  // Model/thinking preference sync controls (existing app test IDs).
+  modelSelectorButton: "model-selector-button",
+  modelDropdown: "model-dropdown",
+  modelFilter: "model-filter",
+  modelRow: "model-row",
+  thinkingLevelButton: "thinking-level-button",
+  thinkingLevelDropdown: "thinking-level-dropdown",
   // Flow launch dialog submit (flow-roundtrip L3 spec drives a real pi-flows
   // run through it). Existing app testid on FlowLaunchDialog's Run button — no
   // new app testid added. See change: add-flow-plugin-e2e-tests.
@@ -153,6 +160,9 @@ export async function pinDirectory(page: Page, absPath: string): Promise<void> {
   }
   const dialog = byTestId(page, "pinDirectoryDialog");
   await dialog.waitFor({ state: "visible" });
+  // Let the initial browse settle before typing; its completion can otherwise
+  // overwrite a just-filled path with the current home directory.
+  await page.waitForTimeout(300);
   await dialog.getByRole("textbox").fill(absPath);
   // PathPicker confirm needs the target listed under its parent dir. Escape
   // regex metacharacters so a dir name like `a.b` matches literally.
@@ -203,8 +213,8 @@ export async function ensureGitSession(page: Page): Promise<Locator> {
  * Unlike `ensureGitSession` (which reuses an existing card), this always spawns
  * a fresh session and resolves it by a `data-session-id` not present before the
  * spawn. Faux round-trip specs need isolation: e.g. an `ask_user` scenario
- * leaves a pending interactive prompt that would block a reused session for the
- * next spec. Pins FIXTURE_GIT first if no folder exists yet.
+ * leaves a pending interactive prompt that would block a reused session for
+ * the next spec. Pins FIXTURE_GIT first if no folder exists yet.
  */
 export async function spawnFreshGitSession(page: Page): Promise<Locator> {
   await gotoDashboard(page);
@@ -272,8 +282,8 @@ export async function spawnFreshGitSession(page: Page): Promise<Locator> {
  * Precondition: a session card is already selected (so CommandInput renders).
  * The faux round-trip specs use a `[[faux:<scenario-id>]]` sentinel prefix the
  * faux fixture resolves to a scripted scenario (see
- * `qa/fixtures/faux-provider.ext.ts`). Requires PI_E2E_SEED=1 so the faux model
- * is staged + selected.
+ * `qa/fixtures/faux-provider.ext.ts`). Requires PI_E2E_SEED=1 so the faux
+ * model is staged + selected.
  */
 export async function sendPrompt(page: Page, text: string): Promise<void> {
   const composer = page.getByPlaceholder(/message/i).first();
@@ -291,8 +301,7 @@ export async function sendPrompt(page: Page, text: string): Promise<void> {
 // the real UI. See change: add-session-uncommitted-indicator-and-commit.
 
 interface GitStatusShape {
-  dirtyCount: number; staged: number; unstaged: number;
-  untracked: number; ahead: number; behind: number;
+  dirtyCount: number; staged: number; unstaged: number; ahead: number; behind: number;
 }
 
 // The dashboard's REST envelope is `{ success, data?, error? }` (ApiResponse),
