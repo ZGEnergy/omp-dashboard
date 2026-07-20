@@ -1,6 +1,11 @@
 {
   "name": "@blackbelt-technology/pi-dashboard-kb",
   "version": "0.6.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlackBeltTechnology/pi-agent-dashboard",
+    "directory": "packages/kb"
+  },
   "publishConfig": {
     "access": "public"
   },
