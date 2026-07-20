@@ -405,6 +405,30 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   }, [state.messages, showDebugTools]);
   const retriedErrorIds = useMemo(() => findRetriedErrorIds(filteredMessages), [filteredMessages]);
   const hiddenToolResultIds = useMemo(() => findActiveInteractiveToolResultIds(filteredMessages), [filteredMessages]);
+  const activeInteractivePrompt = useMemo(() => {
+    for (let index = filteredMessages.length - 1; index >= 0; index -= 1) {
+      const message = filteredMessages[index];
+      if (message.role !== "interactiveUi") continue;
+      const args = message.args as Record<string, unknown> | undefined;
+      if (args?.status !== "pending") continue;
+      const cmp = (args?.params as Record<string, unknown> | undefined)?._promptBusComponent as
+        | { type?: string }
+        | undefined;
+      if (cmp?.type && isWidgetBarPrompt(cmp.type)) continue;
+      return {
+        message,
+        request: {
+          requestId: String(args.requestId ?? ""),
+          method: String(args.method ?? ""),
+          params: (args.params as Record<string, unknown> | undefined) ?? {},
+          status: "pending" as const,
+          result: args.result,
+          toolCallId: message.toolCallId,
+        } satisfies InteractiveUiRequest,
+      };
+    }
+    return null;
+  }, [filteredMessages]);
   // toolCallIds owned by live `interactiveUi` messages still in the list. The
   // paired `ask_user` tool card is redundant with the interactive card (both
   // render title + message), so it is suppressed while the interactive card
@@ -466,6 +490,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
           return true;
         }
         case "interactiveUi": {
+          if (activeInteractivePrompt?.message.id === msg.id) return false;
           const args = msg.args as Record<string, unknown> | undefined;
           const cmp = (args?.params as Record<string, unknown> | undefined)?._promptBusComponent as
             | { type?: string }
@@ -478,7 +503,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
           return true;
       }
     },
-    [prefs, showDebugTools, hiddenToolResultIds],
+    [activeInteractivePrompt, prefs, showDebugTools, hiddenToolResultIds],
   );
   const displayRows = useMemo(() => {
     const rows = groupedMessages.filter(isRowVisible);
@@ -1625,6 +1650,14 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         )
       )}
     </div>
+    {activeInteractivePrompt && (
+      <div
+        data-testid="active-interactive-prompt"
+        className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3"
+      >
+        <InteractiveUiCard request={activeInteractivePrompt.request} onRespondToUi={onRespondToUi} />
+      </div>
+    )}
     {showScrollTopButton && (
       <button
         data-testid="scroll-to-top"
