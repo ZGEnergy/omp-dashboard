@@ -408,6 +408,13 @@ jobs:
   # `packages/shared/src/__tests__/publish-workflow-contract.test.ts`.
   electron:
     needs: [resolve, publish]
+    # On the tag-push path `tag-and-push` is SKIPPED, and a skipped job in the
+    # needs-ancestry poisons the DEFAULT `if: success()` — GitHub then skips
+    # `electron` (and `github-release`) even when `publish` is green. Mirror the
+    # explicit skip-tolerant guard `publish` already uses so the release's
+    # installer + GitHub Release stages survive the skipped `tag-and-push`.
+    # See change: gate-publish-on-smoke-and-tests.
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     # All matrix/steps moved to .github/workflows/_electron-build.yml so the
     # same definition serves both this release flow AND the on-demand CI
     # workflow (.github/workflows/ci-electron.yml). See change:
