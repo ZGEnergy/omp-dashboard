@@ -58,9 +58,9 @@ const RULES = [
     evidence:
       "eliminate-electron-runtime-install task 1.1.a — pi lifted from " +
       "optional peer to regular dep so `npm install` resolves it for the " +
-      "standalone + Electron arms. Floor 0.74.0 taken from the now-vestigial " +
-      "packages/electron/offline-packages.json pin.",
-    minVersion: "0.74.0",
+      "standalone + Electron arms. Floor tracks the deliberate pi bump in " +
+      "commit 8646f1c4c (chore(deps): bump pi to 0.80.10).",
+    minVersion: "0.80.10",
   },
   {
     pkgPath: "packages/server/package.json",
