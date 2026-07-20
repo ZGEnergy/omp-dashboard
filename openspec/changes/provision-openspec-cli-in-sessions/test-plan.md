@@ -26,6 +26,14 @@ on hard failure).
 | X1 | R4 fail-soft + surface | fault-injection (resolve throws) | L1 | automated | `require.resolve` for the pinned CLI stubbed to throw | bridge provision runs at init | init returns without throwing; `PATH` unchanged; a diagnostic is logged AND the `missingTool`-style emit is invoked (spy asserts both) |
 | X2 | R1 + F3 stripped PATH | fault-injection (no node on PATH) | L1 | automated | a child env whose `PATH` lacks `node` | invoke the shim `openspec --version` | exit 0 — resolves `node` via absolute `process.execPath`, not `PATH` |
 
+### Single-source version governance
+
+| id | requirement | technique | level | disposition | input | trigger | expected observable |
+|----|-------------|-----------|-------|-------------|-------|---------|---------------------|
+| S1 | drift fails CI | decision-table | L1 | automated | package.json fixtures where the extension `@fission-ai/openspec` floor diverges from the server | run the `verify-release-deps` floor-consistency check | non-zero exit naming the drifted site; equal-floor fixture exits 0 |
+| S2 | offline-hard regen, flags kept | state / process | L2 | automated | repo with installed openspec `1.6.0`, network blocked | `npx --no-install openspec init --tools pi --force` | exit 0 AND a regenerated `SKILL.md` has `generatedBy: "1.6.0"`; with bin absent it errors (no fetch) |
+| S3 | poller + init compat with 1.6.0 (risk) | fault/compat | L1 | automated | a captured `openspec status\|list --json` payload from 1.6.0 | feed it to `openspec-poller.ts` parsing | poller returns NON-empty `OpenSpecData` matching 1.4.1 parity (fails silent-empty on schema break) |
+
 ### Frontend-quirk
 
 _None — this change touches the bridge/process layer only; the Apply button and all rendered UI are unchanged (no L3 scenario)._
@@ -38,10 +46,10 @@ _None — provisioning is a one-time, negligible init step; no latency/throughpu
 
 ## Coverage summary
 
-- Requirements covered: 4/4 (R1 resolvable, R2 idempotent+non-destructive+re-point, R3 cross-platform, R4 fail-soft+surface)
-- Scenarios by class: edge 4 · perf 0 · frontend 0 · error 2 · cross-platform 1 (C1 below)
-- Scenarios by level: L1 6 · L2 1 · L3 0
-- Scenarios by disposition: automated 7 · manual-only 0
+- Requirements covered: provisioning R1–R4 + single-source (one-version, installed-regen, drift-guard)
+- Scenarios by class: edge 4 · perf 0 · frontend 0 · error 2 · cross-platform 1 · single-source 3
+- Scenarios by level: L1 8 · L2 2 · L3 0
+- Scenarios by disposition: automated 10 · manual-only 0
 
 ### Cross-platform
 

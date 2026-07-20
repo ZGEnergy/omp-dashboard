@@ -1,9 +1,24 @@
 # Tasks
 
-## 1. Pin the CLI dependency
+## 1. Single-source the openspec version
 
-- [ ] 1.1 Add `@fission-ai/openspec` to `packages/extension/package.json` pinned
-      **exact** (`1.4.1`, the generated-skill-compatible version); run install.
+- [ ] 1.1 Declare `@fission-ai/openspec` `^1.6.0` in both `packages/server/
+      package.json` and `packages/extension/package.json` (NO root `overrides`);
+      `npm install`; confirm `npm ls @fission-ai/openspec` shows one hoisted
+      1.6.x, lockfile regenerated + committed.
+- [ ] 1.2 One-time: run `npx --no-install openspec init --tools pi --force` and
+      commit the regenerated `openspec-*` skills so `generatedBy` == 1.6.0 (the
+      worktreeInit gate won't auto-refire on initialized checkouts).
+- [ ] 1.3 Harden `.pi/settings.json` worktreeInit: `npx @fission-ai/openspec init
+      --tools pi --force` → `npx --no-install openspec init --tools pi --force`
+      (offline-hard; flags preserved).
+- [ ] 1.4 Extend `scripts/verify-release-deps.mjs`: add the extension-dep rule +
+      a server↔extension floor-consistency assertion; bump the floor 1.3.0 →
+      1.6.0; wire the script into `ci.yml` (develop), not release-only.
+- [ ] 1.5 Verify `openspec-poller.ts` against real 1.6.0 `status|list --json`
+      (assert NON-empty parity — poller fails silent-empty on schema breaks) AND
+      confirm `init --tools pi` emits the expected skill set at 1.6.0, BEFORE the
+      range bump lands.
 
 ## 2. Shim + PATH prepend (bridge)
 
@@ -57,6 +72,21 @@
       Windows session, `openspec` not on PATH, `node` not required on PATH. Trigger:
       `openspec --version` via `bash.exe -c` after provision. Observable: the
       extensionless shim resolves; exit 0; prints `1.6.0`. Exemplar: `qa/tests/10-bundled-git.ps1` (Windows bundled-binary resolution smoke).
+- [ ] T-S1 (test-plan #S1) L1 unit — verify-release-deps floor consistency. Input:
+      package.json fixtures where the extension `@fission-ai/openspec` floor
+      diverges from the server (no override). Trigger: run the guard's
+      floor-consistency check. Observable: non-zero exit naming the drifted site;
+      equal-floor fixture passes. Exemplar: sibling test of
+      `scripts/verify-release-deps.mjs` (or `scripts/__tests__/`), else a new
+      `verify-release-deps.test.mjs` invoking the rule fn.
+- [ ] T-S2 (test-plan #S2) L2 qa smoke — offline regen matches source. Input: repo
+      with override 1.6.0, network blocked. Trigger: `npx --no-install openspec init
+      --tools pi --force`. Observable: exit 0; a regenerated `openspec-*/SKILL.md`
+      has `generatedBy: "1.6.0"`. Exemplar: `qa/tests/01-install.sh` (offline npm/npx flow).
+- [ ] T-S3 (test-plan #S3) L1 unit — poller compat with 1.6.0. Input: a captured
+      `openspec status|list --json` payload from 1.6.0. Trigger: feed it to the
+      `openspec-poller.ts` parsing. Observable: same `OpenSpecData` shape as 1.4.1
+      (no detection regression). Exemplar: `packages/shared/src/__tests__/openspec-poller-parity.test.ts`.
 
 ## Validate
 
@@ -67,3 +97,6 @@
 - [ ] V3 Idempotency: `/reload` the session; `echo $PATH` shows the shim dir once.
 - [ ] V4 Stripped-PATH: with `node` NOT on PATH, `openspec --version` via the shim
       still runs (absolute `process.execPath`).
+- [ ] V5 Single-source: `npm ls @fission-ai/openspec` shows one resolved 1.6.x
+      tree-wide; `node scripts/verify-release-deps.mjs` passes; a deliberate
+      floor drift in one site makes it fail; the ci.yml step runs it on develop.

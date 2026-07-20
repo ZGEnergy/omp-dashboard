@@ -26,25 +26,49 @@ running in the session (the bridge extension) can guarantee.
   bash child (including the generated skills' bare `openspec`) a resolvable CLI.
 - Result: bare `openspec` works in-session on any machine, offline, with a pinned
   version. No button gate, no server detection, no `npx` warm-up, no skill edits.
+- **Single-source the openspec version** so the shim, the server poller, and the
+  worktree skill-regen track ONE number (today the installed dep is 1.4.1 while
+  skills read `generatedBy: 1.6.0` — real drift). Mechanism (revised after review
+  — no root `overrides`, which would leak into the published root tarball and is
+  redundant with npm's natural hoisting): (a) declare **compatible caret ranges**
+  `^1.6.0` at the server dep AND the new extension dep — npm hoists them to ONE
+  installed copy; (b) a **one-time force-regen** of the `openspec-*` skills at
+  1.6.0, committed, so `generatedBy` matches the installed version; (c) harden
+  worktreeInit to `npx --no-install openspec init --tools pi --force` (offline:
+  errors instead of silently fetching if the local bin is missing — flags kept);
+  (d) extend `verify-release-deps.mjs` to assert the server and extension ranges
+  stay consistent, and wire it into `ci.yml` so drift is caught on `develop`, not
+  only at release. The shim resolves *that one hoisted version*.
 
 ## Capabilities
 
 ### New Capabilities
 - `openspec-cli-session-provisioning`: the bridge extension guarantees the pi
-  session can resolve the `openspec` CLI by placing a pinned shim on the session's
-  PATH at startup, idempotently and cross-platform.
+  session can resolve the `openspec` CLI by placing a shim on the session's PATH
+  at startup, idempotently and cross-platform.
+- `openspec-cli-version-single-source`: the monorepo resolves ONE installed
+  `openspec` version via consistent caret ranges (no root `overrides`), keeps the
+  worktree skill-regen on that installed bin, and CI-guards every declaration site
+  against version drift.
 
 ### Modified Capabilities
 <!-- none: the Apply button and the openspec-* skills are unchanged -->
 
 ## Impact
 
-- **Extension** (`packages/extension/`): add `@fission-ai/openspec` as a dep pinned
-  **exact `1.6.0`** — the version that generated the `openspec-*` skills
-  (`generatedBy: "1.6.0"`), so the shim is flag-compatible with the exact commands
-  those skills run. This intentionally diverges from the server's bundled 1.4.1
-  (the poller runs its own copy; the two invocations are independent); new
-  bridge-init step that builds the shim dir + prepends it to
+- **Single source** (`1.6.0` via consistent `^1.6.0` ranges): server dep +
+  extension dep both `^1.6.0` → npm hoists ONE installed copy; the extension dep
+  exists because the shim `require.resolve`s it and must travel with the published
+  extension into generic projects (the override would not, and would leak into the
+  root tarball). `verify-release-deps.mjs` keeps the two ranges consistent + runs
+  in CI. **Risk:** raising the installed version 1.4.1→1.6.0 moves the server
+  poller too — verify `openspec status|list --json` AND `init --tools pi`
+  flag-compat against 1.6.0, asserting the poller stays non-empty (it fails
+  silent-empty on schema breaks) before this lands.
+- **worktreeInit** (`.pi/settings.json`): keep `--tools pi --force`; add
+  `--no-install` → `npx --no-install openspec init --tools pi --force` (offline
+  hardening only; npx already resolves the local bin).
+- **Extension** (`packages/extension/`): new bridge-init step that builds the shim dir + prepends it to
   `process.env.PATH` (the sole in-extension lever over the LLM Bash tool's child
   env — verified: `user_bash` fires only for interactive `!`, not the tool path).
   Cross-platform shim = an **extensionless** bash-resolvable script (Git Bash

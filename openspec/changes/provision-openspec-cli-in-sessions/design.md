@@ -94,6 +94,46 @@ server's poller.
   created owner-only (`0700`) so a world-writable path can't hijack the shim; the
   shim TARGET is `require.resolve`d (not a PATH search), so the target is trusted.
 
+## Single-source version governance (folded in)
+
+Today the installed dep is 1.4.1 (`^1.3.0` → hoisted 1.4.1) but the `openspec-*`
+skills read `generatedBy: 1.6.0` — real drift. The runtime resolver is already
+version-agnostic (`findPackageJsonByDirWalk` resolves whatever is installed), so
+this is a declaration-time problem. Collapse to one number (`1.6.0`) WITHOUT a
+root `overrides` (rejected in review: root is published via
+`--include-workspace-root`, so an override leaks 1.6.0 onto every downstream
+dashboard installer; and it is redundant — npm already hoists compatible ranges to
+one copy):
+
+- **Consistent caret ranges**: server dep AND the new extension dep both
+  `^1.6.0`. npm hoists a single installed copy (the lockfile already shows one
+  hoisted entry; no duplicate to dedupe). The extension dep is NOT dead weight —
+  the shim (`openspec-cli-shim.ts`) `require.resolve`s it, and it must travel with
+  the published extension into generic projects where no dashboard copy is hoisted.
+- **One-time force-regen**: the worktreeInit `gate` is all-true on an initialized
+  checkout, so init never re-fires and `generatedBy` will NOT auto-flip. Bumping
+  the installed version to 1.6.0 requires a **manual** `openspec init --tools pi
+  --force` once, committed, to align the skills. (The worktreeInit change below
+  only affects FRESH worktrees.)
+- **Offline-harden worktreeInit**: `npx @fission-ai/openspec init --tools pi
+  --force` → `npx --no-install openspec init --tools pi --force`. This does NOT
+  change WHICH version runs (npx already resolves the local bin first) — it only
+  makes a missing bin a hard error instead of a silent network fetch. Flags kept.
+- **Guard (extend `verify-release-deps.mjs`)**: the file carries a
+  `@fission-ai/openspec` floor rule (server, min 1.3.0). Add an extension-dep
+  rule and a cross-consistency assertion (server range floor == extension range
+  floor); bump the floor 1.3.0 → 1.6.0. The server's `^1.3.0` already *covers*
+  1.6.0 — the lever is the floor, not the range. Wire the script into `ci.yml`
+  (today it runs only at release) so drift is caught on `develop`.
+
+**Risk — raising the installed version 1.4.1→1.6.0 moves the server poller.** The
+poller parses `openspec status|list --json` and fails **silent-empty**
+(`{initialized:true, changes:[]}`) on a schema break — no error. `init --tools pi`
+flag-compat with 1.6.0 is likewise load-bearing once worktreeInit runs 1.6.0. Both
+are gated by a verification task that feeds real 1.6.0 output to the poller and
+asserts **non-empty** parity, and confirms `init --tools pi` still emits the
+expected skill set — before the range bump lands.
+
 ## Goals / Non-Goals
 
 - **Goal**: bare `openspec` resolves in-session on any machine, offline, pinned.

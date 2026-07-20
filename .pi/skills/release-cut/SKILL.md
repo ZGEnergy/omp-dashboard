@@ -108,6 +108,18 @@ surface the mismatch and ask the user how to proceed.
    in end-user language (not commit-subject shorthand) and insert them.
 5. Never invent behaviour — only summarise what the commits actually did.
 
+> **Far-behind escape hatch (long release cycle).** If `[Unreleased]` was not
+> maintained per-change and the tag→HEAD span is huge (v0.6.0 was a 2-month,
+> 906-commit release with only 24 of ~234 feat/fix changes documented), do NOT
+> re-audit hundreds of commits by hand and do NOT dump raw commit subjects.
+> Generate the deduped input set — `git log <last-tag>..HEAD --oneline` filtered
+> to `feat|fix|perf`, minus the change-tags already in `[Unreleased]` — then
+> **delegate grouped drafting to a subagent** (keeps quality high + your context
+> focused). Merge the returned bullets under the existing headings
+> programmatically (existing bullets first, new appended), scoped to the
+> `[Unreleased]` section only, and cap the long tail with one rolled-up
+> "Additional fixes" line. This is the exact path that worked for v0.6.0.
+
 ## Step 3 — Decide next version (SemVer)
 
 Propose per this decision tree, then **use AskUserQuestion to confirm**:
@@ -245,6 +257,55 @@ Next steps (human):
 If something is wrong, see `.pi/skills/release-revoke/SKILL.md`.
 ```
 
+## Step 9 — Drive the post-tag Release pipeline (the tag push is the START, not the end)
+
+Pushing the tag begins a gated pipeline in `publish.yml` that fails in ways you
+cannot see until release time. Both v0.6.0 and v0.6.1 needed MANY tag moves
+before a Release was published. Stay on it until `github-release` is green.
+
+**Pipeline shape (each is a gate; a failure before `github-release` means NO
+GitHub Release exists yet):**
+```
+release-gate ( ci-checks + 7-leg smoke ) → publish (npm, OIDC) → electron (6-leg matrix) → github-release
+```
+**Latent-bug warning:** the FIRST release where `publish` finally goes green
+exposes CI bugs that never ran before (v0.6.1's `electron` job had been silently
+skipped every prior cut because `publish` had never succeeded). Expect the
+electron/publish legs to surface never-before-exercised failures.
+
+### Recovery loop (the normal rhythm)
+Fix on `develop` → **force-move the tag to the fix commit** → re-run. `npm publish`
+is idempotent (skips already-published packages), so a partial publish + tag move
+is safe. This is the expected loop **until a GitHub Release is published** — see
+the reconciled guardrail below.
+
+```bash
+git commit ... && git push origin develop
+git tag -f v<version> && git push -f origin v<version>   # re-triggers a clean single-pass run
+```
+
+### Do NOT use `gh run rerun --failed` for gate failures
+GitHub does **not** re-dispatch skipped downstream *reusable-workflow* jobs
+(`electron`, `github-release`) on a `--failed` rerun — even after `publish` turns
+green. You get npm published but no installers / no Release, repeatedly. A fresh
+(or force-moved) **tag push** runs the pipeline top-to-bottom in one pass.
+`rerun` is fine ONLY for an isolated flaky leg whose downstream hasn't been
+reached yet (e.g. a single red smoke leg).
+
+### Failure triage
+
+| Symptom | Class | Action |
+|---|---|---|
+| `ci-checks` red but all tests passed — vitest "Uncaught Exception" (`window is not defined`, react-virtual `setTimeout` after jsdom teardown, `ChatView.test.tsx`) | **flake** | re-run the `ci-checks` job |
+| One smoke leg: `ECONNRESET` / `network aborted` during `npm ci`, or Windows "web UI not reachable" 5s timeout on a cold runner | **flake** | re-run just that leg |
+| `publish` `npm ci` fails `EALLOWGIT` (npm refuses the `@electron/node-gyp` git dep) | **npm-version** | the publish job PINS `npm@11.12.1` — `@latest` blocks git deps, `11.5.1` has a lightningcss optional-dep bug. Known-good = the version that shipped the last successful release. |
+| `publish` 422 `Error verifying sigstore provenance bundle: repository.url is ""` | **metadata** | the offending non-private `package.json` is missing a `repository` block (url + `directory`). Add it, matching a sibling like `shared`. Pre-check: `for f in package.json packages/*/package.json; do node -e "const p=require('./$f'); if(!p.private && !p.repository) console.log(p.name)"; done` |
+| `publish` **E404** (not 403) on one package's `npm publish` | **human / npmjs.com** | Trusted Publisher not configured OR mismatched for THAT package. Since the other packages published with the same OIDC token, the config differs in one field. It must match EXACTLY: repo `BlackBeltTechnology/pi-agent-dashboard`, workflow **filename** `publish.yml` (NOT the display name "Release"), environment `npm-publish`. Web-UI action only — hand off to the user. |
+| `electron`/`github-release` skipped instantly (<1s) even though `publish` is green | **workflow-if** (fixed in-repo; watch for regressions) | a skipped `tag-and-push` in needs-ancestry poisons the default `if: success()`. Those jobs now carry explicit `if: !cancelled() && needs.publish.result == 'success'`. |
+| Windows electron leg: `koffi prebuild GO/NO-GO failed` | **guard-path** (fixed) | koffi 3.x ships per-platform packages (`@koromix/koffi-win32-x64/win32_x64/koffi.node`), not the koffi-2.x `koffi/build/...` path. Guard lives in `scripts/windows-liveness-smoke.ts`. |
+| Windows **arm64** electron leg: NSIS install smoke "pi-dashboard.exe not found after 150s" | **arch** (fixed) | an arm64 binary can't execute on the x64 GitHub runner; install/uninstall smoke must be skipped on arm64 (needs a windows-11-arm runner). |
+| The smoke matrix false-positives a stale import (e.g. a symbol deleted by an earlier PR still imported by a probe) | **latent develop bug** | fix on `develop`, force-move the tag. The 7-leg smoke only runs at release time, so these surface here. |
+
 ## Guardrails
 
 - **Never skip pre-flight.** A failing test or dirty tree means the
@@ -260,8 +321,17 @@ If something is wrong, see `.pi/skills/release-revoke/SKILL.md`.
 - **Production tags publish automatically** (electron-updater needs a
   published release). Only pre-release tags (`-rc.N`, `-beta.N`) stay
   drafts for manual review — never hand-edit a production release to draft.
-- **Never force-push a tag.** If the tag already exists on origin,
-  surface the conflict and hand off to the revoke skill.
+- **Force-moving the tag is the STANDARD post-tag recovery — UNTIL a GitHub
+  Release is published.** Before `github-release` completes, no Release exists
+  and `npm publish` is idempotent, so fixing a publish/electron-phase bug on
+  `develop` and `git push -f origin v<version>` to the fix commit is the expected
+  loop (Step 9), not a violation. Once a GitHub Release IS published, STOP
+  force-moving — surface the conflict and hand off to `release-revoke`.
+- **After tagging, always verify the tag SHA.** The dashboard git-polls and
+  concurrent pi sessions can hold `.git/index.lock`; a blocked commit can
+  silently drop your fix and leave the tag on a sibling session's commit.
+  Confirm: `git rev-parse v<version>` == the intended fix commit, and
+  `git log -1 --oneline v<version>` shows YOUR change — before watching the run.
 - **One version at a time.** If the user asks to release two versions
   in a row, run this skill twice.
 - **Respect the checkpoint in `docs/release-process.md`** — human clicks
