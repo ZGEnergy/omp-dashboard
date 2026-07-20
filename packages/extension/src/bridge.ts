@@ -2566,13 +2566,6 @@ function initBridge(pi: ExtensionAPI) {
     lastModel = initialModel;
     lastThinkingLevel = initialThinkingLevel;
 
-    // Include eventCount so server can skip event wipe on reconnect
-    let eventCount: number | undefined;
-    try {
-      const entries = ctx.sessionManager?.getBranch?.();
-      if (entries) eventCount = entries.length;
-    } catch { /* ignore */ }
-
     // See change: fix-dashboard-source-mislabelling — sent on every
     // register so server can re-stamp source after restart. Derived from the
     // capture-once boolean (token may already be scrubbed). See change:
@@ -2588,7 +2581,6 @@ function initBridge(pi: ExtensionAPI) {
       sessionFile,
       sessionDir,
       firstMessage,
-      eventCount,
       ...(dashboardSpawned ? { dashboardSpawned: true } : {}),
       // Tri-state git-repo signal, computed at register time (authority).
       // See change: gate-session-worktree-button-on-git.

@@ -407,11 +407,14 @@ describe("memory-event-store", () => {
 
       const events = store.getEvents("s1", 1);
       expect(events).toHaveLength(3);
-      // The chat head (seq 1, 2) is retained; the OLDEST non-essential (seq 3)
-      // is dropped instead of the beginning of the chat.
-      expect(events.map((e) => e.seq)).toEqual([2, 3, 4]);
-      expect(events[0].event.eventType).toBe("message_end");
-      expect(events[1].event.eventType).toBe("tool_execution_start");
+      // The oldest non-essential event (seq 3) is dropped before either
+      // essential chat event, preserving the transcript head and seq gaps.
+      expect(events.map((e) => e.seq)).toEqual([1, 2, 4]);
+      expect(events.map((e) => e.event.eventType)).toEqual([
+        "message_start",
+        "message_end",
+        "subagent_started",
+      ]);
     });
 
     it("drops all noise before touching essentials, then oldest essential under extreme pressure", () => {
@@ -427,16 +430,32 @@ describe("memory-event-store", () => {
       store.insertEvent("s1", makeEvent("message_end")); // 8
 
       const events = store.getEvents("s1", 1);
-      // All 4 noise events are dropped first. Then 4 essentials remain > cap 3,
-      // so the memory bound forces dropping the OLDEST essential (seq 1). In
-      // practice the cap is 20000, so essentials never reach it and the whole
-      // transcript is preserved; this only exercises the pathological fallback.
+      // Every non-essential event is dropped before an essential. The four
+      // essentials then exceed cap 3, so the oldest essential (seq 1) is
+      // dropped to enforce the bound.
       expect(events.map((e) => e.event.eventType)).toEqual([
+        "message_end",
         "message_start",
-        "subagent_completed",
         "message_end",
       ]);
-      expect(events.map((e) => e.seq)).toEqual([6, 7, 8]);
+      expect(events.map((e) => e.seq)).toEqual([4, 6, 8]);
+    });
+
+    it("defers reclaim until trim slack is exhausted, then reclaims a batch", () => {
+      const cap = 100;
+      const slack = 5;
+      const store = createMemoryEventStore(neverPinned, 100, cap);
+
+      for (let i = 0; i < cap + slack; i++) {
+        store.insertEvent("s1", makeEvent("tool_execution_start"));
+      }
+      expect(store.getEvents("s1", 1)).toHaveLength(cap + slack);
+
+      store.insertEvent("s1", makeEvent("tool_execution_start"));
+      const events = store.getEvents("s1", 1);
+      expect(events).toHaveLength(cap);
+      expect(events[0].seq).toBe(slack + 2);
+      expect(events.at(-1)?.seq).toBe(cap + slack + 1);
     });
 
     it("survives a subagent flood: chat head kept, buffer stays bounded", () => {
@@ -452,10 +471,12 @@ describe("memory-event-store", () => {
       const events = store.getEvents("s1", 1);
       // Buffer never exceeds cap + slack (hysteresis bound).
       expect(events.length).toBeLessThanOrEqual(cap + 25);
-      // The opening chat events (seq 1, 2) are still present — the flood evicted
-      // only its own oldest noise, never the chat head.
-      expect(events[1].seq).toBe(events[0].seq + 1);
-      expect(events[0].event.eventType).toBe("tool_execution_start");
+      // The flood evicts only non-essential events; both opening chat events
+      // remain present with their original sequence numbers and types.
+      expect(events.map((e) => e.seq)).toContain(1);
+      expect(events.map((e) => e.seq)).toContain(2);
+      expect(events.find((e) => e.seq === 1)?.event.eventType).toBe("message_start");
+      expect(events.find((e) => e.seq === 2)?.event.eventType).toBe("message_end");
     });
   });
 
@@ -602,9 +623,10 @@ describe("memory-event-store", () => {
       store.insertEvent("s1", makeEvent("tool_execution_start")); // 6
 
       const stats = store.getTrimStats();
-      // Three oldest whole events are dropped; only seq3 is a terminal.
+      // Three oldest whole events are dropped: seq3 and seq5 are terminal
+      // tool_execution_end events; seq4 is a tool_execution_start (not a te).
       expect(stats.trimmedEvents.total).toBe(3);
-      expect(stats.trimmedEvents.toolExecutionEnd).toBe(1);
+      expect(stats.trimmedEvents.toolExecutionEnd).toBe(2);
       expect(stats.trimmedEvents.bySession).toEqual({ s1: 3 });
     });
 

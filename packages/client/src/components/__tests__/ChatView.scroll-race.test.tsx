@@ -6,6 +6,21 @@ import { ChatView } from "../ChatView.js";
 import { ThemeProvider } from "../ThemeProvider.js";
 import type { ToolContext } from "../tool-renderers/index.js";
 
+const virtualizerProbe = vi.hoisted(() => ({
+  onChange: undefined as unknown,
+}));
+
+vi.mock("@tanstack/react-virtual", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-virtual")>();
+  return {
+    ...actual,
+    useVirtualizer: (options: Parameters<typeof actual.useVirtualizer>[0]) => {
+      virtualizerProbe.onChange = options.onChange;
+      return actual.useVirtualizer(options);
+    },
+  };
+});
+
 const defaultToolContext: ToolContext = {};
 
 beforeAll(() => {
@@ -513,6 +528,32 @@ describe("ChatView mobile scroll owner", () => {
     expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
   });
 
+  it("leaves ordinary mobile FOLLOWING unchanged when virtualizer rows measure", async () => {
+    virtualizerProbe.onChange = undefined;
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="mobile-following-measurement"
+          state={stateWith(50)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={1}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 120, 1_000, 400);
+
+    expect(virtualizerProbe.onChange).toBeDefined();
+    (virtualizerProbe.onChange as () => void)();
+    await flushRaf();
+
+    expect(scrollEl.scrollTop).toBe(120);
+  });
+
   it("keeps mobile latest navigation pinned while virtual rows grow", async () => {
     const { container, rerender } = render(
       <ThemeProvider>
@@ -768,6 +809,37 @@ describe("ChatView mobile scroll owner", () => {
     const restoredScrollEl = getScrollContainer(container);
     expect(restoredScrollEl.scrollTop).toBe(240);
     expect(container.querySelector('[data-testid="scroll-to-bottom"]')).not.toBeNull();
+  });
+
+  it("hides the exhausted older-history loading affordance after terminal metadata", () => {
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="exhausted-older"
+          state={stateWith(5)}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          loadingOlder
+        />
+      </ThemeProvider>,
+    );
+
+    expect(container.querySelector('[data-testid="load-older-status"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="load-older-status"]')?.textContent).toContain("Loading older messages");
+
+    rerender(
+      <ThemeProvider>
+        <ChatView
+          sessionId="exhausted-older"
+          state={stateWith(5)}
+          toolContext={defaultToolContext}
+          hasMoreOlder={false}
+          loadingOlder
+        />
+      </ThemeProvider>,
+    );
+
+    expect(container.querySelector('[data-testid="load-older-status"]')).toBeNull();
   });
 
   it("keeps the explicit older button and captures an anchor token", async () => {

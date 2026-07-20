@@ -177,14 +177,30 @@ export function createMemoryEventStore(
     }
   }
   function trim(buffer: SessionBuffer, sessionId: string): void {
-    if (maxEventsPerSession <= 0 || buffer.events.length <= maxEventsPerSession) return;
-    const dropped = buffer.events.length - maxEventsPerSession;
-    const removed = buffer.events.splice(0, dropped);
+    if (maxEventsPerSession <= 0) return;
+    const trimSlack = Math.min(256, Math.floor(maxEventsPerSession * 0.05));
+    if (buffer.events.length <= maxEventsPerSession + trimSlack) return;
+
+    let remainingDrops = buffer.events.length - maxEventsPerSession;
+    const removed: StoredEvent[] = [];
+    const retained: StoredEvent[] = [];
+    for (const entry of buffer.events) {
+      const essential = entry.event.eventType === "message_start" || entry.event.eventType === "message_end";
+      if (!essential && remainingDrops > 0) {
+        removed.push(entry);
+        remainingDrops--;
+      } else {
+        retained.push(entry);
+      }
+    }
+    if (remainingDrops > 0) removed.push(...retained.splice(0, remainingDrops));
+
+    buffer.events = retained;
     buffer.historyTruncated = true;
-    trimmedTotal += dropped;
+    trimmedTotal += removed.length;
     const toolEnds = removed.filter((entry) => entry.event.eventType === "tool_execution_end").length;
     trimmedToolEnd += toolEnds;
-    trimmedBySession.set(sessionId, (trimmedBySession.get(sessionId) ?? 0) + dropped);
+    trimmedBySession.set(sessionId, (trimmedBySession.get(sessionId) ?? 0) + removed.length);
   }
 
   return {

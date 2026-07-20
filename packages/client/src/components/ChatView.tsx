@@ -705,8 +705,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       const element = scrollRef.current;
       if (element === null || element.isConnected === false) return;
       const follow = mobileActive
-        ? scrollOwnerRef.current === "FOLLOWING" ||
-          scrollOwnerRef.current === "NAVIGATING_BOTTOM"
+        ? scrollOwnerRef.current === "NAVIGATING_BOTTOM"
         : stickToBottomRef.current;
       if (follow) {
         scheduleProgrammaticWrite((target) => { target.scrollTop = target.scrollHeight; });
@@ -1104,7 +1103,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         `scroll-behavior: smooth` here or on an ancestor — smooth would animate
         each synchronous measurement correction and race the next, reintroducing
         the scroll-to-top drift. See change: fix-chat-scroll-to-top-estimate-drift. */}
-      {(loadingOlder || (hasMoreOlder && state.messages.length > 0)) && (
+      {hasMoreOlder && state.messages.length > 0 && (
         <div
           className="flex justify-center py-2 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]"
           data-testid="load-older-status"

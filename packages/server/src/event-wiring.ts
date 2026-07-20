@@ -536,8 +536,6 @@ export function wireEvents(deps: EventWiringDeps): void {
       });
     },
   });
-  // Sessions whose replay should be discarded (canSkipWipe was true — events already in store)
-  const skipReplayInsert = new Set<string>();
   // Debounce flows refresh to prevent infinite loop between sessions in same cwd
   const recentFlowsRefresh = new Set<string>();
   // Per-session timestamp of the most recent `lastActivityAt` broadcast.
@@ -565,19 +563,6 @@ export function wireEvents(deps: EventWiringDeps): void {
       // Legacy queue_state event no longer emitted (bridge removed PromptQueue).
       // See change: add-followup-edit-and-steer-cancel.
       if (msg.event.eventType === "queue_state") return;
-      // When canSkipWipe was true, the event store already has all events —
-      // don't insert replayed events again (would cause exponential duplication)
-      if (replayingSessions.has(sessionId) && skipReplayInsert.has(sessionId)) {
-        // Still process status updates so session state stays accurate
-        const updates = extractSessionUpdates(msg.event);
-        if (updates) {
-          sessionManager.update(sessionId, updates as Partial<DashboardSession>);
-        }
-        // Skip insert + broadcast — events are already in store
-        // Still need to continue to the rest of the handler for openspec/stats
-        // but those are only for non-replay events, so we can return early
-        return;
-      }
       const seq = eventStore.insertEvent(sessionId, msg.event);
       // Skip broadcasting during replay — browser gets events via subscribe replay
       if (!replayingSessions.has(sessionId)) {
@@ -932,9 +917,7 @@ export function wireEvents(deps: EventWiringDeps): void {
     }
 
     if ((msg as { type: string }).type === "replay_complete") {
-      const wasSkipped = skipReplayInsert.has(sessionId);
       replayingSessions.delete(sessionId);
-      skipReplayInsert.delete(sessionId);
       // Clear any stale OpenSpec activity state that may have leaked
       // (e.g. from events forwarded before the replay flag was set)
       const preSession = sessionManager.get(sessionId);
@@ -950,13 +933,20 @@ export function wireEvents(deps: EventWiringDeps): void {
         browserGateway.broadcastSessionUpdated(sessionId, {
           status: session.status,
           currentTool: session.currentTool ?? null,
+          tokensIn: session.tokensIn ?? 0,
+          tokensOut: session.tokensOut ?? 0,
+          cacheRead: session.cacheRead ?? 0,
+          cacheWrite: session.cacheWrite ?? 0,
+          cost: session.cost ?? 0,
+          contextTokens: session.contextTokens ?? null,
+          contextWindow: session.contextWindow,
           openspecPhase: null,
           openspecChange: null,
         });
       }
       // Replay completion is serialized with live delivery by the gateway coordinator.
       // Legacy test doubles may omit the optional method.
-      if (!wasSkipped) browserGateway.completeBridgeReplay?.(sessionId);
+      browserGateway.completeBridgeReplay?.(sessionId);
     }
     if (msg.type === "session_register") {
       // Reset the once-per-activation liveness guard on every (re)register so
@@ -972,35 +962,38 @@ export function wireEvents(deps: EventWiringDeps): void {
       // Safety timeout: clear replay flag after 5s if replay_complete never arrives
       setTimeout(() => {
         if (replayingSessions.delete(sessionId)) {
-          const wasSkipped = skipReplayInsert.delete(sessionId);
           const session = sessionManager.get(sessionId);
           if (session) {
             browserGateway.broadcastSessionUpdated(sessionId, {
               status: session.status,
               currentTool: session.currentTool ?? null,
+              tokensIn: session.tokensIn ?? 0,
+              tokensOut: session.tokensOut ?? 0,
+              cacheRead: session.cacheRead ?? 0,
+              cacheWrite: session.cacheWrite ?? 0,
+              cost: session.cost ?? 0,
+              contextTokens: session.contextTokens ?? null,
+              contextWindow: session.contextWindow,
             });
           }
           // Let the coordinator serialize the bounded fallback with live events.
-          if (!wasSkipped) browserGateway.completeBridgeReplay?.(sessionId);
+          browserGateway.completeBridgeReplay?.(sessionId);
         }
       }, 5_000);
-      // Skip wipe if bridge provides eventCount matching the last known entry count.
-      // This avoids full replay cascade when bridge simply reconnects.
-      // Compare entry counts (apples to apples) — not entries vs stored events.
-      const session = sessionManager.get(sessionId);
-      const lastEntryCount = session?.lastEntryCount;
-      const canSkipWipe = msg.eventCount !== undefined && lastEntryCount !== undefined && msg.eventCount === lastEntryCount && eventStore.hasEvents(sessionId);
-      // Store the bridge's entry count for future reconnect comparisons
-      if (msg.eventCount !== undefined) {
-        sessionManager.update(sessionId, { lastEntryCount: msg.eventCount });
-      }
-      if (!canSkipWipe) {
-        eventStore.deleteEventsForSession(sessionId);
-        browserGateway.broadcastSessionStateReset(sessionId, "source_replaced");
-      } else {
-        // Mark this session so replayed events are not re-inserted into the store
-        skipReplayInsert.add(sessionId);
-      }
+      // Every registration replaces the in-memory branch. A marker-less or
+      // interrupted replay must never certify a stale prefix as complete.
+      // Turn-end replay rebuilds these cumulative values from zero.
+      sessionManager.update(sessionId, {
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 0,
+        contextTokens: null,
+        contextWindow: undefined,
+      });
+      eventStore.deleteEventsForSession(sessionId);
+      browserGateway.broadcastSessionStateReset(sessionId, "source_replaced");
       // NOTE: do NOT reset `hidden` here. The auto-hide decision is the sole
       // responsibility of `memorySessionManager.register` (first register vs
       // reattach-preserve). Resetting `hidden: false` on every register would

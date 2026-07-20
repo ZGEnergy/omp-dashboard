@@ -28,13 +28,6 @@ export function sendStateSync(
   const sessionDir = bc.lastSessionDir ?? bc.cachedCtx?.sessionManager?.getSessionDir?.() ?? undefined;
   const firstMessage = extractFirstMessage(bc.cachedCtx);
 
-  // Include eventCount so server can skip event wipe on reconnect
-  let eventCount: number | undefined;
-  try {
-    const entries = bc.cachedCtx?.sessionManager?.getBranch?.();
-    if (entries) eventCount = entries.length;
-  } catch { /* ignore */ }
-
   // Tag the very first sendStateSync after process boot as "spawn";
   // every subsequent invocation (driven by WebSocket reconnect after a
   // dashboard restart) is a "reattach". Server applies the configured
@@ -77,7 +70,6 @@ export function sendStateSync(
     sessionFile,
     sessionDir,
     firstMessage,
-    eventCount,
     pid: process.pid,
     registerReason,
     // Tri-state git-repo signal computed synchronously (no git_info_update
@@ -240,14 +232,6 @@ export function handleSessionChange(
   bc.lastModel = getCurrentModelString(bc);
   bc.lastThinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? undefined;
 
-  // Include eventCount for consistency (session switch/fork changes sessionId,
-  // so the server will wipe regardless, but include for completeness)
-  let eventCount: number | undefined;
-  try {
-    const entries = ctx.sessionManager?.getBranch?.();
-    if (entries) eventCount = entries.length;
-  } catch { /* ignore */ }
-
   // handleSessionChange always mints a fresh sessionId (new/fork/resume),
   // so registerReason is unconditionally "spawn" — even after the bridge
   // has previously reattached. See change: reattach-move-to-front.
@@ -266,7 +250,6 @@ export function handleSessionChange(
     sessionDir: bc.lastSessionDir,
     ...(dashboardSpawned ? { dashboardSpawned: true } : {}),
     firstMessage,
-    eventCount,
     pid: process.pid,
     registerReason: "spawn",
     // See change: gate-session-worktree-button-on-git.
