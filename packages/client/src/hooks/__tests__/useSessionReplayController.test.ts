@@ -84,15 +84,15 @@ describe("SessionReplayController", () => {
     const controller = new SessionReplayController(effects);
     const cold = controller.begin("s", "cold", "source-a");
 
-    controller.handle({ ...frame(cold.requestId!, [entry(50)], true), windowMinSeq: 50, hasMoreOlder: true });
-    expect(effects.window).toHaveBeenLastCalledWith("s", { minSeq: 50, hasMoreOlder: true, kind: "cold" });
+    controller.handle({ ...frame(cold.requestId!, [entry(50)], true), windowMinSeq: 50, hasMoreOlder: true, partialHead: true });
+    expect(effects.window).toHaveBeenLastCalledWith("s", { minSeq: 50, hasMoreOlder: true, partialHead: true, kind: "cold" });
 
     // The UI's older callback uses the controller's canonical minimum sequence.
     const older = controller.begin("s", "older", "source-a", "anchor-50");
     expect(older.fromSeq).toBe(50);
     controller.handle({ ...frame(older.requestId!, [entry(49)], true), replayKind: "older", windowMinSeq: 49, hasMoreOlder: false });
 
-    expect(effects.window).toHaveBeenLastCalledWith("s", { minSeq: 49, hasMoreOlder: false, kind: "older" });
+    expect(effects.window).toHaveBeenLastCalledWith("s", { minSeq: 49, hasMoreOlder: false, partialHead: false, kind: "older" });
     expect(effects.replace).toHaveBeenCalledWith("s", [entry(49), entry(50)], { requestId: older.requestId, anchorToken: "anchor-50" });
   });
 

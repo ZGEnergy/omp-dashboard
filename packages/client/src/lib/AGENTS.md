@@ -87,7 +87,7 @@ Files in this directory. One row per source file.
 | `rehydrate-session.ts` | rehydrateSession(sessionId,cache). Cache hit → re-reduce raw payload via reduceEvent into provisional… → see `rehydrate-session.ts.AGENTS.md` |
 | `replay-cache.ts` | Durable per-session replay cache. IndexedDB. put trims newest-by-byte-budget (schema v2, ~4 MiB). → see `replay-cache.ts.AGENTS.md` |
 | `replay-persist.ts` | Debounced replay-cache writer. createReplayPersister(cache,debounceMs). → see `replay-persist.ts.AGENTS.md` |
-| `replay-window.ts` | Pure `mergeReplayWindow(previous, frame, ledgerMin)` — cold replaces history window, older advances minSeq down, delta never regresses it. |
+| `replay-window.ts` | Pure `mergeReplayWindow(previous, frame, ledgerMin)` — cold replaces history window and `partialHead`, older advances minSeq down and adopts a supplied boundary marker, delta never regresses the established window or marker; nullish cursor handling preserves zero. |
 | `route-builders.ts` | URL builders for shell overlay routes: `buildOpenSpecPreviewUrl`, `buildOpenSpecArchiveUrl`,… → see `route-builders.ts.AGENTS.md` |
 | `selectedSessionId.ts` | Pure derivation of selected session id from wouter route matches. → see `selectedSessionId.ts.AGENTS.md` |
 | `selectViewedSessionId.ts` | Pure selector for currently-viewed session id from `/session/:id` route. → see `selectViewedSessionId.ts.AGENTS.md` |
