@@ -116,6 +116,7 @@ const BUNDLED_PLUGINS = [
   "automation-plugin",
   "goal-plugin",
   "subagents-plugin",
+  "kb-plugin",
 ];
 const BUNDLED_PLUGINS_DIR = path.join(SERVER_BUNDLE, "resources", "plugins");
 mkdirSync(BUNDLED_PLUGINS_DIR, { recursive: true });
