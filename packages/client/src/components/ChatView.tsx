@@ -947,6 +947,8 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     if (mobileInactive) return;
     const authority = captureAuthority();
     descendingRef.current = true;
+    olderContinuationRef.current = null;
+    autoContinueAfterRestoreRef.current = false;
     stickToBottomRef.current = true;
     if (mobileActive) scrollOwnerRef.current = "NAVIGATING_BOTTOM";
     setShowScrollButton(false);
@@ -1160,6 +1162,8 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       if (rowIndex == null || mobileInactive) return;
       // Escape sticky bottom so streaming does not pull the user off the turn.
       descendingRef.current = false;
+      olderContinuationRef.current = null;
+      autoContinueAfterRestoreRef.current = false;
       stickToBottomRef.current = false;
       setShowScrollButton(true);
       if (mobileActive) scrollOwnerRef.current = "READING_HISTORY";

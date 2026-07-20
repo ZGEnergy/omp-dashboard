@@ -813,8 +813,9 @@ describe("ChatView mobile scroll owner", () => {
     rerender(
       <ThemeProvider>
         <ChatView
-          sessionId="different-session"
+          sessionId="stale-anchor"
           state={stateWithRange(-1, 5)}
+          replayGeneration={1}
           toolContext={defaultToolContext}
           hasMoreOlder
           onLoadOlder={onLoadOlder}
