@@ -102,6 +102,8 @@ interface Props {
    * See change: session-tail-rehydrate.
    */
   hasMoreOlder?: boolean;
+  /** True when the retained replay window starts after the session head. */
+  partialHead?: boolean;
   /** Older-history fetch in flight — renders a spinner in the load-older affordance. See change: session-tail-rehydrate. */
   loadingOlder?: boolean;
   /** Visible mobile-detail ownership. Omit on desktop/legacy callers. */
@@ -287,7 +289,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, partialHead, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Desktop retains its saved anchor; mobile ownership is explicit below.
   // These refs were accidentally removed by an interrupted migration and are
@@ -317,6 +319,9 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   const olderAnchorSerialRef = useRef(0);
   const pendingOlderAnchorRef = useRef<CapturedScrollAnchor | null>(null);
   const olderRequestLatchRef = useRef<string | null>(null);
+  const olderContinuationRef = useRef<{ sessionId: string | null; initiated: number; baselineIds: Set<string> } | null>(null);
+  const autoContinueAfterRestoreRef = useRef(false);
+  const [olderFeedback, setOlderFeedback] = useState<"messages" | "tools" | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   // Streaming-tail selection preservation (change: preserve-streaming-tail-selection).
@@ -771,15 +776,29 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   }, [captureAuthority, mobileInactive, sessionId, virtualizer]);
 
   const requestOlder = useCallback(() => {
-    if (!onLoadOlder || loadingOlder || olderRequestLatchRef.current) return;
+    if (!onLoadOlder || loadingOlder || olderRequestLatchRef.current) {
+      if (!onLoadOlder) olderContinuationRef.current = null;
+      return;
+    }
     const anchor = captureOlderAnchor();
-    if (!anchor) return;
+    if (!anchor) {
+      olderContinuationRef.current = null;
+      return;
+    }
+    const current = olderContinuationRef.current;
+    const continuing = Boolean(current && current.sessionId === (sessionId ?? null));
+    if (!current || current.sessionId !== (sessionId ?? null)) {
+      olderContinuationRef.current = { sessionId: sessionId ?? null, initiated: 0, baselineIds: new Set() };
+    }
+    olderContinuationRef.current!.initiated += 1;
+    olderContinuationRef.current!.baselineIds = new Set(state.messages.map((message) => message.id));
+    if (!continuing) setOlderFeedback(null);
     // The latch is synchronous: a burst of native wheel/scroll events cannot
     // emit a second exclusive older request before the parent rerenders.
     olderRequestLatchRef.current = anchor.token;
     pendingOlderAnchorRef.current = anchor;
     onLoadOlder(anchor.token);
-  }, [captureOlderAnchor, loadingOlder, onLoadOlder]);
+  }, [captureOlderAnchor, loadingOlder, onLoadOlder, sessionId, state.messages]);
 
   const enterReadingHistory = useCallback((olderDirected: boolean) => {
     if (!mobileActive || mobileInactive) return;
@@ -789,10 +808,16 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       // remaining older-directed callbacks must not cancel the anchor settle
       // they triggered. Only newer-directed movement (or a fresh touch, which
       // reports olderDirected=false) is the user taking the viewport back.
+      olderContinuationRef.current = null;
+      autoContinueAfterRestoreRef.current = false;
       if (olderDirected) return;
       pending.cancelled = true;
       pendingOlderAnchorRef.current = null;
       olderRequestLatchRef.current = null;
+    } else {
+      // Any fresh user movement starts a new bounded discovery action.
+      olderContinuationRef.current = null;
+      autoContinueAfterRestoreRef.current = false;
     }
     cancelProgrammaticWrites();
     scrollOwnerRef.current = "READING_HISTORY";
@@ -808,6 +833,8 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     // Desktop's bottom button also uses the shared rAF writer. A wheel event
     // must fence that queued write before it can call scrollTo.
     cancelProgrammaticWrites();
+    olderContinuationRef.current = null;
+    autoContinueAfterRestoreRef.current = false;
     descendingRef.current = false;
     ascendingRef.current = false;
     userGestureRef.current = true;
@@ -816,7 +843,11 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   const onTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
     touchYRef.current = event.touches[0]?.clientY ?? null;
     if (mobileActive && !mobileInactive) enterReadingHistory(false);
-    else if (!mobileInactive) cancelProgrammaticWrites();
+    else if (!mobileInactive) {
+      cancelProgrammaticWrites();
+      olderContinuationRef.current = null;
+      autoContinueAfterRestoreRef.current = false;
+    }
   }, [cancelProgrammaticWrites, enterReadingHistory, mobileActive, mobileInactive]);
 
   const onTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
@@ -829,6 +860,8 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       return;
     }
     if (!mobileInactive) cancelProgrammaticWrites();
+    olderContinuationRef.current = null;
+    autoContinueAfterRestoreRef.current = false;
     descendingRef.current = false;
     ascendingRef.current = false;
     userGestureRef.current = true;
@@ -929,6 +962,8 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     const authority = captureAuthority();
     descendingRef.current = false;
     ascendingRef.current = true;
+    olderContinuationRef.current = null;
+    autoContinueAfterRestoreRef.current = false;
     stickToBottomRef.current = false;
     if (mobileActive) {
       scrollOwnerRef.current = "NAVIGATING_TOP";
@@ -952,6 +987,8 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     if (pending !== null) pending.cancelled = true;
     pendingOlderAnchorRef.current = null;
     olderRequestLatchRef.current = null;
+    olderContinuationRef.current = null;
+    autoContinueAfterRestoreRef.current = false;
     if (loadingHistory) {
       scrollOwnerRef.current = "HYDRATING";
       return;
@@ -968,6 +1005,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     // A session swap invalidates every pending desktop write from the outgoing
     // transcript before restoring this session's stored viewport.
     cancelProgrammaticWrites();
+    pendingOlderAnchorRef.current = null;
+    olderRequestLatchRef.current = null;
+    olderContinuationRef.current = null;
+    autoContinueAfterRestoreRef.current = false;
     prevSessionRef.current = sessionId;
     escapedDuringHydrateRef.current = false;
     loadingHistoryRef.current = Boolean(loadingHistory);
@@ -1038,18 +1079,48 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   useLayoutEffect(() => {
     const anchor = pendingOlderAnchorRef.current;
     if (!anchor || anchor.token !== completedOlderAnchorToken || anchor.cancelled || anchor.restoring) return;
-    if (!isAuthorityCurrent(anchor.authority)) return;
+    if (!isAuthorityCurrent(anchor.authority)) {
+      pendingOlderAnchorRef.current = null;
+      olderRequestLatchRef.current = null;
+      olderContinuationRef.current = null;
+      autoContinueAfterRestoreRef.current = false;
+      return;
+    }
+    const continuation = olderContinuationRef.current;
+    const baselineIds = continuation?.baselineIds ?? new Set<string>();
+    const newMessages = state.messages.filter((message) => !baselineIds.has(message.id));
+    const hasConversation = newMessages.some((message) => message.role === "user" || message.role === "assistant");
+    const hasToolActivity = newMessages.some((message) => message.role === "toolResult");
+    setOlderFeedback(hasToolActivity && !hasConversation ? "tools" : "messages");
+    autoContinueAfterRestoreRef.current = Boolean(
+      hasConversation === false &&
+      hasMoreOlder === true &&
+      loadingOlder !== true &&
+      onLoadOlder &&
+      continuation &&
+      continuation.sessionId === (sessionId ?? null) &&
+      continuation.initiated < 3,
+    );
     anchor.restoring = true;
     scrollOwnerRef.current = "RESTORING_ANCHOR";
     const commandEpoch = commandEpochRef.current;
     let frames = 0;
     let settled = 0;
     const restore = (element: HTMLDivElement) => {
-      if (anchor.cancelled || !isAuthorityCurrent(anchor.authority)) return;
+      if (anchor.cancelled) return;
+      if (!isAuthorityCurrent(anchor.authority)) {
+        pendingOlderAnchorRef.current = null;
+        olderRequestLatchRef.current = null;
+        olderContinuationRef.current = null;
+        autoContinueAfterRestoreRef.current = false;
+        return;
+      }
       const index = anchor.rowId == null ? -1 : displayRows.findIndex((row, i) => virtualRowKey(row, i) === anchor.rowId);
       if (index < 0) {
         pendingOlderAnchorRef.current = null;
         olderRequestLatchRef.current = null;
+        olderContinuationRef.current = null;
+        autoContinueAfterRestoreRef.current = false;
         scrollOwnerRef.current = "READING_HISTORY";
         return;
       }
@@ -1069,12 +1140,16 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         pendingOlderAnchorRef.current = null;
         olderRequestLatchRef.current = null;
         scrollOwnerRef.current = "READING_HISTORY";
+        const continueOlder = autoContinueAfterRestoreRef.current;
+        autoContinueAfterRestoreRef.current = false;
+        if (continueOlder) requestOlder();
+        else olderContinuationRef.current = null;
       } else {
         scheduleProgrammaticWrite(restore, anchor.authority, commandEpoch);
       }
     };
     scheduleProgrammaticWrite(restore, anchor.authority, commandEpoch);
-  }, [completedOlderAnchorToken, displayRows, isAuthorityCurrent, scheduleProgrammaticWrite, virtualizer]);
+  }, [completedOlderAnchorToken, displayRows, hasMoreOlder, isAuthorityCurrent, loadingOlder, onLoadOlder, requestOlder, scheduleProgrammaticWrite, sessionId, state.messages, virtualizer]);
 
   useImperativeHandle(ref, () => ({
     scrollToTurn(turnIndex: number) {
@@ -1103,6 +1178,22 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         `scroll-behavior: smooth` here or on an ancestor — smooth would animate
         each synchronous measurement correction and race the next, reintroducing
         the scroll-to-top drift. See change: fix-chat-scroll-to-top-estimate-drift. */}
+      {partialHead && (
+        <div data-testid="partial-history-notice" role="status" className="px-4 py-2 text-xs text-[var(--text-secondary)]">
+          Earlier conversation remains available through loading older messages.
+        </div>
+      )}
+      {olderFeedback && (
+        <div data-testid="load-older-feedback" role="status" className="px-4 py-1 text-[10px] text-[var(--text-tertiary)]">
+          {olderFeedback === "tools"
+            ? hasMoreOlder
+              ? "Loaded older tool activity; earlier conversation remains available through loading older messages."
+              : "Loaded older tool activity; no older messages remain."
+            : hasMoreOlder
+              ? "Loaded older messages; earlier conversation remains available through loading older messages."
+              : "Loaded older messages; no older messages remain."}
+        </div>
+      )}
       {hasMoreOlder && state.messages.length > 0 && (
         <div
           className="flex justify-center py-2 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]"

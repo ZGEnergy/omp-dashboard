@@ -1918,6 +1918,7 @@ export default function App() {
               pendingSteering={selectedSession?.pendingQueues?.steering ?? EMPTY_STEERING}
               loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false}
               hasMoreOlder={selectedId ? historyWindowMap.get(selectedId)?.hasMoreOlder ?? false : false}
+              partialHead={selectedId ? historyWindowMap.get(selectedId)?.partialHead ?? false : false}
               loadingOlder={selectedId ? loadingOlderMap.get(selectedId) ?? false : false}
               mobileActive={isMobile && mobileDetailVisible}
               mobileActivationEpoch={mobileActivationEpoch}
