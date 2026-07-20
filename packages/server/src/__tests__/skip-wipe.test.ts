@@ -1,123 +1,144 @@
 /**
- * Tests for bridge reconnect skip-wipe logic in event-wiring.
- * When bridge sends eventCount matching server's stored count, skip the event wipe.
+ * Integration coverage for bridge reconnect replay handling in event-wiring.
+ * A reconnect may skip a replay only after the previous replay completed.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { EventWiringDeps } from "../event-wiring.js";
+import { wireEvents } from "../event-wiring.js";
 import { createMemoryEventStore } from "../memory-event-store.js";
 import { createMemorySessionManager } from "../memory-session-manager.js";
-import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
-function makeEvent(type: string = "test"): DashboardEvent {
-  return { eventType: type, timestamp: Date.now(), data: {} };
+const SID = "session-1";
+
+function event(label: string): DashboardEvent {
+  return { eventType: "message_start", timestamp: Date.now(), data: { label } };
 }
 
-/**
- * Minimal simulation of the session_register path in event-wiring.ts.
- * We test the skip-wipe decision logic in isolation.
- */
-function simulateSessionRegister(opts: {
-  eventStore: ReturnType<typeof createMemoryEventStore>;
-  sessionId: string;
-  previousSessionId?: string;
-  eventCount?: number;
-}) {
-  const { eventStore, sessionId, previousSessionId, eventCount } = opts;
-  const wiped = { value: false };
-  const resetSent = { value: false };
+function createWiring() {
+  const sessionManager = createMemorySessionManager();
+  sessionManager.register({ id: SID, cwd: "/tmp", source: "tui" });
+  const eventStore = createMemoryEventStore(() => false);
+  const piGateway: any = {
+    onEvent: undefined,
+    isSessionConnected: () => true,
+    sendToSession: () => {},
+  };
+  const sessionUpdates: Record<string, unknown>[] = [];
+  const browserGateway: any = {
+    broadcastEvent: () => {},
+    broadcastSessionUpdated: (_sessionId: string, update: Record<string, unknown>) => sessionUpdates.push(update),
+    broadcastSessionAdded: () => {},
+    broadcastSessionRemoved: () => {},
+    broadcastSessionStateReset: () => {},
+    broadcastToAll: () => {},
+    completeBridgeReplay: () => {},
+    headlessPidRegistry: {
+      linkByToken: () => false,
+      linkByPid: () => false,
+      linkSession: () => {},
+    },
+    pendingResumeRegistry: { consume: () => undefined },
+  };
+  const deps: EventWiringDeps = {
+    sessionManager,
+    eventStore,
+    piGateway,
+    browserGateway,
+    sessionOrderManager: { insert: () => {}, getOrder: () => [], moveToFront: () => {}, rekey: () => {} } as any,
+    preferencesStore: { getPinnedDirectories: () => [] } as any,
+    pendingForkRegistry: { consumeFork: () => undefined } as any,
+    directoryService: { onDirectoryAdded: async () => ({ sessions: [], openspecData: null }) } as any,
+    knownSessionIds: new Set([SID]),
+    pendingDashboardSpawns: new Map(),
+  };
+  wireEvents(deps);
 
-  // Decision logic matching event-wiring.ts
-  const sameSession = !previousSessionId || previousSessionId === sessionId;
-  const serverEventCount = eventStore.getEvents(sessionId, 1).length;
-  const canSkipWipe = sameSession && eventCount !== undefined && eventCount === serverEventCount;
+  const register = () => piGateway.onEvent(SID, {
+    type: "session_register",
+    sessionId: SID,
+    cwd: "/tmp",
+    source: "tui",
+  });
+  const forward = (label: string) => piGateway.onEvent(SID, {
+    type: "event_forward",
+    sessionId: SID,
+    event: event(label),
+  });
+  const forwardTurnEnd = () => piGateway.onEvent(SID, {
+    type: "event_forward",
+    sessionId: SID,
+    event: {
+      eventType: "turn_end",
+      timestamp: Date.now(),
+      data: {
+        message: { usage: { input: 10, output: 2, cacheRead: 3, cacheWrite: 4, cost: { total: 0.5 } } },
+      },
+    },
+  });
+  const complete = () => piGateway.onEvent(SID, { type: "replay_complete", sessionId: SID });
 
-  if (!canSkipWipe) {
-    eventStore.deleteEventsForSession(sessionId);
-    wiped.value = true;
-    resetSent.value = true;
-  }
-
-  return { wiped: wiped.value, resetSent: resetSent.value };
+  return { complete, eventStore, forward, forwardTurnEnd, register, sessionManager, sessionUpdates };
 }
 
 describe("skip-wipe on bridge reconnect", () => {
-  it("skips wipe when eventCount matches server event count", () => {
-    const store = createMemoryEventStore(() => false);
-    store.insertEvent("s1", makeEvent("a"));
-    store.insertEvent("s1", makeEvent("b"));
-    store.insertEvent("s1", makeEvent("c"));
+  it("replays a complete transcript after an interrupted replay", () => {
+    const { complete, eventStore, forward, register, sessionManager } = createWiring();
 
-    const result = simulateSessionRegister({
-      eventStore: store,
-      sessionId: "s1",
-      previousSessionId: "s1",
-      eventCount: 3,
-    });
+    register();
+    forward("first");
+    register();
+    forward("first");
+    forward("second");
+    forward("third");
+    complete();
 
-    expect(result.wiped).toBe(false);
-    expect(result.resetSent).toBe(false);
-    // Events preserved
-    expect(store.getEvents("s1", 1)).toHaveLength(3);
+    expect(eventStore.getEvents(SID, 1).map((entry) => entry.event.data.label)).toEqual([
+      "first",
+      "second",
+      "third",
+    ]);
   });
 
-  it("wipes when eventCount mismatches", () => {
-    const store = createMemoryEventStore(() => false);
-    store.insertEvent("s1", makeEvent("a"));
-    store.insertEvent("s1", makeEvent("b"));
+  it("replays the current branch even after a prior replay completed", () => {
+    const { complete, eventStore, forward, register } = createWiring();
 
-    const result = simulateSessionRegister({
-      eventStore: store,
-      sessionId: "s1",
-      previousSessionId: "s1",
-      eventCount: 5, // mismatch
-    });
+    register();
+    forward("first v1");
+    forward("second v1");
+    forward("third v1");
+    complete();
 
-    expect(result.wiped).toBe(true);
-    expect(result.resetSent).toBe(true);
-    expect(store.getEvents("s1", 1)).toHaveLength(0);
+    register();
+    forward("first v2");
+    forward("second v2");
+    forward("third v2");
+
+    expect(eventStore.getEvents(SID, 1).map((entry) => entry.event.data.label)).toEqual([
+      "first v2",
+      "second v2",
+      "third v2",
+    ]);
   });
 
-  it("wipes when eventCount is not provided (backward compat)", () => {
-    const store = createMemoryEventStore(() => false);
-    store.insertEvent("s1", makeEvent("a"));
+  it("rebuilds cumulative stats without double counting on reconnect", () => {
+    const { complete, forwardTurnEnd, register, sessionManager, sessionUpdates } = createWiring();
 
-    const result = simulateSessionRegister({
-      eventStore: store,
-      sessionId: "s1",
-      previousSessionId: "s1",
-      eventCount: undefined,
+    register();
+    forwardTurnEnd();
+    complete();
+    expect(sessionManager.get(SID)).toMatchObject({
+      tokensIn: 10, tokensOut: 2, cacheRead: 3, cacheWrite: 4, cost: 0.5,
     });
 
-    expect(result.wiped).toBe(true);
-    expect(result.resetSent).toBe(true);
-  });
-
-  it("wipes when session ID changed", () => {
-    const store = createMemoryEventStore(() => false);
-    store.insertEvent("s1", makeEvent("a"));
-    store.insertEvent("s1", makeEvent("b"));
-
-    const result = simulateSessionRegister({
-      eventStore: store,
-      sessionId: "s2", // different session
-      previousSessionId: "s1",
-      eventCount: 2,
+    register();
+    forwardTurnEnd();
+    complete();
+    expect(sessionManager.get(SID)).toMatchObject({
+      tokensIn: 10, tokensOut: 2, cacheRead: 3, cacheWrite: 4, cost: 0.5,
     });
-
-    expect(result.wiped).toBe(true);
-    expect(result.resetSent).toBe(true);
-  });
-
-  it("wipes when no previous session (first connect)", () => {
-    const store = createMemoryEventStore(() => false);
-
-    const result = simulateSessionRegister({
-      eventStore: store,
-      sessionId: "s1",
-      previousSessionId: undefined,
-      eventCount: 5,
+    expect(sessionUpdates.at(-1)).toMatchObject({
+      tokensIn: 10, tokensOut: 2, cacheRead: 3, cacheWrite: 4, cost: 0.5,
     });
-
-    // No previous session = can't verify, so wipe
-    expect(result.wiped).toBe(true);
   });
 });

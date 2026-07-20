@@ -225,8 +225,6 @@ export interface DashboardSession {
    * safety-revert timer. Bridges and server SHALL NOT send it.
    */
   closing?: boolean;
-  /** Last known bridge entry count (for skip-wipe comparison on reconnect) */
-  lastEntryCount?: number;
   /** OS process ID of the pi agent — used for force-kill escalation */
   pid?: number;
   /** Active child processes detected by bridge process scanner. Server

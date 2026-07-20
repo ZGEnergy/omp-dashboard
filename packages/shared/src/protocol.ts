@@ -45,8 +45,6 @@ export interface SessionRegisterMessage {
   firstMessage?: string;
   /** True when this is a fresh session start (not a reconnection) */
   isNew?: boolean;
-  /** Number of conversation entries — used by server to skip event wipe on reconnect */
-  eventCount?: number;
   /** OS process ID of the pi agent — used for force-kill escalation */
   pid?: number;
   /**
