@@ -269,7 +269,7 @@ function protectCurrencyInMarkdown(content: string): string {
       continue;
     }
 
-    if (content[cursor] === "$" && content[cursor + 1] !== "$" && content[cursor + 1] >= "0" && content[cursor + 1] <= "9") {
+    if (content[cursor] === "$" && content[cursor - 1] !== "$" && content[cursor + 1] !== "$" && content[cursor + 1] >= "0" && content[cursor + 1] <= "9") {
       let backslashes = 0;
       for (let previous = cursor - 1; previous >= 0 && content[previous] === "\\"; previous--) backslashes++;
       if (backslashes % 2 === 0) {

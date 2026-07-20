@@ -519,6 +519,13 @@ describe("MarkdownContent", () => {
       expect(container.querySelector(".katex-display")).not.toBeNull();
     });
 
+    it("preserves numeric same-line double-dollar math delimiters", () => {
+      const { container } = renderMd("$$100$$");
+      expect(container.querySelector(".katex")).not.toBeNull();
+      expect(container.textContent).toContain("100");
+      expect(container.textContent).not.toContain("$");
+    });
+
     it("renders \\beta as the beta glyph", () => {
       const { container } = renderMd("$x = \\beta$");
       const katex = container.querySelector(".katex");
