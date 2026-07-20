@@ -110,7 +110,7 @@ import { initStore } from "./lib/worktree-init-store.js";
 const NAV_TRACKER = { predecessor, popNav };
 
 import { applyPluginConfigUpdate, initPluginConfigs, PluginContextProvider, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
-import { mergeReplayWindow } from "./lib/replay-window.js";
+import { mergeReplayWindow, type ReplayWindow } from "./lib/replay-window.js";
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, FileEntry, ImageContent, ModelInfo, OpenSpecData, OpenSpecGroup, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -655,9 +655,9 @@ export default function App() {
   const [loadingHistory, setLoadingHistory] = useState<Map<string, boolean>>(new Map());
   const loadingHistoryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // Tail window meta for load-older (session-tail-rehydrate).
-  const historyWindowRef = useRef(new Map<string, { minSeq: number; hasMoreOlder: boolean }>());
+  const historyWindowRef = useRef(new Map<string, ReplayWindow>());
   const [historyWindowMap, setHistoryWindowMap] = useState(
-    () => new Map<string, { minSeq: number; hasMoreOlder: boolean }>(),
+    () => new Map<string, ReplayWindow>(),
   );
   const [loadingOlderMap, setLoadingOlderMap] = useState(() => new Map<string, boolean>());
   // After overlay-url-routing: shell overlays are URL-driven via the
@@ -954,7 +954,7 @@ export default function App() {
   const handleLoadOlder = useCallback((anchorToken: string) => {
     if (!selectedId || loadingOlderMap.get(selectedId)) return;
     const win = historyWindowRef.current.get(selectedId);
-    if (!win?.hasMoreOlder || !(win.minSeq > 0)) return;
+    if (!win?.hasMoreOlder) return;
     setLoadingOlderMap((prev) => new Map(prev).set(selectedId, true));
     const source = sourceGenerationRef.current.get(selectedId) || replayController.ledger(selectedId).sourceGeneration || "";
     completedOlderAnchorRef.current.set(selectedId, null);
@@ -1165,8 +1165,8 @@ export default function App() {
         publishSessionEvents(sid, r.events.map((entry) => entry.event));
         persister.seed(sid, r.events);
         maxSeqMapRef.current.set(sid, r.lastSeq);
-        historyWindowRef.current.set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder });
-        setHistoryWindowMap((prev) => new Map(prev).set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder }));
+        historyWindowRef.current.set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder, partialHead: r.partialHead });
+        setHistoryWindowMap((prev) => new Map(prev).set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder, partialHead: r.partialHead }));
         beginReplay(sid, "delta", source);
       }).catch(() => { /* cache admission is an optimization; cold replay remains active */ })
         .finally(() => rehydrateAbortRef.current.delete(sid));
@@ -1918,6 +1918,7 @@ export default function App() {
               pendingSteering={selectedSession?.pendingQueues?.steering ?? EMPTY_STEERING}
               loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false}
               hasMoreOlder={selectedId ? historyWindowMap.get(selectedId)?.hasMoreOlder ?? false : false}
+              partialHead={selectedId ? historyWindowMap.get(selectedId)?.partialHead ?? false : false}
               loadingOlder={selectedId ? loadingOlderMap.get(selectedId) ?? false : false}
               mobileActive={isMobile && mobileDetailVisible}
               mobileActivationEpoch={mobileActivationEpoch}

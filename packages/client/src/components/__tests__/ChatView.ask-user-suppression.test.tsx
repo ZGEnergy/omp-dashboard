@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, within } from "@testing-library/react";
 import React from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { type ChatMessage, createInitialState } from "../../lib/event-reducer.js";
@@ -54,6 +54,19 @@ function interactiveUi(status: string, overrides: Partial<ChatMessage> = {}): Ch
   };
 }
 
+function toolBurst(count: number): ChatMessage[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `tool-burst-${index}`,
+    role: "toolResult",
+    content: `output-${index}`,
+    toolName: "bash",
+    toolCallId: `burst-${index}`,
+    args: { command: `printf output-${index}` },
+    toolStatus: "complete",
+    timestamp: Date.now() + index,
+  }));
+}
+
 function renderChat(messages: ChatMessage[]) {
   const state = createInitialState();
   state.messages.push(...messages);
@@ -105,5 +118,43 @@ describe("ChatView — ask_user tool-card suppression (change: fix-ask-user-card
       askUserToolResult({ toolStatus: "complete", result: 'User responded: true' }),
     ]);
     expect(toolCardButton(container)).not.toBeNull();
+  });
+  it("T.3 (pending prompt): keeps the latest non-widget prompt persistent after a large tool burst", () => {
+    const { container, getByTestId } = renderChat([
+      ...toolBurst(80),
+      askUserToolResult({ toolStatus: "running" }),
+      interactiveUi("pending"),
+    ]);
+    const scroll = getByTestId("chat-scroll-container");
+    const prompt = getByTestId("active-interactive-prompt");
+
+    expect(scroll.contains(prompt)).toBe(false);
+    expect(scroll.nextElementSibling).toBe(prompt);
+    expect(within(prompt).getByText("Yes")).toBeTruthy();
+    expect(within(prompt).getByText("No")).toBeTruthy();
+    expect(within(scroll).queryByText(TITLE)).toBeNull();
+    expect(toolCardButton(container)).toBeNull();
+    expect(container.querySelectorAll('[data-testid="active-interactive-prompt"]')).toHaveLength(1);
+  });
+
+  it("T.4 (resolved prompt): keeps the historical prompt inline without a persistent bar", () => {
+    const { container, getByTestId, queryByTestId } = renderChat([
+      ...toolBurst(80),
+      askUserToolResult({ toolStatus: "complete", result: 'User responded: true' }),
+      interactiveUi("resolved", {
+        args: {
+          requestId: "r1",
+          method: "confirm",
+          params: { title: TITLE, message: "This is irreversible." },
+          status: "resolved",
+          result: { confirmed: true },
+        } as Record<string, unknown>,
+      }),
+    ]);
+    const scroll = getByTestId("chat-scroll-container");
+
+    expect(queryByTestId("active-interactive-prompt")).toBeNull();
+    expect(within(scroll).getByText(TITLE)).toBeTruthy();
+    expect(toolCardButton(container)).toBeNull();
   });
 });

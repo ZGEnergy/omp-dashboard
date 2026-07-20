@@ -779,6 +779,156 @@ describe("ChatView mobile scroll owner", () => {
     expect(scrollEl.scrollTop).not.toBe(1_020);
   });
 
+  it("renders partial-history notice outside the virtual scroll container", () => {
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView state={stateWith(3)} toolContext={defaultToolContext} partialHead />
+      </ThemeProvider>,
+    );
+
+    const notice = container.querySelector('[data-testid="partial-history-notice"]');
+    expect(notice).not.toBeNull();
+    expect(notice?.textContent).toMatch(/earlier conversation remains available through loading older messages/i);
+    expect(notice?.closest('[data-testid="chat-scroll-container"]')).toBeNull();
+  });
+
+  it("releases a stale older anchor so a later top gesture can request again", async () => {
+    const onLoadOlder = vi.fn();
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="stale-anchor"
+          state={stateWithRange(0, 5)}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    fireEvent.click(container.querySelector('[data-testid="load-older-button"]')!);
+    const firstToken = onLoadOlder.mock.calls[0]?.[0] as string;
+    expect(firstToken).toBeTruthy();
+
+    rerender(
+      <ThemeProvider>
+        <ChatView
+          sessionId="stale-anchor"
+          state={stateWithRange(-1, 5)}
+          replayGeneration={1}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+          completedOlderAnchorToken={firstToken}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    fireEvent.click(container.querySelector('[data-testid="load-older-button"]')!);
+    expect(onLoadOlder).toHaveBeenCalledTimes(2);
+  });
+
+  it("labels a completed older page containing only tool activity", async () => {
+    const onLoadOlder = vi.fn();
+    const initial = stateWithRange(0, 4);
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="tool-only-page"
+          state={initial}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    fireEvent.click(container.querySelector('[data-testid="load-older-button"]')!);
+    const token = onLoadOlder.mock.calls[0]?.[0] as string;
+    if (!token) throw new Error("TOKEN_MISSING");
+    const older = stateWithRange(0, 4);
+    older.messages.unshift({
+      id: "tool-only",
+      role: "toolResult",
+      content: "tool output",
+      toolName: "bash",
+      toolStatus: "complete",
+      timestamp: -1,
+    });
+    rerender(
+      <ThemeProvider>
+        <ChatView
+          sessionId="tool-only-page"
+          state={older}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+          completedOlderAnchorToken={token}
+        />
+      </ThemeProvider>,
+    );
+
+    await flushRaf();
+    expect(container.querySelector('[data-testid="load-older-feedback"]')?.textContent).toMatch(/tool activity/i);
+    expect(container.querySelector('[data-testid="load-older-feedback"]')?.textContent).not.toMatch(/no older messages remain/i);
+  });
+
+  it("automatically continues tool-only older pages at most three times", async () => {
+    const onLoadOlder = vi.fn();
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="bounded-older"
+          state={stateWithRange(0, 4)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={1}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 20, 2_000, 400);
+    fireEvent.wheel(scrollEl, { deltaY: -30 });
+    fireEvent.scroll(scrollEl);
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+
+    let current = stateWithRange(0, 4);
+    for (let page = 0; page < 3; page += 1) {
+      current.messages.unshift({
+        id: `tool-page-${page}`,
+        role: "toolResult",
+        content: `tool output ${page}`,
+        toolName: "bash",
+        toolStatus: "complete",
+        timestamp: -page - 1,
+      });
+      const token = onLoadOlder.mock.calls[page]?.[0] as string;
+      rerender(
+        <ThemeProvider>
+          <ChatView
+            sessionId="bounded-older"
+            state={current}
+            toolContext={defaultToolContext}
+            mobileActive
+            mobileActivationEpoch={1}
+            replayGeneration={1}
+            hasMoreOlder
+            onLoadOlder={onLoadOlder}
+            completedOlderAnchorToken={token}
+          />
+        </ThemeProvider>,
+      );
+      for (let frame = 0; frame < 4; frame += 1) await flushRaf();
+    }
+
+    expect(onLoadOlder).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps the desktop saved anchor across session switches", async () => {
     const { container, rerender } = render(
       <ThemeProvider>

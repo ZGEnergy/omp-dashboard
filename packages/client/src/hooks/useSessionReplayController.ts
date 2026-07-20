@@ -21,6 +21,7 @@ export type ReplayInbound = EventReplayMessage | EventMessage | SessionStateRese
 export interface ReplayWindowMetadata {
   minSeq: number | null;
   hasMoreOlder: boolean | null;
+  partialHead: boolean | null;
   kind: ReplayRequest["kind"];
 }
 
@@ -187,6 +188,7 @@ export class SessionReplayController {
     this.effects.window?.(message.sessionId, {
       minSeq: message.windowMinSeq ?? null,
       hasMoreOlder: typeof message.hasMoreOlder === "boolean" ? message.hasMoreOlder : null,
+      partialHead: typeof message.partialHead === "boolean" ? message.partialHead : null,
       kind: message.replayKind,
     });
     if (message.replayKind !== "older" && result.accepted.length) this.effects.apply(message.sessionId, result.accepted);
