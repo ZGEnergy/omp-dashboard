@@ -1448,6 +1448,9 @@ export function wireEvents(deps: EventWiringDeps): void {
       const modelUpdates: Partial<DashboardSession> = {
         model: msg.model,
       };
+      // Older bridges omit thinkingLevel; do not turn that omission into an
+      // explicit undefined update. A complete current snapshot still carries
+      // either a string or null, both of which are forwarded below.
       if (msg.thinkingLevel !== undefined) {
         modelUpdates.thinkingLevel = msg.thinkingLevel;
       }

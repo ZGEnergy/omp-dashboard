@@ -7,7 +7,7 @@ import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/inp
 
 // Use null (not undefined) for fields that must be cleared — undefined is
 // dropped during JSON serialisation so the browser would keep the stale value.
-type SessionUpdates = Partial<Pick<DashboardSession, "status" | "model" | "thinkingLevel">> & {
+type SessionUpdates = Partial<Pick<DashboardSession, "status">> & {
   currentTool?: string | null;
 };
 
@@ -66,19 +66,6 @@ export function extractSessionUpdates(event: DashboardEvent): SessionUpdates | n
 
     case "tool_execution_end":
       return { currentTool: null };
-
-    case "model_select": {
-      const model = event.data.model as { provider?: string; id?: string } | undefined;
-      if (model?.provider && model?.id) {
-        const updates: SessionUpdates = { model: `${model.provider}/${model.id}` };
-        const thinkingLevel = event.data.thinkingLevel as string | undefined;
-        if (thinkingLevel !== undefined) {
-          updates.thinkingLevel = thinkingLevel;
-        }
-        return updates;
-      }
-      return null;
-    }
 
     // Flow / architect events are NOT extracted here. Per change
     // pluginize-flows-via-registry, flows-plugin owns its own state

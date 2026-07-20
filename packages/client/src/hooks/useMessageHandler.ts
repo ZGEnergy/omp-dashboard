@@ -371,21 +371,23 @@ export function useMessageHandler(
         if ((msg.updates as Partial<DashboardSession>).dataUnavailable === true) {
           clearLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, msg.sessionId);
         }
-        // Mirror model/thinkingLevel into sessionStates so the bottom StatusBar
-        // (which reads selectedState.thinkingLevel ?? selectedSession.thinkingLevel)
-        // stays in sync with the session card. model_update events from the bridge
-        // go through session_updated — there's no dedicated browser-side
-        // model_update handler, so we propagate here.
+        // Only `session_updated` is authoritative for live model preferences.
+        // The server sends model changes as one complete snapshot, including an
+        // explicit null when thinking is cleared. Apply both fields through one
+        // functional update so ordered Pi snapshots cannot be lost to a stale
+        // closure or a partial optimistic write.
         // See change: enrich-custom-provider-model-metadata.
         {
           const updates = msg.updates as Partial<DashboardSession>;
-          if (updates.thinkingLevel !== undefined || updates.model !== undefined) {
+          const hasModel = updates.model !== undefined;
+          const hasThinkingLevel = Object.prototype.hasOwnProperty.call(updates, "thinkingLevel");
+          if (hasModel || hasThinkingLevel) {
             setSessionStates((prev) => {
               const next = new Map(prev);
               const existing = next.get(msg.sessionId) ?? createInitialState();
               const patched: SessionState = { ...existing };
-              if (updates.thinkingLevel !== undefined) patched.thinkingLevel = updates.thinkingLevel;
-              if (updates.model !== undefined) patched.model = updates.model;
+              if (hasModel) patched.model = updates.model;
+              if (hasThinkingLevel) patched.thinkingLevel = updates.thinkingLevel ?? null;
               next.set(msg.sessionId, patched);
               return next;
             });

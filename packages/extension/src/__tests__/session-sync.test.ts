@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { sendStateSync, handleSessionChange } from "../session-sync.js";
+import { resetReconnectCaches, sendModelUpdateIfChanged } from "../model-tracker.js";
 import type { BridgeContext } from "../bridge-context.js";
 
 function createMockBridgeContext(overrides?: Partial<BridgeContext>): BridgeContext {
@@ -53,6 +54,64 @@ describe("sendStateSync", () => {
     expect(registerMsg.pid).toBe(process.pid);
     expect(typeof registerMsg.pid).toBe("number");
     expect(registerMsg.pid).toBeGreaterThan(0);
+  });
+
+  it("leaves model dedup caches to the bridge publisher", () => {
+    const bc = createMockBridgeContext({
+      cachedCtx: {
+        model: { provider: "anthropic", id: "claude" },
+        sessionManager: {
+          getSessionFile: () => "/path/to/session.json",
+          getSessionDir: () => "/path/to/session",
+          getBranch: () => [],
+        },
+      },
+      pi: {
+        getSessionName: () => "test-session",
+        getCommands: () => [],
+        getThinkingLevel: () => "high",
+      } as any,
+    } as any);
+
+    sendStateSync(bc, () => []);
+
+    expect(bc.lastModel).toBeUndefined();
+    expect(bc.lastThinkingLevel).toBeUndefined();
+  });
+
+  it("reconnect reset leaves registration ahead of a fresh full snapshot", () => {
+    let level: string | null = "high";
+    const sent: any[] = [];
+    const bc = createMockBridgeContext({
+      cachedCtx: {
+        model: { provider: "anthropic", id: "claude" },
+        sessionManager: {
+          getSessionFile: () => "/path/to/session.json",
+          getSessionDir: () => "/path/to/session",
+          getBranch: () => [],
+        },
+      },
+      pi: {
+        getSessionName: () => "test-session",
+        getCommands: () => [],
+        getThinkingLevel: () => level,
+      } as any,
+      connection: { send: (msg: any) => { sent.push(msg); } } as any,
+      lastModel: undefined,
+      lastThinkingLevel: undefined,
+    } as any);
+
+    sendModelUpdateIfChanged(bc);
+    sent.length = 0;
+    resetReconnectCaches(bc);
+    sendStateSync(bc, () => []);
+    sendModelUpdateIfChanged(bc);
+    sendModelUpdateIfChanged(bc);
+
+    expect(sent[0].type).toBe("session_register");
+    const updates = sent.filter((m: any) => m.type === "model_update");
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({ model: "anthropic/claude", thinkingLevel: "high" });
   });
 
   // ── reattach-move-to-front ──

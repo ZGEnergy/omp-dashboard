@@ -614,7 +614,7 @@ describe("eventReducer", () => {
 });
 
 describe("model_select event", () => {
-  it("should update model from model_select", () => {
+  it("keeps model_select history from mutating live model preference state", () => {
     const state = applyEvents([
       {
         eventType: "model_select",
@@ -625,10 +625,11 @@ describe("model_select event", () => {
         },
       },
     ]);
-    expect(state.model).toBe("anthropic/claude-opus-4-6");
+    expect(state.model).toBeUndefined();
+    expect(state.thinkingLevel).toBeUndefined();
   });
 
-  it("should update thinkingLevel from model_select event data", () => {
+  it("does not apply thinkingLevel from a partial model_select event", () => {
     const state = applyEvents([
       {
         eventType: "model_select",
@@ -640,8 +641,8 @@ describe("model_select event", () => {
         },
       },
     ]);
-    expect(state.model).toBe("anthropic/claude-opus-4-6");
-    expect(state.thinkingLevel).toBe("high");
+    expect(state.model).toBeUndefined();
+    expect(state.thinkingLevel).toBeUndefined();
   });
 });
 

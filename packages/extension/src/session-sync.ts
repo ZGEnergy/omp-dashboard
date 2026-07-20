@@ -21,8 +21,6 @@ export function sendStateSync(
 ): void {
   const model = getCurrentModelString(bc);
   const thinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? undefined;
-  bc.lastModel = model;
-  bc.lastThinkingLevel = thinkingLevel;
 
   const sessionFile = bc.lastSessionFile ?? bc.cachedCtx?.sessionManager?.getSessionFile?.() ?? undefined;
   const sessionDir = bc.lastSessionDir ?? bc.cachedCtx?.sessionManager?.getSessionDir?.() ?? undefined;
@@ -229,8 +227,6 @@ export function handleSessionChange(
   bc.lastGitPrNumber = undefined;
   bc.lastGitWorktreeJson = undefined;
   bc.lastSessionName = bc.pi.getSessionName() ?? "";
-  bc.lastModel = getCurrentModelString(bc);
-  bc.lastThinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? undefined;
 
   // handleSessionChange always mints a fresh sessionId (new/fork/resume),
   // so registerReason is unconditionally "spawn" — even after the bridge
