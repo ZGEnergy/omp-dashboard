@@ -278,7 +278,11 @@ jobs:
         #
         # Failure mode: any single non-skip publish failure marks the whole step
         # failed (FAIL=1) but lets the loop finish so the logs show every
-        # package's outcome.
+        # package's outcome. Each failure is classified: an OIDC / trusted-
+        # publisher signature in npm's output emits a `::error::<pkg> —
+        # trusted publisher likely missing` annotation and lands the package
+        # in a gap report written to $GITHUB_STEP_SUMMARY, so one release run
+        # tells you exactly which packages still need a Trusted Publisher.
         run: |
           set -uo pipefail
           # Ordering invariant: a package MUST appear AFTER every
@@ -330,6 +334,8 @@ jobs:
           TAG_ARG=""
           if [ "$PRERELEASE" = "true" ]; then TAG_ARG="--tag next"; fi
           FAIL=0
+          FAILED_TP=()     # failures whose signature = missing trusted-publisher / OIDC config
+          FAILED_OTHER=()  # failures for any other reason
           for pkg in "${PACKAGES[@]}"; do
             if npm view "$pkg@$VERSION" version >/dev/null 2>&1; then
               echo "::notice::$pkg@$VERSION already published — skip"
@@ -337,12 +343,44 @@ jobs:
             fi
             echo "::group::Publishing $pkg@$VERSION (is_prerelease=$PRERELEASE)"
             if [ "$pkg" = "@blackbelt-technology/pi-agent-dashboard" ]; then
-              npm publish --provenance --access public $TAG_ARG || FAIL=1
+              npm publish --provenance --access public $TAG_ARG 2>&1 | tee /tmp/pub.log; rc=${PIPESTATUS[0]}
             else
-              npm publish --workspace="$pkg" --provenance --access public $TAG_ARG || FAIL=1
+              npm publish --workspace="$pkg" --provenance --access public $TAG_ARG 2>&1 | tee /tmp/pub.log; rc=${PIPESTATUS[0]}
             fi
             echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              FAIL=1
+              # OIDC / trusted-publisher signatures: the id-token exchange is
+              # rejected, or npm cannot authenticate the provenance publish.
+              if grep -qiE 'oidc|trusted publish|id-token|unable to authenticate|ENEEDAUTH|could not (get|retrieve|read).*(oidc|token)' /tmp/pub.log; then
+                echo "::error::$pkg — publish failed; Trusted Publisher likely NOT configured (OIDC token exchange rejected). Add it: npmjs.com → $pkg → Settings → Trusted Publisher (repo ${GITHUB_REPOSITORY}, workflow publish.yml, environment npm-publish)."
+                FAILED_TP+=("$pkg")
+              else
+                echo "::error::$pkg — publish failed (non-OIDC error; see the group log above)."
+                FAILED_OTHER+=("$pkg")
+              fi
+            fi
           done
+          # Gap report → job summary (renders on the run's Summary tab).
+          {
+            echo "## npm publish — Trusted Publisher gap report"
+            echo ""
+            if [ "${#FAILED_TP[@]}" -eq 0 ] && [ "${#FAILED_OTHER[@]}" -eq 0 ]; then
+              echo "✅ All packages published (or already up-to-date). No Trusted Publisher gaps detected."
+            else
+              if [ "${#FAILED_TP[@]}" -gt 0 ]; then
+                echo "### ❌ Trusted Publisher likely MISSING (${#FAILED_TP[@]})"
+                for p in "${FAILED_TP[@]}"; do echo "- \`$p\`"; done
+                echo ""
+                echo "Fix each: npmjs.com → package → **Settings → Trusted Publisher** — repo \`${GITHUB_REPOSITORY}\`, workflow \`publish.yml\`, environment \`npm-publish\`."
+                echo ""
+              fi
+              if [ "${#FAILED_OTHER[@]}" -gt 0 ]; then
+                echo "### ⚠️ Other publish failures (${#FAILED_OTHER[@]})"
+                for p in "${FAILED_OTHER[@]}"; do echo "- \`$p\`"; done
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
           exit $FAIL
 
   # ── Electron builds (parallel) ────────────────────────────────
