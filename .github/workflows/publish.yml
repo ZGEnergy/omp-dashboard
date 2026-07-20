@@ -344,6 +344,12 @@ jobs:
           FAIL=0
           FAILED_TP=()     # failures whose signature = missing trusted-publisher / OIDC config
           FAILED_OTHER=()  # failures for any other reason
+          # Disable set -e for the publish loop: each package's rc is captured
+          # explicitly (PIPESTATUS) and handled below, so a single failure must
+          # NOT abort the loop. Without this, `set -euo pipefail` exits at the
+          # first failing `npm publish | tee`, so the gap report never lists more
+          # than one package. Re-enabled after the loop.
+          set +e
           for pkg in "${PACKAGES[@]}"; do
             if npm view "$pkg@$VERSION" version >/dev/null 2>&1; then
               echo "::notice::$pkg@$VERSION already published — skip"
@@ -369,6 +375,7 @@ jobs:
               fi
             fi
           done
+          set -e
           # Gap report → job summary (renders on the run's Summary tab).
           {
             echo "## npm publish — Trusted Publisher gap report"
