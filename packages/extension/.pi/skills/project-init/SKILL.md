@@ -223,7 +223,11 @@ Compose the seeded block as:
 1. The marker line `<!-- dox-doctrine -->`
 2. The WRITE discipline — the text between `<!-- dox:write:start -->` and
    `<!-- dox:write:end -->` in `dox-doctrine.md`.
-3. ONE READ discipline variant:
+3. ONE READ discipline variant — **skip this item entirely when the chosen
+   profile's `AGENTS.md.tmpl` already embeds a `## Finding docs (READ
+   discipline)` section** (the shipped `coding` profile does; seeding it again
+   would duplicate the gate). Seed only the WRITE discipline in that case.
+   Otherwise:
    - If the kb toolset is wired (this profile writes
      `knowledge_base.json` with `indexAgentsFiles`/`directoryLevelAgents`),
      use the text between `<!-- dox:read:kb:start -->` and

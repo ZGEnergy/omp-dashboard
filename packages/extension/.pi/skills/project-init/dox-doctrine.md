@@ -16,6 +16,12 @@ Per-directory `AGENTS.md` files form a tree. Each directory `AGENTS.md` is the
 per-file record for the files in that directory. The ROOT `AGENTS.md` holds
 doctrine + architecture pointers only — never a per-file index.
 
+**Keep the root lean.** The root `AGENTS.md` loads into every agent turn — every
+byte costs tokens on every turn. A verbose root file buries the rules the model
+must follow (signal dilution) and measurably degrades adherence; a lean file
+keeps doctrine salient. Default assumption: your update does NOT belong in the
+root — route it by the table below.
+
 **Route every doc update by kind:**
 
 | Kind of update | Goes in |
