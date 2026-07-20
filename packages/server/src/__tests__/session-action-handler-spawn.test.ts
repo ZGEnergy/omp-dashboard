@@ -150,7 +150,7 @@ describe("handleSpawnSession", () => {
     expect(mockAppendSpawnFailure).toHaveBeenCalledWith(expect.objectContaining({ code: "SPAWN_ERRNO" }));
   });
 
-  it("passes advisor through and arms only a successful true spawn token", async () => {
+  it("inherits OMP advisor default and arms the generic successful-spawn watchdog", async () => {
     mockPreflightSpawn.mockReturnValue({ ok: true, reasons: [] });
     const watchdog = { arm: vi.fn() };
     vi.mocked(getSpawnRegisterWatchdog).mockReturnValue(watchdog as never);
@@ -161,40 +161,13 @@ describe("handleSpawnSession", () => {
     }));
 
     const ctx = makeCtx();
-    await handleSpawnSession(
-      { type: "spawn_session", cwd: "/p/x", advisor: true } as never,
-      ctx as never,
-    );
+    await handleSpawnSession({ type: "spawn_session", cwd: "/p/x" } as never, ctx as never);
 
-    expect(mockSpawnPiSession).toHaveBeenCalledWith("/p/x", expect.objectContaining({ advisor: true }));
+    expect(mockSpawnPiSession).toHaveBeenCalledWith("/p/x", expect.not.objectContaining({ advisor: expect.anything() }));
     const spawnOptions = mockSpawnPiSession.mock.calls[0]?.[1];
     expect(spawnOptions?.spawnToken).toBeTypeOf("string");
-    expect(ctx.pendingAdvisorRegistry.reserve).toHaveBeenCalledWith(spawnOptions?.spawnToken);
-    expect(ctx.pendingAdvisorRegistry.arm).toHaveBeenCalledWith(spawnOptions?.spawnToken, 30_000);
+    expect(spawnOptions).not.toHaveProperty("advisor");
     expect(watchdog.arm).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 30_000 }));
   });
 
-  it("does not arm advisor proof for false, absent, or failed spawns", async () => {
-    mockPreflightSpawn.mockReturnValue({ ok: true, reasons: [] });
-    mockSpawnPiSession
-      .mockResolvedValueOnce({ success: true, spawnToken: "false-token", message: "spawned" })
-      .mockResolvedValueOnce({ success: true, spawnToken: "absent-token", message: "spawned" })
-      .mockResolvedValueOnce({ success: false, spawnToken: "failed-token", message: "failed" });
-
-    const ctx = makeCtx();
-    await handleSpawnSession(
-      { type: "spawn_session", cwd: "/p/x", advisor: false } as never,
-      ctx as never,
-    );
-    await handleSpawnSession({ type: "spawn_session", cwd: "/p/x" } as never, ctx as never);
-    await handleSpawnSession(
-      { type: "spawn_session", cwd: "/p/x", advisor: true } as never,
-      ctx as never,
-    );
-
-    const failedSpawnOptions = mockSpawnPiSession.mock.calls[2]?.[1];
-    expect(ctx.pendingAdvisorRegistry.reserve).toHaveBeenCalledTimes(1);
-    expect(ctx.pendingAdvisorRegistry.discard).toHaveBeenCalledWith(failedSpawnOptions?.spawnToken);
-    expect(ctx.pendingAdvisorRegistry.arm).not.toHaveBeenCalled();
-  });
 });

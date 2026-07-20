@@ -32,13 +32,6 @@ describe("session-meta", () => {
       expect(meta).toEqual({ source: "dashboard" });
     });
 
-    it("should persist enabled advisor metadata", () => {
-      const sessionFile = path.join(tmpDir, "advisor.jsonl");
-      writeSessionMeta(sessionFile, { source: "dashboard", advisor: true });
-
-      expect(readSessionMeta(sessionFile)).toMatchObject({ advisor: true });
-    });
-
     it("should return undefined for missing meta file", () => {
       const sessionFile = path.join(tmpDir, "nonexistent.jsonl");
       expect(readSessionMeta(sessionFile)).toBeUndefined();

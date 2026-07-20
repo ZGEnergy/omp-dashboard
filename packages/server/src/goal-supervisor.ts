@@ -63,8 +63,6 @@ export interface GoalDriverSpawnRequest {
   spawnToken: string;
   /** Continue-mode session file (resume only). Absent → fresh. */
   sessionFile?: string;
-  /** Preserved only for an existing advisor-enabled session resume. */
-  advisor?: true;
   /** Re-prime prompt to dispatch once the fresh driver registers. */
   reprime?: string;
 }
@@ -75,8 +73,6 @@ export interface GoalSupervisorDeps {
   isSessionLive: (sessionId: string) => boolean;
   /** Resolve a (dead) driver's session file for continue-mode resume. */
   resolveSessionFile: (sessionId: string) => string | undefined;
-  /** Resolve whether a dead driver was advisor-enabled before a resume. */
-  resolveSessionAdvisor?: (sessionId: string) => boolean;
   /** Ask the host to spawn a goal driver (headless, goalId stamped to token). */
   spawnDriver: (req: GoalDriverSpawnRequest) => Promise<{ success: boolean; message?: string }>;
   /** Host kill by spawn token (spawn→register window). */
@@ -257,8 +253,6 @@ export function createGoalSupervisor(deps: GoalSupervisorDeps): GoalSupervisor {
     const poisoned = consecutiveNoProgressResumes(goal) >= POISON_K;
     const sessionFile = poisoned ? undefined : deps.resolveSessionFile(sessionId);
     const reason: GoalRespawn["reason"] = poisoned || !sessionFile ? "fresh" : "resume";
-    const advisor = reason === "resume" && deps.resolveSessionAdvisor?.(sessionId) === true;
-
     // Record this death as a respawn attempt (drives future counters) + flip to
     // the visible respawning state (never `pursuing` with no live driver — S1).
     const respawn: GoalRespawn = { at: now(), sessionId, reason, madeProgress };
@@ -282,7 +276,7 @@ export function createGoalSupervisor(deps: GoalSupervisorDeps): GoalSupervisor {
       // performSpawn is generation-guarded + lock-serialized; catch so a store
       // I/O failure can't become an unhandled rejection.
       void withGoalLock(goal.id, () =>
-        performSpawn(goal.id, goal.cwd, reason, sessionFile, advisor, generationAtSchedule),
+        performSpawn(goal.id, goal.cwd, reason, sessionFile, generationAtSchedule),
       ).catch((err) => log("[goal-supervisor] performSpawn failed", { goalId: goal.id, err: String(err) }));
     }, backoff);
     timers.set(goal.id, timer);
@@ -293,7 +287,6 @@ export function createGoalSupervisor(deps: GoalSupervisorDeps): GoalSupervisor {
     cwd: string,
     reason: GoalRespawn["reason"],
     sessionFile: string | undefined,
-    advisor: boolean,
     generationAtSchedule: number,
   ): Promise<void> {
     // Re-read: a clear/pause during the backoff bumped `generation` → abort.
@@ -319,7 +312,7 @@ export function createGoalSupervisor(deps: GoalSupervisorDeps): GoalSupervisor {
       goalId,
       reason,
       spawnToken,
-      ...(reason === "resume" && sessionFile ? { sessionFile, ...(advisor ? { advisor: true as const } : {}) } : {}),
+      ...(reason === "resume" && sessionFile ? { sessionFile } : {}),
       ...(reason === "fresh" ? { reprime: deps.buildReprime(goal) } : {}),
     };
 

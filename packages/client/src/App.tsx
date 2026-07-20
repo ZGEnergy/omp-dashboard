@@ -50,7 +50,7 @@ import { allTagsInUse } from "./components/tags/all-tags.js";
 import { WorktreeInitStack } from "./components/WorktreeInitStack.js";
 import { WorktreeSpawnDialog } from "./components/WorktreeSpawnDialog.js";
 import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
-import { useAdvisorSpawnDefault } from "./hooks/useAdvisorSpawnDefault.js";
+
 import { useAppHidden } from "./hooks/useAppHidden.js";
 import { useContentViews } from "./hooks/useContentViews.js";
 import { useDocumentTitle } from "./hooks/useDocumentTitle.js";
@@ -61,6 +61,7 @@ import { useMessageHandler } from "./hooks/useMessageHandler.js";
 import { useMobile } from "./hooks/useMobile.js";
 import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
 import { usePiResourceFileFetch } from "./hooks/usePiResourceFileFetch.js";
+import { type ReplayWindowMetadata, SessionReplayController } from "./hooks/useSessionReplayController.js";
 import { useSidebarState } from "./hooks/useSidebarState.js";
 import { useStaleToolReconcile } from "./hooks/useStaleToolReconcile.js";
 import { useWebSocket } from "./hooks/useWebSocket.js";
@@ -90,9 +91,8 @@ import { dispatchPluginMessage } from "./lib/plugins-api.js";
 import { clearRecoveryOffer } from "./lib/recovery-offer-bus.js";
 import { rehydrateSession } from "./lib/rehydrate-session.js";
 // Strategy A (reduce-session-replay-traffic): durable replay cursor.
-import { replayCache, type ReplayCacheScope } from "./lib/replay-cache.js";
+import { type ReplayCacheScope, replayCache } from "./lib/replay-cache.js";
 import { createReplayPersister, type ReplayPersister } from "./lib/replay-persist.js";
-import { SessionReplayController, type ReplayWindowMetadata } from "./hooks/useSessionReplayController.js";
 import {
   buildFolderSettingsUrl,
   buildOpenSpecArchiveUrl,
@@ -115,7 +115,7 @@ import { initStore } from "./lib/worktree-init-store.js";
 const NAV_TRACKER = { predecessor, popNav };
 
 import { applyPluginConfigUpdate, initPluginConfigs, PluginContextProvider, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
-import { mergeReplayWindow, type ReplayWindow } from "./lib/replay-window.js";
+
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, FileEntry, ImageContent, ModelInfo, OpenSpecData, OpenSpecGroup, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -136,6 +136,7 @@ import { ApiContext, deriveApiBase, setGlobalApiBase, VITE_API_URL } from "./lib
 import { buildContextUsageMap } from "./lib/context-usage.js";
 import { DisplayPrefsProvider } from "./lib/DisplayPrefsContext.js";
 import { registerPluginCatalog, useI18n } from "./lib/i18n.js";
+import { mergeReplayWindow } from "./lib/replay-window.js";
 import { SessionAssetsProvider } from "./lib/SessionAssetsContext.js";
 import { deriveSelectedSessionId } from "./lib/selectedSessionId.js";
 import { selectViewedSessionId } from "./lib/selectViewedSessionId.js";
@@ -149,12 +150,12 @@ const EMPTY_INTERACTIVE_REQUESTS: readonly never[] = Object.freeze([]);
 const EMPTY_SUBAGENTS_MAP: ReadonlyMap<string, SubagentStateSnapshot> = Object.freeze(new Map());
 
 import {
-  clearSessionEvents,
   ContentHeaderStickySlot,
   ContentInlineFooterSlot,
-  publishSessionEvents,
-  ContentViewSlot,createSlotRegistry, 
+  ContentViewSlot,
+  clearSessionEvents,createSlotRegistry, 
   forSession,
+  publishSessionEvents,
   ShellOverlayRouteSlot,
   ShellSessionsProvider,
   useShellOverlayRouteMatched
@@ -552,7 +553,7 @@ export default function App() {
       window.removeEventListener("pageshow", onPageShow);
     };
   }, [requestForegroundReplay]);
-  const advisorDefault = useAdvisorSpawnDefault();
+  
   // Per-session dashboard-local `/view` preview rows. Lives separately from
   // event-reducer state so the reducer never sees them. Merged with
   // `state.messages` by timestamp when passing to ChatView.
@@ -1574,7 +1575,6 @@ export default function App() {
     <SessionList
       sessions={Array.from(sessions.values())}
       sessionMessagesMap={sessionMessagesMap}
-      advisorDefault={advisorDefault}
       terminals={Array.from(terminals.values())}
       selectedId={selectedId}
       onSelect={handleSelect}
@@ -2529,7 +2529,6 @@ export default function App() {
       </div>
       <BoardWorktreeSpawnDialog
         worktree={boardWorktreeForChange}
-        advisorDefault={advisorDefault}
         onCancel={() => setBoardWorktreeForChange(null)}
         onSpawnStart={addSpawningCwd}
         onSpawnAbort={clearSpawningCwd}
@@ -2561,18 +2560,16 @@ export default function App() {
 
 export function BoardWorktreeSpawnDialog({
   worktree,
-  advisorDefault,
   onCancel,
   onSpawnStart,
   onSpawnAbort,
   onSpawn,
 }: {
   worktree: { cwd: string; changeName: string } | null;
-  advisorDefault: boolean;
   onCancel: () => void;
   onSpawnStart: (cwd: string) => void;
   onSpawnAbort: (cwd: string) => void;
-  onSpawn: (path: string, opts?: { gitWorktreeBase?: string; attachProposal?: string; advisor?: true }) => void;
+  onSpawn: (path: string, opts?: { gitWorktreeBase?: string; attachProposal?: string }) => void;
 }) {
   if (!worktree) return null;
   return (
@@ -2580,7 +2577,6 @@ export function BoardWorktreeSpawnDialog({
       cwd={worktree.cwd}
       initialBranch={`os/${worktree.changeName}`}
       attachProposal={worktree.changeName}
-      advisorDefault={advisorDefault}
       onCancel={onCancel}
       onSpawnStart={onSpawnStart}
       onSpawnAbort={onSpawnAbort}

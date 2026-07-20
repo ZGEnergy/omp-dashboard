@@ -17,19 +17,19 @@
  *    `worktree-source-fork` toggle (see `enterFork`).
  */
 
-import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type React from "react";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Router } from "wouter";
-import { memoryLocation } from "wouter/memory-location";
-import { BoardWorktreeSpawnDialog } from "../../App.js";
-import { useAdvisorSpawnDefault } from "../../hooks/useAdvisorSpawnDefault.js";
-import { SessionList } from "../SessionList.js";
-import { ThemeProvider } from "../ThemeProvider.js";
+
+
+
+
+
+
 import { WorktreeSpawnDialog } from "../WorktreeSpawnDialog.js";
 
-const { fetchOmpConfig } = vi.hoisted(() => ({ fetchOmpConfig: vi.fn() }));
+
 
 const {
   fetchGitHead,
@@ -60,7 +60,7 @@ vi.mock("../../lib/git-api.js", async () => {
   };
 });
 
-vi.mock("../../lib/omp-config-api.js", () => ({ fetchOmpConfig }));
+
 
 afterEach(() => {
   cleanup();
@@ -98,7 +98,7 @@ beforeEach(() => {
     configurable: true,
     value: vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
   });
-  fetchOmpConfig.mockResolvedValue({ settings: {} });
+  
   probePathExists.mockResolvedValue(false);
   cleanupOrphanWorktreePath.mockResolvedValue({ ok: true });
 });
@@ -155,154 +155,27 @@ describe("WorktreeSpawnDialog — loading + existing worktrees", () => {
   });
 });
 
-function TestRouter({ children }: { children: React.ReactNode }) {
-  const { hook } = memoryLocation({ path: "/", static: true });
-  return <Router hook={hook}>{children}</Router>;
-}
 
-function productionSession(attachedProposal?: string): DashboardSession {
-  return {
-    id: attachedProposal ? "proposal-session" : "plain-session",
-    cwd: attachedProposal ? "/proposal" : "/plain",
-    source: "tui",
-    status: "active",
-    startedAt: Date.now(),
-    tokensIn: 0,
-    tokensOut: 0,
-    cost: 0,
-    attachedProposal,
-  };
-}
 
-type AdvisorDialogPath = "plain" | "proposal" | "board";
 
-function ProductionAdvisorDialogPath({ path }: { path: AdvisorDialogPath }) {
-  const advisorDefault = useAdvisorSpawnDefault();
-  if (path === "board") {
-    return (
-      <BoardWorktreeSpawnDialog
-        worktree={{ cwd: "/board", changeName: "change" }}
-        advisorDefault={advisorDefault}
-        onCancel={() => {}}
-        onSpawnStart={() => {}}
-        onSpawnAbort={() => {}}
-        onSpawn={() => {}}
-      />
-    );
-  }
-  return (
-    <TestRouter>
-      <ThemeProvider>
-        <SessionList
-          sessions={[productionSession(path === "proposal" ? "change" : undefined)]}
-          onSelect={() => {}}
-          onSpawnSession={() => {}}
-          gitWorktreeEnabled
-          advisorDefault={advisorDefault}
-        />
-      </ThemeProvider>
-    </TestRouter>
-  );
-}
 
-function expectAdvisorDefault(value: boolean) {
-  const checkbox = screen.getByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement;
-  expect(checkbox.checked).toBe(value);
-}
 
-describe("WorktreeSpawnDialog — advisor option", () => {
-  for (const path of ["plain", "proposal", "board"] as const) {
-    it.each([
-      ["true", () => fetchOmpConfig.mockResolvedValue({ settings: { "advisor.enabled": { value: true } } }), true],
-      ["false", () => fetchOmpConfig.mockResolvedValue({ settings: { "advisor.enabled": { value: false } } }), false],
-      ["missing", () => fetchOmpConfig.mockResolvedValue({ settings: {} }), false],
-      ["rejected", () => fetchOmpConfig.mockRejectedValue(new Error("mirror unavailable")), false],
-    ])("mirrors a %s config response through the production dialog path", async (_kind, configure, expected) => {
-      defaultMocks();
-      configure();
-      render(<ProductionAdvisorDialogPath path={path} />);
-      if (path !== "board") fireEvent.click(screen.getByTestId("session-card-spawn-worktree"));
-      await waitFor(() => expectAdvisorDefault(expected));
-      expect(screen.getByTestId("worktree-dialog-create-submit")).toBeTruthy();
-    });
-  }
 
-  it("seeds the checkbox from the mirrored advisor default", async () => {
+
+
+
+
+describe("WorktreeSpawnDialog — global advisor default", () => {
+  it("does not override OMP's advisor default", async () => {
     defaultMocks();
-    fetchOmpConfig.mockResolvedValue({ settings: { "advisor.enabled": { value: true } } });
-    render(<WorktreeSpawnDialog cwd="/repo" advisorDefault onSpawn={() => {}} onCancel={() => {}} />);
-    await waitFor(() => screen.getByTestId("worktree-dialog-existing"));
-    expect((screen.getByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement).checked).toBe(true);
-  });
-
-  it("keeps the checkbox unchecked when the mirror is false or unavailable", async () => {
-    defaultMocks();
-    const { rerender } = render(<WorktreeSpawnDialog cwd="/repo" advisorDefault={false} onSpawn={() => {}} onCancel={() => {}} />);
-    await waitFor(() => screen.getByTestId("worktree-dialog-existing"));
-    expect((screen.getByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement).checked).toBe(false);
-
-    rerender(<WorktreeSpawnDialog cwd="/repo" onSpawn={() => {}} onCancel={() => {}} />);
-    expect((screen.getByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement).checked).toBe(false);
-  });
-
-  it("syncs an async mirror result until the user changes the checkbox", async () => {
-    defaultMocks();
-    const { rerender } = render(<WorktreeSpawnDialog cwd="/repo" advisorDefault={false} onSpawn={() => {}} onCancel={() => {}} />);
-    await waitFor(() => screen.getByTestId("worktree-dialog-existing"));
-    const checkbox = screen.getByRole("checkbox", { name: "Enable advisor" }) as HTMLInputElement;
-
-    fireEvent.click(checkbox);
-    fireEvent.click(checkbox);
-    expect(checkbox.checked).toBe(false);
-
-    rerender(<WorktreeSpawnDialog cwd="/repo" advisorDefault onSpawn={() => {}} onCancel={() => {}} />);
-    expect(checkbox.checked).toBe(false);
-  });
-
-  it("refetches advisor status each time a later dialog opens", async () => {
-    defaultMocks();
-    fetchOmpConfig
-      .mockRejectedValueOnce(new Error("initial mirror unavailable"))
-      .mockRejectedValueOnce(new Error("first dialog mirror unavailable"))
-      .mockResolvedValueOnce({ settings: { "advisor.enabled": { value: true } } });
-    render(<ProductionAdvisorDialogPath path="plain" />);
-
-    fireEvent.click(screen.getByTestId("session-card-spawn-worktree"));
-    await waitFor(() => expectAdvisorDefault(false));
-    fireEvent.click(screen.getByTestId("worktree-dialog-cancel"));
-
-    fireEvent.click(screen.getByTestId("session-card-spawn-worktree"));
-    await waitFor(() => expectAdvisorDefault(true));
-  });
-
-  it("forwards advisor only when checked for existing worktrees", async () => {
-    defaultMocks();
-    fetchOmpConfig.mockResolvedValue({ settings: { "advisor.enabled": { value: true } } });
     const onSpawn = vi.fn();
-    render(<WorktreeSpawnDialog cwd="/repo" advisorDefault onSpawn={onSpawn} onCancel={() => {}} />);
-    await waitFor(() => screen.getByTestId("worktree-row-main"));
-    fireEvent.click(screen.getByTestId("worktree-row-main"));
-    expect(onSpawn).toHaveBeenCalledWith("/repo", { advisor: true });
+    render(<WorktreeSpawnDialog cwd="/repo" onSpawn={onSpawn} onCancel={() => {}} />);
 
-    cleanup();
-    defaultMocks();
-    fetchOmpConfig.mockResolvedValue({ settings: { "advisor.enabled": { value: false } } });
-    render(<WorktreeSpawnDialog cwd="/repo" advisorDefault={false} onSpawn={onSpawn} onCancel={() => {}} />);
     await waitFor(() => screen.getByTestId("worktree-row-main"));
-    fireEvent.click(screen.getByTestId("worktree-row-main"));
-    expect(onSpawn).toHaveBeenLastCalledWith("/repo", {});
+    expect(screen.queryByRole("checkbox", { name: "Enable advisor" })).toBeNull();
 
-    cleanup();
-    defaultMocks();
-    fetchOmpConfig.mockResolvedValue({ settings: { "advisor.enabled": { value: true } } });
-    createWorktree.mockResolvedValue({ ok: true, path: "/repo/.worktrees/main" });
-    render(<WorktreeSpawnDialog cwd="/repo" advisorDefault onSpawn={onSpawn} onCancel={() => {}} />);
-    await waitFor(() => screen.getByTestId("worktree-dialog-create-submit"));
-    fireEvent.click(screen.getByTestId("worktree-dialog-create-submit"));
-    await waitFor(() => expect(onSpawn).toHaveBeenLastCalledWith(
-      "/repo/.worktrees/main",
-      { gitWorktreeBase: "main", advisor: true },
-    ));
+    fireEvent.click(screen.getByTestId("worktree-row-main"));
+    expect(onSpawn).toHaveBeenCalledWith("/repo", {});
   });
 });
 

@@ -1374,12 +1374,8 @@ describe("SessionCard — +Session wiring through handleSpawnSession (session-ca
     expect("attachProposal" in send.mock.calls[0][0]).toBe(false);
   });
 
-  it("4.3 serializes advisor only when explicitly enabled", () => {
+  it("4.3 omits advisor from spawn messages", () => {
     const { send, onSpawnSession } = setup();
-    onSpawnSession("/project/advised", undefined, { advisor: true });
-    expect(send.mock.calls[0][0].advisor).toBe(true);
-
-    send.mockClear();
     onSpawnSession("/project/plain");
     expect("advisor" in send.mock.calls[0][0]).toBe(false);
   });
@@ -1443,14 +1439,9 @@ describe("SessionCard — +Worktree button (session-card-plus-session-button)", 
 
 
 describe("SessionCard — advisor chip", () => {
-  it("shows a passive advisor chip for persisted metadata on desktop", () => {
+  it("does not show an advisor chip for legacy persisted metadata", () => {
     render(<SessionCard session={makeSession({ advisor: true } as Partial<DashboardSession>)} {...defaultProps} />);
-    const chip = screen.getByTestId("advisor-chip");
-    expect(chip.tagName).toBe("SPAN");
-    expect(chip.title).toBe("Advisor reviews this session's transcript as a second agent; status only.");
-    expect(chip.getAttribute("role")).toBeNull();
-    expect(chip.getAttribute("tabindex")).toBeNull();
-    expect(chip.className).not.toContain("pointer-events-none");
+    expect(screen.queryByTestId("advisor-chip")).toBeNull();
   });
 
   it("shows the advisor chip from observed advisor activity on desktop", () => {
@@ -1458,9 +1449,9 @@ describe("SessionCard — advisor chip", () => {
     expect(screen.getByTestId("advisor-chip")).toBeTruthy();
   });
 
-  it("shows the advisor chip on mobile and omits it when advisor is absent", () => {
+  it("shows the advisor chip on mobile only for observed advisor activity", () => {
     vi.mocked(useMobile).mockReturnValue(true);
-    const { rerender } = render(<SessionCard session={makeSession({ advisor: true } as Partial<DashboardSession>)} {...defaultProps} />);
+    const { rerender } = render(<SessionCard session={makeSession()} messages={[{ role: "advisor" }]} {...defaultProps} />);
     expect(screen.getByTestId("advisor-chip").title).toBe("Advisor reviews this session's transcript as a second agent; status only.");
 
     rerender(<SessionCard session={makeSession()} {...defaultProps} />);

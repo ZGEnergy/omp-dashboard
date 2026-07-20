@@ -536,7 +536,7 @@ export function SessionCard({
   const canRename = session.status !== "ended" && !!onRename;
   const isAlive = session.status !== "ended";
   const isMobile = useMobile();
-  const hasAdvisor = session.advisor === true || messages.some((message) => message.role === "advisor");
+  const hasAdvisor = messages.some((message) => message.role === "advisor");
   const prefs = useDisplayPrefs(session.id);
   // Suppress purple `card-input-stripes` when a widget-bar slot owns the
   // pending prompt. Plugin-agnostic. See change: fix-flows-plugin-polish (B1).

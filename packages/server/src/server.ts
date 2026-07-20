@@ -2,8 +2,8 @@
  * Dashboard HTTP + WebSocket server.
  */
 
-import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -63,7 +63,6 @@ import { createOpenSpecGroupStore, joinGroupIdsToOpenSpecData } from "./openspec
 import { PackageManagerWrapper } from "./package-manager-wrapper.js";
 import { PairedDeviceRegistry } from "./paired-devices.js";
 import { PairingManager } from "./pairing.js";
-import { createPendingAdvisorRegistry, type PendingAdvisorRegistry } from "./pending-advisor-registry.js";
 import { createPendingAttachRegistry } from "./pending-attach-registry.js";
 import { createPendingAutomationRunRegistry } from "./pending-automation-run-registry.js";
 import { createPendingClientCorrelations } from "./pending-client-correlations.js";
@@ -205,8 +204,6 @@ export interface DashboardServer {
    * See change: fix-dashboard-spawn-correlation-by-token.
    */
   pendingDashboardSpawns: Map<string, number>;
-  /** Token-keyed advisor proof registry, exposed only for focused integration tests. */
-  pendingAdvisorRegistry: PendingAdvisorRegistry;
   /**
    * In-process OpenSpec poll cache + discovery service. Exposed for tests
    * that need to stub `getOpenSpecData` (e.g. the deleted-proposal bypass).
@@ -293,9 +290,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // session_added.spawnRequestId so the client can auto-select / dismiss
   // its placeholder by exact correlation. See change: spawn-correlation-token.
   const pendingClientCorrelations = createPendingClientCorrelations();
-  // Reservations are bounded independently; successful spawns arm proof with
-  // the same timeout snapshot passed to the registration watchdog.
-  const pendingAdvisorRegistry = createPendingAdvisorRegistry();
 
   // Worktree-init progress registry: maps requestId -> originating ws
   // so `worktree_init_*` events stream only to the dialog that
@@ -665,7 +659,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // Live-server-preview manager (loopback dev-server allowlist + proxy).
   const liveServerManager = createLiveServerManager(preferencesStore);
 
-  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry, pendingInitialPromptRegistry, pendingResumeIntents, pendingClientCorrelations, pendingWorktreeBaseRegistry, metaPersistence, undefined, undefined, serverEpoch, pendingAdvisorRegistry);
+  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry, pendingInitialPromptRegistry, pendingResumeIntents, pendingClientCorrelations, pendingWorktreeBaseRegistry, metaPersistence, undefined, undefined, serverEpoch);
 
   // Editor-pane changed-on-disk watch: the browser declares its open files via
   // `watch_files`; the server watches exactly those and pushes `file_changed`.
@@ -963,7 +957,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     // system-routes applies each successful push save in place.
     getPushPreferences: () => config.push,
     pendingClientCorrelations,
-    pendingAdvisorRegistry,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
     dispatchPluginSessionEnded,
@@ -1218,7 +1211,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
           ? {
               sessionFile: req.sessionFile,
               mode: "continue" as const,
-              ...(req.advisor === true ? { advisor: true as const } : {}),
             }
           : {}),
       });
@@ -1250,7 +1242,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       return !!s && s.status !== "ended";
     },
     resolveSessionFile: (sessionId) => sessionManager.get(sessionId)?.sessionFile,
-    resolveSessionAdvisor: (sessionId) => sessionManager.get(sessionId)?.advisor === true,
     spawnDriver: spawnGoalDriver,
     killByToken: (token) => browserGateway.headlessPidRegistry.killByToken(token),
     killBySession: (sessionId) => browserGateway.headlessPidRegistry.killBySessionId(sessionId),
@@ -1670,7 +1661,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     eventStore,
     browserGateway,
     pendingDashboardSpawns,
-    pendingAdvisorRegistry,
     directoryService,
     sessionOrderManager,
 
@@ -2176,7 +2166,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
               sessionFile: cand.sessionFile,
               mode: "continue",
               strategy: resumeConfig.spawnStrategy,
-              advisor: cand.advisor === true,
             });
             if (result.process && result.pid) {
               browserGateway.headlessPidRegistry.register(
@@ -2229,7 +2218,6 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
       clearTimeout(bootReconcileTimer);
       goalSupervisor?.dispose();
       pendingForkRegistry.dispose();
-      pendingAdvisorRegistry.dispose();
       preferencesStore.flush();
       preferencesStore.dispose();
 

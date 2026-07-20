@@ -10,7 +10,6 @@ import type { HeadlessPidRegistry } from "../headless-pid-registry.js";
 import type { EventStore } from "../memory-event-store.js";
 import type { SessionManager } from "../memory-session-manager.js";
 import type { MetaPersistence } from "../meta-persistence.js";
-import type { PendingAdvisorRegistry } from "../pending-advisor-registry.js";
 import type { PendingAttachRegistry } from "../pending-attach-registry.js";
 import type { PendingClientCorrelations } from "../pending-client-correlations.js";
 import type { PendingForkRegistry } from "../pending-fork-registry.js";
@@ -20,10 +19,10 @@ import type { PendingResumeRegistry } from "../pending-resume-registry.js";
 import type { PendingWorktreeBaseRegistry } from "../pending-worktree-base-registry.js";
 import type { PiGateway } from "../pi-gateway.js";
 import type { PreferencesStore } from "../preferences-store.js";
+import type { ReplayCoordinator } from "../replay-coordinator.js";
 import type { SessionOrderManager } from "../session-order-manager.js";
 import type { TerminalManager } from "../terminal-manager.js";
 import type { ViewMessageStore } from "../view-message-store.js";
-import type { ReplayCoordinator } from "../replay-coordinator.js";
 
 export interface BrowserHandlerContext {
   ws: WebSocket;
@@ -82,8 +81,6 @@ export interface BrowserHandlerContext {
   pendingClientCorrelations?: PendingClientCorrelations;
   /** Optional generation-aware replay coordinator. */
   replayCoordinator?: ReplayCoordinator;
-  /** Advisor spawn proof keyed only by the server-minted spawn token. */
-  pendingAdvisorRegistry?: PendingAdvisorRegistry;
   /** Send message to a specific WebSocket */
   sendTo(ws: WebSocket, msg: any): void;
   /** Broadcast to all connected browsers */

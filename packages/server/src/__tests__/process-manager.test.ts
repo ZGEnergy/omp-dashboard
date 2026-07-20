@@ -2,7 +2,7 @@ import path from "node:path";
 import { MANAGED_BIN } from "@blackbelt-technology/pi-dashboard-shared/managed-paths.js";
 import type { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetWslTmuxCacheForTests, buildHeadlessArgs, buildSpawnEnv, buildTmuxCommand as buildTmuxCommandForProduction, type SessionOptions, resetResolver, setResolver, shellEscape, spawnPiSession, stripZellijClientEnv, zellijEnvUnsetPrefix } from "../process-manager.js";
+import { _resetWslTmuxCacheForTests, buildHeadlessArgs, buildSpawnEnv, buildTmuxCommand as buildTmuxCommandForProduction, resetResolver, type SessionOptions, setResolver, shellEscape, spawnPiSession, stripZellijClientEnv, zellijEnvUnsetPrefix } from "../process-manager.js";
 
 vi.mock("@blackbelt-technology/pi-dashboard-shared/managed-paths.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@blackbelt-technology/pi-dashboard-shared/managed-paths.js")>()),
@@ -166,14 +166,6 @@ describe("Process Manager", () => {
       expect(cmd).not.toContain("--advisor");
     });
 
-    it("adds one --advisor to tmux commands only when true", () => {
-      const enabled = buildTmuxCommand("/home/user/project", false, { advisor: true });
-      const disabled = buildTmuxCommand("/home/user/project", false, { advisor: false });
-
-      expect(enabled.match(/--advisor/g)).toHaveLength(1);
-      expect(disabled).not.toContain("--advisor");
-    });
-
     it("injects the exact spawn token inside tmux pane commands", () => {
       const cmd = buildTmuxCommand("/home/user/project", true, {
         spawnToken: "tmux-token-123",
@@ -193,24 +185,11 @@ describe("Process Manager", () => {
       expect(cmd).toContain("PI_DASHBOARD_SPAWN_TOKEN=wsl-token-456 pi");
     });
 
-    it("adds one --advisor to WSL tmux commands only when true", () => {
-      const wslTmuxCommand = (options?: SessionOptions) =>
-        `wsl ${buildTmuxCommand("/home/user/project", false, options)}`;
-      const enabled = wslTmuxCommand({ advisor: true });
-      const disabled = wslTmuxCommand({ advisor: false });
-      const absent = wslTmuxCommand();
-
-      expect(enabled).toMatch(/^wsl tmux /);
-      expect(enabled.match(/--advisor/g)).toHaveLength(1);
-      expect(disabled).not.toContain("--advisor");
-      expect(absent).not.toContain("--advisor");
-    });
-
     it("passes metacharacter-bearing OMP argv to native tmux without an outer shell parse", async () => {
       const piCmd = ["/managed/bin/omp$HOME", "--runtime=`id`", "$literal"];
       setResolver(makeFakeResolver(piCmd, { tmux: "/usr/bin/tmux" }));
 
-      const result = await spawnPiSession(process.cwd(), { advisor: true, spawnToken: "native-token" });
+      const result = await spawnPiSession(process.cwd(), { spawnToken: "native-token" });
 
       expect(result.success).toBe(true);
       expect(execSyncMock).not.toHaveBeenCalled();
@@ -218,7 +197,7 @@ describe("Process Manager", () => {
         "/usr/bin/tmux",
         expect.arrayContaining([
           "new-window",
-          expect.stringContaining("PI_DASHBOARD_SPAWN_TOKEN=native-token '/managed/bin/omp$HOME' '--runtime=`id`' '$literal' --advisor"),
+          expect.stringContaining("PI_DASHBOARD_SPAWN_TOKEN=native-token '/managed/bin/omp$HOME' '--runtime=`id`' '$literal'"),
         ]),
         expect.objectContaining({ stdio: "ignore" }),
       );
@@ -229,7 +208,7 @@ describe("Process Manager", () => {
       spawnSyncMock.mockReturnValue({ status: 0, stdout: "/home/linux/.local/bin/omp\n" });
       setResolver(makeFakeResolver([String.raw`C:\\Program Files\\OMP\\omp.exe`, "--host-only"], { wt: null }));
 
-      const result = await spawnPiSession(process.cwd(), { advisor: true, spawnToken: "wsl-token" });
+      const result = await spawnPiSession(process.cwd(), { spawnToken: "wsl-token" });
 
       expect(result.success).toBe(true);
       expect(spawnSyncMock).toHaveBeenCalledWith(
@@ -242,7 +221,7 @@ describe("Process Manager", () => {
         expect.arrayContaining([
           "--exec",
           "tmux",
-          expect.stringContaining("PI_DASHBOARD_SPAWN_TOKEN=wsl-token /home/linux/.local/bin/omp --advisor"),
+          expect.stringContaining("PI_DASHBOARD_SPAWN_TOKEN=wsl-token /home/linux/.local/bin/omp"),
         ]),
         expect.objectContaining({ stdio: "ignore" }),
       );
@@ -281,7 +260,7 @@ describe("Process Manager", () => {
       statSyncMock.mockReturnValue({ isFile: () => true });
       spawnDetachedMock.mockResolvedValue({ ok: true, pid: 12345 });
 
-      const result = await spawnPiSession(process.cwd(), { advisor: true, spawnToken: "wt-token" });
+      const result = await spawnPiSession(process.cwd(), { spawnToken: "wt-token" });
 
       expect(result.success).toBe(true);
       expect(readFileSyncMock).toHaveBeenCalledWith(path.win32.join(ompPackageDir, "package.json"), "utf8");
@@ -292,7 +271,7 @@ describe("Process Manager", () => {
       expect(script).toBe(
         "$env:PI_DASHBOARD_SPAWN_TOKEN = 'wt-token'; " +
         "$pi = 'C:\\Users\\Joe\\.bun\\bin\\bun.exe'; " +
-        `$piArgs = @('${ompCli}', '--percent=%USERPROFILE%', '--ampersand=a&b', '--caret=^value', '--advisor'); ` +
+        `$piArgs = @('${ompCli}', '--percent=%USERPROFILE%', '--ampersand=a&b', '--caret=^value'); ` +
         "& $pi @piArgs",
       );
     });
@@ -461,7 +440,7 @@ describe("Process Manager", () => {
       setResolver(makeFakeResolver(piCmd, { wt: String.raw`C:\Windows\System32\wt.exe` }));
       spawnDetachedMock.mockResolvedValue({ ok: true, pid: 12345 });
 
-      await expect(spawnPiSession(process.cwd(), { advisor: true, spawnToken: "wt-token" })).resolves.toMatchObject({ success: true });
+      await expect(spawnPiSession(process.cwd(), { spawnToken: "wt-token" })).resolves.toMatchObject({ success: true });
 
       expect(readFileSyncMock).not.toHaveBeenCalled();
       const args = spawnDetachedMock.mock.calls.at(-1)?.[0].args as string[];
@@ -469,7 +448,7 @@ describe("Process Manager", () => {
       expect(script).toBe(
         "$env:PI_DASHBOARD_SPAWN_TOKEN = 'wt-token'; " +
         "$pi = 'C:\\Program Files\\OMP\\omp.exe'; " +
-        "$piArgs = @('--percent=%USERPROFILE%', '--ampersand=a&b', '--advisor'); " +
+        "$piArgs = @('--percent=%USERPROFILE%', '--ampersand=a&b'); " +
         "& $pi @piArgs",
       );
     });
@@ -511,10 +490,6 @@ describe("Process Manager", () => {
       expect(args).toEqual(["--mode", "rpc"]);
     });
 
-    it("adds one --advisor to headless args only when true", () => {
-      expect(buildHeadlessArgs({ advisor: true })).toEqual(["--mode", "rpc", "--advisor"]);
-      expect(buildHeadlessArgs({ advisor: false })).toEqual(["--mode", "rpc"]);
-    });
   });
 
   describe("spawnPiSession", () => {

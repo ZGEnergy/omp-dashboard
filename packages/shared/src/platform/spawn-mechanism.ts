@@ -112,7 +112,6 @@ export interface SessionFlags {
    * See change: add-automation-plugin.
    */
   model?: string;
-  advisor?: boolean;
 }
 
 /**
@@ -122,18 +121,16 @@ export interface SessionFlags {
  */
 export function sessionFlagsToArgv(flags: SessionFlags): string[] {
   if (flags.sessionFile && flags.mode === "continue") {
-    return ["--session", flags.sessionFile, ...advisorFlag(flags)];
+    return ["--session", flags.sessionFile];
   }
   if (flags.sessionFile && flags.mode === "fork") {
-    return ["--fork", flags.sessionFile, ...modelFlag(flags), ...advisorFlag(flags)];
+    return ["--fork", flags.sessionFile, ...modelFlag(flags)];
   }
-  return [...modelFlag(flags), ...advisorFlag(flags)];
+  return modelFlag(flags);
 }
 
 function modelFlag(flags: SessionFlags): string[] {
   return flags.model ? ["--model", flags.model] : [];
 }
 
-function advisorFlag(flags: SessionFlags): string[] {
-  return flags.advisor === true ? ["--advisor"] : [];
-}
+

@@ -148,7 +148,6 @@ export async function handleHeadlessReload(
       sessionFile: session.sessionFile,
       mode: "continue",
       strategy: "headless",
-      advisor: session.advisor === true,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -234,7 +233,6 @@ export async function handleSendPrompt(
       sessionFile: promptSession.sessionFile,
       mode: "continue",
       strategy: autoResumeConfig.spawnStrategy,
-      advisor: promptSession.advisor === true,
     });
     if (!spawnResult.success) {
       console.error(`[dashboard] auto-resume spawn failed: ${spawnResult.message}`);
@@ -368,7 +366,6 @@ export async function handleResumeSession(
     sessionFile: forkSessionFile,
     mode: msg.mode,
     strategy: resumeConfig.spawnStrategy,
-    advisor: msg.mode === "continue" && session.advisor === true,
   });
   // Record fork parent keyed by spawn token (was: keyed by cwd, racy on
   // multi-fork-in-same-cwd). See change: spawn-correlation-token.
@@ -399,7 +396,7 @@ export async function handleSpawnSession(
   msg: Extract<BrowserToServerMessage, { type: "spawn_session" }>,
   ctx: BrowserHandlerContext,
 ): Promise<void> {
-  const { ws, headlessPidRegistry, pendingDashboardSpawns, pendingAttachRegistry, pendingInitialPromptRegistry, pendingWorktreeBaseRegistry, pendingClientCorrelations, pendingAdvisorRegistry, sendTo } = ctx;
+  const { ws, headlessPidRegistry, pendingDashboardSpawns, pendingAttachRegistry, pendingInitialPromptRegistry, pendingWorktreeBaseRegistry, pendingClientCorrelations, sendTo } = ctx;
   const config = loadConfig();
   const strategy = config.spawnStrategy ?? "tmux";
 
@@ -452,14 +449,10 @@ export async function handleSpawnSession(
   // spawn_error so the UI can render a retryable banner instead of failing
   // silently. Previous behaviour left the user staring at an empty state
   // when pi itself was broken in the target folder.
-  const advisorSpawnToken = msg.advisor === true ? mintSpawnToken() : undefined;
-  if (advisorSpawnToken) pendingAdvisorRegistry?.reserve(advisorSpawnToken);
-
   try {
     const spawnResult = await spawnPiSession(msg.cwd, {
       strategy,
-      advisor: msg.advisor,
-      ...(advisorSpawnToken ? { spawnToken: advisorSpawnToken } : {}),
+      spawnToken: mintSpawnToken(),
     });
     if (spawnResult.process && spawnResult.pid) {
       headlessPidRegistry.register(
@@ -474,12 +467,6 @@ export async function handleSpawnSession(
     // spawnRequestId. See change: spawn-correlation-token.
     if (msg.requestId && spawnResult.spawnToken && pendingClientCorrelations) {
       pendingClientCorrelations.record(spawnResult.spawnToken, msg.requestId);
-    }
-    // Registration can arrive during headless spawn's completion gate. Reserve
-    // only an in-flight correlation before waiting; arm it only after this
-    // result succeeds, so failed spawns never stamp durable advisor proof.
-    if (advisorSpawnToken && (!spawnResult.success || spawnResult.spawnToken !== advisorSpawnToken)) {
-      pendingAdvisorRegistry?.discard(advisorSpawnToken);
     }
     if (spawnResult.dashboardSpawned && spawnResult.success) {
       pendingDashboardSpawns?.set(msg.cwd, (pendingDashboardSpawns?.get(msg.cwd) ?? 0) + 1);
@@ -510,8 +497,7 @@ export async function handleSpawnSession(
         ...(spawnResult.stderr ? { stderrTail: spawnResult.stderr } : {}),
       });
     } else {
-      // Snapshot at arm time so the advisor proof and watchdog share both their
-      // start point and timeout even if Settings changed while spawnPiSession ran.
+      // Snapshot timeout at arm time so Settings changes cannot alter this spawn.
       const registrationWindowMs = clampSpawnRegisterTimeoutMs(loadConfig().spawnRegisterTimeoutMs);
       const watchdog = getSpawnRegisterWatchdog();
       watchdog.arm({
@@ -523,12 +509,8 @@ export async function handleSpawnSession(
         ws,
         spawnToken: spawnResult.spawnToken,
       });
-      if (advisorSpawnToken && spawnResult.spawnToken === advisorSpawnToken) {
-        pendingAdvisorRegistry?.arm(advisorSpawnToken, registrationWindowMs);
-      }
     }
   } catch (err) {
-    if (advisorSpawnToken) pendingAdvisorRegistry?.discard(advisorSpawnToken);
     const message = err instanceof Error ? err.message : String(err);
     const stderr = err instanceof Error && "stderr" in err ? String((err as { stderr: unknown }).stderr).slice(-2048) : undefined;
     sendTo(ws, { type: "spawn_result", cwd: msg.cwd, success: false, message, requestId: msg.requestId });

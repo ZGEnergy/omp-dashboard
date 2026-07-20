@@ -178,7 +178,6 @@ describe("spawnHeadless (headless via keeper)", () => {
       strategy: "headless",
       sessionFile,
       mode: "continue",
-      advisor: true,
     });
 
     expect(result.success).toBe(true);
@@ -194,18 +193,7 @@ describe("spawnHeadless (headless via keeper)", () => {
     // we only assert the path token is present so we don't double-bind to
     // upstream argv shape.
     expect(piArgs).toContain(sessionFile);
-    expect(piArgs.filter(arg => arg === "--advisor")).toHaveLength(1);
-  });
-
-  it("omits --advisor for an explicit false headless option", async () => {
-    const { km, state } = makeFakeKeeperManager({
-      spawnResult: { success: true, pid: 55555, sockPath: "/fake/x.sock" },
-    });
-    setKeeperManager(km);
-
-    await spawnPiSession(tmpCwd, { strategy: "headless", advisor: false });
-
-    expect(state.spawnCalls[0].piArgs).not.toContain("--advisor");
+    expect(piArgs).not.toContain("--advisor");
   });
 
   it("returns SPAWN_ERRNO when KeeperManager.spawnKeeperFor reports !success", async () => {

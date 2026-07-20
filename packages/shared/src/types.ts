@@ -70,7 +70,6 @@ export interface DashboardSession {
    */
   nameSource?: "auto" | "user";
   source: SessionSource;
-  advisor?: true;
   status: SessionStatus;
   model?: string;
   thinkingLevel?: string;

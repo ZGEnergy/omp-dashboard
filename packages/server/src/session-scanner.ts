@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { resolvePiSessionsDir } from "@blackbelt-technology/pi-dashboard-shared/dashboard-paths.js";
-import { metaPath, readSessionMeta, type SessionMeta, writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
+import { readSessionMeta, type SessionMeta, writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
 import { condenseForFirstMessage } from "@blackbelt-technology/pi-dashboard-shared/skill-block-parser.js";
 import type { DashboardSession, SessionSource } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { extractSessionStats } from "./session-stats-reader.js";
@@ -69,7 +69,6 @@ function sessionFromMeta(
     // See change: add-auto-session-naming.
     nameSource: meta.nameSource,
     source: (meta.source as SessionSource) ?? "tui",
-    ...(meta.advisor === true ? { advisor: true as const } : {}),
     status: (meta.status as DashboardSession["status"]) ?? "ended",
     model: meta.model,
     thinkingLevel: meta.thinkingLevel,

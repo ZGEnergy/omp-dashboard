@@ -163,8 +163,6 @@ export interface EventWiringDeps {
    * correlation. See change: spawn-correlation-token.
    */
   pendingClientCorrelations?: import("./pending-client-correlations.js").PendingClientCorrelations;
-  /** Advisor proof records keyed only by successful spawn tokens. */
-  pendingAdvisorRegistry?: import("./pending-advisor-registry.js").PendingAdvisorRegistry;
   /**
    * Optional plugin pi-message dispatcher. When provided, every
    * `plugin_pi_message` envelope forwarded from a plugin bridge entry is
@@ -234,7 +232,6 @@ export function wireEvents(deps: EventWiringDeps): void {
     pushDispatcher,
     getPushPreferences,
     pendingClientCorrelations,
-    pendingAdvisorRegistry,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
     metaPersistence,
@@ -1104,28 +1101,6 @@ export function wireEvents(deps: EventWiringDeps): void {
       const spawnRequestId = (msg.spawnToken && pendingClientCorrelations)
         ? pendingClientCorrelations.consume(msg.spawnToken)
         : undefined;
-
-      // The handler reserves only its server-minted spawn token. Matching that
-      // exact token is strategy-independent provenance: headless, tmux, and
-      // WSL-tmux bridges all echo it in session_register. A dashboardSpawned
-      // boolean alone is never enough to consume advisor proof.
-      const verifiedDashboardSpawnToken = pendingAdvisorRegistry?.has(msg.spawnToken)
-        ? msg.spawnToken
-        : undefined;
-      const applyAdvisorProof = (advisor: { advisor: true }): void => {
-        sessionManager.update(sessionId, advisor);
-        if (msg.sessionFile) {
-          try {
-            mergeSessionMeta(msg.sessionFile, advisor);
-          } catch { /* best-effort */ }
-        }
-        browserGateway.broadcastSessionUpdated(sessionId, advisor);
-      };
-      const advisor = pendingAdvisorRegistry?.consume(
-        verifiedDashboardSpawnToken,
-        applyAdvisorProof,
-      );
-      if (advisor) applyAdvisorProof(advisor);
 
       const isNewSession = !knownSessionIds.has(sessionId);
       knownSessionIds.add(sessionId);

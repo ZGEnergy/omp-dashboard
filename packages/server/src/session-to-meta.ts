@@ -14,7 +14,6 @@ import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared
 export function sessionToMeta(session: DashboardSession): SessionMeta {
   return {
     source: session.source,
-    ...(session.advisor === true ? { advisor: true as const } : {}),
     name: session.name,
     // Persist name provenance. MUST be listed here because this save does a
     // full .meta.json overwrite (not a merge) — omitting it wipes the auto/user

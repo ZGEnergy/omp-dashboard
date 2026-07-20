@@ -18,7 +18,6 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findBundledExtension } from "@blackbelt-technology/pi-dashboard-shared/bridge-register.js";
@@ -128,7 +127,6 @@ export interface SessionOptions {
    * add-automation-plugin.
    */
   model?: string;
-  advisor?: boolean;
 }
 
 export interface SpawnResult {

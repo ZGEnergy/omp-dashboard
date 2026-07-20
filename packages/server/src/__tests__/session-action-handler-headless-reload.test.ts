@@ -157,15 +157,15 @@ describe("handleHeadlessReload — happy path", () => {
   });
 });
 
-describe("handleHeadlessReload — advisor preservation", () => {
+describe("handleHeadlessReload — global advisor default", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.restoreAllMocks());
 
-  it("passes persisted advisor to the replacement spawn", async () => {
+  it("does not preserve prior advisor metadata on the replacement spawn", async () => {
     (spawnPiSession as any).mockResolvedValueOnce({ success: true, message: "ok" });
     const { ctx } = makeCtx({
       sessions: {
-        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "active", advisor: true },
+        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "active" },
       },
     });
 
@@ -174,7 +174,7 @@ describe("handleHeadlessReload — advisor preservation", () => {
       ctx,
     );
 
-    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.objectContaining({ advisor: true }));
+    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.not.objectContaining({ advisor: expect.anything() }));
   });
 });
 
@@ -370,35 +370,35 @@ describe("handleHeadlessReload — concurrent calls", () => {
   });
 });
 
-describe("advisor preservation on session replacement", () => {
+describe("global advisor default on session replacement", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.restoreAllMocks());
 
-  it("passes persisted advisor to ended-session auto-resume", async () => {
+  it("omits advisor override for ended-session auto-resume", async () => {
     (spawnPiSession as any).mockResolvedValueOnce({ success: true, message: "ok" });
     const { ctx } = makeCtx({
       sessions: {
-        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "ended", advisor: true },
+        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "ended" },
       },
     });
 
     await handleSendPrompt({ type: "send_prompt", sessionId: "S1", text: "continue" } as any, ctx);
 
-    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.objectContaining({ advisor: true }));
+    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.not.objectContaining({ advisor: expect.anything() }));
   });
 
-  it("passes persisted advisor to explicit websocket resume", async () => {
+  it("omits advisor override for explicit websocket resume", async () => {
     (spawnPiSession as any).mockResolvedValueOnce({ success: true, message: "ok" });
     const { ctx } = makeCtx({
       sessions: {
-        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "ended", advisor: true },
+        S1: { id: "S1", cwd: "/p", sessionFile: "/p/s.jsonl", status: "ended" },
       },
     });
 
     const { handleResumeSession } = await import("../browser-handlers/session-action-handler.js");
     await handleResumeSession({ type: "resume_session", sessionId: "S1", mode: "continue" } as any, ctx);
 
-    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.objectContaining({ advisor: true }));
+    expect(spawnPiSession).toHaveBeenCalledWith("/p", expect.not.objectContaining({ advisor: expect.anything() }));
   });
 });
 

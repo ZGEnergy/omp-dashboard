@@ -104,22 +104,6 @@ describe("buildWtArgs", () => {
     expect(argv.slice(sentinelIdx + 1)).toEqual(["node.exe", "cli.js", "--fork", "C:\\x\\session.jsonl"]);
   });
 
-  it("preserves advisor only when enabled in Windows Terminal pi argv", () => {
-    const wtArgv = (advisor?: boolean) => buildWtArgs({
-      cwd: "C:\proj",
-      title: "proj",
-      piArgv: ["node.exe", "cli.js", ...sessionFlagsToArgv({ advisor })],
-    });
-    const enabled = wtArgv(true);
-    const disabled = wtArgv(false);
-    const absent = wtArgv();
-    const enabledPiArgv = enabled.slice(enabled.indexOf("--") + 1);
-
-    expect(enabledPiArgv.filter(arg => arg === "--advisor")).toHaveLength(1);
-    expect(disabled).not.toContain("--advisor");
-    expect(absent).not.toContain("--advisor");
-  });
-
   it("never includes -p profile flag", () => {
     const argv = buildWtArgs({ cwd: "C:\\x", title: "y", piArgv: ["pi"] });
     expect(argv).not.toContain("-p");
@@ -145,15 +129,4 @@ describe("sessionFlagsToArgv", () => {
     expect(sessionFlagsToArgv({ sessionFile: "/s/x.jsonl" })).toEqual([]);
   });
 
-  it("appends --advisor only when explicitly enabled", () => {
-    expect(sessionFlagsToArgv({ advisor: true })).toEqual(["--advisor"]);
-    expect(sessionFlagsToArgv({ advisor: false })).toEqual([]);
-  });
-
-  it("appends --advisor after continue and fork flags", () => {
-    expect(sessionFlagsToArgv({ sessionFile: "/s.jsonl", mode: "continue", advisor: true }))
-      .toEqual(["--session", "/s.jsonl", "--advisor"]);
-    expect(sessionFlagsToArgv({ sessionFile: "/s.jsonl", mode: "fork", advisor: true }))
-      .toEqual(["--fork", "/s.jsonl", "--advisor"]);
-  });
 });

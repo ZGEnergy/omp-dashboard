@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { DisplayPrefs, PartialDisplayPrefs } from "./display-prefs.js";
+import type { PartialDisplayPrefs } from "./display-prefs.js";
 
 /**
  * Session metadata stored as a sidecar `.meta.json` file
@@ -12,8 +12,6 @@ import type { DisplayPrefs, PartialDisplayPrefs } from "./display-prefs.js";
 export interface SessionMeta {
   // Dashboard-owned (user-set via UI)
   source?: string;
-  /** Dashboard spawn proof. Absence keeps harness global default. */
-  advisor?: true;
   name?: string;
   /**
    * Provenance of the current session name. `"auto"` = set by the bridge's
