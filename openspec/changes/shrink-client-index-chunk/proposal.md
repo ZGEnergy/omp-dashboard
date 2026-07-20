@@ -14,19 +14,30 @@ which handled only the mechanical, zero-behavior warnings.
 
 ## What Changes
 
-- **Split `@mdi/js` into its own manual chunk** — add `@mdi/js` to `manualChunks` in
-  `packages/client/vite.config.ts` so the ~2.6 MB of icon paths leaves the eager
-  `index` chunk (index ~4.8 → ~2.2 MB) into a separately-cacheable `mdi` chunk. This
-  also resolves the `@mdi/js` dynamic+static import warning at its root (single owning
-  chunk).
-- **Set a deliberate `chunkSizeWarningLimit`** with a documented rationale enumerating
-  the intentionally-large chunks (`monaco` ~3.9 MB lazy, `diff` ~1.1 MB lazy, Monaco
-  workers, the new `mdi` chunk, and the `markdown` chunk enlarged to ~1.0 MB by
-  `fix-vite-build-warnings`) so the oversized-chunk aggregate warning reflects a
-  decision rather than noise.
+- **Kill the `@mdi/js` dynamic+static warning at its real root** — convert the two
+  dynamic `import("@mdi/js")` sites (`ActionList.tsx`, `StatusPill.tsx`) to static
+  namespace imports. The warning fires because `@mdi/js` is dynamically imported yet
+  ALSO statically imported (incl. a static `import * as mdi` in `mdi-icon-lookup.ts`
+  reachable from the eager root), so the dynamic import has no lazy target. Aligning the
+  two stragglers to static removes the conflict. Size-neutral: the static namespace
+  import already forces the full icon set eager. A `manualChunks` entry alone does NOT
+  reliably silence this warning — the reliable fix is import-strategy alignment.
+- **Split `@mdi/js` into its own manual chunk** (separate concern: placement, not the
+  warning) — add `"mdi": ["@mdi/js"]` to `manualChunks` so the ~2.6 MB of icon paths
+  leaves the eager `index` chunk (index ~1388 KB gz → ~700 KB gz expected) into a
+  separately-cacheable `mdi` chunk. **Honest scope:** `App.tsx` statically imports
+  `@mdi/js`, so the `mdi` chunk still loads eagerly — this **relocates** bytes (better
+  caching: icons change far less often than app code); it does **not** reduce
+  initial-download bytes. Icon keys are open-ended (any extension may request any icon),
+  so the namespace lookup is retained — no tree-shaking.
+- **Guard the shrink with a gzip size-test** (repo convention — see
+  `monaco-chunk-size.test.ts`), NOT a config comment: assert the gzipped `index` chunk
+  dropped below a cap and a `mdi` chunk exists.
 
-Because the icon keys are open-ended (any extension may request any MDI icon), the
-namespace lookup is retained — the win is chunk placement, not tree-shaking.
+**Explicitly NOT in scope:** silencing the oversized-chunk (>700 kB) aggregate warning.
+`monaco` (3.9 MB, intentional + lazy) is the floor; zeroing that warning needs a blunt
+limit ≥ 4 MB. `chunkSizeWarningLimit` stays at its deliberate **700**; the aggregate
+warning remains a known, documented notice.
 
 ## Capabilities
 
@@ -45,9 +56,8 @@ namespace lookup is retained — the win is chunk placement, not tree-shaking.
 - No dependencies added or removed; no runtime behavior change. Verified by before/after
   `dist/assets` chunk sizes and a clean build.
 
-## Note
+## Sequencing
 
-This proposal is a **scaffold stub** — it still needs its own full planning pass
-(`plan-proposal`: doubt-review + `scenario-design` → `test-plan.md` → fold) before it
-reaches the worktree boundary. It exists now so `fix-vite-build-warnings` has a real
-deferral owner.
+Sequences **after** `fix-vite-build-warnings` lands (shares `client-build-config` and
+depends on the enlarged `markdown` chunk when choosing the limit). The
+`chunkSizeWarningLimit` value is set against the post-`fix` chunk inventory.
