@@ -513,6 +513,49 @@ describe("ChatView mobile scroll owner", () => {
     expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
   });
 
+  it("keeps mobile latest navigation pinned while virtual rows grow", async () => {
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="mobile-growing-tail"
+          state={stateWith(50)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={1}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 0, 2_000, 400);
+    fireEvent.wheel(scrollEl, { deltaY: -100 });
+    fireEvent.scroll(scrollEl);
+    fireEvent.click(container.querySelector('[data-testid="scroll-to-bottom"]')!);
+
+    // A virtual row measures while the click's smooth scroll is still moving.
+    // The next render must chase the expanded latest position, not leave the
+    // mobile owner stranded in NAVIGATING_BOTTOM below the new tail.
+    setScrollPosition(scrollEl, 900, 3_000, 400);
+    fireEvent.scroll(scrollEl);
+    rerender(
+      <ThemeProvider>
+        <ChatView
+          sessionId="mobile-growing-tail"
+          state={stateWith(51)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={1}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    expect(scrollEl.scrollTop).toBe(3_000);
+  });
+
   it("does not page when a programmatic top navigation emits scroll", async () => {
     const onLoadOlder = vi.fn();
     const { container } = render(

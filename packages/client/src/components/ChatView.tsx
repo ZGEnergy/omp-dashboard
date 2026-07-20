@@ -705,7 +705,8 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       const element = scrollRef.current;
       if (element === null || element.isConnected === false) return;
       const follow = mobileActive
-        ? scrollOwnerRef.current === "FOLLOWING"
+        ? scrollOwnerRef.current === "FOLLOWING" ||
+          scrollOwnerRef.current === "NAVIGATING_BOTTOM"
         : stickToBottomRef.current;
       if (follow) {
         scheduleProgrammaticWrite((target) => { target.scrollTop = target.scrollHeight; });

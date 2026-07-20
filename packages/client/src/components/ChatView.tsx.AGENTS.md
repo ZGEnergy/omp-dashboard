@@ -10,7 +10,7 @@ Passes `showResultBody={prefs.toolResultBodies}` to `<ToolCallStep>`.
 
 See change: configurable-chat-display.
 
-Scroll: one owner. Mobile follows latest only until real touch/wheel says history. `overflowAnchor: "none"`. Browser anchoring bad here. Image decode queues guarded `resizeItem` row measurement. One guarded rAF writes mobile scroll. Desktop writes synchronously and keeps saved scroll state.
+Scroll: one owner. Mobile follows latest until real touch/wheel says history. `FOLLOWING` and `NAVIGATING_BOTTOM` chase virtual row measurement. `overflowAnchor: "none"`. Browser anchoring bad here. Image decode queues guarded `resizeItem` row measurement. One guarded rAF writes mobile scroll. Desktop writes synchronously and keeps saved scroll state. See change: fix-mobile-scroll-latest.
 
 **User-message branch routes to `<SkillInvocationCard>` when `msg.skill` is set** (raw `<MessageBubble>` for plain users); container preserves `mt-4 mb-4 flex justify-end` + `bubbleMax`. See change: render-skill-invocations-collapsibly.
 
