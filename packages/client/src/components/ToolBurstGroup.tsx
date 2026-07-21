@@ -18,9 +18,8 @@
  * top-level reasoning block; only non-empty `assistant` prose renders as flat
  * narration.
  *
- * Default open state: `expanded = override ?? (toolGroupDefaultCollapsed ?
- * false : isRunning)`. The pref only changes the body's default open state; the
- * live header + animation key off `isRunning`, not `expanded`.
+ * Active groups start open so ongoing work is immediately visible. Completed
+ * groups honor `toolGroupDefaultCollapsed`. Manual override always wins.
  *
  * See change: enhance-tool-call-grouping (was: group-tool-call-bursts).
  */
@@ -160,9 +159,9 @@ export function ToolBurstGroup({ burst, toolContext }: Props) {
 
   const [override, setOverride] = useState<boolean | null>(null); // null = follow auto
   const isRunning = visibleMembers.some((m) => m.toolStatus === "running");
-  // Pref only changes the body's default open state; the live header keys off
-  // isRunning, not expanded. Manual override always wins.
-  const autoOpen = prefs.toolGroupDefaultCollapsed ? false : isRunning;
+  // Active work must expose its current tool activity immediately. The display
+  // preference still controls only completed groups; manual override always wins.
+  const autoOpen = isRunning || !prefs.toolGroupDefaultCollapsed;
   const expanded = override ?? autoOpen;
 
   // One-shot completion flash on the running→done flip.

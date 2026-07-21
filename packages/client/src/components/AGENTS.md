@@ -161,7 +161,7 @@ Files in this directory. One row per source file.
 | `ThinkingLevelSelector.tsx` | Thinking-level picker. Optional prop `supportedLevels` filters `THINKING_LEVELS` to supported set (canonical… → see `ThinkingLevelSelector.tsx.AGENTS.md` |
 | `Toast.tsx` | `ToastMessage.variant?: "error"|"success"|"info"` default "error". `useToast.showToast(text, variant?)` additive. Success green, info neutral, error red. See change: add-async-action-feedback. |
 | `TokenStatsBar.tsx` | Exports `TokenStatsBar`. Renders per-turn butterfly chart (input up / output down) + stats panel +… → see `TokenStatsBar.tsx.AGENTS.md` |
-| `ToolBurstGroup.tsx` | Renders temporal BURST group (data from `lib/group-tool-bursts.ts`). → see `ToolBurstGroup.tsx.AGENTS.md` |
+| `ToolBurstGroup.tsx` | Renders temporal BURST group. Active groups open regardless of completed-group collapse preference. → see `ToolBurstGroup.tsx.AGENTS.md` |
 | `ToolCallStep.tsx` | Renders tool-call card. Adds `showResultBody?: boolean` prop (default `true`); when `false` hides result body… → see `ToolCallStep.tsx.AGENTS.md` |
 | `ToolsSection.tsx` | Settings → General → **Tools** section. One row per registered tool: status badge, source, truncated path,… → see `ToolsSection.tsx.AGENTS.md` |
 | `TunnelButton.tsx` | Exports `TunnelButton`. Unified tunnel/QR button. Polls `/api/tunnel-status` every 30s. → see `TunnelButton.tsx.AGENTS.md` |

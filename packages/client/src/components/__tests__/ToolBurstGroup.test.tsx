@@ -121,14 +121,12 @@ describe("ToolBurstGroup", () => {
     expect(container.querySelector('[data-testid="tool-burst-narration"]')).toBeNull();
   });
 
-  it("toolGroupDefaultCollapsed keeps a running group's body closed", () => {
+  it("keeps a running group open even when completed groups default closed", () => {
     const running = [tool({ toolName: "grep" }), tool({ toolName: "read", toolStatus: "running", args: { path: "/a" } })];
-    // Default off → running group is expanded (body present).
     const off = renderBurst(running, { ...DISPLAY_PRESETS.standard, toolGroupDefaultCollapsed: false });
     expect(off.container.querySelector('[data-testid="tool-burst-body"]')).not.toBeNull();
-    // On → running group body starts closed; the live header still renders.
     const on = renderBurst(running, { ...DISPLAY_PRESETS.standard, toolGroupDefaultCollapsed: true });
-    expect(on.container.querySelector('[data-testid="tool-burst-body"]')).toBeNull();
+    expect(on.container.querySelector('[data-testid="tool-burst-body"]')).not.toBeNull();
     expect(on.container.querySelector('[data-testid="tool-burst-header"]')!.textContent).toContain("Working");
   });
 });
