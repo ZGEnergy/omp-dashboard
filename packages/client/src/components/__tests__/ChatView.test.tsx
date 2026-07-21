@@ -1,6 +1,6 @@
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { act, fireEvent, render } from "@testing-library/react";
 import React from "react";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ChatMessage, createInitialState, type PendingPrompt } from "../../lib/event-reducer.js";
 import { ChatView } from "../ChatView.js";
@@ -156,9 +156,12 @@ describe("ChatView", () => {
     // A single tool call now forms a burst group (universal grouping, threshold
     // 1). First click expands the group body (revealing the ToolCallStep);
     // second click expands the ToolCallStep to show its args + result.
-    fireEvent.click(container.querySelector('[data-testid="tool-burst-header"]')!);
-    const stepButton = container.querySelector('[data-testid="tool-burst-body"] button')!;
-    fireEvent.click(stepButton);
+    if (!container.querySelector('[data-testid="tool-burst-body"]')) {
+      fireEvent.click(container.querySelector('[data-testid="tool-burst-header"]')!);
+    }
+    const stepButton = container.querySelector('[data-testid="tool-burst-body"] button');
+    expect(stepButton).not.toBeNull();
+    fireEvent.click(stepButton!);
 
     // Should show args and result in expanded view
     const expanded = container.querySelector(".bg-\\[var\\(--bg-secondary\\)\\]");

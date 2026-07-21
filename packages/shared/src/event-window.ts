@@ -282,14 +282,7 @@ export function selectNewestEventsByBudget(
 
   if (turnStarts.length === 0) {
     const suffix = selectBoundedSuffix(prepared.events, budget);
-    return finalizeSelectedEntries(
-      source,
-      suffix.events,
-      suffix.bytes,
-      suffix.events.length > 0,
-      budget,
-      options,
-    );
+    return finalizeSelectedEntries(source, suffix.events, suffix.bytes, false, budget, options)
   }
 
   let selectedStart = turnStarts.at(-1)!;

@@ -177,4 +177,18 @@ describe("SessionReplayLedger", () => {
     expect(ledger.admit(cold()).stale).toBe(true);
     expect(ledger.events).toEqual([]);
   });
+
+  it("keeps only the newest contiguous tail within the retained-byte budget", () => {
+    const budget = JSON.stringify(event(1)).length * 2;
+    const ledger = new SessionReplayLedger("s", { maxRetainedBytes: budget } as never);
+    ledger.begin({ requestId: "cold-1", kind: "cold", sourceGeneration: "source-a" });
+    ledger.admit(cold([event(1), event(2)]));
+
+    const result = ledger.admitLive(event(3));
+
+    expect(result.evictedHead).toBe(true);
+    expect(ledger.events.map((entry) => entry.seq)).toEqual([2, 3]);
+    expect(ledger.minSeq).toBe(2);
+    expect(ledger.cursor).toBe(3);
+  });
 });

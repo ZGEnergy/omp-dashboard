@@ -302,7 +302,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   const escapedDuringHydrateRef = useRef(false);
   // One owner decides every transcript write. User input moves ownership to
   // READING_HISTORY synchronously; stale authority/command frames are inert.
-  const scrollOwnerRef = useRef<ScrollOwner>(loadingHistory ? "HYDRATING" : "FOLLOWING");
+  const scrollOwnerRef = useRef<ScrollOwner>(loadingHistory ? "HYDRATING" : mobileActive && state.messages.length > 0 ? "NAVIGATING_BOTTOM" : "FOLLOWING");
   const commandEpochRef = useRef(0);
   const pendingWriteRef = useRef<{
     authority: ScrollAuthority;
@@ -1007,6 +1007,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     if (!mobileActive) return;
     const key = `${sessionId ?? ""}:${mobileActivationEpoch}:${replayGeneration}`;
     if (mobileActivationRef.current === key) return;
+    const replayRestart = mobileActivationRef.current !== null;
     mobileActivationRef.current = key;
     cancelProgrammaticWrites();
     const pending = pendingOlderAnchorRef.current;
@@ -1019,9 +1020,12 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       scrollOwnerRef.current = "HYDRATING";
       return;
     }
-    scrollOwnerRef.current = "FOLLOWING";
+    // A replay-generation change arrives after the initial mobile mount. It
+    // must keep chasing the tail while virtual rows finish measuring; initial
+    // ordinary FOLLOWING mounts retain their measurement-neutral behavior.
+    scrollOwnerRef.current = replayRestart || state.messages.length > 0 ? "NAVIGATING_BOTTOM" : "FOLLOWING";
     pinLatest();
-  }, [cancelProgrammaticWrites, loadingHistory, mobileActivationEpoch, mobileActive, pinLatest, replayGeneration, sessionId]);
+  }, [cancelProgrammaticWrites, loadingHistory, mobileActivationEpoch, mobileActive, pinLatest, replayGeneration, sessionId, state.messages.length]);
 
   // Desktop-only anchor restoration. It is intentionally not shared with the
   // mobile owner: an activation must follow latest instead of resurrecting a
@@ -1077,7 +1081,9 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     if (wasLoading && !nowLoading) {
       if (mobileActive) {
         if (scrollOwnerRef.current !== "READING_HISTORY") {
-          scrollOwnerRef.current = "FOLLOWING";
+          // Replay rows measure after the initial hydration pin. Keep the
+          // existing bottom-navigation owner until those measurements settle.
+          scrollOwnerRef.current = "NAVIGATING_BOTTOM";
           pinLatest();
         }
       } else if (!escapedDuringHydrateRef.current) {
@@ -1093,14 +1099,21 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // Content and virtual measurements can only follow latest. TanStack remains
   // the sole owner of row measurement correction; no total-height delta writes
   // compensate history/prepend growth here.
+  const hadVisibleRowsRef = useRef(displayRows.length > 0);
   useLayoutEffect(() => {
+    const receivedFirstVisibleRows = !hadVisibleRowsRef.current && displayRows.length > 0;
+    hadVisibleRowsRef.current = displayRows.length > 0;
     if (isSelecting || mobileInactive) return;
     if (mobileActive) {
-      if (scrollOwnerRef.current === "FOLLOWING") pinLatest();
+      const owner = scrollOwnerRef.current;
+      if (receivedFirstVisibleRows && (owner === "HYDRATING" || owner === "FOLLOWING")) {
+        scrollOwnerRef.current = "NAVIGATING_BOTTOM";
+      }
+      if (scrollOwnerRef.current !== "READING_HISTORY" && scrollOwnerRef.current !== "RESTORING_ANCHOR") pinLatest();
     } else if (stickToBottomRef.current) {
       pinLatest();
     }
-  }, [isSelecting, mobileActive, mobileInactive, pendingSteering, pinLatest, state.messages.length, state.pendingPrompt, state.streamingText, state.streamingThinking]);
+  }, [displayRows.length, isSelecting, mobileActive, mobileInactive, pendingSteering, pinLatest, state.messages.length, state.pendingPrompt, state.streamingText, state.streamingThinking]);
 
   useLayoutEffect(() => {
     const anchor = pendingOlderAnchorRef.current;

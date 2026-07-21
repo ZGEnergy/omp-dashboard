@@ -32,6 +32,21 @@ describe("SessionReplayController", () => {
     expect(effects.replace).toHaveBeenCalledWith("s", [entry(8), entry(9), entry(10), entry(11)], { requestId: older.requestId, anchorToken: "anchor-1" });
   });
 
+  it("renders cold replay batches before terminal arrives", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+
+    controller.handle(frame(cold.requestId!, [entry(1)], false));
+
+    expect(effects.apply).toHaveBeenCalledWith("s", [entry(1)]);
+    expect(effects.loading).toHaveBeenLastCalledWith("s", true);
+
+    controller.handle(frame(cold.requestId!, [], true));
+
+    expect(effects.loading).toHaveBeenLastCalledWith("s", false);
+  });
+
   it("keeps a matching reset request correlated so its cold terminal replaces state", () => {
     const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
     const controller = new SessionReplayController(effects);
@@ -94,6 +109,20 @@ describe("SessionReplayController", () => {
 
     expect(effects.window).toHaveBeenLastCalledWith("s", { minSeq: 49, hasMoreOlder: false, partialHead: false, kind: "older" });
     expect(effects.replace).toHaveBeenCalledWith("s", [entry(49), entry(50)], { requestId: older.requestId, anchorToken: "anchor-50" });
+  });
+
+  it("rebuilds only the retained tail after live history crosses its byte cap", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), window: vi.fn(), trimmed: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const budget = JSON.stringify(entry(1)).length * 2;
+    const controller = new (SessionReplayController as any)(effects, { maxRetainedBytes: budget });
+    const cold = controller.begin("s", "cold", "source-a");
+    controller.handle(frame(cold.requestId!, [entry(1), entry(2)], true));
+
+    controller.handle({ type: "event", sessionId: "s", seq: 3, event: entry(3).event });
+
+    expect(effects.trimmed).toHaveBeenCalledWith("s", 2);
+    expect(effects.replace).toHaveBeenLastCalledWith("s", [entry(2), entry(3)], null);
+    expect(effects.apply).toHaveBeenCalledTimes(1);
   });
 
   it("resets conflicting live state and starts cold recovery without preserving the prefix", () => {
@@ -176,6 +205,55 @@ describe("SessionReplayController", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps cold replay authoritative when cached history lacks a root user turn", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+    const toolEntry = { ...entry(100), event: { sessionId: "s", eventType: "task:subagent:event", timestamp: 100, data: { event: { message: { role: "user", content: "parent interruption" } } } } as unknown as DashboardEvent };
+
+    expect(controller.seedCached("s", "source-a", [toolEntry])).toBe(false);
+    expect(controller.ledger("s").request?.requestId).toBe(cold.requestId);
+    expect(effects.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("automatically continues a partial tool-only tail", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+    const toolEntry = { ...entry(100), event: { sessionId: "s", eventType: "tool_execution_end", timestamp: 100, data: { toolCallId: "hub-1" } } as unknown as DashboardEvent };
+
+    controller.handle({ ...frame(cold.requestId!, [toolEntry], false), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+    controller.handle({ ...frame(cold.requestId!, [], true), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+
+    expect(effects.send).toHaveBeenCalledTimes(2);
+    expect(effects.send.mock.calls[1]![0]).toMatchObject({ sessionId: "s", fromSeq: 100 });
+  });
+
+  it("continues past assistant narration until a user turn", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+    const assistantEntry = { ...entry(100), event: { sessionId: "s", eventType: "message_end", timestamp: 100, data: { message: { role: "assistant", content: [{ type: "text", text: "still working" }] } } } as unknown as DashboardEvent };
+
+    controller.handle({ ...frame(cold.requestId!, [assistantEntry], false), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+    controller.handle({ ...frame(cold.requestId!, [], true), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+
+    expect(effects.send).toHaveBeenCalledTimes(2);
+  });
+
+  it("continues past a user turn while older retained history remains", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+    const userEntry = { ...entry(100), event: { sessionId: "s", eventType: "message_start", timestamp: 100, data: { message: { role: "user", content: "review this" } } } as unknown as DashboardEvent };
+
+    controller.handle({ ...frame(cold.requestId!, [userEntry], false), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+    controller.handle({ ...frame(cold.requestId!, [], true), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+
+    expect(effects.send).toHaveBeenCalledTimes(2);
+    expect(effects.send.mock.calls[1]![0]).toMatchObject({ sessionId: "s", fromSeq: 100 });
   });
 
   it("bounds aggregate asset assembly and publishes a completed asset exactly once", () => {

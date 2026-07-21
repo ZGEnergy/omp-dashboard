@@ -50,7 +50,7 @@ import { allTagsInUse } from "./components/tags/all-tags.js";
 import { WorktreeInitStack } from "./components/WorktreeInitStack.js";
 import { WorktreeSpawnDialog } from "./components/WorktreeSpawnDialog.js";
 import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
-
+import { shouldReconnectForForeground } from "./hooks/foreground-replay.js";
 import { useAppHidden } from "./hooks/useAppHidden.js";
 import { useContentViews } from "./hooks/useContentViews.js";
 import { useDocumentTitle } from "./hooks/useDocumentTitle.js";
@@ -537,10 +537,11 @@ export default function App() {
   const replayResetStateRef = useRef<Map<string, SessionState> | null>(null);
   const foregroundReplayRequestedRef = useRef(false);
   const requestForegroundReplay = useCallback(() => {
+    if (!shouldReconnectForForeground(status)) return;
     if (mobileDetailVisible) bumpMobileActivation();
     foregroundReplayRequestedRef.current = true;
     reconnectNow("foreground");
-  }, [bumpMobileActivation, mobileDetailVisible, reconnectNow]);
+  }, [bumpMobileActivation, mobileDetailVisible, reconnectNow, status]);
   useEffect(() => {
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") requestForegroundReplay();
@@ -859,6 +860,13 @@ export default function App() {
         historyWindowRef.current.set(sessionId, next);
         setHistoryWindowMap((prev) => new Map(prev).set(sessionId, next));
       },
+      trimmed: (sessionId, minSeq) => {
+        // The in-memory ledger evicted its head. Keep paging available even
+        // when the initial server tail had reached the true session beginning.
+        const next: ReplayWindow = { minSeq, hasMoreOlder: true, partialHead: true };
+        historyWindowRef.current.set(sessionId, next);
+        setHistoryWindowMap((previous) => new Map(previous).set(sessionId, next));
+      },
       replace: (sessionId, entries, completion) => {
         const source = controller.ledger(sessionId).sourceGeneration ?? sourceGenerationRef.current.get(sessionId);
         const persister = persisterFor(sessionId, source);
@@ -1153,7 +1161,7 @@ export default function App() {
       void rehydrateSession(sid, replayCache, { authority }).then((r) => {
         if (!r || abort.signal.aborted || r.sourceGeneration !== source || !authority.isCurrent()) return;
         const ledger = replayController.ledger(sid);
-        if (ledger.events.length > 0 || !ledger.seed(source, r.events)) return;
+        if (ledger.events.length > 0 || !replayController.seedCached(sid, source, r.events)) return;
         const stateAtAdmission = sessionStatesRef.current.get(sid);
         const existing = replayPersistersRef.current.get(sid);
         const persister = existing?.scope.serverEpoch === serverEpoch && existing.scope.sourceGeneration === source

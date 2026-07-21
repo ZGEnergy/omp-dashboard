@@ -18,7 +18,7 @@
  *
  * See change: reduce-session-replay-traffic, mobile-session-rehydration.
  */
-import { type CachedEvent, type ReplayCache, type ReplayCacheScope, replayCache } from "./replay-cache.js";
+import { type CachedEvent, DEFAULT_MAX_BYTES_PER_SESSION, type ReplayCache, type ReplayCacheScope, replayCache } from "./replay-cache.js"
 
 export interface ReplayPersister {
   /** Append events (dedup by seq) and schedule a debounced persist. */
@@ -44,25 +44,57 @@ export function createReplayPersister(
   cache: ReplayCache = replayCache,
   debounceMs = 1000,
   scope?: ReplayCacheScope,
+  maxRetainedBytes = DEFAULT_MAX_BYTES_PER_SESSION,
 ): ReplayPersister {
-  const buffers = new Map<string, CachedEvent[]>();
+  interface ReplayBuffer {
+    events: CachedEvent[];
+    head: number;
+    bytes: number;
+    maxSeq: number;
+  }
+
+  const buffers = new Map<string, ReplayBuffer>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  // Inert after dispose: no timers fire, no writes commit, no committed state
-  // is deleted. The flag is the hard gate; clearing timers/buffers is the
-  // physical invalidation so a surviving timer callback finds nothing to write.
+  const encoder = new TextEncoder();
   let disposed = false;
   let flushGeneration = 0;
 
-  function maxSeqOf(buf: CachedEvent[]): number {
-    let m = 0;
-    for (const e of buf) if (e.seq > m) m = e.seq;
-    return m;
+  function eventBytes(event: CachedEvent): number {
+    return encoder.encode(JSON.stringify(event)).byteLength;
+  }
+
+  function retainNewest(events: CachedEvent[]): ReplayBuffer {
+    let head = events.length;
+    let bytes = 0;
+    while (head > 0) {
+      const nextBytes = eventBytes(events[head - 1]!);
+      if (head < events.length && bytes + nextBytes > maxRetainedBytes) break;
+      head -= 1;
+      bytes += nextBytes;
+    }
+    const retained = events.slice(head);
+    return { events: retained, head: 0, bytes, maxSeq: retained.at(-1)?.seq ?? 0 };
+  }
+
+  function snapshotBuffer(buffer: ReplayBuffer | undefined): CachedEvent[] {
+    return buffer ? buffer.events.slice(buffer.head) : [];
+  }
+
+  function trimHead(buffer: ReplayBuffer): void {
+    while (buffer.events.length - buffer.head > 1 && buffer.bytes > maxRetainedBytes) {
+      buffer.bytes -= eventBytes(buffer.events[buffer.head]!);
+      buffer.head += 1;
+    }
+    if (buffer.head >= 1024 && buffer.head * 2 >= buffer.events.length) {
+      buffer.events = buffer.events.slice(buffer.head);
+      buffer.head = 0;
+    }
   }
 
   function clearTimer(sessionId: string): void {
-    const t = timers.get(sessionId);
-    if (t) {
-      clearTimeout(t);
+    const timer = timers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
       timers.delete(sessionId);
     }
   }
@@ -71,9 +103,9 @@ export function createReplayPersister(
     if (disposed) return;
     const generation = flushGeneration;
     clearTimer(sessionId);
-    const buf = buffers.get(sessionId);
-    if (!buf || buf.length === 0) return;
-    const put = { maxSeq: maxSeqOf(buf), payload: [...buf] };
+    const buffer = buffers.get(sessionId);
+    if (!buffer || buffer.events.length === buffer.head) return;
+    const put = { maxSeq: buffer.maxSeq, payload: snapshotBuffer(buffer) };
     const canCommit = () => !disposed && flushGeneration === generation;
     if (scope) await cache.putScoped(scope, sessionId, put, canCommit);
     else await cache.put(sessionId, put, canCommit);
@@ -94,21 +126,21 @@ export function createReplayPersister(
 
   function record(sessionId: string, events: CachedEvent[]): void {
     if (disposed || events.length === 0) return;
-    const buf = buffers.get(sessionId) ?? [];
-    let max = maxSeqOf(buf);
-    for (const e of events) {
-      if (e.seq > max) {
-        buf.push(e);
-        max = e.seq;
-      }
+    const buffer = buffers.get(sessionId) ?? { events: [], head: 0, bytes: 0, maxSeq: 0 };
+    for (const event of events) {
+      if (event.seq <= buffer.maxSeq) continue;
+      buffer.events.push(event);
+      buffer.bytes += eventBytes(event);
+      buffer.maxSeq = event.seq;
+      trimHead(buffer);
     }
-    buffers.set(sessionId, buf);
+    buffers.set(sessionId, buffer);
     schedule(sessionId);
   }
 
   function seed(sessionId: string, events: CachedEvent[]): void {
     if (disposed) return;
-    buffers.set(sessionId, [...events]);
+    buffers.set(sessionId, retainNewest([...events]));
     schedule(sessionId);
   }
 
@@ -116,17 +148,17 @@ export function createReplayPersister(
     if (disposed) return snapshot(sessionId);
     if (events.length === 0) return snapshot(sessionId);
     const bySeq = new Map<number, CachedEvent>();
-    for (const e of buffers.get(sessionId) ?? []) bySeq.set(e.seq, e);
-    for (const e of events) bySeq.set(e.seq, e);
-    const merged = [...bySeq.values()].sort((a, b) => a.seq - b.seq);
-    buffers.set(sessionId, merged);
+    for (const event of snapshotBuffer(buffers.get(sessionId))) bySeq.set(event.seq, event);
+    for (const event of events) bySeq.set(event.seq, event);
+    const buffer = retainNewest([...bySeq.values()].sort((a, b) => a.seq - b.seq));
+    buffers.set(sessionId, buffer);
     schedule(sessionId);
-    return merged;
+    return snapshotBuffer(buffer);
   }
 
   function snapshot(sessionId: string): CachedEvent[] {
     if (disposed) return [];
-    return [...(buffers.get(sessionId) ?? [])];
+    return snapshotBuffer(buffers.get(sessionId));
   }
 
   async function drop(sessionId: string): Promise<void> {
@@ -141,7 +173,7 @@ export function createReplayPersister(
     if (disposed) return;
     disposed = true;
     flushGeneration += 1;
-    for (const t of timers.values()) clearTimeout(t);
+    for (const timer of timers.values()) clearTimeout(timer);
     timers.clear();
     buffers.clear();
   }

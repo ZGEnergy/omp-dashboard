@@ -28,9 +28,11 @@
  * See change: reduce-session-replay-traffic, session-tail-rehydrate,
  * mobile-session-rehydration.
  */
-import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+
 import { selectNewestEventsByBudget } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
 import { prepareEventForReplay } from "@blackbelt-technology/pi-dashboard-shared/prepare-event-for-replay.js";
+import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { DEFAULT_REPLAY_RETENTION_BYTES } from "./replay-retention.js";
 
 /** Bump on any persisted-shape change → all entries invalidate (full replay).
  *  v2: over-budget put trims to newest-by-byte-budget instead of drop-all.
@@ -42,8 +44,8 @@ const DB_NAME = "pi-dashboard-replay-cache";
 const STORE = "sessions";
 const DB_VERSION = 2;
 const DEFAULT_MAX_ENTRIES = 50;
-/** Per-session payload byte budget (~4 MB newest events). Over → trim-on-put. */
-const DEFAULT_MAX_BYTES_PER_SESSION = 4 * 1024 * 1024;
+/** Per-session payload byte budget. Over → trim-on-put. */
+export const DEFAULT_MAX_BYTES_PER_SESSION = DEFAULT_REPLAY_RETENTION_BYTES
 
 export interface CachedEvent {
   seq: number;

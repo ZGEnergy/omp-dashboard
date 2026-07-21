@@ -18,7 +18,7 @@ Files in this directory. One row per source file.
 | `CanvasDriver.tsx` | Auto-canvas driver. Consumes a session's `CanvasState`; viewport-gated open via `useSplitWorkspace` `openInSplit`/`openLiveTarget` (desktop/tablet) or a tap-to-open `canvas-file-chip` (mobile). Renders `CanvasServerChip`. Coexists with URL-driven preview. See change: auto-canvas (Section 6). |
 | `CanvasServerChip.tsx` | Declared-server confirm chip (`data-testid=canvas-server-chip`, carries only port). Tap routes through LiveServerViewer loopback probe (`onTap(127.0.0.1:port)`); NO pre-tap fetch. See change: auto-canvas (Section 7). |
 | `ChangeSummaryBlock.tsx` | Per-turn change-summary block in chat stream. Collapses to `N files · +X −Y`. Gated on `displayPrefs.changeSummaryTable`. Deltas via `buildTurnSummaries`. See change: add-change-summary-table. |
-| `ChatView.tsx` | `msg.view` rows render as `<PreviewCard target={msg.view}>` (right-aligned, `bubbleMax` width) BEFORE… → see `ChatView.tsx.AGENTS.md` |
+| `ChatView.tsx` | Mobile replay hydration keeps `NAVIGATING_BOTTOM` through virtual row measurement so cold reopen lands newest message. → see `ChatView.tsx.AGENTS.md` |
 | `ChatViewMenu.tsx` | Discord-style ⚙ View popover mounted in chat toolbar. Edits per-session `displayPrefsOverride` via… → see `ChatViewMenu.tsx.AGENTS.md` |
 | `CloseWorktreeDialog.tsx` | Confirms worktree removal. Handles `active_sessions` guard: shuts listed sessions down then retries with… → see `CloseWorktreeDialog.tsx.AGENTS.md` |
 | `CollapsedToolGroup.tsx` | Renders collapsed group of repeated tool calls. Exports `CollapsedToolGroup`. → see `CollapsedToolGroup.tsx.AGENTS.md` |
@@ -161,7 +161,7 @@ Files in this directory. One row per source file.
 | `ThinkingLevelSelector.tsx` | Thinking-level picker. Optional prop `supportedLevels` filters `THINKING_LEVELS` to supported set (canonical… → see `ThinkingLevelSelector.tsx.AGENTS.md` |
 | `Toast.tsx` | `ToastMessage.variant?: "error"|"success"|"info"` default "error". `useToast.showToast(text, variant?)` additive. Success green, info neutral, error red. See change: add-async-action-feedback. |
 | `TokenStatsBar.tsx` | Exports `TokenStatsBar`. Renders per-turn butterfly chart (input up / output down) + stats panel +… → see `TokenStatsBar.tsx.AGENTS.md` |
-| `ToolBurstGroup.tsx` | Renders temporal BURST group (data from `lib/group-tool-bursts.ts`). → see `ToolBurstGroup.tsx.AGENTS.md` |
+| `ToolBurstGroup.tsx` | Renders temporal BURST group. Active groups open by default; explicit collapse/expand survives replay remounts. → see `ToolBurstGroup.tsx.AGENTS.md` |
 | `ToolCallStep.tsx` | Renders tool-call card. Adds `showResultBody?: boolean` prop (default `true`); when `false` hides result body… → see `ToolCallStep.tsx.AGENTS.md` |
 | `ToolsSection.tsx` | Settings → General → **Tools** section. One row per registered tool: status badge, source, truncated path,… → see `ToolsSection.tsx.AGENTS.md` |
 | `TunnelButton.tsx` | Exports `TunnelButton`. Unified tunnel/QR button. Polls `/api/tunnel-status` every 30s. → see `TunnelButton.tsx.AGENTS.md` |

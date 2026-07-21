@@ -18,9 +18,8 @@
  * top-level reasoning block; only non-empty `assistant` prose renders as flat
  * narration.
  *
- * Default open state: `expanded = override ?? (toolGroupDefaultCollapsed ?
- * false : isRunning)`. The pref only changes the body's default open state; the
- * live header + animation key off `isRunning`, not `expanded`.
+ * Active groups start open so ongoing work is immediately visible. Completed
+ * groups honor `toolGroupDefaultCollapsed`. Manual override always wins.
  *
  * See change: enhance-tool-call-grouping (was: group-tool-call-bursts).
  */
@@ -48,6 +47,9 @@ interface Props {
   burst: ToolBurstGroupData;
   toolContext: ToolContext;
 }
+
+// Stable event IDs survive transcript replay rebuilds and remounts.
+const completedBurstOverrides = new Map<string, boolean>();
 
 function isGroup(item: ChatItem): item is ToolCallGroup {
   return (item as ToolCallGroup).type === "group";
@@ -158,11 +160,17 @@ export function ToolBurstGroup({ burst, toolContext }: Props) {
   };
   const visibleMembers = underlyingCalls(burst.items).filter((m) => isVisible(m.toolName));
 
-  const [override, setOverride] = useState<boolean | null>(null); // null = follow auto
+  const burstId = visibleMembers[0]?.id;
+  const [override, setOverride] = useState<boolean | null>(() =>
+    burstId ? completedBurstOverrides.get(burstId) ?? null : null,
+  );
+  useEffect(() => {
+    setOverride(burstId ? completedBurstOverrides.get(burstId) ?? null : null);
+  }, [burstId]);
   const isRunning = visibleMembers.some((m) => m.toolStatus === "running");
-  // Pref only changes the body's default open state; the live header keys off
-  // isRunning, not expanded. Manual override always wins.
-  const autoOpen = prefs.toolGroupDefaultCollapsed ? false : isRunning;
+  // Active groups open by default. An explicit user toggle always wins and
+  // survives transcript replay rebuilds and remounts.
+  const autoOpen = isRunning || !prefs.toolGroupDefaultCollapsed;
   const expanded = override ?? autoOpen;
 
   // One-shot completion flash on the running→done flip.
@@ -225,7 +233,11 @@ export function ToolBurstGroup({ burst, toolContext }: Props) {
       meta={meta}
       motionClass={motionClass}
       expanded={expanded}
-      onToggle={() => setOverride(!expanded)}
+      onToggle={() => {
+        const next = !expanded;
+        if (burstId) completedBurstOverrides.set(burstId, next);
+        setOverride(next);
+      }}
       isRunning={isRunning}
     >
       {burst.items.map((it) => (

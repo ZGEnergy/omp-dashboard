@@ -56,30 +56,9 @@ describe("selectNewestEventsByBudget", () => {
     });
   });
 
-  it("returns all when under budget", () => {
-    const all = [ev(1, 10), ev(2, 10), ev(3, 10)];
-    const r = selectNewestEventsByBudget(all, 1_000_000);
-    expect(r.events.map((e) => e.seq)).toEqual([1, 2, 3]);
-    expect(r.hasMoreOlder).toBe(false);
-    expect(r.windowMinSeq).toBe(1);
-    expect(r.windowMaxSeq).toBe(3);
-    expect(r.partialHead).toBe(true);
-  });
+  it("treats a complete userless handoff source as a stable replay window", () => { const all = [ev(1, 10), ev(2, 10), ev(3, 10)]; const r = selectNewestEventsByBudget(all, 1_000_000); expect(r.events.map((e) => e.seq)).toEqual([1, 2, 3]); expect(r.hasMoreOlder).toBe(false); expect(r.windowMinSeq).toBe(1); expect(r.windowMaxSeq).toBe(3); expect(r.partialHead).toBe(false); });
 
-  it("keeps newest under a tight budget", () => {
-    const all = [ev(1, 800), ev(2, 800), ev(3, 800), ev(4, 800)];
-    const oneSize = estimateSeqEventBytes(all[3]!);
-    const budget = oneSize * 2 + 10;
-    const r = selectNewestEventsByBudget(all, budget);
-    expect(r.events.map((e) => e.seq)).toEqual([3, 4]);
-    expect(r.hasMoreOlder).toBe(true);
-    expect(r.windowMinSeq).toBe(3);
-    expect(r.windowMaxSeq).toBe(4);
-    expect(r.partialHead).toBe(true);
-    expect(r.bytes).toBeLessThanOrEqual(budget);
-    expect(r.bytes).toBe(serializedEnvelopeTotal(r.events));
-    expect(r.bytes + serializedEnvelopeBytes(all[1]!)).toBeGreaterThan(budget);
-  });
+  it("keeps a bounded userless handoff tail stable instead of requesting every older page", () => { const all = [ev(1, 800), ev(2, 800), ev(3, 800), ev(4, 800)]; const oneSize = estimateSeqEventBytes(all[3]!); const budget = oneSize * 2 + 10; const r = selectNewestEventsByBudget(all, budget); expect(r.events.map((e) => e.seq)).toEqual([3, 4]); expect(r.hasMoreOlder).toBe(true); expect(r.windowMinSeq).toBe(3); expect(r.windowMaxSeq).toBe(4); expect(r.partialHead).toBe(false); expect(r.bytes).toBeLessThanOrEqual(budget); expect(r.bytes).toBe(serializedEnvelopeTotal(r.events)); expect(r.bytes + serializedEnvelopeBytes(all[1]!)).toBeGreaterThan(budget); });
 
   it("never exceeds the budget when the newest turn is oversized", () => {
     const all: SeqEvent<DashboardEvent>[] = [
@@ -215,14 +194,7 @@ describe("selectOlderEventsByBudget", () => {
     expect(r.windowMaxSeq).toBe(3);
   });
 
-  it("applies budget on the older prefix", () => {
-    const all = [ev(1, 800), ev(2, 800), ev(3, 800), ev(4, 800), ev(5, 800)];
-    const oneSize = estimateSeqEventBytes(all[2]!);
-    const r = selectOlderEventsByBudget(all, 5, oneSize * 2 + 10);
-    expect(r.events.map((e) => e.seq)).toEqual([3, 4]);
-    expect(r.hasMoreOlder).toBe(true);
-    expect(r.partialHead).toBe(true);
-  });
+  it("keeps a bounded userless older page stable", () => { const all = [ev(1, 800), ev(2, 800), ev(3, 800), ev(4, 800), ev(5, 800)]; const oneSize = estimateSeqEventBytes(all[2]!); const r = selectOlderEventsByBudget(all, 5, oneSize * 2 + 10); expect(r.events.map((e) => e.seq)).toEqual([3, 4]); expect(r.hasMoreOlder).toBe(true); expect(r.partialHead).toBe(false); });
 
   it("expands older pages by complete user turns within budget", () => {
     const all: SeqEvent<DashboardEvent>[] = [
