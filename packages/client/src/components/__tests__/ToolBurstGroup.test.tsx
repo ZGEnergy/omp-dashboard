@@ -9,7 +9,7 @@ import {
   DISPLAY_PRESETS,
   type DisplayPrefs,
 } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DisplayPrefsProvider } from "../../lib/DisplayPrefsContext.js";
 import type { ChatMessage } from "../../lib/event-reducer.js";
@@ -119,6 +119,25 @@ describe("ToolBurstGroup", () => {
     );
     expect(container.querySelector('[data-testid="reasoning-block"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="tool-burst-narration"]')).toBeNull();
+  });
+
+  it("keeps a completed burst collapsed after it remounts", () => {
+    const items = [tool({ toolName: "read", content: "cached transcript" })];
+    const first = renderBurst(items);
+    fireEvent.click(first.getByTestId("tool-burst-header"));
+    expect(first.queryByTestId("tool-burst-body")).toBeNull();
+    first.unmount();
+
+    const replayed = renderBurst(items);
+    expect(replayed.queryByTestId("tool-burst-body")).toBeNull();
+  });
+
+  it("lets the user collapse an active burst", () => {
+    const running = [tool({ toolStatus: "running", toolName: "bash" })];
+    const view = renderBurst(running, { ...DISPLAY_PRESETS.standard, toolGroupDefaultCollapsed: true });
+    expect(view.queryByTestId("tool-burst-body")).not.toBeNull();
+    fireEvent.click(view.getByTestId("tool-burst-header"));
+    expect(view.queryByTestId("tool-burst-body")).toBeNull();
   });
 
   it("keeps a running group open even when completed groups default closed", () => {

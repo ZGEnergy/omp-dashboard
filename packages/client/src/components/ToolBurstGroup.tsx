@@ -48,6 +48,9 @@ interface Props {
   toolContext: ToolContext;
 }
 
+// Stable event IDs survive transcript replay rebuilds and remounts.
+const completedBurstOverrides = new Map<string, boolean>();
+
 function isGroup(item: ChatItem): item is ToolCallGroup {
   return (item as ToolCallGroup).type === "group";
 }
@@ -157,10 +160,16 @@ export function ToolBurstGroup({ burst, toolContext }: Props) {
   };
   const visibleMembers = underlyingCalls(burst.items).filter((m) => isVisible(m.toolName));
 
-  const [override, setOverride] = useState<boolean | null>(null); // null = follow auto
+  const burstId = visibleMembers[0]?.id;
+  const [override, setOverride] = useState<boolean | null>(() =>
+    burstId ? completedBurstOverrides.get(burstId) ?? null : null,
+  );
+  useEffect(() => {
+    setOverride(burstId ? completedBurstOverrides.get(burstId) ?? null : null);
+  }, [burstId]);
   const isRunning = visibleMembers.some((m) => m.toolStatus === "running");
-  // Active work must expose its current tool activity immediately. The display
-  // preference still controls only completed groups; manual override always wins.
+  // Active groups open by default. An explicit user toggle always wins and
+  // survives transcript replay rebuilds and remounts.
   const autoOpen = isRunning || !prefs.toolGroupDefaultCollapsed;
   const expanded = override ?? autoOpen;
 
@@ -224,7 +233,11 @@ export function ToolBurstGroup({ burst, toolContext }: Props) {
       meta={meta}
       motionClass={motionClass}
       expanded={expanded}
-      onToggle={() => setOverride(!expanded)}
+      onToggle={() => {
+        const next = !expanded;
+        if (burstId) completedBurstOverrides.set(burstId, next);
+        setOverride(next);
+      }}
       isRunning={isRunning}
     >
       {burst.items.map((it) => (
