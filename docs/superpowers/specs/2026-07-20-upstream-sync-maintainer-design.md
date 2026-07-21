@@ -32,12 +32,13 @@ Skill and executor use repo-relative ledger path.
 
 Installer copies only `SKILL.md`.
 
-Installer never copies ledger, assessments, approval artifacts, or result workspace.
+Installer never copies ledger, assessments, plan files, or result workspace.
 
 ## Non-goals
 
 - Automatic obligation acceptance.
-- Merge, landing, or deploy without human-approved plan.
+- Automatic merge to `main`.
+- Automatic deployment.
 - Policy decision from path alone.
 - Action-created preview PR.
 
@@ -45,7 +46,7 @@ Installer never copies ledger, assessments, approval artifacts, or result worksp
 
 Weekly GitHub Action detects upstream change.
 
-Dispatch workflow consumes immutable sync request.
+Dispatch workflow routes immutable sync request.
 
 Detection workflow records `base_sha`.
 
@@ -65,17 +66,55 @@ Detection workflow never creates or force-updates branch.
 
 Detection workflow never opens PR.
 
-Persistent GitHub issue/comment displays sync request and committed plan link only.
+Persistent GitHub issue/comment displays sync request only.
 
-Issue/comment never grants approval authority.
+Issue/comment displays links to local assessment output.
+
+Issue/comment never grants merge authority.
 
 PR represents audited candidate only.
 
-Maintainer consumes exact request pin.
+Local skill consumes exact request pin.
+
+Local skill loads exact ledger revision.
+
+Local skill mines fork commits for behavior candidates.
+
+Local skill assigns dispositions.
+
+Local skill builds immutable local plan.
+
+Local skill validates request, ledger, and plan internally.
+
+Local skill creates fresh isolated worktree.
+
+Local skill verifies all checks before push.
+
+Local skill commits exact audited sync branch.
+
+Local skill pushes exact audited sync branch.
+
+Local skill opens one ready-for-review PR.
+
+PR body lists upstream pin and range.
+
+PR body lists dispositions and content.
+
+PR body lists verification results.
+
+PR body lists residual risks.
+
+Human reviewers review PR.
+
+Human reviewers merge PR.
+
+Skill never merges `main`.
+
+Skill never deploys.
 
 Newer upstream head supersedes older request.
 
-Newer upstream head requires fresh assessment and approval.
+Newer upstream head requires fresh assessment.
 
 Conservative freshness policy rejects path-limited re-pinning.
 
@@ -87,13 +126,13 @@ Merge target equals exact pinned upstream commit.
 
 Retain `scripts/upstream-sync.sh` as deterministic executor and validator only.
 
-Approved plan invokes `scripts/upstream-sync.sh`.
+Local plan invokes `scripts/upstream-sync.sh`.
 
-Script verifies immutable approval binding before mutation.
+Script verifies immutable request, ledger, and plan values before mutation.
 
-Script merges exact pinned upstream commit.
+Script merges exact pinned upstream commit into isolated worktree.
 
-Script performs approved actions only.
+Script performs planned actions only.
 
 Script runs deterministic validators.
 
@@ -119,13 +158,15 @@ Detector Action does not use `pull_request_target`.
 
 Detector remains read-only for integration behavior.
 
-Executor runs through `workflow_dispatch` or protected environment.
+Local executor uses scoped token.
 
-Executor uses scoped token.
+Local executor runs through explicit dispatch or local invocation.
 
-Executor independently verifies approval identity.
+Executor independently verifies request identity.
 
-Executor independently verifies binding values.
+Executor independently verifies ledger revision.
+
+Executor independently verifies plan hash.
 
 Executor independently verifies request supersession state.
 
@@ -143,7 +184,7 @@ Detector text never becomes workflow command.
 
 Detector text never becomes unquoted step output.
 
-Commit text cannot alter workflow policy or approval state.
+Commit text cannot alter workflow policy or disposition state.
 
 Validators never log secrets.
 
@@ -161,7 +202,7 @@ Deterministic validators check worktree state.
 
 Deterministic validators check canonical upstream pin provenance.
 
-Deterministic validators check approval plan binding.
+Deterministic validators check plan binding.
 
 Deterministic validators check post-merge invariants.
 
@@ -251,19 +292,19 @@ Ledger supports `blocked`.
 
 Ledger supports `closed-unmerged`.
 
-`accepted` means human-approved obligation exists.
+`accepted` means reviewed obligation exists.
 
 `assessed` means current upstream range has disposition proof.
 
-`planned` means approved action plan exists.
+`planned` means immutable local plan exists.
 
-`in-PR` means audited candidate contains approved action.
+`in-PR` means ready-for-review candidate contains planned action.
 
-`merged` means candidate landed with verification proof.
+`merged` means human reviewers merged candidate with verification proof.
 
 `retired` means explicit risk acceptance and tombstone exist.
 
-`blocked` means required proof or approval is absent.
+`blocked` means required proof or ledger state prevents safe action.
 
 `closed-unmerged` means candidate closed without landing.
 
@@ -281,43 +322,20 @@ Each assessed obligation receives immutable assessment record.
 | `test_proof` | Relevant existing or added test evidence |
 | `wiring_proof` | Registration, route, export, deployment, or call-site evidence |
 | `verification` | Validator and command results |
-| `decision_status` | Human approval state |
-| `plan_commit` | Assessment-branch commit containing approved plan |
-| `plan_hash` | Hash of approved plan artifact |
-| `verifier_version` | Validator version bound to approval |
-| `verifier_digest` | Validator artifact digest bound to approval |
+| `decision_status` | Local assessment state |
+| `plan_hash` | Hash of immutable local plan |
+| `verifier_version` | Validator version used |
+| `verifier_digest` | Validator artifact digest used |
 
-Plan artifact commits to assessment branch.
+Local plan contains complete decision set.
 
-Plan artifact carries complete decision set.
+Local plan contains proof paths and verification requirements.
 
-Plan artifact carries proof paths and verification requirements.
-
-Plan artifact hash identifies exact plan contents.
+Plan hash identifies exact plan contents.
 
 Execution consumes referenced `plan_hash` only.
 
-Human approval binds `base_sha`.
-
-Human approval binds `upstream_sha`.
-
-Human approval binds `ledger_revision`.
-
-Human approval binds complete decision set.
-
-Human approval binds `plan_commit`.
-
-Human approval binds `plan_hash`.
-
-Human approval binds `verifier_version`.
-
-Human approval binds `verifier_digest`.
-
-Authorized maintainer approval comes from GitHub API verified CODEOWNERS review.
-
-CODEOWNERS review targets exact plan commit and hash.
-
-Executor byte-matches every bound value before mutation.
+Executor byte-matches request, ledger, and plan values before mutation.
 
 Executor rejects changed pin.
 
@@ -325,13 +343,7 @@ Executor rejects changed ledger revision.
 
 Executor rejects changed decision set.
 
-Executor rejects edited plan commit.
-
 Executor rejects changed plan hash.
-
-Executor rejects dismissed review.
-
-Executor rejects missing review.
 
 Executor rejects changed verifier version.
 
@@ -341,26 +353,33 @@ Executor rejects changed verifier digest.
 
 1. Maintainer consumes exact sync request pin.
 2. Maintainer loads versioned in-repo obligation ledger.
-3. Maintainer mines new fork commits for behavior candidates.
+3. Maintainer mines fork commits for behavior candidates.
 4. Maintainer never auto-accepts candidates.
 5. Maintainer reconciles every accepted obligation with upstream range.
 6. Maintainer assigns one disposition to each affected obligation.
 7. Maintainer records behavior, test, and wiring proof.
-8. Maintainer commits immutable plan artifact on assessment branch.
-9. Maintainer pauses for CODEOWNERS approval of exact plan commit and hash.
+8. Maintainer writes immutable local plan.
+9. Executor validates exact request, ledger, and plan internally.
 10. Executor creates fresh isolated worktree from pinned base.
 11. Executor merges exact pinned upstream commit.
-12. Executor performs approved disposition actions only.
+12. Executor performs planned disposition actions only.
 13. Validator runs structural and obligation checks before test/build.
 14. Maintainer runs required verification.
-15. Maintainer creates or updates exactly one audited PR.
-16. Maintainer records decisions and evidence.
+15. Maintainer commits exact audited sync branch.
+16. Maintainer pushes exact audited sync branch.
+17. Maintainer opens exactly one ready-for-review PR.
+18. Maintainer records decisions and evidence.
+19. Human reviewers review and merge PR.
 
-Executor does not mutate worktree before approval byte-match.
+Executor does not mutate worktree before internal validation.
 
 Executor does not substitute newer upstream head.
 
-Executor does not infer approval from issue labels, comments, or path names.
+Executor does not infer disposition from issue labels, comments, or path names.
+
+Executor never merges `main`.
+
+Executor never deploys.
 
 ## Disposition rules
 
@@ -370,8 +389,8 @@ Executor does not infer approval from issue labels, comments, or path names.
 | `adopt-upstream` | Upstream implementation satisfies observable contract; proof covers behavior, tests, and wiring. |
 | `preserve-zge` | ZGE behavior remains required; proof carries machine-checkable invariants. |
 | `combine` | Shared hub needs upstream behavior and ZGE wiring; proof covers both contracts. |
-| `retire` | Obligation no longer applies; human risk acceptance and tombstone evidence required. |
-| `blocked` | Proof, approval, ledger, pin, or conflict state prevents safe action. |
+| `retire` | Obligation no longer applies; risk rationale and tombstone evidence required. |
+| `blocked` | Proof, ledger, pin, or conflict state prevents safe action. |
 
 `unaffected` still receives assessment record.
 
@@ -383,7 +402,7 @@ Executor does not infer approval from issue labels, comments, or path names.
 
 `retire` never follows path disappearance alone.
 
-`blocked` never receives merge approval.
+`blocked` never reaches PR creation.
 
 ## Blocked isolation and expiry
 
@@ -395,7 +414,7 @@ Scheduled validator marks expired in-scope obligations stale.
 
 Merge-time validator blocks expired non-tombstoned in-scope records.
 
-Affected blocked obligation prevents merge.
+Affected blocked obligation prevents branch push and PR creation.
 
 Affected means upstream range touches scope or dependency roots.
 
@@ -411,7 +430,7 @@ Long-lived blocked record triggers tombstone review.
 
 Carry-forward record does not block unrelated merge.
 
-Retirement requires explicit risk acceptance.
+Retirement requires explicit risk rationale.
 
 Retirement requires tombstone evidence.
 
@@ -419,17 +438,17 @@ Retirement requires tombstone evidence.
 
 High-risk paths require named scope owner.
 
-High-risk paths require two distinct authorized approvals.
+High-risk PR receives two distinct human reviews before merge.
 
 Executor, validator, CI/workflow, and dependency-manifest changes force high-risk disposition.
 
-High-risk disposition receives distinct authorized review.
+High-risk disposition receives separate PR review.
 
-Emergency override requires approval-bound `combine` or `retire` decision.
+Emergency override requires `combine` or `retire` disposition.
 
 Emergency override records rationale.
 
-Emergency override never bypasses binding or validation.
+Emergency override never bypasses internal validation.
 
 ## Existing PR lifecycle
 
@@ -451,7 +470,7 @@ Divergent candidate stops processing.
 
 Divergent candidate requires human resolution.
 
-Exactly one audited PR remains active for one approved identity.
+Exactly one ready-for-review PR remains active for one candidate identity.
 
 Closed unmerged candidate records `closed-unmerged` state.
 
@@ -463,7 +482,7 @@ Executor and validator run from pinned `base_sha` copy.
 
 Pinned executor copy stays outside merge-result tree.
 
-Executor binds verifier version and digest.
+Executor binds verifier version and digest internally.
 
 Executor loads no executor or validator code from upstream result.
 
@@ -481,9 +500,9 @@ All build checks execute in isolated worktree.
 
 All checks complete before push.
 
-Required CI failure retains draft PR.
+Failed verification prevents branch push.
 
-Required CI failure prevents landing.
+Failed verification prevents PR creation.
 
 ## Post-merge proof
 
@@ -507,11 +526,9 @@ CI verification checks required status checks.
 
 All verification runs in isolated worktree before push.
 
-Failed verification retains draft PR.
-
-Failed verification prevents landing.
-
 Failed verification records failure evidence.
+
+Human reviewers receive verification results in PR body.
 
 ## Implementation boundaries
 
@@ -519,17 +536,16 @@ Failed verification records failure evidence.
 |---|---|
 | Weekly detector | Read upstream and fork metadata; emit immutable request; never mutate integration state |
 | Dispatch workflow | Route request to maintainer workflow; preserve request pin |
-| Sync inbox | Display immutable request and committed plan links in GitHub issue/comments; never grant approval |
+| Sync inbox | Display immutable request and assessment links in GitHub issue/comments; never grant merge authority |
 | Obligation ledger | Store versioned behavior records, migrations, orphan records, and tombstones in repository |
 | Candidate miner | Inspect fork commits and identify unreviewed behavior candidates |
 | Reconciler | Compare accepted obligations against exact upstream range; assign dispositions and proof requirements |
-| Plan artifact | Store committed immutable assessment plan and referenced hash on assessment branch |
-| Approval gate | Verify CODEOWNERS review for exact plan commit/hash; bind pins, ledger revision, decision set, plan hash, and verifier version/digest |
-| Executor | Use pinned-base copy outside merge-result tree; merge exact pinned upstream commit; perform approved actions |
-| `scripts/upstream-sync.sh` | Deterministic approved-plan executor and validator; no automatic path-policy merge; no PR orchestration |
+| Plan validator | Validate immutable request, ledger revision, plan hash, and verifier identity internally |
+| Executor | Use pinned-base copy outside merge-result tree; merge exact pinned upstream commit; perform planned actions |
+| `scripts/upstream-sync.sh` | Deterministic planned executor and validator; no automatic path-policy merge; no PR orchestration |
 | Validator | Check schemas, hashes, provenance, state, invariants, expiry, sanitization, and plan binding deterministically |
 | Verification runner | Run structural, obligation, regression, build, and required CI checks in isolated worktree |
-| PR manager | Create or update exactly one audited PR; supersede stale candidates; stop divergent candidates |
+| PR manager | Commit/push exact audited branch; open exactly one ready-for-review PR; supersede stale candidates; stop divergent candidates |
 | Decision recorder | Persist decisions, evidence, statuses, owners, and recheck triggers |
 
 `scripts/lib/upstream-sync-policy.sh` becomes deleted.
@@ -538,13 +554,15 @@ Ledger tooling owns non-authoritative path investigation hints.
 
 Detector owns request creation only.
 
-Maintainer workflow owns assessment and approval pause.
+Maintainer workflow owns assessment and local plan.
 
-Executor owns approved mutation only.
+Executor owns planned mutation only.
 
 Validator owns deterministic safety gates.
 
-PR manager owns candidate identity and lifecycle.
+PR manager owns candidate identity and ready-for-review lifecycle.
+
+Human reviewers own merge and deployment decisions.
 
 ## End-to-end data flow
 
@@ -554,22 +572,24 @@ PR manager owns candidate identity and lifecycle.
 4. Detector classifies changed paths and risk flags.
 5. Detector sanitizes displayed request text.
 6. Detector publishes immutable request to persistent issue/comment inbox.
-7. Maintainer commits immutable plan artifact on assessment branch.
-8. Maintainer loads ledger revision from repository.
-9. Candidate miner scans fork history for new behavior.
-10. Reconciler maps candidates and accepted obligations to upstream range.
-11. Reconciler writes assessment records and dispositions.
-12. CODEOWNERS reviewers approve exact plan commit and hash through GitHub API.
-13. Executor independently verifies approval identity, bindings, and supersession.
-14. Executor loads pinned-base executor and validator copy outside merge-result tree.
-15. Executor creates fresh worktree at pinned base SHA.
-16. Executor invokes `scripts/upstream-sync.sh` with referenced plan hash.
-17. Script merges exact pinned upstream SHA and performs approved actions.
-18. Script validates post-merge invariants before tests and build.
-19. Verification runner executes all checks in isolated worktree before push.
-20. PR manager creates or updates one audited candidate PR.
-21. Decision recorder links PR, evidence, verification, and ledger states.
-22. Fresh upstream head supersedes request and restarts assessment.
+7. Maintainer loads ledger revision from repository.
+8. Candidate miner scans fork history for new behavior.
+9. Reconciler maps candidates and accepted obligations to upstream range.
+10. Reconciler writes assessment records and dispositions.
+11. Maintainer writes immutable local plan and computes `plan_hash`.
+12. Executor validates request, ledger, plan, and verifier identity internally.
+13. Executor loads pinned-base executor and validator copy outside merge-result tree.
+14. Executor creates fresh worktree at pinned base SHA.
+15. Executor invokes `scripts/upstream-sync.sh` with referenced plan hash.
+16. Script merges exact pinned upstream SHA and performs planned actions.
+17. Script validates post-merge invariants before tests and build.
+18. Verification runner executes all checks in isolated worktree before push.
+19. Maintainer commits and pushes exact audited sync branch.
+20. PR manager opens exactly one ready-for-review PR.
+21. PR manager writes concise PR body with pin, range, dispositions, content, verification, and residual risks.
+22. Human reviewers review and merge PR.
+23. Decision recorder links PR, evidence, verification, and ledger states.
+24. Fresh upstream head supersedes request and restarts assessment.
 
 ## Validation fixtures
 
@@ -583,7 +603,7 @@ Combine shared-hub scenario proves upstream registration and ZGE wiring coexist.
 
 Negative fixtures cover upstream movement.
 
-Negative fixtures cover approval mismatch.
+Negative fixtures cover plan mismatch.
 
 Negative fixtures cover missing wiring.
 
@@ -609,28 +629,32 @@ Fixture runs execute in CI for skill edits.
 
 ## Decision invariants
 
-Request pins remain immutable from detection through execution.
+Request pins remain immutable from detection through PR creation.
 
-Ledger revision remains immutable from assessment through execution.
+Ledger revision remains immutable from assessment through PR creation.
 
-Decision set remains immutable from approval through execution.
+Decision set remains immutable from local plan through PR creation.
 
-Plan commit remains immutable from approval through execution.
+Plan hash remains immutable from local plan through PR creation.
 
-Plan hash remains immutable from approval through execution.
+Verifier version remains immutable during validation.
 
-Verifier version remains immutable from approval through execution.
-
-Verifier digest remains immutable from approval through execution.
+Verifier digest remains immutable during validation.
 
 Merge target remains exact pinned upstream commit.
 
 Fresh worktree starts from exact pinned base.
 
-Untrusted upstream text cannot issue commands or change decisions.
+Exact audited branch receives only verified result.
+
+Exactly one ready-for-review PR represents candidate identity.
+
+Untrusted upstream text cannot issue commands or change dispositions.
 
 Missing proof blocks affected obligation.
 
-Expired in-scope record blocks merge without tombstone.
+Expired in-scope record blocks branch push without tombstone.
 
-Failed verification prevents landing.
+Failed verification prevents PR creation.
+
+Skill never merges `main` or deploys.
