@@ -14,6 +14,16 @@ Upstream implementation wins when proof satisfies obligation.
 
 No separate audit skill exists.
 
+## Skill source boundary
+
+Canonical source lives at `.pi/skills/omp-dashboard-upstream-sync/`.
+
+Managed runtime copy lives at `/home/joe/.omp/agent/managed-skills/omp-dashboard-upstream-sync/`.
+
+Explicit checked installer installs and syncs managed copy only from canonical source.
+
+Managed copy never becomes source of truth.
+
 ## Non-goals
 
 - Automatic obligation acceptance.
