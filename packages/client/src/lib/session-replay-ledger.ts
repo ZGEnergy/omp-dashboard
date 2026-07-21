@@ -2,7 +2,9 @@ import type {
   EventReplayMessage,
   ReplayKind,
 } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import { estimateSeqEventBytes } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { DEFAULT_REPLAY_RETENTION_BYTES } from "./replay-retention.js";
 
 export interface LedgerEvent {
   seq: number;
@@ -26,11 +28,15 @@ export interface LedgerAdmission {
   reset: LedgerResetReason | null;
   repair: { kind: "delta"; cursor: number } | null;
   rebuild: boolean;
+  /** Oldest retained rows were evicted to keep the hot transcript bounded. */
+  evictedHead: boolean;
 }
 
 export interface SessionReplayLedgerOptions {
   maxGapEvents?: number;
   maxGapBytes?: number;
+  /** Max UTF-8 bytes retained in the hot transcript. */
+  maxRetainedBytes?: number;
 }
 
 const DEFAULT_MAX_GAP_EVENTS = 256;
@@ -47,6 +53,7 @@ export class SessionReplayLedger {
   private active: ReplayRequest | null = null;
   private activeSource: string | null = null;
   private gapBytes = 0;
+  private retainedBytes = 0;
   private repairLatched = false;
   private completion: { requestId: string; anchorToken?: string } | null = null;
   /** Highest sequence admitted for the current ascending older-page stream. */
@@ -54,11 +61,13 @@ export class SessionReplayLedger {
   private failures = new Map<ReplayKind, number>();
   private readonly maxGapEvents: number;
   private readonly maxGapBytes: number;
+  private readonly maxRetainedBytes: number;
   status: LedgerStatus = "cold";
 
   constructor(readonly sessionId: string, options: SessionReplayLedgerOptions = {}) {
     this.maxGapEvents = options.maxGapEvents ?? DEFAULT_MAX_GAP_EVENTS;
     this.maxGapBytes = options.maxGapBytes ?? DEFAULT_MAX_GAP_BYTES;
+    this.maxRetainedBytes = options.maxRetainedBytes ?? DEFAULT_REPLAY_RETENTION_BYTES;
   }
 
   get sourceGeneration(): string | null {
@@ -119,7 +128,8 @@ export class SessionReplayLedger {
     if (entries.length === 0 || !this.isStrictlyAscending(entries) || !this.isContiguous(entries)) return false;
     this.clear(sourceGeneration);
     this.active = null;
-    for (const entry of entries) this.bySeq.set(entry.seq, entry);
+    for (const entry of entries) this.addRetained(entry);
+    this.trimRetained();
     this.status = "ready";
     return true;
   }
@@ -170,7 +180,7 @@ export class SessionReplayLedger {
       // retention means its first sequence is not one. Internal holes are never
       // a valid baseline, regardless of the retained starting sequence.
       if (!this.isContiguous(events)) return this.resetResult("invalid_replay");
-      for (const entry of events) this.bySeq.set(entry.seq, entry);
+      for (const entry of events) this.addRetained(entry);
       result.accepted = events;
     } else if (frame.replayKind === "older") {
       if (!this.acceptOlder(events, originalMin, result, frame.isLast)) return this.resetResult("invalid_replay");
@@ -183,6 +193,8 @@ export class SessionReplayLedger {
       }
       this.drainGaps(result.accepted);
     }
+
+    result.evictedHead = this.trimRetained();
 
     if (frame.isLast) {
       const completed = this.active;
@@ -209,6 +221,7 @@ export class SessionReplayLedger {
     if (admission === "accepted") {
       result.accepted.push(entry);
       this.drainGaps(result.accepted);
+      result.evictedHead = this.trimRetained();
       return result;
     }
     if (admission === "duplicate") return result;
@@ -232,7 +245,7 @@ export class SessionReplayLedger {
         const old = this.bySeq.get(entry.seq);
         if (old && !sameEvent(old, entry)) return false;
         if (!old) {
-          this.bySeq.set(entry.seq, entry);
+          this.addRetained(entry);
           result.accepted.push(entry);
         }
       }
@@ -250,7 +263,7 @@ export class SessionReplayLedger {
     if (buffered) return sameEvent(buffered, entry) ? "duplicate" : "conflict";
     const cursor = this.cursor;
     if (cursor === 0 || entry.seq === cursor + 1) {
-      this.bySeq.set(entry.seq, entry);
+      this.addRetained(entry);
       return "accepted";
     }
     return "gap";
@@ -262,10 +275,29 @@ export class SessionReplayLedger {
       if (!entry) break;
       this.gaps.delete(entry.seq);
       this.gapBytes -= JSON.stringify(entry).length;
-      this.bySeq.set(entry.seq, entry);
+      this.addRetained(entry);
       accepted.push(entry);
     }
     if (this.gaps.size === 0) this.repairLatched = false;
+  }
+
+  private addRetained(entry: LedgerEvent): void {
+    this.bySeq.set(entry.seq, entry);
+    this.retainedBytes += estimateSeqEventBytes(entry);
+  }
+
+  private trimRetained(): boolean {
+    let evicted = false;
+    while (this.bySeq.size > 1 && this.retainedBytes > this.maxRetainedBytes) {
+      let oldestSeq = Number.POSITIVE_INFINITY;
+      for (const seq of this.bySeq.keys()) oldestSeq = Math.min(oldestSeq, seq);
+      const oldest = this.bySeq.get(oldestSeq);
+      if (!oldest) break;
+      this.bySeq.delete(oldestSeq);
+      this.retainedBytes -= estimateSeqEventBytes(oldest);
+      evicted = true;
+    }
+    return evicted;
   }
 
   private isStrictlyAscending(events: readonly LedgerEvent[]): boolean {
@@ -286,6 +318,7 @@ export class SessionReplayLedger {
     this.bySeq.clear();
     this.gaps.clear();
     this.gapBytes = 0;
+    this.retainedBytes = 0;
     this.repairLatched = false;
     this.completion = null;
     this.olderPageLastSeq = null;
@@ -294,7 +327,7 @@ export class SessionReplayLedger {
   }
 
   private empty(): LedgerAdmission {
-    return { accepted: [], stale: false, reset: null, repair: null, rebuild: false };
+    return { accepted: [], stale: false, reset: null, repair: null, rebuild: false, evictedHead: false };
   }
 
   private resetResult(reason: LedgerResetReason): LedgerAdmission {
@@ -304,12 +337,13 @@ export class SessionReplayLedger {
     this.bySeq.clear();
     this.gaps.clear();
     this.gapBytes = 0;
+    this.retainedBytes = 0;
     this.repairLatched = false;
     this.completion = null;
     this.olderPageLastSeq = null;
     this.active = null;
     this.status = "cold";
-    return { accepted: [], stale: false, reset: reason, repair: null, rebuild: false };
+    return { accepted: [], stale: false, reset: reason, repair: null, rebuild: false, evictedHead: false };
   }
 }
 

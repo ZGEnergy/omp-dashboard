@@ -111,6 +111,20 @@ describe("SessionReplayController", () => {
     expect(effects.replace).toHaveBeenCalledWith("s", [entry(49), entry(50)], { requestId: older.requestId, anchorToken: "anchor-50" });
   });
 
+  it("rebuilds only the retained tail after live history crosses its byte cap", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), window: vi.fn(), trimmed: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const budget = JSON.stringify(entry(1)).length * 2;
+    const controller = new (SessionReplayController as any)(effects, { maxRetainedBytes: budget });
+    const cold = controller.begin("s", "cold", "source-a");
+    controller.handle(frame(cold.requestId!, [entry(1), entry(2)], true));
+
+    controller.handle({ type: "event", sessionId: "s", seq: 3, event: entry(3).event });
+
+    expect(effects.trimmed).toHaveBeenCalledWith("s", 2);
+    expect(effects.replace).toHaveBeenLastCalledWith("s", [entry(2), entry(3)], null);
+    expect(effects.apply).toHaveBeenCalledTimes(1);
+  });
+
   it("resets conflicting live state and starts cold recovery without preserving the prefix", () => {
     const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
     const controller = new SessionReplayController(effects);

@@ -85,8 +85,9 @@ Files in this directory. One row per source file.
 | `providers-api.ts` | Fetch helper for custom-LLM-provider management. Exports `TestProviderInput`, `TestProviderResult` (discriminated union), `testProvider(input)` — POST `/api/providers/test` verifying baseUrl+apiKey+api against upstream `/models` without saving; `apiKey` accepts literal, `$ENV_VAR` ref, or `"***"` (resolved server-side from saved provider). |
 | `rail-width.ts` | Per-session browse-rail width, localStorage `pi-dashboard:rail:<id>`, clamp [160,480], default 224. `useRailWidth`. Independent of outer split ratio. See change: split-editor-workspace. |
 | `rehydrate-session.ts` | rehydrateSession(sessionId,cache). Cache hit → re-reduce raw payload via reduceEvent into provisional… → see `rehydrate-session.ts.AGENTS.md` |
-| `replay-cache.ts` | Durable per-session replay cache. IndexedDB. put trims newest-by-byte-budget (schema v2, ~4 MiB). → see `replay-cache.ts.AGENTS.md` |
+| `replay-cache.ts` | Durable per-session replay cache. IndexedDB. put trims newest-by-byte-budget (10 MiB cap). → see `replay-cache.ts.AGENTS.md` |
 | `replay-persist.ts` | Debounced replay-cache writer. createReplayPersister(cache,debounceMs). → see `replay-persist.ts.AGENTS.md` |
+| `replay-retention.ts` | Shared 10 MiB hot-transcript and durable-cache cap. Exports `DEFAULT_REPLAY_RETENTION_BYTES`. |
 | `replay-window.ts` | Pure `mergeReplayWindow(previous, frame, ledgerMin)` — cold replaces history window and `partialHead`, older advances minSeq down and adopts a supplied boundary marker, delta never regresses the established window or marker; nullish cursor handling preserves zero. |
 | `route-builders.ts` | URL builders for shell overlay routes: `buildOpenSpecPreviewUrl`, `buildOpenSpecArchiveUrl`,… → see `route-builders.ts.AGENTS.md` |
 | `selectedSessionId.ts` | Pure derivation of selected session id from wouter route matches. → see `selectedSessionId.ts.AGENTS.md` |
@@ -98,7 +99,7 @@ Files in this directory. One row per source file.
 | `session-filter-storage.ts` | localStorage persistence for session-list filter state. Exports `removeLegacyHiddenSessions`,… → see `session-filter-storage.ts.AGENTS.md` |
 | `session-grouping.ts` | Pure session grouping/sorting/filtering utilities. Exports `DirectoryGroup`, `WorkspaceGroup`,… → see `session-grouping.ts.AGENTS.md` |
 | `session-list-scroll.ts` | Pure helper producing stable scroll-fingerprint of selected session card's position-affecting state. → see `session-list-scroll.ts.AGENTS.md` |
-| `session-replay-ledger.ts` | Canonical contiguous replay ledger. Validates source generation and sequence continuity, admits ascending multi-frame older pages against immutable request boundary, and atomically replaces older windows. |
+| `session-replay-ledger.ts` | Canonical contiguous replay ledger. Validates source generation and sequence continuity; retains only newest 10 MiB tail; emits head-eviction signal for atomic state rebuild; older pages remain available. |
 | `session-status-visuals.ts` | Shared session-status visual primitives. Exports `statusColors`, `sourceIcons`, `sourceLabels`,… → see `session-status-visuals.ts.AGENTS.md` |
 | `SessionAssetsContext.tsx` | Per-session image-asset registry context resolving `pi-asset:<hash>` srcs in `MarkdownContent` |
 | `sidebar-dnd.ts` | Shared drag-and-drop helpers for sidebar `SessionList`. Exports `sameTypeClosestCenter` (type-aware collision… → see `sidebar-dnd.ts.AGENTS.md` |

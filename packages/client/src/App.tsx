@@ -859,6 +859,13 @@ export default function App() {
         historyWindowRef.current.set(sessionId, next);
         setHistoryWindowMap((prev) => new Map(prev).set(sessionId, next));
       },
+      trimmed: (sessionId, minSeq) => {
+        // The in-memory ledger evicted its head. Keep paging available even
+        // when the initial server tail had reached the true session beginning.
+        const next: ReplayWindow = { minSeq, hasMoreOlder: true, partialHead: true };
+        historyWindowRef.current.set(sessionId, next);
+        setHistoryWindowMap((previous) => new Map(previous).set(sessionId, next));
+      },
       replace: (sessionId, entries, completion) => {
         const source = controller.ledger(sessionId).sourceGeneration ?? sourceGenerationRef.current.get(sessionId);
         const persister = persisterFor(sessionId, source);
