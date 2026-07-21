@@ -7,10 +7,28 @@ import { ChatView } from "../ChatView.js";
 import { ThemeProvider } from "../ThemeProvider.js";
 import type { ToolContext } from "../tool-renderers/index.js";
 
+const virtualizerProbe = vi.hoisted(() => ({
+  onChange: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-virtual", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-virtual")>();
+  return {
+    ...actual,
+    useVirtualizer: (options: Parameters<typeof actual.useVirtualizer>[0]) => {
+      const onChange = vi.fn(options.onChange);
+      virtualizerProbe.onChange = onChange;
+      return actual.useVirtualizer({ ...options, onChange });
+    },
+  };
+});
+
 const defaultToolContext: ToolContext = {};
 
-function WindowVirtualizerProbe() {
-  useWindowVirtualizer({ count: 1, estimateSize: () => 1 });
+type WindowVirtualizerChangeHandler = NonNullable<Parameters<typeof useWindowVirtualizer>[0]["onChange"]>;
+
+function WindowVirtualizerProbe({ onChange }: { onChange?: WindowVirtualizerChangeHandler } = {}) {
+  useWindowVirtualizer({ count: 1, estimateSize: () => 1, onChange });
   return null;
 }
 
@@ -55,50 +73,64 @@ function stateWithToolMessage(overrides: Partial<ChatMessage> = {}) {
 }
 
 describe("ChatView", () => {
-  it("cancels the virtualizer reset timer when unmounted", () => {
+  it("does not retain a timer after ChatView unmount", () => {
     vi.useFakeTimers();
     const timerCountBeforeRender = vi.getTimerCount();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    let view: { unmount: () => void } | undefined;
 
     try {
-      const view = render(
+      view = render(
         <ThemeProvider><ChatView state={createInitialState()} toolContext={defaultToolContext} /></ThemeProvider>,
       );
-
-      expect(vi.getTimerCount()).toBeGreaterThan(timerCountBeforeRender);
-      view.unmount();
-      expect(vi.getTimerCount()).toBe(timerCountBeforeRender);
-
-      // Advancing past TanStack Virtual's 150ms reset delay must not schedule
-      // a React update after the ChatView tree is gone.
-      act(() => {
-        vi.advanceTimersByTime(151);
-      });
-      expect(vi.getTimerCount()).toBe(timerCountBeforeRender);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("cancels the window virtualizer reset timer when unmounted", () => {
-    vi.useFakeTimers();
-    const timerCountBeforeRender = vi.getTimerCount();
-    let view: ReturnType<typeof render> | undefined;
-
-    try {
-      view = render(<WindowVirtualizerProbe />);
+      const onChange = virtualizerProbe.onChange;
+      onChange.mockClear();
 
       expect(vi.getTimerCount()).toBeGreaterThan(timerCountBeforeRender);
       view.unmount();
       view = undefined;
-      expect(vi.getTimerCount()).toBe(timerCountBeforeRender);
 
+      // Let TanStack Virtual pending debounce drain after unmount so this
+      // verifies no timer remains and no update reaches the dead tree.
       act(() => {
-        vi.advanceTimersByTime(151);
+        vi.runOnlyPendingTimers();
       });
       expect(vi.getTimerCount()).toBe(timerCountBeforeRender);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(consoleError).not.toHaveBeenCalled();
     } finally {
       view?.unmount();
       vi.clearAllTimers();
+      consoleError.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retain a timer after WindowVirtualizerProbe unmount", () => {
+    vi.useFakeTimers();
+    const timerCountBeforeRender = vi.getTimerCount();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onChange = vi.fn();
+    let view: { unmount: () => void } | undefined;
+
+    try {
+      view = render(<WindowVirtualizerProbe onChange={onChange} />);
+      onChange.mockClear();
+
+      expect(vi.getTimerCount()).toBeGreaterThan(timerCountBeforeRender);
+      view.unmount();
+      view = undefined;
+
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+      expect(vi.getTimerCount()).toBe(timerCountBeforeRender);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      view?.unmount();
+      vi.clearAllTimers();
+      consoleError.mockRestore();
       vi.useRealTimers();
     }
   });
