@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
   validatePlan,
   validateRequest,
 } from "../upstream-sync/contracts.mjs";
+import canonicalLedger from "../../upstream-sync/ledger/obligations.json" with { type: "json" };
 import validLedger from "../upstream-sync/fixtures/valid-ledger.json" with { type: "json" };
 import validRequest from "../upstream-sync/fixtures/valid-request.json" with { type: "json" };
 import validPlan from "../upstream-sync/fixtures/valid-plan.json" with { type: "json" };
@@ -19,6 +20,19 @@ describe("upstream sync contracts", () => {
     expect(validateLedger(validLedger)).toEqual(validLedger);
     expect(validateRequest(validRequest)).toEqual(validRequest);
     expect(validatePlan(validPlan)).toEqual(validPlan);
+  });
+
+  it("validates the canonical ledger and resolves every evidence path", () => {
+    expect(validateLedger(canonicalLedger)).toEqual(canonicalLedger);
+    const repoRoot = path.resolve(".");
+    for (const obligation of canonicalLedger.obligations) {
+      for (const [kind, evidencePaths] of Object.entries(obligation.evidence)) {
+        for (const evidencePath of evidencePaths) {
+          const resolved = resolveProofPath(repoRoot, evidencePath);
+          expect(existsSync(resolved), `${obligation.id} ${kind}: ${evidencePath}`).toBe(true);
+        }
+      }
+    }
   });
 
   it("canonicalizes object keys deterministically while preserving array order", () => {

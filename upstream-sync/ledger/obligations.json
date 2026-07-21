@@ -6,17 +6,17 @@
       "id": "zge-push-vapid",
       "intent": "Keep ZGE web-push and VAPID delivery behavior wired through the fork.",
       "observable_contract": "Configured VAPID credentials produce authenticated browser push registration and delivery without exposing private key material.",
-      "origin_commit": "1111111111111111111111111111111111111111",
+      "origin_commit": "abb13cbde06a680ba10b512723afe9802c7e3afe",
       "evidence": {
-        "behavior": ["packages/server/src/push-vapid.ts"],
+        "behavior": ["packages/server/src/push/push-vapid.ts"],
         "test": ["packages/server/src/__tests__/push-vapid.test.ts"],
-        "wiring": ["packages/server/src/index.ts"]
+        "wiring": ["packages/server/src/server.ts"]
       },
       "scope": {
-        "paths": ["packages/server/src/push-vapid.ts", "packages/server/src/index.ts"],
+        "paths": ["packages/server/src/push/push-vapid.ts", "packages/server/src/server.ts"],
         "behaviors": ["web-push", "vapid-authentication"]
       },
-      "dependency_roots": ["packages/server/src/push-vapid.ts", "packages/server/src/index.ts", "VAPID_PUBLIC_KEY"],
+      "dependency_roots": ["packages/server/src/push/push-vapid.ts", "packages/server/src/server.ts", "VAPID_PUBLIC_KEY"],
       "owner": "ZGEnergy platform maintainers",
       "review_date": "2026-07-21",
       "expiry": "2026-10-21",
@@ -28,17 +28,17 @@
       "id": "omp-settings-agent-paths",
       "intent": "Preserve ZGE OMP settings and agent path integration.",
       "observable_contract": "The dashboard resolves OMP settings and agent directories from the configured home and keeps agent session discovery functional.",
-      "origin_commit": "2222222222222222222222222222222222222222",
+      "origin_commit": "6fe73ba849490d8eade032fb4948ac70bcc4c2d4",
       "evidence": {
-        "behavior": ["packages/server/src/config.ts"],
-        "test": ["packages/server/src/__tests__/config.test.ts"],
+        "behavior": ["packages/server/src/omp-config-cli.ts"],
+        "test": ["packages/server/src/__tests__/omp-config-cli.test.ts"],
         "wiring": ["packages/server/src/cli.ts"]
       },
       "scope": {
-        "paths": ["packages/server/src/config.ts", "packages/server/src/cli.ts"],
+        "paths": ["packages/server/src/omp-config-cli.ts", "packages/server/src/cli.ts"],
         "behaviors": ["omp-settings", "agent-path-resolution"]
       },
-      "dependency_roots": ["packages/server/src/config.ts", "packages/server/src/cli.ts", "PI_CODING_AGENT_DIR"],
+      "dependency_roots": ["packages/server/src/omp-config-cli.ts", "packages/server/src/cli.ts", "PI_CODING_AGENT_DIR"],
       "owner": "ZGEnergy platform maintainers",
       "review_date": "2026-07-21",
       "expiry": "2026-10-21",
@@ -50,17 +50,17 @@
       "id": "deploy-installer",
       "intent": "Keep deployment and standalone installer behavior safe and reproducible.",
       "observable_contract": "A clean installation starts the dashboard, exposes health, and does not copy unmanaged skill or ledger artifacts.",
-      "origin_commit": "3333333333333333333333333333333333333333",
+      "origin_commit": "f5f2b1946f8def1b8164ab0743201dd6d58ed088",
       "evidence": {
         "behavior": ["scripts/install-managed-skill.sh"],
         "test": ["scripts/__tests__/install-managed-skill.test.mjs"],
-        "wiring": [".github/workflows/standalone-install-smoke.yml"]
+        "wiring": [".github/workflows/_smoke.yml"]
       },
       "scope": {
-        "paths": ["scripts/install-managed-skill.sh", ".github/workflows/standalone-install-smoke.yml"],
+        "paths": ["scripts/install-managed-skill.sh", ".github/workflows/_smoke.yml"],
         "behaviors": ["standalone-install", "deployment-health"]
       },
-      "dependency_roots": ["scripts/install-managed-skill.sh", "scripts/upstream-sync/install-managed-skill.mjs", ".github/workflows/standalone-install-smoke.yml"],
+      "dependency_roots": ["scripts/install-managed-skill.sh", "scripts/upstream-sync/install-managed-skill.mjs", ".github/workflows/_smoke.yml"],
       "owner": "ZGEnergy release maintainers",
       "review_date": "2026-07-21",
       "expiry": "2026-10-21",
@@ -72,7 +72,7 @@
       "id": "sync-tooling",
       "intent": "Keep upstream sync tooling deterministic, reviewable, and repository-owned.",
       "observable_contract": "Sync requests, ledger records, proof paths, and approved plans are validated deterministically before any integration mutation.",
-      "origin_commit": "4444444444444444444444444444444444444444",
+      "origin_commit": "804c8bfa8b21e4f8cddfc823f3625228c4378224",
       "evidence": {
         "behavior": ["scripts/upstream-sync/contracts.mjs"],
         "test": ["scripts/__tests__/upstream-sync-contracts.test.mjs"],
