@@ -50,7 +50,7 @@ import { allTagsInUse } from "./components/tags/all-tags.js";
 import { WorktreeInitStack } from "./components/WorktreeInitStack.js";
 import { WorktreeSpawnDialog } from "./components/WorktreeSpawnDialog.js";
 import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
-
+import { shouldReconnectForForeground } from "./hooks/foreground-replay.js";
 import { useAppHidden } from "./hooks/useAppHidden.js";
 import { useContentViews } from "./hooks/useContentViews.js";
 import { useDocumentTitle } from "./hooks/useDocumentTitle.js";
@@ -537,10 +537,11 @@ export default function App() {
   const replayResetStateRef = useRef<Map<string, SessionState> | null>(null);
   const foregroundReplayRequestedRef = useRef(false);
   const requestForegroundReplay = useCallback(() => {
+    if (!shouldReconnectForForeground(status)) return;
     if (mobileDetailVisible) bumpMobileActivation();
     foregroundReplayRequestedRef.current = true;
     reconnectNow("foreground");
-  }, [bumpMobileActivation, mobileDetailVisible, reconnectNow]);
+  }, [bumpMobileActivation, mobileDetailVisible, reconnectNow, status]);
   useEffect(() => {
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") requestForegroundReplay();
