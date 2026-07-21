@@ -243,7 +243,7 @@ describe("SessionReplayController", () => {
     expect(effects.send).toHaveBeenCalledTimes(2);
   });
 
-  it("stops automatic paging at the latest user turn", () => {
+  it("continues past a user turn while older retained history remains", () => {
     const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
     const controller = new SessionReplayController(effects);
     const cold = controller.begin("s", "cold", "source-a");
@@ -252,7 +252,8 @@ describe("SessionReplayController", () => {
     controller.handle({ ...frame(cold.requestId!, [userEntry], false), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
     controller.handle({ ...frame(cold.requestId!, [], true), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
 
-    expect(effects.send).toHaveBeenCalledTimes(1);
+    expect(effects.send).toHaveBeenCalledTimes(2);
+    expect(effects.send.mock.calls[1]![0]).toMatchObject({ sessionId: "s", fromSeq: 100 });
   });
 
   it("bounds aggregate asset assembly and publishes a completed asset exactly once", () => {

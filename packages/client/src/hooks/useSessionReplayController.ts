@@ -236,7 +236,7 @@ export class SessionReplayController {
       const cursor = ledger.minSeq;
       const priorCursor = this.automaticOlderFloor.get(message.sessionId);
       const shouldContinue = message.hasMoreOlder === true && message.partialHead === true &&
-        !hasUserTurnStart(ledger.events) && (priorCursor === undefined || cursor < priorCursor);
+        (priorCursor === undefined || cursor < priorCursor);
       if (shouldContinue) {
         this.automaticOlderFloor.set(message.sessionId, cursor);
         this.begin(message.sessionId, "older", ledger.sourceGeneration ?? message.sourceGeneration);
