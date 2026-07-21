@@ -302,7 +302,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   const escapedDuringHydrateRef = useRef(false);
   // One owner decides every transcript write. User input moves ownership to
   // READING_HISTORY synchronously; stale authority/command frames are inert.
-  const scrollOwnerRef = useRef<ScrollOwner>(loadingHistory ? "HYDRATING" : "FOLLOWING");
+  const scrollOwnerRef = useRef<ScrollOwner>(loadingHistory ? "HYDRATING" : mobileActive && state.messages.length > 0 ? "NAVIGATING_BOTTOM" : "FOLLOWING");
   const commandEpochRef = useRef(0);
   const pendingWriteRef = useRef<{
     authority: ScrollAuthority;
@@ -1023,9 +1023,9 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     // A replay-generation change arrives after the initial mobile mount. It
     // must keep chasing the tail while virtual rows finish measuring; initial
     // ordinary FOLLOWING mounts retain their measurement-neutral behavior.
-    scrollOwnerRef.current = replayRestart ? "NAVIGATING_BOTTOM" : "FOLLOWING";
+    scrollOwnerRef.current = replayRestart || state.messages.length > 0 ? "NAVIGATING_BOTTOM" : "FOLLOWING";
     pinLatest();
-  }, [cancelProgrammaticWrites, loadingHistory, mobileActivationEpoch, mobileActive, pinLatest, replayGeneration, sessionId]);
+  }, [cancelProgrammaticWrites, loadingHistory, mobileActivationEpoch, mobileActive, pinLatest, replayGeneration, sessionId, state.messages.length]);
 
   // Desktop-only anchor restoration. It is intentionally not shared with the
   // mobile owner: an activation must follow latest instead of resurrecting a

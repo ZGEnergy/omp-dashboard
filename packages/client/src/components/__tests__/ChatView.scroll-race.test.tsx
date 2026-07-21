@@ -608,7 +608,7 @@ describe("ChatView mobile scroll owner", () => {
     expect(scrollEl.scrollTop).toBe(4_000);
   });
 
-  it("leaves ordinary mobile FOLLOWING unchanged when virtualizer rows measure", async () => {
+  it("pins preloaded mobile history while virtualizer rows measure", async () => {
     virtualizerProbe.onChange = undefined;
     const { container } = render(
       <ThemeProvider>
@@ -631,7 +631,7 @@ describe("ChatView mobile scroll owner", () => {
     (virtualizerProbe.onChange as () => void)();
     await flushRaf();
 
-    expect(scrollEl.scrollTop).toBe(120);
+    expect(scrollEl.scrollTop).toBe(1_000);
   });
 
   it("keeps a completed mobile hydration pinned while virtual rows measure", async () => {
