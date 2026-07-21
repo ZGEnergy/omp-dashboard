@@ -4,6 +4,7 @@ Files in this directory. One row per source file.
 
 | File | Purpose |
 |------|---------|
+| `foreground-replay.ts` | `shouldReconnectForForeground(status)` returns true only for `offline`; healthy foreground visibility retains existing WebSocket transcript. |
 | `useActiveChatSelection.ts` | `useActiveChatSelection(containerRef, mapRange) → { isSelecting, selectionSpanRef }`. `selectionchange` listener; `isSelecting` true when a non-collapsed Selection has anchor OR focus inside `containerRef` (cross-boundary safe, NOT anchor-only). Boolean flip microtask-coalesced (ref + single setState); `selectionSpanRef` updated synchronously each event via `mapRange` (PROACTIVE capture while rows mounted → `rangeExtractor` reads it so selected rows never unmount). See change: preserve-chat-selection-during-churn. |
 | `useAppHidden.ts` | NEW. Exports `useAppHidden()` hook + `applyAppHiddenClass(root, hidden)`. Toggles `app-hidden` class on document root from `document.visibilityState`; listens visibilitychange + window blur/focus. CSS `:root.app-hidden *` sets `animation-play-state: paused`, freezes compositor when window hidden to tray. See change: throttle-idle-ui-animations. |
 | `useArchiveListing.ts` | Fetches `GET /api/openspec-archive?cwd=` into `entries: ArchiveEntry[]` with `isLoading`/`error`. Exports `groupByDate(entries)` (sort newest-first) and `filterEntries(entries, query)` (case-insensitive slug match). Re-fetches on `cwd` change; cancels stale fetch. |
