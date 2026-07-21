@@ -856,6 +856,8 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       }
     },
   });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () =>
+    !(authorityRef.current.mobileActive && scrollOwnerRef.current === "READING_HISTORY");
   const virtualItems = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
 

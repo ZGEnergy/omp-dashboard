@@ -8,6 +8,7 @@ import type { ToolContext } from "../tool-renderers/index.js";
 
 const virtualizerProbe = vi.hoisted(() => ({
   onChange: undefined as unknown,
+  instance: undefined as { shouldAdjustScrollPositionOnItemSizeChange?: unknown } | undefined,
 }));
 
 vi.mock("@tanstack/react-virtual", async (importOriginal) => {
@@ -16,7 +17,9 @@ vi.mock("@tanstack/react-virtual", async (importOriginal) => {
     ...actual,
     useVirtualizer: (options: Parameters<typeof actual.useVirtualizer>[0]) => {
       virtualizerProbe.onChange = options.onChange;
-      return actual.useVirtualizer(options);
+      const instance = actual.useVirtualizer(options);
+      virtualizerProbe.instance = instance;
+      return instance;
     },
   };
 });
@@ -56,6 +59,14 @@ function getRowTop(row: Element): number {
 function findRowContaining(scrollEl: Element, text: string): Element | undefined {
   return Array.from(scrollEl.querySelectorAll("[data-index]"))
     .find((row) => row.textContent?.includes(text));
+}
+
+type SizeCorrectionPolicy = (item: never, delta: number) => boolean;
+
+function invokeSizeCorrectionPolicy(delta = 24): boolean {
+  const policy = virtualizerProbe.instance?.shouldAdjustScrollPositionOnItemSizeChange;
+  expect(policy).toBeTypeOf("function");
+  return (policy as SizeCorrectionPolicy)(undefined as never, delta);
 }
 
 function stateWith(n: number) {
@@ -1206,4 +1217,98 @@ describe("ChatView mobile scroll owner", () => {
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
     expect(onLoadOlder).toHaveBeenCalledWith(expect.stringMatching(/^button:/));
   });
+  it("disables size correction after active mobile touch ownership changes", async () => {
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="size-correction-history"
+          state={stateWith(10)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={1}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    expect(invokeSizeCorrectionPolicy()).toBe(true);
+
+    const scrollEl = getScrollContainer(container);
+    fireEvent.touchStart(scrollEl, { touches: [{ clientY: 100 }] });
+
+    expect(invokeSizeCorrectionPolicy()).toBe(false);
+  });
+
+  it("preserves size correction for desktop, inactive mobile, and active mobile FOLLOWING", async () => {
+    const desktop = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="size-correction-desktop"
+          state={stateWith(10)}
+          toolContext={defaultToolContext}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    expect(invokeSizeCorrectionPolicy()).toBe(true);
+    desktop.unmount();
+
+    const inactiveMobile = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="size-correction-inactive-mobile"
+          state={stateWith(10)}
+          toolContext={defaultToolContext}
+          mobileActive={false}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    expect(invokeSizeCorrectionPolicy()).toBe(true);
+    inactiveMobile.unmount();
+
+    render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="size-correction-following"
+          state={stateWith(10)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={1}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    expect(invokeSizeCorrectionPolicy()).toBe(true);
+  });
+
+  it("preserves size correction during explicit active mobile bottom navigation", async () => {
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="size-correction-bottom-navigation"
+          state={stateWith(50)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={1}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 0, 2_000, 400);
+    fireEvent.wheel(scrollEl, { deltaY: -100 });
+    fireEvent.scroll(scrollEl);
+
+    const scrollToBottom = container.querySelector('[data-testid="scroll-to-bottom"]');
+    expect(scrollToBottom).not.toBeNull();
+    fireEvent.click(scrollToBottom!);
+
+    expect(invokeSizeCorrectionPolicy()).toBe(true);
+  });
+
 });
