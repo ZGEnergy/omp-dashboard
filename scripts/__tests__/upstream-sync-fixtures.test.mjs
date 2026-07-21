@@ -43,10 +43,13 @@ describe("upstream sync fixture benchmark", () => {
     expect(() => runFixtures({ fixtureRoot: tempRoot, skillPath })).toThrow(/fixture assertions failed/);
   });
 
-  it("is deterministic for grading, benchmark, and timing", () => {
-    const first = runFixtures({ fixtureRoot, skillPath, failOnAssertion: false });
-    const second = runFixtures({ fixtureRoot, skillPath, failOnAssertion: false });
-
-    expect(second).toEqual(first);
-  });
+  it("is deterministic for grading, benchmark, timing, and nested output paths", () => {
+      const first = runFixtures({ fixtureRoot, skillPath, failOnAssertion: false });
+      const second = runFixtures({ fixtureRoot, skillPath, failOnAssertion: false });
+      const outputPath = path.join(mkdtempSync(path.join(os.tmpdir(), "upstream-sync-output-")), "nested", "benchmark.json");
+      runFixtures({ fixtureRoot, skillPath, outputPath });
+  
+      expect(second).toEqual(first);
+      expect(JSON.parse(readFileSync(outputPath, "utf8"))).toEqual(first);
+    });
 });

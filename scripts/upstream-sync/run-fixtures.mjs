@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const SKILL_NAME = "omp-dashboard-upstream-sync";
@@ -144,7 +144,10 @@ export function runFixtures({ fixtureRoot, skillPath, outputPath, failOnAssertio
     },
   };
   const failed = result.benchmark.with_skill.failed;
-  if (outputPath) writeFileSync(outputPath, `${JSON.stringify(result, null, 2)}\n`);
+  if (outputPath) {
+    mkdirSync(path.dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, `${JSON.stringify(result, null, 2)}\n`);
+  }
   if (failOnAssertion && failed > 0) throw new Error(`fixture assertions failed: ${failed}`);
   return result;
 }
