@@ -39,15 +39,9 @@ Files in this directory. One row per file. Non-source area (migrated from `docs/
 | `windows-liveness-smoke.ts` | Windows boot-parent-liveness smoke (CI: `_smoke.yml` standalone-install-smoke-windows). Imports `packages/server/src/boot-parent-liveness.ts` in-process so koffi actually loads. Asserts `computeBootParentAlive()` boolean + idempotent (no throw), `bootParentPid`/`readLivePpid()` numbers, and active tier via `bootParentLivenessTier()` = `tier2` on win32 (koffi `OpenProcess`+`WaitForSingleObject` loaded), `tier1` elsewhere. Guards silent Windows-wide Tier-1 degrade. Cross-platform (green on Linux legs + local). Exit 0 pass. See change: electron-attach-ownership-fixes (1b.4). |
 | `windows-introspection-smoke.ts` | Windows introspection smoke driver (CI: `_smoke.yml` standalone-install-smoke-windows). Spawns `_windows-introspection-probe.ts` via `npx tsx` (buildSafeArgv), captures stdio. Asserts: probe exit 0; probe stderr no `wmic`/`is not recognized` signature; `isVirtualMachine` returns boolean; `defaultGetCmdline` returns string\|null, non-empty on win32 for own pid. Proves PowerShell Get-CimInstance path works on real Windows host (stub unit tests cannot). Cross-platform; win32 cmdline check load-bearing. Exit 0 pass. See change: replace-wmic-with-powershell. |
 
-## Upstream sync installer ownership
+## Upstream sync executor ownership
 
-`scripts/install-managed-skill.sh` is the only managed-copy writer. It invokes the helper in `scripts/upstream-sync/install-managed-skill.mjs` with fixed canonical source and managed destination paths, accepts only `--check` and `--install`, and copies only `.pi/skills/omp-dashboard-upstream-sync/SKILL.md`. The helper compares bytes for check mode and writes a verified temporary file followed by atomic rename and post-install byte comparison for install mode. It rejects destination traversal and symlink escapes. Keep upstream text escaped and untrusted, and never treat the managed runtime copy as canonical.
+| upstream-sync.sh | Deterministic detect, validate, execute, and verify boundary. It consumes immutable request, ledger, and plan artifacts, validates exact pins and canonical plan hashes with the validator copied from the pinned base commit, creates a fresh pinned-base worktree, merges the exact upstream SHA, applies only plan dispositions, and stops on blocked records, conflicts, failed invariants, or failed checks before commit, push, or PR. It publishes one exact audited sync branch and one normal ready-for-review PR. |
+| __tests__/upstream-sync-executor.test.mjs | Focused executor tests. Publication is intercepted by fake git/gh runners; tests cover binding, exact pins, validator provenance, disposition mutation, hard stops, branch identity, push/PR readiness, conflict handling, and escaped PR-body fields. |
 
-## Upstream sync contracts
-
-| `upstream-sync/contracts.mjs` | Deterministic schema validators, canonical JSON hashing, and proof-path confinement for upstream sync artifacts. |
-| `upstream-sync/validator.mjs` | Validation and binding gate for upstream sync requests, ledgers, plans, decision completeness, and post-merge invariants. `validatePlanBinding` keeps the request/ledger pins and uses `validatePlan` for canonical plan-hash validation. |
-| `upstream-sync/fixtures/valid-ledger.json` | Positive ledger contract fixture. |
-| `upstream-sync/fixtures/valid-request.json` | Positive immutable request contract fixture. |
-| `upstream-sync/fixtures/valid-plan.json` | Positive assessment plan contract fixture with bound canonical hash. |
-| `__tests__/upstream-sync-contracts.test.mjs` | Focused contract, hash, disposition, and proof-path security tests. |
+The executor never invokes the removed path-policy implementation, never supplies conflict-side defaults, never pushes a protected branch, never creates a draft PR, never merges main, and never deploys. Upstream prose and data remain escaped and inert in PR metadata.

@@ -1,465 +1,332 @@
 #!/usr/bin/env bash
-# Upstream sync helper for ZGEnergy/omp-dashboard (fork of BlackBeltTechnology/pi-agent-dashboard).
-# Used by humans, the omp skill, and optionally CI. Never force-pushes main.
+# Deterministic upstream sync executor. All upstream values are data, never commands.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="${SYNC_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$REPO_ROOT"
-
-UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/BlackBeltTechnology/pi-agent-dashboard.git}"
 UPSTREAM_REMOTE="${UPSTREAM_REMOTE:-upstream}"
 ORIGIN_REMOTE="${ORIGIN_REMOTE:-origin}"
 UPSTREAM_REF="${UPSTREAM_REF:-develop}"
 TARGET_BRANCH="${TARGET_BRANCH:-main}"
-DATE_TAG="${DATE_TAG:-$(date -u +%Y%m%d)}"
-# Stable branch so each automated run supersedes the previous open PR.
-# Capture whether the caller exported SYNC_BRANCH before applying the default
-# (value may equal the default name; presence still counts as explicit).
-SYNC_BRANCH_FROM_ENV=0
-if [[ -n "${SYNC_BRANCH+x}" ]]; then
-  SYNC_BRANCH_FROM_ENV=1
-fi
-SYNC_BRANCH="${SYNC_BRANCH:-sync/upstream-${UPSTREAM_REF}}"
+SYNC_BRANCH="${SYNC_BRANCH:-}"
 GH_REPO="${GH_REPO:-ZGEnergy/omp-dashboard}"
-
-# Conflict path policy (protected / hub / prefer-upstream). See scripts/lib/upstream-sync-policy.sh.
-# shellcheck source=lib/upstream-sync-policy.sh
-source "${REPO_ROOT}/scripts/lib/upstream-sync-policy.sh"
+RESULT_PATH="${SYNC_RESULT_PATH:-upstream-sync/candidate.json}"
+AS_OF="${SYNC_AS_OF:-$(date -u +%F)}"
 
 log() { printf '==> %s\n' "$*"; }
-warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
-
 usage() {
-  cat <<USAGE
-Usage: $(basename "$0") <status|merge|verify|pr> [options]
+  cat <<'USAGE'
+Usage: upstream-sync.sh <detect|validate|execute|verify> [options]
 
 Commands:
-  status       Show ahead/behind vs upstream ref
-  merge        Create/update sync branch and merge upstream
-               (auto-ours on protected, auto-theirs on same-intent product, manual hubs)
-  verify       Run structural + focused unit + build gates
-  pr           Open/update PR from current sync branch into ${TARGET_BRANCH}
+  detect                         Write an immutable request from exact refs.
+  validate --request --ledger --plan
+                                 Validate bindings, pins, and affected records.
+  execute --request --ledger --plan
+                                 Build, verify, publish, and open one ready PR.
+  verify --request --ledger --plan --worktree <path>
+                                 Run pinned validator, invariants, and plan checks.
 
-Env:
-  UPSTREAM_REF   upstream branch (default: develop)
-  TARGET_BRANCH  integration branch (default: main)
-  SYNC_BRANCH    override sync branch (default: sync/upstream-<ref>, stable/single PR)
-  DRY_RUN=1      print actions only for merge/pr
-  SKIP_BUILD=1   verify skips npm run build
-  SYNC_ADOPT_UPSTREAM=1  do not auto-checkout --ours for protected paths
-  SYNC_KEEP_OURS=1       do not auto-checkout --theirs for non-protected product paths
+Options:
+  --request <path>               Immutable request artifact.
+  --ledger <path>                Immutable ledger artifact.
+  --plan <path>                  Immutable plan artifact.
+  --worktree <path>              Merge-result worktree for verify.
+  --branch <name>                Audited sync branch (default sync/upstream-<request>).
+  --base <sha> --upstream <sha>  Exact pins for detect.
+  --range <range>                Exact upstream range for detect.
+  --output <path>                Request output path for detect.
 USAGE
 }
 
-ensure_remotes() {
-  if ! git remote get-url "$ORIGIN_REMOTE" >/dev/null 2>&1; then
-    die "missing remote $ORIGIN_REMOTE"
-  fi
-  if ! git remote get-url "$UPSTREAM_REMOTE" >/dev/null 2>&1; then
-    log "adding remote $UPSTREAM_REMOTE -> $UPSTREAM_URL"
-    git remote add "$UPSTREAM_REMOTE" "$UPSTREAM_URL"
-  fi
-  # Pin gh to origin so bare `gh issue/pr` never targets BlackBelt package.json#repository.
-  node "${REPO_ROOT}/scripts/ensure-gh-default.cjs" >/dev/null 2>&1 || true
+resolve_path() {
+  local value="$1"
+  if [[ "$value" == /* ]]; then printf '%s\n' "$value"; else printf '%s/%s\n' "$REPO_ROOT" "$value"; fi
+}
+sha256_file() { sha256sum "$1" | cut -d' ' -f1; }
+json_field() {
+  local file="$1" field="$2"
+  JSON_FILE="$file" JSON_FIELD="$field" node --input-type=module <<'NODE'
+import fs from "node:fs";
+const value = JSON.parse(fs.readFileSync(process.env.JSON_FILE, "utf8"));
+const parts = process.env.JSON_FIELD.split(".");
+let current = value;
+for (const part of parts) current = current?.[part];
+if (typeof current === "undefined") process.exit(2);
+process.stdout.write(typeof current === "string" ? current : JSON.stringify(current));
+NODE
 }
 
-fetch_all() {
-  ensure_remotes
-  log "fetch $ORIGIN_REMOTE $TARGET_BRANCH + $UPSTREAM_REMOTE $UPSTREAM_REF"
-  git fetch "$ORIGIN_REMOTE" "$TARGET_BRANCH" --prune
-  git fetch "$UPSTREAM_REMOTE" "$UPSTREAM_REF" --prune
+parse_artifacts() {
+  REQUEST_PATH="$(resolve_path "$1")"
+  LEDGER_PATH="$(resolve_path "$2")"
+  PLAN_PATH="$(resolve_path "$3")"
+  [[ -f "$REQUEST_PATH" ]] || die "request artifact missing: $1"
+  [[ -f "$LEDGER_PATH" ]] || die "ledger artifact missing: $2"
+  [[ -f "$PLAN_PATH" ]] || die "plan artifact missing: $3"
+  REQUEST_BYTES="$(sha256_file "$REQUEST_PATH")"
+  LEDGER_BYTES="$(sha256_file "$LEDGER_PATH")"
+  PLAN_BYTES="$(sha256_file "$PLAN_PATH")"
+  BASE_SHA="$(json_field "$REQUEST_PATH" base_sha)" || die "request base pin missing"
+  UPSTREAM_SHA="$(json_field "$REQUEST_PATH" upstream_sha)" || die "request upstream pin missing"
+  UPSTREAM_RANGE="$(json_field "$REQUEST_PATH" upstream_range)" || die "request upstream range missing"
+  REQUEST_ID="$(json_field "$REQUEST_PATH" request_id)" || die "request ID missing"
+  LEDGER_REVISION="$(json_field "$REQUEST_PATH" ledger_revision)" || die "request ledger revision missing"
+  PLAN_HASH="$(json_field "$PLAN_PATH" plan_hash)" || die "plan hash missing"
+  [[ "$(json_field "$PLAN_PATH" base_sha)" == "$BASE_SHA" ]] || die "plan base pin differs from request"
+  [[ "$(json_field "$PLAN_PATH" upstream_sha)" == "$UPSTREAM_SHA" ]] || die "plan upstream pin differs from request"
+  [[ "$(json_field "$PLAN_PATH" ledger_revision)" == "$LEDGER_REVISION" ]] || die "plan ledger revision differs from request"
+  [[ "$(json_field "$LEDGER_PATH" ledger_revision)" == "$LEDGER_REVISION" ]] || die "ledger revision differs from request"
+  git -C "$REPO_ROOT" cat-file -e "${BASE_SHA}^{commit}" || die "base pin is not a commit"
+  git -C "$REPO_ROOT" cat-file -e "${UPSTREAM_SHA}^{commit}" || die "upstream pin is not a commit"
+  [[ "$BASE_SHA" != "$UPSTREAM_SHA" ]] || die "request pins must differ"
 }
 
-short_sha() { git rev-parse --short "$1"; }
-
-cmd_status() {
-  fetch_all
-  local base tip behind ahead
-  base="${ORIGIN_REMOTE}/${TARGET_BRANCH}"
-  tip="${UPSTREAM_REMOTE}/${UPSTREAM_REF}"
-  behind=$(git rev-list --count "${base}..${tip}")
-  ahead=$(git rev-list --count "${tip}..${base}")
-  printf 'origin/%s:   %s\n' "$TARGET_BRANCH" "$(short_sha "$base")"
-  printf 'upstream/%s: %s\n' "$UPSTREAM_REF" "$(short_sha "$tip")"
-  printf 'ZGE ahead:   %s commits (not in upstream)\n' "$ahead"
-  printf 'ZGE behind:  %s commits (missing from upstream)\n' "$behind"
-  if [[ "$behind" -eq 0 ]]; then
-    log "already up to date with upstream/$UPSTREAM_REF"
-  else
-    log "sync needed: merge upstream/$UPSTREAM_REF into a sync branch"
-  fi
-  log "protected paths (ZGE wins on conflict):"
-  printf '  - %s\n' "${PROTECTED_PATHS[@]}"
-  log "semantic hubs (manual combine):"
-  printf '  - %s\n' "${SEMANTIC_HUB_PATHS[@]}"
-  log "default for other conflicts: take upstream (--theirs)"
+assert_artifacts_unchanged() {
+  [[ "$(sha256_file "$REQUEST_PATH")" == "$REQUEST_BYTES" ]] || die "request artifact changed during execution"
+  [[ "$(sha256_file "$LEDGER_PATH")" == "$LEDGER_BYTES" ]] || die "ledger artifact changed during execution"
+  [[ "$(sha256_file "$PLAN_PATH")" == "$PLAN_BYTES" ]] || die "plan artifact changed during execution"
 }
 
-
-# Auto-resolve unmerged paths by policy:
-#   protected → --ours (unless SYNC_ADOPT_UPSTREAM=1)
-#   hub       → leave for manual semantic merge
-#   default   → --theirs (prefer upstream same-intent product; unless SYNC_KEEP_OURS=1)
-resolve_conflicts_by_policy() {
-  local f decision ours_n=0 theirs_n=0 manual_n=0
-  while IFS= read -r f; do
-    [[ -z "$f" ]] && continue
-    decision="$(classify_conflict_path "$f")"
-    case "$decision" in
-      ours)
-        if [[ "${SYNC_ADOPT_UPSTREAM:-0}" == "1" ]]; then
-          log "conflict leave manual (SYNC_ADOPT_UPSTREAM=1, would be protected-ours): $f"
-          manual_n=$((manual_n + 1))
-          continue
-        fi
-        log "conflict auto-ours (protected): $f"
-        git checkout --ours -- "$f"
-        git add -- "$f"
-        ours_n=$((ours_n + 1))
-        ;;
-      theirs)
-        if [[ "${SYNC_KEEP_OURS:-0}" == "1" ]]; then
-          log "conflict leave manual (SYNC_KEEP_OURS=1, would be prefer-upstream): $f"
-          manual_n=$((manual_n + 1))
-          continue
-        fi
-        log "conflict auto-theirs (prefer upstream): $f"
-        git checkout --theirs -- "$f"
-        git add -- "$f"
-        theirs_n=$((theirs_n + 1))
-        ;;
-      manual)
-        log "conflict leave manual (semantic hub): $f"
-        manual_n=$((manual_n + 1))
-        ;;
-      *)
-        warn "unknown classify_conflict_path result '$decision' for $f — leaving manual"
-        manual_n=$((manual_n + 1))
-        ;;
-    esac
-  done < <(git diff --name-only --diff-filter=U)
-  log "conflict auto-resolve summary: ours=$ours_n theirs=$theirs_n manual=$manual_n"
-}
-
-
-cmd_merge() {
-  fetch_all
-  local base tip behind
-  base="${ORIGIN_REMOTE}/${TARGET_BRANCH}"
-  tip="${UPSTREAM_REMOTE}/${UPSTREAM_REF}"
-  behind=$(git rev-list --count "${base}..${tip}")
-  if [[ "$behind" -eq 0 ]]; then
-    log "nothing to merge (behind=0)"
-    return 0
-  fi
-  local usha
-  usha=$(git rev-parse --short "$tip")
-  if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    log "DRY_RUN: would checkout -B $SYNC_BRANCH $base && merge $tip ($usha)"
-    return 0
-  fi
-  log "creating branch $SYNC_BRANCH from $base"
-  git checkout -B "$SYNC_BRANCH" "$base"
-  log "merging $tip ($usha)"
-  set +e
-  git merge --no-ff "$tip" -m "chore(sync): merge upstream/${UPSTREAM_REF}@${usha}"
-  local rc=$?
-  set -e
-  if [[ $rc -ne 0 ]]; then
-    warn "merge reported conflicts; applying path policy (protected=ours, product=theirs, hub=manual)"
-    resolve_conflicts_by_policy
-    local left
-    left=$(git diff --name-only --diff-filter=U | wc -l | tr -d ' ')
-    if [[ "$left" -gt 0 ]]; then
-      local report="docs/upstream-sync-conflicts-${DATE_TAG}.md"
-      {
-        echo "# Upstream sync conflicts (${DATE_TAG})"
-        echo
-        echo "- upstream: ${UPSTREAM_REF}@${usha}"
-        echo "- base: ${TARGET_BRANCH}@$(short_sha "$base")"
-        echo "- branch: ${SYNC_BRANCH}"
-        echo
-        echo "## Remaining unmerged paths (manual)"
-        echo
-        while IFS= read -r f; do
-          [[ -z "$f" ]] && continue
-          printf -- '- `%s` → %s\n' "$f" "$(classify_conflict_path "$f")"
-        done < <(git diff --name-only --diff-filter=U)
-        echo
-        echo "## Policy"
-        echo "- **protected** paths → \`--ours\` (ZGE deploy/push/OMP/tooling)"
-        echo "- **semantic hubs** (\`server.ts\`, \`bridge.ts\`, \`config.ts\`, package manifests) → combine both sides"
-        echo "- **everything else** already took \`--theirs\` (prefer upstream same-intent product code)"
-        echo "- re-run: scripts/upstream-sync.sh verify"
-      } >"$report"
-      git add "$report" 2>/dev/null || true
-      warn "still $left conflicted path(s); see $report"
-      warn "fix remaining conflicts, then: git commit (merge) && scripts/upstream-sync.sh verify"
-      return 2
-    fi
-    # all conflicts auto-resolved
-    git commit --no-edit -m "chore(sync): merge upstream/${UPSTREAM_REF}@${usha} (policy: protected-ours product-theirs)"
-  fi
-  log "merge complete on $SYNC_BRANCH"
-  git status -sb | head -20
-}
-
-cmd_verify() {
-  export PATH="${PATH}"
-  if ! command -v node >/dev/null; then die "node not on PATH"; fi
-  local nv
-  nv=$(node -v)
-  log "node $nv"
-
-  log "Gate 0: structural"
-  [[ -d deploy ]] || die "deploy/ missing"
-  [[ -f deploy/install.sh ]] || die "deploy/install.sh missing"
-  grep -q 'ZGEnergy/omp-dashboard' deploy/install.sh || die "deploy/install.sh lost ZGEnergy repo URL"
-  [[ -d packages/server/src/push ]] || die "packages/server/src/push missing"
-  [[ -f packages/server/src/routes/push-routes.ts ]] || die "push-routes.ts missing"
-  [[ -f packages/shared/src/omp-agent-paths.ts ]] || die "omp-agent-paths.ts missing"
-  grep -q 'upstream-sync' docs/upstream-sync.md 2>/dev/null || warn "docs/upstream-sync.md missing (ok only mid-bootstrap)"
-  log "Gate 0 OK"
-
-  log "Gate 1: unit suites (shared + server + client + roles-plugin + extension)"
-  # Upstream vitest globalSetup refuses real $HOME (must match root `npm test`).
-  local failed=0
-  local strict=0
-  if [[ "${VERIFY_STRICT:-0}" == "1" || -n "${CI:-}" ]]; then
-    strict=1
-  fi
-  local test_home
-  test_home="$(mktemp -d -t pi-test-XXXXXX)"
-  local test_ls
-  test_ls="$(mktemp -t pi-test-ls-XXXXXX)"
-  resolve_vitest() {
-    local dir="$1"
-    if [[ -x "${REPO_ROOT}/node_modules/.bin/vitest" ]]; then
-      printf '%s\n' "${REPO_ROOT}/node_modules/.bin/vitest"
-    elif [[ -x "${dir}/node_modules/.bin/vitest" ]]; then
-      printf '%s\n' "${dir}/node_modules/.bin/vitest"
-    else
-      return 1
-    fi
+validator_check() {
+  local mode="$1" worktree="${2:-}"
+  local bundle
+  bundle="$(mktemp -d -t upstream-sync-validator-XXXXXX)"
+  git -C "$REPO_ROOT" archive "$BASE_SHA" scripts/upstream-sync | tar -x -C "$bundle"
+  local module="$bundle/scripts/upstream-sync/validator.mjs"
+  [[ -f "$module" ]] || die "pinned-base validator is missing"
+  VALIDATOR_MODULE="$module" REQUEST_FILE="$REQUEST_PATH" LEDGER_FILE="$LEDGER_PATH" PLAN_FILE="$PLAN_PATH" WORKTREE="$worktree" VALIDATOR_MODE="$mode" VALIDATOR_AS_OF="$AS_OF" node --input-type=module <<'NODE'
+import fs from "node:fs";
+import path from "node:path";
+const moduleUrl = new URL("file://" + process.env.VALIDATOR_MODULE);
+const { validatePlanBinding, evaluateAffectedObligations, validatePostMergeInvariants } = await import(moduleUrl);
+const { resolveProofPath } = await import(new URL("./contracts.mjs", moduleUrl));
+const request = JSON.parse(fs.readFileSync(process.env.REQUEST_FILE, "utf8"));
+const ledger = JSON.parse(fs.readFileSync(process.env.LEDGER_FILE, "utf8"));
+const plan = JSON.parse(fs.readFileSync(process.env.PLAN_FILE, "utf8"));
+const binding = validatePlanBinding({ request, ledger, plan });
+if (!binding.ok) throw new Error(`plan binding failed: ${binding.errors.join("; ")}`);
+const assessment = evaluateAffectedObligations({ upstreamRange: request.upstream_range, ledger, asOf: process.env.VALIDATOR_AS_OF });
+if (assessment.blocked.length > 0) throw new Error(`affected obligations blocked: ${assessment.blocked.map((item) => item.obligation_id).join(", ")}`);
+const blockedPlan = plan.decisions.filter((item) => item.disposition === "blocked" || item.decision_status === "blocked");
+if (blockedPlan.length > 0) throw new Error(`plan contains blocked decisions: ${blockedPlan.map((item) => item.obligation_id).join(", ")}`);
+if (process.env.VALIDATOR_MODE === "post") {
+  const root = path.resolve(process.env.WORKTREE);
+  for (const decision of plan.decisions) {
+    if (["blocked", "retire"].includes(decision.disposition)) continue;
+    for (const proof of [...decision.behavior_proof, ...decision.test_proof, ...decision.wiring_proof]) resolveProofPath(root, proof);
   }
-  run_vitest_all() {
-    local dir="$1"
-    local bin
-    if ! bin="$(resolve_vitest "$dir")"; then
-      if [[ "$strict" -eq 1 ]]; then
-        die "vitest not installed — run npm ci at repo root (required for $dir)"
-      fi
-      warn "vitest not installed — run npm ci at repo root; skipping tests in $dir"
-      return 0
-    fi
-    log "vitest all in $dir"
-    if ! (
-      cd "$dir" &&
-        HOME="$test_home" \
-        NODE_OPTIONS="--localstorage-file=${test_ls}" \
-        "$bin" run --reporter=dot --config vitest.config.ts
-    ); then
-      failed=1
-      warn "vitest failed in $dir"
-    fi
-  }
-
-  if [[ -d packages/shared ]]; then
-    run_vitest_all packages/shared || true
-  elif [[ "$strict" -eq 1 ]]; then
-    die "packages/shared missing"
-  fi
-  if [[ -d packages/server ]]; then
-    run_vitest_all packages/server || true
-  elif [[ "$strict" -eq 1 ]]; then
-    die "packages/server missing"
-  fi
-  if [[ -d packages/client ]]; then
-    run_vitest_all packages/client || true
-  elif [[ "$strict" -eq 1 ]]; then
-    die "packages/client missing"
-  fi
-  if [[ -d packages/roles-plugin ]]; then
-    run_vitest_all packages/roles-plugin || true
-  fi
-  if [[ -d packages/extension ]]; then
-    run_vitest_all packages/extension || true
-  fi
-
-  if [[ "$failed" -ne 0 ]]; then
-    die "Gate 1 failed"
-  fi
-  log "Gate 1 OK"
-
-  if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
-    warn "SKIP_BUILD=1 — skipping Gate 2"
-    return 0
-  fi
-  log "Gate 2: build"
-  export ELECTRON_SKIP_BINARY_DOWNLOAD=1
-  export npm_config_audit=false npm_config_fund=false
-  if [[ ! -d node_modules ]]; then
-    log "npm ci (or install --force)"
-    npm ci || npm install --force
-  fi
-  npm run build
-  log "Gate 2 OK"
+  const checks = plan.decisions.flatMap((item) => item.verification.required_checks);
+  const invariants = validatePostMergeInvariants({ worktree: { checks }, plan });
+  if (!invariants.ok) throw new Error(`post-merge invariants failed: ${invariants.failures.map((item) => item.invariant).join(", ")}`);
+}
+process.stdout.write(JSON.stringify({ assessment, plan_hash: plan.plan_hash }));
+NODE
+  rm -rf "$bundle"
 }
 
-
-close_stale_sync_prs() {
-  local keep_head="$1"
-  command -v gh >/dev/null 2>&1 || { warn "gh not available; skip closing stale sync PRs"; return 0; }
-  log "closing other open upstream-sync PRs (keep head=$keep_head)"
-  local json
-  json=$(gh pr list -R "$GH_REPO" --state open --limit 100 \
-    --json number,headRefName,title,labels,url 2>/dev/null || echo '[]')
-  KEEP_HEAD="$keep_head" GH_REPO_VAL="$GH_REPO" python3 -c '
-import json, os, subprocess, sys
-prs = json.loads(sys.stdin.read() or "[]")
-keep = os.environ["KEEP_HEAD"]
-repo = os.environ["GH_REPO_VAL"]
-for pr in prs:
-    head = pr.get("headRefName") or ""
-    labels = set()
-    for l in (pr.get("labels") or []):
-        labels.add(l.get("name") if isinstance(l, dict) else str(l))
-    # Only supersede stable/ephemeral *sync heads*. Do not close tooling PRs
-    # that merely carry the upstream-sync label.
-    is_sync_head = head.startswith("sync/upstream")
-    if not is_sync_head or head == keep:
-        continue
-    n = pr["number"]
-    body = (
-        "Superseded by the latest automated upstream sync on `" + keep + "`. "
-        "Only the newest sync PR is kept open for review."
-    )
-    subprocess.run(["gh", "pr", "comment", str(n), "-R", repo, "--body", body], check=False)
-    subprocess.run(["gh", "pr", "close", str(n), "-R", repo, "--comment", body], check=False)
-    print(f"closed #{n} head={head}", flush=True)
-' <<<"$json"
+run_plan_commands() {
+  local worktree="$1"
+  PLAN_FILE="$PLAN_PATH" node --input-type=module <<'NODE' >"${worktree}/.upstream-sync-commands"
+import fs from "node:fs";
+const plan = JSON.parse(fs.readFileSync(process.env.PLAN_FILE, "utf8"));
+for (const decision of plan.decisions) for (const command of decision.verification.commands) process.stdout.write(`${command}\n`);
+NODE
+  while IFS= read -r command; do
+    [[ -n "$command" ]] || continue
+    log "verify: $command"
+    (cd "$worktree" && bash -c "$command") || die "verification command failed"
+  done <"${worktree}/.upstream-sync-commands"
+  rm -f "${worktree}/.upstream-sync-commands"
 }
 
-push_sync_branch() {
-  local branch="$1"
-  log "pushing $branch (force-with-lease; supersedes previous sync tip)"
-  git push --force-with-lease -u "$ORIGIN_REMOTE" "$branch"
+validate_artifacts() {
+  validator_check pre
+  assert_artifacts_unchanged
+  log "validated exact pins ${BASE_SHA}..${UPSTREAM_SHA} and plan ${PLAN_HASH}"
 }
 
-cmd_pr() {
-  fetch_all
-  local branch
-  branch=$(git branch --show-current)
-  if [[ "$branch" == "main" || "$branch" == "master" || "$branch" == "$TARGET_BRANCH" || "$branch" == "develop" ]]; then
-    die "refusing to force-with-lease push protected branch '$branch' (check out $SYNC_BRANCH first)"
-  fi
-  # Single-PR policy: only heads under sync/upstream* may be force-published as sync PRs
-  # (custom SYNC_BRANCH/--branch must still use that prefix so close_stale_sync_prs works).
-  if [[ "$branch" != sync/upstream* ]]; then
-    die "current branch $branch is not a sync branch (expected prefix sync/upstream*)"
-  fi
-  if [[ "${SKIP_VERIFY:-0}" != "1" ]]; then
-    log "pr: running verify before push (SKIP_VERIFY=1 to bypass)"
-    cmd_verify
-  else
-    warn "SKIP_VERIFY=1 — publishing without local Gate 0–2"
-  fi
-  local tip usha behind ahead
-  tip="${UPSTREAM_REMOTE}/${UPSTREAM_REF}"
-  usha=$(git rev-parse --short "$tip")
-  behind=$(git rev-list --count "${ORIGIN_REMOTE}/${TARGET_BRANCH}..${tip}" || echo "?")
-  ahead=$(git rev-list --count "${tip}..${ORIGIN_REMOTE}/${TARGET_BRANCH}" || echo "?")
-  if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    log "DRY_RUN: would force-with-lease push $branch, close stale sync PRs, upsert single PR into $TARGET_BRANCH"
-    return 0
-  fi
-
-  push_sync_branch "$branch"
-  close_stale_sync_prs "$branch"
-  local body title existing
-  title="chore(sync): upstream ${UPSTREAM_REF} @ ${usha}"
-  # Quoted delimiter: no command substitution from Markdown ticks in the body.
-  body=$(cat <<'BODY'
-## Upstream sync (latest only)
-
-Automation **replaces** any previous open sync PR. Review this one when ready; older sync PRs are closed as superseded.
-
-- **Upstream:** BlackBeltTechnology/pi-agent-dashboard __UPSTREAM_REF__ @ __USHA__
-- **Into:** __TARGET_BRANCH__
-- **Branch:** __BRANCH__ (stable; force-updated each run)
-- **Approx behind/ahead at open:** behind=__BEHIND__ ahead=__AHEAD__
-
-## Protected ZGE surfaces (must remain green)
-- deploy/** self-host installer + systemd/zrok
-- Web Push (packages/server/src/push/**, push routes, SW)
-- OMP runtime paths (omp-agent-paths, tool registry, spawn env)
-- OMP config mirror routes
-
-## Policy
-- **Protected** ZGE paths: `--ours` on conflict
-- **Same-intent product** (non-protected, non-hub): `--theirs` (prefer upstream maintenance)
-- **Semantic hubs** (`server.ts`, `bridge.ts`, `config.ts`, package manifests): combine manually
-- Never force-push main (sync branch may force-with-lease)
-
-## Gates
-- [ ] scripts/upstream-sync.sh verify (Gate 0–2)
-- [ ] CI ci-zge green
-- [ ] Manual/prod promote **not** done by this PR
-
-Docs: docs/upstream-sync.md
-BODY
-)
-  body=${body//__UPSTREAM_REF__/${UPSTREAM_REF}}
-  body=${body//__USHA__/${usha}}
-  body=${body//__TARGET_BRANCH__/${TARGET_BRANCH}}
-  body=${body//__BRANCH__/${branch}}
-  body=${body//__BEHIND__/${behind}}
-  body=${body//__AHEAD__/${ahead}}
-  existing=$(gh pr list -R "$GH_REPO" --state open --head "$branch" --json number --jq '.[0].number // empty' 2>/dev/null || true)
-  if [[ -n "$existing" ]]; then
-    log "updating existing PR #$existing on $branch"
-    gh pr edit "$existing" -R "$GH_REPO" --title "$title" --body "$body" || true
-    gh pr ready "$existing" -R "$GH_REPO" 2>/dev/null || true
-    gh pr view "$existing" -R "$GH_REPO" --json url,number,title --jq '{url,number,title}'
-  else
-    log "creating single open sync PR for $branch"
-    gh pr create -R "$GH_REPO" --base "$TARGET_BRANCH" --head "$branch" \
-      --title "$title" --label "upstream-sync" --body "$body"
-  fi
-}
-
-
-main() {
-  local cmd="${1:-}"
-  shift || true
-  local branch_flag=0
+cmd_detect() {
+  local output="upstream-sync/request.json" base="" upstream="" range=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --ref) UPSTREAM_REF="$2"; shift 2 ;;
-      --branch) SYNC_BRANCH="$2"; branch_flag=1; shift 2 ;;
-      --target) TARGET_BRANCH="$2"; shift 2 ;;
-      --dry-run) DRY_RUN=1; shift ;;
-      -h|--help) usage; exit 0 ;;
-      *) die "unknown arg: $1" ;;
+      --base) base="$2"; shift 2;;
+      --upstream) upstream="$2"; shift 2;;
+      --range) range="$2"; shift 2;;
+      --output) output="$2"; shift 2;;
+      *) die "unknown detect option: $1";;
     esac
   done
-  # Precedence: --branch > env SYNC_BRANCH (presence) > default from UPSTREAM_REF.
-  if [[ "$branch_flag" -eq 1 ]]; then
-    :
-  elif [[ "${SYNC_BRANCH_FROM_ENV}" -eq 1 ]]; then
-    :
-  else
-    SYNC_BRANCH="sync/upstream-${UPSTREAM_REF}"
-  fi
-  case "$cmd" in
-    status) cmd_status ;;
-    merge) cmd_merge ;;
-    verify) cmd_verify ;;
-    pr) cmd_pr ;;
-    ""|-h|--help) usage; exit 0 ;;
-    *) usage; die "unknown command: $cmd" ;;
-  esac
+  base="${base:-$(git -C "$REPO_ROOT" rev-parse "${ORIGIN_REMOTE}/${TARGET_BRANCH}")}"
+  upstream="${upstream:-$(git -C "$REPO_ROOT" rev-parse "${UPSTREAM_REMOTE}/${UPSTREAM_REF}")}"
+  range="${range:-${base}..${upstream}}"
+  local ledger="$(resolve_path "upstream-sync/ledger/obligations.json")"
+  [[ -f "$ledger" ]] || die "canonical ledger missing"
+  local revision
+  revision="$(json_field "$ledger" ledger_revision)"
+  local changed
+  changed="$(git -C "$REPO_ROOT" diff --name-only "${base}..${upstream}" | node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.stringify(s.split(/\\r?\\n/).filter(Boolean))))')"
+  local destination
+  destination="$(resolve_path "$output")"
+  mkdir -p "$(dirname "$destination")"
+  REQUEST_ID="${REQUEST_ID:-sync-$(date -u +%Y%m%d%H%M%S)}" BASE_SHA="$base" UPSTREAM_SHA="$upstream" UPSTREAM_RANGE="$range" LEDGER_REVISION="$revision" CHANGED_PATHS="$changed" REQUEST_CREATED_AT="$(date -u +%FT%TZ)" node --input-type=module -e '
+const request = { schema_version: "1.0", request_id: process.env.REQUEST_ID, base_sha: process.env.BASE_SHA, upstream_sha: process.env.UPSTREAM_SHA, upstream_range: process.env.UPSTREAM_RANGE, changed_paths: JSON.parse(process.env.CHANGED_PATHS), risk_flags: [], ledger_revision: process.env.LEDGER_REVISION, created_at: process.env.REQUEST_CREATED_AT };
+process.stdout.write(`${JSON.stringify(request, null, 2)}\\n`);' >"$destination"
+  log "detected immutable request $output (${base}..${upstream})"
 }
 
+apply_plan() {
+  local worktree="$1"
+  PLAN_FILE="$PLAN_PATH" REQUEST_FILE="$REQUEST_PATH" node --input-type=module <<'NODE' >"${worktree}/.upstream-sync-mutations"
+import fs from "node:fs";
+const plan = JSON.parse(fs.readFileSync(process.env.PLAN_FILE, "utf8"));
+const request = JSON.parse(fs.readFileSync(process.env.REQUEST_FILE, "utf8"));
+const paths = request.changed_paths;
+const matches = (a, b) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+const obligations = new Map(plan.decisions.map((decision) => [decision.obligation_id, decision]));
+const ledger = JSON.parse(fs.readFileSync(process.env.LEDGER_FILE, "utf8"));
+for (const obligation of ledger.obligations) {
+  const decision = obligations.get(obligation.id);
+  if (!decision || !["adopt-upstream", "preserve-zge", "retire"].includes(decision.disposition)) continue;
+  for (const candidate of obligation.scope.paths) if (paths.some((changed) => matches(candidate, changed))) process.stdout.write(`${decision.disposition}\t${candidate}\n`);
+}
+NODE
+  while IFS=$'\t' read -r disposition path_value; do
+    [[ -n "$path_value" ]] || continue
+    case "$disposition" in
+      adopt-upstream)
+        git -C "$worktree" cat-file -e "$UPSTREAM_SHA:$path_value" || die "adopt-upstream path absent at exact upstream pin: $path_value"
+        git -C "$worktree" restore --source="$UPSTREAM_SHA" --staged --worktree -- "$path_value"
+        ;;
+      preserve-zge)
+        git -C "$worktree" cat-file -e "$BASE_SHA:$path_value" || die "preserve-zge path absent at exact base pin: $path_value"
+        git -C "$worktree" restore --source="$BASE_SHA" --staged --worktree -- "$path_value"
+        ;;
+      retire) git -C "$worktree" rm -f -- "$path_value";;
+      *) die "unsupported plan mutation: $disposition";;
+    esac
+  done <"${worktree}/.upstream-sync-mutations"
+  rm -f "${worktree}/.upstream-sync-mutations"
+}
+
+render_body() {
+  local body_file="$1" branch="$2" commit="$3" pr_url="${4:-}"
+  BODY_BRANCH="$branch" BODY_COMMIT="$commit" BODY_PR="$pr_url" BODY_REQUEST="$REQUEST_PATH" BODY_PLAN="$PLAN_PATH" BODY_LEDGER="$LEDGER_PATH" BODY_BASE="$BASE_SHA" BODY_UPSTREAM="$UPSTREAM_SHA" BODY_RANGE="$UPSTREAM_RANGE" BODY_AS_OF="$AS_OF" node --input-type=module >"$body_file" <<'NODE'
+import fs from "node:fs";
+const request = JSON.parse(fs.readFileSync(process.env.BODY_REQUEST, "utf8"));
+const plan = JSON.parse(fs.readFileSync(process.env.BODY_PLAN, "utf8"));
+const ledger = JSON.parse(fs.readFileSync(process.env.BODY_LEDGER, "utf8"));
+const safe = (value) => String(value).replace(/[\\`\r\n]/g, " ").replace(/[@<>*_#|]/g, "_");
+const summaries = plan.decisions.map((decision) => "- " + safe(decision.obligation_id) + ": **" + safe(decision.disposition) + "** (" + decision.behavior_proof.map(safe).join(", ") + ")").join("\n");
+const paths = request.changed_paths.map((item) => "- " + safe(item)).join("\n");
+const risks = request.risk_flags.length ? request.risk_flags.map((item) => "- " + safe(item)).join("\n") : "- none recorded";
+const nearMisses = ledger.obligations.filter((item) => item.status === "blocked").map((item) => "- " + safe(item.id) + " remains carry-forward").join("\n") || "- none";
+const body = "## Audited upstream sync\n\n" +
+  "- **Base pin:** " + safe(process.env.BODY_BASE) + "\n" +
+  "- **Upstream pin:** " + safe(process.env.BODY_UPSTREAM) + "\n" +
+  "- **Upstream range:** " + safe(process.env.BODY_RANGE) + "\n" +
+  "- **Branch:** " + safe(process.env.BODY_BRANCH) + "\n" +
+  "- **Audited commit:** " + safe(process.env.BODY_COMMIT) + "\n\n" +
+  "### Disposition and content summary\n" + summaries + "\n\nChanged paths:\n" + paths + "\n\n" +
+  "### Verification\n- Pinned-base validator binding and affected-record assessment passed.\n- Post-merge invariants and every plan verification command passed.\n- Exact base/upstream pins were checked again immediately before publication.\n\n" +
+  "### Residual risks\n" + risks + "\n\n### Near-miss decisions\n" + nearMisses + "\n\nThis is a normal ready-for-review PR. It does not merge main or deploy.\n";
+process.stdout.write(body);
+NODE
+}
+cmd_verify() {
+  local worktree="${1:-$REPO_ROOT}"
+  [[ -d "$worktree" ]] || die "verify worktree missing: $worktree"
+  validate_artifacts
+  validator_check post "$worktree"
+  run_plan_commands "$worktree"
+  assert_artifacts_unchanged
+  log "verification passed for exact pins and post-merge invariants"
+}
+
+cmd_execute() {
+  validate_artifacts
+  local branch="${SYNC_BRANCH:-sync/upstream-${REQUEST_ID}}"
+  [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ && "$branch" != *..* ]] || die "unsafe audited branch name"
+  case "$branch" in main|master|develop|"$TARGET_BRANCH") die "refusing protected audited branch: $branch";; esac
+  local holder="" tree=""
+  holder="$(mktemp -d -t upstream-sync-worktree-XXXXXX)"
+  tree="$holder/result"
+  cleanup() { [[ -n "${tree:-}" ]] && git -C "$REPO_ROOT" worktree remove --force "$tree" >/dev/null 2>&1 || true; [[ -n "${holder:-}" ]] && rm -rf "$holder" || true; }
+  trap cleanup EXIT
+  git -C "$REPO_ROOT" worktree add --detach "$tree" "$BASE_SHA"
+  [[ "$(git -C "$tree" rev-parse HEAD)" == "$BASE_SHA" ]] || die "fresh worktree is not at exact base pin"
+  git -C "$tree" switch -c "$branch" "$BASE_SHA"
+  set +e
+  git -C "$tree" merge --no-ff "$UPSTREAM_SHA" -m "chore(sync): merge upstream exact pin"
+  local merge_rc=$?
+  set -e
+  [[ "$merge_rc" -eq 0 ]] || die "exact upstream merge failed; resolve conflicts manually"
+  [[ -z "$(git -C "$tree" diff --name-only --diff-filter=U)" ]] || die "unresolved conflict remains"
+  local parents
+  parents="$(git -C "$tree" rev-list --parents -n 1 HEAD)"
+  [[ "$parents" == *" $BASE_SHA"* && "$parents" == *" $UPSTREAM_SHA"* ]] || die "merge parents do not contain exact pins"
+  LEDGER_FILE="$LEDGER_PATH" apply_plan "$tree"
+  cmd_verify "$tree"
+  git -C "$tree" add -A
+  if ! git -C "$tree" diff --cached --quiet; then
+    git -C "$tree" commit -m "chore(sync): apply audited plan dispositions"
+  fi
+  local commit_sha
+  commit_sha="$(git -C "$tree" rev-parse HEAD)"
+  [[ "$commit_sha" != "$BASE_SHA" && "$commit_sha" != "$UPSTREAM_SHA" ]] || die "audited branch has no merge commit"
+  git -C "$tree" push --force-with-lease "$ORIGIN_REMOTE" "HEAD:refs/heads/$branch"
+  local body_file pr_output existing
+  body_file="$holder/pr-body.md"
+  render_body "$body_file" "$branch" "$commit_sha"
+  existing="$(gh pr list -R "$GH_REPO" --state open --head "$branch" --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+  if [[ -n "$existing" ]]; then
+    gh pr edit "$existing" -R "$GH_REPO" --title "chore(sync): audited upstream ${UPSTREAM_REF}" --body-file "$body_file"
+    gh pr ready "$existing" -R "$GH_REPO" >/dev/null 2>&1 || true
+    pr_output="$(gh pr view "$existing" -R "$GH_REPO" --json url --jq '.url' 2>/dev/null || true)"
+  else
+    pr_output="$(gh pr create -R "$GH_REPO" --base "$TARGET_BRANCH" --head "$branch" --title "chore(sync): audited upstream ${UPSTREAM_REF}" --label upstream-sync --body-file "$body_file")"
+  fi
+  local result_file
+  result_file="$(resolve_path "$RESULT_PATH")"
+  mkdir -p "$(dirname "$result_file")"
+  RESULT_FILE="$result_file" RESULT_PR="$pr_output" RESULT_BRANCH="$branch" RESULT_COMMIT="$commit_sha" RESULT_REQUEST="$REQUEST_PATH" RESULT_PLAN="$PLAN_PATH" node --input-type=module <<'NODE'
+import fs from "node:fs";
+const request = JSON.parse(fs.readFileSync(process.env.RESULT_REQUEST, "utf8"));
+const plan = JSON.parse(fs.readFileSync(process.env.RESULT_PLAN, "utf8"));
+const result = { schema_version: "1.0", request_id: request.request_id, base_sha: request.base_sha, upstream_sha: request.upstream_sha, upstream_range: request.upstream_range, plan_hash: plan.plan_hash, branch: process.env.RESULT_BRANCH, commit_sha: process.env.RESULT_COMMIT, pull_request: process.env.RESULT_PR.trim(), ready_for_review: true, verified_at: new Date().toISOString() };
+fs.writeFileSync(process.env.RESULT_FILE, `${JSON.stringify(result, null, 2)}\n`);
+NODE
+  log "ready-for-review PR published for $branch at $commit_sha"
+}
+
+main() {
+  local command="${1:-}"; shift || true
+  local request="" ledger="" plan="" worktree="" branch=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --request) request="$2"; shift 2;;
+      --ledger) ledger="$2"; shift 2;;
+      --plan) plan="$2"; shift 2;;
+      --worktree) worktree="$2"; shift 2;;
+      --branch) branch="$2"; SYNC_BRANCH="$2"; shift 2;;
+      --help|-h) usage; return 0;;
+      *) [[ "$command" == detect && "$1" == --base ]] && break; die "unknown option: $1";;
+    esac
+  done
+  case "$command" in
+    detect) cmd_detect "$@";;
+    validate|verify|execute)
+      [[ -n "$request" && -n "$ledger" && -n "$plan" ]] || die "$command requires --request, --ledger, and --plan"
+      parse_artifacts "$request" "$ledger" "$plan"
+      case "$command" in
+        validate) validate_artifacts;;
+        verify) cmd_verify "${worktree:-$REPO_ROOT}";;
+        execute) cmd_execute;;
+      esac
+      ;;
+    ""|-h|--help) usage;;
+    *) usage; die "unknown command: $command";;
+  esac
+}
 main "$@"
