@@ -1,8 +1,8 @@
 diff --git a/node_modules/@tanstack/virtual-core/dist/cjs/index.cjs b/node_modules/@tanstack/virtual-core/dist/cjs/index.cjs
-index ea619f4..adba51b 100644
+index ea619f4..fd139f7 100644
 --- a/node_modules/@tanstack/virtual-core/dist/cjs/index.cjs
 +++ b/node_modules/@tanstack/virtual-core/dist/cjs/index.cjs
-@@ -80,7 +80,7 @@ const observeElementOffset = (instance, cb) => {
+@@ -80,10 +80,12 @@ const observeElementOffset = (instance, cb) => {
      return;
    }
    let offset = 0;
@@ -10,8 +10,14 @@ index ea619f4..adba51b 100644
 +  const fallback = instance.options.useScrollendEvent && supportsScrollend ? Object.assign(() => void 0, { cancel: () => void 0 }) : utils.debounce(
      targetWindow,
      () => {
-       cb(offset, false);
-@@ -102,6 +102,7 @@ const observeElementOffset = (instance, cb) => {
+-      cb(offset, false);
++      if (instance.scrollElement === element) {
++        cb(offset, false);
++      }
+     },
+     instance.options.isScrollingResetDelay
+   );
+@@ -102,6 +104,7 @@ const observeElementOffset = (instance, cb) => {
      element.addEventListener("scrollend", endHandler, addEventListenerOptions);
    }
    return () => {
@@ -19,7 +25,7 @@ index ea619f4..adba51b 100644
      element.removeEventListener("scroll", handler);
      if (registerScrollendEvent) {
        element.removeEventListener("scrollend", endHandler);
-@@ -118,7 +119,7 @@ const observeWindowOffset = (instance, cb) => {
+@@ -118,10 +121,12 @@ const observeWindowOffset = (instance, cb) => {
      return;
    }
    let offset = 0;
@@ -27,8 +33,14 @@ index ea619f4..adba51b 100644
 +  const fallback = instance.options.useScrollendEvent && supportsScrollend ? Object.assign(() => void 0, { cancel: () => void 0 }) : utils.debounce(
      targetWindow,
      () => {
-       cb(offset, false);
-@@ -139,6 +140,7 @@ const observeWindowOffset = (instance, cb) => {
+-      cb(offset, false);
++      if (instance.scrollElement === element) {
++        cb(offset, false);
++      }
+     },
+     instance.options.isScrollingResetDelay
+   );
+@@ -139,6 +144,7 @@ const observeWindowOffset = (instance, cb) => {
      element.addEventListener("scrollend", endHandler, addEventListenerOptions);
    }
    return () => {
@@ -63,10 +75,10 @@ index 310dfe7..59b0e07 100644
  exports.approxEqual = approxEqual;
  exports.debounce = debounce;
 diff --git a/node_modules/@tanstack/virtual-core/dist/esm/index.js b/node_modules/@tanstack/virtual-core/dist/esm/index.js
-index 8acf35b..331b49f 100644
+index 8acf35b..633d104 100644
 --- a/node_modules/@tanstack/virtual-core/dist/esm/index.js
 +++ b/node_modules/@tanstack/virtual-core/dist/esm/index.js
-@@ -78,7 +78,7 @@ const observeElementOffset = (instance, cb) => {
+@@ -78,10 +78,12 @@ const observeElementOffset = (instance, cb) => {
      return;
    }
    let offset = 0;
@@ -74,8 +86,14 @@ index 8acf35b..331b49f 100644
 +  const fallback = instance.options.useScrollendEvent && supportsScrollend ? Object.assign(() => void 0, { cancel: () => void 0 }) : debounce(
      targetWindow,
      () => {
-       cb(offset, false);
-@@ -100,6 +100,7 @@ const observeElementOffset = (instance, cb) => {
+-      cb(offset, false);
++      if (instance.scrollElement === element) {
++        cb(offset, false);
++      }
+     },
+     instance.options.isScrollingResetDelay
+   );
+@@ -100,6 +102,7 @@ const observeElementOffset = (instance, cb) => {
      element.addEventListener("scrollend", endHandler, addEventListenerOptions);
    }
    return () => {
@@ -83,7 +101,7 @@ index 8acf35b..331b49f 100644
      element.removeEventListener("scroll", handler);
      if (registerScrollendEvent) {
        element.removeEventListener("scrollend", endHandler);
-@@ -116,7 +117,7 @@ const observeWindowOffset = (instance, cb) => {
+@@ -116,10 +119,12 @@ const observeWindowOffset = (instance, cb) => {
      return;
    }
    let offset = 0;
@@ -91,8 +109,14 @@ index 8acf35b..331b49f 100644
 +  const fallback = instance.options.useScrollendEvent && supportsScrollend ? Object.assign(() => void 0, { cancel: () => void 0 }) : debounce(
      targetWindow,
      () => {
-       cb(offset, false);
-@@ -137,6 +138,7 @@ const observeWindowOffset = (instance, cb) => {
+-      cb(offset, false);
++      if (instance.scrollElement === element) {
++        cb(offset, false);
++      }
+     },
+     instance.options.isScrollingResetDelay
+   );
+@@ -137,6 +142,7 @@ const observeWindowOffset = (instance, cb) => {
      element.addEventListener("scrollend", endHandler, addEventListenerOptions);
    }
    return () => {
@@ -127,10 +151,10 @@ index ff39058..63d47c1 100644
  export {
    approxEqual,
 diff --git a/node_modules/@tanstack/virtual-core/src/index.ts b/node_modules/@tanstack/virtual-core/src/index.ts
-index b4794e0..5b25729 100644
+index b4794e0..f07a48a 100644
 --- a/node_modules/@tanstack/virtual-core/src/index.ts
 +++ b/node_modules/@tanstack/virtual-core/src/index.ts
-@@ -159,7 +159,7 @@ export const observeElementOffset = <T extends Element>(
+@@ -159,11 +159,13 @@ export const observeElementOffset = <T extends Element>(
    let offset = 0
    const fallback =
      instance.options.useScrollendEvent && supportsScrollend
@@ -139,7 +163,14 @@ index b4794e0..5b25729 100644
        : debounce(
            targetWindow,
            () => {
-@@ -187,6 +187,7 @@ export const observeElementOffset = <T extends Element>(
+-            cb(offset, false)
++            if (instance.scrollElement === element) {
++              cb(offset, false)
++            }
+           },
+           instance.options.isScrollingResetDelay,
+         )
+@@ -187,6 +189,7 @@ export const observeElementOffset = <T extends Element>(
      element.addEventListener('scrollend', endHandler, addEventListenerOptions)
    }
    return () => {
@@ -147,7 +178,7 @@ index b4794e0..5b25729 100644
      element.removeEventListener('scroll', handler)
      if (registerScrollendEvent) {
        element.removeEventListener('scrollend', endHandler)
-@@ -210,7 +211,7 @@ export const observeWindowOffset = (
+@@ -210,11 +213,13 @@ export const observeWindowOffset = (
    let offset = 0
    const fallback =
      instance.options.useScrollendEvent && supportsScrollend
@@ -156,7 +187,14 @@ index b4794e0..5b25729 100644
        : debounce(
            targetWindow,
            () => {
-@@ -235,6 +236,7 @@ export const observeWindowOffset = (
+-            cb(offset, false)
++            if (instance.scrollElement === element) {
++              cb(offset, false)
++            }
+           },
+           instance.options.isScrollingResetDelay,
+         )
+@@ -235,6 +240,7 @@ export const observeWindowOffset = (
      element.addEventListener('scrollend', endHandler, addEventListenerOptions)
    }
    return () => {
