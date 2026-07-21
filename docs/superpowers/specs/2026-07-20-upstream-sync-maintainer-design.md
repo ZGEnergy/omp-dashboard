@@ -24,6 +24,16 @@ Explicit checked installer installs and syncs managed copy only from canonical s
 
 Managed copy never becomes source of truth.
 
+Mutable canonical ledger lives at `upstream-sync/ledger/obligations.json`.
+
+Ledger stays outside installable skill tree.
+
+Skill and executor use repo-relative ledger path.
+
+Installer copies only `SKILL.md`.
+
+Installer never copies ledger, assessments, approval artifacts, or result workspace.
+
 ## Non-goals
 
 - Automatic obligation acceptance.

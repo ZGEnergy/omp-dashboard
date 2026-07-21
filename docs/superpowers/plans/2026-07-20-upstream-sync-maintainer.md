@@ -12,7 +12,10 @@
 
 - [ ] Keep all mutations inside isolated worktree.
 - [ ] Use `.pi/skills/omp-dashboard-upstream-sync/` as canonical skill source.
+- [ ] Use `upstream-sync/ledger/obligations.json` as repo-relative mutable ledger path.
 - [ ] Let explicit checked installer alone update `/home/joe/.omp/agent/managed-skills/omp-dashboard-upstream-sync/`.
+- [ ] Copy `SKILL.md` only. Never copy ledger, assessment, or approval artifacts.
+- [ ] Keep real `/home/joe/.omp/agent/managed-skills/omp-dashboard-upstream-sync/` installation after merge and explicit user deployment request only.
 - [ ] Do not auto-merge, auto-land, or auto-deploy.
 - [ ] Grant detector `contents: read` and `issues: write` only.
 - [ ] Do not use `pull_request_target`.
@@ -50,12 +53,13 @@
 
 **Produces:** `installManagedSkill({source, destination, mode})`; deterministic skill artifact; byte-equality report; atomic managed `SKILL.md` replacement; installer exit status; skill frontmatter with push-trigger sync/audit requests and deterministic artifact references.
 
-- [ ] Write installer tests before implementation. Test helper with temporary controlled source/destination paths. Test `--check` drift detection, byte-identical `--install` synchronization, destination traversal rejection, destination symlink rejection, and atomic replacement boundary. Test shell CLI fixed production paths.
+- [ ] Write installer tests before implementation. Test helper with temporary controlled source/destination paths. Test `--check` drift detection, byte-identical `--install` synchronization, destination traversal rejection, destination symlink rejection, and atomic replacement boundary. Test shell CLI argument handling without invoking real managed-runtime `--install`.
 - [ ] Run focused test in RED state: `npm test -- scripts/__tests__/install-managed-skill.test.mjs`. Expected: FAIL because `scripts/install-managed-skill.sh` and canonical skill artifacts do not exist.
 - [ ] Define shell CLI source and destination as fixed constants. Accept only `--check` and `--install`. Reject any destination outside `/home/joe/.omp/agent/managed-skills/omp-dashboard-upstream-sync/`. Resolve symlink and parent traversal before mutation.
 - [ ] Export `installManagedSkill({source, destination, mode})` for tests. Let shell CLI call helper with fixed production paths.
+- [ ] Keep implementation tests inside isolated worktree. Never invoke real managed-runtime `--install` during implementation.
 - [ ] Implement `--check` as byte comparison with nonzero drift result. Implement `--install` as temporary-file write, byte verification, atomic rename, and post-install byte comparison. Keep installer as only managed-copy writer.
-- [ ] Write skill frontmatter that triggers sync/audit requests on push and references deterministic ledger, request, plan, validator, verifier, and fixture artifacts. Keep upstream text escaped and untrusted. Document canonical-source boundary in local `AGENTS.md` files.
+- [ ] Write skill frontmatter that triggers sync/audit requests on push and references repo-relative `upstream-sync/ledger/obligations.json`, request, plan, validator, verifier, and fixture artifacts. Keep upstream text escaped and untrusted. Document canonical-source boundary in local `AGENTS.md` files.
 - [ ] Run focused test in GREEN state: `npm test -- scripts/__tests__/install-managed-skill.test.mjs`. Expected: PASS with drift, synchronization, traversal, symlink, and atomicity assertions.
 - [ ] Run code review gate. Reviewer checks fixed paths, byte equality, atomic replacement, symlink defense, trigger scope, and canonical-source wording against approved design spec.
 - [ ] Commit Task 1: `git add .pi/skills/omp-dashboard-upstream-sync .pi/skills/AGENTS.md scripts/install-managed-skill.sh scripts/upstream-sync/install-managed-skill.mjs scripts/AGENTS.md scripts/__tests__/install-managed-skill.test.mjs && git commit -m "feat: add deterministic upstream sync skill installer"`.
@@ -65,7 +69,8 @@
 **Files:**
 
 - Create `scripts/upstream-sync/contracts.mjs`.
-- Create `.pi/skills/omp-dashboard-upstream-sync/ledger/obligations.json`.
+- Create `upstream-sync/ledger/obligations.json`.
+- Create `upstream-sync/AGENTS.md`.
 - Create `scripts/upstream-sync/fixtures/valid-ledger.json`.
 - Create `scripts/upstream-sync/fixtures/valid-request.json`.
 - Create `scripts/upstream-sync/fixtures/valid-plan.json`.
@@ -73,19 +78,19 @@
 - Modify `scripts/AGENTS.md`.
 - Modify `.pi/skills/omp-dashboard-upstream-sync/AGENTS.md`.
 
-**Consumes:** Ledger, request, and plan JSON values; worktree root; relative proof path.
+**Consumes:** Repo-relative `upstream-sync/ledger/obligations.json`; request and plan JSON values; worktree root; relative proof path.
 
 **Produces:** `validateLedger(value)`; `validateRequest(value)`; `validatePlan(value)`; `canonicalJson(value)`; `sha256Canonical(value)`; `resolveProofPath(worktree, relativePath)`; versioned fixture contracts.
 
 - [ ] Write contract tests before implementation. Cover canonical ledger and valid ledger, request, and plan; missing fields; unknown fields; duplicate stable obligation IDs; unsupported disposition; changed canonical hash; absolute proof path; parent traversal proof path; symlink proof path escape.
 - [ ] Run focused test in RED state: `npm test -- scripts/__tests__/upstream-sync-contracts.test.mjs`. Expected: FAIL because contract exports and fixtures do not exist.
 - [ ] Define schemas with required schema versions, stable obligation IDs, scope and dependency roots, expiry and recheck trigger, owner, pins, ledger revision, dispositions, behavior/test/wiring proof, plan commit/hash, verifier version, and verifier digest. Reject unknown fields and duplicate IDs.
-- [ ] Seed canonical `.pi/skills/omp-dashboard-upstream-sync/ledger/obligations.json` with `schema_version` and reviewed accepted obligations for ZGE-only push/VAPID, OMP settings/agent paths, deploy/installer, and sync tooling. Give each stable ID, observable contract, provenance, evidence paths, scope, dependency roots, owner, review date, expiry, and recheck trigger. Keep valid fixtures separate.
+- [ ] Seed canonical repo-relative `upstream-sync/ledger/obligations.json` with `schema_version` and reviewed accepted obligations for ZGE-only push/VAPID, OMP settings/agent paths, deploy/installer, and sync tooling. Give each stable ID, observable contract, provenance, evidence paths, scope, dependency roots, owner, review date, expiry, and recheck trigger. Keep valid fixtures separate.
 - [ ] Implement deterministic canonical JSON ordering and SHA-256 hashing. Implement `resolveProofPath(worktree, relativePath)` with absolute, parent traversal, and symlink escape rejection while preserving a path inside worktree.
 - [ ] Add valid fixtures that exercise every required field and approved disposition. Keep fixture paths relative and machine-checkable.
 - [ ] Run focused test in GREEN state: `npm test -- scripts/__tests__/upstream-sync-contracts.test.mjs`. Expected: PASS for valid inputs and every rejection boundary.
 - [ ] Run code review gate. Reviewer compares field requirements, disposition enum, hash algorithm, proof-path confinement, and fixture shape with approved design spec.
-- [ ] Commit Task 2: `git add .pi/skills/omp-dashboard-upstream-sync/ledger/obligations.json .pi/skills/omp-dashboard-upstream-sync/AGENTS.md scripts/upstream-sync/contracts.mjs scripts/upstream-sync/fixtures/valid-ledger.json scripts/upstream-sync/fixtures/valid-request.json scripts/upstream-sync/fixtures/valid-plan.json scripts/__tests__/upstream-sync-contracts.test.mjs scripts/AGENTS.md && git commit -m "feat: define upstream sync contracts and proof paths"`.
+- [ ] Commit Task 2: `git add upstream-sync/ledger/obligations.json upstream-sync/AGENTS.md .pi/skills/omp-dashboard-upstream-sync/AGENTS.md scripts/upstream-sync/contracts.mjs scripts/upstream-sync/fixtures/valid-ledger.json scripts/upstream-sync/fixtures/valid-request.json scripts/upstream-sync/fixtures/valid-plan.json scripts/__tests__/upstream-sync-contracts.test.mjs scripts/AGENTS.md && git commit -m "feat: define upstream sync contracts and proof paths"`.
 
 ## Task 3: Deterministic assessment and approval verification
 
@@ -97,7 +102,7 @@
 - Create `scripts/__tests__/upstream-sync-approval.test.mjs`.
 - Modify `scripts/AGENTS.md`.
 
-**Consumes:** Upstream range; versioned ledger; request; plan; approval; worktree; GitHub API review data.
+**Consumes:** Upstream range; repo-relative `upstream-sync/ledger/obligations.json`; request; plan; approval; worktree; GitHub API review data.
 
 **Produces:** `evaluateAffectedObligations({upstreamRange, ledger})`; `validatePlanBinding({request, ledger, plan, approval})`; `validatePostMergeInvariants({worktree, plan})`; `verifyCodeownersApproval({repository, planCommit, planHash, githubApi})`; deterministic decision and approval verdicts.
 
@@ -122,7 +127,7 @@
 - Create `scripts/__tests__/upstream-sync-executor.test.mjs`.
 - Modify `scripts/AGENTS.md`.
 
-**Consumes:** `detect`, `validate`, `execute --request <path> --ledger <path> --plan <path> --approval <path>`, and `verify` commands; pinned-base Node validators; immutable request, ledger, plan, and approval artifacts.
+**Consumes:** `detect`, `validate`, `execute --request <path> --ledger <path> --plan <path> --approval <path>`, and `verify` commands; repo-relative `upstream-sync/ledger/obligations.json`; pinned-base Node validators; immutable request, ledger, plan, and approval artifacts.
 
 **Produces:** Deterministic shell command boundary; fresh worktree at base SHA; exact upstream SHA merge; approved-disposition mutations; candidate metadata; no PR creation.
 
@@ -170,7 +175,7 @@
 - Modify `.gitignore`.
 - Modify `.pi/skills/omp-dashboard-upstream-sync/AGENTS.md`.
 
-**Consumes:** Immutable sync request; accepted ledger entries; detector, contract, validator, approval, executor, and verifier interfaces; fixture repositories; three eval prompts.
+**Consumes:** Immutable sync request; accepted entries from repo-relative `upstream-sync/ledger/obligations.json`; detector, contract, validator, approval, executor, and verifier interfaces; fixture repositories; three eval prompts.
 
 **Produces:** Senior-maintainer procedure; mandatory stop conditions and non-goals; three with-skill and no-skill result trees; timing records; assertion grades; aggregate benchmark; generated review.
 
@@ -201,7 +206,7 @@
 
 - [ ] Run fixture-runner contract before CI/docs wiring: `npm test -- scripts/__tests__/upstream-sync-fixtures.test.mjs`. Expected: PASS because Task 6 creates runner and fixture test.
 - [ ] Add CI jobs for contract, validator, executor, detector, installer, and skill fixture tests.
-- [ ] Add CI path filters for `.pi/skills/omp-dashboard-upstream-sync/**`, `scripts/upstream-sync/**`, `scripts/upstream-sync.sh`, `.github/workflows/upstream-sync.yml`, and `.github/workflows/ci-zge.yml`. Keep required CI failures from automatic landing.
+- [ ] Add CI path filters for `.pi/skills/omp-dashboard-upstream-sync/**`, `upstream-sync/**`, `scripts/upstream-sync/**`, `scripts/upstream-sync.sh`, `.github/workflows/upstream-sync.yml`, and `.github/workflows/ci-zge.yml`. Keep required CI failures from automatic landing.
 - [ ] Rewrite `docs/upstream-sync.md` to remove auto-policy and preview-PR instructions. Document detector → inbox → assessment → approval → audited PR flow, exact pins, ledger dispositions, proof, stop conditions, isolated checks, and explicit installer boundary.
 - [ ] Add path-alphabetical row for `superpowers/plans/2026-07-20-upstream-sync-maintainer.md` in `docs/AGENTS.md`. Keep existing index entries unchanged.
 - [ ] Run focused test in GREEN state: `npm test -- scripts/__tests__/install-managed-skill.test.mjs scripts/__tests__/upstream-sync-contracts.test.mjs scripts/__tests__/upstream-sync-validator.test.mjs scripts/__tests__/upstream-sync-approval.test.mjs scripts/__tests__/upstream-sync-executor.test.mjs scripts/__tests__/upstream-sync-detect.test.mjs scripts/__tests__/upstream-sync-fixtures.test.mjs`. Expected: PASS. Run fixture runner: `node scripts/upstream-sync/run-fixtures.mjs --fixtures .pi/skills/omp-dashboard-upstream-sync/evals/fixtures --results .pi/skills/omp-dashboard-upstream-sync-workspace/iteration-1`. Expected: PASS with zero failed assertions and nonzero behavior proven by failure fixture test.
