@@ -1099,14 +1099,20 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // Content and virtual measurements can only follow latest. TanStack remains
   // the sole owner of row measurement correction; no total-height delta writes
   // compensate history/prepend growth here.
+  const hadVisibleRowsRef = useRef(displayRows.length > 0);
   useLayoutEffect(() => {
+    const receivedFirstVisibleRows = !hadVisibleRowsRef.current && displayRows.length > 0;
+    hadVisibleRowsRef.current = displayRows.length > 0;
     if (isSelecting || mobileInactive) return;
     if (mobileActive) {
-      if (scrollOwnerRef.current === "FOLLOWING") pinLatest();
+      if (receivedFirstVisibleRows && scrollOwnerRef.current === "FOLLOWING") {
+        scrollOwnerRef.current = "NAVIGATING_BOTTOM";
+      }
+      if (scrollOwnerRef.current === "FOLLOWING" || scrollOwnerRef.current === "NAVIGATING_BOTTOM") pinLatest();
     } else if (stickToBottomRef.current) {
       pinLatest();
     }
-  }, [isSelecting, mobileActive, mobileInactive, pendingSteering, pinLatest, state.messages.length, state.pendingPrompt, state.streamingText, state.streamingThinking]);
+  }, [displayRows.length, isSelecting, mobileActive, mobileInactive, pendingSteering, pinLatest, state.messages.length, state.pendingPrompt, state.streamingText, state.streamingThinking]);
 
   useLayoutEffect(() => {
     const anchor = pendingOlderAnchorRef.current;
