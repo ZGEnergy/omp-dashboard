@@ -32,6 +32,21 @@ describe("SessionReplayController", () => {
     expect(effects.replace).toHaveBeenCalledWith("s", [entry(8), entry(9), entry(10), entry(11)], { requestId: older.requestId, anchorToken: "anchor-1" });
   });
 
+  it("renders cold replay batches before terminal arrives", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+
+    controller.handle(frame(cold.requestId!, [entry(1)], false));
+
+    expect(effects.apply).toHaveBeenCalledWith("s", [entry(1)]);
+    expect(effects.loading).toHaveBeenLastCalledWith("s", true);
+
+    controller.handle(frame(cold.requestId!, [], true));
+
+    expect(effects.loading).toHaveBeenLastCalledWith("s", false);
+  });
+
   it("keeps a matching reset request correlated so its cold terminal replaces state", () => {
     const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
     const controller = new SessionReplayController(effects);
