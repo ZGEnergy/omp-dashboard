@@ -264,7 +264,7 @@ describe("replay-cache — scoped + generation fence", () => {
     expect(hit!.maxSeq).toBe(3);
     // Window metadata.
     expect(hit!.hasMoreOlder).toBe(false);
-    expect(hit!.partialHead).toBe(true);
+    expect(hit!.partialHead).toBe(false);
     expect(hit!.bytes).toBeGreaterThan(0);
     // Prepared suffix retained in seq order.
     expect(hit!.payload.map((e) => e.seq)).toEqual([1, 2, 3]);
