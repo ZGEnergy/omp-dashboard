@@ -151,11 +151,17 @@ cmd_detect() {
   local output="upstream-sync/request.json" base="" upstream="" range=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --base) base="$2"; shift 2;;
-      --upstream) upstream="$2"; shift 2;;
-      --range) range="$2"; shift 2;;
-      --output) output="$2"; shift 2;;
-      *) die "unknown detect option: $1";;
+      --base|--upstream|--range|--output)
+        [[ $# -ge 2 ]] || die "$1 requires a value"
+        case "$1" in
+          --base) base="$2" ;;
+          --upstream) upstream="$2" ;;
+          --range) range="$2" ;;
+          --output) output="$2" ;;
+        esac
+        shift 2
+        ;;
+      *) die "unknown detect option: $1" ;;
     esac
   done
   base="${base:-$(git -C "$REPO_ROOT" rev-parse "${ORIGIN_REMOTE}/${TARGET_BRANCH}")}"
@@ -165,14 +171,19 @@ cmd_detect() {
   [[ -f "$ledger" ]] || die "canonical ledger missing"
   local revision
   revision="$(json_field "$ledger" ledger_revision)"
-  local changed
-  changed="$(git -C "$REPO_ROOT" diff --name-only "${base}..${upstream}" | node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.stringify(s.split(/\\r?\\n/).filter(Boolean))))')"
+  local changed_file
+  changed_file="$(mktemp -t upstream-sync-changed-XXXXXX)"
+  git -C "$REPO_ROOT" diff --name-only "$range" >"$changed_file"
   local destination
   destination="$(resolve_path "$output")"
   mkdir -p "$(dirname "$destination")"
-  REQUEST_ID="${REQUEST_ID:-sync-$(date -u +%Y%m%d%H%M%S)}" BASE_SHA="$base" UPSTREAM_SHA="$upstream" UPSTREAM_RANGE="$range" LEDGER_REVISION="$revision" CHANGED_PATHS="$changed" REQUEST_CREATED_AT="$(date -u +%FT%TZ)" node --input-type=module -e '
-const request = { schema_version: "1.0", request_id: process.env.REQUEST_ID, base_sha: process.env.BASE_SHA, upstream_sha: process.env.UPSTREAM_SHA, upstream_range: process.env.UPSTREAM_RANGE, changed_paths: JSON.parse(process.env.CHANGED_PATHS), risk_flags: [], ledger_revision: process.env.LEDGER_REVISION, created_at: process.env.REQUEST_CREATED_AT };
-process.stdout.write(`${JSON.stringify(request, null, 2)}\\n`);' >"$destination"
+  REQUEST_ID="${REQUEST_ID:-sync-$(date -u +%Y%m%d%H%M%S)}" BASE_SHA="$base" UPSTREAM_SHA="$upstream" UPSTREAM_RANGE="$range" LEDGER_REVISION="$revision" CHANGED_PATHS_FILE="$changed_file" REQUEST_CREATED_AT="$(date -u +%FT%TZ)" node --input-type=module <<'NODE' >"$destination"
+import fs from "node:fs";
+const changedPaths = fs.readFileSync(process.env.CHANGED_PATHS_FILE, "utf8").split(/\r?\n/).filter(Boolean);
+const request = { schema_version: "1.0", request_id: process.env.REQUEST_ID, base_sha: process.env.BASE_SHA, upstream_sha: process.env.UPSTREAM_SHA, upstream_range: process.env.UPSTREAM_RANGE, changed_paths: changedPaths, risk_flags: [], ledger_revision: process.env.LEDGER_REVISION, created_at: process.env.REQUEST_CREATED_AT };
+process.stdout.write(`${JSON.stringify(request, null, 2)}\n`);
+NODE
+  rm -f "$changed_file"
   log "detected immutable request $output (${base}..${upstream})"
 }
 
@@ -244,11 +255,19 @@ cmd_verify() {
   log "verification passed for exact pins and post-merge invariants"
 }
 
+preflight_publish() {
+  local branch="$1"
+  command -v gh >/dev/null 2>&1 || die "gh CLI is required for publication"
+  gh auth status >/dev/null 2>&1 || die "gh authentication is required for publication"
+  git -C "$REPO_ROOT" push --dry-run "$ORIGIN_REMOTE" "HEAD:refs/heads/$branch" >/dev/null 2>&1 || die "origin push access is required for publication"
+}
+
 cmd_execute() {
   validate_artifacts
   local branch="${SYNC_BRANCH:-sync/upstream-${REQUEST_ID}}"
   [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ && "$branch" != *..* ]] || die "unsafe audited branch name"
   case "$branch" in main|master|develop|"$TARGET_BRANCH") die "refusing protected audited branch: $branch";; esac
+  preflight_publish "$branch"
   local holder="" tree=""
   holder="$(mktemp -d -t upstream-sync-worktree-XXXXXX)"
   tree="$holder/result"
@@ -285,7 +304,7 @@ cmd_execute() {
     gh pr ready "$existing" -R "$GH_REPO" >/dev/null 2>&1 || true
     pr_output="$(gh pr view "$existing" -R "$GH_REPO" --json url --jq '.url' 2>/dev/null || true)"
   else
-    pr_output="$(gh pr create -R "$GH_REPO" --base "$TARGET_BRANCH" --head "$branch" --title "chore(sync): audited upstream ${UPSTREAM_REF}" --label upstream-sync --body-file "$body_file")"
+    pr_output="$(gh pr create -R "$GH_REPO" --base "$TARGET_BRANCH" --head "$branch" --title "chore(sync): audited upstream ${UPSTREAM_REF}" --body-file "$body_file")"
   fi
   local result_file
   result_file="$(resolve_path "$RESULT_PATH")"
@@ -302,6 +321,10 @@ NODE
 
 main() {
   local command="${1:-}"; shift || true
+  if [[ "$command" == "detect" ]]; then
+    cmd_detect "$@"
+    return 0
+  fi
   local request="" ledger="" plan="" worktree="" branch=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -311,7 +334,7 @@ main() {
       --worktree) worktree="$2"; shift 2;;
       --branch) branch="$2"; SYNC_BRANCH="$2"; shift 2;;
       --help|-h) usage; return 0;;
-      *) [[ "$command" == detect && "$1" == --base ]] && break; die "unknown option: $1";;
+      *) die "unknown option: $1";;
     esac
   done
   case "$command" in

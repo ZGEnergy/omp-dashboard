@@ -113,10 +113,31 @@ function fixtureRepo({ blocked = false, verificationCommand = "true", conflict =
 function fakePublishers(root) {
   const bin = path.join(root, "fake-bin");
   mkdirSync(bin);
-  writeFileSync(path.join(bin, "git"), `#!/usr/bin/env bash\nset -e\nfor arg in "$@"; do if [[ "$arg" == push ]]; then printf 'git %q ' "$@" >> "$SYNC_TEST_LOG"; printf '\\n' >> "$SYNC_TEST_LOG"; exit 0; fi; done\nexec /usr/bin/git "$@"\n`);
-  writeFileSync(path.join(bin, "gh"), `#!/usr/bin/env bash\nset -e\nprintf 'gh ' >> "$SYNC_TEST_LOG"; printf '%q ' "$@" >> "$SYNC_TEST_LOG"; printf '\\n' >> "$SYNC_TEST_LOG"\nbody_file=""; previous=""; for arg in "$@"; do if [[ "$previous" == --body-file ]]; then body_file="$arg"; fi; previous="$arg"; done; if [[ -n "$body_file" ]]; then cat "$body_file" >> "$SYNC_TEST_LOG"; fi\nif [[ "$1" == pr && "$2" == create ]]; then echo 'https://github.test/pr/1'; fi\n`);
+  writeFileSync(path.join(bin, "git"), `#!/usr/bin/env bash\nset -e\nfor arg in "$@"; do if [[ "$arg" == push ]]; then printf 'git %q ' "$@" >> "$SYNC_TEST_LOG"; printf '\\n' >> "$SYNC_TEST_LOG"; [[ "\${SYNC_TEST_FAIL_PUSH:-0}" == 1 ]] && exit 1; exit 0; fi; done\nexec /usr/bin/git "$@"\n`);
+  writeFileSync(path.join(bin, "gh"), `#!/usr/bin/env bash\nset -e\nprintf 'gh ' >> "$SYNC_TEST_LOG"; printf '%q ' "$@" >> "$SYNC_TEST_LOG"; printf '\\n' >> "$SYNC_TEST_LOG"\nif [[ "$1" == auth && "$2" == status && "\${SYNC_TEST_FAIL_AUTH:-0}" == 1 ]]; then exit 1; fi\nbody_file=""; previous=""; for arg in "$@"; do if [[ "$previous" == --body-file ]]; then body_file="$arg"; fi; previous="$arg"; done; if [[ -n "$body_file" ]]; then cat "$body_file" >> "$SYNC_TEST_LOG"; fi\nif [[ "$1" == pr && "$2" == create ]]; then echo 'https://github.test/pr/1'; fi\n`);
   execFileSync("chmod", ["+x", path.join(bin, "git"), path.join(bin, "gh")]);
   return bin;
+}
+
+function detectFixture(changedText) {
+  const root = mkdtempSync(path.join(os.tmpdir(), "upstream-sync-detect-"));
+  const bin = path.join(root, "fake-bin");
+  mkdirSync(path.join(root, "upstream-sync/ledger"), { recursive: true });
+  writeJson(path.join(root, "upstream-sync/ledger/obligations.json"), { ledger_revision: "ledger-detect-test" });
+  const pathsFile = path.join(root, "changed-paths.txt");
+  writeFileSync(pathsFile, changedText);
+  mkdirSync(bin);
+  writeFileSync(path.join(bin, "git"), `#!/usr/bin/env bash
+set -e
+printf '%q ' "$@" >> "$SYNC_DETECT_GIT_LOG"
+printf '\n' >> "$SYNC_DETECT_GIT_LOG"
+if [[ "$1" == -C ]]; then shift 2; fi
+if [[ "$1" == diff ]]; then cat "$SYNC_DETECT_PATH_FILE"; exit 0; fi
+echo "unexpected fake git command: $*" >&2
+exit 1
+`);
+  execFileSync("chmod", ["+x", path.join(bin, "git")]);
+  return { root, bin, pathsFile };
 }
 
 describe("upstream sync executor", () => {
@@ -130,6 +151,99 @@ describe("upstream sync executor", () => {
     expect(source).not.toContain("--theirs");
     expect(source).not.toContain("upstream-sync-policy");
     expect(source).not.toContain("resolve_conflicts_by_policy");
+  });
+
+  it("detect preserves every path from an oversized fake-git range", () => {
+    const paths = Array.from({ length: 100000 }, (_, index) => `generated/path-${String(index).padStart(6, "0")}.ts`);
+    const fixture = detectFixture(`${paths.join("\n")}\n`);
+    const base = "b".repeat(64);
+    const upstream = "u".repeat(64);
+    try {
+      run(fixture.root, ["detect", "--base", base, "--upstream", upstream], {
+        PATH: `${fixture.bin}:${process.env.PATH}`,
+        SYNC_DETECT_PATH_FILE: fixture.pathsFile,
+        SYNC_DETECT_GIT_LOG: path.join(fixture.root, "git.log"),
+      });
+      const request = JSON.parse(readFileSync(path.join(fixture.root, "upstream-sync/request.json"), "utf8"));
+      expect(request.changed_paths).toEqual(paths);
+      expect(request.changed_paths.at(-1)).toBe(paths.at(-1));
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("detect splits actual newline-delimited paths", () => {
+    const fixture = detectFixture("packages/alpha.ts\r\npackages/beta.ts\r\npackages/gamma.ts\n");
+    try {
+      run(fixture.root, ["detect", "--base", "base", "--upstream", "tip"], {
+        PATH: `${fixture.bin}:${process.env.PATH}`,
+        SYNC_DETECT_PATH_FILE: fixture.pathsFile,
+        SYNC_DETECT_GIT_LOG: path.join(fixture.root, "git.log"),
+      });
+      const request = JSON.parse(readFileSync(path.join(fixture.root, "upstream-sync/request.json"), "utf8"));
+      expect(request.changed_paths).toEqual(["packages/alpha.ts", "packages/beta.ts", "packages/gamma.ts"]);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("detect accepts documented options in any order and diffs the requested range", () => {
+    const fixture = detectFixture("one.txt\ntwo.txt\n");
+    const base = "a".repeat(64);
+    const upstream = "c".repeat(64);
+    const range = "base~2..upstream";
+    try {
+      run(fixture.root, ["detect", "--output", "artifacts/request.json", "--range", range, "--upstream", upstream, "--base", base], {
+        PATH: `${fixture.bin}:${process.env.PATH}`,
+        SYNC_DETECT_PATH_FILE: fixture.pathsFile,
+        SYNC_DETECT_GIT_LOG: path.join(fixture.root, "git.log"),
+      });
+      const request = JSON.parse(readFileSync(path.join(fixture.root, "artifacts/request.json"), "utf8"));
+      expect(request.base_sha).toBe(base);
+      expect(request.upstream_sha).toBe(upstream);
+      expect(request.upstream_range).toBe(range);
+      expect(readFileSync(path.join(fixture.root, "git.log"), "utf8")).toContain(range);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("preflights gh authentication before creating a merge worktree", () => {
+    const fixture = fixtureRepo();
+    const log = path.join(fixture.root, "publish.log");
+    const bin = fakePublishers(fixture.root);
+    try {
+      expect(() => run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json"], {
+        PATH: `${bin}:${process.env.PATH}`,
+        SYNC_TEST_LOG: log,
+        SYNC_TEST_FAIL_AUTH: "1",
+      })).toThrow();
+      const output = readFileSync(log, "utf8");
+      expect(output).toMatch(/gh auth status/);
+      expect(output).not.toMatch(/git push/);
+      expect(output).not.toMatch(/gh pr /);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("preflights origin push access before creating a merge worktree", () => {
+    const fixture = fixtureRepo();
+    const log = path.join(fixture.root, "publish.log");
+    const bin = fakePublishers(fixture.root);
+    try {
+      expect(() => run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json"], {
+        PATH: `${bin}:${process.env.PATH}`,
+        SYNC_TEST_LOG: log,
+        SYNC_TEST_FAIL_PUSH: "1",
+      })).toThrow();
+      const output = readFileSync(log, "utf8");
+      expect(output).toMatch(/gh auth status/);
+      expect(output).toMatch(/git push/);
+      expect(output).not.toMatch(/gh pr /);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 
   it("stops before push and PR when the plan hash is changed", () => {
@@ -153,7 +267,14 @@ describe("upstream sync executor", () => {
     const log = path.join(fixture.root, "publish.log");
     const bin = fakePublishers(fixture.root);
     expect(() => run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json"], { PATH: `${bin}:${process.env.PATH}`, SYNC_TEST_LOG: log })).toThrow();
-    expect(existsSync(log) ? readFileSync(log, "utf8") : "").not.toMatch(/git push|gh /);
+    const output = existsSync(log) ? readFileSync(log, "utf8") : "";
+    if (_name === "failed verification") {
+      expect(output).toMatch(/git push/);
+      expect(output).toMatch(/gh auth status/);
+      expect(output).not.toMatch(/gh pr /);
+    } else {
+      expect(output).not.toMatch(/git push|gh /);
+    }
     rmSync(fixture.root, { recursive: true, force: true });
   });
 
@@ -163,7 +284,9 @@ describe("upstream sync executor", () => {
     const bin = fakePublishers(fixture.root);
     expect(() => run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json"], { PATH: `${bin}:${process.env.PATH}`, SYNC_TEST_LOG: log })).toThrow();
     const output = existsSync(log) ? readFileSync(log, "utf8") : "";
-    expect(output).not.toMatch(/git push|gh /);
+    expect(output).toMatch(/git push/);
+    expect(output).toMatch(/gh auth status/);
+    expect(output).not.toMatch(/gh pr /);
     rmSync(fixture.root, { recursive: true, force: true });
   });
 
@@ -176,6 +299,7 @@ describe("upstream sync executor", () => {
     expect(output).toMatch(/git push/);
     expect(output).toMatch(/gh pr create/);
     expect(output).not.toMatch(/--draft/);
+    expect(output).not.toMatch(/--label/);
     expect(output).toMatch(fixture.baseSha);
     expect(output).toMatch(fixture.upstreamSha);
     expect(readFileSync(path.join(fixture.root, "upstream-sync/candidate.json"), "utf8")).toMatch(fixture.upstreamSha);
