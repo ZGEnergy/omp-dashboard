@@ -9,6 +9,7 @@ const repoRoot = path.resolve(import.meta.dirname, "../..");
 const executor = path.join(repoRoot, "scripts/upstream-sync.sh");
 const contracts = readFileSync(path.join(repoRoot, "scripts/upstream-sync/contracts.mjs"));
 const validator = readFileSync(path.join(repoRoot, "scripts/upstream-sync/validator.mjs"));
+const detector = readFileSync(path.join(repoRoot, "scripts/upstream-sync/detect.mjs"));
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 const run = (cwd, args, env = {}) => execFileSync("bash", [executor, ...args], {
   cwd,
@@ -26,6 +27,7 @@ function fixtureRepo({ blocked = false, verificationCommand = "true", conflict =
   mkdirSync(path.join(root, "scripts/upstream-sync"), { recursive: true });
   writeFileSync(path.join(root, "scripts/upstream-sync/contracts.mjs"), contracts);
   writeFileSync(path.join(root, "scripts/upstream-sync/validator.mjs"), validator);
+  writeFileSync(path.join(root, "scripts/upstream-sync/detect.mjs"), detector);
   writeFileSync(path.join(root, "proof.txt"), "base proof\n");
   writeFileSync(path.join(root, "changed.txt"), "base\n");
   writeFileSync(path.join(root, "check.txt"), "present\n");
@@ -124,6 +126,8 @@ function detectFixture(changedText) {
   const bin = path.join(root, "fake-bin");
   mkdirSync(path.join(root, "upstream-sync/ledger"), { recursive: true });
   writeJson(path.join(root, "upstream-sync/ledger/obligations.json"), { ledger_revision: "ledger-detect-test" });
+  mkdirSync(path.join(root, "scripts/upstream-sync"), { recursive: true });
+  writeFileSync(path.join(root, "scripts/upstream-sync/detect.mjs"), detector);
   const pathsFile = path.join(root, "changed-paths.txt");
   writeFileSync(pathsFile, changedText);
   mkdirSync(bin);
@@ -172,20 +176,21 @@ describe("upstream sync executor", () => {
     }
   });
 
-  it("detect splits actual newline-delimited paths", () => {
-    const fixture = detectFixture("packages/alpha.ts\r\npackages/beta.ts\r\npackages/gamma.ts\n");
-    try {
-      run(fixture.root, ["detect", "--base", "base", "--upstream", "tip"], {
-        PATH: `${fixture.bin}:${process.env.PATH}`,
-        SYNC_DETECT_PATH_FILE: fixture.pathsFile,
-        SYNC_DETECT_GIT_LOG: path.join(fixture.root, "git.log"),
-      });
-      const request = JSON.parse(readFileSync(path.join(fixture.root, "upstream-sync/request.json"), "utf8"));
-      expect(request.changed_paths).toEqual(["packages/alpha.ts", "packages/beta.ts", "packages/gamma.ts"]);
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
-  });
+  it("detect splits paths and derives transparent risk flags", () => {
+      const fixture = detectFixture("packages/alpha.ts\r\n.github/workflows/check.yml\r\npackage-lock.json\ndocker/test.sh\n");
+      try {
+        run(fixture.root, ["detect", "--base", "base", "--upstream", "tip"], {
+          PATH: `${fixture.bin}:${process.env.PATH}`,
+          SYNC_DETECT_PATH_FILE: fixture.pathsFile,
+          SYNC_DETECT_GIT_LOG: path.join(fixture.root, "git.log"),
+        });
+        const request = JSON.parse(readFileSync(path.join(fixture.root, "upstream-sync/request.json"), "utf8"));
+        expect(request.changed_paths).toEqual(["packages/alpha.ts", ".github/workflows/check.yml", "package-lock.json", "docker/test.sh"]);
+        expect(request.risk_flags).toEqual(["high-risk:dependency", "high-risk:deployment", "high-risk:workflow"]);
+      } finally {
+        rmSync(fixture.root, { recursive: true, force: true });
+      }
+    });
 
   it("detect accepts documented options in any order and diffs the requested range", () => {
     const fixture = detectFixture("one.txt\ntwo.txt\n");

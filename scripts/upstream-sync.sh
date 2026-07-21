@@ -179,8 +179,9 @@ cmd_detect() {
   mkdir -p "$(dirname "$destination")"
   REQUEST_ID="${REQUEST_ID:-sync-$(date -u +%Y%m%d%H%M%S)}" BASE_SHA="$base" UPSTREAM_SHA="$upstream" UPSTREAM_RANGE="$range" LEDGER_REVISION="$revision" CHANGED_PATHS_FILE="$changed_file" REQUEST_CREATED_AT="$(date -u +%FT%TZ)" node --input-type=module <<'NODE' >"$destination"
 import fs from "node:fs";
+import { deriveRiskFlags } from "./scripts/upstream-sync/detect.mjs";
 const changedPaths = fs.readFileSync(process.env.CHANGED_PATHS_FILE, "utf8").split(/\r?\n/).filter(Boolean);
-const request = { schema_version: "1.0", request_id: process.env.REQUEST_ID, base_sha: process.env.BASE_SHA, upstream_sha: process.env.UPSTREAM_SHA, upstream_range: process.env.UPSTREAM_RANGE, changed_paths: changedPaths, risk_flags: [], ledger_revision: process.env.LEDGER_REVISION, created_at: process.env.REQUEST_CREATED_AT };
+const request = { schema_version: "1.0", request_id: process.env.REQUEST_ID, base_sha: process.env.BASE_SHA, upstream_sha: process.env.UPSTREAM_SHA, upstream_range: process.env.UPSTREAM_RANGE, changed_paths: changedPaths, risk_flags: deriveRiskFlags(changedPaths), ledger_revision: process.env.LEDGER_REVISION, created_at: process.env.REQUEST_CREATED_AT };
 process.stdout.write(`${JSON.stringify(request, null, 2)}\n`);
 NODE
   rm -f "$changed_file"
