@@ -779,17 +779,23 @@ describe("ChatView mobile scroll owner", () => {
     expect(scrollEl.scrollTop).not.toBe(1_020);
   });
 
-  it("renders partial-history notice outside the virtual scroll container", () => {
+  it("removes partial-history notice while keeping older control", () => {
+    const onLoadOlder = vi.fn();
     const { container } = render(
       <ThemeProvider>
-        <ChatView state={stateWith(3)} toolContext={defaultToolContext} partialHead />
+        <ChatView
+          state={stateWith(3)}
+          toolContext={defaultToolContext}
+          partialHead
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+        />
       </ThemeProvider>,
     );
 
-    const notice = container.querySelector('[data-testid="partial-history-notice"]');
-    expect(notice).not.toBeNull();
-    expect(notice?.textContent).toMatch(/earlier conversation remains available through loading older messages/i);
-    expect(notice?.closest('[data-testid="chat-scroll-container"]')).toBeNull();
+    expect(container.querySelector('[data-testid="partial-history-notice"]')).toBeNull();
+    expect(container.textContent).not.toMatch(/earlier conversation remains available through loading older messages/i);
+    expect(container.querySelector('[data-testid="load-older-button"]')).not.toBeNull();
   });
 
   it("releases a stale older anchor so a later top gesture can request again", async () => {
@@ -829,7 +835,7 @@ describe("ChatView mobile scroll owner", () => {
     expect(onLoadOlder).toHaveBeenCalledTimes(2);
   });
 
-  it("labels a completed older page containing only tool activity", async () => {
+  it("removes completed tool-only feedback while keeping older control", async () => {
     const onLoadOlder = vi.fn();
     const initial = stateWithRange(0, 4);
     const { container, rerender } = render(
@@ -870,10 +876,46 @@ describe("ChatView mobile scroll owner", () => {
     );
 
     await flushRaf();
-    expect(container.querySelector('[data-testid="load-older-feedback"]')?.textContent).toMatch(/tool activity/i);
-    expect(container.querySelector('[data-testid="load-older-feedback"]')?.textContent).not.toMatch(/no older messages remain/i);
+    expect(container.querySelector('[data-testid="load-older-feedback"]')).toBeNull();
+    expect(container.querySelector('[data-testid="load-older-button"]')).not.toBeNull();
   });
 
+  it("removes completed ordinary-page feedback while keeping older control", async () => {
+    const onLoadOlder = vi.fn();
+    const initial = stateWithRange(0, 4);
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="ordinary-page"
+          state={initial}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    fireEvent.click(container.querySelector('[data-testid="load-older-button"]')!);
+    const token = onLoadOlder.mock.calls[0]?.[0] as string;
+    if (!token) throw new Error("TOKEN_MISSING");
+
+    rerender(
+      <ThemeProvider>
+        <ChatView
+          sessionId="ordinary-page"
+          state={stateWithRange(-1, 4)}
+          toolContext={defaultToolContext}
+          hasMoreOlder
+          onLoadOlder={onLoadOlder}
+          completedOlderAnchorToken={token}
+        />
+      </ThemeProvider>,
+    );
+
+    await flushRaf();
+    expect(container.querySelector('[data-testid="load-older-feedback"]')).toBeNull();
+    expect(container.querySelector('[data-testid="load-older-button"]')).not.toBeNull();
+  });
   it("automatically continues tool-only older pages at most three times", async () => {
     const onLoadOlder = vi.fn();
     const { container, rerender } = render(

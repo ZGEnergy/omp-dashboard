@@ -290,7 +290,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, partialHead, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Desktop retains its saved anchor; mobile ownership is explicit below.
   // These refs were accidentally removed by an interrupted migration and are
@@ -322,7 +322,6 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   const olderRequestLatchRef = useRef<string | null>(null);
   const olderContinuationRef = useRef<{ sessionId: string | null; initiated: number; baselineIds: Set<string> } | null>(null);
   const autoContinueAfterRestoreRef = useRef(false);
-  const [olderFeedback, setOlderFeedback] = useState<"messages" | "tools" | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   // Streaming-tail selection preservation (change: preserve-streaming-tail-selection).
@@ -818,7 +817,6 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     }
     olderContinuationRef.current!.initiated += 1;
     olderContinuationRef.current!.baselineIds = new Set(state.messages.map((message) => message.id));
-    if (!continuing) setOlderFeedback(null);
     // The latch is synchronous: a burst of native wheel/scroll events cannot
     // emit a second exclusive older request before the parent rerenders.
     olderRequestLatchRef.current = anchor.token;
@@ -1118,8 +1116,6 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     const baselineIds = continuation?.baselineIds ?? new Set<string>();
     const newMessages = state.messages.filter((message) => !baselineIds.has(message.id));
     const hasConversation = newMessages.some((message) => message.role === "user" || message.role === "assistant");
-    const hasToolActivity = newMessages.some((message) => message.role === "toolResult");
-    setOlderFeedback(hasToolActivity && !hasConversation ? "tools" : "messages");
     autoContinueAfterRestoreRef.current = Boolean(
       hasConversation === false &&
       hasMoreOlder === true &&
@@ -1208,22 +1204,6 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         `scroll-behavior: smooth` here or on an ancestor — smooth would animate
         each synchronous measurement correction and race the next, reintroducing
         the scroll-to-top drift. See change: fix-chat-scroll-to-top-estimate-drift. */}
-      {partialHead && (
-        <div data-testid="partial-history-notice" role="status" className="px-4 py-2 text-xs text-[var(--text-secondary)]">
-          Earlier conversation remains available through loading older messages.
-        </div>
-      )}
-      {olderFeedback && (
-        <div data-testid="load-older-feedback" role="status" className="px-4 py-1 text-[10px] text-[var(--text-tertiary)]">
-          {olderFeedback === "tools"
-            ? hasMoreOlder
-              ? "Loaded older tool activity; earlier conversation remains available through loading older messages."
-              : "Loaded older tool activity; no older messages remain."
-            : hasMoreOlder
-              ? "Loaded older messages; earlier conversation remains available through loading older messages."
-              : "Loaded older messages; no older messages remain."}
-        </div>
-      )}
       {hasMoreOlder && state.messages.length > 0 && (
         <div
           className="flex justify-center py-2 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]"
