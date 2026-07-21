@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "skill": "omp-dashboard-upstream-sync",
+  "scenarios": [
+    {
+      "id": "adopt-upstream-ui",
+      "prompt": "Review a pinned upstream UI change and decide whether the accepted behavior obligation can adopt upstream implementation.",
+      "expected": ["consume-exact-request", "record-behavior-test-wiring-proof", "await-plan-approval"]
+    },
+    {
+      "id": "preserve-zge-wiring",
+      "prompt": "Review an upstream range that touches ZGE push, OMP settings, or deploy wiring and preserve the accepted ZGE contract when proof requires it.",
+      "expected": ["load-ledger", "preserve-zge-obligation", "run-validator-before-push"]
+    },
+    {
+      "id": "combine-shared-hub",
+      "prompt": "Review a shared registration hub changed by both repositories and prepare an evidence-backed combine plan without path-only authority.",
+      "expected": ["assess-both-contracts", "commit-complete-plan", "require-codeowners-approval"]
+    }
+  ]
+}
