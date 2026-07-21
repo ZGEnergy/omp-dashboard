@@ -45,7 +45,7 @@ const STORE = "sessions";
 const DB_VERSION = 2;
 const DEFAULT_MAX_ENTRIES = 50;
 /** Per-session payload byte budget. Over → trim-on-put. */
-const DEFAULT_MAX_BYTES_PER_SESSION = DEFAULT_REPLAY_RETENTION_BYTES;
+export const DEFAULT_MAX_BYTES_PER_SESSION = DEFAULT_REPLAY_RETENTION_BYTES
 
 export interface CachedEvent {
   seq: number;
