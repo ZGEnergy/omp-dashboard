@@ -132,6 +132,26 @@ describe("turnFileDeltas", () => {
     ];
     expect(turnFileDeltas(messages).size).toBe(0);
   });
+  it("excludes xd:// writes while retaining real file deltas", () => {
+    const messages: ChatMessage[] = [
+      user("t", 0),
+      tool("Write", { path: "xd://mcp__context_mode_ctx_execute", content: "device\n" }),
+      tool("Write", { path: "src/created.ts", content: "a\n" }),
+    ];
+    expect(turnFileDeltas(messages).get(0)).toEqual(new Map([["src/created.ts", { additions: 1, deletions: 0 }]]));
+    expect(buildTurnSummaries(messages)[0].files).toEqual([
+      { path: "src/created.ts", additions: 1, deletions: 0, status: "added" },
+    ]);
+  });
+
+  it("does not create a turn entry for xd://-only writes", () => {
+    const messages: ChatMessage[] = [
+      user("t", 0),
+      tool("Write", { path: "xd://mcp__context_mode_ctx_execute", content: "device\n" }),
+    ];
+    expect(turnFileDeltas(messages).size).toBe(0);
+    expect(buildTurnSummaries(messages)).toEqual([]);
+  });
 });
 
 describe("buildTurnSummaries", () => {
@@ -179,5 +199,14 @@ describe("buildTurnSummaries", () => {
     expect(s.files.map((f) => f.path)).toEqual(["a.ts", "z.ts"]);
     expect(s.files.find((f) => f.path === "a.ts")?.status).toBe("added");
     expect(s.files.find((f) => f.path === "z.ts")?.status).toBe("modified");
+  });
+
+  it("keeps filesystem paths that merely begin with xd", () => {
+    const messages: ChatMessage[] = [
+      user("t", 0),
+      tool("Write", { path: "xd-notes.ts", content: "a\n" }),
+    ];
+    expect(buildTurnSummaries(messages)[0].files[0].path).toBe("xd-notes.ts");
+    expect(turnFileDeltas(messages).get(0)?.has("xd-notes.ts")).toBe(true);
   });
 });

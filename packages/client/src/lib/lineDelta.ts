@@ -113,7 +113,8 @@ function isEditOrWrite(toolName: string | undefined): boolean {
 
 /** Rel-path of an Edit/Write tool event, or `undefined`. */
 function toolPath(msg: ChatMessage): string | undefined {
-  return typeof msg.args?.path === "string" ? (msg.args.path as string) : undefined;
+  const path = typeof msg.args?.path === "string" ? (msg.args.path as string) : undefined;
+  return path?.startsWith("xd://") ? undefined : path;
 }
 
 /**
