@@ -302,6 +302,7 @@ describe("upstream sync executor", () => {
       const identityBranch = `${requestedBranch}-${plan.plan_hash.slice(0, 12)}`;
       const execute = () => run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json", "--branch", requestedBranch], { PATH: `${bin}:${process.env.PATH}`, SYNC_TEST_LOG: log, SYNC_RESULT_PATH: "upstream-sync/candidate.json" });
       git(fixture.root, "branch", requestedBranch, fixture.baseSha);
+          git(fixture.root, "branch", identityBranch, fixture.baseSha);
       execute();
       execute();
       const output = readFileSync(log, "utf8");
@@ -310,7 +311,8 @@ describe("upstream sync executor", () => {
       expect(output).toMatch(/--force-with-lease/);
       expect(output).toMatch(/gh pr create/);
       expect(output).not.toMatch(/--draft|--label/);
-      expect(output).toMatch(fixture.baseSha);
+      expect(output).toContain(`--force-with-lease=refs/heads/${identityBranch}:${fixture.baseSha}`);
+          expect(output).toMatch(fixture.baseSha);
       expect(output).toMatch(fixture.upstreamSha);
       expect(readFileSync(path.join(fixture.root, "upstream-sync/candidate.json"), "utf8")).toMatch(fixture.upstreamSha);
       rmSync(fixture.root, { recursive: true, force: true });

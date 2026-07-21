@@ -256,10 +256,13 @@ cmd_verify() {
 }
 
 preflight_publish() {
-  local branch="$1"
+  local branch="$1" remote_tip
   command -v gh >/dev/null 2>&1 || die "gh CLI is required for publication"
   gh auth status >/dev/null 2>&1 || die "gh authentication is required for publication"
-  git -C "$REPO_ROOT" push --dry-run --force-with-lease "$ORIGIN_REMOTE" "HEAD:refs/heads/$branch" >/dev/null 2>&1 || die "origin push access is required for publication"
+  remote_tip="$(git -C "$REPO_ROOT" ls-remote --heads "$ORIGIN_REMOTE" "refs/heads/$branch" | awk '{print $1}')" || die "cannot inspect remote audited branch"
+  PUSH_LEASE_ARG="--force-with-lease"
+  [[ -z "$remote_tip" ]] || PUSH_LEASE_ARG="--force-with-lease=refs/heads/$branch:$remote_tip"
+  git -C "$REPO_ROOT" push --dry-run "$PUSH_LEASE_ARG" "$ORIGIN_REMOTE" "HEAD:refs/heads/$branch" >/dev/null 2>&1 || die "origin push or branch lease check failed"
 }
 
 cmd_execute() {
@@ -294,7 +297,7 @@ cmd_execute() {
   local commit_sha
   commit_sha="$(git -C "$tree" rev-parse HEAD)"
   [[ "$commit_sha" != "$BASE_SHA" && "$commit_sha" != "$UPSTREAM_SHA" ]] || die "audited branch has no merge commit"
-  git -C "$tree" push --force-with-lease "$ORIGIN_REMOTE" "HEAD:refs/heads/$branch"
+  git -C "$tree" push "$PUSH_LEASE_ARG" "$ORIGIN_REMOTE" "HEAD:refs/heads/$branch"
   local body_file pr_output existing
   body_file="$holder/pr-body.md"
   render_body "$body_file" "$branch" "$commit_sha"
