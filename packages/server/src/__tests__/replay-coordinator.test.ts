@@ -77,12 +77,12 @@ describe("replay coordinator", () => {
     expect(aReplay).toHaveLength(2);
     expect(aReplay.filter((frame: any) => frame.isLast)).toHaveLength(1);
     expect(aReplay.every((frame: any) => frame.requestId === "a")).toBe(true);
-    expect(aReplay.at(-1)).toEqual({ type: "event_replay", sessionId: "s", requestId: "a", sourceGeneration: generation, replayKind: "cold", events: [], isLast: true, windowMinSeq: 1, windowMaxSeq: 2, retainedMinSeq: 1, hasMoreOlder: false, partialHead: true, historyTruncated: false });
+    expect(aReplay.at(-1)).toEqual({ type: "event_replay", sessionId: "s", requestId: "a", sourceGeneration: generation, replayKind: "cold", events: [], isLast: true, windowMinSeq: 1, windowMaxSeq: 2, retainedMinSeq: 1, hasMoreOlder: false, partialHead: false, historyTruncated: false });
     expect(bReplay).toHaveLength(2);
     expect(bReplay[0].isLast).toBe(false);
     expect(bReplay.every((frame: any) => frame.requestId === "b")).toBe(true);
     expect(bReplay.flatMap((frame: any) => frame.events.map((entry: any) => entry.event.data.label))).toEqual(["one", "two"]);
-    expect(bReplay.at(-1)).toEqual({ type: "event_replay", sessionId: "s", requestId: "b", sourceGeneration: generation, replayKind: "older", events: [], isLast: true, windowMinSeq: 1, windowMaxSeq: 2, retainedMinSeq: 1, hasMoreOlder: false, partialHead: true, historyTruncated: false });
+    expect(bReplay.at(-1)).toEqual({ type: "event_replay", sessionId: "s", requestId: "b", sourceGeneration: generation, replayKind: "older", events: [], isLast: true, windowMinSeq: 1, windowMaxSeq: 2, retainedMinSeq: 1, hasMoreOlder: false, partialHead: false, historyTruncated: false });
     expect(wsA.frames).toHaveLength(2);
     expect(wsB.frames).toHaveLength(2);
   });
