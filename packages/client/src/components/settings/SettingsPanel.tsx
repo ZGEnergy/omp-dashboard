@@ -1146,6 +1146,7 @@ export function SettingsPanel({ availableModels, onMessage, onBack, selectedCwd 
                   </div>
                 </Section>
                 <SettingsSectionSlot tab="sessions" />
+                <SettingsSectionSlot tab="omp" />
               </>
             )}
 
