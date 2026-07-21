@@ -44,7 +44,7 @@ export function deriveRiskFlags(changedPaths, explicitFlags = []) {
   return Object.freeze([...flags].sort());
 }
 
-export function buildSyncRequest({ baseSha, upstreamSha, range, changedPaths, riskFlags }) {
+export function buildSyncRequest({ baseSha, upstreamSha, range, changedPaths, riskFlags, ledgerRevision }) {
   assertSha(baseSha, "baseSha");
   assertSha(upstreamSha, "upstreamSha");
   if (baseSha === upstreamSha) throw new TypeError("baseSha and upstreamSha must differ");
@@ -52,6 +52,7 @@ export function buildSyncRequest({ baseSha, upstreamSha, range, changedPaths, ri
   if (range !== `${baseSha}..${upstreamSha}`) throw new TypeError("range must exactly equal baseSha..upstreamSha");
   assertStringArray(changedPaths, "changedPaths");
   assertStringArray(riskFlags, "riskFlags");
+  assertString(ledgerRevision, "ledgerRevision");
   return freezeRequest({
     schema_version: "1.0",
     request_id: `sync-${baseSha.slice(0, 12)}-${upstreamSha.slice(0, 12)}`,
@@ -60,6 +61,7 @@ export function buildSyncRequest({ baseSha, upstreamSha, range, changedPaths, ri
     upstream_range: range,
     changed_paths: [...changedPaths],
     risk_flags: [...riskFlags],
+    ledger_revision: ledgerRevision,
     created_at: new Date().toISOString(),
   });
 }

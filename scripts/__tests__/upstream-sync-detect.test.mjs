@@ -16,6 +16,7 @@ function input(overrides = {}) {
     range: RANGE,
     changedPaths: ["packages/client/src/view.tsx"],
     riskFlags: [],
+    ledgerRevision: "ledger-test-1",
     ...overrides,
   };
 }
@@ -35,7 +36,8 @@ describe("buildSyncRequest", () => {
       changed_paths: [".github/workflows/upstream-sync.yml", "package-lock.json"],
       risk_flags: ["high-risk:workflow", "high-risk:dependency"],
     }));
-    expect(request.request_id).toBe(`sync-${BASE_SHA.slice(0, 12)}-${UPSTREAM_SHA.slice(0, 12)}`);
+    expect(request.ledger_revision).toBe("ledger-test-1");
+        expect(request.request_id).toBe(`sync-${BASE_SHA.slice(0, 12)}-${UPSTREAM_SHA.slice(0, 12)}`);
     expect(Number.isNaN(Date.parse(request.created_at))).toBe(false);
   });
 

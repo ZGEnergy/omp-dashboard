@@ -59,12 +59,14 @@ jobs:
           import { buildSyncRequest, deriveRiskFlags } from "./scripts/upstream-sync/detect.mjs";
           const changedPaths = fs.readFileSync("/tmp/upstream-sync-changed-paths").toString().split("\0").filter(Boolean);
           const riskFlags = deriveRiskFlags(changedPaths);
+          const ledgerRevision = JSON.parse(fs.readFileSync("upstream-sync/ledger/obligations.json", "utf8")).ledger_revision;
           const request = buildSyncRequest({
             baseSha: process.env.BASE_SHA,
             upstreamSha: process.env.UPSTREAM_SHA,
             range: process.env.UPSTREAM_RANGE,
             changedPaths,
             riskFlags,
+            ledgerRevision,
           });
           process.stdout.write(`${JSON.stringify(request, null, 2)}\n`);
           NODE
