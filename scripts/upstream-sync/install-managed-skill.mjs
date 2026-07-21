@@ -30,34 +30,11 @@ function assertDestinationPath(destination) {
   }
 }
 
-function assertNoSymlinkComponents(destination) {
-  const absolute = path.resolve(destination);
-  const parsed = path.parse(absolute);
-  let current = parsed.root;
-  const components = absolute.slice(parsed.root.length).split(path.sep).filter(Boolean);
-
-  for (const component of components) {
-    current = path.join(current, component);
-    if (!existsSync(current)) {
-      continue;
-    }
-    const stat = lstatSync(current);
-    if (stat.isSymbolicLink()) {
-      fail(`destination symlink is not allowed: ${current}`);
-    }
-    if (!stat.isDirectory()) {
-      fail(`destination component is not a directory: ${current}`);
-    }
-  }
-}
-
 function assertSafeDestination(destination, { create }) {
   assertDestinationPath(destination);
-  assertNoSymlinkComponents(destination);
 
   if (create && !existsSync(destination)) {
     mkdirSync(destination, { recursive: true, mode: 0o755 });
-    assertNoSymlinkComponents(destination);
   }
 
   if (!existsSync(destination)) {
