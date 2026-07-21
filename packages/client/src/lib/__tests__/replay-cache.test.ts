@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { IDBFactory } from "fake-indexeddb";
-import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import {
   DEFAULT_MAX_REPLAY_TEXT_BYTES,
   REPLAY_BYTE_TRUNCATION_MARKER,
 } from "@blackbelt-technology/pi-dashboard-shared/prepare-event-for-replay.js";
+import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { IDBFactory } from "fake-indexeddb";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
+  type CachedEvent,
   createReplayCache,
   REPLAY_CACHE_SCHEMA_VERSION,
-  type CachedEvent,
 } from "../replay-cache.js";
 
 function evt(seq: number): CachedEvent {
@@ -99,6 +99,24 @@ describe("replay-cache", () => {
     expect(hit!.maxSeq).toBe(3);
     // Guarantee: persisted array serialization never exceeds the byte budget.
     expect(JSON.stringify(hit!.payload).length).toBeLessThanOrEqual(budget);
+  });
+
+  it("retains a session cache payload up to the 10 MiB default cap", async () => {
+    const cache = createReplayCache({ factory });
+    const fiveMiB = "x".repeat(5 * 1024 * 1024);
+    const payload: CachedEvent[] = [{
+      seq: 1,
+      event: {
+        sessionId: "s",
+        eventType: "tool_execution_end",
+        timestamp: 1,
+        data: { toolCallId: "tc1", result: fiveMiB },
+      } as unknown as DashboardEvent,
+    }];
+
+    await cache.put("large-session", { maxSeq: 1, payload });
+
+    expect(await cache.get("large-session")).not.toBeNull();
   });
 
   it("evicts the least-recently-accessed entry past the cap", async () => {

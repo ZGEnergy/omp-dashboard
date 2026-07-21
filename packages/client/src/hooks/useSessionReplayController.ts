@@ -9,6 +9,7 @@ import {
   type LedgerEvent,
   type ReplayRequest,
   SessionReplayLedger,
+  type SessionReplayLedgerOptions,
 } from "../lib/session-replay-ledger.js";
 import {
   buildLoadOlderSubscribe,
@@ -31,6 +32,8 @@ export interface ReplayControllerEffects {
   apply(sessionId: string, events: readonly LedgerEvent[]): void;
   /** Authoritative server window metadata for every admitted replay frame. */
   window?(sessionId: string, metadata: ReplayWindowMetadata): void;
+  /** The ledger dropped its head to keep the hot transcript within budget. */
+  trimmed?(sessionId: string, minSeq: number): void;
   /** Older replay is rebuilt atomically from the same canonical sequence. */
   replace(
     sessionId: string,
@@ -44,6 +47,8 @@ export interface ReplayControllerEffects {
   assetUnavailable?(sessionId: string, hash: string, reason: string): void;
   retry?(sessionId: string, kind: ReplayRequest["kind"]): void;
 }
+
+export interface SessionReplayControllerOptions extends Pick<SessionReplayLedgerOptions, "maxRetainedBytes"> {}
 
 interface PendingRequest extends ReplayRequest {
   /** Local replay authority increments whenever a request is superseded. */
@@ -79,12 +84,15 @@ export class SessionReplayController {
   private readonly completedAssetHashes = new Map<string, Map<string, Set<string>>>();
   private readonly replayGenerations = new Map<string, number>();
 
-  constructor(private readonly effects: ReplayControllerEffects) {}
+  constructor(
+    private readonly effects: ReplayControllerEffects,
+    private readonly options: SessionReplayControllerOptions = {},
+  ) {}
 
   ledger(sessionId: string): SessionReplayLedger {
     let ledger = this.ledgers.get(sessionId);
     if (!ledger) {
-      ledger = new SessionReplayLedger(sessionId);
+      ledger = new SessionReplayLedger(sessionId, this.options);
       this.ledgers.set(sessionId, ledger);
     }
     return ledger;
@@ -155,7 +163,7 @@ export class SessionReplayController {
       this.begin(message.sessionId, "cold", ledger.sourceGeneration ?? "");
       return true;
     }
-    if (result.accepted.length) this.effects.apply(message.sessionId, result.accepted);
+    if (result.accepted.length) this.publishAdmitted(message.sessionId, result);
     if (result.repair) this.begin(message.sessionId, "delta", ledger.sourceGeneration!);
     return true;
   }
@@ -191,17 +199,30 @@ export class SessionReplayController {
       partialHead: typeof message.partialHead === "boolean" ? message.partialHead : null,
       kind: message.replayKind,
     });
-    if (message.replayKind !== "older" && result.accepted.length) this.effects.apply(message.sessionId, result.accepted);
+    if (message.replayKind !== "older" && result.accepted.length) this.publishAdmitted(message.sessionId, result);
     if (message.isLast) {
       this.clearPending(message.sessionId);
       this.effects.loading(message.sessionId, false);
-      if (result.rebuild) this.effects.replace(
-        message.sessionId,
-        ledger.events,
-        ledger.takeOlderCompletion(),
-      );
+      if (result.rebuild) {
+        if (result.evictedHead) this.effects.trimmed?.(message.sessionId, ledger.minSeq);
+        this.effects.replace(
+          message.sessionId,
+          ledger.events,
+          ledger.takeOlderCompletion(),
+        );
+      }
     }
     return true;
+  }
+
+  private publishAdmitted(sessionId: string, result: { accepted: readonly LedgerEvent[]; evictedHead: boolean }): void {
+    if (result.evictedHead) {
+      const ledger = this.ledger(sessionId);
+      this.effects.trimmed?.(sessionId, ledger.minSeq);
+      this.effects.replace(sessionId, ledger.events, null);
+      return;
+    }
+    this.effects.apply(sessionId, result.accepted);
   }
 
   private handleReset(message: SessionStateResetMessage): boolean {
