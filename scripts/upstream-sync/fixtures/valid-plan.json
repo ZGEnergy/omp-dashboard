@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "plan_id": "plan-2026-07-21-0001",
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "upstream_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ledger_revision": "ledger-2026-07-21",
+  "decisions": [
+    {
+      "obligation_id": "zge-push-vapid",
+      "disposition": "preserve-zge",
+      "behavior_proof": ["packages/server/src/push-vapid.ts"],
+      "test_proof": ["packages/server/src/__tests__/push-vapid.test.ts"],
+      "wiring_proof": ["packages/server/src/index.ts"],
+      "verification": {
+        "commands": ["npm test -- packages/server/src/__tests__/push-vapid.test.ts"],
+        "required_checks": ["push-vapid-preserved"]
+      },
+      "decision_status": "approved"
+    },
+    {
+      "obligation_id": "omp-settings-agent-paths",
+      "disposition": "combine",
+      "behavior_proof": ["packages/server/src/config.ts"],
+      "test_proof": ["packages/server/src/__tests__/config.test.ts"],
+      "wiring_proof": ["packages/server/src/cli.ts"],
+      "verification": {
+        "commands": ["npm test -- packages/server/src/__tests__/config.test.ts"],
+        "required_checks": ["omp-settings-wired"]
+      },
+      "decision_status": "approved"
+    },
+    {
+      "obligation_id": "deploy-installer",
+      "disposition": "adopt-upstream",
+      "behavior_proof": ["scripts/install-managed-skill.sh"],
+      "test_proof": ["scripts/__tests__/install-managed-skill.test.mjs"],
+      "wiring_proof": [".github/workflows/standalone-install-smoke.yml"],
+      "verification": {
+        "commands": ["npm test -- scripts/__tests__/install-managed-skill.test.mjs"],
+        "required_checks": ["standalone-install"]
+      },
+      "decision_status": "approved"
+    },
+    {
+      "obligation_id": "sync-tooling",
+      "disposition": "unaffected",
+      "behavior_proof": ["scripts/upstream-sync/contracts.mjs"],
+      "test_proof": ["scripts/__tests__/upstream-sync-contracts.test.mjs"],
+      "wiring_proof": [".pi/skills/omp-dashboard-upstream-sync/SKILL.md"],
+      "verification": {
+        "commands": ["npm test -- scripts/__tests__/upstream-sync-contracts.test.mjs"],
+        "required_checks": ["sync-contracts"]
+      },
+      "decision_status": "approved"
+    }
+  ],
+  "plan_commit": "cccccccccccccccccccccccccccccccccccccccc",
+  "plan_hash": "ec61eece32027bf78323cb2721403df623345773074b8df0a0897cbb2c538ead",
+  "verifier_version": "upstream-sync-validator@1.0",
+  "verifier_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "created_at": "2026-07-21T12:05:00.000Z"
+}

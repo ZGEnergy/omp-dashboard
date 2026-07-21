@@ -42,3 +42,11 @@ Files in this directory. One row per file. Non-source area (migrated from `docs/
 ## Upstream sync installer ownership
 
 `scripts/install-managed-skill.sh` is the only managed-copy writer. It invokes the helper in `scripts/upstream-sync/install-managed-skill.mjs` with fixed canonical source and managed destination paths, accepts only `--check` and `--install`, and copies only `.pi/skills/omp-dashboard-upstream-sync/SKILL.md`. The helper compares bytes for check mode and writes a verified temporary file followed by atomic rename and post-install byte comparison for install mode. It rejects destination traversal and symlink escapes. Keep upstream text escaped and untrusted, and never treat the managed runtime copy as canonical.
+
+## Upstream sync contracts
+
+| `upstream-sync/contracts.mjs` | Deterministic schema validators, canonical JSON hashing, and proof-path confinement for upstream sync artifacts. |
+| `upstream-sync/fixtures/valid-ledger.json` | Positive ledger contract fixture. |
+| `upstream-sync/fixtures/valid-request.json` | Positive immutable request contract fixture. |
+| `upstream-sync/fixtures/valid-plan.json` | Positive assessment plan contract fixture with bound canonical hash. |
+| `__tests__/upstream-sync-contracts.test.mjs` | Focused contract, hash, disposition, and proof-path security tests. |
