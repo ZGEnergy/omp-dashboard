@@ -91,11 +91,13 @@ Behavior ledger determines disposition and ownership.
 
 ## Trust boundaries
 
-Detector Action uses least-privilege read-only permissions.
+Detector Action uses `contents: read` and `issues: write`.
+
+Detector Action lacks branch and PR write permission.
 
 Detector Action does not use `pull_request_target`.
 
-Detector remains read-only.
+Detector remains read-only for integration behavior.
 
 Executor runs through `workflow_dispatch` or protected environment.
 
