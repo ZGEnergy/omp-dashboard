@@ -96,9 +96,7 @@ export interface SessionAddedMessage {
 export interface SessionUpdatedMessage {
   type: "session_updated";
   sessionId: string;
-  updates: Partial<Omit<DashboardSession, "thinkingLevel">> & {
-    thinkingLevel?: string | null;
-  };
+  updates: Partial<DashboardSession>;
 }
 
 export interface SessionRemovedMessage {
@@ -113,24 +111,11 @@ export interface EventMessage {
   event: DashboardEvent;
 }
 
-export type ReplayKind = "cold" | "delta" | "older";
-export type ReplayErrorCode = "unavailable" | "malformed_source" | "delivery_failed";
-
 export interface EventReplayMessage {
   type: "event_replay";
   sessionId: string;
-  requestId?: string;
-  sourceGeneration: string;
-  replayKind: ReplayKind;
   events: Array<{ seq: number; event: DashboardEvent }>;
   isLast: boolean;
-  windowMinSeq: number | null;
-  windowMaxSeq: number | null;
-  retainedMinSeq: number | null;
-  hasMoreOlder: boolean;
-  partialHead: boolean;
-  historyTruncated: boolean;
-  errorCode?: ReplayErrorCode;
 }
 
 export interface BrowserCommandsListMessage {
@@ -394,8 +379,6 @@ export interface SessionsReorderedMessage {
  */
 export interface SessionsSnapshotMessage {
   type: "sessions_snapshot";
-  /** Opaque identity generated once per server process. */
-  serverEpoch: string;
   /** Every session known to the server at construction time, alive AND ended. */
   sessions: DashboardSession[];
   /** cwd → ordered session ids. Only non-empty arrays are included. */
@@ -455,20 +438,10 @@ export interface TerminalUpdatedMessage {
   updates: Partial<TerminalSession>;
 }
 
-export type SessionStateResetReason =
-  | "source_replaced"
-  | "retention_gap"
-  | "source_generation_mismatch"
-  | "malformed_source"
-  | "manual_reset";
-
-/** Tells the browser to replace accumulated state for one authoritative generation. */
+/** Tells the browser to reset accumulated state for a session (bridge reconnected). */
 export interface SessionStateResetMessage {
   type: "session_state_reset";
   sessionId: string;
-  requestId?: string;
-  sourceGeneration: string;
-  reason: SessionStateResetReason;
 }
 
 // ── PromptBus protocol (Server → Browser) ───────────────────────────
@@ -732,27 +705,6 @@ export interface BrowserAssetRegisterMessage {
   data: string;
 }
 
-export interface AssetReplayChunkMessage {
-  type: "asset_replay_chunk";
-  sessionId: string;
-  requestId: string;
-  sourceGeneration: string;
-  hash: string;
-  mimeType: string;
-  chunkIndex: number;
-  chunkCount: number;
-  data: string;
-}
-
-export interface AssetUnavailableMessage {
-  type: "asset_unavailable";
-  sessionId: string;
-  requestId: string;
-  sourceGeneration: string;
-  hash: string;
-  reason: "missing" | "budget_exceeded" | "malformed";
-}
-
 /**
  * Server → browser: a `plugin_action` arrived for a `pluginId` with no
  * registered handler. Surfaced to the sender so the action is never silently
@@ -900,14 +852,11 @@ export type ServerToBrowserMessage =
   | BrowserUiDataListMessage
   | BrowserExtUiDecoratorMessage
   | BrowserAssetRegisterMessage
-  | AssetReplayChunkMessage
-  | AssetUnavailableMessage
   | PluginIntentsMessage
   | PluginEventBroadcast
   | DisplayPrefsUpdatedMessage
   | QueueUpdateToBrowserMessage
   | PromptReceivedToBrowserMessage
-  | ViewMessagesUpdateMessage
   | CanvasIntentMessage
   | CanvasServerChipMessage
   | FileChangedMessage;
@@ -971,22 +920,7 @@ export interface FileChangedMessage {
 export interface SubscribeMessage {
   type: "subscribe";
   sessionId: string;
-  requestId?: string;
-  knownSourceGeneration?: string;
   lastSeq?: number;
-  /**
-   * `"tail"` = newest events under a byte budget (cold open).
-   * `"full"` or omitted = legacy full/delta behavior.
-   * See change: session-tail-rehydrate.
-   */
-  mode?: "full" | "tail";
-  /** Soft budget hint for tail/older pages; server clamps. */
-  windowBytes?: number;
-  /**
-   * Load-older: exclusive upper bound — return newest events with seq < fromSeq.
-   * See change: session-tail-rehydrate.
-   */
-  fromSeq?: number;
 }
 
 export interface UnsubscribeMessage {
@@ -1077,25 +1011,10 @@ export interface PromptReceivedToBrowserMessage {
   fresh: boolean;
 }
 
-/**
- * Server → browser: full snapshot of a session's `/view` preview rows.
- * Sent on subscribe (as a snapshot) and on every change (append). Each
- * entry is a minimal ChatMessage shape with `view` set; the client merges
- * them into its rendered chat by timestamp. View messages live in a
- * separate server-side store, NEVER in pi's events.jsonl — the agent does
- * not observe them. See change: render-file-previews.
- */
-export interface ViewMessagesUpdateMessage {
-  type: "view_messages_update";
-  sessionId: string;
-  viewMessages: Array<{
-    id: string;
-    role: "user";
-    content: "";
-    timestamp: number;
-    view: import("./types.js").ViewTarget;
-  }>;
-}
+// The `/view` inline surface is retired (change:
+// open-view-command-in-editor-pane): `/view` opens the editor pane, so the
+// server no longer emits `view_messages_update` nor accepts
+// `inject_view_message`. Both message types removed.
 
 export interface RequestCommandsToBrowserMessage {
   type: "request_commands";
@@ -1610,54 +1529,8 @@ export interface UiManagementBrowserMessage {
   params?: Record<string, unknown>;
 }
 
-/**
- * Browser → server: inject a `/view` preview row into the session. The
- * server persists it in a per-session view-messages store (separate from
- * pi's events.jsonl so the agent never observes it) and broadcasts the
- * updated list via `view_messages_update`.
- * See change: render-file-previews.
- */
-export interface InjectViewMessageBrowserMessage {
-  type: "inject_view_message";
-  sessionId: string;
-  target: import("./types.js").ViewTarget;
-}
-
-export type ReplayDiagnosticCode =
-  | "cache_timeout"
-  | "cache_poison"
-  | "reset_domination"
-  | "sequence_gap"
-  | "sequence_conflict"
-  | "gap_overflow"
-  | "terminal_timeout"
-  | "wrong_generation"
-  | "reducer_failure"
-  | "preparation_failure"
-  | "sender_rejected"
-  | "socket_closed"
-  | "anchor_timeout"
-  | "stale_callback";
-
-export interface ReplayDiagnosticMessage {
-  type: "replay_diagnostic";
-  code: ReplayDiagnosticCode;
-  sessionId: string;
-  requestId?: string;
-  sourceGeneration?: string;
-  connectionEpoch: number;
-  replayGeneration: number;
-  contiguousMinSeq: number | null;
-  contiguousMaxSeq: number | null;
-  eventCount: number;
-  byteCount: number;
-  durationMs: number;
-  scrollOwner?: string;
-}
-
 export type BrowserToServerMessage =
   | SubscribeMessage
-  | ReplayDiagnosticMessage
   | UnsubscribeMessage
   | BrowserExtensionUiResponseMessage
   | SendPromptToBrowserMessage
@@ -1728,7 +1601,6 @@ export type BrowserToServerMessage =
   | SetSessionDisplayPrefsBrowserMessage
   | SetSessionProcessDrawerBrowserMessage
   | SetSessionTagsBrowserMessage
-  | InjectViewMessageBrowserMessage
   | RecoveryDismissMessage
   | SubagentResyncRequestBrowserMessage
   | WatchFilesBrowserMessage;

@@ -4,53 +4,53 @@ import { Icon } from "@mdi/react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Redirect, Route, Switch, useLocation, useRoute, useSearchParams } from "wouter";
-import { ArchiveBrowserView } from "./components/ArchiveBrowserView.js";
-import { CanvasDriver } from "./components/CanvasDriver.js";
-import { ChatView, type ChatViewHandle } from "./components/ChatView.js";
-import { ChatViewMenu } from "./components/ChatViewMenu.js";
-import { CommandInput } from "./components/CommandInput.js";
-import { CommitDialogProvider } from "./components/CommitDialog.js";
-import { ComposerSessionActions } from "./components/ComposerSessionActions.js";
-import { ConnectionStatusBanner } from "./components/ConnectionStatusBanner.js";
-import { DirectoryHomeView } from "./components/DirectoryHomeView.js";
+import { ArchiveBrowserView } from "./components/openspec/ArchiveBrowserView.js";
+import { CanvasDriver } from "./components/canvas/CanvasDriver.js";
+import { ChatView, type ChatViewHandle } from "./components/chat/ChatView.js";
+import { ChatViewMenu } from "./components/chat/ChatViewMenu.js";
+import { CommandInput } from "./components/chat/CommandInput.js";
+import { CommitDialogProvider } from "./components/worktree/CommitDialog.js";
+import { ComposerSessionActions } from "./components/session/ComposerSessionActions.js";
+import { ConnectionStatusBanner } from "./components/connectivity/ConnectionStatusBanner.js";
+import { DirectoryHomeView } from "./components/folder/DirectoryHomeView.js";
 import { DirectorySettings, type DirectorySettingsPage } from "./components/DirectorySettings/DirectorySettings.js";
-import { FileDiffView } from "./components/FileDiffView.js";
-import { FolderEditorView } from "./components/FolderEditorView.js";
-import { InstallBanner } from "./components/InstallBanner.js";
-import { LandingPage } from "./components/LandingPage.js";
+import { FolderEditorView } from "./components/folder/FolderEditorView.js";
+import { FileDiffView } from "./components/diff/FileDiffView.js";
+import { InstallBanner } from "./components/packages/InstallBanner.js";
+import { LandingPage } from "./components/shell/LandingPage.js";
 // Flow components are no longer imported by the shell. They render
 // exclusively via plugin slot claims (content-header-sticky,
 // content-view, content-inline-footer, command-route). See change:
 // pluginize-flows-via-registry.
-import { MarkdownPreviewView } from "./components/MarkdownPreviewView.js";
-import { MissingRequiredBanner } from "./components/MissingRequiredBanner.js";
-import { HamburgerButton, MobileOverlay } from "./components/MobileOverlay.js";
-import { MobileShell } from "./components/MobileShell.js";
-import { OpenSpecBoardView } from "./components/OpenSpecBoardView.js";
-import { PiUpdateBadge } from "./components/PiUpdateBadge.js";
-import { PluginStalenessBanner } from "./components/PluginStalenessBanner.js";
-import { PreviewOverlayView } from "./components/PreviewOverlayView.js";
-import { QueuePanel } from "./components/QueuePanel.js";
-import { RecoveryOfferHost } from "./components/RecoveryOfferHost.js";
-import { ResizableSidebar } from "./components/ResizableSidebar.js";
-import { ServerSelector } from "./components/ServerSelector.js";
-import { SessionBanner } from "./components/SessionBanner.js";
-import { SessionDiffProvider } from "./components/SessionDiffContext.js";
-import { SessionHeader } from "./components/SessionHeader.js";
-import { SessionList } from "./components/SessionList.js";
-import { SessionSplitView, SplitRouteSync } from "./components/SessionSplitView.js";
-import { SettingsPanel } from "./components/SettingsPanel.js";
-import { SpawnErrorToastHost } from "./components/SpawnErrorToastHost.js";
-import { SpecsBrowserView } from "./components/SpecsBrowserView.js";
-import { SplitWorkspaceProvider } from "./components/SplitWorkspaceContext.js";
-import { StatusBar } from "./components/StatusBar.js";
-import { Toast, useToast } from "./components/Toast.js";
-import { TokenStatsBar } from "./components/TokenStatsBar.js";
+import { MarkdownPreviewView } from "./components/preview/MarkdownPreviewView.js";
+import { MissingRequiredBanner } from "./components/session/MissingRequiredBanner.js";
+import { HamburgerButton, MobileOverlay } from "./components/shell/MobileOverlay.js";
+import { MobileShell } from "./components/shell/MobileShell.js";
+import { OpenSpecArtifactDialog } from "./components/openspec/OpenSpecArtifactDialog.js";
+import { OpenSpecBoardView } from "./components/openspec/OpenSpecBoardView.js";
+import { PiUpdateBadge } from "./components/packages/PiUpdateBadge.js";
+import { PluginStalenessBanner } from "./components/packages/PluginStalenessBanner.js";
+import { PreviewOverlayView } from "./components/preview/PreviewOverlayView.js";
+import { QueuePanel } from "./components/session/QueuePanel.js";
+import { RecoveryOfferHost } from "./components/session/RecoveryOfferHost.js";
+import { ResizableSidebar } from "./components/shell/ResizableSidebar.js";
+import { ServerSelector } from "./components/connectivity/ServerSelector.js";
+import { SessionBanner } from "./components/session/SessionBanner.js";
+import { SessionDiffProvider } from "./components/diff/SessionDiffContext.js";
+import { SessionHeader } from "./components/session/SessionHeader.js";
+import { SessionList } from "./components/session/SessionList.js";
+import { SessionSplitView, SplitRouteSync } from "./components/split/SessionSplitView.js";
+import { SettingsPanel } from "./components/settings/SettingsPanel.js";
+import { SpawnErrorToastHost } from "./components/session/SpawnErrorToastHost.js";
+import { SpecsBrowserView } from "./components/openspec/SpecsBrowserView.js";
+import { SplitWorkspaceProvider } from "./components/split/SplitWorkspaceContext.js";
+import { StatusBar } from "./components/shell/StatusBar.js";
+import { Toast, useToast } from "./components/primitives/Toast.js";
+import { TokenStatsBar } from "./components/session/TokenStatsBar.js";
 import { allTagsInUse } from "./components/tags/all-tags.js";
-import { WorktreeInitStack } from "./components/WorktreeInitStack.js";
-import { WorktreeSpawnDialog } from "./components/WorktreeSpawnDialog.js";
-import { ZrokInstallGuide } from "./components/ZrokInstallGuide.js";
-
+import { WorktreeInitStack } from "./components/worktree/WorktreeInitStack.js";
+import { WorktreeSpawnDialog } from "./components/worktree/WorktreeSpawnDialog.js";
+import { ZrokInstallGuide } from "./components/packages/ZrokInstallGuide.js";
 import { useAppHidden } from "./hooks/useAppHidden.js";
 import { useContentViews } from "./hooks/useContentViews.js";
 import { useDocumentTitle } from "./hooks/useDocumentTitle.js";
@@ -61,38 +61,38 @@ import { useMessageHandler } from "./hooks/useMessageHandler.js";
 import { useMobile } from "./hooks/useMobile.js";
 import { useOpenSpecReader } from "./hooks/useOpenSpecReader.js";
 import { usePiResourceFileFetch } from "./hooks/usePiResourceFileFetch.js";
-import { type ReplayWindowMetadata, SessionReplayController } from "./hooks/useSessionReplayController.js";
 import { useSidebarState } from "./hooks/useSidebarState.js";
 import { useStaleToolReconcile } from "./hooks/useStaleToolReconcile.js";
 import { useWebSocket } from "./hooks/useWebSocket.js";
-import { maybeAutoInitWorktreeOnSpawn } from "./lib/auto-init-worktree.js";
-import { EMPTY_CANVAS_STATE } from "./lib/canvas-gate.js";
-import { deleteDraft, readAllDrafts, writeDraft } from "./lib/draft-storage.js";
+import { maybeAutoInitWorktreeOnSpawn } from "./lib/git/auto-init-worktree.js";
+import { EMPTY_CANVAS_STATE } from "./lib/canvas/canvas-gate.js";
+import { deleteDraft, readAllDrafts, writeDraft } from "./lib/state/draft-storage.js";
 // SubagentPopoutPage no longer imported by the shell — it's registered via
 // the subagents-plugin's `shell-overlay-route` claim and mounted through
 // `<ShellOverlayRouteSlot>` below. See change: add-flow-agent-popout.
-import { createInitialState, deriveBannerState, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
-import { decodeFolderPath, encodeFolderPath } from "./lib/folder-encoding.js";
-import { fetchActiveInits } from "./lib/git-api.js";
-import { refreshGitStatus } from "./lib/git-status-cache.js";
-import { goBack as goBackAction } from "./lib/history-back.js";
-import { clearLoadingHistory, SUBSCRIBE_ACK_MS } from "./lib/loading-history.js";
-import { extractUserPromptHistory } from "./lib/message-history.js";
-import { getMobileDepth } from "./lib/mobile-depth.js";
+import { createInitialState, deriveBannerState, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/chat/event-reducer.js";
+import { decodeFolderPath, encodeFolderPath } from "./lib/util/folder-encoding.js";
+import { fetchActiveInits } from "./lib/git/git-api.js";
+import { refreshGitStatus } from "./lib/git/git-status-cache.js";
+import { goBack as goBackAction } from "./lib/nav/history-back.js";
+import { clearLoadingHistory, SUBSCRIBE_ACK_MS } from "./lib/replay/loading-history.js";
+import { extractUserPromptHistory } from "./lib/replay/message-history.js";
+import { getMobileDepth } from "./lib/layout/mobile-depth.js";
 import {
   initNavTracker,
   popNav,
   predecessor,
   recordNavigation,
   resetNavStack,
-} from "./lib/nav-tracker.js";
-import { useOpenSpecConfig } from "./lib/openspec-config-api.js";
-import { dispatchPluginMessage } from "./lib/plugins-api.js";
-import { clearRecoveryOffer } from "./lib/recovery-offer-bus.js";
-import { rehydrateSession } from "./lib/rehydrate-session.js";
+} from "./lib/nav/nav-tracker.js";
+import { useOpenSpecConfig } from "./lib/openspec/openspec-config-api.js";
+import { viewTargetToEditorPath } from "./lib/nav/view-route.js";
+import { dispatchPluginMessage } from "./lib/package/plugins-api.js";
+import { clearRecoveryOffer } from "./lib/state/recovery-offer-bus.js";
+import { rehydrateSession } from "./lib/replay/rehydrate-session.js";
 // Strategy A (reduce-session-replay-traffic): durable replay cursor.
-import { type ReplayCacheScope, replayCache } from "./lib/replay-cache.js";
-import { createReplayPersister, type ReplayPersister } from "./lib/replay-persist.js";
+import { replayCache } from "./lib/replay/replay-cache.js";
+import { createReplayPersister } from "./lib/replay/replay-persist.js";
 import {
   buildFolderSettingsUrl,
   buildOpenSpecArchiveUrl,
@@ -100,46 +100,41 @@ import {
   buildOpenSpecPreviewUrl,
   buildOpenSpecSpecsUrl,
   buildSessionDiffUrl,
-} from "./lib/route-builders.js";
-import { performServerSwitch } from "./lib/server-switch.js";
-import {
-  buildLoadOlderSubscribe,
-  buildSessionSubscribe,
-} from "./lib/session-subscribe.js";
-import { openStagingSocket } from "./lib/staging-socket.js";
-import { resendActiveCwdSubscriptions, setInitSender } from "./lib/worktree-init-bus.js";
-import { initStore } from "./lib/worktree-init-store.js";
+} from "./lib/nav/route-builders.js";
+import { performServerSwitch } from "./lib/api/server-switch.js";
+import { openStagingSocket } from "./lib/api/staging-socket.js";
+import { resendActiveCwdSubscriptions, setInitSender } from "./lib/git/worktree-init-bus.js";
+import { initStore } from "./lib/git/worktree-init-store.js";
 
 // Stable tracker facade for the depth-aware back action
 // (change: fix-mobile-back-depth-aware).
 const NAV_TRACKER = { predecessor, popNav };
 
 import { applyPluginConfigUpdate, initPluginConfigs, PluginContextProvider, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
-
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, FileEntry, ImageContent, ModelInfo, OpenSpecData, OpenSpecGroup, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { DialogPortal } from "./components/DialogPortal.js";
-import { ErrorBoundary } from "./components/ErrorBoundary.js";
+import { DialogPortal } from "./components/primitives/DialogPortal.js";
+import { ErrorBoundary } from "./components/primitives/ErrorBoundary.js";
 import { GenericExtensionDialog } from "./components/extension-ui/GenericExtensionDialog.js";
 import { ToastSlot } from "./components/extension-ui/ToastSlot.js";
-import { FirstLaunchDisplayModal } from "./components/FirstLaunchDisplayModal.js";
-import { PinDirectoryDialog } from "./components/PinDirectoryDialog.js";
-import { SearchableSelectDialog, type SelectOption } from "./components/SearchableSelectDialog.js";
+import { FirstLaunchDisplayModal } from "./components/settings/FirstLaunchDisplayModal.js";
+import { PinDirectoryDialog } from "./components/workspace/PinDirectoryDialog.js";
+import { SearchableSelectDialog, type SelectOption } from "./components/primitives/SearchableSelectDialog.js";
 import type { ToolContext } from "./components/tool-renderers/index.js";
 import { useOpenSpecActions } from "./hooks/useOpenSpecActions.js";
+import { openArtifactForViewport } from "./lib/util/artifact-view-gate.js";
 import { usePendingPromptTimeout } from "./hooks/usePendingPromptTimeout.js";
 import { useProvidersReady } from "./hooks/useProvidersReady.js";
 import { useSessionActions } from "./hooks/useSessionActions.js";
 import { useViewDispatcher } from "./hooks/useViewDispatcher.js";
-import { ApiContext, deriveApiBase, setGlobalApiBase, VITE_API_URL } from "./lib/api-context.js";
+import { ApiContext, deriveApiBase, setGlobalApiBase, VITE_API_URL } from "./lib/api/api-context.js";
 import { buildContextUsageMap } from "./lib/context-usage.js";
-import { DisplayPrefsProvider } from "./lib/DisplayPrefsContext.js";
-import { registerPluginCatalog, useI18n } from "./lib/i18n.js";
-import { mergeReplayWindow, type ReplayWindow } from "./lib/replay-window.js";
-import { SessionAssetsProvider } from "./lib/SessionAssetsContext.js";
-import { deriveSelectedSessionId } from "./lib/selectedSessionId.js";
-import { selectViewedSessionId } from "./lib/selectViewedSessionId.js";
+import { DisplayPrefsProvider } from "./lib/state/DisplayPrefsContext.js";
+import { registerPluginCatalog, useI18n } from "./lib/i18n/i18n.js";
+import { SessionAssetsProvider } from "./lib/session/SessionAssetsContext.js";
+import { deriveSelectedSessionId } from "./lib/session/selectedSessionId.js";
+import { selectViewedSessionId } from "./lib/session/selectViewedSessionId.js";
 
 // Stable empty references for plugin context's session-state primitives.
 // See change: route-flow-asks-to-upper-slot + add-flow-agent-popout.
@@ -152,10 +147,8 @@ const EMPTY_SUBAGENTS_MAP: ReadonlyMap<string, SubagentStateSnapshot> = Object.f
 import {
   ContentHeaderStickySlot,
   ContentInlineFooterSlot,
-  ContentViewSlot,
-  clearSessionEvents,createSlotRegistry, 
+  ContentViewSlot,createSlotRegistry, 
   forSession,
-  publishSessionEvents,
   ShellOverlayRouteSlot,
   ShellSessionsProvider,
   useShellOverlayRouteMatched
@@ -163,7 +156,7 @@ import {
 import { claimsToRouteDescriptors } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/route-descriptor.js";
 import { PLUGIN_REGISTRY } from "./generated/plugin-registry.js";
 import { usePluginEnabledSet } from "./hooks/usePluginEnabledSet.js";
-import { registerPluginRouteDescriptors } from "./lib/back-target.js";
+import { registerPluginRouteDescriptors } from "./lib/nav/back-target.js";
 
 // Populate the slot registry from the build-time generated plugin manifest.
 // PLUGIN_REGISTRY is `[]` on a fresh checkout (committed stub) — slot consumers
@@ -323,7 +316,7 @@ export default function App() {
   // See change: throttle-idle-ui-animations.
   useAppHidden();
   const [wsUrl, setWsUrl] = useState(getInitialWsUrl);
-  const { send, onMessage, status, serverEpoch, connectionEpoch, reconnectNow } = useWebSocket(wsUrl);
+  const { send, onMessage, status } = useWebSocket(wsUrl);
   // Worktree-init bus needs a way to send subscribe/unsubscribe
   // messages over the same socket. See change: generalize-worktree-init-hook.
   useEffect(() => {
@@ -434,6 +427,9 @@ export default function App() {
   const diffSessionId = diffMatch && diffParams ? diffParams.id : null;
   const editorSessionId = editorMatch && editorParams ? editorParams.id : null;
   const editorFile = editorMatch ? fileViewSearch.get("file") : null;
+  // `/view <url>` deep-link param (mutually exclusive with `file`; `file` wins).
+  // See change: open-view-command-in-editor-pane (D1/D6).
+  const editorUrl = editorMatch ? fileViewSearch.get("url") : null;
   const editorLineRaw = editorMatch ? fileViewSearch.get("line") : null;
   const editorLineParsed = editorLineRaw ? Number.parseInt(editorLineRaw, 10) : Number.NaN;
   const editorLine = Number.isInteger(editorLineParsed) && editorLineParsed > 0 ? editorLineParsed : null;
@@ -478,87 +474,17 @@ export default function App() {
   const folderEditorCwd = folderEditorMatch ? decodeFolderPath(folderEditorParams?.encodedCwd ?? "") : null;
   const sidebar = useSidebarState();
   const chatViewRef = useRef<ChatViewHandle>(null);
-  const contentPaneRef = useRef<HTMLDivElement>(null);
   const isMobile = useMobile();
-  const mobileDepth = isMobile ? getMobileDepth({
-    hasSessionRoute: !!selectedId,
-    hasFolderRoute: !!folderEditorCwd || !!folderHomeCwd,
-    hasSettingsRoute: !!settingsMatch,
-    hasFolderSettingsRoute: !!folderSettingsMatch,
-    hasTunnelRoute: !!tunnelSetupMatch,
-    hasOverlayRoute: hasShellOverlayRoute,
-    hasPiResourceRoute: hasPiResourceRouteFlag,
-  }) : 0;
-  const mobileDetailVisible = !isMobile || mobileDepth >= 1;
-  const mobileActivationEpochRef = useRef(0);
-  const [mobileActivationEpoch, setMobileActivationEpoch] = useState(0);
-  const previousMobileActivationKeyRef = useRef<string | null>(null);
-  const bumpMobileActivation = useCallback(() => {
-    mobileActivationEpochRef.current += 1;
-    setMobileActivationEpoch(mobileActivationEpochRef.current);
-  }, []);
-  const mobileActivationKey = mobileDetailVisible
-    ? `${selectedId ?? ""}:${mobileDepth >= 2 ? "overlay" : "detail"}`
-    : "list";
-  useEffect(() => {
-    if (!isMobile) return;
-    if (previousMobileActivationKeyRef.current !== mobileActivationKey && mobileDetailVisible) {
-      bumpMobileActivation();
-    }
-    previousMobileActivationKeyRef.current = mobileActivationKey;
-  }, [bumpMobileActivation, isMobile, mobileActivationKey, mobileDetailVisible]);
   const installPrompt = useInstallPrompt();
   const launchSource = useLaunchSource();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sessions, setSessions] = useState<Map<string, DashboardSession>>(new Map());
   const [sessionStates, setSessionStates] = useState<Map<string, SessionState>>(new Map());
-  const sessionStatesRef = useRef(sessionStates);
-  sessionStatesRef.current = sessionStates;
-  const replayGenerationRef = useRef(new Map<string, number>());
-  const [replayGenerationMap, setReplayGenerationMap] = useState(() => new Map<string, number>());
-  const bumpReplayGeneration = useCallback((sessionId: string) => {
-    const generation = (replayGenerationRef.current.get(sessionId) ?? 0) + 1;
-    replayGenerationRef.current.set(sessionId, generation);
-    setReplayGenerationMap((previous) => {
-      if (previous.get(sessionId) === generation) return previous;
-      const next = new Map(previous);
-      next.set(sessionId, generation);
-      return next;
-    });
-    return generation;
-  }, []);
-  const completedOlderAnchorRef = useRef(new Map<string, string | null>());
-  const [completedOlderAnchorMap, setCompletedOlderAnchorMap] = useState(() => new Map<string, string | null>());
-  // A controller is recreated for every connection epoch. Its new ledger has
-  // no cursor, so cold replay must not reduce onto the prior reducer state.
-  // The subscription effect waits for this reset to commit before requesting
-  // replay (same-server foreground reconnect included).
-  const replayResetPendingRef = useRef(false);
-  const replayResetStateRef = useRef<Map<string, SessionState> | null>(null);
-  const foregroundReplayRequestedRef = useRef(false);
-  const requestForegroundReplay = useCallback(() => {
-    if (mobileDetailVisible) bumpMobileActivation();
-    foregroundReplayRequestedRef.current = true;
-    reconnectNow("foreground");
-  }, [bumpMobileActivation, mobileDetailVisible, reconnectNow]);
-  useEffect(() => {
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") requestForegroundReplay();
-    };
-    const onPageShow = () => requestForegroundReplay();
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("pageshow", onPageShow);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("pageshow", onPageShow);
-    };
-  }, [requestForegroundReplay]);
-  
   // Per-session dashboard-local `/view` preview rows. Lives separately from
   // event-reducer state so the reducer never sees them. Merged with
   // `state.messages` by timestamp when passing to ChatView.
   // See change: render-file-previews.
-  const [viewMessagesMap, setViewMessagesMap] = useState<Map<string, import("./lib/event-reducer.js").ChatMessage[]>>(new Map());
+
   // Per-session chat-input drafts. Hydrated once from localStorage on mount,
   // then persisted (debounced) whenever the map changes.
   const [drafts, setDrafts] = useState<Map<string, string>>(() => readAllDrafts());
@@ -584,8 +510,11 @@ export default function App() {
   const [changedOnDisk, setChangedOnDisk] = useState<Map<string, Set<string>>>(() => new Map());
   // Per-session auto-canvas state (coexists with the URL-driven preview routes).
   // Folded from `canvas_intent` / `canvas_server_chip`. See change: auto-canvas.
-  const [canvasMap, setCanvasMap] = useState<Map<string, import("./lib/canvas-gate.js").CanvasState>>(() => new Map());
+  const [canvasMap, setCanvasMap] = useState<Map<string, import("./lib/canvas/canvas-gate.js").CanvasState>>(() => new Map());
   const [openspecMap, setOpenspecMap] = useState<Map<string, OpenSpecData>>(new Map());
+  // Non-mobile artifact dialog (local-state, URL unchanged). Mobile keeps the
+  // full-page preview route. See change: openspec-artifact-dialog-desktop.
+  const [artifactDialog, setArtifactDialog] = useState<{ cwd: string; changeName: string; artifactId: string } | null>(null);
   // Folder-HEAD branch map (`cwd → branch | null`), synced via `git_head_update`.
   // See change: refresh-folder-header-branch.
   const [folderGitMap, setFolderGitMap] = useState<Map<string, string | null>>(new Map());
@@ -595,7 +524,6 @@ export default function App() {
   // See change: redesign-openspec-board.
   const [boardWorktreeForChange, setBoardWorktreeForChange] = useState<{ cwd: string; changeName: string } | null>(null);
   const [modelsMap, setModelsMap] = useState<Map<string, ModelInfo[]>>(new Map());
-
   // Write-only: the last reader (StatusBar's deprecated `roles` prop) was
   // removed in `redesign-prompt-input`; roles UI lives in the roles settings
   // plugin. `setRolesMap` still consumes server role events. Full excision of
@@ -626,6 +554,12 @@ export default function App() {
   const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
   // folder-workspaces: full workspace list, kept in sync via workspaces_updated broadcast.
   const [workspaces, setWorkspaces] = useState<import("@blackbelt-technology/pi-dashboard-shared/browser-protocol.js").Workspace[]>([]);
+  // Flipped true on the first `workspaces_updated`. Pinned dirs and workspaces
+  // arrive in SEPARATE WS messages, so DirectoryHomeView's cold-load guard must
+  // wait on this flag too — otherwise a workspace-only cwd flashes the miss
+  // notice after `pinned_dirs_updated` lands but before workspaces arrive.
+  // See change: enable-workspace-folder-home-page (design D3).
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   const [pinDialogOpen, setPinDialogOpen] = useState(false);
   const providersReady = useProvidersReady();
   const [terminals, setTerminals] = useState<Map<string, TerminalSession>>(new Map());
@@ -635,7 +569,7 @@ export default function App() {
   // mount. Defaults to true while loading. See change:
   // openspec-worktree-spawn-button.
   const [gitWorktreeEnabled, setGitWorktreeEnabled] = useState<boolean>(true);
-  const [discoveredServers, setDiscoveredServers] = useState<import("./components/ServerSelector.js").DiscoveredServerInfo[]>([]);
+  const [discoveredServers, setDiscoveredServers] = useState<import("./components/connectivity/ServerSelector.js").DiscoveredServerInfo[]>([]);
   // Global chat-display preferences. `undefined` until the initial GET
   // /api/preferences/display response lands. When the server returns
   // `displayPrefs: undefined` the FirstLaunchDisplayModal opens.
@@ -653,21 +587,13 @@ export default function App() {
   // Strategy A (reduce-session-replay-traffic): durable replay-cache writer +
   // "already rehydrated from IndexedDB" guard so reconnect re-subscribes don't
   // re-read (and clobber) live state. See change: reduce-session-replay-traffic.
-  const replayPersistersRef = useRef(new Map<string, { scope: ReplayCacheScope; persister: ReplayPersister }>());
-  const sourceGenerationRef = useRef(new Map<string, string>());
+  const replayPersisterRef = useRef(createReplayPersister());
   const rehydratedRef = useRef(new Set<string>());
-  const rehydrateAbortRef = useRef(new Map<string, AbortController>());
   // Per-session "history loading" flag: true between sending `subscribe`
   // and the first content / terminal / failure / timeout. Drives the
   // ChatView loading indicator. See change: show-chat-history-loading-indicator.
   const [loadingHistory, setLoadingHistory] = useState<Map<string, boolean>>(new Map());
   const loadingHistoryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  // Tail window meta for load-older (session-tail-rehydrate).
-  const historyWindowRef = useRef(new Map<string, ReplayWindow>());
-  const [historyWindowMap, setHistoryWindowMap] = useState(
-    () => new Map<string, ReplayWindow>(),
-  );
-  const [loadingOlderMap, setLoadingOlderMap] = useState(() => new Map<string, boolean>());
   // After overlay-url-routing: shell overlays are URL-driven via the
   // useRoute matches declared above. `previewState`, `specsBrowserCwd`,
   // `archiveBrowserCwd`, `diffViewSessionId`, and the three useContentViews
@@ -719,7 +645,7 @@ export default function App() {
         persistLastServer: (h, p) => {
           localStorage.setItem(LAST_SERVER_KEY, `${h}:${p}`);
         },
-        notifyError: (msg) => showToast(msg),
+        notifyError: (msg) => showToast(msg, "error"),
       },
     ).finally(() => {
       inFlightSwitchKeyRef.current = null;
@@ -812,178 +738,14 @@ export default function App() {
     );
   }, []);
 
-  const authorityKey = `${serverEpoch ?? "unknown"}:${connectionEpoch}`;
-  const replayController = useMemo(() => {
-    let controller: SessionReplayController;
-    const persisterFor = (sessionId: string, sourceGeneration?: string): ReplayPersister | null => {
-      if (!serverEpoch || !sourceGeneration) return null;
-      const scope: ReplayCacheScope = { serverEpoch, sourceGeneration };
-      const existing = replayPersistersRef.current.get(sessionId);
-      if (existing && existing.scope.serverEpoch === scope.serverEpoch && existing.scope.sourceGeneration === scope.sourceGeneration) {
-        return existing.persister;
-      }
-      existing?.persister.dispose();
-      const persister = createReplayPersister(replayCache, 1000, scope);
-      replayPersistersRef.current.set(sessionId, { scope, persister });
-      return persister;
-    };
-    controller = new SessionReplayController({
-      send,
-      apply: (sessionId, entries) => {
-        const source = controller.ledger(sessionId).sourceGeneration ?? undefined;
-        sourceGenerationRef.current.set(sessionId, source ?? sourceGenerationRef.current.get(sessionId) ?? "");
-        persisterFor(sessionId, source)?.record(sessionId, [...entries]);
-        const accepted = [...entries];
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          let current = next.get(sessionId) ?? createInitialState();
-          for (const entry of accepted) current = reduceEvent(current, entry.event);
-          next.set(sessionId, current);
-          return next;
-        });
-        if (accepted.length > 0) {
-          const last = accepted[accepted.length - 1]!;
-          maxSeqMapRef.current.set(sessionId, Math.max(maxSeqMapRef.current.get(sessionId) ?? 0, last.seq));
-          publishSessionEvents(sessionId, accepted.map((entry) => entry.event));
-        }
-      },
-      window: (sessionId, metadata: ReplayWindowMetadata) => {
-        // The merge helper owns cold/older/delta semantics; a delta frame must
-        // never clobber a cache-admitted older window or load-older dies.
-        const next = mergeReplayWindow(
-          historyWindowRef.current.get(sessionId),
-          metadata,
-          controller.ledger(sessionId).minSeq,
-        );
-        if (!next) return;
-        historyWindowRef.current.set(sessionId, next);
-        setHistoryWindowMap((prev) => new Map(prev).set(sessionId, next));
-      },
-      replace: (sessionId, entries, completion) => {
-        const source = controller.ledger(sessionId).sourceGeneration ?? sourceGenerationRef.current.get(sessionId);
-        const persister = persisterFor(sessionId, source);
-        persister?.seed(sessionId, [...entries]);
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          const previous = next.get(sessionId);
-          let current = createInitialState();
-          if (previous?.pendingPrompt) current.pendingPrompt = previous.pendingPrompt;
-          for (const entry of entries) current = reduceEvent(current, entry.event);
-          if (previous && previous.interactiveRequests.length > 0) {
-            const existing = new Set(current.interactiveRequests.map((request) => request.requestId));
-            current.interactiveRequests = [
-              ...current.interactiveRequests,
-              ...previous.interactiveRequests.filter((request) => !existing.has(request.requestId)),
-            ];
-          }
-          next.set(sessionId, current);
-          return next;
-        });
-        clearSessionEvents(sessionId);
-        publishSessionEvents(sessionId, entries.map((entry) => entry.event));
-        const last = entries.at(-1);
-        maxSeqMapRef.current.set(sessionId, last?.seq ?? 0);
-        if (completion) {
-          setLoadingOlderMap((prev) => new Map(prev).set(sessionId, false));
-          const anchorToken = completion.anchorToken ?? null;
-          completedOlderAnchorRef.current.set(sessionId, anchorToken);
-          setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, anchorToken));
-        }
-      },
-      reset: (sessionId) => {
-        bumpReplayGeneration(sessionId);
-        completedOlderAnchorRef.current.set(sessionId, null);
-        setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, null));
-        replayPersistersRef.current.get(sessionId)?.persister.dispose();
-        replayPersistersRef.current.delete(sessionId);
-        setSessionStates((prev) => {
-          const next = new Map(prev);
-          const pendingPrompt = next.get(sessionId)?.pendingPrompt;
-          const fresh = createInitialState();
-          if (pendingPrompt) fresh.pendingPrompt = pendingPrompt;
-          next.set(sessionId, fresh);
-          return next;
-        });
-        maxSeqMapRef.current.delete(sessionId);
-        historyWindowRef.current.delete(sessionId);
-        setHistoryWindowMap((prev) => { const next = new Map(prev); next.delete(sessionId); return next; });
-        setLoadingOlderMap((prev) => { const next = new Map(prev); next.delete(sessionId); return next; });
-        clearSessionEvents(sessionId);
-      },
-      loading: (sessionId, loading) => {
-        if (loading) beginLoadingHistory(sessionId);
-        else clearLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, sessionId);
-      },
-      reconnect: () => {
-        if (selectedSessionIdRef.current) bumpReplayGeneration(selectedSessionIdRef.current);
-        reconnectNow("retry");
-      },
-      retry: (sessionId, kind) => {
-        // A retried-then-abandoned older page must release the load-older
-        // latch; otherwise pull-down stays disabled for the session.
-        if (kind !== "older") return;
-        setLoadingOlderMap((prev) => new Map(prev).set(sessionId, false));
-      },
-      publishAsset: (sessionId, asset) => {
-        setSessions((prev) => {
-          const current = prev.get(sessionId);
-          if (!current) return prev;
-          const next = new Map(prev);
-          next.set(sessionId, { ...current, assets: { ...(current.assets ?? {}), [asset.hash]: { data: asset.data, mimeType: asset.mimeType } } });
-          return next;
-        });
-      },
-    });
-    return controller;
-  }, [authorityKey, bumpReplayGeneration]);
-
-  const beginReplay = useCallback((sessionId: string, kind: "cold" | "delta" | "older", sourceGeneration: string, anchorToken?: string) => {
-    if (kind !== "older") bumpReplayGeneration(sessionId);
-    return replayController.begin(sessionId, kind, sourceGeneration, anchorToken);
-  }, [bumpReplayGeneration, replayController]);
-
-  useEffect(() => {
-    const retainedSessionIds = [...sessionStatesRef.current.keys()];
-    if (retainedSessionIds.length > 0) {
-      replayResetPendingRef.current = true;
-      replayResetStateRef.current = sessionStatesRef.current;
-      for (const sessionId of retainedSessionIds) replayController.reset(sessionId);
-    }
-    subscribedRef.current.clear();
-    return () => {
-    replayController.dispose();
-    for (const { persister } of replayPersistersRef.current.values()) persister.dispose();
-    replayPersistersRef.current.clear();
-    for (const abort of rehydrateAbortRef.current.values()) abort.abort();
-    rehydrateAbortRef.current.clear();
-    };
-  }, [replayController]);
-
-  const handleLoadOlder = useCallback((anchorToken: string) => {
-    if (!selectedId || loadingOlderMap.get(selectedId)) return;
-    const win = historyWindowRef.current.get(selectedId);
-    if (!win?.hasMoreOlder) return;
-    setLoadingOlderMap((prev) => new Map(prev).set(selectedId, true));
-    const source = sourceGenerationRef.current.get(selectedId) || replayController.ledger(selectedId).sourceGeneration || "";
-    completedOlderAnchorRef.current.set(selectedId, null);
-    setCompletedOlderAnchorMap((prev) => new Map(prev).set(selectedId, null));
-    beginReplay(selectedId, "older", source, anchorToken);
-  }, [selectedId, loadingOlderMap, replayController, beginReplay]);
-
   const handleMessage = useMessageHandler(
-    { setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap, setLoadingHistory, setCanvasMap },
-    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, showToast, historyWindowRef, setHistoryWindowMap, setLoadingOlderMap, replayController },
+    { setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setWorkspacesLoaded, setTerminals, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setLoadingHistory, setCanvasMap },
+    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, replayPersister: replayPersisterRef.current, showToast },
   );
-  const handleAuthorityMessage = useCallback((msg: ServerToBrowserMessage) => {
-    handleMessage(msg);
-    if ((msg.type === "event_replay" || msg.type === "session_state_reset") && replayController.ledger(msg.sessionId).sourceGeneration === msg.sourceGeneration) {
-      sourceGenerationRef.current.set(msg.sessionId, msg.sourceGeneration);
-    }
-  }, [handleMessage, replayController]);
 
   useEffect(() => {
-    return onMessage(handleAuthorityMessage);
-  }, [onMessage, handleAuthorityMessage]);
+    return onMessage(handleMessage);
+  }, [onMessage, handleMessage]);
 
   // Stale running-tool reconcile: heal a tool card whose terminal
   // `tool_execution_end` was dropped on the WS hop, via the independent HTTP
@@ -1048,24 +810,11 @@ export default function App() {
     return () => { cancelled = true; };
   }, [apiBase]);
 
-  const previousServerEpochRef = useRef(serverEpoch);
-  useEffect(() => {
-    if (previousServerEpochRef.current && serverEpoch && previousServerEpochRef.current !== serverEpoch) {
-      sourceGenerationRef.current.clear();
-      maxSeqMapRef.current.clear();
-      rehydratedRef.current.clear();
-    }
-    previousServerEpochRef.current = serverEpoch;
-  }, [serverEpoch]);
-
   // Clear subscriptions on reconnect so sessions get re-subscribed
   const prevStatusRef = useRef(status);
   useEffect(() => {
     if (status === "connected" && prevStatusRef.current !== "connected") {
       subscribedRef.current.clear();
-      rehydratedRef.current.clear();
-      for (const abort of rehydrateAbortRef.current.values()) abort.abort();
-      rehydrateAbortRef.current.clear();
       // sessionOrderMap is replaced atomically by the on-connect
       // `sessions_snapshot` message — no pre-reset needed.
       // See change: fix-stale-sessions-on-reconnect.
@@ -1119,85 +868,92 @@ export default function App() {
   // for the subscription side-effect below.
   const prevSelectedRef = useRef(selectedId);
   useEffect(() => {
-    if (replayResetPendingRef.current) {
-      if (!selectedId || status !== "connected" || sessionStatesRef.current === replayResetStateRef.current) return;
-      replayResetPendingRef.current = false;
-      replayResetStateRef.current = null;
+    if (selectedId !== prevSelectedRef.current) {
+      prevSelectedRef.current = selectedId;
     }
-    if (selectedId !== prevSelectedRef.current) prevSelectedRef.current = selectedId;
-    if (!selectedId || subscribedRef.current.has(selectedId) || status !== "connected") return;
-    subscribedRef.current.add(selectedId);
-    const sid = selectedId;
-    const st = sessionStates.get(sid);
-    if (st) {
-      for (const sub of st.subagents.values()) {
-        if (sub.status === "running" && (!sub.entries || sub.entries.length === 0)) {
-          send({ type: "subagent_resync_request", sessionId: sid, agentId: sub.id });
+    // Lazy subscribe: load events for ended sessions when first selected.
+    // Also re-subscribes the selected session after reconnect (status change
+    // clears subscribedRef, and adding `status` here re-triggers the effect).
+    if (selectedId && !subscribedRef.current.has(selectedId) && status === "connected") {
+      subscribedRef.current.add(selectedId);
+      const sid = selectedId;
+      // Resync running subagents whose live timeline is empty: a reconnect gap
+      // may have swallowed their frames downstream of the bridge, so pull the
+      // latest snapshot instead of waiting for completion. No-op server-side
+      // for unknown/finished agents. See change: fix-subagent-live-detail-reliability (D2).
+      {
+        const st = sessionStates.get(sid);
+        if (st) {
+          // De-dup by state.id: a subagent dual-indexed under both its agentId
+          // and its agentSessionId appears twice in .values() as the SAME ref,
+          // so skip the alias to avoid a duplicate resync request (invariant N1).
+          // See change: resolve-subagent-inspector-by-session-id.
+          const seen = new Set<string>();
+          for (const sub of st.subagents.values()) {
+            if (seen.has(sub.id)) continue;
+            seen.add(sub.id);
+            if (sub.status === "running" && (!sub.entries || sub.entries.length === 0)) {
+              send({ type: "subagent_resync_request", sessionId: sid, agentId: sub.id });
+            }
+          }
         }
       }
-    }
-    if (!modelsMap.has(sid)) send({ type: "request_models", sessionId: sid });
-    const source = sourceGenerationRef.current.get(sid) ?? "";
-    const foregroundDelta = foregroundReplayRequestedRef.current && replayController.ledger(sid).events.length > 0;
-    foregroundReplayRequestedRef.current = false;
-    const initialRequest = beginReplay(sid, foregroundDelta ? "delta" : "cold", source);
-    if (source && !rehydratedRef.current.has(sid)) {
-      rehydratedRef.current.add(sid);
-      const abort = new AbortController();
-      rehydrateAbortRef.current.set(sid, abort);
-      const authority = {
-        scope: { serverEpoch: serverEpoch!, sourceGeneration: source },
-        signal: abort.signal,
-        isCurrent: () => replayController.ledger(sid).request?.requestId === initialRequest.requestId && replayController.ledger(sid).sourceGeneration === source,
+      // Send subscribe with the resolved cursor, enter LOADING, and request
+      // models if missing. Extracted so the cache-rehydrate path can call it
+      // after the async IndexedDB read resolves.
+      const doSubscribe = (lastSeq: number) => {
+        send({ type: "subscribe", sessionId: sid, lastSeq });
+        // Enter LOADING. Covers warm (in-memory replay / reconnect re-subscribe)
+        // and cold (disk-load) paths uniformly, since the warm path never sends
+        // an empty `isLast:false` start marker.
+        // See change: show-chat-history-loading-indicator.
+        beginLoadingHistory(sid);
+        // Request model list for this session if we don't have it yet (e.g. after page refresh)
+        if (!modelsMap.has(sid)) {
+          send({ type: "request_models", sessionId: sid });
+        }
       };
-      void rehydrateSession(sid, replayCache, { authority }).then((r) => {
-        if (!r || abort.signal.aborted || r.sourceGeneration !== source || !authority.isCurrent()) return;
-        const ledger = replayController.ledger(sid);
-        if (ledger.events.length > 0 || !ledger.seed(source, r.events)) return;
-        const stateAtAdmission = sessionStatesRef.current.get(sid);
-        const existing = replayPersistersRef.current.get(sid);
-        const persister = existing?.scope.serverEpoch === serverEpoch && existing.scope.sourceGeneration === source
-          ? existing.persister
-          : createReplayPersister(replayCache, 1000, { serverEpoch: serverEpoch!, sourceGeneration: source });
-        if (!existing) replayPersistersRef.current.set(sid, { scope: { serverEpoch: serverEpoch!, sourceGeneration: source }, persister });
-        setSessionStates((prev) => {
-          // Cache admission must not overwrite a state update that raced the
-          // async cache read. The reset-created placeholder is the exact
-          // object captured above; any newer live/replay update replaces it.
-          if (prev.get(sid) !== stateAtAdmission) return prev;
-          const next = new Map(prev);
-          next.set(sid, r.state);
-          return next;
-        });
-        clearSessionEvents(sid);
-        publishSessionEvents(sid, r.events.map((entry) => entry.event));
-        persister.seed(sid, r.events);
-        maxSeqMapRef.current.set(sid, r.lastSeq);
-        historyWindowRef.current.set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder, partialHead: r.partialHead });
-        setHistoryWindowMap((prev) => new Map(prev).set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder, partialHead: r.partialHead }));
-        beginReplay(sid, "delta", source);
-      }).catch(() => { /* cache admission is an optimization; cold replay remains active */ })
-        .finally(() => rehydrateAbortRef.current.delete(sid));
+      // Strategy A (reduce-session-replay-traffic): on the FIRST subscribe after
+      // a page load (no live cursor yet, not previously rehydrated), try the
+      // durable replay cache. A hit pre-seeds reduced state + the raw-event
+      // buffer and subscribes with `lastSeq = persistedMaxSeq` so the server
+      // delta-replays only the tail. Any miss/error degrades to `lastSeq: 0`.
+      // Reconnect re-subscribes already hold a live cursor → skip the cache read.
+      if (!maxSeqMapRef.current.has(sid) && !rehydratedRef.current.has(sid)) {
+        rehydratedRef.current.add(sid);
+        void rehydrateSession(sid, replayCache)
+          .then((r) => {
+            if (r) {
+              setSessionStates((prev) => {
+                const next = new Map(prev);
+                // Don't clobber state that arrived live while the read was in flight.
+                if (!next.has(sid)) next.set(sid, r.state);
+                return next;
+              });
+              if (!maxSeqMapRef.current.has(sid)) maxSeqMapRef.current.set(sid, r.lastSeq);
+              replayPersisterRef.current.seed(sid, r.events);
+              doSubscribe(maxSeqMapRef.current.get(sid) ?? r.lastSeq);
+            } else {
+              doSubscribe(0);
+            }
+          })
+          .catch(() => doSubscribe(0));
+      } else {
+        doSubscribe(maxSeqMapRef.current.get(sid) ?? 0);
+      }
     }
-  }, [selectedId, send, status, modelsMap, sessionStates, replayController, beginReplay, serverEpoch]);
+  }, [selectedId, send, status]);
 
   // Cold-open subscription for plugin overlay routes is now the claim's
-  // responsibility — each claim subscribes via its own plugin sender.
+  // responsibility — each claim (e.g. SubagentPopoutClaim)
+  // subscribes on mount via `usePluginSend({ type: "subscribe", ... })`.
   // See change: add-flow-agent-popout.
 
-  const rawSelectedState = selectedId
+  // `/view` now opens the editor pane (change: open-view-command-in-editor-pane);
+  // the retired inline-row merge is gone — rendered chat = raw reducer messages.
+  const selectedState = selectedId
     ? sessionStates.get(selectedId) ?? createInitialState()
     : createInitialState();
-  // Merge dashboard-local `/view` rows into the rendered chat by timestamp.
-  // View rows are stored separately so the event reducer never sees them.
-  // See change: render-file-previews.
-  const selectedState = useMemo(() => {
-    if (!selectedId) return rawSelectedState;
-    const views = viewMessagesMap.get(selectedId);
-    if (!views || views.length === 0) return rawSelectedState;
-    const merged = [...rawSelectedState.messages, ...views].sort((a, b) => a.timestamp - b.timestamp);
-    return { ...rawSelectedState, messages: merged };
-  }, [rawSelectedState, viewMessagesMap, selectedId]);
 
   // Per-session draft text + history recall for CommandInput.
   const selectedDraft = selectedId ? (drafts.get(selectedId) ?? "") : "";
@@ -1506,6 +1262,27 @@ export default function App() {
     handleAttachProposal, handleDetachProposal, handleReplaceProposal,
   } = openspecActions;
 
+  // Viewport gate for badge clicks: non-mobile opens the local-state dialog
+  // over the current view (URL unchanged); mobile keeps the full-page preview
+  // route (`handleReadArtifact` → navigate). All 5 badge wiring sites call
+  // this instead of `handleReadArtifact`. See change:
+  // openspec-artifact-dialog-desktop.
+  const openArtifact = useCallback(
+    (cwd: string, changeName: string, artifactId: string) => {
+      openArtifactForViewport(isMobile, { cwd, changeName, artifactId }, {
+        navigateToPreview: (r) => handleReadArtifact(r.cwd, r.changeName, r.artifactId),
+        openDialog: (r) => setArtifactDialog(r),
+      });
+    },
+    [isMobile, handleReadArtifact],
+  );
+
+  // Crossing into mobile closes the dialog so a local-state modal is never
+  // stranded over a route that subsequent badge clicks would navigate behind.
+  useEffect(() => {
+    if (isMobile) setArtifactDialog(null);
+  }, [isMobile]);
+
   // Flow YAML viewer + agent source viewer moved into flows-plugin's
   // FlowYamlPreview (content-view route flow-yaml-preview) + the
   // FlowsUiStateContext setters. The shell no longer fetches yaml or
@@ -1566,6 +1343,7 @@ export default function App() {
   // (card + detail) and the sidebar tag filter group. Recomputes only when the
   // session list changes. See change: add-session-tags.
   const allTags = useMemo(() => allTagsInUse(Array.from(sessions.values())), [sessions]);
+
   const sessionList = (
     <SessionList
       sessions={Array.from(sessions.values())}
@@ -1590,7 +1368,7 @@ export default function App() {
       onSendPrompt={handleSendPromptToSession}
       onOpenSpecRefresh={handleOpenSpecRefresh}
       onBulkArchive={handleBulkArchive}
-      onReadArtifact={handleReadArtifact}
+      onReadArtifact={openArtifact}
       onOpenPiResources={handleOpenPiResources}
       onOpenSpecs={(cwd) => navigate(buildOpenSpecSpecsUrl(cwd))}
       onOpenArchive={(cwd) => navigate(buildOpenSpecArchiveUrl(cwd))}
@@ -1682,7 +1460,7 @@ export default function App() {
       groupsState={openspecGroupsMap.get(openspecBoardCwd)}
       onBack={goBack}
       onRefresh={() => handleOpenSpecRefresh(openspecBoardCwd)}
-      onReadArtifact={(changeName, artifactId) => handleReadArtifact(openspecBoardCwd, changeName, artifactId)}
+      onReadArtifact={(changeName, artifactId) => openArtifact(openspecBoardCwd, changeName, artifactId)}
       onNavigateToSession={handleSelect}
       onOpenSpecs={() => navigate(buildOpenSpecSpecsUrl(openspecBoardCwd))}
       onOpenArchive={() => navigate(buildOpenSpecArchiveUrl(openspecBoardCwd))}
@@ -1747,7 +1525,7 @@ export default function App() {
           onAttachProposal: (changeName) => handleAttachProposal(selectedId, changeName),
           onDetachProposal: () => handleDetachProposal(selectedId),
           onSendPrompt: (text) => wrappedHandleSend(text),
-          onReadArtifact: (changeName, artifactId) => handleReadArtifact(selectedCwd!, changeName, artifactId),
+          onReadArtifact: (changeName, artifactId) => openArtifact(selectedCwd!, changeName, artifactId),
           onRefresh: () => {
             setSessionStates((prev) => {
               const next = new Map(prev);
@@ -1757,10 +1535,8 @@ export default function App() {
             maxSeqMapRef.current.set(selectedId, 0);
             subscribedRef.current.delete(selectedId);
             subscribedRef.current.add(selectedId);
-            replayPersistersRef.current.get(selectedId)?.persister.dispose();
-            replayPersistersRef.current.delete(selectedId);
-            clearSessionEvents(selectedId);
-            beginReplay(selectedId, "cold", sourceGenerationRef.current.get(selectedId) ?? "");
+            send({ type: "subscribe", sessionId: selectedId, lastSeq: 0 });
+            beginLoadingHistory(selectedId);
           },
         } : undefined}
         commands={selectedCommands}
@@ -1768,7 +1544,7 @@ export default function App() {
         openspecChanges={selectedCwd ? openspecMap.get(selectedCwd)?.changes : undefined}
         onAttachProposal={(changeName) => handleAttachProposal(selectedId, changeName)}
         onDetachProposal={() => handleDetachProposal(selectedId)}
-        onReadArtifact={selectedCwd ? (changeName, artifactId) => handleReadArtifact(selectedCwd, changeName, artifactId) : undefined}
+        onReadArtifact={selectedCwd ? (changeName, artifactId) => openArtifact(selectedCwd, changeName, artifactId) : undefined}
         hasFileChanges={selectedState.hasFileChanges}
         onOpenDiffView={() => navigate(buildSessionDiffUrl(selectedId))}
         onOpenExtensionModulePicker={() => setExtensionModulePickerOpen(true)}
@@ -1781,10 +1557,8 @@ export default function App() {
           maxSeqMapRef.current.set(selectedId, 0);
           subscribedRef.current.delete(selectedId);
           subscribedRef.current.add(selectedId);
-          replayPersistersRef.current.get(selectedId)?.persister.dispose();
-          replayPersistersRef.current.delete(selectedId);
-          clearSessionEvents(selectedId);
-          beginReplay(selectedId, "cold", sourceGenerationRef.current.get(selectedId) ?? "");
+          send({ type: "subscribe", sessionId: selectedId, lastSeq: 0 });
+          beginLoadingHistory(selectedId);
         }}
       />
       {/* Mobile info strip */}
@@ -1912,28 +1686,7 @@ export default function App() {
             </div>
           }>
             <SessionAssetsProvider assets={selectedSession?.assets}>
-            <ChatView
-              ref={chatViewRef}
-              sessionId={selectedId}
-              state={selectedState}
-              toolContext={toolContext}
-              onRespondToUi={handleRespondToUi}
-              onAbort={handleAbort}
-              onForceKill={handleForceKill}
-              onForkFromMessage={selectedId ? handleForkFromMessage : undefined}
-              onCloseInlineTerminal={selectedId ? handleCloseInlineTerminalForSelected : undefined}
-              pendingSteering={selectedSession?.pendingQueues?.steering ?? EMPTY_STEERING}
-              loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false}
-              hasMoreOlder={selectedId ? historyWindowMap.get(selectedId)?.hasMoreOlder ?? false : false}
-              partialHead={selectedId ? historyWindowMap.get(selectedId)?.partialHead ?? false : false}
-              loadingOlder={selectedId ? loadingOlderMap.get(selectedId) ?? false : false}
-              mobileActive={isMobile && mobileDetailVisible}
-              mobileActivationEpoch={mobileActivationEpoch}
-              replayGeneration={selectedId ? replayGenerationMap.get(selectedId) ?? 0 : 0}
-              completedOlderAnchorToken={selectedId ? completedOlderAnchorMap.get(selectedId) ?? null : null}
-              onLoadOlder={selectedId && (!isMobile || mobileDetailVisible) ? handleLoadOlder : undefined}
-              onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined}
-            />
+            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? handleForkFromMessage : undefined} onCloseInlineTerminal={selectedId ? handleCloseInlineTerminalForSelected : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? EMPTY_STEERING} loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false} onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined} />
             </SessionAssetsProvider>
           </ErrorBoundary>
           {/* Single-card error-lifecycle surface. Sticky above the command
@@ -1976,7 +1729,6 @@ export default function App() {
                       sessionId={selectedId}
                       currentOverride={selectedSession?.displayPrefsOverride}
                       send={(msg) => send({ type: "setSessionDisplayPrefs", sessionId: selectedId, override: msg.override })}
-                      boundaryRef={contentPaneRef}
                     />
                   )}
                 </>
@@ -1987,7 +1739,7 @@ export default function App() {
                 openspecHasDir={selectedCwd ? openspecMap.get(selectedCwd)?.hasOpenspecDir : undefined}
                 openspecPending={selectedCwd ? openspecMap.get(selectedCwd)?.pending : undefined}
                 onSendPrompt={(text, images) => wrappedHandleSend(text, images)}
-                onReadArtifact={selectedCwd ? (changeName, artifactId) => handleReadArtifact(selectedCwd, changeName, artifactId) : undefined}
+                onReadArtifact={selectedCwd ? (changeName, artifactId) => openArtifact(selectedCwd, changeName, artifactId) : undefined}
                 onBulkArchive={selectedCwd ? () => handleBulkArchive(selectedCwd) : undefined}
                 allSessions={Array.from(sessions.values())}
                 showGitInfo={true}
@@ -2036,7 +1788,11 @@ export default function App() {
             currentCwd={selectedSession?.cwd}
             onViewLocal={(target) => {
               if (!selectedId) return;
-              send({ type: "inject_view_message", sessionId: selectedId, target });
+              // `/view` now opens its target in the editor pane via the deep-link
+              // route (SplitRouteSync bridges `?file=`/`?url=` into the split),
+              // replacing the retired inline PreviewCard surface. See change:
+              // open-view-command-in-editor-pane (D1/D2).
+              navigate(viewTargetToEditorPath(selectedId, target));
             }}
             onOpenInlineTerminal={selectedId && selectedCwd ? () => handleOpenInlineTerminal(selectedId, selectedCwd) : undefined}
             sessionMessages={selectedState.messages}
@@ -2150,6 +1906,15 @@ export default function App() {
 
   const allSessionsList = useMemo(() => Array.from(sessions.values()), [sessions]);
 
+  // Flat set of all workspace-owned folder paths, memoized on `workspaces` so a
+  // fresh Set isn't allocated every render (design D1 — keeps a future
+  // React.memo on DirectoryHomeView stable). See change:
+  // enable-workspace-folder-home-page.
+  const workspaceFolderSet = useMemo(
+    () => new Set(workspaces.flatMap((w) => w.folders)),
+    [workspaces],
+  );
+
   // Bare `/folder/:encodedCwd` directory home page (design D1/D2/D4).
   // Rendered in BOTH the desktop and mobile chains. See change:
   // add-directory-home-page.
@@ -2158,6 +1923,8 @@ export default function App() {
       cwd={folderHomeCwd}
       pinnedDirectories={pinnedDirectories}
       pinnedDirectoriesLoaded={pinnedDirsLoaded}
+      workspaceFolders={workspaceFolderSet}
+      workspacesLoaded={workspacesLoaded}
       sessions={allSessionsList.filter((s) => s.cwd === folderHomeCwd)}
       onSpawnSession={handleSpawnSession}
       onSelectSession={handleSelect}
@@ -2204,7 +1971,7 @@ export default function App() {
   const apiProvider = (children: React.ReactNode) => (
     <ApiContext.Provider value={apiBase}>
       <DisplayPrefsProvider value={displayPrefsContextValue}>
-      <CommitDialogProvider onCommitted={(shortHash, cwd) => { showToast(`Committed ${shortHash}`); void refreshGitStatus(cwd); }}>
+      <CommitDialogProvider onCommitted={(shortHash, cwd) => { showToast(`Committed ${shortHash}`, "success"); void refreshGitStatus(cwd); }}>
       <PluginContextProvider
         registry={_pluginRegistry}
         sessions={allSessionsList}
@@ -2265,7 +2032,7 @@ export default function App() {
               });
             }}
           >
-            <SplitRouteSync active={!!editorMatch} file={editorFile} line={editorLine} />
+            <SplitRouteSync active={!!editorMatch} file={editorFile} line={editorLine} url={editorUrl} />
             <CanvasDriver state={selectedId ? canvasMap.get(selectedId) ?? EMPTY_CANVAS_STATE : EMPTY_CANVAS_STATE} />
             <SessionDiffProvider sessionId={selectedId ?? ""} changeSignal={diffChangeSignal}>
               {children}
@@ -2281,6 +2048,15 @@ export default function App() {
 
   // Mobile: two-step full-screen navigation
   if (isMobile) {
+    const mobileDepth = getMobileDepth({
+      hasSessionRoute: !!selectedId,
+      hasFolderRoute: !!folderEditorCwd || !!folderHomeCwd,
+      hasSettingsRoute: !!settingsMatch,
+      hasFolderSettingsRoute: !!folderSettingsMatch,
+      hasTunnelRoute: !!tunnelSetupMatch,
+      hasOverlayRoute: hasShellOverlayRoute,
+      hasPiResourceRoute: hasPiResourceRouteFlag,
+    });
     return apiProvider(
       <div className="bg-[var(--bg-primary)] text-[var(--text-primary)]">
         <PluginStalenessBanner />
@@ -2423,7 +2199,7 @@ export default function App() {
         {sessionList}
       </MobileOverlay>
 
-      <div ref={contentPaneRef} className="flex-1 flex flex-col min-w-0 min-h-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {connectionBanner}
         <RecoveryOfferHost onReopen={(ids) => { for (const id of ids) handleResumeSession(id, "continue"); }} onDismiss={(ids) => send({ type: "recovery_dismiss", sessionIds: ids })} />
         {/* Folder-scoped editor pane (hosts terminal tabs via the keep-alive
@@ -2521,19 +2297,32 @@ export default function App() {
         })()} onMessage={onMessage} onBack={goBack} selectedCwd={selectedCwd} />}
         {tunnelSetupMatch && <ZrokInstallGuide onBack={goBack} />}
       </div>
-      <BoardWorktreeSpawnDialog
-        worktree={boardWorktreeForChange}
-        onCancel={() => setBoardWorktreeForChange(null)}
-        onSpawnStart={addSpawningCwd}
-        onSpawnAbort={clearSpawningCwd}
-        onSpawn={(path, opts) => {
-          const placeholderCwd = boardWorktreeForChange?.cwd;
-          setBoardWorktreeForChange(null);
-          handleSpawnSession(path, opts?.attachProposal, { ...opts, ...(placeholderCwd ? { placeholderCwd } : {}) });
-          // Opt-in trusted-only worktree auto-init. See change: auto-init-worktree-on-spawn.
-          void maybeAutoInitWorktreeOnSpawn(path);
-        }}
-      />
+      {artifactDialog && (
+        <OpenSpecArtifactDialog
+          cwd={artifactDialog.cwd}
+          changeName={artifactDialog.changeName}
+          initialArtifact={artifactDialog.artifactId}
+          openspecMap={openspecMap}
+          onClose={() => setArtifactDialog(null)}
+        />
+      )}
+      {boardWorktreeForChange && (
+        <WorktreeSpawnDialog
+          cwd={boardWorktreeForChange.cwd}
+          initialBranch={`os/${boardWorktreeForChange.changeName}`}
+          attachProposal={boardWorktreeForChange.changeName}
+          onCancel={() => setBoardWorktreeForChange(null)}
+          onSpawnStart={(c) => addSpawningCwd(c)}
+          onSpawnAbort={(c) => clearSpawningCwd(c)}
+          onSpawn={(path, opts) => {
+            const placeholderCwd = boardWorktreeForChange.cwd;
+            setBoardWorktreeForChange(null);
+            handleSpawnSession(path, opts?.attachProposal, { ...opts, placeholderCwd });
+            // Opt-in trusted-only worktree auto-init. See change: auto-init-worktree-on-spawn.
+            void maybeAutoInitWorktreeOnSpawn(path);
+          }}
+        />
+      )}
       {pinDialogOpen && (
         <DialogPortal>
           <PinDirectoryDialog
@@ -2548,34 +2337,6 @@ export default function App() {
         </DialogPortal>
       )}
     </div>
-  );
-}
-
-
-export function BoardWorktreeSpawnDialog({
-  worktree,
-  onCancel,
-  onSpawnStart,
-  onSpawnAbort,
-  onSpawn,
-}: {
-  worktree: { cwd: string; changeName: string } | null;
-  onCancel: () => void;
-  onSpawnStart: (cwd: string) => void;
-  onSpawnAbort: (cwd: string) => void;
-  onSpawn: (path: string, opts?: { gitWorktreeBase?: string; attachProposal?: string }) => void;
-}) {
-  if (!worktree) return null;
-  return (
-    <WorktreeSpawnDialog
-      cwd={worktree.cwd}
-      initialBranch={`os/${worktree.changeName}`}
-      attachProposal={worktree.changeName}
-      onCancel={onCancel}
-      onSpawnStart={onSpawnStart}
-      onSpawnAbort={onSpawnAbort}
-      onSpawn={onSpawn}
-    />
   );
 }
 

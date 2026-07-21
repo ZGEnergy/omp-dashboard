@@ -1,124 +1,21 @@
 /**
  * Tests for the bridge's built-in TUI adapter behavior.
- * Tests the adapter contract using the same mock pattern as the wiring tests.
- * The TUI adapter is defined inline in bridge.ts session_start.
+ * Tests the production adapter used by bridge.ts.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { PromptBus, type PromptAdapter, type PromptRequest, type PromptResponse, type PromptClaim } from "../prompt-bus.js";
-
-// Minimal TUI adapter reimplementation for testing the contract
-// (mirrors the inline adapter in bridge.ts session_start)
-function createTestTuiAdapter(mockUi: any, bus: PromptBus): PromptAdapter {
-  const controllers = new Map<string, AbortController>();
-
-  return {
-    name: "tui",
-    onRequest(prompt: PromptRequest): PromptClaim | null {
-      const ac = new AbortController();
-      controllers.set(prompt.id, ac);
-
-      const present = async () => {
-        try {
-          let answer: any;
-          if (prompt.type === "select") {
-            answer = await mockUi.select(prompt.question, prompt.options, { signal: ac.signal });
-          } else if (prompt.type === "input") {
-            answer = await mockUi.input(prompt.question, prompt.defaultValue || "", { signal: ac.signal });
-          } else if (prompt.type === "confirm") {
-            answer = await mockUi.confirm(prompt.question, "", { signal: ac.signal });
-          } else if (prompt.type === "batch") {
-            const questions = Array.isArray(prompt.metadata?.questions)
-              ? (prompt.metadata.questions as Array<Record<string, unknown>>)
-              : [];
-            const answers: Array<Record<string, unknown>> = [];
-            let cancelled = questions.length === 0;
-            for (const q of questions) {
-              if (ac.signal.aborted) {
-                cancelled = true;
-                break;
-              }
-              const method = typeof q.method === "string" ? q.method : "select";
-              const title =
-                (typeof q.title === "string" && q.title) ||
-                (typeof q.message === "string" && q.message) ||
-                "Question";
-              const options = Array.isArray(q.options)
-                ? q.options.map((o) => String(o)).filter(Boolean)
-                : [];
-              if ((method === "input" || options.length === 0) && mockUi.input) {
-                const text = await mockUi.input(title, "", { signal: ac.signal });
-                if (text === undefined || ac.signal.aborted) {
-                  cancelled = true;
-                  break;
-                }
-                answers.push({ value: text });
-                continue;
-              }
-              if (mockUi.select && options.length > 0) {
-                const picked = await mockUi.select(title, options, { signal: ac.signal });
-                if (picked === undefined || ac.signal.aborted) {
-                  cancelled = true;
-                  break;
-                }
-                answers.push(method === "multiselect" ? { values: [picked] } : { value: picked });
-                continue;
-              }
-              cancelled = true;
-              break;
-            }
-            if (!ac.signal.aborted) {
-              if (cancelled) {
-                bus.respond({ id: prompt.id, cancelled: true, source: "tui" });
-              } else {
-                bus.respond({
-                  id: prompt.id,
-                  answer: JSON.stringify(answers),
-                  cancelled: false,
-                  source: "tui",
-                });
-              }
-            }
-            return;
-          }
-          if (!ac.signal.aborted) {
-            const str = typeof answer === "boolean" ? (answer ? "true" : "false") : answer;
-            bus.respond({ id: prompt.id, answer: str ?? undefined, cancelled: str == null, source: "tui" });
-          }
-        } catch {
-          if (!ac.signal.aborted) {
-            bus.respond({ id: prompt.id, cancelled: true, source: "tui" });
-          }
-        } finally {
-          controllers.delete(prompt.id);
-        }
-      };
-      present();
-      return {};
-    },
-    onResponse(response: PromptResponse) {
-      if (response.source !== "tui") {
-        const ac = controllers.get(response.id);
-        if (ac) { ac.abort(); controllers.delete(response.id); }
-      }
-    },
-    onCancel(id: string) {
-      const ac = controllers.get(id);
-      if (ac) { ac.abort(); controllers.delete(id); }
-    },
-  };
-}
+import { PromptBus } from "../prompt-bus.js";
+import { createTuiPromptAdapter } from "../tui-prompt-adapter.js";
 
 function createMockUi() {
   const signals: Record<string, AbortSignal | undefined> = {};
-  const resolvers: Record<string, Array<{ resolve: (v: any) => void }>> = {};
+  const resolvers: Record<string, { resolve: (v: any) => void }> = {};
 
   function makeMock(name: string) {
     return vi.fn().mockImplementation((_q: string, _a?: any, opts?: any) => {
       signals[name] = opts?.signal;
       return new Promise((resolve) => {
-        if (!resolvers[name]) resolvers[name] = [];
-        resolvers[name]!.push({ resolve });
+        resolvers[name] = { resolve };
         opts?.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
       });
     });
@@ -128,7 +25,8 @@ function createMockUi() {
     select: makeMock("select"),
     input: makeMock("input"),
     confirm: makeMock("confirm"),
-    _resolve: (method: string, value: any) => resolvers[method]?.shift()?.resolve(value),
+    editor: makeMock("editor"),
+    _resolve: (method: string, value: any) => resolvers[method]?.resolve(value),
     _signal: (method: string) => signals[method],
   };
 }
@@ -148,28 +46,82 @@ describe("Bridge TUI adapter", () => {
   });
 
   it("calls original select with question and options", () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
     bus.request({ pipeline: "command", type: "select", question: "Pick:", options: ["A", "B"] });
 
     expect(mockUi.select).toHaveBeenCalledWith("Pick:", ["A", "B"], expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it("calls original input with question and defaultValue", () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
     bus.request({ pipeline: "command", type: "input", question: "Name:", defaultValue: "default" });
 
     expect(mockUi.input).toHaveBeenCalledWith("Name:", "default", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
-  it("calls original confirm with question", () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
+  it("calls original editor with question and prefill", () => {
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
+    bus.request({
+      pipeline: "command",
+      type: "editor",
+      question: "Edit response:",
+      defaultValue: "draft",
+    });
+
+    expect(mockUi.editor).toHaveBeenCalledWith(
+      "Edit response:",
+      "draft",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("calls original confirm with question and message context", () => {
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
+    bus.request({
+      pipeline: "command",
+      type: "confirm",
+      question: "Run production promotion?",
+      metadata: { message: "Staging passed all verification checks." },
+    });
+
+    expect(mockUi.confirm).toHaveBeenCalledWith(
+      "Run production promotion?",
+      "Staging passed all verification checks.",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("passes an empty confirm message when context is absent", () => {
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
     bus.request({ pipeline: "command", type: "confirm", question: "Sure?" });
 
-    expect(mockUi.confirm).toHaveBeenCalledWith("Sure?", "", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(mockUi.confirm).toHaveBeenCalledWith(
+      "Sure?",
+      "",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("does not present multiselect prompts in the TUI", () => {
+    const adapter = createTuiPromptAdapter(mockUi, bus);
+
+    const claim = adapter.onRequest({
+      id: "multi",
+      pipeline: "command",
+      type: "multiselect",
+      question: "Pick several:",
+      options: ["A", "B"],
+    });
+
+    expect(claim).toEqual({});
+    expect(mockUi.select).not.toHaveBeenCalled();
+    expect(mockUi.input).not.toHaveBeenCalled();
+    expect(mockUi.confirm).not.toHaveBeenCalled();
+    expect(mockUi.editor).not.toHaveBeenCalled();
   });
 
   it("responds via bus when user answers select", async () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
     const promise = bus.request({ pipeline: "command", type: "select", question: "Q", options: ["A"] });
 
     mockUi._resolve("select", "A");
@@ -181,7 +133,7 @@ describe("Bridge TUI adapter", () => {
   });
 
   it("responds cancelled when user dismisses dialog", async () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
     const promise = bus.request({ pipeline: "command", type: "select", question: "Q", options: ["A"] });
 
     mockUi._resolve("select", undefined);
@@ -192,7 +144,7 @@ describe("Bridge TUI adapter", () => {
   });
 
   it("converts boolean confirm to string", async () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
     const promise = bus.request({ pipeline: "command", type: "confirm", question: "Sure?" });
 
     mockUi._resolve("confirm", true);
@@ -203,7 +155,7 @@ describe("Bridge TUI adapter", () => {
   });
 
   it("aborts TUI dialog when another adapter answers", async () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
     const promise = bus.request({ pipeline: "command", type: "select", question: "Q", options: ["A"] });
 
     // External adapter answers
@@ -219,7 +171,7 @@ describe("Bridge TUI adapter", () => {
   });
 
   it("aborts TUI dialog on cancel", async () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
     const promise = bus.request({ pipeline: "command", type: "select", question: "Q", options: ["A"] });
 
     const id = (bus as any).pending.keys().next().value;
@@ -233,7 +185,7 @@ describe("Bridge TUI adapter", () => {
 
   it("does not respond after being aborted", async () => {
     const respondSpy = vi.spyOn(bus, "respond");
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
+    bus.registerAdapter(createTuiPromptAdapter(mockUi, bus));
     bus.request({ pipeline: "command", type: "select", question: "Q", options: ["A"] });
 
     const id = (bus as any).pending.keys().next().value;
@@ -250,85 +202,12 @@ describe("Bridge TUI adapter", () => {
   });
 
   it("returns empty claim (no component)", () => {
-    const adapter = createTestTuiAdapter(mockUi, bus);
+    const adapter = createTuiPromptAdapter(mockUi, bus);
     bus.registerAdapter(adapter);
     const claim = adapter.onRequest({
       id: "test", pipeline: "command", type: "select", question: "Q", options: ["A"],
     });
     expect(claim).toEqual({});
     expect(claim?.component).toBeUndefined();
-  });
-
-  it("presents multi-question batch sequentially on TUI", async () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
-    const promise = bus.request({
-      pipeline: "command",
-      type: "batch",
-      question: "Questions",
-      metadata: {
-        questions: [
-          { method: "select", title: "Priority?", options: ["P1", "P3"] },
-          { method: "select", title: "Next?", options: ["Stop", "Dispatch"] },
-        ],
-      },
-    });
-
-    await vi.advanceTimersByTimeAsync(0);
-    expect(mockUi.select).toHaveBeenCalledWith(
-      "Priority?",
-      ["P1", "P3"],
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-    mockUi._resolve("select", "P1");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(mockUi.select).toHaveBeenCalledWith(
-      "Next?",
-      ["Stop", "Dispatch"],
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-    mockUi._resolve("select", "Stop");
-    await vi.advanceTimersByTimeAsync(0);
-
-    const result = await promise;
-    expect(result.cancelled).toBeFalsy();
-    expect(JSON.parse(result.answer ?? "[]")).toEqual([{ value: "P1" }, { value: "Stop" }]);
-    expect(result.source).toBe("tui");
-  });
-
-  it("cancels batch when user dismisses a sequential step", async () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
-    const promise = bus.request({
-      pipeline: "command",
-      type: "batch",
-      question: "Questions",
-      metadata: {
-        questions: [
-          { method: "select", title: "A?", options: ["1", "2"] },
-          { method: "select", title: "B?", options: ["3", "4"] },
-        ],
-      },
-    });
-
-    await vi.advanceTimersByTimeAsync(0);
-    mockUi._resolve("select", undefined);
-    await vi.advanceTimersByTimeAsync(0);
-
-    const result = await promise;
-    expect(result.cancelled).toBe(true);
-    expect(mockUi.select).toHaveBeenCalledTimes(1);
-  });
-
-  it("cancels pending request when abort signal fires", async () => {
-    bus.registerAdapter(createTestTuiAdapter(mockUi, bus));
-    const ac = new AbortController();
-    const promise = bus.request(
-      { pipeline: "command", type: "select", question: "Q", options: ["A"] },
-      ac.signal,
-    );
-    await vi.advanceTimersByTimeAsync(0);
-    ac.abort();
-    await vi.advanceTimersByTimeAsync(0);
-    const result = await promise;
-    expect(result.cancelled).toBe(true);
   });
 });

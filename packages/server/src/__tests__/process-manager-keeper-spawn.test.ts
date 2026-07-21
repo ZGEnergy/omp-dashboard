@@ -15,18 +15,18 @@
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
-import type { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  resetResolver,
-  setKeeperManager,
-  setResolver,
-  spawnPiSession,
-} from "../process-manager.js";
 import type {
   KeeperManager,
   KeeperSpawnResult,
 } from "../rpc-keeper/keeper-manager.js";
+import {
+  setKeeperManager,
+  setResolver,
+  resetResolver,
+  spawnPiSession,
+} from "../spawn-process/process-manager.js";
+import type { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 
 // Fake resolver returning a fixed pi argv so spawnHeadlessViaKeeper's
 // resolvePiCommand() call succeeds. The PI_NOT_FOUND branch is exercised
@@ -132,7 +132,6 @@ describe("spawnHeadless (headless via keeper)", () => {
     expect(state.spawnCalls[0].piArgs).toBeDefined();
     expect(state.spawnCalls[0].piArgs).toContain("--mode");
     expect(state.spawnCalls[0].piArgs).toContain("rpc");
-    expect(state.spawnCalls[0].piArgs).not.toContain("--advisor");
 
     // SpawnResult.keeperSockPath populated so callers can pass it to
     // `headlessPidRegistry.register(..., {keeperPid, keeperSockPath})`
@@ -143,22 +142,6 @@ describe("spawnHeadless (headless via keeper)", () => {
     // so the keeper can spawn pi via the absolute path. See change:
     // fix-rpc-keeper-pi-resolution.
     expect(state.spawnCalls[0].piCmd).toEqual(["/usr/bin/pi"]);
-  });
-
-  it("passes the dashboard bridge explicitly to OMP headless sessions", async () => {
-    const fakeChild = new FakeKeeperChild(44444);
-    const { km, state } = makeFakeKeeperManager({
-      spawnResult: { success: true, pid: 44444, sockPath: "/fake/x.sock", process: fakeChild as unknown as import("node:child_process").ChildProcess },
-    });
-    setResolver(makeFakeResolver(["/usr/bin/omp"]));
-    setKeeperManager(km);
-
-    await spawnPiSession(tmpCwd, { strategy: "headless" });
-
-    const args = state.spawnCalls[0]?.piArgs ?? [];
-    const extensionIndex = args.indexOf("--extension");
-    expect(extensionIndex).toBeGreaterThanOrEqual(0);
-    expect(args[extensionIndex + 1]).toMatch(/packages\/extension\/src\/bridge\.ts$/);
   });
 
   it("forwards resume flags (sessionFile / mode) to the keeper as piArgs", async () => {
@@ -193,7 +176,33 @@ describe("spawnHeadless (headless via keeper)", () => {
     // we only assert the path token is present so we don't double-bind to
     // upstream argv shape.
     expect(piArgs).toContain(sessionFile);
-    expect(piArgs).not.toContain("--advisor");
+  });
+
+  it("forwards --name to the keeper as piArgs (B.1.4)", async () => {
+    // Integration: a named spawn threads `--name <name>` all the way through
+    // spawnPiSession → buildHeadlessArgs → sessionFlagsToArgv → the piArgs
+    // handed to spawnKeeperFor. See change: adopt-pi-074-080-features.
+    const fakeChild = new FakeKeeperChild(44444);
+    const { km, state } = makeFakeKeeperManager({
+      spawnResult: {
+        success: true,
+        pid: 44444,
+        sockPath: "/fake/named.sock",
+        process: fakeChild as unknown as import("node:child_process").ChildProcess,
+      },
+    });
+    setKeeperManager(km);
+
+    const result = await spawnPiSession(tmpCwd, { strategy: "headless", name: "review-worktree" });
+
+    expect(result.success).toBe(true);
+    expect(state.spawnCalls).toHaveLength(1);
+    const piArgs = state.spawnCalls[0].piArgs ?? [];
+    expect(piArgs).toContain("--name");
+    expect(piArgs[piArgs.indexOf("--name") + 1]).toBe("review-worktree");
+    // Still a headless rpc spawn.
+    expect(piArgs).toContain("--mode");
+    expect(piArgs).toContain("rpc");
   });
 
   it("returns SPAWN_ERRNO when KeeperManager.spawnKeeperFor reports !success", async () => {

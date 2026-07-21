@@ -2,12 +2,12 @@
  * Session action callbacks extracted from App.tsx.
  * Handles send, abort, resume, spawn, hide, rename, shutdown, terminal, and selection actions.
  */
-
-import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
-import type { DashboardSession, ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { useCallback } from "react";
-import { createInitialState, resolveInteractiveRequest, type SessionState } from "../lib/event-reducer.js";
-import { encodePromptAnswer } from "../lib/prompt-answer-encoder.js";
+import { createInitialState, resolveInteractiveRequest, type SessionState } from "../lib/chat/event-reducer.js";
+import { encodePromptAnswer } from "../lib/chat/prompt-answer-encoder.js";
+import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
+import type { ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
 export interface SessionActionDeps {
   selectedId: string | undefined;
@@ -145,9 +145,10 @@ export function useSessionActions(deps: SessionActionDeps) {
 
   const handleRespondToUi = useCallback((requestId: string, result?: unknown, cancelled?: boolean) => {
     if (selectedId) {
-      // All interactive prompts now use the PromptBus browser protocol. Keep
-      // one typed response channel so legacy extension_ui_response cannot race
-      // or double-deliver a core ask/ask_user answer.
+      send({ type: "extension_ui_response", sessionId: selectedId, requestId, result, cancelled });
+      // Also send via PromptBus protocol for new-style prompts.
+      // Encoding precedence (multiselect-aware): see prompt-answer-encoder.ts.
+      // Fix: change fix-multiselect-auto-cancel-on-dashboard.
       const answer = encodePromptAnswer(result, cancelled);
       // Standalone method:"input" carries pasted images that cannot fit in
       // the string `answer`; lift them onto the message. Batch images ride
@@ -169,7 +170,7 @@ export function useSessionActions(deps: SessionActionDeps) {
       setSessions((prev) => {
         const next = new Map(prev);
         const session = next.get(selectedId);
-        if (session?.currentTool === "ask_user" || session?.currentTool === "ask") {
+        if (session?.currentTool === "ask_user") {
           next.set(selectedId, { ...session, currentTool: undefined });
         }
         return next;

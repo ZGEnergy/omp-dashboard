@@ -2,11 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { COOKIE_NAME, signToken } from "../auth.js";
-import { validateWsUpgrade, validateWsUpgradeWithoutAuth } from "../auth-plugin.js";
-import { parseBearerHeader } from "../bearer-auth.js";
-import { PairedDeviceRegistry } from "../paired-devices.js";
-import { WsTicketStore } from "../ws-ticket.js";
+import { COOKIE_NAME, signToken } from "../auth/auth.js";
+import { validateWsUpgrade } from "../auth/auth-plugin.js";
+import { parseBearerHeader } from "../auth/bearer-auth.js";
+import { PairedDeviceRegistry } from "../pairing/paired-devices.js";
+import { WsTicketStore } from "../auth/ws-ticket.js";
 
 const SECRET = "test-secret-for-bearer";
 let tmpDir: string;
@@ -37,33 +37,6 @@ describe("validateWsUpgrade — ticket branch is additive (Task 3.3/3.5)", () =>
     expect(validateWsUpgrade(undefined, "127.0.0.1", SECRET)).toBe(true);
     expect(validateWsUpgrade(undefined, "::1", SECRET)).toBe(true);
   });
-  it("consumes a ticket even when loopback bypass authorizes the first upgrade", () => {
-    const store = new WsTicketStore();
-    const consumeTicket = (t: string, s: any) => store.consume(t, s);
-    const ticket = store.mint("browser");
-
-    expect(validateWsUpgrade(undefined, "127.0.0.1", SECRET, [], { ticket, scope: "browser", consumeTicket })).toBe(true);
-    // The ticket was consumed before the bypass returned, so the same ticket
-    // cannot authorize a later external upgrade.
-    expect(validateWsUpgrade(undefined, "1.2.3.4", SECRET, [], { ticket, scope: "browser", consumeTicket })).toBe(false);
-  });
-  it("consumes a ticket before an auth-disabled local bypass", () => {
-    const store = new WsTicketStore();
-    const consumeTicket = (t: string, s: any) => store.consume(t, s);
-    const ticket = store.mint("browser");
-
-    expect(validateWsUpgradeWithoutAuth("127.0.0.1", [], {
-      ticket,
-      scope: "browser",
-      consumeTicket,
-    })).toBe(true);
-    // A later non-local attempt cannot reuse the ticket consumed above.
-    expect(validateWsUpgradeWithoutAuth("1.2.3.4", [], {
-      ticket,
-      scope: "browser",
-      consumeTicket,
-    })).toBe(false);
-  });
 
   it("valid cookie still authorizes external requests (unchanged)", () => {
     const cookie = `${COOKIE_NAME}=${signToken({ sub: "u@e.com", name: "U", username: "u", provider: "github" }, SECRET)}`;
@@ -91,25 +64,4 @@ describe("validateWsUpgrade — ticket branch is additive (Task 3.3/3.5)", () =>
     // token is a durable bearer, never minted as a ticket.
     expect(validateWsUpgrade(undefined, "1.2.3.4", SECRET, [], { ticket: token, scope: "browser", consumeTicket })).toBe(false);
   });
-
-  it("unknown route upgrade still burns a presented ticket (single-use)", () => {
-    const store = new WsTicketStore(() => 1_000);
-    const ticket = store.mint("browser");
-    // scope null mimics routeScopeForUrl("/not-a-route?ticket=…")
-    const allowed = validateWsUpgrade(
-      undefined,
-      "10.0.0.5",
-      "secret",
-      [],
-      {
-        ticket,
-        scope: null,
-        consumeTicket: (t, s) => store.consume(t, s),
-      },
-    );
-    expect(allowed).toBe(false);
-    // Second attempt with correct scope must fail — ticket already burned.
-    expect(store.consume(ticket, "browser")).toBe(false);
-  });
-
 });

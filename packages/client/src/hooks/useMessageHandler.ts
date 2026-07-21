@@ -12,20 +12,19 @@ import type { DisplayPrefs } from "@blackbelt-technology/pi-dashboard-shared/dis
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, FileEntry, ModelInfo, OpenSpecData, OpenSpecGroup, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { useCallback, useEffect, useRef } from "react";
-import type { DiscoveredServerInfo } from "../components/ServerSelector.js";
-import { EMPTY_CANVAS_STATE, reduceCanvasChip, reduceCanvasIntent } from "../lib/canvas-gate.js";
-import { foldLiveEvents, type QueuedLiveEvent } from "../lib/coalesce-live-events.js";
-import { isVisibleCwd } from "../lib/cwd-visibility.js";
-import { addInteractiveRequest, applyPromptReceived, createInitialState, dismissInteractiveRequest, reduceEvent, type SessionState } from "../lib/event-reducer.js";
-import { t } from "../lib/i18n";
-import { clearLoadingHistory, HYDRATE_CEILING_MS, rearmLoadingHistory } from "../lib/loading-history.js";
-import { clearRecoveryOffer, setRecoveryOffer } from "../lib/recovery-offer-bus.js";
-import type { ReplayPersister } from "../lib/replay-persist.js";
-import type { ReplayWindow } from "../lib/replay-window.js";
-import type { SessionReplayController } from "./useSessionReplayController.js";
-import { inferPlatform, pathKey } from "../lib/session-grouping.js";
-import { pushSpawnErrorToast } from "../lib/spawn-error-toast-bus.js";
-import { dispatchInitEvent } from "../lib/worktree-init-bus.js";
+import type { DiscoveredServerInfo } from "../components/connectivity/ServerSelector.js";
+import type { ToastVariant } from "../components/primitives/Toast.js";
+import { EMPTY_CANVAS_STATE, reduceCanvasChip, reduceCanvasIntent } from "../lib/canvas/canvas-gate.js";
+import { foldLiveEvents, type QueuedLiveEvent } from "../lib/chat/coalesce-live-events.js";
+import { isVisibleCwd } from "../lib/util/cwd-visibility.js";
+import { addInteractiveRequest, applyPromptReceived, createInitialState, dismissInteractiveRequest, reduceEvent, type SessionState } from "../lib/chat/event-reducer.js";
+import { t } from "../lib/i18n/i18n.js";
+import { clearLoadingHistory, HYDRATE_CEILING_MS, rearmLoadingHistory } from "../lib/replay/loading-history.js";
+import { clearRecoveryOffer, setRecoveryOffer } from "../lib/state/recovery-offer-bus.js";
+import type { ReplayPersister } from "../lib/replay/replay-persist.js";
+import { inferPlatform, pathKey } from "../lib/session/session-grouping.js";
+import { pushSpawnErrorToast } from "../lib/state/spawn-error-toast-bus.js";
+import { dispatchInitEvent } from "../lib/git/worktree-init-bus.js";
 
 /**
  * Rich spawn error detail stored per cwd.
@@ -84,6 +83,10 @@ export interface MessageHandlerSetters {
   setFavoriteModels: React.Dispatch<React.SetStateAction<string[]>>;
   /** folder-workspaces: full workspace list, kept in sync via `workspaces_updated`. */
   setWorkspaces: React.Dispatch<React.SetStateAction<import("@blackbelt-technology/pi-dashboard-shared/browser-protocol.js").Workspace[]>>;
+  /** Flipped true on the first `workspaces_updated` (sent on modern connect).
+      Gates DirectoryHomeView's cold-load guard for workspace-only cwds.
+      See change: enable-workspace-folder-home-page. */
+  setWorkspacesLoaded: React.Dispatch<React.SetStateAction<boolean>>;
   setTerminals: React.Dispatch<React.SetStateAction<Map<string, TerminalSession>>>;
   setDiscoveredServers: React.Dispatch<React.SetStateAction<DiscoveredServerInfo[]>>;
   setSpawnErrors: React.Dispatch<React.SetStateAction<Map<string, SpawnErrorDetail>>>;
@@ -96,7 +99,7 @@ export interface MessageHandlerSetters {
    * rendered chat by timestamp at the App level.
    * See change: render-file-previews.
    */
-  setViewMessagesMap: React.Dispatch<React.SetStateAction<Map<string, import("../lib/event-reducer.js").ChatMessage[]>>>;
+
   /**
    * Per-session "history loading" flag. Cleared on the first content batch,
    * the terminal `event_replay{isLast:true}`, or `session_updated{dataUnavailable:true}`.
@@ -108,7 +111,7 @@ export interface MessageHandlerSetters {
    * `canvas_server_chip` broadcasts. Coexists with the URL-driven preview
    * routes. See change: auto-canvas (Section 6).
    */
-  setCanvasMap: React.Dispatch<React.SetStateAction<Map<string, import("../lib/canvas-gate.js").CanvasState>>>;
+  setCanvasMap: React.Dispatch<React.SetStateAction<Map<string, import("../lib/canvas/canvas-gate.js").CanvasState>>>;
 }
 
 export interface MessageHandlerDeps {
@@ -156,22 +159,7 @@ export interface MessageHandlerDeps {
    * auto-name a session). Optional for back-compat / lean test contexts.
    * See change: add-auto-session-naming.
    */
-  showToast?: (text: string, variant?: "error" | "success" | "info") => void;
-  /**
-   * Per-session history-window cursor for session-tail-rehydrate: the low
-   * watermark (`minSeq`) already loaded and whether older events remain on
-   * the server. Updated as older history is fetched so re-renders don't
-   * refetch. See change: session-tail-rehydrate.
-   */
-  historyWindowRef?: React.MutableRefObject<Map<string, ReplayWindow>>;
-  /** Set-state for the history-window cursor map. See change: session-tail-rehydrate. */
-  setHistoryWindowMap?: React.Dispatch<React.SetStateAction<Map<string, ReplayWindow>>>;
-  /** Per-session "loading older" flag for the Load-more affordance. See change: session-tail-rehydrate. */
-  setLoadingOlderMap?: React.Dispatch<React.SetStateAction<Map<string, boolean>>>;
-  /** The single authoritative replay admission boundary. When supplied, replay,
-   * reset, live event, and correlated asset frames must not fall through to
-   * legacy reducer/persister/plugin side effects. */
-  replayController?: Pick<SessionReplayController, "handle">;
+  showToast?: (text: string, variant?: ToastVariant) => void;
 }
 
 export function useMessageHandler(
@@ -181,29 +169,11 @@ export function useMessageHandler(
   const {
     setSessions, setSessionStates, setSessionCommands,
     setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult,
-    setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals,
+    setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setWorkspacesLoaded, setTerminals,
     setDiscoveredServers, setSpawnErrors, setResumeErrors,
-    setDisplayPrefs, setViewMessagesMap, setLoadingHistory, setCanvasMap,
+    setDisplayPrefs, setLoadingHistory, setCanvasMap,
   } = setters;
-  const {
-    send,
-    navigate,
-    clearSpawningCwd,
-    spawningCwdsRef,
-    subscribedRef,
-    pendingTerminalCwdRef,
-    lastCreatedTerminalIdRef,
-    maxSeqMapRef,
-    selectedSessionIdRef,
-    pendingSpawnsRef,
-    loadingHistoryTimersRef,
-    replayPersister,
-    showToast,
-    historyWindowRef,
-    setHistoryWindowMap,
-    setLoadingOlderMap,
-    replayController,
-  } = deps;
+  const { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, loadingHistoryTimersRef, replayPersister, showToast } = deps;
   // One-shot per session: suppress a repeat auto-name toast for the same
   // session id. See change: add-auto-session-naming.
   const autoNameToastedRef = useRef<Set<string>>(new Set());
@@ -278,17 +248,6 @@ export function useMessageHandler(
   );
 
   return useCallback((msg: ServerToBrowserMessage) => {
-    // The controller owns every replay-adjacent side effect. Its `true` result
-    // is a hard stop: stale frames cannot reach reducer/cache/plugin/loading.
-    const replayAdjacent = msg.type === "event" || msg.type === "event_replay" ||
-      msg.type === "session_state_reset" || msg.type === "asset_replay_chunk" ||
-      msg.type === "asset_unavailable";
-    if (replayAdjacent && replayController) {
-      // Once a controller is installed, every replay frame is owned by its
-      // authority gate. Unknown/stale replay frames are intentionally consumed
-      // too, rather than falling through to legacy reducer/cache/plugin effects.
-      if (replayController.handle(msg as never) || msg.type !== "event") return;
-    }
     // Preserve strict ordering: any queued live events must apply before a
     // non-`event` message can mutate the same session's state (reset, replay,
     // interactive request, removal). Draining here keeps coalescing on the hot
@@ -371,23 +330,21 @@ export function useMessageHandler(
         if ((msg.updates as Partial<DashboardSession>).dataUnavailable === true) {
           clearLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, msg.sessionId);
         }
-        // Only `session_updated` is authoritative for live model preferences.
-        // The server sends model changes as one complete snapshot, including an
-        // explicit null when thinking is cleared. Apply both fields through one
-        // functional update so ordered Pi snapshots cannot be lost to a stale
-        // closure or a partial optimistic write.
+        // Mirror model/thinkingLevel into sessionStates so the bottom StatusBar
+        // (which reads selectedState.thinkingLevel ?? selectedSession.thinkingLevel)
+        // stays in sync with the session card. model_update events from the bridge
+        // go through session_updated — there's no dedicated browser-side
+        // model_update handler, so we propagate here.
         // See change: enrich-custom-provider-model-metadata.
         {
           const updates = msg.updates as Partial<DashboardSession>;
-          const hasModel = updates.model !== undefined;
-          const hasThinkingLevel = Object.prototype.hasOwnProperty.call(updates, "thinkingLevel");
-          if (hasModel || hasThinkingLevel) {
+          if (updates.thinkingLevel !== undefined || updates.model !== undefined) {
             setSessionStates((prev) => {
               const next = new Map(prev);
               const existing = next.get(msg.sessionId) ?? createInitialState();
               const patched: SessionState = { ...existing };
-              if (hasModel) patched.model = updates.model;
-              if (hasThinkingLevel) patched.thinkingLevel = updates.thinkingLevel ?? null;
+              if (updates.thinkingLevel !== undefined) patched.thinkingLevel = updates.thinkingLevel;
+              if (updates.model !== undefined) patched.model = updates.model;
               next.set(msg.sessionId, patched);
               return next;
             });
@@ -423,39 +380,10 @@ export function useMessageHandler(
           return next;
         });
         maxSeqMapRef.current.set(msg.sessionId, 0);
-        historyWindowRef?.current.delete(msg.sessionId);
-        setHistoryWindowMap?.((prev) => {
-          if (!prev.has(msg.sessionId)) return prev;
-          const next = new Map(prev);
-          next.delete(msg.sessionId);
-          return next;
-        });
-        setLoadingOlderMap?.((prev) => {
-          if (!prev.has(msg.sessionId)) return prev;
-          const next = new Map(prev);
-          next.delete(msg.sessionId);
-          return next;
-        });
         // Strategy A invalidation: purge the durable cache so stale history is
         // never stitched onto reset sequence numbers; full replay rebuilds it.
         // See change: reduce-session-replay-traffic.
         void replayPersister?.drop(msg.sessionId);
-        // Drop load-older window meta so a rebuilt tail does not Math.min with a
-        // pre-reset minSeq (which can skip a mid-range forever).
-        // See change: session-tail-rehydrate.
-        historyWindowRef?.current.delete(msg.sessionId);
-        setHistoryWindowMap?.((m) => {
-          if (!m.has(msg.sessionId)) return m;
-          const next = new Map(m);
-          next.delete(msg.sessionId);
-          return next;
-        });
-        setLoadingOlderMap?.((m) => {
-          if (!m.get(msg.sessionId)) return m;
-          const next = new Map(m);
-          next.set(msg.sessionId, false);
-          return next;
-        });
         // Mirror the reset into the plugin-runtime per-session event
         // store so plugin reducers (e.g. flows-plugin) re-derive from
         // a clean stream after a replay. See change:
@@ -702,176 +630,71 @@ export function useMessageHandler(
 
       case "event_replay": {
         const firstSeq = msg.events.length > 0 ? msg.events[0].seq : null;
+        // Reset on every full replay sweep: firstSeq===1 (cold start) OR
+        // firstSeq <= maxSeq for this session (server is re-replaying events
+        // the client has already accounted for, e.g. paginated reconnect
+        // re-replay where the first batch may not start at seq=1).
+        // See change: fix-replay-duplicates-tool-and-flushed-rows.
         const maxSeq = maxSeqMapRef.current.get(msg.sessionId) ?? 0;
-        // Older page: every delivered seq is below the client's current max.
-        // Must merge+re-reduce, never wipe to only the older page.
-        // See change: session-tail-rehydrate.
-        const isOlderPage =
-          msg.events.length > 0 &&
-          maxSeq > 0 &&
-          (msg.windowMaxSeq != null
-            ? msg.windowMaxSeq < maxSeq
-            : msg.events.every((e) => e.seq < maxSeq));
-
-        // Reset on full replay sweep (cold start / re-replay of known seqs),
-        // but never for older pages.
-        // Windowed cold tail (mode:tail, firstSeq > 1, no prior max) is also a
-        // reset: seed from the window rather than appending onto empty/partial
-        // state. See change: fix-replay-duplicates-tool-and-flushed-rows,
-        // session-tail-rehydrate.
-        const shouldReset =
-          !isOlderPage &&
-          firstSeq != null &&
-          (firstSeq === 1 || firstSeq <= maxSeq || maxSeq === 0);
-
-        if (isOlderPage && replayPersister) {
-          const merged = replayPersister.merge(msg.sessionId, msg.events);
-          setSessionStates((prev) => {
-            const next = new Map(prev);
-            const prevState = next.get(msg.sessionId);
-            // Re-reduce raw events from empty, but keep out-of-band UI that is
-            // not in the event store (pendingPrompt + active interactive asks).
-            // Server load-older does not re-send pending UI requests.
-            // See change: session-tail-rehydrate.
-            let current = createInitialState();
-            if (prevState?.pendingPrompt) current.pendingPrompt = prevState.pendingPrompt;
-            for (const { event } of merged) {
-              current = reduceEvent(current, event);
-            }
-            if (prevState && prevState.interactiveRequests.length > 0) {
-              const byId = new Map(current.interactiveRequests.map((r) => [r.requestId, r]));
-              for (const req of prevState.interactiveRequests) {
-                if (!byId.has(req.requestId)) {
-                  current.interactiveRequests = [...current.interactiveRequests, req];
-                }
-              }
-              const uiRows = prevState.messages.filter((m) => m.role === "interactiveUi");
-              const have = new Set(
-                current.messages.filter((m) => m.role === "interactiveUi").map((m) => m.id),
-              );
-              for (const row of uiRows) {
-                if (!have.has(row.id)) current.messages = [...current.messages, row];
-              }
-            }
-            next.set(msg.sessionId, current);
-            return next;
-          });
-          clearSessionEvents(msg.sessionId);
-          publishSessionEvents(
-            msg.sessionId,
-            merged.map((e) => e.event),
-          );
-          if (merged.length > 0) {
-            const lastEvt = merged[merged.length - 1]!;
-            if (lastEvt.seq > (maxSeqMapRef.current.get(msg.sessionId) ?? 0)) {
-              maxSeqMapRef.current.set(msg.sessionId, lastEvt.seq);
-            }
+        const shouldReset = firstSeq != null && (firstSeq === 1 || firstSeq <= maxSeq);
+        setSessionStates((prev) => {
+          const next = new Map(prev);
+          // Same rationale as session_state_reset: preserve optimistic
+          // pendingPrompt across the full-replay reset branch.
+          // See change: preserve-pending-prompt-across-replay.
+          const carry = shouldReset ? next.get(msg.sessionId)?.pendingPrompt : undefined;
+          let current = shouldReset ? createInitialState() : (next.get(msg.sessionId) ?? createInitialState());
+          if (carry) current.pendingPrompt = carry;
+          for (const { event } of msg.events) {
+            current = reduceEvent(current, event);
           }
-        } else {
-          setSessionStates((prev) => {
-            const next = new Map(prev);
-            // Same rationale as session_state_reset: preserve optimistic
-            // pendingPrompt across the full-replay reset branch.
-            // See change: preserve-pending-prompt-across-replay.
-            const carry = shouldReset ? next.get(msg.sessionId)?.pendingPrompt : undefined;
-            let current = shouldReset ? createInitialState() : (next.get(msg.sessionId) ?? createInitialState());
-            if (carry) current.pendingPrompt = carry;
-            for (const { event } of msg.events) {
-              current = reduceEvent(current, event);
-            }
-            next.set(msg.sessionId, current);
-            return next;
-          });
-          // Mirror the replayed batch into the plugin-runtime per-session event
-          // store so plugin slot consumers rehydrate on cold load.
-          // See change: replay-persisted-flow-runs.
-          if (shouldReset) clearSessionEvents(msg.sessionId);
-          publishSessionEvents(msg.sessionId, msg.events.map((e) => e.event));
-          if (shouldReset) {
-            maxSeqMapRef.current.set(msg.sessionId, 0);
-          }
-          if (msg.events.length > 0) {
-            const lastEvt = msg.events[msg.events.length - 1]!;
-            if (lastEvt.seq > (maxSeqMapRef.current.get(msg.sessionId) ?? 0)) {
-              maxSeqMapRef.current.set(msg.sessionId, lastEvt.seq);
-            }
-          }
-          // Strategy A: mirror into durable buffer.
-          if (msg.events.length > 0) {
-            if (shouldReset) replayPersister?.seed(msg.sessionId, msg.events);
-            else replayPersister?.record(msg.sessionId, msg.events);
+          next.set(msg.sessionId, current);
+          return next;
+        });
+        // Mirror the replayed batch into the plugin-runtime per-session event
+        // store so plugin slot consumers (flows card, goal chip) reading
+        // `useSessionEvents` rehydrate on cold load — the live `event` path
+        // publishes per event, so the replay path must too. Reuse `shouldReset`
+        // (full-sweep) to clear before republishing so a re-replay does not
+        // duplicate; continuation batches append.
+        // See change: replay-persisted-flow-runs.
+        if (shouldReset) clearSessionEvents(msg.sessionId);
+        publishSessionEvents(msg.sessionId, msg.events.map((e) => e.event));
+        // If we reset, also reset maxSeq tracking so a subsequent batch isn't
+        // misclassified. We rebuild it below from this batch's events.
+        if (shouldReset) {
+          maxSeqMapRef.current.set(msg.sessionId, 0);
+        }
+        // Track highest seq from replay batch
+        if (msg.events.length > 0) {
+          const lastEvt = msg.events[msg.events.length - 1];
+          if (lastEvt.seq > (maxSeqMapRef.current.get(msg.sessionId) ?? 0)) {
+            maxSeqMapRef.current.set(msg.sessionId, lastEvt.seq);
           }
         }
-
-        // Track window meta for load-older UI.
-        // Prefer server meta. Infer hasMoreOlder only for cold/windowed seeds
-        // (no prior maxSeq / shouldReset cold land), never for warm deltas —
-        // otherwise old servers that omit window fields look like gaps forever.
-        // See change: session-tail-rehydrate.
-        {
-          const prev = historyWindowRef?.current.get(msg.sessionId);
-          const serverSaid = msg.hasMoreOlder != null || msg.windowMinSeq != null;
-          const coldInfer =
-            !isOlderPage &&
-            shouldReset &&
-            firstSeq != null &&
-            firstSeq > 1 &&
-            msg.hasMoreOlder == null;
-          if (serverSaid || coldInfer) {
-            const inferredMin =
-              msg.windowMinSeq != null
-                ? msg.windowMinSeq
-                : firstSeq != null
-                  ? firstSeq
-                  : (prev?.minSeq ?? 0);
-            // On shouldReset cold rebuild, replace minSeq (do not Math.min with
-            // pre-reset values — those were cleared on session_state_reset).
-            const minSeq =
-              shouldReset || !prev
-                ? inferredMin
-                : Math.min(prev.minSeq, inferredMin);
-            const hasMoreOlder =
-              msg.hasMoreOlder != null
-                ? msg.hasMoreOlder
-                : coldInfer
-                  ? true
-                  : (prev?.hasMoreOlder ?? false);
-            historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder, partialHead: prev?.partialHead ?? false });
-            setHistoryWindowMap?.((m) => {
-              const next = new Map(m);
-              next.set(msg.sessionId, { minSeq, hasMoreOlder, partialHead: prev?.partialHead ?? false });
-              return next;
-            });
-          } else if (isOlderPage && firstSeq != null && prev) {
-            // Older page without meta: advance minSeq downward only.
-            const minSeq = Math.min(prev.minSeq, firstSeq);
-            historyWindowRef?.current.set(msg.sessionId, { minSeq, hasMoreOlder: prev.hasMoreOlder, partialHead: prev.partialHead });
-            setHistoryWindowMap?.((m) => {
-              const next = new Map(m);
-              next.set(msg.sessionId, { minSeq, hasMoreOlder: prev.hasMoreOlder, partialHead: prev.partialHead });
-              return next;
-            });
-          }
+        // Strategy A: mirror the reducer into the durable replay buffer. A
+        // full-sweep reset (shouldReset) replaces the buffer; a delta appends.
+        // This is also the reconciliation path: an offline-drift replay whose
+        // firstSeq <= maxSeq resets and rebuilds the persisted tail too.
+        // See change: reduce-session-replay-traffic.
+        if (msg.events.length > 0) {
+          if (shouldReset) replayPersister?.seed(msg.sessionId, msg.events);
+          else replayPersister?.record(msg.sessionId, msg.events);
         }
-
-        // Exit LOADING: first content or terminal empty session.
-        // See change: show-chat-history-loading-indicator,
+        // Exit LOADING: first content (clear immediately so partial history
+        // paints) OR terminal marker for a genuinely-empty session
+        // (`events:[], isLast:true` → falls through to "No messages yet").
+        // Else — the empty non-terminal marker (`events:[], isLast:false`) is the
+        // cold-hydration start marker AND every server heartbeat: re-arm the
+        // short subscribe window to the longer hydration ceiling so a slow disk
+        // parse never flashes "No messages yet". `rearmLoadingHistory` no-ops
+        // unless a timer is armed (flag set), so warm/painted sessions are
+        // unaffected. See change: show-chat-history-loading-indicator,
         // fix-history-loading-false-empty-flash.
         if (msg.events.length > 0 || msg.isLast === true) {
           clearLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, msg.sessionId);
         } else {
           rearmLoadingHistory(setLoadingHistory, loadingHistoryTimersRef, msg.sessionId, HYDRATE_CEILING_MS);
-        }
-        // Load-older in-flight ends only on terminal batch (isLast), including
-        // empty terminal pages — multi-batch older pages must not clear early.
-        // See change: session-tail-rehydrate.
-        if (msg.isLast === true) {
-          setLoadingOlderMap?.((m) => {
-            if (!m.get(msg.sessionId)) return m;
-            const next = new Map(m);
-            next.set(msg.sessionId, false);
-            return next;
-          });
         }
         break;
       }
@@ -887,19 +710,6 @@ export function useMessageHandler(
             "error",
           );
         }
-        break;
-      }
-
-      case "plugin_action_error": {
-        // Unknown pluginId on plugin_action — gateway never silent-drops.
-        // See change: fix-plugin-action-fanout-and-handlers.
-        const detail = msg.action
-          ? `${msg.pluginId}/${msg.action}: ${msg.error}`
-          : `${msg.pluginId}: ${msg.error}`;
-        showToast?.(
-          t("plugin.actionError", { detail }, `Plugin action failed: ${detail}`),
-          "error",
-        );
         break;
       }
 
@@ -1079,26 +889,18 @@ export function useMessageHandler(
         // folder-workspaces: server sends full snapshot on subscribe and
         // after every mutation. Replace, do not merge.
         setWorkspaces(msg.workspaces);
+        // enable-workspace-folder-home-page: first snapshot marks workspaces
+        // loaded so the directory-home cold-load guard can release.
+        setWorkspacesLoaded(true);
         break;
 
       case "extension_ui_request":
         setSessionStates((prev) => {
           const next = new Map(prev);
           const current = next.get(msg.sessionId) ?? createInitialState();
-          const updated = addInteractiveRequest(current, msg.requestId, msg.method, msg.params, true);
+          const updated = addInteractiveRequest(current, msg.requestId, msg.method, msg.params);
           if (updated === current) return prev;
           next.set(msg.sessionId, updated);
-          return next;
-        });
-        break;
-
-      case "view_messages_update":
-        // Full snapshot of `/view` preview rows for a session. Replace,
-        // not append. Merged into the rendered chat at the App level.
-        // See change: render-file-previews.
-        setViewMessagesMap((prev) => {
-          const next = new Map(prev);
-          next.set(msg.sessionId, msg.viewMessages.slice());
           return next;
         });
         break;
@@ -1144,7 +946,6 @@ export function useMessageHandler(
               _promptBusComponent: msg.component,
               _promptBusPlacement: msg.placement,
             },
-            false,
             toolCallId,
           );
           if (updated === current) return prev;
@@ -1321,5 +1122,5 @@ export function useMessageHandler(
         break;
       }
     }
-  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals, setDiscoveredServers, setLoadingHistory, setCanvasMap, setHistoryWindowMap, setLoadingOlderMap, spawningCwdsRef, subscribedRef, maxSeqMapRef, selectedSessionIdRef, historyWindowRef, loadingHistoryTimersRef, replayPersister, flushLiveEvents, scheduleLiveFlush, showToast, replayController]);
+  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setWorkspacesLoaded, setTerminals, setDiscoveredServers, setLoadingHistory, setCanvasMap, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, maxSeqMapRef, selectedSessionIdRef, loadingHistoryTimersRef, replayPersister, flushLiveEvents, scheduleLiveFlush]);
 }

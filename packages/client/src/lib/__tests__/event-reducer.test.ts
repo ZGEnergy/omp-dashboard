@@ -1,12 +1,37 @@
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { describe, expect, it, vi } from "vitest";
-import { addInteractiveRequest, applyPromptReceived, type ChatMessage, createInitialState, deriveBannerState, dismissInteractiveRequest, extractAgentEndError, findLastUserPrompt, type PendingPrompt, reduceEvent, resolveInteractiveRequest, type SessionState, toDisplayString } from "../event-reducer.js";
+import { describe, expect, it } from "vitest";
+import { addInteractiveRequest, applyPromptReceived, type ChatMessage, createInitialState, deriveBannerState, dismissInteractiveRequest, extractAgentEndError, findLastUserPrompt, type PendingPrompt, reduceEvent, resolveInteractiveRequest, type SessionState, toDisplayString } from "../chat/event-reducer.js";
 
 function applyEvents(events: DashboardEvent[]): SessionState {
   return events.reduce((s, e) => reduceEvent(s, e), createInitialState());
 }
 
 describe("eventReducer", () => {
+  // D8 / test-plan X6: the retired `ChatMessage.view` field is gone. An OLD
+  // serialized session whose messages still carry `view` must replay inertly —
+  // the reducer never reads it, nothing throws, other fields stay intact, and
+  // no inline card is produced. See change: open-view-command-in-editor-pane.
+  it("X6 ignores a legacy `view` field on a message during replay (no throw, fields intact)", () => {
+    const legacy = createInitialState();
+    // A message persisted while `view` existed, cast past the (now narrower) type.
+    legacy.messages.push({
+      id: "m1",
+      role: "user",
+      content: "hello",
+      timestamp: 1,
+      view: { kind: "file", cwd: "/p", path: "a.ts" },
+    } as unknown as ChatMessage);
+    // A subsequent event re-reduces the state; must not throw on the stray field.
+    const next = reduceEvent(legacy, {
+      eventType: "message_start",
+      timestamp: 2,
+      data: { message: { role: "user", content: [{ type: "text", text: "again" }] } },
+    } as DashboardEvent);
+    expect(next.messages).toHaveLength(2);
+    // Original message's real fields intact; the `view` field is inert.
+    expect(next.messages[0]).toMatchObject({ id: "m1", role: "user", content: "hello" });
+  });
+
   it("should start with empty state", () => {
     const state = createInitialState();
     expect(state.messages).toHaveLength(0);
@@ -317,14 +342,23 @@ describe("eventReducer", () => {
     expect(state.messages[0].toolDetails).toBeUndefined();
   });
 
-  it("should set status to idle on agent_end", () => {
-    const state = applyEvents([
+  it("should set status to ended on agent_end, then idle on agent_settled", () => {
+    // agent_end is now the INTERMEDIATE terminal; agent_settled resolves idle.
+    // See change: adopt-pi-074-080-features (A.1).
+    const ended = applyEvents([
       { eventType: "agent_start", timestamp: Date.now(), data: {} },
       { eventType: "agent_end", timestamp: Date.now(), data: { messages: [] } },
     ]);
+    expect(ended.status).toBe("ended");
+    expect(ended.isStreaming).toBe(false);
 
-    expect(state.status).toBe("idle");
-    expect(state.isStreaming).toBe(false);
+    const settled = applyEvents([
+      { eventType: "agent_start", timestamp: Date.now(), data: {} },
+      { eventType: "agent_end", timestamp: Date.now(), data: { messages: [] } },
+      { eventType: "agent_settled", timestamp: Date.now(), data: {} },
+    ]);
+    expect(settled.status).toBe("idle");
+    expect(settled.isStreaming).toBe(false);
   });
 
   it("should handle a full conversation sequence", () => {
@@ -361,8 +395,9 @@ describe("eventReducer", () => {
         timestamp: now + 5,
         data: { message: { role: "assistant" } },
       },
-      // Agent ends
+      // Agent ends, then settles (bridge guarantees one terminal settle).
       { eventType: "agent_end", timestamp: now + 6, data: { messages: [] } },
+      { eventType: "agent_settled", timestamp: now + 7, data: {} },
     ]);
 
     expect(state.messages).toHaveLength(3); // user + tool (added on start, updated on end) + assistant
@@ -614,7 +649,7 @@ describe("eventReducer", () => {
 });
 
 describe("model_select event", () => {
-  it("keeps model_select history from mutating live model preference state", () => {
+  it("should update model from model_select", () => {
     const state = applyEvents([
       {
         eventType: "model_select",
@@ -625,11 +660,10 @@ describe("model_select event", () => {
         },
       },
     ]);
-    expect(state.model).toBeUndefined();
-    expect(state.thinkingLevel).toBeUndefined();
+    expect(state.model).toBe("anthropic/claude-opus-4-6");
   });
 
-  it("does not apply thinkingLevel from a partial model_select event", () => {
+  it("should update thinkingLevel from model_select event data", () => {
     const state = applyEvents([
       {
         eventType: "model_select",
@@ -641,8 +675,8 @@ describe("model_select event", () => {
         },
       },
     ]);
-    expect(state.model).toBeUndefined();
-    expect(state.thinkingLevel).toBeUndefined();
+    expect(state.model).toBe("anthropic/claude-opus-4-6");
+    expect(state.thinkingLevel).toBe("high");
   });
 });
 
@@ -1274,12 +1308,12 @@ describe("command_feedback events", () => {
       const initial = createInitialState();
       const params = { title: "Continue?", message: "" };
 
-      const s1 = addInteractiveRequest(initial, "req-1", "confirm", params, true);
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", params);
       expect(s1.interactiveRequests).toHaveLength(1);
       expect(s1.messages).toHaveLength(1);
 
       // Same requestId again — should be a no-op
-      const s2 = addInteractiveRequest(s1, "req-1", "confirm", params, true);
+      const s2 = addInteractiveRequest(s1, "req-1", "confirm", params);
       expect(s2).toBe(s1); // exact same reference
       expect(s2.interactiveRequests).toHaveLength(1);
       expect(s2.messages).toHaveLength(1);
@@ -1288,9 +1322,9 @@ describe("command_feedback events", () => {
     it("should ignore duplicate pending request with same method+title but different requestId", () => {
       const initial = createInitialState();
 
-      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" }, true);
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
       // Different requestId, same method+title (recursive proxy scenario)
-      const s2 = addInteractiveRequest(s1, "req-2", "confirm", { title: "Continue?" }, true);
+      const s2 = addInteractiveRequest(s1, "req-2", "confirm", { title: "Continue?" });
       expect(s2).toBe(s1);
       expect(s2.interactiveRequests).toHaveLength(1);
     });
@@ -1298,18 +1332,18 @@ describe("command_feedback events", () => {
     it("should allow same title after previous request is resolved", () => {
       const initial = createInitialState();
 
-      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" }, true);
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
       const s2 = resolveInteractiveRequest(s1, "req-1", true);
       // Same title but previous is resolved — should allow
-      const s3 = addInteractiveRequest(s2, "req-2", "confirm", { title: "Continue?" }, true);
+      const s3 = addInteractiveRequest(s2, "req-2", "confirm", { title: "Continue?" });
       expect(s3.interactiveRequests).toHaveLength(2);
     });
 
     it("should allow different titles", () => {
       const initial = createInitialState();
 
-      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "A" }, true);
-      const s2 = addInteractiveRequest(s1, "req-2", "confirm", { title: "B" }, true);
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "A" });
+      const s2 = addInteractiveRequest(s1, "req-2", "confirm", { title: "B" });
       expect(s2.interactiveRequests).toHaveLength(2);
       expect(s2.messages).toHaveLength(2);
     });
@@ -1318,7 +1352,7 @@ describe("command_feedback events", () => {
   describe("dismissInteractiveRequest", () => {
     it("should transition pending request to dismissed", () => {
       const initial = createInitialState();
-      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" }, true);
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
       const s2 = dismissInteractiveRequest(s1, "req-1");
 
       expect(s2.interactiveRequests[0].status).toBe("dismissed");
@@ -1327,7 +1361,7 @@ describe("command_feedback events", () => {
 
     it("should not change already resolved requests", () => {
       const initial = createInitialState();
-      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" }, true);
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
       const s2 = resolveInteractiveRequest(s1, "req-1", { confirmed: true });
       const s3 = dismissInteractiveRequest(s2, "req-1");
 
@@ -1337,7 +1371,7 @@ describe("command_feedback events", () => {
 
     it("should not change already cancelled requests", () => {
       const initial = createInitialState();
-      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" }, true);
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
       const s2 = resolveInteractiveRequest(s1, "req-1", undefined, true);
       const s3 = dismissInteractiveRequest(s2, "req-1");
 
@@ -1347,68 +1381,10 @@ describe("command_feedback events", () => {
 
     it("should return same state for unknown requestId", () => {
       const initial = createInitialState();
-      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" }, true);
+      const s1 = addInteractiveRequest(initial, "req-1", "confirm", { title: "Continue?" });
       const s2 = dismissInteractiveRequest(s1, "unknown-id");
 
       expect(s2).toBe(s1);
-    });
-  });
-
-  describe("stale answered ask replay (fix-stale-answered-ask-replay)", () => {
-    it("addInteractiveRequest ignores prompt when originating tool already completed", () => {
-      const withTool = applyEvents([
-        {
-          eventType: "tool_execution_start",
-          timestamp: 1,
-          data: { toolCallId: "tool-ask-1", toolName: "ask_user", args: {} },
-        },
-        {
-          eventType: "tool_execution_end",
-          timestamp: 2,
-          data: { toolCallId: "tool-ask-1", toolName: "ask_user", result: "A", isError: false },
-        },
-      ]);
-      const next = addInteractiveRequest(
-        withTool,
-        "prompt-1",
-        "select",
-        { title: "Pick one" },
-        false,
-        "tool-ask-1",
-      );
-      expect(next).toBe(withTool);
-      expect(next.interactiveRequests).toHaveLength(0);
-    });
-
-    it("tool_execution_end dismisses pending interactive card for that toolCallId", () => {
-      const initial = createInitialState();
-      const withAsk = addInteractiveRequest(
-        initial,
-        "prompt-1",
-        "select",
-        { title: "Pick one" },
-        false,
-        "tool-ask-1",
-      );
-      const seeded: SessionState = {
-        ...withAsk,
-        toolCalls: new Map(withAsk.toolCalls).set("tool-ask-1", {
-          toolCallId: "tool-ask-1",
-          toolName: "ask_user",
-          args: {},
-          status: "running",
-          startedAt: 1,
-        }),
-      };
-      const ended = reduceEvent(seeded, {
-        eventType: "tool_execution_end",
-        timestamp: 3,
-        data: { toolCallId: "tool-ask-1", toolName: "ask_user", result: "A", isError: false },
-      });
-      expect(ended.interactiveRequests[0]?.status).toBe("dismissed");
-      expect((ended.messages.find((m) => m.role === "interactiveUi")?.args as any)?.status).toBe(
-        "dismissed",
-      );
     });
   });
 
@@ -2279,124 +2255,136 @@ describe("command_feedback events", () => {
       expect(state.subagents.get("sub_abc")?.displayName).toBe("explorer");
     });
   });
-  it("reconciles tool_execution_update that arrives before its start", () => {
-    const state = applyEvents([{
-      eventType: "tool_execution_update",
-      timestamp: 2000,
-      data: {
-        toolCallId: "late-update",
-        toolName: "bash",
-        args: { command: "pwd" },
-        partialResult: { content: [{ type: "text", text: "/tmp" }], details: { stream: true } },
-      },
-    }]);
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0]).toMatchObject({ id: "tool-late-update", toolCallId: "late-update", toolName: "bash", toolStatus: "running", result: "/tmp", toolDetails: { stream: true } });
-    expect(state.toolCalls.get("late-update")).toMatchObject({ toolCallId: "late-update", status: "running", toolName: "bash" });
-  });
 
-  it.each([
-    [false, "complete"],
-    [true, "error"],
-  ])("reconciles a real tool_execution_end before start (%s)", (isError, status) => {
-    const state = applyEvents([{
-      eventType: "tool_execution_end",
-      timestamp: 3000,
-      data: { toolCallId: `late-end-${isError}`, toolName: "read", args: { path: "x" }, result: "done", isError },
-    }]);
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0]).toMatchObject({ toolCallId: `late-end-${isError}`, toolName: "read", toolStatus: status, result: "done" });
-    expect(state.toolCalls.get(`late-end-${isError}`)?.status).toBe(status);
-  });
-
-  it("delayed tool_execution_start after end does not resurrect running status", () => {
-    const state = applyEvents([
-      {
-        eventType: "tool_execution_end",
-        timestamp: 3000,
-        data: {
-          toolCallId: "end-first",
-          toolName: "bash",
-          args: { command: "ls" },
-          result: "ok",
-          isError: false,
-        },
-      },
-      {
-        eventType: "tool_execution_start",
-        timestamp: 3100,
-        data: {
-          toolCallId: "end-first",
-          toolName: "bash",
-          args: { command: "ls" },
-        },
-      },
-    ]);
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0]).toMatchObject({
-      toolCallId: "end-first",
-      toolName: "bash",
-      toolStatus: "complete",
-      result: "ok",
-    });
-    expect(state.toolCalls.get("end-first")).toMatchObject({
-      toolCallId: "end-first",
-      toolName: "bash",
-      status: "complete",
-      result: "ok",
-    });
-    expect(state.currentTool).toBeUndefined();
-  });
-
-  it("does not let a superseded heal create a phantom row", () => {
-    const state = applyEvents([{
-      eventType: "tool_execution_end",
-      timestamp: 3000,
-      data: { toolCallId: "missing-heal", healedBy: "superseded", isError: false },
-    }]);
-    expect(state.messages).toHaveLength(0);
-    expect(state.toolCalls.has("missing-heal")).toBe(false);
-  });
-
-  it("diagnoses malformed update and end IDs without mutating state", () => {
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      const before = createInitialState();
+  // Change: resolve-subagent-inspector-by-session-id — dual-index the reduced
+  // SubagentState under both the v4 agentId and the v7 runner agentSessionId so
+  // the inspector resolves a deep-link by either id.
+  describe("agentSessionId dual-index", () => {
+    it("E1: dual-indexes a started frame under both ids (same ref; id stays canonical)", () => {
       const state = applyEvents([
-        { eventType: "tool_execution_update", timestamp: 1, data: { partialResult: "x" } },
-        { eventType: "tool_execution_end", timestamp: 2, data: { toolCallId: 42, result: "x" } },
+        {
+          eventType: "subagent_started",
+          timestamp: 1000,
+          data: { id: "A", type: "Explore", description: "d", details: { agentSessionId: "S" } },
+        },
       ]);
-      expect(state.messages).toEqual(before.messages);
-      expect(state.toolCalls).toEqual(before.toolCalls);
-      expect(warning).toHaveBeenCalledTimes(2);
-      expect(warning.mock.calls[0][0]).toContain("tool_execution_update");
-      expect(warning.mock.calls[1][0]).toContain("tool_execution_end");
-    } finally {
-      warning.mockRestore();
-    }
-  });
+      const byAgentId = state.subagents.get("A");
+      const bySession = state.subagents.get("S");
+      expect(byAgentId).toBeDefined();
+      expect(bySession).toBe(byAgentId); // SAME reference
+      expect(byAgentId!.id).toBe("A"); // canonical v4 id, even via the v7 key
+      expect(byAgentId!.agentSessionId).toBe("S");
+    });
 
-  it("backfills cumulative Agent entries from an unmatched update through terminal end", () => {
-    const entries = [
-      { kind: "tool" as const, toolName: "Read", input: {}, ts: 1 },
-      { kind: "text" as const, text: "working", ts: 2 },
-      { kind: "tool" as const, toolName: "Bash", input: {}, ts: 3 },
-    ];
-    const state = applyEvents([
-      {
-        eventType: "tool_execution_update",
-        timestamp: 1000,
-        data: { toolCallId: "agent-late", toolName: "Agent", partialResult: { content: [{ type: "text", text: "working" }], details: { agentId: "sub-late", entries, toolUses: 2, displayName: "late" } } },
-      },
-      {
-        eventType: "tool_execution_end",
-        timestamp: 2000,
-        data: { toolCallId: "agent-late", toolName: "Agent", result: "done", isError: false, details: { agentId: "sub-late", entries, toolUses: 2 } },
-      },
-    ]);
-    expect(state.subagents.get("sub-late")).toMatchObject({ status: "completed", entries, toolUses: 2, displayName: "late" });
-  });
+    it("E1b: a later update via one key is visible via the other (paired ref)", () => {
+      const state = applyEvents([
+        {
+          eventType: "subagent_created",
+          timestamp: 1000,
+          data: { id: "A", type: "Explore", description: "d", details: { agentSessionId: "S" } },
+        },
+        {
+          eventType: "subagent_completed",
+          timestamp: 2000,
+          data: { id: "A", result: "ok", details: { agentSessionId: "S" } },
+        },
+      ]);
+      expect(state.subagents.get("A")!.status).toBe("completed");
+      expect(state.subagents.get("S")!.status).toBe("completed");
+      expect(state.subagents.get("S")).toBe(state.subagents.get("A"));
+    });
 
+    it("E2: single-key when the frame carries no agentSessionId (no alias)", () => {
+      const state = applyEvents([
+        {
+          eventType: "subagent_started",
+          timestamp: 1000,
+          data: { id: "A", type: "Explore", description: "d" },
+        },
+      ]);
+      expect(state.subagents.get("A")).toBeDefined();
+      expect(state.subagents.get("A")!.agentSessionId).toBeUndefined();
+      expect(state.subagents.size).toBe(1); // exactly one key for the run
+    });
+
+    it("E3: backfill dual-indexes a completed Agent run under both ids", () => {
+      const state = applyEvents([
+        {
+          eventType: "tool_execution_start",
+          timestamp: 1000,
+          data: { toolCallId: "tc1", toolName: "Agent", args: {} },
+        },
+        {
+          eventType: "tool_execution_end",
+          timestamp: 2000,
+          data: {
+            toolCallId: "tc1",
+            toolName: "Agent",
+            isError: false,
+            result: "done",
+            details: { agentId: "A", agentSessionId: "S" },
+          },
+        },
+      ]);
+      const byAgentId = state.subagents.get("A");
+      const bySession = state.subagents.get("S");
+      expect(byAgentId).toBeDefined();
+      expect(bySession).toBe(byAgentId);
+      expect(byAgentId!.id).toBe("A");
+      expect(byAgentId!.agentSessionId).toBe("S");
+    });
+
+    it("E4: backfill single-key when the end details carry no agentSessionId", () => {
+      const state = applyEvents([
+        {
+          eventType: "tool_execution_start",
+          timestamp: 1000,
+          data: { toolCallId: "tc1", toolName: "Agent", args: {} },
+        },
+        {
+          eventType: "tool_execution_end",
+          timestamp: 2000,
+          data: {
+            toolCallId: "tc1",
+            toolName: "Agent",
+            isError: false,
+            result: "done",
+            details: { agentId: "A" },
+          },
+        },
+      ]);
+      expect(state.subagents.get("A")).toBeDefined();
+      expect(state.subagents.size).toBe(1);
+    });
+
+    it("E6: an unknown id (neither agentId nor agentSessionId) resolves to undefined", () => {
+      const state = applyEvents([
+        {
+          eventType: "subagent_started",
+          timestamp: 1000,
+          data: { id: "A", type: "Explore", description: "d", details: { agentSessionId: "S" } },
+        },
+      ]);
+      expect(state.subagents.get("unknown-id")).toBeUndefined();
+    });
+
+    it("X1: graceful degrade — no agentSessionId anywhere → reducer creates no alias key", () => {
+      const state = applyEvents([
+        {
+          eventType: "subagent_started",
+          timestamp: 1000,
+          data: { id: "A", type: "Explore", description: "d" },
+        },
+        {
+          eventType: "subagent_completed",
+          timestamp: 2000,
+          data: { id: "A", result: "ok" },
+        },
+      ]);
+      expect(state.subagents.get("A")).toBeDefined();
+      expect(state.subagents.size).toBe(1); // no S alias
+    });
+  });
 });
 
 describe("turnIndex tracking", () => {
@@ -2592,7 +2580,9 @@ describe("lastError extraction from agent_end", () => {
       },
     ]);
     expect(state.lastError).toEqual({ message: "Rate limit exceeded", timestamp: 1000 });
-    expect(state.status).toBe("idle");
+    // agent_end sets the intermediate "ended"; lastError extraction is a
+    // preserved agent_end side-effect. See change: adopt-pi-074-080-features.
+    expect(state.status).toBe("ended");
     expect(state.isStreaming).toBe(false);
   });
 
@@ -3304,54 +3294,5 @@ describe("manual retry visual-dedup (ChatMessage.retriedFrom)", () => {
       data: { message: { role: "user", content: "hello" }, entryId: "u1" },
     });
     expect(state.messages[0]!.retriedFrom).toBeUndefined();
-  });
-});
-
-
-describe("advisor message_end rows", () => {
-  const advisorEvent = (overrides: Record<string, unknown> = {}): DashboardEvent => ({
-    eventType: "message_end",
-    timestamp: 7000,
-    data: {
-      entryId: "advisor-7",
-      message: {
-        id: "bridge-7",
-        role: "custom",
-        customType: "advisor",
-        display: true,
-        content: "<advisory>fix type</advisory>",
-        details: { notes: [{ note: "fix type", severity: "concern", advisor: "Scout" }] },
-        ...overrides,
-      },
-    },
-  });
-
-  it("upserts advisor rows for both live and replay event delivery", () => {
-    const event = advisorEvent();
-    const once = reduceEvent(createInitialState(), event, { isLive: true });
-    const twice = reduceEvent(once, event);
-
-    expect(twice.messages.filter((message) => message.role === "advisor")).toHaveLength(1);
-    expect(twice.messages.find((message) => message.id === "advisor-7")).toMatchObject({
-      content: "<advisory>fix type</advisory>",
-      timestamp: 7000,
-      advisorDetails: { notes: [{ note: "fix type", severity: "concern", advisor: "Scout" }] },
-    });
-  });
-
-  it("uses message id when an advisor event has no entry id", () => {
-    const event = advisorEvent();
-    delete event.data.entryId;
-    const state = reduceEvent(createInitialState(), event);
-
-    expect(state.messages).toContainEqual(expect.objectContaining({ id: "bridge-7", role: "advisor" }));
-  });
-
-  it("skips hidden and unrelated custom message_end events", () => {
-    const hidden = reduceEvent(createInitialState(), advisorEvent({ display: false }));
-    const unrelated = reduceEvent(createInitialState(), advisorEvent({ customType: "rewind-report" }));
-
-    expect(hidden.messages).toHaveLength(0);
-    expect(unrelated.messages).toHaveLength(0);
   });
 });

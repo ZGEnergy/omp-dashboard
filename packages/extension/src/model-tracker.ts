@@ -3,7 +3,6 @@
  * Sends model_update only when values actually change.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BridgeContext } from "./bridge-context.js";
@@ -13,23 +12,12 @@ import { gatherGitInfo, gatherGitStatus } from "./vcs-info.js";
 /**
  * Send model_update if model or thinking level has changed since last send.
  */
-type ModelUpdateSnapshot = {
-  model: string | undefined;
-  thinkingLevel: string | null;
-};
-
-export function sendModelUpdateIfChanged(
-  bc: BridgeContext,
-  snapshot?: ModelUpdateSnapshot,
-): void {
-  const model = snapshot ? snapshot.model : getCurrentModelString(bc);
-  const thinkingLevel = snapshot
-    ? snapshot.thinkingLevel
-    : (bc.pi as any).getThinkingLevel?.() ?? null;
-  const thinkingLevelCache = thinkingLevel === null ? undefined : thinkingLevel;
-  if (model === bc.lastModel && thinkingLevelCache === bc.lastThinkingLevel) return;
+export function sendModelUpdateIfChanged(bc: BridgeContext): void {
+  const model = getCurrentModelString(bc);
+  const thinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? undefined;
+  if (model === bc.lastModel && thinkingLevel === bc.lastThinkingLevel) return;
   bc.lastModel = model;
-  bc.lastThinkingLevel = thinkingLevelCache;
+  bc.lastThinkingLevel = thinkingLevel;
   if (model) {
     bc.connection.send({
       type: "model_update",
@@ -97,18 +85,14 @@ export function sendGitInfoIfChanged(bc: BridgeContext, cwd: string): void {
 }
 
 /**
- * The last pi version is cached on BridgeContext so each bridge/session tracks
- * its own initial emission. The warning timestamp remains module-scoped because
- * it only rate-limits noisy diagnostics.
+ * Last pi version pushed via `pi_version_update`. Module-scoped: a single pi
+ * process has exactly one pi version, so this correctly survives bridge
+ * reconnect and suppresses redundant pushes. See change:
+ * restore-pi-version-skew-surface.
  */
-/** Rate-limit failed-read warnings so Bun poll ticks don't flood the session log. */
-let lastPiVersionWarnAt = 0;
+let lastPiVersion: string | undefined;
 
-const PI_PKG_CANDIDATES = [
-  "@earendil-works/pi-coding-agent",
-  "@mariozechner/pi-coding-agent",
-] as const;
-const PI_PKG = PI_PKG_CANDIDATES[0];
+const PI_PKG = "@earendil-works/pi-coding-agent";
 
 /**
  * Read a package's `version` without resolving its `./package.json` subpath.
@@ -147,52 +131,6 @@ export function readPkgVersionByWalkUp(
 }
 
 /**
- * Filesystem fallback for runtimes (Bun/jiti under OMP) where
- * `import.meta.resolve(pkg)` cannot see workspace/hoisted deps from an
- * externally-loaded extension path. Walks ancestors of `startDir` for
- * `node_modules/<pkg>/package.json`, then checks known managed installs.
- */
-export function readPiVersionFromFilesystem(
-  startDir: string,
-  readFile: (p: string) => string = (p) => readFileSync(p, "utf8"),
-  fileExists: (p: string) => boolean = existsSync,
-  home: string = homedir(),
-): string | undefined {
-  let dir = startDir;
-  for (let i = 0; i < 12; i++) {
-    for (const pkgName of PI_PKG_CANDIDATES) {
-      const candidate = join(dir, "node_modules", pkgName, "package.json");
-      if (!fileExists(candidate)) continue;
-      try {
-        const parsed = JSON.parse(readFile(candidate)) as { name?: string; version?: string };
-        if (PI_PKG_CANDIDATES.includes(parsed.name as (typeof PI_PKG_CANDIDATES)[number]) && typeof parsed.version === "string") {
-          return parsed.version;
-        }
-      } catch {
-        // ignore malformed manifests
-      }
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-
-  for (const root of [join(home, ".omp-dashboard"), join(home, ".omp", "plugins")]) {
-    for (const pkgName of PI_PKG_CANDIDATES) {
-      const candidate = join(root, "node_modules", pkgName, "package.json");
-      if (!fileExists(candidate)) continue;
-      try {
-        const parsed = JSON.parse(readFile(candidate)) as { name?: string; version?: string };
-        if (typeof parsed.version === "string") return parsed.version;
-      } catch {
-        // ignore
-      }
-    }
-  }
-  return undefined;
-}
-
-/**
  * Default reader: pi-coding-agent version from inside the bridge's own tree.
  *
  * Uses `import.meta.resolve` (the ESM resolver, `import` condition) rather than
@@ -201,25 +139,8 @@ export function readPiVersionFromFilesystem(
  * `ERR_PACKAGE_PATH_NOT_EXPORTED` ("No exports main defined"). `import.meta.resolve`
  * returns a `file://` URL, converted to a path for the walk-up.
  */
-function defaultReadPiVersion(): string | undefined {
-  // 1) Node ESM resolver (works when the package is visible from this module).
-  try {
-    const version = readPkgVersionByWalkUp(PI_PKG, (spec) => fileURLToPath(import.meta.resolve(spec)));
-    if (version) return version;
-  } catch {
-    // Bun/jiti often throws "Cannot find module … from <extension path>" here.
-  }
-  for (const alt of PI_PKG_CANDIDATES.slice(1)) {
-    try {
-      const version = readPkgVersionByWalkUp(alt, (spec) => fileURLToPath(import.meta.resolve(spec)));
-      if (version) return version;
-    } catch {
-      // continue
-    }
-  }
-  // 2) Direct filesystem probe — does not depend on package exports or Bun's
-  // module graph for external --extension loads.
-  return readPiVersionFromFilesystem(dirname(fileURLToPath(import.meta.url)));
+export function defaultReadPiVersion(): string | undefined {
+  return readPkgVersionByWalkUp(PI_PKG, (spec) => fileURLToPath(import.meta.resolve(spec)));
 }
 
 /**
@@ -237,15 +158,11 @@ export function sendPiVersionIfChanged(
   try {
     version = readVersion();
   } catch (e) {
-    const now = Date.now();
-    if (now - lastPiVersionWarnAt > 60_000) {
-      lastPiVersionWarnAt = now;
-      console.warn("[dashboard] pi version read failed:", e);
-    }
+    console.warn("[dashboard] pi version read failed:", e);
     return;
   }
-  if (!version || version === bc.lastPiVersion) return;
-  bc.lastPiVersion = version;
+  if (!version || version === lastPiVersion) return;
+  lastPiVersion = version;
   bc.connection.send({
     type: "pi_version_update",
     sessionId: bc.sessionId,
@@ -253,9 +170,9 @@ export function sendPiVersionIfChanged(
   });
 }
 
-/** Test-only: clear the failed-read warning rate-limit state. */
-export function _resetPiVersionWarnRateLimit(): void {
-  lastPiVersionWarnAt = 0;
+/** Test-only: clear the module-scoped pi-version cache. */
+export function _resetPiVersionCache(): void {
+  lastPiVersion = undefined;
 }
 
 /**
@@ -265,15 +182,10 @@ export function _resetPiVersionWarnRateLimit(): void {
  * staleness.
  */
 export function resetReconnectCaches(bc: BridgeContext): void {
-  // Model updates are bridge-owned full snapshots; clear their dedup state so
-  // reconnect publication cannot be suppressed by the prior socket lifetime.
-  bc.lastModel = undefined;
-  bc.lastThinkingLevel = undefined;
   // Defensive: reset git so a reconnect through a stale state cache
   // doesn't surface stale branch info if .meta.json wasn't persisted yet.
   bc.lastGitBranch = undefined;
   bc.lastGitPrNumber = undefined;
-  bc.lastPiVersion = undefined;
   bc.lastGitWorktreeJson = undefined;
   bc.lastGitStatusJson = undefined;
 }

@@ -51,6 +51,12 @@ reach the same all-green end state.
 
 ### 2. Run apply if non-manual work remains — inject the exemplar
 
+**kb-first, even as an executor.** You know which files the tasks name, so your
+reflex is `grep`/`cat`/Read on them directly. The docs-first gate still applies:
+before you `grep`/`rg` for a symbol, Read a file to learn its purpose, or chase
+an import, run `kb_search` / `kb agents <path>` / `kb_neighbors` FIRST. Knowing
+the file does not exempt you — kb the symbol/file, then edit.
+
 If non-`manual-only` tasks remain (real code + the test files the fold tasked),
 run `openspec-apply-change` for the change. `apply` writes code and marks tasks.
 
@@ -156,11 +162,19 @@ step-level control for the teardown ordering below.
 - `test-plan.md` absent (legacy change) → `ship-change`'s current keyword defer
   applies unchanged.
 
+**Archive+sync gate before the destructive steps (load-bearing):** do **not** let
+`ship-change` merge the PR, delete the branch, or remove the worktree while the
+proposal is not archived and specs are not synced. `ship-change` step 8.5 is that
+hard gate — driving `ship-change` inline, hold at step 8.5 until the change is
+archived (source dir moved to `openspec/changes/archive/`, move committed) and
+specs synced. Failed/skipped archive → STOP (return to step 2 or the escape hatch),
+never proceed to steps 9/10.
+
 **Teardown-before-removal ordering (load-bearing):** the harness MUST be torn down
 (`test-down.sh`, already wired via the step-3 trap) **before** `ship-change` step
 10 removes the worktree. A leaked container makes the worktree "busy" and stalls
 removal. Run the harness teardown, then let `ship-change` archive → commit → PR →
-CI → CodeRabbit → squash-merge → remove worktree.
+CI → CodeRabbit → (archive+sync gate) → squash-merge → remove worktree.
 
 ## Guardrails
 
@@ -171,6 +185,7 @@ CI → CodeRabbit → squash-merge → remove worktree.
 - **Merge `develop` before the harness (step 2.5)** — the strong gate validates
   the integrated tree `T1`; merge `origin/develop` (remote ref), never rebase.
   Conflict → abort + STOP, never enter the harness on a half-merged tree.
+- **Never merge / delete branch / remove worktree while the proposal is not archived and synced** — hold at `ship-change` step 8.5 (archive+sync gate) until it passes; failed archive → STOP.
 - **Always tear the harness down** (trap/finally), **before** worktree removal.
 - **Never hardcode `:18000`** — read `dashboardPort` from `.pi-test-harness.json`.
 - **Never headlessly rewrite planning artifacts** — use the escape hatch.

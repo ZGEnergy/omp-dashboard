@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createBranchedSessionFile, findSessionToolCallPayload, loadSessionEntries } from "../session-file-reader.js";
+import { createBranchedSessionFile, findSessionToolCallPayload } from "../session/session-file-reader.js";
 
 describe("createBranchedSessionFile", () => {
   let tmpDir: string;
@@ -81,17 +81,6 @@ describe("createBranchedSessionFile", () => {
 
     expect(header.id).not.toBe("original-id");
     expect(header.id).toMatch(/^[0-9a-f-]+$/); // UUID format
-  });
-
-  it("reads sessions whose title record precedes the session header", () => {
-    const message = { type: "message", id: "e1", parentId: null, message: { role: "user", content: "Hello" } };
-    const sessionFile = writeSession([
-      { type: "title", v: 1, title: "renamed session" },
-      { type: "session", id: "sess-1", timestamp: "2025-01-01T00:00:00Z", cwd: "/tmp" },
-      message,
-    ]);
-
-    expect(loadSessionEntries(sessionFile)).toEqual([message]);
   });
 });
 

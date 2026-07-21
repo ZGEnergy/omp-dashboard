@@ -247,8 +247,16 @@ jobs:
 
       # Trusted Publishing requires npm CLI ≥ 11.5.1. Node 24 ships a recent
       # npm, but upgrade explicitly to guarantee the feature is available.
-      - name: Upgrade npm to latest (trusted publishing)
-        run: npm install -g npm@latest
+      # PINNED to 11.12.1 (not @latest): a LATER npm defaults to refusing git-
+      # protocol dependency fetches (EALLOWGIT), which breaks `npm ci` on the
+      # pre-existing transitive git dep @electron/node-gyp (via @electron/rebuild
+      # ← @electron-forge/core devDeps). An EARLIER npm (11.5.1) has an optional
+      # platform-dep install bug that drops lightningcss-linux-x64-gnu, breaking
+      # the client vite build. 11.12.1 is the version that shipped v0.5.4
+      # successfully: supports OIDC trusted publishing, allows the git dep, and
+      # installs optional native deps. Do NOT float back to @latest.
+      - name: Upgrade npm for trusted publishing (pinned 11.12.1; see note)
+        run: npm install -g npm@11.12.1
 
       - run: npm ci
 
@@ -278,7 +286,11 @@ jobs:
         #
         # Failure mode: any single non-skip publish failure marks the whole step
         # failed (FAIL=1) but lets the loop finish so the logs show every
-        # package's outcome.
+        # package's outcome. Each failure is classified: an OIDC / trusted-
+        # publisher signature in npm's output emits a `::error::<pkg> —
+        # trusted publisher likely missing` annotation and lands the package
+        # in a gap report written to $GITHUB_STEP_SUMMARY, so one release run
+        # tells you exactly which packages still need a Trusted Publisher.
         run: |
           set -uo pipefail
           # Ordering invariant: a package MUST appear AFTER every
@@ -316,6 +328,9 @@ jobs:
             "@blackbelt-technology/pi-dashboard-video-transcription"
             "@blackbelt-technology/pi-dashboard-session-distiller"
             "@blackbelt-technology/pi-dashboard-distill-session-knowledge"
+            "@blackbelt-technology/pi-dashboard-code-review-toolkit"
+            "@blackbelt-technology/pi-dashboard-frontend-patterns"
+            "@blackbelt-technology/pi-dashboard-openspec-workflow"
             "@blackbelt-technology/pi-agent-dashboard"
           )
           VERSION="${{ needs.resolve.outputs.version }}"
@@ -327,6 +342,14 @@ jobs:
           TAG_ARG=""
           if [ "$PRERELEASE" = "true" ]; then TAG_ARG="--tag next"; fi
           FAIL=0
+          FAILED_TP=()     # failures whose signature = missing trusted-publisher / OIDC config
+          FAILED_OTHER=()  # failures for any other reason
+          # Disable set -e for the publish loop: each package's rc is captured
+          # explicitly (PIPESTATUS) and handled below, so a single failure must
+          # NOT abort the loop. Without this, `set -euo pipefail` exits at the
+          # first failing `npm publish | tee`, so the gap report never lists more
+          # than one package. Re-enabled after the loop.
+          set +e
           for pkg in "${PACKAGES[@]}"; do
             if npm view "$pkg@$VERSION" version >/dev/null 2>&1; then
               echo "::notice::$pkg@$VERSION already published — skip"
@@ -334,12 +357,45 @@ jobs:
             fi
             echo "::group::Publishing $pkg@$VERSION (is_prerelease=$PRERELEASE)"
             if [ "$pkg" = "@blackbelt-technology/pi-agent-dashboard" ]; then
-              npm publish --provenance --access public $TAG_ARG || FAIL=1
+              npm publish --provenance --access public $TAG_ARG 2>&1 | tee /tmp/pub.log; rc=${PIPESTATUS[0]}
             else
-              npm publish --workspace="$pkg" --provenance --access public $TAG_ARG || FAIL=1
+              npm publish --workspace="$pkg" --provenance --access public $TAG_ARG 2>&1 | tee /tmp/pub.log; rc=${PIPESTATUS[0]}
             fi
             echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              FAIL=1
+              # OIDC / trusted-publisher signatures: the id-token exchange is
+              # rejected, or npm cannot authenticate the provenance publish.
+              if grep -qiE 'oidc|trusted publish|id-token|unable to authenticate|ENEEDAUTH|could not (get|retrieve|read).*(oidc|token)' /tmp/pub.log; then
+                echo "::error::$pkg — publish failed; Trusted Publisher likely NOT configured (OIDC token exchange rejected). Add it: npmjs.com → $pkg → Settings → Trusted Publisher (repo ${GITHUB_REPOSITORY}, workflow publish.yml, environment npm-publish)."
+                FAILED_TP+=("$pkg")
+              else
+                echo "::error::$pkg — publish failed (non-OIDC error; see the group log above)."
+                FAILED_OTHER+=("$pkg")
+              fi
+            fi
           done
+          set -e
+          # Gap report → job summary (renders on the run's Summary tab).
+          {
+            echo "## npm publish — Trusted Publisher gap report"
+            echo ""
+            if [ "${#FAILED_TP[@]}" -eq 0 ] && [ "${#FAILED_OTHER[@]}" -eq 0 ]; then
+              echo "✅ All packages published (or already up-to-date). No Trusted Publisher gaps detected."
+            else
+              if [ "${#FAILED_TP[@]}" -gt 0 ]; then
+                echo "### ❌ Trusted Publisher likely MISSING (${#FAILED_TP[@]})"
+                for p in "${FAILED_TP[@]}"; do echo "- \`$p\`"; done
+                echo ""
+                echo "Fix each: npmjs.com → package → **Settings → Trusted Publisher** — repo \`${GITHUB_REPOSITORY}\`, workflow \`publish.yml\`, environment \`npm-publish\`."
+                echo ""
+              fi
+              if [ "${#FAILED_OTHER[@]}" -gt 0 ]; then
+                echo "### ⚠️ Other publish failures (${#FAILED_OTHER[@]})"
+                for p in "${FAILED_OTHER[@]}"; do echo "- \`$p\`"; done
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
           exit $FAIL
 
   # ── Electron builds (parallel) ────────────────────────────────
@@ -352,6 +408,13 @@ jobs:
   # `packages/shared/src/__tests__/publish-workflow-contract.test.ts`.
   electron:
     needs: [resolve, publish]
+    # On the tag-push path `tag-and-push` is SKIPPED, and a skipped job in the
+    # needs-ancestry poisons the DEFAULT `if: success()` — GitHub then skips
+    # `electron` (and `github-release`) even when `publish` is green. Mirror the
+    # explicit skip-tolerant guard `publish` already uses so the release's
+    # installer + GitHub Release stages survive the skipped `tag-and-push`.
+    # See change: gate-publish-on-smoke-and-tests.
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     # All matrix/steps moved to .github/workflows/_electron-build.yml so the
     # same definition serves both this release flow AND the on-demand CI
     # workflow (.github/workflows/ci-electron.yml). See change:

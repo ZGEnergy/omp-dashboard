@@ -116,6 +116,7 @@ const BUNDLED_PLUGINS = [
   "automation-plugin",
   "goal-plugin",
   "subagents-plugin",
+  "kb-plugin",
 ];
 const BUNDLED_PLUGINS_DIR = path.join(SERVER_BUNDLE, "resources", "plugins");
 mkdirSync(BUNDLED_PLUGINS_DIR, { recursive: true });
@@ -351,13 +352,23 @@ if (tail) console.log(tail);
 // the node-pty GO/NO-GO above so a future koffi bump that drops the prebuild
 // fails the build here rather than silently regressing every Windows user to
 // Tier 1. See change: electron-attach-ownership-fixes.
+//
+// koffi 3.x delivers the prebuild via per-platform @koromix/koffi-<os>-<arch>
+// optional packages (koffi 2.x bundled them under koffi/build/koffi/). Both
+// win32 legs install the x64 optional package (win32-arm64 bundles an
+// x64-emulated server — no win32-arm64 koffi prebuild exists), so we assert
+// the x64 binary regardless of target arch. Check the 3.x layout first, then
+// fall back to the 2.x layout so a future bump either way still passes.
 if (resolveTargetPlatformForGit() === "win32") {
-  const koffiNode = path.join(
-    SERVER_BUNDLE,
-    "node_modules", "koffi", "build", "koffi", "win32_x64", "koffi.node",
-  );
-  if (!existsSync(koffiNode)) {
-    console.error(`\u2717 koffi prebuild GO/NO-GO failed at ${koffiNode}`);
+  const koffiCandidates = [
+    path.join(SERVER_BUNDLE, "node_modules", "@koromix", "koffi-win32-x64", "win32_x64", "koffi.node"),
+    path.join(SERVER_BUNDLE, "node_modules", "koffi", "build", "koffi", "win32_x64", "koffi.node"),
+  ];
+  const koffiNode = koffiCandidates.find((p) => existsSync(p));
+  if (!koffiNode) {
+    console.error(
+      `\u2717 koffi prebuild GO/NO-GO failed; searched:\n  ${koffiCandidates.join("\n  ")}`,
+    );
     console.error(
       "  koffi (optionalDependency) win32_x64 prebuild absent \u2014 Windows Tier-2",
     );

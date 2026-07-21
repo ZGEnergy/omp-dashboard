@@ -4,39 +4,36 @@
  */
 
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { detectOpenSpecActivity, isValidOpenSpecChangeSlug } from "@blackbelt-technology/pi-dashboard-shared/openspec-activity-detector.js";
 import { mergeSessionMeta, writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
 import { extractTurnStats } from "@blackbelt-technology/pi-dashboard-shared/stats-extractor.js";
 import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import type { BrowserGateway } from "./browser-gateway.js";
-import { createCanvasAccumulator } from "./canvas-accumulator.js";
-import { readEffectiveCanvasTypes } from "./canvas-settings.js";
-import { decideDashboardSource } from "./dashboard-source-decision.js";
+import type { BrowserGateway } from "./pairing/browser-gateway.js";
+import { createCanvasAccumulator } from "./canvas/canvas-accumulator.js";
+import { readEffectiveCanvasTypes } from "./canvas/canvas-settings.js";
+import { decideDashboardSource } from "./lifecycle/dashboard-source-decision.js";
 import type { DirectoryService } from "./directory-service.js";
-import { extractSessionUpdates, isActivityEvent, isUnreadTrigger } from "./event-status-extraction.js";
-import { composeWorktreePayload } from "./git-worktree-compose.js";
-import { keeperOptsFromSpawnResult } from "./headless-pid-registry.js";
-import type { EventStore } from "./memory-event-store.js";
-import type { SessionManager } from "./memory-session-manager.js";
-import type { PendingForkRegistry } from "./pending-fork-registry.js";
-import type { PiGateway } from "./pi-gateway.js";
-import type { PreferencesStore } from "./preferences-store.js";
-import { buildPidIndex, classifyProcesses } from "./process-classifier.js";
-import { spawnPiSession } from "./process-manager.js";
-import { attachRenameTarget, isNameAutoSetFromAttachment } from "./proposal-attach-naming.js";
-import { setCatalogueForSession } from "./provider-catalogue-cache.js";
-import type { PushDispatcher } from "./push/push-dispatcher.js";
-import { classifyPushTrigger, type PushTriggerPreferences } from "./push/push-trigger-classifier.js";
-import { resolveOrderKey } from "./resolve-order-key.js";
+import { extractSessionUpdates, isActivityEvent, isUnreadTrigger } from "./session/event-status-extraction.js";
+import { composeWorktreePayload } from "./git-worktree/git-worktree-compose.js";
+import { keeperOptsFromSpawnResult } from "./spawn-process/headless-pid-registry.js";
+import type { EventStore } from "./persistence/memory-event-store.js";
+import type { SessionManager } from "./session/memory-session-manager.js";
+import type { PendingForkRegistry } from "./pending/pending-fork-registry.js";
+import type { PiGateway } from "./pi/pi-gateway.js";
+import type { PreferencesStore } from "./persistence/preferences-store.js";
+import { buildPidIndex, classifyProcesses } from "./spawn-process/process-classifier.js";
+import { spawnPiSession } from "./spawn-process/process-manager.js";
+import { attachRenameTarget, isNameAutoSetFromAttachment } from "./openspec/proposal-attach-naming.js";
+import { setCatalogueForSession } from "./package/provider-catalogue-cache.js";
+import { resolveOrderKey } from "./session/resolve-order-key.js";
 import { handleDispatchExtensionCommand } from "./rpc-keeper/dispatch-router.js";
-import type { SessionOrderManager } from "./session-order-manager.js";
+import type { SessionOrderManager } from "./session/session-order-manager.js";
 import {
   buildEmptyActionableLogLine,
   buildModelErrorLogLine,
   extractModelTurnError,
-} from "./spawned-turn-log.js";
-import type { ViewedSessionTracker } from "./viewed-session-tracker.js";
+} from "./spawn-process/spawned-turn-log.js";
+import type { ViewedSessionTracker } from "./session/viewed-session-tracker.js";
 
 /**
  * `true` iff `changeName` appears in the cwd's authoritative OpenSpec poll
@@ -92,14 +89,14 @@ export interface EventWiringDeps {
    * pending intent on each `session_register` and applies the attach +
    * auto-rename. See change: add-folder-task-checker-and-spawn-attach.
    */
-  pendingAttachRegistry?: import("./pending-attach-registry.js").PendingAttachRegistry;
+  pendingAttachRegistry?: import("./pending/pending-attach-registry.js").PendingAttachRegistry;
   /**
    * Optional pending-initial-prompt registry. When provided, the wiring
    * consumes a pending prompt on each `session_register` and dispatches it as
    * the session's first `send_prompt` (e.g. `/skill:project-init` from the
    * no-hook Initialize button). See change: project-init-skill-and-profiles.
    */
-  pendingInitialPromptRegistry?: import("./pending-initial-prompt-registry.js").PendingInitialPromptRegistry;
+  pendingInitialPromptRegistry?: import("./pending/pending-initial-prompt-registry.js").PendingInitialPromptRegistry;
   /**
    * Optional pending-worktree-base registry. When provided, the wiring
    * consumes a pending base ref on each `session_register` and persists
@@ -108,7 +105,7 @@ export interface EventWiringDeps {
    * composes `gitWorktree.base` correctly.
    * See change: add-worktree-spawn-dialog.
    */
-  pendingWorktreeBaseRegistry?: import("./pending-worktree-base-registry.js").PendingWorktreeBaseRegistry;
+  pendingWorktreeBaseRegistry?: import("./pending/pending-worktree-base-registry.js").PendingWorktreeBaseRegistry;
   /**
    * Optional pending-automation-run registry. When provided, the wiring
    * consumes a pending run stamp on each `session_register` and stamps the
@@ -116,15 +113,15 @@ export interface EventWiringDeps {
    * persists both to the session's `.meta.json` sidecar.
    * See change: add-automation-plugin.
    */
-  pendingAutomationRunRegistry?: import("./pending-automation-run-registry.js").PendingAutomationRunRegistry;
+  pendingAutomationRunRegistry?: import("./pending/pending-automation-run-registry.js").PendingAutomationRunRegistry;
   /**
    * Optional pending-goal-link registry + goal store. When both provided, the
    * wiring consumes a pending goalId on each `session_register`, stamps
    * `.meta.json#goalId` + in-memory `DashboardSession.goalId`, and links the
    * new sessionId into its `GoalRecord`. See change: add-goals-folder-page.
    */
-  pendingGoalLinkRegistry?: import("./pending-goal-link-registry.js").PendingGoalLinkRegistry;
-  goalStore?: import("./goal-store.js").GoalStore;
+  pendingGoalLinkRegistry?: import("./pending/pending-goal-link-registry.js").PendingGoalLinkRegistry;
+  goalStore?: import("./goal/goal-store.js").GoalStore;
   /**
    * Optional goal-session primer. When provided, a session linked to a goal on
    * `session_register` is renamed to the objective and dispatched `/goal …` so
@@ -142,27 +139,13 @@ export interface EventWiringDeps {
    */
   viewedSessionTracker?: ViewedSessionTracker;
   /**
-   * Optional push dispatcher. When provided (production, `config.push.enabled`),
-   * the same unread-trigger site fans a notable event out to registered
-   * devices via `fanout(sessionId, event)`. Fire-and-forget — NEVER awaited.
-   * Mirrors how `viewedSessionTracker?` is threaded so push-free tests stay
-   * lean. See change: add-server-push-notifications.
-   */
-  pushDispatcher?: PushDispatcher;
-  /**
-   * Live push bucket preferences. The server passes a getter over its existing
-   * config object so Settings saves apply without rebuilding transports. These
-   * toggles gate push attempts only; unread stamping/broadcast stays unchanged.
-   */
-  getPushPreferences?: () => PushTriggerPreferences | undefined;
-  /**
    * Optional client-correlation registry. When provided, the wiring
    * consumes the requestId for the resolved spawnToken after a successful
    * three-tier link and surfaces it on `session_added` as `spawnRequestId`,
    * letting the client auto-select / dismiss its placeholder by exact
    * correlation. See change: spawn-correlation-token.
    */
-  pendingClientCorrelations?: import("./pending-client-correlations.js").PendingClientCorrelations;
+  pendingClientCorrelations?: import("./pending/pending-client-correlations.js").PendingClientCorrelations;
   /**
    * Optional plugin pi-message dispatcher. When provided, every
    * `plugin_pi_message` envelope forwarded from a plugin bridge entry is
@@ -192,7 +175,7 @@ export interface EventWiringDeps {
    * eager (non-debounced) write path, so an unclean host shutdown leaves a
    * recoverable marker on disk. See change: reopen-sessions-after-shutdown.
    */
-  metaPersistence?: import("./meta-persistence.js").MetaPersistence;
+  metaPersistence?: import("./persistence/meta-persistence.js").MetaPersistence;
   liveEpoch?: number;
   /**
    * Settles pending `/api/git/commit-draft` requests when the bridge replies
@@ -229,8 +212,6 @@ export function wireEvents(deps: EventWiringDeps): void {
     goalStore,
     primeGoalSession,
     viewedSessionTracker,
-    pushDispatcher,
-    getPushPreferences,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
@@ -471,7 +452,9 @@ export function wireEvents(deps: EventWiringDeps): void {
 
   // Broadcast session ended to browsers when sessions are unregistered
   sessionManager.onUnregister = (sessionId) => {
-    browserGateway.clearPendingPromptResponses(sessionId);
+    // Turn-boundary reset (change: auto-canvas): a terminated session must not
+    // leave stale candidates behind. No settle broadcast on termination.
+    canvasAccumulator.resetTurn(sessionId);
     const session = sessionManager.get(sessionId);
     if (session) {
       // Durably clear the liveness marker EAGERLY (atomic, not debounced).
@@ -536,6 +519,8 @@ export function wireEvents(deps: EventWiringDeps): void {
       });
     },
   });
+  // Sessions whose replay should be discarded (canSkipWipe was true — events already in store)
+  const skipReplayInsert = new Set<string>();
   // Debounce flows refresh to prevent infinite loop between sessions in same cwd
   const recentFlowsRefresh = new Set<string>();
   // Per-session timestamp of the most recent `lastActivityAt` broadcast.
@@ -563,6 +548,19 @@ export function wireEvents(deps: EventWiringDeps): void {
       // Legacy queue_state event no longer emitted (bridge removed PromptQueue).
       // See change: add-followup-edit-and-steer-cancel.
       if (msg.event.eventType === "queue_state") return;
+      // When canSkipWipe was true, the event store already has all events —
+      // don't insert replayed events again (would cause exponential duplication)
+      if (replayingSessions.has(sessionId) && skipReplayInsert.has(sessionId)) {
+        // Still process status updates so session state stays accurate
+        const updates = extractSessionUpdates(msg.event);
+        if (updates) {
+          sessionManager.update(sessionId, updates as Partial<DashboardSession>);
+        }
+        // Skip insert + broadcast — events are already in store
+        // Still need to continue to the rest of the handler for openspec/stats
+        // but those are only for non-replay events, so we can return early
+        return;
+      }
       const seq = eventStore.insertEvent(sessionId, msg.event);
       // Skip broadcasting during replay — browser gets events via subscribe replay
       if (!replayingSessions.has(sessionId)) {
@@ -616,30 +614,6 @@ export function wireEvents(deps: EventWiringDeps): void {
         }
       }
 
-      // After an input-needed tool finishes, drop any still-tracked PromptBus
-      // requests for it. TUI answers normally emit prompt_dismiss; if that
-      // frame is lost, pendingPromptRequests would otherwise re-surface the
-      // already-answered card on the next browser subscribe (mobile open).
-      if (
-        !replayingSessions.has(sessionId) &&
-        msg.event.eventType === "tool_execution_end" &&
-        isInputNeededTool((msg.event.data?.toolName as string | undefined) ?? null)
-      ) {
-        const toolCallId =
-          typeof msg.event.data?.toolCallId === "string" ? msg.event.data.toolCallId : undefined;
-        const cleared =
-          typeof (browserGateway as any).clearPromptRequestsForTool === "function"
-            ? (browserGateway as any).clearPromptRequestsForTool(sessionId, toolCallId) as string[]
-            : [];
-        for (const promptId of cleared) {
-          browserGateway.sendToSubscribers(sessionId, {
-            type: "prompt_dismiss",
-            sessionId,
-            promptId,
-          } as any);
-        }
-      }
-
       // Unread-trigger evaluation. Only fires for live (non-replay) events
       // and only stamps when no browser is currently viewing the session.
       // The viewedSessionTracker dep is optional for backward compatibility
@@ -664,29 +638,12 @@ export function wireEvents(deps: EventWiringDeps): void {
             sessionManager.update(sessionId, { unread: true });
             browserGateway.broadcastSessionUpdated(sessionId, { unread: true });
           }
-          // Classify only after the existing live, not-viewed unread gate.
-          // Preference toggles suppress this push attempt only; unread state
-          // mutation and broadcast above always retain their current behavior.
-          const pushClassification = classifyPushTrigger(msg.event, beforeSnapshot, afterSnapshot);
-          const pushPreferences = getPushPreferences?.();
-          const pushEnabled =
-            pushClassification !== null &&
-            (pushPreferences === undefined ||
-              (pushClassification.bucket === "actions-required"
-                ? pushPreferences.actionsRequired !== false
-                : pushPreferences.claudeDecides !== false));
-          if (pushEnabled) {
-            // Fire-and-forget (void, never awaited) so transport latency cannot
-            // block the WS fan-out. Dispatcher owns the live master gate and
-            // coalescing state.
-            pushDispatcher?.fanout(sessionId, msg.event);
-          }
         }
       }
 
       // Gated status-transition placement for session-card ordering.
-      //   questionFirst: alive session whose currentTool flips to an
-      //     input-needed tool (`ask_user` / core `ask`) → top of active tier.
+      //   questionFirst: alive session whose currentTool flips to
+      //     "ask_user" → move to top of active tier.
       //   completedFirst: alive session emitting `agent_end` (turn done,
       //     still idle) → move to top of active tier.
       // Both gated by the live config flags, idempotent (moveToFront is a
@@ -699,8 +656,8 @@ export function wireEvents(deps: EventWiringDeps): void {
         if (placed && placed.status !== "ended") {
           const askTrigger =
             !!isQuestionFirst?.() &&
-            isInputNeededTool(placed.currentTool) &&
-            !isInputNeededTool(beforeSnapshot.currentTool);
+            placed.currentTool === "ask_user" &&
+            beforeSnapshot.currentTool !== "ask_user";
           const endTrigger =
             !!isCompletedFirst?.() && msg.event.eventType === "agent_end";
           if (askTrigger || endTrigger) {
@@ -916,8 +873,10 @@ export function wireEvents(deps: EventWiringDeps): void {
       }
     }
 
-    if ((msg as { type: string }).type === "replay_complete") {
+    if (msg.type === "replay_complete") {
+      const wasSkipped = skipReplayInsert.has(sessionId);
       replayingSessions.delete(sessionId);
+      skipReplayInsert.delete(sessionId);
       // Clear any stale OpenSpec activity state that may have leaked
       // (e.g. from events forwarded before the replay flag was set)
       const preSession = sessionManager.get(sessionId);
@@ -933,21 +892,27 @@ export function wireEvents(deps: EventWiringDeps): void {
         browserGateway.broadcastSessionUpdated(sessionId, {
           status: session.status,
           currentTool: session.currentTool ?? null,
-          tokensIn: session.tokensIn ?? 0,
-          tokensOut: session.tokensOut ?? 0,
-          cacheRead: session.cacheRead ?? 0,
-          cacheWrite: session.cacheWrite ?? 0,
-          cost: session.cost ?? 0,
-          contextTokens: session.contextTokens ?? null,
-          contextWindow: session.contextWindow,
           openspecPhase: null,
           openspecChange: null,
         });
       }
-      // Replay completion is serialized with live delivery by the gateway coordinator.
-      // Legacy test doubles may omit the optional method.
-      browserGateway.completeBridgeReplay?.(sessionId);
+      // Send replayed events to browser subscribers.
+      // During replay, event_forward messages were stored but not broadcast.
+      // Subscribers who received session_state_reset need the events to rebuild chat.
+      // Skip when canSkipWipe was true — browser already has the events.
+      if (!wasSkipped) {
+        const storedEvents = eventStore.getEvents(sessionId, 1);
+        if (storedEvents.length > 0) {
+          browserGateway.sendToSubscribers(sessionId, {
+            type: "event_replay",
+            sessionId,
+            events: storedEvents.map((e) => ({ seq: e.seq, event: e.event })),
+            isLast: true,
+          } as any);
+        }
+      }
     }
+
     if (msg.type === "session_register") {
       // Reset the once-per-activation liveness guard on every (re)register so
       // a resumed session re-stamps `{ live:true, liveEpoch }` on its next
@@ -962,38 +927,45 @@ export function wireEvents(deps: EventWiringDeps): void {
       // Safety timeout: clear replay flag after 5s if replay_complete never arrives
       setTimeout(() => {
         if (replayingSessions.delete(sessionId)) {
+          const wasSkipped = skipReplayInsert.delete(sessionId);
           const session = sessionManager.get(sessionId);
           if (session) {
             browserGateway.broadcastSessionUpdated(sessionId, {
               status: session.status,
               currentTool: session.currentTool ?? null,
-              tokensIn: session.tokensIn ?? 0,
-              tokensOut: session.tokensOut ?? 0,
-              cacheRead: session.cacheRead ?? 0,
-              cacheWrite: session.cacheWrite ?? 0,
-              cost: session.cost ?? 0,
-              contextTokens: session.contextTokens ?? null,
-              contextWindow: session.contextWindow,
             });
           }
-          // Let the coordinator serialize the bounded fallback with live events.
-          browserGateway.completeBridgeReplay?.(sessionId);
+          // Send any accumulated events to browser subscribers
+          if (!wasSkipped) {
+            const fallbackEvents = eventStore.getEvents(sessionId, 1);
+            if (fallbackEvents.length > 0) {
+              browserGateway.sendToSubscribers(sessionId, {
+                type: "event_replay",
+                sessionId,
+                events: fallbackEvents.map((e) => ({ seq: e.seq, event: e.event })),
+                isLast: true,
+              } as any);
+            }
+          }
         }
       }, 5_000);
-      // Every registration replaces the in-memory branch. A marker-less or
-      // interrupted replay must never certify a stale prefix as complete.
-      // Turn-end replay rebuilds these cumulative values from zero.
-      sessionManager.update(sessionId, {
-        tokensIn: 0,
-        tokensOut: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        cost: 0,
-        contextTokens: null,
-        contextWindow: undefined,
-      });
-      eventStore.deleteEventsForSession(sessionId);
-      browserGateway.broadcastSessionStateReset(sessionId, "source_replaced");
+      // Skip wipe if bridge provides eventCount matching the last known entry count.
+      // This avoids full replay cascade when bridge simply reconnects.
+      // Compare entry counts (apples to apples) — not entries vs stored events.
+      const session = sessionManager.get(sessionId);
+      const lastEntryCount = session?.lastEntryCount;
+      const canSkipWipe = msg.eventCount !== undefined && lastEntryCount !== undefined && msg.eventCount === lastEntryCount && eventStore.hasEvents(sessionId);
+      // Store the bridge's entry count for future reconnect comparisons
+      if (msg.eventCount !== undefined) {
+        sessionManager.update(sessionId, { lastEntryCount: msg.eventCount });
+      }
+      if (!canSkipWipe) {
+        eventStore.deleteEventsForSession(sessionId);
+        browserGateway.broadcastSessionStateReset(sessionId);
+      } else {
+        // Mark this session so replayed events are not re-inserted into the store
+        skipReplayInsert.add(sessionId);
+      }
       // NOTE: do NOT reset `hidden` here. The auto-hide decision is the sole
       // responsibility of `memorySessionManager.register` (first register vs
       // reattach-preserve). Resetting `hidden: false` on every register would
@@ -1051,10 +1023,9 @@ export function wireEvents(deps: EventWiringDeps): void {
       // bridges that send neither token nor pid (and is logged so we can see
       // when it actually triggers).
       let linked = false;
-      const linkedBySpawnToken = msg.spawnToken
-        ? browserGateway.headlessPidRegistry.linkByToken(msg.spawnToken, sessionId, msg.pid)
-        : false;
-      linked = linkedBySpawnToken;
+      if (msg.spawnToken) {
+        linked = browserGateway.headlessPidRegistry.linkByToken(msg.spawnToken, sessionId, msg.pid);
+      }
       if (!linked && msg.pid !== undefined) {
         linked = browserGateway.headlessPidRegistry.linkByPid(sessionId, msg.pid);
       }
@@ -1448,9 +1419,6 @@ export function wireEvents(deps: EventWiringDeps): void {
       const modelUpdates: Partial<DashboardSession> = {
         model: msg.model,
       };
-      // Older bridges omit thinkingLevel; do not turn that omission into an
-      // explicit undefined update. A complete current snapshot still carries
-      // either a string or null, both of which are forwarded below.
       if (msg.thinkingLevel !== undefined) {
         modelUpdates.thinkingLevel = msg.thinkingLevel;
       }
@@ -1462,16 +1430,18 @@ export function wireEvents(deps: EventWiringDeps): void {
 
     // ── PromptBus protocol messages (extension → browser) ──
     if (msg.type === "prompt_request") {
-      if (browserGateway.trackPromptRequest(sessionId, msg as any)) {
-        browserGateway.sendToSubscribers(sessionId, msg as any);
-      }
+      browserGateway.trackPromptRequest(sessionId, msg as any);
+      browserGateway.sendToSubscribers(sessionId, msg as any);
     }
 
-    if (msg.type === "prompt_dismiss" || msg.type === "prompt_cancel" || msg.type === "prompt_response_ack") {
+    if (msg.type === "prompt_dismiss") {
       browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
-      if (msg.type !== "prompt_response_ack") {
-        browserGateway.sendToSubscribers(sessionId, msg as any);
-      }
+      browserGateway.sendToSubscribers(sessionId, msg as any);
+    }
+
+    if (msg.type === "prompt_cancel") {
+      browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
+      browserGateway.sendToSubscribers(sessionId, msg as any);
     }
 
     // ── Extension UI System (Phase 1): cache + broadcast ──

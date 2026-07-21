@@ -112,25 +112,41 @@ export interface SessionFlags {
    * See change: add-automation-plugin.
    */
   model?: string;
+  /**
+   * Optional session name appended as `--name <name>` (pi 0.78.0+). Set the
+   * pi session name AT CREATION so worktree / flow spawns land with an
+   * intended title instead of relying only on post-hoc auto-naming. Composes
+   * with `--session` / `--fork` / `--model`. Empty / absent → no `--name`.
+   * See change: adopt-pi-074-080-features.
+   */
+  name?: string;
 }
 
 /**
- * Return `--session` / `--fork` flags followed by enabled optional flags.
+ * Return `["--session", file]` or `["--fork", file]` or `[]`.
  * Every mechanism MUST use this to append flags; dropping them silently
  * is the exact bug that motivated this change (B1, B2).
  */
 export function sessionFlagsToArgv(flags: SessionFlags): string[] {
   if (flags.sessionFile && flags.mode === "continue") {
-    return ["--session", flags.sessionFile];
+    return [...nameFlag(flags), "--session", flags.sessionFile];
   }
   if (flags.sessionFile && flags.mode === "fork") {
-    return ["--fork", flags.sessionFile, ...modelFlag(flags)];
+    return [...nameFlag(flags), "--fork", flags.sessionFile, ...modelFlag(flags)];
   }
-  return modelFlag(flags);
+  return [...nameFlag(flags), ...modelFlag(flags)];
 }
 
 function modelFlag(flags: SessionFlags): string[] {
   return flags.model ? ["--model", flags.model] : [];
 }
 
-
+/**
+ * `["--name", name]` when `name` is a non-empty string, else `[]`. The name is
+ * a single argv element (never shell-split), so quotes / spaces in the title
+ * pass through verbatim with no injection surface. See change:
+ * adopt-pi-074-080-features.
+ */
+function nameFlag(flags: SessionFlags): string[] {
+  return flags.name ? ["--name", flags.name] : [];
+}

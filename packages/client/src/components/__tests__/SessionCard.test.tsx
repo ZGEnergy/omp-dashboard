@@ -6,8 +6,8 @@ import type React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useMobile } from "../../hooks/useMobile.js";
 import { useSessionActions } from "../../hooks/useSessionActions.js";
-import { DisplayPrefsProvider } from "../../lib/DisplayPrefsContext.js";
-import { branchCache, GroupGitInfo, SessionCard } from "../SessionCard.js";
+import { DisplayPrefsProvider } from "../../lib/state/DisplayPrefsContext.js";
+import { branchCache, GroupGitInfo, SessionCard } from "../session/SessionCard.js";
 
 vi.mock("../../hooks/useMobile.js", () => ({
   useMobile: vi.fn(() => false),

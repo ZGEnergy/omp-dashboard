@@ -5,7 +5,7 @@ TBD - created by archiving change render-file-previews. Update Purpose after arc
 ## Requirements
 ### Requirement: ViewTarget discriminated union
 
-The dashboard SHALL define a `ViewTarget` discriminated union in `packages/shared/src/types.ts` with exactly two variants: `{ kind: "file"; cwd: string; path: string }` and `{ kind: "url"; url: string }`. `ChatMessage` SHALL gain an optional `view?: ViewTarget` field; the existing `content`, `role`, `id`, and other fields remain unchanged. The addition is additive — existing serialized messages without a `view` field deserialize successfully.
+The dashboard SHALL define a `ViewTarget` discriminated union in `packages/shared/src/types.ts` with exactly two variants: `{ kind: "file"; cwd: string; path: string }` and `{ kind: "url"; url: string }`. The `/view` composer command SHALL parse `@<relPath>` into a file target and `http(s)://…` into a URL target, then route that target to the internal editor pane (see `internal-monaco-editor-pane` → "`/view` opens its target in the editor pane"). `ChatMessage` SHALL NOT carry a `view?` field; `/view` no longer injects an inline preview row into the chat transcript.
 
 #### Scenario: File target shape
 
@@ -19,11 +19,19 @@ The dashboard SHALL define a `ViewTarget` discriminated union in `packages/share
 - **WHEN** the composer constructs a `ViewTarget`
 - **THEN** the result is `{ kind: "url", url: "https://youtu.be/abc123" }`
 
-#### Scenario: Backward compatibility
+#### Scenario: No inline view row
 
-- **GIVEN** a `ChatMessage` serialized before this change (no `view` field)
-- **WHEN** deserialized by code that includes this change
-- **THEN** the resulting object has `view === undefined` and all other fields intact
+- **GIVEN** the user runs `/view @docs/foo.md`
+- **WHEN** the command is handled
+- **THEN** no `ChatMessage` with a `view` field is produced and the chat transcript gains no inline `PreviewCard`
+- **AND** the target opens in the editor pane instead
+
+#### Scenario: Legacy `view` field is inert on replay
+
+- **GIVEN** an OLD persisted session whose messages were serialized with a `view` field
+- **WHEN** that session is reduced/replayed by code that includes this change
+- **THEN** the `view` field is silently ignored (dropped) — no error is thrown, no inline `PreviewCard` renders
+- **AND** every other field on the message remains intact
 
 ### Requirement: Renderer dispatch is purely shape-based
 
@@ -151,7 +159,7 @@ The `HtmlPreview` component SHALL render local `.html` files in an `<iframe>` wi
 
 ### Requirement: PDF preview ships as a lazy chunk
 
-The `PdfPreview` component SHALL be imported via dynamic `import()` (`React.lazy`) so that the `pdfjs-dist` dependency does NOT appear in the main client bundle. The build output SHALL place pdfjs in a separate chunk loaded only when a PDF preview mounts.
+The `PdfPreview` component SHALL be imported via dynamic `import()` (`React.lazy`) so that the `pdfjs-dist` dependency does NOT appear in the main client bundle. The build output SHALL place pdfjs in a separate chunk loaded only when a PDF preview mounts. This includes the pdfjs component viewer (`pdfjs-dist/web/pdf_viewer.mjs`) and its stylesheet (`pdfjs-dist/web/pdf_viewer.css`): both SHALL ride the lazy `PdfPreview` chunk and SHALL NOT appear in the main JS or main CSS bundle.
 
 #### Scenario: Main bundle excludes pdfjs
 
@@ -159,15 +167,11 @@ The `PdfPreview` component SHALL be imported via dynamic `import()` (`React.lazy
 - **THEN** the main entry chunk (`assets/index-*.js`) does NOT contain `pdfjs-dist`
 - **AND** a separate chunk containing `pdfjs-dist` exists
 
-### Requirement: Inline + overlay surfaces share renderers
+#### Scenario: Main CSS bundle excludes the pdfjs viewer stylesheet
 
-Every renderer (`MarkdownPreview`, `AsciiDocPreview`, `HtmlPreview`, `PdfPreview`, `VideoPreview`, `ImagePreview`, `YouTubePreview`, `FallbackPreview`) SHALL be usable in two contexts: inline within `PreviewCard` (in-chat) and full-screen within the `/view` overlay route. The renderer component SHALL NOT contain navigation or surface chrome; the shell is owned by `PreviewCard` (inline) or the overlay route component (full-screen).
-
-#### Scenario: Same component, two shells
-
-- **GIVEN** the inline `PreviewCard` displays a `.pdf` target
-- **WHEN** the user clicks the `⤢ expand` icon
-- **THEN** the overlay route mounts the SAME `PdfPreview` component with the same `target` prop (no separate fullscreen variant component)
+- **WHEN** `npm run build` runs
+- **THEN** the main CSS chunk (`assets/index-*.css`) does NOT contain the `pdf_viewer.css` viewer rules (e.g. the `.pdfViewer` / `.textLayer` selectors)
+- **AND** those rules appear only in a lazily-loaded asset
 
 ### Requirement: Preview overlay does not block the composer
 
@@ -187,22 +191,6 @@ This preserves the companion invariant (change `fix-file-preview-survives-messag
 - **WHEN** a file preview overlay is open
 - **AND** the user presses Escape
 - **THEN** the overlay SHALL close
-
-### Requirement: Inline size caps prevent runaway height
-
-`PreviewCard` SHALL apply size caps to the inline renderer per the design.md D2 policy: markdown/asciidoc/html capped at `max-h-[60vh]` with internal scroll; pdf fixed at `h-[60vh]`; video/youtube at 16:9 aspect ratio with `max-w-full`; image capped at `max-h-[40vh] max-w-full`.
-
-#### Scenario: Large markdown does not stretch chat
-
-- **GIVEN** the target is a 10,000-line markdown file
-- **WHEN** the `PreviewCard` mounts in chat
-- **THEN** the card height is at most 60vh and the body scrolls internally
-
-#### Scenario: Image dimensions capped
-
-- **GIVEN** the target is a 4000×3000 image
-- **WHEN** the `PreviewCard` mounts in chat
-- **THEN** the image scales to fit within `max-h-[40vh]` and `max-w-full` without overflow
 
 ### Requirement: Markdown preview enables frontmatter properties
 
@@ -599,4 +587,37 @@ client SHALL degrade to the existing `FallbackPreview` download card with a clea
 - **GIVEN** a `.pptx` file whose size exceeds the pptx size cap
 - **WHEN** a render is requested
 - **THEN** the server responds HTTP 413 before invoking the engine
+
+### Requirement: Overlay and editor-pane surfaces share renderers
+
+Every renderer (`MarkdownPreview`, `AsciiDocPreview`, `HtmlPreview`, `PdfPreview`, `VideoPreview`, `ImagePreview`, `YouTubePreview`, `DocxPreview`, `PptxPreview`, `SpreadsheetPreview`, `EmlPreview`, `FallbackPreview`) SHALL be usable in two contexts: the full-screen `/pi-view` / `…/view` overlay route (FileLink / OpenFileButton / canvas) and the internal editor pane (`viewer-registry` + `UrlViewer`). The renderer component SHALL NOT contain navigation or surface chrome; the shell is owned by the overlay route component or the editor-pane viewer wrapper. There is no longer an in-chat `PreviewCard` surface.
+
+#### Scenario: Same component, two shells
+
+- **GIVEN** a `.pdf` target opens in the editor pane via `/view`
+- **WHEN** the same file is opened through a FileLink overlay
+- **THEN** both mount the SAME `PdfPreview` component with the same `target` prop (no separate variant component)
+
+### Requirement: PDF preview renders as a continuous-scroll viewer
+
+`PdfPreview` SHALL render the document via the pdfjs component viewer (`PDFViewer` from `pdfjs-dist/web/pdf_viewer.mjs`) in continuous-scroll mode: all pages stacked vertically in a single scroll container, with page rendering virtualized (only near-viewport pages painted). The component SHALL enable the text layer so text is selectable and in-document find works. It SHALL NOT render a Prev/Next paging toolbar; navigation is native scroll. The public component contract (`Props { target, srcUrl? }`) is unchanged, so `DocxPreview`, `PptxPreview`, and `EmlPreview` reuse it unmodified via `srcUrl`.
+
+#### Scenario: Multi-page PDF scrolls continuously
+
+- **GIVEN** a `.pdf` with multiple pages is previewed
+- **WHEN** the user scrolls the preview
+- **THEN** pages flow continuously in one scroll container (no Prev/Next click required)
+- **AND** no Prev/Next paging toolbar is present
+
+#### Scenario: PDF text is selectable and findable
+
+- **GIVEN** a text-bearing `.pdf` is previewed
+- **WHEN** the user selects text or triggers browser find (ctrl-F)
+- **THEN** the text layer allows selection and the find matches within the document
+
+#### Scenario: Viewer honours dark theme
+
+- **GIVEN** a dark dashboard theme is active
+- **WHEN** a PDF preview mounts
+- **THEN** the viewer gutter/background honours the dashboard `--bg-canvas` theme token rather than the pdfjs default light background
 

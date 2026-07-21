@@ -15,20 +15,22 @@ import { fileKind } from "@blackbelt-technology/pi-dashboard-shared/file-kind.js
 import { mdiClose, mdiConsoleLine, mdiFileTreeOutline, mdiMagnify, mdiRefresh, mdiWeb } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { grepContents } from "../../lib/grep-api.js";
-import { useI18n } from "../../lib/i18n";
-import { useRailWidth } from "../../lib/rail-width.js";
-import { useTreeVisible } from "../../lib/tree-visible.js";
-import { SplitDivider } from "../SplitDivider.js";
-import { useSplitWorkspace } from "../SplitWorkspaceContext.js";
+import { grepContents } from "../../lib/api/grep-api.js";
+import { useI18n } from "../../lib/i18n/i18n.js";
+import { useRailWidth } from "../../lib/layout/rail-width.js";
+import { useTreeVisible } from "../../lib/util/tree-visible.js";
+import { stripTermId } from "../../lib/layout/use-terminal-pane-tabs.js";
+import { SplitDivider } from "../split/SplitDivider.js";
+import { useSplitWorkspace } from "../split/SplitWorkspaceContext.js";
 import { ChangedOnDiskBanner } from "./ChangedOnDiskBanner.js";
 import { ChangesRailSection } from "./ChangesRailSection.js";
 import { EditorFileTree } from "./EditorFileTree.js";
 import { EditorSearchPanel } from "./EditorSearchPanel.js";
-import { stripTermId } from "../../lib/use-terminal-pane-tabs.js";
 import { EditorTabs } from "./EditorTabs.js";
 import { TerminalPaneLayer } from "./TerminalPaneLayer.js";
-import { viewerRegistry } from "./viewer-registry.js";
+import { useServerCapabilities } from "../../hooks/useServerCapabilities.js";
+import { CappedViewer } from "./CappedViewer.js";
+import { TabActions, type TabActionTarget } from "./TabActions.js";
 
 const absOf = (cwd: string, rel: string): string => (rel ? `${cwd}/${rel}` : cwd);
 
@@ -111,6 +113,18 @@ export function EditorPane() {
   const activeTab = state.activeIndex >= 0 ? state.openFiles[state.activeIndex] : null;
   const activePath = activeTab?.path ?? null;
 
+  // System-open tab actions (D9). Gated on the server capability; only a real
+  // file or a url tab exposes an action (virtual live-server/diff/terminal do
+  // not). See change: open-view-command-in-editor-pane.
+  const caps = useServerCapabilities();
+  const tabActionTarget: TabActionTarget | null = !activeTab
+    ? null
+    : activeTab.viewer === "url"
+      ? { kind: "url", url: activeTab.path.replace(/^url:/, "") }
+      : activeTab.viewer === "live-server" || activeTab.viewer === "diff" || activeTab.viewer === "terminal"
+        ? null
+        : { kind: "file", cwd, path: activeTab.path };
+
   // Honour a pending scroll for the active tab exactly once, then clear it.
   useEffect(() => {
     if (pendingScroll && pendingScroll.path === activePath) {
@@ -130,11 +144,11 @@ export function EditorPane() {
     );
   } else {
     const classification = fileKind(absOf(cwd, activeTab.path));
-    const Viewer = viewerRegistry[activeTab.viewer];
     body = (
       <Suspense fallback={<div className="p-4 text-sm text-[var(--text-tertiary)]">{t("editor.loadingViewer", undefined, "Loading viewer…")}</div>}>
-        <Viewer
+        <CappedViewer
           key={`${activeTab.path}:${refreshNonce}:${lineForTab ?? ""}`}
+          viewer={activeTab.viewer}
           cwd={cwd}
           path={activeTab.path}
           kind={classification.kind}
@@ -200,6 +214,7 @@ export function EditorPane() {
         >
           <Icon path={mdiMagnify} size={0.7} />
         </button>
+        {tabActionTarget && <TabActions target={tabActionTarget} systemOpen={caps.systemOpen} />}
         {activeTab && (
           <button
             type="button"

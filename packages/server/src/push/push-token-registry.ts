@@ -8,7 +8,7 @@
  * See change: add-server-push-notifications.
  */
 import crypto from "node:crypto";
-import { readJsonFile, writeJsonFile } from "../json-store.js";
+import { readJsonFile, writeJsonFile } from "../persistence/json-store.js";
 import type { PushTransportKind } from "./push-transports/types.js";
 
 export interface PushToken {

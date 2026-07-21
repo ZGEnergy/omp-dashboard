@@ -3,7 +3,7 @@
  */
 import { existsSync } from "node:fs";
 import type { BrowserToServerMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import { clampSpawnRegisterTimeoutMs, loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import { ToolResolver } from "@blackbelt-technology/pi-dashboard-shared/platform/binary-lookup.js";
 import {
   killPidWithGroup,
@@ -12,13 +12,12 @@ import {
 import {
   findPidByMarker,
 } from "@blackbelt-technology/pi-dashboard-shared/platform/process-identify.js";
-import { keeperOptsFromSpawnResult } from "../headless-pid-registry.js";
-import { spawnPiSession } from "../process-manager.js";
-import { createBranchedSessionFile } from "../session-file-reader.js";
-import { appendSpawnFailure } from "../spawn-failure-log.js";
-import { preflightSpawn } from "../spawn-preflight.js";
-import { getSpawnRegisterWatchdog } from "../spawn-register-watchdog.js";
-import { mintSpawnToken } from "../spawn-token.js";
+import { keeperOptsFromSpawnResult } from "../spawn-process/headless-pid-registry.js";
+import { spawnPiSession } from "../spawn-process/process-manager.js";
+import { createBranchedSessionFile } from "../session/session-file-reader.js";
+import { appendSpawnFailure } from "../spawn-process/spawn-failure-log.js";
+import { preflightSpawn } from "../spawn-process/spawn-preflight.js";
+import { getSpawnRegisterWatchdog } from "../spawn-process/spawn-register-watchdog.js";
 import type { BrowserHandlerContext } from "./handler-context.js";
 import { shouldInterceptReload } from "./session-action-helpers.js";
 
@@ -450,10 +449,7 @@ export async function handleSpawnSession(
   // silently. Previous behaviour left the user staring at an empty state
   // when pi itself was broken in the target folder.
   try {
-    const spawnResult = await spawnPiSession(msg.cwd, {
-      strategy,
-      spawnToken: mintSpawnToken(),
-    });
+    const spawnResult = await spawnPiSession(msg.cwd, { strategy });
     if (spawnResult.process && spawnResult.pid) {
       headlessPidRegistry.register(
         spawnResult.pid,
@@ -497,15 +493,16 @@ export async function handleSpawnSession(
         ...(spawnResult.stderr ? { stderrTail: spawnResult.stderr } : {}),
       });
     } else {
-      // Snapshot timeout at arm time so Settings changes cannot alter this spawn.
-      const registrationWindowMs = clampSpawnRegisterTimeoutMs(loadConfig().spawnRegisterTimeoutMs);
+      // Arm watchdog for every successful spawn. See change: spawn-failure-diagnostics.
       const watchdog = getSpawnRegisterWatchdog();
       watchdog.arm({
         pid: spawnResult.pid,
         cwd: msg.cwd,
         mechanism: strategy as import("@blackbelt-technology/pi-dashboard-shared/platform/spawn-mechanism.js").SpawnMechanism,
         logPath: spawnResult.logPath,
-        timeoutMs: registrationWindowMs,
+        // Read-on-arm: pass current config value so a Settings change takes effect
+        // on the next spawn without a server restart. See change: spawn-failure-diagnostics (fix W1).
+        timeoutMs: config.spawnRegisterTimeoutMs,
         ws,
         spawnToken: spawnResult.spawnToken,
       });

@@ -9,7 +9,7 @@
  * See change: add-server-push-notifications.
  */
 import webpush from "web-push";
-import { readJsonFile, writeJsonFile } from "../json-store.js";
+import { readJsonFile, writeJsonFile } from "../persistence/json-store.js";
 
 export interface VapidKeys {
   publicKey: string;
