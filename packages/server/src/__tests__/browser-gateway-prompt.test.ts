@@ -1,8 +1,8 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import { createBrowserGateway } from "../browser-gateway.js";
-import { createMemoryEventStore } from "../memory-event-store.js";
-import { createMemorySessionManager } from "../memory-session-manager.js";
+import { createBrowserGateway } from "../pairing/browser-gateway.js"
+import { createMemoryEventStore } from "../persistence/memory-event-store.js"
+import { createMemorySessionManager } from "../session/memory-session-manager.js"
 import type { PiGateway } from "../pi-gateway.js";
 
 function makeFakeWs() {

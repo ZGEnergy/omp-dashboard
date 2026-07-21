@@ -1,6 +1,6 @@
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { describe, expect, it } from "vitest";
-import { createMemoryEventStore } from "../memory-event-store.js";
+import { createMemoryEventStore } from "../persistence/memory-event-store.js"
 import { createReplayCoordinator, REPLAY_SEND_BACKPRESSURE } from "../replay-coordinator.js";
 
 function event(label: string): DashboardEvent {

@@ -7,7 +7,7 @@
  */
 import type { DashboardEvent, SessionStatus } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
-import { isUnreadTrigger } from "../event-status-extraction.js";
+import { isUnreadTrigger } from "../session/event-status-extraction.js"
 
 export type PushTriggerBucket = "actions-required" | "claude-decides";
 export type PushTriggerKind = "input-needed" | "crash" | "turn-done";

@@ -3,6 +3,7 @@
  * Sends model_update only when values actually change.
  */
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BridgeContext } from "./bridge-context.js";
@@ -12,12 +13,23 @@ import { gatherGitInfo, gatherGitStatus } from "./vcs-info.js";
 /**
  * Send model_update if model or thinking level has changed since last send.
  */
-export function sendModelUpdateIfChanged(bc: BridgeContext): void {
-  const model = getCurrentModelString(bc);
-  const thinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? undefined;
-  if (model === bc.lastModel && thinkingLevel === bc.lastThinkingLevel) return;
+type ModelUpdateSnapshot = {
+  model: string | undefined;
+  thinkingLevel: string | null;
+};
+
+export function sendModelUpdateIfChanged(
+  bc: BridgeContext,
+  snapshot?: ModelUpdateSnapshot,
+): void {
+  const model = snapshot ? snapshot.model : getCurrentModelString(bc);
+  const thinkingLevel = snapshot
+    ? snapshot.thinkingLevel
+    : (bc.pi as any).getThinkingLevel?.() ?? null;
+  const thinkingLevelCache = thinkingLevel === null ? undefined : thinkingLevel;
+  if (model === bc.lastModel && thinkingLevelCache === bc.lastThinkingLevel) return;
   bc.lastModel = model;
-  bc.lastThinkingLevel = thinkingLevel;
+  bc.lastThinkingLevel = thinkingLevelCache;
   if (model) {
     bc.connection.send({
       type: "model_update",
@@ -48,13 +60,13 @@ export function sendSessionNameIfChanged(bc: BridgeContext): void {
 export function sendGitInfoIfChanged(bc: BridgeContext, cwd: string): void {
   const info = gatherGitInfo(cwd);
   if (!info) return;
-  // Worktree state diff: serialise to a stable string. `"null"` marks an
+  // Worktree state diff: serialise to a stable string. "null" marks an
   // explicit "cwd is not a worktree" so a subsequent transition into a
   // worktree still counts as a change.
   const nextWorktreeJson = info.gitWorktree ? JSON.stringify(info.gitWorktree) : "null";
   // Working-tree dirtiness + drift, gathered on the same tick (one extra
   // `git status` — cheap; git is already running here). Serialised for a
-  // stable change-diff; `"null"` = inconclusive probe this tick.
+  // stable change-diff; "null" = inconclusive probe this tick.
   // See change: add-session-uncommitted-indicator-and-commit.
   const status = gatherGitStatus(cwd);
   const nextStatusJson = status ? JSON.stringify(status) : "null";
@@ -85,22 +97,26 @@ export function sendGitInfoIfChanged(bc: BridgeContext, cwd: string): void {
 }
 
 /**
- * Last pi version pushed via `pi_version_update`. Module-scoped: a single pi
- * process has exactly one pi version, so this correctly survives bridge
- * reconnect and suppresses redundant pushes. See change:
- * restore-pi-version-skew-surface.
+ * The last pi version is cached on BridgeContext so each bridge/session tracks
+ * its own initial emission. The warning timestamp remains module-scoped because
+ * it only rate-limits noisy diagnostics.
  */
-let lastPiVersion: string | undefined;
+/** Rate-limit failed-read warnings so Bun poll ticks don't flood the session log. */
+let lastPiVersionWarnAt = 0;
 
-const PI_PKG = "@earendil-works/pi-coding-agent";
+const PI_PKG_CANDIDATES = [
+  "@earendil-works/pi-coding-agent",
+  "@mariozechner/pi-coding-agent",
+] as const;
+const PI_PKG = PI_PKG_CANDIDATES[0];
 
 /**
  * Read a package's `version` without resolving its `./package.json` subpath.
  *
  * Node gates subpath resolution on the package's `exports` map: a package that
- * exports only `"."` makes resolving the `"<pkg>/package.json"` subpath throw
+ * exports only "." makes resolving the "<pkg>/package.json" subpath throw
  * `ERR_PACKAGE_PATH_NOT_EXPORTED` (pi 0.80.2 is such a package). So we resolve
- * the always-present `"."` entry instead, then walk up to the nearest
+ * the always-present "." entry instead, then walk up to the nearest
  * `package.json` whose `name` matches — the `name` check avoids grabbing an
  * ancestor workspace manifest under hoisted/linked layouts. Returns `undefined`
  * (not throw) when no matching manifest is found; a truly-uninstalled package
@@ -131,16 +147,78 @@ export function readPkgVersionByWalkUp(
 }
 
 /**
+ * Filesystem fallback for runtimes (Bun/jiti under OMP) where
+ * `import.meta.resolve(pkg)` cannot see workspace/hoisted deps from an
+ * externally-loaded extension path. Walks ancestors of `startDir` for
+ * `node_modules/<pkg>/package.json`, then checks known managed installs.
+ */
+export function readPiVersionFromFilesystem(
+  startDir: string,
+  readFile: (p: string) => string = (p) => readFileSync(p, "utf8"),
+  fileExists: (p: string) => boolean = existsSync,
+  home: string = homedir(),
+): string | undefined {
+  let dir = startDir;
+  for (let i = 0; i < 12; i++) {
+    for (const pkgName of PI_PKG_CANDIDATES) {
+      const candidate = join(dir, "node_modules", pkgName, "package.json");
+      if (!fileExists(candidate)) continue;
+      try {
+        const parsed = JSON.parse(readFile(candidate)) as { name?: string; version?: string };
+        if (PI_PKG_CANDIDATES.includes(parsed.name as (typeof PI_PKG_CANDIDATES)[number]) && typeof parsed.version === "string") {
+          return parsed.version;
+        }
+      } catch {
+        // ignore malformed manifests
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  for (const root of [join(home, ".omp-dashboard"), join(home, ".omp", "plugins")]) {
+    for (const pkgName of PI_PKG_CANDIDATES) {
+      const candidate = join(root, "node_modules", pkgName, "package.json");
+      if (!fileExists(candidate)) continue;
+      try {
+        const parsed = JSON.parse(readFile(candidate)) as { name?: string; version?: string };
+        if (PI_PKG_CANDIDATES.includes(parsed.name as (typeof PI_PKG_CANDIDATES)[number]) && typeof parsed.version === "string") {
+          return parsed.version;
+        }
+      } catch {
+        // ignore malformed manifests
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
  * Default reader: pi-coding-agent version from inside the bridge's own tree.
  *
  * Uses `import.meta.resolve` (the ESM resolver, `import` condition) rather than
- * `createRequire().resolve` (CJS, `require` condition): pi's `"."` export defines
+ * `createRequire().resolve` (CJS, `require` condition): pi's "." export defines
  * only `import`/`types`, so the CJS resolver would itself throw
  * `ERR_PACKAGE_PATH_NOT_EXPORTED` ("No exports main defined"). `import.meta.resolve`
  * returns a `file://` URL, converted to a path for the walk-up.
  */
 export function defaultReadPiVersion(): string | undefined {
-  return readPkgVersionByWalkUp(PI_PKG, (spec) => fileURLToPath(import.meta.resolve(spec)));
+  try {
+    const version = readPkgVersionByWalkUp(PI_PKG, (spec) => fileURLToPath(import.meta.resolve(spec)));
+    if (version) return version;
+  } catch {
+    // Bun/jiti often throws when the package is loaded from an external path.
+  }
+  for (const alt of PI_PKG_CANDIDATES.slice(1)) {
+    try {
+      const version = readPkgVersionByWalkUp(alt, (spec) => fileURLToPath(import.meta.resolve(spec)));
+      if (version) return version;
+    } catch {
+      // continue
+    }
+  }
+  return readPiVersionFromFilesystem(dirname(fileURLToPath(import.meta.url)));
 }
 
 /**
@@ -158,11 +236,15 @@ export function sendPiVersionIfChanged(
   try {
     version = readVersion();
   } catch (e) {
-    console.warn("[dashboard] pi version read failed:", e);
+    const now = Date.now();
+    if (now - lastPiVersionWarnAt > 60_000) {
+      lastPiVersionWarnAt = now;
+      console.warn("[dashboard] pi version read failed:", e);
+    }
     return;
   }
-  if (!version || version === lastPiVersion) return;
-  lastPiVersion = version;
+  if (!version || version === bc.lastPiVersion) return;
+  bc.lastPiVersion = version;
   bc.connection.send({
     type: "pi_version_update",
     sessionId: bc.sessionId,
@@ -170,9 +252,9 @@ export function sendPiVersionIfChanged(
   });
 }
 
-/** Test-only: clear the module-scoped pi-version cache. */
-export function _resetPiVersionCache(): void {
-  lastPiVersion = undefined;
+/** Test-only: clear the failed-read warning rate-limit state. */
+export function _resetPiVersionWarnRateLimit(): void {
+  lastPiVersionWarnAt = 0;
 }
 
 /**
@@ -182,6 +264,11 @@ export function _resetPiVersionCache(): void {
  * staleness.
  */
 export function resetReconnectCaches(bc: BridgeContext): void {
+  // Model updates are bridge-owned full snapshots; clear their dedup state so
+  // reconnect publication cannot be suppressed by the prior socket lifetime.
+  bc.lastModel = undefined;
+  bc.lastThinkingLevel = undefined;
+  bc.lastPiVersion = undefined;
   // Defensive: reset git so a reconnect through a stale state cache
   // doesn't surface stale branch info if .meta.json wasn't persisted yet.
   bc.lastGitBranch = undefined;
@@ -213,4 +300,3 @@ export function sendCwdMissingIfChanged(
     sessionId: bc.sessionId,
   });
 }
-

@@ -1,6 +1,6 @@
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { describe, expect, it } from "vitest";
-import { createMemoryEventStore } from "../memory-event-store.js";
+import { createMemoryEventStore } from "../persistence/memory-event-store.js"
 
 function event(label: string): DashboardEvent {
   return { eventType: "message_end", timestamp: 1, data: { label } };

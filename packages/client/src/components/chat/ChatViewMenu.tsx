@@ -38,11 +38,9 @@ interface Props {
    * fields accumulate rather than replacing each other).
    */
   currentOverride: PartialDisplayPrefs | undefined;
-  /** Desktop content pane boundary for horizontal popover positioning. */
-  boundaryRef?: React.RefObject<HTMLElement | null>;
 }
 
-export function ChatViewMenu({ sessionId, send, currentOverride, boundaryRef }: Props): React.ReactElement {
+export function ChatViewMenu({ sessionId, send, currentOverride }: Props): React.ReactElement {
   const { global } = useDisplayPrefsContext();
   const prefs = useDisplayPrefs(sessionId);
   const [open, setOpen] = useState(false);

@@ -4,6 +4,7 @@
  */
 
 import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { detectOpenSpecActivity, isValidOpenSpecChangeSlug } from "@blackbelt-technology/pi-dashboard-shared/openspec-activity-detector.js";
 import { mergeSessionMeta, writeSessionMeta } from "@blackbelt-technology/pi-dashboard-shared/session-meta.js";
 import { extractTurnStats } from "@blackbelt-technology/pi-dashboard-shared/stats-extractor.js";
@@ -34,6 +35,8 @@ import {
   extractModelTurnError,
 } from "./spawn-process/spawned-turn-log.js";
 import type { ViewedSessionTracker } from "./session/viewed-session-tracker.js";
+import type { PushDispatcher } from "./push/push-dispatcher.js";
+import { classifyPushTrigger, type PushTriggerPreferences } from "./push/push-trigger-classifier.js";
 
 /**
  * `true` iff `changeName` appears in the cwd's authoritative OpenSpec poll
@@ -138,6 +141,10 @@ export interface EventWiringDeps {
    * See change: session-card-unread-stripes.
    */
   viewedSessionTracker?: ViewedSessionTracker;
+  /** Optional push dispatcher. Fans notable live events to paired devices without awaiting transport. */
+  pushDispatcher?: PushDispatcher;
+  /** Reads live push bucket preferences so Settings changes apply without a dispatcher restart. */
+  getPushPreferences?: () => PushTriggerPreferences | undefined;
   /**
    * Optional client-correlation registry. When provided, the wiring
    * consumes the requestId for the resolved spawnToken after a successful
@@ -212,6 +219,8 @@ export function wireEvents(deps: EventWiringDeps): void {
     goalStore,
     primeGoalSession,
     viewedSessionTracker,
+    pushDispatcher,
+    getPushPreferences,
     pendingClientCorrelations,
     dispatchPluginPiMessage,
     dispatchPluginRawEvent,
@@ -473,6 +482,7 @@ export function wireEvents(deps: EventWiringDeps): void {
         currentTool: null,
       });
     }
+    browserGateway.clearPendingPromptResponses(sessionId);
     // Fan the death out to plugin onSessionEnded subscribers regardless of
     // whether a session record still exists — the automation plugin finalizes
     // any run wedged by a lost terminal event.
@@ -614,6 +624,26 @@ export function wireEvents(deps: EventWiringDeps): void {
         }
       }
 
+      if (
+        !replayingSessions.has(sessionId) &&
+        msg.event.eventType === "tool_execution_end" &&
+        isInputNeededTool((msg.event.data?.toolName as string | undefined) ?? null)
+      ) {
+        const toolCallId =
+          typeof msg.event.data?.toolCallId === "string" ? msg.event.data.toolCallId : undefined;
+        const cleared =
+          typeof (browserGateway as any).clearPromptRequestsForTool === "function"
+            ? (browserGateway as any).clearPromptRequestsForTool(sessionId, toolCallId) as string[]
+            : [];
+        for (const promptId of cleared) {
+          browserGateway.sendToSubscribers(sessionId, {
+            type: "prompt_dismiss",
+            sessionId,
+            promptId,
+          } as any);
+        }
+      }
+
       // Unread-trigger evaluation. Only fires for live (non-replay) events
       // and only stamps when no browser is currently viewing the session.
       // The viewedSessionTracker dep is optional for backward compatibility
@@ -637,6 +667,17 @@ export function wireEvents(deps: EventWiringDeps): void {
           if (sessionAfter && !sessionAfter.unread) {
             sessionManager.update(sessionId, { unread: true });
             browserGateway.broadcastSessionUpdated(sessionId, { unread: true });
+          }
+          const pushClassification = classifyPushTrigger(msg.event, beforeSnapshot, afterSnapshot);
+          const pushPreferences = getPushPreferences?.();
+          const pushEnabled =
+            pushClassification !== null &&
+            (pushPreferences === undefined ||
+              (pushClassification.bucket === "actions-required"
+                ? pushPreferences.actionsRequired !== false
+                : pushPreferences.claudeDecides !== false));
+          if (pushEnabled) {
+            void pushDispatcher?.fanout(sessionId, msg.event);
           }
         }
       }
@@ -1434,14 +1475,11 @@ export function wireEvents(deps: EventWiringDeps): void {
       browserGateway.sendToSubscribers(sessionId, msg as any);
     }
 
-    if (msg.type === "prompt_dismiss") {
+    if (msg.type === "prompt_dismiss" || msg.type === "prompt_cancel" || msg.type === "prompt_response_ack") {
       browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
-      browserGateway.sendToSubscribers(sessionId, msg as any);
-    }
-
-    if (msg.type === "prompt_cancel") {
-      browserGateway.clearPromptRequest(sessionId, (msg as any).promptId);
-      browserGateway.sendToSubscribers(sessionId, msg as any);
+      if (msg.type !== "prompt_response_ack") {
+        browserGateway.sendToSubscribers(sessionId, msg as any);
+      }
     }
 
     // ── Extension UI System (Phase 1): cache + broadcast ──

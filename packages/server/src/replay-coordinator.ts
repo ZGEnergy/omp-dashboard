@@ -5,7 +5,7 @@ import { prepareEventForReplay, utf8ByteLength } from "@blackbelt-technology/pi-
 import type { WebSocket } from "ws";
 import type { BrowserHandlerContext } from "./browser-handlers/handler-context.js";
 import type { DirectoryService } from "./directory-service.js";
-import type { EventStore, StoredEvent } from "./memory-event-store.js";
+import type { EventStore, StoredEvent } from "./persistence/memory-event-store.js"
 import type { SessionManager } from "./memory-session-manager.js";
 
 export const REPLAY_BATCH_SIZE = 50;

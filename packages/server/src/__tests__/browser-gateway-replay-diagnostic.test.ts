@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { createBrowserGateway } from "../browser-gateway.js";
-import { createMemoryEventStore } from "../memory-event-store.js";
-import { createMemorySessionManager } from "../memory-session-manager.js";
+import { createBrowserGateway } from "../pairing/browser-gateway.js"
+import { createMemoryEventStore } from "../persistence/memory-event-store.js"
+import { createMemorySessionManager } from "../session/memory-session-manager.js"
 import { createDrainingWs } from "./helpers/draining-ws.js";
 
 function diagnostic(sessionId = "session-1", code = "sequence_gap") {

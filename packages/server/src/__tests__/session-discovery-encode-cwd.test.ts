@@ -11,7 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { encodeCwd } from "../session-discovery.js";
+import { encodeCwd } from "../session/session-discovery.js"
 
 describe("encodeCwd (omp session-dir scheme)", () => {
   it("home root -> `-`", () => {
