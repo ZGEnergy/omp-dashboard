@@ -1077,7 +1077,9 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     if (wasLoading && !nowLoading) {
       if (mobileActive) {
         if (scrollOwnerRef.current !== "READING_HISTORY") {
-          scrollOwnerRef.current = "FOLLOWING";
+          // Replay rows measure after the initial hydration pin. Keep the
+          // existing bottom-navigation owner until those measurements settle.
+          scrollOwnerRef.current = "NAVIGATING_BOTTOM";
           pinLatest();
         }
       } else if (!escapedDuringHydrateRef.current) {
