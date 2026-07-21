@@ -278,7 +278,6 @@ cmd_execute() {
   trap cleanup EXIT
   git -C "$REPO_ROOT" worktree add --detach "$tree" "$BASE_SHA"
   [[ "$(git -C "$tree" rev-parse HEAD)" == "$BASE_SHA" ]] || die "fresh worktree is not at exact base pin"
-  git -C "$tree" switch -C "$branch" "$BASE_SHA"
   set +e
   git -C "$tree" merge --no-ff "$UPSTREAM_SHA" -m "chore(sync): merge upstream exact pin"
   local merge_rc=$?
