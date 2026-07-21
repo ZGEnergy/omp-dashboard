@@ -66,6 +66,31 @@ describe("installManagedSkill", () => {
     );
   });
 
+  it("allows safe install and check through a symlinked ancestor", () => {
+    const resolvedParent = path.join(fixture.root, "resolved-parent");
+    const symlinkedParent = path.join(fixture.root, "symlinked-parent");
+    mkdirSync(resolvedParent, { recursive: true });
+    symlinkSync(resolvedParent, symlinkedParent, "dir");
+    const destination = path.join(symlinkedParent, "managed");
+
+    const installResult = installManagedSkill({
+      source: fixture.source,
+      destination,
+      mode: "install",
+    });
+    const checkResult = installManagedSkill({
+      source: fixture.source,
+      destination,
+      mode: "check",
+    });
+
+    expect(installResult).toMatchObject({ mode: "install", installed: true, identical: true });
+    expect(checkResult).toMatchObject({ mode: "check", installed: false, drift: false, identical: true });
+    expect(readFileSync(path.join(resolvedParent, "managed", "SKILL.md"), "utf8")).toBe(
+      "canonical skill bytes\n",
+    );
+  });
+
   it("rejects destination paths containing parent traversal before mutation", () => {
     const outside = path.join(fixture.root, "outside");
     const traversingDestination = `${fixture.root}/managed/../outside`;
