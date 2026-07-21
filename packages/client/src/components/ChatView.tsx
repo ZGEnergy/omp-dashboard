@@ -1007,6 +1007,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     if (!mobileActive) return;
     const key = `${sessionId ?? ""}:${mobileActivationEpoch}:${replayGeneration}`;
     if (mobileActivationRef.current === key) return;
+    const replayRestart = mobileActivationRef.current !== null;
     mobileActivationRef.current = key;
     cancelProgrammaticWrites();
     const pending = pendingOlderAnchorRef.current;
@@ -1019,7 +1020,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       scrollOwnerRef.current = "HYDRATING";
       return;
     }
-    scrollOwnerRef.current = "FOLLOWING";
+    // A replay-generation change arrives after the initial mobile mount. It
+    // must keep chasing the tail while virtual rows finish measuring; initial
+    // ordinary FOLLOWING mounts retain their measurement-neutral behavior.
+    scrollOwnerRef.current = replayRestart ? "NAVIGATING_BOTTOM" : "FOLLOWING";
     pinLatest();
   }, [cancelProgrammaticWrites, loadingHistory, mobileActivationEpoch, mobileActive, pinLatest, replayGeneration, sessionId]);
 

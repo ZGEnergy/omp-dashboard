@@ -528,6 +528,46 @@ describe("ChatView mobile scroll owner", () => {
     expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
   });
 
+  it("keeps a mobile replay-generation restart pinned while virtual rows measure", async () => {
+    virtualizerProbe.onChange = undefined;
+    const { container, rerender } = render(
+      <ThemeProvider>
+        <ChatView
+          sessionId="mobile-replay-restart"
+          state={createInitialState()}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={0}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    const scrollEl = getScrollContainer(container);
+    setScrollPosition(scrollEl, 0, 0, 400);
+    rerender(
+      <ThemeProvider>
+        <ChatView
+          sessionId="mobile-replay-restart"
+          state={stateWith(50)}
+          toolContext={defaultToolContext}
+          mobileActive
+          mobileActivationEpoch={1}
+          replayGeneration={1}
+        />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+
+    setScrollPosition(scrollEl, 0, 4_000, 400);
+    expect(virtualizerProbe.onChange).toBeDefined();
+    (virtualizerProbe.onChange as () => void)();
+    await flushRaf();
+
+    expect(scrollEl.scrollTop).toBe(4_000);
+  });
+
   it("leaves ordinary mobile FOLLOWING unchanged when virtualizer rows measure", async () => {
     virtualizerProbe.onChange = undefined;
     const { container } = render(
