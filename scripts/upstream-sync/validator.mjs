@@ -98,9 +98,13 @@ function expectedPlanHash(plan) {
 
 export function validatePlanBinding({ request, ledger, plan, approval } = {}) {
   const errors = [];
+  let canonicalPlanHash;
   try { validateRequest(request); } catch (error) { errors.push(`request: ${error.message}`); }
   try { validateLedger(ledger); } catch (error) { errors.push(`ledger: ${error.message}`); }
-  try { validatePlan(plan); } catch (error) { errors.push(`plan: ${error.message}`); }
+  try {
+    validatePlan(plan);
+    canonicalPlanHash = expectedPlanHash(plan);
+  } catch (error) { errors.push(`plan: ${error.message}`); }
   if (request && plan) {
     if (plan.base_sha !== request.base_sha) errors.push("base_sha is not bound to request");
     if (plan.upstream_sha !== request.upstream_sha) errors.push("upstream_sha is not bound to request");
@@ -113,7 +117,7 @@ export function validatePlanBinding({ request, ledger, plan, approval } = {}) {
   }
   if (plan && approval) {
     if (approval.plan_commit !== plan.plan_commit) errors.push("plan_commit approval mismatch");
-    if (approval.plan_hash !== plan.plan_hash) errors.push("plan_hash approval mismatch");
+    if (approval.plan_hash !== canonicalPlanHash) errors.push("plan_hash approval mismatch");
     if (approval.verifier_version !== plan.verifier_version) errors.push("verifier_version approval mismatch");
     if (approval.verifier_digest !== plan.verifier_digest) errors.push("verifier_digest approval mismatch");
   }

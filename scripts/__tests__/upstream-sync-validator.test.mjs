@@ -124,6 +124,35 @@ describe("validatePlanBinding", () => {
     const changedDecisions = plan([decision("one", "preserve-zge"), decision("two", "combine")]);
     expect(validatePlanBinding({ request: req, ledger: ledger(obligations), plan: changedDecisions, approval })).toEqual(expect.objectContaining({ ok: false }));
   });
+
+  it("rejects a plan when canonical contents change after the first hash read", () => {
+    const req = request();
+    const p = plan(decisions);
+    const canonicalHash = p.plan_hash;
+    let mutated = false;
+    Object.defineProperty(p, "plan_hash", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        if (!mutated) {
+          mutated = true;
+          p.created_at = "2026-07-22T00:00:00.000Z";
+        }
+        return canonicalHash;
+      },
+    });
+
+    const approval = {
+      ok: true,
+      approved_review_ids: ["r1", "r2"],
+      plan_commit: p.plan_commit,
+      plan_hash: canonicalHash,
+      verifier_version: p.verifier_version,
+      verifier_digest: p.verifier_digest,
+    };
+
+    expect(validatePlanBinding({ request: req, ledger: ledger(obligations), plan: p, approval })).toEqual(expect.objectContaining({ ok: false, errors: expect.arrayContaining(["plan_hash approval mismatch"]) }));
+  });
 });
 
 describe("validatePostMergeInvariants", () => {

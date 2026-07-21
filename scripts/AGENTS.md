@@ -46,6 +46,8 @@ Files in this directory. One row per file. Non-source area (migrated from `docs/
 ## Upstream sync contracts
 
 | `upstream-sync/contracts.mjs` | Deterministic schema validators, canonical JSON hashing, and proof-path confinement for upstream sync artifacts. |
+| `upstream-sync/validator.mjs` | Validation and binding gate for upstream sync requests, ledgers, plans, approvals, and post-merge invariants. `validatePlanBinding` recomputes the canonical plan hash before comparing it to approval bindings. |
+| `upstream-sync/approval.mjs` | High-risk approval verifier that checks GitHub reviews against repository, `plan_commit`, and `plan_hash` bindings while enforcing CODEOWNERS authorization. |
 | `upstream-sync/fixtures/valid-ledger.json` | Positive ledger contract fixture. |
 | `upstream-sync/fixtures/valid-request.json` | Positive immutable request contract fixture. |
 | `upstream-sync/fixtures/valid-plan.json` | Positive assessment plan contract fixture with bound canonical hash. |
