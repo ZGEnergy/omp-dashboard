@@ -259,12 +259,12 @@ preflight_publish() {
   local branch="$1"
   command -v gh >/dev/null 2>&1 || die "gh CLI is required for publication"
   gh auth status >/dev/null 2>&1 || die "gh authentication is required for publication"
-  git -C "$REPO_ROOT" push --dry-run "$ORIGIN_REMOTE" "HEAD:refs/heads/$branch" >/dev/null 2>&1 || die "origin push access is required for publication"
+  git -C "$REPO_ROOT" push --dry-run --force-with-lease "$ORIGIN_REMOTE" "HEAD:refs/heads/$branch" >/dev/null 2>&1 || die "origin push access is required for publication"
 }
 
 cmd_execute() {
   validate_artifacts
-  local branch="${SYNC_BRANCH:-sync/upstream-${REQUEST_ID}}"
+  local branch="${SYNC_BRANCH:-sync/upstream-${REQUEST_ID}}-${PLAN_HASH:0:12}"
   [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ && "$branch" != *..* ]] || die "unsafe audited branch name"
   case "$branch" in main|master|develop|"$TARGET_BRANCH") die "refusing protected audited branch: $branch";; esac
   preflight_publish "$branch"

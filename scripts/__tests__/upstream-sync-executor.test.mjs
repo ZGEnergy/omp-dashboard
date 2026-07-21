@@ -240,6 +240,7 @@ describe("upstream sync executor", () => {
       const output = readFileSync(log, "utf8");
       expect(output).toMatch(/gh auth status/);
       expect(output).toMatch(/git push/);
+          expect(output).toMatch(/--force-with-lease/);
       expect(output).not.toMatch(/gh pr /);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
@@ -270,6 +271,7 @@ describe("upstream sync executor", () => {
     const output = existsSync(log) ? readFileSync(log, "utf8") : "";
     if (_name === "failed verification") {
       expect(output).toMatch(/git push/);
+          expect(output).toMatch(/--force-with-lease/);
       expect(output).toMatch(/gh auth status/);
       expect(output).not.toMatch(/gh pr /);
     } else {
@@ -285,29 +287,35 @@ describe("upstream sync executor", () => {
     expect(() => run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json"], { PATH: `${bin}:${process.env.PATH}`, SYNC_TEST_LOG: log })).toThrow();
     const output = existsSync(log) ? readFileSync(log, "utf8") : "";
     expect(output).toMatch(/git push/);
+        expect(output).toMatch(/--force-with-lease/);
     expect(output).toMatch(/gh auth status/);
     expect(output).not.toMatch(/gh pr /);
     rmSync(fixture.root, { recursive: true, force: true });
   });
 
-  it("uses exact pins, mutates only the disposition path, and renders one ready PR body", () => {
-    const fixture = fixtureRepo();
-    const log = path.join(fixture.root, "publish.log");
-    const bin = fakePublishers(fixture.root);
-    run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json", "--branch", "sync/upstream-test"], { PATH: `${bin}:${process.env.PATH}`, SYNC_TEST_LOG: log, SYNC_RESULT_PATH: "upstream-sync/candidate.json" });
-    const output = readFileSync(log, "utf8");
-    expect(output).toMatch(/git push/);
-    expect(output).toMatch(/gh pr create/);
-    expect(output).not.toMatch(/--draft/);
-    expect(output).not.toMatch(/--label/);
-    expect(output).toMatch(fixture.baseSha);
-    expect(output).toMatch(fixture.upstreamSha);
-    expect(readFileSync(path.join(fixture.root, "upstream-sync/candidate.json"), "utf8")).toMatch(fixture.upstreamSha);
-    rmSync(fixture.root, { recursive: true, force: true });
-  });
+  it("publishes a plan-identity branch instead of reusing a stale requested branch", () => {
+      const fixture = fixtureRepo();
+      const log = path.join(fixture.root, "publish.log");
+      const bin = fakePublishers(fixture.root);
+      const requestedBranch = "sync/upstream-test";
+      const plan = JSON.parse(readFileSync(path.join(fixture.root, "upstream-sync/plan.json"), "utf8"));
+      const identityBranch = `${requestedBranch}-${plan.plan_hash.slice(0, 12)}`;
+      git(fixture.root, "branch", requestedBranch, fixture.baseSha);
+      run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json", "--branch", requestedBranch], { PATH: `${bin}:${process.env.PATH}`, SYNC_TEST_LOG: log, SYNC_RESULT_PATH: "upstream-sync/candidate.json" });
+      const output = readFileSync(log, "utf8");
+      expect(output).toMatch(new RegExp(`refs/heads/${identityBranch}`));
+      expect(output).not.toMatch(new RegExp(`refs/heads/${requestedBranch}(?:\s|$)`));
+      expect(output).toMatch(/--force-with-lease/);
+      expect(output).toMatch(/gh pr create/);
+      expect(output).not.toMatch(/--draft|--label/);
+      expect(output).toMatch(fixture.baseSha);
+      expect(output).toMatch(fixture.upstreamSha);
+      expect(readFileSync(path.join(fixture.root, "upstream-sync/candidate.json"), "utf8")).toMatch(fixture.upstreamSha);
+      rmSync(fixture.root, { recursive: true, force: true });
+    });
 });
 
 it("keeps the obsolete policy implementation deleted", () => {
-  expect(existsSync(path.join(repoRoot, "lib/upstream-sync-policy.sh"))).toBe(false);
-  expect(existsSync(path.join(repoRoot, "__tests__/upstream-sync-policy.test.mjs"))).toBe(false);
+  expect(existsSync(path.join(repoRoot, "scripts/lib/upstream-sync-policy.sh"))).toBe(false);
+  expect(existsSync(path.join(repoRoot, "scripts/__tests__/upstream-sync-policy.test.mjs"))).toBe(false);
 });
