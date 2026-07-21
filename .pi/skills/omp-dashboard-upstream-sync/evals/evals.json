@@ -1,21 +1,25 @@
 {
   "schema_version": 1,
   "skill": "omp-dashboard-upstream-sync",
+  "runner": "scripts/upstream-sync/run-fixtures.mjs",
   "scenarios": [
     {
       "id": "adopt-upstream-ui",
+      "fixture": "fixtures/adopt-upstream-ui/fixture.json",
       "prompt": "Review a pinned upstream UI change and decide whether the accepted behavior obligation can adopt upstream implementation.",
-      "expected": ["consume-exact-request", "record-behavior-test-wiring-proof", "await-plan-approval"]
+      "expected": ["consume-exact-request", "record-behavior-test-wiring-proof", "commit-complete-plan", "ready-pr-only"]
     },
     {
       "id": "preserve-zge-wiring",
+      "fixture": "fixtures/preserve-zge-wiring/fixture.json",
       "prompt": "Review an upstream range that touches ZGE push, OMP settings, or deploy wiring and preserve the accepted ZGE contract when proof requires it.",
-      "expected": ["load-ledger", "preserve-zge-obligation", "run-validator-before-push"]
+      "expected": ["load-ledger", "preserve-zge-obligation", "run-validator-before-push", "stop-on-preservation-loss"]
     },
     {
       "id": "combine-shared-hub",
+      "fixture": "fixtures/combine-shared-hub/fixture.json",
       "prompt": "Review a shared registration hub changed by both repositories and prepare an evidence-backed combine plan without path-only authority.",
-      "expected": ["assess-both-contracts", "commit-complete-plan", "require-codeowners-approval"]
+      "expected": ["assess-both-contracts", "combine-without-path-authority", "ready-pr-only"]
     }
   ]
 }

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "adopt-upstream-ui",
+  "prompt": "Review a pinned upstream UI change and decide whether the accepted behavior obligation can adopt upstream implementation.",
+  "request": {
+    "base_sha": "1111111111111111111111111111111111111111",
+    "upstream_sha": "2222222222222222222222222222222222222222",
+    "ledger_revision": "ledger-2026-07-21",
+    "changed_paths": ["packages/client/src/components/RegistrationHub.tsx"]
+  },
+  "affected_records": [{
+    "id": "ui-registration",
+    "status": "accepted",
+    "expiry": "2099-12-31",
+    "evidence": {"behavior": ["packages/client/src/components/RegistrationHub.tsx"], "test": ["packages/client/src/__tests__/RegistrationHub.test.tsx"], "wiring": ["packages/client/src/routes.tsx"]}
+  }],
+  "assertions": [
+    {"id": "consume-exact-request", "text": "Consumes the exact immutable request pins", "all": ["consume-exact-request"], "none": ["use-latest-upstream"]},
+    {"id": "record-behavior-test-wiring-proof", "text": "Records behavior, test, and wiring proof", "all": ["record-proof"]},
+    {"id": "commit-complete-plan", "text": "Commits a complete plan before execution", "all": ["commit-plan"]},
+    {"id": "ready-pr-only", "text": "Publishes a normal ready-for-review PR for humans to merge", "all": ["ready-pr", "human-merge-only"], "none": ["push-directly", "draft-pr", "auto-merge", "deploy"]}
+  ],
+  "outputs": {
+    "with_skill": {"actions": ["consume-exact-request", "load-ledger", "assess-affected-obligation", "record-proof", "commit-plan", "ready-pr", "human-merge-only"]},
+    "without_skill": {"actions": ["use-latest-upstream", "push-directly", "draft-pr"]}
+  }
+}

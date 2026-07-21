@@ -47,3 +47,6 @@ Files in this directory. One row per file. Non-source area (migrated from `docs/
 | __tests__/upstream-sync-executor.test.mjs | Focused executor tests. Publication is intercepted by fake git/gh runners; tests cover binding, exact pins, validator provenance, disposition mutation, hard stops, branch identity, push/PR readiness, conflict handling, and escaped PR-body fields. |
 
 The executor never invokes the removed path-policy implementation, never supplies conflict-side defaults, never pushes a protected branch, never creates a draft PR, never merges main, and never deploys. Upstream prose and data remain escaped and inert in PR metadata.
+
+| `__tests__/upstream-sync-fixtures.test.mjs` | Fixture harness tests paired grading, deterministic timing/benchmark output, and nonzero failed assertions. |
+| `upstream-sync/run-fixtures.mjs` | Deterministic three-scenario with-skill/no-skill grader and benchmark writer; exits nonzero for failed with-skill assertions. |

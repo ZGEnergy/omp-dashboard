@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "combine-shared-hub",
+  "prompt": "Review a shared registration hub changed by both repositories and prepare an evidence-backed combine plan without path-only authority.",
+  "request": {
+    "base_sha": "5555555555555555555555555555555555555555",
+    "upstream_sha": "6666666666666666666666666666666666666666",
+    "ledger_revision": "ledger-2026-07-21",
+    "changed_paths": ["packages/server/src/server.ts", "packages/client/src/routes.tsx"]
+  },
+  "affected_records": [
+    {"id": "zge-push-vapid", "status": "accepted", "expiry": "2099-12-31", "evidence": {"behavior": ["packages/server/src/push/push-vapid.ts"], "test": ["packages/server/src/__tests__/push-vapid.test.ts"], "wiring": ["packages/server/src/server.ts"]}},
+    {"id": "ui-registration", "status": "accepted", "expiry": "2099-12-31", "evidence": {"behavior": ["packages/client/src/components/RegistrationHub.tsx"], "test": ["packages/client/src/__tests__/RegistrationHub.test.tsx"], "wiring": ["packages/client/src/routes.tsx"]}}
+  ],
+  "assertions": [
+    {"id": "assess-both-contracts", "text": "Assesses every affected contract", "all": ["assess-all-affected", "record-proof"]},
+    {"id": "combine-without-path-authority", "text": "Combines only from behavioral evidence", "all": ["combine", "compare-preservation-proof"], "none": ["path-only-decision"]},
+    {"id": "ready-pr-only", "text": "Publishes only a normal ready-for-review PR for humans to merge", "all": ["ready-pr", "human-merge-only"], "none": ["draft-pr", "auto-merge", "deploy"]}
+  ],
+  "outputs": {
+    "with_skill": {"actions": ["consume-exact-request", "load-ledger", "assess-all-affected", "record-proof", "combine", "compare-preservation-proof", "ready-pr", "human-merge-only"]},
+    "without_skill": {"actions": ["path-only-decision", "draft-pr", "auto-merge", "deploy"]}
+  }
+}
