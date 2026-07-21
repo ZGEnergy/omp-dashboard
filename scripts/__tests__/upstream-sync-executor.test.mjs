@@ -300,8 +300,10 @@ describe("upstream sync executor", () => {
       const requestedBranch = "sync/upstream-test";
       const plan = JSON.parse(readFileSync(path.join(fixture.root, "upstream-sync/plan.json"), "utf8"));
       const identityBranch = `${requestedBranch}-${plan.plan_hash.slice(0, 12)}`;
+      const execute = () => run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json", "--branch", requestedBranch], { PATH: `${bin}:${process.env.PATH}`, SYNC_TEST_LOG: log, SYNC_RESULT_PATH: "upstream-sync/candidate.json" });
       git(fixture.root, "branch", requestedBranch, fixture.baseSha);
-      run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json", "--branch", requestedBranch], { PATH: `${bin}:${process.env.PATH}`, SYNC_TEST_LOG: log, SYNC_RESULT_PATH: "upstream-sync/candidate.json" });
+      execute();
+      execute();
       const output = readFileSync(log, "utf8");
       expect(output).toMatch(new RegExp(`refs/heads/${identityBranch}`));
       expect(output).not.toMatch(new RegExp(`refs/heads/${requestedBranch}(?:\s|$)`));
@@ -315,7 +317,12 @@ describe("upstream sync executor", () => {
     });
 });
 
-it("keeps the obsolete policy implementation deleted", () => {
+it("refuses protected requested branches and keeps obsolete policy deleted", () => {
+  const fixture = fixtureRepo();
+  const log = path.join(fixture.root, "publish.log");
+  const bin = fakePublishers(fixture.root);
+  expect(() => run(fixture.root, ["execute", "--request", "upstream-sync/request.json", "--ledger", "upstream-sync/ledger.json", "--plan", "upstream-sync/plan.json", "--branch", "main"], { PATH: `${bin}:${process.env.PATH}`, SYNC_TEST_LOG: log })).toThrow(/protected audited branch/);
   expect(existsSync(path.join(repoRoot, "scripts/lib/upstream-sync-policy.sh"))).toBe(false);
   expect(existsSync(path.join(repoRoot, "scripts/__tests__/upstream-sync-policy.test.mjs"))).toBe(false);
+  rmSync(fixture.root, { recursive: true, force: true });
 });

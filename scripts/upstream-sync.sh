@@ -266,7 +266,7 @@ cmd_execute() {
   validate_artifacts
   local branch="${SYNC_BRANCH:-sync/upstream-${REQUEST_ID}}-${PLAN_HASH:0:12}"
   [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ && "$branch" != *..* ]] || die "unsafe audited branch name"
-  case "$branch" in main|master|develop|"$TARGET_BRANCH") die "refusing protected audited branch: $branch";; esac
+  case "${SYNC_BRANCH:-sync/upstream-${REQUEST_ID}}" in main|master|develop|"$TARGET_BRANCH") die "refusing protected audited branch: ${SYNC_BRANCH:-sync/upstream-${REQUEST_ID}}";; esac
   preflight_publish "$branch"
   local holder="" tree=""
   holder="$(mktemp -d -t upstream-sync-worktree-XXXXXX)"
@@ -275,7 +275,7 @@ cmd_execute() {
   trap cleanup EXIT
   git -C "$REPO_ROOT" worktree add --detach "$tree" "$BASE_SHA"
   [[ "$(git -C "$tree" rev-parse HEAD)" == "$BASE_SHA" ]] || die "fresh worktree is not at exact base pin"
-  git -C "$tree" switch -c "$branch" "$BASE_SHA"
+  git -C "$tree" switch -C "$branch" "$BASE_SHA"
   set +e
   git -C "$tree" merge --no-ff "$UPSTREAM_SHA" -m "chore(sync): merge upstream exact pin"
   local merge_rc=$?
