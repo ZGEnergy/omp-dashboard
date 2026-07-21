@@ -1153,7 +1153,7 @@ export default function App() {
       void rehydrateSession(sid, replayCache, { authority }).then((r) => {
         if (!r || abort.signal.aborted || r.sourceGeneration !== source || !authority.isCurrent()) return;
         const ledger = replayController.ledger(sid);
-        if (ledger.events.length > 0 || !ledger.seed(source, r.events)) return;
+        if (ledger.events.length > 0 || !replayController.seedCached(sid, source, r.events)) return;
         const stateAtAdmission = sessionStatesRef.current.get(sid);
         const existing = replayPersistersRef.current.get(sid);
         const persister = existing?.scope.serverEpoch === serverEpoch && existing.scope.sourceGeneration === source

@@ -193,6 +193,17 @@ describe("SessionReplayController", () => {
     }
   });
 
+  it("keeps cold replay authoritative when cached history lacks a root user turn", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+    const toolEntry = { ...entry(100), event: { sessionId: "s", eventType: "task:subagent:event", timestamp: 100, data: { event: { message: { role: "user", content: "parent interruption" } } } } as unknown as DashboardEvent };
+
+    expect(controller.seedCached("s", "source-a", [toolEntry])).toBe(false);
+    expect(controller.ledger("s").request?.requestId).toBe(cold.requestId);
+    expect(effects.send).toHaveBeenCalledTimes(1);
+  });
+
   it("automatically continues a partial tool-only tail", () => {
     const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
     const controller = new SessionReplayController(effects);

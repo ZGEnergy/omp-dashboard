@@ -103,6 +103,12 @@ export class SessionReplayController {
     return ledger;
   }
 
+  /** Cache must contain a primary conversation turn before it can supersede canonical cold replay. */
+  seedCached(sessionId: string, sourceGeneration: string, events: readonly LedgerEvent[]): boolean {
+    if (!hasUserTurnStart(events)) return false;
+    return this.ledger(sessionId).seed(sourceGeneration, events);
+  }
+
   begin(sessionId: string, kind: ReplayRequest["kind"], sourceGeneration = "", anchorToken?: string): SessionSubscribeMessage {
     if (kind === "cold") this.automaticOlderFloor.delete(sessionId);
     const ledger = this.ledger(sessionId);
