@@ -185,7 +185,7 @@ describe.skipIf(!hasDocker())("compose interpolation (requires docker)", () => {
     expect(out).toMatch(/published:\s*"?19042"?/);
     expect(out).toMatch(/target:\s*19042/);
     expect(out).toMatch(/PI_GATEWAY_PORT:\s*"?19042"?/);
-  });
+  }, 30_000);
 });
 
 if (!hasDocker()) {

@@ -41,3 +41,5 @@ doc-example/
 
 # kb knowledge base index
 /.pi/dashboard/kb/index.db
+# Deterministic upstream-sync fixture benchmark and static review outputs
+.pi/skills/omp-dashboard-upstream-sync-workspace/

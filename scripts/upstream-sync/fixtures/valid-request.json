@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "request_id": "sync-2026-07-21-0001",
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "upstream_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "upstream_range": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "changed_paths": ["packages/server/src/config.ts", "scripts/upstream-sync.sh"],
+  "risk_flags": ["executor", "dependency-manifest"],
+  "ledger_revision": "ledger-2026-07-21",
+  "created_at": "2026-07-21T12:00:00.000Z"
+}

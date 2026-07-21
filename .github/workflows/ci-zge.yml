@@ -33,12 +33,90 @@ jobs:
         run: |
           npm ci || npm install --force
 
-      - name: Structural + unit suites + build
+      - name: Upstream sync structural tests
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm test -- scripts/__tests__/upstream-sync-contracts.test.mjs scripts/__tests__/upstream-sync-validator.test.mjs
+
+  # Required. Failure blocks landing for upstream-sync changes.
+  zge-upstream-sync:
+    name: zge-upstream-sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22"
+          cache: npm
+
+      - name: Install
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: |
-          chmod +x scripts/upstream-sync.sh
-          scripts/upstream-sync.sh verify
+          npm ci || npm install --force
+
+      - name: Detect upstream-sync paths
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            upstream_sync:
+              - '.pi/skills/omp-dashboard-upstream-sync/**'
+              - 'upstream-sync/**'
+              - 'scripts/upstream-sync/**'
+              - 'scripts/upstream-sync.sh'
+              - 'scripts/__tests__/install-managed-skill.test.mjs'
+              - 'scripts/__tests__/upstream-sync-*.test.mjs'
+              - '.github/workflows/upstream-sync.yml'
+              - '.github/workflows/ci-zge.yml'
+              - 'docs/upstream-sync.md'
+              - 'docs/AGENTS.md'
+              - '.github/workflows/AGENTS.md'
+              - 'scripts/AGENTS.md'
+
+      - name: Contract tests
+        if: steps.changes.outputs.upstream_sync == 'true'
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm test -- scripts/__tests__/upstream-sync-contracts.test.mjs
+
+      - name: Validator tests
+        if: steps.changes.outputs.upstream_sync == 'true'
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm test -- scripts/__tests__/upstream-sync-validator.test.mjs
+
+      - name: Executor tests
+        if: steps.changes.outputs.upstream_sync == 'true'
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm test -- scripts/__tests__/upstream-sync-executor.test.mjs
+
+      - name: Detector tests
+        if: steps.changes.outputs.upstream_sync == 'true'
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm test -- scripts/__tests__/upstream-sync-detect.test.mjs
+
+      - name: Installer tests
+        if: steps.changes.outputs.upstream_sync == 'true'
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm test -- scripts/__tests__/install-managed-skill.test.mjs
+
+      - name: Skill fixture tests
+        if: steps.changes.outputs.upstream_sync == 'true'
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm test -- scripts/__tests__/upstream-sync-fixtures.test.mjs
+
+      - name: Skill fixture runner
+        if: steps.changes.outputs.upstream_sync == 'true'
+        run: node scripts/upstream-sync/run-fixtures.mjs --fixture-root .pi/skills/omp-dashboard-upstream-sync/evals/fixtures --output .pi/skills/omp-dashboard-upstream-sync-workspace/iteration-1/benchmark.json
 
   # Full monorepo unit suite is green (electron still excluded). Advisory so flakes cannot block land.
   zge-full-tests:

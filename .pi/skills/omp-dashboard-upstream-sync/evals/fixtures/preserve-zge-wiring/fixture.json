@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "preserve-zge-wiring",
+  "prompt": "Review an upstream range that touches ZGE push, OMP settings, or deploy wiring and preserve the accepted ZGE contract when proof requires it.",
+  "request": {
+    "base_sha": "3333333333333333333333333333333333333333",
+    "upstream_sha": "4444444444444444444444444444444444444444",
+    "ledger_revision": "ledger-2026-07-21",
+    "changed_paths": ["packages/server/src/push/push-vapid.ts", "packages/server/src/server.ts"]
+  },
+  "affected_records": [{
+    "id": "zge-push-vapid",
+    "status": "accepted",
+    "expiry": "2099-12-31",
+    "evidence": {"behavior": ["packages/server/src/push/push-vapid.ts"], "test": ["packages/server/src/__tests__/push-vapid.test.ts"], "wiring": ["packages/server/src/server.ts"]}
+  }],
+  "assertions": [
+    {"id": "load-ledger", "text": "Loads the pinned ledger revision", "all": ["load-ledger", "bind-ledger-revision"]},
+    {"id": "preserve-zge-obligation", "text": "Preserves the affected ZGE behavior", "all": ["preserve-zge", "compare-preservation-proof"], "none": ["drop-zge-wiring"]},
+    {"id": "run-validator-before-push", "text": "Runs deterministic validation before a ready PR", "all": ["run-validator", "run-verifier", "ready-pr"]},
+    {"id": "stop-on-preservation-loss", "text": "Stops if preservation proof is lost", "all": ["stop-on-preservation-loss"]}
+  ],
+  "outputs": {
+    "with_skill": {"actions": ["consume-exact-request", "load-ledger", "bind-ledger-revision", "assess-affected-obligation", "preserve-zge", "compare-preservation-proof", "run-validator", "run-verifier", "ready-pr", "stop-on-preservation-loss"]},
+    "without_skill": {"actions": ["load-upstream-only", "adopt-upstream", "skip-verifier", "push-directly"]}
+  }
+}
