@@ -1105,10 +1105,11 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     hadVisibleRowsRef.current = displayRows.length > 0;
     if (isSelecting || mobileInactive) return;
     if (mobileActive) {
-      if (receivedFirstVisibleRows && scrollOwnerRef.current === "FOLLOWING") {
+      const owner = scrollOwnerRef.current;
+      if (receivedFirstVisibleRows && (owner === "HYDRATING" || owner === "FOLLOWING")) {
         scrollOwnerRef.current = "NAVIGATING_BOTTOM";
       }
-      if (scrollOwnerRef.current === "FOLLOWING" || scrollOwnerRef.current === "NAVIGATING_BOTTOM") pinLatest();
+      if (scrollOwnerRef.current !== "READING_HISTORY" && scrollOwnerRef.current !== "RESTORING_ANCHOR") pinLatest();
     } else if (stickToBottomRef.current) {
       pinLatest();
     }
