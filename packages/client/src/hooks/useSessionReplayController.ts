@@ -64,6 +64,17 @@ const MAX_ASSET_CHUNKS = 256;
 const MAX_ASSET_BYTES = 1024 * 1024;
 const ASSET_HASH = /^[A-Za-z0-9_-]{1,256}$/;
 const MIME_TYPE = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/;
+function hasUserTurnStart(events: readonly LedgerEvent[]): boolean {
+  return events.some(({ event }) => {
+    if (event.eventType !== "message_start" && event.eventType !== "message_end") return false;
+    const data = event.data as Record<string, unknown>;
+    const message = data.message && typeof data.message === "object"
+      ? data.message as Record<string, unknown>
+      : data;
+    return message.role === "user";
+  });
+}
+
 
 /**
  * Stateful controller used by App integration. It is deliberately framework
@@ -78,6 +89,8 @@ export class SessionReplayController {
   /** Completed hashes are retained while a request is active so duplicate full sequences stay inert. */
   private readonly completedAssetHashes = new Map<string, Map<string, Set<string>>>();
   private readonly replayGenerations = new Map<string, number>();
+  /** Smallest cursor already used for automatic backward hydration. */
+  private readonly automaticOlderFloor = new Map<string, number>();
 
   constructor(private readonly effects: ReplayControllerEffects) {}
 
@@ -91,6 +104,7 @@ export class SessionReplayController {
   }
 
   begin(sessionId: string, kind: ReplayRequest["kind"], sourceGeneration = "", anchorToken?: string): SessionSubscribeMessage {
+    if (kind === "cold") this.automaticOlderFloor.delete(sessionId);
     const ledger = this.ledger(sessionId);
     const message = kind === "older"
       ? buildLoadOlderSubscribe(sessionId, ledger.minSeq, sourceGeneration)
@@ -123,6 +137,7 @@ export class SessionReplayController {
 
   /** Atomically clear one session's replay authority and rendered state. */
   reset(sessionId: string, sourceGeneration?: string): void {
+    this.automaticOlderFloor.delete(sessionId);
     const ledger = this.ledger(sessionId);
     this.handleReset({
       type: "session_state_reset",
@@ -133,6 +148,8 @@ export class SessionReplayController {
   }
 
   dispose(sessionId?: string): void {
+    if (sessionId) this.automaticOlderFloor.delete(sessionId);
+    else this.automaticOlderFloor.clear();
     const ids = sessionId ? [sessionId] : [...new Set([...this.pending.keys(), ...this.ledgers.keys()])];
     for (const id of ids) {
       this.clearPending(id);
@@ -194,12 +211,21 @@ export class SessionReplayController {
     if (message.replayKind !== "older" && result.accepted.length) this.effects.apply(message.sessionId, result.accepted);
     if (message.isLast) {
       this.clearPending(message.sessionId);
-      this.effects.loading(message.sessionId, false);
       if (result.rebuild) this.effects.replace(
         message.sessionId,
         ledger.events,
         ledger.takeOlderCompletion(),
       );
+      const cursor = ledger.minSeq;
+      const priorCursor = this.automaticOlderFloor.get(message.sessionId);
+      const shouldContinue = message.hasMoreOlder === true && message.partialHead === true &&
+        !hasUserTurnStart(ledger.events) && (priorCursor === undefined || cursor < priorCursor);
+      if (shouldContinue) {
+        this.automaticOlderFloor.set(message.sessionId, cursor);
+        this.begin(message.sessionId, "older", ledger.sourceGeneration ?? message.sourceGeneration);
+      } else {
+        this.effects.loading(message.sessionId, false);
+      }
     }
     return true;
   }

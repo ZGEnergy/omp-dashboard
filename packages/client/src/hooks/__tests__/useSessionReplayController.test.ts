@@ -193,6 +193,43 @@ describe("SessionReplayController", () => {
     }
   });
 
+  it("automatically continues a partial tool-only tail", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+    const toolEntry = { ...entry(100), event: { sessionId: "s", eventType: "tool_execution_end", timestamp: 100, data: { toolCallId: "hub-1" } } as unknown as DashboardEvent };
+
+    controller.handle({ ...frame(cold.requestId!, [toolEntry], false), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+    controller.handle({ ...frame(cold.requestId!, [], true), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+
+    expect(effects.send).toHaveBeenCalledTimes(2);
+    expect(effects.send.mock.calls[1]![0]).toMatchObject({ sessionId: "s", fromSeq: 100 });
+  });
+
+  it("continues past assistant narration until a user turn", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+    const assistantEntry = { ...entry(100), event: { sessionId: "s", eventType: "message_end", timestamp: 100, data: { message: { role: "assistant", content: [{ type: "text", text: "still working" }] } } } as unknown as DashboardEvent };
+
+    controller.handle({ ...frame(cold.requestId!, [assistantEntry], false), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+    controller.handle({ ...frame(cold.requestId!, [], true), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+
+    expect(effects.send).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops automatic paging at the latest user turn", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+    const userEntry = { ...entry(100), event: { sessionId: "s", eventType: "message_start", timestamp: 100, data: { message: { role: "user", content: "review this" } } } as unknown as DashboardEvent };
+
+    controller.handle({ ...frame(cold.requestId!, [userEntry], false), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+    controller.handle({ ...frame(cold.requestId!, [], true), windowMinSeq: 100, windowMaxSeq: 100, hasMoreOlder: true, partialHead: true });
+
+    expect(effects.send).toHaveBeenCalledTimes(1);
+  });
+
   it("bounds aggregate asset assembly and publishes a completed asset exactly once", () => {
     const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn(), assetUnavailable: vi.fn() };
     const controller = new SessionReplayController(effects);
