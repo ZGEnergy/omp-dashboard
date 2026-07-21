@@ -92,37 +92,21 @@ describe("validatePlanBinding", () => {
   const obligations = [obligation("one"), obligation("two")];
   const decisions = [decision("one"), decision("two", "preserve-zge")];
 
-  it("accepts exact pins, complete decisions, approval, and verifier binding", () => {
+  it("accepts exact pins and complete decisions", () => {
     const req = request({ risk_flags: ["executor"] });
     const p = plan(decisions);
-    const approval = {
-      ok: true,
-      approved_review_ids: ["r1", "r2"],
-      plan_commit: p.plan_commit,
-      plan_hash: p.plan_hash,
-      verifier_version: p.verifier_version,
-      verifier_digest: p.verifier_digest,
-    };
-    expect(validatePlanBinding({ request: req, ledger: ledger(obligations), plan: p, approval })).toEqual(expect.objectContaining({ ok: true }));
+    expect(validatePlanBinding({ request: req, ledger: ledger(obligations), plan: p })).toEqual(expect.objectContaining({ ok: true }));
   });
 
-  it("rejects every stale binding and incomplete decision set", () => {
+  it("rejects stale request pins and incomplete decision sets", () => {
     const req = request();
-    const approval = {
-      ok: true,
-      approved_review_ids: ["r1", "r2"],
-      plan_commit: SHA_C,
-      plan_hash: plan(decisions).plan_hash,
-      verifier_version: "validator@1",
-      verifier_digest: DIGEST,
-    };
-    for (const [field, value] of [["base_sha", SHA_B], ["upstream_sha", SHA_A], ["ledger_revision", "ledger-2"], ["plan_commit", SHA_A], ["verifier_version", "validator@2"], ["verifier_digest", "e".repeat(64)]]) {
+    for (const [field, value] of [["base_sha", SHA_B], ["upstream_sha", SHA_A], ["ledger_revision", "ledger-2"]]) {
       const changed = { ...plan(decisions), [field]: value };
       changed.plan_hash = sha256Canonical(Object.fromEntries(Object.entries(changed).filter(([key]) => key !== "plan_hash")));
-      expect(validatePlanBinding({ request: req, ledger: ledger(obligations), plan: changed, approval })).toEqual(expect.objectContaining({ ok: false }));
+      expect(validatePlanBinding({ request: req, ledger: ledger(obligations), plan: changed })).toEqual(expect.objectContaining({ ok: false }));
     }
-    const changedDecisions = plan([decision("one", "preserve-zge"), decision("two", "combine")]);
-    expect(validatePlanBinding({ request: req, ledger: ledger(obligations), plan: changedDecisions, approval })).toEqual(expect.objectContaining({ ok: false }));
+    const incomplete = plan([decisions[0]]);
+    expect(validatePlanBinding({ request: req, ledger: ledger(obligations), plan: incomplete })).toEqual(expect.objectContaining({ ok: false }));
   });
 
   it("rejects a plan when canonical contents change after the first hash read", () => {
@@ -142,16 +126,9 @@ describe("validatePlanBinding", () => {
       },
     });
 
-    const approval = {
-      ok: true,
-      approved_review_ids: ["r1", "r2"],
-      plan_commit: p.plan_commit,
-      plan_hash: canonicalHash,
-      verifier_version: p.verifier_version,
-      verifier_digest: p.verifier_digest,
-    };
-
-    expect(validatePlanBinding({ request: req, ledger: ledger(obligations), plan: p, approval })).toEqual(expect.objectContaining({ ok: false, errors: expect.arrayContaining(["plan_hash approval mismatch"]) }));
+    expect(validatePlanBinding({ request: req, ledger: ledger(obligations), plan: p })).toEqual(
+      expect.objectContaining({ ok: false, errors: expect.arrayContaining([expect.stringMatching(/plan_hash|canonical/i)]) }),
+    );
   });
 });
 

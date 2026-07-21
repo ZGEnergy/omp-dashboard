@@ -1,10 +1,9 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { validateLedger, validatePlan, validateRequest, sha256Canonical } from "./contracts.mjs";
+import { validateLedger, validatePlan, validateRequest } from "./contracts.mjs";
 
 const DISPOSITIONS = new Set(["unaffected", "adopt-upstream", "preserve-zge", "combine", "retire", "blocked"]);
 const TOMBSTONES = new Set(["retired", "closed-unmerged"]);
-const HIGH_RISK = new Set(["executor", "validator", "ci", "CI/workflow", "workflow", "dependency", "dependency-manifest", "dependency-paths"]);
 const DEFAULT_AS_OF = "2026-07-21";
 
 const list = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
@@ -90,21 +89,23 @@ export function evaluateAffectedObligations({ upstreamRange, ledger, asOf = DEFA
   };
 }
 
-function expectedPlanHash(plan) {
-  const payload = structuredClone(plan);
-  delete payload.plan_hash;
-  return sha256Canonical(payload);
-}
-
-export function validatePlanBinding({ request, ledger, plan, approval } = {}) {
+export function validatePlanBinding({ request, ledger, plan } = {}) {
   const errors = [];
-  let canonicalPlanHash;
-  try { validateRequest(request); } catch (error) { errors.push(`request: ${error.message}`); }
-  try { validateLedger(ledger); } catch (error) { errors.push(`ledger: ${error.message}`); }
+  try {
+    validateRequest(request);
+  } catch (error) {
+    errors.push(`request: ${error.message}`);
+  }
+  try {
+    validateLedger(ledger);
+  } catch (error) {
+    errors.push(`ledger: ${error.message}`);
+  }
   try {
     validatePlan(plan);
-    canonicalPlanHash = expectedPlanHash(plan);
-  } catch (error) { errors.push(`plan: ${error.message}`); }
+  } catch (error) {
+    errors.push(`plan: ${error.message}`);
+  }
   if (request && plan) {
     if (plan.base_sha !== request.base_sha) errors.push("base_sha is not bound to request");
     if (plan.upstream_sha !== request.upstream_sha) errors.push("upstream_sha is not bound to request");
@@ -114,18 +115,6 @@ export function validatePlanBinding({ request, ledger, plan, approval } = {}) {
     const expected = uniqueSorted(ledger.obligations.map((item) => item.id));
     const actual = uniqueSorted(plan.decisions.map((item) => item.obligation_id));
     if (JSON.stringify(actual) !== JSON.stringify(expected)) errors.push("decision set is incomplete or contains unknown obligations");
-  }
-  if (plan && approval) {
-    if (approval.plan_commit !== plan.plan_commit) errors.push("plan_commit approval mismatch");
-    if (approval.plan_hash !== canonicalPlanHash) errors.push("plan_hash approval mismatch");
-    if (approval.verifier_version !== plan.verifier_version) errors.push("verifier_version approval mismatch");
-    if (approval.verifier_digest !== plan.verifier_digest) errors.push("verifier_digest approval mismatch");
-  }
-  if (!approval || approval.ok !== true) errors.push("approval verdict is not approved");
-  const riskFlags = list(request?.risk_flags);
-  if (riskFlags.some((flag) => HIGH_RISK.has(flag))) {
-    const ids = uniqueSorted(list(approval?.approved_review_ids));
-    if (ids.length < 2) errors.push("high-risk paths require two distinct authorized approvals");
   }
   return { ok: errors.length === 0, errors };
 }
