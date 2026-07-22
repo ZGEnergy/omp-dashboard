@@ -353,7 +353,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // cache hit resolves `loadingHistory` before the timer fires, so it never
   // renders — one stable paint, no intermediate loading flash. See change:
   // bounded-hot-transcript-state.
-  const showSkeleton = useDelayedSkeleton(!!loadingHistory);
+  // ChatView is reused (not remounted) across session switches, so the
+  // window must re-arm on sessionId change — otherwise a still-loading
+  // session B inherits session A's partially-elapsed or already-fired timer.
+  const showSkeleton = useDelayedSkeleton(!!loadingHistory, sessionId ?? undefined);
   // One owner decides every transcript write. User input moves ownership to
   // READING_HISTORY synchronously; stale authority/command frames are inert.
   const scrollOwnerRef = useRef<ScrollOwner>(loadingHistory ? "HYDRATING" : mobileActive && state.messages.length > 0 ? "NAVIGATING_BOTTOM" : "FOLLOWING");
