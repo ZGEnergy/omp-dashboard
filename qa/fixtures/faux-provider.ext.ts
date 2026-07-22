@@ -161,8 +161,10 @@ export default function fauxProviderExtension(pi: ExtensionAPI): void {
         if (slash <= 0) continue;
         const model = ctx.modelRegistry.find(ref.slice(0, slash), ref.slice(slash + 1));
         if (!model) continue;
-        await pi.setModel(model);
-        pi.setThinkingLevel(level === "null" ? "off" : level as never);
+        // setModel/setThinkingLevel exist at runtime but are not on the
+        // ExtensionAPI type; match the production cast (provider-register.ts).
+        await (pi as any).setModel(model);
+        (pi as any).setThinkingLevel(level === "null" ? "off" : level as never);
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
     },

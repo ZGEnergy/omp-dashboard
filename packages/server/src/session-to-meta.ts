@@ -28,7 +28,7 @@ export function sessionToMeta(session: DashboardSession): SessionMeta {
     startedAt: session.startedAt,
     endedAt: session.endedAt,
     model: session.model,
-    thinkingLevel: session.thinkingLevel,
+    thinkingLevel: session.thinkingLevel ?? undefined,
     tokensIn: session.tokensIn,
     tokensOut: session.tokensOut,
     cacheRead: session.cacheRead,
