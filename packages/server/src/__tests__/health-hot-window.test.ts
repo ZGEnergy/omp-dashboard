@@ -78,6 +78,37 @@ describe("GET /api/health — hotWindow", () => {
     expect(body.hotWindow.maxToolCalls).toBe(2);
   });
 
+  it("ingest re-sanitizes and never leaks stray content fields into /api/health", async () => {
+    const hotWindowMetrics = createHotWindowMetrics(20);
+    hotWindowMetrics.ingest({
+      sessionId: "s",
+      highWaterBytes: 1234,
+      // Stray content fields a careless caller might forget to sanitize.
+      messageText: "SECRET USER TEXT",
+      toolArgs: { password: "x" },
+      rawEvent: { type: "message", text: "SECRET USER TEXT" },
+    } as never);
+
+    app = Fastify({ logger: false });
+    registerSystemRoutes(app, makeHealthDeps(hotWindowMetrics) as never);
+    await app.ready();
+    const res = await app.inject({ method: "GET", url: "/api/health" });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    const serialized = JSON.stringify(body.hotWindow);
+
+    expect(serialized).not.toContain("SECRET USER TEXT");
+    expect(serialized).not.toContain("messageText");
+    expect(serialized).not.toContain("toolArgs");
+    expect(serialized).not.toContain("rawEvent");
+    expect(serialized).not.toContain("password");
+    for (const entry of body.hotWindow.reports) {
+      expect(entry).not.toHaveProperty("messageText");
+      expect(entry).not.toHaveProperty("toolArgs");
+      expect(entry).not.toHaveProperty("rawEvent");
+    }
+  });
+
   it("throwing hotWindowMetrics.snapshot never turns /api/health into a 500", async () => {
     const hotWindowMetrics = {
       ingest: () => {},
