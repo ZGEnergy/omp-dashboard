@@ -13,7 +13,11 @@ const detector = readFileSync(path.join(repoRoot, "scripts/upstream-sync/detect.
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 const run = (cwd, args, env = {}) => execFileSync("bash", [executor, ...args], {
   cwd,
-  env: { ...process.env, SYNC_REPO_ROOT: cwd, ...env },
+  // Pin the assessment date to the fixtures' review_date so obligation staleness
+  // is deterministic. Without this, upstream-sync.sh defaults AS_OF to today, and
+  // the frozen fixtures go "stale review" (→ blocked) the day after authoring —
+  // which is why these tests passed only on their authoring date.
+  env: { ...process.env, SYNC_REPO_ROOT: cwd, SYNC_AS_OF: "2026-07-21", ...env },
   encoding: "utf8",
   stdio: ["ignore", "pipe", "pipe"],
 });
