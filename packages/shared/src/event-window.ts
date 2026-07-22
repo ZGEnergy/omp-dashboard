@@ -14,15 +14,7 @@ export interface SeqEvent<T = DashboardEvent> {
   event: T;
 }
 
-export type EventWindowPreparationOptions = Pick<PrepareEventForReplayOptions, "registerInlineAsset" | "maxEventBytes"> & {
-  /**
-   * Sub-budget (in UTF-8 bytes) bounding cumulative TOOL-event bytes within
-   * the selected window. Defaults to half of `budgetBytes`. Chat
-   * (`message_*`) events are never affected — only tool events are trimmed,
-   * oldest first, when the window's tool bytes exceed this cap.
-   */
-  toolBudgetBytes?: number;
-};
+export type EventWindowPreparationOptions = Pick<PrepareEventForReplayOptions, "registerInlineAsset" | "maxEventBytes">;
 
 export interface EventWindowResult<T> {
   /** Selected events in ascending seq order. */
@@ -59,45 +51,6 @@ export function estimateSeqEventBytes(entry: SeqEvent): number {
     // nonthrowing for callers inspecting untrusted store records directly.
     return Number.MAX_SAFE_INTEGER;
   }
-}
-
-const TOOL_EVENT_TYPES = new Set(["tool_execution_start", "tool_execution_end", "tool_execution_update"]);
-
-function isToolEvent(entry: SeqEvent<DashboardEvent>): boolean {
-  return TOOL_EVENT_TYPES.has(entry.event.eventType);
-}
-
-/**
- * Bound cumulative TOOL-event bytes across `entries` by `toolBudgetBytes`,
- * dropping the OLDEST tool events first. Chat (`message_*`) and any other
- * non-tool events are never dropped by this trim.
- */
-function trimToolEventBytes(
-  entries: readonly SeqEvent<DashboardEvent>[],
-  toolBudgetBytes: number,
-): SeqEvent<DashboardEvent>[] {
-  // Only bound tool bytes when there is chat to protect. Tool-only history
-  // (e.g. a userless handoff window) has nothing to crowd out, so leave the
-  // existing budget-based suffix selection in control of what fits.
-  const hasChatEvent = entries.some((entry) => entry.event.eventType.startsWith("message_"));
-  if (!hasChatEvent) return entries.slice();
-
-  const toolIndexes: number[] = [];
-  let toolBytes = 0;
-  for (let index = 0; index < entries.length; index += 1) {
-    if (!isToolEvent(entries[index]!)) continue;
-    toolIndexes.push(index);
-    toolBytes += estimateSeqEventBytes(entries[index]!);
-  }
-  if (toolBytes <= toolBudgetBytes) return entries.slice();
-
-  const dropped = new Set<number>();
-  for (const index of toolIndexes) {
-    if (toolBytes <= toolBudgetBytes) break;
-    toolBytes -= estimateSeqEventBytes(entries[index]!);
-    dropped.add(index);
-  }
-  return entries.filter((_, index) => !dropped.has(index));
 }
 
 function isUserTurnStart(entry: SeqEvent<DashboardEvent>): boolean {
@@ -322,10 +275,6 @@ export function selectNewestEventsByBudget(
   if (source.length === 0) return emptyWindow();
 
   const prepared = prepareEntries(source, budget);
-  const toolBudgetBytes = options.toolBudgetBytes != null && Number.isFinite(options.toolBudgetBytes) && options.toolBudgetBytes > 0
-    ? Math.floor(options.toolBudgetBytes)
-    : Math.floor(budget / 2);
-  prepared.events = trimToolEventBytes(prepared.events, toolBudgetBytes);
 
   const turnStarts: number[] = [];
   for (let index = 0; index < prepared.events.length; index += 1) {
