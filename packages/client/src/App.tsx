@@ -2074,7 +2074,7 @@ export default function App() {
             onToggleFavorite={(label, makeFavorite) =>
               send({ type: makeFavorite ? "favorite_model" : "unfavorite_model", label })
             }
-            thinkingLevel={selectedState.thinkingLevel ?? selectedSession?.thinkingLevel}
+            thinkingLevel={selectedState.thinkingLevel ?? selectedSession?.thinkingLevel ?? undefined}
             onSelectModel={(modelStr) => {
               const slashIdx = modelStr.indexOf("/");
               if (slashIdx > 0) {

@@ -6,8 +6,8 @@ const SESSION_ID = "model-update-session";
 
 function makeWiring() {
   const callOrder: string[] = [];
-  const update = vi.fn(() => callOrder.push("update"));
-  const broadcastSessionUpdated = vi.fn(() => callOrder.push("broadcast"));
+  const update = vi.fn((_id: string, _patch: Record<string, unknown>) => callOrder.push("update"));
+  const broadcastSessionUpdated = vi.fn((_id: string, _patch: Record<string, unknown>) => callOrder.push("broadcast"));
   const broadcastEvent = vi.fn();
   const eventStore = {
     insertEvent: vi.fn(() => 1),

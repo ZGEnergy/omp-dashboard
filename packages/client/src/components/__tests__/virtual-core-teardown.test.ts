@@ -42,7 +42,7 @@ describe("TanStack Virtual offset observer teardown", () => {
       scrollTop: 17,
     };
     const instance = {
-      scrollElement: element,
+      scrollElement: element as typeof element | null,
       targetWindow: timerWindow,
       options: {
         horizontal: false,
@@ -79,7 +79,7 @@ describe("TanStack Virtual offset observer teardown", () => {
       scrollY: 23,
     };
     const instance = {
-      scrollElement: element,
+      scrollElement: element as typeof element | null,
       targetWindow: timerWindow,
       options: {
         horizontal: false,
