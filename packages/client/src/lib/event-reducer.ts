@@ -310,6 +310,44 @@ export interface EvictedToolBurst {
 }
 
 /**
+ * Hard cap (bytes, UTF-8) on the derived `SubagentState.entries` timeline
+ * reassembled by the reducer. The server already truncates individual tool
+ * output; this bounds the client-side reassembly of a subagent's *whole*
+ * timeline across many events, independent of raw event bytes. Scalar
+ * summary fields (`activity`, `displayName`, `toolUses`, `durationMs`, etc.)
+ * are read separately in `readSubagentDetails` and are never affected by
+ * this cap. See change: bounded-hot-transcript-state.
+ */
+export const MAX_DERIVED_DETAIL_BYTES = 256 * 1024;
+
+function byteLengthOf(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+/**
+ * Drop the oldest entries until the serialized array fits under
+ * `MAX_DERIVED_DETAIL_BYTES`, retaining the newest ones plus a bounded
+ * sentinel entry marking the elision (so the UI can indicate truncation).
+ * No-op when already under the cap. See change: bounded-hot-transcript-state.
+ */
+function capSubagentEntries(entries: SubagentTimelineEntry[]): SubagentTimelineEntry[] {
+  if (byteLengthOf(entries) <= MAX_DERIVED_DETAIL_BYTES) return entries;
+  let kept = entries.slice();
+  const withSentinel = (): SubagentTimelineEntry[] => [
+    {
+      kind: "text",
+      text: `[${entries.length - kept.length} earlier entries truncated]`,
+      ts: kept[0]?.ts ?? 0,
+    },
+    ...kept,
+  ];
+  while (kept.length > 0 && byteLengthOf(withSentinel()) > MAX_DERIVED_DETAIL_BYTES) {
+    kept = kept.slice(1);
+  }
+  return withSentinel();
+}
+
+/**
  * Pull optional Phase-2 fields (`entries`, `activity`, `displayName`, model,
  * etc.) from a streamed `AgentDetails`-shaped object. Returns a partial that
  * spreads into a `SubagentState`. All fields are optional; absent keys yield
@@ -329,7 +367,7 @@ function readSubagentDetails(
   // legitimate transition to zero entries never occurs.
   // See change: fix-subagent-live-detail-reliability (D3).
   if (Array.isArray(details.entries) && details.entries.length > 0) {
-    out.entries = details.entries as SubagentTimelineEntry[];
+    out.entries = capSubagentEntries(details.entries as SubagentTimelineEntry[]);
   }
   if (typeof details.activity === "string") out.activity = details.activity;
   if (typeof details.displayName === "string") out.displayName = details.displayName;
