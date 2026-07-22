@@ -15,7 +15,9 @@ export function computeChatFloorSeq(
     .map((m) => m.seq as number)
     .sort((a, b) => a - b);
   let budgetFloor = 0;
-  if (turnStarts.length > retainedTurns) {
+  if (retainedTurns <= 0) {
+    budgetFloor = turnStarts.length > 0 ? (turnStarts.at(-1) ?? 0) + 1 : 0;
+  } else if (turnStarts.length > retainedTurns) {
     budgetFloor = turnStarts[turnStarts.length - retainedTurns]!;
   }
   if (viewportFloorSeq != null) return Math.min(budgetFloor, viewportFloorSeq);
