@@ -1,20 +1,27 @@
 /**
  * Process-local aggregate of client-reported `HotWindowReport` frames.
  *
- * Ingests already-sanitized reports (see `sanitizeHotWindowReport` in
- * `@blackbelt-technology/pi-dashboard-shared/hot-window-metrics.js`) and folds
- * them into a bounded, content-free aggregate: the newest `capacity` reports
- * (newest-first, mirrors `HydrationMetrics.snapshot()`) plus running
- * high-water marks across ALL reports ever ingested (not just the retained
- * window). No transcript content ever passes through this module — it only
- * ever sees the already-whitelisted numeric/label fields of `HotWindowReport`.
+ * `ingest` re-runs `sanitizeHotWindowReport` (see
+ * `@blackbelt-technology/pi-dashboard-shared/hot-window-metrics.js`) itself
+ * before storing anything, so this module is content-free by construction —
+ * it does not rely on the caller having sanitized first (sanitizing is
+ * idempotent, so a caller that already sanitized pays a cheap no-op). Folds
+ * the sanitized report into a bounded, content-free aggregate: the newest
+ * `capacity` reports (newest-first, mirrors `HydrationMetrics.snapshot()`)
+ * plus running high-water marks across ALL reports ever ingested (not just
+ * the retained window). No transcript content ever passes through this
+ * module — it only ever sees the whitelisted numeric/label fields of
+ * `HotWindowReport`.
  *
  * Process-local, no persistence. Shared between `browser-gateway.ts` (ingests
  * on `hot_window_report`) and the `/api/health` route (reads `snapshot()`).
  *
  * See change: bounded-hot-transcript-state (Slice 3, Task 3.2).
  */
-import type { HotWindowReport } from "@blackbelt-technology/pi-dashboard-shared/hot-window-metrics.js";
+import {
+  type HotWindowReport,
+  sanitizeHotWindowReport,
+} from "@blackbelt-technology/pi-dashboard-shared/hot-window-metrics.js";
 
 export interface HotWindowReportEntry extends HotWindowReport {
   /** Epoch ms when the server ingested this report. */
@@ -62,15 +69,19 @@ export function createHotWindowMetrics(capacity: number): HotWindowMetrics {
 
   return {
     ingest(report: HotWindowReport): void {
-      totalReports++;
-      highWaterBytes = Math.max(highWaterBytes, report.highWaterBytes, report.ledgerBytes);
-      maxMessages = Math.max(maxMessages, report.messages);
-      maxToolCalls = Math.max(maxToolCalls, report.toolCalls);
-      maxSubagents = Math.max(maxSubagents, report.subagents);
-      maxInteractiveRequests = Math.max(maxInteractiveRequests, report.interactiveRequests);
-      totalEvictions += report.evictions;
+      // Re-sanitize here (idempotent) so this module is content-free by
+      // construction, not just by caller discipline — see module doc comment.
+      const sanitized = sanitizeHotWindowReport(report);
 
-      buf.push({ ...report, receivedAt: Date.now() });
+      totalReports++;
+      highWaterBytes = Math.max(highWaterBytes, sanitized.highWaterBytes, sanitized.ledgerBytes);
+      maxMessages = Math.max(maxMessages, sanitized.messages);
+      maxToolCalls = Math.max(maxToolCalls, sanitized.toolCalls);
+      maxSubagents = Math.max(maxSubagents, sanitized.subagents);
+      maxInteractiveRequests = Math.max(maxInteractiveRequests, sanitized.interactiveRequests);
+      totalEvictions += sanitized.evictions;
+
+      buf.push({ ...sanitized, receivedAt: Date.now() });
       if (buf.length > cap) buf.shift();
     },
     snapshot(): HotWindowMetricsSnapshot {
