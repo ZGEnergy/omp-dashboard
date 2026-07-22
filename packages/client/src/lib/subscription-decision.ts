@@ -9,11 +9,12 @@
  * a reconnect that has no retained, source-matched baseline to resume from.
  */
 
-/** Why a replay subscribe was issued — surfaced in `[replay] begin` logs. */
+/** Why a replay subscribe was issued — surfaced in `[replay] begin` logs.
+ *  (A source reset is not a subscribe; it is surfaced separately via
+ *  `[replay] reset` with the server's reset reason.) */
 export type ReplayReason =
   | "initial_navigation"
   | "transport_reconnect"
-  | "source_reset"
   | "cache_miss"
   | "load_older"
   | "live_gap"

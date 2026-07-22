@@ -313,6 +313,22 @@ describe("SessionReplayController", () => {
     }
   });
 
+  it("logs a source reset as a distinct replay trigger with the server reason (#59 observability)", () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    try {
+      const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+      const controller = new SessionReplayController(effects);
+      controller.begin("s", "cold", "source-a");
+      controller.handle({ type: "session_state_reset", sessionId: "s", sourceGeneration: "source-b", reason: "source_generation_mismatch" });
+      const resets = debug.mock.calls
+        .filter((call) => call[0] === "[replay] reset")
+        .map((call) => (call[1] as { reason: string }).reason);
+      expect(resets).toEqual(["source_generation_mismatch"]);
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
   it("cancelInflight drops the in-flight request but keeps the retained tail for a later delta (#59)", () => {
     const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
     const controller = new SessionReplayController(effects);

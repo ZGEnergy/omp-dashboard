@@ -273,6 +273,8 @@ export class SessionReplayController {
   private handleReset(message: SessionStateResetMessage): boolean {
     const ledger = this.ledgers.get(message.sessionId);
     if (!ledger) return false;
+    // Observability (#59 AC): a source reset is a distinct replay trigger.
+    console.debug("[replay] reset", { sessionId: message.sessionId, reason: message.reason });
     const pending = this.pending.get(message.sessionId);
     // A correlated reset for another request is stale. An uncorrelated reset
     // is authoritative for its source and must dominate any in-progress work.
