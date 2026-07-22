@@ -9,6 +9,7 @@ import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useActiveChatSelection } from "../hooks/useActiveChatSelection.js";
 import { isDebugTool } from "../hooks/useDebugToolsVisible.js";
+import { useDelayedSkeleton } from "../hooks/useDelayedSkeleton.js";
 import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
 import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import { useMobile } from "../hooks/useMobile.js";
@@ -338,6 +339,12 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   const ascendingRef = useRef(false);
   const loadingHistoryRef = useRef(!!loadingHistory);
   const escapedDuringHydrateRef = useRef(false);
+  // Task 2.2: the cold-start skeleton only earns its paint once the read
+  // (cache or network) has genuinely run past a short threshold. A fast
+  // cache hit resolves `loadingHistory` before the timer fires, so it never
+  // renders — one stable paint, no intermediate loading flash. See change:
+  // bounded-hot-transcript-state.
+  const showSkeleton = useDelayedSkeleton(!!loadingHistory);
   // One owner decides every transcript write. User input moves ownership to
   // READING_HISTORY synchronously; stale authority/command frames are inert.
   const scrollOwnerRef = useRef<ScrollOwner>(loadingHistory ? "HYDRATING" : mobileActive && state.messages.length > 0 ? "NAVIGATING_BOTTOM" : "FOLLOWING");
@@ -1702,18 +1709,26 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         3-way empty state (see change: show-chat-history-loading-indicator):
         loading spinner while history is in flight, "No messages yet" when no
         rows can render, else nothing (bubbles render above).
+
+        Task 2.2 (bounded-hot-transcript-state): the skeleton is additionally
+        gated behind `showSkeleton` (useDelayedSkeleton) so a fast cache-hit
+        read never flashes it — a genuinely slow read shows nothing for the
+        first ~150ms (a calm, blank load state), then swaps once to the
+        static skeleton.
       */}
       {renderRows.length === 0 && !state.streamingText && !state.pendingPrompt && !(pendingSteering && pendingSteering.length > 0) && (
         loadingHistory ? (
-          <div
-            className="flex flex-col gap-3 px-4 py-3"
-            aria-busy="true"
-            role="status"
-            aria-label={i18nT("status.loadingConversation", undefined, "Loading conversation…")}
-            data-testid="chat-history-skeleton"
-          >
-            <Skeleton variant="bubble" count={3} />
-          </div>
+          showSkeleton && (
+            <div
+              className="flex flex-col gap-3 px-4 py-3"
+              aria-busy="true"
+              role="status"
+              aria-label={i18nT("status.loadingConversation", undefined, "Loading conversation…")}
+              data-testid="chat-history-skeleton"
+            >
+              <Skeleton variant="bubble" count={3} />
+            </div>
+          )
         ) : (
           <div className="flex items-center justify-center h-full">
             <EmptyState
