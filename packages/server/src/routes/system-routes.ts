@@ -25,6 +25,7 @@ import { readConfigRedacted, writeConfigPartial } from "../config-api.js";
 import type { PushConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
 import type { DirectoryService } from "../directory-service.js";
 import type { EventLoopSpikeMetrics } from "../eventloop-spike-metrics.js";
+import type { HotWindowMetrics } from "../hot-window-metrics.js";
 import type { HydrationMetrics } from "../hydration-metrics.js";
 import { computeEffectiveLaunchSource } from "../launch-source-effective.js";
 import { localhostGuard, netmaskToCidrBits, networkAddress } from "../localhost-guard.js";
@@ -123,9 +124,13 @@ export function registerSystemRoutes(
         evictedSessions: number;
       };
     };
+    // Shared hot-window-report aggregate; `/api/health` reads its snapshot
+    // into the additive `hotWindow` field. See change:
+    // bounded-hot-transcript-state (Slice 3, Task 3.2).
+    hotWindowMetrics?: HotWindowMetrics;
   },
 ) {
-  const { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version, directoryService, piGateway, browserGateway, hydrationMetrics, readEventLoopDelay, eventLoopSpikes, applyPushConfig, eventStore } = deps;
+  const { sessionManager, preferencesStore, metaPersistence, config, networkGuard, version, directoryService, piGateway, browserGateway, hydrationMetrics, readEventLoopDelay, eventLoopSpikes, applyPushConfig, eventStore, hotWindowMetrics } = deps;
 
   // Quiesce windows for the bridge `server_restarting` broadcast. See change
   // `fix-restart-bridge-auto-start-race`. Bridges that receive this message
@@ -356,6 +361,11 @@ export function registerSystemRoutes(
     try { hydration = hydrationMetrics?.snapshot() ?? hydration; } catch { /* keep empty */ }
     let eventLoopSpikesSnap: ReturnType<EventLoopSpikeMetrics["snapshot"]> = [];
     try { eventLoopSpikesSnap = eventLoopSpikes?.snapshot() ?? eventLoopSpikesSnap; } catch { /* keep empty */ }
+    let hotWindowSnap: ReturnType<HotWindowMetrics["snapshot"]> = {
+      reports: [], highWaterBytes: 0, maxMessages: 0, maxToolCalls: 0,
+      maxSubagents: 0, maxInteractiveRequests: 0, totalEvictions: 0, totalReports: 0,
+    };
+    try { hotWindowSnap = hotWindowMetrics?.snapshot() ?? hotWindowSnap; } catch { /* keep zeros */ }
     const activeSessions = sessionManager.listActive();
     const agentMetrics = activeSessions
       .filter(s => s.processMetrics)
@@ -463,6 +473,11 @@ export function registerSystemRoutes(
         trimmedEvents: { total: 0, toolExecutionEnd: 0, bySession: {} },
         evictedSessions: 0,
       },
+      // Bounded, content-free aggregate of client-reported hot-window sizes
+      // (`hot_window_report` frames). Completes the observability loop for
+      // the bounded hot transcript alongside `storeTrim`. Additive field.
+      // See change: bounded-hot-transcript-state (Slice 3, Task 3.2).
+      hotWindow: hotWindowSnap,
     };
   });
 

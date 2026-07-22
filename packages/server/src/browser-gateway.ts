@@ -8,10 +8,12 @@ import type {
   BrowserToServerMessage,
   ServerToBrowserMessage,
 } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import { sanitizeHotWindowReport } from "@blackbelt-technology/pi-dashboard-shared/hot-window-metrics.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { type DirectoryService, hasOpenSpecDir, hasOpenSpecRoot } from "./directory-service.js";
 // PendingLoadManager removed — server loads sessions directly via DirectoryService
 import { createHeadlessPidRegistry, type HeadlessPidRegistry } from "./headless-pid-registry.js";
+import type { HotWindowMetrics } from "./hot-window-metrics.js";
 import type { EventStore } from "./memory-event-store.js";
 import type { SessionManager } from "./memory-session-manager.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
@@ -216,6 +218,10 @@ export function createBrowserGateway(
   viewMessageStore: ViewMessageStore = new ViewMessageStore(),
   promptResponseMaxAgeMs = PROMPT_RESPONSE_RETRY_MAX_AGE_MS,
   serverEpoch?: string,
+  // Shared aggregate for client `hot_window_report` frames; `/api/health`
+  // reads its snapshot. See change: bounded-hot-transcript-state (Slice 3,
+  // Task 3.2).
+  hotWindowMetrics?: HotWindowMetrics,
 ): BrowserGateway {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -1015,6 +1021,19 @@ export function createBrowserGateway(
           }
           case "session_unview": {
             viewedSessionTracker.unview(msg.sessionId, ws);
+            break;
+          }
+          case "hot_window_report": {
+            // Payload-free client observability frame — sanitize (whitelist
+            // construct; strips any stray content) then fold into the bounded
+            // in-memory aggregate `/api/health` exposes as `hotWindow`. Never
+            // forwarded, never lets a malformed report crash the WS handler.
+            // See change: bounded-hot-transcript-state (Slice 3, Task 3.2).
+            try {
+              hotWindowMetrics?.ingest(sanitizeHotWindowReport(msg.report));
+            } catch {
+              // A bad report must never break the WS message loop.
+            }
             break;
           }
           default: {
