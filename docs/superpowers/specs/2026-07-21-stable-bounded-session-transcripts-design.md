@@ -5,6 +5,8 @@
 **Scope:** GitHub issues #59 and #48  
 **Baseline:** PR #53 merged at `deb6edec`
 
+> **Superseded (Phase 2 & 3):** #48 client plan replaced by `2026-07-22-omp-hot-transcript-budget-design.md` — single-cursor eviction, invisible eviction UX, cold-start no-visible-replay, server paging deferred. Phase 1 (#59) shipped, stays authoritative.
+
 ## Problem and goals
 
 Issue #59 comes first.
