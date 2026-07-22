@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { SKELETON_DELAY_MS } from "../lib/delayed-skeleton.js";
+
+/** Delay before the skeleton is allowed to appear (see hook doc below). */
+export const SKELETON_DELAY_MS = 150;
 
 /**
  * Delayed skeleton gate for cold-start reveal (Task 2.2,
@@ -12,11 +14,20 @@ import { SKELETON_DELAY_MS } from "../lib/delayed-skeleton.js";
  * flips false the flag drops immediately (single swap to the resolved
  * content), and re-activating restarts the threshold window.
  *
+ * `resetKey` re-arms the window whenever it changes while `active` stays
+ * `true` — needed because `ChatView` is reused (not remounted) across
+ * session switches, so a still-loading session B must not inherit session
+ * A's partially-elapsed or already-fired timer. Pass the session identifier.
+ *
  * See change: bounded-hot-transcript-state (Task 2.2). Reuses no #59
  * machinery directly — this only gates when the existing `loadingHistory`
  * skeleton (`ChatView`) is allowed to render.
  */
-export function useDelayedSkeleton(active: boolean, thresholdMs: number = SKELETON_DELAY_MS): boolean {
+export function useDelayedSkeleton(
+  active: boolean,
+  resetKey?: string,
+  thresholdMs: number = SKELETON_DELAY_MS,
+): boolean {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -24,9 +35,10 @@ export function useDelayedSkeleton(active: boolean, thresholdMs: number = SKELET
       setVisible(false);
       return;
     }
+    setVisible(false);
     const timer = setTimeout(() => setVisible(true), thresholdMs);
     return () => clearTimeout(timer);
-  }, [active, thresholdMs]);
+  }, [active, resetKey, thresholdMs]);
 
   return visible;
 }

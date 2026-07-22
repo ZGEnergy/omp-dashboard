@@ -1,7 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SKELETON_DELAY_MS } from "../../lib/delayed-skeleton.js";
-import { useDelayedSkeleton } from "../useDelayedSkeleton.js";
+import { SKELETON_DELAY_MS, useDelayedSkeleton } from "../useDelayedSkeleton.js";
 
 describe("useDelayedSkeleton", () => {
   beforeEach(() => {
@@ -60,6 +59,27 @@ describe("useDelayedSkeleton", () => {
     act(() => { vi.advanceTimersByTime(100); });
     expect(result.current).toBe(false);
     act(() => { vi.advanceTimersByTime(50); });
+    expect(result.current).toBe(true);
+  });
+
+  it("re-arms the threshold window when resetKey changes while active stays true", () => {
+    const { result, rerender } = renderHook(
+      ({ active, resetKey }) => useDelayedSkeleton(active, resetKey),
+      { initialProps: { active: true, resetKey: "session-a" } },
+    );
+    act(() => { vi.advanceTimersByTime(SKELETON_DELAY_MS); });
+    expect(result.current).toBe(true);
+
+    // Switching to another still-loading session must hide the skeleton
+    // immediately and restart the 150ms window, not inherit session A's
+    // already-fired timer.
+    rerender({ active: true, resetKey: "session-b" });
+    expect(result.current).toBe(false);
+
+    act(() => { vi.advanceTimersByTime(SKELETON_DELAY_MS - 1); });
+    expect(result.current).toBe(false);
+
+    act(() => { vi.advanceTimersByTime(1); });
     expect(result.current).toBe(true);
   });
 });
