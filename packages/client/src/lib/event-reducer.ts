@@ -95,6 +95,13 @@ export interface ChatMessage {
    * See change: reasoning-auto-collapse-timer.
    */
   streamedLive?: boolean;
+  /**
+   * Max-touch sequence number: the highest `opts.seq` of any reducing event
+   * that created or mutated this row. Optional and purely additive — used
+   * by the (future) eviction task to prune settled history by floor.
+   * See change: bounded-hot-transcript-state.
+   */
+  seq?: number;
 }
 
 export interface ToolCallState {
@@ -117,6 +124,13 @@ export interface ToolCallState {
    * fix-stuck-tool-card-superseded-heal.
    */
   emittedAtInferenceSeq?: number;
+  /**
+   * Max-touch sequence number: the highest `opts.seq` across every frame
+   * that touched this tool call (open, output, end). Never lowered by a
+   * later out-of-order frame — see `stampMax`. See change:
+   * bounded-hot-transcript-state.
+   */
+  seq?: number;
 }
 
 export interface TurnStat {
@@ -167,6 +181,12 @@ export interface InteractiveUiRequest {
   result?: unknown;
   /** Originating tool call id when the prompt came from ask_user/ask. */
   toolCallId?: string;
+  /**
+   * Max-touch sequence number: the highest `opts.seq` of any reducing event
+   * that created or resolved this request. See change:
+   * bounded-hot-transcript-state.
+   */
+  seq?: number;
 }
 
 /**
@@ -485,6 +505,7 @@ export function flushStreamingTextAsAssistantRow(
   state: SessionState,
   timestamp: number,
   toolCallId: string,
+  seq?: number,
 ): SessionState {
   if (state.streamingTextFlushed) return state;
   if (!state.streamingText) return state;
@@ -510,6 +531,7 @@ export function flushStreamingTextAsAssistantRow(
         role: "assistant",
         content: state.streamingText,
         timestamp,
+        seq,
         // entryId/nonce intentionally undefined — message_end stamps both
         // via findFlushedAssistantRowIndex below.
       },
@@ -1102,12 +1124,26 @@ export function deriveBannerState(state: SessionState): BannerState {
   return out;
 }
 
+/**
+ * Max-touch seq helper: returns the higher of an entity's existing stamped
+ * seq and the seq of the frame currently touching it. Never lowers a
+ * previously-stamped seq on a later out-of-order frame. Purely additive —
+ * `undefined` seq inputs are treated as absent, not zero.
+ * See change: bounded-hot-transcript-state.
+ */
+function stampMax(existingSeq: number | undefined, seq: number | undefined): number | undefined {
+  if (existingSeq === undefined) return seq;
+  if (seq === undefined) return existingSeq;
+  return Math.max(existingSeq, seq);
+}
+
 export function reduceEvent(
   state: SessionState,
   event: DashboardEvent,
-  opts?: { isLive?: boolean },
+  opts?: { isLive?: boolean; seq?: number },
 ): SessionState {
   const isLive = opts?.isLive === true;
+  const seq = opts?.seq;
   const next = { ...state, toolCalls: new Map(state.toolCalls) };
   const data = event.data;
 
@@ -1281,6 +1317,7 @@ export function reduceEvent(
             ...(retriedFrom ? { retriedFrom } : {}),
             images,
             timestamp: event.timestamp,
+            seq,
             // entryId from data.entryId is correct ONLY for replayed events
             // (state-replay attaches the persisted id). For LIVE user
             // message_start the bridge no longer stamps entryId because
@@ -1346,6 +1383,7 @@ export function reduceEvent(
                 startedAt,
                 duration: startedAt ? event.timestamp - startedAt : undefined,
                 streamedLive: next.streamingThinkingCollapsed ? false : isLive,
+                seq,
               },
             ];
           }
@@ -1394,6 +1432,7 @@ export function reduceEvent(
           content: typeof msg.content === "string" ? msg.content : "",
           advisorDetails: msg.details,
           timestamp: event.timestamp,
+          seq,
         };
         const index = state.messages.findIndex((message) => message.id === id);
         return index < 0
@@ -1452,6 +1491,7 @@ export function reduceEvent(
               content: text,
               timestamp: event.timestamp,
               streamedLive: false,
+              seq,
             });
           }
           if (thinkingRows.length > 0) {
@@ -1474,6 +1514,7 @@ export function reduceEvent(
               ...next.messages[flushedIdx],
               entryId: data.entryId as string | undefined,
               nonce: data.nonce as string | undefined,
+              seq: stampMax(next.messages[flushedIdx].seq, seq),
             };
             // Honor message_end content replacement: swap the flushed row's
             // content only when it differs (avoid object-identity churn).
@@ -1498,6 +1539,7 @@ export function reduceEvent(
               timestamp: event.timestamp,
               entryId: data.entryId as string | undefined,
               nonce: data.nonce as string | undefined,
+              seq,
             },
           ];
           next.streamingText = "";
@@ -1518,6 +1560,7 @@ export function reduceEvent(
                 timestamp: event.timestamp,
                 entryId: data.entryId as string | undefined,
                 nonce: data.nonce as string | undefined,
+                seq,
               },
             ];
           } else {
@@ -1532,6 +1575,7 @@ export function reduceEvent(
                   role: "turnSeparator",
                   content: "",
                   timestamp: event.timestamp,
+                  seq,
                 },
               ];
             }
@@ -1578,7 +1622,7 @@ export function reduceEvent(
       if (next.streamingText && !next.streamingTextFlushed) {
         Object.assign(
           next,
-          flushStreamingTextAsAssistantRow(next, event.timestamp, toolCallId),
+          flushStreamingTextAsAssistantRow(next, event.timestamp, toolCallId, seq),
         );
       }
       const args = data.args as Record<string, unknown> | undefined;
@@ -1598,6 +1642,7 @@ export function reduceEvent(
           toolName: toolName !== "unknown" ? toolName : existingCall.toolName,
           ...(args !== undefined ? { args } : {}),
           // Preserve terminal status/result/startedAt/emittedAtInferenceSeq.
+          seq: stampMax(existingCall.seq, seq),
         });
         // Do not set currentTool — call is already finished.
       } else {
@@ -1611,6 +1656,7 @@ export function reduceEvent(
           // already advanced the counter, so only a LATER inference satisfies the
           // supersede proof. See change: fix-stuck-tool-card-superseded-heal.
           emittedAtInferenceSeq: next.assistantInferenceSeq,
+          seq: stampMax(existingCall?.seq, seq),
         });
         next.currentTool = toolName;
       }
@@ -1662,6 +1708,7 @@ export function reduceEvent(
           toolStatus: "running",
           timestamp: event.timestamp,
           startedAt: event.timestamp,
+          seq,
         },
       ];
       break;
@@ -1686,6 +1733,7 @@ export function reduceEvent(
           status: "running",
           startedAt,
           emittedAtInferenceSeq: next.assistantInferenceSeq,
+          seq,
         });
       }
       let messageIdx = idx;
@@ -1700,11 +1748,17 @@ export function reduceEvent(
           toolStatus: existingTool?.status ?? "running",
           timestamp: event.timestamp,
           startedAt,
+          seq,
         }];
         messageIdx = next.messages.length - 1;
       } else if (existingTool && next.messages[messageIdx].toolName !== toolName) {
         next.messages = [...next.messages];
-        next.messages[messageIdx] = { ...next.messages[messageIdx], toolName, args: args ?? next.messages[messageIdx].args };
+        next.messages[messageIdx] = {
+          ...next.messages[messageIdx],
+          toolName,
+          args: args ?? next.messages[messageIdx].args,
+          seq: stampMax(next.messages[messageIdx].seq, seq),
+        };
       }
       const partialResult = data.partialResult;
       if (partialResult !== undefined) {
@@ -1768,6 +1822,7 @@ export function reduceEvent(
         status: isError ? "error" : "complete",
         ...(startedAt !== undefined ? { startedAt } : {}),
         ...(result !== undefined ? { result: truncateOutputForDisplay(result) } : {}),
+        seq: stampMax(existing?.seq, seq),
       });
       next.currentTool = undefined;
 
@@ -1797,6 +1852,7 @@ export function reduceEvent(
           ...(startedAt !== undefined ? { duration: event.timestamp - startedAt } : {}),
           ...(images ? { images } : {}),
           ...(finalDetails ? { toolDetails: finalDetails } : {}),
+          seq: stampMax(message.seq, seq),
         };
       } else if (healedBy !== "superseded") {
         next.messages = [...next.messages, {
@@ -1812,6 +1868,7 @@ export function reduceEvent(
           ...(result !== undefined ? { result: truncateOutputForDisplay(result) } : {}),
           ...(images ? { images } : {}),
           ...(finalDetails ? { toolDetails: finalDetails } : {}),
+          seq,
         }];
       }
 
@@ -1834,7 +1891,7 @@ export function reduceEvent(
           next.interactiveRequests = next.interactiveRequests.map((req) =>
             req.status === "pending" &&
             (req.toolCallId === toolCallId || req.requestId === toolCallId)
-              ? { ...req, status: "dismissed" as const }
+              ? { ...req, status: "dismissed" as const, seq: stampMax(req.seq, seq) }
               : req,
           );
           next.messages = next.messages.map((msg) => {
@@ -1909,6 +1966,7 @@ export function reduceEvent(
           role: "assistant",
           content: "── Session compacted ──",
           timestamp: event.timestamp,
+          seq,
         },
       ];
       break;
@@ -1936,6 +1994,7 @@ export function reduceEvent(
           content: output,
           timestamp: event.timestamp,
           args: { command, exitCode, excludeFromContext, missingTool, source } as any,
+          seq,
         },
       ];
       break;
@@ -1956,6 +2015,7 @@ export function reduceEvent(
           content: "",
           timestamp: event.timestamp,
           args: { terminalId, closed: false } as any,
+          seq,
         },
       ];
       break;
@@ -1974,6 +2034,7 @@ export function reduceEvent(
             content: transcript,
             timestamp: event.timestamp,
             args: { terminalId, closed: true },
+            seq: stampMax(m.seq, seq),
           };
           replaced = true;
           break;
@@ -1991,6 +2052,7 @@ export function reduceEvent(
             content: transcript,
             timestamp: event.timestamp,
             args: { terminalId, closed: true } as any,
+            seq,
           },
         ];
       }
@@ -2021,6 +2083,7 @@ export function reduceEvent(
               content: message ?? "",
               timestamp: event.timestamp,
               args: { command, status },
+              seq: stampMax(m.seq, seq),
             };
             replaced = true;
             break;
@@ -2039,6 +2102,7 @@ export function reduceEvent(
           content: message ?? "",
           timestamp: event.timestamp,
           args: { command, status } as any,
+          seq,
         },
       ];
       break;
@@ -2104,7 +2168,7 @@ export function reduceEvent(
         const updated = next.messages.map((m) => {
           if (!m.entryId && m.nonce === targetNonce) {
             mutated = true;
-            return { ...m, entryId: persistedEntryId };
+            return { ...m, entryId: persistedEntryId, seq: stampMax(m.seq, seq) };
           }
           return m;
         });
@@ -2130,6 +2194,7 @@ export function reduceEvent(
           content: JSON.stringify(event.data, null, 2),
           timestamp: event.timestamp,
           toolName: event.eventType,
+          seq,
         }];
       }
       break;

@@ -851,7 +851,7 @@ export default function App() {
         setSessionStates((prev) => {
           const next = new Map(prev);
           let current = next.get(sessionId) ?? createInitialState();
-          for (const entry of accepted) current = reduceEvent(current, entry.event);
+          for (const entry of accepted) current = reduceEvent(current, entry.event, { seq: entry.seq });
           next.set(sessionId, current);
           return next;
         });
@@ -889,7 +889,7 @@ export default function App() {
           const previous = next.get(sessionId);
           let current = createInitialState();
           if (previous?.pendingPrompt) current.pendingPrompt = previous.pendingPrompt;
-          for (const entry of entries) current = reduceEvent(current, entry.event);
+          for (const entry of entries) current = reduceEvent(current, entry.event, { seq: entry.seq });
           if (previous && previous.interactiveRequests.length > 0) {
             const existing = new Set(current.interactiveRequests.map((request) => request.requestId));
             current.interactiveRequests = [
