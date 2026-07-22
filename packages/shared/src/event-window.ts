@@ -275,7 +275,6 @@ export function selectNewestEventsByBudget(
   if (source.length === 0) return emptyWindow();
 
   const prepared = prepareEntries(source, budget);
-
   const turnStarts: number[] = [];
   for (let index = 0; index < prepared.events.length; index += 1) {
     if (isUserTurnStart(prepared.events[index]!)) turnStarts.push(index);

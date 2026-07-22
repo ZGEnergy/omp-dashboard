@@ -26,5 +26,19 @@ describe("long synthetic session stays bounded", () => {
     expect(s.toolCalls.size).toBeLessThanOrEqual(DEFAULT_TOOL_TIER_MAX_COUNT);
     const userTurns = s.messages.filter((m) => m.role === "user").length;
     expect(userTurns).toBeGreaterThan(0); // chat not annihilated by tool salvos
+
+    // Coherence guard (blocking-fix, whole-branch review): an `EvictedToolBurst`
+    // marker claims those seqs' tool rows are gone. If any surviving toolResult
+    // row's seq falls inside a marker's [fromSeq, toSeq] range, the UI would
+    // both show the marker AND the tool card for the same call — the exact
+    // double-render defect this fix closes.
+    const survivingToolSeqs = s.messages
+      .filter((m) => m.role === "toolResult" && typeof m.seq === "number")
+      .map((m) => m.seq as number);
+    for (const burst of s.evictedToolBursts) {
+      for (const seq of survivingToolSeqs) {
+        expect(seq < burst.fromSeq || seq > burst.toSeq).toBe(true);
+      }
+    }
   });
 });

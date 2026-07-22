@@ -466,30 +466,69 @@ export function createInitialState(): SessionState {
 }
 
 /**
- * Pure two-tier prune: drops chat messages with `seq < chatFloorSeq` and tool
- * calls with `seq < toolFloorSeq`, collapsing each evicted contiguous tool
- * run into one bounded `EvictedToolBurst` marker. Never drops a
- * running tool, a pending interactive request, or a streaming message,
- * regardless of how low the floors are. Entities with `seq === undefined`
- * are always kept. See change: bounded-hot-transcript-state.
+ * Message roles whose rows render as TOOL-OUTPUT cards and are therefore
+ * governed by the TOOL floor (`toolFloorSeq`), not the chat floor. Verified
+ * against ChatView's render switch:
+ *   - `toolResult`  → `ToolCallStep` / `RetriedErrorBadge` (the tool card itself)
+ *   - `bashOutput`  → `BashOutputCard` (shell output, can be large; produced by
+ *     `bash_output` events, one-shot — no running/streaming state of its own)
+ * Every OTHER role renders chat-tier chrome (bubbles, banners, cards that are
+ * not "a tool's output") and stays governed by `chatFloorSeq`, kept
+ * generously: `user`, `assistant`, `thinking`, `interactiveUi`,
+ * `turnSeparator`, `commandFeedback`, `advisor`. `rawEvent` (debug-only raw
+ * event dump, gated behind `showDebugTools`) and `inlineTerminal` (a
+ * long-lived interactive terminal session with its own open/close lifecycle,
+ * not a single completed tool result) are deliberately left chat-tier too —
+ * neither is "a tool's output row" in the toolCalls-map sense, and an
+ * `inlineTerminal` row must never be evicted while its session is still open.
+ * If a future role is added, it MUST be classified here (tool-tier) or left
+ * out (chat-tier, the default). See change: bounded-hot-transcript-state.
+ */
+const TOOL_TIER_ROLES: ReadonlySet<ChatMessage["role"]> = new Set(["toolResult", "bashOutput"]);
+
+/**
+ * Pure two-tier prune: drops TOOL-TIER message rows (`TOOL_TIER_ROLES`) and
+ * `toolCalls` map entries with `seq < toolFloorSeq`, and drops CHAT-TIER
+ * message rows / interactive requests with `seq < chatFloorSeq`. Tool-tier
+ * rows and `toolCalls` entries are pruned independently against the SAME
+ * `toolFloorSeq` (both are stamped from the same event's `seq`, so in
+ * practice they move together) — this is what makes a "N tool calls
+ * collapsed" marker coherent with what is actually still rendered: the marker
+ * is built from the evicted TOOL-TIER ROW seq-runs, not from the map-entry
+ * seqs, so it always describes rows that are truly gone.
+ *
+ * Never drops a running tool (`toolCalls` map or a `toolResult` row with
+ * `toolStatus === "running"`), a pending interactive request, or a streaming
+ * message, regardless of how low the floors are. Entities with
+ * `seq === undefined` are always kept. See change: bounded-hot-transcript-state.
  */
 export function evictBelow(
   state: SessionState,
   floors: { chatFloorSeq: number; toolFloorSeq: number },
 ): SessionState {
   const protectedTool = (t: ToolCallState) => t.status === "running";
-  const evictedSeqs: number[] = [];
   const toolCalls = new Map(state.toolCalls);
   for (const [id, t] of state.toolCalls) {
     if (typeof t.seq === "number" && t.seq < floors.toolFloorSeq && !protectedTool(t)) {
       toolCalls.delete(id);
-      evictedSeqs.push(t.seq);
     }
   }
   const streamingIds = new Set(state.messages.filter((m) => m.isStreaming).map((m) => m.id));
-  const messages = state.messages.filter(
-    (m) => streamingIds.has(m.id) || typeof m.seq !== "number" || m.seq >= floors.chatFloorSeq,
-  );
+  const evictedToolRowSeqs: number[] = [];
+  const messages = state.messages.filter((m) => {
+    if (streamingIds.has(m.id) || typeof m.seq !== "number") return true;
+    if (TOOL_TIER_ROLES.has(m.role)) {
+      // A row still tied to a running tool must survive even below the tool
+      // floor — mirrors the `protectedTool` guard on the toolCalls map above.
+      if (m.toolStatus === "running") return true;
+      if (m.seq < floors.toolFloorSeq) {
+        evictedToolRowSeqs.push(m.seq);
+        return false;
+      }
+      return true;
+    }
+    return m.seq >= floors.chatFloorSeq;
+  });
   // Unresolved interactive requests are never dropped (also true of the
   // streaming-message keep above). Subagents are intentionally left
   // resident in Slice 1 — this function does not touch `state.subagents`.
@@ -501,7 +540,7 @@ export function evictBelow(
     toolCalls,
     messages,
     interactiveRequests,
-    evictedToolBursts: mergeBursts(state.evictedToolBursts, evictedSeqs),
+    evictedToolBursts: mergeBursts(state.evictedToolBursts, evictedToolRowSeqs),
   };
 }
 

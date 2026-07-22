@@ -10,18 +10,36 @@
  * See change: virtualize-chat-transcript-tanstack (Phase 2 Step B). Doubt-Review
  * corrections CR-3 (per-type key), CR-4 (turn map over the filtered rows).
  */
-import type { ChatMessage } from "./event-reducer.js";
+import type { ChatMessage, EvictedToolBurst } from "./event-reducer.js";
 import type { BurstItem, ToolBurstGroup } from "./group-tool-bursts.js";
 import type { ToolCallGroup } from "./group-tool-calls.js";
 
+/**
+ * A display row after interleaving evicted-tool-burst markers into
+ * `BurstItem[]` (see `interleaveEvictedBursts`). See change:
+ * bounded-hot-transcript-state (blocking-fix follow-up).
+ */
+export type DisplayRow = BurstItem | EvictedToolBurst;
+
 /** A temporal burst group row. */
-export function isBurst(item: BurstItem): item is ToolBurstGroup {
+export function isBurst(item: DisplayRow): item is ToolBurstGroup {
   return (item as ToolBurstGroup).type === "burst";
 }
 
 /** A bare semantic ×N group row. */
-export function isGroup(item: BurstItem): item is ToolCallGroup {
+export function isGroup(item: DisplayRow): item is ToolCallGroup {
   return (item as ToolCallGroup).type === "group";
+}
+
+/**
+ * An interleaved `EvictedToolBurst` marker row (as opposed to a real
+ * `BurstItem`). Distinguished structurally: bursts/groups carry `type`,
+ * messages carry `role`; an `EvictedToolBurst` carries neither, only
+ * `fromSeq`/`toSeq`/`count`. See change: bounded-hot-transcript-state
+ * (blocking-fix follow-up).
+ */
+export function isEvictedBurst(item: DisplayRow): item is EvictedToolBurst {
+  return typeof item === "object" && item !== null && !("type" in item) && !("role" in item) && "fromSeq" in item;
 }
 
 /**
@@ -33,7 +51,8 @@ export function isGroup(item: BurstItem): item is ToolCallGroup {
  *   message→ `messageKey(msg)`
  * Uniqueness is a hard precondition for measurement caching under windowing.
  */
-export function virtualRowKey(item: BurstItem, index: number): string {
+export function virtualRowKey(item: DisplayRow, index: number): string {
+  if (isEvictedBurst(item)) return `evicted-${item.fromSeq}-${item.toSeq}`;
   if (isBurst(item)) return item.id;
   if (isGroup(item)) { const first = item.messages[0]; return first ? messageKey(first) : `group-${index}`; }
   return messageKey(item as ChatMessage);
@@ -117,7 +136,10 @@ function baseRowSize(role: ChatMessage["role"]): number {
   }
 }
 
-export function estimateVirtualRowSize(item: BurstItem, textChars = 0): number {
+export function estimateVirtualRowSize(item: DisplayRow, textChars = 0): number {
+  // Evicted-burst markers are a single-line, fixed-chrome row (see
+  // EvictedToolBurstMarkerRow) — small constant, no text reserve.
+  if (isEvictedBurst(item)) return 32;
   // Burst/group rows keep type constants — their variance is small relative to
   // text rows and their aggregate text is folded into child cards.
   if (isBurst(item)) return 220;
@@ -138,7 +160,8 @@ export function estimateVirtualRowSize(item: BurstItem, textChars = 0): number {
  * `estimateVirtualRowSize` so `estimateSize` never re-walks per scroll pass.
  * Burst/group rows sum their members so their (unused) reserve stays bounded.
  */
-export function computeRowTextChars(item: BurstItem): number {
+export function computeRowTextChars(item: DisplayRow): number {
+  if (isEvictedBurst(item)) return 0;
   if (isBurst(item)) {
     let sum = 0;
     for (const sub of item.items) {
@@ -170,11 +193,11 @@ function groupTextChars(g: ToolCallGroup): number {
  * Built over the FILTERED `displayRows` so the resulting index feeds
  * `virtualizer.scrollToIndex` directly.
  */
-export function buildTurnToFirstRowIndex(rows: BurstItem[]): Map<number, number> {
+export function buildTurnToFirstRowIndex(rows: DisplayRow[]): Map<number, number> {
   const map = new Map<number, number>();
   for (let i = 0; i < rows.length; i++) {
     const item = rows[i];
-    if (isBurst(item) || isGroup(item)) continue;
+    if (isEvictedBurst(item) || isBurst(item) || isGroup(item)) continue;
     const turnIndex = (item as ChatMessage).turnIndex;
     if (turnIndex != null && !map.has(turnIndex)) {
       map.set(turnIndex, i);
@@ -255,12 +278,17 @@ export function rangeToRowIndexSpan(
 }
 
 /**
- * Best-effort `seq` for a display row, used only to report the viewport floor
- * (Task 1.7, change: bounded-hot-transcript-state). Burst/group rows report
- * their first underlying member's `seq` — good enough for a floor (eviction
- * only needs a conservative lower bound, not an exact per-row value).
+ * Best-effort `seq` for a display row, used to report the viewport floor
+ * (Task 1.7, change: bounded-hot-transcript-state) and to position evicted-
+ * burst markers (`interleaveEvictedBursts`, blocking-fix follow-up). Burst/
+ * group rows report their first underlying member's `seq` — good enough for
+ * a floor (eviction only needs a conservative lower bound, not an exact
+ * per-row value). An `EvictedToolBurst` marker reports its `toSeq` (its
+ * newest evicted seq) so ordering treats it as sitting just before whatever
+ * real row comes next.
  */
-function rowSeq(item: BurstItem): number | undefined {
+export function rowSeq(item: DisplayRow): number | undefined {
+  if (isEvictedBurst(item)) return item.toSeq;
   if (isBurst(item)) {
     for (const sub of item.items) {
       const seq = isGroup(sub) ? sub.messages[0]?.seq : (sub as ChatMessage).seq;
@@ -278,7 +306,7 @@ function rowSeq(item: BurstItem): number | undefined {
  * range), or `null` when the range is empty or no row in it carries a `seq`.
  * Pure + O(range length) — safe to call on every virtualizer range change.
  */
-export function lowestVisibleSeq(rows: readonly BurstItem[], startIndex: number, endIndex: number): number | null {
+export function lowestVisibleSeq(rows: readonly DisplayRow[], startIndex: number, endIndex: number): number | null {
   let lowest: number | null = null;
   const lo = Math.max(0, startIndex);
   const hi = Math.min(rows.length - 1, endIndex);
@@ -287,6 +315,49 @@ export function lowestVisibleSeq(rows: readonly BurstItem[], startIndex: number,
     if (seq != null && (lowest === null || seq < lowest)) lowest = seq;
   }
   return lowest;
+}
+
+/**
+ * Interleave `EvictedToolBurst` markers into `rows` at their seq position,
+ * ordered ascending by seq among the surviving rows — NOT unconditionally at
+ * the top. `evictBelow` prunes the tool and chat tiers against independent
+ * floors, so a tool-heavy few-turn session can have `toolFloorSeq >
+ * chatFloorSeq`: an evicted tool run then sits BELOW some still-retained
+ * chat-tier rows, and a marker rendered at the top would misrepresent it as
+ * older than everything currently shown.
+ *
+ * Walks `rows` once; before emitting a row that carries a `seq`
+ * (`rowSeq(row)`), flushes every pending marker whose `toSeq` is strictly
+ * below that row's seq (i.e. every marker that is older than this row).
+ * Rows without a `seq` never trigger a flush — markers stay pending past
+ * them and settle at the next seq-bearing row (or at the very end, if none
+ * follows). Pure: returns a new array; neither input is mutated.
+ *
+ * See change: bounded-hot-transcript-state (blocking-fix follow-up).
+ */
+export function interleaveEvictedBursts(
+  rows: readonly BurstItem[],
+  bursts: readonly EvictedToolBurst[],
+): DisplayRow[] {
+  if (bursts.length === 0) return [...rows];
+  const sorted = [...bursts].sort((a, b) => a.fromSeq - b.fromSeq);
+  const result: DisplayRow[] = [];
+  let bi = 0;
+  for (const row of rows) {
+    const seq = rowSeq(row);
+    if (seq !== undefined) {
+      while (bi < sorted.length && sorted[bi]!.toSeq < seq) {
+        result.push(sorted[bi]!);
+        bi += 1;
+      }
+    }
+    result.push(row);
+  }
+  while (bi < sorted.length) {
+    result.push(sorted[bi]!);
+    bi += 1;
+  }
+  return result;
 }
 
 /**

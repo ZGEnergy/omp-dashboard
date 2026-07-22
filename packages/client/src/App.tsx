@@ -921,13 +921,23 @@ export default function App() {
           setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, anchorToken));
         }
       },
+      // `_minSeq` is intentionally unused: the two floors are recomputed fresh
+      // from reducer state (`current.messages` / `current.toolCalls`) on every
+      // call, not derived from the ledger's minSeq hint.
       evict: (sessionId, _minSeq) => {
         setSessionStates((prev) => {
           const current = prev.get(sessionId);
           if (!current) return prev;
+          const vp = viewportFloorRef.current.get(sessionId) ?? null;
+          const toolFloorSeq = computeToolFloorSeq(current.toolCalls.values(), DEFAULT_TOOL_TIER_MAX_BYTES, DEFAULT_TOOL_TIER_MAX_COUNT);
+          // Clamp the tool floor to the session's viewport pin too (mirrors
+          // computeChatFloorSeq's own viewport clamp below) so a currently
+          // visible tool row can never be evicted out from under the user.
+          // See change: bounded-hot-transcript-state (blocking-fix follow-up).
+          const effToolFloorSeq = vp != null ? Math.min(toolFloorSeq, vp) : toolFloorSeq;
           const floors = {
-            chatFloorSeq: computeChatFloorSeq(current.messages, DEFAULT_CHAT_RETAINED_TURNS, viewportFloorRef.current.get(sessionId) ?? null),
-            toolFloorSeq: computeToolFloorSeq(current.toolCalls.values(), DEFAULT_TOOL_TIER_MAX_BYTES, DEFAULT_TOOL_TIER_MAX_COUNT),
+            chatFloorSeq: computeChatFloorSeq(current.messages, DEFAULT_CHAT_RETAINED_TURNS, vp),
+            toolFloorSeq: effToolFloorSeq,
           };
           const next = new Map(prev);
           next.set(sessionId, evictBelow(current, floors));
