@@ -16,6 +16,7 @@ import {
   buildSessionSubscribe,
   type SessionSubscribeMessage,
 } from "../lib/session-subscribe.js";
+import type { ReplayReason } from "../lib/subscription-decision.js";
 
 export type ReplayInbound = EventReplayMessage | EventMessage | SessionStateResetMessage | AssetReplayChunkMessage | AssetUnavailableMessage;
 
@@ -117,12 +118,14 @@ export class SessionReplayController {
     return this.ledger(sessionId).seed(sourceGeneration, events);
   }
 
-  begin(sessionId: string, kind: ReplayRequest["kind"], sourceGeneration = "", anchorToken?: string): SessionSubscribeMessage {
+  begin(sessionId: string, kind: ReplayRequest["kind"], sourceGeneration = "", anchorToken?: string, reason: ReplayReason = "initial_navigation"): SessionSubscribeMessage {
     if (kind === "cold") this.automaticOlderFloor.delete(sessionId);
     const ledger = this.ledger(sessionId);
     const message = kind === "older"
       ? buildLoadOlderSubscribe(sessionId, ledger.minSeq, sourceGeneration)
       : buildSessionSubscribe(sessionId, kind === "cold" ? 0 : ledger.cursor, sourceGeneration);
+    // Observability (#59 AC): identify why every replay was issued.
+    console.debug("[replay] begin", { sessionId, kind, reason, requestId: message.requestId, cursor: kind === "cold" ? 0 : ledger.cursor, sourceGeneration });
     const replayGeneration = (this.replayGenerations.get(sessionId) ?? 0) + 1;
     this.replayGenerations.set(sessionId, replayGeneration);
     const request: ReplayRequest = {
@@ -177,17 +180,27 @@ export class SessionReplayController {
     }
   }
 
+  /**
+   * Cancel in-flight replay requests (e.g. on a transport reconnect) without
+   * dropping retained ledger tails. Stops stale request deadlines from firing a
+   * recover→reconnect after the socket has already been replaced, while keeping
+   * each session's baseline so a returning session can still resume via delta.
+   */
+  cancelInflight(): void {
+    for (const sessionId of [...this.pending.keys()]) this.clearPending(sessionId);
+  }
+
   private handleLive(message: EventMessage): boolean {
     const ledger = this.ledgers.get(message.sessionId);
     if (!ledger) return false; // ordinary live handling remains available before replay ownership begins
     const result = ledger.admitLive({ seq: message.seq, event: message.event });
     if (result.reset) {
       this.effects.reset(message.sessionId);
-      this.begin(message.sessionId, "cold", ledger.sourceGeneration ?? "");
+      this.begin(message.sessionId, "cold", ledger.sourceGeneration ?? "", undefined, "conflict");
       return true;
     }
     if (result.accepted.length) this.publishAdmitted(message.sessionId, result);
-    if (result.repair) this.begin(message.sessionId, "delta", ledger.sourceGeneration!);
+    if (result.repair) this.begin(message.sessionId, "delta", ledger.sourceGeneration!, undefined, "live_gap");
     return true;
   }
 
@@ -210,7 +223,7 @@ export class SessionReplayController {
     if (result.reset) {
       this.clearPending(message.sessionId);
       this.effects.reset(message.sessionId);
-      this.begin(message.sessionId, "cold", message.sourceGeneration);
+      this.begin(message.sessionId, "cold", message.sourceGeneration, undefined, "conflict");
       return true;
     }
     // A non-stale frame has passed request/source correlation and ledger admission.
@@ -239,7 +252,7 @@ export class SessionReplayController {
         (priorCursor === undefined || cursor < priorCursor);
       if (shouldContinue) {
         this.automaticOlderFloor.set(message.sessionId, cursor);
-        this.begin(message.sessionId, "older", ledger.sourceGeneration ?? message.sourceGeneration);
+        this.begin(message.sessionId, "older", ledger.sourceGeneration ?? message.sourceGeneration, undefined, "load_older");
       } else {
         this.effects.loading(message.sessionId, false);
       }
@@ -382,7 +395,7 @@ export class SessionReplayController {
       return;
     }
     if (!reuseTransport) this.effects.reconnect("retry");
-    this.begin(sessionId, request.kind, request.sourceGeneration, request.anchorToken);
+    this.begin(sessionId, request.kind, request.sourceGeneration, request.anchorToken, "transport_reconnect");
   }
 
   private resetDeadline(sessionId: string, pending: PendingRequest): void {

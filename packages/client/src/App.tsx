@@ -140,6 +140,7 @@ import { mergeReplayWindow, type ReplayWindow } from "./lib/replay-window.js";
 import { SessionAssetsProvider } from "./lib/SessionAssetsContext.js";
 import { deriveSelectedSessionId } from "./lib/selectedSessionId.js";
 import { selectViewedSessionId } from "./lib/selectViewedSessionId.js";
+import { computeSubscribeAction, type ReplayReason } from "./lib/subscription-decision.js";
 
 // Stable empty references for plugin context's session-state primitives.
 // See change: route-flow-asks-to-upper-slot + add-flow-agent-popout.
@@ -323,7 +324,7 @@ export default function App() {
   // See change: throttle-idle-ui-animations.
   useAppHidden();
   const [wsUrl, setWsUrl] = useState(getInitialWsUrl);
-  const { send, onMessage, status, serverEpoch, connectionEpoch, reconnectNow } = useWebSocket(wsUrl);
+  const { send, onMessage, status, serverEpoch, reconnectNow } = useWebSocket(wsUrl);
   // Worktree-init bus needs a way to send subscribe/unsubscribe
   // messages over the same socket. See change: generalize-worktree-init-hook.
   useEffect(() => {
@@ -536,6 +537,10 @@ export default function App() {
   const replayResetPendingRef = useRef(false);
   const replayResetStateRef = useRef<Map<string, SessionState> | null>(null);
   const foregroundReplayRequestedRef = useRef(false);
+  // #59: a genuine transport reconnect (not the first connect) re-subscribes the
+  // selected session as a delta continuation over its retained tail.
+  const reconnectResubscribePendingRef = useRef(false);
+  const hasConnectedRef = useRef(false);
   const requestForegroundReplay = useCallback(() => {
     if (!shouldReconnectForForeground(status)) return;
     if (mobileDetailVisible) bumpMobileActivation();
@@ -813,7 +818,15 @@ export default function App() {
     );
   }, []);
 
-  const authorityKey = `${serverEpoch ?? "unknown"}:${connectionEpoch}`;
+  // #59: key the replay controller on SERVER identity only, not the transport
+  // generation. A socket reconnect briefly drops serverEpoch to null; latching
+  // the last known value keeps the controller (and its retained ledgers) alive
+  // across an ordinary reconnect so returning to a session resumes via delta
+  // instead of a visible cold rebuild. Only a real server-identity change
+  // (a different non-null serverEpoch) recreates it, which correctly cold-resets.
+  const lastServerEpochRef = useRef<string | null>(null);
+  if (serverEpoch && serverEpoch !== lastServerEpochRef.current) lastServerEpochRef.current = serverEpoch;
+  const authorityKey = lastServerEpochRef.current ?? "unknown";
   const replayController = useMemo(() => {
     let controller: SessionReplayController;
     const persisterFor = (sessionId: string, sourceGeneration?: string): ReplayPersister | null => {
@@ -945,9 +958,9 @@ export default function App() {
     return controller;
   }, [authorityKey, bumpReplayGeneration]);
 
-  const beginReplay = useCallback((sessionId: string, kind: "cold" | "delta" | "older", sourceGeneration: string, anchorToken?: string) => {
+  const beginReplay = useCallback((sessionId: string, kind: "cold" | "delta" | "older", sourceGeneration: string, anchorToken?: string, reason: ReplayReason = "initial_navigation") => {
     if (kind !== "older") bumpReplayGeneration(sessionId);
-    return replayController.begin(sessionId, kind, sourceGeneration, anchorToken);
+    return replayController.begin(sessionId, kind, sourceGeneration, anchorToken, reason);
   }, [bumpReplayGeneration, replayController]);
 
   useEffect(() => {
@@ -975,8 +988,25 @@ export default function App() {
     const source = sourceGenerationRef.current.get(selectedId) || replayController.ledger(selectedId).sourceGeneration || "";
     completedOlderAnchorRef.current.set(selectedId, null);
     setCompletedOlderAnchorMap((prev) => new Map(prev).set(selectedId, null));
-    beginReplay(selectedId, "older", source, anchorToken);
+    beginReplay(selectedId, "older", source, anchorToken, "load_older");
   }, [selectedId, loadingOlderMap, replayController, beginReplay]);
+
+  // Explicit user hard-refresh: discard the rendered tail and cold-rebuild.
+  const refreshSelectedSession = useCallback(() => {
+    if (!selectedId) return;
+    setSessionStates((prev) => {
+      const next = new Map(prev);
+      next.set(selectedId, createInitialState());
+      return next;
+    });
+    maxSeqMapRef.current.set(selectedId, 0);
+    subscribedRef.current.delete(selectedId);
+    subscribedRef.current.add(selectedId);
+    replayPersistersRef.current.get(selectedId)?.persister.dispose();
+    replayPersistersRef.current.delete(selectedId);
+    clearSessionEvents(selectedId);
+    beginReplay(selectedId, "cold", sourceGenerationRef.current.get(selectedId) ?? "", undefined, "cache_miss");
+  }, [selectedId, beginReplay]);
 
   const handleMessage = useMessageHandler(
     { setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap, setLoadingHistory, setCanvasMap },
@@ -1070,6 +1100,15 @@ export default function App() {
   const prevStatusRef = useRef(status);
   useEffect(() => {
     if (status === "connected" && prevStatusRef.current !== "connected") {
+      if (hasConnectedRef.current) {
+        // #59: a real reconnect (not the first connect). Re-subscribe the
+        // selected session as a delta continuation over its retained tail
+        // (no visible clear), and drop stale in-flight requests bound to the
+        // replaced socket so their deadlines cannot fire a recover→reconnect.
+        reconnectResubscribePendingRef.current = true;
+        replayController.cancelInflight();
+      }
+      hasConnectedRef.current = true;
       subscribedRef.current.clear();
       rehydratedRef.current.clear();
       for (const abort of rehydrateAbortRef.current.values()) abort.abort();
@@ -1080,7 +1119,7 @@ export default function App() {
       setTerminals(new Map());
     }
     prevStatusRef.current = status;
-  }, [status]);
+  }, [status, replayController]);
 
   // Redirect to / if session ID in URL is not found after sessions have loaded
   const sessionsLoaded = sessions.size > 0;
@@ -1146,10 +1185,17 @@ export default function App() {
     }
     if (!modelsMap.has(sid)) send({ type: "request_models", sessionId: sid });
     const source = sourceGenerationRef.current.get(sid) ?? "";
-    const foregroundDelta = foregroundReplayRequestedRef.current && replayController.ledger(sid).events.length > 0;
+    // A reconnect/foreground continuation over a source-matched retained tail
+    // resumes via delta (off-screen), never a visible cold rebuild. Mirrors the
+    // early-return guard above; see computeSubscribeAction / issue #59.
+    const ledger = replayController.ledger(sid);
+    const continuation = foregroundReplayRequestedRef.current || reconnectResubscribePendingRef.current;
+    const ledgerHasBaseline = ledger.events.length > 0 && (ledger.sourceGeneration === source || source === "");
     foregroundReplayRequestedRef.current = false;
-    const initialRequest = beginReplay(sid, foregroundDelta ? "delta" : "cold", source);
-    if (source && !rehydratedRef.current.has(sid)) {
+    reconnectResubscribePendingRef.current = false;
+    const action = computeSubscribeAction({ selectedId: sid, connected: true, alreadySubscribed: false, continuation, ledgerHasBaseline });
+    const initialRequest = beginReplay(sid, action.kind, source, undefined, action.reason);
+    if (source && serverEpoch && !rehydratedRef.current.has(sid)) {
       rehydratedRef.current.add(sid);
       const abort = new AbortController();
       rehydrateAbortRef.current.set(sid, abort);
@@ -1183,7 +1229,7 @@ export default function App() {
         maxSeqMapRef.current.set(sid, r.lastSeq);
         historyWindowRef.current.set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder, partialHead: r.partialHead });
         setHistoryWindowMap((prev) => new Map(prev).set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder, partialHead: r.partialHead }));
-        beginReplay(sid, "delta", source);
+        beginReplay(sid, "delta", source, undefined, "initial_navigation");
       }).catch(() => { /* cache admission is an optimization; cold replay remains active */ })
         .finally(() => rehydrateAbortRef.current.delete(sid));
     }
@@ -1756,20 +1802,7 @@ export default function App() {
           onDetachProposal: () => handleDetachProposal(selectedId),
           onSendPrompt: (text) => wrappedHandleSend(text),
           onReadArtifact: (changeName, artifactId) => handleReadArtifact(selectedCwd!, changeName, artifactId),
-          onRefresh: () => {
-            setSessionStates((prev) => {
-              const next = new Map(prev);
-              next.set(selectedId, createInitialState());
-              return next;
-            });
-            maxSeqMapRef.current.set(selectedId, 0);
-            subscribedRef.current.delete(selectedId);
-            subscribedRef.current.add(selectedId);
-            replayPersistersRef.current.get(selectedId)?.persister.dispose();
-            replayPersistersRef.current.delete(selectedId);
-            clearSessionEvents(selectedId);
-            beginReplay(selectedId, "cold", sourceGenerationRef.current.get(selectedId) ?? "");
-          },
+          onRefresh: refreshSelectedSession,
         } : undefined}
         commands={selectedCommands}
         onSendPrompt={wrappedHandleSend}
@@ -1780,20 +1813,7 @@ export default function App() {
         hasFileChanges={selectedState.hasFileChanges}
         onOpenDiffView={() => navigate(buildSessionDiffUrl(selectedId))}
         onOpenExtensionModulePicker={() => setExtensionModulePickerOpen(true)}
-        onRefresh={() => {
-          setSessionStates((prev) => {
-            const next = new Map(prev);
-            next.set(selectedId, createInitialState());
-            return next;
-          });
-          maxSeqMapRef.current.set(selectedId, 0);
-          subscribedRef.current.delete(selectedId);
-          subscribedRef.current.add(selectedId);
-          replayPersistersRef.current.get(selectedId)?.persister.dispose();
-          replayPersistersRef.current.delete(selectedId);
-          clearSessionEvents(selectedId);
-          beginReplay(selectedId, "cold", sourceGenerationRef.current.get(selectedId) ?? "");
-        }}
+        onRefresh={refreshSelectedSession}
       />
       {/* Mobile info strip */}
       {isMobile && selectedSession && (

@@ -273,4 +273,61 @@ describe("SessionReplayController", () => {
     expect(effects.publishAsset).toHaveBeenCalledTimes(1);
     expect(effects.publishAsset).toHaveBeenCalledWith("s", { hash: "asset_once", mimeType: "image/png", data: "ab" });
   });
+
+  it("resumes a reconnect via delta from the retained cursor without resetting rendered state (#59)", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const coldReq = controller.begin("s", "cold", "source-a");
+    controller.handle(frame(coldReq.requestId!, [entry(10), entry(11)], true));
+    expect(controller.ledger("s").cursor).toBe(11);
+    effects.apply.mockClear();
+
+    // Transport reconnect: re-subscribe as a delta continuation over the tail.
+    const deltaReq = controller.begin("s", "delta", "source-a", undefined, "transport_reconnect");
+    const sent = effects.send.mock.calls.at(-1)![0];
+    expect(sent.lastSeq).toBe(11); // delta from the retained cursor
+    expect(sent.mode).toBeUndefined(); // not a cold tail
+    expect(effects.reset).not.toHaveBeenCalled();
+    expect(effects.replace).not.toHaveBeenCalled();
+
+    controller.handle({ ...frame(deltaReq.requestId!, [entry(12)], true, "source-a"), replayKind: "delta" });
+    // Only the newly missed tail is applied additively; prior transcript untouched.
+    expect(effects.apply).toHaveBeenCalledWith("s", [entry(12)]);
+    expect(effects.reset).not.toHaveBeenCalled();
+    expect(controller.ledger("s").events).toEqual([entry(10), entry(11), entry(12)]);
+  });
+
+  it("logs a replay-trigger reason for each begin (#59 observability)", () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    try {
+      const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+      const controller = new SessionReplayController(effects);
+      controller.begin("s", "cold", "source-a", undefined, "initial_navigation");
+      controller.begin("s", "delta", "source-a", undefined, "transport_reconnect");
+      const reasons = debug.mock.calls
+        .filter((call) => call[0] === "[replay] begin")
+        .map((call) => (call[1] as { reason: string }).reason);
+      expect(reasons).toEqual(["initial_navigation", "transport_reconnect"]);
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
+  it("cancelInflight drops the in-flight request but keeps the retained tail for a later delta (#59)", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const coldReq = controller.begin("s", "cold", "source-a");
+    controller.handle(frame(coldReq.requestId!, [entry(10), entry(11)], false)); // non-terminal: still in flight
+    expect(controller.ledger("s").request).not.toBeNull();
+
+    controller.cancelInflight();
+    expect(controller.ledger("s").request).toBeNull(); // pending cancelled
+    expect(controller.ledger("s").events).toEqual([entry(10), entry(11)]); // tail preserved
+
+    const deltaReq = controller.begin("s", "delta", "source-a", undefined, "transport_reconnect");
+    expect(effects.send.mock.calls.at(-1)![0].lastSeq).toBe(11);
+    expect(effects.reset).not.toHaveBeenCalled();
+    controller.handle({ ...frame(deltaReq.requestId!, [entry(12)], true, "source-a"), replayKind: "delta" });
+    expect(controller.ledger("s").events.map((e) => e.seq)).toEqual([10, 11, 12]);
+  });
 });
