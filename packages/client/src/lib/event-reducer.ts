@@ -452,7 +452,9 @@ export function evictBelow(
   const messages = state.messages.filter(
     (m) => streamingIds.has(m.id) || typeof m.seq !== "number" || m.seq >= floors.chatFloorSeq,
   );
-  // Unresolved interactive requests and active subagents are never dropped.
+  // Unresolved interactive requests are never dropped (also true of the
+  // streaming-message keep above). Subagents are intentionally left
+  // resident in Slice 1 — this function does not touch `state.subagents`.
   const interactiveRequests = state.interactiveRequests.filter(
     (r) => r.status === "pending" || typeof r.seq !== "number" || r.seq >= floors.chatFloorSeq,
   );
@@ -470,6 +472,21 @@ function mergeBursts(existing: EvictedToolBurst[], seqs: number[]): EvictedToolB
   const sorted = [...seqs].sort((a, b) => a - b);
   const bursts = [...existing];
   let run: EvictedToolBurst | null = null;
+  // Cross-call coalescing: `evictBelow` is called repeatedly as the floor
+  // advances, so a contiguous run of tool evictions can land in separate
+  // calls (e.g. seq 50 evicted this call, seq 51 evicted next call). If the
+  // last existing burst is contiguous with the first new seq, seed `run`
+  // from it so the new seq extends the SAME marker instead of starting a
+  // fresh one. `bursts = [...existing]` is only a shallow copy — its
+  // objects are the same references as `existing`'s — so the last burst
+  // MUST be cloned before mutation to keep this function pure (the caller's
+  // `state.evictedToolBursts` array must never be mutated in place).
+  // See change: bounded-hot-transcript-state.
+  if (bursts.length > 0 && bursts[bursts.length - 1]!.toSeq + 1 === sorted[0]) {
+    const cloned = { ...bursts[bursts.length - 1]! };
+    bursts[bursts.length - 1] = cloned;
+    run = cloned;
+  }
   for (const seq of sorted) {
     if (run && seq === run.toSeq + 1) {
       run.toSeq = seq;

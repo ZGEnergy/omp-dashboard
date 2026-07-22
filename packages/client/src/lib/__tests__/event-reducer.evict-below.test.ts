@@ -46,4 +46,30 @@ describe("evictBelow (two-tier prune)", () => {
     const next = evictBelow(state, { chatFloorSeq: 0, toolFloorSeq: 1000 });
     expect(next.toolCalls.has("t5000")).toBe(true);
   });
+
+  it("coalesces a contiguous tool run split across separate evictBelow calls into one burst", () => {
+    const first = withState({ toolCalls: new Map([tool(50)]) });
+    const s1 = evictBelow(first, { chatFloorSeq: 0, toolFloorSeq: 100 });
+    expect(s1.evictedToolBursts).toEqual([{ fromSeq: 50, toSeq: 50, count: 1 }]);
+
+    const second = { ...s1, toolCalls: new Map([tool(51)]) };
+    const s2 = evictBelow(second, { chatFloorSeq: 0, toolFloorSeq: 100 });
+    expect(s2.evictedToolBursts).toEqual([{ fromSeq: 50, toSeq: 51, count: 2 }]);
+  });
+
+  it("does not mutate the input's evictedToolBursts array or its objects when merging across calls (purity)", () => {
+    const first = withState({ toolCalls: new Map([tool(50)]) });
+    const s1 = evictBelow(first, { chatFloorSeq: 0, toolFloorSeq: 100 });
+    const beforeArray = s1.evictedToolBursts;
+    const beforeBurst = s1.evictedToolBursts[0];
+    const beforeSnapshot = { ...beforeBurst };
+
+    const second = { ...s1, toolCalls: new Map([tool(51)]) };
+    evictBelow(second, { chatFloorSeq: 0, toolFloorSeq: 100 });
+
+    expect(s1.evictedToolBursts).toBe(beforeArray);
+    expect(s1.evictedToolBursts).toHaveLength(1);
+    expect(s1.evictedToolBursts[0]).toBe(beforeBurst);
+    expect(s1.evictedToolBursts[0]).toEqual(beforeSnapshot);
+  });
 });
