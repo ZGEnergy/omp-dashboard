@@ -290,6 +290,23 @@ export interface SessionState {
    * See change: fix-streaming-text-vs-interactive-ui-order.
    */
   streamingTextFlushed?: boolean;
+  /**
+   * Bounded list of collapsed markers for evicted contiguous tool-call runs.
+   * Produced by `evictBelow`'s two-tier prune. See change:
+   * bounded-hot-transcript-state.
+   */
+  evictedToolBursts: EvictedToolBurst[];
+}
+
+/**
+ * Collapsed marker for a contiguous run of evicted tool calls: `fromSeq`/
+ * `toSeq` are the min/max max-touch `seq` of the evicted tools in the run,
+ * `count` is how many were merged. See change: bounded-hot-transcript-state.
+ */
+export interface EvictedToolBurst {
+  fromSeq: number;
+  toSeq: number;
+  count: number;
 }
 
 /**
@@ -406,7 +423,64 @@ export function createInitialState(): SessionState {
     subagents: new Map(),
     turnCount: 0,
     assistantInferenceSeq: 0,
+    evictedToolBursts: [],
   };
+}
+
+/**
+ * Pure two-tier prune: drops chat messages with `seq < chatFloorSeq` and tool
+ * calls with `seq < toolFloorSeq`, collapsing each evicted contiguous tool
+ * run into one bounded `EvictedToolBurst` marker. Never drops a
+ * running tool, a pending interactive request, or a streaming message,
+ * regardless of how low the floors are. Entities with `seq === undefined`
+ * are always kept. See change: bounded-hot-transcript-state.
+ */
+export function evictBelow(
+  state: SessionState,
+  floors: { chatFloorSeq: number; toolFloorSeq: number },
+): SessionState {
+  const protectedTool = (t: ToolCallState) => t.status === "running";
+  const evictedSeqs: number[] = [];
+  const toolCalls = new Map(state.toolCalls);
+  for (const [id, t] of state.toolCalls) {
+    if (typeof t.seq === "number" && t.seq < floors.toolFloorSeq && !protectedTool(t)) {
+      toolCalls.delete(id);
+      evictedSeqs.push(t.seq);
+    }
+  }
+  const streamingIds = new Set(state.messages.filter((m) => m.isStreaming).map((m) => m.id));
+  const messages = state.messages.filter(
+    (m) => streamingIds.has(m.id) || typeof m.seq !== "number" || m.seq >= floors.chatFloorSeq,
+  );
+  // Unresolved interactive requests and active subagents are never dropped.
+  const interactiveRequests = state.interactiveRequests.filter(
+    (r) => r.status === "pending" || typeof r.seq !== "number" || r.seq >= floors.chatFloorSeq,
+  );
+  return {
+    ...state,
+    toolCalls,
+    messages,
+    interactiveRequests,
+    evictedToolBursts: mergeBursts(state.evictedToolBursts, evictedSeqs),
+  };
+}
+
+function mergeBursts(existing: EvictedToolBurst[], seqs: number[]): EvictedToolBurst[] {
+  if (seqs.length === 0) return existing;
+  const sorted = [...seqs].sort((a, b) => a - b);
+  const bursts = [...existing];
+  let run: EvictedToolBurst | null = null;
+  for (const seq of sorted) {
+    if (run && seq === run.toSeq + 1) {
+      run.toSeq = seq;
+      run.count += 1;
+    } else {
+      run = { fromSeq: seq, toSeq: seq, count: 1 };
+      bursts.push(run);
+    }
+  }
+  const MAX_BURSTS = 200;
+  return bursts.length > MAX_BURSTS ? bursts.slice(bursts.length - MAX_BURSTS) : bursts;
 }
 
 /**
