@@ -26,4 +26,17 @@ describe("reduceEvent seq stamping", () => {
     s = reduceEvent(s, ev("tool_execution_end", { toolCallId: "t1", result: "ok" }), { seq: 100 });
     expect(s.toolCalls.get("t1")?.seq).toBe(5000);
   });
+
+  it("advances seq on a tool_execution_update partial-result frame (max-touch)", () => {
+    let s = createInitialState();
+    s = reduceEvent(s, ev("tool_execution_start", { toolCallId: "t1", toolName: "bash" }), { seq: 100 });
+    s = reduceEvent(
+      s,
+      ev("tool_execution_update", { toolCallId: "t1", partialResult: "partial output" }),
+      { seq: 250 },
+    );
+    expect(s.toolCalls.get("t1")?.seq).toBe(250);
+    const toolMsg = s.messages.find((m) => m.toolCallId === "t1");
+    expect(toolMsg?.seq).toBe(250);
+  });
 });

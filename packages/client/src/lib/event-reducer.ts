@@ -1779,13 +1779,21 @@ export function reduceEvent(
             ...current,
             ...(text != null ? { result: truncateOutputForDisplay(text) } : {}),
             ...(mergedDetails ? { toolDetails: mergedDetails } : {}),
+            seq: stampMax(current.seq, seq),
           };
           if (toolName === "Agent") mergeAgentSubagent(next, mergedDetails);
         } else {
           next.messages[messageIdx] = {
             ...current,
             result: truncateOutputForDisplay(String(partialResult)),
+            seq: stampMax(current.seq, seq),
           };
+        }
+        if (existingTool) {
+          next.toolCalls.set(toolCallId, {
+            ...existingTool,
+            seq: stampMax(existingTool.seq, seq),
+          });
         }
       }
       break;
