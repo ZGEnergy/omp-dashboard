@@ -1,4 +1,4 @@
-# ZGEnergy fork gates — required check on main (branch protection: zge-gates).
+# ZGEnergy fork gates — required checks on main (branch protection: zge-gates, zge-typecheck).
 name: ci-zge
 
 on:
@@ -118,6 +118,31 @@ jobs:
         if: steps.changes.outputs.upstream_sync == 'true'
         run: node scripts/upstream-sync/run-fixtures.mjs --fixture-root .pi/skills/omp-dashboard-upstream-sync/evals/fixtures --output .pi/skills/omp-dashboard-upstream-sync-workspace/iteration-1/benchmark.json
 
+  # Required. Blocks landing on type errors so they cannot silently accumulate.
+  # tsc is deterministic (not flaky), so it gates unlike the advisory full suite.
+  zge-typecheck:
+    name: zge-typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22"
+          cache: npm
+
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: |
+          npm ci || npm install --force
+
+      - name: Typecheck
+        run: npm run lint
+
   # Full monorepo unit suite is green (electron still excluded). Advisory so flakes cannot block land.
   zge-full-tests:
     name: zge-full-tests (advisory)
@@ -144,7 +169,3 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: npm test
-
-      - name: Typecheck (advisory)
-        continue-on-error: true
-        run: npm run lint
