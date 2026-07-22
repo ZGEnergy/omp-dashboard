@@ -71,7 +71,7 @@ import { deleteDraft, readAllDrafts, writeDraft } from "./lib/draft-storage.js";
 // SubagentPopoutPage no longer imported by the shell — it's registered via
 // the subagents-plugin's `shell-overlay-route` claim and mounted through
 // `<ShellOverlayRouteSlot>` below. See change: add-flow-agent-popout.
-import { createInitialState, deriveBannerState, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { createInitialState, deriveBannerState, evictBelow, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { decodeFolderPath, encodeFolderPath } from "./lib/folder-encoding.js";
 import { fetchActiveInits } from "./lib/git-api.js";
 import { refreshGitStatus } from "./lib/git-status-cache.js";
@@ -107,6 +107,13 @@ import {
   buildSessionSubscribe,
 } from "./lib/session-subscribe.js";
 import { openStagingSocket } from "./lib/staging-socket.js";
+import {
+  computeChatFloorSeq,
+  computeToolFloorSeq,
+  DEFAULT_CHAT_RETAINED_TURNS,
+  DEFAULT_TOOL_TIER_MAX_BYTES,
+  DEFAULT_TOOL_TIER_MAX_COUNT,
+} from "./lib/two-tier-floors.js";
 import { resendActiveCwdSubscriptions, setInitSender } from "./lib/worktree-init-bus.js";
 import { initStore } from "./lib/worktree-init-store.js";
 
@@ -824,6 +831,9 @@ export default function App() {
   // across an ordinary reconnect so returning to a session resumes via delta
   // instead of a visible cold rebuild. Only a real server-identity change
   // (a different non-null serverEpoch) recreates it, which correctly cold-resets.
+  // Task 1.7 wiring: ChatView's visible-range callback updates this per-session
+  // viewport floor; the chat tier's evict floor never prunes below what is on screen.
+  const viewportFloorRef = useRef<Map<string, number>>(new Map());
   const lastServerEpochRef = useRef<string | null>(null);
   if (serverEpoch && serverEpoch !== lastServerEpochRef.current) lastServerEpochRef.current = serverEpoch;
   const authorityKey = lastServerEpochRef.current ?? "unknown";
@@ -910,6 +920,19 @@ export default function App() {
           completedOlderAnchorRef.current.set(sessionId, anchorToken);
           setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, anchorToken));
         }
+      },
+      evict: (sessionId, _minSeq) => {
+        setSessionStates((prev) => {
+          const current = prev.get(sessionId);
+          if (!current) return prev;
+          const floors = {
+            chatFloorSeq: computeChatFloorSeq(current.messages, DEFAULT_CHAT_RETAINED_TURNS, viewportFloorRef.current.get(sessionId) ?? null),
+            toolFloorSeq: computeToolFloorSeq(current.toolCalls.values(), DEFAULT_TOOL_TIER_MAX_BYTES, DEFAULT_TOOL_TIER_MAX_COUNT),
+          };
+          const next = new Map(prev);
+          next.set(sessionId, evictBelow(current, floors));
+          return next;
+        });
       },
       reset: (sessionId) => {
         bumpReplayGeneration(sessionId);
