@@ -255,6 +255,41 @@ export function rangeToRowIndexSpan(
 }
 
 /**
+ * Best-effort `seq` for a display row, used only to report the viewport floor
+ * (Task 1.7, change: bounded-hot-transcript-state). Burst/group rows report
+ * their first underlying member's `seq` — good enough for a floor (eviction
+ * only needs a conservative lower bound, not an exact per-row value).
+ */
+function rowSeq(item: BurstItem): number | undefined {
+  if (isBurst(item)) {
+    for (const sub of item.items) {
+      const seq = isGroup(sub) ? sub.messages[0]?.seq : (sub as ChatMessage).seq;
+      if (seq != null) return seq;
+    }
+    return undefined;
+  }
+  if (isGroup(item)) return item.messages[0]?.seq;
+  return (item as ChatMessage).seq;
+}
+
+/**
+ * Lowest `seq` among display rows in the inclusive index range
+ * `[startIndex, endIndex]` (typically the virtualizer's current visible
+ * range), or `null` when the range is empty or no row in it carries a `seq`.
+ * Pure + O(range length) — safe to call on every virtualizer range change.
+ */
+export function lowestVisibleSeq(rows: readonly BurstItem[], startIndex: number, endIndex: number): number | null {
+  let lowest: number | null = null;
+  const lo = Math.max(0, startIndex);
+  const hi = Math.min(rows.length - 1, endIndex);
+  for (let i = lo; i <= hi; i++) {
+    const seq = rowSeq(rows[i]!);
+    if (seq != null && (lowest === null || seq < lowest)) lowest = seq;
+  }
+  return lowest;
+}
+
+/**
  * Union an active selection's row span into the virtualizer's default range
  * (D3). Returns `base` unchanged when there is no span OR when the span exceeds
  * the retained-row ceiling `cap` (past the cap the caller ACTIVELY clears the

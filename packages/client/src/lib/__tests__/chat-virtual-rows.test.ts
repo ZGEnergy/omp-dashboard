@@ -6,6 +6,7 @@ import {
   extendRangeWithSelection,
   isBurst,
   isGroup,
+  lowestVisibleSeq,
   rangeToRowIndexSpan,
   virtualRowKey,
 } from "../chat-virtual-rows.js";
@@ -362,5 +363,42 @@ describe("advisor virtual rows", () => {
     expect(estimateVirtualRowSize(advisor)).toBe(72);
     expect(computeRowTextChars(advisor)).toBe(81);
     expect(estimateVirtualRowSize(advisor, computeRowTextChars(advisor))).toBe(112);
+  });
+});
+
+describe("lowestVisibleSeq (task 1.7 — viewport floor)", () => {
+  it("returns the lowest seq among plain message rows in range", () => {
+    const rows: BurstItem[] = [
+      msg({ id: "u1", role: "user", seq: 5 }),
+      msg({ id: "a1", role: "assistant", seq: 6 }),
+      msg({ id: "u2", role: "user", seq: 9 }),
+    ];
+    expect(lowestVisibleSeq(rows, 1, 2)).toBe(6);
+    expect(lowestVisibleSeq(rows, 0, 2)).toBe(5);
+  });
+
+  it("reads a burst/group row's seq from its first underlying member", () => {
+    const rows: BurstItem[] = [
+      msg({ id: "u1", role: "user", seq: 1 }),
+      { type: "burst", id: "b1", items: [msg({ id: "t1", role: "toolResult", seq: 3 })] },
+      group("m1"),
+    ];
+    (rows[2] as { messages: ChatMessage[] }).messages[0]!.seq = 4;
+    expect(lowestVisibleSeq(rows, 1, 1)).toBe(3);
+    expect(lowestVisibleSeq(rows, 2, 2)).toBe(4);
+  });
+
+  it("returns null for an empty or out-of-bounds range", () => {
+    const rows: BurstItem[] = [msg({ id: "u1", role: "user", seq: 1 })];
+    expect(lowestVisibleSeq(rows, 5, 10)).toBeNull();
+    expect(lowestVisibleSeq([], 0, 0)).toBeNull();
+  });
+
+  it("skips rows carrying no seq (e.g. client-only rows)", () => {
+    const rows: BurstItem[] = [
+      msg({ id: "u1", role: "user" }), // no seq
+      msg({ id: "u2", role: "user", seq: 7 }),
+    ];
+    expect(lowestVisibleSeq(rows, 0, 1)).toBe(7);
   });
 });

@@ -13,12 +13,12 @@ import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
 import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import { useMobile } from "../hooks/useMobile.js";
 import { buildSelectionClipboardText } from "../lib/chat-selection-copy.js";
-import { buildTurnToFirstRowIndex, computeRowTextChars, estimateVirtualRowSize, extendRangeWithSelection, isBurst, isGroup, rangeToRowIndexSpan, type SelectionRowSpan, virtualRowKey } from "../lib/chat-virtual-rows.js";
+import { buildTurnToFirstRowIndex, computeRowTextChars, estimateVirtualRowSize, extendRangeWithSelection, isBurst, isGroup, lowestVisibleSeq, rangeToRowIndexSpan, type SelectionRowSpan, virtualRowKey } from "../lib/chat-virtual-rows.js";
 import { findActiveInteractiveToolResultIds, findRetriedErrorIds, findSurfaceSuppressedErrorIds } from "../lib/collapse-retried-errors.js";
 // RetryBanner + ErrorBanner replaced by the unified SessionBanner mounted
 // in App.tsx (sticky above the command input). See change:
 // unify-status-banner-and-terminal-limit-stop.
-import type { ChatImage, InteractiveUiRequest, SessionState } from "../lib/event-reducer.js";
+import type { ChatImage, EvictedToolBurst, InteractiveUiRequest, SessionState } from "../lib/event-reducer.js";
 import { formatMessageTime } from "../lib/format.js";
 import { type BurstItem, groupToolBursts, type ToolBurstGroup as ToolBurstGroupData } from "../lib/group-tool-bursts.js";
 import type { ToolCallGroup } from "../lib/group-tool-calls.js";
@@ -121,6 +121,15 @@ interface Props {
   onLoadOlder?: (anchorToken: string) => void;
   /** Anchor token returned by the matching older terminal. */
   completedOlderAnchorToken?: string | null;
+  /**
+   * Reports the lowest `seq` currently visible in the virtualized viewport
+   * (or `null` when no visible row carries a `seq`, e.g. an empty transcript).
+   * The caller (App.tsx) writes this into `viewportFloorRef` so `evictBelow`
+   * never prunes rows the user is currently looking at. Fired on every
+   * virtualizer range change; cheap — callers should just store the value.
+   * See change: bounded-hot-transcript-state.
+   */
+  onVisibleFloorSeqChange?: (seq: number | null) => void;
 }
 
 function ImageAttachments({
@@ -246,6 +255,39 @@ function hasMermaid(content: string): boolean {
   return /```mermaid\b/.test(content);
 }
 
+/**
+ * Collapsed markers for evicted contiguous tool-call runs (`state.
+ * evictedToolBursts`, produced by `evictBelow`'s two-tier prune). Rendered
+ * informationally — click-to-page (loading the evicted seq range back in) is
+ * NOT wired here; it would need new plumbing beyond the existing whole-page
+ * `onLoadOlder` affordance, deferred as a follow-up (see Task 1.7 report).
+ * Visual language borrowed from `ToolBurstGroup`'s frame (border-l-2 pl-3,
+ * muted text) for consistency, without its interactive chrome. Always older
+ * than every currently-retained row, so rendered once at the very top of the
+ * scrollable transcript. See change: bounded-hot-transcript-state.
+ */
+function EvictedToolBurstMarkers({ bursts, isMobile }: { bursts: EvictedToolBurst[]; isMobile: boolean }) {
+  if (bursts.length === 0) return null;
+  const sorted = [...bursts].sort((a, b) => a.fromSeq - b.fromSeq);
+  return (
+    <div className="space-y-1 mb-2" data-testid="evicted-tool-burst-markers">
+      {sorted.map((burst) => (
+        <div
+          key={`${burst.fromSeq}-${burst.toSeq}`}
+          data-testid="evicted-tool-burst-marker"
+          className={`${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3 py-1 text-xs text-[var(--text-tertiary)]`}
+        >
+          {i18nT(
+            "chat.evictedToolBurst",
+            { count: burst.count, from: burst.fromSeq, to: burst.toSeq },
+            "{count} tool calls collapsed (#{from}–#{to})",
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const SCROLL_THRESHOLD = 50;
 
 type ScrollOwner =
@@ -290,7 +332,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Desktop retains its saved anchor; mobile ownership is explicit below.
   // These refs were accidentally removed by an interrupted migration and are
@@ -744,6 +786,28 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   });
   const virtualItems = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
+
+  // Viewport-floor reporting (Task 1.7, change: bounded-hot-transcript-state):
+  // report the lowest `seq` currently visible so App.tsx's `viewportFloorRef`
+  // stops `evictBelow` from pruning rows the user is looking at. Dedup via a
+  // ref so a no-op range recompute (same first/last visible index) doesn't
+  // spam the parent callback every render.
+  const lastReportedFloorSeqRef = useRef<number | null | undefined>(undefined);
+  const lastReportedFloorSessionRef = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (!onVisibleFloorSeqChange) return;
+    const floor = virtualItems.length > 0
+      ? lowestVisibleSeq(displayRows, virtualItems[0]!.index, virtualItems.at(-1)!.index)
+      : null;
+    // A session switch reuses this same mounted instance (ChatView is not
+    // remounted per session), so the dedup ref must reset on sessionId change
+    // too — otherwise a coincidental same-seq floor for a NEW session would
+    // silently suppress its first report.
+    if (floor === lastReportedFloorSeqRef.current && sessionId === lastReportedFloorSessionRef.current) return;
+    lastReportedFloorSeqRef.current = floor;
+    lastReportedFloorSessionRef.current = sessionId;
+    onVisibleFloorSeqChange(floor);
+  }, [displayRows, onVisibleFloorSeqChange, sessionId, virtualItems]);
 
   // Streaming-tail content: the frozen snapshot while a tail selection is held
   // (buffers chunks; survives the message_end unmount), else the live text.
@@ -1238,6 +1302,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         </div>
       )}
     <div ref={scrollRef} onScroll={handleScroll} onCopy={handleCopy} onWheel={onWheel} onTouchStart={onTouchStart} onTouchMove={onTouchMove} style={{ overflowAnchor: "none" }} data-testid="chat-scroll-container" className={`chat-cv h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"}`}>
+      {/* Evicted-tool-burst markers are always older than every retained row
+          (evictBelow only prunes below the retention floor), so they render
+          once, non-virtualized, at the very top of the scrollable transcript. */}
+      <EvictedToolBurstMarkers bursts={state.evictedToolBursts} isMobile={isMobile} />
       {/* Windowed historical rows (TanStack Virtual): only viewport + overscan
           are mounted. The spacer reserves getTotalSize(); each row is absolutely
           positioned + re-measured on mount. chat-cv-skip keeps Step A's

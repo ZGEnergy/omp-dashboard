@@ -1014,6 +1014,21 @@ export default function App() {
     beginReplay(selectedId, "older", source, anchorToken, "load_older");
   }, [selectedId, loadingOlderMap, replayController, beginReplay]);
 
+  // Task 1.7: ChatView reports the lowest `seq` currently visible in the
+  // virtualized viewport; stash it per-session so the `evict` effect's
+  // computeChatFloorSeq call never prunes rows the user is looking at. A
+  // `null` floor (empty transcript / no seq-bearing row visible) clears the
+  // entry rather than writing null, so `?? null` downstream reads plainly.
+  // See change: bounded-hot-transcript-state.
+  const handleVisibleFloorSeqChange = useCallback((seq: number | null) => {
+    if (!selectedId) return;
+    if (seq == null) {
+      viewportFloorRef.current.delete(selectedId);
+    } else {
+      viewportFloorRef.current.set(selectedId, seq);
+    }
+  }, [selectedId]);
+
   // Explicit user hard-refresh: discard the rendered tail and cold-rebuild.
   const refreshSelectedSession = useCallback(() => {
     if (!selectedId) return;
@@ -1984,6 +1999,7 @@ export default function App() {
               completedOlderAnchorToken={selectedId ? completedOlderAnchorMap.get(selectedId) ?? null : null}
               onLoadOlder={selectedId && (!isMobile || mobileDetailVisible) ? handleLoadOlder : undefined}
               onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined}
+              onVisibleFloorSeqChange={handleVisibleFloorSeqChange}
             />
             </SessionAssetsProvider>
           </ErrorBoundary>
