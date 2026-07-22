@@ -45,7 +45,7 @@ interface SessionBuffer {
 
 export const DEFAULT_MAX_CACHED_SESSIONS = 100;
 export const DEFAULT_MAX_EVENTS_PER_SESSION = 20_000;
-const DEFAULT_MAX_STRING_SIZE = 4_000;
+export const DEFAULT_MAX_STRING_SIZE = 4_000;
 export const DEFAULT_MAX_EVENT_DATA_SIZE = 20_000;
 const SKILL_ENVELOPE_RE = /^(<skill name="[^"]+" location="[^"]+">\n)([\s\S]*?)(\n<\/skill>)((?:\n\n[\s\S]+)?)$/;
 
@@ -139,7 +139,7 @@ function pickSmallScalars(value: unknown): Record<string, unknown> {
   }
   return out;
 }
-function truncateEvent(event: DashboardEvent, maxString: number, maxData: number): DashboardEvent {
+export function truncateEvent(event: DashboardEvent, maxString: number, maxData: number): DashboardEvent {
   if (!event.data || typeof event.data !== "object") return event;
   const data = truncateStrings(event.data, maxString) as Record<string, unknown>;
   if (maxData > 0 && exceedsSerializedSize(data, maxData)) {
