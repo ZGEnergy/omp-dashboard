@@ -1,6 +1,6 @@
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { describe, expect, it } from "vitest";
-import { createMemoryEventStore, DEFAULT_MAX_EVENT_DATA_SIZE } from "../memory-event-store.js";
+import { createMemoryEventStore, DEFAULT_MAX_EVENT_DATA_SIZE, DEFAULT_MAX_STRING_SIZE } from "../memory-event-store.js";
 import { createReplayCoordinator } from "../replay-coordinator.js";
 
 function toolEndEvent(resultBytes: number): DashboardEvent {
@@ -59,5 +59,46 @@ describe("replay coordinator truncation parity", () => {
     const toolEnd = delivered.find((entry: any) => entry.event.eventType === "tool_execution_end");
     expect(toolEnd).toBeDefined();
     expect(JSON.stringify(toolEnd!.event).length).toBeLessThanOrEqual(DEFAULT_MAX_EVENT_DATA_SIZE + 1_000);
+  });
+
+  it("truncates a persisted older-page event to the store's CONFIGURED string limit, not the module default", async () => {
+    // maxStringFieldSize=100 (far below the DEFAULT_MAX_STRING_SIZE=4000 module
+    // constant) simulates an operator override via config-api.ts
+    // (memoryLimits.maxStringFieldSize) / server.ts (config.maxStringFieldSize).
+    // maxEventsPerSession=1 forces eviction of the big event so seq 1 must be
+    // rehydrated from the persisted (raw, untruncated) source.
+    const configuredStringLimit = 100;
+    const store = createMemoryEventStore(() => false, 10, 1, configuredStringLimit);
+    const bigStringEvent: DashboardEvent = { eventType: "tool_execution_end", timestamp: 1, data: { toolCallId: "t1", result: "x".repeat(5_000) } };
+    const persisted: DashboardEvent[] = [
+      bigStringEvent,
+      { eventType: "message_end", timestamp: 1, data: { label: "two" } },
+    ];
+    for (const entry of persisted) store.insertEvent("s", entry);
+    expect(store.getRetainedRange("s")).toMatchObject({ retainedMinSeq: 2, historyTruncated: true });
+
+    const ws = socket();
+    const sessionManager: any = { get: () => ({ sessionFile: "/tmp/session.jsonl" }) };
+    const coordinator = createReplayCoordinator({
+      store,
+      directoryService: { loadSessionEvents: async () => ({ success: true, events: persisted }) } as any,
+      sessionManager,
+    });
+    const ctx: any = {
+      ws, sessionManager, eventStore: store,
+      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
+      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
+    };
+
+    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "older", fromSeq: 2, windowBytes: 256 * 1024 }, ctx);
+    const olderReplay = ws.frames.filter((frame: any) => frame.type === "event_replay");
+    const delivered = olderReplay.flatMap((frame: any) => frame.events);
+    const toolEnd = delivered.find((entry: any) => entry.event.eventType === "tool_execution_end");
+    expect(toolEnd).toBeDefined();
+    const result = (toolEnd!.event.data as { result?: string }).result;
+    expect(result).toBeDefined();
+    // capString appends a short "…[truncated]" marker after slicing to `max`; allow for that suffix.
+    expect(result!.length).toBeLessThanOrEqual(configuredStringLimit + 20);
+    expect(result!.length).toBeLessThan(DEFAULT_MAX_STRING_SIZE);
   });
 });

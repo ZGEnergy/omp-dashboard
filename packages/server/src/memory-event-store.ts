@@ -32,6 +32,7 @@ export interface EventStore {
   replaceEvents(sessionId: string, events: DashboardEvent[]): StoredSource;
   sessionCount(): number;
   getTrimStats(): TrimStats;
+  getTruncationLimits(): { maxStringFieldSize: number; maxEventDataSize: number };
 }
 
 interface SessionBuffer {
@@ -284,5 +285,6 @@ export function createMemoryEventStore(
     },
     sessionCount() { return buffers.size; },
     getTrimStats() { return { trimmedEvents: { total: trimmedTotal, toolExecutionEnd: trimmedToolEnd, bySession: Object.fromEntries(trimmedBySession) }, evictedSessions: evictedTotal }; },
+    getTruncationLimits() { return { maxStringFieldSize: stringFieldLimit, maxEventDataSize }; },
   };
 }
