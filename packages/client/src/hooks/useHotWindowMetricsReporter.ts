@@ -63,6 +63,8 @@ function buildReport(
     interactiveRequests: state.interactiveRequests.length,
     // Detail/inspector pane byte accounting not wired yet; metric-tuning follow-up.
     detailBytes: 0,
+    // PROXY, not an exact eviction count: this is the evicted-tool-burst
+    // count, so the health-endpoint consumer must not treat it as precise.
     evictions: state.evictedToolBursts.length,
     highWaterBytes,
     // No timing instrumentation around derivation yet; metric-tuning follow-up.
@@ -95,6 +97,25 @@ export function useHotWindowMetricsReporter({
       pendingTimers.clear();
     };
   }, []);
+
+  // Prune per-session tracking state for sessions no longer in
+  // `sessionStates` so a long-lived tab with many rotated sessions doesn't
+  // accumulate stale entries. Clears any pending timer for a pruned session.
+  useEffect(() => {
+    const liveIds = new Set(sessionStates.keys());
+    for (const sessionId of lastSentAtRef.current.keys()) {
+      if (!liveIds.has(sessionId)) lastSentAtRef.current.delete(sessionId);
+    }
+    for (const sessionId of highWaterRef.current.keys()) {
+      if (!liveIds.has(sessionId)) highWaterRef.current.delete(sessionId);
+    }
+    for (const [sessionId, timer] of pendingTimersRef.current) {
+      if (!liveIds.has(sessionId)) {
+        clearTimeout(timer);
+        pendingTimersRef.current.delete(sessionId);
+      }
+    }
+  }, [sessionStates]);
 
   useEffect(() => {
     if (!connected) return;
