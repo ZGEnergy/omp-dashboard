@@ -46,15 +46,19 @@ export function isEvictedBurst(item: DisplayRow): item is EvictedToolBurst {
  * Stable virtualizer/React key for a display row (CR-3). Mirrors the current
  * render keys per row type:
  *   burst  → `burst.id` (first tool-like member id; survives head-trim churn)
- *   group  → first member key, else `group-<index>` (never a bare `toolName`,
- *            which collides across two sub-threshold bursts of the same tool)
+ *   group  → first member key, else `group-<toolName>` (position-independent;
+ *            a populated group always keys off its stable first-member id, so
+ *            the empty fallback is defensive/unreachable — groups emit at >= 3
+ *            members. A positional `group-<index>` renumbered on Load-older
+ *            re-reduce, bouncing scroll anchors. See change:
+ *            load-older-viewport-bounce.)
  *   message→ `messageKey(msg)`
  * Uniqueness is a hard precondition for measurement caching under windowing.
  */
-export function virtualRowKey(item: DisplayRow, index: number): string {
+export function virtualRowKey(item: DisplayRow, _index: number): string {
   if (isEvictedBurst(item)) return `evicted-${item.fromSeq}-${item.toSeq}`;
   if (isBurst(item)) return item.id;
-  if (isGroup(item)) { const first = item.messages[0]; return first ? messageKey(first) : `group-${index}`; }
+  if (isGroup(item)) { const first = item.messages[0]; return first ? messageKey(first) : `group-${item.toolName}`; }
   return messageKey(item as ChatMessage);
 }
 

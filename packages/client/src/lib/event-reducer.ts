@@ -1544,7 +1544,7 @@ export function reduceEvent(
             next.messages = [
               ...next.messages,
               {
-                id: `thinking-${next.messages.length}`,
+                id: seq !== undefined ? `thinking-${seq}-0` : `thinking-${next.messages.length}`,
                 role: "thinking",
                 content: next.streamingThinking,
                 timestamp: event.timestamp,
@@ -1654,7 +1654,10 @@ export function reduceEvent(
               : typeof block.text === "string" ? block.text : "";
             if (!text) continue;
             thinkingRows.push({
-              id: `thinking-${next.messages.length + thinkingRows.length}`,
+              id:
+                seq !== undefined
+                  ? `thinking-${seq}-${thinkingRows.length}`
+                  : `thinking-${next.messages.length + thinkingRows.length}`,
               role: "thinking",
               content: text,
               timestamp: event.timestamp,

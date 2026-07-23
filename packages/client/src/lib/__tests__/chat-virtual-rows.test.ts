@@ -41,10 +41,12 @@ describe("virtualRowKey (CR-3)", () => {
     expect(virtualRowKey(group("m1"), 3)).toBe("m1");
   });
 
-  it("falls back to a positional group key (never a bare toolName)", () => {
-    // A member-less group would otherwise collide across two sub-threshold
-    // bursts of the same tool — synthesize a per-position id instead.
-    expect(virtualRowKey(group(undefined, "bash"), 7)).toBe("group-7");
+  it("falls back to a position-independent group-<toolName> key", () => {
+    // A populated group always keys off its stable first-member id, so this
+    // member-less branch is unreachable dead code — groups only emit at >= 3
+    // members. The fallback stays position-independent (`group-<toolName>`) so
+    // it never renumbers on Load-older re-reduce.
+    expect(virtualRowKey(group(undefined, "bash"), 7)).toBe("group-bash");
   });
 
   it("keys a plain message by its id", () => {
