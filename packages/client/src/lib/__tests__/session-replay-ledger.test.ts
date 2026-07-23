@@ -191,4 +191,22 @@ describe("SessionReplayLedger", () => {
     expect(ledger.minSeq).toBe(2);
     expect(ledger.cursor).toBe(3);
   });
+
+  it("setMaxRetainedBytes lifts the cap without pruning and lowering flushes to the new budget", () => {
+    const ledger = new SessionReplayLedger("s"); // default cap fits all
+    ledger.begin({ requestId: "cold-1", kind: "cold", sourceGeneration: "source-a" });
+    ledger.admit(cold([event(10), event(11), event(12), event(13)]));
+    expect(ledger.events.map((entry) => entry.seq)).toEqual([10, 11, 12, 13]);
+
+    // Lifting the cap (reading older history) never prunes.
+    expect(ledger.setMaxRetainedBytes(Number.POSITIVE_INFINITY)).toBe(false);
+    expect(ledger.events.map((entry) => entry.seq)).toEqual([10, 11, 12, 13]);
+
+    // Lowering (returning to the live tail) flushes the oldest, keeps the newest
+    // contiguous tail, and reports the head eviction so the reducer can prune.
+    expect(ledger.setMaxRetainedBytes(1)).toBe(true);
+    expect(ledger.events.map((entry) => entry.seq)).toEqual([13]);
+    expect(ledger.minSeq).toBe(13);
+    expect(ledger.cursor).toBe(13);
+  });
 });

@@ -111,8 +111,8 @@ describe("SessionReplayController", () => {
     expect(effects.replace).toHaveBeenCalledWith("s", [entry(49), entry(50)], { requestId: older.requestId, anchorToken: "anchor-50" });
   });
 
-  it("rebuilds only the retained tail after live history crosses its byte cap", () => {
-    const effects = { send: vi.fn(), apply: vi.fn(), window: vi.fn(), trimmed: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+  it("applies the accepted tail and evicts to the ledger floor after live history crosses its byte cap", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), window: vi.fn(), trimmed: vi.fn(), replace: vi.fn(), evict: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
     const budget = JSON.stringify(entry(1)).length * 2;
     const controller = new (SessionReplayController as any)(effects, { maxRetainedBytes: budget });
     const cold = controller.begin("s", "cold", "source-a");
@@ -121,8 +121,11 @@ describe("SessionReplayController", () => {
     controller.handle({ type: "event", sessionId: "s", seq: 3, event: entry(3).event });
 
     expect(effects.trimmed).toHaveBeenCalledWith("s", 2);
-    expect(effects.replace).toHaveBeenLastCalledWith("s", [entry(2), entry(3)], null);
-    expect(effects.apply).toHaveBeenCalledTimes(1);
+    // The ledger head is byte-bounded; the reducer is bounded separately by
+    // evictBelow (two-tier floors) rather than being rebuilt from the ledger window.
+    expect(effects.apply).toHaveBeenLastCalledWith("s", [entry(3)]);
+    expect(effects.evict).toHaveBeenCalledWith("s", 2);
+    expect(effects.replace).not.toHaveBeenCalled();
   });
 
   it("resets conflicting live state and starts cold recovery without preserving the prefix", () => {
@@ -345,5 +348,37 @@ describe("SessionReplayController", () => {
     expect(effects.reset).not.toHaveBeenCalled();
     controller.handle({ ...frame(deltaReq.requestId!, [entry(12)], true, "source-a"), replayKind: "delta" });
     expect(controller.ledger("s").events.map((e) => e.seq)).toEqual([10, 11, 12]);
+  });
+
+  it("rematerialize re-reduces from resident ledger events with no server request", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+    controller.handle(frame(cold.requestId!, [entry(10), entry(11)], true));
+    expect(controller.ledger("s").status).toBe("ready");
+    const sendCalls = effects.send.mock.calls.length;
+    effects.replace.mockClear();
+
+    controller.rematerialize("s");
+
+    // Full re-reduce from the resident ledger events, no load-older completion.
+    expect(effects.replace).toHaveBeenCalledWith("s", [entry(10), entry(11)], null);
+    // Interior expansion NEVER hits the wire: no new subscribe was sent.
+    expect(effects.send).toHaveBeenCalledTimes(sendCalls);
+  });
+
+  it("rematerialize is a no-op when the ledger is not ready", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    // No ledger for this session at all.
+    controller.rematerialize("missing");
+    expect(effects.replace).not.toHaveBeenCalled();
+
+    // Ledger exists but is still cold (in-flight cold replay, not terminal).
+    const cold = controller.begin("s", "cold", "source-a");
+    controller.handle(frame(cold.requestId!, [entry(1)], false));
+    expect(controller.ledger("s").status).not.toBe("ready");
+    controller.rematerialize("s");
+    expect(effects.replace).not.toHaveBeenCalled();
   });
 });

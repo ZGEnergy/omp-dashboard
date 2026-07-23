@@ -32,6 +32,7 @@ export interface EventStore {
   replaceEvents(sessionId: string, events: DashboardEvent[]): StoredSource;
   sessionCount(): number;
   getTrimStats(): TrimStats;
+  getTruncationLimits(): { maxStringFieldSize: number; maxEventDataSize: number };
 }
 
 interface SessionBuffer {
@@ -45,7 +46,7 @@ interface SessionBuffer {
 
 export const DEFAULT_MAX_CACHED_SESSIONS = 100;
 export const DEFAULT_MAX_EVENTS_PER_SESSION = 20_000;
-const DEFAULT_MAX_STRING_SIZE = 4_000;
+export const DEFAULT_MAX_STRING_SIZE = 4_000;
 export const DEFAULT_MAX_EVENT_DATA_SIZE = 20_000;
 const SKILL_ENVELOPE_RE = /^(<skill name="[^"]+" location="[^"]+">\n)([\s\S]*?)(\n<\/skill>)((?:\n\n[\s\S]+)?)$/;
 
@@ -64,8 +65,15 @@ function capString(value: string, max: number): string {
 }
 type TruncateContext = "normal" | "assistant-content" | "assistant-text";
 
+// A block whose text must never be capped: assistant prose (`type: "text"`) and
+// reasoning/thinking blocks (`type: "thinking"` — real shape carries its text under
+// either `.thinking` or `.text`, per replay-coordinator.ts `isToolOnlyAssistantMessage`;
+// `"reasoning"` covered defensively though not observed in this codebase — its text may
+// arrive under `.reasoning` or `.text`, both promoted to the uncapped context below).
+const PROTECTED_TEXT_BLOCK_TYPES = new Set(["text", "thinking", "reasoning"]);
+
 function isAssistantTextBlock(value: unknown): boolean {
-  return !!value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).type === "text";
+  return !!value && typeof value === "object" && !Array.isArray(value) && PROTECTED_TEXT_BLOCK_TYPES.has((value as Record<string, unknown>).type as string);
 }
 
 function truncateStrings(value: unknown, max: number, depth = 0, context: TruncateContext = "normal"): unknown {
@@ -76,7 +84,12 @@ function truncateStrings(value: unknown, max: number, depth = 0, context: Trunca
   }
   if (typeof value === "string") return context === "assistant-text" ? value : capString(value, max);
   if (Array.isArray(value)) {
-    if (value.length > 20) return "[array truncated]";
+    // A protected message's `content` array (context === "assistant-content", set below
+    // when traversing an assistant/user message's `content` key) must never collapse by
+    // count: doing so would drop whole text/thinking blocks past the 20-element mark,
+    // violating the "message content never dropped" invariant. Non-protected arrays
+    // (arbitrary tool output/args) keep the existing count-based collapse unchanged.
+    if (value.length > 20 && context !== "assistant-content") return "[array truncated]";
     let changed = false;
     const result = value.map((child) => {
       const childContext = context === "assistant-content" && isAssistantTextBlock(child) ? "assistant-text" : "normal";
@@ -89,12 +102,15 @@ function truncateStrings(value: unknown, max: number, depth = 0, context: Trunca
   if (!value || typeof value !== "object") return value;
   let changed = false;
   const result: Record<string, unknown> = {};
-  const isAssistantMessage = (value as Record<string, unknown>).role === "assistant";
+  const role = (value as Record<string, unknown>).role;
+  const isProtectedMessageRole = role === "assistant" || role === "user";
   for (const [key, child] of Object.entries(value)) {
     if (key === "data" && typeof child === "string" && "mimeType" in value) { result[key] = child; continue; }
     const childContext: TruncateContext = context === "assistant-text"
-      ? key === "text" ? "assistant-text" : "normal"
-      : isAssistantMessage && key === "content" ? "assistant-content" : "normal";
+      ? key === "text" || key === "thinking" || key === "reasoning" ? "assistant-text" : "normal"
+      : isProtectedMessageRole && key === "content"
+        ? typeof child === "string" ? "assistant-text" : "assistant-content"
+        : "normal";
     const next = truncateStrings(child, max, depth + 1, childContext);
     changed ||= next !== child;
     result[key] = next;
@@ -139,10 +155,35 @@ function pickSmallScalars(value: unknown): Record<string, unknown> {
   }
   return out;
 }
-function truncateEvent(event: DashboardEvent, maxString: number, maxData: number): DashboardEvent {
+function isProtectedContentBlockArray(content: unknown): boolean {
+  return Array.isArray(content) && content.some((block) => isAssistantTextBlock(block));
+}
+
+/**
+ * True when `data` carries a message (assistant/user, or a reasoning/thinking
+ * block) whose content is a hard-invariant-protected string. Detected from the
+ * event's own message shape — never from byte size — so the whole-event
+ * scalar-collapse below can be skipped without ever nuking protected text.
+ */
+function isProtectedMessageEvent(data: Record<string, unknown>): boolean {
+  const message = data.message as Record<string, unknown> | undefined;
+  if (!message || typeof message !== "object") return false;
+  const role = message.role;
+  if (role !== "assistant" && role !== "user") return false;
+  const content = message.content;
+  return typeof content === "string" || isProtectedContentBlockArray(content);
+}
+
+export function truncateEvent(event: DashboardEvent, maxString: number, maxData: number): DashboardEvent {
   if (!event.data || typeof event.data !== "object") return event;
   const data = truncateStrings(event.data, maxString) as Record<string, unknown>;
-  if (maxData > 0 && exceedsSerializedSize(data, maxData)) {
+  // Protected message events (assistant text, reasoning/thinking, user text) skip the
+  // whole-event scalar collapse below: `truncateStrings` above already preserved their
+  // content uncapped, but the byte-blind `pickSmallScalars` collapse would otherwise
+  // drop that content entirely just because the event's total size exceeds `maxData`.
+  // Tool events (tool_execution_*) are never message events, so they keep the
+  // existing collapse behavior unchanged.
+  if (maxData > 0 && !isProtectedMessageEvent(data) && exceedsSerializedSize(data, maxData)) {
     return { ...event, data: { ...pickSmallScalars(data), __truncated: true, reason: "event data exceeded MAX_EVENT_DATA_SIZE", thresholdBytes: maxData, eventType: event.eventType } };
   }
   return data === event.data ? event : { ...event, data };
@@ -284,5 +325,6 @@ export function createMemoryEventStore(
     },
     sessionCount() { return buffers.size; },
     getTrimStats() { return { trimmedEvents: { total: trimmedTotal, toolExecutionEnd: trimmedToolEnd, bySession: Object.fromEntries(trimmedBySession) }, evictedSessions: evictedTotal }; },
+    getTruncationLimits() { return { maxStringFieldSize: stringFieldLimit, maxEventDataSize }; },
   };
 }

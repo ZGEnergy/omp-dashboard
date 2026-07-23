@@ -35,6 +35,8 @@ export interface ReplayControllerEffects {
   window?(sessionId: string, metadata: ReplayWindowMetadata): void;
   /** The ledger dropped its head to keep the hot transcript within budget. */
   trimmed?(sessionId: string, minSeq: number): void;
+  /** Prune the reducer's hot state to the ledger's two-tier retention floor. */
+  evict?(sessionId: string, minSeq: number): void;
   /** Older replay is rebuilt atomically from the same canonical sequence. */
   replace(
     sessionId: string,
@@ -110,6 +112,42 @@ export class SessionReplayController {
       this.ledgers.set(sessionId, ledger);
     }
     return ledger;
+  }
+
+  /**
+   * Adjust a session's retained-bytes cap. Raising it (the user is reading
+   * older history) lifts the ceiling so paged-in rows are not pruned; lowering
+   * it back to the base ceiling (the user returned to the live tail) flushes
+   * the ledger head and prunes the reducer's two-tier floors to match. No-op
+   * for a session with no ledger.
+   */
+  setRetentionCap(sessionId: string, bytes: number): void {
+    const ledger = this.ledgers.get(sessionId);
+    if (!ledger) return;
+    if (!ledger.setMaxRetainedBytes(bytes)) return;
+    this.effects.trimmed?.(sessionId, ledger.minSeq);
+    if (ledger.status === "ready") this.effects.evict?.(sessionId, ledger.minSeq);
+  }
+
+  /**
+   * Re-materialize a session's reducer rows from the already-resident ledger
+   * events, WITHOUT any server request or ledger admission. Used to expand an
+   * interior `EvictedToolBurst` marker in place (issue #77): the raw events for
+   * the evicted range are still in the ledger — only the derived rows were
+   * two-tier-pruned — so a full re-reduce from `ledger.events` (the exact
+   * `replace` effect the older-page terminal uses) rebuilds every row and
+   * clears `evictedToolBursts`. Passing `null` completion means no load-older
+   * latch is touched.
+   *
+   * CRITICAL INVARIANT: this NEVER calls `begin`/`admit`, so the ledger's
+   * single-contiguous-island gate (`acceptOlder`) is never touched and no
+   * non-contiguous frame is ever created. No-op unless the ledger is `ready`.
+   */
+  rematerialize(sessionId: string): void {
+    const ledger = this.ledgers.get(sessionId);
+    if (!ledger) return;
+    if (ledger.status !== "ready") return;
+    this.effects.replace(sessionId, ledger.events, null);
   }
 
   /** Cache must contain a primary conversation turn before it can supersede canonical cold replay. */
@@ -264,7 +302,10 @@ export class SessionReplayController {
     if (result.evictedHead) {
       const ledger = this.ledger(sessionId);
       this.effects.trimmed?.(sessionId, ledger.minSeq);
-      this.effects.replace(sessionId, ledger.events, null);
+      // Apply the new tail before evicting so the two-tier floors are computed
+      // against the up-to-date reducer state, not the pre-tail snapshot.
+      this.effects.apply(sessionId, result.accepted);
+      if (ledger.status === "ready") this.effects.evict?.(sessionId, ledger.minSeq);
       return;
     }
     this.effects.apply(sessionId, result.accepted);

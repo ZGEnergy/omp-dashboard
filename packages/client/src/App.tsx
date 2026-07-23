@@ -54,6 +54,7 @@ import { shouldReconnectForForeground } from "./hooks/foreground-replay.js";
 import { useAppHidden } from "./hooks/useAppHidden.js";
 import { useContentViews } from "./hooks/useContentViews.js";
 import { useDocumentTitle } from "./hooks/useDocumentTitle.js";
+import { useHotWindowMetricsReporter } from "./hooks/useHotWindowMetricsReporter.js";
 import { selectInflightBashTools } from "./hooks/useInflightBashTools.js";
 import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { useLaunchSource } from "./hooks/useLaunchSource.js";
@@ -71,7 +72,8 @@ import { deleteDraft, readAllDrafts, writeDraft } from "./lib/draft-storage.js";
 // SubagentPopoutPage no longer imported by the shell — it's registered via
 // the subagents-plugin's `shell-overlay-route` claim and mounted through
 // `<ShellOverlayRouteSlot>` below. See change: add-flow-agent-popout.
-import { createInitialState, deriveBannerState, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { createInitialState, deriveBannerState, type EvictedToolBurst, evictBelow, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { classifyExpand, reachedExpandTarget } from "./lib/expand-evicted-burst.js";
 import { decodeFolderPath, encodeFolderPath } from "./lib/folder-encoding.js";
 import { fetchActiveInits } from "./lib/git-api.js";
 import { refreshGitStatus } from "./lib/git-status-cache.js";
@@ -93,6 +95,7 @@ import { rehydrateSession } from "./lib/rehydrate-session.js";
 // Strategy A (reduce-session-replay-traffic): durable replay cursor.
 import { type ReplayCacheScope, replayCache } from "./lib/replay-cache.js";
 import { createReplayPersister, type ReplayPersister } from "./lib/replay-persist.js";
+import { DEFAULT_REPLAY_RETENTION_BYTES } from "./lib/replay-retention.js";
 import {
   buildFolderSettingsUrl,
   buildOpenSpecArchiveUrl,
@@ -107,6 +110,13 @@ import {
   buildSessionSubscribe,
 } from "./lib/session-subscribe.js";
 import { openStagingSocket } from "./lib/staging-socket.js";
+import {
+  computeChatFloorSeq,
+  computeToolFloorSeq,
+  DEFAULT_CHAT_RETAINED_TURNS,
+  DEFAULT_TOOL_TIER_MAX_BYTES,
+  DEFAULT_TOOL_TIER_MAX_COUNT,
+} from "./lib/two-tier-floors.js";
 import { resendActiveCwdSubscriptions, setInitSender } from "./lib/worktree-init-bus.js";
 import { initStore } from "./lib/worktree-init-store.js";
 
@@ -117,6 +127,7 @@ const NAV_TRACKER = { predecessor, popNav };
 import { applyPluginConfigUpdate, initPluginConfigs, PluginContextProvider, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import type { HydrationSource } from "@blackbelt-technology/pi-dashboard-shared/hot-window-metrics.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, FileEntry, ImageContent, ModelInfo, OpenSpecData, OpenSpecGroup, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { DialogPortal } from "./components/DialogPortal.js";
@@ -660,6 +671,12 @@ export default function App() {
   // "already rehydrated from IndexedDB" guard so reconnect re-subscribes don't
   // re-read (and clobber) live state. See change: reduce-session-replay-traffic.
   const replayPersistersRef = useRef(new Map<string, { scope: ReplayCacheScope; persister: ReplayPersister }>());
+  // Per-session hot-window telemetry inputs (sizes/counts/labels only — see
+  // HotWindowReport). `hydrationStateRef` records the actual cold-start path
+  // (stream/cache/memory) + optional trigger label; `derivationTimingRef` holds
+  // the latest ChatView renderRows derivation ms. See change: hot-window-metrics.
+  const hydrationStateRef = useRef(new Map<string, { source: HydrationSource; coldStartTrigger?: string }>());
+  const derivationTimingRef = useRef(new Map<string, number>());
   const sourceGenerationRef = useRef(new Map<string, string>());
   const rehydratedRef = useRef(new Set<string>());
   const rehydrateAbortRef = useRef(new Map<string, AbortController>());
@@ -824,6 +841,17 @@ export default function App() {
   // across an ordinary reconnect so returning to a session resumes via delta
   // instead of a visible cold rebuild. Only a real server-identity change
   // (a different non-null serverEpoch) recreates it, which correctly cold-resets.
+  // Task 1.7 wiring: ChatView's visible-range callback updates this per-session
+  // viewport floor; the chat tier's evict floor never prunes below what is on screen.
+  const viewportFloorRef = useRef<Map<string, number>>(new Map());
+  // Issue #77: expanding an evicted tool-burst marker pins the session's tool
+  // floor down to the marker's `fromSeq` so a subsequent live-event evict
+  // cannot re-collapse the just-expanded range. `expandTargetRef` holds a
+  // below-floor expansion's stop target while the contiguous older-paging loop
+  // drives the ledger min down to it. Both are transient — cleared on return
+  // to the live tail. See change: load-older-seq-range-paging.
+  const expandFloorRef = useRef<Map<string, number>>(new Map());
+  const expandTargetRef = useRef<Map<string, number>>(new Map());
   const lastServerEpochRef = useRef<string | null>(null);
   if (serverEpoch && serverEpoch !== lastServerEpochRef.current) lastServerEpochRef.current = serverEpoch;
   const authorityKey = lastServerEpochRef.current ?? "unknown";
@@ -851,7 +879,7 @@ export default function App() {
         setSessionStates((prev) => {
           const next = new Map(prev);
           let current = next.get(sessionId) ?? createInitialState();
-          for (const entry of accepted) current = reduceEvent(current, entry.event);
+          for (const entry of accepted) current = reduceEvent(current, entry.event, { seq: entry.seq });
           next.set(sessionId, current);
           return next;
         });
@@ -889,7 +917,7 @@ export default function App() {
           const previous = next.get(sessionId);
           let current = createInitialState();
           if (previous?.pendingPrompt) current.pendingPrompt = previous.pendingPrompt;
-          for (const entry of entries) current = reduceEvent(current, entry.event);
+          for (const entry of entries) current = reduceEvent(current, entry.event, { seq: entry.seq });
           if (previous && previous.interactiveRequests.length > 0) {
             const existing = new Set(current.interactiveRequests.map((request) => request.requestId));
             current.interactiveRequests = [
@@ -911,12 +939,44 @@ export default function App() {
           setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, anchorToken));
         }
       },
+      // `_minSeq` is intentionally unused: the two floors are recomputed fresh
+      // from reducer state (`current.messages` / `current.toolCalls`) on every
+      // call, not derived from the ledger's minSeq hint.
+      evict: (sessionId, _minSeq) => {
+        setSessionStates((prev) => {
+          const current = prev.get(sessionId);
+          if (!current) return prev;
+          // Fold the viewport pin and the expanded-burst pin (issue #77) into a
+          // single lower bound. `pin` is the lowest seq that must survive this
+          // evict: the on-screen floor and/or the tool floor an expand pinned.
+          const rawVp = viewportFloorRef.current.get(sessionId);
+          const rawExpand = expandFloorRef.current.get(sessionId);
+          const pin = Math.min(rawVp ?? Number.POSITIVE_INFINITY, rawExpand ?? Number.POSITIVE_INFINITY);
+          const vp = Number.isFinite(pin) ? pin : null;
+          const toolFloorSeq = computeToolFloorSeq(current.toolCalls.values(), DEFAULT_TOOL_TIER_MAX_BYTES, DEFAULT_TOOL_TIER_MAX_COUNT);
+          // Clamp the tool floor to the session's pin too (mirrors
+          // computeChatFloorSeq's own viewport clamp below) so a currently
+          // visible OR just-expanded tool row can never be evicted out from
+          // under the user. See changes: bounded-hot-transcript-state,
+          // load-older-seq-range-paging.
+          const effToolFloorSeq = vp != null ? Math.min(toolFloorSeq, vp) : toolFloorSeq;
+          const floors = {
+            chatFloorSeq: computeChatFloorSeq(current.messages, DEFAULT_CHAT_RETAINED_TURNS, vp),
+            toolFloorSeq: effToolFloorSeq,
+          };
+          const next = new Map(prev);
+          next.set(sessionId, evictBelow(current, floors));
+          return next;
+        });
+      },
       reset: (sessionId) => {
         bumpReplayGeneration(sessionId);
         completedOlderAnchorRef.current.set(sessionId, null);
         setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, null));
         replayPersistersRef.current.get(sessionId)?.persister.dispose();
         replayPersistersRef.current.delete(sessionId);
+        derivationTimingRef.current.delete(sessionId);
+        hydrationStateRef.current.delete(sessionId);
         setSessionStates((prev) => {
           const next = new Map(prev);
           const pendingPrompt = next.get(sessionId)?.pendingPrompt;
@@ -960,6 +1020,16 @@ export default function App() {
 
   const beginReplay = useCallback((sessionId: string, kind: "cold" | "delta" | "older", sourceGeneration: string, anchorToken?: string, reason: ReplayReason = "initial_navigation") => {
     if (kind !== "older") bumpReplayGeneration(sessionId);
+    // Record the hydration path for hot-window telemetry (label/enum only):
+    // a cold rebuild streams from the server (carrying its trigger reason); a
+    // delta resumes over the retained in-memory ledger. `older` is paging, not
+    // a (re)hydration — leave any existing entry untouched. Cache admission
+    // overrides "stream" later in the seedCached success branch.
+    if (kind === "cold") {
+      hydrationStateRef.current.set(sessionId, { source: "stream", coldStartTrigger: reason });
+    } else if (kind === "delta") {
+      hydrationStateRef.current.set(sessionId, { source: "memory" });
+    }
     return replayController.begin(sessionId, kind, sourceGeneration, anchorToken, reason);
   }, [bumpReplayGeneration, replayController]);
 
@@ -980,16 +1050,125 @@ export default function App() {
     };
   }, [replayController]);
 
+  // Shared starter for one contiguous older page: set the load-older latch,
+  // clear the completed anchor, and issue the `older` request (which derives
+  // `fromSeq = ledger.minSeq`, so every page abuts the ledger head — the
+  // single-contiguous-island invariant is preserved). `handleLoadOlder` calls
+  // it with ChatView's scroll anchor token; the expand driver (issue #77)
+  // calls it with a synthetic token. See change: load-older-seq-range-paging.
+  const beginOlderPage = useCallback((sessionId: string, anchorToken: string) => {
+    setLoadingOlderMap((prev) => new Map(prev).set(sessionId, true));
+    const source = sourceGenerationRef.current.get(sessionId) || replayController.ledger(sessionId).sourceGeneration || "";
+    completedOlderAnchorRef.current.set(sessionId, null);
+    setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, null));
+    beginReplay(sessionId, "older", source, anchorToken, "load_older");
+  }, [replayController, beginReplay]);
+
   const handleLoadOlder = useCallback((anchorToken: string) => {
     if (!selectedId || loadingOlderMap.get(selectedId)) return;
     const win = historyWindowRef.current.get(selectedId);
     if (!win?.hasMoreOlder) return;
-    setLoadingOlderMap((prev) => new Map(prev).set(selectedId, true));
-    const source = sourceGenerationRef.current.get(selectedId) || replayController.ledger(selectedId).sourceGeneration || "";
-    completedOlderAnchorRef.current.set(selectedId, null);
-    setCompletedOlderAnchorMap((prev) => new Map(prev).set(selectedId, null));
-    beginReplay(selectedId, "older", source, anchorToken, "load_older");
-  }, [selectedId, loadingOlderMap, replayController, beginReplay]);
+    beginOlderPage(selectedId, anchorToken);
+  }, [selectedId, loadingOlderMap, beginOlderPage]);
+
+  // Task 1.7: ChatView reports the lowest `seq` currently visible in the
+  // virtualized viewport; stash it per-session so the `evict` effect's
+  // computeChatFloorSeq call never prunes rows the user is looking at. A
+  // `null` floor (empty transcript / no seq-bearing row visible) clears the
+  // entry rather than writing null, so `?? null` downstream reads plainly.
+  // See change: bounded-hot-transcript-state.
+  const handleVisibleFloorSeqChange = useCallback((seq: number | null) => {
+    if (!selectedId) return;
+    if (seq == null) {
+      viewportFloorRef.current.delete(selectedId);
+    } else {
+      viewportFloorRef.current.set(selectedId, seq);
+    }
+  }, [selectedId]);
+
+  // Stash the latest ChatView renderRows derivation ms per session so the
+  // hot-window reporter can read it. Scalar number only, no content.
+  // See change: hot-window-metrics.
+  const handleDerivationTiming = useCallback((sessionId: string | null, ms: number) => {
+    if (sessionId) derivationTimingRef.current.set(sessionId, ms);
+  }, []);
+
+  // While the user reads older history, lift the ledger retention cap so
+  // Load-older is not ceilinged by the base 6 MiB budget; flush back to the
+  // base ceiling when they return to the live tail. Edge-driven by ChatView.
+  // See change: dynamic-retention-while-reading.
+  const handleReadingHistoryChange = useCallback((reading: boolean) => {
+    if (!selectedId) return;
+    // Returning to the live tail ends any expand-in-place session (issue #77):
+    // drop the transient tool-floor pin + stop target so the normal flush can
+    // re-prune the expanded range back down. Expand is a reading-mode state.
+    if (!reading) {
+      expandFloorRef.current.delete(selectedId);
+      expandTargetRef.current.delete(selectedId);
+    }
+    replayController.setRetentionCap(
+      selectedId,
+      reading ? Number.POSITIVE_INFINITY : DEFAULT_REPLAY_RETENTION_BYTES,
+    );
+  }, [selectedId, replayController]);
+
+  // Issue #77: expand a clicked evicted tool-burst marker back into the
+  // transcript in place. Interior ranges (`fromSeq >= ledger.minSeq`) still
+  // have their raw events resident, so re-materializing locally needs NO server
+  // request; below-floor ranges (raw events byte-trimmed) drive the existing
+  // contiguous older-paging loop down to `fromSeq` as a stop target. Either way
+  // the tool floor is pinned so the range survives the next live-event evict,
+  // and the retention cap is lifted so a later flush cannot trim it.
+  // See change: load-older-seq-range-paging.
+  const handleExpandEvictedBurst = useCallback((burst: EvictedToolBurst) => {
+    const sid = selectedId;
+    if (!sid) return;
+    const minSeq = replayController.ledger(sid).minSeq;
+    expandFloorRef.current.set(sid, Math.min(expandFloorRef.current.get(sid) ?? Number.POSITIVE_INFINITY, burst.fromSeq));
+    handleReadingHistoryChange(true);
+    if (classifyExpand(burst, minSeq) === "interior") {
+      // Raw events resident: re-materialize locally, no server request, no
+      // ledger admission — the single-contiguous-island gate is never touched.
+      replayController.rematerialize(sid);
+      requestAnimationFrame(() => chatViewRef.current?.scrollToSeq(burst.fromSeq));
+      return;
+    }
+    // Below-floor: set the stop target and kick the contiguous older loop; the
+    // driver effect below advances it and scrolls on arrival.
+    expandTargetRef.current.set(sid, burst.fromSeq);
+    if (!loadingOlderMap.get(sid) && historyWindowRef.current.get(sid)?.hasMoreOlder) {
+      beginOlderPage(sid, crypto.randomUUID());
+    }
+  }, [selectedId, replayController, handleReadingHistoryChange, loadingOlderMap, beginOlderPage]);
+
+  // Issue #77 below-floor driver: advance the contiguous older-paging loop
+  // toward a pending expand stop target. Each `older` completion lowers the
+  // ledger min; when it reaches the marker's `fromSeq` the range is resident —
+  // scroll to it and clear the target. If paging hits the session head before
+  // reaching the target (`!hasMoreOlder`), terminate gracefully by scrolling to
+  // the lowest reached row (R6). `loadingOlder` is the shared concurrency gate,
+  // so a concurrent ChatView scroll cannot double-fire.
+  useEffect(() => {
+    const sid = selectedId;
+    if (!sid) return;
+    const target = expandTargetRef.current.get(sid);
+    if (target == null) return;
+    const minSeq = replayController.ledger(sid).minSeq;
+    if (reachedExpandTarget(minSeq, target)) {
+      expandTargetRef.current.delete(sid);
+      requestAnimationFrame(() => chatViewRef.current?.scrollToSeq(target));
+      return;
+    }
+    if (loadingOlderMap.get(sid)) return;
+    if (historyWindowRef.current.get(sid)?.hasMoreOlder) {
+      beginOlderPage(sid, crypto.randomUUID());
+    } else {
+      // Reached the session head without covering the whole range: expand as far
+      // as it goes and stop (no hang).
+      expandTargetRef.current.delete(sid);
+      requestAnimationFrame(() => chatViewRef.current?.scrollToSeq(minSeq));
+    }
+  }, [selectedId, historyWindowMap, sessionStates, loadingOlderMap, replayController, beginOlderPage]);
 
   // Explicit user hard-refresh: discard the rendered tail and cold-rebuild.
   const refreshSelectedSession = useCallback(() => {
@@ -1004,6 +1183,8 @@ export default function App() {
     subscribedRef.current.add(selectedId);
     replayPersistersRef.current.get(selectedId)?.persister.dispose();
     replayPersistersRef.current.delete(selectedId);
+    derivationTimingRef.current.delete(selectedId);
+    hydrationStateRef.current.delete(selectedId);
     clearSessionEvents(selectedId);
     beginReplay(selectedId, "cold", sourceGenerationRef.current.get(selectedId) ?? "", undefined, "cache_miss");
   }, [selectedId, beginReplay]);
@@ -1028,6 +1209,19 @@ export default function App() {
   // tool-result route. Session-scoped (survives transcript virtualization).
   // See change: fix-stuck-tool-card-on-dropped-event.
   useStaleToolReconcile(sessionStates, setSessionStates, apiBase);
+
+  // Rate-limited, payload-free hot-window observability report over the
+  // existing socket (sizes/counts only — see `HotWindowReport`).
+  // See change: bounded-hot-transcript-state.
+  useHotWindowMetricsReporter({
+    sessionStates,
+    send,
+    replayController,
+    connected: status === "connected",
+    replayPersisters: replayPersistersRef.current,
+    hydrationState: hydrationStateRef.current,
+    derivationTiming: derivationTimingRef.current,
+  });
 
   // Fetch the gitWorktreeEnabled preference on mount.
   // See change: openspec-worktree-spawn-button.
@@ -1208,6 +1402,9 @@ export default function App() {
         if (!r || abort.signal.aborted || r.sourceGeneration !== source || !authority.isCurrent()) return;
         const ledger = replayController.ledger(sid);
         if (ledger.events.length > 0 || !replayController.seedCached(sid, source, r.events)) return;
+        // Cache actually seeded — override the provisional "stream" recorded by
+        // the cold beginReplay above. See change: hot-window-metrics.
+        hydrationStateRef.current.set(sid, { source: "cache" });
         const stateAtAdmission = sessionStatesRef.current.get(sid);
         const existing = replayPersistersRef.current.get(sid);
         const persister = existing?.scope.serverEpoch === serverEpoch && existing.scope.sourceGeneration === source
@@ -1960,7 +2157,11 @@ export default function App() {
               replayGeneration={selectedId ? replayGenerationMap.get(selectedId) ?? 0 : 0}
               completedOlderAnchorToken={selectedId ? completedOlderAnchorMap.get(selectedId) ?? null : null}
               onLoadOlder={selectedId && (!isMobile || mobileDetailVisible) ? handleLoadOlder : undefined}
+              onExpandEvictedBurst={selectedId && (!isMobile || mobileDetailVisible) ? handleExpandEvictedBurst : undefined}
               onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined}
+              onVisibleFloorSeqChange={handleVisibleFloorSeqChange}
+              onReadingHistoryChange={handleReadingHistoryChange}
+              onDerivationTiming={handleDerivationTiming}
             />
             </SessionAssetsProvider>
           </ErrorBoundary>

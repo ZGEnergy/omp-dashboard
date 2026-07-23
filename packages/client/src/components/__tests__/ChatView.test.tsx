@@ -1,7 +1,7 @@
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { act, fireEvent, render } from "@testing-library/react";
 import React from "react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ChatMessage, createInitialState, type PendingPrompt } from "../../lib/event-reducer.js";
 import { ChatView } from "../ChatView.js";
 import { ThemeProvider } from "../ThemeProvider.js";
@@ -372,11 +372,28 @@ describe("ChatView", () => {
 
   // See change: show-chat-history-loading-indicator.
   describe("history loading 3-way empty state", () => {
-    it("renders skeleton bubbles (not the placeholder) when loadingHistory and empty", () => {
+    // Task 2.2 (bounded-hot-transcript-state): the skeleton is gated behind
+    // useDelayedSkeleton's ~150ms threshold — a fresh loadingHistory=true
+    // must NOT paint the skeleton immediately.
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it("shows nothing (calm blank load state) immediately when loadingHistory flips true", () => {
       const state = createInitialState();
       const { container } = render(
         <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} loadingHistory={true} /></ThemeProvider>,
       );
+      expect(container.querySelector("[data-testid='chat-history-skeleton']")).toBeNull();
+      expect(container.textContent).not.toContain("No messages yet");
+      expect(container.textContent).not.toContain("Loading conversation…");
+    });
+
+    it("renders skeleton bubbles (not the placeholder) once loadingHistory has stayed true past the threshold", () => {
+      const state = createInitialState();
+      const { container } = render(
+        <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} loadingHistory={true} /></ThemeProvider>,
+      );
+      act(() => { vi.advanceTimersByTime(150); });
       // Content-layout load -> bubble skeletons, not a centered spinner.
       // See change: extend-client-utils-state-feedback-primitives.
       const skeleton = container.querySelector("[data-testid='chat-history-skeleton']");
@@ -384,6 +401,23 @@ describe("ChatView", () => {
       expect(skeleton?.getAttribute("aria-label")).toContain("Loading conversation…");
       expect(container.querySelector("[data-skeleton='bubble']")).not.toBeNull();
       expect(container.textContent).not.toContain("No messages yet");
+    });
+
+    it("never shows the skeleton for a cache-hit that resolves before the threshold (single stable paint)", () => {
+      const state = createInitialState();
+      const { container, rerender } = render(
+        <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} loadingHistory={true} /></ThemeProvider>,
+      );
+      act(() => { vi.advanceTimersByTime(100); });
+      expect(container.querySelector("[data-testid='chat-history-skeleton']")).toBeNull();
+      // Cache hit resolves: history stops loading and messages land in the same tick.
+      const resolved = stateWithMessages([{ id: "1", role: "user", content: "hi" }]);
+      rerender(
+        <ThemeProvider><ChatView state={resolved} toolContext={defaultToolContext} loadingHistory={false} /></ThemeProvider>,
+      );
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(container.querySelector("[data-testid='chat-history-skeleton']")).toBeNull();
+      expect(container.querySelector('button[title="Copy as Markdown"]')).not.toBeNull();
     });
 
     it("renders 'No messages yet' when not loading and empty (existing behavior)", () => {
@@ -771,5 +805,133 @@ describe("advisor transcript rows", () => {
       <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
     );
     expect(getByRole("button", { name: /scout.*concern/i })).not.toBeNull();
+  });
+});
+
+// Task 1.7 (change: bounded-hot-transcript-state).
+describe("evicted tool-burst markers", () => {
+  it("renders a collapsed marker with count and seq range for each evicted burst", () => {
+    const state = createInitialState();
+    state.messages.push({ id: "1", role: "user", content: "hi", timestamp: Date.now(), seq: 100 });
+    state.evictedToolBursts = [{ fromSeq: 10, toSeq: 42, count: 7 }];
+
+    const { container } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
+    );
+    const markers = container.querySelectorAll('[data-testid="evicted-tool-burst-marker"]');
+    expect(markers.length).toBe(1);
+    expect(markers[0]!.textContent).toContain("7");
+    expect(markers[0]!.textContent).toContain("10");
+    expect(markers[0]!.textContent).toContain("42");
+  });
+
+  it("renders nothing when there are no evicted bursts", () => {
+    const state = createInitialState();
+    state.messages.push({ id: "1", role: "user", content: "hi", timestamp: Date.now() });
+
+    const { container } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
+    );
+    expect(container.querySelector('[data-testid="evicted-tool-burst-marker"]')).toBeNull();
+  });
+
+  it("renders multiple markers ordered by fromSeq ascending", () => {
+    const state = createInitialState();
+    state.messages.push({ id: "1", role: "user", content: "hi", timestamp: Date.now(), seq: 100 });
+    state.evictedToolBursts = [
+      { fromSeq: 50, toSeq: 60, count: 3 },
+      { fromSeq: 10, toSeq: 20, count: 2 },
+    ];
+
+    const { container } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
+    );
+    const markers = container.querySelectorAll('[data-testid="evicted-tool-burst-marker"]');
+    expect(markers.length).toBe(2);
+    expect(markers[0]!.textContent).toContain("10");
+    expect(markers[1]!.textContent).toContain("50");
+  });
+
+  // Issue #77: markers become interactive when a handler is wired.
+  it("renders the marker as a button and fires the burst on click when onExpandEvictedBurst is set", () => {
+    const state = createInitialState();
+    state.messages.push({ id: "1", role: "user", content: "hi", timestamp: Date.now(), seq: 100 });
+    state.evictedToolBursts = [{ fromSeq: 10, toSeq: 42, count: 7 }];
+    const onExpandEvictedBurst = vi.fn();
+
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView state={state} toolContext={defaultToolContext} onExpandEvictedBurst={onExpandEvictedBurst} />
+      </ThemeProvider>,
+    );
+    const marker = container.querySelector('[data-testid="evicted-tool-burst-marker"]')!;
+    expect(marker.tagName).toBe("BUTTON");
+    fireEvent.click(marker);
+    expect(onExpandEvictedBurst).toHaveBeenCalledTimes(1);
+    expect(onExpandEvictedBurst).toHaveBeenCalledWith({ fromSeq: 10, toSeq: 42, count: 7 });
+  });
+
+  it("keeps the marker non-interactive when onExpandEvictedBurst is absent", () => {
+    const state = createInitialState();
+    state.messages.push({ id: "1", role: "user", content: "hi", timestamp: Date.now(), seq: 100 });
+    state.evictedToolBursts = [{ fromSeq: 10, toSeq: 42, count: 7 }];
+
+    const { container } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
+    );
+    const marker = container.querySelector('[data-testid="evicted-tool-burst-marker"]')!;
+    expect(marker.tagName).toBe("DIV");
+  });
+});
+
+// Task 1.7 (change: bounded-hot-transcript-state).
+describe("viewport-floor reporting", () => {
+  it("reports the lowest visible seq up to the caller", () => {
+    const state = createInitialState();
+    state.messages.push(
+      { id: "1", role: "user", content: "one", timestamp: Date.now(), seq: 5 },
+      { id: "2", role: "assistant", content: "two", timestamp: Date.now(), seq: 6 },
+    );
+    const onVisibleFloorSeqChange = vi.fn();
+    render(
+      <ThemeProvider>
+        <ChatView state={state} toolContext={defaultToolContext} onVisibleFloorSeqChange={onVisibleFloorSeqChange} />
+      </ThemeProvider>,
+    );
+    expect(onVisibleFloorSeqChange).toHaveBeenCalled();
+    const calls = onVisibleFloorSeqChange.mock.calls.map((c) => c[0]);
+    expect(calls.at(-1)).toBe(5);
+  });
+
+  it("reports null when the transcript is empty", () => {
+    const state = createInitialState();
+    const onVisibleFloorSeqChange = vi.fn();
+    render(
+      <ThemeProvider>
+        <ChatView state={state} toolContext={defaultToolContext} onVisibleFloorSeqChange={onVisibleFloorSeqChange} />
+      </ThemeProvider>,
+    );
+    expect(onVisibleFloorSeqChange).toHaveBeenCalledWith(null);
+  });
+});
+
+// See change: hot-window-metrics.
+describe("renderRows derivation timing", () => {
+  it("reports (sessionId, ms) with a finite non-negative ms for a non-empty transcript", () => {
+    const state = stateWithMessages([
+      { id: "1", role: "user", content: "one" },
+      { id: "2", role: "assistant", content: "two" },
+    ]);
+    const onDerivationTiming = vi.fn();
+    render(
+      <ThemeProvider>
+        <ChatView sessionId="s1" state={state} toolContext={defaultToolContext} onDerivationTiming={onDerivationTiming} />
+      </ThemeProvider>,
+    );
+    expect(onDerivationTiming).toHaveBeenCalled();
+    const [sid, ms] = onDerivationTiming.mock.calls.at(-1)!;
+    expect(sid).toBe("s1");
+    expect(Number.isFinite(ms)).toBe(true);
+    expect(ms).toBeGreaterThanOrEqual(0);
   });
 });

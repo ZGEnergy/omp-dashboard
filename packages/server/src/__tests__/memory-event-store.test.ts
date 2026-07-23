@@ -188,14 +188,14 @@ describe("memory-event-store", () => {
       expect(val).toContain("truncated");
     });
 
-    it("skill invocation envelope survives string truncation with closing tag intact", () => {
-      // Regression: /skill:<name> expands to a <skill ...>body</skill> envelope
-      // whose body routinely exceeds the 4KB string cap. Naive mid-string
-      // truncation destroyed the closing </skill> tag, so the client's
-      // parseSkillBlock returned null and the message rendered as raw
-      // pseudo-HTML (invisible). The truncator must cap the BODY but keep the
-      // envelope well-formed. See change: bound-subagent-event-serialization
-      // (skill regression fix).
+    it("skill invocation envelope in user text is retained whole (Task 4.2: user text never capped)", () => {
+      // Originally a regression test for capString's skill-envelope-aware
+      // truncation (mid-string truncation destroyed the closing </skill> tag).
+      // Task 4.2 makes the hard invariant unconditional: user message text is
+      // NEVER capped or dropped, so this envelope now survives whole rather
+      // than being body-capped. See change: bound-subagent-event-serialization
+      // (skill regression fix); superseded by the message-content preservation
+      // invariant (issue #48 Slice 4, Task 4.2).
       const store = createMemoryEventStore(neverPinned); // production defaults
       const bigBody = "Diagnose failed CI runs. ".repeat(2000); // ~50KB body
       const envelope = `<skill name="ci-troubleshoot" location="/u/.pi/skills/ci-troubleshoot/SKILL.md">\n${bigBody}\n</skill>\n\nplease check run 42`;
@@ -208,11 +208,33 @@ describe("memory-event-store", () => {
       const stored = store.getEvent("s1", 1) as any;
       expect(stored.data.__truncated).toBeUndefined();
       const content = stored.data.message.content as string;
-      // Envelope must stay parseable: header, closing tag, and args intact.
-      expect(content).toMatch(/^<skill name="ci-troubleshoot" location="[^"]+">\n/);
-      expect(content).toMatch(/\n<\/skill>\n\nplease check run 42$/);
-      // Body must actually be truncated (bounded).
-      expect(content.length).toBeLessThan(10_000);
+      // Envelope stays intact (whole), never truncated.
+      expect(content).toBe(envelope);
+    });
+
+    it("skill invocation envelope in tool output (non-protected context) is body-capped, head/tail preserved", () => {
+      // Regression coverage: this branch of capString lost its only test when the
+      // user-text-capping test above was inverted (user text is now never capped, so
+      // that path no longer exercises the envelope-aware capping). Tool output strings
+      // are still capped, so a skill envelope arriving as a tool_execution_end `result`
+      // must still have its `<skill ...>` head and `</skill>` tail preserved verbatim
+      // while the body is capped.
+      const store = createMemoryEventStore(neverPinned); // production defaults
+      const bigBody = "Diagnose failed CI runs. ".repeat(2000); // ~50KB body
+      const head = `<skill name="ci-troubleshoot" location="/u/.pi/skills/ci-troubleshoot/SKILL.md">\n`;
+      const envelope = `${head}${bigBody}\n</skill>`;
+      const event: DashboardEvent = {
+        eventType: "tool_execution_end",
+        timestamp: Date.now(),
+        data: { toolCallId: "t1", result: envelope },
+      };
+      store.insertEvent("s1", event);
+      const stored = store.getEvent("s1", 1) as any;
+      const result = stored.data.result as string;
+      expect(result.length).toBeLessThan(envelope.length);
+      expect(result.startsWith(head)).toBe(true);
+      expect(result.endsWith("</skill>")).toBe(true);
+      expect(result).toContain("truncated");
     });
 
     it("user message with a large pasted image survives the per-event size ceiling", () => {
@@ -343,13 +365,15 @@ describe("memory-event-store", () => {
         expect(entry.seq).toBe(index + 1);
       }
 
+      // Task 4.2: user text is protected the same way as assistant text — never
+      // capped or dropped (hard invariant, issue #48 Slice 4).
       const userStore = createMemoryEventStore(neverPinned);
       userStore.insertEvent("user", {
         eventType: "message_end",
         timestamp: 1,
         data: { message: { role: "user", content: [{ type: "text", text: longText }] } },
       });
-      expect((userStore.getEvent("user", 1) as any).data.message.content[0].text).toContain("…[truncated]");
+      expect((userStore.getEvent("user", 1) as any).data.message.content[0].text).toBe(longText);
     });
   });
 

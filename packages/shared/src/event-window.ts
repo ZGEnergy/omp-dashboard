@@ -1,8 +1,8 @@
 import { prepareEventForReplay, utf8ByteLength, type PrepareEventForReplayOptions } from "./prepare-event-for-replay.js";
 import type { DashboardEvent } from "./types.js";
 
-/** Default wire/IDB tail budget (~4 MiB). */
-export const DEFAULT_TAIL_WINDOW_BYTES = 4 * 1024 * 1024;
+/** Default wire/IDB tail budget (~1.5 MiB). */
+export const DEFAULT_TAIL_WINDOW_BYTES = 1.5 * 1024 * 1024;
 
 /** Server clamp for client-supplied windowBytes. */
 export const MIN_TAIL_WINDOW_BYTES = 256 * 1024;
@@ -103,31 +103,79 @@ function eventEnvelopeOverhead(seq: number): number {
   return envelopeWithNull - utf8ByteLength("null");
 }
 
+// A single event can never exceed one replay frame even when the selection
+// spans many frames; callers pass the frame budget so oversized events are
+// accounted (and truncated) at their delivered size, not their raw size.
+function computePerEventCap(budgetBytes: number, maxEventBytes?: number): number {
+  return maxEventBytes != null && Number.isFinite(maxEventBytes) && maxEventBytes > 0
+    ? Math.min(budgetBytes, Math.floor(maxEventBytes))
+    : budgetBytes;
+}
+
+// Prepare one entry against a fixed per-event cap. Preparation is per-event
+// independent (its only inputs are the event, the constant cap, and the seq
+// overhead), so preparing an entry inside a suffix yields the byte-identical
+// result it would have inside the full source — this is what lets the window
+// selector prepare only the chosen suffix instead of the whole source.
+function prepareSingleEntry(
+  entry: SeqEvent<DashboardEvent>,
+  perEventCap: number,
+  options: EventWindowPreparationOptions,
+): { prepared: SeqEvent<DashboardEvent>; truncated: boolean } {
+  const maxEventBytes = Math.max(1, perEventCap - eventEnvelopeOverhead(entry.seq));
+  const prepared = prepareEventForReplay(entry.event, {
+    maxEventBytes,
+    maxTextBytes: maxEventBytes,
+    registerInlineAsset: options.registerInlineAsset,
+  });
+  const truncated = prepared.issues.some((issue) => issue.code === "event_truncated");
+  return { prepared: { seq: entry.seq, event: prepared.event }, truncated };
+}
+
 function prepareEntries(
   eventsAsc: readonly SeqEvent<DashboardEvent>[],
   budgetBytes: number,
   options: EventWindowPreparationOptions = {},
 ): { events: SeqEvent<DashboardEvent>[]; truncatedSeqs: Set<number> } {
-  // A single event can never exceed one replay frame even when the selection
-  // spans many frames; callers pass the frame budget so oversized events are
-  // accounted (and truncated) at their delivered size, not their raw size.
-  const perEventCap = options.maxEventBytes != null && Number.isFinite(options.maxEventBytes) && options.maxEventBytes > 0
-    ? Math.min(budgetBytes, Math.floor(options.maxEventBytes))
-    : budgetBytes;
+  const perEventCap = computePerEventCap(budgetBytes, options.maxEventBytes);
   const truncatedSeqs = new Set<number>();
   const events = eventsAsc.map((entry) => {
-    const maxEventBytes = Math.max(1, perEventCap - eventEnvelopeOverhead(entry.seq));
-    const prepared = prepareEventForReplay(entry.event, {
-      maxEventBytes,
-      maxTextBytes: maxEventBytes,
-      registerInlineAsset: options.registerInlineAsset,
-    });
-    if (prepared.issues.some((issue) => issue.code === "event_truncated")) {
-      truncatedSeqs.add(entry.seq);
-    }
-    return { seq: entry.seq, event: prepared.event };
+    const { prepared, truncated } = prepareSingleEntry(entry, perEventCap, options);
+    if (truncated) truncatedSeqs.add(entry.seq);
+    return prepared;
   });
   return { events, truncatedSeqs };
+}
+
+function sumSeqEventBytes(
+  entries: readonly SeqEvent<DashboardEvent>[],
+  from: number,
+  to: number,
+): number {
+  let total = 0;
+  for (let index = from; index < to; index += 1) {
+    total += estimateSeqEventBytes(entries[index]!);
+  }
+  return total;
+}
+
+// Does a user-turn boundary survive preparation somewhere strictly before the
+// bounded suffix? Turn-start-ness is decided on *prepared* events (an oversized
+// `message_start` can be wiped by the per-event cap), so raw `message_start`
+// user entries are only candidates — each is prepared and re-checked, newest
+// first, stopping at the first survivor. Raw scanning is O(source) but cheap;
+// preparation runs only on candidates until one survives, so it stays bounded.
+function hasPreparedTurnStartBelow(
+  source: readonly SeqEvent<DashboardEvent>[],
+  suffixStart: number,
+  perEventCap: number,
+): boolean {
+  for (let index = suffixStart - 1; index >= 0; index -= 1) {
+    if (!isUserTurnStart(source[index]!)) continue;
+    const { prepared } = prepareSingleEntry(source[index]!, perEventCap, {});
+    if (isUserTurnStart(prepared)) return true;
+  }
+  return false;
 }
 
 function emptyWindow<T>(): EventWindowResult<T> {
@@ -159,21 +207,6 @@ function resultFromSelection<T>(
     windowMaxSeq: selected.at(-1)?.seq ?? null,
     bytes,
   };
-}
-
-function selectBoundedSuffix(
-  source: readonly SeqEvent<DashboardEvent>[],
-  budget: number,
-): { start: number; events: SeqEvent<DashboardEvent>[]; bytes: number } {
-  let start = source.length;
-  let bytes = 0;
-  for (let index = source.length - 1; index >= 0; index -= 1) {
-    const size = estimateSeqEventBytes(source[index]!);
-    if (bytes + size > budget) break;
-    start = index;
-    bytes += size;
-  }
-  return { start, events: source.slice(start), bytes };
 }
 
 function selectionContainsTruncation(
@@ -274,53 +307,68 @@ export function selectNewestEventsByBudget(
   if (source === null) return malformedWindow();
   if (source.length === 0) return emptyWindow();
 
-  const prepared = prepareEntries(source, budget);
-  const turnStarts: number[] = [];
-  for (let index = 0; index < prepared.events.length; index += 1) {
-    if (isUserTurnStart(prepared.events[index]!)) turnStarts.push(index);
+  const perEventCap = computePerEventCap(budget, options.maxEventBytes);
+
+  // Window BEFORE preparing: prepare only the newest bounded suffix, walking
+  // from the tail until adding one more prepared event would exceed the budget.
+  // This is exactly the bounded contiguous suffix a full-source prepare +
+  // `selectBoundedSuffix` would yield, but preparation is O(window), not
+  // O(source). The whole selection (including turn extension) always fits the
+  // budget, so every event it can pick lives inside this suffix.
+  const truncatedSeqs = new Set<number>();
+  const suffixDescending: SeqEvent<DashboardEvent>[] = [];
+  let suffixStart = source.length;
+  let suffixBytes = 0;
+  for (let index = source.length - 1; index >= 0; index -= 1) {
+    const { prepared, truncated } = prepareSingleEntry(source[index]!, perEventCap, {});
+    const size = estimateSeqEventBytes(prepared);
+    if (suffixBytes + size > budget) break;
+    if (truncated) truncatedSeqs.add(prepared.seq);
+    suffixStart = index;
+    suffixBytes += size;
+    suffixDescending.push(prepared);
+  }
+  const suffix = suffixDescending.slice().reverse();
+
+  // Turn starts detected on the PREPARED suffix (absolute source indices).
+  const turnStartsAbs: number[] = [];
+  for (let position = 0; position < suffix.length; position += 1) {
+    if (isUserTurnStart(suffix[position]!)) turnStartsAbs.push(suffixStart + position);
   }
 
-  if (turnStarts.length === 0) {
-    const suffix = selectBoundedSuffix(prepared.events, budget);
-    return finalizeSelectedEntries(source, suffix.events, suffix.bytes, false, budget, options)
+  // No user-turn boundary inside the budget window. The bounded suffix is the
+  // result; `partialHead` distinguishes "an older user turn exists off-window"
+  // (the newest turn is farther back than the budget — original
+  // `selectedBytes > budget` branch → true) from "no user turn exists at all"
+  // (original `turnStarts.length === 0` branch → false).
+  if (turnStartsAbs.length === 0) {
+    const partialHead = hasPreparedTurnStartBelow(source, suffixStart, perEventCap);
+    return finalizeSelectedEntries(source, suffix, suffixBytes, partialHead, budget, options);
   }
 
-  let selectedStart = turnStarts.at(-1)!;
-  let selectedBytes = 0;
-  for (let index = selectedStart; index < prepared.events.length; index += 1) {
-    selectedBytes += estimateSeqEventBytes(prepared.events[index]!);
-  }
-
-  if (selectedBytes > budget) {
-    const suffix = selectBoundedSuffix(prepared.events.slice(selectedStart), budget);
-    const absoluteStart = selectedStart + suffix.start;
-    return finalizeSelectedEntries(
-      source,
-      suffix.events,
-      suffix.bytes,
-      absoluteStart !== selectedStart || selectionContainsTruncation(suffix.events, prepared.truncatedSeqs),
-      budget,
-      options,
+  // A user-turn boundary lives inside the bounded suffix, so its bytes fit the
+  // budget: always extend turn-by-turn toward older complete turns while they
+  // fit. Positions are relative to the suffix (absoluteIndex - suffixStart).
+  let selectedStart = turnStartsAbs.at(-1)!;
+  let selectedBytes = sumSeqEventBytes(suffix, selectedStart - suffixStart, suffix.length);
+  for (let turn = turnStartsAbs.length - 2; turn >= 0; turn -= 1) {
+    const candidateStart = turnStartsAbs[turn]!;
+    const candidateBytes = sumSeqEventBytes(
+      suffix,
+      candidateStart - suffixStart,
+      selectedStart - suffixStart,
     );
-  }
-
-  for (let turn = turnStarts.length - 2; turn >= 0; turn -= 1) {
-    const candidateStart = turnStarts[turn]!;
-    let candidateBytes = 0;
-    for (let index = candidateStart; index < selectedStart; index += 1) {
-      candidateBytes += estimateSeqEventBytes(prepared.events[index]!);
-    }
     if (selectedBytes + candidateBytes > budget) break;
     selectedStart = candidateStart;
     selectedBytes += candidateBytes;
   }
 
-  const selected = prepared.events.slice(selectedStart);
+  const selected = suffix.slice(selectedStart - suffixStart);
   return finalizeSelectedEntries(
     source,
     selected,
     selectedBytes,
-    selectionContainsTruncation(selected, prepared.truncatedSeqs),
+    selectionContainsTruncation(selected, truncatedSeqs),
     budget,
     options,
   );

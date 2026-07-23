@@ -1655,9 +1655,21 @@ export interface ReplayDiagnosticMessage {
   scrollOwner?: string;
 }
 
+/**
+ * Browser → server: rate-limited, payload-free report of the client's
+ * bounded hot-window sizes (ledger/persister/reducer/detail-pane byte and
+ * count metrics). Carries no transcript content — see `HotWindowReport`.
+ * See change: bounded-hot-transcript-state.
+ */
+export interface HotWindowReportMessage {
+  type: "hot_window_report";
+  report: import("./hot-window-metrics.js").HotWindowReport;
+}
+
 export type BrowserToServerMessage =
   | SubscribeMessage
   | ReplayDiagnosticMessage
+  | HotWindowReportMessage
   | UnsubscribeMessage
   | BrowserExtensionUiResponseMessage
   | SendPromptToBrowserMessage

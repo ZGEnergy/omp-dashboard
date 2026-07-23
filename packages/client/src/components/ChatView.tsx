@@ -6,19 +6,20 @@ import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/inp
 import { mdiCheck, mdiChevronDown, mdiChevronUp, mdiClose, mdiContentCopy, mdiLoading, mdiSourceFork, mdiTextBox } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useActiveChatSelection } from "../hooks/useActiveChatSelection.js";
 import { isDebugTool } from "../hooks/useDebugToolsVisible.js";
+import { useDelayedSkeleton } from "../hooks/useDelayedSkeleton.js";
 import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
 import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import { useMobile } from "../hooks/useMobile.js";
 import { buildSelectionClipboardText } from "../lib/chat-selection-copy.js";
-import { buildTurnToFirstRowIndex, computeRowTextChars, estimateVirtualRowSize, extendRangeWithSelection, isBurst, isGroup, rangeToRowIndexSpan, type SelectionRowSpan, virtualRowKey } from "../lib/chat-virtual-rows.js";
+import { buildTurnToFirstRowIndex, computeRowTextChars, type DisplayRow, estimateVirtualRowSize, extendRangeWithSelection, interleaveEvictedBursts, isBurst, isEvictedBurst, isGroup, lowestVisibleSeq, rangeToRowIndexSpan, rowSeq, type SelectionRowSpan, virtualRowKey } from "../lib/chat-virtual-rows.js";
 import { findActiveInteractiveToolResultIds, findRetriedErrorIds, findSurfaceSuppressedErrorIds } from "../lib/collapse-retried-errors.js";
 // RetryBanner + ErrorBanner replaced by the unified SessionBanner mounted
 // in App.tsx (sticky above the command input). See change:
 // unify-status-banner-and-terminal-limit-stop.
-import type { ChatImage, InteractiveUiRequest, SessionState } from "../lib/event-reducer.js";
+import type { ChatImage, EvictedToolBurst, InteractiveUiRequest, SessionState } from "../lib/event-reducer.js";
 import { formatMessageTime } from "../lib/format.js";
 import { type BurstItem, groupToolBursts, type ToolBurstGroup as ToolBurstGroupData } from "../lib/group-tool-bursts.js";
 import type { ToolCallGroup } from "../lib/group-tool-calls.js";
@@ -119,8 +120,42 @@ interface Props {
    * across retries and returns it only with the matching terminal.
    */
   onLoadOlder?: (anchorToken: string) => void;
+  /**
+   * Expand a clicked `EvictedToolBurst` marker back into the transcript in
+   * place. Interior ranges (raw events still resident) re-materialize locally
+   * with no server request; below-floor ranges drive the contiguous
+   * older-paging loop to the marker's `fromSeq`. See change:
+   * load-older-seq-range-paging (issue #77). Omitted → markers stay
+   * non-interactive.
+   */
+  onExpandEvictedBurst?: (burst: EvictedToolBurst) => void;
   /** Anchor token returned by the matching older terminal. */
   completedOlderAnchorToken?: string | null;
+  /**
+   * Reports the lowest `seq` currently visible in the virtualized viewport
+   * (or `null` when no visible row carries a `seq`, e.g. an empty transcript).
+   * The caller (App.tsx) writes this into `viewportFloorRef` so `evictBelow`
+   * never prunes rows the user is currently looking at. Fired on every
+   * virtualizer range change; cheap — callers should just store the value.
+   * See change: bounded-hot-transcript-state.
+   */
+  onVisibleFloorSeqChange?: (seq: number | null) => void;
+  /**
+   * Fires on the transition between the live tail and reading older history:
+   * `true` when the viewport leaves the live bottom (the user scrolls up to
+   * read older messages), `false` when it returns to the bottom. App.tsx lifts
+   * the ledger retention cap while reading so Load-older is not ceilinged, and
+   * flushes it back to the base ceiling on return. Edge-triggered — fired only
+   * on change, not every scroll. See change: dynamic-retention-while-reading.
+   */
+  onReadingHistoryChange?: (reading: boolean) => void;
+  /**
+   * Reports the wall-clock ms of the `renderRows` derivation (the virtualized
+   * row-list assembly this component owns) after each rebuild. An approximation
+   * of the render-derivation cost — a scalar millisecond number, never content.
+   * Feeds `HotWindowReport.derivationMs`. See change: hot-window-metrics.
+   */
+  onDerivationTiming?: (sessionId: string | null, ms: number) => void;
 }
 
 function ImageAttachments({
@@ -246,6 +281,50 @@ function hasMermaid(content: string): boolean {
   return /```mermaid\b/.test(content);
 }
 
+/**
+ * Collapsed marker for a single evicted contiguous tool-tier run (`state.
+ * evictedToolBursts`, produced by `evictBelow`'s two-tier prune). Interleaved
+ * into `renderRows` at its seq position (see `interleaveEvictedBursts`) — NOT
+ * unconditionally at the top: `evictBelow` prunes the tool and chat tiers
+ * against independent floors, so a tool-heavy few-turn session can evict a
+ * tool run that sits BELOW some still-retained chat-tier rows. Rendered
+ * informationally — click-to-page (loading the evicted seq range back in) is
+ * NOT wired here; it would need new plumbing beyond the existing whole-page
+ * `onLoadOlder` affordance, deferred as a follow-up (see Task 1.7 report).
+ * Visual language borrowed from `ToolBurstGroup`'s frame (border-l-2 pl-3,
+ * muted text) for consistency, without its interactive chrome.
+ * See change: bounded-hot-transcript-state.
+ */
+function EvictedToolBurstMarkerRow({ burst, isMobile, onExpand }: { burst: EvictedToolBurst; isMobile: boolean; onExpand?: () => void }) {
+  const label = i18nT(
+    "chat.evictedToolBurst",
+    { count: burst.count, from: burst.fromSeq, to: burst.toSeq },
+    "{count} tool calls collapsed (#{from}–#{to})",
+  );
+  const frame = `${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3 py-1 text-xs text-[var(--text-tertiary)]`;
+  // Clickable when a handler is wired (issue #77): expand the evicted run back
+  // into the transcript in place. Non-interactive fallback stays a <div>.
+  if (onExpand) {
+    return (
+      <button
+        type="button"
+        data-testid="evicted-tool-burst-marker"
+        aria-label={label}
+        title={label}
+        onClick={onExpand}
+        className={`${frame} block w-full text-left cursor-pointer hover:text-[var(--text-secondary)]`}
+      >
+        {label}
+      </button>
+    );
+  }
+  return (
+    <div data-testid="evicted-tool-burst-marker" className={frame}>
+      {label}
+    </div>
+  );
+}
+
 const SCROLL_THRESHOLD = 50;
 
 type ScrollOwner =
@@ -288,9 +367,16 @@ const scrollStateMap = new Map<string, { anchorRowId: string | null; offset: num
 
 export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
+  /**
+   * Scroll the first display row whose `seq >= seq` to the top of the
+   * viewport. Used after an evicted-burst expansion (issue #77) to bring the
+   * newly-materialized range into view. No-op when no row reaches `seq`.
+   */
+  scrollToSeq: (seq: number) => void;
 }
 
-const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, onExpandEvictedBurst, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange, onReadingHistoryChange, onDerivationTiming }, ref) {
+
   const scrollRef = useRef<HTMLDivElement>(null);
   // Desktop retains its saved anchor; mobile ownership is explicit below.
   // These refs were accidentally removed by an interrupted migration and are
@@ -300,6 +386,15 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   const ascendingRef = useRef(false);
   const loadingHistoryRef = useRef(!!loadingHistory);
   const escapedDuringHydrateRef = useRef(false);
+  // Task 2.2: the cold-start skeleton only earns its paint once the read
+  // (cache or network) has genuinely run past a short threshold. A fast
+  // cache hit resolves `loadingHistory` before the timer fires, so it never
+  // renders — one stable paint, no intermediate loading flash. See change:
+  // bounded-hot-transcript-state.
+  // ChatView is reused (not remounted) across session switches, so the
+  // window must re-arm on sessionId change — otherwise a still-loading
+  // session B inherits session A's partially-elapsed or already-fired timer.
+  const showSkeleton = useDelayedSkeleton(!!loadingHistory, sessionId ?? undefined);
   // One owner decides every transcript write. User input moves ownership to
   // READING_HISTORY synchronously; stale authority/command frames are inert.
   const scrollOwnerRef = useRef<ScrollOwner>(loadingHistory ? "HYDRATING" : mobileActive && state.messages.length > 0 ? "NAVIGATING_BOTTOM" : "FOLLOWING");
@@ -469,9 +564,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   );
 
   // Prefs-gated / suppressed rows (the render's ~7 `return null` sites) are
-  // filtered OUT here so the virtualizer's `count === displayRows.length` and
+  // filtered OUT here so the virtualizer's `count === renderRows.length` and
   // no index reserves empty spacer space (CR-5). getItemKey, the turn map, and
-  // per-session persistence all key off displayRows.
+  // per-session persistence all key off `renderRows` (displayRows with
+  // evicted-tool-burst markers interleaved in).
   const isRowVisible = useCallback(
     (item: BurstItem): boolean => {
       if (isBurst(item) || isGroup(item)) return true;
@@ -523,18 +619,36 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     }
     return rows;
   }, [groupedMessages, isRowVisible, frozenTailText, state.streamingText]);
-  // Precompute each row's aggregate rendered text length ONCE per displayRows
+  // Interleave evicted-tool-burst markers at their seq position among the
+  // surviving rows (NOT unconditionally at the top — see
+  // `interleaveEvictedBursts`). This IS the virtualized row list from here
+  // down: count/estimateSize/getItemKey/turn-map/viewport-floor all key off
+  // `renderRows`, not the pre-interleave `displayRows`.
+  // See change: bounded-hot-transcript-state (blocking-fix follow-up).
+  // Time the row-assembly derivation (approximation of the render-derivation
+  // cost, not full end-to-end). Scalar ms only — emitted after commit below.
+  const derivationMsRef = useRef(0);
+  const renderRows = useMemo(
+    () => {
+      const t0 = performance.now();
+      const rows = interleaveEvictedBursts(displayRows, state.evictedToolBursts);
+      derivationMsRef.current = performance.now() - t0;
+      return rows;
+    },
+    [displayRows, state.evictedToolBursts],
+  );
+  // Precompute each row's aggregate rendered text length ONCE per renderRows
   // rebuild (task 2.1), so `estimateSize` stays O(1) per scroll pass and never
   // walks content blocks. Feeds the content-aware estimate (Decision 1).
-  const rowTextChars = useMemo(() => displayRows.map(computeRowTextChars), [displayRows]);
-  const turnToFirstRowIndex = useMemo(() => buildTurnToFirstRowIndex(displayRows), [displayRows]);
+  const rowTextChars = useMemo(() => renderRows.map(computeRowTextChars), [renderRows]);
+  const turnToFirstRowIndex = useMemo(() => buildTurnToFirstRowIndex(renderRows), [renderRows]);
 
   // --- Active-selection preservation (change: preserve-chat-selection-during-churn) ---
   // Row count + device-aware retained-row ceiling read as refs so the stable
   // `mapChatRange` closure and the virtualizer `rangeExtractor` always see the
   // latest values without re-subscribing.
   const rowCountRef = useRef(0);
-  rowCountRef.current = displayRows.length;
+  rowCountRef.current = renderRows.length;
   const selectionCapRef = useRef(SELECTION_RETAIN_CAP_DESKTOP);
   selectionCapRef.current = isMobile ? SELECTION_RETAIN_CAP_MOBILE : SELECTION_RETAIN_CAP_DESKTOP;
 
@@ -707,10 +821,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   }, []);
 
   const virtualizer = useVirtualizer({
-    count: displayRows.length,
+    count: renderRows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (i) => estimateVirtualRowSize(displayRows[i], rowTextChars[i]),
-    getItemKey: (i) => virtualRowKey(displayRows[i], i),
+    estimateSize: (i) => estimateVirtualRowSize(renderRows[i], rowTextChars[i]),
+    getItemKey: (i) => virtualRowKey(renderRows[i], i),
     overscan: 6,
     // Union any active selection's row span into the mounted range (D3), so
     // rows the selection intersects stay mounted, positioned, and measured by
@@ -744,6 +858,38 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   });
   const virtualItems = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
+
+  // Viewport-floor reporting (Task 1.7, change: bounded-hot-transcript-state):
+  // report the lowest `seq` currently visible so App.tsx's `viewportFloorRef`
+  // stops `evictBelow` from pruning rows the user is looking at. Dedup via a
+  // ref so a no-op range recompute (same first/last visible index) doesn't
+  // spam the parent callback every render.
+  const lastReportedFloorSeqRef = useRef<number | null | undefined>(undefined);
+  const lastReportedFloorSessionRef = useRef<string | undefined>(undefined);
+  // Edge-tracking for onReadingHistoryChange: last reported `reading` value and
+  // the session it was reported for (reset the baseline on session switch).
+  const readingHistoryRef = useRef<boolean | null>(null);
+  const readingHistorySessionRef = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (!onVisibleFloorSeqChange) return;
+    const floor = virtualItems.length > 0
+      ? lowestVisibleSeq(renderRows, virtualItems[0]!.index, virtualItems.at(-1)!.index)
+      : null;
+    // A session switch reuses this same mounted instance (ChatView is not
+    // remounted per session), so the dedup ref must reset on sessionId change
+    // too — otherwise a coincidental same-seq floor for a NEW session would
+    // silently suppress its first report.
+    if (floor === lastReportedFloorSeqRef.current && sessionId === lastReportedFloorSessionRef.current) return;
+    lastReportedFloorSeqRef.current = floor;
+    lastReportedFloorSessionRef.current = sessionId;
+    onVisibleFloorSeqChange(floor);
+  }, [renderRows, onVisibleFloorSeqChange, sessionId, virtualItems]);
+
+  // Emit the timed `renderRows` derivation cost after commit (never during
+  // render), deduped per renderRows rebuild — mirrors onVisibleFloorSeqChange.
+  useEffect(() => {
+    onDerivationTiming?.(sessionId ?? null, derivationMsRef.current);
+  }, [renderRows, onDerivationTiming, sessionId]);
 
   // Streaming-tail content: the frozen snapshot while a tail selection is held
   // (buffers chunks; survives the message_end unmount), else the live text.
@@ -898,6 +1044,21 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < SCROLL_THRESHOLD;
     const nearTop = element.scrollTop <= SCROLL_THRESHOLD;
 
+    // Reading-history edge: leaving the live bottom lifts the retention cap so
+    // Load-older is not ceilinged; returning flushes it. Platform-agnostic —
+    // computed before the mobile/desktop branch and fired only on transitions.
+    if (onReadingHistoryChange) {
+      const reading = !nearBottom;
+      if (sessionId !== readingHistorySessionRef.current) {
+        readingHistorySessionRef.current = sessionId;
+        readingHistoryRef.current = null;
+      }
+      if (readingHistoryRef.current !== reading) {
+        readingHistoryRef.current = reading;
+        onReadingHistoryChange(reading);
+      }
+    }
+
     if (mobileActive) {
       const owner = scrollOwnerRef.current;
       if (owner === "NAVIGATING_BOTTOM" && nearBottom) scrollOwnerRef.current = "FOLLOWING";
@@ -957,7 +1118,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       // session switch. The first stable row is still a valid desktop anchor;
       // do not discard its saved position merely because it is between range
       // calculations.
-      const fallbackRow = displayRows[0];
+      const fallbackRow = renderRows[0];
       scrollStateMap.set(sessionId, {
         anchorRowId: item ? String(item.key) : fallbackRow ? virtualRowKey(fallbackRow, 0) : null,
         offset: item ? element.scrollTop - item.start : element.scrollTop,
@@ -965,7 +1126,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         nearBottom,
       });
     }
-  }, [hasMoreOlder, loadingHistory, loadingOlder, mobileActive, mobileInactive, requestOlder, sessionId, virtualizer]);
+  }, [hasMoreOlder, loadingHistory, loadingOlder, mobileActive, mobileInactive, onReadingHistoryChange, requestOlder, sessionId, virtualizer]);
 
   const scrollToBottom = useCallback(() => {
     if (mobileInactive) return;
@@ -1065,7 +1226,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       setShowScrollButton(false);
       scheduleProgrammaticWrite((element) => { element.scrollTop = element.scrollHeight; }, authority);
     }
-  }, [cancelProgrammaticWrites, captureAuthority, displayRows, loadingHistory, mobileActive, mobileInactive, scheduleProgrammaticWrite, sessionId, state.messages.length, virtualizer]);
+  }, [cancelProgrammaticWrites, captureAuthority, renderRows, loadingHistory, mobileActive, mobileInactive, scheduleProgrammaticWrite, sessionId, state.messages.length, virtualizer]);
 
   useLayoutEffect(() => {
     const wasLoading = loadingHistoryRef.current;
@@ -1099,10 +1260,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // Content and virtual measurements can only follow latest. TanStack remains
   // the sole owner of row measurement correction; no total-height delta writes
   // compensate history/prepend growth here.
-  const hadVisibleRowsRef = useRef(displayRows.length > 0);
+  const hadVisibleRowsRef = useRef(renderRows.length > 0);
   useLayoutEffect(() => {
-    const receivedFirstVisibleRows = !hadVisibleRowsRef.current && displayRows.length > 0;
-    hadVisibleRowsRef.current = displayRows.length > 0;
+    const receivedFirstVisibleRows = !hadVisibleRowsRef.current && renderRows.length > 0;
+    hadVisibleRowsRef.current = renderRows.length > 0;
     if (isSelecting || mobileInactive) return;
     if (mobileActive) {
       const owner = scrollOwnerRef.current;
@@ -1113,7 +1274,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     } else if (stickToBottomRef.current) {
       pinLatest();
     }
-  }, [displayRows.length, isSelecting, mobileActive, mobileInactive, pendingSteering, pinLatest, state.messages.length, state.pendingPrompt, state.streamingText, state.streamingThinking]);
+  }, [renderRows.length, isSelecting, mobileActive, mobileInactive, pendingSteering, pinLatest, state.messages.length, state.pendingPrompt, state.streamingText, state.streamingThinking]);
 
   useLayoutEffect(() => {
     const anchor = pendingOlderAnchorRef.current;
@@ -1152,7 +1313,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         autoContinueAfterRestoreRef.current = false;
         return;
       }
-      const index = anchor.rowId == null ? -1 : displayRows.findIndex((row, i) => virtualRowKey(row, i) === anchor.rowId);
+      const index = anchor.rowId == null ? -1 : renderRows.findIndex((row, i) => virtualRowKey(row, i) === anchor.rowId);
       if (index < 0) {
         pendingOlderAnchorRef.current = null;
         olderRequestLatchRef.current = null;
@@ -1186,7 +1347,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       }
     };
     scheduleProgrammaticWrite(restore, anchor.authority, commandEpoch);
-  }, [completedOlderAnchorToken, displayRows, hasMoreOlder, isAuthorityCurrent, loadingOlder, onLoadOlder, requestOlder, scheduleProgrammaticWrite, sessionId, state.messages, virtualizer]);
+  }, [completedOlderAnchorToken, renderRows, hasMoreOlder, isAuthorityCurrent, loadingOlder, onLoadOlder, requestOlder, scheduleProgrammaticWrite, sessionId, state.messages, virtualizer]);
 
   useImperativeHandle(ref, () => ({
     scrollToTurn(turnIndex: number) {
@@ -1204,7 +1365,27 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       if (mobileActive) scrollOwnerRef.current = "READING_HISTORY";
       scheduleProgrammaticWrite(() => virtualizer.scrollToIndex(rowIndex, { align: "start" }));
     },
-  }), [mobileActive, mobileInactive, scheduleProgrammaticWrite, turnToFirstRowIndex, virtualizer]);
+    scrollToSeq(seq: number) {
+      // Find the first materialized row at/above `seq` and scroll it to the
+      // top. Reuses the older-anchor restore's `renderRows.findIndex` +
+      // `scrollToIndex` precedent (#81) so an expand-in-place row splice does
+      // not leave the viewport pointing at a churned index. See change:
+      // load-older-seq-range-paging (issue #77).
+      if (mobileInactive) return;
+      const index = renderRows.findIndex((row) => {
+        const s = rowSeq(row);
+        return s != null && s >= seq;
+      });
+      if (index < 0) return;
+      descendingRef.current = false;
+      olderContinuationRef.current = null;
+      autoContinueAfterRestoreRef.current = false;
+      stickToBottomRef.current = false;
+      setShowScrollButton(true);
+      if (mobileActive) scrollOwnerRef.current = "READING_HISTORY";
+      scheduleProgrammaticWrite(() => virtualizer.scrollToIndex(index, { align: "start" }));
+    },
+  }), [mobileActive, mobileInactive, renderRows, scheduleProgrammaticWrite, turnToFirstRowIndex, virtualizer]);
 
   return (
     // Key by sessionId so switching sessions (ChatView is reused, not remounted)
@@ -1242,11 +1423,15 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
           are mounted. The spacer reserves getTotalSize(); each row is absolutely
           positioned + re-measured on mount. chat-cv-skip keeps Step A's
           content-visibility off the spacer (windowing supersedes it). Bottom-pin
-          + scroll-lock stay on the DOM scroll machine (CR-1). See change:
-          virtualize-chat-transcript-tanstack. */}
+          + scroll-lock stay on the DOM scroll machine (CR-1). Evicted-tool-burst
+          markers are interleaved into `renderRows` at their seq position (NOT
+          rendered once at the top — `evictBelow` prunes the tool and chat tiers
+          against independent floors, so an evicted tool run is not always older
+          than every retained row). See changes:
+          virtualize-chat-transcript-tanstack, bounded-hot-transcript-state. */}
       <div className="chat-cv-skip" style={{ position: "relative", width: "100%", height: totalSize }}>
         {virtualItems.map((vi) => {
-          const item: BurstItem = displayRows[vi.index];
+          const item: DisplayRow = renderRows[vi.index];
           return (
             <div
               key={vi.key}
@@ -1255,6 +1440,17 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
               style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${vi.start}px)` }}
             >
               {((): React.ReactNode => {
+        // Collapsed marker for an evicted contiguous tool-tier run, positioned
+        // by seq among the surviving rows (see `interleaveEvictedBursts`).
+        if (isEvictedBurst(item)) {
+          return (
+            <EvictedToolBurstMarkerRow
+              burst={item}
+              isMobile={isMobile}
+              onExpand={onExpandEvictedBurst ? () => onExpandEvictedBurst(item) : undefined}
+            />
+          );
+        }
         // Temporal burst group of heterogeneous tool calls (carries collapse
         // state → key by first-member id, NOT positional idx, so event-trim
         // head churn cannot bleed one burst's state into another (finding 3).
@@ -1622,18 +1818,26 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         3-way empty state (see change: show-chat-history-loading-indicator):
         loading spinner while history is in flight, "No messages yet" when no
         rows can render, else nothing (bubbles render above).
+
+        Task 2.2 (bounded-hot-transcript-state): the skeleton is additionally
+        gated behind `showSkeleton` (useDelayedSkeleton) so a fast cache-hit
+        read never flashes it — a genuinely slow read shows nothing for the
+        first ~150ms (a calm, blank load state), then swaps once to the
+        static skeleton.
       */}
-      {displayRows.length === 0 && !state.streamingText && !state.pendingPrompt && !(pendingSteering && pendingSteering.length > 0) && (
+      {renderRows.length === 0 && !state.streamingText && !state.pendingPrompt && !(pendingSteering && pendingSteering.length > 0) && (
         loadingHistory ? (
-          <div
-            className="flex flex-col gap-3 px-4 py-3"
-            aria-busy="true"
-            role="status"
-            aria-label={i18nT("status.loadingConversation", undefined, "Loading conversation…")}
-            data-testid="chat-history-skeleton"
-          >
-            <Skeleton variant="bubble" count={3} />
-          </div>
+          showSkeleton && (
+            <div
+              className="flex flex-col gap-3 px-4 py-3"
+              aria-busy="true"
+              role="status"
+              aria-label={i18nT("status.loadingConversation", undefined, "Loading conversation…")}
+              data-testid="chat-history-skeleton"
+            >
+              <Skeleton variant="bubble" count={3} />
+            </div>
+          )
         ) : (
           <div className="flex items-center justify-center h-full">
             <EmptyState
