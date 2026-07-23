@@ -927,6 +927,10 @@ export function useMessageHandler(
             next.set(msg.sessionId, msg.message ?? t("session.resumeFailed", undefined, "Resume failed"));
             return next;
           });
+          // Surface a failed fork/resume as a visible toast — the per-session
+          // resumeErrors banner alone is easy to miss and makes a failed fork
+          // look like an inert no-op. See change: fork-from-here-inert (#69).
+          showToast?.(msg.message ?? t("session.resumeFailed", undefined, "Resume failed"), "error");
           // Drop the pending-spawn entry on failure so a stale entry can't
           // mis-route a later session_added. See change: spawn-correlation-token.
           if (msg.requestId) pendingSpawnsRef.current.delete(msg.requestId);
