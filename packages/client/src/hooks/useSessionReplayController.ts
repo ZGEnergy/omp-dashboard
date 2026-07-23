@@ -247,7 +247,6 @@ export class SessionReplayController {
           ledger.events,
           ledger.takeOlderCompletion(),
         );
-        if (result.evictedHead && ledger.status === "ready") this.effects.evict?.(message.sessionId, ledger.minSeq);
       }
       const cursor = ledger.minSeq;
       const priorCursor = this.automaticOlderFloor.get(message.sessionId);
