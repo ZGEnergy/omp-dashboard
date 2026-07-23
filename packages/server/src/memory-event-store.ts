@@ -68,7 +68,8 @@ type TruncateContext = "normal" | "assistant-content" | "assistant-text";
 // A block whose text must never be capped: assistant prose (`type: "text"`) and
 // reasoning/thinking blocks (`type: "thinking"` — real shape carries its text under
 // either `.thinking` or `.text`, per replay-coordinator.ts `isToolOnlyAssistantMessage`;
-// `"reasoning"` covered defensively though not observed in this codebase).
+// `"reasoning"` covered defensively though not observed in this codebase — its text may
+// arrive under `.reasoning` or `.text`, both promoted to the uncapped context below).
 const PROTECTED_TEXT_BLOCK_TYPES = new Set(["text", "thinking", "reasoning"]);
 
 function isAssistantTextBlock(value: unknown): boolean {
@@ -83,7 +84,12 @@ function truncateStrings(value: unknown, max: number, depth = 0, context: Trunca
   }
   if (typeof value === "string") return context === "assistant-text" ? value : capString(value, max);
   if (Array.isArray(value)) {
-    if (value.length > 20) return "[array truncated]";
+    // A protected message's `content` array (context === "assistant-content", set below
+    // when traversing an assistant/user message's `content` key) must never collapse by
+    // count: doing so would drop whole text/thinking blocks past the 20-element mark,
+    // violating the "message content never dropped" invariant. Non-protected arrays
+    // (arbitrary tool output/args) keep the existing count-based collapse unchanged.
+    if (value.length > 20 && context !== "assistant-content") return "[array truncated]";
     let changed = false;
     const result = value.map((child) => {
       const childContext = context === "assistant-content" && isAssistantTextBlock(child) ? "assistant-text" : "normal";
@@ -101,7 +107,7 @@ function truncateStrings(value: unknown, max: number, depth = 0, context: Trunca
   for (const [key, child] of Object.entries(value)) {
     if (key === "data" && typeof child === "string" && "mimeType" in value) { result[key] = child; continue; }
     const childContext: TruncateContext = context === "assistant-text"
-      ? key === "text" || key === "thinking" ? "assistant-text" : "normal"
+      ? key === "text" || key === "thinking" || key === "reasoning" ? "assistant-text" : "normal"
       : isProtectedMessageRole && key === "content"
         ? typeof child === "string" ? "assistant-text" : "assistant-content"
         : "normal";

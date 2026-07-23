@@ -212,6 +212,31 @@ describe("memory-event-store", () => {
       expect(content).toBe(envelope);
     });
 
+    it("skill invocation envelope in tool output (non-protected context) is body-capped, head/tail preserved", () => {
+      // Regression coverage: this branch of capString lost its only test when the
+      // user-text-capping test above was inverted (user text is now never capped, so
+      // that path no longer exercises the envelope-aware capping). Tool output strings
+      // are still capped, so a skill envelope arriving as a tool_execution_end `result`
+      // must still have its `<skill ...>` head and `</skill>` tail preserved verbatim
+      // while the body is capped.
+      const store = createMemoryEventStore(neverPinned); // production defaults
+      const bigBody = "Diagnose failed CI runs. ".repeat(2000); // ~50KB body
+      const head = `<skill name="ci-troubleshoot" location="/u/.pi/skills/ci-troubleshoot/SKILL.md">\n`;
+      const envelope = `${head}${bigBody}\n</skill>`;
+      const event: DashboardEvent = {
+        eventType: "tool_execution_end",
+        timestamp: Date.now(),
+        data: { toolCallId: "t1", result: envelope },
+      };
+      store.insertEvent("s1", event);
+      const stored = store.getEvent("s1", 1) as any;
+      const result = stored.data.result as string;
+      expect(result.length).toBeLessThan(envelope.length);
+      expect(result.startsWith(head)).toBe(true);
+      expect(result.endsWith("</skill>")).toBe(true);
+      expect(result).toContain("truncated");
+    });
+
     it("user message with a large pasted image survives the per-event size ceiling", () => {
       // Regression: the per-event total-size ceiling (DEFAULT_MAX_EVENT_DATA_SIZE)
       // counted preserved base64 image bytes, so ANY user message with a pasted
