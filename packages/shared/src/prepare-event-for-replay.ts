@@ -460,13 +460,29 @@ function boundEventBytes(
   const locations: StringLocation[] = [];
   collectStringLocations(event.data, locations);
   locations.sort((left, right) => right.bytes - left.bytes);
-  for (const location of locations) {
-    if (bytes <= limit) break;
-    const overage = bytes - limit;
-    const target = Math.max(1, location.bytes - overage - utf8ByteLength(REPLAY_BYTE_TRUNCATION_MARKER));
-    const replacement = REPLAY_BYTE_TRUNCATION_MARKER + suffixWithinUtf8Budget(location.value, target);
-    location.parent[location.key as never] = replacement as never;
-    bytes = utf8ByteLength(JSON.stringify(event));
+  // Bounded multi-pass shrink: a single pass sizes the replacement from its
+  // raw UTF-8 byte length, but the wire size is its JSON-serialized length —
+  // `REPLAY_BYTE_TRUNCATION_MARKER`'s embedded `\n` escapes to `\n` (+1 byte)
+  // under JSON.stringify, so a target computed to land exactly at `limit` can
+  // still serialize a few bytes over. Re-scan and re-shrink until the event
+  // actually fits (or no location can shrink further), instead of falling
+  // straight to the full-data `replayUnavailable` wipe on a near-boundary miss.
+  const markerBytes = utf8ByteLength(REPLAY_BYTE_TRUNCATION_MARKER);
+  for (let pass = 0; pass < 5 && bytes > limit; pass++) {
+    let progressed = false;
+    for (const location of locations) {
+      if (bytes <= limit) break;
+      const overage = bytes - limit;
+      const current = location.parent[location.key as never] as unknown as string;
+      const currentBytes = utf8ByteLength(current);
+      const target = Math.max(1, currentBytes - overage - markerBytes);
+      const replacement = REPLAY_BYTE_TRUNCATION_MARKER + suffixWithinUtf8Budget(location.value, target);
+      if (replacement === current) continue;
+      location.parent[location.key as never] = replacement as never;
+      progressed = true;
+      bytes = utf8ByteLength(JSON.stringify(event));
+    }
+    if (!progressed) break;
   }
 
   addIssue(issues, "event_truncated", "event_byte_limit");

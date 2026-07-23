@@ -274,7 +274,7 @@ export function selectNewestEventsByBudget(
   if (source === null) return malformedWindow();
   if (source.length === 0) return emptyWindow();
 
-  const prepared = prepareEntries(source, budget);
+  const prepared = prepareEntries(source, budget, { maxEventBytes: options.maxEventBytes });
   const turnStarts: number[] = [];
   for (let index = 0; index < prepared.events.length; index += 1) {
     if (isUserTurnStart(prepared.events[index]!)) turnStarts.push(index);
