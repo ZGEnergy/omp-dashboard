@@ -1,7 +1,8 @@
 /**
  * SessionActivityBar — renders one row per in-flight `bash` toolCall.
  *
- * Pure component. Input is the list of in-flight bash tools (from
+ * Presentational component (reads `useMobile()` for touch sizing only). Input
+ * is the list of in-flight bash tools (from
  * `selectInflightBashTools` / `useInflightBashTools`); output is a stack
  * of rows showing `⏵ <command> <elapsed> [⏹]` plus an overflow chip
  * (`+M more ⏵`) when the list exceeds `MAX_VISIBLE`.
@@ -25,6 +26,7 @@ import { mdiPlay, mdiStopCircleOutline } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React from "react";
 import type { InflightBashTool } from "../hooks/useInflightBashTools.js";
+import { useMobile } from "../hooks/useMobile.js";
 import { splitOverflow } from "./collapse-summary.js";
 
 /** Visible row cap. Excess rows collapse into a `+N more ⏵` chip.
@@ -63,6 +65,7 @@ interface SessionActivityBarProps {
 }
 
 export function SessionActivityBar({ tools, onAbort, now, compact }: SessionActivityBarProps) {
+  const isMobile = useMobile();
   if (tools.length === 0) return null;
 
   const { visible, overflow } = splitOverflow(tools, MAX_VISIBLE);
@@ -103,12 +106,16 @@ export function SessionActivityBar({ tools, onAbort, now, compact }: SessionActi
               e.stopPropagation();
               onAbort(t.toolCallId);
             }}
-            className="text-[var(--text-muted)] hover:text-yellow-400 flex-shrink-0 p-0.5"
+            className={
+              isMobile
+                ? "flex min-h-[44px] min-w-[44px] flex-shrink-0 items-center justify-center rounded text-yellow-400"
+                : "text-[var(--text-muted)] hover:text-yellow-400 flex-shrink-0 p-0.5"
+            }
             title={STOP_TOOLTIP}
             data-testid="session-activity-stop"
             aria-label={STOP_TOOLTIP}
           >
-            <Icon path={mdiStopCircleOutline} size={0.45} />
+            <Icon path={mdiStopCircleOutline} size={isMobile ? 0.7 : 0.45} />
           </button>
         </div>
       ))}

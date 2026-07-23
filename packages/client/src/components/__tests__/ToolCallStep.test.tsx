@@ -542,6 +542,10 @@ describe("ToolCallStep plugin tool-renderer dispatch", () => {
 });
 
 describe("ToolCallStep inline stop button", () => {
+  afterEach(() => {
+    mockIsMobileForToolCallStep = false;
+  });
+
   it("shows stop button when running and onAbort provided", () => {
     const onAbort = vi.fn();
     const { container } = renderStep({ status: "running", onAbort });
@@ -575,6 +579,59 @@ describe("ToolCallStep inline stop button", () => {
     // Click force-stop
     fireEvent.click(container.querySelector('[data-testid="tool-force-stop-button"]')!);
     expect(onForceKill).toHaveBeenCalledOnce();
+  });
+
+  // See change: mobile-stop-buttons-not-visible (issue #91)
+  it("mobile: stop button is a >=44px target and still aborts", () => {
+    mockIsMobileForToolCallStep = true;
+    const onAbort = vi.fn();
+    const { container } = renderStep({ status: "running", onAbort });
+    const btn = container.querySelector('[data-testid="tool-stop-button"]')!;
+    expect(btn.className).toContain("min-h-[44px]");
+    expect(btn.className).toContain("min-w-[44px]");
+    expect(btn.className).toContain("shrink-0");
+    fireEvent.click(btn);
+    expect(onAbort).toHaveBeenCalledOnce();
+  });
+
+  it("mobile: force-stop button is a >=44px target", () => {
+    mockIsMobileForToolCallStep = true;
+    const onAbort = vi.fn();
+    const onForceKill = vi.fn();
+    const { container } = renderStep({ status: "running", onAbort, onForceKill });
+    fireEvent.click(container.querySelector('[data-testid="tool-stop-button"]')!);
+    const force = container.querySelector('[data-testid="tool-force-stop-button"]')!;
+    expect(force.className).toContain("min-h-[44px]");
+    expect(force.className).toContain("min-w-[44px]");
+  });
+
+  it("mobile: clicking stop does not toggle the row expansion", () => {
+    mockIsMobileForToolCallStep = true;
+    const onAbort = vi.fn();
+    const { container } = renderStep({
+      status: "running",
+      onAbort,
+      result: "some output",
+      toolName: "bash",
+    });
+    expect(container.querySelector(".overflow-x-auto")).toBeNull();
+    fireEvent.click(container.querySelector('[data-testid="tool-stop-button"]')!);
+    expect(onAbort).toHaveBeenCalledOnce();
+    expect(container.querySelector(".overflow-x-auto")).toBeNull();
+
+    // Sanity: clicking the row itself DOES expand, proving the guard above is
+    // stopPropagation and not an inert selector.
+    fireEvent.click(container.querySelector("button")!);
+    expect(container.querySelector(".overflow-x-auto")).not.toBeNull();
+  });
+
+  it("desktop: stop button keeps the compact target", () => {
+    mockIsMobileForToolCallStep = false;
+    const onAbort = vi.fn();
+    const { container } = renderStep({ status: "running", onAbort });
+    const btn = container.querySelector('[data-testid="tool-stop-button"]')!;
+    expect(btn.className).not.toContain("min-h-[44px]");
+    expect(btn.className).toContain("p-0.5");
   });
 });
 
