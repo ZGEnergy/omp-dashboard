@@ -134,6 +134,11 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
     }
   }, [hasImages]);
 
+  // Mobile: the stop lives inside the row's 44px expand <button>, so it needs its own
+  // ≥44px target with a visible resting boundary — a hover-only accent never fires on
+  // touch. See change: mobile-stop-buttons-not-visible.
+  const mobileStopCls = "ml-1 shrink-0 min-h-[44px] min-w-[44px] items-center justify-center rounded inline-flex";
+
   return (
     <div className={`${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3`}>
       <button
@@ -172,10 +177,14 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
             role="button"
             data-testid="tool-stop-button"
             onClick={(e) => { e.stopPropagation(); onAbort(); if (onForceKill) setStopState("aborting"); }}
-            className="ml-1 p-0.5 rounded text-red-400 hover:text-red-300 hover:bg-red-900/30 inline-flex"
+            className={
+              isMobile
+                ? `${mobileStopCls} text-red-400 bg-red-500/10 border border-red-500/30`
+                : "ml-1 p-0.5 rounded text-red-400 hover:text-red-300 hover:bg-red-900/30 inline-flex"
+            }
             title={i18nT("common.stop", undefined, "Stop")}
           >
-            <Icon path={mdiStop} size={0.45} />
+            <Icon path={mdiStop} size={isMobile ? 0.7 : 0.45} />
           </span>
         )}
         {status === "running" && onForceKill && stopState === "aborting" && (
@@ -183,10 +192,14 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
             role="button"
             data-testid="tool-force-stop-button"
             onClick={(e) => { e.stopPropagation(); onForceKill(); setStopState("killing"); }}
-            className="ml-1 p-0.5 rounded text-orange-400 hover:text-orange-300 hover:bg-orange-900/30 animate-pulse inline-flex"
+            className={
+              isMobile
+                ? `${mobileStopCls} text-orange-400 bg-orange-500/10 border border-orange-500/30 animate-pulse`
+                : "ml-1 p-0.5 rounded text-orange-400 hover:text-orange-300 hover:bg-orange-900/30 animate-pulse inline-flex"
+            }
             title={i18nT("common.forceStopKillTheProcess", undefined, "Force Stop — kill the process")}
           >
-            <Icon path={mdiAlert} size={0.45} />
+            <Icon path={mdiAlert} size={isMobile ? 0.7 : 0.45} />
           </span>
         )}
         <span className="ml-auto text-[var(--text-muted)] inline-flex">

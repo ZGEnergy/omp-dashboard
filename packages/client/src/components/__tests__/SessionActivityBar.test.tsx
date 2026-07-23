@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, cleanup, fireEvent } from "@testing-library/react";
 import React from "react";
+const mobileHolder = vi.hoisted(() => ({ isMobile: false }));
+vi.mock("../../hooks/useMobile.js", () => ({
+  useMobile: () => mobileHolder.isMobile,
+  MobileProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 import { SessionActivityBar, MAX_VISIBLE, STOP_TOOLTIP } from "../SessionActivityBar.js";
 import type { InflightBashTool } from "../../hooks/useInflightBashTools.js";
 
@@ -8,7 +14,10 @@ function mk(id: string, command = `cmd-${id}`, startedAt = 0): InflightBashTool 
   return { toolCallId: id, command, startedAt };
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  mobileHolder.isMobile = false;
+});
 
 describe("SessionActivityBar (redesign-process-list-activity-bar)", () => {
   const onAbort = vi.fn();
@@ -92,5 +101,52 @@ describe("SessionActivityBar (redesign-process-list-activity-bar)", () => {
       <SessionActivityBar tools={[mk("tc-1", "x", NOW - (2 * 60 + 14) * 1000)]} onAbort={onAbort} now={NOW} />,
     );
     expect(container.textContent).toContain("2m 14s");
+  });
+});
+
+// See change: mobile-stop-buttons-not-visible (issue #91)
+describe("SessionActivityBar mobile stop affordance", () => {
+  const NOW = 100_000;
+
+  it("mobile: stop is a >=44px target, visible without hover, and aborts", () => {
+    mobileHolder.isMobile = true;
+    const onAbort = vi.fn();
+    const { getByTestId } = render(
+      <SessionActivityBar tools={[mk("tc-m")]} onAbort={onAbort} now={NOW} />,
+    );
+    const stop = getByTestId("session-activity-stop");
+    expect(stop.className).toContain("min-h-[44px]");
+    expect(stop.className).toContain("min-w-[44px]");
+    expect(stop.className).toContain("text-yellow-400");
+    expect(stop.className).not.toContain("text-[var(--text-muted)]");
+    fireEvent.click(stop);
+    expect(onAbort).toHaveBeenCalledWith("tc-m");
+  });
+
+  it("mobile: stop click does not bubble to an enclosing card handler", () => {
+    mobileHolder.isMobile = true;
+    const onAbort = vi.fn();
+    const onCardClick = vi.fn();
+    const { getByTestId } = render(
+      // Test stand-in for SessionCard's <li onClick> navigation handler.
+      <div onClick={onCardClick}>
+        <SessionActivityBar tools={[mk("tc-m")]} onAbort={onAbort} now={NOW} />
+      </div>,
+    );
+    fireEvent.click(getByTestId("session-activity-stop"));
+    expect(onAbort).toHaveBeenCalledWith("tc-m");
+    expect(onCardClick).not.toHaveBeenCalled();
+  });
+
+  it("desktop: stop keeps the muted compact styling", () => {
+    mobileHolder.isMobile = false;
+    const onAbort = vi.fn();
+    const { getByTestId } = render(
+      <SessionActivityBar tools={[mk("tc-d")]} onAbort={onAbort} now={NOW} />,
+    );
+    const stop = getByTestId("session-activity-stop");
+    expect(stop.className).toContain("text-[var(--text-muted)]");
+    expect(stop.className).toContain("hover:text-yellow-400");
+    expect(stop.className).not.toContain("min-h-[44px]");
   });
 });
