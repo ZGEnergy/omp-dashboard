@@ -94,6 +94,7 @@ import { rehydrateSession } from "./lib/rehydrate-session.js";
 // Strategy A (reduce-session-replay-traffic): durable replay cursor.
 import { type ReplayCacheScope, replayCache } from "./lib/replay-cache.js";
 import { createReplayPersister, type ReplayPersister } from "./lib/replay-persist.js";
+import { DEFAULT_REPLAY_RETENTION_BYTES } from "./lib/replay-retention.js";
 import {
   buildFolderSettingsUrl,
   buildOpenSpecArchiveUrl,
@@ -115,7 +116,6 @@ import {
   DEFAULT_TOOL_TIER_MAX_BYTES,
   DEFAULT_TOOL_TIER_MAX_COUNT,
 } from "./lib/two-tier-floors.js";
-import { DEFAULT_REPLAY_RETENTION_BYTES } from "./lib/replay-retention.js";
 import { resendActiveCwdSubscriptions, setInitSender } from "./lib/worktree-init-bus.js";
 import { initStore } from "./lib/worktree-init-store.js";
 
@@ -126,6 +126,7 @@ const NAV_TRACKER = { predecessor, popNav };
 import { applyPluginConfigUpdate, initPluginConfigs, PluginContextProvider, type SubagentStateSnapshot } from "@blackbelt-technology/dashboard-plugin-runtime/context";
 
 import type { ServerToBrowserMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import type { HydrationSource } from "@blackbelt-technology/pi-dashboard-shared/hot-window-metrics.js";
 import type { TerminalSession } from "@blackbelt-technology/pi-dashboard-shared/terminal-types.js";
 import type { CommandInfo, DashboardSession, FileEntry, ImageContent, ModelInfo, OpenSpecData, OpenSpecGroup, RoleInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { DialogPortal } from "./components/DialogPortal.js";
@@ -669,6 +670,12 @@ export default function App() {
   // "already rehydrated from IndexedDB" guard so reconnect re-subscribes don't
   // re-read (and clobber) live state. See change: reduce-session-replay-traffic.
   const replayPersistersRef = useRef(new Map<string, { scope: ReplayCacheScope; persister: ReplayPersister }>());
+  // Per-session hot-window telemetry inputs (sizes/counts/labels only — see
+  // HotWindowReport). `hydrationStateRef` records the actual cold-start path
+  // (stream/cache/memory) + optional trigger label; `derivationTimingRef` holds
+  // the latest ChatView renderRows derivation ms. See change: hot-window-metrics.
+  const hydrationStateRef = useRef(new Map<string, { source: HydrationSource; coldStartTrigger?: string }>());
+  const derivationTimingRef = useRef(new Map<string, number>());
   const sourceGenerationRef = useRef(new Map<string, string>());
   const rehydratedRef = useRef(new Set<string>());
   const rehydrateAbortRef = useRef(new Map<string, AbortController>());
@@ -952,6 +959,8 @@ export default function App() {
         setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, null));
         replayPersistersRef.current.get(sessionId)?.persister.dispose();
         replayPersistersRef.current.delete(sessionId);
+        derivationTimingRef.current.delete(sessionId);
+        hydrationStateRef.current.delete(sessionId);
         setSessionStates((prev) => {
           const next = new Map(prev);
           const pendingPrompt = next.get(sessionId)?.pendingPrompt;
@@ -995,6 +1004,16 @@ export default function App() {
 
   const beginReplay = useCallback((sessionId: string, kind: "cold" | "delta" | "older", sourceGeneration: string, anchorToken?: string, reason: ReplayReason = "initial_navigation") => {
     if (kind !== "older") bumpReplayGeneration(sessionId);
+    // Record the hydration path for hot-window telemetry (label/enum only):
+    // a cold rebuild streams from the server (carrying its trigger reason); a
+    // delta resumes over the retained in-memory ledger. `older` is paging, not
+    // a (re)hydration — leave any existing entry untouched. Cache admission
+    // overrides "stream" later in the seedCached success branch.
+    if (kind === "cold") {
+      hydrationStateRef.current.set(sessionId, { source: "stream", coldStartTrigger: reason });
+    } else if (kind === "delta") {
+      hydrationStateRef.current.set(sessionId, { source: "memory" });
+    }
     return replayController.begin(sessionId, kind, sourceGeneration, anchorToken, reason);
   }, [bumpReplayGeneration, replayController]);
 
@@ -1041,6 +1060,13 @@ export default function App() {
     }
   }, [selectedId]);
 
+  // Stash the latest ChatView renderRows derivation ms per session so the
+  // hot-window reporter can read it. Scalar number only, no content.
+  // See change: hot-window-metrics.
+  const handleDerivationTiming = useCallback((sessionId: string | null, ms: number) => {
+    if (sessionId) derivationTimingRef.current.set(sessionId, ms);
+  }, []);
+
   // While the user reads older history, lift the ledger retention cap so
   // Load-older is not ceilinged by the base 6 MiB budget; flush back to the
   // base ceiling when they return to the live tail. Edge-driven by ChatView.
@@ -1066,6 +1092,8 @@ export default function App() {
     subscribedRef.current.add(selectedId);
     replayPersistersRef.current.get(selectedId)?.persister.dispose();
     replayPersistersRef.current.delete(selectedId);
+    derivationTimingRef.current.delete(selectedId);
+    hydrationStateRef.current.delete(selectedId);
     clearSessionEvents(selectedId);
     beginReplay(selectedId, "cold", sourceGenerationRef.current.get(selectedId) ?? "", undefined, "cache_miss");
   }, [selectedId, beginReplay]);
@@ -1099,6 +1127,9 @@ export default function App() {
     send,
     replayController,
     connected: status === "connected",
+    replayPersisters: replayPersistersRef.current,
+    hydrationState: hydrationStateRef.current,
+    derivationTiming: derivationTimingRef.current,
   });
 
   // Fetch the gitWorktreeEnabled preference on mount.
@@ -1280,6 +1311,9 @@ export default function App() {
         if (!r || abort.signal.aborted || r.sourceGeneration !== source || !authority.isCurrent()) return;
         const ledger = replayController.ledger(sid);
         if (ledger.events.length > 0 || !replayController.seedCached(sid, source, r.events)) return;
+        // Cache actually seeded — override the provisional "stream" recorded by
+        // the cold beginReplay above. See change: hot-window-metrics.
+        hydrationStateRef.current.set(sid, { source: "cache" });
         const stateAtAdmission = sessionStatesRef.current.get(sid);
         const existing = replayPersistersRef.current.get(sid);
         const persister = existing?.scope.serverEpoch === serverEpoch && existing.scope.sourceGeneration === source
@@ -2035,6 +2069,7 @@ export default function App() {
               onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined}
               onVisibleFloorSeqChange={handleVisibleFloorSeqChange}
               onReadingHistoryChange={handleReadingHistoryChange}
+              onDerivationTiming={handleDerivationTiming}
             />
             </SessionAssetsProvider>
           </ErrorBoundary>

@@ -32,7 +32,8 @@ export interface HotWindowReport {
   interactiveRequests: number;
   /** Estimated bytes rendered in the detail/inspector pane, if open. */
   detailBytes: number;
-  /** Count of hot-window eviction events observed so far. */
+  /** Exact count of hot-window tool evictions observed so far (sum of each
+   *  evicted-tool-burst's collapsed member count, not the burst count). */
   evictions: number;
   /** High-water mark of ledgerBytes observed for this session. */
   highWaterBytes: number;

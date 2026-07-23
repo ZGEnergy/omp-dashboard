@@ -1,6 +1,11 @@
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { describe, expect, it } from "vitest";
-import { createInitialState, MAX_DERIVED_DETAIL_BYTES, reduceEvent } from "../event-reducer.js";
+import {
+  createInitialState,
+  estimateDerivedDetailBytes,
+  MAX_DERIVED_DETAIL_BYTES,
+  reduceEvent,
+} from "../event-reducer.js";
 
 describe("derived subagent detail cap", () => {
   it("caps oversized subagent detail entries but retains a terminal summary", () => {
@@ -42,5 +47,25 @@ describe("derived subagent detail cap", () => {
     const sub = state.subagents.get("sa2");
     expect(sub?.entries).toEqual([{ kind: "text", text: "small", ts: 0 }]);
     expect(sub?.activity).toBe("running");
+  });
+
+  it("estimateDerivedDetailBytes sums each subagent's entries, 0 when empty", () => {
+    // Empty state / no subagent entries → 0.
+    expect(estimateDerivedDetailBytes(createInitialState())).toBe(0);
+
+    const mk = (id: string, text: string): DashboardEvent => ({
+      eventType: "subagent_started",
+      timestamp: 0,
+      data: { id, details: { entries: [{ kind: "text", text, ts: 0 }] } },
+    });
+    let state = reduceEvent(createInitialState(), mk("sa1", "alpha"), { seq: 1 });
+    state = reduceEvent(state, mk("sa2", "beta"), { seq: 2 });
+
+    const expected = [...state.subagents.values()].reduce(
+      (sum, sub) => sum + new TextEncoder().encode(JSON.stringify(sub.entries)).length,
+      0,
+    );
+    expect(estimateDerivedDetailBytes(state)).toBe(expected);
+    expect(estimateDerivedDetailBytes(state)).toBeGreaterThan(0);
   });
 });

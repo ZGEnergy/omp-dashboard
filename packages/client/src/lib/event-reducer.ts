@@ -325,6 +325,20 @@ function byteLengthOf(value: unknown): number {
 }
 
 /**
+ * Serialized bytes of every subagent's derived detail timeline
+ * (`SubagentState.entries`, the reducer-reassembled subagent inspector rows,
+ * each already capped at `MAX_DERIVED_DETAIL_BYTES`). Returns a byte COUNT
+ * only — content-free by construction; feeds `HotWindowReport.detailBytes`.
+ */
+export function estimateDerivedDetailBytes(state: SessionState): number {
+  let total = 0;
+  for (const sub of state.subagents.values()) {
+    if (sub.entries?.length) total += byteLengthOf(sub.entries);
+  }
+  return total;
+}
+
+/**
  * Drop the oldest entries until the serialized array fits under
  * `MAX_DERIVED_DETAIL_BYTES`, retaining the newest ones plus a bounded
  * sentinel entry marking the elision (so the UI can indicate truncation).

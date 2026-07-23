@@ -883,3 +883,24 @@ describe("viewport-floor reporting", () => {
     expect(onVisibleFloorSeqChange).toHaveBeenCalledWith(null);
   });
 });
+
+// See change: hot-window-metrics.
+describe("renderRows derivation timing", () => {
+  it("reports (sessionId, ms) with a finite non-negative ms for a non-empty transcript", () => {
+    const state = stateWithMessages([
+      { id: "1", role: "user", content: "one" },
+      { id: "2", role: "assistant", content: "two" },
+    ]);
+    const onDerivationTiming = vi.fn();
+    render(
+      <ThemeProvider>
+        <ChatView sessionId="s1" state={state} toolContext={defaultToolContext} onDerivationTiming={onDerivationTiming} />
+      </ThemeProvider>,
+    );
+    expect(onDerivationTiming).toHaveBeenCalled();
+    const [sid, ms] = onDerivationTiming.mock.calls.at(-1)!;
+    expect(sid).toBe("s1");
+    expect(Number.isFinite(ms)).toBe(true);
+    expect(ms).toBeGreaterThanOrEqual(0);
+  });
+});
