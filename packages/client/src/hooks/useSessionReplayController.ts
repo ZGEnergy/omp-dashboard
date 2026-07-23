@@ -35,6 +35,8 @@ export interface ReplayControllerEffects {
   window?(sessionId: string, metadata: ReplayWindowMetadata): void;
   /** The ledger dropped its head to keep the hot transcript within budget. */
   trimmed?(sessionId: string, minSeq: number): void;
+  /** Prune the reducer's hot state to the ledger's two-tier retention floor. */
+  evict?(sessionId: string, minSeq: number): void;
   /** Older replay is rebuilt atomically from the same canonical sequence. */
   replace(
     sessionId: string,
@@ -110,6 +112,21 @@ export class SessionReplayController {
       this.ledgers.set(sessionId, ledger);
     }
     return ledger;
+  }
+
+  /**
+   * Adjust a session's retained-bytes cap. Raising it (the user is reading
+   * older history) lifts the ceiling so paged-in rows are not pruned; lowering
+   * it back to the base ceiling (the user returned to the live tail) flushes
+   * the ledger head and prunes the reducer's two-tier floors to match. No-op
+   * for a session with no ledger.
+   */
+  setRetentionCap(sessionId: string, bytes: number): void {
+    const ledger = this.ledgers.get(sessionId);
+    if (!ledger) return;
+    if (!ledger.setMaxRetainedBytes(bytes)) return;
+    this.effects.trimmed?.(sessionId, ledger.minSeq);
+    if (ledger.status === "ready") this.effects.evict?.(sessionId, ledger.minSeq);
   }
 
   /** Cache must contain a primary conversation turn before it can supersede canonical cold replay. */
@@ -264,7 +281,10 @@ export class SessionReplayController {
     if (result.evictedHead) {
       const ledger = this.ledger(sessionId);
       this.effects.trimmed?.(sessionId, ledger.minSeq);
-      this.effects.replace(sessionId, ledger.events, null);
+      // Apply the new tail before evicting so the two-tier floors are computed
+      // against the up-to-date reducer state, not the pre-tail snapshot.
+      this.effects.apply(sessionId, result.accepted);
+      if (ledger.status === "ready") this.effects.evict?.(sessionId, ledger.minSeq);
       return;
     }
     this.effects.apply(sessionId, result.accepted);

@@ -773,3 +773,79 @@ describe("advisor transcript rows", () => {
     expect(getByRole("button", { name: /scout.*concern/i })).not.toBeNull();
   });
 });
+
+// Task 1.7 (change: bounded-hot-transcript-state).
+describe("evicted tool-burst markers", () => {
+  it("renders a collapsed marker with count and seq range for each evicted burst", () => {
+    const state = createInitialState();
+    state.messages.push({ id: "1", role: "user", content: "hi", timestamp: Date.now(), seq: 100 });
+    state.evictedToolBursts = [{ fromSeq: 10, toSeq: 42, count: 7 }];
+
+    const { container } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
+    );
+    const markers = container.querySelectorAll('[data-testid="evicted-tool-burst-marker"]');
+    expect(markers.length).toBe(1);
+    expect(markers[0]!.textContent).toContain("7");
+    expect(markers[0]!.textContent).toContain("10");
+    expect(markers[0]!.textContent).toContain("42");
+  });
+
+  it("renders nothing when there are no evicted bursts", () => {
+    const state = createInitialState();
+    state.messages.push({ id: "1", role: "user", content: "hi", timestamp: Date.now() });
+
+    const { container } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
+    );
+    expect(container.querySelector('[data-testid="evicted-tool-burst-marker"]')).toBeNull();
+  });
+
+  it("renders multiple markers ordered by fromSeq ascending", () => {
+    const state = createInitialState();
+    state.messages.push({ id: "1", role: "user", content: "hi", timestamp: Date.now(), seq: 100 });
+    state.evictedToolBursts = [
+      { fromSeq: 50, toSeq: 60, count: 3 },
+      { fromSeq: 10, toSeq: 20, count: 2 },
+    ];
+
+    const { container } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
+    );
+    const markers = container.querySelectorAll('[data-testid="evicted-tool-burst-marker"]');
+    expect(markers.length).toBe(2);
+    expect(markers[0]!.textContent).toContain("10");
+    expect(markers[1]!.textContent).toContain("50");
+  });
+});
+
+// Task 1.7 (change: bounded-hot-transcript-state).
+describe("viewport-floor reporting", () => {
+  it("reports the lowest visible seq up to the caller", () => {
+    const state = createInitialState();
+    state.messages.push(
+      { id: "1", role: "user", content: "one", timestamp: Date.now(), seq: 5 },
+      { id: "2", role: "assistant", content: "two", timestamp: Date.now(), seq: 6 },
+    );
+    const onVisibleFloorSeqChange = vi.fn();
+    render(
+      <ThemeProvider>
+        <ChatView state={state} toolContext={defaultToolContext} onVisibleFloorSeqChange={onVisibleFloorSeqChange} />
+      </ThemeProvider>,
+    );
+    expect(onVisibleFloorSeqChange).toHaveBeenCalled();
+    const calls = onVisibleFloorSeqChange.mock.calls.map((c) => c[0]);
+    expect(calls.at(-1)).toBe(5);
+  });
+
+  it("reports null when the transcript is empty", () => {
+    const state = createInitialState();
+    const onVisibleFloorSeqChange = vi.fn();
+    render(
+      <ThemeProvider>
+        <ChatView state={state} toolContext={defaultToolContext} onVisibleFloorSeqChange={onVisibleFloorSeqChange} />
+      </ThemeProvider>,
+    );
+    expect(onVisibleFloorSeqChange).toHaveBeenCalledWith(null);
+  });
+});

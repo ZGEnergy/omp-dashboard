@@ -134,18 +134,20 @@ describe("ToolBurstGroup", () => {
 
   it("lets the user collapse an active burst", () => {
     const running = [tool({ toolStatus: "running", toolName: "bash" })];
-    const view = renderBurst(running, { ...DISPLAY_PRESETS.standard, toolGroupDefaultCollapsed: true });
+    const view = renderBurst(running, { ...DISPLAY_PRESETS.standard, toolGroupDefaultCollapsed: false });
     expect(view.queryByTestId("tool-burst-body")).not.toBeNull();
     fireEvent.click(view.getByTestId("tool-burst-header"));
     expect(view.queryByTestId("tool-burst-body")).toBeNull();
   });
 
-  it("keeps a running group open even when completed groups default closed", () => {
+  it("collapses a running group when tool groups default collapsed (running is not an exception)", () => {
     const running = [tool({ toolName: "grep" }), tool({ toolName: "read", toolStatus: "running", args: { path: "/a" } })];
     const off = renderBurst(running, { ...DISPLAY_PRESETS.standard, toolGroupDefaultCollapsed: false });
     expect(off.container.querySelector('[data-testid="tool-burst-body"]')).not.toBeNull();
     const on = renderBurst(running, { ...DISPLAY_PRESETS.standard, toolGroupDefaultCollapsed: true });
-    expect(on.container.querySelector('[data-testid="tool-burst-body"]')).not.toBeNull();
+    // A running salvo no longer force-opens on hydrate — it obeys the collapse default.
+    expect(on.container.querySelector('[data-testid="tool-burst-body"]')).toBeNull();
+    // Header still reflects the running state even while collapsed.
     expect(on.container.querySelector('[data-testid="tool-burst-header"]')!.textContent).toContain("Working");
   });
 });

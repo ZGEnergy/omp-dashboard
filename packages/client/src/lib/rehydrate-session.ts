@@ -115,9 +115,9 @@ export async function rehydrateSession(
     let state = createInitialState();
     const sliceMs = options.sliceMs ?? REDUCTION_SLICE_MS;
     let sliceStart = performance.now();
-    for (const { event } of entries) {
+    for (const { seq, event } of entries) {
       if (stale(authority)) return null;
-      state = reduceEvent(state, event);
+      state = reduceEvent(state, event, { seq });
       if (performance.now() - sliceStart >= sliceMs) {
         await sleepTurn();
         if (stale(authority)) return null;

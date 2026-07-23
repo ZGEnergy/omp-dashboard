@@ -106,6 +106,37 @@ describe("ChatView sticky scroll", () => {
     expect(container.querySelector('[data-testid="scroll-to-bottom"]')).toBeNull();
   });
 
+  it("fires onReadingHistoryChange on the live-tail ↔ reading-history transition", async () => {
+    const onReadingHistoryChange = vi.fn();
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView state={stateWith(50)} toolContext={defaultToolContext} onReadingHistoryChange={onReadingHistoryChange} />
+      </ThemeProvider>,
+    );
+    await flushRaf();
+    const scrollEl = getScrollContainer(container);
+
+    // At the live bottom → reading = false.
+    setScrollPosition(scrollEl, 950, 1000, 400);
+    fireEvent.scroll(scrollEl);
+    expect(onReadingHistoryChange).toHaveBeenLastCalledWith(false);
+
+    // Scroll up into older history → reading = true (edge fires once).
+    setScrollPosition(scrollEl, 0, 1000, 400);
+    fireEvent.scroll(scrollEl);
+    expect(onReadingHistoryChange).toHaveBeenLastCalledWith(true);
+
+    // Return to the live bottom → reading = false (edge fires once).
+    setScrollPosition(scrollEl, 950, 1000, 400);
+    fireEvent.scroll(scrollEl);
+    expect(onReadingHistoryChange).toHaveBeenLastCalledWith(false);
+
+    // Idempotent: another scroll still at the bottom does not re-fire.
+    const callsBefore = onReadingHistoryChange.mock.calls.length;
+    fireEvent.scroll(scrollEl);
+    expect(onReadingHistoryChange.mock.calls.length).toBe(callsBefore);
+  });
+
   it("lets the user escape sticky bottom immediately on scroll-up", async () => {
     const { container, rerender } = render(
       <ThemeProvider>

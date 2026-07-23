@@ -36,8 +36,8 @@ function burst(): QueuedLiveEvent[] {
 // Sequential reference: apply each event one-by-one in seq order (live path).
 function sequential(current: SessionState, queued: QueuedLiveEvent[]): SessionState {
   let s = current;
-  for (const { event } of [...queued].sort((a, b) => a.seq - b.seq)) {
-    s = reduceEvent(s, event, { isLive: true });
+  for (const { seq, event } of [...queued].sort((a, b) => a.seq - b.seq)) {
+    s = reduceEvent(s, event, { isLive: true, seq });
   }
   return s;
 }
