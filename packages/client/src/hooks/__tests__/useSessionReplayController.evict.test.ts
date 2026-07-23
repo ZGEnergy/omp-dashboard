@@ -68,4 +68,39 @@ describe("eviction wiring", () => {
     expect(effects.replace).toHaveBeenCalled();
     expect(effects.evict).not.toHaveBeenCalled();
   });
+
+  it("setRetentionCap lifts the cap while reading older, then flushes on lowering (trimmed + evict)", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), window: vi.fn(), trimmed: vi.fn(), replace: vi.fn(), evict: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const budget = JSON.stringify(entry(1)).length * 2; // holds ~2 events
+    const controller = new (SessionReplayController as any)(effects, { maxRetainedBytes: budget });
+
+    // Ready baseline holding seq 3-4 (already at the byte cap).
+    const cold = controller.begin("s", "cold", "source-a");
+    controller.handle(frame(cold.requestId!, [entry(3), entry(4)], true));
+    expect(controller.ledger("s").status).toBe("ready");
+
+    // Reading older history: lift the cap so the paged-in rows survive.
+    controller.setRetentionCap("s", Number.POSITIVE_INFINITY);
+    const older = controller.begin("s", "older", "source-a");
+    controller.handle(olderFrame(older.requestId!, [entry(1), entry(2)], true));
+    expect(controller.ledger("s").events.map((e: any) => e.seq)).toEqual([1, 2, 3, 4]);
+
+    // Returning to the live tail: flush to the base budget → prune oldest.
+    effects.trimmed.mockClear();
+    effects.evict.mockClear();
+    controller.setRetentionCap("s", budget);
+    const floor = controller.ledger("s").minSeq;
+    expect(effects.trimmed).toHaveBeenCalledWith("s", floor);
+    expect(effects.evict).toHaveBeenCalled();
+    expect(effects.evict.mock.calls.at(-1)![1]).toBe(floor);
+    expect(controller.ledger("s").events.map((e: any) => e.seq)).toEqual([3, 4]);
+  });
+
+  it("setRetentionCap is a no-op for an unknown session", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), window: vi.fn(), trimmed: vi.fn(), replace: vi.fn(), evict: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new (SessionReplayController as any)(effects, {});
+    controller.setRetentionCap("never-seen", 123);
+    expect(effects.trimmed).not.toHaveBeenCalled();
+    expect(effects.evict).not.toHaveBeenCalled();
+  });
 });

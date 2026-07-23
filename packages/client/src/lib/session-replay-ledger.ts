@@ -63,7 +63,7 @@ export class SessionReplayLedger {
   private failures = new Map<ReplayKind, number>();
   private readonly maxGapEvents: number;
   private readonly maxGapBytes: number;
-  private readonly maxRetainedBytes: number;
+  private maxRetainedBytes: number;
   status: LedgerStatus = "cold";
 
   constructor(readonly sessionId: string, options: SessionReplayLedgerOptions = {}) {
@@ -123,6 +123,17 @@ export class SessionReplayLedger {
     this.clear(sourceGeneration);
     this.active = null;
     this.status = "cold";
+  }
+
+  /**
+   * Lift or lower the retained-bytes cap at runtime. Raising (e.g. to
+   * `Infinity` while the user reads older history) never prunes; lowering back
+   * to the base ceiling flushes the oldest events to the new budget. Returns
+   * whether the head was evicted so the caller can prune the reducer to match.
+   */
+  setMaxRetainedBytes(bytes: number): boolean {
+    this.maxRetainedBytes = bytes;
+    return this.trimRetained();
   }
 
   /** Seed a cache-admitted nonempty contiguous suffix before issuing its delta request. */

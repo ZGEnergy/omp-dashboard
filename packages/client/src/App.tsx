@@ -114,6 +114,7 @@ import {
   DEFAULT_TOOL_TIER_MAX_BYTES,
   DEFAULT_TOOL_TIER_MAX_COUNT,
 } from "./lib/two-tier-floors.js";
+import { DEFAULT_REPLAY_RETENTION_BYTES } from "./lib/replay-retention.js";
 import { resendActiveCwdSubscriptions, setInitSender } from "./lib/worktree-init-bus.js";
 import { initStore } from "./lib/worktree-init-store.js";
 
@@ -1038,6 +1039,18 @@ export default function App() {
       viewportFloorRef.current.set(selectedId, seq);
     }
   }, [selectedId]);
+
+  // While the user reads older history, lift the ledger retention cap so
+  // Load-older is not ceilinged by the base 6 MiB budget; flush back to the
+  // base ceiling when they return to the live tail. Edge-driven by ChatView.
+  // See change: dynamic-retention-while-reading.
+  const handleReadingHistoryChange = useCallback((reading: boolean) => {
+    if (!selectedId) return;
+    replayController.setRetentionCap(
+      selectedId,
+      reading ? Number.POSITIVE_INFINITY : DEFAULT_REPLAY_RETENTION_BYTES,
+    );
+  }, [selectedId, replayController]);
 
   // Explicit user hard-refresh: discard the rendered tail and cold-rebuild.
   const refreshSelectedSession = useCallback(() => {
@@ -2010,6 +2023,7 @@ export default function App() {
               onLoadOlder={selectedId && (!isMobile || mobileDetailVisible) ? handleLoadOlder : undefined}
               onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined}
               onVisibleFloorSeqChange={handleVisibleFloorSeqChange}
+              onReadingHistoryChange={handleReadingHistoryChange}
             />
             </SessionAssetsProvider>
           </ErrorBoundary>
