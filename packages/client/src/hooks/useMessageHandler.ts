@@ -22,10 +22,10 @@ import { clearLoadingHistory, HYDRATE_CEILING_MS, rearmLoadingHistory } from "..
 import { clearRecoveryOffer, setRecoveryOffer } from "../lib/recovery-offer-bus.js";
 import type { ReplayPersister } from "../lib/replay-persist.js";
 import type { ReplayWindow } from "../lib/replay-window.js";
-import type { SessionReplayController } from "./useSessionReplayController.js";
 import { inferPlatform, pathKey } from "../lib/session-grouping.js";
 import { pushSpawnErrorToast } from "../lib/spawn-error-toast-bus.js";
 import { dispatchInitEvent } from "../lib/worktree-init-bus.js";
+import type { SessionReplayController } from "./useSessionReplayController.js";
 
 /**
  * Rich spawn error detail stored per cwd.
@@ -735,8 +735,8 @@ export function useMessageHandler(
             // See change: session-tail-rehydrate.
             let current = createInitialState();
             if (prevState?.pendingPrompt) current.pendingPrompt = prevState.pendingPrompt;
-            for (const { event } of merged) {
-              current = reduceEvent(current, event);
+            for (const { seq, event } of merged) {
+              current = reduceEvent(current, event, { seq });
             }
             if (prevState && prevState.interactiveRequests.length > 0) {
               const byId = new Map(current.interactiveRequests.map((r) => [r.requestId, r]));
@@ -776,8 +776,8 @@ export function useMessageHandler(
             const carry = shouldReset ? next.get(msg.sessionId)?.pendingPrompt : undefined;
             let current = shouldReset ? createInitialState() : (next.get(msg.sessionId) ?? createInitialState());
             if (carry) current.pendingPrompt = carry;
-            for (const { event } of msg.events) {
-              current = reduceEvent(current, event);
+            for (const { seq, event } of msg.events) {
+              current = reduceEvent(current, event, { seq });
             }
             next.set(msg.sessionId, current);
             return next;

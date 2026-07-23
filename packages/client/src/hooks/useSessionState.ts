@@ -69,8 +69,8 @@ function applyReplay(
   let current = shouldReset ? createInitialState() : acc.state;
   const carry = shouldReset ? acc.state.pendingPrompt : undefined;
   if (carry) current = { ...current, pendingPrompt: carry };
-  for (const { event } of events) {
-    current = reduceEvent(current, event);
+  for (const { seq, event } of events) {
+    current = reduceEvent(current, event, { seq });
   }
   let maxSeq = shouldReset ? 0 : acc.maxSeq;
   if (events.length > 0) {

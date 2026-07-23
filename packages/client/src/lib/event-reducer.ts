@@ -95,6 +95,13 @@ export interface ChatMessage {
    * See change: reasoning-auto-collapse-timer.
    */
   streamedLive?: boolean;
+  /**
+   * Max-touch sequence number: the highest `opts.seq` of any reducing event
+   * that created or mutated this row. Optional and purely additive — used
+   * by the (future) eviction task to prune settled history by floor.
+   * See change: bounded-hot-transcript-state.
+   */
+  seq?: number;
 }
 
 export interface ToolCallState {
@@ -117,6 +124,13 @@ export interface ToolCallState {
    * fix-stuck-tool-card-superseded-heal.
    */
   emittedAtInferenceSeq?: number;
+  /**
+   * Max-touch sequence number: the highest `opts.seq` across every frame
+   * that touched this tool call (open, output, end). Never lowered by a
+   * later out-of-order frame — see `stampMax`. See change:
+   * bounded-hot-transcript-state.
+   */
+  seq?: number;
 }
 
 export interface TurnStat {
@@ -167,6 +181,12 @@ export interface InteractiveUiRequest {
   result?: unknown;
   /** Originating tool call id when the prompt came from ask_user/ask. */
   toolCallId?: string;
+  /**
+   * Max-touch sequence number: the highest `opts.seq` of any reducing event
+   * that created or resolved this request. See change:
+   * bounded-hot-transcript-state.
+   */
+  seq?: number;
 }
 
 /**
@@ -270,6 +290,61 @@ export interface SessionState {
    * See change: fix-streaming-text-vs-interactive-ui-order.
    */
   streamingTextFlushed?: boolean;
+  /**
+   * Bounded list of collapsed markers for evicted contiguous tool-call runs.
+   * Produced by `evictBelow`'s two-tier prune. See change:
+   * bounded-hot-transcript-state.
+   */
+  evictedToolBursts: EvictedToolBurst[];
+}
+
+/**
+ * Collapsed marker for a contiguous run of evicted tool calls: `fromSeq`/
+ * `toSeq` are the min/max max-touch `seq` of the evicted tools in the run,
+ * `count` is how many were merged. See change: bounded-hot-transcript-state.
+ */
+export interface EvictedToolBurst {
+  fromSeq: number;
+  toSeq: number;
+  count: number;
+}
+
+/**
+ * Hard cap (bytes, UTF-8) on the derived `SubagentState.entries` timeline
+ * reassembled by the reducer. The server already truncates individual tool
+ * output; this bounds the client-side reassembly of a subagent's *whole*
+ * timeline across many events, independent of raw event bytes. Scalar
+ * summary fields (`activity`, `displayName`, `toolUses`, `durationMs`, etc.)
+ * are read separately in `readSubagentDetails` and are never affected by
+ * this cap. See change: bounded-hot-transcript-state.
+ */
+export const MAX_DERIVED_DETAIL_BYTES = 256 * 1024;
+
+function byteLengthOf(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+/**
+ * Drop the oldest entries until the serialized array fits under
+ * `MAX_DERIVED_DETAIL_BYTES`, retaining the newest ones plus a bounded
+ * sentinel entry marking the elision (so the UI can indicate truncation).
+ * No-op when already under the cap. See change: bounded-hot-transcript-state.
+ */
+function capSubagentEntries(entries: SubagentTimelineEntry[]): SubagentTimelineEntry[] {
+  if (byteLengthOf(entries) <= MAX_DERIVED_DETAIL_BYTES) return entries;
+  let kept = entries.slice();
+  const withSentinel = (): SubagentTimelineEntry[] => [
+    {
+      kind: "text",
+      text: `[${entries.length - kept.length} earlier entries truncated]`,
+      ts: kept[0]?.ts ?? 0,
+    },
+    ...kept,
+  ];
+  while (kept.length > 0 && byteLengthOf(withSentinel()) > MAX_DERIVED_DETAIL_BYTES) {
+    kept = kept.slice(1);
+  }
+  return withSentinel();
 }
 
 /**
@@ -292,7 +367,7 @@ function readSubagentDetails(
   // legitimate transition to zero entries never occurs.
   // See change: fix-subagent-live-detail-reliability (D3).
   if (Array.isArray(details.entries) && details.entries.length > 0) {
-    out.entries = details.entries as SubagentTimelineEntry[];
+    out.entries = capSubagentEntries(details.entries as SubagentTimelineEntry[]);
   }
   if (typeof details.activity === "string") out.activity = details.activity;
   if (typeof details.displayName === "string") out.displayName = details.displayName;
@@ -386,7 +461,120 @@ export function createInitialState(): SessionState {
     subagents: new Map(),
     turnCount: 0,
     assistantInferenceSeq: 0,
+    evictedToolBursts: [],
   };
+}
+
+/**
+ * Message roles whose rows render as TOOL-OUTPUT cards and are therefore
+ * governed by the TOOL floor (`toolFloorSeq`), not the chat floor. Verified
+ * against ChatView's render switch:
+ *   - `toolResult`  → `ToolCallStep` / `RetriedErrorBadge` (the tool card itself)
+ *   - `bashOutput`  → `BashOutputCard` (shell output, can be large; produced by
+ *     `bash_output` events, one-shot — no running/streaming state of its own)
+ * Every OTHER role renders chat-tier chrome (bubbles, banners, cards that are
+ * not "a tool's output") and stays governed by `chatFloorSeq`, kept
+ * generously: `user`, `assistant`, `thinking`, `interactiveUi`,
+ * `turnSeparator`, `commandFeedback`, `advisor`. `rawEvent` (debug-only raw
+ * event dump, gated behind `showDebugTools`) and `inlineTerminal` (a
+ * long-lived interactive terminal session with its own open/close lifecycle,
+ * not a single completed tool result) are deliberately left chat-tier too —
+ * neither is "a tool's output row" in the toolCalls-map sense, and an
+ * `inlineTerminal` row must never be evicted while its session is still open.
+ * If a future role is added, it MUST be classified here (tool-tier) or left
+ * out (chat-tier, the default). See change: bounded-hot-transcript-state.
+ */
+const TOOL_TIER_ROLES: ReadonlySet<ChatMessage["role"]> = new Set(["toolResult", "bashOutput"]);
+
+/**
+ * Pure two-tier prune: drops TOOL-TIER message rows (`TOOL_TIER_ROLES`) and
+ * `toolCalls` map entries with `seq < toolFloorSeq`, and drops CHAT-TIER
+ * message rows / interactive requests with `seq < chatFloorSeq`. Tool-tier
+ * rows and `toolCalls` entries are pruned independently against the SAME
+ * `toolFloorSeq` (both are stamped from the same event's `seq`, so in
+ * practice they move together) — this is what makes a "N tool calls
+ * collapsed" marker coherent with what is actually still rendered: the marker
+ * is built from the evicted TOOL-TIER ROW seq-runs, not from the map-entry
+ * seqs, so it always describes rows that are truly gone.
+ *
+ * Never drops a running tool (`toolCalls` map or a `toolResult` row with
+ * `toolStatus === "running"`), a pending interactive request, or a streaming
+ * message, regardless of how low the floors are. Entities with
+ * `seq === undefined` are always kept. See change: bounded-hot-transcript-state.
+ */
+export function evictBelow(
+  state: SessionState,
+  floors: { chatFloorSeq: number; toolFloorSeq: number },
+): SessionState {
+  const protectedTool = (t: ToolCallState) => t.status === "running";
+  const toolCalls = new Map(state.toolCalls);
+  for (const [id, t] of state.toolCalls) {
+    if (typeof t.seq === "number" && t.seq < floors.toolFloorSeq && !protectedTool(t)) {
+      toolCalls.delete(id);
+    }
+  }
+  const streamingIds = new Set(state.messages.filter((m) => m.isStreaming).map((m) => m.id));
+  const evictedToolRowSeqs: number[] = [];
+  const messages = state.messages.filter((m) => {
+    if (streamingIds.has(m.id) || typeof m.seq !== "number") return true;
+    if (TOOL_TIER_ROLES.has(m.role)) {
+      // A row still tied to a running tool must survive even below the tool
+      // floor — mirrors the `protectedTool` guard on the toolCalls map above.
+      if (m.toolStatus === "running") return true;
+      if (m.seq < floors.toolFloorSeq) {
+        evictedToolRowSeqs.push(m.seq);
+        return false;
+      }
+      return true;
+    }
+    return m.seq >= floors.chatFloorSeq;
+  });
+  // Unresolved interactive requests are never dropped (also true of the
+  // streaming-message keep above). Subagents are intentionally left
+  // resident in Slice 1 — this function does not touch `state.subagents`.
+  const interactiveRequests = state.interactiveRequests.filter(
+    (r) => r.status === "pending" || typeof r.seq !== "number" || r.seq >= floors.chatFloorSeq,
+  );
+  return {
+    ...state,
+    toolCalls,
+    messages,
+    interactiveRequests,
+    evictedToolBursts: mergeBursts(state.evictedToolBursts, evictedToolRowSeqs),
+  };
+}
+
+function mergeBursts(existing: EvictedToolBurst[], seqs: number[]): EvictedToolBurst[] {
+  if (seqs.length === 0) return existing;
+  const sorted = [...seqs].sort((a, b) => a - b);
+  const bursts = [...existing];
+  let run: EvictedToolBurst | null = null;
+  // Cross-call coalescing: `evictBelow` is called repeatedly as the floor
+  // advances, so a contiguous run of tool evictions can land in separate
+  // calls (e.g. seq 50 evicted this call, seq 51 evicted next call). If the
+  // last existing burst is contiguous with the first new seq, seed `run`
+  // from it so the new seq extends the SAME marker instead of starting a
+  // fresh one. `bursts = [...existing]` is only a shallow copy — its
+  // objects are the same references as `existing`'s — so the last burst
+  // MUST be cloned before mutation to keep this function pure (the caller's
+  // `state.evictedToolBursts` array must never be mutated in place).
+  // See change: bounded-hot-transcript-state.
+  if (bursts.length > 0 && bursts[bursts.length - 1]!.toSeq + 1 === sorted[0]) {
+    const cloned = { ...bursts[bursts.length - 1]! };
+    bursts[bursts.length - 1] = cloned;
+    run = cloned;
+  }
+  for (const seq of sorted) {
+    if (run && seq === run.toSeq + 1) {
+      run.toSeq = seq;
+      run.count += 1;
+    } else {
+      run = { fromSeq: seq, toSeq: seq, count: 1 };
+      bursts.push(run);
+    }
+  }
+  const MAX_BURSTS = 200;
+  return bursts.length > MAX_BURSTS ? bursts.slice(bursts.length - MAX_BURSTS) : bursts;
 }
 
 /**
@@ -485,6 +673,7 @@ export function flushStreamingTextAsAssistantRow(
   state: SessionState,
   timestamp: number,
   toolCallId: string,
+  seq?: number,
 ): SessionState {
   if (state.streamingTextFlushed) return state;
   if (!state.streamingText) return state;
@@ -510,6 +699,7 @@ export function flushStreamingTextAsAssistantRow(
         role: "assistant",
         content: state.streamingText,
         timestamp,
+        seq,
         // entryId/nonce intentionally undefined — message_end stamps both
         // via findFlushedAssistantRowIndex below.
       },
@@ -1102,12 +1292,26 @@ export function deriveBannerState(state: SessionState): BannerState {
   return out;
 }
 
+/**
+ * Max-touch seq helper: returns the higher of an entity's existing stamped
+ * seq and the seq of the frame currently touching it. Never lowers a
+ * previously-stamped seq on a later out-of-order frame. Purely additive —
+ * `undefined` seq inputs are treated as absent, not zero.
+ * See change: bounded-hot-transcript-state.
+ */
+function stampMax(existingSeq: number | undefined, seq: number | undefined): number | undefined {
+  if (existingSeq === undefined) return seq;
+  if (seq === undefined) return existingSeq;
+  return Math.max(existingSeq, seq);
+}
+
 export function reduceEvent(
   state: SessionState,
   event: DashboardEvent,
-  opts?: { isLive?: boolean },
+  opts?: { isLive?: boolean; seq?: number },
 ): SessionState {
   const isLive = opts?.isLive === true;
+  const seq = opts?.seq;
   const next = { ...state, toolCalls: new Map(state.toolCalls) };
   const data = event.data;
 
@@ -1281,6 +1485,7 @@ export function reduceEvent(
             ...(retriedFrom ? { retriedFrom } : {}),
             images,
             timestamp: event.timestamp,
+            seq,
             // entryId from data.entryId is correct ONLY for replayed events
             // (state-replay attaches the persisted id). For LIVE user
             // message_start the bridge no longer stamps entryId because
@@ -1346,6 +1551,7 @@ export function reduceEvent(
                 startedAt,
                 duration: startedAt ? event.timestamp - startedAt : undefined,
                 streamedLive: next.streamingThinkingCollapsed ? false : isLive,
+                seq,
               },
             ];
           }
@@ -1394,6 +1600,7 @@ export function reduceEvent(
           content: typeof msg.content === "string" ? msg.content : "",
           advisorDetails: msg.details,
           timestamp: event.timestamp,
+          seq,
         };
         const index = state.messages.findIndex((message) => message.id === id);
         return index < 0
@@ -1452,6 +1659,7 @@ export function reduceEvent(
               content: text,
               timestamp: event.timestamp,
               streamedLive: false,
+              seq,
             });
           }
           if (thinkingRows.length > 0) {
@@ -1474,6 +1682,7 @@ export function reduceEvent(
               ...next.messages[flushedIdx],
               entryId: data.entryId as string | undefined,
               nonce: data.nonce as string | undefined,
+              seq: stampMax(next.messages[flushedIdx].seq, seq),
             };
             // Honor message_end content replacement: swap the flushed row's
             // content only when it differs (avoid object-identity churn).
@@ -1498,6 +1707,7 @@ export function reduceEvent(
               timestamp: event.timestamp,
               entryId: data.entryId as string | undefined,
               nonce: data.nonce as string | undefined,
+              seq,
             },
           ];
           next.streamingText = "";
@@ -1518,6 +1728,7 @@ export function reduceEvent(
                 timestamp: event.timestamp,
                 entryId: data.entryId as string | undefined,
                 nonce: data.nonce as string | undefined,
+                seq,
               },
             ];
           } else {
@@ -1532,6 +1743,7 @@ export function reduceEvent(
                   role: "turnSeparator",
                   content: "",
                   timestamp: event.timestamp,
+                  seq,
                 },
               ];
             }
@@ -1578,7 +1790,7 @@ export function reduceEvent(
       if (next.streamingText && !next.streamingTextFlushed) {
         Object.assign(
           next,
-          flushStreamingTextAsAssistantRow(next, event.timestamp, toolCallId),
+          flushStreamingTextAsAssistantRow(next, event.timestamp, toolCallId, seq),
         );
       }
       const args = data.args as Record<string, unknown> | undefined;
@@ -1598,6 +1810,7 @@ export function reduceEvent(
           toolName: toolName !== "unknown" ? toolName : existingCall.toolName,
           ...(args !== undefined ? { args } : {}),
           // Preserve terminal status/result/startedAt/emittedAtInferenceSeq.
+          seq: stampMax(existingCall.seq, seq),
         });
         // Do not set currentTool — call is already finished.
       } else {
@@ -1611,6 +1824,7 @@ export function reduceEvent(
           // already advanced the counter, so only a LATER inference satisfies the
           // supersede proof. See change: fix-stuck-tool-card-superseded-heal.
           emittedAtInferenceSeq: next.assistantInferenceSeq,
+          seq: stampMax(existingCall?.seq, seq),
         });
         next.currentTool = toolName;
       }
@@ -1662,6 +1876,7 @@ export function reduceEvent(
           toolStatus: "running",
           timestamp: event.timestamp,
           startedAt: event.timestamp,
+          seq,
         },
       ];
       break;
@@ -1686,6 +1901,7 @@ export function reduceEvent(
           status: "running",
           startedAt,
           emittedAtInferenceSeq: next.assistantInferenceSeq,
+          seq,
         });
       }
       let messageIdx = idx;
@@ -1700,11 +1916,17 @@ export function reduceEvent(
           toolStatus: existingTool?.status ?? "running",
           timestamp: event.timestamp,
           startedAt,
+          seq,
         }];
         messageIdx = next.messages.length - 1;
       } else if (existingTool && next.messages[messageIdx].toolName !== toolName) {
         next.messages = [...next.messages];
-        next.messages[messageIdx] = { ...next.messages[messageIdx], toolName, args: args ?? next.messages[messageIdx].args };
+        next.messages[messageIdx] = {
+          ...next.messages[messageIdx],
+          toolName,
+          args: args ?? next.messages[messageIdx].args,
+          seq: stampMax(next.messages[messageIdx].seq, seq),
+        };
       }
       const partialResult = data.partialResult;
       if (partialResult !== undefined) {
@@ -1725,13 +1947,21 @@ export function reduceEvent(
             ...current,
             ...(text != null ? { result: truncateOutputForDisplay(text) } : {}),
             ...(mergedDetails ? { toolDetails: mergedDetails } : {}),
+            seq: stampMax(current.seq, seq),
           };
           if (toolName === "Agent") mergeAgentSubagent(next, mergedDetails);
         } else {
           next.messages[messageIdx] = {
             ...current,
             result: truncateOutputForDisplay(String(partialResult)),
+            seq: stampMax(current.seq, seq),
           };
+        }
+        if (existingTool) {
+          next.toolCalls.set(toolCallId, {
+            ...existingTool,
+            seq: stampMax(existingTool.seq, seq),
+          });
         }
       }
       break;
@@ -1768,6 +1998,7 @@ export function reduceEvent(
         status: isError ? "error" : "complete",
         ...(startedAt !== undefined ? { startedAt } : {}),
         ...(result !== undefined ? { result: truncateOutputForDisplay(result) } : {}),
+        seq: stampMax(existing?.seq, seq),
       });
       next.currentTool = undefined;
 
@@ -1797,6 +2028,7 @@ export function reduceEvent(
           ...(startedAt !== undefined ? { duration: event.timestamp - startedAt } : {}),
           ...(images ? { images } : {}),
           ...(finalDetails ? { toolDetails: finalDetails } : {}),
+          seq: stampMax(message.seq, seq),
         };
       } else if (healedBy !== "superseded") {
         next.messages = [...next.messages, {
@@ -1812,6 +2044,7 @@ export function reduceEvent(
           ...(result !== undefined ? { result: truncateOutputForDisplay(result) } : {}),
           ...(images ? { images } : {}),
           ...(finalDetails ? { toolDetails: finalDetails } : {}),
+          seq,
         }];
       }
 
@@ -1834,7 +2067,7 @@ export function reduceEvent(
           next.interactiveRequests = next.interactiveRequests.map((req) =>
             req.status === "pending" &&
             (req.toolCallId === toolCallId || req.requestId === toolCallId)
-              ? { ...req, status: "dismissed" as const }
+              ? { ...req, status: "dismissed" as const, seq: stampMax(req.seq, seq) }
               : req,
           );
           next.messages = next.messages.map((msg) => {
@@ -1909,6 +2142,7 @@ export function reduceEvent(
           role: "assistant",
           content: "── Session compacted ──",
           timestamp: event.timestamp,
+          seq,
         },
       ];
       break;
@@ -1936,6 +2170,7 @@ export function reduceEvent(
           content: output,
           timestamp: event.timestamp,
           args: { command, exitCode, excludeFromContext, missingTool, source } as any,
+          seq,
         },
       ];
       break;
@@ -1956,6 +2191,7 @@ export function reduceEvent(
           content: "",
           timestamp: event.timestamp,
           args: { terminalId, closed: false } as any,
+          seq,
         },
       ];
       break;
@@ -1974,6 +2210,7 @@ export function reduceEvent(
             content: transcript,
             timestamp: event.timestamp,
             args: { terminalId, closed: true },
+            seq: stampMax(m.seq, seq),
           };
           replaced = true;
           break;
@@ -1991,6 +2228,7 @@ export function reduceEvent(
             content: transcript,
             timestamp: event.timestamp,
             args: { terminalId, closed: true } as any,
+            seq,
           },
         ];
       }
@@ -2021,6 +2259,7 @@ export function reduceEvent(
               content: message ?? "",
               timestamp: event.timestamp,
               args: { command, status },
+              seq: stampMax(m.seq, seq),
             };
             replaced = true;
             break;
@@ -2039,6 +2278,7 @@ export function reduceEvent(
           content: message ?? "",
           timestamp: event.timestamp,
           args: { command, status } as any,
+          seq,
         },
       ];
       break;
@@ -2104,7 +2344,7 @@ export function reduceEvent(
         const updated = next.messages.map((m) => {
           if (!m.entryId && m.nonce === targetNonce) {
             mutated = true;
-            return { ...m, entryId: persistedEntryId };
+            return { ...m, entryId: persistedEntryId, seq: stampMax(m.seq, seq) };
           }
           return m;
         });
@@ -2130,6 +2370,7 @@ export function reduceEvent(
           content: JSON.stringify(event.data, null, 2),
           timestamp: event.timestamp,
           toolName: event.eventType,
+          seq,
         }];
       }
       break;

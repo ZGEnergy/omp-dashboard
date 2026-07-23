@@ -30,6 +30,8 @@ export interface LedgerAdmission {
   rebuild: boolean;
   /** Oldest retained rows were evicted to keep the hot transcript bounded. */
   evictedHead: boolean;
+  /** The ledger's retained floor after this admission's trim. */
+  minSeq: number;
 }
 
 export interface SessionReplayLedgerOptions {
@@ -207,6 +209,7 @@ export class SessionReplayLedger {
         result.rebuild = true;
       }
     }
+    result.minSeq = this.minSeq;
     return result;
   }
 
@@ -222,6 +225,7 @@ export class SessionReplayLedger {
       result.accepted.push(entry);
       this.drainGaps(result.accepted);
       result.evictedHead = this.trimRetained();
+      result.minSeq = this.minSeq;
       return result;
     }
     if (admission === "duplicate") return result;
@@ -327,7 +331,15 @@ export class SessionReplayLedger {
   }
 
   private empty(): LedgerAdmission {
-    return { accepted: [], stale: false, reset: null, repair: null, rebuild: false, evictedHead: false };
+    return {
+      accepted: [],
+      stale: false,
+      reset: null,
+      repair: null,
+      rebuild: false,
+      evictedHead: false,
+      minSeq: this.minSeq,
+    };
   }
 
   private resetResult(reason: LedgerResetReason): LedgerAdmission {
@@ -343,7 +355,15 @@ export class SessionReplayLedger {
     this.olderPageLastSeq = null;
     this.active = null;
     this.status = "cold";
-    return { accepted: [], stale: false, reset: reason, repair: null, rebuild: false, evictedHead: false };
+    return {
+      accepted: [],
+      stale: false,
+      reset: reason,
+      repair: null,
+      rebuild: false,
+      evictedHead: false,
+      minSeq: 0,
+    };
   }
 }
 

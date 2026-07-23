@@ -71,7 +71,7 @@ import { deleteDraft, readAllDrafts, writeDraft } from "./lib/draft-storage.js";
 // SubagentPopoutPage no longer imported by the shell — it's registered via
 // the subagents-plugin's `shell-overlay-route` claim and mounted through
 // `<ShellOverlayRouteSlot>` below. See change: add-flow-agent-popout.
-import { createInitialState, deriveBannerState, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { createInitialState, deriveBannerState, evictBelow, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
 import { decodeFolderPath, encodeFolderPath } from "./lib/folder-encoding.js";
 import { fetchActiveInits } from "./lib/git-api.js";
 import { refreshGitStatus } from "./lib/git-status-cache.js";
@@ -107,6 +107,13 @@ import {
   buildSessionSubscribe,
 } from "./lib/session-subscribe.js";
 import { openStagingSocket } from "./lib/staging-socket.js";
+import {
+  computeChatFloorSeq,
+  computeToolFloorSeq,
+  DEFAULT_CHAT_RETAINED_TURNS,
+  DEFAULT_TOOL_TIER_MAX_BYTES,
+  DEFAULT_TOOL_TIER_MAX_COUNT,
+} from "./lib/two-tier-floors.js";
 import { resendActiveCwdSubscriptions, setInitSender } from "./lib/worktree-init-bus.js";
 import { initStore } from "./lib/worktree-init-store.js";
 
@@ -824,6 +831,9 @@ export default function App() {
   // across an ordinary reconnect so returning to a session resumes via delta
   // instead of a visible cold rebuild. Only a real server-identity change
   // (a different non-null serverEpoch) recreates it, which correctly cold-resets.
+  // Task 1.7 wiring: ChatView's visible-range callback updates this per-session
+  // viewport floor; the chat tier's evict floor never prunes below what is on screen.
+  const viewportFloorRef = useRef<Map<string, number>>(new Map());
   const lastServerEpochRef = useRef<string | null>(null);
   if (serverEpoch && serverEpoch !== lastServerEpochRef.current) lastServerEpochRef.current = serverEpoch;
   const authorityKey = lastServerEpochRef.current ?? "unknown";
@@ -851,7 +861,7 @@ export default function App() {
         setSessionStates((prev) => {
           const next = new Map(prev);
           let current = next.get(sessionId) ?? createInitialState();
-          for (const entry of accepted) current = reduceEvent(current, entry.event);
+          for (const entry of accepted) current = reduceEvent(current, entry.event, { seq: entry.seq });
           next.set(sessionId, current);
           return next;
         });
@@ -889,7 +899,7 @@ export default function App() {
           const previous = next.get(sessionId);
           let current = createInitialState();
           if (previous?.pendingPrompt) current.pendingPrompt = previous.pendingPrompt;
-          for (const entry of entries) current = reduceEvent(current, entry.event);
+          for (const entry of entries) current = reduceEvent(current, entry.event, { seq: entry.seq });
           if (previous && previous.interactiveRequests.length > 0) {
             const existing = new Set(current.interactiveRequests.map((request) => request.requestId));
             current.interactiveRequests = [
@@ -910,6 +920,29 @@ export default function App() {
           completedOlderAnchorRef.current.set(sessionId, anchorToken);
           setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, anchorToken));
         }
+      },
+      // `_minSeq` is intentionally unused: the two floors are recomputed fresh
+      // from reducer state (`current.messages` / `current.toolCalls`) on every
+      // call, not derived from the ledger's minSeq hint.
+      evict: (sessionId, _minSeq) => {
+        setSessionStates((prev) => {
+          const current = prev.get(sessionId);
+          if (!current) return prev;
+          const vp = viewportFloorRef.current.get(sessionId) ?? null;
+          const toolFloorSeq = computeToolFloorSeq(current.toolCalls.values(), DEFAULT_TOOL_TIER_MAX_BYTES, DEFAULT_TOOL_TIER_MAX_COUNT);
+          // Clamp the tool floor to the session's viewport pin too (mirrors
+          // computeChatFloorSeq's own viewport clamp below) so a currently
+          // visible tool row can never be evicted out from under the user.
+          // See change: bounded-hot-transcript-state (blocking-fix follow-up).
+          const effToolFloorSeq = vp != null ? Math.min(toolFloorSeq, vp) : toolFloorSeq;
+          const floors = {
+            chatFloorSeq: computeChatFloorSeq(current.messages, DEFAULT_CHAT_RETAINED_TURNS, vp),
+            toolFloorSeq: effToolFloorSeq,
+          };
+          const next = new Map(prev);
+          next.set(sessionId, evictBelow(current, floors));
+          return next;
+        });
       },
       reset: (sessionId) => {
         bumpReplayGeneration(sessionId);
@@ -990,6 +1023,21 @@ export default function App() {
     setCompletedOlderAnchorMap((prev) => new Map(prev).set(selectedId, null));
     beginReplay(selectedId, "older", source, anchorToken, "load_older");
   }, [selectedId, loadingOlderMap, replayController, beginReplay]);
+
+  // Task 1.7: ChatView reports the lowest `seq` currently visible in the
+  // virtualized viewport; stash it per-session so the `evict` effect's
+  // computeChatFloorSeq call never prunes rows the user is looking at. A
+  // `null` floor (empty transcript / no seq-bearing row visible) clears the
+  // entry rather than writing null, so `?? null` downstream reads plainly.
+  // See change: bounded-hot-transcript-state.
+  const handleVisibleFloorSeqChange = useCallback((seq: number | null) => {
+    if (!selectedId) return;
+    if (seq == null) {
+      viewportFloorRef.current.delete(selectedId);
+    } else {
+      viewportFloorRef.current.set(selectedId, seq);
+    }
+  }, [selectedId]);
 
   // Explicit user hard-refresh: discard the rendered tail and cold-rebuild.
   const refreshSelectedSession = useCallback(() => {
@@ -1961,6 +2009,7 @@ export default function App() {
               completedOlderAnchorToken={selectedId ? completedOlderAnchorMap.get(selectedId) ?? null : null}
               onLoadOlder={selectedId && (!isMobile || mobileDetailVisible) ? handleLoadOlder : undefined}
               onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined}
+              onVisibleFloorSeqChange={handleVisibleFloorSeqChange}
             />
             </SessionAssetsProvider>
           </ErrorBoundary>

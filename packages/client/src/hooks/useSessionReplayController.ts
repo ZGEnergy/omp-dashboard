@@ -35,6 +35,8 @@ export interface ReplayControllerEffects {
   window?(sessionId: string, metadata: ReplayWindowMetadata): void;
   /** The ledger dropped its head to keep the hot transcript within budget. */
   trimmed?(sessionId: string, minSeq: number): void;
+  /** Prune the reducer's hot state to the ledger's two-tier retention floor. */
+  evict?(sessionId: string, minSeq: number): void;
   /** Older replay is rebuilt atomically from the same canonical sequence. */
   replace(
     sessionId: string,
@@ -264,7 +266,10 @@ export class SessionReplayController {
     if (result.evictedHead) {
       const ledger = this.ledger(sessionId);
       this.effects.trimmed?.(sessionId, ledger.minSeq);
-      this.effects.replace(sessionId, ledger.events, null);
+      // Apply the new tail before evicting so the two-tier floors are computed
+      // against the up-to-date reducer state, not the pre-tail snapshot.
+      this.effects.apply(sessionId, result.accepted);
+      if (ledger.status === "ready") this.effects.evict?.(sessionId, ledger.minSeq);
       return;
     }
     this.effects.apply(sessionId, result.accepted);
