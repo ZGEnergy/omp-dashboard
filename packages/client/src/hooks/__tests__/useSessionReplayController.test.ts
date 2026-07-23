@@ -349,4 +349,36 @@ describe("SessionReplayController", () => {
     controller.handle({ ...frame(deltaReq.requestId!, [entry(12)], true, "source-a"), replayKind: "delta" });
     expect(controller.ledger("s").events.map((e) => e.seq)).toEqual([10, 11, 12]);
   });
+
+  it("rematerialize re-reduces from resident ledger events with no server request", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    const cold = controller.begin("s", "cold", "source-a");
+    controller.handle(frame(cold.requestId!, [entry(10), entry(11)], true));
+    expect(controller.ledger("s").status).toBe("ready");
+    const sendCalls = effects.send.mock.calls.length;
+    effects.replace.mockClear();
+
+    controller.rematerialize("s");
+
+    // Full re-reduce from the resident ledger events, no load-older completion.
+    expect(effects.replace).toHaveBeenCalledWith("s", [entry(10), entry(11)], null);
+    // Interior expansion NEVER hits the wire: no new subscribe was sent.
+    expect(effects.send).toHaveBeenCalledTimes(sendCalls);
+  });
+
+  it("rematerialize is a no-op when the ledger is not ready", () => {
+    const effects = { send: vi.fn(), apply: vi.fn(), replace: vi.fn(), reset: vi.fn(), loading: vi.fn(), reconnect: vi.fn(), publishAsset: vi.fn() };
+    const controller = new SessionReplayController(effects);
+    // No ledger for this session at all.
+    controller.rematerialize("missing");
+    expect(effects.replace).not.toHaveBeenCalled();
+
+    // Ledger exists but is still cold (in-flight cold replay, not terminal).
+    const cold = controller.begin("s", "cold", "source-a");
+    controller.handle(frame(cold.requestId!, [entry(1)], false));
+    expect(controller.ledger("s").status).not.toBe("ready");
+    controller.rematerialize("s");
+    expect(effects.replace).not.toHaveBeenCalled();
+  });
 });

@@ -14,7 +14,7 @@ import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
 import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import { useMobile } from "../hooks/useMobile.js";
 import { buildSelectionClipboardText } from "../lib/chat-selection-copy.js";
-import { buildTurnToFirstRowIndex, computeRowTextChars, type DisplayRow, estimateVirtualRowSize, extendRangeWithSelection, interleaveEvictedBursts, isBurst, isEvictedBurst, isGroup, lowestVisibleSeq, rangeToRowIndexSpan, type SelectionRowSpan, virtualRowKey } from "../lib/chat-virtual-rows.js";
+import { buildTurnToFirstRowIndex, computeRowTextChars, type DisplayRow, estimateVirtualRowSize, extendRangeWithSelection, interleaveEvictedBursts, isBurst, isEvictedBurst, isGroup, lowestVisibleSeq, rangeToRowIndexSpan, rowSeq, type SelectionRowSpan, virtualRowKey } from "../lib/chat-virtual-rows.js";
 import { findActiveInteractiveToolResultIds, findRetriedErrorIds, findSurfaceSuppressedErrorIds } from "../lib/collapse-retried-errors.js";
 // RetryBanner + ErrorBanner replaced by the unified SessionBanner mounted
 // in App.tsx (sticky above the command input). See change:
@@ -120,6 +120,15 @@ interface Props {
    * across retries and returns it only with the matching terminal.
    */
   onLoadOlder?: (anchorToken: string) => void;
+  /**
+   * Expand a clicked `EvictedToolBurst` marker back into the transcript in
+   * place. Interior ranges (raw events still resident) re-materialize locally
+   * with no server request; below-floor ranges drive the contiguous
+   * older-paging loop to the marker's `fromSeq`. See change:
+   * load-older-seq-range-paging (issue #77). Omitted → markers stay
+   * non-interactive.
+   */
+  onExpandEvictedBurst?: (burst: EvictedToolBurst) => void;
   /** Anchor token returned by the matching older terminal. */
   completedOlderAnchorToken?: string | null;
   /**
@@ -286,17 +295,32 @@ function hasMermaid(content: string): boolean {
  * muted text) for consistency, without its interactive chrome.
  * See change: bounded-hot-transcript-state.
  */
-function EvictedToolBurstMarkerRow({ burst, isMobile }: { burst: EvictedToolBurst; isMobile: boolean }) {
+function EvictedToolBurstMarkerRow({ burst, isMobile, onExpand }: { burst: EvictedToolBurst; isMobile: boolean; onExpand?: () => void }) {
+  const label = i18nT(
+    "chat.evictedToolBurst",
+    { count: burst.count, from: burst.fromSeq, to: burst.toSeq },
+    "{count} tool calls collapsed (#{from}–#{to})",
+  );
+  const frame = `${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3 py-1 text-xs text-[var(--text-tertiary)]`;
+  // Clickable when a handler is wired (issue #77): expand the evicted run back
+  // into the transcript in place. Non-interactive fallback stays a <div>.
+  if (onExpand) {
+    return (
+      <button
+        type="button"
+        data-testid="evicted-tool-burst-marker"
+        aria-label={label}
+        title={label}
+        onClick={onExpand}
+        className={`${frame} block w-full text-left cursor-pointer hover:text-[var(--text-secondary)]`}
+      >
+        {label}
+      </button>
+    );
+  }
   return (
-    <div
-      data-testid="evicted-tool-burst-marker"
-      className={`${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3 py-1 text-xs text-[var(--text-tertiary)]`}
-    >
-      {i18nT(
-        "chat.evictedToolBurst",
-        { count: burst.count, from: burst.fromSeq, to: burst.toSeq },
-        "{count} tool calls collapsed (#{from}–#{to})",
-      )}
+    <div data-testid="evicted-tool-burst-marker" className={frame}>
+      {label}
     </div>
   );
 }
@@ -343,9 +367,16 @@ const scrollStateMap = new Map<string, { anchorRowId: string | null; offset: num
 
 export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
+  /**
+   * Scroll the first display row whose `seq >= seq` to the top of the
+   * viewport. Used after an evicted-burst expansion (issue #77) to bring the
+   * newly-materialized range into view. No-op when no row reaches `seq`.
+   */
+  scrollToSeq: (seq: number) => void;
 }
 
-const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange, onReadingHistoryChange, onDerivationTiming }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, onExpandEvictedBurst, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange, onReadingHistoryChange, onDerivationTiming }, ref) {
+
   const scrollRef = useRef<HTMLDivElement>(null);
   // Desktop retains its saved anchor; mobile ownership is explicit below.
   // These refs were accidentally removed by an interrupted migration and are
@@ -1334,7 +1365,27 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
       if (mobileActive) scrollOwnerRef.current = "READING_HISTORY";
       scheduleProgrammaticWrite(() => virtualizer.scrollToIndex(rowIndex, { align: "start" }));
     },
-  }), [mobileActive, mobileInactive, scheduleProgrammaticWrite, turnToFirstRowIndex, virtualizer]);
+    scrollToSeq(seq: number) {
+      // Find the first materialized row at/above `seq` and scroll it to the
+      // top. Reuses the older-anchor restore's `renderRows.findIndex` +
+      // `scrollToIndex` precedent (#81) so an expand-in-place row splice does
+      // not leave the viewport pointing at a churned index. See change:
+      // load-older-seq-range-paging (issue #77).
+      if (mobileInactive) return;
+      const index = renderRows.findIndex((row) => {
+        const s = rowSeq(row);
+        return s != null && s >= seq;
+      });
+      if (index < 0) return;
+      descendingRef.current = false;
+      olderContinuationRef.current = null;
+      autoContinueAfterRestoreRef.current = false;
+      stickToBottomRef.current = false;
+      setShowScrollButton(true);
+      if (mobileActive) scrollOwnerRef.current = "READING_HISTORY";
+      scheduleProgrammaticWrite(() => virtualizer.scrollToIndex(index, { align: "start" }));
+    },
+  }), [mobileActive, mobileInactive, renderRows, scheduleProgrammaticWrite, turnToFirstRowIndex, virtualizer]);
 
   return (
     // Key by sessionId so switching sessions (ChatView is reused, not remounted)
@@ -1392,7 +1443,13 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         // Collapsed marker for an evicted contiguous tool-tier run, positioned
         // by seq among the surviving rows (see `interleaveEvictedBursts`).
         if (isEvictedBurst(item)) {
-          return <EvictedToolBurstMarkerRow burst={item} isMobile={isMobile} />;
+          return (
+            <EvictedToolBurstMarkerRow
+              burst={item}
+              isMobile={isMobile}
+              onExpand={onExpandEvictedBurst ? () => onExpandEvictedBurst(item) : undefined}
+            />
+          );
         }
         // Temporal burst group of heterogeneous tool calls (carries collapse
         // state → key by first-member id, NOT positional idx, so event-trim

@@ -72,7 +72,8 @@ import { deleteDraft, readAllDrafts, writeDraft } from "./lib/draft-storage.js";
 // SubagentPopoutPage no longer imported by the shell — it's registered via
 // the subagents-plugin's `shell-overlay-route` claim and mounted through
 // `<ShellOverlayRouteSlot>` below. See change: add-flow-agent-popout.
-import { createInitialState, deriveBannerState, evictBelow, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { createInitialState, deriveBannerState, type EvictedToolBurst, evictBelow, reduceEvent, resolveInteractiveRequest, type SessionState } from "./lib/event-reducer.js";
+import { classifyExpand, reachedExpandTarget } from "./lib/expand-evicted-burst.js";
 import { decodeFolderPath, encodeFolderPath } from "./lib/folder-encoding.js";
 import { fetchActiveInits } from "./lib/git-api.js";
 import { refreshGitStatus } from "./lib/git-status-cache.js";
@@ -843,6 +844,14 @@ export default function App() {
   // Task 1.7 wiring: ChatView's visible-range callback updates this per-session
   // viewport floor; the chat tier's evict floor never prunes below what is on screen.
   const viewportFloorRef = useRef<Map<string, number>>(new Map());
+  // Issue #77: expanding an evicted tool-burst marker pins the session's tool
+  // floor down to the marker's `fromSeq` so a subsequent live-event evict
+  // cannot re-collapse the just-expanded range. `expandTargetRef` holds a
+  // below-floor expansion's stop target while the contiguous older-paging loop
+  // drives the ledger min down to it. Both are transient — cleared on return
+  // to the live tail. See change: load-older-seq-range-paging.
+  const expandFloorRef = useRef<Map<string, number>>(new Map());
+  const expandTargetRef = useRef<Map<string, number>>(new Map());
   const lastServerEpochRef = useRef<string | null>(null);
   if (serverEpoch && serverEpoch !== lastServerEpochRef.current) lastServerEpochRef.current = serverEpoch;
   const authorityKey = lastServerEpochRef.current ?? "unknown";
@@ -937,12 +946,19 @@ export default function App() {
         setSessionStates((prev) => {
           const current = prev.get(sessionId);
           if (!current) return prev;
-          const vp = viewportFloorRef.current.get(sessionId) ?? null;
+          // Fold the viewport pin and the expanded-burst pin (issue #77) into a
+          // single lower bound. `pin` is the lowest seq that must survive this
+          // evict: the on-screen floor and/or the tool floor an expand pinned.
+          const rawVp = viewportFloorRef.current.get(sessionId);
+          const rawExpand = expandFloorRef.current.get(sessionId);
+          const pin = Math.min(rawVp ?? Number.POSITIVE_INFINITY, rawExpand ?? Number.POSITIVE_INFINITY);
+          const vp = Number.isFinite(pin) ? pin : null;
           const toolFloorSeq = computeToolFloorSeq(current.toolCalls.values(), DEFAULT_TOOL_TIER_MAX_BYTES, DEFAULT_TOOL_TIER_MAX_COUNT);
-          // Clamp the tool floor to the session's viewport pin too (mirrors
+          // Clamp the tool floor to the session's pin too (mirrors
           // computeChatFloorSeq's own viewport clamp below) so a currently
-          // visible tool row can never be evicted out from under the user.
-          // See change: bounded-hot-transcript-state (blocking-fix follow-up).
+          // visible OR just-expanded tool row can never be evicted out from
+          // under the user. See changes: bounded-hot-transcript-state,
+          // load-older-seq-range-paging.
           const effToolFloorSeq = vp != null ? Math.min(toolFloorSeq, vp) : toolFloorSeq;
           const floors = {
             chatFloorSeq: computeChatFloorSeq(current.messages, DEFAULT_CHAT_RETAINED_TURNS, vp),
@@ -1034,16 +1050,26 @@ export default function App() {
     };
   }, [replayController]);
 
+  // Shared starter for one contiguous older page: set the load-older latch,
+  // clear the completed anchor, and issue the `older` request (which derives
+  // `fromSeq = ledger.minSeq`, so every page abuts the ledger head — the
+  // single-contiguous-island invariant is preserved). `handleLoadOlder` calls
+  // it with ChatView's scroll anchor token; the expand driver (issue #77)
+  // calls it with a synthetic token. See change: load-older-seq-range-paging.
+  const beginOlderPage = useCallback((sessionId: string, anchorToken: string) => {
+    setLoadingOlderMap((prev) => new Map(prev).set(sessionId, true));
+    const source = sourceGenerationRef.current.get(sessionId) || replayController.ledger(sessionId).sourceGeneration || "";
+    completedOlderAnchorRef.current.set(sessionId, null);
+    setCompletedOlderAnchorMap((prev) => new Map(prev).set(sessionId, null));
+    beginReplay(sessionId, "older", source, anchorToken, "load_older");
+  }, [replayController, beginReplay]);
+
   const handleLoadOlder = useCallback((anchorToken: string) => {
     if (!selectedId || loadingOlderMap.get(selectedId)) return;
     const win = historyWindowRef.current.get(selectedId);
     if (!win?.hasMoreOlder) return;
-    setLoadingOlderMap((prev) => new Map(prev).set(selectedId, true));
-    const source = sourceGenerationRef.current.get(selectedId) || replayController.ledger(selectedId).sourceGeneration || "";
-    completedOlderAnchorRef.current.set(selectedId, null);
-    setCompletedOlderAnchorMap((prev) => new Map(prev).set(selectedId, null));
-    beginReplay(selectedId, "older", source, anchorToken, "load_older");
-  }, [selectedId, loadingOlderMap, replayController, beginReplay]);
+    beginOlderPage(selectedId, anchorToken);
+  }, [selectedId, loadingOlderMap, beginOlderPage]);
 
   // Task 1.7: ChatView reports the lowest `seq` currently visible in the
   // virtualized viewport; stash it per-session so the `evict` effect's
@@ -1073,11 +1099,76 @@ export default function App() {
   // See change: dynamic-retention-while-reading.
   const handleReadingHistoryChange = useCallback((reading: boolean) => {
     if (!selectedId) return;
+    // Returning to the live tail ends any expand-in-place session (issue #77):
+    // drop the transient tool-floor pin + stop target so the normal flush can
+    // re-prune the expanded range back down. Expand is a reading-mode state.
+    if (!reading) {
+      expandFloorRef.current.delete(selectedId);
+      expandTargetRef.current.delete(selectedId);
+    }
     replayController.setRetentionCap(
       selectedId,
       reading ? Number.POSITIVE_INFINITY : DEFAULT_REPLAY_RETENTION_BYTES,
     );
   }, [selectedId, replayController]);
+
+  // Issue #77: expand a clicked evicted tool-burst marker back into the
+  // transcript in place. Interior ranges (`fromSeq >= ledger.minSeq`) still
+  // have their raw events resident, so re-materializing locally needs NO server
+  // request; below-floor ranges (raw events byte-trimmed) drive the existing
+  // contiguous older-paging loop down to `fromSeq` as a stop target. Either way
+  // the tool floor is pinned so the range survives the next live-event evict,
+  // and the retention cap is lifted so a later flush cannot trim it.
+  // See change: load-older-seq-range-paging.
+  const handleExpandEvictedBurst = useCallback((burst: EvictedToolBurst) => {
+    const sid = selectedId;
+    if (!sid) return;
+    const minSeq = replayController.ledger(sid).minSeq;
+    expandFloorRef.current.set(sid, Math.min(expandFloorRef.current.get(sid) ?? Number.POSITIVE_INFINITY, burst.fromSeq));
+    handleReadingHistoryChange(true);
+    if (classifyExpand(burst, minSeq) === "interior") {
+      // Raw events resident: re-materialize locally, no server request, no
+      // ledger admission — the single-contiguous-island gate is never touched.
+      replayController.rematerialize(sid);
+      requestAnimationFrame(() => chatViewRef.current?.scrollToSeq(burst.fromSeq));
+      return;
+    }
+    // Below-floor: set the stop target and kick the contiguous older loop; the
+    // driver effect below advances it and scrolls on arrival.
+    expandTargetRef.current.set(sid, burst.fromSeq);
+    if (!loadingOlderMap.get(sid) && historyWindowRef.current.get(sid)?.hasMoreOlder) {
+      beginOlderPage(sid, crypto.randomUUID());
+    }
+  }, [selectedId, replayController, handleReadingHistoryChange, loadingOlderMap, beginOlderPage]);
+
+  // Issue #77 below-floor driver: advance the contiguous older-paging loop
+  // toward a pending expand stop target. Each `older` completion lowers the
+  // ledger min; when it reaches the marker's `fromSeq` the range is resident —
+  // scroll to it and clear the target. If paging hits the session head before
+  // reaching the target (`!hasMoreOlder`), terminate gracefully by scrolling to
+  // the lowest reached row (R6). `loadingOlder` is the shared concurrency gate,
+  // so a concurrent ChatView scroll cannot double-fire.
+  useEffect(() => {
+    const sid = selectedId;
+    if (!sid) return;
+    const target = expandTargetRef.current.get(sid);
+    if (target == null) return;
+    const minSeq = replayController.ledger(sid).minSeq;
+    if (reachedExpandTarget(minSeq, target)) {
+      expandTargetRef.current.delete(sid);
+      requestAnimationFrame(() => chatViewRef.current?.scrollToSeq(target));
+      return;
+    }
+    if (loadingOlderMap.get(sid)) return;
+    if (historyWindowRef.current.get(sid)?.hasMoreOlder) {
+      beginOlderPage(sid, crypto.randomUUID());
+    } else {
+      // Reached the session head without covering the whole range: expand as far
+      // as it goes and stop (no hang).
+      expandTargetRef.current.delete(sid);
+      requestAnimationFrame(() => chatViewRef.current?.scrollToSeq(minSeq));
+    }
+  }, [selectedId, historyWindowMap, sessionStates, loadingOlderMap, replayController, beginOlderPage]);
 
   // Explicit user hard-refresh: discard the rendered tail and cold-rebuild.
   const refreshSelectedSession = useCallback(() => {
@@ -2066,6 +2157,7 @@ export default function App() {
               replayGeneration={selectedId ? replayGenerationMap.get(selectedId) ?? 0 : 0}
               completedOlderAnchorToken={selectedId ? completedOlderAnchorMap.get(selectedId) ?? null : null}
               onLoadOlder={selectedId && (!isMobile || mobileDetailVisible) ? handleLoadOlder : undefined}
+              onExpandEvictedBurst={selectedId && (!isMobile || mobileDetailVisible) ? handleExpandEvictedBurst : undefined}
               onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined}
               onVisibleFloorSeqChange={handleVisibleFloorSeqChange}
               onReadingHistoryChange={handleReadingHistoryChange}

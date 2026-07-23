@@ -166,4 +166,34 @@ describe("evictBelow (two-tier prune)", () => {
       }
     });
   });
+
+  // Issue #77 (R2): after an evicted burst is expanded, App pins the tool floor
+  // down to the expanded `fromSeq` by clamping the computed floor with the pin
+  // (`Math.min(toolFloorSeq, pin)`). A subsequent live-event evict must not drop
+  // the just-expanded rows. This exercises that clamp directly.
+  describe("expanded-burst pin (issue #77)", () => {
+    it("keeps just-expanded tool rows when the tool floor is clamped to the pin", () => {
+      const state = withState({
+        messages: [
+          { id: "u1", role: "user", content: "keep", timestamp: 0, seq: 400 },
+          toolRow(50),
+          toolRow(60),
+        ],
+        toolCalls: new Map([tool(50), tool(60)]),
+      });
+      // Computed tool floor would prune everything below 100; the expand pin at
+      // 50 clamps it down so the expanded range (50, 60) survives.
+      const computedToolFloorSeq = 100;
+      const expandPin = 50;
+      const next = evictBelow(state, {
+        chatFloorSeq: 0,
+        toolFloorSeq: Math.min(computedToolFloorSeq, expandPin),
+      });
+      expect(next.toolCalls.has("t50")).toBe(true);
+      expect(next.toolCalls.has("t60")).toBe(true);
+      expect(next.messages.map((m) => m.id)).toEqual(["u1", "tool-t50", "tool-t60"]);
+      // No new burst is produced — nothing was evicted below the pinned floor.
+      expect(next.evictedToolBursts).toEqual([]);
+    });
+  });
 });

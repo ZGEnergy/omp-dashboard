@@ -129,6 +129,27 @@ export class SessionReplayController {
     if (ledger.status === "ready") this.effects.evict?.(sessionId, ledger.minSeq);
   }
 
+  /**
+   * Re-materialize a session's reducer rows from the already-resident ledger
+   * events, WITHOUT any server request or ledger admission. Used to expand an
+   * interior `EvictedToolBurst` marker in place (issue #77): the raw events for
+   * the evicted range are still in the ledger — only the derived rows were
+   * two-tier-pruned — so a full re-reduce from `ledger.events` (the exact
+   * `replace` effect the older-page terminal uses) rebuilds every row and
+   * clears `evictedToolBursts`. Passing `null` completion means no load-older
+   * latch is touched.
+   *
+   * CRITICAL INVARIANT: this NEVER calls `begin`/`admit`, so the ledger's
+   * single-contiguous-island gate (`acceptOlder`) is never touched and no
+   * non-contiguous frame is ever created. No-op unless the ledger is `ready`.
+   */
+  rematerialize(sessionId: string): void {
+    const ledger = this.ledgers.get(sessionId);
+    if (!ledger) return;
+    if (ledger.status !== "ready") return;
+    this.effects.replace(sessionId, ledger.events, null);
+  }
+
   /** Cache must contain a primary conversation turn before it can supersede canonical cold replay. */
   seedCached(sessionId: string, sourceGeneration: string, events: readonly LedgerEvent[]): boolean {
     if (!hasUserTurnStart(events)) return false;
