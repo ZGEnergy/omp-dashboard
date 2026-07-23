@@ -131,6 +131,15 @@ interface Props {
    * See change: bounded-hot-transcript-state.
    */
   onVisibleFloorSeqChange?: (seq: number | null) => void;
+  /**
+   * Fires on the transition between the live tail and reading older history:
+   * `true` when the viewport leaves the live bottom (the user scrolls up to
+   * read older messages), `false` when it returns to the bottom. App.tsx lifts
+   * the ledger retention cap while reading so Load-older is not ceilinged, and
+   * flushes it back to the base ceiling on return. Edge-triggered — fired only
+   * on change, not every scroll. See change: dynamic-retention-while-reading.
+   */
+  onReadingHistoryChange?: (reading: boolean) => void;
 }
 
 function ImageAttachments({
@@ -329,7 +338,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange, onReadingHistoryChange }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Desktop retains its saved anchor; mobile ownership is explicit below.
   // These refs were accidentally removed by an interrupted migration and are
@@ -811,6 +820,10 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // spam the parent callback every render.
   const lastReportedFloorSeqRef = useRef<number | null | undefined>(undefined);
   const lastReportedFloorSessionRef = useRef<string | undefined>(undefined);
+  // Edge-tracking for onReadingHistoryChange: last reported `reading` value and
+  // the session it was reported for (reset the baseline on session switch).
+  const readingHistoryRef = useRef<boolean | null>(null);
+  const readingHistorySessionRef = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
     if (!onVisibleFloorSeqChange) return;
     const floor = virtualItems.length > 0
@@ -979,6 +992,21 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < SCROLL_THRESHOLD;
     const nearTop = element.scrollTop <= SCROLL_THRESHOLD;
 
+    // Reading-history edge: leaving the live bottom lifts the retention cap so
+    // Load-older is not ceilinged; returning flushes it. Platform-agnostic —
+    // computed before the mobile/desktop branch and fired only on transitions.
+    if (onReadingHistoryChange) {
+      const reading = !nearBottom;
+      if (sessionId !== readingHistorySessionRef.current) {
+        readingHistorySessionRef.current = sessionId;
+        readingHistoryRef.current = null;
+      }
+      if (readingHistoryRef.current !== reading) {
+        readingHistoryRef.current = reading;
+        onReadingHistoryChange(reading);
+      }
+    }
+
     if (mobileActive) {
       const owner = scrollOwnerRef.current;
       if (owner === "NAVIGATING_BOTTOM" && nearBottom) scrollOwnerRef.current = "FOLLOWING";
@@ -1046,7 +1074,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         nearBottom,
       });
     }
-  }, [hasMoreOlder, loadingHistory, loadingOlder, mobileActive, mobileInactive, requestOlder, sessionId, virtualizer]);
+  }, [hasMoreOlder, loadingHistory, loadingOlder, mobileActive, mobileInactive, onReadingHistoryChange, requestOlder, sessionId, virtualizer]);
 
   const scrollToBottom = useCallback(() => {
     if (mobileInactive) return;

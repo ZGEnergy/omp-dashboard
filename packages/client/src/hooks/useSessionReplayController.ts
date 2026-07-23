@@ -114,6 +114,21 @@ export class SessionReplayController {
     return ledger;
   }
 
+  /**
+   * Adjust a session's retained-bytes cap. Raising it (the user is reading
+   * older history) lifts the ceiling so paged-in rows are not pruned; lowering
+   * it back to the base ceiling (the user returned to the live tail) flushes
+   * the ledger head and prunes the reducer's two-tier floors to match. No-op
+   * for a session with no ledger.
+   */
+  setRetentionCap(sessionId: string, bytes: number): void {
+    const ledger = this.ledgers.get(sessionId);
+    if (!ledger) return;
+    if (!ledger.setMaxRetainedBytes(bytes)) return;
+    this.effects.trimmed?.(sessionId, ledger.minSeq);
+    if (ledger.status === "ready") this.effects.evict?.(sessionId, ledger.minSeq);
+  }
+
   /** Cache must contain a primary conversation turn before it can supersede canonical cold replay. */
   seedCached(sessionId: string, sourceGeneration: string, events: readonly LedgerEvent[]): boolean {
     if (!hasUserTurnStart(events)) return false;

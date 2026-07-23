@@ -1,8 +1,8 @@
 import { prepareEventForReplay, utf8ByteLength, type PrepareEventForReplayOptions } from "./prepare-event-for-replay.js";
 import type { DashboardEvent } from "./types.js";
 
-/** Default wire/IDB tail budget (~1 MiB). */
-export const DEFAULT_TAIL_WINDOW_BYTES = 1 * 1024 * 1024;
+/** Default wire/IDB tail budget (~1.5 MiB). */
+export const DEFAULT_TAIL_WINDOW_BYTES = 1.5 * 1024 * 1024;
 
 /** Server clamp for client-supplied windowBytes. */
 export const MIN_TAIL_WINDOW_BYTES = 256 * 1024;

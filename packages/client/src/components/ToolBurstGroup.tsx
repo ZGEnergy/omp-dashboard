@@ -168,9 +168,10 @@ export function ToolBurstGroup({ burst, toolContext }: Props) {
     setOverride(burstId ? completedBurstOverrides.get(burstId) ?? null : null);
   }, [burstId]);
   const isRunning = visibleMembers.some((m) => m.toolStatus === "running");
-  // Active groups open by default. An explicit user toggle always wins and
-  // survives transcript replay rebuilds and remounts.
-  const autoOpen = isRunning || !prefs.toolGroupDefaultCollapsed;
+  // Tool groups obey the collapse default uniformly — a running (streaming)
+  // salvo is NOT an exception, so a group never force-opens on hydrate. An
+  // explicit user toggle always wins and survives replay rebuilds/remounts.
+  const autoOpen = !prefs.toolGroupDefaultCollapsed;
   const expanded = override ?? autoOpen;
 
   // One-shot completion flash on the running→done flip.
