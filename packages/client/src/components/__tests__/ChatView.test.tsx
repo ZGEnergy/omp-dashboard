@@ -851,6 +851,37 @@ describe("evicted tool-burst markers", () => {
     expect(markers[0]!.textContent).toContain("10");
     expect(markers[1]!.textContent).toContain("50");
   });
+
+  // Issue #77: markers become interactive when a handler is wired.
+  it("renders the marker as a button and fires the burst on click when onExpandEvictedBurst is set", () => {
+    const state = createInitialState();
+    state.messages.push({ id: "1", role: "user", content: "hi", timestamp: Date.now(), seq: 100 });
+    state.evictedToolBursts = [{ fromSeq: 10, toSeq: 42, count: 7 }];
+    const onExpandEvictedBurst = vi.fn();
+
+    const { container } = render(
+      <ThemeProvider>
+        <ChatView state={state} toolContext={defaultToolContext} onExpandEvictedBurst={onExpandEvictedBurst} />
+      </ThemeProvider>,
+    );
+    const marker = container.querySelector('[data-testid="evicted-tool-burst-marker"]')!;
+    expect(marker.tagName).toBe("BUTTON");
+    fireEvent.click(marker);
+    expect(onExpandEvictedBurst).toHaveBeenCalledTimes(1);
+    expect(onExpandEvictedBurst).toHaveBeenCalledWith({ fromSeq: 10, toSeq: 42, count: 7 });
+  });
+
+  it("keeps the marker non-interactive when onExpandEvictedBurst is absent", () => {
+    const state = createInitialState();
+    state.messages.push({ id: "1", role: "user", content: "hi", timestamp: Date.now(), seq: 100 });
+    state.evictedToolBursts = [{ fromSeq: 10, toSeq: 42, count: 7 }];
+
+    const { container } = render(
+      <ThemeProvider><ChatView state={state} toolContext={defaultToolContext} /></ThemeProvider>,
+    );
+    const marker = container.querySelector('[data-testid="evicted-tool-burst-marker"]')!;
+    expect(marker.tagName).toBe("DIV");
+  });
 });
 
 // Task 1.7 (change: bounded-hot-transcript-state).
