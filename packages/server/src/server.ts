@@ -46,6 +46,7 @@ import { createGoalStore } from "./goal-store.js";
 import { createGoalSupervisor, type GoalDriverSpawnRequest, type GoalSupervisor } from "./goal-supervisor.js";
 import { createGoalVerdictAccumulator } from "./goal-verdict-accumulator.js";
 import { keeperOptsFromSpawnResult } from "./headless-pid-registry.js";
+import { createHotWindowMetrics } from "./hot-window-metrics.js";
 import { createHydrationMetrics } from "./hydration-metrics.js";
 import { ensureServerIdentity } from "./identity.js";
 import { createIdleTimer } from "./idle-timer.js";
@@ -542,6 +543,12 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // instrument-session-hydration-timing.
   const hydrationMetrics = createHydrationMetrics(20);
 
+  // Bounded aggregate of client `hot_window_report` frames. Shared with
+  // `browser-gateway.ts` (ingests on the `hot_window_report` case) and the
+  // `/api/health` route (reads `snapshot()` into `hotWindow`). See change:
+  // bounded-hot-transcript-state (Slice 3, Task 3.2).
+  const hotWindowMetrics = createHotWindowMetrics(20);
+
   // Event-loop delay histogram, started once at boot. `/api/health` reads
   // {meanMs,p99Ms,maxMs} then resets the window so each read reflects recent
   // activity. Negligible libuv-timer overhead. See change above.
@@ -659,7 +666,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
   // Live-server-preview manager (loopback dev-server allowlist + proxy).
   const liveServerManager = createLiveServerManager(preferencesStore);
 
-  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry, pendingInitialPromptRegistry, pendingResumeIntents, pendingClientCorrelations, pendingWorktreeBaseRegistry, metaPersistence, undefined, undefined, serverEpoch);
+  const browserGateway = createBrowserGateway(sessionManager, eventStore, piGateway, undefined, pendingForkRegistry, sessionOrderManager, preferencesStore, directoryService, terminalManager, pendingDashboardSpawns, config.maxWsBufferBytes, pendingAttachRegistry, pendingInitialPromptRegistry, pendingResumeIntents, pendingClientCorrelations, pendingWorktreeBaseRegistry, metaPersistence, undefined, undefined, serverEpoch, hotWindowMetrics);
 
   // Editor-pane changed-on-disk watch: the browser declares its open files via
   // `watch_files`; the server watches exactly those and pushes `file_changed`.
@@ -1283,6 +1290,7 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     eventLoopSpikes,
     applyPushConfig,
     eventStore,
+    hotWindowMetrics,
   });
   registerOmpConfigRoutes(fastify, { networkGuard });
   // GET /api/doctor — see change: doctor-rich-output (task 4.2). Auth-gated identically to /api/config.

@@ -54,6 +54,7 @@ import { shouldReconnectForForeground } from "./hooks/foreground-replay.js";
 import { useAppHidden } from "./hooks/useAppHidden.js";
 import { useContentViews } from "./hooks/useContentViews.js";
 import { useDocumentTitle } from "./hooks/useDocumentTitle.js";
+import { useHotWindowMetricsReporter } from "./hooks/useHotWindowMetricsReporter.js";
 import { selectInflightBashTools } from "./hooks/useInflightBashTools.js";
 import { useInstallPrompt } from "./hooks/useInstallPrompt.js";
 import { useLaunchSource } from "./hooks/useLaunchSource.js";
@@ -1089,6 +1090,16 @@ export default function App() {
   // tool-result route. Session-scoped (survives transcript virtualization).
   // See change: fix-stuck-tool-card-on-dropped-event.
   useStaleToolReconcile(sessionStates, setSessionStates, apiBase);
+
+  // Rate-limited, payload-free hot-window observability report over the
+  // existing socket (sizes/counts only — see `HotWindowReport`).
+  // See change: bounded-hot-transcript-state.
+  useHotWindowMetricsReporter({
+    sessionStates,
+    send,
+    replayController,
+    connected: status === "connected",
+  });
 
   // Fetch the gitWorktreeEnabled preference on mount.
   // See change: openspec-worktree-spawn-button.
