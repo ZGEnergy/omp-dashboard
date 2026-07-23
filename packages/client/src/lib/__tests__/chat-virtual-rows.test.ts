@@ -4,12 +4,15 @@ import {
   computeRowTextChars,
   estimateVirtualRowSize,
   extendRangeWithSelection,
+  interleaveEvictedBursts,
   isBurst,
+  isEvictedBurst,
   isGroup,
+  lowestVisibleSeq,
   rangeToRowIndexSpan,
   virtualRowKey,
 } from "../chat-virtual-rows.js";
-import type { ChatMessage } from "../event-reducer.js";
+import type { ChatMessage, EvictedToolBurst } from "../event-reducer.js";
 import type { BurstItem, ToolBurstGroup } from "../group-tool-bursts.js";
 import type { ToolCallGroup } from "../group-tool-calls.js";
 
@@ -362,5 +365,127 @@ describe("advisor virtual rows", () => {
     expect(estimateVirtualRowSize(advisor)).toBe(72);
     expect(computeRowTextChars(advisor)).toBe(81);
     expect(estimateVirtualRowSize(advisor, computeRowTextChars(advisor))).toBe(112);
+  });
+});
+
+describe("lowestVisibleSeq (task 1.7 — viewport floor)", () => {
+  it("returns the lowest seq among plain message rows in range", () => {
+    const rows: BurstItem[] = [
+      msg({ id: "u1", role: "user", seq: 5 }),
+      msg({ id: "a1", role: "assistant", seq: 6 }),
+      msg({ id: "u2", role: "user", seq: 9 }),
+    ];
+    expect(lowestVisibleSeq(rows, 1, 2)).toBe(6);
+    expect(lowestVisibleSeq(rows, 0, 2)).toBe(5);
+  });
+
+  it("reads a burst/group row's seq from its first underlying member", () => {
+    const rows: BurstItem[] = [
+      msg({ id: "u1", role: "user", seq: 1 }),
+      { type: "burst", id: "b1", items: [msg({ id: "t1", role: "toolResult", seq: 3 })] },
+      group("m1"),
+    ];
+    (rows[2] as { messages: ChatMessage[] }).messages[0]!.seq = 4;
+    expect(lowestVisibleSeq(rows, 1, 1)).toBe(3);
+    expect(lowestVisibleSeq(rows, 2, 2)).toBe(4);
+  });
+
+  it("returns null for an empty or out-of-bounds range", () => {
+    const rows: BurstItem[] = [msg({ id: "u1", role: "user", seq: 1 })];
+    expect(lowestVisibleSeq(rows, 5, 10)).toBeNull();
+    expect(lowestVisibleSeq([], 0, 0)).toBeNull();
+  });
+
+  it("skips rows carrying no seq (e.g. client-only rows)", () => {
+    const rows: BurstItem[] = [
+      msg({ id: "u1", role: "user" }), // no seq
+      msg({ id: "u2", role: "user", seq: 7 }),
+    ];
+    expect(lowestVisibleSeq(rows, 0, 1)).toBe(7);
+  });
+});
+
+// Blocking-fix follow-up (change: bounded-hot-transcript-state): ChatView must
+// not render every EvictedToolBurst marker unconditionally at the top — a
+// tool-heavy few-turn session can have toolFloorSeq > chatFloorSeq, putting
+// an evicted tool run BELOW some still-retained chat rows.
+describe("isEvictedBurst", () => {
+  it("recognizes an EvictedToolBurst and rejects burst/group/message rows", () => {
+    const marker: EvictedToolBurst = { fromSeq: 1, toSeq: 2, count: 2 };
+    expect(isEvictedBurst(marker)).toBe(true);
+    expect(isEvictedBurst(burst("b"))).toBe(false);
+    expect(isEvictedBurst(group("m"))).toBe(false);
+    expect(isEvictedBurst(msg({ id: "u1", role: "user" }))).toBe(false);
+  });
+});
+
+describe("interleaveEvictedBursts (ordering helper, blocking-fix follow-up)", () => {
+  it("returns the rows unchanged (as a new array) when there are no bursts", () => {
+    const rows: BurstItem[] = [msg({ id: "u1", role: "user", seq: 1 })];
+    const out = interleaveEvictedBursts(rows, []);
+    expect(out).toEqual(rows);
+    expect(out).not.toBe(rows);
+  });
+
+  it("inserts a marker before the first row whose seq exceeds its toSeq", () => {
+    const rows: BurstItem[] = [
+      msg({ id: "u1", role: "user", seq: 1 }),
+      msg({ id: "u2", role: "user", seq: 100 }),
+    ];
+    const bursts: EvictedToolBurst[] = [{ fromSeq: 10, toSeq: 20, count: 3 }];
+    const out = interleaveEvictedBursts(rows, bursts);
+    expect(out.map((r) => virtualRowKey(r, 0))).toEqual(["u1", "evicted-10-20", "u2"]);
+  });
+
+  it("places a marker whose toSeq is BELOW some retained rows in the middle, not the top (the core defect)", () => {
+    // toolFloorSeq > chatFloorSeq scenario: the evicted tool run (seq 10-11)
+    // sits between two chat rows (seq 1 and seq 100) — NOT before seq 1.
+    const rows: BurstItem[] = [
+      msg({ id: "u1", role: "user", seq: 1 }),
+      msg({ id: "a1", role: "assistant", seq: 100 }),
+    ];
+    const bursts: EvictedToolBurst[] = [{ fromSeq: 10, toSeq: 11, count: 2 }];
+    const out = interleaveEvictedBursts(rows, bursts);
+    const keys = out.map((r, i) => virtualRowKey(r, i));
+    expect(keys.indexOf("u1")).toBeLessThan(keys.indexOf("evicted-10-11"));
+    expect(keys.indexOf("evicted-10-11")).toBeLessThan(keys.indexOf("a1"));
+  });
+
+  it("orders multiple markers among rows purely by seq", () => {
+    const rows: BurstItem[] = [
+      msg({ id: "u1", role: "user", seq: 1 }),
+      msg({ id: "u2", role: "user", seq: 50 }),
+      msg({ id: "u3", role: "user", seq: 200 }),
+    ];
+    const bursts: EvictedToolBurst[] = [
+      { fromSeq: 100, toSeq: 110, count: 2 }, // between u2 (50) and u3 (200)
+      { fromSeq: 10, toSeq: 20, count: 2 }, // between u1 (1) and u2 (50)
+    ];
+    const out = interleaveEvictedBursts(rows, bursts);
+    expect(out.map((r, i) => virtualRowKey(r, i))).toEqual([
+      "u1",
+      "evicted-10-20",
+      "u2",
+      "evicted-100-110",
+      "u3",
+    ]);
+  });
+
+  it("does not let a no-seq row block a marker from settling at the next seq-bearing row", () => {
+    const rows: BurstItem[] = [
+      msg({ id: "u1", role: "user", seq: 1 }),
+      msg({ id: "gap", role: "assistant" }), // no seq — must not swallow the marker
+      msg({ id: "u2", role: "user", seq: 100 }),
+    ];
+    const bursts: EvictedToolBurst[] = [{ fromSeq: 10, toSeq: 20, count: 1 }];
+    const out = interleaveEvictedBursts(rows, bursts);
+    expect(out.map((r, i) => virtualRowKey(r, i))).toEqual(["u1", "gap", "evicted-10-20", "u2"]);
+  });
+
+  it("appends trailing markers newer than every row at the end", () => {
+    const rows: BurstItem[] = [msg({ id: "u1", role: "user", seq: 1 })];
+    const bursts: EvictedToolBurst[] = [{ fromSeq: 500, toSeq: 510, count: 4 }];
+    const out = interleaveEvictedBursts(rows, bursts);
+    expect(out.map((r, i) => virtualRowKey(r, i))).toEqual(["u1", "evicted-500-510"]);
   });
 });

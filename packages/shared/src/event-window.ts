@@ -1,8 +1,8 @@
 import { prepareEventForReplay, utf8ByteLength, type PrepareEventForReplayOptions } from "./prepare-event-for-replay.js";
 import type { DashboardEvent } from "./types.js";
 
-/** Default wire/IDB tail budget (~4 MiB). */
-export const DEFAULT_TAIL_WINDOW_BYTES = 4 * 1024 * 1024;
+/** Default wire/IDB tail budget (~1.5 MiB). */
+export const DEFAULT_TAIL_WINDOW_BYTES = 1.5 * 1024 * 1024;
 
 /** Server clamp for client-supplied windowBytes. */
 export const MIN_TAIL_WINDOW_BYTES = 256 * 1024;
@@ -274,7 +274,7 @@ export function selectNewestEventsByBudget(
   if (source === null) return malformedWindow();
   if (source.length === 0) return emptyWindow();
 
-  const prepared = prepareEntries(source, budget);
+  const prepared = prepareEntries(source, budget, { maxEventBytes: options.maxEventBytes });
   const turnStarts: number[] = [];
   for (let index = 0; index < prepared.events.length; index += 1) {
     if (isUserTurnStart(prepared.events[index]!)) turnStarts.push(index);

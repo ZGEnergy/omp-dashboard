@@ -36,7 +36,7 @@ export function foldLiveEvents(
   let state = current;
   let maxSeq = Number.NEGATIVE_INFINITY;
   for (const { seq, event } of sorted) {
-    state = reduceEvent(state, event, { isLive: true });
+    state = reduceEvent(state, event, { isLive: true, seq });
     if (seq > maxSeq) maxSeq = seq;
   }
   return { state, maxSeq };

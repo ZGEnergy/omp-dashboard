@@ -30,6 +30,8 @@ export interface LedgerAdmission {
   rebuild: boolean;
   /** Oldest retained rows were evicted to keep the hot transcript bounded. */
   evictedHead: boolean;
+  /** The ledger's retained floor after this admission's trim. */
+  minSeq: number;
 }
 
 export interface SessionReplayLedgerOptions {
@@ -61,7 +63,7 @@ export class SessionReplayLedger {
   private failures = new Map<ReplayKind, number>();
   private readonly maxGapEvents: number;
   private readonly maxGapBytes: number;
-  private readonly maxRetainedBytes: number;
+  private maxRetainedBytes: number;
   status: LedgerStatus = "cold";
 
   constructor(readonly sessionId: string, options: SessionReplayLedgerOptions = {}) {
@@ -121,6 +123,17 @@ export class SessionReplayLedger {
     this.clear(sourceGeneration);
     this.active = null;
     this.status = "cold";
+  }
+
+  /**
+   * Lift or lower the retained-bytes cap at runtime. Raising (e.g. to
+   * `Infinity` while the user reads older history) never prunes; lowering back
+   * to the base ceiling flushes the oldest events to the new budget. Returns
+   * whether the head was evicted so the caller can prune the reducer to match.
+   */
+  setMaxRetainedBytes(bytes: number): boolean {
+    this.maxRetainedBytes = bytes;
+    return this.trimRetained();
   }
 
   /** Seed a cache-admitted nonempty contiguous suffix before issuing its delta request. */
@@ -207,6 +220,7 @@ export class SessionReplayLedger {
         result.rebuild = true;
       }
     }
+    result.minSeq = this.minSeq;
     return result;
   }
 
@@ -222,6 +236,7 @@ export class SessionReplayLedger {
       result.accepted.push(entry);
       this.drainGaps(result.accepted);
       result.evictedHead = this.trimRetained();
+      result.minSeq = this.minSeq;
       return result;
     }
     if (admission === "duplicate") return result;
@@ -327,7 +342,15 @@ export class SessionReplayLedger {
   }
 
   private empty(): LedgerAdmission {
-    return { accepted: [], stale: false, reset: null, repair: null, rebuild: false, evictedHead: false };
+    return {
+      accepted: [],
+      stale: false,
+      reset: null,
+      repair: null,
+      rebuild: false,
+      evictedHead: false,
+      minSeq: this.minSeq,
+    };
   }
 
   private resetResult(reason: LedgerResetReason): LedgerAdmission {
@@ -343,7 +366,15 @@ export class SessionReplayLedger {
     this.olderPageLastSeq = null;
     this.active = null;
     this.status = "cold";
-    return { accepted: [], stale: false, reset: reason, repair: null, rebuild: false, evictedHead: false };
+    return {
+      accepted: [],
+      stale: false,
+      reset: reason,
+      repair: null,
+      rebuild: false,
+      evictedHead: false,
+      minSeq: 0,
+    };
   }
 }
 
