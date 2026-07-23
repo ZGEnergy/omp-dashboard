@@ -10,6 +10,7 @@
 import { mdiClose, mdiConsoleLine } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import { useEffect, useRef, useState } from "react";
+import { useMobile } from "../../hooks/useMobile.js";
 import type { OpenFile } from "../../lib/editor-pane-state.js";
 import { fileIcon } from "../../lib/file-icon.js";
 import { useI18n } from "../../lib/i18n";
@@ -32,6 +33,7 @@ function basename(p: string): string {
 
 export function EditorTabs({ openFiles, activeIndex, onActivate, onClose, onReorder, terminalTitle }: EditorTabsProps) {
   const { t } = useI18n();
+  const isMobile = useMobile();
   const dragFrom = useRef<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const tabRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -135,7 +137,11 @@ export function EditorTabs({ openFiles, activeIndex, onActivate, onClose, onReor
               e.stopPropagation();
               onClose(i);
             }}
-            className="opacity-0 transition-opacity hover:text-[var(--text-primary)] group-hover:opacity-100"
+            className={
+              isMobile
+                ? "flex min-h-[44px] min-w-[44px] items-center justify-center opacity-100 hover:text-[var(--text-primary)]"
+                : "opacity-0 transition-opacity hover:text-[var(--text-primary)] group-hover:opacity-100"
+            }
           >
             <Icon path={mdiClose} size={0.5} />
           </button>
