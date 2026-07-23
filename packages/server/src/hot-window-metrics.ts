@@ -40,8 +40,8 @@ export interface HotWindowMetricsSnapshot {
   maxInteractiveRequests: number;
   /**
    * Sum of `evictions` across all reports ever ingested. Each report's
-   * `evictions` field is itself a PROXY (evicted tool-burst count), not an
-   * exact eviction count — treat this total as a proxy too, not a precise count.
+   * `evictions` field is the exact tool-eviction count (sum of every
+   * evicted-tool-burst's collapsed member count), so this total is exact.
    */
   totalEvictions: number;
   /** Count of reports ingested since boot (including ones since evicted from `reports`). */

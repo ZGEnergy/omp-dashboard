@@ -38,6 +38,8 @@ export interface ReplayPersister {
    *  state. After dispose, record/seed/merge/flush/drop are inert no-ops (no
    *  timers fire, no writes commit) and snapshot returns []. */
   dispose(): void;
+  /** Estimated UTF-8 bytes retained in this session's buffer (0 when absent/disposed). */
+  bytes(sessionId: string): number;
 }
 
 export function createReplayPersister(
@@ -178,5 +180,10 @@ export function createReplayPersister(
     buffers.clear();
   }
 
-  return { record, seed, merge, snapshot, drop, flush, dispose };
+  function bytes(sessionId: string): number {
+    if (disposed) return 0;
+    return buffers.get(sessionId)?.bytes ?? 0;
+  }
+
+  return { record, seed, merge, snapshot, drop, flush, dispose, bytes };
 }

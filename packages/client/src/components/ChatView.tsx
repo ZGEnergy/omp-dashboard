@@ -6,7 +6,7 @@ import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/inp
 import { mdiCheck, mdiChevronDown, mdiChevronUp, mdiClose, mdiContentCopy, mdiLoading, mdiSourceFork, mdiTextBox } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useActiveChatSelection } from "../hooks/useActiveChatSelection.js";
 import { isDebugTool } from "../hooks/useDebugToolsVisible.js";
 import { useDelayedSkeleton } from "../hooks/useDelayedSkeleton.js";
@@ -140,6 +140,13 @@ interface Props {
    * on change, not every scroll. See change: dynamic-retention-while-reading.
    */
   onReadingHistoryChange?: (reading: boolean) => void;
+  /**
+   * Reports the wall-clock ms of the `renderRows` derivation (the virtualized
+   * row-list assembly this component owns) after each rebuild. An approximation
+   * of the render-derivation cost — a scalar millisecond number, never content.
+   * Feeds `HotWindowReport.derivationMs`. See change: hot-window-metrics.
+   */
+  onDerivationTiming?: (sessionId: string | null, ms: number) => void;
 }
 
 function ImageAttachments({
@@ -338,7 +345,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange, onReadingHistoryChange }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange, onReadingHistoryChange, onDerivationTiming }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Desktop retains its saved anchor; mobile ownership is explicit below.
   // These refs were accidentally removed by an interrupted migration and are
@@ -587,8 +594,16 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
   // down: count/estimateSize/getItemKey/turn-map/viewport-floor all key off
   // `renderRows`, not the pre-interleave `displayRows`.
   // See change: bounded-hot-transcript-state (blocking-fix follow-up).
+  // Time the row-assembly derivation (approximation of the render-derivation
+  // cost, not full end-to-end). Scalar ms only — emitted after commit below.
+  const derivationMsRef = useRef(0);
   const renderRows = useMemo(
-    () => interleaveEvictedBursts(displayRows, state.evictedToolBursts),
+    () => {
+      const t0 = performance.now();
+      const rows = interleaveEvictedBursts(displayRows, state.evictedToolBursts);
+      derivationMsRef.current = performance.now() - t0;
+      return rows;
+    },
     [displayRows, state.evictedToolBursts],
   );
   // Precompute each row's aggregate rendered text length ONCE per renderRows
@@ -838,6 +853,12 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
     lastReportedFloorSessionRef.current = sessionId;
     onVisibleFloorSeqChange(floor);
   }, [renderRows, onVisibleFloorSeqChange, sessionId, virtualItems]);
+
+  // Emit the timed `renderRows` derivation cost after commit (never during
+  // render), deduped per renderRows rebuild — mirrors onVisibleFloorSeqChange.
+  useEffect(() => {
+    onDerivationTiming?.(sessionId ?? null, derivationMsRef.current);
+  }, [renderRows, onDerivationTiming, sessionId]);
 
   // Streaming-tail content: the frozen snapshot while a tail selection is held
   // (buffers chunks; survives the message_end unmount), else the live text.

@@ -164,4 +164,21 @@ describe("replay-persist — scoped + dispose", () => {
     // Committed state is NOT deleted by dispose.
     expect(await cache.getScoped(scope, "committed")).not.toBeNull();
   });
+
+  it("bytes() reports retained buffer bytes, 0 for unknown/disposed", () => {
+    const cache = createReplayCache({ factory });
+    const p = createReplayPersister(cache, 1000);
+    expect(p.bytes("s1")).toBe(0); // unknown session
+    p.record("s1", [evt(1), evt(2), evt(3)]);
+    const retained = p.bytes("s1");
+    expect(retained).toBeGreaterThan(0);
+    // Matches the persister's own UTF-8 estimate of the retained events.
+    const expected = p.snapshot("s1").reduce(
+      (sum, e) => sum + new TextEncoder().encode(JSON.stringify(e)).byteLength,
+      0,
+    );
+    expect(retained).toBe(expected);
+    p.dispose();
+    expect(p.bytes("s1")).toBe(0); // disposed
+  });
 });
