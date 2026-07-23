@@ -6,6 +6,7 @@ import type { WebSocket } from "ws";
 import type { BrowserHandlerContext } from "./browser-handlers/handler-context.js";
 import type { DirectoryService } from "./directory-service.js";
 import type { EventStore, StoredEvent } from "./memory-event-store.js";
+import { truncateEvent } from "./memory-event-store.js";
 import type { SessionManager } from "./memory-session-manager.js";
 
 export const REPLAY_BATCH_SIZE = 50;
@@ -309,7 +310,11 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
       try {
         const result = await options.directoryService!.loadSessionEvents(sessionId, session.sessionFile!, session.contextWindow);
         if (!result.success) return { ok: false, code: result.error === "cancelled" ? "unavailable" : "malformed_source" };
-        const events = result.events.map((event, index) => ({ seq: index + 1, event }));
+        const { maxStringFieldSize, maxEventDataSize } = options.store.getTruncationLimits();
+        const events = result.events.map((event, index) => ({
+          seq: index + 1,
+          event: truncateEvent(event, maxStringFieldSize, maxEventDataSize),
+        }));
         persistedSources.set(sessionId, { sourceGeneration, events });
         return { ok: true, events };
       } catch { return { ok: false, code: "malformed_source" }; }
