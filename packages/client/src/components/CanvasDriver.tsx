@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useCanvasTier } from "../hooks/useCanvasTier.js";
 import { type CanvasState, gateAllowsAutoOpen } from "../lib/canvas-gate.js";
 import { t as i18nT } from "../lib/i18n";
+import { normalizeUnderCwd } from "../lib/normalize-path.js";
 import { CanvasServerChip } from "./CanvasServerChip.js";
 import { useSplitWorkspace } from "./SplitWorkspaceContext.js";
 
@@ -42,7 +43,11 @@ function useOpenTarget() {
       if (target.kind === "file") {
         // Canvas auto-open (no user click) → restrictCsp so document viewers
         // block external subresources (auto-open egress ≤ manual-click, S34).
-        openInSplit(target.path, undefined, true);
+        // pi Write/Edit record an ABSOLUTE args.path, but the editor-pane viewer
+        // + /api/file backend expect a cwd-relative tab path — normalize under
+        // the target's cwd first (mirrors ChatView/FileLink) or the read resolves
+        // wrong → "not found" (#79). Relative declare targets pass unchanged.
+        openInSplit(normalizeUnderCwd(target.path, target.cwd), undefined, true);
       } else if (target.kind === "url" && isLoopbackUrl(target.url)) {
         // Loopback dev-server URL → SSRF-gated live-server viewer.
         openLiveTarget(target.url);
@@ -99,7 +104,9 @@ export function CanvasDriver({ state }: Props) {
             {state.title ?? i18nT("canvas.openCanvas", undefined, "Open canvas")}
           </span>
           {state.target.kind === "file" && (
-            <span className="font-mono text-[var(--text-tertiary)]">{state.target.path}</span>
+            <span className="font-mono text-[var(--text-tertiary)]">
+              {normalizeUnderCwd(state.target.path, state.target.cwd)}
+            </span>
           )}
         </button>
       )}
