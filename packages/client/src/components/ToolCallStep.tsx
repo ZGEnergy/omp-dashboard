@@ -83,6 +83,9 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
   const [expanded, setExpanded] = useState(hasImages || isAgentRunning || (isInputTool && !isFailedInputTool));
   const [stopState, setStopState] = useState<StopState>("idle");
   const Renderer = getToolRenderer(toolName);
+  const pendingInteractiveRequest = context.session?.interactiveRequests.find(
+    (request) => request.status === "pending" && request.toolCallId === toolCallId,
+  );
 
   // Show-full-output affordance: when the rendered result carries the
   // truncation marker, offer an on-demand fetch of the full stored result.
@@ -225,11 +228,14 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
             ) : (
               <Renderer
                 toolName={toolName}
+                toolCallId={toolCallId}
                 args={args}
                 status={status}
                 result={displayResult}
                 images={images}
                 context={context}
+                requestId={pendingInteractiveRequest?.requestId}
+                onRespondToUi={context.onRespondToUi}
                 toolDetails={toolDetails}
               />
             )}

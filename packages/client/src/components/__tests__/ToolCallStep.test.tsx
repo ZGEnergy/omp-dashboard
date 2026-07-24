@@ -4,6 +4,7 @@ import { DemoToolRenderer } from "@blackbelt-technology/demo-plugin";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type React from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { createInitialState } from "../../lib/event-reducer.js";
 import { ThemeProvider } from "../ThemeProvider.js";
 import { ToolCallStep } from "../ToolCallStep.js";
 import type { ToolContext } from "../tool-renderers/index.js";
@@ -54,6 +55,58 @@ function renderStep(props: Partial<React.ComponentProps<typeof ToolCallStep>> = 
 }
 
 describe("ToolCallStep", () => {
+  it("routes a live core ask option through its pending PromptBus request", () => {
+    const onRespondToUi = vi.fn();
+    const context: ToolContext = {
+      session: {
+        ...createInitialState(),
+        interactiveRequests: [
+          {
+            requestId: "prompt-1",
+            method: "ask",
+            params: { questions: [{ id: "question-1", question: "Choose", options: ["A", "B"] }] },
+            toolCallId: "tool-1",
+            status: "pending",
+          },
+        ],
+      },
+      onRespondToUi,
+    };
+
+    const { getByRole } = renderStep({
+      toolName: "ask",
+      toolCallId: "tool-1",
+      args: { questions: [{ id: "question-1", question: "Choose", options: ["A", "B"] }] },
+      status: "running",
+      context,
+    });
+
+    fireEvent.click(getByRole("button", { name: "A" }));
+
+    expect(onRespondToUi).toHaveBeenCalledTimes(1);
+    expect(onRespondToUi).toHaveBeenCalledWith("prompt-1", "A");
+  });
+  it("does not respond to a core ask option without a matching pending request", () => {
+    const onRespondToUi = vi.fn();
+    const context: ToolContext = {
+      session: { ...createInitialState(), interactiveRequests: [] },
+      onRespondToUi,
+    };
+
+    const { getByRole } = renderStep({
+      toolName: "ask",
+      toolCallId: "tool-without-pending-request",
+      args: { questions: [{ id: "question-1", question: "Choose", options: ["A", "B"] }] },
+      status: "running",
+      context,
+    });
+
+    const option = getByRole("button", { name: "A" });
+    expect(option).toHaveProperty("disabled", true);
+    fireEvent.click(option);
+
+    expect(onRespondToUi).not.toHaveBeenCalled();
+  });
   it("renders ask_user as a standard collapsible tool step, not an InteractiveRenderer", () => {
     const { container, getByText } = renderStep({
       toolName: "ask_user",

@@ -150,4 +150,28 @@ describe("ToolBurstGroup", () => {
     // Header still reflects the running state even while collapsed.
     expect(on.container.querySelector('[data-testid="tool-burst-header"]')!.textContent).toContain("Working");
   });
+
+  it("auto-expands a running ask even when tool groups default collapsed", () => {
+    const ask = tool({
+      toolName: "ask",
+      toolStatus: "running",
+      args: { questions: [{ id: "q1", question: "Continue?", options: [{ label: "Yes" }] }] },
+    });
+    const view = renderBurst([ask], { ...DISPLAY_PRESETS.standard, toolGroupDefaultCollapsed: true });
+    expect(view.container.querySelector('[data-testid="tool-burst-body"]')).not.toBeNull();
+  });
+
+  it("keeps a mixed burst with a running ask expanded by default", () => {
+    const members = [
+      tool({ toolName: "read", args: { path: "/a" } }),
+      tool({
+        toolName: "ask",
+        toolStatus: "running",
+        args: { questions: [{ id: "q1", question: "Continue?", options: [{ label: "Yes" }] }] },
+      }),
+    ];
+    const view = renderBurst(members, { ...DISPLAY_PRESETS.standard, toolGroupDefaultCollapsed: true });
+
+    expect(view.container.querySelector('[data-testid="tool-burst-body"]')).not.toBeNull();
+  });
 });
