@@ -20,6 +20,8 @@ export interface ToolContext {
 export interface ToolRendererProps {
   toolName: string;
   toolCallId?: string;
+  /** PromptBus request id for a live interactive tool call. */
+  requestId?: string;
   args?: Record<string, unknown>;
   status: "running" | "complete" | "error";
   /** Optional response callback for a renderer-owned interactive tool body. */

@@ -377,6 +377,10 @@ export interface ChatViewHandle {
 
 const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, onExpandEvictedBurst, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange, onReadingHistoryChange, onDerivationTiming }, ref) {
 
+  const rendererToolContext = useMemo<ToolContext>(
+    () => ({ ...toolContext, onRespondToUi: onRespondToUi ?? toolContext.onRespondToUi }),
+    [toolContext, onRespondToUi],
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   // Desktop retains its saved anchor; mobile ownership is explicit below.
   // These refs were accidentally removed by an interrupted migration and are
@@ -1458,12 +1462,12 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
         // head churn cannot bleed one burst's state into another (finding 3).
         if ((item as ToolBurstGroupData).type === "burst") {
           const burst = item as ToolBurstGroupData;
-          return <ToolBurstGroup key={burst.id} burst={burst} toolContext={toolContext} />;
+          return <ToolBurstGroup key={burst.id} burst={burst} toolContext={rendererToolContext} />;
         }
         // Bare semantic ×N group (sub-threshold burst that still folded a poll).
         if ((item as ToolCallGroup).type === "group") {
           const group = item as ToolCallGroup;
-          return <CollapsedToolGroup key={group.messages[0]?.id ?? group.toolName} group={group} toolContext={toolContext} />;
+          return <CollapsedToolGroup key={group.messages[0]?.id ?? group.toolName} group={group} toolContext={rendererToolContext} />;
         }
 
         const msg = item as import("../lib/event-reducer.js").ChatMessage;
@@ -1596,7 +1600,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
               status={msg.toolStatus ?? "running"}
               result={msg.result}
               images={msg.images}
-              context={toolContext}
+              context={rendererToolContext}
               startedAt={msg.startedAt}
               duration={msg.duration}
               toolDetails={msg.toolDetails}

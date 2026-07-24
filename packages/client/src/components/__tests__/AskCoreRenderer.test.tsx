@@ -17,7 +17,7 @@ beforeAll(() => {
   });
 });
 
-function renderAsk(context: ToolContext) {
+function renderAsk(context: ToolContext, overrides: { args?: Record<string, unknown>; toolDetails?: Record<string, unknown>; requestId?: string } = {}) {
   return render(
     <ThemeProvider>
       <AskUserToolRenderer
@@ -28,9 +28,12 @@ function renderAsk(context: ToolContext) {
             question: "Continue with the **long markdown question**?",
             options: [{ label: "A very long option label that must wrap", description: "A long description that should remain available without truncation." }],
           }],
+          ...overrides.args,
         }}
         status="running"
         context={context}
+        requestId={overrides.requestId}
+        toolDetails={overrides.toolDetails}
       />
     </ThemeProvider>,
   );
@@ -48,5 +51,19 @@ describe("AskCoreRenderer", () => {
 
     fireEvent.click(option);
     expect(onRespond).toHaveBeenCalledWith("A very long option label that must wrap");
+  });
+
+  it.each([
+    ["args", { args: { requestId: "stale-args-request" } }],
+    ["toolDetails", { toolDetails: { requestId: "stale-details-request" } }],
+  ] as const)("disables options when %s has a requestId without a pending mapping", (_source, overrides) => {
+    const onRespondToUi = vi.fn();
+    renderAsk({ onRespondToUi }, overrides);
+
+    const option = screen.getByRole("button", { name: /A very long option label/ });
+    expect((option as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(option);
+    expect(onRespondToUi).not.toHaveBeenCalled();
   });
 });

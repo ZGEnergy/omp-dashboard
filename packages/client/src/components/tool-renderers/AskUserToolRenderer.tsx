@@ -232,12 +232,13 @@ function coreQuestionAnswer(
   return [];
 }
 
-function AskCoreRenderer({ args, status, result, toolDetails, context, onRespondToUi, onRespond }: ToolRendererProps) {
+function AskCoreRenderer({ args, status, result, toolDetails, context, requestId, onRespondToUi, onRespond }: ToolRendererProps) {
   const view = normalizeAskToolView("ask", args, toolDetails, status);
   const cancelled = view.cancelled || /cancelled ask/i.test(result ?? "");
   const respond = onRespond ?? context.onRespond;
   const respondToUi = onRespondToUi ?? context.onRespondToUi;
-  const requestId = stringValue(toolDetails?.requestId ?? args?.requestId);
+  const resolvedRequestId = requestId;
+  const canRespondToOption = !!respond || !!(respondToUi && resolvedRequestId);
 
   return (
     <div className="space-y-2">
@@ -257,8 +258,8 @@ function AskCoreRenderer({ args, status, result, toolDetails, context, onRespond
             const answer = question.multi ? { values: [label] } : label;
             if (respond) {
               respond(answer);
-            } else if (respondToUi) {
-              respondToUi(requestId || question.id, answer);
+            } else if (respondToUi && resolvedRequestId) {
+              respondToUi(resolvedRequestId, answer);
             }
           };
           return (
@@ -288,7 +289,8 @@ function AskCoreRenderer({ args, status, result, toolDetails, context, onRespond
                         key={option.label}
                         type="button"
                         onClick={() => respondToOption(option.label)}
-                        className={className}
+                        disabled={!canRespondToOption}
+                        className={`${className} disabled:cursor-not-allowed disabled:opacity-50`}
                       >
                         {optionContent}
                       </button>
