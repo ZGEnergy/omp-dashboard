@@ -225,6 +225,7 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
             ) : (
               <Renderer
                 toolName={toolName}
+                toolCallId={toolCallId}
                 args={args}
                 status={status}
                 result={displayResult}

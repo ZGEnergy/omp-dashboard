@@ -232,9 +232,13 @@ function coreQuestionAnswer(
   return [];
 }
 
-function AskCoreRenderer({ args, status, result, toolDetails }: ToolRendererProps) {
+function AskCoreRenderer({ args, status, result, toolDetails, context, onRespondToUi, onRespond }: ToolRendererProps) {
   const view = normalizeAskToolView("ask", args, toolDetails, status);
   const cancelled = view.cancelled || /cancelled ask/i.test(result ?? "");
+  const respond = onRespond ?? context.onRespond;
+  const respondToUi = onRespondToUi ?? context.onRespondToUi;
+  const requestId = stringValue(toolDetails?.requestId ?? args?.requestId);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
@@ -249,26 +253,48 @@ function AskCoreRenderer({ args, status, result, toolDetails }: ToolRendererProp
       <div className="flex flex-col gap-1.5">
         {view.questions.map((question, index) => {
           const selected = coreQuestionAnswer(question, index, toolDetails, result);
+          const respondToOption = (label: string) => {
+            const answer = question.multi ? { values: [label] } : label;
+            if (respond) {
+              respond(answer);
+            } else if (respondToUi) {
+              respondToUi(requestId || question.id, answer);
+            }
+          };
           return (
             <div key={question.id} className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2.5 py-1.5">
               {question.title && question.title !== question.question && (
-                <div className="text-[10px] uppercase tracking-wide text-[var(--text-tertiary)] truncate">{question.title}</div>
+                <div className="text-[10px] uppercase tracking-wide text-[var(--text-tertiary)] break-words whitespace-normal">{question.title}</div>
               )}
-              <div className="text-xs text-[var(--text-primary)]"><MarkdownContent content={question.question} /></div>
+              <div className="text-xs text-[var(--text-primary)] break-words whitespace-normal"><MarkdownContent content={question.question} /></div>
               {question.options.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-1">
                   {question.options.map((option) => {
                     const isSelected = selected.includes(option.label);
-                    return (
-                      <span
+                    const className = isSelected
+                      ? "inline-flex max-w-full min-w-0 flex-wrap items-start gap-1 px-1.5 py-0.5 text-xs rounded bg-green-600/20 border border-green-500/40 text-green-400 font-medium whitespace-normal break-words text-left"
+                      : "inline-flex max-w-full min-w-0 flex-wrap items-start gap-1 px-1.5 py-0.5 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border-secondary)] text-[var(--text-tertiary)] whitespace-normal break-words text-left";
+                    const optionContent = (
+                      <>
+                        {isSelected && <Icon path={mdiCheckCircle} size={0.4} className="inline mr-0.5 -mt-0.5 shrink-0" />}
+                        <span className="min-w-0 break-words whitespace-normal">{option.label}</span>
+                        {option.description && (
+                          <span className="basis-full min-w-0 break-words whitespace-normal text-[var(--text-secondary)]">{option.description}</span>
+                        )}
+                      </>
+                    );
+                    return status === "running" ? (
+                      <button
                         key={option.label}
-                        title={option.description}
-                        className={isSelected
-                          ? "px-1.5 py-0.5 text-xs rounded bg-green-600/20 border border-green-500/40 text-green-400 font-medium"
-                          : "px-1.5 py-0.5 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border-secondary)] text-[var(--text-tertiary)]"}
+                        type="button"
+                        onClick={() => respondToOption(option.label)}
+                        className={className}
                       >
-                        {isSelected && <Icon path={mdiCheckCircle} size={0.4} className="inline mr-0.5 -mt-0.5" />}
-                        {option.label}
+                        {optionContent}
+                      </button>
+                    ) : (
+                      <span key={option.label} title={option.description} className={className}>
+                        {optionContent}
                       </span>
                     );
                   })}
@@ -278,7 +304,7 @@ function AskCoreRenderer({ args, status, result, toolDetails }: ToolRendererProp
                 <div className="mt-1 flex items-center gap-1.5 text-xs">
                   <Icon path={mdiCheckCircle} size={0.45} className="text-green-400 shrink-0" />
                   <span className="text-green-400 font-medium">{i18nT("auto.response", undefined, "Response:")}</span>
-                  <span className="text-[var(--text-primary)]">{selected.join(", ")}</span>
+                  <span className="text-[var(--text-primary)] break-words whitespace-normal">{selected.join(", ")}</span>
                 </div>
               )}
               {cancelled && selected.length === 0 && (

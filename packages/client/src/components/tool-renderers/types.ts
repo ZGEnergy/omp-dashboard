@@ -10,13 +10,22 @@ export interface ToolContext {
   session?: SessionState;
   /** Send a message to the server (e.g. subagent resync request). Optional for backward-compat / tests. See change: fix-subagent-live-detail-reliability. */
   send?: (message: BrowserToServerMessage) => void;
+  /** Respond to a pending PromptBus request from a tool renderer. */
+  onRespondToUi?: (requestId: string, result?: unknown, cancelled?: boolean) => void;
+  /** Simple response callback used by interactive renderer integrations. */
+  onRespond?: (result: unknown) => void;
 }
 
 /** Props every tool renderer receives */
 export interface ToolRendererProps {
   toolName: string;
+  toolCallId?: string;
   args?: Record<string, unknown>;
   status: "running" | "complete" | "error";
+  /** Optional response callback for a renderer-owned interactive tool body. */
+  onRespondToUi?: (requestId: string, result?: unknown, cancelled?: boolean) => void;
+  /** Optional response callback matching interactive renderer semantics. */
+  onRespond?: (result: unknown) => void;
   result?: string;
   images?: ChatImage[];
   context: ToolContext;
