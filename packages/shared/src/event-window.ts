@@ -147,18 +147,6 @@ function prepareEntries(
   return { events, truncatedSeqs };
 }
 
-function sumSeqEventBytes(
-  entries: readonly SeqEvent<DashboardEvent>[],
-  from: number,
-  to: number,
-): number {
-  let total = 0;
-  for (let index = from; index < to; index += 1) {
-    total += estimateSeqEventBytes(entries[index]!);
-  }
-  return total;
-}
-
 // Does a user-turn boundary survive preparation somewhere strictly before the
 // bounded suffix? Turn-start-ness is decided on *prepared* events (an oversized
 // `message_start` can be wiped by the per-event cap), so raw `message_start`
@@ -330,45 +318,18 @@ export function selectNewestEventsByBudget(
   }
   const suffix = suffixDescending.slice().reverse();
 
-  // Turn starts detected on the PREPARED suffix (absolute source indices).
-  const turnStartsAbs: number[] = [];
-  for (let position = 0; position < suffix.length; position += 1) {
-    if (isUserTurnStart(suffix[position]!)) turnStartsAbs.push(suffixStart + position);
-  }
-
-  // No user-turn boundary inside the budget window. The bounded suffix is the
-  // result; `partialHead` distinguishes "an older user turn exists off-window"
-  // (the newest turn is farther back than the budget — original
-  // `selectedBytes > budget` branch → true) from "no user turn exists at all"
-  // (original `turnStarts.length === 0` branch → false).
-  if (turnStartsAbs.length === 0) {
-    const partialHead = hasPreparedTurnStartBelow(source, suffixStart, perEventCap);
-    return finalizeSelectedEntries(source, suffix, suffixBytes, partialHead, budget, options);
-  }
-
-  // A user-turn boundary lives inside the bounded suffix, so its bytes fit the
-  // budget: always extend turn-by-turn toward older complete turns while they
-  // fit. Positions are relative to the suffix (absoluteIndex - suffixStart).
-  let selectedStart = turnStartsAbs.at(-1)!;
-  let selectedBytes = sumSeqEventBytes(suffix, selectedStart - suffixStart, suffix.length);
-  for (let turn = turnStartsAbs.length - 2; turn >= 0; turn -= 1) {
-    const candidateStart = turnStartsAbs[turn]!;
-    const candidateBytes = sumSeqEventBytes(
-      suffix,
-      candidateStart - suffixStart,
-      selectedStart - suffixStart,
-    );
-    if (selectedBytes + candidateBytes > budget) break;
-    selectedStart = candidateStart;
-    selectedBytes += candidateBytes;
-  }
-
-  const selected = suffix.slice(selectedStart - suffixStart);
+  // Return the complete bounded suffix. User-turn alignment must not discard
+  // older tool events that already fit the byte budget, especially for paging.
+  // Mark a partial head only when the bounded suffix begins inside a turn.
+  // A suffix beginning at a user message is already turn-aligned, even when
+  // older complete turns exist below it.
+  const partialHead = selectionContainsTruncation(suffix, truncatedSeqs)
+    || (!isUserTurnStart(suffix[0]!) && hasPreparedTurnStartBelow(source, suffixStart, perEventCap));
   return finalizeSelectedEntries(
     source,
-    selected,
-    selectedBytes,
-    selectionContainsTruncation(selected, truncatedSeqs),
+    suffix,
+    suffixBytes,
+    partialHead,
     budget,
     options,
   );

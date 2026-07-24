@@ -77,6 +77,17 @@ describe("selectNewestEventsByBudget", () => {
     expect(r.bytes).toBeLessThanOrEqual(budget);
   });
 
+  it("keeps pre-turn events when the bounded older page fits", () => {
+    const all = [
+      ev(1, 100),
+      ev(2, 100),
+      { seq: 3, event: event("message_start", { message: { role: "user", content: "prompt" } }) },
+      ev(4, 100),
+    ];
+    const r = selectOlderEventsByBudget(all, 5, 1_000_000);
+    expect(r.events.map((entry) => entry.seq)).toEqual([1, 2, 3, 4]);
+  });
+
   it("accounts oversized events at a per-event cap so other turns still fit", () => {
     const all: SeqEvent<DashboardEvent>[] = [
       { seq: 1, event: event("message_start", { message: { role: "user", content: "first" } }) },
