@@ -587,6 +587,72 @@ describe("MarkdownContent", () => {
         const input = "```text\n$100 and \\text{MW}$\n```";
         expect(protectDollarsInMarkdown(input)).toBe(input);
       });
+
+      // `\text{…}` arguments are math notation, not prose: the domain
+      // vocabulary in them must not trip the prose-word veto.
+      it.each([
+        "$\\text{Revenue} = \\text{Price} \\times \\text{Volume}$",
+        "$\\text{Binding Capture Mass Share}$",
+        "$\\frac{\\text{DA Price}}{\\text{RT Price}}$",
+      ])("leaves well-formed \\text{} math untouched: %s", (input) => {
+        expect(protectDollarsInMarkdown(input)).toBe(input);
+      });
+
+      // micromark accepts padded inline math, so a whitespace edge alone is
+      // not enough to veto — only a padded span carrying prose words is.
+      it.each(["Value $ x^2 $ here.", "Value $x^2 $ here.", "Value $ x^2$ here."])(
+        "leaves padded inline math untouched: %s",
+        (input) => {
+          expect(protectDollarsInMarkdown(input)).toBe(input);
+        },
+      );
+
+      it("escapes a whitespace-padded span that carries prose words", () => {
+        expect(protectDollarsInMarkdown("Costs $5 to $10 today.")).toBe(
+          "Costs \\$5 to \\$10 today.",
+        );
+      });
+
+      // Threshold: <3 prose words stays math, >=3 becomes prose.
+      it("keeps a span with two prose words as math", () => {
+        const input = "See $x = ab cd$ now.";
+        expect(protectDollarsInMarkdown(input)).toBe(input);
+      });
+
+      it("escapes a span with three or more prose words", () => {
+        expect(protectDollarsInMarkdown("run $HOME/bin and $PATH now")).toBe(
+          "run \\$HOME/bin and \\$PATH now",
+        );
+      });
+
+      it("escapes a span that crosses a blank line", () => {
+        expect(protectDollarsInMarkdown("open $x^2\n\ny^2$ close")).toBe(
+          "open \\$x^2\n\ny^2\\$ close",
+        );
+      });
+
+      // Backslash escapes are not processed inside autolinks or raw HTML, so
+      // a `\$` there silently corrupts the href/attribute.
+      it.each([
+        "See <https://api.example.com/x?$filter=foo> now",
+        "See https://api.example.com/x?$filter=foo now",
+        '<img src="a$b.png">',
+        '<a href="https://x.com/?$q=1">hi</a>',
+        "Query https://api.example.com/x?$top=10&$skip=5 works",
+      ])("leaves `$` inside URLs and raw HTML untouched: %s", (input) => {
+        expect(protectDollarsInMarkdown(input)).toBe(input);
+      });
+    });
+
+    it("renders well-formed \\text{} math as KaTeX", () => {
+      const { container } = renderMd("$\\text{Binding Capture Mass Share}$");
+      expect(container.querySelector(".katex")).not.toBeNull();
+    });
+
+    it("keeps a `$` inside an autolink out of the href", () => {
+      const { container } = renderMd("See <https://api.example.com/x?$filter=foo> now");
+      const href = container.querySelector("a")?.getAttribute("href");
+      expect(href).toBe("https://api.example.com/x?$filter=foo");
     });
 
     it("renders the issue repro with all downstream prose intact and no KaTeX", () => {
